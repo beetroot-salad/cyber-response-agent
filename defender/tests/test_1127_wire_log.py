@@ -1,11 +1,4 @@
-"""#1127 second review: the wire log keeps a record for every response, however deep.
-
-A model's too-deep tool call arrives in a response. Pydantic's own message dump refuses
-arguments nested past about 250 levels, and `log` used to raise there: the request's response
-record (the one that carries its usage, and so its price) was dropped. Below that bound the
-response is written cut where its line would pass the reader's bound. Requests are written as
-they are: the query tool replaces a refused call's arguments in the history.
-"""
+"""The wire log keeps a record for every response, however deep its tool call."""
 from __future__ import annotations
 
 import json

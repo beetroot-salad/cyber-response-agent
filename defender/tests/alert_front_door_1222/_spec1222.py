@@ -1714,18 +1714,22 @@ class _ReplayLifecycle:
         run_dir = run.run_dir
         self.d.run_dir = Path(run_dir)
         self.d.lifecycle_calls.append({"run_dir": Path(run_dir), "tenant": tenant, **kw})
+        # #1256 r4: run.py judges the systems once, before the run folder exists, and hands that
+        # judgement on (`systems=`); production's lifecycle passes it to the driver, which then
+        # does not judge again. Passed on here too, so a run driven through this seam takes
+        # production's path (absent — run.py handed none — the driver judges, as before).
         summary = drive_run(
             self.d, Path(run_dir), tenant=tenant.tenant, verbs=self.verbs, limits=self.limits,
             store_factory=self.store_factory, defender_dir=self.defender_dir,
             orient_shim=self.orient_shim, review_stages=self.review_stages,
-            wrap_model=self.wrap_model)
+            wrap_model=self.wrap_model, systems=kw.get("systems"))
         return summary
 
 
 def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ...,  # noqa: PLR0913 — `drive`'s seams, passed through only when given
               limits: Any = None, store_factory: Any = None, defender_dir: Path | None = None,
               orient_shim: Any = None, resume: Any = None, run_id: str | None = None,
-              review_stages: Any = None, wrap_model: Any = None) -> dict:
+              review_stages: Any = None, wrap_model: Any = None, systems: Any = None) -> dict:
     """`_replay_harness.drive` over `run_dir` with `d`'s fakes. `verbs=...` means `d.backend`'s
     registry; `None` drives with NO registry (p172: withheld). `review_stages` / `wrap_model`
     are `drive`'s own seams (#1243), passed through only when given."""
@@ -1738,7 +1742,8 @@ def drive_run(d: Drive, run_dir: Path, *, tenant: Any = None, verbs: Any = ..., 
     for name, value in (("limits", limits), ("store_factory", store_factory),
                         ("defender_dir", defender_dir), ("orient_shim", orient_shim),
                         ("tenant", tenant), ("resume", resume),
-                        ("review_stages", review_stages), ("wrap_model", wrap_model)):
+                        ("review_stages", review_stages), ("wrap_model", wrap_model),
+                        ("systems", systems)):
         if value is not None:
             kw[name] = value
     d.run_dir = Path(run_dir)
@@ -1788,6 +1793,7 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     before: Callable[[Path], None] | None = None,
     extra_argv: Sequence[str] = (),
     catch: bool = True,
+    roster: Any = None,
     review_stages: Any = None,
     wrap_model: Any = None,
     visualize: Callable[..., None] | None = None,
@@ -1803,7 +1809,10 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     fault through (a pre-claimed `l-00c` sidecar, a directory squatting an artifact's name).
     `catch=False` lets an exception out of `run.main` (a setup fault that must stop the run
     loudly); with `catch=True` it is kept on `.raised`. `run_id` defaults to `fresh_run_id()`
-    (unique per call); pass one to re-drive a folder or to pin a name.
+    (unique per call); pass one to re-drive a folder or to pin a name. `roster` is handed to
+    `run.main(roster=…)` when given: the adapters roster the run reads (#1256: the one whose
+    declared checks judge each granted system at run start); omitted, `run.main` is called
+    without it, as before.
 
     #1243: `review_stages` and `wrap_model` are `_replay_harness.drive`'s seams of those names;
     `visualize` is `run.main`'s render step (default: none, as before); `router` is a ready-made
@@ -1858,11 +1867,12 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
     run_main = sym("run", "main")
     writer = tickets if tickets is not None else NoTicket()
     d.tickets = writer
+    seams: dict[str, Any] = {} if roster is None else {"roster": roster}
     try:
         d.rc = run_main(
             argv, lifecycle=lifecycle_fn, preflight=lambda *_a, **_k: 0,
             visualize=visualize if visualize is not None else (lambda *_a, **_k: None),
-            ticket_writer=writer, enqueue=record_enqueue)
+            ticket_writer=writer, enqueue=record_enqueue, **seams)
     except SystemExit as exit_:
         d.refusal = exit_.code if isinstance(exit_.code, str) else None
         d.rc = exit_.code if isinstance(exit_.code, int) else 1

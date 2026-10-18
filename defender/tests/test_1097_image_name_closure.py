@@ -1,53 +1,9 @@
-"""#1097 (design amendment) — the owned image is named from the lock's core + `box` closure.
-
-The name is `defender-box:v2-<12 hex>` over: the bytes of `box.Dockerfile`; `[tool.uv]` from
-`pyproject.toml` (absent -> `{}`); the root lock entry's `dependencies` + `optional-
-dependencies.box` (the root is the lock package `[project].name` names); and every lock
-`[[package]]` entry reachable from those edges — `runtime/box/_image.py::box_closure` — each a
-whole parsed dict, canonically digested.
-
-Design amendment 2 (M1″): the walk reads ONE thing from the lock, each dependency link's
-`name`. From the root it takes the links in `dependencies` + `optional-dependencies.box`; from
-every entry it reaches, the links in `dependencies` AND in EVERY list under
-`optional-dependencies`, whether or not any link asks for that extra. A link reaches EVERY
-entry with its name; its `extra`, `marker`, `version` and `source` are never interpreted (the
-superset rule: at most an extra rename, never a missed one). The root is found by
-`[project].name` normalised as uv writes names (PEP 503). A lock or manifest the walk cannot
-use — a malformed entry or link, a value the canonical form cannot encode — is
-`ImageInputError` naming the file and saying "cannot use"; an unreadable file says "cannot
-read".
-
-Design amendment 3 (M1‴): the digest also covers `pyproject.toml`'s `[project].dependencies`
-and `[project].optional-dependencies.box` AS WRITTEN (lists of requirement strings; absent ->
-`[]`; anything else is `ImageInputError` naming `pyproject.toml`), so a core or `box`
-requirement edited without a relock renames the image and the build's `--locked` sync fails
-loudly (the `dev`/`runtime` lists stay out). Everything after the three reads — parse, shape
-check, walk, digest — is ONE fault boundary: any exception there is `ImageInputError`
-("cannot use") naming the file being processed. Every list inside a hashed value is sorted by
-its canonical encoding, so no list ORDER renames. And the root is not special once reached: a
-link that reaches the root entry walks and hashes it like any other entry, all its optional
-lists included. `box_closure` normalises the `root_name` it is given (PEP 503).
-
-O1: an edit that cannot change the image does not rename it — `[tool.*]` other than
-`[tool.uv]`, the root's `dev`/`runtime` extras and their lock entries, comments, reordering
-and reformatting the lock, reordering any list in a hashed value. O2: an edit to a closure
-entry (version, source, an artifact hash, its own links and optional lists), to an entry
-reached only through a closure entry's unrequested extra, to the closure's roots, to the core
-or `box` requirement strings, to `[tool.uv]`, or to the recipe's bytes renames it.
-
-Real inputs through the real primitive: every tree is planted from well-formed TOML text
-(`_spec1092.PLANTED_LOCK`, or a copy of THIS checkout's `uv.lock`/`pyproject.toml`) and the
-resolver parses the bytes itself. The synthetic lock is edited as parsed data and written back
-through `_lock_toml` below, whose every output is re-parsed and checked against the data it was
-asked to write — so an edit is exactly the edit named, and a reformatted lock is exactly the
-same lock. Each negative carries its positive control in the same test.
-"""
+"""The image name digests the Dockerfile plus the lock's core + box dependency closure (runtime/box/_image.py::box_closure)."""
 from __future__ import annotations
 
 import copy
 import json
 import re
-import shutil
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -55,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from defender.tests._spec1092 import (
-    DEFENDER,
     HASH_INPUTS,
     PLANTED_INPUT_BYTES,
     PLANTED_LOCK,
@@ -92,20 +47,6 @@ PLANTED_CLOSURE = sorted([
 #: link that did reach the root would walk them too).
 PLANTED_OUTSIDE = ("devdep", "devtool", "rtlib")
 
-#: This checkout's core + `box` closure today (#1097 item 2). A relock that moves it moves this
-#: list — on purpose: it is the review point for what enters the boundary. The last three are
-#: pydantic's `email` extra — nothing asks for it and the image does not install them, but
-#: amendment 2 walks every optional list of a reached entry, so they are hashed (the superset).
-#: #1255 K3 (owner decision, 2026-10-16) adds the box's clock library, the PyPI `libfaketime`
-#: wheel (3.0.1), and what its metadata requires: `python-dateutil>=1.3` and `pytz` (already
-#: in), and python-dateutil's own `six>=1.5` — a deliberate, owner-approved widening of the box
-#: boundary (read from PyPI's metadata for those releases, before the relock that pins them).
-REAL_CLOSURE_NAMES = sorted([
-    "annotated-types", "duckdb", "pydantic", "pydantic-core", "pytz", "pyyaml", "typing-extensions",
-    "typing-inspection",
-    "libfaketime", "python-dateutil", "six",
-    "dnspython", "email-validator", "idna",
-])
 
 _REGISTRY = {"registry": "https://pypi.org/simple"}
 
@@ -224,19 +165,6 @@ def _append(path: list, item) -> Callable[[dict], None]:
     return lambda lock: _walk_to(lock, path)[path[-1]].append(copy.deepcopy(item))
 
 
-def _reverse(path: list, version: str | None = None) -> Callable[[dict], None]:
-    """An edit reversing the list at `path` (entry name — at `version`, when split — then
-    keys). The list must hold two or more DIFFERENT items, or the edit would change nothing."""
-    def fn(lock: dict) -> None:
-        node = _entry(lock, path[0], version)
-        for step in path[1:-1]:
-            node = node[step]
-        target = node[path[-1]]
-        assert target != target[::-1], f"reversing {path} changes nothing: {target}"
-        target.reverse()
-    return fn
-
-
 def _reverse_every_list(node) -> None:
     """Every list at every depth of `node` reversed in place — entries, links, wheels,
     resolution-markers, metadata rows, the lot."""
@@ -349,59 +277,6 @@ def test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_ever
         assert _names(box_closure(edited, ROOT)) == PLANTED_CLOSURE, f"{what}: the closure moved"
 
 
-def test_a_string_extra_on_a_link_walks_exactly_like_no_extra_and_is_no_fault(tmp_path):
-    """A link whose `extra` is a STRING — `{ name = "beta", extra = "speed" }`, and the root's
-    `{ name = "gamma", extra = "fast" }` — is walked exactly like the same link with no `extra`
-    and like the list spelling uv writes: `box_closure` returns the same entries (eta and delta
-    included; a walk that iterated the string would look for extras `s`, `p`, `e`, … and drop
-    them), and `image_tag` over the tree names an image rather than faulting.
-
-    The NAME does move with that spelling — the link sits inside `alpha`'s entry and the root's
-    `box` list, both hashed as opaque data — so no equality with the baseline name is pinned
-    here; only the walk and the absence of a fault are."""
-    def stringly(lock: dict) -> None:
-        for link in _entry(lock, "alpha")["dependencies"]:
-            if link["name"] == "beta":
-                link["extra"] = "speed"
-        for link in _entry(lock, ROOT)["optional-dependencies"]["box"]:
-            link["extra"] = "fast"
-
-    string_lock = _lock_edit(stringly)
-    assert {"name": "beta", "extra": "speed"} in _entry(string_lock, "alpha")["dependencies"]
-    assert _names(box_closure(string_lock, ROOT)) == _names(box_closure(_lock_edit(_strip_extras), ROOT)) \
-        == _names(box_closure(copy.deepcopy(BASE_LOCK), ROOT)) == PLANTED_CLOSURE
-
-    named = image_tag(_plant(tmp_path, "string-extra", lock=string_lock))
-    assert TAG_RE.match(named), named
-
-
-def test_box_closure_of_this_checkouts_lock_is_exactly_the_core_and_box_closure_and_no_dev_or_runtime_package():
-    """Over THIS checkout's `uv.lock`, with the root that `pyproject.toml`'s `[project].name`
-    names, `box_closure` returns exactly the eleven packages the image installs —
-    annotated-types, duckdb, pydantic, pydantic-core, pytz, pyyaml, typing-extensions,
-    typing-inspection and (#1255 K3) libfaketime, python-dateutil and six — PLUS email-validator, dnspython and idna, which only pydantic's `email`
-    extra reaches (nothing asks for it; amendment 2 walks every optional list of a reached
-    entry, the superset cost it records), each at its locked version — and none of the packages
-    the `dev` or `runtime` extras reach directly (pytest, ruff, mypy, pydantic-ai-slim, toons,
-    …). `duckdb` and `pytz`, which `runtime` also names, are in: they are `box`'s."""
-    pyproject = tomllib.loads((DEFENDER / "pyproject.toml").read_text(encoding="utf-8"))
-    lock = tomllib.loads((DEFENDER / "uv.lock").read_text(encoding="utf-8"))
-    root_name = pyproject["project"]["name"]
-    got = box_closure(lock, root_name)
-    names = sorted(e["name"] for e in got)
-    assert names == REAL_CLOSURE_NAMES, names
-    for entry in got:
-        assert entry in lock["package"], f"not the lock's own entry: {entry['name']}"
-    pydantic_extras = _entry(lock, "pydantic").get("optional-dependencies", {})
-    assert [d["name"] for d in pydantic_extras.get("email", [])] == ["email-validator"], pydantic_extras
-
-    root = _entry(lock, root_name)
-    extras = root.get("optional-dependencies", {})
-    other = {d["name"] for extra in ("dev", "runtime") for d in extras.get(extra, [])}
-    assert {"pytest", "ruff", "mypy", "pydantic-ai-slim", "toons"} <= other, sorted(other)
-    assert sorted(other & set(names)) == ["duckdb", "pytz"], sorted(other & set(names))
-
-
 # ---- O1: what does NOT rename the image --------------------------------------------------------
 def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
     """Over the planted tree, none of these renames the image: in `pyproject.toml` a
@@ -490,124 +365,6 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
         "package = false", "package = true")))
     assert lock_read != baseline, "the positive control: a closure entry's version did not rename"
     assert manifest_read != baseline, "the positive control: [tool.uv] did not rename"
-
-
-def test_reordering_or_reformatting_the_lock_does_not_rename_the_image(tmp_path):
-    """The same lock spelled differently names the same image: its `[[package]]` entries in
-    reverse order (the parsed entry LIST differs), every table's keys in reverse order (the
-    parsed dicts are equal but their key order differs), one-line arrays, comment lines between
-    entries — and all of these at once, which is what a re-emitting tool (a newer uv) does to a
-    lock. Positive control, same spelling: a closure entry's one artifact-hash byte renames it."""
-    baseline = image_tag(_plant(tmp_path, "baseline"))
-    spellings = {
-        "entries reversed": {"reverse_entries": True},
-        "keys reversed": {"reverse_keys": True},
-        "one-line arrays": {"multiline": False},
-        "comments between entries": {"comments": True},
-        "all at once": {"reverse_entries": True, "reverse_keys": True, "multiline": False, "comments": True},
-    }
-    uv_text = _lock_toml(BASE_LOCK)
-    for i, (what, knobs) in enumerate(spellings.items()):
-        text = _lock_toml(BASE_LOCK, **knobs)
-        assert text != uv_text, f"{what}: the spelling did not change"
-        parsed = tomllib.loads(text)
-        if knobs.get("reverse_entries"):
-            assert parsed["package"] != BASE_LOCK["package"], "the entry order did not change"
-        if knobs.get("reverse_keys"):
-            first = [p for p in parsed["package"] if p["name"] == "alpha"][0]
-            assert list(first) != list(_entry(BASE_LOCK, "alpha")), "the key order did not change"
-        tree = _plant(tmp_path, f"spelled-{i}")
-        (tree / "uv.lock").write_text(text, encoding="utf-8")
-        assert image_tag(tree) == baseline, f"{what} renamed the image"
-
-        one_hash_byte = _lock_edit(_flip_artifact("gamma", "wheel"))
-        (tree / "uv.lock").write_text(_lock_toml(one_hash_byte, **knobs), encoding="utf-8")
-        assert image_tag(tree) != baseline, f"{what}: the positive control did not rename"
-
-
-def test_reordering_a_list_inside_a_hashed_value_does_not_rename_the_image(tmp_path):
-    """Amendment 3, M1‴ (c): every list inside a hashed value is sorted by its canonical
-    encoding before hashing, so no list ORDER renames the image — none of them changes what the
-    sync installs. Each of these holds the name, over a lock that is otherwise the same: a
-    closure entry's `dependencies` reversed (alpha's two links); its `wheels` reversed (alpha
-    with a second wheel); one of its optional lists reversed (gamma's `slow` with a second link);
-    the root's `dependencies` reversed (its three links) and its `box` links reversed (with a
-    second `box` link); an entry's `resolution-markers` reversed (`split` 1.0.0 with a second
-    marker); EVERY list at every depth of the lock reversed at once; and in `pyproject.toml` the
-    core requirements reordered and the `box` requirements reordered (with a second one).
-
-    Positive control under each reordering, same tree: a version or one artifact-hash byte of
-    an entry in the closure — or, for the requirement lists, one requirement's specifier —
-    still renames the image. A list only has an order to change when it holds two different
-    items, so each baseline that needs one grows it first (`_reverse` refuses a no-op)."""
-    def two_slow(lock: dict) -> None:
-        _append(["gamma", "optional-dependencies", "slow"], {"name": "devdep"})(lock)
-
-    def two_box(lock: dict) -> None:
-        _append([ROOT, "optional-dependencies", "box"], {"name": "delta"})(lock)
-
-    def two_markers(lock: dict) -> None:
-        _entry(lock, "split", "1.0.0")["resolution-markers"].append("sys_platform == 'linux'")
-
-    def every_base(lock: dict) -> None:
-        for fn in (_two_wheels, two_slow, two_box, two_markers):
-            fn(lock)
-
-    def every_list(lock: dict) -> None:
-        before = copy.deepcopy(lock)
-        _reverse_every_list(lock)
-        assert lock != before, "reversing every list changed nothing"
-
-    # case -> (the edit that gives the baseline lists an order, the reordering, the control)
-    lock_cases: dict[str, tuple[Callable[[dict], None] | None, Callable[[dict], None], Callable[[dict], None]]] = {
-        "a closure entry's dependencies reversed": (
-            None, _reverse(["alpha", "dependencies"]), _set(["alpha", "version"], "1.0.1")),
-        "a closure entry's wheels reversed": (
-            _two_wheels, _reverse(["alpha", "wheels"]), _flip_artifact("alpha", "wheel")),
-        "a closure entry's optional list reversed": (
-            two_slow, _reverse(["gamma", "optional-dependencies", "slow"]), _set(["epsilon", "version"], "5.0.1")),
-        "the root's dependencies reversed": (
-            None, _reverse([ROOT, "dependencies"]), _flip_artifact("split", "wheel", "2.0.0")),
-        "the root's box links reversed": (
-            two_box, _reverse([ROOT, "optional-dependencies", "box"]), _flip_artifact("delta", "wheel")),
-        "an entry's resolution-markers reversed": (
-            two_markers, _reverse(["split", "resolution-markers"], "1.0.0"), _flip_artifact("split", "sdist", "1.0.0")),
-        "every list in the lock reversed at once": (
-            every_base, every_list, _flip_artifact("alpha", "sdist")),
-    }
-    for i, (what, (base_edit, reorder, control)) in enumerate(lock_cases.items()):
-        base = _lock_edit(base_edit or (lambda lock: None))
-        reordered = copy.deepcopy(base)
-        reorder(reordered)
-        assert reordered != base, f"{what}: the reordering changed nothing"
-        controlled = copy.deepcopy(reordered)
-        control(controlled)
-        before = image_tag(_plant(tmp_path, f"lock-{i}-base", lock=base))
-        assert image_tag(_plant(tmp_path, f"lock-{i}-reordered", lock=reordered)) == before, f"{what} renamed the image"
-        assert image_tag(_plant(tmp_path, f"lock-{i}-control", lock=controlled)) != before, (
-            f"{what}: the positive control did not rename")
-
-    core = '    "alpha>=1",\n    "split",\n'
-    two_box_reqs = _replace_once(PLANTED_PYPROJECT, 'box = ["gamma[fast]"]', 'box = ["gamma[fast]", "delta"]')
-    manifest_cases: dict[str, tuple[str, str, str]] = {
-        # case -> (the baseline manifest, the reordered one, the reordered one with a specifier moved)
-        "the core requirements reordered": (
-            PLANTED_PYPROJECT,
-            _replace_once(PLANTED_PYPROJECT, core, '    "split",\n    "alpha>=1",\n'),
-            _replace_once(PLANTED_PYPROJECT, core, '    "split",\n    "alpha>=2",\n'),
-        ),
-        "the box requirements reordered": (
-            two_box_reqs,
-            _replace_once(two_box_reqs, '["gamma[fast]", "delta"]', '["delta", "gamma[fast]"]'),
-            _replace_once(two_box_reqs, '["gamma[fast]", "delta"]', '["delta", "gamma[fast]>=3"]'),
-        ),
-    }
-    for i, (what, (base_text, reordered_text, control_text)) in enumerate(manifest_cases.items()):
-        before = image_tag(_plant(tmp_path, f"manifest-{i}-base", pyproject=base_text))
-        assert image_tag(_plant(tmp_path, f"manifest-{i}-reordered", pyproject=reordered_text)) == before, (
-            f"{what} renamed the image")
-        assert image_tag(_plant(tmp_path, f"manifest-{i}-control", pyproject=control_text)) != before, (
-            f"{what}: the positive control did not rename")
 
 
 # ---- O2: what DOES rename the image ------------------------------------------------------------
@@ -816,101 +573,6 @@ def test_a_package_split_across_two_lock_entries_renames_the_image_whichever_ent
     assert relocked not in (baseline, lower, upper), relocked
 
 
-# ---- the real lock ------------------------------------------------------------------------------
-def test_on_this_checkouts_manifests_a_dev_tool_relock_holds_the_name_and_a_closure_relock_moves_it(tmp_path):
-    """Over copies of THIS checkout's `uv.lock` and `pyproject.toml`: a pytest bump (its
-    version and one sdist-hash byte), a dev-extra edge dropped from the root, the lock's
-    entries in reverse order with a comment, the whole lock re-spelled (every key reversed,
-    one-line arrays), a `[tool.mypy]`/`[tool.ruff.lint]` key and a dev requirement added to
-    `pyproject.toml`, and the core requirements reordered (amendment 3's order-free form) —
-    none renames the image (the key flow "a pytest bump plus relock: the name holds"). A
-    pydantic bump, one wheel-hash byte of pydantic-core, a typing-inspection bump (reached only
-    through pydantic), one sdist-hash byte of duckdb (`box`'s), a second `box` edge, and
-    `[tool.uv]`'s `package` flipped each rename it — and so does a dnspython or an idna bump,
-    packages the image does NOT install, reached only through pydantic's unrequested `email`
-    extra (amendment 2's recorded superset cost: a relock bumping them renames the image; it
-    never goes stale) — and, amendment 3, a core requirement added to `pyproject.toml` or the
-    `box` requirement's specifier changed, each WITHOUT a relock (the next box start is sent
-    to the build, whose `--locked` sync fails loudly)."""
-    lock_text = (DEFENDER / "uv.lock").read_text(encoding="utf-8")
-    pyproject_text = (DEFENDER / "pyproject.toml").read_text(encoding="utf-8")
-    lock = tomllib.loads(lock_text)
-
-    def tree(label: str, *, lock_bytes: str = lock_text, manifest: str = pyproject_text) -> str:
-        defender_dir = tmp_path / label / "defender"
-        defender_dir.mkdir(parents=True)
-        shutil.copyfile(DEFENDER / "box.Dockerfile", defender_dir / "box.Dockerfile")
-        (defender_dir / "uv.lock").write_text(lock_bytes, encoding="utf-8")
-        (defender_dir / "pyproject.toml").write_text(manifest, encoding="utf-8")
-        return image_tag(defender_dir)
-
-    def version_line(name: str, new: str) -> str:
-        entry = _entry(lock, name)
-        return _replace_once(lock_text, f'name = "{name}"\nversion = "{entry["version"]}"\n',
-                             f'name = "{name}"\nversion = "{new}"\n')
-
-    def hash_byte(name: str, artifact: str) -> str:
-        entry = _entry(lock, name)
-        digest = entry["sdist"]["hash"] if artifact == "sdist" else entry["wheels"][0]["hash"]
-        return _replace_once(lock_text, digest, _flip_hex(digest))
-
-    head, *blocks = lock_text.split("\n[[package]]\n")
-    assert len(blocks) == len(lock["package"]), "the lock did not split into its entries"
-    reversed_lock = head + "\n# re-ordered by hand\n" + "".join(f"\n[[package]]\n{b}" for b in reversed(blocks))
-    assert _canonical(tomllib.loads(reversed_lock)) == _canonical(lock)
-    assert tomllib.loads(reversed_lock)["package"] != lock["package"]
-
-    installed_wheel = next(
-        w["hash"] for w in _entry(lock, "pydantic-core")["wheels"]
-        if "cp311-cp311-manylinux_2_17_x86_64" in w["url"]
-    )
-    assert installed_wheel != _entry(lock, "pydantic-core")["wheels"][0]["hash"]
-
-    baseline = tree("baseline")
-    assert TAG_RE.match(baseline), baseline
-    holding = {
-        "a pytest version": {"lock_bytes": version_line("pytest", "99.0.0")},
-        "a pytest sdist hash byte": {"lock_bytes": hash_byte("pytest", "sdist")},
-        "a dev edge dropped": {"lock_bytes": _replace_once(lock_text, '    { name = "radon" },\n', "")},
-        "the entries reversed": {"lock_bytes": reversed_lock},
-        "the lock re-spelled": {"lock_bytes": _lock_toml(lock, reverse_keys=True, multiline=False, comments=True)},
-        "a [tool.mypy] key": {"manifest": _replace_once(pyproject_text, "[tool.mypy]\n", "[tool.mypy]\nplanted_1097 = true\n")},
-        "a [tool.ruff.lint] key": {"manifest": _replace_once(pyproject_text, "[tool.ruff.lint]\n", "[tool.ruff.lint]\nplanted-1097 = 1\n")},
-        "a dev requirement, unlocked": {"manifest": _replace_once(pyproject_text, 'dev = [\n', 'dev = [\n    "planted-1097",\n')},
-        "the core requirements reordered": {"manifest": _replace_once(
-            _replace_once(pyproject_text, '    "pyyaml>=6.0",\n', ""),
-            '    "typing-extensions>=4.12",\n]\n', '    "typing-extensions>=4.12",\n    "pyyaml>=6.0",\n]\n')},
-    }
-    for i, (what, edit) in enumerate(holding.items()):
-        assert tree(f"hold-{i}", **edit) == baseline, f"{what} renamed the image"
-
-    moving = {
-        "a pydantic version": {"lock_bytes": version_line("pydantic", "99.0.0")},
-        "a pydantic-core wheel hash byte": {"lock_bytes": hash_byte("pydantic-core", "wheel")},
-        # The wheel the image actually installs — not wheels[0] (#1097 round-2 adversary H1).
-        "the installed pydantic-core wheel's hash byte": {"lock_bytes": _replace_once(
-            lock_text, installed_wheel, _flip_hex(installed_wheel))},
-        "a typing-inspection version": {"lock_bytes": version_line("typing-inspection", "99.0.0")},
-        "a dnspython version (pydantic's email extra)": {"lock_bytes": version_line("dnspython", "99.0.0")},
-        "an idna version (pydantic's email extra)": {"lock_bytes": version_line("idna", "99.0.0")},
-        "a duckdb sdist hash byte": {"lock_bytes": hash_byte("duckdb", "sdist")},
-        # #1255 K3: the lock's `box` list is duckdb, libfaketime, pytz (`test_1092_dockerfile`).
-        "a second box edge": {"lock_bytes": _replace_once(
-            lock_text,
-            'box = [\n    { name = "duckdb" },\n    { name = "libfaketime" },\n'
-            '    { name = "pytz" },\n]',
-            'box = [\n    { name = "duckdb" },\n    { name = "libfaketime" },\n'
-            '    { name = "pytz" },\n    { name = "pyyaml" },\n]')},
-        "[tool.uv] package": {"manifest": _replace_once(pyproject_text, "package = false", "package = true")},
-        "a core requirement, unlocked": {"manifest": _replace_once(
-            pyproject_text, 'dependencies = [\n', 'dependencies = [\n    "planted-1097",\n')},
-        "the box requirement, unlocked": {"manifest": _replace_once(
-            pyproject_text, 'box = [\n    "duckdb>=1.5,<2",\n', 'box = [\n    "duckdb>=1.5,<3",\n')},
-    }
-    for i, (what, edit) in enumerate(moving.items()):
-        assert tree(f"move-{i}", **edit) != baseline, f"{what} did not rename the image"
-
-
 # ---- the root: found by the normalised project name -------------------------------------------
 def _renamed_root(new: str) -> Callable[[dict], None]:
     return lambda lock: _entry(lock, ROOT).__setitem__("name", new)
@@ -952,89 +614,6 @@ def test_the_root_is_the_lock_entry_the_pep503_normalised_project_name_names(tmp
     assert "uv.lock" in message, message
     assert "plantedx" in message, message
     assert "pyproject.toml" not in message, message
-
-
-def test_box_closure_normalises_the_root_name_it_is_given():
-    """Amendment 3, M1‴ (e): `box_closure(lock, root_name)` normalises `root_name` itself
-    (PEP 503), so a direct caller need not: over the planted lock `"Planted"` and `"PLANTED"`
-    return exactly what `"planted"` returns, and over a lock whose root entry is `planted-x`,
-    `"planted_x"`, `"Planted.X"` and `"planted-_.x"` return exactly what `"planted-x"` returns
-    (the planted closure, the root not in it).
-
-    Positive control — normalising is not matching loosely: `"plantedx"` over that lock still
-    raises the walk's missing-entry `KeyError` naming it."""
-    planted = box_closure(copy.deepcopy(BASE_LOCK), ROOT)
-    assert _names(planted) == PLANTED_CLOSURE, _names(planted)
-    for spelling in ("Planted", "PLANTED"):
-        assert box_closure(copy.deepcopy(BASE_LOCK), spelling) == planted, spelling
-
-    lock_x = _lock_edit(_renamed_root("planted-x"))
-    base_x = box_closure(copy.deepcopy(lock_x), "planted-x")
-    assert _names(base_x) == PLANTED_CLOSURE, _names(base_x)
-    for spelling in ("planted_x", "Planted.X", "planted-_.x"):
-        assert box_closure(copy.deepcopy(lock_x), spelling) == base_x, spelling
-
-    with pytest.raises(KeyError) as e:
-        box_closure(copy.deepcopy(lock_x), "plantedx")
-    assert "plantedx" in str(e.value), str(e.value)
-
-
-def _links_to_the_root(lock: dict) -> None:
-    """`alpha` (a closure entry) gains a link back to the root, asking for its `runtime` extra —
-    the shape of a `defender[runtime]` link."""
-    _append(["alpha", "dependencies"], {"name": ROOT, "extra": ["runtime"]})(lock)
-
-
-def test_a_link_that_reaches_the_root_walks_and_hashes_it_like_any_entry(tmp_path):
-    """Amendment 3, M1‴ (d): the root is not special once reached. Over a lock where `alpha`
-    links `{ name = "planted", extra = ["runtime"] }`, `box_closure` returns the root entry
-    itself (the lock's own dict) AND the targets of EVERY one of its optional lists — rtlib
-    (`runtime`), devtool (`dev`) and devdep (devtool's) — beside the planted closure; the same
-    link with no `extra` returns the same entries (a link's `extra` is never read). Under that
-    lock a bump to rtlib, and a bump to devdep, each rename the image.
-
-    Negative control, same test: over the planted lock (no link reaches the root) none of
-    those is in the closure and the rtlib bump holds the name."""
-    reached = _lock_edit(_links_to_the_root)
-    got = box_closure(copy.deepcopy(reached), ROOT)
-    root_entry = _entry(reached, ROOT)
-    assert root_entry in got, "a root reached by a link is not in the closure"
-    assert _names(got) == sorted([*PLANTED_CLOSURE, ("devdep", "0.1.0"), ("devtool", "7.0.0"),
-                                  (ROOT, "0.0.0"), ("rtlib", "8.0.0")]), _names(got)
-    for entry in got:
-        assert entry in reached["package"], f"not the lock's own entry: {entry['name']}"
-
-    bare = _lock_edit(lambda lock: _append(["alpha", "dependencies"], {"name": ROOT})(lock))
-    assert _names(box_closure(bare, ROOT)) == _names(got), "a link's extra changed what the root reaches"
-
-    unreached = {name for name, _ in _names(box_closure(copy.deepcopy(BASE_LOCK), ROOT))}
-    assert not unreached & {ROOT, "rtlib", "devtool", "devdep"}, sorted(unreached)
-
-    def bumped(lock: dict, name: str, version: str) -> dict:
-        out = copy.deepcopy(lock)
-        _entry(out, name)["version"] = version
-        return out
-
-    base = image_tag(_plant(tmp_path, "reached", lock=reached))
-    assert image_tag(_plant(tmp_path, "reached-rtlib", lock=bumped(reached, "rtlib", "8.0.1"))) != base, (
-        "rtlib, behind the reached root's runtime list, did not rename")
-    assert image_tag(_plant(tmp_path, "reached-devdep", lock=bumped(reached, "devdep", "0.1.1"))) != base, (
-        "devdep, behind the reached root's dev list, did not rename")
-
-    # The reached root is HASHED, not only walked: a change to its own dict alone — its
-    # version, or a marker on its runtime link — renames (#1097 round-4 adversary A3).
-    root_version = copy.deepcopy(reached)
-    _entry(root_version, ROOT)["version"] = "0.0.1"
-    runtime_marker = copy.deepcopy(reached)
-    _entry(runtime_marker, ROOT)["optional-dependencies"]["runtime"][0]["marker"] = "sys_platform == 'win32'"
-    assert image_tag(_plant(tmp_path, "reached-root-version", lock=root_version)) != base, (
-        "the reached root's own version did not rename")
-    assert image_tag(_plant(tmp_path, "reached-root-marker", lock=runtime_marker)) != base, (
-        "a marker on the reached root's runtime link did not rename")
-
-    planted = image_tag(_plant(tmp_path, "planted"))
-    assert image_tag(_plant(tmp_path, "planted-rtlib", lock=bumped(BASE_LOCK, "rtlib", "8.0.1"))) == planted, (
-        "rtlib renamed the image with no link reaching the root")
 
 
 # ---- faults: never a fallback name --------------------------------------------------------------

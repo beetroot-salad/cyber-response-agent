@@ -138,17 +138,7 @@ def _spec(source, store):
 
 
 def _resume(spec, sibling_dir, *, main, verbs=None):
-    """Drive the sibling, turning an escape out of the driver into the demand it fails.
-
-    `run_investigation` reports the failures it OWNS through `truncated_by`; anything that
-    escapes it is a resume the runtime could not start at all, and a bare traceback out of the
-    framework names the demand nowhere.
-
-    NO `store_factory=`, deliberately. A resume is supposed to DERIVE its store from the spec —
-    `_resolve_store_factory` is the whole of that contract — and handing the factory in
-    alongside is what let every arm below stay green over a driver that had lost the derivation
-    entirely. Without it, a regression there opens a fresh empty database and dies at
-    `main_session_id` with "found 0", which is what these demands should see."""
+    """Drive the sibling, turning an escape out of the driver into the demand it fails."""
     kw = {"verbs": verbs} if verbs is not None else {}
     try:
         return drive(sibling_dir, run_id="branch-920-sibling", main=main,
@@ -285,7 +275,7 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
 
 
 def test_a_resumed_run_does_not_orient_again(tmp_path):
-    """    A resumed run skips the correlation lead entirely: no new `l-00c` leads row, no new
+    """A resumed run skips the correlation lead entirely: no new `l-00c` leads row, no new
     query rows under the reserved id — even though the sibling is handed the same kind of verb
     registry the source run dispatched `l-00c` through.
 

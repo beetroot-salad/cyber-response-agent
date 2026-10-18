@@ -1,38 +1,4 @@
-"""#1234 slice 11 — the user section of `judge.yaml`, the per-finding ledger, and the page.
-
-What these tests pin (spec_graph_1234.yaml; design.md as amended by design-amendments.md
-A1-A15; 70-resolutions.md, 78-gate-resolutions.md):
-
-* the user section's three lists — the judge's NAMED gaps (listed only when every completed
-  draw names the same blocked call, A7), the code's FOUND gaps (one entry per blocked call keyed
-  (run, system, verb, params) with a count, from every run's served ledger, plus pre-flight's
-  `not_replayable` entries and J3's inherited pre-branch `∅.denied` row as family entries,
-  A2/A12/A14), and the serving-only world findings;
-* the ledger: every filed finding keeps its index in ONE index space over the three filed lists
-  and carries exactly one lane (A11, A13);
-* the episode page renders the user section and every lane, pairs each ledger entry with the
-  finding it names, and renders every record field it shows as data (OB19).
-
-Builders, as `80-survey.md` assigns them: the REAL path (`S.real_family`, I-10) wherever J3's
-row has to be identified the way A12 says (no id of this run, identical in every readable
-table) or a run is not archived / cut short by a real failed write; the hand-built archive
-(`S.family`) for named gaps, ledger fates and the page. Two hand-built deviations from the
-survey's builder column are recorded in `82-writer-user_record_ledger_page.md`: s_AM11 (a
-`refused` then a `fault` row for ONE call key — no real writer produces both, since `refused`
-is a grant denial and `fault` an adapter that cannot load) and s_A39 (no A12/A14 identification
-at stake).
-
-Entry spellings are COINED (`S.COINED`): a found/named gap entry carries `run`, `system`,
-`verb`, `params`, `count`; a family entry's `run` is `S.COINED["found.family_run"]`; an entry
-named unread carries its cause under `S.COINED["found.unread"]`. A world's `run` value is its
-label (`_run`), the spelling world rows and finding ids already use; the integrator is asked
-to move that spelling into `S.COINED`. Lane words are `S.LANES`.
-
-Every import of the code under test goes through `S.mod()` / `S.sym()` inside a test (via the
-shared drivers), so a missing target is one red per test, never a collection error. Every test
-is expected RED at base 463833df: main has no user section, no call id and refuses the amended
-reply shape (`malformed_replies`).
-"""
+"""#1234 judge contrast: user record, gap census, ledger fates and episode page."""
 from __future__ import annotations
 
 import json
@@ -68,9 +34,6 @@ WITHHELD = (("edr", "lookup"), ("siem-x", "lookup"))
 #: `_inherit_evidence` seeds into every sibling's table (params distinct from the post-branch
 #: refusal unless a scenario wants them equal).
 J3_PARAMS = {"entity": "j3-prebranch"}
-#: A fresh key no recording holds, so its call reaches the estate adapter (where
-#: `Estate1234.break_write` can plant the failed write).
-BOB = S.query_params("user:bob")
 #: A frame-closing string of the prompt's untrusted frames (`_triplet_947.UNTRUSTED_FRAME`).
 FRAME_CLOSER = "</run-0123abcd-untrusted>"
 
@@ -262,161 +225,12 @@ def test_1234_user_record_holds_named_gaps_found_gaps_and_serving_findings(
     assert what not in _text(serving)
 
 
-@pytest.mark.parametrize("pass_kind", ["graded", "stamped"])
-def test_1234_user_record_lists_every_archived_gap_for_every_run(
-        tmp_path: Path, pass_kind: str) -> None:
-    """The user record's found gaps list, for every run whose ledger is read (the control, each
-    planted world, failed, not-archived and ungraded worlds, on graded and stamped passes
-    alike), one entry per blocked call (a ledger refused/fault row, keyed run, system, verb,
-    params, with a count), pre-flight's not_replayable entries, and J3's family entry (an
-    inherited ∅.denied row carrying no id of this run and present identically in every readable
-    table, listed once; named unread with its cause when fewer than two tables read), whether
-    or not the judge named any of them. Every blocked call has its ledger row or the run is cut
-    short naming the failed write, and a cut-short world's recorded blocked calls are listed
-    (AN01).
-
-    graded: c refuses `edr lookup`, then its next call's served-ledger write fails (a directory
-    planted at the ledger by the estate adapter, `Estate1234.break_write`) — c is cut short; a
-    and b are archived and readable. stamped: b and c are not archived (no scrub verdict), so O5
-    stamps the family unusable and only the control's table is readable.
-    """
-    if pass_kind == "graded":
-        est = S.Estate1234(tmp_path / "estate", withheld=WITHHELD)
-        est.break_write("idp", "query", BOB, "{episode}/served/*.{label}.jsonl")
-        cut = [*S.default_turns()[:-1], S.query_turn("idp", "query", BOB), S.done_turn()]
-        worlds = {"c": S.RealWorld("c", turns=cut)}
-    else:
-        est = S.Estate1234(tmp_path / "estate", withheld=WITHHELD)
-        worlds = {"b": S.RealWorld("b", oracle=S.altering_oracle(), scrub=False),
-                  "c": S.RealWorld("c", scrub=False)}
-    built = S.real_family(tmp_path, worlds, estate=est,
-                          after_source=lambda src: S.capture_sentinel(src, params=J3_PARAMS))
-    S.grade(built, S.judge(), draws=1)
-
-    expected = {_denied("a"): 1, _denied("b"): 1, _denied("c"): 1, NOT_REPLAYABLE_KEY: 1}
-    if pass_kind == "graded":
-        expected[J3_KEY] = 1
-        # The failed append replaced c's ledger with a directory: its old rows are no
-        # longer readable, so the user receives the explicit unread-ledger entry instead.
-        expected.pop(_denied("c"))
-        assert _counts(built) == expected, "nobody named a gap; every blocked call is listed"
-        assert "c" in _unread(built), "the damaged ledger is reported by run"
-        cut_row = _text(S.row(built, "c"))
-        assert S.word_re(S.COINED["cut.ledger"]).search(cut_row), (
-            "the cut-short world's row names the failed write")
-    else:
-        assert S.stamp(built), "the pass stamps the family"
-        assert _counts(built) == expected, "a stamped pass carries the census too"
-        assert _unread(built).get(FAMILY_RUN), (
-            "one readable table: J3's family entry is named unread with its cause")
 
 
-def test_1234_user_record_lists_the_gaps_the_judge_named(tmp_path: Path) -> None:
-    """A deployment gap named by every completed draw (the same blocked-call key: run, system,
-    verb, params, J3's inherited row included) is listed in the user record with what was
-    blocked, how and its evidence pointers; a named gap with no blocked-call key (only outage
-    or context pointers) is not listed (AM25).
-
-    Both draws name three gaps: b's refused call, J3's inherited denial (row 0 of b's table),
-    and one resting only on b's live outage row and a samples section.
-    """
-    worlds = S.triad(b={"calls": [*_shown("b"), _refused({"entity": "b-refused"}),
-                                  S.error_call(params=S.query_params("user:outage"))]})
-    built = S.family(tmp_path, worlds, inherited=[S.inherited_denial(params=J3_PARAMS)])
-    refused_at = built.served("b", built.served_row("b", 2))
-    outage_at = built.served("b", built.served_row("b", 3))
-    what, how = S.marker("b", "named-what"), S.marker("b", "named-how")
-    keyless = S.marker("b", "keyless-what")
-    reply = S.world_reply("lead-quality", ["idp"], gaps=[
-        S.gap(what, how, evidence=[refused_at]),
-        S.gap(S.marker("b", "j3-what"), evidence=[built.table("b", 0)]),
-        S.gap(keyless, evidence=[outage_at, S.samples_ptr("idp")])])
-    S.grade(built, S.judge({"b": reply}), draws=2)
-
-    named = S.named_gaps(built)
-    keys = _named(built)
-    assert len(named) == 2, f"two keyed gaps are listed, the keyless one is not: {keys}"
-    assert _key(_run("b"), "edr", "lookup", {"entity": "b-refused"}) in keys
-    assert ("edr", "lookup", S.canonical(J3_PARAMS)) in [k[1:] for k in keys], (
-        "J3's inherited denial is a blocked-call key too (A14)")
-    first = next(e for e in named if S.gap_key(e)[3] == S.canonical({"entity": "b-refused"}))
-    assert what in _text(first), "what was blocked"
-    assert how in _text(first), "how"
-    assert refused_at in _text(first), "its evidence pointers"
-    assert keyless not in _text(named)
 
 
-def test_1234_focus_reply_names_a_gap_that_blocked_a_reference_run(tmp_path: Path) -> None:
-    """A named gap is a blocked-call key (run, system, verb, params) resolved from its pointers
-    (A7); a named gap with at least one run-naming pointer, all lying in c's run, is dropped
-    from b's reply (A1, A15), so it does not make b not measured. The user record's found gaps
-    list the real blocked call under the run whose ledger holds it (A2, every run's ledger).
-
-    b's one draw names, as the reason its facts never reached the investigator, a gap whose
-    only pointer is c's refused ledger row. Control: the same gap on b's OWN refused row does
-    make b not measured and is listed.
-    """
-    c_calls = [S.CallRow(system="edr", params=S.query_params("host:db-1")),
-               _refused({"entity": "c-blocked"})]
-    built = S.family(tmp_path, S.triad(c={"calls": c_calls}))
-    c_row = built.served("c", built.served_row("c", 1))
-    gap = S.gap(S.marker("b", "gap"), evidence=[c_row], kept_facts=True)
-    S.grade(built, S.judge({"b": S.world_reply("lead-quality", ["idp"], gaps=[gap])}), draws=1)
-
-    assert S.row(built, "b").get(MEASURED) is True, "a dropped gap does not unmeasure b"
-    assert S.named_gaps(built) == []
-    assert S.lane_of(built, built.finding_id("b", 0, 0)) == LANE["dropped_other_run"]
-    counts = _counts(built)
-    assert counts.get(_key(_run("c"), "edr", "lookup", {"entity": "c-blocked"})) == 1
-    assert _key(_run("b"), "edr", "lookup", {"entity": "c-blocked"}) not in counts
-
-    b_calls = [*_shown("b"), _refused({"entity": "b-blocked"})]
-    own = S.family(tmp_path, S.triad(b={"calls": b_calls}), root=tmp_path / "own-run-root")
-    b_row = own.served("b", own.served_row("b", 2))
-    own_gap = S.gap(S.marker("b", "gap"), evidence=[b_row], kept_facts=True)
-    S.grade(own, S.judge({"b": S.world_reply("lead-quality", ["idp"], gaps=[own_gap])}),
-            draws=1)
-    assert S.row(own, "b").get(MEASURED) is False, "control: b's own gap unmeasures b"
-    assert _named(own) == [_key(_run("b"), "edr", "lookup", {"entity": "b-blocked"})]
 
 
-@pytest.mark.parametrize("stamp", ["control-unusable", "manifest-refused"])
-def test_1234_stamped_family_with_gaps_in_its_archive(tmp_path: Path, stamp: str) -> None:
-    """The user record's found gaps are computed on every pass that reads the manifest, graded
-    or stamped (A2), from every run's ledger plus pre-flight `not_replayable` entries and J3's
-    inherited pre-branch `∅.denied` row (A14: a blocked call like the others); a stamped family
-    carries them. J3's row is a `∅.denied` table row carrying no id of this run (inherited) and
-    present identically in every readable run's table, the control's included (A12); it is
-    listed once, as the family's. With fewer than two readable tables the family's entry is
-    named unread with its cause. A pass refused at the manifest read (before the run list is
-    known) has no census.
-
-    drift: "a pass refused at the manifest read has no census". A door refusal (AP-10 at
-    463833df: `runs/` present with no record or another tenant's) comes earlier still. It reads
-    no manifest, writes no judge.yaml or stamp, and so has no census. It is the same class as
-    the manifest refusal NA04 settled.
-
-    control-unusable (real path): the control closes with no report, so A3 stamps the family
-    not graded; all three tables read. manifest-refused (hand-built): the manifest is not a
-    family document while `served/` holds a refusal — the pass raises and writes nothing.
-    """
-    if stamp == "control-unusable":
-        judge = S.judge()
-        built = S.real_family(tmp_path, {"a": S.RealWorld("a", disposition=None)},
-                              withheld=WITHHELD,
-                              after_source=lambda src: S.capture_sentinel(src, params=J3_PARAMS))
-        S.grade(built, judge, draws=1)
-        assert S.stamp(built), "the unusable control stamps the family"
-        assert judge.calls == 0, "a stamp makes no model call"
-        assert _counts(built) == {_denied("a"): 1, _denied("b"): 1, _denied("c"): 1,
-                                  J3_KEY: 1, NOT_REPLAYABLE_KEY: 1}
-        assert _unread(built) == {}
-        return
-    worlds = S.triad(b={"calls": [*_shown("b"), _refused({"entity": "b-refused"})]})
-    built = S.family(tmp_path, worlds, not_replayable=[_not_replayable()])
-    (built.ep / "family.yaml").write_text("- not\n- a family\n", encoding="utf-8")
-    S.grade_refused(built, S.judge())
-    assert not (built.ep / "judge.yaml").exists(), "a refused manifest writes no census"
 
 
 @pytest.mark.parametrize("builder", ["real", "hand-built"])
@@ -429,7 +243,7 @@ def test_1234_not_archived_world_with_refusals_in_its_served_ledger(
 
     real: c ends with no scrub verdict, so it is not archived; its ledger holds its refused
     `edr lookup`. hand-built: c's ledger holds one refused call and the same faulted call twice
-    (a `fault` row is `decide_call`'s, an adapter that cannot load), and c's archived tree is
+    (a `fault` row is `resolve_call`'s, an adapter that cannot load), and c's archived tree is
     gone beside a `not archived` world record whose detail is marked.
     """
     if builder == "real":
@@ -504,21 +318,6 @@ def test_1234_one_blocked_call_recorded_in_both_records(tmp_path: Path, builder:
         "both-records is one entry, ledger-only is an entry, table-only sentinels are none")
 
 
-def test_1234_judge_named_gap_that_the_code_also_found(tmp_path: Path) -> None:
-    """The judge's named gaps stay a separate list from the code's found gaps (A2): the same
-    blocked call appears once in each list, and no cross-link between the two entries is
-    pinned (NA05).
-
-    Both draws of b name b's refused call; the code finds the same call in b's ledger.
-    """
-    built = S.family(tmp_path, S.triad(
-        b={"calls": [*_shown("b"), _refused({"entity": "b-refused"})]}))
-    gap = S.gap(S.marker("b", "gap"), evidence=[built.served("b", built.served_row("b", 2))])
-    S.grade(built, S.judge({"b": S.world_reply("lead-quality", ["idp"], gaps=[gap])}), draws=2)
-    key = _key(_run("b"), "edr", "lookup", {"entity": "b-refused"})
-    assert _named(built) == [key], "once among the named gaps"
-    assert list(_counts(built)) == [key], "once among the found gaps"
-    assert S.user(built)[S.NAMED_GAPS] != S.user(built)[S.FOUND_GAPS], "two separate lists"
 
 
 @pytest.mark.parametrize("damage", ["failed-world-table", "ledger-link"])
@@ -687,137 +486,10 @@ def test_1234_am_found_gap_census_on_a_stamped_pass_with_a_damaged_ledger(
     assert _counts(built) == {keys[x]: 1 for x in "abc" if x != bad}
 
 
-@pytest.mark.parametrize("tables", ["every-table", "fewer-than-two-readable"])
-def test_1234_am_inherited_prebranch_denial_identified_and_listed_once(
-        tmp_path: Path, tables: str) -> None:
-    """The family's inherited denial is a `∅.denied` table row carrying no id of this run that
-    is present identically in every readable run's table, the control's included (A12). It is
-    listed once as a found gap of the family, not per sibling. A `∅.denied` row in only one
-    table is not J3's row: written after the branch it carries that run's id and counts only
-    through its ledger partner (A2); carrying no id it is an inherited row only that run holds,
-    shared baseline and no found gap. The post-branch refusal of the same call in b's ledger is
-    a separate entry under b, so with the source denied twice before the branch the family's
-    entry carries count 2 and b's refusal is a second entry. With fewer than two readable
-    tables the family's entry is named unread with its cause, never silently omitted or listed.
-
-    every-table (real path): the source was denied `edr lookup sent-real` twice before the
-    branch; only b repeats it after the branch; c's box writes a no-id `∅.denied` row into its
-    own table before the archive. fewer-than-two-readable: the control's archived table is torn
-    and c is not archived, so only b's table reads.
-    """
-    def twice(src: Path) -> None:
-        S.capture_sentinel(src, seq=3)
-        S.capture_sentinel(src, seq=4)
-
-    quiet = [S.query_turn("idp", "query", S.Q1), S.query_turn("idp", "query", S.QP),
-             S.done_turn()]
-    if tables == "every-table":
-        only_c = {"entity": "only-c"}
-        worlds = {"a": S.RealWorld("a", disposition="benign", turns=quiet),
-                  "c": S.RealWorld("c", turns=quiet, after=lambda run_dir: S.capture_sentinel(
-                      run_dir, params=only_c, seq=40))}
-        built = S.real_family(tmp_path, worlds, after_source=twice)
-        S.grade(built, S.judge(), draws=1)
-        family_key = _key(FAMILY_RUN, "edr", "lookup", S.DENIED_LOOKUP)
-        assert _counts(built) == {family_key: 2, _denied("b"): 1}, (
-            "J3's row once, as the family's, count 2; b's post-branch refusal its own entry; "
-            "the row only c's table holds is no found gap")
-        return
-    built = S.real_family(tmp_path, {"c": S.RealWorld("c", scrub=False)}, after_source=twice)
-    S.tear_jsonl(built.table_path("a"))
-    S.grade(built, S.judge(), draws=1)
-    assert _unread(built).get(FAMILY_RUN), "fewer than two readable tables: named unread"
-    assert _key(FAMILY_RUN, "edr", "lookup", S.DENIED_LOOKUP) not in _found(built), (
-        "never silently listed")
-    assert _counts(built) == {_denied("a"): 1, _denied("b"): 1, _denied("c"): 1}
 
 
-def test_1234_am_named_gap_multiplicity_across_draws(tmp_path: Path) -> None:
-    """A named gap is the blocked call its pointers resolve to (A7): a call is listed only when
-    every draw names it. Draw 2 names only the first call, so the first call is listed once and
-    the second call (named by draws 0 and 1 only) is not; the user record carries one named-gap
-    entry (NA02).
-
-    Draw 0 names one gap citing both of b's refused calls; draw 1 names two gaps, one per call;
-    draw 2 names one gap citing only the first.
-    """
-    first, second = {"entity": "first"}, {"entity": "second"}
-    built = S.family(tmp_path, S.triad(
-        b={"calls": [*_shown("b"), _refused(first), _refused(second)]}))
-    one, two = built.served("b", built.served_row("b", 2)), built.served("b", built.served_row("b", 3))
-    replies = {
-        ("b", 0): S.world_reply("lead-quality", ["idp"], gaps=[S.gap("both", evidence=[one, two])]),
-        ("b", 1): S.world_reply("lead-quality", ["idp"], gaps=[S.gap("first", evidence=[one]),
-                                                               S.gap("second", evidence=[two])]),
-        ("b", 2): S.world_reply("lead-quality", ["idp"], gaps=[S.gap("first", evidence=[one])])}
-    S.grade(built, S.judge(replies), draws=3)
-    assert _named(built) == [_key(_run("b"), "edr", "lookup", first)]
 
 
-def test_1234_am_named_gap_with_no_blocked_call_key(tmp_path: Path) -> None:
-    """A named gap whose resolving pointers are only outage rows or only context files has no
-    blocked-call key (A2), so it is never listed among the named gaps; but a resolving gap the
-    draw flags as the reason the world's facts never reached the investigator counts toward
-    "not measured" whether or not it has a key: when every completed draw flags one, the world
-    is not measured, its reason naming the gap, and the flagged keyless gaps are listed in the
-    user record as their own list (R1 (c), human 2026-10-12; F-14; I3's "a served system that
-    doesn't hold the field", brief F03, reaches the user this way). A named gap resting only
-    on the inherited pre-branch denial is keyed to that blocked call (A14, identified per A12)
-    and is listed when every draw names it.
-
-    Both draws name three gaps: one on b's live outage row and one on samples and pre-flight's
-    record (each flagged as the reason b's facts never reached the investigator), and one on
-    J3's inherited denial (row 0 of b's table), unflagged. The flagged keyless gaps take the
-    user-record lane; nothing reaches a queue. The paired positive control is the same family
-    whose keyless gaps are unflagged: b stays measured, they take their own ledger lane (I-6;
-    COINED `lane.gap_unkeyed`) and the keyless list stays empty.
-    """
-    def graded(root: str, *, flagged: bool) -> S.Built:
-        built = S.family(tmp_path, S.triad(b={"calls": [*_shown("b"), S.error_call()]}),
-                         inherited=[S.inherited_denial(params=J3_PARAMS)],
-                         root=tmp_path / root)
-        outage = S.gap(S.marker("b", "outage"), kept_facts=flagged,
-                       evidence=[built.served("b", built.served_row("b", 2))])
-        context = S.gap(S.marker("b", "context"), kept_facts=flagged,
-                        evidence=[S.samples_ptr("idp"), S.outcome_ptr()])
-        inherited = S.gap(S.marker("b", "j3"), evidence=[built.table("b", 0)])
-        investigator = [S.inv(contrast=[S.conduct("b"), S.conduct("a")],
-                              claim=S.marker("b", "inv"))]
-        reply = S.world_reply("lead-quality", ["idp"], investigator=investigator,
-                              gaps=[outage, context, inherited])
-        S.grade(built, S.judge({"b": reply}), draws=2)
-        return built
-
-    keyless = (S.marker("b", "outage"), S.marker("b", "context"))
-    built = graded("flagged-root", flagged=True)
-    assert [k[1:] for k in _named(built)] == [("edr", "lookup", S.canonical(J3_PARAMS))]
-    assert not any(m in _text(S.named_gaps(built)) for m in keyless), (
-        "a keyless gap was listed among the keyed named gaps")
-    row = S.row(built, "b")
-    assert row.get(MEASURED) is False, f"every draw flagged a resolving keyless gap: {row}"
-    reason = str(row.get(S.COINED["row.not_measured_reason"]) or "")
-    assert any(m in reason for m in keyless), f"b's reason does not name the gap: {reason!r}"
-    listed = _text(S.unkeyed_gaps(built))
-    assert all(m in listed for m in keyless), (
-        f"the flagged keyless gaps are not listed in the user record's own list: {listed}")
-    for draw in (0, 1):
-        assert S.lane_of(built, built.finding_id("b", draw, 0)) == LANE["not_measured"], draw
-        for index in range(1, 4):
-            lane = S.lane_of(built, built.finding_id("b", draw, index))
-            assert lane == LANE["user_record"], (draw, index, lane)
-    assert not S.from_world(S.defender_queue(), "b"), "a not-measured world queued a row"
-
-    control = graded("unflagged-root", flagged=False)
-    assert S.row(control, "b").get(MEASURED) is True, "control: unflagged keyless gaps unmeasured b"
-    assert S.unkeyed_gaps(control) == [], "control: an unflagged keyless gap was listed"
-    queued = {r.get("finding_id") for r in S.defender_queue()}
-    for draw in (0, 1):
-        assert control.finding_id("b", draw, 0) in queued, (
-            f"control: b's investigator finding of draw {draw} was not queued")
-        for index in (1, 2):
-            lane = S.lane_of(control, control.finding_id("b", draw, index))
-            assert lane == LANE["gap_unkeyed"], (draw, index, lane)
-        assert S.lane_of(control, control.finding_id("b", draw, 3)) == LANE["user_record"]
 
 
 def test_1234_one_hostile_run_with_a_flood_of_refusal_rows(tmp_path: Path) -> None:
@@ -890,45 +562,8 @@ def test_1234_user_record_across_a_rerun_keeps_earlier_named_gaps_once(tmp_path:
     assert S.serving_findings(built) == serving_before, "the serving finding is not doubled"
 
 
-def test_1234_user_record_found_gaps_after_repeated_reruns(tmp_path: Path) -> None:
-    """Each gap appears once across repeated re-runs, computed from the archive on read.
-
-    The control refused a call and pre-flight could not replay one. Pass one grades b (c and d
-    fail, #921 P9), the first re-run grades c, the second grades d.
-    """
-    worlds = S.triad(a={"calls": [S.CallRow(), _refused({"entity": "a-refused"})]},
-                     d={"calls": _shown("d")})
-    built = S.family(tmp_path, worlds, not_replayable=[_not_replayable()])
-    expected = {_key(_run("a"), "edr", "lookup", {"entity": "a-refused"}): 1,
-                NOT_REPLAYABLE_KEY: 1}
-    for graded, failing in (("b", {"c", "d"}), ("c", {"d"}), ("d", set())):
-        S.grade(built, S.judge(fail=failing), draws=1)
-        assert _counts(built) == expected, f"after grading {graded}: each gap once"
-        assert S.row(built, graded).get("completed_draws"), f"this pass graded {graded}"
 
 
-def test_1234_gap_named_by_one_draw_of_three(tmp_path: Path) -> None:
-    """A named gap is listed when every draw names the same blocked call (A7); a gap named by
-    one of three draws is not listed.
-
-    Draw 0 of three names b's refused call; draws 1 and 2 name nothing. Control: all three
-    draws name it, and it is listed once.
-    """
-    calls = [*_shown("b"), _refused({"entity": "b-refused"})]
-    built = S.family(tmp_path, S.triad(b={"calls": calls}))
-    gap = S.gap("b's gap", evidence=[built.served("b", built.served_row("b", 2))])
-    named = S.world_reply("lead-quality", ["idp"], gaps=[gap])
-    silent = S.world_reply("lead-quality", ["idp"])
-    S.grade(built, S.judge({("b", 0): named, ("b", 1): silent, ("b", 2): silent}), draws=3)
-    key = _key(_run("b"), "edr", "lookup", {"entity": "b-refused"})
-    assert _named(built) == [], "one draw of three does not list it"
-    assert _counts(built) == {key: 1}, "the blocked call is on the archive all the same"
-
-    every = S.family(tmp_path, S.triad(b={"calls": calls}), root=tmp_path / "all-root")
-    all_gap = S.gap("b's gap", evidence=[every.served("b", every.served_row("b", 2))])
-    S.grade(every, S.judge({"b": S.world_reply("lead-quality", ["idp"], gaps=[all_gap])}),
-            draws=3)
-    assert _named(every) == [key], "control: every draw names it, listed once"
 
 
 # ======================================================================================
@@ -960,37 +595,6 @@ def _six_findings_family(tmp_path: Path) -> S.Built:
         b={"calls": [*_shown("b"), _refused({"entity": "b-refused"})]}))
 
 
-def test_1234_findings_at_the_same_position_in_two_lists_of_one_draw(tmp_path: Path) -> None:
-    """One index space across the investigator, world and gap lists in filing order, before any
-    drop (A11, A13); `finding_id` stays `<episode>/<world>/<draw>/<index>`, so no two findings
-    of a draw share an id; kept ids may skip numbers.
-
-    Each of two draws files investigator finding 0, world finding 0 and gap 0 — the same
-    position in three lists. The ledger, the two queues and the page must tell them apart.
-    """
-    built = _six_findings_family(tmp_path)
-    refused_at = built.served("b", built.served_row("b", 2))
-    marks = {d: [S.marker("b", f"d{d}-{what}") for what in ("inv", "wf", "gap")] for d in (0, 1)}
-    replies = {("b", d): S.world_reply(
-        "lead-quality", ["idp"], investigator=[S.inv(claim=marks[d][0])],
-        world=[S.wf("mislabelled", claim=marks[d][1], evidence=[S.plan_ptr("b")])],
-        gaps=[S.gap(marks[d][2], evidence=[refused_at])]) for d in (0, 1)}
-    S.grade(built, S.judge(replies), draws=2)
-
-    ids = [str(e.get("finding_id")) for e in S.ledger(built)]
-    assert len(ids) == len(set(ids)), f"two ledger entries share an id: {ids}"
-    for d in (0, 1):
-        lanes = [S.lane_of(built, built.finding_id("b", d, i)) for i in range(4)]
-        assert lanes == [LANE["defender"], LANE["questioner"], LANE["user_record"], None]
-    defender = {r["finding_id"] for r in S.from_world(S.defender_queue(), "b")}
-    questioner = {r["finding_id"] for r in S.from_world(S.questioner_queue(), "b")}
-    assert defender == {built.finding_id("b", d, 0) for d in (0, 1)}
-    assert questioner == {built.finding_id("b", d, 1) for d in (0, 1)}
-    pg = _page(built)
-    for d in (0, 1):
-        for i in range(3):
-            assert marks[d][i] in pg.section(f"f-b-{d}-{i}").text(), (d, i)
-        assert len({_heading(pg, "b", d, i) for i in range(3)}) == 3
 
 
 def test_1234_every_new_fate_appears_on_the_ledger_and_the_page(tmp_path: Path) -> None:
@@ -1071,105 +675,8 @@ def test_1234_every_new_fate_appears_on_the_ledger_and_the_page(tmp_path: Path) 
             assert retired.replace("_", " ") not in heading, heading
 
 
-def test_1234_am_index_space_with_dropped_findings(tmp_path: Path) -> None:
-    """The index runs over the three lists in filing order before any drop (A13): the three
-    investigator findings take 0, 1 and 2, the two world findings 3 and 4, the gap 5; the second
-    investigator finding (index 1) is dropped for unresolved pointers and the first world
-    finding (index 3) for naming only another run, so the kept ids are 0, 2, 4 and 5 and skip
-    numbers. Each dropped finding appears on the ledger under its own id with one drop lane.
-
-    Both draws file the same six findings.
-    """
-    built = _six_findings_family(tmp_path)
-    replies = {("b", d): _six_findings(built, d, drops=True) for d in (0, 1)}
-    S.grade(built, S.judge(replies), draws=2)
-    for d in (0, 1):
-        lanes = [S.lane_of(built, built.finding_id("b", d, i)) for i in range(7)]
-        assert lanes == [LANE["defender"], LANE["dropped_unresolved"], LANE["defender"],
-                         LANE["dropped_other_run"], LANE["questioner"], LANE["user_record"],
-                         None], (d, lanes)
-    defender = {r["finding_id"] for r in S.from_world(S.defender_queue(), "b")}
-    assert defender == {built.finding_id("b", d, i) for d in (0, 1) for i in (0, 2)}, (
-        "kept ids skip the dropped index")
-    questioner = {r["finding_id"] for r in S.from_world(S.questioner_queue(), "b")}
-    assert questioner == {built.finding_id("b", d, 4) for d in (0, 1)}
 
 
-@pytest.mark.parametrize("arm", ["fates", "overflow"])
-def test_1234_am_fates_the_amendment_adds_on_the_ledger(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, arm: str) -> None:
-    """Each filed finding has exactly one lane (A13): dropped unresolved, dropped for naming
-    only another run, dropped for no two-run pair, or a routing fate. A withheld world's
-    investigator findings take a draws-disagree lane; a named gap that not every draw names
-    takes its own lane; a withheld world's design and serving findings take their own routing
-    fates (withholding stops only defender rows). A finding both unresolved and naming only
-    another run takes the unresolved lane (precedence: pointers unresolved, names only another
-    run, no two-run pair). A world refused for overflow files no finding (no draw ran): its
-    fate is the refusal reason on its row, not a finding lane. The lane words differ from the
-    retired `withheld`; the page and every LEDGER_LANES reader learn them.
-
-    fates: b's two draws disagree on the bucket; each files an investigator finding, one citing
-    only missing files of c, one citing only c's report, a design and a serving world finding
-    and a gap both draws name; draw 0 also names a second gap. overflow: a payload cap below
-    every world's computed sections refuses each planted world before any call.
-    """
-    calls = [*_shown("b"), _refused({"entity": "first"}), _refused({"entity": "second"})]
-    built = S.family(tmp_path, S.triad(b={"calls": calls}))
-    judge_seam: S.RoutedJudge
-    if arm == "overflow":
-        monkeypatch.setenv(S.CAP_KNOB, "200")
-        judge_seam = S.judge()
-        S.grade(built, judge_seam, draws=2)
-        for label in ("b", "c"):
-            assert not judge_seam.called(label), f"no draw ran for {label}"
-            # A world refused at prompt build (A9) is not measured, and says why in d00a's one
-            # reason slot (the reading frames_and_cap's s_A74 and AM28 take).
-            row = S.row(built, label)
-            assert row.get(MEASURED) is False, f"{label} reads as measured: {row}"
-            reason = row.get(S.COINED["row.not_measured_reason"])
-            assert isinstance(reason, str), f"{label}'s row names its refusal"
-            assert reason.strip(), f"{label}'s row names its refusal"
-        assert not [e for e in S.ledger(built)
-                    if "/b/" in str(e.get("finding_id")) or "/c/" in str(e.get("finding_id"))], (
-            "a world refused for overflow files no finding lane")
-        return
-    first = built.served("b", built.served_row("b", 2))
-    second = built.served("b", built.served_row("b", 3))
-
-    def draw(bucket: str, *, extra_gap: bool) -> dict:
-        gaps = [S.gap("first", evidence=[first])]
-        if extra_gap:
-            gaps.append(S.gap("second", evidence=[second]))
-        return S.world_reply(
-            bucket, ["idp"],
-            investigator=[S.inv(claim="i0"),
-                          S.inv(claim="i1", contrast=[S.conduct("c", "missing-1.md"),
-                                                      S.conduct("c", "missing-2.md")])],
-            world=[S.wf("mislabelled", claim="w2", evidence=[S.conduct("c")]),
-                   S.wf("mislabelled", claim="w3", evidence=[S.plan_ptr("b")]),
-                   S.wf("mislabelled", claim="w4", evidence=[S.conduct("b")])],
-            gaps=gaps)
-
-    judge_seam = S.judge({("b", 0): draw("lead-quality", extra_gap=True),
-                          ("b", 1): draw("lead-set", extra_gap=False)})
-    S.grade(built, judge_seam, draws=2)
-    expected = [LANE["draws_disagree"], LANE["dropped_unresolved"], LANE["dropped_other_run"],
-                LANE["questioner"], LANE["user_record"], LANE["user_record"]]
-    observed: dict[tuple, str] = {}
-    for d in (0, 1):
-        for i, lane in enumerate(expected):
-            assert S.lane_of(built, built.finding_id("b", d, i)) == lane, (d, i)
-            observed[("b", d, i)] = lane
-    assert S.lane_of(built, built.finding_id("b", 0, 6)) == LANE["gap_not_unanimous"]
-    assert S.lane_of(built, built.finding_id("b", 1, 6)) is None
-    observed[("b", 0, 6)] = LANE["gap_not_unanimous"]
-    assert S.row(built, "b").get(DRAWS_DISAGREE), "b is withheld: its draws disagree"
-    assert S.from_world(S.defender_queue(), "b") == [], "withholding stops defender rows"
-    assert {r["finding_id"] for r in S.from_world(S.questioner_queue(), "b")} == {
-        built.finding_id("b", d, 3) for d in (0, 1)}, "and only those"
-    assert not {str(e.get("lane")) for e in S.ledger(built)} & set(S.RETIRED_LANES)
-    pg = _page(built)
-    _assert_headings_follow_lanes(pg, observed)
 
 
 # ======================================================================================

@@ -135,23 +135,25 @@ def infra_env(defender_dir: Path, run_dir: Path) -> dict[str, str]:
     return env
 
 
-def _derived_infra_env(workdir: Path) -> dict[str, str]:
-    """The infra keys derived off the request's workdir (`defender_dir.parent`)."""
-    defender_dir = Path(workdir) / "defender"
+def _derived_infra_env(workdir: Path, *, defender_dir: Path | None = None) -> dict[str, str]:
+    """Infra keys from the explicit product root, or a legacy checkout workdir."""
+    from ._spec import _code_dir
+
+    defender_dir = _code_dir(workdir, defender_dir)
     return {
         "DEFENDER_DIR": str(defender_dir),
         "PATH": f"{defender_dir / 'bin'}:{_BOX_PATH}",
-        "PYTHONPATH": str(workdir),
+        "PYTHONPATH": str(defender_dir.parent),
     }
 
 
-def _render_env(request_env: Mapping[str, str], workdir: Path) -> dict[str, str]:
+def _render_env(request_env: Mapping[str, str], workdir: Path, *, defender_dir: Path | None = None) -> dict[str, str]:
     """Render the box env from a key allowlist. Derived infra keys override the request;
     `LANG`/`TZ` are defaults the request may override; the `DEFENDER_BOX` mark goes last so
     no request env can switch it off."""
     merged = dict(_LOCALE_ENV)
     merged.update({k: v for k, v in request_env.items() if k in BOX_ENV_ALLOWLIST})
-    merged.update(_derived_infra_env(workdir))
+    merged.update(_derived_infra_env(workdir, defender_dir=defender_dir))
     merged.update(_BOX_MARK_ENV)
     return merged
 

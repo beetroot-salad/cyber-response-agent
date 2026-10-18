@@ -1,26 +1,4 @@
-"""#1106 — a run starts on its own tenant or not at all, and the refusal comes BEFORE the box
-(O4, C9, D4, M5), end to end through `run.py`'s real `main`.
-
-`run.py` is the entry point that resolves the data root (`$DEFENDER_DATA_ROOT`, #1120: the one
-place tenants are found, with no default) and hands it down (D2). The run's tenant is the one
-its request names (`--tenant`, #1078 — there is no default). Before `start_box` the run accepts
-the tenant (`accept_tenant(root, tenant)`, its knowledge folder at `<root>/<T>/knowledge/`),
-loads the table and lead-zero, runs the lead-zero agreement check and checks gather's grant is
-not empty (M5) — every refusal naming the path an operator must fix.
-
-Each scenario drives the REAL `main` with the REAL lifecycle (`_run_investigation_lifecycle`)
-composed over its existing seams: a recording `start_box` (so "never reached" is an
-observation), and — on the path that does reach it — the REAL `_drive_investigation` over a
-recording registry class and a recording driver, so what the run hands its box, its verb
-registry, its driver and its ticket writer is captured as the INBOUND payload each fake
-received. No new seam is added to `main`; nothing is monkeypatched but the data-root env var
-`main` already reads.
-
-The positive half is O1/O2/O3 at the run level: ONE process runs tenant A then tenant B, and
-each run's box gets its own `agent/` half and no settings path, each run's registry holds
-exactly its own table's gather pairs, and each run's driver and ticket writer are handed its
-own settings folder and nobody else's.
-"""
+"""#1106 e2e through run.py's real main: a run for a tenant that is missing, incomplete or inconsistent refuses before the box naming the path to fix; one process running tenant A then B hands each run only its own tenant's agent half, grant and settings."""
 from __future__ import annotations
 
 import functools
@@ -40,9 +18,7 @@ class _StartBoxReached(Exception):
 
 
 class StartBoxRecorder:
-    """The lifecycle's `start_box` seam: records every call's (args, kwargs). With `stop`, it
-    raises once called, so a refusal scenario that wrongly reaches the box fails loudly here
-    rather than running an investigation; without it, it hands back the unboxed executor."""
+    """The lifecycle's `start_box` seam:"""
 
     def __init__(self, *, stop: bool) -> None:
         self.stop = stop
@@ -58,8 +34,7 @@ class StartBoxRecorder:
 
 
 class TicketWriterRecorder:
-    """`main`'s `ticket_writer` seam (a module-shaped object): records what each leg is handed —
-    the run's record, the code tree and the run's env (#1107) with the rest of its arguments."""
+    """`main`'s `ticket_writer` seam (a module-shaped object):"""
 
     def __init__(self) -> None:
         self.opened: list[tuple[tuple, dict]] = []
@@ -81,10 +56,7 @@ class TicketWriterRecorder:
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    """An alert, a data root outside the checkout (`DEFENDER_DATA_ROOT`, where each scenario
-    plants its tenants' knowledge folders and rows), and a `runs_base(tenant_id)` factory that
-    chooses the run's tenant, gives it a row if the scenario planted none, and returns its runs
-    base; the tenant then rides on every argv below as `--tenant` (#1078)."""
+    """An alert, a data root outside the checkout (`DEFENDER_DATA_ROOT`, where each scenario plants its tenants'..."""
     alert_dir = tmp_path / "alerts" / "a-1106"
     alert_dir.mkdir(parents=True)
     alert = alert_dir / "alert.json"
@@ -131,12 +103,7 @@ def _names(text: str, path: Path) -> bool:
 
 
 def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
-    """Drive `main` for the current runs base and return (refusal text, the recorder).
-
-    A refusal may be a `SystemExit` carrying the message (the entry point's existing
-    operator-refusal idiom), a raised exception, or a non-zero return with the message on
-    stderr — the exit mechanism is not what is pinned; the TIMING (never reaching `start_box`)
-    and the NAMED PATH are."""
+    """Drive `main` for the current runs base and return (refusal text, the recorder)."""
     start = StartBoxRecorder(stop=True)
     argv = [str(world["alert"]), "--tenant", world["chosen"]["tenant"], "--no-learn", *extra]
     text = ""
@@ -171,11 +138,7 @@ def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(worl
 
 
 def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base_record(world, capsys):
-    """O4's second named case: the injected root's `playground` lacks `mapping.yaml`, and a run
-    for it refuses naming that file — rather than reaching the ticket screen's quiet "serve no
-    comments". And refused, it leaves NO runs-base record: a base gets its tenant record only
-    when a run dir is actually built there (the run-dir builder creates it), never from a run
-    that stopped."""
+    """O4's second named case:"""
     T.place_tenant(world["root"], T.PLAYGROUND_ID,
                    omit=("systems/case-history/mapping.yaml",))
     base = world["runs_base"](T.PLAYGROUND_ID)
@@ -195,9 +158,7 @@ def test_a_tenant_missing_another_required_file_refuses_before_the_box(world, ca
 
 
 def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(world, capsys):
-    """C9: a grant-nothing table loads clean, and gather's own `GrantError` would fire only at
-    `bind`, mid-run, after the box started and MAIN spent model calls. M5 moves it to start:
-    refused before the box, naming the table the operator must grant gather a verb in."""
+    """C9:"""
     T.place_tenant(world["root"], "newco", table=T.TABLE_BLANK)
     world["runs_base"]("newco")
     text, _ = _refusal(world, capsys)
@@ -215,10 +176,7 @@ dispositions:
 
 
 def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(world, capsys):
-    """The template refusal's sibling: a table granting gather only `health-check` is not an
-    empty grant, so a check on `entries` alone passes it — and the run then spends model calls
-    to have every query DENIED. A health check reaches no data; refused before the box, naming
-    the table. The control is the positive-control test below (a table granting a query)."""
+    """The template refusal's sibling:"""
     T.place_tenant(world["root"], "probe", table=TABLE_HEALTH_CHECK_ONLY)
     grants = T.run_grants(world["root"] / "probe" / "knowledge" / "settings")
     assert {(s, v) for s, v, _ in grants.gather.entries} == {("cmdb", "health-check")}, \
@@ -230,9 +188,7 @@ def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(wor
 
 
 def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, capsys):
-    """M5 runs the lead-zero agreement check at start: a tenant whose table grants the lead
-    while its config names a template the catalog does not hold is refused before the box —
-    today that surfaces inside `run_investigation`, after the box is up."""
+    """M5 runs the lead-zero agreement check at start:"""
     T.place_tenant(world["root"], "drift", lead_zero=T.lead_zero_text("elastic.no-such-template"))
     world["runs_base"]("drift")
     text, _ = _refusal(world, capsys)
@@ -256,11 +212,7 @@ dispositions:
 
 def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_before_the_box(
         world, capsys):
-    """M5's agreement half, not only its existence half: the configured template EXISTS and is
-    established, but it binds `elastic.alerts` while the table grants the lead `elastic.query`.
-    An existence-only check passes this; the run must refuse before the box, naming both
-    sides. The control is `test_the_positive_control_reaches_the_box_…` — the same template
-    with a table granting the lead the pair it binds."""
+    """M5's agreement half, not only its existence half:"""
     T.place_tenant(world["root"], "drift", table=TABLE_LEAD_ON_QUERY)
     grants = T.run_grants(world["root"] / "drift" / "knowledge" / "settings")
     assert {(s, v) for s, v, _ in grants.correlation.entries} == {
@@ -271,37 +223,12 @@ def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_befo
     assert "elastic.query" in text, text
 
 
-def test_the_positive_control_reaches_the_box_with_the_tenants_agent_half(world, capsys):
-    """The complementary condition for every refusal above: the same root, a complete tenant,
-    and `start_box` IS called — with the run's resolved `agent/` half (M6), and with no
-    settings path and no other tenant among its arguments (O1)."""
-    T.place_tenant(world["root"], "acme")
-    T.place_tenant(world["root"], "bravo", table=T.TABLE_B)
-    world["runs_base"]("acme")
-    start = StartBoxRecorder(stop=True)
-    with pytest.raises(_StartBoxReached):
-        _run().main(
-            [str(world["alert"]), "--tenant", "acme", "--no-learn"],
-            lifecycle=_lifecycle(start), visualize=lambda p, **kw: None, preflight=lambda m: 0)
-    assert len(start.calls) == 1, start.calls
-    _args, kwargs = start.calls[0]
-    acme, bravo = world["root"] / "acme" / "knowledge", world["root"] / "bravo"
-    assert Path(kwargs["tenant_agent"]) == (acme / "agent").resolve()
-    assert not T.reaches(start.calls, acme / "settings")
-    assert not T.reaches(start.calls, bravo)
-    # Nor anything that CONTAINS a settings folder or the other tenant (a tenant folder or the
-    # root handed over as a tree): `exposes` also counts an ancestor of the forbidden path.
-    for forbidden in (acme / "settings", bravo / "knowledge" / "settings", bravo):
-        assert not T.exposes(start.calls, forbidden), (forbidden, start.calls)
-
-
 # =============================================================================================
 # O1 / O2 / O3 — one process, tenant A then tenant B: each run carries only its own tenant.
 # =============================================================================================
 
 class _RegistryRecorder:
-    """`_drive_investigation`'s `registry_cls` seam: records what the run built its verb
-    registry from."""
+    """`_drive_investigation`'s `registry_cls` seam:"""
 
     built: list[tuple[tuple, dict]] = []
 

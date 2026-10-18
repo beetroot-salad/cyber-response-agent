@@ -88,7 +88,7 @@ SECRETS_KW = "secrets"
 #: The reference-key suffix (F10, auto: stays `_SECRET_REF`).
 SECRET_REF_SUFFIX = "_SECRET_REF"
 #: The one implemented access method (D2).
-DOCKER_EXEC = "docker-exec"
+DOCKER_EXEC = T1106.DOCKER_EXEC
 #: The per-tenant secret store's file name, under `settings/` (D3).
 SECRETS_ENV = "secrets.env"
 #: The new lint's program name (O7).
@@ -152,64 +152,25 @@ def settings_pointer() -> str:
 # ======================================================================================
 
 #: Each system folder's key prefix, as the adapters spell it.
-PREFIX: dict[str, str] = {
-    "cmdb": "CMDB",
-    "identity": "IDENTITY",
-    "ticket": "TICKET",
-    "case-history": "CASE_HISTORY",
-    "change-mgmt": "CHANGE_MGMT",
-    "threat-intel": "THREAT_INTEL",
-    "elastic": "ELASTIC",
-    "host-state": "HOST_STATE",
-}
+PREFIX = T1106.PREFIX
 
 #: The six docker-exec-curl stub systems (`_stub_transport.load_config`'s three-key template).
 STUB_SYSTEMS: tuple[str, ...] = (
     "cmdb", "identity", "ticket", "case-history", "change-mgmt", "threat-intel")
 
-
-def context_name(marker: str, system: str) -> str:
-    """The docker context a fixture tenant names for `system` — distinct per system and per
-    tenant, and never `soc-playground` (the base's built-in default, CX17)."""
-    return f"ctx-{marker}-{system}"
-
-
-def es_container(marker: str) -> str:
-    return f"es-{marker}"
-
-
-def kibana_container(marker: str) -> str:
-    return f"kibana-{marker}"
+context_name = T1106.context_name
+es_container = T1106.es_container
+kibana_container = T1106.kibana_container
 
 
 def config_texts(marker: str, *, events_index: str | None = None,
                  alerts_index: str | None = None) -> dict[str, str]:
     """One COMPLETE post-#1107 `config.env` per system, host-state's new one included.
 
-    `_tenants1106.config_texts` plus what D2 adds: every system's `<PREFIX>_TRANSPORT` and
-    `<PREFIX>_DOCKER_CONTEXT`, elastic's two containers, and the two stub systems it omits
-    (change-mgmt, threat-intel). A fixture without these lines is a tenant whose every system is
-    down once #1107 lands (no default), so a scenario about one fault would ride on eight."""
-    base = T1106.config_texts(marker, events_index=events_index, alerts_index=alerts_index)
-    base["change-mgmt"] = (
-        f'CHANGE_MGMT_URL_BASE="http://change-mgmt-{marker}:8080"\n'
-        f'CHANGE_MGMT_BASTION_HOST="bastion-{marker}"\n'
-        'CHANGE_MGMT_TIMEOUT_SEC="10"\n')
-    base["threat-intel"] = (
-        f'THREAT_INTEL_URL_BASE="http://threat-intel-{marker}:8080"\n'
-        f'THREAT_INTEL_BASTION_HOST="bastion-{marker}"\n'
-        'THREAT_INTEL_TIMEOUT_SEC="10"\n')
-    base["host-state"] = ""
-    out: dict[str, str] = {}
-    for system, text in base.items():
-        prefix = PREFIX[system]
-        text += (f'{prefix}_TRANSPORT="{DOCKER_EXEC}"\n'
-                 f'{prefix}_DOCKER_CONTEXT="{context_name(marker, system)}"\n')
-        if system == "elastic":
-            text += (f'ELASTIC_ES_CONTAINER="{es_container(marker)}"\n'
-                     f'ELASTIC_KIBANA_CONTAINER="{kibana_container(marker)}"\n')
-        out[system] = text
-    return out
+    Since #1256 that is `_tenants1106.config_texts` itself: it writes every system, access
+    method and elastic's containers included, because a system whose settings check fails is
+    down from run start. A scenario about one fault must not ride on eight."""
+    return T1106.config_texts(marker, events_index=events_index, alerts_index=alerts_index)
 
 
 def plant(root: Path, tenant_id: str = PLAYGROUND_ID, *, marker: str = "t1107",

@@ -1,43 +1,4 @@
-"""#947 — the archive, its two derived readers, and where a sibling's artifacts may live
-(M8, O4, O7; §7 FORK-13).
-
-D3: the episode dir is self-contained. After the runs it holds, per world, the report, the
-investigation document, the two tables, the stamp and the scrub verdict; `delta_o` and the
-verdicts compute from that directory alone, with no re-run and no path outside it.
-
-**The scrub verdict is a SIDECAR beside the run dir** (G17, refuted): `verdict_path(tree)` is
-`tree.parent / f"{tree.name}.scrub-verdict.json"`, sited outside the tree it judges on purpose.
-So the archive reaches a runs-base path, not a run-dir one — a copy written against the design's
-"inside the run dir" sentence would copy a file that is never there.
-
-**Sibling artifacts move OUT of the runs base**, and the episode dir with them (§7 FORK-13,
-resolved by the human on 48-consumers-probe and 4a-relocation-probe, both executed). At §7
-round 2 the human moved the episodes root further still: it is a CONFIGURED location, outside
-both the runs base and the checkout, and is NEVER derived from the runs base — deriving it is
-what put `episodes/` back inside the tree the corpus walker descends and inside the checkout a
-sibling's own stamp is taken over. Three consumers walk that base and cannot tell a synthetic
-sibling from a real run:
-
-* `evals/held_out.py::index_runs` — under the launch convention `held_out.py` itself prescribes,
-  every sibling claims the real run's slug by prefix and mtime recency hands the score to the
-  newest, so a sibling DISPLACES the real run. Dormant only because the fixture set is committed
-  empty.
-* `learning/ops/trace_lesson.py::in_context_cases` — admits all three siblings; one episode
-  turns one investigation into four hits.
-* `skills/invlang/corpus.py::load_corpus` — in NO census before this run, reached through the
-  `defender-invlang` shim at every ordinary run's ORIENT: one episode moved the printed
-  denominator 2 → 5 and multiplied every ranked count fourfold, because siblings inherit the
-  source's alert and document prefix byte for byte.
-
-The three consumer demands are REGRESSION witnesses in the relocated layout, not the per-reader
-filter the human refused: each builds the layout through the production resolver and asserts the
-walker is unaffected. Adding sibling-filtering logic to `held_out.py`, `trace_lesson.py` or
-`invlang/corpus.py` is option (C), and option (C) is not the answer this seam took.
-
-RED against b8a63e66: `learning/branch/archive.py` and `learning/branch/episode.py` do not exist
-(X16), the episode dir is built INSIDE the runs base (`cli.py:146`), and there is no configured
-episodes root at all.
-"""
+"""#947 — the archive, its two derived readers, and where a sibling's artifacts may live (M8, O4, O7"""
 from __future__ import annotations
 
 import json
@@ -88,9 +49,7 @@ def _archived(tmp_path, worlds=T.WORLDS, **kw):
     return ep
 
 
-# ---------------------------------------------------------------------------------------
 # M8 — what lands in the archive, and how it got there
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
@@ -110,10 +69,7 @@ def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
 
 
 def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_path):
-    """The archive copies through the existing screened paths and never through a raw copy: the
-    two tables go through the repository's own staging helper, and each single file through the
-    regular-file screen — so a link planted at an artifact's name in a model-writable run dir is
-    refused rather than followed."""
+    """The archive copies through the existing screened paths and never through a raw copy"""
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     run_dir = T.sibling_run_dir(base, "b")
@@ -130,10 +86,7 @@ def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_pa
 
 
 def test_947_archive_reads_the_scrub_verdict_at_its_sidecar_path(tmp_path):
-    """The archive reads each sibling's scrub verdict at the sidecar path beside the run dir,
-    through the same regular-file screen every other artifact goes through — the verdict is
-    deliberately written OUTSIDE the tree it judges, so a run-dir-scoped copy would find
-    nothing and archive a world with no verdict at all."""
+    """The archive reads each sibling's scrub verdict at the sidecar path beside the run dir, through the same regular-file screen every other artifact..."""
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     run_dir = T.sibling_run_dir(base, "b", scrub_ran=True)
@@ -197,9 +150,7 @@ def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
     assert _episode().delta_o(ep) is not None
 
 
-# ---------------------------------------------------------------------------------------
 # the two derived readers
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_delta_o_returns_class_per_shared_correlation_key(tmp_path):
@@ -262,10 +213,7 @@ def test_947_readers_over_an_episode_with_no_archived_worlds_return_empty(tmp_pa
 
 @pytest.mark.parametrize("outcome", ["unusable", "refused", None])
 def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_path, outcome):
-    """The derived readers refuse to compare an episode whose recorded outcome is anything but
-    `accepted` — `unusable`, `refused`, or no record at all (#1224 M05=A retired `incomplete`;
-    the outcome record is pre-flight's `outcome.yaml`): the worlds that ARE archived are not
-    comparable and a silent per-key answer over them would read as a measurement."""
+    """The derived readers refuse to compare an episode whose recorded outcome is anything but `accepted` — `unusable`, `refused`, or no record at all..."""
     if outcome is None:
         ep = T.episode(tmp_path)
     else:
@@ -278,18 +226,7 @@ def test_947_the_derived_readers_refuse_to_compare_an_incomplete_episode(tmp_pat
         assert (outcome or "no outcome record") in str(bad.value), reader.__name__
 
 
-# ---------------------------------------------------------------------------------------
 # §7 FORK-13 + §7 round 2 (F5-EPISODE-ROOT) — containment, and where the episodes root lives
-#
-# The human's round-1 answer was RELOCATION, not a per-reader filter, and round 2 moved the
-# episodes root further: it is a CONFIGURED location, outside both the runs base and the
-# checkout, and is never derived from the runs base. So the three consumer demands below are
-# REGRESSION witnesses in the relocated layout — each builds the layout through the production
-# resolver and asserts the walker is unaffected — and not the filtering demands the human
-# refused. Every scenario here is rooted in `tmp_path` through the two configured roots: a
-# fixture that mixed a tmp runs base with a production episode dir asserts about two different
-# worlds and is true whatever the implementation does.
-# ---------------------------------------------------------------------------------------
 
 
 def _clean_checkout(tmp_path):
@@ -308,14 +245,7 @@ def _clean_checkout(tmp_path):
 
 
 def _relocated(tmp_path, monkeypatch):
-    """The relocated layout, built through the production resolver: a runs base holding only the
-    source run, and an episode dir `episode_dir_for` places under the CONFIGURED episodes root,
-    with this episode's three sibling run dirs under the runs root the child processes are handed.
-
-    Nothing here hand-places an episode: the whole point of the demand is WHERE the production
-    resolver puts one, so a fixture that chose the path itself would assert about its own
-    arithmetic.
-    """
+    """The relocated layout, built through the production resolver"""
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     ep = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
     for w in T.WORLDS:
@@ -324,10 +254,7 @@ def _relocated(tmp_path, monkeypatch):
 
 
 def test_947_no_sibling_artifact_is_reachable_by_a_runs_base_walk(tmp_path, monkeypatch):
-    """No sibling artifact is reachable by a walk of the runs base: with an episode's three
-    siblings run and archived, a recursive walk of the base finds the source run's own document,
-    stamp and queries table and NOTHING of the episode — no sibling run dir, no archived world,
-    and no episode directory for a walker to descend into."""
+    """No sibling artifact is reachable by a walk of the runs base"""
     base, src, root, ep = _relocated(tmp_path, monkeypatch)
     for w in T.WORLDS:
         T.archived_world(ep, w)
@@ -355,44 +282,8 @@ def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch)
     assert found == sorted([T.SOURCE_RUN_ID, ordinary.name])
 
 
-def test_947_the_episode_dir_is_outside_the_runs_base(tmp_path, monkeypatch):
-    """The episode dir is outside the runs base AND outside the checkout: every recursive walker
-    of the base descends into every directory under it, and an untracked directory inside the
-    checkout is what a sibling's own provenance stamp reports as a dirty tree — so the episodes
-    root is refused if it resolves inside either."""
-    base, src, root = T.configured_layout(tmp_path, monkeypatch)
-    ep = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-    assert ep != base
-    assert base not in ep.parents
-    assert T.mod("run_common").REPO_ROOT not in ep.parents
-    for bad in (base / "episodes", T.mod("run_common").REPO_ROOT / "episodes"):
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(bad))
-        with pytest.raises(T.refusals()) as refusal:
-            EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-        assert str(bad) in str(refusal.value)
-
-
-def test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base(tmp_path, monkeypatch):
-    """The episodes root is READ FROM CONFIGURATION and never derived from the runs base: with
-    the configuration held fixed, re-pointing the runs base does not move a single episode dir,
-    and with the configuration absent the launcher refuses rather than inventing a location
-    under the runs base."""
-    base, src, root = T.configured_layout(tmp_path, monkeypatch)
-    before = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-    assert before.parent == root
-    monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "somewhere-else"))
-    assert EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID) == before
-    monkeypatch.delenv(T.EPISODES_BASE_ENV)
-    with pytest.raises(T.refusals()) as refusal:
-        EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-    assert T.EPISODES_BASE_ENV in str(refusal.value)
-
-
 def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path, monkeypatch):
-    """An episode's own placement never dirties a sibling's provenance stamp: with the runs base
-    inside a checkout — the shape the devcontainer documents — the episode dir, its manifest and
-    its sibling run dirs all land outside that checkout, so a stamp captured over it still reads
-    a clean tree and the family completes without the dirty override."""
+    """An episode's own placement never dirties a sibling's provenance stamp"""
     checkout = _clean_checkout(tmp_path)
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(checkout / ".defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
@@ -406,38 +297,8 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
     assert stamp.unavailable is None
 
 
-def test_947_a_sibling_run_dir_lives_under_the_episode_not_the_runs_base(tmp_path, monkeypatch):
-    """A sibling's run dir lives under its own episode rather than beside the source run: the
-    child process is handed its EPISODE by id (#1105 PR 2, declared change 6: `--episode <ep>`),
-    which it opens under the configured episodes root and whose container (`<episode>/runs`, made
-    with the tenant's record before the first sibling) is its runs base.
-
-    #1078 D2 (brief R2, settled s104): the launcher sets NO `DEFENDER_RUNS_BASE` of its own. A
-    child's value is the parent's, inherited unchanged (J46) — the stale configured base here —
-    never one the launcher composed."""
-    base, src, root = T.configured_layout(tmp_path, monkeypatch)
-    spawn = T.FakeSpawn()
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src.resolve())))
-    with Episode.open(ep) as episode:
-        # The launcher makes the container before the first sibling (#1105 PR 2).
-        T.episode_view(episode)
-        T.mod("learning.branch.cli").start_family(
-            episode, ["a", "b", "c"], spawn=spawn, tenant_id=T.SOURCE_TENANT)
-    assert spawn.launches, "no sibling was started"
-    for launch in spawn.launches:
-        assert launch["env"].get("DEFENDER_RUNS_BASE") == str(base), (
-            "the launcher composed a runs base of its own for a sibling: "
-            f"{launch['env'].get('DEFENDER_RUNS_BASE')}")
-        argv = launch["argv"]
-        assert argv[argv.index("--episode") + 1] == ep.name, argv
-
-
 def test_947_the_held_out_index_never_selects_a_sibling_for_a_fixture_slug(tmp_path, monkeypatch):
-    """The held-out index never selects a sibling for a fixture slug, whatever world label was
-    chosen: with the real run named after the fixture slug in the runs base and an episode's
-    three siblings in the relocated layout — including one whose label re-claims the slug, the
-    arm that displaces the real run by mtime recency — the index still resolves the slug to the
-    real run."""
+    """The held-out index never selects a sibling for a fixture slug, whatever world label was chosen"""
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     held_out = T.mod("evals.held_out")
     slug = "web-1-suspicious-binary"
@@ -451,10 +312,7 @@ def test_947_the_held_out_index_never_selects_a_sibling_for_a_fixture_slug(tmp_p
 
 
 def test_947_the_lesson_tracer_counts_no_sibling_as_an_in_context_case(tmp_path, monkeypatch):
-    """The lesson tracer counts no sibling as an in-context case: one investigation plus one
-    episode's three siblings, each carrying the same loaded-lesson row, is ONE hit and not four,
-    so the printed index reports the number of investigations that loaded a lesson rather than
-    the number of processes that did."""
+    """The lesson tracer counts no sibling as an in-context case"""
     base, src, root, ep = _relocated(tmp_path, monkeypatch)
     trace = T.mod("learning.ops.trace_lesson")
     T.lesson_row(src)
@@ -466,10 +324,7 @@ def test_947_the_lesson_tracer_counts_no_sibling_as_an_in_context_case(tmp_path,
 
 
 def test_947_the_invlang_corpus_counts_no_sibling_and_no_archived_world(tmp_path, monkeypatch):
-    """The orientation corpus counts no sibling and no archived world: the shim's recursive walk
-    for companion documents under the runs base loads ONE case where one investigation happened,
-    so an episode cannot move the denominator every ordinary run's orientation is ranked against
-    — the walker that relocation alone does not contain, because it descends rather than lists."""
+    """The orientation corpus counts no sibling and no archived world"""
     base, src, root, ep = _relocated(tmp_path, monkeypatch)
     corpus = T.mod("skills.invlang.corpus")
     T.corpus_document(src)

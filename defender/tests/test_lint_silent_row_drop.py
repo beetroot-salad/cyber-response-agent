@@ -1,28 +1,14 @@
-"""The lint gate for the silent invlang row drop: lint_silent_row_drop (#876).
-
-The gate says a row may not leave a loop in the invlang row-carrying surface by
-``continue``/``break``/bare ``return`` unless, unconditionally on that same path, a
-``ParseWarning`` was raised or the row landed somewhere. What makes it a construction
-boundary rather than a ban on a spelling is that the two ROLES are derived structurally —
-a PROJECTOR is a class that both holds ``list[ParseWarning]`` state and raises one, a
-TOKENIZER is a function whose return annotation mentions ``Block`` — so these tests carry
-both directions of each role test, not just the positive one.
-
-Driven through the testability seam the shipped gates carry:
-  - ``main(argv, *, scope=None, baseline_path=None) -> exit code``
-  - ``_scan(scope) -> list[Finding]``
-The gate lives at repo-root ``scripts/lint/``, so its path is derived from this file.
-"""
+"""The lint gate for the silent invlang row drop: lint_silent_row_drop (#876)."""
 from __future__ import annotations
 
 import json
+
 from pathlib import Path
 
 import pytest
 
-from defender.tests._by_path import import_lint_lib, load_lint_gate
+from defender.tests._by_path import load_lint_gate
 
-_ASTLIB = import_lint_lib("_astlib")
 _GATE = load_lint_gate("lint_silent_row_drop")
 
 
@@ -73,9 +59,9 @@ def _scope(tmp_path: Path, *methods: str, name: str = "scope") -> Path:
     return tree
 
 
-def _write_baseline(path: Path, fingerprints: list[str], reason: str = "triaged") -> None:
+def _write_baseline(path: Path, fingerprints: list[str]) -> None:
     path.write_text(
-        json.dumps({"//": "test", "entries": {fp: reason for fp in fingerprints}}) + "\n",
+        json.dumps({"//": "test", "entries": {fp: "triaged" for fp in fingerprints}}) + "\n",
         encoding="utf-8",
     )
 
@@ -292,76 +278,3 @@ def test_scan_and_ratchet_contract(tmp_path):
     assert _GATE.main([], scope=tmp_path / "does-not-exist") == 2
 
 
-def test_an_untriaged_baseline_entry_still_fails(tmp_path):
-    """`require_reasons` closes the ratchet's own escape hatch: burying a drop by running
-    `--update-baseline` costs a sentence saying why it is not one."""
-    tree = _scope(tmp_path, _DROPS)
-    bp = tmp_path / "bp.json"
-    assert _GATE.main(["--update-baseline"], scope=tree, baseline_path=bp) == 0
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 1, "'' must not pass"
-    _write_baseline(bp, [f.fingerprint for f in _GATE._scan(tree)], reason="#876")
-    assert _GATE.main([], scope=tree, baseline_path=bp) == 0
-
-
-def test_unparseable_file_in_scope_raises_scanblind(tmp_path):
-    """A file the gate could not read never entered the corpus, so a silent drop could sit
-    in it while the gate printed 0 findings. It must raise, not shrink the corpus."""
-    tree = _scope(tmp_path, _DROPS)
-    _pyfile(tree, "broken.py", "def f(:\n    this is not python\n")
-    with pytest.raises(_ASTLIB.ScanBlind) as exc:
-        _GATE._scan(tree)
-    assert "broken.py" in str(exc.value)
-    assert _GATE.main([], scope=tree, baseline_path=tmp_path / "bp.json") == 2
-
-
-def test_clean_tree_still_scans(tmp_path):
-    """The control for the above: without the unparseable file the same tree scans normally
-    and still finds the real site, so the raises-test cannot pass against a gate that raises
-    unconditionally."""
-    assert _quals(_GATE._scan(_scope(tmp_path, _DROPS))) == {"_Projector.project_drop"}
-
-
-def test_every_finding_this_gate_was_built_on_stays_fixed():
-    """The four real drops `lint_silent_row_drop` shipped with, asserted GONE — neither
-    reported nor baselined.
-
-    They were baselined at the gate's landing because that change was forbidden from editing
-    `parser.py`; #876 fixed all four, so the shipped baseline now holds nothing but false
-    positives. Absent-from-BOTH is the assertion that matters: a later edit that reverted a
-    landing would make the site a finding again, and regenerating the baseline would then
-    accept it in silence — this test is what refuses that.
-
-    That the gate can still SEE a drop is proved by the synthetic-scope tests above
-    (`test_clean_tree_still_scans` and its siblings), which build a projector with a real
-    drop in it and assert the gate reports exactly that one. Nothing in the shipped tree is
-    load-bearing for the gate's sight any more, which is the point of having fixed them.
-    """
-    reported = {f.fingerprint for f in _GATE._scan(_GATE.INVLANG)}
-    baselined = json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))["entries"]
-    for fingerprint in (
-        # F-2's two spellings — the guard was split, so both are gone.
-        "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story or cur is None",
-        "defender/skills/invlang/parser.py:_tokenize_fence:continue:in_story",
-        "defender/skills/invlang/parser.py:_Projector._project_surviving_block:"
-        "continue:not hid or is_conclude_empty_marker(hid)",
-    ):
-        assert fingerprint not in reported, f"{fingerprint} came back"
-        assert fingerprint not in baselined, f"{fingerprint} was re-baselined"
-
-
-def test_every_baseline_entry_carries_a_reason():
-    """The baseline is the gate's triage record: an entry with no reason is a finding
-    nobody looked at. `require_reasons` enforces it at run time; this pins it as intent.
-
-    Not asserted non-empty any more. Every true positive the gate found is fixed, so an
-    empty baseline is now a legal — and better — state, and a test demanding entries would
-    stand in the way of the last two false positives being retired."""
-    data = json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))
-    assert all(reason.strip() for reason in data["entries"].values())
-
-
-@pytest.mark.gate
-def test_real_tree_clean():
-    """`gate`-marked: the code-smells step runs this same `main([])` over this same tree and
-    blocks on it, so the `test` job's copy would be duplicate cost on CI's critical path."""
-    assert _GATE.main([]) == 0

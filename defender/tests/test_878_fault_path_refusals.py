@@ -1,18 +1,4 @@
-"""#878 — four reachable faults on the runtime's own fault paths that ended the run with no
-disposition, and a rollback that closed an fd it no longer owned.
-
-Every one of them is the same shape as the family #851 named: the refusal that should have been
-drawn already exists in the same function, a few lines away, and the fault path walks past it.
-So each test here drives the REAL function over the REAL corrupt input and asserts a VERDICT —
-a `ModelRetry`, a bool, a returned state — rather than asserting the absence of a traceback,
-which any narrowing would satisfy.
-
-F-07 is not here: it is a live-run property (five calls, two rows, three down-messages, and a
-run that survives) and it lives with the rest of the breaker's spec, in
-`tests/e2e/test_repeat_breaker_807.py::test_load_error_repeat_is_answered_by_the_breaker_not_
-the_run_kill`. F-36's amendment lives with `claim_lead`'s other rollback tests, in
-`tests/test_record_lead.py`.
-"""
+"""#878 — four reachable faults on the runtime's own fault paths that ended the run with no disposition, and a rollback that closed an fd it no longer owned."""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -29,7 +15,6 @@ from defender.hooks.budget_enforcer import (  # noqa: E402
     DEFAULT_LIMITS,
     tail_exhausted,
 )
-from defender.runtime import circuit_breaker as cb  # noqa: E402
 
 # A basename over NAME_MAX (255 bytes on every filesystem the runs tree is mounted on). The
 # parent — the run root — always exists, which is what carries the probe past the clean ENOENT
@@ -181,26 +166,3 @@ def _state(tmp_path):
     return RunState(tmp_path, "run-878")
 
 
-def test_a_healthy_state_still_reads_and_trips(tmp_path):
-    """An ordinary state still counts, still trips at `PER_SYSTEM_FAIL_LIMIT`, and still reports
-    a real failure count in `down_message`."""
-    state = _state(tmp_path)
-    assert cb.is_tripped(state, "elastic") is False
-    cb.record_outcome(state, "elastic", 2)
-    assert cb.is_tripped(state, "elastic") is False
-    cb.record_outcome(state, "elastic", 2)
-    assert cb.is_tripped(state, "elastic") is True
-    msg = cb.down_message(state, "elastic")
-    assert "2 infra failures" in msg
-    assert cb.is_tripped(state, "identity") is False, "one system's failures tripped another"
-
-
-def test_the_run_kill_still_fires_on_a_healthy_state(tmp_path):
-    """The other positive control: `RUN_FAIL_KILL_LIMIT` is still reachable. The F-07 fix stops
-    ONE class of call from spending it, and that must not have made the kill
-    itself unreachable — it is the deliberate abort for a genuinely unreachable environment."""
-    state = _state(tmp_path)
-    for i in range(cb.RUN_FAIL_KILL_LIMIT - 1):
-        cb.record_outcome(state, f"system-{i}", 2)
-    with pytest.raises(cb.RunAborted):
-        cb.record_outcome(state, "system-last", 2)

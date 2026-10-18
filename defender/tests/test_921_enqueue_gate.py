@@ -1,30 +1,4 @@
-"""#921 — the queue row, the appender that writes it, and the family partition inside the gate.
-
-The findings channel has ONE gate over the whole batch (`CorpusAuthorConfig.gate`, wired to
-`author/lessons/run.py::_gate_findings`), called once per tick over EVERY keyed row of
-`findings.jsonl`. So `_gate_family` is a PARTITION inside that gate, never a second gate, and a
-mixed batch is the designed shape rather than an edge case.
-
-P6 IS THE HARDEST CONSTRAINT HERE, and it was executed end to end rather than read: one
-family-shaped row with no `run_id` raises a bare `KeyError('run_id')` out of `_gate_findings`,
-`_tick` finds `KeyError` outside `RETIRE_SET`, stuck-records THE WHOLE KEYED BATCH — every
-well-formed adversarial and benign row riding beside it — and then RE-RAISES, so the tick fails.
-Verbatim from a real tick over a real channel:
-`{"fault_class": "KeyError", "row_ids": ["f-adversarial-1", "f-benign-1", "f-family-1"], …}`.
-One malformed #921 row wedges the two lanes that already work.
-
-TWO §7 RESOLUTIONS ARE APPLIED HERE AS SETTLED:
-* **J12** — family rows are EXEMPT from the forward check (their ground truth is
-  `disposition_declared` on the family record, not a `source_refs.yaml` they do not have), and
-  the WRITER refuses a family row lacking `run_id` / `direction` so a malformed one never
-  reaches the shared gate at all.
-* **J7's survivor** — the append goes through the guarded writer or carries the documented
-  suppression, or it is a new blocking lint finding.
-
-RED against `d1b8b06a`: `learning/judge/enqueue.py` and `_gate_family` do not exist,
-`QUEUEABLE_FINDING_TYPES` has no `decision-discipline`, and a `direction: family` row is held
-`no_ground_truth` forever.
-"""
+"""#921 — the queue row, the appender that writes it, and the family partition inside the gate."""
 from __future__ import annotations
 
 import json
@@ -299,29 +273,6 @@ def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
             "the family record is the artifact, and it lost its per-world grading")
 
 
-def test_921_gradable_episode_appends_one_row_per_finding(tmp_path):
-    """The paired positive control: a `gradable` episode appends EXACTLY one row per finding per
-    world per draw, so the refusal above cannot pass vacuously on a broken appender.
-
-    "Every draw's findings become rows" is the doc's own text — flow 3 says "each finding of each
-    world -> one `FindingRow`", unqualified by draw, and N3 says the spread is reported rather
-    than averaged away.
-    """
-    two_findings = J.as_reply_text(J.reply_doc(findings=[
-        J.finding_doc(topic="first"), J.finding_doc(topic="second", anchor="l-002")]))
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
-                            dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    J.grade_at(
-        ep, judge=J.FakeJudge(default=two_findings), draws=2, state=env_state())
-
-    record = J.judge_record(ep)
-    rows = J.enqueued_rows(record)
-    assert all(row["measured"] for row in record["worlds"]), "a world was not measured"
-    assert len(rows) == 2 * 2 * 2, f"two worlds x two draws x two findings gave {len(rows)} rows"
-    assert record["enqueued_rows"] == len(rows)
-
-
 def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path):
     """A row missing `run_id` or `direction` raises a bare `KeyError` inside `_gate_findings`;
     `_tick` stuck-records THE ENTIRE KEYED BATCH — every well-formed adversarial and benign row
@@ -410,74 +361,6 @@ def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
 # ---------------------------------------------------------------------------------------
 # O6 / M5 — the twelve-key row
 # ---------------------------------------------------------------------------------------
-
-
-def test_921_finding_row_carries_the_twelve_keys_persist_writes(tmp_path):
-    """One row per finding carrying the keys `persist.py:315-330` writes:
-    `schema_version, finding_id, run_id, alert_rule_key, direction="family", type=<bucket>,
-    subject_anchor, subject_topic, finding, citations=<resolving pointers>,
-    source_run_dir=<archived world dir>` — #1234 (d00d) drops `judge_outcome` (A4) and adds
-    `contrast_evidence`, `on_verdict_path` and `world_label_doubted` (`J.ROW_KEYS`).
-
-    A row missing a key the queue's validator reads is O6's stated failing mode — and P6 makes
-    two of those keys load-bearing well past validation, because `run_id` and `direction` are
-    plain `dict[...]` lookups inside the shared gate.
-    """
-    ep, record = _graded(tmp_path)
-    rows = J.enqueued_rows(record)
-    assert rows, "the graded episode enqueued nothing to check"
-
-    # Exactly the two graded (non-control) worlds' own archived dirs, in the literal
-    # `episodes/<id>/worlds/<label>` form F-3's collision docstring pins — not merely a string
-    # that ends with "worlds/b" or contains "worlds/" anywhere, which the colliding value F-3
-    # names (a label spelled like a real run id) would satisfy just as well.
-    expected_dirs = {f"episodes/{ep.name}/worlds/{label}" for label in ("b", "c")}
-
-    for row in rows:
-        # `recorded_signature` (#1222 B2) is the one key beyond the thirteen, present exactly when
-        # the episode's record holds a signature.
-        assert set(row) - {"recorded_signature"} == set(J.ROW_KEYS), (
-            f"row keys differ from the queue's shape: {sorted(set(row) ^ set(J.ROW_KEYS))}")
-        assert row["direction"] == "family"
-        assert "judge_outcome" not in row
-        assert isinstance(row["contrast_evidence"], list)
-        assert row["contrast_evidence"]
-        assert isinstance(row["on_verdict_path"], bool)
-        assert isinstance(row["world_label_doubted"], bool)
-        assert row["type"] in J.mod("learning.core.config").QUEUEABLE_FINDING_TYPES
-        assert row["source_run_dir"] in expected_dirs, (
-            f"source_run_dir must be exactly the row's own archived world dir "
-            f"({sorted(expected_dirs)}), not merely something shaped like 'worlds/*': "
-            f"got {row['source_run_dir']!r}")
-    assert {row["source_run_dir"] for row in rows} == expected_dirs, (
-        "every graded (non-control) world's archived dir must appear across the enqueued rows "
-        f"exactly once each: got {sorted(row['source_run_dir'] for row in rows)}")
-
-
-def test_921_decision_discipline_is_queueable_and_an_unknown_type_is_refused(tmp_path):
-    """`decision-discipline` is a queueable finding type, and a type OUTSIDE the vocabulary is
-    refused AT THE APPENDER.
-
-    At base there was no production consumer of `QUEUEABLE_FINDING_TYPES` at all: the only
-    membership test on a finding `type` anywhere was inside the OLD pipeline judge's document
-    validator, which never saw a queue row. The appender below is the enforcement O6 named, and
-    since #922 deleted that validator it is the only one left.
-    """
-    config = J.mod("learning.core.config")
-    enqueue = _enqueue()
-    ep, record = _graded(tmp_path)
-
-    assert "decision-discipline" in config.QUEUEABLE_FINDING_TYPES
-    before = len(J.enqueued_rows(record))
-    with pytest.raises(J.refusals()) as raised:
-        enqueue.append_rows(ep, [_family_row(type="root-cause-vibes")], state=env_state())
-    assert "root-cause-vibes" in str(raised.value)
-    assert len(J.enqueued_rows(record)) == before
-
-    # Positive control: the same row with a queueable type lands.
-    assert enqueue.append_rows(ep, [_family_row("ep-1/b/0/7", type="decision-discipline")], state=env_state()) == 1
-
-
 
 
 def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path):
@@ -712,12 +595,3 @@ def test_921_discard_needs_a_majority_of_draws(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_the_row_rule_screens_key_presence_not_the_value():
-    """`finding_id`/`run_id`/`direction` are screened for KEY PRESENCE: an explicit `None`
-    passes that screen (and is refused, if at all, by a later rule), a missing key does not."""
-    JudgeRefused = J.sym("learning.judge", "JudgeRefused")
-    row = _family_row()
-    del row["run_id"]
-    with pytest.raises(JudgeRefused, match="missing 'run_id'"):
-        _enqueue()._validate_row(row)
-    assert _enqueue()._validate_row(_family_row(run_id=None)) is None

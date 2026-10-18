@@ -1,16 +1,4 @@
-"""#1127, second review: a record holding a YAML alias is refused, never read as absent or as its word.
-
-Before #1127 the host's own writer (`yaml.safe_dump`) wrote `&id001`/`*id001` whenever a
-document shared an object, so an episode archived before it can hold an aliased record. The
-tree now refuses any alias at load (`_yaml.AliasRefused`). The gate that refuses an episode
-whose outcome is not `accepted` must take that refusal as the "no record" state — never read
-the word the aliased document carries, which would let an unreadable record pass the gate as
-`accepted`, failing open.
-
-(#1224 moved the outcome from the merged `review.yaml` to pre-flight's write-once
-`outcome.yaml`, `learning/branch/outcome.py`; the review merge and its replace-a-torn-record
-rule went with it.) The control: a torn record keeps its meaning, the same "no record" state.
-"""
+"""A record holding a YAML alias is refused by the outcome gate, never read as absent or as its word."""
 from __future__ import annotations
 
 from pathlib import Path

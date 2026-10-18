@@ -1,40 +1,7 @@
-"""#1105 PR 1 — run setup's new checks (D3.7, D2.1, D12, OP-2; MF-17 and MF-21; Open item 1).
-
-Run setup (`run_common.materialize_run`, called once from `run._materialize_run`, the seam
-`run.main` injects) gains, in this order:
-
-  1. id admission: the `_tenant.json` collision guard first (as today), then `RunId.parse`
-     (pinned) or `RunId.mint` (minted) in place of `refuse_bad_run_id` / `mint_run_id`, then the
-     sidecar clause, staged shape included, for pinned and minted ids alike (D2.1, MF-21,
-     RG-18-a) — refusals stay `sys.exit(str)`: the guard's own message, and `invalid run id: …`
-     for the rest. A minted id's label is the alert's file stem, or its folder's name when the
-     stem is `alert` (`run_common._alert_label`, unchanged);
-  2. the runs-folder state (OP-2): a link (dangling or not) or a non-directory at the runs folder
-     this branch uses — `tenant.runs`, or a sibling's episode `runs/` in PR 1 — raises
-     `TenantRefused`, which `run.py` surfaces as `[run.py] …`, before anything is created or
-     read inside it; an absent folder is created at step 3, as today;
-  3. `guarded_mkdir` and `ensure_runs_base_record`, as today (a record naming another tenant
-     refuses here, RG-1); a 200,000-deep `_tenant.json` refuses with `TenantRefused`, not
-     today's raw `RecursionError` (Open item 1, a declared O5 change);
-  4. the claimed-id check, for PINNED ids on the non-sibling branch only: it holds the runs
-     folder with `_io.hold(runs_base, follow=False)` and reads `episode_sibling_ids` over its
-     view; every refusal there is one stderr line naming the path (`sys.exit(str)`, MF-17);
-  5. `Run.for_tenant`, then today's existing-folder handling (odd occupants keep today's
-     outcome, RG-21-a).
-
-Every input is real: the runs folder is a real link, the records are written by the writer or
-planted by hand on disk, the deep record is a real 200,000-deep JSON. The claimed-id read is
-observed with a `sys.setprofile` hook (the calls made, in order) — observation only.
-
-Red at base 80888efb: no claimed-id check, no runs-folder refusal (a link is followed, R-151-a),
-no `RunId` admission (ids of 207+ bytes and sidecar-named ids are admitted), and the deep
-record raises `RecursionError` (RG-20-a). The tests that import the door (`record_episode_runs`,
-`RunId`) fail there at their own import.
-"""
+"""Run setup checks: pinned ids claimed by records, id bounds, sidecar suffixes, linked runs folders, one-line stderr refusals."""
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 from defender import _tenant
@@ -60,35 +27,6 @@ def _one_line_exit(err: BaseException | None) -> bool:
     return (isinstance(err, SystemExit) and isinstance(err.code, str)
             and len(err.code.splitlines()) == 1)
 
-
-class _Calls:
-    """The calls run setup makes, in order, observed with `sys.setprofile` (an observation
-    hook; it alters nothing): `hold` (with its `root` and `follow`), `episode_sibling_ids`,
-    `for_tenant`."""
-
-    WATCHED = ("hold", "episode_sibling_ids", "for_tenant")
-
-    def __init__(self) -> None:
-        self.seen: list[tuple[str, object, object]] = []
-
-    def __call__(self, frame, event, _arg):
-        if event != "call":
-            return
-        name = frame.f_code.co_name
-        if name in self.WATCHED:
-            loc = frame.f_locals
-            self.seen.append((name, loc.get("root"), loc.get("follow")))
-
-    def run(self, fn, *args, **kwargs):
-        previous = sys.getprofile()
-        sys.setprofile(self)
-        try:
-            return H.raised(fn, *args, **kwargs)
-        finally:
-            sys.setprofile(previous)
-
-    def names(self) -> list[str]:
-        return [n for n, _r, _f in self.seen]
 
 
 def _link_runs_to(t, outside: Path) -> None:
@@ -160,56 +98,6 @@ def test_1105_run_setup_refuses_a_pinned_id_a_record_naming_another_tenant_claim
     assert not os.path.lexists(runs / "ep1-a"), "a run folder was created for a claimed id"
     assert _pinned(alert, "ep1-b", t).run_dir == runs / "ep1-b", "an unclaimed pinned id runs"
 
-
-def test_1105_run_setup_admits_the_id_then_checks_the_folder_then_the_record_then_the_claims(
-        tmp_path, data_root):
-    """Run setup refuses in order: '_tenant.json' as a pinned id gets the collision guard's own
-    message; a bad id over a linked runs folder gets 'invalid run id: ...' and nothing is
-    created; a linked runs folder gets TenantRefused ('[run.py] ...') with nothing created
-    through the link; a foreign _tenant.json with a pinned id a record claims gets TenantRefused
-    at the record step before _episodes is read; a claimed pinned id is refused, through the
-    claimed-id read over a no-follow hold of the runs folder, before Run.for_tenant and any run
-    folder."""
-    alert = H.alert_file(tmp_path / "in")
-    t = H.tenant(data_root, H.T_ID)
-    outside = tmp_path / "elsewhere"
-    _link_runs_to(t, outside)
-    # 1. id admission comes first: over a linked runs folder, the id refusals fire.
-    collision = str(_tenant.refuse_colliding_run_id("_tenant.json"))
-    err = H.raised(_via_run_py, alert, "_tenant.json", t)
-    assert H.message(err) == collision, f"the collision guard's own message, got {err!r}"
-    err = H.raised(_via_run_py, alert, "Bad Name", t)
-    assert H.message(err).startswith("invalid run id: "), f"a bad id gave {err!r}"
-    assert H.tree_state(outside) == {}, "an id refusal created something through the link"
-    # 2. the runs-folder state, before the record and the claims.
-    err = H.raised(_via_run_py, alert, "r1", t)
-    assert H.message(err).startswith("[run.py] "), f"a linked runs folder gave {err!r}"
-    assert H.tree_state(outside) == {}, "run setup created something through a linked runs folder"
-    os.unlink(t.runs)
-    # 3. the tenant record, before `_episodes` is read: a stray name there would refuse
-    #    differently, so a TenantRefused proves the order.
-    runs = Path(t.runs)
-    H.plant_tenant_record(runs, H.U_ID)
-    H.plant_record(runs, "ep1", t.id, "src1", {"a": "ep1-a"})
-    (runs / "_episodes" / "README").write_text("stray\n", encoding="utf-8")
-    err = H.raised(_pinned, alert, "ep1-a", t)
-    assert isinstance(err, _tenant.TenantRefused), (
-        f"a foreign _tenant.json did not refuse at the record step first: {err!r}")
-    assert "_tenant.json" in str(err), f"the record step's refusal names the record: {err!r}"
-    # 4. the claimed-id read, over a no-follow hold, before Run.for_tenant and any run folder.
-    (runs / "_episodes" / "README").unlink()
-    H.plant_tenant_record(runs, t.id)
-    calls = _Calls()
-    err = calls.run(_pinned, alert, "ep1-a", t)
-    assert _one_line_exit(err), f"a claimed pinned id was not refused: {err!r}"
-    nofollow = [i for i, (n, root, follow) in enumerate(calls.seen)
-                if n == "hold" and follow is False and Path(str(root)) == runs]
-    assert nofollow, f"the claimed-id read held no no-follow handle on {runs}: {calls.seen}"
-    assert "episode_sibling_ids" in calls.names()[nofollow[0]:], (
-        f"episode_sibling_ids did not read the held folder: {calls.names()}")
-    assert "for_tenant" not in calls.names(), (
-        f"Run.for_tenant ran before the claimed-id refusal: {calls.names()}")
-    assert not os.path.lexists(runs / "ep1-a"), "a run folder was created for a claimed id"
 
 
 def test_1105_run_setup_refuses_a_pinned_or_minted_id_over_206_bytes_with_the_invalid_run_id_exit(

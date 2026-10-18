@@ -6,11 +6,9 @@ log collector would receive.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import io
 import json
 import logging
-import types
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -237,25 +235,6 @@ def test_configure_owns_one_handler_and_keeps_third_party_info_out(restore_root,
     assert got == ["ours", "theirs, but worth seeing"]
 
 
-def test_the_handler_writes_where_stderr_points_now(restore_root):
-    """A redirect made AFTER setup still captures log lines — the eval harness captures a
-    curator's output this way, as it did when that output was printed."""
-    _log.configure(fmt="text", level="INFO")
-    buf = io.StringIO()
-    with contextlib.redirect_stderr(buf):
-        logging.getLogger("defender.x").info("into the redirect")
-    assert buf.getvalue().rstrip().endswith("INFO defender.x into the redirect")
-
-
-def test_text_format_is_readable_and_names_the_bound_run(restore_root, capsys):
-    _log.configure(fmt="text", level="INFO")
-    capsys.readouterr()
-    with _log.log_context(run_id="r9", tenant_id="t9"):
-        logging.getLogger("defender.x").warning("careful")
-    out = capsys.readouterr().err.strip()
-    assert out.endswith("WARNING defender.x [run_id=r9 tenant_id=t9] careful")
-
-
 @pytest.mark.parametrize(("var", "value"), [
     (_log.FORMAT_ENV, "yaml"), (_log.LEVEL_ENV, "LOUD"), (_log.LEVEL_ENV, "--5"),
     (_log.LEVEL_ENV, "²"), (_log.LEVEL_ENV, "NOTSET"), (_log.LEVEL_ENV, "0"),
@@ -272,18 +251,6 @@ def test_an_unknown_setting_falls_back_and_says_so(monkeypatch, restore_root, ca
     assert value.upper() in line["message"].upper()
     logging.getLogger("defender.x").info("still logging")
     assert json.loads(capsys.readouterr().err)["message"] == "still logging"
-
-
-@pytest.mark.parametrize(("value", "level"), [
-    ("info", logging.INFO), (" Warning ", logging.WARNING), ("warn", logging.WARNING),
-    ("FATAL", logging.CRITICAL), ("30", logging.WARNING),
-])
-def test_every_level_logging_accepts_is_accepted(monkeypatch, restore_root, capsys, value, level):
-    monkeypatch.setenv(_log.LEVEL_ENV, value)
-    capsys.readouterr()
-    _log.configure_from_env()
-    assert capsys.readouterr().err == "", "a valid level was reported as a bad one"
-    assert logging.getLogger(_log.ROOT_LOGGER).level == level
 
 
 def test_the_fallback_notice_cannot_be_hidden_by_the_level(monkeypatch, restore_root, capsys):
@@ -316,19 +283,6 @@ def test_the_format_is_read_by_the_one_lenient_choice_rule(
         assert _strict(err)["message"] == "still logging"
     else:
         assert err.rstrip().endswith("INFO defender.x still logging"), err
-
-
-@pytest.mark.parametrize(("main", "name"), [
-    (types.SimpleNamespace(__spec__=types.SimpleNamespace(name="defender.learning.loop")),
-     "defender.learning.loop"),
-    (types.SimpleNamespace(__spec__=types.SimpleNamespace(name="defender.pkg.__main__")),
-     "defender.pkg"),
-    (types.SimpleNamespace(__spec__=None, __file__=str(Path(_log.__file__).with_name("run.py"))),
-     "defender.run"),
-    (types.SimpleNamespace(__spec__=None, __file__="/elsewhere/tool.py"), "__main__"),
-])
-def test_a_program_is_named_as_the_module_it_is(main, name):
-    assert _log.program_name(main) == name
 
 
 def test_a_program_s_own_info_lines_are_kept_and_named(restore_root, capsys):

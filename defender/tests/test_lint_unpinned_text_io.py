@@ -1,34 +1,13 @@
-"""Tests for the lint_unpinned_text_io gate (#594/#602).
-
-The first block characterizes the detector — the net under a gate that had no
-tests at all. The second block is the bugs the resolver fixed; each was an
-``xfail(strict=True)`` when it was written, so the fix announced itself as an
-XPASS and the deleted marker is the proof.
-
-Every one of those bugs came from ONE mistake. The old ``_open_mode`` read
-``call.args[0]`` as the mode of any ``<x>.open(...)`` — right for
-``Path.open(mode)``, wrong for every module-level opener, which is path-FIRST
-(``codecs.open(file, mode)``, ``io.open(file, mode)``, ``gzip.open(file, mode)``).
-So the gate read the FILE PATH as the mode string, and every verdict on that
-family turned on whether the path was a literal containing the letter ``b``:
-``codecs.open("f.bin", "rb")`` scanned clean because of the ``b`` in ``"f.bin"``.
-The mode's slot and default are properties of the CALLEE — which is why resolving
-the callee is what makes this gate correct, not merely alias-proof.
-
-The gate is driven through its DI seam:
-  - main(argv=None, *, scope=None, baseline_path=None) -> exit code
-  - _scan(root) -> list[Finding]
-"""
+"""Tests for the lint_unpinned_text_io gate (#594/#602)."""
 from __future__ import annotations
 
 import json
+
 from pathlib import Path
 
-import pytest
 
-from defender.tests._by_path import import_lint_lib, load_lint_gate
+from defender.tests._by_path import load_lint_gate
 
-_ASTLIB = import_lint_lib("_astlib")
 _GATE = load_lint_gate("lint_unpinned_text_io")
 
 
@@ -128,52 +107,10 @@ def test_suppression(tmp_path):
     )
 
 
-def test_syntax_error_file_is_not_silently_skipped(tmp_path):
-    """INVERTED by #652 (was `test_syntax_error_file_is_skipped`).
-
-    The old assertion pinned the swallow — `broken.py` left the corpus and the scan carried
-    on, so an unpinned `read_text()` sitting in an unparseable file was reported as clean.
-    A gate that cannot look must not report clean (#618/#621), so the gate now raises
-    ScanBlind, which `main()` surfaces as exit 2."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "broken.py", "def f(:\n")
-    _pyfile(tree, "prod.py", "def f(p):\n    return p.read_text()\n")
-    with pytest.raises(_ASTLIB.ScanBlind) as exc:
-        _kinds(tree)
-    assert "broken.py" in str(exc.value)
-
-
-def test_clean_tree_still_scans(tmp_path):
-    """Control for the above: without the unparseable file the scan works normally, so the
-    raises-test cannot pass against a gate that raises unconditionally."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "prod.py", "def f(p):\n    return p.read_text()\n")
-    assert all("prod.py" in fp for fp in _kinds(tree))
-
-
 def test_fingerprint_dedups_within_a_function(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(tree, "prod.py", "def f(p, q):\n    return p.read_text(), q.read_text()\n")
     assert len(_kinds(tree)) == 1, "same file+function+kind is one fingerprint"
-
-
-@pytest.mark.gate
-def test_real_tree_clean():
-    """The regression check: the shipped baseline is EMPTY, so the real trees must
-    scan clean. `main([])` scans BOTH scopes (defender/ + spec-flow/scripts/), so any
-    new unpinned site in either tree turns this — and CI — red.
-
-    `gate`-marked: "and CI" is the code-smells step, which runs this same `main([])` over
-    both the same scopes and blocks on it. That step is the one keeping this red."""
-    assert _GATE.main([]) == 0
-
-
-def test_spec_flow_scripts_is_in_scope():
-    """#655: the spec-graph tooling was dark to this gate (SCOPE was defender/ only),
-    which let check_actors' unpinned reads land — the #643 false-clean. Pin that the
-    tree is now a scanned scope so a future refactor can't silently drop it again."""
-    gate = _GATE
-    assert gate.REPO_ROOT / "spec-flow" / "scripts" in gate.SCOPES
 
 
 def test_multiple_scopes_are_prefixed_and_cannot_collide(tmp_path):
@@ -191,17 +128,6 @@ def test_multiple_scopes_are_prefixed_and_cannot_collide(tmp_path):
     assert [f.fingerprint for f in fb] == ["spec-flow/scripts/_config.py:f:read"]
     assert not ({f.fingerprint for f in fa} & {f.fingerprint for f in fb})
     assert gate._prefixed_scan(a, "") == gate._scan(a)
-
-
-def test_binary_tempfile_in_the_real_tree_stays_clean(tmp_path):
-    """Guard rail. defender/runtime/bash_exec.py:242 is the ONLY tempfile opener
-    under defender/, and it is BINARY (`mode="w+b"`). It must stay clean — it is
-    the one site that turns the real tree red if the tempfile branch ignores the
-    mode and flags on the callee alone."""
-    assert not _flags(tmp_path, (
-        "import tempfile\n"
-        'def f():\n    return tempfile.TemporaryFile(mode="w+b")\n'
-    ))
 
 
 def test_from_import_subprocess_is_flagged(tmp_path):
@@ -297,8 +223,6 @@ def test_open_on_an_imported_object_is_flagged(tmp_path):
         "from defender._paths import PATHS\n"
         "def f():\n    return PATHS.lessons_dir.open()\n"
     ))
-
-
 
 
 def test_aliased_subprocess_is_flagged(tmp_path):

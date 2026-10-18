@@ -1,15 +1,4 @@
-"""ticket_adapter read-only adapter — the `--require-closed` scoped-read guard (#338).
-
-Since #611 ticket_adapter is a VERBS registry (its one CLI went with #1107). The guard's seam is now
-the verb functions `get_ticket(ctx, key=…, require_closed=…)` and `list_tickets(ctx, status=…,
-require_closed=…)` (the old `cmd_get_ticket(args, config)` / `cmd_list_tickets` wrappers are
-gone). The refusal of a non-closed ticket now RAISES `UpstreamFault` (a query error the capture
-layer maps to exit 1) instead of `SystemExit(1)` — the #338 answer-key guard is unchanged in
-substance: the benign judge's closed-only read cannot reach the in-flight (open) ticket even by
-key. The verbs RETURN the payload (the capture layer serializes it); they no longer print.
-
-Transport is stubbed, so no docker/network.
-"""
+"""ticket_adapter verbs: the --require-closed scoped-read guard (#338: a non-closed ticket raises UpstreamFault so a closed-only reader cannot reach the in-flight ticket), key grammar, percent-encoding, and case_opened_at. Transport is stubbed."""
 from __future__ import annotations
 
 import urllib.parse
@@ -146,9 +135,7 @@ def test_key_pattern_verb_serves_the_configured_grammar(tmp_path, real_config):
 def test_key_pattern_is_required_config_and_absence_takes_the_system_down(tmp_path, real_config):
     """KEY_PATTERN is REQUIRED, on the same rule as URL_BASE: absent means the system is down
     — a ConfigFault (infra, exit 2) — never a silent built-in default. Because it is required
-    at `_config`, the absence fails the WHOLE ticket surface closed, not just the screen that
-    reads it: a consumer cannot get a store read out of an environment that has not said what
-    its keys look like, and the fault names the missing key so the fix is obvious."""
+    at `_config`, the absence fails the WHOLE ticket surface closed, not just the screen that"""
     ctx = _config_ctx(tmp_path, **_BASE_CONFIG)  # no TICKET_KEY_PATTERN
     with pytest.raises(ConfigFault, match="TICKET_KEY_PATTERN"):
         ticket_adapter.key_pattern(ctx)
@@ -186,16 +173,7 @@ def test_run_env_does_not_override_the_declared_grammar(tmp_path, real_config):
          "dotdot", "crlf", "non-ascii"],
 )
 def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key, expect_path):
-    """The key is encoded into `/tickets/{key}`, so no key value can RESHAPE the request:
-    `?` cannot start a query string, `#` cannot start a fragment, `/` cannot add a path
-    segment, and CR-LF cannot break a header. The keys that need no encoding — the minted
-    case id and the seeded `SOC-<n>` — pass through byte-identical, so this is not a
-    behavior change for any key the store actually holds.
-
-    This is what makes #672's key screen defense-in-depth rather than the only thing
-    standing between a model-chosen string and a reshaped request (#684): the screen still
-    refuses these keys first, with retry-class feedback, but the transport is now safe
-    whether or not a consumer screens."""
+    """The key is encoded into `/tickets/{key}`, so no key value can RESHAPE the request:"""
     seen = {}
 
     def fake_get_obj(c, cfg, path, system=None, params=None):
@@ -210,14 +188,7 @@ def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key,
 def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
     """The reader asks for exactly the URL the writer wrote to, so a key the writer can mint
     is a key this reader can fetch. `ticket_writer` has always encoded the keys it mints
-    (`urllib.parse.quote(..., safe="")` at every site that puts one in a path — one site since
-    #922 retired the ticket-seed and enrichment lanes); until #684 this reader interpolated raw, so for any case id needing encoding the two sides disagreed —
-    the ticket was stored under one URL and requested at another, and the read 404'd on a
-    ticket that exists.
-
-    Both halves are bound so the pair cannot drift apart again: the reader's built path is
-    compared against the writer's OWN encoding of the same id, and the writer is pinned at
-    the source to still encode that way. Change either side alone and this fails."""
+    (`urllib.parse.quote(..., safe="")` at every site that puts one in a path — one site since"""
     from defender.scripts.case_history import ticket_writer
 
     seen = {}
@@ -254,10 +225,7 @@ def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
 def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     """The OTHER half of the symmetry: `list_tickets`' filters reach the verb OPAQUELY —
     verbatim, no screen, #672's deliberate non-clause — and are then URLENCODED into the
-    query string by the transport. That encoding is what made "label/q need no screen"
-    true; it was asserted in prose across #672's artifacts and pinned nowhere, so this test
-    makes it executable. The filter values arrive at `http_get` unchanged, and no
-    metacharacter survives into the built URL as a delimiter."""
+    query string by the transport. That encoding is what made "label/q need no screen """
     seen = {}
 
     def fake_request(c, cfg, url, system=None, method="GET", body=None):
@@ -288,14 +256,7 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
 def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx):
     """This is the ONE verb that reaches a ticket without `require_closed`, because the case
     under judgment is by definition still open. Its answer-key guarantee is therefore not a
-    status filter but the RETURN TYPE: the in-flight record is fetched, one field is read off
-    it, and everything else is discarded unreturned — so no caller, however wired, can read
-    the answer key through this verb.
-
-    The fixture is deliberately loud: a record whose every other field is a marker string. A
-    `str` return cannot carry any of them, so the assertion is that NONE appear anywhere in
-    what the verb hands back.
-    """
+    status filter but the RETURN TYPE: the in-flight record is fetched, one field is read off"""
     record = {
         "key": "20260720T0000Z-sshd-672",
         "status": "in_progress",

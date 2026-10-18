@@ -1,9 +1,4 @@
-"""#1120 piece 1 — the launcher refuses a bad tenant before spending anything, observed by a
-detector that can see the spend (code review, max).
-
-The spec's O3 matrix watches the launcher for a box launch only, with the billable role
-preflight replaced by a silent no-op. Here the preflight records each call.
-"""
+"""The launcher refuses a bad tenant before its billable role preflight."""
 from __future__ import annotations
 
 from pathlib import Path

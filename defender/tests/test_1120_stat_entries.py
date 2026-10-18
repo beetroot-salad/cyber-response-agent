@@ -1,5 +1,4 @@
-"""`_io.stat_entries` (#1120 piece 1, code review third pass): every entry of a bound directory,
-judged without following it, in one walk to the directory."""
+"""_io.stat_entries judges every directory entry without following it."""
 from __future__ import annotations
 
 import os

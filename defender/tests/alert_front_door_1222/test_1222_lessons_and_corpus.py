@@ -1,50 +1,8 @@
-"""#1222 S10 — lessons and the invlang corpus: the signature as a key, end to end.
-
-The slice's subject is what happens to a run's RECORDED signature after run start: the lessons
-lookups (orientation's, and MAIN's taught one in its sandbox) match it exactly; the lesson author
-is handed it on the queue row and a lesson written with it is found again; every lesson reader
-takes a `source_signature` entry as the text written (C42); the invlang corpus, the held-out
-index and the lesson tracer read past runs by their record and skip a recordless folder by name.
-
-HOW EACH ACTOR IS REACHED (no attribute is ever patched):
-
-* `cmd_grep` / `cmd_tags` (`defender-lessons`) have no corpus seam (`lessons_fm.LESSONS_DIR` is a
-  module constant). They are reached the two ways production reaches them: orientation's lessons
-  section (`S.run_alert(orient_shim=S.RecordingShim())`, the real `orient._shim` subprocesses),
-  and MAIN's own `bash` call in its sandbox (drive's unboxed executor, the run's own env). MAIN's
-  lookup is the one its INSTRUCTIONS teach: `_TaughtLookups` reads the `defender-lessons …
-  <…signature…>` command line from the system prompt MAIN received and runs it as taught.
-* `load_corpus` / the invlang CLI: orientation's vocabulary section, MAIN's `bash`, the CLI's
-  own `main`, and `load_corpus` itself.
-* `build_corpus_manifest`, `iter_lessons`, `match_lessons`, `trace_lesson`, `held_out`,
-  `serialize.build_view`: their own entry points over a planted corpus or runs base.
-* The lesson author: the REAL judge enqueue (`_judge_921.grade`) writes the queue rows from an
-  episode carrying the record copy, and the REAL drain (`drain.run_batch`) hands them to the
-  curator through the `invoke_agent=` seam. `_Curator` stands in for the model: it records what
-  it was handed (and the user turn production builds for those rows) and writes the lesson text
-  the TEST gives it — a fixture, never a policy. What the author writes is the model's; what
-  production controls, and what these tests pin, is what it is handed and what becomes of the
-  file it writes.
-
-SCOPE (user correction, 2026-10-13): the curator and runtime retain one checkout-owned
-corpus until #1108 P4 migrates writers, data, all retrieval paths, mounts and permissions
-atomically. These tests run real shims in isolated product checkouts; they do not patch a
-reader or redirect only discovery into a tenant folder.
-
-BASE REGRESSIONS: (1) case-insensitive substring matching over-matches signatures.
-(2) `S.plant_run(record=…)` and
-`S.plant_episode_copy` fail at base on the coined record accessors; `_with_record` plants the
-record AFTER the folder (alert, investigation, report) so the behavioural observation comes
-first, and every test asserts the record was planted only after its behavioural assertions.
-(3) The lesson-author tests fail first on the key the judge's enqueue writes today
-(`rule-<world rule.id>`, not the recorded signature). p189 is green at base: the design leaves
-the committed eval scenario as committed (C54), and its drive leg is blocked by a pre-existing
-gap (82-writer red flag).
-"""
+"""The recorded signature as a lessons/corpus key: lesson lookups, the lesson author, the invlang
+corpus and held-out index reading past runs by their record."""
 from __future__ import annotations
 
 import json
-import os
 import re
 import shlex
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -60,9 +18,7 @@ from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests.alert_front_door_1222 import _spec1222 as S
 
-# =================================================================================================
 # The shipped corpus and lesson files
-# =================================================================================================
 
 #: The frontier selector a lesson needs to be on `match_lessons`' lane (an open `class` cell on
 #: a `process` vertex), written through `S.lesson_text(extra_lines=...)`.
@@ -125,13 +81,7 @@ def _manifest_entries(body: str) -> list[str] | None:
     return None
 
 
-def _declaring(lessons: Mapping[str, Sequence[str]], sig: str) -> set[str]:
-    return {stem for stem, entries in lessons.items() if sig in entries}
-
-
-# =================================================================================================
 # Reading what the model received
-# =================================================================================================
 
 _HIT_LINE = re.compile(r"([^/\t\n]+)\.md\t")
 
@@ -192,86 +142,16 @@ def _tag_counts(section: str, dimension: str = "source_signature") -> dict[str, 
     return counts
 
 
-def _naming(section: str | None, sig: str, d: S.Drive) -> list[str]:
-    """The HOST's lines of `section` that name `sig`, normalised (frames, run folder, run id)."""
-    if section is None:
-        return []
-    prose = S.normalize(S.harness_text(section), run_dir=d.run_dir,
-                        run_id=d.run_dir.name if d.run_dir else None)
-    return [ln.strip() for ln in prose.splitlines() if sig in ln]
-
-
 def _same_text(section: str | None, d: S.Drive) -> str | None:
     if section is None:
         return None
     return S.normalize(section, run_dir=d.run_dir, run_id=d.run_dir.name if d.run_dir else None)
 
 
-# =================================================================================================
 # MAIN running the lessons lookup its instructions teach
-# =================================================================================================
-
-_PLACEHOLDER = re.compile(r"<[^<>\n]*(?:signature|rule)[^<>\n]*>", re.IGNORECASE)
-_TAUGHT_LINE = re.compile(r"^\s*(defender-lessons\b[^\n]*)$", re.MULTILINE)
 
 
-def _taught_lookup(instructions: str) -> str | None:
-    """The `defender-lessons` command line MAIN's instructions teach for the alert's signature:
-    the first such line carrying a `<…signature…>` / `<…rule…>` placeholder."""
-    for m in _TAUGHT_LINE.finditer(instructions):
-        line = m.group(1).rstrip().removesuffix("\\").rstrip()
-        if _PLACEHOLDER.search(line):
-            return line
-    return None
-
-
-def _instantiate(line: str, sig: str) -> list[str]:
-    """The taught command for `sig`: its words up to and including the one holding the
-    placeholder, with the placeholder replaced by `sig`."""
-    words = shlex.split(line)
-    for i, word in enumerate(words):
-        if _PLACEHOLDER.search(word):
-            return [*words[:i], _PLACEHOLDER.sub(lambda _m: sig, word, count=1)]
-    raise AssertionError(f"no placeholder word in the taught lookup {line!r}")
-
-
-class _TaughtLookups(S.MainScript):
-    """MAIN runs, once per signature, the lessons lookup its received instructions teach, then
-    stops. The command is read off the system prompt MAIN was handed (never spelled here), so a
-    lookup that is taught but refused by MAIN's own gate, or taught and inexact, shows."""
-
-    def __init__(self, signatures: Sequence[str]) -> None:
-        super().__init__([S.text(S.DONE)])
-        self.signatures = list(signatures)
-        self.taught: str | None = None
-        self.argvs: list[list[str]] = []
-
-    def __call__(self, messages: Any, info: Any) -> Any:
-        with self._lock:
-            if not self._script.seen:
-                self.taught = _taught_lookup(getattr(info, "instructions", None) or "")
-                if self.taught is not None:
-                    self.argvs = [_instantiate(self.taught, sig) for sig in self.signatures]
-                    self._script.turns[:0] = [S.call("bash", command=shlex.join(argv))
-                                              for argv in self.argvs]
-            return self._script.answer(messages, info)
-
-    def results(self) -> dict[str, str]:
-        """signature -> the tool result its lookup came back with."""
-        assert self.taught is not None, (
-            "MAIN's instructions teach no lessons lookup keyed on the signature (no "
-            "`defender-lessons … <…signature…>` line in the system prompt MAIN received)")
-        out: dict[str, str] = {}
-        for k, sig in enumerate(self.signatures, start=1):
-            assert len(self.seen) > k, f"MAIN was never answered for its lookup of {sig!r}"
-            back = [t for kind, t in self.seen[k].parts if kind in ("tool-return", "retry-prompt")]
-            out[sig] = back[-1] if back else ""
-        return out
-
-
-# =================================================================================================
 # Past runs
-# =================================================================================================
 
 _GOLDEN_HYPOTHESIS = "?scanner-or-noise-probe"
 
@@ -318,9 +198,7 @@ def _past_run(runs_base: Path, run_id: str, *, tag: str, rule_id: str = "R-PAST"
                         digest=digest)
 
 
-# =================================================================================================
 # The lesson author, through the real judge enqueue and the real drain
-# =================================================================================================
 
 FINDINGS = S.sym("learning.core.state", "FINDINGS")
 
@@ -406,15 +284,6 @@ def _signatures_handed(curator: _Curator) -> dict[str, Any]:
     return {r["finding_id"]: r.get(S.QUEUE_SIGNATURE_FIELD) for r in curator.rows()}
 
 
-def _signature_paragraphs(prompt: str) -> list[str]:
-    """The curator-instruction paragraphs naming both a lesson's `source_signature` and the row's
-    signature field — where the instructions say a lesson's signature comes from that field (B2).
-    A word-level pin: an implementer whose correct wording trips it loosens the word list to their
-    own words and never removes the check (§7 round 3, B5)."""
-    return [para for para in re.split(r"\n\s*\n", prompt)
-            if "source_signature" in para and S.QUEUE_SIGNATURE_FIELD in para]
-
-
 def _queued_row(finding_id: str, key: str, *, pre_change: bool = False, **over: Any) -> dict:
     """A defender finding row in the shape the judge appends (a family finding that survived).
     `key` is its `alert_rule_key`: after the change the recorded signature verbatim, `unkeyed`
@@ -446,14 +315,6 @@ def _author_lesson(name: str, entries: Sequence[str] | None, finding_ids: Iterab
     return text.replace(f"  - front-door/{name}/0", "\n".join(f"  - {i}" for i in ids) or "  []")
 
 
-def _prompt_text(paths: Any) -> str:
-    """The curator's system prompt as the drain wires it (`AuthorConfig.author_prompt`), read
-    from the checkout that ships it."""
-    cfg = D.cfg_for(paths, "findings")
-    rel = Path(cfg.author_prompt).relative_to(Path(paths.repo_root))
-    return (S.REPO_ROOT / rel).read_text(encoding="utf-8")
-
-
 #: A tenant mapping that takes the signature from `rule.uuid` (a remap away from `rule.id`).
 _UUID_MAPPING = {"signature": "rule.uuid", "event_time": "detected_at", "summary": "rule.description"}
 
@@ -464,9 +325,7 @@ def _lesson_alert(sig: str, **rule: Any) -> dict[str, Any]:
                                               "description": "front door lesson lookup", **rule})
 
 
-# =================================================================================================
 # o8 / r6 / r7 / r8 — the gate's lesson demands
-# =================================================================================================
 
 def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
     """A lesson authored from a run of an alert_id-mapped tenant is listed in orientation's
@@ -536,7 +395,6 @@ def test_curated_checkout_lesson_is_discovered_and_read_by_main(tmp_path):
 _GOOD_ENTRY = "R-good-1"
 #: Entries outside the allow-list a model or a hand could write into `source_signature`: a line
 #: break, an ANSI escape, heading text, a key-looking value, YAML-significant punctuation, 129
-#: characters. Each is written in its own lesson beside the well-formed entry.
 _HOSTILE_ENTRIES = {
     "fd-r6-newline": '"evil\\nsource_signature: [forged]"',
     "fd-r6-ansi": '"\\e[31mred\\e[0m"',
@@ -694,145 +552,11 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     assert recorded, "the traced run's record could not be planted (S.COINED accessors)"
 
 
-def test_r8_each_shipped_lesson_is_found_by_exact_lookup_of_its_declared_signature(tmp_path):
-    """The 16 lessons in defender/lessons, written before the change (source_signature
-    v2-cross-tier-ssh-pivot, v2-falco-suspicious-network-tool, v2-sshd-success-after-failures; a
-    lesson may list several), are each found by the exact, case-sensitive lookup of each
-    signature they declare -- orientation's lookup and MAIN's in-box lookup alike -- for a
-    committed alert whose rule.id is that signature under the fixture tenant's rule.id mapping;
-    the lookup returns the lessons declaring it and none of the others, and a near miss (case
-    change, prefix, suffix) finds none. Positive control: the result is non-empty for every
-    declared signature.
-
-    Observed: the shipped corpus (resolved where production keeps it) in the isolated checkout corpus; one
-    run per signature and per near miss, orientation's hits and MAIN's taught lookup each read.
-    """
-    planted = S.plant_tenant(alert_mapping=S.DEFAULT_MAPPING)
-    shipped = _plant_shipped(planted)
-    declared = sorted({e for entries in shipped.values() for e in entries})
-    assert declared, "the shipped lessons declare no signature"
-    by_rule = {S.fixture_alert(slug)["rule"]["id"]: slug for slug in S.FIXTURE_SLUGS}
-
-    def lookup(sig: str, run_id: str) -> tuple[list[str], list[str]]:
-        slug = by_rule.get(sig, S.FIXTURE_SLUGS[0])
-        alert = S.kibana_alert(slug, rule={**S.fixture_alert(slug)["rule"], "id": sig})
-        main = _TaughtLookups([sig])
-        d = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id=run_id, main=main,
-                        orient_shim=S.RecordingShim())
-        return _listed(_lessons_section(d)), _listed(main.results()[sig])
-
-    near = {
-        "case": declared[0].upper(),
-        "prefix": declared[1 % len(declared)].rsplit("-", 1)[0],
-        "suffix": declared[2 % len(declared)] + "-x",
-    }
-    for kind, sig in near.items():
-        assert sig not in declared
-        oriented, in_box = lookup(sig, f"r8-near-{kind}")
-        assert oriented == [], f"orientation's lookup of the {kind} near miss {sig!r} found {oriented}"
-        assert in_box == [], f"MAIN's lookup of the {kind} near miss {sig!r} found {in_box}"
-    for i, sig in enumerate(declared):
-        want = _declaring(shipped, sig)
-        oriented, in_box = lookup(sig, f"r8-exact-{i}")
-        assert want, sig
-        assert set(oriented) == want, f"orientation's lookup of {sig!r}: {sorted(oriented)} != {sorted(want)}"
-        assert set(in_box) == want, f"MAIN's lookup of {sig!r}: {sorted(in_box)} != {sorted(want)}"
-
-
-def _held_out_fixture(fixtures: Path, slug: str, *, disposition: str = "benign") -> None:
-    """One labelled held-out fixture (`ground_truth.yaml`, `alert.json`), the alert written
-    where the fixture reader looks (`RunPaths(<fixture>).alert`) and at the folder's own
-    `alert.json`."""
-    folder = fixtures / slug
-    folder.mkdir(parents=True)
-    (folder / "ground_truth.yaml").write_text(
-        f"held_out: true\ndisposition: {disposition}\n", encoding="utf-8")
-    raw = S.alert_bytes(S.generic_alert(rule_id="R-HELD"))
-    for target in {folder / "alert.json", S.alert_file(folder)}:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(raw)
-
-
 def _report(disposition: str) -> str:
     return f"---\ndisposition: {disposition}\n---\n\nbody\n"
 
 
-def _age(runs: Path, order: Sequence[str]) -> None:
-    """Give the folders strictly increasing mtimes in `order` (the last is the newest)."""
-    for i, name in enumerate(order):
-        stamp = 1_800_000_000 + 60 * i
-        os.utime(runs / name, (stamp, stamp))
-
-
-def test_r7_the_eval_index_and_the_lesson_tracer_skip_a_recordless_run_folder_by_name(tmp_path, capsys):
-    """Over a runs base holding a run with a readable record and folders with none (a pre-change
-    run, a crashed setup), the held-out eval index and the lesson tracer each skip a recordless
-    folder by name and count it, as the corpus and the sibling union do, and still index and
-    trace the recorded run; neither raises on a recordless folder, and neither picks it as the
-    newest run of a slug. Positive control: with its record present the folder is indexed and
-    traced.
-
-    Observed: `evals/held_out.main` and `learning/ops/trace_lesson.main --all` over one runs
-    base, first with only recordless folders (the newest of them a pre-change run whose report
-    says malicious), then with records planted.
-    """
-    slug, lesson = "fd-slug", "fd-traced"
-    fixtures, runs, corpus = tmp_path / "fixtures", S.plant_tenant().accept().runs, tmp_path / "lessons"
-    runs.mkdir(parents=True, exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, "acme")
-    _held_out_fixture(fixtures, slug)
-    corpus.mkdir()
-    (corpus / f"{lesson}.md").write_text(S.lesson_text(lesson), encoding="utf-8")
-    alert = S.generic_alert(rule_id="R-HELD")
-    pre, crashed, recorded_run = f"{slug}-pre", f"{slug}-crashed", slug
-    S.plant_run(runs, pre, alert=alert, record=False,
-                files={"report.md": _report("malicious"), "lessons_loaded.jsonl": _loaded_row(lesson)})
-    S.plant_run(runs, crashed, alert=alert, record=False)
-    _age(runs, [pre, crashed])
-
-    held_out = S.sym("evals.held_out", "main")
-    trace = S.sym("learning.ops.trace_lesson", "main")
-
-    def both() -> tuple[str, str]:
-        capsys.readouterr()
-        held_out([str(runs), "--fixtures-dir", str(fixtures)])
-        scored = capsys.readouterr()
-        assert trace(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0
-        traced = capsys.readouterr()
-        return scored.out + scored.err, traced.out + traced.err
-
-    scored, traced = both()
-    assert "predicted=" not in scored, (
-        f"the held-out index scored {slug!r} off a recordless folder:\n{scored}")
-    row = [ln for ln in traced.splitlines() if ln.startswith(f"{lesson}\t")]
-    assert len(row) == 1, f"the lesson tracer did not index {lesson!r} once:\n{traced}"
-    assert row[0].split("\t")[2] == "0", (
-        f"the lesson tracer counted a recordless folder's case:\n{traced}")
-    for out, walker in ((scored, "held-out index"), (traced, "lesson tracer")):
-        for name in (pre, crashed):
-            assert name in out, f"the {walker} did not name the recordless folder {name!r}:\n{out}"
-        assert any(re.search(r"\b2\b", ln) and "record" in ln.lower() for ln in out.splitlines()), (
-            f"the {walker} does not count the two recordless folders:\n{out}")
-
-    S.plant_run(runs, recorded_run, alert=alert, record=False,
-                files={"report.md": _report("benign"), "lessons_loaded.jsonl": _loaded_row(lesson)})
-    planted = [_with_record(runs, name, alert=alert, facts={"signature": "R-HELD"})
-               for name in (recorded_run, pre)]
-    _age(runs, [recorded_run, pre, crashed])
-    scored, traced = both()
-    assert "predicted='malicious'" in scored, (
-        f"with its record present the newest run {pre!r} is not the one scored:\n{scored}")
-    row = [ln for ln in traced.splitlines() if ln.startswith(f"{lesson}\t")]
-    assert len(row) == 1, f"the lesson tracer did not index {lesson!r} once:\n{traced}"
-    assert row[0].split("\t")[2] == "2", f"with records present both runs are traced:\n{traced}"
-    assert crashed in scored, "the held-out index does not name the still-recordless folder"
-    assert crashed in traced, "the lesson tracer does not name the still-recordless folder"
-    assert all(planted), "the records could not be planted (S.COINED accessors)"
-
-
-# =================================================================================================
 # The invlang corpus and the vocabulary lookup
-# =================================================================================================
 
 def _vocab_cli(capsys: Any, root: Path, sig: str) -> tuple[int, str]:
     """`defender-invlang <root> hypothesis-vocabulary --signature <sig>` — the CLI's own main —
@@ -968,106 +692,6 @@ def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
     assert recorded, "the past run's record could not be planted (S.COINED accessors)"
 
 
-def test_p066_corpus_subprocess_misses_orientations_time_allow(tmp_path):
-    """A lookup that did not finish is named in the section it would have filled. The run
-    continues.
-
-    Observed: both orientation lookups answering the shim runner's "did not finish" (`None`, the
-    contract's spelling of a timeout, PR-05) against the same run with both lookups finishing
-    over an empty corpus and no past run.
-    """
-    sig = "R-P066"
-    planted = S.plant_tenant()
-    cut = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id="p066-cut",
-                      orient_shim=S.RecordingShim(fail=("defender-lessons", "defender-invlang")))
-    whole = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id="p066-whole",
-                        orient_shim=S.RecordingShim())
-    assert _naming(_lessons_section(cut), sig, cut) != _naming(_lessons_section(whole), sig, whole), (
-        "a lessons lookup that did not finish reads exactly as one that matched nothing:\n"
-        + _lessons_section(cut))
-    named = _vocab_section(cut)
-    assert named is not None, "a vocabulary lookup that did not finish left no section"
-    assert _same_text(named, cut) != _same_text(_vocab_section(whole), whole), (
-        "a vocabulary lookup that did not finish reads exactly as one that found nothing")
-    assert cut.rc == 0, f"the run did not finish past the cut lookups (rc={cut.rc})"
-    assert cut.main.requests == whole.main.requests, (
-        f"MAIN was asked {cut.main.requests} times, not as often as in the whole run "
-        f"({whole.main.requests})")
-
-
-def test_p107_vendor_changes_the_alert_shape_mid_life(tmp_path):
-    """An alert lacking the path gives no signature. The corpus leaves runs whose record holds
-    none out of the signature filter, never attributing them via rule.id.
-
-    Observed: a tenant mapping the signature from `rule.uuid`; one past run whose alert lacked
-    that path (record without a signature, `rule.id` equal to the looked-up value) and one
-    recorded under it; orientation's vocabulary lookup for that value.
-    """
-    sig = "SIG-P107"
-    planted = S.plant_tenant(alert_mapping=_UUID_MAPPING)
-    recorded = [
-        _past_run(planted.runs, "past-p1", tag="p1", signature=None,
-                  alert=S.generic_alert(rule_id=sig)),
-        _past_run(planted.runs, "past-p2", tag="p2", signature=sig,
-                  alert=S.generic_alert(rule_id="R-x", rule={"id": "R-x", "uuid": sig})),
-    ]
-    d = S.run_alert(tmp_path, alert=S.generic_alert(rule_id="R-cur", rule={"id": "R-cur", "uuid": sig}),
-                    tenant=planted, orient_shim=S.RecordingShim())
-    section = _vocab_section(d) or ""
-    assert _probes(section) == {"p2"}, (
-        f"the corpus lookup of {sig!r} did not count exactly the run recorded under it:\n{section}")
-    assert all(recorded), "the past runs' records could not be planted (S.COINED accessors)"
-
-
-def test_p108_past_run_alert_missing_or_unparseable(tmp_path):
-    """A past run with no readable record is skipped by name and counted in what the index
-    returns, and the rest are served.
-
-    Observed: `load_corpus` over a runs base holding a recordless run, a recordless run with its
-    alert gone, a recordless run with an unparseable alert, and a recorded run whose alert is
-    gone.
-    """
-    base = tmp_path / "runs"
-    for name in ("p108-no-record", "p108-no-alert", "p108-garbage"):
-        _past_run(base, name, tag=name.replace("p108-", ""), recorded=False)
-    S.alert_file(base / "p108-no-alert").unlink()
-    S.alert_file(base / "p108-garbage").write_bytes(b"not json at all {")
-    recorded = _past_run(base, "p108-served", tag="served", signature="SIG-P108")
-    S.alert_file(base / "p108-served").unlink()
-
-    companions, report = S.sym("skills.invlang.corpus", "load_corpus")(base)
-    skipped = set(_skipped_runs(report, base))
-    assert skipped == {"p108-no-record", "p108-no-alert", "p108-garbage"}, (
-        f"the index did not skip exactly the recordless runs by name: skipped {sorted(skipped)}, "
-        f"loaded {[c.case_id for c in companions]}")
-    assert [c.case_id for c in companions] == ["p108-served"]
-    assert companions[0].signature_id == "SIG-P108"
-    assert recorded, "the served run's record could not be planted (S.COINED accessors)"
-
-
-def test_p115_past_run_rewrote_its_alert_to_change_the_corpus(tmp_path, capsys):
-    """The corpus attributes each past run by its recorded signature.
-
-    Observed: a past run whose box rewrote its alert (PR-17: the run folder was a read-write
-    bind) to another rule id after the record was written; `load_corpus` and the corpus CLI's
-    filter for each value.
-    """
-    base = tmp_path / "runs"
-    original = S.generic_alert(rule_id="TRUE-P115")
-    forged = S.generic_alert(rule_id="FORGED-P115")
-    recorded = _past_run(base, "p115-rewritten", tag="rewritten", alert=forged,
-                         signature="TRUE-P115", digest=S.sha256_hex(S.alert_bytes(original)))
-    companions, _report = S.sym("skills.invlang.corpus", "load_corpus")(base)
-    assert [(c.case_id, c.signature_id) for c in companions] == [("p115-rewritten", "TRUE-P115")], (
-        f"the corpus attributed the past run by its rewritten alert: "
-        f"{[(c.case_id, c.signature_id) for c in companions]}")
-    _rc, true_listing = _vocab_cli(capsys, base, "TRUE-P115")
-    _rc, forged_listing = _vocab_cli(capsys, base, "FORGED-P115")
-    assert _probes(true_listing) == {"rewritten"}, true_listing
-    assert _probes(forged_listing) == set(), forged_listing
-    assert recorded, "the record could not be planted (S.COINED accessors)"
-
-
 def _raw_record(run_dir: Path, data: bytes) -> bool:
     """Write `data` verbatim where the run's record goes (an unreadable record, p143). False
     when the coined record accessor is absent (base)."""
@@ -1138,115 +762,6 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
-def test_p187_lesson_authored_with_no_source_signature_meets_c(tmp_path):
-    """A lesson for a run with no signature has no source_signature key at all (not null, not
-    []).
-      - The tags listing, the manifest, the frontend and the lint all load it.
-      - The curator's "populate every dimension list" instruction no longer forces a value.
-
-    Observed: a lesson written with no source_signature key beside a signed one; the tags
-    listing orientation hands MAIN (`defender-lessons --tags`), the curator's corpus manifest
-    (`build_corpus_manifest`), the lessons posture view (`serialize.build_view`); and the
-    curator's instructions as the drain wires them.
-    """
-    sig, unsigned, signed = "R-P187", "fd-p187-unsigned", "fd-p187-signed"
-    texts = {unsigned: S.lesson_text(unsigned, source_signature=None),
-             signed: S.lesson_text(signed, source_signature=[sig])}
-    planted = S.plant_tenant(lessons=texts)
-
-    manifest = S.sym("learning.author.shared", "build_corpus_manifest")(S.checkout_lessons())
-    sections = {chunk.partition("\n")[0].strip(): chunk.partition("\n")[2]
-                for chunk in re.split(r"(?m)^## ", manifest)[1:]}
-    assert set(sections) == {unsigned, signed}, f"the manifest lost a lesson: {sorted(sections)}"
-    doc = _yaml.safe_load(sections[unsigned])
-    assert isinstance(doc, dict), f"the manifest's unsigned section is not a mapping: {doc!r}"
-    assert doc.get("telemetry_source") == ["auth-log"], (
-        f"the manifest does not load the unsigned lesson: {sections[unsigned]!r}")
-    assert "source_signature" not in doc, (
-        f"the manifest shows the unsigned lesson a source_signature: {sections[unsigned]!r}")
-
-    defender_dir = tmp_path / "posture" / "defender"
-    corpus = defender_dir / "lessons"
-    corpus.mkdir(parents=True)
-    for name, text in texts.items():
-        (corpus / f"{name}.md").write_text(text, encoding="utf-8")
-    view = S.sym("learning.frontend.serialize", "build_view")(defender_dir)
-    shown = {rec["title"]: rec for group in view["groups"].values() for rec in group["lessons"]}
-    assert unsigned in shown, f"the posture view lost the unsigned lesson: {sorted(shown)}"
-    assert shown[unsigned]["status"] != "malformed", (
-        f"the posture view does not load the unsigned lesson: {shown[unsigned]}")
-    assert shown[unsigned]["metadata"].get("telemetry_source") == ["auth-log"]
-    assert "source_signature" not in shown[unsigned]["metadata"], shown[unsigned]["metadata"]
-
-    paths = D.make_paths(tmp_path / "drain", state_dir=tmp_path / "drain-state")
-    prompt = _prompt_text(paths)
-    populate = [para for para in re.split(r"\n\s*\n", prompt)
-                if re.search(r"\bpopulate", para, re.I) and re.search(r"dimension", para, re.I)]
-    assert populate, "the curator's instructions no longer say how the dimension lists are filled"
-    for para in populate:
-        assert S.UNKEYED in para or re.search(
-            r"no (recorded )?signature|without a signature|no source_signature", para, re.I), (
-            "the curator's dimension-list instruction forces a source_signature on a lesson for a "
-            f"run with none:\n{para}")
-
-    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, orient_shim=S.RecordingShim())
-    section = _lessons_section(d)
-    assert _tag_counts(section, "telemetry_source") == {"auth-log": 2}, (
-        f"the tags listing does not count the unsigned lesson: {_tag_frame(section)}")
-    assert _tag_counts(section) == {sig: 1}, _tag_frame(section)
-
-
-def test_p064_in_box_lessons_grep_with_a_mapped_signature(tmp_path):
-    """The in-box lessons lookup returns exactly the lessons with an entry equal to the
-    signature.
-
-    Observed: MAIN's own lessons lookup in its sandbox (the `defender-lessons` command its
-    instructions teach, run through its `bash` tool) for the signature a `rule.uuid`-mapped
-    tenant records, a prefix of a shipped signature, over the shipped corpus plus lessons keyed
-    on that value, on a longer value, and on its case variant; the alert's `rule.id` is a
-    shipped signature.
-    """
-    shipped_sig, sig = "v2-sshd-success-after-failures", "v2-sshd"
-    planted = S.plant_tenant(alert_mapping=_UUID_MAPPING)
-    shipped = _plant_shipped(planted)
-    assert _declaring(shipped, shipped_sig), f"no shipped lesson declares {shipped_sig!r}"
-    for name, entries in {"fd-p064-mapped": [sig], "fd-p064-second": ["R-other", sig],
-                          "fd-p064-longer": [sig + "-x"], "fd-p064-case": [sig.upper()]}.items():
-        S.plant_lesson(name, source_signature=entries)
-    alert = _lesson_alert(shipped_sig, uuid=sig)
-    main = _TaughtLookups([sig])
-    S.run_alert(tmp_path, alert=alert, tenant=planted, main=main)
-    found = sorted(_listed(main.results()[sig]))
-    assert found == ["fd-p064-mapped", "fd-p064-second"], (
-        f"MAIN's in-box lookup of the mapped signature {sig!r} returned {found}")
-
-
-def test_p183_main_runs_its_taught_lessons_lookup_in_the_box(tmp_path):
-    """The lessons lookup taught to MAIN is exact, whole-value and case-sensitive.
-
-    Observed: the `defender-lessons` command MAIN's received instructions teach, run by MAIN
-    through its `bash` tool in the sandbox: for a case variant of a shipped signature, and for
-    signatures whose lessons sit beside entries a pattern or a fold would also take (a case
-    variant, a longer value, a value the signature's `.` matches as a pattern, a prefix).
-    """
-    planted = S.plant_tenant()
-    shipped = _plant_shipped(planted)
-    declared = sorted({e for entries in shipped.values() for e in entries})
-    for name, entries in {"fd-p183-exact": ["R-183"], "fd-p183-second": ["Z-1", "R-183"],
-                          "fd-p183-case": ["r-183"], "fd-p183-longer": ["R-1830"],
-                          "fd-p183-dot": ["R.183"], "fd-p183-dot-as-pattern": ["RX183"]}.items():
-        S.plant_lesson(name, source_signature=entries)
-    case_miss = declared[0].upper()
-    want = {case_miss: [], "R-183": ["fd-p183-exact", "fd-p183-second"], "R.183": ["fd-p183-dot"],
-            "R-18": []}
-    main = _TaughtLookups(list(want))
-    S.run_alert(tmp_path, alert=_lesson_alert("R-183"), tenant=planted, main=main)
-    found = {sig: sorted(_listed(out)) for sig, out in main.results().items()}
-    for sig, lessons in want.items():
-        assert found[sig] == lessons, (
-            f"MAIN's taught lookup {main.taught!r} of {sig!r} returned {found[sig]}, not {lessons}")
-
-
 def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     """Orientation lists exactly the lessons with an entry equal to the signature.
       - A one-character signature matches only an entry of that character.
@@ -1277,79 +792,6 @@ def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
         f"a blank value was looked up as a signature: {_listed(_lessons_section(blank))}")
     assert _probes(_vocab_section(blank) or "") == set(), _vocab_section(blank)
     assert all(recorded), "the past runs' records could not be planted (S.COINED accessors)"
-
-
-def test_checkout_corpus_stays_authoritative_until_atomic_tenant_migration(tmp_path):
-    """Until #1108 P4, discovery uses the curator's checkout corpus for every tenant.
-
-    A tenant-local lesson folder must not prematurely replace that corpus. Tenant isolation
-    is deferred to the atomic writer, reader, mount and permissions migration in P4.
-    """
-    sig = "R-P081"
-    tenant = S.plant_tenant("acme-b")
-    private = S.sym("_knowledge", "KnowledgePaths")(tenant.agent, "agent").lessons_dir
-    private.mkdir(parents=True)
-    (private / "fd-p081-private.md").write_text(
-        S.lesson_text("fd-p081-private", source_signature=[sig]), encoding="utf-8")
-    S.plant_lesson("fd-p081-checkout", source_signature=[sig])
-    main = _TaughtLookups([sig])
-    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=tenant, main=main,
-                    orient_shim=S.RecordingShim())
-    assert _listed(_lessons_section(d)) == ["fd-p081-checkout"]
-    assert _listed(main.results()[sig]) == ["fd-p081-checkout"]
-
-
-def test_p084_lessons_authored_before_the_change_under_a_remap(tmp_path):
-    """Lessons written under the old value are not found after a remap, and the miss reads as
-    "no lesson applies".
-
-    Observed: a tenant that remapped its signature from `rule.id` to `rule.uuid`, holding a
-    lesson written under the alert's old value; orientation's lessons section for the alert;
-    then, as the positive control, the same alert once a lesson keyed on the new value is in
-    the corpus.
-    """
-    old, new = "R-OLD84", "U-NEW84"
-    planted = S.plant_tenant(alert_mapping=_UUID_MAPPING)
-    S.plant_lesson("fd-p084-old", source_signature=[old])
-    alert = _lesson_alert(old, uuid=new)
-    before = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="p084-before",
-                         orient_shim=S.RecordingShim())
-    section = _lessons_section(before)
-    assert _listed(section) == [], f"the lesson under the old value was found: {_listed(section)}"
-    assert _naming(section, old, before) == [], (
-        f"the host's lessons prose names the old value {old!r}: {_naming(section, old, before)}")
-    assert "fd-p084-old" not in S.harness_text(section), "the host's prose points at the old lesson"
-
-    S.plant_lesson("fd-p084-new", source_signature=[new])
-    after = S.run_alert(tmp_path, alert=alert, tenant=planted, run_id="p084-after",
-                        orient_shim=S.RecordingShim())
-    assert _listed(_lessons_section(after)) == ["fd-p084-new"], (
-        f"the lesson under the remapped value is not found: {_listed(_lessons_section(after))}")
-
-
-def test_p144_first_run_after_upgrade_finds_only_recordless_ru(tmp_path):
-    """On the first run after the upgrade, orientation's vocabulary section states how many past
-    runs were skipped for having no record. It does not read as "no past runs".
-
-    Observed: a tenant whose runs base holds only pre-change runs of the alert (no record, an
-    investigation, `rule.id` equal to the signature); orientation's vocabulary section, against
-    the same section for a tenant with no past run.
-    """
-    sig = "R-P144"
-    upgraded, fresh = S.plant_tenant("acme-up"), S.plant_tenant("acme-fresh")
-    for tag in ("old1", "old2", "old3"):
-        _past_run(upgraded.runs, f"pre-{tag}", tag=tag, rule_id=sig, recorded=False)
-    d = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=upgraded, run_id="p144-upgraded",
-                    orient_shim=S.RecordingShim())
-    e = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=fresh, run_id="p144-fresh",
-                    orient_shim=S.RecordingShim())
-    section = _vocab_section(d)
-    assert section is not None, "the first run after the upgrade carries no vocabulary section"
-    assert _probes(section) == set(), f"the vocabulary served recordless pre-change runs:\n{section}"
-    assert any(re.search(r"\b3\b", ln) and "record" in ln.lower() for ln in section.splitlines()), (
-        f"the vocabulary section does not count the 3 runs skipped for having no record:\n{section}")
-    assert _same_text(section, d) != _same_text(_vocab_section(e), e), (
-        "the vocabulary over only recordless runs reads exactly as no past runs")
 
 
 _WRITTEN_P182 = ["000123", "yes", "2026-05-01", "5710"]
@@ -1389,9 +831,7 @@ def test_p182_lesson_signature_entry_that_frontmatter_reads_as(tmp_path):
             f"orientation found the lesson for its retyped value {sig!r}")
 
 
-# =================================================================================================
 # The lesson author: queue row to lesson file, through the real judge enqueue and drain
-# =================================================================================================
 
 def _ids(rows: Iterable[dict]) -> list[str]:
     return [r["finding_id"] for r in rows]
@@ -1455,89 +895,6 @@ def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
-#: The committed eval scenario's old-form key (`evals/scenarios/01-real-baseline`, PA-26).
-_PRE_CHANGE_KEY = "rule-5710"
-
-
-def test_p073_queue_rows_from_before_the_change_drained_after(tmp_path):
-    """A row with no signature in the row's signature field gives the curator no signature to
-    copy: an unsigned run's rows carry none there, and a row queued before the change lacks the
-    field and is handed on unchanged, so it reads as unsigned by construction (no old-shape
-    recognition, N13). The curator's instructions say a lesson's source_signature comes from that
-    field, so the curator never invents one.
-
-    Observed: one drain batch holding the REAL judge's findings for an episode whose record
-    holds no signature (its world copies' alerts carry a rule id) and a finding queued before
-    the change (old-form key, no signature field); the rows and user turn the curator is handed;
-    the curator's instructions as the drain wires them; the queue after the tick; the lesson
-    file the drain commits as the curator wrote it (the drain adds no source_signature).
-    """
-    world = "R-P073-WORLD"
-    rows, copied = _judged(tmp_path, signature=None, world_rule=world)
-    assert rows, "the judge enqueued no finding"
-    pre = _queued_row("p073-before/1", _PRE_CHANGE_KEY, pre_change=True)
-    curator = _Curator({"fd-p073": _author_lesson("fd-p073", None, [*_ids(rows), pre["finding_id"]])})
-    paths = _drain(tmp_path, curator, extra_rows=[pre])
-
-    handed = {r["finding_id"]: r for r in curator.rows()}
-    keys = {fid: handed.get(fid, {}).get("alert_rule_key") for fid in _ids(rows)}
-    assert keys == dict.fromkeys(_ids(rows), S.UNKEYED), (
-        f"the curator was handed a key for findings of a run with no signature: {keys}")
-    assert world not in "\n".join(curator.user_turns), (
-        f"the world copies' rule id {world!r} reached the curator")
-    assert pre["finding_id"] in handed, "the row queued before the change was not handed on"
-    assert {k: handed[pre["finding_id"]].get(k) for k in pre} == pre, (
-        f"the row queued before the change was rewritten: {handed[pre['finding_id']]}")
-    carried = _signatures_handed(curator)
-    assert carried == dict.fromkeys([*_ids(rows), pre["finding_id"]]), (
-        f"the curator was handed a signature for a row that has none: {carried}")
-    assert _signature_paragraphs(_prompt_text(paths)), (
-        "the curator's instructions never say a lesson's source_signature comes from the row's "
-        f"{S.QUEUE_SIGNATURE_FIELD!r} field, so an old row's key can still become one")
-    assert D.pending(paths, FINDINGS) == [], "a row was left on the queue after the tick"
-    lesson = _committed(paths)["fd-p073"]
-    assert lesson.lines("source_signature") == [], (
-        f"the drain added a source_signature to the lesson: {lesson.lines('source_signature')}")
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
-
-
-@pytest.mark.parametrize("sig", ["SIG-B2:r3.q", "unkeyed"])
-def test_b2_finding_rows_carry_the_signature_in_a_field_old_rows_lack(tmp_path, sig):
-    """A finding row the judge enqueues for a run with a recorded signature carries that
-    signature, verbatim, in its own field (`S.QUEUE_SIGNATURE_FIELD`, coined) -- a field rows
-    queued before the change lack; the rows reach the curator with that field as written, and
-    the curator's instructions take a lesson's source_signature from that field alone, never
-    from the row's rule key, which rows queued before the change also carry. (An unsigned run's
-    rows carry none there: p073.)
-
-    Observed: the REAL judge's rows for an episode recorded under a signature (its world copies'
-    alerts carry another rule id); one REAL drain tick over them; the rows the curator is
-    handed; the curator's instructions as the drain wires them. The instruction checks are
-    word-level pins: an implementer whose correct wording trips one loosens the word list to
-    their own words and never removes the check (§7 round 3, B5).
-    """
-    world = "R-B2-WORLD"
-    rows, copied = _judged(tmp_path, signature=sig, world_rule=world)
-    assert rows, "the judge enqueued no finding"
-    written = {r["finding_id"]: r.get(S.QUEUE_SIGNATURE_FIELD) for r in rows}
-    assert written == dict.fromkeys(_ids(rows), sig), (
-        f"the judge's rows do not carry the recorded signature in {S.QUEUE_SIGNATURE_FIELD!r}: "
-        f"{written}")
-    curator = _Curator({"fd-b2": _author_lesson("fd-b2", [sig], _ids(rows))})
-    paths = _drain(tmp_path, curator)
-    assert _signatures_handed(curator) == dict.fromkeys(_ids(rows), sig), (
-        f"the curator was not handed each row's signature field as written: "
-        f"{_signatures_handed(curator)}")
-    prompt = _prompt_text(paths)
-    assert _signature_paragraphs(prompt), (
-        "the curator's instructions never say a lesson's source_signature comes from the row's "
-        f"{S.QUEUE_SIGNATURE_FIELD!r} field")
-    from_key = [ln.strip() for ln in prompt.splitlines()
-                if "source_signature" in ln and "alert_rule_key" in ln]
-    assert not from_key, f"the curator's instructions take source_signature from the rule key: {from_key}"
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
-
-
 @pytest.mark.parametrize("sig", ["Rule:Brute/Force@v2", "unkeyed"])
 def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
     """The curator writes the recorded signature verbatim as source_signature, and a later run's
@@ -1595,127 +952,3 @@ def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
 
 
-def test_p111_lesson_author_runs_for_a_run_whose_alert_is_unma(tmp_path):
-    """A lesson authored from a run with no signature has no source_signature. The curator never
-    invents one, and orientation never finds the lesson by signature.
-
-    Observed: the REAL judge's findings for an episode whose record holds no signature (its
-    alert was unmapped) while its world copies' alerts carry a rule id; the keys, user turn and
-    instructions the curator is handed; the lesson it writes with no source_signature, as the
-    drain commits it; later runs of that rule id and of a signature spelled `unkeyed`, with the
-    lesson in the isolated checkout corpus beside a control keyed on the rule id.
-    """
-    world = "R-P111-WORLD"
-    rows, copied = _judged(tmp_path, signature=None, world_rule=world)
-    assert rows, "the judge enqueued no finding"
-    curator = _Curator({"fd-p111": _author_lesson("fd-p111", None, _ids(rows))})
-    paths = _drain(tmp_path, curator)
-    assert set(_keys_handed(curator).values()) == {S.UNKEYED}, (
-        f"the curator was handed a key for a run with no signature: {_keys_handed(curator)}")
-    assert world not in "\n".join(curator.user_turns), (
-        f"the world copies' rule id {world!r} reached the curator")
-    prompt = _prompt_text(paths)
-    assert any(S.UNKEYED in para and "source_signature" in para
-               for para in re.split(r"\n\s*\n", prompt)), (
-        f"the curator's instructions never say what a finding keyed {S.UNKEYED!r} writes as its "
-        "source_signature")
-    planted = S.plant_tenant()
-    _adopt(planted, paths, "fd-p111")
-    S.plant_lesson("fd-p111-control", source_signature=[world])
-    assert _later_hits(tmp_path, planted, world, "p111-later-rule") == ["fd-p111-control"]
-    assert _later_hits(tmp_path, planted, S.UNKEYED, "p111-later-unkeyed") == []
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
-
-
-def test_p116_lesson_author_reads_a_source_alert_the_run_rewro(tmp_path):
-    """The lesson author is handed the recorded signature.
-
-    Observed: the REAL judge's findings for an episode recorded under one signature whose world
-    copies' alerts the box rewrote to another rule id (PR-17); the keys, user turn and
-    instructions the curator is handed; the lesson it writes, as the drain commits it.
-    """
-    sig, forged = "SIG-P116", "FORGED-P116"
-    rows, copied = _judged(tmp_path, signature=sig, world_rule=forged)
-    assert rows, "the judge enqueued no finding"
-    curator = _Curator({"fd-p116": _author_lesson("fd-p116", [sig], _ids(rows))})
-    paths = _drain(tmp_path, curator)
-    assert set(_keys_handed(curator).values()) == {sig}, (
-        f"the curator was not handed the recorded signature: {_keys_handed(curator)}")
-    assert set(_signatures_handed(curator).values()) == {sig}, (
-        f"the rows do not carry the recorded signature in their signature field: "
-        f"{_signatures_handed(curator)}")
-    turn = "\n".join(curator.user_turns)
-    assert sig in turn, f"the curator's user turn does not carry {sig!r}"
-    assert forged not in turn, (
-        f"the curator's user turn carries the rewritten alert's rule id {forged!r}")
-    sends = [ln.strip() for ln in _prompt_text(paths).splitlines()
-             if "source_signature" in ln and re.search(r"rule\.id|alert\.json", ln)]
-    assert not sends, f"the curator's instructions take source_signature from the alert: {sends}"
-    assert _committed(paths)["fd-p116"].lines("source_signature") == [sig]
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
-
-
-def test_p188_fold_between_signed_and_unsigned(tmp_path):
-    """A folded lesson's source_signature lists the recorded signatures of the findings it
-    carries; folding never invents one; a lesson listing several matches any one exactly.
-
-    Observed: a drain corpus holding a lesson signed SIG-P188-A and one with no
-    source_signature; one batch with the REAL judge's findings for an episode recorded under
-    SIG-P188-B (world copies carrying another rule id), a queued finding recorded under
-    SIG-P188-C and an unkeyed one; the keys the curator is handed; the two lessons it folds them
-    into, as the drain commits them; later runs of each signature and of a near miss.
-    """
-    sig_a, sig_b, sig_c, world = "SIG-P188-A", "SIG-P188-B", "SIG-P188-C", "R-P188-WORLD"
-    signed, unsigned = "fd-p188-signed", "fd-p188-unsigned"
-    existing = {signed: S.lesson_text(signed, source_signature=[sig_a]),
-                unsigned: S.lesson_text(unsigned, source_signature=None)}
-    rows_b, copied = _judged(tmp_path, signature=sig_b, world_rule=world)
-    assert rows_b, "the judge enqueued no finding"
-    row_c, row_u = _queued_row("p188-c/1", sig_c), _queued_row("p188-u/1", S.UNKEYED)
-    curator = _Curator({
-        signed: _author_lesson(signed, [sig_a, sig_b],
-                               [f"front-door/{signed}/0", *_ids(rows_b), row_u["finding_id"]]),
-        unsigned: _author_lesson(unsigned, [sig_c], [f"front-door/{unsigned}/0", row_c["finding_id"]]),
-    })
-    paths = _drain(tmp_path, curator, extra_rows=[row_c, row_u], corpus=existing)
-    assert _keys_handed(curator) == {**dict.fromkeys(_ids(rows_b), sig_b),
-                                     row_c["finding_id"]: sig_c, row_u["finding_id"]: S.UNKEYED}, (
-        f"the curator was not handed each finding's recorded signature: {_keys_handed(curator)}")
-    assert world not in "\n".join(curator.user_turns)
-    planted = S.plant_tenant()
-    committed = _adopt(planted, paths, signed, unsigned)
-    assert committed[signed].lines("source_signature") == [sig_a, sig_b]
-    assert committed[unsigned].lines("source_signature") == [sig_c]
-    for i, (sig, want) in enumerate(((sig_a, [signed]), (sig_b, [signed]), (sig_c, [unsigned]),
-                                     ("SIG-P188", []))):
-        assert _later_hits(tmp_path, planted, sig, f"p188-later-{i}") == want, sig
-    assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
-
-
-def test_p189_eval_scenario_queue_rows_in_the_old_shape(tmp_path, monkeypatch):
-    """The committed eval scenario's rows stay as committed; the lessons it authors come out
-    with no source_signature, and nothing the eval measures changes.
-
-    Observed: the committed scenario (`evals/scenarios/01-real-baseline`, rows keyed
-    `rule-5710` with no recorded signature) materialized by the eval harness
-    (`evals/harness.materialize`): the queue it leaves for the lesson author against the
-    committed rows, and the corpus it leaves. The author's own leg over these rows is blocked
-    before this change (82-writer red flag: the rows predate the `direction` field the
-    lessons gate indexes).
-    """
-    monkeypatch.syspath_prepend(str(S.DEFENDER / "evals"))
-    harness = S.mod("evals.harness")
-    scenario = S.DEFENDER / "evals" / "scenarios" / "01-real-baseline"
-    committed = (scenario / "findings.jsonl").read_bytes()
-    rows = [json.loads(ln) for ln in committed.decode("utf-8").splitlines() if ln.strip()]
-    assert {r.get("alert_rule_key") for r in rows} == {_PRE_CHANGE_KEY}, (
-        "the committed scenario no longer holds the old-shape rows this demand is about")
-    root = tmp_path / "eval"
-    root.mkdir()
-    harness.materialize(scenario, root)
-    queued = root / "defender" / "learning" / "_pending" / "findings.jsonl"
-    assert queued.read_bytes() == committed, "the eval harness did not queue the rows as committed"
-    corpus = S.sym("_knowledge", "KnowledgePaths").of_defender_dir(root / "defender").lessons_dir
-    assert corpus.is_dir(), f"the eval harness laid out no corpus at {corpus}"
-    assert sorted(p.name for p in corpus.glob("*.md")) == sorted(
-        p.name for p in (scenario / "lessons").glob("*.md")), "the eval's starting corpus changed"

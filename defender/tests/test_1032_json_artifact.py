@@ -1,19 +1,4 @@
-"""`_io.load_json_artifact` — ONE decoder for box-written JSON, with nesting judged by the bytes.
-
-`json.loads` recurses once per nested container on the interpreter's shared stack budget, so
-without a bound "is this text readable" was a fact about the CALLER: the same line decoded
-from a deep call raised `RecursionError` where a shallow one returned a value. Every reader
-of a run dir that tolerated the nested shape did so by catching that error — a safe direction
-for a reader (skip it) and a wrong one for the writer side of the trace-row agreement
-(`challenge_gate._is_row_shaped`, asked deep inside the gate: "not a row" there let a reply
-stand as a raw line that every reader, asked from the top, then parsed as a row). The bound
-makes both sides answer from the bytes, so they cannot disagree.
-
-Pinned here: the depth scan is exact on valid JSON (brackets inside strings, escaped quotes);
-the bound admits `JSON_NESTING_LIMIT` and refuses one past it; and the row predicate answers
-the SAME from a stack that has almost no budget left as from the top — for a line the old
-predicate answered two ways.
-"""
+"""`_io.load_json_artifact` — ONE decoder for box-written JSON, with nesting judged by the bytes."""
 from __future__ import annotations
 
 import inspect
@@ -34,8 +19,6 @@ from defender._io import (
 )
 
 #: Stack frames left for the call under test once `from_a_deep_stack` has used the rest. Small
-#: enough that `json.loads` of `_DEEP` containers cannot complete in it, large enough for the
-#: predicate's own frames — the point of the bound is that the second fact no longer matters.
 _HEADROOM = 150
 #: Nested past the headroom and short of Python's default budget from the top: the depth the
 #: OLD predicate decoded from the top and could not from the deep stack.
@@ -70,12 +53,8 @@ def test_the_depth_scan_is_exact_on_valid_json_and_blind_to_brackets_inside_stri
 
 
 def test_the_depth_scan_is_linear_on_an_unclosed_run_of_escaped_quotes():
-    """#1127 review: the scan reads model text (a tool call's raw arguments) and every
-    box-written row, so its cost must not depend on what the text holds. A string that opens
-    and never closes, followed by escaped quotes, made the old string pattern back up and
-    restart at every later quote — 40 KB took seconds, 80 KB half a minute — on the event loop
-    every lead shares. Linear, the same text is a few milliseconds; the bound leaves room for a
-    loaded box and none for the quadratic scan."""
+    """#1127 review: the scan reads model text (a tool call's raw arguments) and every box-written
+    row, so its cost must not depend on what the text holds."""
     text = '{"query": "' + '\\"' * 20_000
 
     start = time.monotonic()
@@ -106,14 +85,7 @@ def test_the_bound_admits_the_limit_and_refuses_one_past_it():
 
 @pytest.mark.parametrize(("depth", "is_row"), [(20, True), (_DEEP, False), (200_000, False)])
 def test_the_row_predicate_answers_from_the_bytes_not_the_stack(depth, is_row):
-    """The same line, asked from the top and from a stack with `_HEADROOM` frames left: one
-    answer. `_DEEP` is the discriminating case — from the top the old predicate decoded it (a
-    dict, a row); from the deep stack `json.loads` raised and the caught `RecursionError` read
-    as "not a row". A writer that trusted the deep answer put the line out raw; the reader,
-    from the top, counted it as a row.
-
-    Observed failing by: a predicate that decodes first and catches `RecursionError` — the
-    `_DEEP` line is a dict from the top and `None` from the deep stack."""
+    """The same line, asked from the top and from a stack with `_HEADROOM` frames left: one answer."""
     line = _nested(depth)
     shallow = parse_jsonl_row(line)
     deep = from_a_deep_stack(lambda: parse_jsonl_row(line))

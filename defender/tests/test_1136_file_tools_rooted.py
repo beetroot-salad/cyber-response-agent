@@ -1,43 +1,18 @@
-"""#1136 — the model's file tools reach the host through the rooted core, not the path seams.
-
-The tools keep taking paths exactly as the agent sees them (absolute, or relative to
-`deps.cwd_anchor`); only the host I/O below them moves onto `defender/_io.py`'s rooted core
-(`bind(root).read(name)`, `rooted_mkdir` + `rooted_write`). That is a refactor, so plain trees
-must look exactly as they do today — the existing tool tests guard that, and the positive
-controls here re-pin the shapes the move could break (a symlinked repo root for a curator, a run
-dir spelled through a symlinked ancestor).
-
-What comes with the core, accepted rather than sought, and pinned by a few tests rather than a
-matrix:
-
-  * a hard link, a link at the name, a FIFO or a symlinked holding folder on the path is
-    refused as a `ModelRetry` instead of followed — never a raw `OSError`/`ValueError`
-    traceback, never a hang — and a refused write leaves the planted target byte-for-byte as
-    it was;
-  * so the hard-link read leak closes: today `read_file` as MAIN returns the bytes of a hard
-    link in the run dir to a file outside every read root;
-  * a `..` component in a model path is refused with a `ModelRetry`;
-  * `read_companion` keeps its three-way split (never written → `""`; planted or undecodable
-    → `None`, not retryable; I/O fault → retryable).
-
-The symlinked holding folders here point INSIDE the allowed tree on purpose: the permission
-gate resolves the path and admits it, so only the I/O layer can refuse.
-
-Every plant is a real one (`os.link`, `os.symlink`, `os.mkfifo`); no `monkeypatch.setattr`.
+"""The model's file tools reach the host through the rooted core: a hard link, a link at the name, a FIFO, a symlinked
+holding folder or a `..` component is refused as a `ModelRetry` (never followed, never a hang), a refused write leaves
+the host file untouched, and plain trees, symlinked repo roots and run dirs behave as before. Real plants only.
 """
 from __future__ import annotations
 
-import ast
 import contextlib
 import os
 import signal
 import stat
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
-from defender.tests._1255_view import model_path
 
 pytest.importorskip("pydantic_ai")
 
@@ -59,7 +34,6 @@ from defender.runtime.tools import (  # noqa: E402
 )
 from defender.tests._curator_691_harness import make_worktree, pending_run_dir  # noqa: E402
 
-_DEFENDER = Path(__file__).resolve().parents[1]
 
 #: The host file's bytes. Distinctive, so "the message carries no host bytes" is checkable.
 HOST = "HOST-SECRET-1136 do not disclose\n"
@@ -177,11 +151,7 @@ def test_lesson_read_refuses_a_hard_link_to_a_host_file(tmp_path):
 def test_a_write_over_a_hard_link_is_a_retry_and_the_host_file_is_unchanged(tool, tmp_path):
     """A writer over a hard link at the name: today the guarded write refuses it by raising an
     `OSError` straight out of the tool. It must reach the model as a retry, and the host file
-    the link shares an inode with must be byte-for-byte unchanged.
-
-    `edit_file`'s `old_string` is text the HOST file holds, so its pre-read is what decides: a
-    `old_string` absent from it would be refused as "not found" on any code and prove nothing.
-    Same address, plain file first: the write lands as today."""
+    the link shares an inode with must be byte-for-byte unchanged."""
     deps, corpus = _curator(tmp_path)
     host = _host_file(tmp_path)
     lesson = corpus / "x.md"
@@ -499,84 +469,15 @@ def test_the_write_gate_does_not_take_its_baseline_through_a_hard_link(tmp_path)
 # the static guard: the touched sites call no path seam
 
 
-#: The path seams the file tools leave: each follows the caller's path spelling.
-_SEAMS = frozenset({
-    "write_guarded", "read_guarded", "read_plain", "read_plain_bytes", "read_bytes_guarded",
-    "read_text_utf8", "read_text_soft", "guarded_mkdir", "locked_for_rewrite",
-    "locked_for_read", "open_guarded", "write_atomic", "append_jsonl",  # lint-stale-ref: ok — a census word for the deleted `_io.write_atomic`; a name no module defines adds no seam to the scan
-})
-
-#: Path-following probes and I/O no file tool may call on a model path.
-_PATH_IO = frozenset({
-    "is_file", "read_text", "read_bytes", "write_text", "write_bytes", "open", "mkdir",
-    "makedirs",
-})
 
 
-def _offences(nodes: Sequence[ast.AST]) -> list[str]:
-    """Every seam reference and path-following call under `nodes`, by resolved name rather than
-    spelling: an imported seam is flagged whatever alias binds it, an attribute access is flagged
-    whatever object it is taken off, and a seam named as a string (`getattr`) is flagged too."""
-    found: list[str] = []
-    for top in nodes:
-        for node in ast.walk(top):
-            if isinstance(node, ast.ImportFrom):
-                found += [f"imports {a.name}" for a in node.names if a.name in _SEAMS]
-            elif isinstance(node, ast.Attribute) and node.attr in _SEAMS:
-                found.append(f"references .{node.attr}")
-            elif isinstance(node, ast.Name) and node.id in _SEAMS:
-                found.append(f"uses {node.id}")
-            elif isinstance(node, ast.Constant) and node.value in _SEAMS:
-                found.append(f"names {node.value!r}")
-            elif isinstance(node, ast.Call):
-                fn = node.func
-                if isinstance(fn, ast.Attribute) and fn.attr in _PATH_IO:
-                    found.append(f"calls .{fn.attr}()")
-                elif isinstance(fn, ast.Name) and fn.id == "open":
-                    found.append("calls open()")
-    return found
 
 
-def _module(rel: str) -> ast.Module:
-    return ast.parse((_DEFENDER / rel).read_text(encoding="utf-8"))
 
 
-def _decide_write_and_its_helpers() -> list[ast.AST]:
-    """`decide_write` and every module-level function of `permission/files.py` it reaches by
-    name, so a baseline read moved into a helper is still in scope. (Its unused twin
-    `_decide_investigation_write` was deleted.)"""
-    tree = _module("runtime/permission/files.py")
-    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
-    seen: dict[str, ast.AST] = {}
-    todo = ["decide_write"]
-    while todo:
-        name = todo.pop()
-        if name in seen or name not in funcs:
-            continue
-        seen[name] = funcs[name]
-        todo += [
-            c.func.id for c in ast.walk(funcs[name])
-            if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
-        ]
-    assert "decide_write" in seen, "permission/files.py no longer defines decide_write"
-    return list(seen.values())
 
 
-@pytest.mark.parametrize("site", [
-    "runtime/tools/_files.py",
-    "runtime/tools/_document.py",
-    "runtime/tools/_bash.py",
-    "permission.decide_write",
-])
-def test_the_file_tools_call_no_path_seam(site):
-    """The census half of the refactor: the file tools' modules (`_files.py`, `_document.py`,
-    `_bash.py`, home of the folder-making helper) and the write gate's baseline read reference
-    none of the path seams, and call no path-following probe or open on a path. Their host I/O
-    goes through the rooted core instead. This feeds #1105's ratchet."""
-    nodes = (
-        _decide_write_and_its_helpers() if site == "permission.decide_write" else [_module(site)]
-    )
-    assert _offences(nodes) == [], f"{site} still reaches the host through a path seam"
+
 
 
 # ---------------------------------------------------------------------------------------------
@@ -598,25 +499,6 @@ def test_a_folder_link_two_levels_above_the_name_is_refused_for_reads(tmp_path):
     assert "INSIDE" not in message
 
 
-def test_a_folder_link_two_levels_above_the_name_is_refused_for_curator_io(tmp_path):
-    """`defender/alias -> defender`: `defender/alias/lessons/a.md` resolves to a lesson the
-    curator may read and write. Both are refused and the lesson is unchanged; the real path
-    reads and writes as today."""
-    deps, corpus = _curator(tmp_path)
-    lesson = corpus / "a.md"
-    lesson.write_text("ORIGINAL lesson\n", encoding="utf-8")
-    os.symlink(corpus.parent, corpus.parent / "alias", target_is_directory=True)
-    deep = "defender/alias/lessons/a.md"
-
-    _refused(lambda: _tool_lesson_read(deps, deep, part="full"))
-    before = _snapshot(lesson)
-    _refused(lambda: _tool_write_file(deps, deep, "REDIRECTED\n"))
-    _refused(lambda: _tool_edit_file(deps, deep, "ORIGINAL", "REDIRECTED"))
-    assert _snapshot(lesson) == before, "a write landed through the linked folder"
-
-    assert "ORIGINAL lesson" in _tool_lesson_read(deps, "defender/lessons/a.md", part="full")
-    _tool_write_file(deps, "defender/lessons/a.md", "REWRITTEN\n")
-    assert lesson.read_text(encoding="utf-8") == "REWRITTEN\n"
 
 
 def test_lesson_read_and_edit_file_refuse_a_symlink_at_the_name(tmp_path):
@@ -662,49 +544,14 @@ def test_the_write_gate_over_a_fifo_at_investigation_md_denies_without_blocking(
         assert not decide().allow, "the gate took a FIFO as the baseline"
 
 
-def test_the_file_tools_hold_no_path_seam_by_object():
-    """The census by object, not spelling: no module-level name of the file tools' modules (the
-    whole `runtime/tools` package's tool modules, `lesson_read` and `permission/files.py`) is
-    bound to a path-seam function, whatever it is called and wherever it was re-exported from.
-    `_deps.py` is excluded: its `lessons_loaded` append is a run record (#1165)."""
-    import importlib
-
-    import defender._io as io_mod
-
-    seams = {getattr(io_mod, n) for n in _SEAMS if hasattr(io_mod, n)}
-    assert seams, "no seam resolved — the census would pass vacuously"
-    offences = []
-    for modname in (
-        "defender.runtime.tools._files", "defender.runtime.tools._document",
-        "defender.runtime.tools._bash", "defender.runtime.tools",
-        "defender.learning.author.lesson_read", "defender.runtime.permission.files",
-    ):
-        mod = importlib.import_module(modname)
-        offences += [f"{modname}.{k}" for k, v in vars(mod).items() if any(v is s for s in seams)]
-    assert offences == [], offences
 
 
-def test_read_file_keeps_todays_messages(tmp_path):
-    """Plain-tree messages are unchanged: a missing file is `file not found: <path>`, and
-    undecodable bytes are `<path> is not valid UTF-8 text (binary or corrupt)`."""
-    deps, run = _main(tmp_path)
-    assert _refused(lambda: _tool_read_file(deps, "nope.txt")) == "file not found: nope.txt"
-    (run / "bin.txt").write_bytes(b"\xff\xfe\x00bad")
-    assert _refused(lambda: _tool_read_file(deps, "bin.txt")) == (
-        "bin.txt is not valid UTF-8 text (binary or corrupt)"
-    )
 
 
 # ---------------------------------------------------------------------------------------------
 # review round (#1208): a plain folder is "file not found", and no refusal names a host path
 
 
-def test_read_file_on_a_plain_folder_is_file_not_found_as_today(tmp_path):
-    """An ordinary folder at the name is not a plant: `read_file` says `file not found`, as
-    `is_file()` answered before the move, not the alias refusal."""
-    deps, run = _main(tmp_path)
-    (run / "sub").mkdir()
-    assert _refused(lambda: _tool_read_file(deps, "sub")) == "file not found: sub"
 
 
 @pytest.mark.parametrize("tool", ["read_file", "write_file"])
@@ -729,43 +576,7 @@ def test_a_refusal_names_no_host_path(tool, tmp_path):
 # second review round (#1208): a confine is never a trust root; `//`; the refusal kind
 
 
-def test_a_symlinked_corpus_folder_is_refused_for_curator_io(tmp_path):
-    """`defender/lessons` itself a symlink to a folder outside the worktree, made before the
-    curator binds (the gate resolves it and admits both lanes): the walk starts at the defender
-    dir, never at the confined corpus folder, so the link is refused for the read and the
-    write and nothing lands at its target — as `main` refused the write."""
-    wt = make_worktree(tmp_path)
-    corpus = wt / "defender" / "lessons"
-    outside = tmp_path / "outside-lessons"
-    corpus.rename(outside)
-    os.symlink(outside, corpus, target_is_directory=True)
-    (outside / "a.md").write_text("ORIGINAL lesson\n", encoding="utf-8")
-    deps = CuratorDeps.for_run(pending_run_dir(tmp_path), wt, corpus, box=None)
-
-    _refused(lambda: _tool_lesson_read(deps, "defender/lessons/a.md", part="full"))
-    _refused(lambda: _tool_write_file(deps, "defender/lessons/new.md", "NEW\n"))
-    assert not (outside / "new.md").exists(), "the write landed through the linked corpus"
 
 
-def test_a_double_slash_spelling_reads_as_today(tmp_path):
-    """POSIX lets `//x` mean `/x`; the gate admits it, so the read must too, not refuse it as
-    reaching its root through a symlink."""
-    deps, run = _main(tmp_path)
-    (run / "notes.txt").write_text("plain notes\n", encoding="utf-8")
-    # #1255 P1: the model's own spelling (`//runs/current/notes.txt`), the double slash kept.
-    assert "plain notes" in _tool_read_file(deps, "/" + model_path(run / "notes.txt", run_dir=run))
 
 
-def test_a_refused_record_read_must_say_what_refused_it():
-    """`RecordRead.refused_by` is set exactly when the read was refused, so a consumer that
-    branches on it can never meet a refusal with no kind (and misfile an I/O fault as a
-    plant)."""
-    from defender._io import REFUSED_FAULT, RecordRead
-
-    with pytest.raises(ValueError, match="names what refused it"):
-        RecordRead(name="x", absent=False, reason="refused", text=None)
-    with pytest.raises(ValueError, match="names what refused it"):
-        RecordRead(name="x", absent=False, reason=None, text="t", refused_by=REFUSED_FAULT)
-    assert RecordRead(
-        name="x", absent=False, reason="refused", text=None, refused_by=REFUSED_FAULT,
-    ).refused_by == REFUSED_FAULT

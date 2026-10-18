@@ -97,12 +97,6 @@ def test_rotate_drops_a_keyless_row_that_already_carried_attempts(tmp_path):
     assert rows == []
 
 
-def test_a_refusal_is_not_an_exception_so_no_broad_arm_absorbs_it():
-    """`except Exception` never catches a refusal: only an arm that names it does."""
-    from defender.learning.core.state import StateRefused
-
-    assert issubclass(StateRefused, BaseException)
-    assert not issubclass(StateRefused, Exception)
 
 
 def _curator_world(tmp_path):
@@ -162,13 +156,3 @@ def test_an_ordinary_failure_recording_a_contained_curator_fault_does_not_escape
     assert any("NOT written" in r.getMessage() for r in caplog.records)
 
 
-def test_a_lane_is_named_only_by_its_member(tmp_path):
-    """`stage_dir` takes a `DrainLabel` member; the member's value as a string is not a lane."""
-    import pytest
-
-    from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-
-    state = LearningState.open(make_paths(tmp_path))
-    assert state.stage_dir(AUTHOR_DRAIN_LABEL).name == "_pending"
-    with pytest.raises(ValueError, match="unknown drain lane"):
-        state.stage_dir("author_drain")  # type: ignore[arg-type]

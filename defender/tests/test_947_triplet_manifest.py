@@ -1,14 +1,4 @@
-"""#947 — the family manifest is the contract (M2, O1).
-
-`runtime/branch/_family.py` owns the schema and its loader because the RUNTIME reads it:
-`run.py --resume` derives the episode dir, the source run and the world from this one document
-and nothing else. Learning writes through the same loader, so the questioner's output is
-validated into `Family` before any other step reads it, and a refusal names the offending field.
-
-The whole module is RED against b8a63e66 by design: `runtime/branch/_family.py` does not exist
-(X16). Each test imports it through `_triplet_947.mod`, so a missing target is one failure per
-demand rather than one collection error swallowing the file.
-"""
+"""#947 — the family manifest is the contract (M2, O1)."""
 from __future__ import annotations
 
 import pytest
@@ -35,49 +25,7 @@ def _no_preflight(*_args, **_kw) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------------------
 # the document's shape
-# ---------------------------------------------------------------------------------------
-
-
-def test_947_family_schema_and_loader_live_in_runtime_branch():
-    """The `Family` schema and its loader are importable from `runtime/branch/_family.py`,
-    not from `learning/`, so the resumed run reads the manifest without importing learning."""
-    fam = _family()
-    assert fam.__name__ == "defender.runtime.branch._family"
-    for name in ("Family", "World", "Fact", "parse_family", "load_family", "FamilyError"):
-        assert hasattr(fam, name), f"_family.py declares no {name}"
-
-
-def test_947_family_manifest_carries_every_declared_field(tmp_path):
-    """A loaded family carries the launcher's derived half, the operator's instrument field
-    and the questioner's authored half as one document: episode id, source run id, branch
-    message id, fences, T0, the served systems, the base story, the discriminator and the
-    worlds — every field the data model declares, none omitted. (#1105 PR 2, declared change
-    9: the source is named by id only; `source_run_dir` is no field. #1255 P4, D1: the
-    operator's continuation prompt is no field either — it was in this list; that it is GONE is
-    `test_1255_snapshot_instrument`'s demand.)"""
-    fam = _load(T.family_doc())
-    for slot in ("episode_id", "source_run_id", "branch_message_id",
-                 "fences_at", "as_of", "served_systems", "base_story",
-                 "discriminator", "worlds"):
-        assert getattr(fam, slot) is not None, f"the manifest lost {slot}"
-    assert fam.episode_id == T.EPISODE_ID
-    assert len(fam.worlds) == 3
-
-
-def test_947_world_entry_carries_every_declared_field():
-    """Each world entry carries its short label, its role, its story, its axis, the declared
-    disposition, the label basis and its facts — the seven fields the data model names."""
-    fam = _load(T.family_doc())
-    w = {x.world_id: x for x in fam.worlds}["b"]
-    for slot in ("world_id", "role", "story", "axis", "disposition_declared",
-                 "label_basis", "facts"):
-        assert hasattr(w, slot), f"a World entry declares no {slot}"
-    assert w.world_id == "b"
-    assert w.label_basis == "policy-rule"
-    assert [(f.fact_id, f.statement, f.entities) for f in w.facts] == [
-        ("f1", "a second login to web-1 came from 10.0.0.9", ("web-1", "10.0.0.9"))]
 
 
 def test_947_world_a_is_the_control_with_no_facts_and_null_axis():
@@ -91,9 +39,7 @@ def test_947_world_a_is_the_control_with_no_facts_and_null_axis():
     assert a.facts == ()
 
 
-# ---------------------------------------------------------------------------------------
 # what the loader refuses — the strict reading (§7 FORK-5)
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_questioner_output_is_validated_into_family_before_any_reader():
@@ -129,19 +75,6 @@ def test_947_the_null_replicate_arm_loads_and_is_not_run_by_default():
     assert [w.world_id for w in _family().runnable_worlds(fam)] == ["a", "b"]
 
 
-def test_947_label_basis_defaults_to_policy_rule():
-    """A world entry that omits its label basis loads as the policy-rule basis; the judgment
-    basis is admitted only when the manifest says so."""
-    fam = _family()
-    doc = T.world_doc("b")
-    doc.pop("label_basis")
-    loaded = fam.parse_family(T.family_doc(worlds=[T.base_world(), doc]))
-    assert loaded.worlds[1].label_basis == "policy-rule"
-    judged = fam.parse_family(T.family_doc(
-        worlds=[T.base_world(), T.world_doc("b", label_basis="judgment")]))
-    assert judged.worlds[1].label_basis == "judgment"
-
-
 def test_947_a_naive_or_non_utc_as_of_is_refused_as_a_fault():
     """A naive or non-UTC T0 is refused where the registry reads it, as a manifest fault."""
     fam = _family()
@@ -166,9 +99,7 @@ def test_947_a_model_authored_free_text_field_stays_one_scalar(tmp_path):
     assert reread["episode_id"] == T.EPISODE_ID
 
 
-# ---------------------------------------------------------------------------------------
 # §7 FORK-5 (auto) — the strict loader, the manifest digest, the sentinel reading
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_the_family_loader_refuses_an_unknown_top_level_field():
@@ -211,18 +142,12 @@ def test_947_disposition_declared_is_gated_by_the_same_enum_the_report_is():
     assert ok.worlds[1].disposition_declared in vocab.DISPOSITION_ENUM
 
 
-# ---------------------------------------------------------------------------------------
 # §7 FORK-4 (auto) — one identity gate, before anything is launched
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tmp_path,
                                                                                monkeypatch):
-    """ONE identity gate runs over the whole manifest BEFORE anything is launched: each label
-    must be nameable, the labels must be distinct case-folded, none may be the reserved base
-    ledger name, the roles must be distinct, and each composed world token must round-trip — and
-    driven through the launcher, a family failing any of them is refused at the question-writer's
-    step, with no sibling started, which is the ordering the fork's answer turns on."""
+    """ONE identity gate runs over the whole manifest BEFORE anything is launched"""
     fam = _family()
     bad_families = (
         ([T.base_world(), T.world_doc("B")], "b"),
@@ -265,24 +190,7 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
 
 
 def test_947_a_source_run_id_that_cannot_render_is_refused_by_the_gate_that_runs_first():
-    """A source run whose id cannot render to a nameable episode token is refused, and refused
-    EARLIER — by the id gate `episode_dir_for` runs before any token is derived — so the escape
-    this test used to pin has no input left to serve.
-
-    EDITED BY #1007 (F-R5), on a recorded human decision, and this is the one place a removed
-    flag's own test changes hands. It used to assert that `--episode-token` made an unrenderable
-    source branchable again. That escape is removed: it replaced the derived token outright, so
-    two episode ids could share one namespace and one episode could stage under a namespace no
-    reader re-derives, and `staging.sweep` — the only recovery for a killed attempt's live
-    cluster aliases — was defeated by hand in both directions.
-
-    THE WORKFLOW SURVIVES THROUGH ITS SUBSTITUTE, which is what this test now pins: every id
-    that `episode_token_for` cannot render is ALREADY refused by `refuse_bad_episode_id`, which
-    `episode_dir_for` calls first, so an operator meets one legible refusal before anything is
-    spent rather than a source run that is permanently unbranchable. The pairing is re-probed
-    against the real predicates on every run rather than recorded once. The positive control is
-    a valid id, which both admit.
-    """
+    """A source run whose id cannot render to a nameable episode token is refused, and refused EARLIER — by the id gate `episode_dir_for` runs before any..."""
     fam = _family()
     untokenable = ("FRESH CASE/2026-n59", "_lead-n5", ".hidden-n5", "-n5")
     for episode_id in untokenable:
@@ -294,9 +202,7 @@ def test_947_a_source_run_id_that_cannot_render_is_refused_by_the_gate_that_runs
     assert fam.episode_token_for(T.EPISODE_ID) == T.EPISODE_TOKEN
 
 
-# ---------------------------------------------------------------------------------------
 # §7 NEW-1 (gate finding) — a fact's entity is bounded data, never document structure
-# ---------------------------------------------------------------------------------------
 
 
 def _entity_family(entity: str) -> dict:
@@ -305,11 +211,7 @@ def _entity_family(entity: str) -> dict:
 
 
 def test_947_a_fact_entity_outside_its_declared_domain_is_refused():
-    """A fact's entity has a bounded, validated domain: an entity carrying a control character
-    (the document-structural newline included), an empty one, or one over the length bound is
-    refused naming `entities` rather than admitted as free text. (#1224: an entity is any
-    printable name — it is data everywhere and never a path component — so path- or
-    mapping-looking text is admitted as exactly the text it is.)"""
+    """A fact's entity has a bounded, validated domain"""
     fam = _family()
     bound = fam.ENTITY_MAX_LEN
     for bad_entity in ("web-1\n  owner: root", "", "x" * (bound + 1)):

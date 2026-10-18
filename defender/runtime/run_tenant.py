@@ -66,8 +66,11 @@ class RunTenant:
     correlation: CorrelationDispatch | None
     #: One entry per folder under `settings/systems/`, each `config.env` parsed ONCE here,
     #: verbatim (keys as written, prefix included): a `SystemConfig`, or the `ConfigFault` for why
-    #: there is none. A fault is kept, never raised at resolve — that system is down, the run is
-    #: not refused (O5). Asking for a system with no folder gets the "not configured" fault.
+    #: there is none. A fault is kept, never raised at resolve: resolution is not refused for it
+    #: (O5). At run start each granted system's own settings check judges this record (#1256);
+    #: a system it faults is down for the run, and a start at which no granted system is usable
+    #: is refused by the run's start check (O-8), never here (D4). Asking for a system with no
+    #: folder gets the "not configured" fault.
     systems: Mapping[str, SystemConfig | ConfigFault]
     #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
     ticket_mapping: CaseMapping | CaseTicketError

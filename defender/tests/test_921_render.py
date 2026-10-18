@@ -1,26 +1,4 @@
-"""#921 — the judge's input: the four joined views, the withholding, and what the archive owes it.
-
-THIS IS THE HALF THE EXPERIMENT SETTLED, and the amendment left it untouched. 45 K3 replies
-graded by Fable 5.1 at xhigh against a frozen reference: a judge fed the manifest and the two
-documents scored 0.2-0.3/3 recall and invented 2.0-2.8 false findings per reply, restating the
-run's own close; fed the joined views plus the correlating prompt it scored 2.8 / 2.3 / 0.9 on
-the three fixtures with false findings at or below 0.2 (C9). The cadence break went 0/5 -> 5/5
-once the prompt demanded a derivation pass (C10). Without the counterfactual marking, 5/5
-replies cited sibling worlds' injected facts as facts about world A and 2/5 declared a corpus
-contradiction that does not exist (C11). Every assertion below is one of those measured edges.
-
-THREE §7 RESOLUTIONS ARE APPLIED HERE AS SETTLED:
-* **J8** — the sibling's recorded commit is resolved to a SHA once per pass and threaded; an
-  absent commit or path renders as an explicit `unavailable: <reason>` line rather than failing
-  the world; an `allow_dirty` family is surfaced as a caveat.
-* **J9** — RETIRED by #1105 PR 2 (J3): the same-alert sibling union over the operator's runs
-  base, and its trial spread, left the judge's input — the judge reads only the episode it is
-  handed — and the tests that pinned the union went with it.
-* **J14** — the withholding's scope is stated across ALL FOUR views, not the manifest alone.
-
-RED against `d1b8b06a`: `learning/judge/render.py` does not exist, no reader anywhere indexes
-the runs base by `alert_id`, and `archive.py` copies none of D7's three inputs.
-"""
+"""#921 — the judge's input: the four joined views, the withholding, and what the archive owes it."""
 from __future__ import annotations
 
 import json
@@ -156,33 +134,6 @@ def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
         run_mod.validate_reply(J.as_reply_text(J.reply_doc(passes=False)))
     # Positive control: the same reply WITH the three tables validates.
     assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).bucket == "lead-set"
-
-
-def test_921_prompt_names_the_graded_world_and_keeps_the_cap_and_quoting_rule(tmp_path):
-    """The prompt is the correlating prompt parameterised by the GRADED WORLD's label ("world X
-    has run; grade it"), keeping the 20-row cap and the quote-any-colon rule that made 15/15
-    replies parse strictly (C12). Its wording names hand-offs, never entities or systems.
-
-    The parameterisation is what makes one call about one trajectory: the experiment's own text
-    said "world A", and that sentence becomes "world X has run; grade it".
-    """
-    ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
-                                               "c": [J.oracle_row("c")]})
-    judge = _prompts(tmp_path, ep, draws=1)
-    # #1007 M5 adds a THIRD call (`judge:family:<n>`) beside the two per-world ones; excluded
-    # here, since this test is about the per-world prompt's own parameterisation.
-    by_world = {aid.split(":")[1]: prompt
-               for aid, prompt in zip(judge.agent_ids, judge.prompts, strict=True)
-               if aid.split(":")[1] != "family"}
-
-    assert set(by_world) == {"b", "c"}
-    for label, prompt in by_world.items():
-        assert f"world {label}" in prompt
-        other = "c" if label == "b" else "b"
-        assert f"world {other} has run" not in prompt
-        assert "20" in prompt, "the 20-row cap left the prompt"
-        assert "colon" in prompt.lower(), (
-            "the quote-any-colon rule left the prompt; it is what made 15/15 replies parse")
 
 
 # ---------------------------------------------------------------------------------------

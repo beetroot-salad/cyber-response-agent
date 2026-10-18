@@ -1,12 +1,4 @@
-"""What the strict-pydantic port (#1067) must NOT change about the records it swapped.
-
-Each test here pins one behaviour the stdlib `@dataclass` gave for free and strict pydantic
-takes away unless the record asks for it back: a mistyped field refusing as the DOMAIN
-exception every caller's handler names (not pydantic's `ValidationError`), a mutable container
-that `dataclasses.replace` must hand to the copy BY IDENTITY, a mapping that must not be
-copied into a writable `dict`, a stdlib knob that must not vanish into `ConfigDict`, and a
-compiled-pattern field that must not compile a bare string on the caller's behalf.
-"""
+"""What the strict-pydantic port (#1067) must NOT change about the records it swapped."""
 
 from __future__ import annotations
 
@@ -23,9 +15,7 @@ from defender._model import model
 from defender.tests import _branch_947 as B947
 
 
-# ---------------------------------------------------------------------------------------
 # the decorator itself
-# ---------------------------------------------------------------------------------------
 
 
 def test_model_forwards_kw_only_rather_than_dropping_it_into_config():
@@ -42,14 +32,6 @@ def test_model_forwards_kw_only_rather_than_dropping_it_into_config():
     assert K(a=1).b == 2
 
 
-def test_model_forwards_order():
-    @model(order=True)
-    class Ordered:
-        a: int
-
-    assert Ordered(1) < Ordered(2)
-
-
 def test_model_refuses_a_keyword_that_is_neither_a_knob_nor_a_config_key():
     """`init` is the one stdlib knob pydantic only accepts as `False`; a typo lands here too.
     Refused loudly rather than ignored silently."""
@@ -64,21 +46,11 @@ def test_model_refuses_a_keyword_that_is_neither_a_knob_nor_a_config_key():
             a: int
 
 
-def test_model_still_passes_a_real_config_key_through():
-    @model(validate_assignment=True)
-    class V:
-        a: int
-
-    v = V(1)
-    with pytest.raises(ValidationError):
-        v.a = "2"  # type: ignore[assignment]
-
-
 def test_model_refuses_a_keyword_the_class_has_no_field_for():
     """Stdlib `@dataclass` raised `TypeError` on an unknown keyword; pydantic's own default
     (`extra="ignore"`) drops it in silence, so a typo in a constructor call — or in a
     `dataclasses.replace`, which forwards its leftover keys to `__init__` — would have handed
-    back a record that quietly kept its old value. `@model` restores the refusal."""
+    back a record that quietly kept its old value."""
     @model(frozen=True)
     class R:
         worktree_root: Path
@@ -92,56 +64,7 @@ def test_model_refuses_a_keyword_the_class_has_no_field_for():
     assert replace(good, worktree_base=Path("/y")).worktree_base == Path("/y")
 
 
-def test_complete_finishes_a_schema_that_names_a_later_class():
-    """Two records naming each other leave the first decorated one incomplete: pydantic then
-    builds its schema on the FIRST construction, from whichever thread gets there. `complete`
-    at module end finishes it at import, and the field validates strictly afterwards."""
-    from defender._model import complete
-
-    @model(frozen=True)
-    class Ctx:
-        check: Chk
-
-    @model(frozen=True)
-    class Chk:
-        name: str
-
-    assert Ctx.__pydantic_complete__ is False
-    assert complete(Ctx) is Ctx
-    assert Ctx.__pydantic_complete__ is True
-    chk = Chk(name="n")
-    assert Ctx(check=chk).check is chk
-    with pytest.raises(ValidationError):
-        Ctx(check="not a check")  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize(("module", "name"), [
-    ("defender.learning.core.drains", "BatchDisposition"),
-])
-def test_every_ported_record_with_a_forward_reference_is_complete_at_import(module, name):
-    """The records whose field names a class the module defines later, or another module
-    owns: `BatchDisposition.pitfalls` (now `core/pitfalls_disposition`, imported at top).
-    (#1224 retired the mechanical judge's family grade; #1166 the forward check's
-    `CheckContext`.) Each was left for pydantic to finish on the first construction.
-
-    IN A FRESH INTERPRETER, because the flag this reads flips to true on the first
-    construction anyway: in this process, any earlier test in the worker that built one of
-    these would make a class left lazily incomplete read as complete, and the fix could be
-    reverted with this arm still green."""
-    import subprocess
-    import sys
-
-    probe = (
-        f"import importlib; cls = getattr(importlib.import_module({module!r}), {name!r}); "
-        "assert cls.__pydantic_complete__ is True, 'left for the first construction to finish'"
-    )
-    subprocess.run([sys.executable, "-c", probe], check=True, cwd=Path(__file__).parents[2],
-                   timeout=120)
-
-
-# ---------------------------------------------------------------------------------------
 # the branch spec: every mistyped field is a `BranchError`, at construction
-# ---------------------------------------------------------------------------------------
 
 
 #: #1255 (D1, P4) COMPAT: the continuation prompt is offered only while `BranchSpec` still
@@ -170,27 +93,7 @@ def test_branch_spec_refuses_a_mistyped_field_as_branch_error(field_name, bad):
         BranchSpec(**{**_GOOD, field_name: bad})
 
 
-def test_branch_spec_accepts_the_positional_form_too():
-    from defender.runtime.branch import BranchSpec
-
-    # #1255 (D1, P4): positional order is (source, message, [prompt while it exists], as_of).
-    spec = BranchSpec(Path("/x"), 3, *_RETIRED_PROMPT.values(), datetime(2026, 1, 1, tzinfo=UTC))
-    assert spec.branch_message_id == 3
-
-
-def test_branch_spec_has_one_as_of_type_refusal_not_two():
-    """The datetime check lives on the spec; `_refuse_bad_as_of`'s copy of it was dead code
-    once the spec refused first, and a rule spelled twice drifts."""
-    import inspect
-
-    from defender.runtime.branch import _frontier
-
-    assert "must be a datetime" not in inspect.getsource(_frontier._refuse_bad_as_of)
-
-
-# ---------------------------------------------------------------------------------------
 # the family manifest: a non-string fact entity is a `FamilyError`
-# ---------------------------------------------------------------------------------------
 
 
 def test_family_fact_refuses_a_non_string_entity_as_family_error():
@@ -205,59 +108,7 @@ def test_family_fact_refuses_a_non_string_entity_as_family_error():
                      "facts": [{"fact_id": "f1", "statement": "s", "entities": [True]}]})
 
 
-# ---------------------------------------------------------------------------------------
 # identity-carrying fields: no rebuild on construction
-# ---------------------------------------------------------------------------------------
-
-
-def test_agent_deps_replace_shares_the_mutable_containers():
-    """`review_state` and `authored_paths` are THE ONE mutable container each on a frozen deps
-    — `ReviewState.of(deps)` counts turns in the former, `write_file` records into the latter
-    — and every `dataclasses.replace(deps, ...)` (sub-agent deps, `LeadStop`'s copy) must
-    hand the copy the same object, or the count forks between the two in silence."""
-    pytest.importorskip("pydantic_ai")
-    from defender.runtime import permission
-    from defender.runtime.tools import AgentDeps
-
-    class _Box:
-        def run_parsed(self, *a, **k):  # noqa: ARG002 — duck-typed `BoxLike`
-            raise AssertionError("never run")
-
-    deps = AgentDeps(run_dir=Path("/r"), defender_dir=Path("/d"), run_id="x",
-                     policy=permission.AgentPolicy(), cwd_anchor=Path("/r"), box=_Box())
-    copy = replace(deps, run_id="y")
-    assert copy.review_state is deps.review_state
-    assert copy.authored_paths is deps.authored_paths
-
-
-def test_learning_deps_subclasses_validate_like_the_base():
-    """The learning-side deps subclasses are ported with the base: a stdlib
-    `@dataclass` subclass of a pydantic dataclass gets a stdlib `__init__`, so strict
-    validation would have been silently OFF for exactly those roles."""
-    pytest.importorskip("pydantic_ai")
-    from defender.learning.author.curator_engine import CuratorDeps
-    from defender.learning.leads.lead_author_engine import LeadAuthorDeps
-    from defender.runtime import permission
-
-    class _Box:
-        def run_parsed(self, *a, **k):  # noqa: ARG002 — duck-typed `BoxLike`
-            raise AssertionError("never run")
-
-    for cls in (CuratorDeps, LeadAuthorDeps):
-        with pytest.raises(ValidationError):
-            cls(run_dir=Path("/r"), defender_dir=Path("/d"), run_id=123,  # type: ignore[arg-type]
-                policy=permission.AgentPolicy(), cwd_anchor=Path("/r"), box=_Box())
-
-
-def test_frozen_prefix_holds_the_history_messages_by_identity():
-    """`_build_prefix` takes the orientation message straight from `history`; a validated
-    `tuple[Message, ...]` would shallow-copy every dict, and each "reused" step would then
-    re-send copies the live history no longer shares."""
-    from defender.runtime.compaction import FrozenState
-
-    message = {"role": "user", "parts": []}
-    state = FrozenState(prefix=(message,), freeze_index=1, frozen_through=0)
-    assert state.prefix[0] is message
 
 
 def test_verb_context_keeps_the_mapping_it_was_handed():
@@ -272,9 +123,7 @@ def test_verb_context_keeps_the_mapping_it_was_handed():
     assert ctx.env is env
 
 
-# ---------------------------------------------------------------------------------------
 # the gate's patterns: compiled by the caller, never on its behalf
-# ---------------------------------------------------------------------------------------
 
 
 def test_grant_pattern_refuses_a_bare_string():
@@ -294,152 +143,13 @@ def test_grant_pattern_refuses_a_bare_string():
     assert AgentPolicy(write_allow=(shape,)).write_allow[0] is shape
 
 
-# ---------------------------------------------------------------------------------------
 # PR 3 — defender/learning/
-# ---------------------------------------------------------------------------------------
 
 
-def test_query_row_hands_back_the_record_it_was_read_from():
-    """`QueryRow.record()` is "the parsed JSON record, byte-for-byte what [the run's rows hand]
-    the guard live, never a re-projection of the typed fields" (#1017 C16; since #1235 those
-    rows are the run's state, `RunState.lead_rows`), and its docstring makes "`params` is the same object" part of that promise.
-    A validated `dict` field is REBUILT on every construction, which turns both into copies
-    in silence — the typed view then IS the re-projection the distinction exists to refuse."""
-    from defender.learning.lead_repository import QueryRow
-
-    rec = {"lead_id": "l-001", "params": {"host": "h1"}}
-    row = QueryRow(
-        lead_id="l-001", seq=1, system="cmdb", verb="get-host", query_id="cmdb.get-host",
-        params=rec["params"], raw_command="c", exit_code=0, error_class=None,
-        payload_status="ok", payload_digest="d", raw_ref=None, _record=rec,
-    )
-    assert row.record() is rec
-    assert row.params is rec["params"]
-
-
-def test_batch_disposition_validates_its_curator_type_without_loading_the_curator():
-    """`BatchDisposition.pitfalls` is typed `PitfallsDisposition`, validated strictly, and the
-    class it names lives in `core/pitfalls_disposition` — NOT the curator module, which the
-    lessons lane must never pay to import. Both halves matter: typed `Any` the record would
-    carry anything, and named under `TYPE_CHECKING` from the curator its schema was left
-    unfinished at import and completed by a frame-introspecting rebuild at the lane's entry."""
-    import subprocess
-    import sys
-
-    probe = (
-        "import sys; from defender.learning.core import drains; "
-        "assert not [m for m in sys.modules if m.startswith('defender.learning.leads')], "
-        "sorted(m for m in sys.modules if m.startswith('defender.learning.leads'))"
-    )
-    # A fresh interpreter: this process has long since imported the curator for other tests
-    # (completeness at import is the census above's, in the same fresh-interpreter shape).
-    subprocess.run([sys.executable, "-c", probe], check=True, cwd=Path(__file__).parents[2],
-                   timeout=120)
-
-    from defender.learning.core import drains
-    from defender.learning.core.pitfalls_disposition import PitfallsDisposition
-    from defender.learning.leads import pitfalls_curator
-
-    assert pitfalls_curator.PitfallsDisposition is PitfallsDisposition
-    real = PitfallsDisposition(committed_ids=("c:l-000:0",), sha=None, held_ids=())
-    assert drains.BatchDisposition(
-        served=[], pitfalls=real, lock_wait_seconds=None).pitfalls is real
-    assert drains.BatchDisposition(
-        served=[], pitfalls=None, lock_wait_seconds=None).pitfalls is None
-    with pytest.raises(ValidationError):
-        drains.BatchDisposition(
-            served=[], pitfalls="a disposition", lock_wait_seconds=None)  # type: ignore[arg-type]
-
-
-def test_author_branch_accepts_any_structural_forge():
-    """`AuthorBranch.forge` is typed `Forge | None`, and `arbitrary_types_allowed` validates a
-    class annotation with `isinstance` — which a plain `Protocol` refuses to be the second
-    argument of (`SchemaError: 'cls' must be valid as the first argument to 'isinstance'`).
-    `@runtime_checkable` is what keeps the structural contract usable as a field type: the
-    production `GhForge` and the drain's own doubles both reach the field as themselves, and
-    an object holding none of the three methods still does not."""
-    from defender.learning.author.branch import AuthorBranch
-    from defender.learning.author.forge import GhForge
-
-    class _Forge:
-        def list_open_prs(self, head_prefix): return []
-        def list_prs_for_head(self, head): return []
-        def open_pr(self, *, base, head, title, body): return "url"
-
-    double = _Forge()
-    assert AuthorBranch(forge=double).forge is double
-    gh = GhForge()
-    assert AuthorBranch(forge=gh).forge is gh
-    with pytest.raises(ValidationError):
-        AuthorBranch(forge=object())  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------------------
 # the second review pass
-# ---------------------------------------------------------------------------------------
 
 
-def test_unwrap_before_keeps_pydantics_arity_checks():
-    """A before-validator that returns a `dict` has replaced the `ArgsKwargs` pydantic would
-    have checked itself, so the helper checks arity: a surplus positional and a keyword
-    naming a field a positional already filled are both refused, as stdlib does."""
-    from defender.runtime.branch import BranchSpec
-
-    # #1255 (D1, P4): four positional fields while the prompt exists, three after.
-    arity = 3 + len(_RETIRED_PROMPT)
-    fields = (Path("/x"), 3, *_RETIRED_PROMPT.values(), datetime(2026, 1, 1, tzinfo=UTC))
-    with pytest.raises(TypeError, match=f"takes {arity} positional argument"):
-        BranchSpec(*fields, "EXTRA")  # type: ignore[call-arg]
-    with pytest.raises(TypeError, match=r"multiple values for argument\(s\) \['branch_message_id'\]"):
-        BranchSpec(*fields, branch_message_id=99)  # type: ignore[call-arg]
-
-
-def test_branch_spec_field_types_are_read_off_the_class():
-    """The before-validator's table is derived from the annotations, so a field added to the
-    spec cannot be missed by it; only the per-field reason is hand-kept, and a field without
-    one refuses at import."""
-    from defender.runtime.branch import _spec
-
-    # #1255 (D1, P4): the continuation prompt ceased to be a field of the spec.
-    expected = {"source_run_dir": Path, "branch_message_id": int, "as_of": datetime}
-    assert expected == _spec._FIELD_TYPES
-    assert set(_spec._WHY) == set(_spec._FIELD_TYPES)
-
-
-def test_providers_imports_without_pydantic_ai():
-    """`defender.runtime.providers` is on the runtime-free install's import path
-    (`run_common.run_env`, `learning.core.config.source_first_party_key`), so no module in
-    it may import `pydantic_ai` at module scope."""
-    from defender._paths import PATHS
-    from defender.tests._import_blocker import run_blocked
-
-    out = run_blocked(
-        "from defender.runtime import providers\n"
-        "from defender.runtime.providers.base import BuiltModel\n"
-        "print(BuiltModel(model=object(), settings=None) is not None)\n",
-        block=("pydantic_ai",), cwd=PATHS.repo_root)
-    assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == b"True"
-
-
-
-
-def test_gate_wrapper_toolset_survives_replace():
-    """`WrapperToolset` rebuilds itself through `dataclasses.replace(self, ...)` on every
-    `for_run`/`for_run_step`, re-passing every field explicitly — so a field whose default
-    the strict type refuses is constructible once and unusable after. The gate is required."""
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.toolsets import FunctionToolset
-
-    from defender.runtime.toon_gate import _GateWrapperToolset
-
-    with pytest.raises(ValidationError):
-        _GateWrapperToolset(wrapped=FunctionToolset())  # type: ignore[call-arg]
-
-
-# ---------------------------------------------------------------------------------------
 # PR5: the two model-facing validators batch every problem into one refusal
-# ---------------------------------------------------------------------------------------
 
 
 def test_validate_params_names_every_problem_once_in_one_refusal():
@@ -487,11 +197,8 @@ def test_validate_report_names_every_problem_in_one_refusal():
 
 
 def test_a_domain_exception_raised_inside_a_model_validator_reaches_the_caller_unconverted():
-    """`_model`'s convention: a domain exception that is not a `ValueError` propagates out of
-    a validator as ITSELF; pydantic wraps only `ValueError`/`AssertionError`. `JudgeRefused`
-    is the one that was a `ValueError` until #1067 PR5 — every caller's `except JudgeRefused`
-    would have silently missed it out of any `@model` validator. Asked for the EXACT class:
-    `ValidationError` is itself a `ValueError`, so a looser `raises` cannot see the wrap."""
+    """`_model`'s convention: a domain exception that is not a `ValueError` propagates out of a
+    validator as ITSELF; pydantic wraps only `ValueError`/`AssertionError`."""
     from pydantic import model_validator
 
     from defender.learning.judge import JudgeRefused

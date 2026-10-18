@@ -1,42 +1,4 @@
-"""#771 — the executable spec for the WRITE BACKSTOP half: M3's alias-refusing primitive and
-its lint (O1), M4's atomic-write rewrite, and the four call-site postures F1 preserved.
-
-Every test here is exactly one demand of `spec-flow/specs/spec_graph_771.yaml`, named by
-that demand's `discharged_by`, and its docstring carries the demand's observable-outcome prose
-(that docstring is what `spec-graph binds` scans in place of an `outcome`).
-
-RED BY CONSTRUCTION, and that is the expected state of a spec. `_io.write_guarded`,
-`_io.guarded_mkdir`, `_io.stage_name`, `_io.sweep_staged` and the new lint do not exist at
-`c98bc86c`. Measured after the round-five hygiene pass, the census negative below is RED on
-THIRTEEN of its fifteen rows: a planted symlink at the artifact name redirects the write to a
-file outside the tree today. Exactly TWO already hold (`claim_lead`'s `O_CREAT|O_EXCL`, and
-`write_atomic`'s DESTINATION plant, which `os.replace` replaces rather than follows — B5) and
-they stay in the census because the census is the contract, not a to-do list. A third row used
-to read as a hold and did not: the guarded primitive is its own census row, and driving a
-symbol that does not exist writes nothing, so the row passed for the one reason that proves
-nothing. It now carries the missing-symbol guard the parity demand already carried.
-
-THREE §7 RESOLUTIONS ARE LOAD-BEARING HERE AND ARE ENCODED LITERALLY:
-
-  * D1 — every replacing write stages under an UNPREDICTABLE name, then renames into place.
-    Our own staged names never repeat, so a leftover cannot collide with a later write and an
-    attacker cannot pre-plant a name they cannot predict; an occupied staged name is therefore
-    ALWAYS hostile and `EEXIST` fails closed unambiguously. No retry-on-collision: a retry
-    would re-open exactly the ambiguity the unpredictable name dissolves.
-  * D3 — an alias refusal is RECORDED but is exempt from every failure circuit, so it can
-    never end a run. This is a deliberate, narrow amendment to F1's "preserve every call-site
-    posture", and without it F1's own rationale (do not hand the box a denial-of-service lever)
-    was false in three places. Its positive control is the GENUINE failure, which still
-    escalates — and on the ELAPSED limb, because X14 re-probed the kill as two refused writes
-    past a 300s window, never "five consecutive".
-  * The X17/G3 REFUTATION — the model's write gate is blind to a planted HARD LINK.
-    `Path.resolve()` does not dereference one, so the resolved path is the allowlisted name
-    itself and `write_text` truncates the shared inode. The two gated model writers are back in
-    the negatives on that axis; the retained-property clause now covers only the symlink shape.
-
-No `monkeypatch.setattr` (CI ratchets new sites). Every alias is built with the real
-`os.symlink`/`os.link` in the test body, so the taxonomy assumption is re-probed on every run.
-"""
+"""#771 — write backstop: the alias-refusing guarded write primitive (symlink/hard-link/planted-directory refusal at every shared-tree writer, unpredictable staged names, ELOOP before lock), refusal postures preserved per call site, and the gated model writers."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
@@ -59,19 +21,14 @@ from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.tests.e2e._spec771 import (  # noqa: E402
     CENSUS,
-    LINT_BASELINE,
-    LINT_HARD_GATED_MODULES,
     POSTURES,
-    X5_MEASURED_SITES,
     Writer,
     drive_drain_restore,
     drive_fault_exit_trace,
     drive_normal_exit_trace,
     drive_writer,
-    drive_writer_at,
     guarded_mkdir,
     is_eexist,
-    load_write_lint,
     outside,
     plant_component_for,
     plant_dir_symlink,
@@ -91,21 +48,9 @@ pytestmark = pytest.mark.e2e
 
 # demand #0 and its leave-in-place doctrine
 def test_refused_write_raises_oserror_and_leaves_the_outside_target_intact(tmp_path):
-    """refused_write_outcome — driving the guarded primitive at a name a symlink occupies
-    RAISES `OSError` at the primitive and writes NOTHING through the alias: the outside
-    target's bytes, inode and link count are unchanged, and no new entry appears beside it.
-
-    F1 resolved the return contract in favour of raising rather than returning a status, so
-    the observable is the exception, not a flag a caller may ignore. The errno is B7's `ELOOP`
-    (O_NOFOLLOW met a link) or B6's `EEXIST` (the exclusive create met an occupied name) —
-    both were executed on a real filesystem; which one arrives depends on the idiom, and the
-    demand is that one of them does rather than a silent success.
-
-    THE ORACLE IS THE WHOLE OUTSIDE TREE, and that is the repair rather than a flourish. The
-    docstring promised that no new entry appears beside the target while the body compared the
-    target's own bytes, inode and link count — so a refusal that wrote the payload to a NEW
-    name in the same directory satisfied every assertion here. The suite already carries the
-    tree-wide snapshot the census negative uses for exactly this, one demand over."""
+    """refused_write_outcome — driving the guarded primitive at a name a symlink occupies RAISES
+    `OSError` at the primitive and writes NOTHING through the alias: the outside target's
+    bytes, inode and link count are unchanged, and no new entry appears beside it."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -128,14 +73,7 @@ def test_refused_write_raises_oserror_and_leaves_the_outside_target_intact(tmp_p
 
 def test_a_refused_write_leaves_the_planted_alias_in_place(tmp_path):
     """refused_write_leaves_the_planted_entry — a refused write does NOT remove the entry it
-    refused: the symlink is still a symlink, still pointing where it pointed, after the raise.
-
-    Removal is sanitizing, and M10's doctrine refuses it — an entry deleted by the writer is
-    an entry the reap scan can never report. The pin has a known weakness the ledger measured:
-    X4 refutes "the scan always runs" on BOTH teardown-fault arms, so the reporter this
-    doctrine leans on is not guaranteed. §7 D2 is what makes the pin true — the skipped scan
-    now leaves a did-not-run verdict, pinned by
-    `test_a_skipped_reap_scan_leaves_a_did_not_run_marker`."""
+    refused: the symlink is still a symlink, still pointing where it pointed, after the raise."""
     run = run_tree(tmp_path)
     target = outside(tmp_path)
     planted = plant_symlink(run / "report.md", target)
@@ -150,34 +88,9 @@ def test_a_refused_write_leaves_the_planted_alias_in_place(tmp_path):
 # O1's census-keyed negative and its positive control
 @pytest.mark.parametrize("writer", CENSUS, ids=lambda w: w.id)
 def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, tmp_path):
-    """no_write_through_planted_leaf — for EVERY host-side writer into a shared tree, a
-    symlink planted at the artifact name it is about to write leaves the outside target
-    byte-identical: the write fails closed instead of redirecting.
-
-    CENSUS-KEYED, and the census is a FLOOR. C1 claimed twelve writers in three idioms; it was
-    refuted twice — C3-fix raised it to at least fourteen in at least five, and both additions
-    (`write_atomic` on the budget artifact, and the host-side lead-claim hook) are structurally
-    invisible to the grep that produced C1. A grep is not a census instrument, which is why
-    `test_a_new_shared_tree_writer_is_a_lint_finding` demands the lint see a WRAPPER.
-
-    THE DRIVER'S FAULT-EXIT TRACE WRITE IS A ROW HERE, and its absence was the sharpest hole
-    in this suite: it is the second of the two sites the original issue reported, it shares one
-    fixed artifact name with the happy-path trace writer, and it was missing from the census,
-    the lint's gate list and the project profile's writer list at the same time — three
-    instruments, all hand-derived, all blind to the same write. The queries table is a row for
-    the neighbouring reason: one bound edge covered a writer with two artifacts and only one
-    was ever driven.
-
-    The oracle is the whole outside tree, not one file: `assert target.read_text() == original`
-    is also green when the writer created a NEW file beside the target. Every surface the
-    redirected content could reach out there is compared.
-
-    AND A ROW WHOSE SYMBOL DOES NOT EXIST YET IS NOT A PASS. The guarded primitive is itself a
-    census row, and at HEAD driving it raises a missing-symbol error: nothing is written, the
-    outside tree is trivially unchanged, and the row went green for the one reason that proves
-    nothing. The parity demand one screen away already refuses to grade an arm that measured a
-    missing symbol rather than a write failure; applying that rule here and not there is how
-    "93 red at HEAD" became 93 red and one green-because-absent."""
+    """no_write_through_planted_leaf — for EVERY host-side writer into a shared tree, a symlink
+    planted at the artifact name it is about to write leaves the outside target byte-
+    identical: the write fails closed instead of redirecting."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -203,17 +116,7 @@ def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, t
 
 def test_each_writer_lands_its_artifact_when_nothing_is_planted(tmp_path):
     """writer_lands_artifact_unlinked — with NOTHING planted, every census writer still lands
-    real bytes at its own artifact path inside the tree.
-
-    The positive control for `no_write_through_planted_leaf`, and it is not ceremony: a bare
-    negative passes vacuously on any writer that simply stopped writing, which is exactly what
-    a too-eager refusal would produce. Proof the mechanism fired and the observation channel
-    can see the difference.
-
-    ONE ROW IS EXEMPT FROM THE ANTI-VACUITY CHECK and names itself: the driver's fault-exit
-    trace write is literally `write_text("")`, so an empty artifact IS its contract. The
-    exemption is a per-row flag rather than a size threshold, because a threshold would have
-    silently excused any writer that later stopped producing bytes."""
+    real bytes at its own artifact path inside the tree."""
     landed: dict[str, int] = {}
     for writer in CENSUS:
         d = tmp_path / writer.id
@@ -235,20 +138,7 @@ def test_the_fault_exit_trace_write_never_blanks_a_completed_one(tmp_path):
     """tool_trace_write_is_torn_write_safe — when the trace write raises inside the run, the
     fault-exit path leaves `tool_trace.jsonl` present and parseable as (empty) JSONL rather
     than a torn write; and on the happy path the fault handler never touches the file the
-    normal exit wrote.
-
-    Two writers, one fixed name, both truncating — the R2 hit the gate leaf minted this demand
-    from. Reading both call sites shows the fault-exit write only runs when the normal one
-    itself raised, so they cannot collide today; nothing asserted it, and nothing exercised the
-    fault path at all. The store is driven to raise through the harness's `store_factory=`
-    seam, which is the condition `driver.py`'s own `except` comment names.
-
-    THE HAPPY-PATH ARM DRIVES BOTH WRITERS TOGETHER, which is the only arrangement in which
-    "the fault handler never touches the file the normal exit wrote" can be false. It used to
-    drive the fault path in one tree and then call the normal trace writer, alone, in another —
-    two writers exercised, never the same run, so the mutual exclusion the demand is about was
-    asserted of nothing. Both live in one `try/except` inside the real driver, so one hermetic
-    run with a working store puts the handler in place and requires it to stay quiet."""
+    normal exit wrote."""
     run = run_tree(tmp_path)
     (run / "report.md").write_text("---\ndisposition: benign\n---\n", encoding="utf-8")
     drive_fault_exit_trace(run)
@@ -275,24 +165,7 @@ def test_the_fault_exit_trace_write_never_blanks_a_completed_one(tmp_path):
 def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
     """no_write_through_planted_dir_component — a symlink-to-directory planted at a path
     COMPONENT a writer will create or traverse makes the write fail closed; nothing lands in
-    the directory the component points at, at ANY depth.
-
-    B8: `O_NOFOLLOW` on the leaf does not protect a swapped component — the write still lands
-    outside. B10: `mkdir(parents=True, exist_ok=True)` over a symlink-to-directory succeeds
-    SILENTLY, with no error to notice. The rule is stated over the whole call and is
-    depth-agnostic (firm consensus #13), so the plant here is at a component the writer must
-    traverse rather than at the one it creates first. F8/G15/X1 refuted the design's "two
-    sites": there are at least FIVE, and this demand binds five edges.
-
-    ALL FIVE ARE DRIVEN, and that is the repair rather than a flourish. The three PRODUCTION
-    sites — the model-named gather_raw component, the lead sidecar's parent create, and the
-    fixed gather_summaries component — were bound by this demand and exercised by nothing: the
-    body drove the primitive and the drain restore, and named the other three in prose. A
-    negative that binds an edge it never drives is a negative that is silently scoped to the
-    edges someone thought to plant at, which is the same failure one level up from the one this
-    demand exists to catch. Executed while writing this: with a symlink-to-directory at a
-    snapshot key's parent component, the drain restore lands its blob inside the outside
-    directory and raises nothing at all."""
+    the directory the component points at, at ANY depth."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     outside_dir = elsewhere / "loot"
@@ -340,12 +213,8 @@ def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
 
 
 def test_directory_component_writers_land_when_nothing_is_planted(tmp_path):
-    """dir_component_write_lands_when_unplanted — with no component planted, the same
-    writers create their nested directories inside the tree and land their payloads there.
-
-    The positive control for `no_write_through_planted_dir_component`: without it, a component
-    guard that refused everything would pass the negative and silently break every gather
-    payload, every lead sidecar and every gather summary."""
+    """dir_component_write_lands_when_unplanted — with no component planted, the same writers
+    create their nested directories inside the tree and land their payloads there."""
     run = run_tree(tmp_path)
     guarded_mkdir(run / "gather_raw" / "l-003" / "deep", base=run)
     assert (run / "gather_raw" / "l-003" / "deep").is_dir()
@@ -363,23 +232,9 @@ def test_directory_component_writers_land_when_nothing_is_planted(tmp_path):
 
 
 def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
-    """component_guard_is_anchored_at_the_tree_root — a symlinked component ABOVE the shared
-    tree does not refuse the write, and a run whose runs base sits under one still opens its
-    session store; a component planted INSIDE the tree is still refused in that same layout.
-
-    THE NEGATIVE CONTROL FOR THE ANCHOR, AND IT IS A REAL CONFIGURATION. Judging every
-    component down from `/` reads a symlinked ancestor as the hazard, but an ancestor is host
-    configuration the box cannot influence — and the layout is ordinary rather than exotic:
-    `/tmp` is a symlink on macOS and that is where the default runs base lives, and a symlinked
-    `/data` or `/var/run` does the same on Linux. The blast radius is total rather than
-    partial: `open_store` does not catch the refusal, so NO RUN STARTS, and the three sidecar
-    writers that swallow `OSError` degrade to permanent silent no-ops — a run that appears
-    healthy while persisting nothing.
-
-    The third arm is what keeps the anchor from being a hole. Anchoring is only free because
-    the box's writable mounts start AT the tree, so the region the walk stops judging is the
-    region the box cannot reach; if the plant-inside-the-tree arm ever passed under a symlinked
-    ancestor, the anchor would have moved above the box's reach instead of to it."""
+    """component_guard_is_anchored_at_the_tree_root — a symlinked component ABOVE the shared tree
+    does not refuse the write, and a run whose runs base sits under one still opens its
+    session store; a component planted INSIDE the tree is still refused in that same layout."""
     from defender.runtime import session_store
 
     # The whole shared tree sits under a symlinked ancestor — the macOS `/tmp` shape.
@@ -418,20 +273,8 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
 
 # §7 D1 — the staged name, and the collision class it dissolves
 def test_a_replacing_write_stages_under_an_unpredictable_name(tmp_path):
-    """staged_name_is_unpredictable — the replacing write stages its payload under a name that
-    is never `<artifact>.tmp` and never repeats between two writes to the SAME artifact.
-
-    §7 D1, applied literally. `write_atomic`'s deterministic `<name>.tmp` (F7/B4) is both a
-    plantable address and the whole source of the legitimate-collision class fork R3 opened:
-    a stale `.tmp` from a killed write, two concurrent accounted tool calls, and a model-chosen
-    basename colliding with another artifact's temp name all produce a pre-existing name with
-    no adversary anywhere. Removing the predictable address removes the plant target and the
-    false-positive class at once, which is the only reading under which all five premises
-    answer the same way.
-
-    Driving the name source directly is the discriminating shape: asserting that two full
-    writes left no `.tmp` behind would also be green for a primitive that stages
-    deterministically and cleans up."""
+    """staged_name_is_unpredictable — the replacing write stages its payload under a name that is
+    never `<artifact>.tmp` and never repeats between two writes to the SAME artifact."""
     artifact = run_tree(tmp_path) / "budget.json"
     names = {str(_io.stage_name(artifact)) for _ in range(32)}  # type: ignore[attr-defined]
 
@@ -445,19 +288,9 @@ def test_a_replacing_write_stages_under_an_unpredictable_name(tmp_path):
 
 
 def test_atomic_write_refuses_a_planted_temp_name(tmp_path):
-    """write_atomic_temp_not_followed — when the staged name is already occupied, the
-    replacing write fails closed with `EEXIST` and the payload never reaches whatever that
-    entry aliases; there is no retry under another name.
-
-    §7 D1's second half: because our own staged names never repeat and an attacker cannot
-    predict one, an occupied staged name is ALWAYS hostile — so failing closed is unambiguous
-    rather than the false-positive generator fork R3 feared. A retry-on-collision would put
-    that ambiguity straight back.
-
-    The staged name is pinned through the primitive's `stage_name=` seam. The design gives the
-    name source no observation point, and a fault that cannot be induced cannot be specified —
-    so the seam is part of the contract (schema.md), and `test_every_shared_tree_writer_routes_
-    through_the_guarded_primitive` pins its signature."""
+    """write_atomic_temp_not_followed — when the staged name is already occupied, the replacing
+    write fails closed with `EEXIST` and the payload never reaches whatever that entry
+    aliases; there is no retry under another name."""
     run = run_tree(tmp_path)
     target = outside(tmp_path)
     original = target.read_bytes()
@@ -475,12 +308,7 @@ def test_atomic_write_refuses_a_planted_temp_name(tmp_path):
 def test_orphaned_staged_files_are_swept_through_the_same_primitive(tmp_path):
     """orphaned_staged_files_are_swept — a staged file an interrupted write left behind is
     removed by the sweep, the sweep is itself a guarded write into the tree, and it refuses to
-    follow an alias planted at an orphan's name.
-
-    §7 D1's ACCEPTED COST, made mechanism: unpredictable staged names mean no later write ever
-    replaces an orphan by name, so orphans accumulate after every crash. The human's resolution
-    states the sweep inherits the same primitive — so an attacker who plants an alias at a name
-    the sweep will touch must not get a deletion outside the tree either."""
+    follow an alias planted at an orphan's name."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -505,50 +333,10 @@ def test_orphaned_staged_files_are_swept_through_the_same_primitive(tmp_path):
 # the four postures F1 preserved, and §7 D3's exemption
 @pytest.mark.parametrize("writer", CENSUS, ids=lambda w: w.id)
 def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(writer, tmp_path):
-    """call_site_postures_preserved — for EVERY census writer, an alias refusal produces the
-    same observable that site produces today when its write fails for an ordinary reason, and
-    the outside target stays byte-identical; across the census the four posture classes X5
-    measured are all still distinguishable.
-
-    F1 chose to preserve every call site's posture rather than unify them, and this is the
-    demand that pins it. It is parametrized over the CENSUS, not over the four labels: keying
-    the arms on labels certified the four rows someone had thought to label and left eleven
-    exercised by no arm at all — including the writer the artifact's own comment named as the
-    exemplar of the posture it was supposed to be testing.
-
-    TODAY'S POSTURE IS MEASURED, NOT DECLARED. Each row is driven twice in this test: once
-    with a REAL directory squatting the artifact name (an ordinary, root-proof write failure
-    with no alias anywhere — the shape 47-reground used), and once with a real planted symlink.
-    Arm one is the site's posture as it exists at HEAD; arm two must reproduce it. That is what
-    lets the demand cover every row without an author's prior standing in for a measurement
-    at the eleven sites X5 never looked at — and it re-probes the premise on every run rather
-    than pinning a table that drifts the moment a handler moves.
-
-    WHAT PARITY CANNOT SEE, AND WHERE THAT IS COVERED. Both arms run against the same code, so
-    an implementation that changed a site's reaction in BOTH lanes agrees with itself and
-    passes here. This demand is therefore internal consistency plus the anti-collapse floor,
-    and the absolute anchor is a separate demand:
-    `test_the_four_call_site_postures_the_ledger_measured_are_unchanged` drives X5's own four
-    sites under X5's own faults and asserts the four observables the ledger recorded. Measuring
-    "today" during the test run is what makes preservation vacuous for a site that moves
-    twice; the ledger's four measurements are the only "today" that predates the change.
-
-    ALTITUDE IS PART OF THE ROW, and one altitude claim came back the other way when measured:
-    the sentinel's plant helper already converts its write failure into a box STARTUP fault, so
-    that row was at the right height all along and the defect was on the reading side — a
-    startup fault is not an `OSError`, so the two tests that touched X5's one fatal class caught
-    nothing and ERRORED. `drive_writer` catches `BaseException` and `posture_class` keys a raise
-    by its exception TYPE for exactly that reason: a startup fault and an ordinary OSError are
-    one outcome to `except OSError` and two to the caller X5 was reading. The lesson-load row
-    did move: it is driven at its production site, which swallows, rather than at the shared
-    appender underneath, which raises. And the trace row's LABEL moved: X5's swallow-continue
-    site is the driver's accounting call, one frame above `observe.write_trace`, which raises at
-    its own altitude — the census carried that label on the wrong writer until the anchor
-    demand went back to the ledger's own four sites.
-
-    The fatal-looking fifth case is NOT here: §7 D3 exempted an alias refusal from every failure
-    circuit, and #1235 then retired the budget site's write altogether (the counters live in the
-    run process's memory), so no accounting escalation is left to ride on this demand."""
+    """call_site_postures_preserved — for EVERY census writer, an alias refusal produces the same
+    observable that site produces today when its write fails for an ordinary reason, and the
+    outside target stays byte-identical; across the census the four posture classes X5
+    measured are all still ..."""
     ordinary_dir = tmp_path / f"{writer.id}-ordinary"
     ordinary_dir.mkdir()
     ordinary_run = run_tree(ordinary_dir)
@@ -581,117 +369,11 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
     assert len(POSTURES) == 4, "the X5 posture record moved; re-read the ledger before editing"
 
 
-@pytest.mark.parametrize("site", X5_MEASURED_SITES, ids=lambda s: s.posture)
-def test_the_four_call_site_postures_the_ledger_measured_are_unchanged(site, tmp_path):
-    """measured_postures_anchored_to_the_ledger — each of the four call sites X5 measured still
-    produces, under the fault X5 induced there, the observable X5 recorded: the gather
-    raw-payload writer returns None, the lead sidecar writer returns 0, and the startup sentinel
-    raises a box fault rather than an ordinary `OSError`. (The fourth, the accounting site's
-    swallow-continue, retired with #1235: the budget is counted in memory, so that site has no
-    write to fail.)
-
-    THE ANCHOR FOR F1, and the reason the parity demand alone is not one. F1's content is
-    "every call site keeps the posture it has TODAY"; measuring "today" during the test run
-    makes that vacuous for any site whose reaction changes in both the ordinary lane and the
-    aliased lane, because the two arms then agree with each other about the new behaviour. The
-    ledger's four measurements are the only "today" that predates this change, and until this
-    demand existed they sat in the census as data and were asserted by nothing.
-
-    THE SITES ARE X5'S, NOT THE CENSUS'S, and that distinction found a real misattribution. Two
-    of the four are not census rows: the swallow-continue posture belongs to
-    `driver._account_executed_call`, one frame ABOVE the trace writer the census had labelled
-    with it — driven at its own altitude `observe.write_trace` raises, so the census row was
-    carrying a measurement of a different function. Re-deriving a ledger label from the nearest
-    row is exactly the move that produces a green test about the wrong thing.
-
-    THE FAULTS ARE X5'S TOO. `claim_lead` is the case that shows why: under X5's fault (a plain
-    file squatting the parent component) it returns 0, indistinguishable from success; under
-    the census row's fault (a directory squatting the artifact name) the exclusive create sees
-    `EEXIST` and the site answers 2 — reporting a write failure as a duplicate lead id. Both
-    are today's behaviour and only the first is the measurement, so the anchor rebuilds the
-    ledger's own fault rather than borrowing the row's.
-
-    Each fault is built with the real filesystem in the test body and each is root-proof: a
-    real directory or a real regular file occupying a name, never a permission bit."""
-    run = run_tree(tmp_path)
-
-    observed = posture_class(drive_writer_at(site, run))
-
-    assert observed == site.observed, (
-        f"{site.site} no longer produces the posture the ledger measured under {site.fault}: "
-        f"observed {observed}, X5 recorded {site.observed}. F1 preserved these four rather than "
-        f"unifying them, and this is the only assertion in the suite anchored to a measurement "
-        f"taken before the change rather than during the test run."
-    )
-    assert site.posture in POSTURES, (
-        f"{site.posture!r} is not one of X5's four classes {POSTURES} — the ledger moved and "
-        f"this anchor is describing something else"
-    )
-
-
-def test_the_census_still_exhibits_all_four_measured_posture_classes(tmp_path):
-    """census_exhibits_every_measured_posture — driving the whole census under an ordinary
-    write failure still produces at least the FOUR distinguishable posture classes X5 measured,
-    including one that is not a swallow.
-
-    The anti-collapse control for `call_site_postures_preserved`. That demand compares each
-    row against its own measurement, so it is satisfied — vacuously — by an implementation
-    that made every site behave identically, because the two arms would then agree everywhere.
-    This is the assertion that fails when F1's whole point is undone: four postures preserved
-    rather than unified, and at least one of them fatal rather than silent."""
-    observed: dict[str, str] = {}
-    for writer in CENSUS:
-        d = tmp_path / writer.id
-        d.mkdir()
-        run = run_tree(d)
-        squat = run / writer.artifact
-        squat.parent.mkdir(parents=True, exist_ok=True)
-        squat.mkdir()
-        seen = posture_class(drive_writer(writer, run))
-        # A missing symbol is not a posture. Counting it would let a row that measures nothing
-        # inflate the class count and carry this control past a real collapse.
-        if seen != "raised:AttributeError":
-            observed[writer.id] = seen
-
-    classes = set(observed.values())
-    assert len(classes) >= len(POSTURES), (
-        f"the census collapsed to {len(classes)} posture classes {sorted(classes)}; X5 measured "
-        f"{len(POSTURES)} distinct ones ({', '.join(POSTURES)}) and F1 preserved them: "
-        f"{observed}"
-    )
-    assert any(c.startswith("raised:") for c in classes), "no census site raises at all"
-    assert any(not c.startswith("raised:") for c in classes), (
-        "every census site now raises, so the swallowing postures F1 preserved are gone"
-    )
-
-    # The two rows below are read by name, so a row that DEGRADED to a missing symbol (and was
-    # therefore dropped from `observed` above) must fail here as a stated finding rather than
-    # as a KeyError three lines into a traceback — the reading-side defect that made X5's fatal
-    # class error out instead of asserting, one instrument over.
-    contrasted = ("start_box", "gather_dispatch")
-    missing = [row for row in contrasted if row not in observed]
-    assert not missing, (
-        f"{missing} measured no posture at all (a missing symbol, not a reaction), so the "
-        f"fatal-vs-swallow contrast below has nothing to compare and this control would pass "
-        f"by not applying"
-    )
-    assert observed["start_box"] != observed["gather_dispatch"], (
-        "the startup-fault site and a swallow-and-continue site produce the same observable — "
-        "X5's fourth class is exactly the one a single-posture implementation erases"
-    )
-
-
 # the locked idiom, the seam, the lint, and the callers outside every box
 def test_locked_json_open_fails_before_the_lock_is_acquired(tmp_path):
     """locked_json_open_refuses_before_the_lock — the locked read-modify-write idiom refuses at
     the OPEN, with `ELOOP`, so `flock` is never taken on the outside target and its bytes are
-    unchanged.
-
-    `O_NOFOLLOW` fails the open before the lock (B7, executed) — which matters beyond the
-    write: taking an exclusive lock on a file outside the tree is itself a denial-of-service
-    the box would otherwise get for free. Fork R24 found the circuit breaker shares this idiom,
-    so both artifacts are driven; the demand binds at the TREE rather than at either artifact's
-    identity facet so the collision question stays open rather than reading as answered."""
+    unchanged."""
     run = run_tree(tmp_path)
     target = outside(tmp_path)
     original = target.read_bytes()
@@ -712,18 +394,7 @@ def test_locked_json_open_fails_before_the_lock_is_acquired(tmp_path):
 def test_every_shared_tree_writer_routes_through_the_guarded_primitive(tmp_path):
     """write_guarded_is_the_single_write_seam — the guarded primitive exists with the declared
     signature, its three modes are distinguishable in effect, and it is reachable for both
-    shared roots.
-
-    M3 gives fourteen writers a new dependency and nothing pinned a seam for it — schema.md's
-    "if the design gives a dependency no seam, the seam is part of the contract" case. This is
-    what write-code-from-spec's reconciliation reads, and it is what the new lint keys on: a
-    lint with no canonical writer to point at degrades into a pattern matcher, which is exactly
-    how C1's own grep went blind on a wrapper.
-
-    The signature is asserted because a `kind: seam` demand IS the signature; the modes are
-    then EXERCISED, because a field's existence is not its wiring. And BOTH ROOTS are driven
-    because the demand binds both edges: a seam demonstrated only against a run dir is the
-    shape under which the drain lane's own writers have no pinned primitive to route through."""
+    shared roots."""
     import inspect
 
     sig = inspect.signature(_io.write_guarded)  # type: ignore[attr-defined]
@@ -760,103 +431,11 @@ def test_every_shared_tree_writer_routes_through_the_guarded_primitive(tmp_path)
     )
 
 
-def test_a_new_shared_tree_writer_is_a_lint_finding(tmp_path):
-    """new_writer_without_primitive_is_a_finding — the lint reports a shared-tree write that
-    reaches the tree through a HELPER WRAPPER, not only one written as a direct idiom.
-
-    C3-fix is the discriminating case and the reason this demand exists at all: the census
-    missed `budget_enforcer`'s wrapper around the atomic helper precisely because the
-    instrument that produced it was a grep over write idioms, and a grep cannot see a wrapper.
-    A pattern-matching lint reproduces C1's own blind spot and certifies it.
-
-    NOT claimed: that the lint proves a link cannot arrive in the tree by some other route. A
-    host-side bug or a restored corpus is backstopped by the primitive, not disproved by the
-    lint (NO7)."""
-    module = load_write_lint()
-
-    tree = tmp_path / "src"
-    (tree / "pkg").mkdir(parents=True)
-    # The wrapped callee is `append_jsonl`, the lint's surviving unsafe `_io` callee: the
-    # original wrapper over `write_atomic` lost its subject when #1235 deleted that helper.
-    (tree / "pkg" / "wrapper.py").write_text(
-        "from defender._io import append_jsonl\n"
-        "def _write_thing_rows(run_dir, rows):\n"
-        "    append_jsonl(run_dir / 'thing.jsonl', rows)\n",
-        encoding="utf-8",
-    )
-    (tree / "pkg" / "guarded.py").write_text(
-        "from defender._io import write_guarded\n"
-        "def _write_thing(run_dir, state):\n"
-        "    write_guarded(run_dir / 'thing.json', state)\n",
-        encoding="utf-8",
-    )
-
-    found = {f.fingerprint for f in module._scan(tree)}
-    assert any("wrapper.py" in f for f in found), (
-        "the lint missed a writer reaching the tree through a wrapper — C1's own blind spot"
-    )
-    assert not any("guarded.py" in f for f in found), (
-        "the lint flags the guarded primitive itself, so every converted writer stays red"
-    )
-
-
-def test_the_write_lint_hard_gates_the_census_rows_and_ratchets_only_new_ones(tmp_path):
-    """lint_hard_gates_the_census_rows — the lint's baseline does NOT contain any census row:
-    every writer C1 names must be converted before merge, and the ratchet applies only to
-    writers discovered after this change.
-
-    Fork R25. Thirteen ratcheted lint modules already exist, so the ratchet is the default
-    nobody chooses — and a baseline that accepts unconverted rows makes the next miscount
-    invisible in exactly the way C1's grep did. The census is the thing this design already
-    got wrong twice: twelve writers became fourteen, two mkdir sites became five.
-
-    THE GATE LIST IS DERIVED FROM THE CENSUS, NOT TYPED BESIDE IT, and that is the repair
-    rather than a tidy-up. A hand-typed list of ten module paths is what dropped the driver's
-    fault-exit trace write out of the gate while the demand still bound its edge: the design
-    said the lint is what covers the oracle's blind spot, and for that writer neither
-    instrument held. Deriving it means a census row added later cannot be silently absent
-    here — which is the only failure mode this demand exists for. The drain lane's restore
-    module rides along for the same reason: F6's parity is asserted at the tool, and the lint
-    is the backstop for the lane's own writers."""
-    assert LINT_BASELINE.is_file(), f"the lint ships no baseline at {LINT_BASELINE}"
-    entries = json.loads(LINT_BASELINE.read_text(encoding="utf-8")).get("entries", {})
-
-    # The gate list the LINT actually runs on is a copy: a repo-root lint cannot import this
-    # package. Comparing the two set-for-set is the only thing that makes "derived from the
-    # census" true of the shipped gate rather than only of this module — without it a census
-    # row added here and not there is a module the gate silently stops covering, which is the
-    # exact way `runtime/driver.py` went missing from it once already.
-    assert load_write_lint().LINT_HARD_GATED_MODULES == LINT_HARD_GATED_MODULES, (
-        "the lint's hard-gate list has drifted from the census it mirrors — a census module "
-        "missing there is a writer CI stops gating"
-    )
-
-    assert "runtime/driver/" in LINT_HARD_GATED_MODULES, (
-        "the derived gate list lost the driver's fault-exit trace write — one of the two sites "
-        "the issue itself reported, and the row whose absence made this assertion vacuous"
-    )
-    assert "learning/author/drain.py" in LINT_HARD_GATED_MODULES, (
-        "the derived gate list names no drain-lane module, so the second shared root's own "
-        "writers can ship unconverted with the parity demand green"
-    )
-    leaked = {fp for fp in entries if any(m in fp for m in LINT_HARD_GATED_MODULES)}
-    assert not leaked, (
-        f"census rows were ratcheted into the baseline instead of converted: {sorted(leaked)}"
-    )
-
-
-
-
 # the lead tables, and the second shared root
 def test_a_duplicate_lead_id_still_fails_exclusive_create(tmp_path):
     """duplicate_lead_claim_still_refuses — claiming a `lead_id` twice still fails on the
     exclusive create: the second claim reports the reuse and does NOT overwrite the first
-    sidecar's contents.
-
-    Pre-existing behaviour C3-fix named, and the one place where fail-closed-on-a-pre-existing-
-    name is ALREADY the contract rather than fork R3's new false-positive class. It is pinned
-    here because §7 D1 changes the staging discipline around it and a careless conversion to
-    stage-then-rename would silently make a duplicate claim overwrite."""
+    sidecar's contents."""
     run = run_tree(tmp_path)
     dispatch = {"run_dir": str(run), "lead_id": "l-001", "goal": "first", "what_to_summarize": []}
 
@@ -877,18 +456,7 @@ def test_a_duplicate_lead_id_still_fails_exclusive_create(tmp_path):
 def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_path):
     """lead_id_gates_agree_at_both_check_sites — the claim-time gate and the gather-seam gate
     accept and reject exactly the same `lead_id` values, driven at both enforcement sites over
-    a boundary set.
-
-    The brief's "enforced at claim and again at the gather seam" is true of the SITES and false
-    of the mechanism: the dispatched probe (G16) found two independently authored `re.compile`
-    calls with no cross-import, plus a third copy on the read/join side. They agree today only
-    because nobody has edited either — anchoring, the character class or a stray `IGNORECASE`
-    could diverge with a one-line single-file edit the other file's suite would not catch.
-
-    This is load-bearing for the census's own no-traversal argument: `gather_raw`'s first path
-    component is MODEL-NAMED, and the claim that it carries no traversal rests on both copies
-    staying equal. Comparing the two compiled patterns would NOT discharge it — one site could
-    stop consulting its pattern entirely and the comparison would still be green."""
+    a boundary set."""
     import asyncio
 
     from defender.runtime.tools_gather import _run_gather
@@ -934,27 +502,7 @@ def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_pa
 def test_the_drain_worktree_writers_meet_a_planted_alias_the_same_way(tmp_path):
     """alias_backstop_covers_the_second_shared_root — the writers into the SECOND shared root
     (the curator drain worktree) meet a planted alias exactly as the run-dir writers do: the
-    outside target is byte-identical and the write fails closed.
-
-    O1 is surface-general, and copy2's operative consequence is the one that matters: a fix or
-    test written AT THE TOOL covers both lanes, one written at the run dir covers only lane 1.
-    The drain lane's writable set is batch-dependent (X16), so "which tree" is not a static
-    property of the lane — which is why this binds the root's identity facet rather than a
-    path.
-
-    A PRODUCTION DRAIN-LANE WRITER IS DRIVEN HERE, not only the primitive. Driving the
-    primitive twice against drain-lane-SHAPED paths asserts nothing about the lane: the whole
-    drain lane could ship unconverted with such a test green, and the lint would be the only
-    backstop — with the drain module absent from its gate list. The corpus restore is the
-    lane's own writer (X9's shape: `mkdir(parents=True, exist_ok=True)` then `write_bytes`
-    from an `except` around the agent call), and it redirects at HEAD: driven against a symlink
-    planted at a snapshot leaf, it truncates the outside file with the restored blob.
-
-    The stray-discard writer is bound but is NOT a redirect risk: 47-reground executed
-    `git checkout -- <path>` against a planted symlink and it REPLACED the link with the
-    committed blob, leaving the outside file untouched — the same answer B5 gave for
-    `os.replace`. Fork R19 is closed on that ground; the row stays because it is a subprocess
-    write into a box-writable tree that no static walk censuses."""
+    outside target is byte-identical and the write fails closed."""
     worktree = tmp_path / "wt"
     corpus = worktree / "defender" / "lessons"
     corpus.mkdir(parents=True)
@@ -1028,29 +576,7 @@ LANDING_ARMS = tuple(arm for arm in GATED_WRITE_ARMS if arm[1] != "report.md")
 def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, drive, tmp_path):
     """gated_model_writers_refuse_a_planted_hard_link — a HARD LINK planted at either of the two
     names the model's write allowlist admits leaves the outside file byte-identical, through
-    EITHER gated write tool: all four arms refuse rather than truncating the shared inode.
-
-    FOUR ARMS, DRIVEN. X17's matrix was executed over both tools and both names and the outside
-    file was overwritten in all four; a negative that drove one of them was a sound test of a
-    quarter of its own docstring. Re-executed while writing this: `write_file` on `report.md`
-    replaced the outside bytes with the report body, `write_file` on `investigation.md` replaced
-    them with the invlang line, and both `edit_file` arms rewrote the outside file in place.
-
-    THIS IS THE REFUTATION THE SPEC EXISTS TO PIN. X17 and G3 both claimed the gate denies "a
-    statically planted link", and the executed alias matrix overturned both: symlinks are
-    denied (absolute and relative), but `Path.resolve()` does not dereference a HARD link, so
-    the resolved path IS the allowlisted name — it passes the allowlist, passes the
-    read-containment check, passes the content schema, and `write_text` truncates the outside
-    file. Executed on both tools and both allowed names; the outside file was overwritten in
-    all four arms.
-
-    So the stated ground for binding these two rows to the retained-property clause instead of
-    the O1 negatives is false on this axis. The clause still covers the symlink shape and the
-    check-then-write race; it no longer covers the plant.
-
-    The residual exposure is detection-after-the-fact even once this is red-to-green: the reap
-    scan refuses a hard link (`nlink > 1`), and X4 says that scan is skipped on exactly the
-    crash path — which is what §7 D2's verdict marker is for."""
+    EITHER gated write tool: all four arms refuse rather than truncating the shared inode."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -1089,15 +615,7 @@ def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, dr
 )
 def test_the_gated_model_write_lands_when_nothing_is_planted(tool, name, seed, drive, tmp_path):
     """gated_model_write_lands_when_nothing_is_planted — with no alias planted, each gated write
-    tool still writes each allowlisted artifact and reports it.
-
-    The positive control for the hard-link negative, and it takes the negative's shape: the
-    same bytes ARE written through the sanctioned path. (#774/R1 narrowed this from four arms
-    to two: report.md left the model's write allow entirely, so it no longer has a "lands"
-    case — see test_report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted for
-    its own positive-shaped control.) Without this, a gate that refused every write would pass
-    the negative while silently ending the model's ability to author investigation.md — and a
-    control driven on one arm would leave that possible on the other."""
+    tool still writes each allowlisted artifact and reports it."""
     run = run_tree(tmp_path)
     deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).resolve().parents[2])
     artifact = run / name
@@ -1121,8 +639,7 @@ def test_report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted(
     """report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted (#774/R1) — the
     positive control LANDING_ARMS lost when report.md left the model's write_file/edit_file
     allow entirely: unlike the other allowlisted name, there is no "lands" case for report.md
-    to be missing a control for. Both tools refuse it unconditionally now, plant or no plant —
-    the close tool (runtime/close_tool.py) is its sole writer."""
+    to be missing a control for."""
     run = run_tree(tmp_path)
     deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).resolve().parents[2])
     artifact = run / name

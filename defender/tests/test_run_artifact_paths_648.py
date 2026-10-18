@@ -1,18 +1,4 @@
-"""#648 — a path recorded in a run artifact is a label, not an address.
-
-The run dir is the box's rw bind, so model-written bash can write the queries table and the
-gather tree. Two host-side readers used to turn a recorded string into an `open()` under a
-LEXICAL guard: the payload reader rejected paths that were spelled absolute, and the bundle
-resolver TRUSTED paths that were spelled absolute. Neither asked where the value lands.
-
-Both gates matter and they answer different questions, so the symlink case is the load-bearing
-one here: it is spelled exactly like a real artifact and still escapes, which is precisely what
-a shape-only fix passes.
-
-The bundle resolver (`resolve_run_bundle`) is gone (#1105 PR 2, F-13): a stored run is
-addressed by id (`RunAddress`, which refuses a path where the id belongs) and opened through
-its tenant's repository, so its three tests went with it.
-"""
+"""A path recorded in a run artifact is a label, not an address: payload reads and staging refuse escapes and planted links."""
 from __future__ import annotations
 
 import json
@@ -51,14 +37,7 @@ def test_gather_payload_resolves_when_it_names_a_real_artifact(tmp_path: Path) -
 
 
 def test_ticket_read_capture_payload_passes_the_gate(tmp_path: Path) -> None:
-    """The judge's ticket-read capture is the second by-ref family the gate admits.
-
-    Asserted on the gate DIRECTLY, not through ``load_queries``: the judge's capture rows carry
-    no ``lead_id`` (closed_ticket_tool writes seq/system/verb/params/payload_path/exit_code/
-    error_class), and ``load_queries`` drops a lead-less row before the gate is consulted — so
-    no ticket-read payload reaches ``raw_ref`` today. Driving this family through
-    ``load_queries`` would need a forged ``lead_id`` and would certify a row shape production
-    never writes."""
+    """The judge's ticket-read capture is the second by-ref family the gate admits."""
     run = tmp_path / "runs" / "case-1"
     (run / "ticket_reads").mkdir(parents=True)
     (run / "ticket_reads" / "3.json").write_text("{}", encoding="utf-8")
@@ -88,10 +67,7 @@ def test_symlink_wearing_the_expected_artifact_name_is_refused(tmp_path: Path) -
 
 
 def test_symlink_staying_inside_the_run_dir_is_allowed(tmp_path: Path) -> None:
-    """Containment is the whole question the read gate asks, and an in-run link answers it.
-
-    It does not survive STAGING — that boundary refuses every link (below) — so this is what
-    the gate concedes on the source tree, not a payload the learning copy will still hold."""
+    """Containment is the whole question the read gate asks, and an in-run link answers it."""
     run = _run_with_query(tmp_path, f"gather_raw/{LEAD}/0.json")
     (run / "gather_raw" / "real.json").write_text("ok", encoding="utf-8")
     (run / "gather_raw" / LEAD / "0.json").symlink_to(run / "gather_raw" / "real.json")

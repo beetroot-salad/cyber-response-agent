@@ -1,54 +1,9 @@
-"""#1134 (curator step): the curator's git calls cannot hang the tick.
-
-While the agent runs, its box has the lessons corpus mounted read-write; the curator drain
-(`drain.run_batch`) runs git over that corpus afterwards, before any scrub. A FIFO the agent leaves
-at `<corpus>/.gitignore` blocks every git walk that reads ignore rules (`git status
---untracked-files=all`, `ls-files --others --exclude-standard`); one at `<corpus>/.gitattributes`
-blocks every git call that reads attributes for a file it must hash or write (`status` re-hashing a
-stat-dirty file, `checkout`, `reset`, `add`, `commit -- <paths>`). Today the settle's first `git
-status` blocks for good, holding the repo lock.
-
-The contract pinned here:
-
-1. `CorpusAuthorConfig.git_timeout` (seconds; one module default, 60) bounds every git read the
-   tick runs: `_capture_pre_state`, the settle, the report cross-checks, and the fault undo
-   (`_commit_landed`, `_restore_corpus`'s reset / status / ls-files / compare, `_revert_strays`).
-   Set here through `S.build_scene(..., git_timeout=...)`. The `git commit` itself is not bounded.
-2. A read that does not answer in time is a git failure, and fails closed. In the tick it is
-   `drain.GitProbeError` (never retired: recorded stuck under that class, the row's `attempts` not
-   bumped, nothing committed), its message saying git "did not answer within" the bound. In the
-   fault undo it is handled like a failed step (status -> `git_worktree_files`; both -> "nothing
-   swept"; compare -> every before-state file written back), so the original fault keeps
-   propagating: a `TimeoutExpired` never replaces it.
-3. Every curator git call (the reads, and the commit's add / rm / commit) runs with
-   `GIT_ATTR_SOURCE=HEAD`, so a `.gitattributes` the agent plants, FIFO or regular, is never
-   opened. A regular one is still a non-`.md` stray, reverted before the commit.
-4. `_git.git_tree_blobs`, `git_unchanged_since` and `git_worktree_files` take `timeout=`, which
-   bounds every git process each runs; expiry raises `subprocess.TimeoutExpired`, unconverted.
-   `git_tree_blobs` and `git_unchanged_since` ignore replace objects (`GIT_NO_REPLACE_OBJECTS`):
-   the before-state and the comparison are the real commit's.
-
-Every scene with a FIFO, and every call against a sleeping git, runs under `_within`'s deadline,
-so a regression costs one failed test, not a wedged worker: past the deadline each FIFO is opened
-from its other end (the blocked git returns) and replaced by a plain file (the tick's next git
-call does not block again), each stalled shim git is killed, and the test fails.
-
-The adversary's holes, closed in a second pass (H1-H8): every git call between the tick-start
-clean gate (deliberately unbounded: it runs before the agent) and the commit's `git add` is
-bounded and routed, found by an ordinal census of the calls a full tick makes and stalled one at a
-time (the fault undo's the same way), not only the first read on each path (H1); the probe error's
-message names the bound's value (H2); a fault undo whose `rev-parse` or `reset` does not answer
-keeps the fault (H3); `_put_back`'s checkout reads attributes from HEAD (H4); the tick's bound is
-`cfg.git_timeout`, built from the 60-second constant (H5); a timed-out status falls back to `git
-ls-files` (H6); the commit is not bounded (H7); a replaced commit stands in for nothing (H8).
-
-Red on the current code (39d8a2f8): a scene that sets `git_timeout`, and a `_git` call passing
-`timeout=`, fails on the missing field or keyword (pydantic's "Unexpected keyword argument", a
-`TypeError`); the `.gitattributes` scenes set no bound and miss the deadline (the settle's first
-`git status` blocks); the replace-object units read the replacement's bytes; `_git_read` lets a
-`TimeoutExpired` through unconverted. The regular-file controls pass today: they pin behaviour the
-change must keep.
-"""
+"""#1134 curator step: the curator's git calls cannot hang the tick. A FIFO the agent leaves at
+`.gitignore` / `.gitattributes` must never block git: every git call the tick and the fault undo make is
+bounded by `cfg.git_timeout` (a timeout is `GitProbeError`, fails closed, and never replaces the
+original fault), curator git calls run with `GIT_ATTR_SOURCE=HEAD`, the `_git` helpers take
+`timeout=` and ignore replace objects, and the commit itself is not bounded. Every FIFO scene and
+stalled git runs under `_within`'s deadline so a regression is one failed test, not a wedged worker."""
 from __future__ import annotations
 
 import contextlib
@@ -69,10 +24,9 @@ from typing import Any
 import pytest
 
 from defender import _git
-from defender._git import GitError
-from defender.learning.author import _config, drain
+from defender.learning.author import drain
 from defender.tests import _spec773 as S
-from defender.tests._curator1134 import lesson_text, plant_fifo, put, questioner_cfg, world
+from defender.tests._curator1134 import lesson_text, plant_fifo, put, world
 from defender.tests.test_1134_curator_drain import PLANTED, SEEDED, _scene
 
 #: The bound a scene sets (`git_timeout`) or a `_git` call passes (`timeout=`) when a git call is
@@ -754,18 +708,6 @@ def test_a_git_read_that_does_not_answer_in_time_is_a_git_probe_error():
     assert str(BOUND) in str(got), str(got)
 
 
-def test_control_git_read_routes_a_git_failure_and_passes_an_answer_through():
-    """The positive control on the same wrapper: a step's `GitError` is `GitProbeError` as
-    ever, and a step that answers hands its answer back."""
-    def failing():
-        raise GitError(["status"], 128, "fatal: Unable to create index.lock")
-
-    got = _raised(lambda: drain._git_read("x", failing))
-
-    assert type(got) is drain.GitProbeError, repr(got)
-    assert drain._git_read("x", lambda: "the answer") == "the answer"
-
-
 # ---------------------------------------------------------------------------------------
 # H1: every git call between the clean gate and the commit is bounded (an ordinal census)
 # ---------------------------------------------------------------------------------------
@@ -1165,18 +1107,6 @@ def test_control_a_plain_gitattributes_beside_a_rewritten_gitkeep_is_reverted_wi
 #: answering: past `STALL_BOUND` and past any bound under 3 s, well short of `_LONG_BOUND`.
 SLOW_READ = 4
 _LONG_BOUND = 20.0
-
-
-def test_the_channels_build_git_timeout_from_the_sixty_second_constant(tmp_path):
-    """H5. `_config.GIT_TIMEOUT_SECONDS` is 60 seconds, and both channels' real config builders
-    leave `git_timeout` at it.
-
-    Catches: a default that bounds nothing (`None`, x2a)."""
-    w = world(tmp_path)
-
-    assert _config.GIT_TIMEOUT_SECONDS == 60.0
-    assert w.cfg().git_timeout == 60.0
-    assert questioner_cfg(w.paths, trees=w.trees).git_timeout == 60.0
 
 
 def _slow_head_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

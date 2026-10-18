@@ -46,10 +46,19 @@ second one.
   record resolved from that folder when the run began), each key prefixed with the system
   name (e.g. `IDENTITY_URL_BASE`) next to the two access lines above. Non-secret only.
   An exported variable does not override a key: the run's record is the one source.
+- **Settings check — `check_settings(tenant)`, in every adapter.** A pure
+  function of the run's tenant record that raises `ConfigFault` for every
+  settings fault any verb can raise (`_stub_transport.check_docker_curl_settings`
+  for the docker-exec-curl stubs; `record_access_context` for host-state;
+  elastic adds its ES container). The run judges each granted system with it
+  once, at start: one that fails is down for the run with that reason, and no
+  verb of it is called (#1256). A system needing no settings (tacit-knowledge)
+  declares one that never raises.
 - **Exit codes — `0` ok / `1` query rejected / `2`
-  unreachable-or-misconfigured / `64` bad invocation.** The circuit breaker
-  counts only genuine `2`s as infra failures, so keep agent-side mistakes
-  (bad flag, unknown subcommand) on `64`.
+  unreachable / `64` bad invocation.** The circuit breaker counts only genuine
+  `2`s as infra failures, so keep agent-side mistakes (bad flag, unknown
+  subcommand) on `64`. A `ConfigFault` at call time is never counted: it means
+  the settings check missed a key, and the system goes down as not configured.
 
 To add an adapter: copy the closest sibling here, keep the conventions
 above, register its shim per `../../bin/README.md`, and run the scaffold

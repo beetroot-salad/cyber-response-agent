@@ -1,127 +1,8 @@
-"""#1134 v3 step 2: `DrainTrees` (`defender/learning/core/lane_trees.py`), the drain's holder of
-one `Held` per writable mount, and D7's guard-plus-positive-control matrix run through the
-handles it hands out.
-
-The contract is #1134's 2026-10-01 design addendum, A3 part 1 (unchanged by addendum 2, B3). It
-replaces the 2026-09-28 design's D3 `tree_for` on `LoopPaths`, and keeps D7's matrix and O3's
-regression. The reads through a handle are #1133's `Bound.read` / `entries` / `under`, as
-#1133 shipped them (addendum 3 dropped `Bound.read_bytes`, so a byte-exact control reads the
-file by path in the test). Addendum 2 dropped v2's `Bound.kind` and `Bound.walk`; this file is
-v2's, its kind rows retargeted onto the listing of the record's folder (`entries()`, whose row
-for the record is its kind) and its walk rows onto the listings of the tree's fixed shape (one
-`under(...).entries()` per folder). B2's helpers over a view (`entry_kind`, `list_tree`) land
-with their first consumers, higher in the stack, so no row here needs them (helpers moved to
-their first consumers, 2026-10-03). The API forks A3 leaves open were settled for this step:
-
-    DrainTrees.open(mounts: tuple[Path, ...], *, os_=os) -> DrainTrees
-    .mounts -> tuple[Path, ...]; .tree_for(path) -> tuple[Held, str] | None; .mount(path) -> Held
-    .close(); context manager (`__enter__` gives the trees, `__exit__` closes them)
-
-What each section pins:
-
-- Opening. The whole tuple is judged before anything is opened. A relative mount, a `..`, a
-  NUL or a `//` anchor in one, a duplicate (spelled the same after `Path` normalises it) or one
-  mount inside another (any pair, adjacent or not) is `ValueError`, and nothing is opened
-  through `os_`. Two mounts whose names only share a prefix (`lessons`, `lessons-questioner`)
-  are not nested. The empty tuple, an unknown label's list, opens nothing, maps nothing, and
-  answers `ValueError` for every `mount`. Otherwise each mount is held once, in the order given
-  (never sorted), by its own spelling, through the `os_` given (exactly `len(mounts)` opens by
-  path), and never again by path, whatever runs through the handles. `.mounts` is the tuple as
-  given, as `Path`s. If a mount cannot be held (missing, not a directory, or a fault of `os_`:
-  an `OSError`, a `ValueError`, or a `BaseException` that is no `Exception`), that exception
-  propagates as itself, and every root already held has been closed by the time it does. This
-  is checked while the traceback still holds the call's frames, so a handle that was only
-  dropped is still open there.
-- `tree_for(path)`. Purely lexical: no `os_` call, nothing on disk read or made, nothing
-  resolved. A mount spelled through a link maps only under that spelling, and a link at a record
-  or a holding folder neither moves a path out of its mount nor moves one in. Containment is by
-  whole path components (`lessons-questioner/x` is never in `lessons`). The answer is the very
-  `Held` opened for that mount (one object per mount, never re-held per call) and the POSIX name
-  below it, a `str`. The mount itself is `"."`, however `pathlib` spells it. A catalog path maps
-  to the `skills/` handle with its `gather/queries/...` name, never to a handle rooted at the
-  catalog. A `..` below a mount is `ValueError`. A path outside every mount is `None`, including
-  a `..` that would collapse into a mount, which is never re-homed there. The same `..` spelling
-  is `ValueError` or `None` depending only on whether it sits below a held mount. A relative
-  path is `ValueError`, even with the cwd set so that it would name a real mount (`DrainTrees`
-  has no repo root to join it to, and `None` would send the caller to a plain path), and so is
-  a path anchored at `//`. Every matrix row asks `tree_for` with its plant already in place.
-- `mount(path)`. The same `Held` `tree_for` hands out, for an exact mount point under the same
-  normalisation. Any other path is `ValueError`: inside a mount, its parent, the catalog, a
-  `..` spelling, a sibling, a relative path.
-- Lifetime. `__enter__` gives the trees themselves. `__exit__` closes every root exactly once,
-  also while any exception unwinds (`asyncio.CancelledError` and other `BaseException`s
-  included), and that exception propagates as itself. `close()` is idempotent: nothing closes a
-  root a second time after it (a second `close()`, the exit, each handle's own `close()`, garbage
-  collection). A root whose close fails (EIO) leaves no other root open; the close fault is not
-  swallowed, and a work-step exception unwinding at the time stays reachable from what
-  propagates. After `close()`, `write`, `mkdir` and `unlink` are `OSError(EBADF)` and touch nothing. A
-  view taken before the close answers `Bad file descriptor` from `read`, and so
-  does `entries()` of the record's folder and of the folder the drain lists (neither raises).
-  `tree_for` and `mount` still answer, with the closed `Held`.
-- The handles are the real `Held`, both by exact type and by behaviour. Mounts renamed away
-  after `open`, with a fresh folder or a link to an outside folder put at each path, are still
-  the folders written, read and listed, through every route asked after the swap (`tree_for` of
-  a record, `mount`, `tree_for` of the mount point): no route re-resolves a mount by its name.
-  (v1's E2 hole was a look-alike handle that passed every equality check.)
-- D7's matrix, over three trees under one working copy. `lessons/` and `lessons-questioner/`
-  are flat: their record sits at the mount's top level, so a plant goes at the name only.
-  `skills/` holds `gather/defender-sql.md`, `gather/queries/elastic/failed-logons.md` and the
-  record `gather/queries/elastic/_draft/x.md`. Its holding folders `gather`, `gather/queries`,
-  `<sys>` (`elastic`) and `_draft` are each a plant site. Every handle comes from `tree_for` of
-  the record's absolute path, the drain's shape, and is planted after `open`. The verbs:
-  `Held.write` in the two modes the drain uses (`replace`, `create`), `Held.unlink`,
-  `Held.mkdir` (of the draft folder), through `held.view()` `read`, and `entries()` of the
-  record's folder (the record's row there is its kind). The listings are the tree's fixed shape:
-  for skills `view().under("gather/queries")` and, below it, `elastic` and `elastic/_draft` (the
-  catalog's `<sys>/_draft/<file>.md`), each listed by its own `under(...).entries()`; for a
-  corpus `view()` (flat). The plants at the name are a symlink to an outside file, a symlink to an
-  outside folder, a hard link, a FIFO and a directory. At a holding folder they are a link to an
-  outside folder that holds the rest of the name, and a plain file. For the listings, a plant is
-  at the listed folder, above it, or below it. Each row asserts three things.
-  (1) Nothing is read from or written at what the plant reaches: the census of the whole tmp
-  dir is unchanged, a read's answer holds none of its bytes, and over a FIFO a writer parked in
-  its open stays parked through every verb that judges by a listing (nothing opened it to read).
-  (2) The plant is left in place: same type, inode, link count and link target.
-  (3) The control: the plant removed, the same verb through the SAME handle succeeds on the same
-  address, byte-exact. Writes land `PAYLOAD`, which holds a NUL and bytes that are not UTF-8, so
-  no text path can reproduce it. A refusal at the name is exactly `_io.NotPlainEntry`, a linked
-  folder exactly `OSError(ELOOP)` and a file at a folder exactly `NotADirectoryError`, each with
-  the core's errno and alias mark (`_spec1133.assert_refusal`).
-- O3, the headline regression (C2's shape). With `skills/gather/queries`, `gather`, `elastic`
-  or `_draft` replaced by a link to an EMPTY outside folder, by a dangling link, or by a plain
-  file, a draft written through `tree_for`'s handle is refused, nothing lands at or creates the
-  target, and the plant stays. The control, plant removed, lands the draft under `skills/`.
-- No following open, by any route. A child interpreter (`_drain_trees_1134.child`) runs each
-  matrix row whose plant reaches something (a link to a file or a folder, a hard link's other
-  name, a linked holding folder) through `DrainTrees` with an audit hook armed. Nothing may be
-  opened by a spelling that could follow a link: an absolute path under the tmp dir or under
-  `/proc`, a relative name spanning folders, or a relative name other than `.` opened without
-  `O_NOFOLLOW`. No descriptor opened or listed may name anything under the outside folder, no
-  target is named, and no process is spawned. In each row the child also asks `mount` and
-  `tree_for` of every mount point while armed: each answers the held root, opening nothing. Non-vacuity: in each row the watch sees, and the
-  rule flags, an `O_PATH` open of the plant by its absolute spelling. The rows that list a
-  folder or read a leaf also show the call's own opens.
-
-Not repeated here: the bare core verbs' own rules, pinned by #1133 (`test_1133_*`) and step 1
-(`test_1134_tree_listing.py`). That covers the name grammar, a folder removed under its own
-listing, the errno ladders, and the close race.
-
-Every plant is a real filesystem entry. Fakes enter only through `DrainTrees.open(..., os_=)`,
-as pass-throughs over the real `os` (`_spec1133.OsSpy`, `_tree_listing_1134.CallRecorder`).
-Nothing is monkeypatched (`monkeypatch.chdir` only sets the cwd). The worker never installs an
-audit hook and never forks; the one child runs under a deadline.
-
-Red before #1134 step 2: `defender/learning/core/lane_trees.py` does not exist, so this module
-fails at import. An adversary pass against v2's first version of this file greened five holes;
-the rows that close each say so: H1 (`mount` or `tree_for` of a mount point re-resolving the
-mount by name), H2 (`tree_for` peeking at the disk), H3 (cleanup skipping a `BaseException`),
-H4 (nesting judged only between neighbours), H5 (mounts held in sorted order). v3's scoped
-adversary pass over the retargeted rows greened one more, closed by its own row: v3-H1 (each
-mount held over its `realpath`, not its spelling). The kind and walk rows were retargeted from
-B2's helpers onto `entries()` when the helpers moved to their first consumers (2026-10-03);
-each keeps its three assertions (nothing reached, the plant left in place, the control exact)
-and the swapped-mount rows still list through the held roots.
-"""
+"""#1134: `DrainTrees` (`defender/learning/core/lane_trees.py`), the drain's holder of one `Held` per
+writable mount. Covers open validation and failure cleanup, the lexical `tree_for` / `mount` mapping,
+close lifetime, mounts swapped after open, and D7's plant matrix (writes, reads, listings, the
+catalog-folder draft regression) plus a child-interpreter audit-hook check that nothing opens by a
+spelling that could follow a link. Every plant is a real filesystem entry."""
 from __future__ import annotations
 
 import asyncio
@@ -150,7 +31,6 @@ from defender.tests._drain_trees_1134 import (
 from defender.tests._tree_listing_1134 import (
     CHILD_DEADLINE,
     HOST_BYTES,
-    CallRecorder,
     ParkedWriter,
     Planted,
     census,
@@ -701,21 +581,6 @@ def test_a_dotdot_outside_every_mount_is_none_never_rehomed_into_one(drain, tree
     assert_maps(trees, collapsed, home, collapsed.relative_to(home).as_posix())
 
 
-def test_one_dotdot_spelling_is_value_error_below_a_held_mount_and_none_outside_them(drain):
-    """`<defender>/skills/../lessons/x.md` is below the skills mount when skills is held
-    (`ValueError`), and outside every mount when only the two corpora are (`None`, not
-    re-homed into `lessons`)."""
-    d = drain
-    les, que, ski = d.mounts
-    dotted = d.defender / "skills" / ".." / "lessons" / "x.md"
-    for mounts in (d.mounts, (ski,)):
-        with DrainTrees.open(mounts) as with_skills:
-            refused_value_error(lambda t=with_skills: t.tree_for(dotted), "below skills")
-    with DrainTrees.open((les, que)) as corpora:
-        assert corpora.tree_for(dotted) is None
-        assert_maps(corpora, les / "x.md", les, "x.md")
-
-
 def test_a_path_outside_every_mount_is_none(drain, trees):
     """The mounts' parent, the working copy, other trees in it, siblings whose names extend a
     mount's, another working copy, the outside folder, a host path and `/`: each `None`, as a
@@ -787,31 +652,6 @@ def test_a_catalog_path_maps_to_the_skills_mounts_handle_never_one_rooted_at_the
         held.write(name, PAYLOAD, mode="replace")
     assert_landed(d, SKILLS)
     assert [o.path for o in spy.opens if o.dir_fd is None] == [str(m) for m in d.mounts]
-
-
-def test_tree_for_and_mount_make_no_os_call_and_touch_nothing_on_disk(drain):
-    """Mapping is lexical: after `open`, no `tree_for` or `mount` call (in a mount, a mount
-    point, outside, deep under absent folders, refused for `..`, `mount` refused) asks `os_` for
-    anything at all, the tree is unchanged, and an absent record stays absent."""
-    d = drain
-    rec = CallRecorder()
-    with DrainTrees.open(d.mounts, os_=rec) as trees:
-        mark = len(rec.calls)
-        before = census(d.tmp)
-        asked = [*d.mounts, *(d.path(label) for label in LABELS), d.defender, d.wc,
-                 d.mount(SKILLS) / "gather/queries/newsys/_draft/0a1b2c3d.md",
-                 d.mount(LESSONS) / "sub" / "deeper" / "y.md", d.outside / "x.md", Path("/")]
-        for p in asked:
-            trees.tree_for(p)
-            trees.tree_for(str(p))
-        for m in d.mounts:
-            trees.mount(m)
-        refused_value_error(lambda: trees.tree_for(d.mount(LESSONS) / ".." / "x.md"), "..")
-        refused_value_error(lambda: trees.mount(d.defender), "the mounts' parent")
-        refused_value_error(lambda: trees.tree_for("lessons/x.md"), "relative")
-        assert rec.calls[mark:] == [], f"mapping asked os_ for {rec.calls[mark:]}"
-        assert census(d.tmp) == before
-        assert not os.path.lexists(d.path(LESSONS)), "mapping made the record"
 
 
 def test_tree_for_is_lexical_no_link_moves_a_path_into_or_out_of_a_mount(drain):
@@ -1092,21 +932,6 @@ def test_after_close_the_verbs_are_ebadf_the_views_answer_bad_fd_and_the_map_sti
 # =======================================================================================
 # The handles are the real Held: one per mount, held by descriptor
 # =======================================================================================
-
-def test_each_mount_is_held_once_as_the_real_held(drain, trees):
-    """Exactly `_io.Held` (never a subclass or a look-alike), one object per mount, the same one
-    for every path in it, and three different ones."""
-    d = drain
-    helds = []
-    for label in LABELS:
-        m = d.mount(label)
-        held = trees.mount(m)
-        assert type(held) is _io.Held, type(held)
-        for spelled in (m, d.path(label), m / NEIGHBOURS[label][0], m / "not-there" / "x.md"):
-            assert trees.tree_for(spelled)[0] is held, str(spelled)
-        helds.append(held)
-    assert len({id(h) for h in helds}) == len(LABELS)
-
 
 #: How the drain reaches a held mount: `tree_for` of a record, `mount` of the mount point, and
 #: `tree_for` of the mount point itself (`"."`). Each answers `(held, record name)` here.

@@ -1,51 +1,6 @@
-"""#1235, round 2 — one `RunState` per run, created by the driver and carried by reference.
-
-The owner's redesign (issue comment 6117481676): round 1 kept the run's live decision state in
-three process-wide tables keyed by the run folder's path. The review found four faults that come
-from that keying, and the redesign makes them impossible by construction: the driver builds ONE
-`defender.runtime.run_state.RunState` at the start of `run_investigation`, every live decision
-is an operation on it, it rides on `AgentDeps.run_state` (gather leads get the parent's object)
-and on `VerbContext.run_state`, and it lives exactly as long as the run.
-
-The seam a driven test reads the state through is the harness's own return value: since round
-3 production's summary carries no state — `run_investigation(run_state=…)` takes it — and
-`drive(...)` builds the run's state, injects it, and returns it under `"run_state"`. It is the
-one place a test reaches a driven run's state.
-
-What this module pins, each through the real driver:
-
-  R1. A branch sibling's inherited query rows are live from its first turn. The sibling is a
-      real resume (`drive(..., resume=spec)`) of a legal source whose queries table holds rows
-      for `l-001`, rows a real run wrote. The repeat guard and the rejection budget count the
-      inherited rows; the sibling's next `l-001` row takes the seq after them and leaves the
-      inherited payload files alone; a failed reducer over an inherited payload is recorded with
-      that payload's system. Round 1 loaded its view before seeding wrote the rows, and no test
-      caught it.
-
-      Reachability: a production source copies each lead's claim (`gather_raw/<lead>.lead.json`)
-      into the sibling, so a sibling's MAIN cannot re-dispatch an inherited lead; the
-      repeat/rejection/seq arms reach it through `_branch_947.planted_source`, a legal source that
-      carries no claim for its lead (as lead-0's leads look to `leads_at`). The reducer arm is
-      the one a production sibling reaches as is: a NEW lead reading an inherited payload.
-  R2. No live operation finds its state by looking it up. A run driven through a symlinked
-      spelling of its folder counts one pool, and the gather lead's verb context carries the
-      very object the driver returns; two runs with ONE run id driven in one process share
-      nothing.
-  R4. State is released with the run: once the caller drops what `drive()` returned, a weak
-      reference to the run's state dies.
-  R5. A run recorded before #1235 (its case link still inside the folder, no sidecar) is refused
-      loudly by every reader of the run -> case link, naming the run and saying to re-run it; it
-      never reads as "no session".
-
-R3 (a refused row write leaves the state unchanged) and the oracle clock's half of R6 are pinned
-at the object in `tests/test_1235_run_state_object.py` and `tests/test_record_query.py`; the
-driven clock tests are `live_oracle_1224/test_1224_concurrency_and_clock.py`.
-
-RED until the round-2 implementation lands: `defender.runtime.run_state` does not exist.
-"""
+"""#1235 — one `RunState` per run, driven through the real driver: a branch sibling counts its inherited query rows live from its first turn; no live operation looks state up by path (symlinked folder, shared run id); state is released with the run."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 import gc
 import json
@@ -60,7 +15,6 @@ pytest.importorskip("pydantic_ai")
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
-from defender.runtime import branch, session_store  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
 from defender.tests._1255_view import model_path  # noqa: E402
@@ -78,11 +32,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     Turn,
     drive,
     materialize,
-)
-from defender.tests.e2e.test_1235_queries_and_pointer import (  # noqa: E402
-    OLD_POINTER_NAME,
-    _finished_run,
-    _pointer,
 )
 from defender.tests.e2e.test_pitfalls_input_823 import SQL, _Box  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
@@ -215,13 +164,9 @@ def _two_same(tmp_path: Path) -> Branched:
 
 
 def test_the_siblings_state_holds_its_inherited_rows_from_its_first_call(tmp_path):
-    """R1: the sibling's first query already sees, on the state its verb context carries, the
-    two `l-001` rows the sibling inherited — exactly the rows seeding wrote into its table — and
-    that state is the one the driver hands back. After the run it still holds them first, in
-    order, followed by the sibling's own row.
-
-    Observed failing by: a state loaded before seeding (round 1's view), which holds no
-    inherited row."""
+    """R1: the sibling's first query already sees, on the state its verb context carries, the two
+    `l-001` rows the sibling inherited — exactly the rows seeding wrote into its table — and
+    that state is the one the driver hands back."""
     branched = _two_same(tmp_path)
     asked = Asked("sibling")
     summary = branched.resume(main=_main(LEAD),
@@ -242,11 +187,7 @@ def test_the_siblings_state_holds_its_inherited_rows_from_its_first_call(tmp_pat
 
 def test_the_repeat_guard_counts_inherited_rows(tmp_path):
     """R1: with two identical `l-001` requests inherited, the sibling's first identical request
-    is the third occurrence and is refused before it reaches the backend.
-
-    Positive control, same lead and request: a fresh run's first such request reaches it.
-
-    Observed failing by: the guard seeing no inherited row and the verb asked again."""
+    is the third occurrence and is refused before it reaches the backend."""
     branched = _two_same(tmp_path)
     asked = Asked("sibling")
     branched.resume(main=_main(LEAD), gather=ReplayFn([q("elastic", "query", _SAME), DONE]),
@@ -262,12 +203,7 @@ def test_the_repeat_guard_counts_inherited_rows(tmp_path):
 
 def test_a_siblings_next_row_takes_the_seq_after_its_inherited_rows(tmp_path):
     """R1: the sibling's first `l-001` row is seq 2 (after the two it inherited), its payload is
-    `gather_raw/l-001/2.json`, and the inherited payload files keep the source's bytes.
-
-    Positive control, same lead: a fresh run's first row is seq 0.
-
-    Observed failing by: seq restarting at 0 and the sibling's payload written over the
-    inherited `0.json`."""
+    `gather_raw/l-001/2.json`, and the inherited payload files keep the source's bytes."""
     branched = _two_same(tmp_path)
     branched.resume(main=_main(LEAD), gather=ReplayFn([q("elastic", "query", _OTHER), DONE]),
                     verbs=Asked("sibling").registry())
@@ -288,13 +224,8 @@ def test_a_siblings_next_row_takes_the_seq_after_its_inherited_rows(tmp_path):
 
 def test_the_rejection_budget_counts_inherited_rejections(tmp_path):
     """R1: with one capture and `REJECTION_BUDGET - 1` above-guard rejections inherited on
-    `l-001`, the sibling's first rejection spends the budget: the lead is ended and the corrected
-    call scripted after it never reaches the backend.
-
-    Positive control, same script on a fresh run: one rejection is far from the budget, and the
-    corrected call runs.
-
-    Observed failing by: the budget counting only the sibling's own rejection."""
+    `l-001`, the sibling's first rejection spends the budget: the lead is ended and the
+    corrected call scripted after it never reaches the backend."""
     rows, payloads = _real_rows(tmp_path / "rows",
                                 [q("elastic", "query", _SAME), *[_rejected(i) for i in range(B - 1)]])
     assert len(rows) == B, "the source run did not write a capture and B-1 rejections"
@@ -313,13 +244,8 @@ def test_the_rejection_budget_counts_inherited_rejections(tmp_path):
 
 def test_a_failed_reducer_over_an_inherited_payload_is_recorded_with_its_system(tmp_path):
     """R1, the arm a production sibling reaches as is: a NEW lead reduces an inherited payload
-    (`cat gather_raw/l-001/0.json | defender-sql …`) and the reducer fails; its shim row carries
-    the inherited payload's system, `elastic`, read off the run's state.
-
-    Positive control, same lead and same reducer: reducing the lead's OWN payload records
-    `elastic` too.
-
-    Observed failing by: the inherited row missing from the state and the row's system `""`."""
+    (`cat gather_raw/l-001/0.json | defender-sql …`) and the reducer fails; its shim row
+    carries the inherited payload's system, `elastic`, read off the run's state."""
     branched = _two_same(tmp_path)
     sib = branched.sibling
     own_payload = sib / "gather_raw" / NEW_LEAD / "0.json"
@@ -381,11 +307,8 @@ def _pool_script(run_dir: Path, *, run_id: str, probe: Probe) -> dict:
 def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     """R2: a run whose folder is reached through a symlinked data root keeps one state: the
     gather lead's verb context carries the very object the driver returns, and that object
-    counts MAIN's calls and the lead's together (four calls, one spawn) and holds the lead's two
-    rows — the rows the table holds, read through the folder's real spelling.
-
-    Observed failing by: any site finding its state by the folder's spelling, which a second
-    spelling of the same folder splits into two pools."""
+    counts MAIN's calls and the lead's together (four calls, one spawn) and holds the lead's
+    two rows — the rows the table holds, ..."""
     real = tmp_path / "real"
     real.mkdir()
     link = tmp_path / "link"
@@ -410,12 +333,7 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
 
 def test_two_runs_with_one_run_id_in_one_process_share_no_state(tmp_path):
     """R2, the positive control: two runs driven one after the other in this process, with the
-    SAME run id in different folders, get two states. The first keeps its four calls, one spawn
-    and two rows after the second ran; the second counts only its own two calls, no spawn, no
-    rows.
-
-    Observed failing by: state keyed by run id (or any process-wide table), which pools the two
-    runs or resets the first."""
+    SAME run id in different folders, get two states."""
     probe = Probe()
     first = _pool_script(materialize(tmp_path / "a", GOLDEN_AB3), run_id="r1235-v2-same",
                          probe=probe)["run_state"]
@@ -439,21 +357,7 @@ def test_two_runs_with_one_run_id_in_one_process_share_no_state(tmp_path):
 
 def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path):
     """R4: after the run returns and the caller drops what `drive()` returned, no process-wide
-    reference keeps the run's state — a weak reference to it dies at the next collection.
-
-    Positive control: right after the run, the reference is live and the object holds the run's
-    rows and counts, so what dies below is the run's state, not an empty stand-in.
-
-    Round 2 had to pop the state OUT of the summary before dropping it: the replay models are
-    sync `FunctionModel`s that pydantic-ai runs through `anyio.to_thread.run_sync`, and anyio
-    caches the run's root task (whose result is `run_investigation`'s summary) in a module-level
-    table keyed by the event loop, so that summary outlives `asyncio.run`. Since round 3 the
-    summary carries no state (O6): `drive()`'s result is its own dict holding the state the
-    harness injected, so dropping it whole is the honest release, and whatever still holds the
-    state then is production's.
-
-    Observed failing by: any process-wide registry of run states (round 1's three tables), and
-    a summary that still carries the state (anyio's cache would keep it alive)."""
+    reference keeps the run's state — a weak reference to it dies at the next collection."""
     answered: list[str] = []
 
     def probe(ctx, *, native_query: str = "FROM hosts") -> list[dict]:
@@ -485,70 +389,4 @@ def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path)
 # R5 — a run recorded before #1235 is refused at every reader of its case link.
 # ======================================================================================
 
-def _make_pre_1235(run_dir: Path) -> dict:
-    """Turn a finished run into what #1235 found on disk before it: the case link inside the
-    folder under its old name, and no sidecar beside it. Returns the link."""
-    link = _pointer(run_dir)
-    (run_dir / OLD_POINTER_NAME).write_text(json.dumps(link), encoding="utf-8")
-    RunPaths(run_dir).session_pointer().unlink()
-    return link
 
-
-def _says_rerun(err: BaseException, run_dir: Path) -> None:
-    text = str(err)
-    assert run_dir.name in text, f"the refusal does not name the run: {text}"
-    assert "re-run" in text, f"the refusal does not say to re-run the run: {text}"
-    assert "1235" in text, f"the refusal does not say the run predates #1235: {text}"
-
-
-def test_a_run_recorded_before_1235_refuses_at_every_reader_of_its_case_link(tmp_path):
-    """R5: a folder holding `session_store_pointer.json` and no sidecar is a run recorded before
-    #1235. Every reader of the run -> case link refuses it with one clear error naming the run
-    and saying to re-run it: the run page's store and session lookups
-    (`session_store.LegacyRunLink`, a `StoreError`), the branch's source-store opens
-    (`BranchError`), and the branch-point session lookup, which must not fall back to the root
-    session. None of them reads it as "no session".
-
-    Controls on the same folder: with the old file gone it reads as "no session" (the plain
-    absent error, `None`, the root session); with the sidecar back beside the old file, the
-    sidecar wins and the run's own store opens."""
-    run_dir = _finished_run(tmp_path / "a", "r1235-v2-legacy")
-    link = _make_pre_1235(run_dir)
-    store = session_store.open_store_for_read(Path(link["store_path"]))
-    try:
-        assert issubclass(session_store.LegacyRunLink, session_store.StoreError)
-        for read in (session_store.resolve_store_path, session_store.resolve_session_id):
-            with pytest.raises(session_store.LegacyRunLink) as err:
-                read(_run_handle_1165(run_dir))
-            _says_rerun(err.value, run_dir)
-        for open_store in (branch.open_source_store, branch.source_store_if_any):
-            with pytest.raises(branch.BranchError) as err:
-                open_store(run_dir, source_run=_run_handle_1165(run_dir))
-            _says_rerun(err.value, run_dir)
-        with pytest.raises(session_store.LegacyRunLink) as err:
-            branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir))
-        _says_rerun(err.value, run_dir)
-
-        # Control: no old file and no sidecar is a folder with no link — "no session".
-        (run_dir / OLD_POINTER_NAME).unlink()
-        with pytest.raises(FileNotFoundError):
-            session_store.resolve_store_path(_run_handle_1165(run_dir))
-        with pytest.raises(FileNotFoundError):
-            session_store.resolve_session_id(_run_handle_1165(run_dir))
-        assert branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir)) is None
-        assert branch.session_for_run(store, run_dir, source_run=_run_handle_1165(run_dir)) == branch.main_session(store)
-    finally:
-        store.connection.close()
-
-    # Control: the sidecar beside an old file wins.
-    (run_dir / OLD_POINTER_NAME).write_text(json.dumps({"case_id": "elsewhere"}), encoding="utf-8")
-    session_store.write_case_pointer(_run_handle_1165(run_dir), case_id=link["case_id"],
-                                     store_path=Path(link["store_path"]),
-                                     session_id=link.get("session_id"))
-    assert session_store.resolve_store_path(_run_handle_1165(run_dir)) == Path(link["store_path"])
-    handle = branch.source_store_if_any(run_dir, source_run=_run_handle_1165(run_dir))
-    assert handle is not None
-    try:
-        assert Path(handle.path).resolve() == Path(link["store_path"]).resolve()
-    finally:
-        handle.connection.close()

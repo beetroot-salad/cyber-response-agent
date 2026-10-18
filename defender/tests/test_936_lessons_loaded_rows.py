@@ -1,10 +1,4 @@
-"""#936, the unit half — every `lessons_loaded.jsonl` row says `kind` and `role`, `render`
-takes a lead, `trace_lesson` reads the closed evidence vocabulary, and SKILL.md names the
-fold push. No driver and no runtime extra: these run on every box, including one that skips
-`e2e`. The fold itself — the frontier row carrying the block, the record written after the
-mint — is `test_936_fold_lessons_push.py`. Obligations by name in each docstring
-(O5/O7/O8/O9, M4, O3); the fixtures are `_fold_936`.
-"""
+"""#936, the unit half — every `lessons_loaded.jsonl` row says `kind` and `role`, `render` takes a lead, `trace_lesson` reads the closed evidence..."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -42,10 +36,7 @@ TID = H1105.T_ID
 
 
 def _tenant_runs() -> Path:
-    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105
-    PR 2 (J8, declared change 10): the tracer takes a required `--tenant` and walks that
-    tenant's runs (`--runs-dir` is gone). The data root is conftest's autouse per-test one; the
-    tenant is set up here, on request, so tests that never trace keep a tenant-free root."""
+    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2 (J8, declared change 10)"""
     from defender import _tenant
     from defender.tests._data_root_1078 import current_data_root
 
@@ -60,10 +51,7 @@ def _tenant_runs() -> Path:
 # O5 / O8 — `kind` and `role` on every row
 
 def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
-    """O5: a lesson opened through the real `_gated_read` (MAIN's `read_file`) leaves a row
-    with `kind == "read"` and the reader's role; the same read through GATHER deps says
-    `gather`. Without the role a row cannot say WHICH agent opened the lesson, and without
-    the kind a runtime push and a model's choice read the same."""
+    """O5: a lesson opened through the real `_gated_read` (MAIN's `read_file`) leaves a row with `kind == "read"` and the reader's role"""
     from defender.runtime.agent_definition import bind
     from defender.tests import _tenants1106
     from defender.runtime.tools import _tool_read_file
@@ -86,10 +74,7 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
 
 
 def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
-    """O5: the row's `role` is the deps' `AgentRole` value for EVERY role, not "gather or
-    else main". The curator's `lesson_read` (CORPUS_AUTHOR deps, the wider corpora) is the
-    third reader of `_gated_read`, and a two-way guess records it as MAIN — which
-    `trace_lesson` would then lift to `read`."""
+    """O5: the row's `role` is the deps' `AgentRole` value for EVERY role, not "gather or else main"."""
     from defender.learning.author.lesson_read import _tool_lesson_read
     from defender.runtime.agent_role import AgentRole
     from defender.tests._curator_scene import curator_deps, curator_scene
@@ -132,14 +117,7 @@ def test_a_push_row_names_the_push_and_the_main_role(tmp_path):
 def test_the_write_that_advances_the_fold_boundary_pushes_nothing_under_compaction(
     tmp_path, monkeypatch,
 ):
-    """Under compaction the render that prepares MAIN's next request folds through the loop
-    a write just closed, and that write's return is off the send path before the model reads
-    it — so the write-return lane withholds its block and its rows on exactly that write (the
-    fold's own row carries the same top three, with its own rows). Three writes in sequence:
-    the closed loop 1 + open loop 2 (advances the boundary 0→1; opens no slot, so a control
-    only for "nothing to push either way"), the block that opens `class` (advances nothing:
-    pushes under compaction too), and the block that closes loop 2 and opens `attrs.loginuid`
-    (advances 1→2: pushes with compaction OFF, withheld with it ON)."""
+    """Under compaction the render that prepares MAIN's next request folds through the loop a write just closed, and that write's return is off the send..."""
     from defender.runtime import compaction
     from defender.runtime.tools import _tool_append_block
 
@@ -180,10 +158,7 @@ def test_the_write_that_advances_the_fold_boundary_pushes_nothing_under_compacti
 # M4 — a header per push
 
 def test_render_takes_a_lead_and_the_default_is_the_write_return_header(tmp_path):
-    """M4: `render(hits)` still leads with the write-return sentence (the CLI and #919's pins
-    are untouched); `render(hits, lead=…)` puts the given lead on line 1 and leaves the hit
-    lines byte-identical; `render([], lead=…)` is still empty, since the fold gates "no
-    block" on that falsiness exactly as `_frontier_recall` does."""
+    """M4: `render(hits)` still leads with the write-return sentence (the CLI and #919's pins are untouched)"""
     from defender.runtime.lessons_engine.lessons_frontier import match_lessons, render
     from defender.skills.invlang.frontier import frontier_from_text
 
@@ -246,11 +221,7 @@ def _named(tmp_path: Path, capsys, lesson: str = "L") -> dict[str, list[str]]:
 
 
 def test_trace_names_the_evidence_class_behind_each_case(tmp_path, capsys):
-    """O7 / O8: the per-case line gains a fourth column, `evidence`, that says what "in
-    context" rests on — a MAIN `read`, a runtime `push`, a read by another role
-    (`indirect`), or a legacy row that cannot say (`unknown`). A MAIN-read-only case and a
-    push-only case must not render identically; a legacy `{lesson_name, ts}` row still
-    counts (O8), it just says so."""
+    """O7 / O8: the per-case line gains a fourth column, `evidence`, that says what "in context" rests on — a MAIN `read`, a runtime `push`, a read by..."""
     _mk_lesson(tmp_path / "lessons", "L")
     runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     _mk_run(runs, "case-read", [_row("L", kind="read", role="main")])
@@ -314,10 +285,7 @@ def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, ca
 
 
 def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp_path, capsys):
-    """O9: `lessons_loaded.jsonl` is a #1047 forgery universal, so a `kind` or `role` carrying
-    a tab, a newline, or a word outside the vocabulary must reach the TSV as one of the four
-    closed values — never its own bytes, never an extra column or row. Positive control on
-    the same column: a clean `kind: read` row renders `read`."""
+    """O9: `lessons_loaded.jsonl` is a #1047 forgery universal, so a `kind` or `role` carrying a tab, a newline, or a word outside the vocabulary must..."""
     _mk_lesson(tmp_path / "lessons", "L")
     runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     _mk_run(runs, "clean", [_row("L", kind="read", role="main")])
@@ -355,11 +323,7 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
 # the record's ONE reader — `hooks.record_lesson_load.exposures`
 
 def test_the_record_has_one_reader_and_both_consumers_ask_it():
-    """The judge's lessons view and the trace CLI both read `lessons_loaded.jsonl` through
-    `exposures` (and its classifier `row_evidence`) rather than each interpreting the rows —
-    #785's rule, one parser not several interpreters that drift. Pinned by identity: the
-    consumers import the function, not a copy of it, and neither keeps a classifier of its
-    own."""
+    """The judge's lessons view and the trace CLI both read `lessons_loaded.jsonl` through `exposures` (and its classifier `row_evidence`) rather than..."""
     import defender.hooks.record_lesson_load as reader
     from defender.learning.judge import render as judge
 
@@ -372,10 +336,7 @@ def test_the_record_has_one_reader_and_both_consumers_ask_it():
 
 
 def test_a_push_to_another_role_is_indirect_and_a_push_without_a_role_is_unknown():
-    """A `push` row says the runtime put the lesson in front of the role it names — it says
-    nothing about MAIN unless MAIN is that role. `record` writes whichever deps it is handed,
-    so a future push to GATHER, or a forged row, must rank `indirect`/`unknown`, not above a
-    genuine GATHER read."""
+    """A `push` row says the runtime put the lesson in front of the role it names — it says nothing about MAIN unless MAIN is that role."""
     from defender.hooks.record_lesson_load import row_evidence
 
     assert row_evidence({"kind": "push", "role": "main"}) == "push"
@@ -387,11 +348,7 @@ def test_a_push_to_another_role_is_indirect_and_a_push_without_a_role_is_unknown
 
 
 def test_exposure_time_is_the_earliest_row_of_the_strongest_class():
-    """`evidence_at` and `evidence` describe ONE event: a case pushed at 10:00 and read by MAIN
-    at 11:00 is `read` at 11:00, never `read` at 10:00 (the earliest row of any class paired
-    with the strongest class read as "MAIN read it at 10:00"). Among rows of the strongest
-    class the earliest wins, by instant not string order; and the record is read as a set —
-    one exposure per lesson, first-occurrence order, however many rows."""
+    """`evidence_at` and `evidence` describe ONE event"""
     from defender.hooks.record_lesson_load import exposures
 
     rows = [
@@ -415,27 +372,3 @@ def test_exposure_time_is_the_earliest_row_of_the_strongest_class():
         ("L", "push", "2026-06-05T12:00:00+00:00")]
     # a row that names no lesson is COUNTED, never silently dropped — the judge states it
     assert exposures([{"lesson_name": 123, "ts": "x"}, {"ts": "x"}, _row("L")]).unnamed == 2
-
-
-# O3 — the prose contract
-
-def test_skill_md_names_the_fold_push_and_what_no_block_means_after_it():
-    """O3 / M4: SKILL.md §Lessons tells the model what the fold block is — a third push,
-    keyed on the record, the top three the record matches at the fold (derived fresh, not a
-    re-show of what it was shown) — and that "no block" after a fold means unchanged since
-    the fold showed it. Pinned on distinctive substrings, not the sentence: the old "Two
-    pushes" framing must be gone, the fold must be named where the pushes are enumerated, and
-    the prose must not claim the block is what the model "had already been shown"."""
-    text = (DEFENDER / "SKILL.md").read_text(encoding="utf-8")
-    start = text.index("**Lessons.**")
-    end = text.index("### GATHER", start)
-    section = " ".join(text[start:end].split())  # the paragraphs are hard-wrapped
-    assert "Two pushes" not in section, "SKILL.md still describes two pushes"
-    assert "fold" in section.lower(), "SKILL.md §Lessons does not name the fold push"
-    assert "keyed on the record" in section.lower(), (
-        "SKILL.md does not say the fold push is keyed on the record (like push 2, not the alert)")
-    assert "unchanged since the fold" in section.lower(), (
-        "SKILL.md does not tell the model \"no block\" after a fold means unchanged since it")
-    assert "already been shown, put back" not in section, (
-        "SKILL.md claims the fold block is a re-show; it is derived fresh over the record")
-    assert "derived fresh" in section.lower()

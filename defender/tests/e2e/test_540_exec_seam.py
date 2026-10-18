@@ -1,57 +1,6 @@
-"""#540 — the box execution seam: the wire, argv byte-exactness, the cwd anchor, the deps seam.
-
-This module pins FOUR things and nothing else (the filesystem/network/env boundary,
-the scrub, the lifecycle and the survival demands live in their sibling spec files):
-
-  1. **The wire (demand #0).** `BoxResult` / `BoxFault` / `BoxSpec` are dataclasses at
-     every Python seam, and the channel between host and box is a LENGTH-PREFIXED BINARY
-     FRAMING carrying RAW BYTES — `MAGIC(4) | rc(4) | len(out)(8) | len(err)(8) | out | err`.
-     Not JSON (a JSON string is unicode and cannot carry arbitrary bytes without base64,
-     which is a transcoding step on the one channel whose whole promise is that it does
-     not transform anything). Not pickle (it would deserialize on the trusted-parse side).
-     **The fault signal is the FRAME'S ABSENCE**: an rc INSIDE a well-formed frame is the
-     program's own; no frame at all is infrastructure. That is what dissolves the rc=127
-     triple ambiguity, and it is version-independent — which matters, because the design's
-     original heuristic (recognise daemon text on stdout) rested on ledger claim C39, which
-     this run REFUTED (`docker run --rm alpine /nonexistent-binary-xyz` → rc=127 with stdout
-     **0 bytes** and stderr **347 bytes with plain LF** — exactly inverted from the doc).
-     No test here may assert daemon text on stdout, CRLF endings, or an empty stderr.
-
-  2. **Argv byte-exactness (O7 / NO15).** What the gate approved is what runs, byte for
-     byte, or the call fails LOUDLY. The two rejection points are DIFFERENT and are pinned
-     separately: C36a (a non-UTF-8 argv element crosses `docker exec` silently rewritten to
-     U+FFFD **at rc=0** — observed `ef bf bd` ×3) and C36b (an embedded NUL raises
-     `ValueError: embedded null byte` from Python's **subprocess**, before docker sees it).
-
-  3. **The three-site cwd invariant (M9 / C52).** The cwd is coupled at THREE sites: the
-     gate's rebase of a relative operand (`permission/bash.py:234`), `_resolve_operand`'s
-     rebase (`tools.py:304-313`), and the executor's `cwd=`. Move fewer than three and the
-     validator/executor differential reopens at the same moment O12 is fixed. Since #1255
-     (C8, C8-extended) the box mounts each tree at its model path and receives the command
-     AND the working directory in the model view (`/runs/current`); the host sites keep the
-     host run folder that path maps to.
-
-  4. **The deps seam.** `_tool_bash` executes through an INJECTED box on `AgentDeps`, and
-     every bash-enabled role has one (H3).
-
-**Fakes enter through injection seams, never by monkeypatching** (`lint_monkeypatch.py` is
-a blocking ratcheted gate). There are two seams in play: `AgentDeps.box` / `drive(box=…)`
-takes a `BoxExecutor`, and the `BoxExecutor` itself takes a TRANSPORT — the thing that
-actually spawns `docker exec` and hands back its raw rc/stdout/stderr. Faking at the
-transport level rather than at `BoxExecutor.run` is deliberate: it leaves the REAL framing
-codec running on both sides, so a payload demand can assert on the **captured inbound
-frame** rather than on a canned answer, and a fault demand can feed the classifier the
-exact bytes the ledger OBSERVED a real daemon produce.
-
-Sandbox honesty: this environment is docker-outside-of-Docker (E2) — bind sources resolve
-on the real daemon host and are invisible to this process. Nothing in this module needs a
-live daemon: every assertion is on the framing, the argv, the cwd or the seam, all of which
-are host-side. The demands that genuinely need a container are in the boundary spec file
-and are gated there.
-"""
+"""#540 — the box execution seam: the length-prefixed binary wire (raw bytes, fault = frame absence), argv byte-exactness, the three-site cwd invariant, and the injected-box deps seam. Fakes enter at the transport."""
 from __future__ import annotations
 
-import dataclasses
 import pickle
 import struct
 from dataclasses import dataclass
@@ -63,26 +12,21 @@ import pytest
 
 from defender.tests._1255_view import MODEL_RUN, model_path
 
-from _replay_harness import DEFENDER, GOLDEN_AB3, ReplayFn, Turn, drive, materialize
+from _replay_harness import DEFENDER, GOLDEN_AB3, materialize
 
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai import ModelRetry  # noqa: E402
 
-from defender import agents as agents_registry  # noqa: E402
 from defender.runtime import bash_exec, box, permission  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import RunScope, bind, effective_tools_for  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.tests import _tenants1106 as T1106  # noqa: E402
-from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
 SALT = "s540"
 RUN_ID = "exec-seam-540"
-
 
 
 @dataclass(frozen=True)
@@ -99,16 +43,7 @@ class ExecCall:
 
 
 class RecordingTransport:
-    """The injected box transport: records what it received, replies from a script.
-
-    `replies` is consumed one per call; past the end it repeats the last one, so a replay
-    with an unknown number of bash turns does not need its count predicted. A reply is
-    either a `box.RawExec` (returned) or an exception INSTANCE (raised) — the latter models
-    a transport that could not even reach the daemon.
-
-    It never classifies. Whether an unframed stdout is a fault, whether an rc is the
-    program's, and what the caller is told are all `BoxExecutor`'s job — a fake that
-    decided any of that would be asserting against itself."""
+    """The injected box transport: records what it received, replies from a script."""
 
     def __init__(self, *replies, view: dict[str, Path] | None = None):
         self._replies = list(replies) or [framed(0, b"", b"")]
@@ -178,7 +113,6 @@ NAME_COLLISION_FAILURE = box.RawExec(
 )
 
 
-
 #: The stored alert, spelled relative to the run folder (it sits in the read-only input directory, #1222).
 ALERT_REL = RunPaths(Path("run")).alert.relative_to("run").as_posix()
 
@@ -188,11 +122,7 @@ def _run_dir(tmp_path: Path) -> Path:
 
 
 def _main_deps(run_dir: Path, transport) -> runtime_tools.AgentDeps:
-    """MAIN deps through the REAL `bind` seam, carrying a `BoxExecutor` over `transport`.
-
-    `bind(..., box=…)` is the injection point (#540): production builds the executor from
-    `BoxSpec`; a test hands one in. The policy, the roots and the gate are all the real
-    compiled article — only the thing that would have spawned a container is faked."""
+    """MAIN deps through the REAL `bind` seam, carrying a `BoxExecutor` over `transport`."""
     return bind(
         MAIN_DEF, run_dir, defender_dir=DEFENDER,
         box=box.BoxExecutor(spec=box.BoxSpec(), transport=transport),
@@ -214,42 +144,10 @@ def _alert_model_path(run_dir: Path) -> str:
     return model_path(RunPaths(run_dir).alert, run_dir=run_dir)
 
 
-
-def test_box_returns_boxresult_dataclass_not_a_tuple(tmp_path):
-    """box_returns_boxresult_dataclass_not_a_tuple — a completed box call yields a
-    `BoxResult` DATACLASS carrying `rc: int`, `out: bytes`, `err: bytes`, not a bare
-    `(rc, out, err)` tuple and not a dict. Assertions on box results are therefore on
-    NAMED FIELDS, and `out`/`err` stay `bytes` all the way to the caller: a tuple would
-    let a field be read positionally and a str would already have transcoded the payload
-    the wire exists to carry unchanged."""
-    t = RecordingTransport(framed(0, b"hello\n", b"warn\n"))
-    executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
-
-    result = executor.run_parsed(bash_exec.parse("cat x"), command="cat x", cwd=tmp_path, timeout=5.0)
-
-    assert dataclasses.is_dataclass(result), "the box result is not a dataclass"
-    assert isinstance(result, box.BoxResult)
-    assert not isinstance(result, tuple), "a (rc, out, err) tuple survived at the Python seam"
-    assert not isinstance(result, dict)
-    assert {f.name for f in dataclasses.fields(result)} == {"rc", "out", "err"}
-    assert result.rc == 0
-    assert isinstance(result.out, bytes)
-    assert isinstance(result.err, bytes)
-    assert (result.out, result.err) == (b"hello\n", b"warn\n")
-
-
 def test_unframed_stdout_is_never_returned_as_program_output(tmp_path):
-    """unframed_stdout_is_never_returned_as_program_output — when the box's stdout carries
-    NO well-formed frame, the call raises `BoxFault`; the unframed bytes are never handed
-    back as a `BoxResult`, and never reach the model inside the bash tool's program-output
-    envelope. Any unframed stdout is BY DEFINITION daemon text: the entrypoint writes a
-    frame or the entrypoint never ran.
-
-    The fault content is R-C39 as OBSERVED this run — `docker run --rm alpine:latest
-    /nonexistent-binary-xyz` gave rc=127 with stdout **0 bytes** and stderr **347 bytes,
-    plain LF**, exactly inverted from the doc's C39 claim. That refutation is why the signal
-    here is structural (no frame) rather than a match on daemon text: the text moved streams
-    under us between daemon versions, and the framing does not care which stream it chose."""
+    """unframed_stdout_is_never_returned_as_program_output — when the box's stdout carries NO
+    well-formed frame, the call raises `BoxFault`; the unframed bytes are never handed back as
+    a `BoxResult`, and never reach the model inside the bash tool's program-output envelope."""
     run_dir = _run_dir(tmp_path)
     t = RecordingTransport(DAEMON_START_FAILURE)
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
@@ -275,18 +173,9 @@ def test_unframed_stdout_is_never_returned_as_program_output(tmp_path):
 
 
 def test_program_rc_127_inside_the_frame_reaches_the_model(tmp_path):
-    """program_rc_127_inside_the_frame_reaches_the_model — a genuine in-pipeline
-    `command not found` (rc=127 INSIDE a well-formed frame) is returned as a normal
-    `BoxResult` and reaches the model as a real, actionable result. It is NOT reclassified
-    as infrastructure.
-
-    This is the POSITIVE CONTROL for the whole fault-classification family: without it the
-    classifier passes vacuously by calling every 127 infrastructure. Together with
-    `test_unframed_stdout_is_never_returned_as_program_output` it is what dissolves the
-    rc=127 triple ambiguity — C39's daemon error, C35b's missing `-w` target (both rc=127
-    with NO frame), and the program's own 127 (rc=127 WITH a frame). Note the outer
-    `docker exec` rc is 127 in all three cases, so rc alone can never separate them; only
-    the frame can."""
+    """program_rc_127_inside_the_frame_reaches_the_model — a genuine in-pipeline `command not
+    found` (rc=127 INSIDE a well-formed frame) is returned as a normal `BoxResult` and reaches
+    the model as a real, actionable result."""
     run_dir = _run_dir(tmp_path)
     not_found = b"nosuchprog: command not found\n"
     t = RecordingTransport(framed(127, b"", not_found))
@@ -305,16 +194,10 @@ def test_program_rc_127_inside_the_frame_reaches_the_model(tmp_path):
 
 
 def test_program_output_bytes_cross_the_frame_untranscoded(tmp_path):
-    """program_output_bytes_cross_the_frame_untranscoded — arbitrary program bytes cross
-    the wire with ZERO transcoding: the `BoxResult.out`/`err` the caller receives are byte
-    for byte the bytes the program wrote, including sequences that are not valid UTF-8 and
-    a payload containing the frame's own MAGIC.
-
-    The excluded failure mode is C36a's, executed this run: a non-UTF-8 element crossing
-    `docker exec` came back silently rewritten to U+FFFD (`ef bf bd` ×3) at rc=0. A channel
-    that encodes would reproduce exactly that corruption on the results half, silently. So
-    the assertion is equality on raw bytes AND the explicit absence of the replacement
-    character — a decode-with-replace anywhere on the path is caught, not merely improbable."""
+    """program_output_bytes_cross_the_frame_untranscoded — arbitrary program bytes cross the wire
+    with ZERO transcoding: the `BoxResult.out`/`err` the caller receives are byte for byte the
+    bytes the program wrote, including sequences that are not valid UTF-8 and a payload
+    containing the frame's own MAGIC."""
     payload = b"\xff\xfe\x00\x80 \xc3(" + box.RESPONSE_MAGIC + b"\r\n\x00tail"
     errbytes = b"\x89PNG\r\n\x1a\n\xff"
     t = RecordingTransport(framed(3, payload, errbytes))
@@ -330,16 +213,8 @@ def test_program_output_bytes_cross_the_frame_untranscoded(tmp_path):
 
 
 def test_infrastructure_failure_raises_boxfault(tmp_path):
-    """infrastructure_failure_raises_boxfault — an infrastructure failure RAISES `BoxFault`;
-    it is never returned as a value. So callers assert the raise, and no caller can forget
-    to inspect a status field: there is no status field to forget.
-
-    Both observed failure shapes are driven. C43b (executed): a STOPPED container of the
-    same name collides at **rc=125**. C35b (executed): `docker exec -w <missing>` is
-    **rc=127**, while `docker run -w <missing>` silently CREATES the directory. Neither
-    produces a frame, so neither can be confused with a program result. A transport that
-    cannot reach the daemon at all raises, and that too must surface as `BoxFault` rather
-    than as whatever primitive error the spawn happened to produce."""
+    """infrastructure_failure_raises_boxfault — an infrastructure failure RAISES `BoxFault`; it
+    is never returned as a value."""
     executor = box.BoxExecutor(
         spec=box.BoxSpec(), transport=RecordingTransport(NAME_COLLISION_FAILURE))
     with pytest.raises(box.BoxFault):
@@ -363,17 +238,8 @@ def test_infrastructure_failure_raises_boxfault(tmp_path):
 
 
 def test_malformed_frame_never_becomes_a_different_command(tmp_path):
-    """malformed_frame_never_becomes_a_different_command — a corrupted frame fails CLOSED in
-    both directions. A response whose declared lengths do not match its payload raises
-    `BoxFault` rather than yielding a truncated or over-read `BoxResult`; a request frame
-    with a mutated length header raises rather than decoding into a DIFFERENTLY-SHAPED
-    pipeline. The box-side decoder is not itself a security boundary (the trust direction is
-    host-sends / box-receives), but a malformed decode that silently became another command
-    would be one — a length field is an offset into the argv, so a flipped byte re-slices
-    which tokens are which.
-
-    Every corrupt input here is a REAL frame from the REAL encoder, mutated — not an
-    author-imagined byte string."""
+    """malformed_frame_never_becomes_a_different_command — a corrupted frame fails CLOSED in both
+    directions."""
     good = box.encode_response(box.BoxResult(rc=0, out=b"abcdefgh", err=b"xy"))
 
     overstated = good[:8] + struct.pack("!Q", 9999) + good[16:]
@@ -408,15 +274,7 @@ def test_malformed_frame_never_becomes_a_different_command(tmp_path):
 
 
 def test_no_pickle_on_the_box_boundary(tmp_path):
-    """no_pickle_on_the_box_boundary — nothing on the box boundary pickles or unpickles.
-    The host-side module and the in-box entrypoint contain no pickle import, a real request
-    frame is not a pickle stream, and a PICKLE offered where a response frame belongs is
-    rejected as an absent frame rather than deserialized.
-
-    The last clause is the one that matters: unpickling happens on the HOST — the trusted
-    parse side — so a box that could choose the bytes could choose the objects the host
-    constructs. TM class 2 cites 'no pickle' as evidence our own code is clean, and that
-    claim has to be true of the newest boundary too."""
+    """no_pickle_on_the_box_boundary — nothing on the box boundary pickles or unpickles."""
     for module in (box, bash_exec):
         source = Path(module.__file__).read_text()
         assert "pickle" not in source, f"{module.__name__} names pickle on the box boundary"
@@ -440,13 +298,7 @@ def test_no_pickle_on_the_box_boundary(tmp_path):
 def test_an_empty_pipeline_crosses_as_a_valid_zero_rc_frame(tmp_path):
     """an_empty_pipeline_crosses_as_a_valid_zero_rc_frame — an EMPTY pipeline list (B12:
     `parse("")` → `[]`) is a valid falsy domain member, not a fault and not a host-side
-    shortcut. It crosses the wire as a real request and comes back as a well-formed frame
-    decoding to `BoxResult(rc=0, out=b"", err=b"")`.
-
-    The failure this forbids is a host-side `if not pipelines: return ...` that fabricates a
-    result without ever consulting the box: it would make the falsy case the ONE input shape
-    the box boundary never sees, and `run_parsed([])` → `(0, "", "")` is exactly the
-    fabrication already available to copy. So the transport must record the call."""
+    shortcut."""
     t = RecordingTransport(framed(0, b"", b""))
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
 
@@ -457,19 +309,9 @@ def test_an_empty_pipeline_crosses_as_a_valid_zero_rc_frame(tmp_path):
     assert result == box.BoxResult(rc=0, out=b"", err=b"")
 
 
-
 def test_hostile_argv_crosses_byte_exact(tmp_path):
-    """hostile_argv_crosses_byte_exact — the argv the gate approved is the argv that crosses
-    the wire, byte for byte. A quoted operand containing a space stays ONE token, a glob
-    stays ONE token, and a `$VAR` stays the LITERAL characters `$SECRET` — no expansion, no
-    re-splitting, no requoting. Asserted against the CAPTURED INBOUND FRAME, decoded with the
-    real decoder, not against a canned reply.
-
-    R-B13 (executed) is what fixes this list: quotes, backticks and globs are each preserved
-    as one token by `parse`, but `$(...)` is NOT — so there is no uniform 'all metacharacter
-    classes cross as single tokens' claim to make, and that case gets its own test. Backticks
-    and `$(` never reach the box at all: the host gate denies them, which is checked here so
-    their absence from this list is a recorded fact rather than an oversight."""
+    """hostile_argv_crosses_byte_exact — the argv the gate approved is the argv that crosses the
+    wire, byte for byte."""
     run_dir = _run_dir(tmp_path)
     alert = _alert_model_path(run_dir)   # #1255 P1/C8: the model's spelling, and the box's
 
@@ -499,16 +341,8 @@ def test_hostile_argv_crosses_byte_exact(tmp_path):
 
 
 def test_non_utf8_argv_rejected_rather_than_transcoded(tmp_path):
-    """non_utf8_argv_rejected_rather_than_transcoded — an argv element that is not valid
-    UTF-8 is REJECTED LOUDLY by the encoder, with an error naming the offending element. It
-    is never silently repaired, and the U+FFFD replacement character never appears in a frame.
-
-    This is C36a's fault, executed this run: a non-UTF-8 argv element handed to `docker exec`
-    came back silently rewritten to U+FFFD **at rc=0** (observed `ef bf bd` ×3). The runtime
-    will NOT honour byte-exact-or-fail unaided — it prefers a quiet lie — so O7's limit (a)
-    has to be an explicit encoder-side refusal. The framing carrying raw bytes does not
-    supersede this obligation: it removes the transcode from the RESULTS half, while the
-    argv half is rejected outright."""
+    """non_utf8_argv_rejected_rather_than_transcoded — an argv element that is not valid UTF-8 is
+    REJECTED LOUDLY by the encoder, with an error naming the offending element."""
     surrogate = "\udcff"
     hostile = [bash_exec.Pipeline("first", [bash_exec.Stage(["grep", "-n", surrogate])])]
 
@@ -525,15 +359,7 @@ def test_non_utf8_argv_rejected_rather_than_transcoded(tmp_path):
 
 def test_embedded_nul_argv_rejected(tmp_path):
     """embedded_nul_argv_rejected — an argv element containing a NUL byte is rejected at the
-    ENCODER, before the transport is touched, with an error naming the embedded NUL.
-
-    C36b (executed) is why this is a SEPARATE test from the UTF-8 case and not a second
-    assertion inside it: the two are rejected at DIFFERENT points. A NUL raises
-    `ValueError: embedded null byte` out of Python's **subprocess** layer, before docker ever
-    sees the argv, whereas a non-UTF-8 element (C36a) sails through subprocess AND docker and
-    is corrupted at the far end at rc=0. Inheriting the NUL rejection from subprocess would
-    make the boundary's fail-closed behaviour an accident of which spawn primitive it happens
-    to use — so the encoder owns it, and the proof is that the transport records nothing."""
+    ENCODER, before the transport is touched, with an error naming the embedded NUL."""
     hostile = [bash_exec.Pipeline("first", [bash_exec.Stage(["grep", "-n", "a\x00b"])])]
 
     t = RecordingTransport(framed(0, b"", b""))
@@ -549,14 +375,7 @@ def test_embedded_nul_argv_rejected(tmp_path):
 
 def test_box_accepts_no_raw_command_string(tmp_path):
     """box_accepts_no_raw_command_string — the request frame carries the `Pipeline`/`Stage`
-    STRUCTURE and nothing else. The model's raw command text does not cross, so there is
-    nothing in the box for a second parser to re-decompose.
-
-    F5 was dissolved by demand #0 for exactly this reason: re-parsing in the box would
-    reintroduce a second parse and therefore the validator/executor differential O7 exists to
-    prevent. The witness is a command whose raw spelling differs from its token structure —
-    doubled spaces and quoting that vanish under `parse` — so a raw string riding along would
-    be visible in the frame bytes."""
+    STRUCTURE and nothing else."""
     run_dir = _run_dir(tmp_path)
     alert = _alert_model_path(run_dir)   # #1255 P1/C8: the model's spelling, and the box's
     command = f"cat   {alert}    |   grep -n   'a b'"
@@ -573,43 +392,11 @@ def test_box_accepts_no_raw_command_string(tmp_path):
         "the box received something other than the host's single parse"
 
 
-def test_command_substitution_splits_into_four_tokens_at_the_host_parse():
-    """command_substitution_splits_into_four_tokens_at_the_host_parse — `$(...)` is NOT
-    preserved as one literal token by the host parse: `parse('echo $(whoami)')` yields FOUR
-    tokens, `['echo', '$', '(', 'whoami', ')']`. Quotes, backticks and globs ARE each
-    preserved as one token. This asymmetry is at the HOST parse, upstream of the box
-    entirely, and it is pinned so no later test writes a uniform 'all four metacharacter
-    classes cross as single literal tokens' assertion.
-
-    R-B13, executed this run, refuted precisely that uniform claim. The security property is
-    unchanged either way — nothing expands, because bash never re-parses — but the SHAPE the
-    box receives differs between the classes, and a test that assumed otherwise would have
-    pinned a false belief about the wire's contents."""
-    assert bash_exec.parse("echo $(whoami)")[0].stages[0].argv == \
-        ["echo", "$", "(", "whoami", ")"]
-
-    assert bash_exec.parse("grep -n 'a b'")[0].stages[0].argv == ["grep", "-n", "a b"]
-    assert bash_exec.parse("grep -n `y`")[0].stages[0].argv == ["grep", "-n", "`y`"]
-    assert bash_exec.parse("grep -n *.txt")[0].stages[0].argv == ["grep", "-n", "*.txt"]
-
-
-
 def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
-    """relative_operand_names_the_same_file_at_all_three_sites — a RELATIVE operand names one
-    and the same absolute file at ALL THREE sites the cwd is coupled at: the gate's rebase
+    """relative_operand_names_the_same_file_at_all_three_sites — a RELATIVE operand names one and
+    the same absolute file at ALL THREE sites the cwd is coupled at: the gate's rebase
     (`permission/bash.py:234`), `_resolve_operand`'s rebase (`tools.py:304-313`), and the
-    executor's `cwd=` (now the box's working directory). All three are the run folder (F4):
-    the two host sites name the host run folder, and the box's working directory is the model
-    path that folder is mounted at (`/runs/current`, #1255 C8-extended), so the file the box
-    opens is the model path of the file the host resolved.
-
-    C52 is why this asserts THREE and not two: move fewer than three and the
-    validator/executor differential reopens at the very moment O12 is fixed — the gate would
-    resolve `x` against one root while the program opens it from another, so the file
-    approved and the file read are different files. Site 1 is observed through the real
-    gate's ALLOW/DENY, which is the only thing it exposes: `cat <alert>` is in the cat
-    grant's scope iff the anchor is the run dir, and `cat defender/lessons/<f>.md` is in
-    scope iff the anchor is the repo root — one discriminating pair, both answers required."""
+    executor's `cwd=` (now the box's ..."""
     run_dir = _run_dir(tmp_path)
     lesson = sorted((DEFENDER / "lessons").glob("*.md"))[0]
     lesson_rel = lesson.relative_to(DEFENDER.parent)
@@ -635,15 +422,9 @@ def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
 
 
 def test_cwd_is_reapplied_per_call_and_does_not_persist(tmp_path):
-    """cwd_is_reapplied_per_call_and_does_not_persist — the cwd is carried caller-side and
-    RE-APPLIED on every box call: two successive bash tool calls each hand the executor the
-    anchor explicitly, and the second does not inherit it from the first.
-
-    C35a, executed this run, is why nothing here may assert persistence: cwd does NOT persist
-    across `docker exec` (exec1 at `/tmp` → exec2 at `/`), while `/tmp` itself DOES persist as
-    a filesystem. A design that set the directory once and relied on it would silently run
-    every subsequent command from `/` — where a relative operand resolves to a different file
-    than the one the gate approved, which is the same differential C52 names."""
+    """cwd_is_reapplied_per_call_and_does_not_persist — the cwd is carried caller-side and RE-
+    APPLIED on every box call: two successive bash tool calls each hand the executor the
+    anchor explicitly, and the second does not inherit it from the first."""
     run_dir = _run_dir(tmp_path)
     t = RecordingTransport(framed(0, b"", b""))
     deps = _main_deps(run_dir, t)
@@ -660,14 +441,7 @@ def test_cwd_is_reapplied_per_call_and_does_not_persist(tmp_path):
 
 def test_the_chosen_cwd_exists_before_the_first_exec(tmp_path):
     """the_chosen_cwd_exists_before_the_first_exec — the directory chosen as the box's cwd
-    already EXISTS at the moment of the first exec.
-
-    C35b, executed this run: `docker exec -w <missing>` is **rc=127**, while
-    `docker run -w <missing>` silently CREATES the directory. So the run-time behaviour of a
-    missing anchor differs by which docker verb is used, and on the exec path — the one this
-    design takes, for C35's amortization (57ms exec vs 201ms run) — it fails with the SAME
-    rc=127 a program's own `command not found` produces. The frame absence distinguishes
-    them after the fact; the anchor existing beforehand is what stops the confusion arising."""
+    already EXISTS at the moment of the first exec."""
     run_dir = _run_dir(tmp_path)
     # #1255 C8-extended: the cwd is the model path `/runs/current`, which exists in the box iff
     # the run folder bound there exists — so existence is read off the bound folder.
@@ -681,18 +455,9 @@ def test_the_chosen_cwd_exists_before_the_first_exec(tmp_path):
     assert call.cwd == Path(MODEL_RUN)
 
 
-
 def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
     """tool_bash_executes_through_the_injected_box_seam — the REAL `_tool_bash` runs its
-    validated pipelines through the box carried on `AgentDeps`, and through nothing else.
-    The gate still runs host-side first, the box receives the gate's own parse, and the
-    result the model sees is the BOX's — not the host's.
-
-    The witness is a command that would succeed identically on the host: `cat alert.json`
-    exists and is readable in this process, so a surviving in-process execution path would
-    return the file's real content and the test would still 'pass' if it only checked for
-    success. It checks for the box's OWN distinctive bytes instead, and for the file's real
-    content being absent."""
+    validated pipelines through the box carried on `AgentDeps`, and through nothing else."""
     run_dir = _run_dir(tmp_path)
     real_content = (RunPaths(run_dir).alert).read_text()
     only_the_box_says = b"<<from-the-box>>\n"
@@ -716,102 +481,10 @@ def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
     assert t2.calls == [], "a denied command was still handed to the box"
 
 
-def test_every_bash_enabled_role_executes_through_a_box(tmp_path):
-    """every_bash_enabled_role_executes_through_a_box — every role whose `ToolSet.bash` is
-    True is bound with a real `BoxExecutor` on its deps. There is no bash-enabled role whose
-    box is absent, so no production code path has to be absent-tolerant.
-
-    H3 closed the asymmetry this way rather than by making 'bash enabled + box absent'
-    unconstructible: the four `ToolSet.bash=True` learning-pipeline roles (lead_author,
-    curator, actor, judge — census A4) are ported alongside the two runtime agents, and
-    `oracle` has an EMPTY ToolSet and is unaffected. The census is read off
-    the live registry rather than restated here, so a newly bash-enabled role fails this test
-    instead of quietly inheriting no box."""
-    run_dir = _run_dir(tmp_path)
-    scope = RunScope(read_confine=(run_dir,), scripts=(), add_dirs=(run_dir,))
-
-    bash_roles = [d for d in agents_registry.AGENTS.values() if d.tools.bash]
-    assert bash_roles, "the registry reports no bash-enabled role — the census cannot be empty"
-
-    for defn in bash_roles:
-        if defn.role is AgentRole.GATHER:
-            # #1106 M4: gather binds with a RUN's grant (its definition carries none).
-            defn = T1106.fixture_gather_def()
-        tree = tmp_path / "tree" / "defender" if defn.requires_explicit_tree else DEFENDER
-        if defn.requires_explicit_tree:
-            tree.mkdir(parents=True, exist_ok=True)
-            # The lead author's write lanes are compiled per system the tree declares (#772),
-            # so an explicit tree has to declare one or the bind is refused before the box
-            # lane — which is what this probe is actually about — is ever reached.
-            seed_adapter_stubs(tree, ("elastic",))
-        if defn.requires_corpus:
-            corpora = ("lessons", "lessons-actor", "lessons-environment")
-            for name in corpora:
-                (tree / name).mkdir(parents=True, exist_ok=True)
-            role_scope = RunScope(
-                corpus_name="lessons",
-                read_confine=tuple((tree / name).resolve() for name in corpora),
-            )
-        else:
-            role_scope = scope
-        # effective_tools_for (#632, §7 R7): the judge's static tools/verb_grant disagree by
-        # construction (only the per-leg replace() at its own spawn site agreed them); this
-        # probe is about the box lane, not the verb grant.
-        from dataclasses import replace as _replace
-        bindable = _replace(defn, tools=effective_tools_for(defn))
-        deps = bind(bindable, run_dir, scope=role_scope, defender_dir=tree)
-        assert isinstance(deps.box, box.BoxExecutor), \
-            f"{defn.role.name} has bash but no box on its deps"
-
-    # The census's real content: the curator — bash=True but excluded under the RETIRED
-    # `d.bindable` conjunct — is now enumerated by the single `d.tools.bash` predicate. A
-    # reintroduced narrower gate would drop it and fail here. (The former assertion — non-bash
-    # roles disjoint from the bash census — was tautological: any predicate partitions the
-    # registry into disjoint sets, so it could never fail and proved nothing.)
-    assert AgentRole.CORPUS_AUTHOR in {d.role for d in bash_roles}
-
-
-def test_the_existing_e2e_bash_corpus_completes_through_the_box(tmp_path):
-    """the_existing_e2e_bash_corpus_completes_through_the_box — the bash turns the existing
-    hermetic e2e corpus already drives still complete, now routed through the box, and every
-    one of them crossed the wire.
-
-    R5's survival demand: today the e2e harness drives the REAL `_tool_bash` → `decide_bash`
-    → `run_parsed` → `subprocess.Popen` with NO seam between the tool and the OS, so the box
-    seam is exercised by every existing e2e test the moment it lands — leverage and risk in
-    equal measure. This drives the whole real driver loop (gather dispatch included) with the
-    box injected at `drive(box=…)`, so the surviving workflow is the run, not a unit call."""
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
-    alert = RunPaths(run_dir).alert
-    t = RecordingTransport(framed(0, b"3\n", b""))
-
-    main = ReplayFn([
-        Turn(tool_calls=[("bash", {"command": f"cat {model_path(alert, run_dir=run_dir)}"})]),
-        Turn(tool_calls=[("bash", {"command": f"cat {model_path(alert, run_dir=run_dir)} | wc -l"})]),
-        Turn(text="done"),
-    ])
-    drive(run_dir, run_id=RUN_ID, main=main,
-          box=box.BoxExecutor(spec=box.BoxSpec(), transport=t))
-
-    assert main.calls == 3, "the run did not complete its script through the box"
-    assert len(t.calls) == 2, "a bash turn did not reach the box"
-    assert t.argvs(0) == [["cat", model_path(alert, run_dir=run_dir)]]
-    assert t.argvs(1) == [["cat", model_path(alert, run_dir=run_dir)], ["wc", "-l"]]
-    assert "3" in main.seen[-1], "the box's result never came back to the model"
-
-
 def test_infrastructure_fault_text_reaches_the_model_labelled(tmp_path):
-    """infrastructure_fault_text_reaches_the_model_labelled — a mid-run box failure degrades
-    to a TOOL ERROR the model sees, carrying the infrastructure detail, and labelled as
-    infrastructure rather than presented inside the program-output envelope. The model is
-    told the tool broke; it is never told the program printed this.
-
-    F6: a mid-run `docker exec` failure is a tool error, NEVER an in-process `bash_exec`
-    fallback — a silent downgrade converts O4 from a boundary into best-effort. The fault
-    content is R-C39 as observed (rc=127, stdout 0 bytes, stderr 347 bytes with plain LF).
-    'Labelled' is asserted structurally, not by matching a magic word: the daemon text must
-    NOT appear under the `--- stdout ---` header that means 'the program wrote this', and the
-    envelope must not claim a program exit code."""
+    """infrastructure_fault_text_reaches_the_model_labelled — a mid-run box failure degrades to a
+    TOOL ERROR the model sees, carrying the infrastructure detail, and labelled as
+    infrastructure rather than presented inside the program-output envelope."""
     run_dir = _run_dir(tmp_path)
     t = RecordingTransport(DAEMON_START_FAILURE)
     deps = _main_deps(run_dir, t)

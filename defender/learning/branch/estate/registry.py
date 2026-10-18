@@ -388,31 +388,10 @@ class WorldRegistry(ModuleVerbRegistry):
 
     # -- the grant door -------------------------------------------------------------------------
 
-    def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
-        """The grant decision for a call, recorded as a `refused` row when it denies the call.
-
-        A denied verb never reaches the serve seam, so without this it leaves no row and the
-        sibling reads as never having asked (the mechanical grader's "no row on H"). It is filed
-        like any other refusal, against the params as asked.
-
-        An adapter that cannot load raises out of `decide` and is filed `fault`, matching what
-        the base world records for the same failure, then re-raised untouched — unless the
-        row's write fails, whose `CallRecordWriteFailed` ends the run instead (A12). Every row
-        carries the call's id (`CALL_ID`, set by the query tool before it asked).
-
-        A call no row could carry is refused first (`_refuse_unstorable`), so neither row is
-        ever attempted for it.
-        """
+    def authorize_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """Record a cold grant refusal once, before the callable resolution door."""
         _refuse_unstorable(system, verb, params)
-        try:
-            decision = super().decide_call(system, verb, params)
-        except Exception as failure:
-            _record_beside(self.ledger, ServedCall(
-                system=system, verb=verb, params=dict(params),
-                payload_text=f"{type(failure).__name__}: {failure}", source=FAULT,
-                world_id=self.world.world_id, call_id=CALL_ID.get(),
-            ))
-            raise
+        decision = super().authorize_call(system, verb, params)
         if decision.outcome == DENIED:
             _record_beside(self.ledger, ServedCall(
                 system=system, verb=verb, params=dict(params),
@@ -420,6 +399,19 @@ class WorldRegistry(ModuleVerbRegistry):
                 world_id=self.world.world_id, call_id=CALL_ID.get(),
             ))
         return decision
+
+    def resolve_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """Record a callable loading fault once; runnable calls are recorded by `served`."""
+        _refuse_unstorable(system, verb, params)
+        try:
+            return super().resolve_call(system, verb, params)
+        except Exception as failure:
+            _record_beside(self.ledger, ServedCall(
+                system=system, verb=verb, params=dict(params),
+                payload_text=f"{type(failure).__name__}: {failure}", source=FAULT,
+                world_id=self.world.world_id, call_id=CALL_ID.get(),
+            ))
+            raise
 
     def verbs(self, system: str):
         """Every verb this system declares, wrapped so no body reaches the caller unwrapped.
@@ -679,7 +671,8 @@ _EXAMPLES_PER_SYSTEM = 2
 def _refuse_unstorable(system: str, verb: str, params: Mapping[str, Any]) -> None:
     """Refuse, as the table's own `LedgerError`, a call whose params no ledger row could carry.
 
-    Both doors into the registry (`decide_call`, `served`) ask this before anything is decided,
+    Every call entry (`authorize_call`, `resolve_call`, `served`) asks this before anything is
+    decided,
     served or filed: past them every row is built from params already known to fit, so no
     refused or FAULT row is ever attempted and then dropped. `served` re-raises `LedgerError`
     untouched, where any other exception would be filed as a FAULT row."""

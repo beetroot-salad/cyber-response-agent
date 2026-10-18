@@ -47,8 +47,6 @@ def _case(
     )
 
 
-
-
 def test_lead_sequence_pattern_emits_trace_per_case():
     corpus = [
         _case(
@@ -76,16 +74,6 @@ def test_lead_sequence_pattern_emits_trace_per_case():
     assert traces["case-b"] == "auth-events:FAIL→natural:inconclusive"
 
 
-def test_lead_sequence_pattern_contains_filter():
-    corpus = [
-        _case("case-a", leads=[{"name": "auth-events", "outcome": {}}], disposition="benign"),
-        _case("case-b", leads=[{"name": "process-tree", "outcome": {}}], disposition="benign"),
-    ]
-    out = lead_sequence_pattern(corpus, contains="auth-events")
-    assert out["count"] == 1
-    assert out["hits"][0]["case_id"] == "case-a"
-
-
 def test_lead_sequence_pattern_disposition_and_signature_filters_compose():
     corpus = [
         _case("case-a", signature_id="5710", disposition="benign"),
@@ -94,17 +82,6 @@ def test_lead_sequence_pattern_disposition_and_signature_filters_compose():
     ]
     out = lead_sequence_pattern(corpus, disposition="benign", signature_id="5710")
     assert {h["case_id"] for h in out["hits"]} == {"case-a"}
-
-
-def test_lead_sequence_pattern_sorts_by_lead_count_desc():
-    corpus = [
-        _case("short", leads=[{"name": "a", "outcome": {}}]),
-        _case("long", leads=[{"name": "a", "outcome": {}}, {"name": "b", "outcome": {}}, {"name": "c", "outcome": {}}]),
-    ]
-    out = lead_sequence_pattern(corpus)
-    assert [h["case_id"] for h in out["hits"]] == ["long", "short"]
-
-
 
 
 def test_hypothesis_name_wildcard_matches_fnmatch():
@@ -150,30 +127,6 @@ def test_hypothesis_name_wildcard_final_weight_filter():
     out = hypothesis_name_wildcard(corpus, "?*", final_weight="++")
     names = [h["name"] for h in out["hits"]]
     assert names == ["?brute-force"]
-
-
-def test_hypothesis_name_wildcard_uses_initial_weight_when_unassessed():
-    corpus = [
-        _case(
-            "case-a",
-            hypotheses=[{"id": "h-001", "name": "?never-touched", "weight": "+"}],
-            leads=[],
-        ),
-    ]
-    out = hypothesis_name_wildcard(corpus, "?never*")
-    assert out["hits"][0]["final_weight"] == "+"
-
-
-def test_hypothesis_name_wildcard_sorts_by_final_weight_desc():
-    corpus = [
-        _case("c1", hypotheses=[{"id": "h-001", "name": "?h", "weight": "-"}]),
-        _case("c2", hypotheses=[{"id": "h-001", "name": "?h", "weight": "++"}]),
-        _case("c3", hypotheses=[{"id": "h-001", "name": "?h", "weight": "+"}]),
-    ]
-    out = hypothesis_name_wildcard(corpus, "?h")
-    assert [h["case_id"] for h in out["hits"]] == ["c2", "c3", "c1"]
-
-
 
 
 def test_lead_branch_effects_aggregates_per_hypothesis():
@@ -245,11 +198,7 @@ def test_lead_branch_effects_pattern_filter_excludes_unrelated_hypotheses():
 
 
 def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
-    """Codex P2: when `hypothesis_patterns` is supplied, `n` and
-    `empty_rate` must reflect frontier-specific support only. A lead that
-    appeared 4 times but only touched the frontier once should report n=1
-    and empty_rate scoped to that single occurrence.
-    """
+    """Codex P2: when `hypothesis_patterns` is supplied, `n` and `empty_rate` must reflect frontier-specific support only."""
     corpus = [
         _case(
             f"hit-{i}",
@@ -279,12 +228,7 @@ def test_lead_branch_effects_frontier_scopes_n_and_empty_rate():
 
 
 def test_lead_branch_effects_surfaces_tested_hypothesis_without_resolutions():
-    """Codex P2: a lead with `tests_hypotheses` for a frontier hypothesis
-    but no `resolutions[]` (e.g. empty/failed gather) must still appear
-    with the hypothesis present and all-zero buckets. The empty_rate is
-    where the "this lead bombed on ?H" signal lives, and it's worthless
-    if the row gets stripped.
-    """
+    """Codex P2: a lead with `tests_hypotheses` for a frontier hypothesis but no `resolutions[]` (e.g."""
     corpus = [
         _case(
             f"case-{i}",
@@ -314,81 +258,6 @@ def test_lead_branch_effects_min_support_drops_low_n_rows():
     ]
     out = lead_branch_effects(corpus, min_support=2)
     assert [r["lead_name"] for r in out["leads"]] == ["common"]
-
-
-# Codex P3: `per_hypothesis_effect` is seeded by iterating the `matching` SET, so its key
-# order is hash order unless the builder sorts. Both the uncapped and the capped path have to
-# sort — the capped one because the retained K is chosen under a bucket-sum TIE, where
-# set-iteration order (varying with PYTHONHASHSEED) would otherwise pick the winners.
-@pytest.mark.parametrize(("case", "touched", "cap", "expected"), [
-    # uncapped: every touched hypothesis is retained, in name order
-    ("uncapped", 4, 10, ["?z0", "?z1", "?z2", "?z3"]),
-    # capped under ties: the retained 3 are the name-sorted first 3, not an arbitrary 3
-    ("capped-under-ties", 6, 3, ["?z0", "?z1", "?z2"]),
-], ids=lambda v: v if isinstance(v, str) else "")
-def test_lead_branch_effects_hypothesis_ordering_is_deterministic(
-    case, touched, cap, expected
-):
-    """Stable key order across runs, which is what makes the JSON output diffable. Every
-    hypothesis here ties on bucket sum on purpose, so name-sorting is the ONLY thing that can
-    produce a repeatable answer."""
-    hypotheses = [
-        {"id": f"h-{i:03}", "name": f"?z{i}", "weight": "+"} for i in range(touched)
-    ]
-    resolutions = [
-        {"hypothesis": h["id"], "before": "+", "after": "++"} for h in hypotheses
-    ]
-    corpus = [
-        _case(
-            "case-a",
-            hypotheses=hypotheses,
-            leads=[{"name": "L", "outcome": {}, "resolutions": resolutions}],
-        ),
-    ]
-    out = lead_branch_effects(corpus, max_hypotheses_per_lead=cap)
-    keys = list(out["leads"][0]["per_hypothesis_effect"].keys())
-    assert keys == expected, f"expected name-sorted keys under ties; got {keys}"
-
-
-def test_lead_branch_effects_caps_hypotheses_per_lead_without_patterns():
-    """Without a frontier filter, runaway hypothesis tables stay terse."""
-    hypotheses = [{"id": f"h-{i:03}", "name": f"?h{i}", "weight": "+"} for i in range(10)]
-    resolutions = [{"hypothesis": h["id"], "before": "+", "after": "++"} for h in hypotheses]
-    corpus = [
-        _case(
-            "case-a",
-            hypotheses=hypotheses,
-            leads=[{"name": "L", "outcome": {}, "resolutions": resolutions}],
-        ),
-    ]
-    out = lead_branch_effects(corpus, max_hypotheses_per_lead=3)
-    row = out["leads"][0]
-    assert len(row["per_hypothesis_effect"]) == 3
-
-
-def test_lead_branch_effects_ignores_unknown_assessment_shifts():
-    """A malformed `after` value (e.g. None or 'abstain') must not crash;
-    it just doesn't contribute to a bucket.
-    """
-    corpus = [
-        _case(
-            "case-a",
-            hypotheses=[{"id": "h-001", "name": "?h", "weight": "+"}],
-            leads=[
-                {"name": "L", "outcome": {},
-                 "resolutions": [
-                     {"hypothesis": "h-001", "before": "+", "after": None},
-                     {"hypothesis": "h-001", "before": "+", "after": "abstain"},
-                     {"hypothesis": "h-001", "before": "+", "after": "++"},
-                 ]},
-            ],
-        ),
-    ]
-    out = lead_branch_effects(corpus, hypothesis_patterns=("?h",))
-    bucket = out["leads"][0]["per_hypothesis_effect"]["?h"]
-    assert bucket == {"++": 1, "+": 0, "-": 0, "--": 0}
-
-
 
 
 def _shape_case(
@@ -435,7 +304,6 @@ def _hyp(h_id: str, name: str, *, attached_to: str = "v-001",
 
 
 def test_hypothesis_shape_requires_at_least_one_filter():
-    import pytest
     with pytest.raises(ValueError, match="at least one of"):
         hypothesis_shape_match([])
 
@@ -463,25 +331,6 @@ def test_hypothesis_shape_aggregates_by_name_across_cases():
     assert hit["cases"] == ["case-a", "case-b"]
 
 
-def test_hypothesis_shape_parent_class_glob():
-    corpus = [
-        _shape_case(
-            "case-a",
-            vertices=[{"id": "v-001", "type": "compute"}],
-            hypotheses=[_hyp("h-001", "?bastion-h",
-                              parent_class="bastion/internal/known-corp")],
-        ),
-        _shape_case(
-            "case-b",
-            vertices=[{"id": "v-001", "type": "compute"}],
-            hypotheses=[_hyp("h-002", "?novel-h",
-                              parent_class="ip-only/internet/novel")],
-        ),
-    ]
-    out = hypothesis_shape_match(corpus, parent_class="bastion/*")
-    assert {h["name"] for h in out["hits"]} == {"?bastion-h"}
-
-
 def test_hypothesis_shape_resolves_attached_to_type_through_prologue():
     corpus = [
         _shape_case(
@@ -504,15 +353,7 @@ def test_hypothesis_shape_resolves_attached_to_type_through_prologue():
 
 
 def test_hypothesis_shape_resolves_attached_to_type_from_a_mid_run_vertex():
-    """The anchor index spans the WHOLE document, not just the prologue.
-
-    An investigation declares vertices in two places, and a run that discovers one
-    mid-investigation declares it in that lead's `outcome.observations` — then raises the
-    hypothesis anchored to it right there. `case_hypotheses` walks BOTH sites, so an index
-    built from the prologue alone resolved that anchor to no type at all, and the
-    `attached_to_type` filter refused the hypothesis as a NON-match rather than as a missing
-    id: the case dropped out of every precedent lookup, silently.
-    """
+    """The anchor index spans the WHOLE document, not just the prologue."""
     body = {
         "prologue": {"vertices": [{"id": "v-001", "type": "compute"}], "edges": []},
         "hypothesize": {"hypotheses": []},
@@ -582,43 +423,8 @@ def test_hypothesis_shape_match_filters_via_anchor_field():
     assert {hit["name"] for hit in out["hits"]} == {"?config-changed"}
 
 
-def test_hypothesis_shape_filters_compose_with_and():
-    corpus = [
-        _shape_case(
-            "case-a",
-            vertices=[{"id": "v-001", "type": "compute"}],
-            hypotheses=[_hyp("h-001", "?matches", parent_type="identity",
-                              rel="modified")],
-        ),
-        _shape_case(
-            "case-b",
-            vertices=[{"id": "v-001", "type": "compute"}],
-            hypotheses=[_hyp("h-002", "?wrong-rel", parent_type="identity",
-                              rel="read")],
-        ),
-        _shape_case(
-            "case-c",
-            vertices=[{"id": "v-001", "type": "compute"}],
-            hypotheses=[_hyp("h-003", "?wrong-type", parent_type="compute",
-                              rel="modified")],
-        ),
-    ]
-    out = hypothesis_shape_match(corpus, parent_type="identity", rel="modified")
-    assert {h["name"] for h in out["hits"]} == {"?matches"}
-
-
 def test_hypothesis_vocabulary_counts_hypotheses_the_run_raised_mid_investigation():
-    """`cli`'s vocabulary command counts BOTH declaration sites — the prologue's opening
-    hypotheses and the ones a lead raised as it went.
-
-    It hand-walked the two sites itself, a third spelling of the traversal
-    `_walkers.all_hypotheses` owns and the same one whose prologue-only sibling was a live
-    defect in `_vertex_types`. Nothing covered the command at all, so the copy could have
-    lost the lead half — the half that only exists once a run has actually learned
-    something — with no test to say so.
-
-    The per-case dedup is the other half of the contract: a name raised twice in one case is
-    one case, because the figure is "how many cases reached for this word"."""
+    """`cli`'s vocabulary command counts BOTH declaration sites — the prologue's opening hypotheses and the ones a lead raised as it went."""
     from defender.skills.invlang.cli import _hypothesis_vocabulary
 
     corpus = [

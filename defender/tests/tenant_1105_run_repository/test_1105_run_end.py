@@ -1,22 +1,4 @@
-"""#1105 PR 1 — run end keeps today's order (N-h; ruling 2; 20-demands F-13 (a), auto).
-
-PR 1 adds no timeout and reorders nothing at run end. Today's order (R4-20, re-executed as
-RG-08-a..d at 80888efb) is: the narration cross-check (`run.py:615`), then the ticket record
-when `--update-ticket` (`:621-625`), then the curation enqueue (`:629-634`), then the run page
-(`:636-639`). This test drives the REAL `run.main` through its existing keyword seams
-(`lifecycle=`, `visualize=`, `ticket_writer=`, `enqueue=` — `tests/_spec791.py`'s tail fake for
-the first three, the REAL `run_common.enqueue_curation` wrapped to note its call for the
-fourth) and observes the order; the cross-check, which has no seam, is observed through the
-warning it logs over a tree whose tables disagree with its `investigation.md` (RG-08-a).
-
-A raising step is driven only through a seam whose fault the ledger observed on the real
-`run.main` (RG-08-b: the ticket record raising `OSError(EIO)`; RG-08-c: the enqueue raising
-`OSError(ENOSPC)`; RG-08-d: the page raising `VisualizeFailed`).
-
-GREEN at base 80888efb by design: this pins behaviour PR 1 must not change (O5). It does not
-touch the new package, so `spec-graph calls` reaches it only with `--target defender.run`, and
-its null-stub pass is recorded (class: reuse).
-"""
+"""Run end keeps its order: cross-check, ticket, curation, page."""
 from __future__ import annotations
 
 import errno

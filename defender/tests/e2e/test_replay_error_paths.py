@@ -1,17 +1,5 @@
 """Error-path + edge-case e2e scripts — the driver's OWN error handling and the
-gate-as-feedback recovery loop.
-
-The golden replays (test_replay_skeleton.py) prove the HAPPY path; these prove
-the paths an organic golden never hits, because a well-behaved model doesn't loop
-forever, exhaust every data source, or write invalid invlang. Each drives the
-REAL driver/tools/gate end-to-end; only the model (and, where a data source is
-touched, the adapter subprocess) is faked. `ReplayFn.seen` lets each script
-assert the deny/abort reason bounced back to the model as retry feedback — the
-wiring the pure decide_* unit tests can't observe.
-
-Machinery (ReplayFn/drive/materialize/the model + subprocess fakes) lives in
-`_replay_harness.py`; this module is just the scripts.
-"""
+gate-as-feedback recovery loop."""
 from __future__ import annotations
 
 import re
@@ -66,8 +54,7 @@ def _q(system: str) -> Turn:
 def test_request_limit_writes_partial_trace(tmp_path):
     """Driver terminal path #1 — the request limit. The agent loop never stops on
     its own, so `agent.iter` raises UsageLimitExceeded at DEFAULT_REQUEST_LIMIT.
-    The driver must treat it as an expected terminator (not a crash): catch it,
-    still project the partial trace, and report no output (no End node)."""
+    The driver must treat it as an expected terminator (not a crash): catch it."""
     run_id = "limit"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -87,16 +74,7 @@ def test_request_limit_writes_partial_trace(tmp_path):
 def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
     """Driver terminal path #2 — the run-wide circuit breaker. A nested gather
     keeps hitting connectivity failures (adapter exit 2) across distinct systems;
-    the RUN_FAIL_KILL_LIMIT-th raises RunAborted from circuit_breaker, deep inside
-    the nested gather's capture path. It must propagate up through the gather
-    subagent AND the main agent.iter loop to the driver, which catches it and
-    writes the partial trace — same contract as the request-limit path. (No unit
-    test spans this chain; the breaker unit test stops at record_outcome.)
-
-    Since #611 the capture path is the `query` tool's capability, and `RunAborted` has to
-    survive its catch-all: the broad `except BaseException` that stops a transport fault from
-    unwinding the run is exactly what would swallow the kill switch, because `RunAborted` is a
-    plain `Exception` subclass. This test is what says it does not."""
+    the RUN_FAIL_KILL_LIMIT-th raises RunAborted from circuit_breaker, deep inside"""
     run_id = "kill-switch"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -128,15 +106,7 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
 def test_invlang_deny_bounces_then_recovers(tmp_path):
     """Gate-as-feedback recovery: an investigation.md append that fails invlang
     validation is denied (ModelRetry), the validator's errors come back to the
-    model, and a corrected append then commits. The in-process twin of the old
-    hook's exit-2 → fix → retry loop, proven end-to-end through the driver — the
-    decide_write unit test sees the deny, never the bounce-and-recover.
-
-    #810 added the second half of the feedback: the refusal must also tell the model
-    that NOTHING WAS WRITTEN. Without it the model reads "fix and rewrite" as "your
-    text is on disk, now amend it" and anchors its recovery to a document that never
-    received the block — the measured failure this issue exists for. Asserted here
-    rather than only at the unit, because it is the bounce that has to carry it."""
+    model, and a corrected append then commits. The in-process twin of the old"""
     run_id = "invlang-recover"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     good = (GOLDEN_AB3 / "investigation.md").read_text()
@@ -167,7 +137,10 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     a third `elastic` call IN-GATHER (the _tripped_message gate — a down-message
     return, not a captured query). A SECOND dispatch of the now-tripped system
     short-circuits at the DISPATCH gate: the nested gather is never spawned and the
-    main loop gets the transparent 'system down' summary instead."""
+    main loop gets the transparent 'system down' summary instead.
+
+    #1256 r4: the down gate comes before the lead claim for every down cause, a trip included,
+    so the short-circuited `l-002` writes no lead record (it did before r4)."""
     run_id = "tripped"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -193,15 +166,16 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
     qlines = _own_qlines(run_dir)
     assert len(qlines) == circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     assert (run_dir / "gather_raw" / "l-001.lead.json").is_file()
-    assert (run_dir / "gather_raw" / "l-002.lead.json").is_file()
+    assert not (run_dir / "gather_raw" / "l-002.lead.json").exists(), (
+        "the dispatch to the tripped system claimed l-002 before its down gate refused it "
+        "(#1256 r4: the down gate comes before the lead claim)")
     assert "DOWN for this run" in main.seen[-1]
 
 
 def test_gather_lead_guards_bounce_then_recover(tmp_path):
     """Gather dispatch guards as retry feedback: an invalid lead_id and a reused
     lead_id each bounce the main loop (ModelRetry) WITHOUT spawning the nested
-    agent; a fresh, well-formed lead then dispatches normally. No data source is
-    touched — the nested gather returns a text summary immediately."""
+    agent; a fresh, well-formed lead then dispatches normally. No data source is"""
     run_id = "lead-guards"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -230,20 +204,7 @@ def test_gather_lead_guards_bounce_then_recover(tmp_path):
 
 def test_edit_file_guards_bounce_then_recover(tmp_path):
     """edit_file's create-only / not-found / non-unique guards as retry feedback: each
-    bad edit raises ModelRetry with its own reason; a unique edit then commits.
-
-    #774/R1: report.md left MAIN's write allow-list entirely (the close tool is now its
-    only writer), so this generic edit_file-guard probe — which never cared about the
-    artifact's schema, only about the create-only/not-found/non-unique mechanics — now
-    drives investigation.md.
-
-    #810 dropped it a level, from a driven replay to the handler. `edit_file` is no longer
-    registered on MAIN, so there is no main turn that can call it — but the verb still
-    ships for the curator and lead-author roles, whose corpora it edits, and these three
-    guards are its whole contract and were tested NOWHERE else. Moving the probe keeps
-    them covered; deleting it with the registration would have retired a live verb's only
-    test. The write allowlist is unchanged (`_main_write_shape`), so MAIN's bound policy
-    is still a valid stand-in for exercising the handler."""
+    bad edit raises ModelRetry with its own reason; a unique edit then commits."""
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     notes = run_dir / "investigation.md"
     deps = bind(MAIN_DEF, run_dir,

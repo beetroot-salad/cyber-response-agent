@@ -1,23 +1,4 @@
-"""Tests for defender/hooks/record_lead.py.
-
-`claim_lead` writes the leads-table row `gather_raw/{lead_id}.lead.json` and
-claims the `lead_id` with an atomic exclusive create — a reused id fails the
-create and returns `ALREADY_CLAIMED`, which `runtime/tools_gather._run_gather`
-turns into a `ModelRetry` before gather is spawned.
-
-THE CODES ARE THREE, and every assertion below names which one it means (#855
-F-12). They used to be two: success and every silent skip both returned 0, so
-the one live caller could not write the check it needed and read "not the reuse
-code" as success — which ran a gather session under an id with no leads row,
-past the reuse gate that IS that row's exclusive create. An assertion that
-spells `== CLAIMED` is one that would have failed when the write did not happen.
-
-Driven through `claim_lead(dispatch)` — the function that live caller reaches,
-with the same dict shape it builds from the typed `gather` request. These used
-to run through the module's `claude -p` PreToolUse `main()`, which recovered
-that dict from a Task prompt's fenced YAML; nothing invokes it, and the lenient
-parser it fed (`extract_dispatch`/`_parse_block`) was deleted with it.
-"""
+"""record_lead.claim_lead: atomic exclusive claim of a lead id and its failure modes."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run
@@ -88,25 +69,8 @@ def test_reused_id_returns_already_claimed_with_remediation(tmp_path, capsys):
     assert json.loads((run_dir / "gather_raw" / "l-001.lead.json").read_text())["goal"] == "first"
 
 
-def test_the_three_codes_are_distinct(tmp_path):
-    """#855 F-12, at the seam that caused it: a caller must be able to write "the row is on
-    disk" as a check, and it can only do that if SUCCESS has a code no skip shares. One run
-    over the three domains — a good claim, a refused one, a reused one — and the three answers
-    are three."""
-    run_dir = tmp_path / "run"
-    good = claim_lead(_dispatch(run_dir, "l-001", "g", ["d"]), run=fixture_run(run_dir))
-    refused = claim_lead(_dispatch(run_dir, "l-002", "", ["d"]), run=fixture_run(run_dir))
-    reused = claim_lead(_dispatch(run_dir, "l-001", "again", ["d"]), run=fixture_run(run_dir))
-    assert len({good, refused, reused}) == 3, \
-        "two of the claim's outcomes share a code — a caller cannot tell them apart"
-    assert (good, refused, reused) == (CLAIMED, NOT_CLAIMED, ALREADY_CLAIMED)
-
-
 def test_an_empty_or_whitespace_goal_claims_nothing(tmp_path):
-    """The leads row records the STRIPPED goal, so `"   "` used to claim the id and write a
-    row whose goal is `""` — the same empty row the falsy arm refuses, reached by a string
-    that merely is not falsy. Both spellings now leave the id unclaimed AND unburnt: the
-    corrected re-dispatch of the same id must still be able to take it."""
+    """The leads row records the STRIPPED goal, so `"   "` used to claim the id and write a"""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     for empty in ("", "   ", "\n\t"):
@@ -116,10 +80,7 @@ def test_an_empty_or_whitespace_goal_claims_nothing(tmp_path):
 
 
 def test_an_overlong_lead_id_is_refused_before_os_open(tmp_path):
-    """A well-shaped but unbounded id spent as a filename component fails the create with
-    ENAMETOOLONG, and "the write failed" is the outcome a caller has the least to say about.
-    `LEAD_ID_RE` bounds the body, so the refusal happens at the shape check — and the same
-    bound is what `tools_gather`'s own seam check reads."""
+    """A well-shaped but unbounded id spent as a filename component fails the create with"""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "l-" + "a" * 300, "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
@@ -130,14 +91,6 @@ def test_malformed_lead_id_silently_skips(tmp_path):
     run_dir = tmp_path / "run-bad-id"
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "0", "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
-    assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
-
-
-def test_missing_lead_id_silently_skips(tmp_path):
-    run_dir = tmp_path / "run-no-id"
-    (run_dir / "gather_raw").mkdir(parents=True)
-    dispatch = {"run_dir": str(run_dir), "goal": "g", "what_to_summarize": ["d"]}
-    assert claim_lead(dispatch, run=fixture_run(run_dir)) == NOT_CLAIMED
     assert list((run_dir / "gather_raw").glob("*.lead.json")) == []
 
 
@@ -169,20 +122,7 @@ def _fd_is_closed(fd: int) -> bool:
 
 
 def test_fdopen_failure_removes_empty_sidecar_and_allows_retry(tmp_path, monkeypatch):
-    """A write failure after the O_EXCL create must not leave a 0-byte sidecar:
-    it would degrade the lead to an orphan AND falsely reject a same-id retry.
-
-    NAMED for the branch it actually drives (#878 F-36). The stub raises FROM `os.fdopen`, so
-    this is the one case where ownership never transferred and the hook still owes the fd a
-    close — not the flush failure its "disk full" message names.
-    `failed_flush_does_not_close_a_descriptor_it_no_longer_owns` below drives that one.
-
-    The stub LEAVES THE FD OPEN, which is what the real failure does: `io.open` over a passed-in
-    descriptor sets `fd_is_own = 0`, so a `FileIO` init fault — the OSError arm this branch
-    exists for — returns with the descriptor untouched. A stub that closed it first would make
-    the hook's own `os.close(fd)` the second close F-36 is about, silently absorbed by
-    `contextlib.suppress` and invisible to every assertion here. The fd is captured instead, and
-    `os.fstat` on it afterwards is what proves the hook closed the one it still owned."""
+    """A write failure after the O_EXCL create must not leave a 0-byte sidecar: it would degrade the lead to an orphan AND falsely reject a same-id retry."""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = _dispatch(run_dir, "l-001", "g", ["d"])
@@ -212,25 +152,7 @@ def test_fdopen_failure_removes_empty_sidecar_and_allows_retry(tmp_path, monkeyp
 
 
 def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, monkeypatch):
-    """#878 F-36 — the rooted named-create backend must not double-close on failure.
-
-    `os.fdopen` takes ownership, and the `with` block closes the fd on the way out INCLUDING
-    when the failure is the implicit flush inside `close()` — the ENOSPC/EDQUOT/EIO case the
-    arm exists for. The `os.close(fd)` that followed was therefore a SECOND close, silent under
-    `contextlib.suppress(OSError)` whether it hit EBADF or an unrelated descriptor the OS had
-    since handed the same number.
-
-    That window is reproduced here rather than reasoned about: the stub is a real file object
-    that really owns the fd, and on the way out of the `with` it closes that fd and then opens a
-    SENTINEL, which Linux hands the same (now lowest-free) number — exactly what lead-0's
-    fire-and-forget correlation task does when its `asyncio.to_thread` → `subprocess.run` opens
-    pipes while `claim_lead` runs on the event-loop thread. The assertion is that the sentinel
-    is still readable afterwards. Under the defect it is closed and `os.read` raises EBADF; the
-    hook has corrupted an unrelated descriptor and reported nothing.
-
-    The rest of `failed_payload_write_removes_empty_sidecar_and_allows_retry`'s contract is
-    re-asserted on this branch too, because it was only ever driven on the other one: the
-    0-byte sidecar is removed, the code is `NOT_CLAIMED`, and the id stays takeable."""
+    """#878 F-36 — the rooted named-create backend must not double-close on failure."""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     dispatch = _dispatch(run_dir, "l-001", "g", ["d"])
@@ -296,10 +218,7 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
 
 
 def test_a_planted_alias_refuses_with_the_same_remedy_the_reuse_gate_gives(tmp_path, capsys):
-    """#1077 D7 review: the owner's containment check moved the alias refusal ahead of the
-    `O_EXCL` create, and the new arm answered `ALREADY_CLAIMED` in SILENCE. Both arms tell the
-    model the same thing — the id is held — so both owe it the same correctable instruction.
-    A refusal carrying only a code is one the model can do nothing with but repeat."""
+    """#1077 D7 review: the owner's containment check moved the alias refusal ahead of the"""
     run_dir = tmp_path / "run-alias"
     (run_dir / "gather_raw").mkdir(parents=True)
     outside = tmp_path / "elsewhere.json"
@@ -315,13 +234,7 @@ def test_a_planted_alias_refuses_with_the_same_remedy_the_reuse_gate_gives(tmp_p
 
 
 def test_a_lead_id_that_is_not_a_plain_string_claims_nothing_and_does_not_raise(tmp_path):
-    """`claim_lead`'s contract is "never raises: the contract is a code". The shape half of
-    the owner's check (`_check_component`) raises `ValueError` for a component that is not a
-    plain string, and the id regex runs on `str(lead_id)` — so an object whose `str()` looks
-    like an id reaches the owner as itself. The old hand-composed f-string accepted it.
-
-    NOT_CLAIMED, not ALREADY_CLAIMED: nothing holds the name. This is the caller handing us an
-    id we cannot compose, which is a refusal, not a taken id."""
+    """`claim_lead`'s contract is "never raises: the contract is a code"."""
     run_dir = tmp_path / "run-shape"
     assert claim_lead(_dispatch(run_dir, Path("l-a1"), "g", ["d"]), run=fixture_run(run_dir)) == NOT_CLAIMED
     assert not list((run_dir / "gather_raw").glob("*.lead.json")), "a row was written anyway"

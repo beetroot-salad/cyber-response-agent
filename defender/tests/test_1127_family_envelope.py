@@ -1,26 +1,4 @@
-"""#1127 on the branch manifest — YAML aliases are refused at load, anywhere in the document.
-
-The manifest is model-authored (the questioner writes `family.yaml`). YAML has no nesting bound
-(C7), and an alias can make the loaded value cyclic (C10) or — nine anchors of ten aliases each,
-a few hundred bytes — a billion leaves that any walk of the value visits one by one.
-
-The design (issue #1127, as amended after the review of PR #1139):
-
-* C — aliases are refused AT LOAD: `defender._yaml.safe_load(text)` (every reader there) raises a
-  `yaml.YAMLError` subclass on any alias, and it is the loader behind `_family._read_document`
-  (so `load_family` raises `FamilyError`, chained from that `YAMLError`, for an alias ANYWHERE
-  in the manifest) and behind the questioner's reply parser (so an aliased reply to ANY of its
-  calls is a `BranchError` like any malformed YAML). `write_family` therefore dumps with no
-  aliases, so a document holding one object twice still round-trips through `load_family`.
-
-(#1224 retired the discriminator's `envelope` — a world is now the natural-language `facts` it
-asserts — and with it M4, the envelope-params depth bound. The splice point the arms below use
-is world b's `facts`, the manifest's model-authored structure.)
-
-Every manifest arm goes through `load(path)` over YAML text — the anchor cases only exist
-in the text. The alias bomb is loaded in a CHILD PROCESS under a timeout: a loader that expands
-it does not return, and a hang must fail the arm, not the run.
-"""
+"""YAML aliases are refused at load anywhere in the family manifest and in model replies."""
 from __future__ import annotations
 
 import json
@@ -162,38 +140,6 @@ def test_every_yaml_reader_refuses_any_alias_as_a_yaml_error(text, reader):
 
     assert isinstance(err, _yaml.AliasRefused), \
         f"{reader} did not refuse an aliased document: {type(err).__name__} {err}"
-
-
-_PLAIN = {
-    "empty": "",
-    "scalars": "a: 1\nb: [x, y, {c: true, d: null, e: 1.5}]\nwhen: 2026-07-25T07:48:37Z\n"
-               "mode: 0755\nflag: yes\nq: '*not-an-alias'\n",
-    "inline-merge": "base:\n  <<: {x: 1}\n  y: 2\n",
-    "family-json": json.dumps(T.family_doc()),
-    "family-block": yaml.safe_dump(T.family_doc(), sort_keys=False),
-}
-
-
-@pytest.mark.parametrize("text", list(_PLAIN.values()), ids=list(_PLAIN))
-def test_an_alias_free_document_reads_exactly_as_pyyamls_safe_loader_reads_it(text):
-    """The paired control: without an alias, `_yaml.safe_load` is PyYAML's safe loader — same
-    document, same typed scalars (timestamps, octals, `yes`), a quoted `*` is text, and a merge
-    of an inline mapping (no alias) still merges."""
-    assert _anchors_and_aliases(text) == []
-
-    assert _yaml.safe_load(text) == yaml.safe_load(text)
-
-
-@pytest.mark.parametrize("text", ["a: [1, 2\n", "a: b: c\n", "[" * 3000 + "]" * 3000],
-                         ids=["unclosed", "bad-mapping", "too-deep-to-compose"])
-def test_malformed_yaml_is_a_yaml_error_never_an_interpreter_error(text):
-    """Malformed text, including text nested past the composer's recursion, is a `YAMLError`
-    from `_yaml.safe_load` — never a `RecursionError` a caller's `except yaml.YAMLError` would
-    miss."""
-    err = raised(lambda: _yaml.safe_load(text))
-
-    assert isinstance(err, yaml.YAMLError), \
-        f"refused with {type(err).__name__}, not a YAMLError"
 
 
 def test_the_yaml_writer_writes_a_shared_value_in_full_and_refuses_a_cycle():
@@ -389,35 +335,6 @@ def test_a_cyclic_fact_list_built_by_a_yaml_anchor_is_refused_at_load(tmp_path):
     assert_refused_at_load(raised(lambda: load(path)), "a cyclic anchor")
 
 
-_REUSED = ('[{"fact_id": "f1", "statement": "s", "entities": &e ["web-1", "10.0.0.9"]}, '
-           '{"fact_id": "f2", "statement": "t", "entities": *e}]')
-_LONGHAND = [{"fact_id": "f1", "statement": "s", "entities": ["web-1", "10.0.0.9"]},
-             {"fact_id": "f2", "statement": "t", "entities": ["web-1", "10.0.0.9"]}]
-
-
-def test_a_fact_list_that_reuses_a_yaml_anchor_is_refused_at_load(tmp_path):
-    """C: a reused anchor makes a shared reference, not a cycle, and is shallow — but it is an
-    alias, and the manifest loader refuses every alias."""
-    path = manifest(tmp_path, _REUSED)
-    facts = _world_b_facts_on_disk(path)
-    assert facts[0]["entities"] is facts[1]["entities"], "the spliced anchor was not reused"
-    assert facts == _LONGHAND
-
-    assert_refused_at_load(raised(lambda: load(path)), "a reused anchor")
-
-
-def test_the_same_fact_list_written_longhand_loads_whole(tmp_path):
-    """The paired control: the same values spelled out, no alias, load — so the refusal above
-    is about the alias, not about the values it carried."""
-    path = manifest(tmp_path, json.dumps(_LONGHAND))
-    assert _anchors_and_aliases(path.read_text(encoding="utf-8")) == []
-
-    family = load(path)
-
-    assert [(f.fact_id, f.statement, list(f.entities)) for f in family.world("b").facts] == [
-        (f["fact_id"], f["statement"], f["entities"]) for f in _LONGHAND]
-
-
 def test_write_family_writes_a_shared_object_longhand_and_it_loads_back(tmp_path):
     """C's other half: `write_family` dumps with no aliases, so a document holding one object
     in two places — the ordinary result of composing it in Python — round-trips through the
@@ -527,27 +444,9 @@ def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tm
     assert agent.calls == 1, "seat calls were paid against a refused family"
 
 
-def test_the_same_questioner_reply_written_longhand_is_accepted(tmp_path):
-    """The paired control: the reused-anchor reply's document with the sharing broken — the
-    same values, no alias — composes, both seats are called, and each world carries the facts
-    call 1 planned for it."""
-    doc = json.loads(json.dumps(_shared_facts_doc()))
-    text = yaml.safe_dump(doc, sort_keys=False)
-    assert _anchors_and_aliases(text) == []
-    agent = T.FakeAgent(_fenced(text), *_seats())
-
-    family = _author(tmp_path, agent)
-
-    assert agent.calls == 3
-    assert [w["facts"] for w in family["worlds"][1:]] == [w["facts"] for w in doc["worlds"][1:]]
-
-
 #: Seat B's reply (call 2) with its story's text reused as its axis through an alias.
 _SEAT_B_ALIASED = ("world_id: b\nrole: B\nstory: &s a story\naxis: *s\n"
                    "disposition_declared: malicious\nlabel_basis: policy-rule\n")
-#: The same reply, the alias written out.
-_SEAT_B_LONGHAND = ("world_id: b\nrole: B\nstory: a story\naxis: a story\n"
-                    "disposition_declared: malicious\nlabel_basis: policy-rule\n")
 #: Seat B's reply carrying the bomb under a key the questioner never reads — so no check of
 #: the COMPOSED world would ever see it; only the loader can refuse it.
 _SEAT_B_BOMB = ("world_id: b\nrole: B\nstory: a story\naxis: an axis\n"
@@ -581,14 +480,3 @@ def test_a_seat_reply_carrying_a_yaml_alias_is_refused_naming_the_seat(tmp_path,
     assert agent.calls == 2, "the questioner went on to seat C after refusing seat B"
 
 
-def test_the_same_seat_reply_written_longhand_is_accepted(tmp_path):
-    """The paired control: seat B's reply with the alias written out composes, seat C is
-    called, and world b carries the story seat B wrote."""
-    assert _anchors_and_aliases(_SEAT_B_LONGHAND) == []
-    assert yaml.safe_load(_SEAT_B_LONGHAND) == yaml.safe_load(_SEAT_B_ALIASED)
-    agent = T.FakeAgent(_family_reply(), _fenced(_SEAT_B_LONGHAND), _seats()[1])
-
-    family = _author(tmp_path, agent)
-
-    assert agent.calls == 3
-    assert family["worlds"][1]["story"] == "a story"

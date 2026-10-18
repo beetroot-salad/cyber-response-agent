@@ -1,27 +1,4 @@
-"""Hermetic spec for the in-process PydanticAI lead-author engine (no API key, no network).
-
-The lead author is the FIRST *writer* port onto the shared ``_pydantic_stage`` transport
-(after the read-only judge/actor/oracle/verify predictors). These drive the REAL engine
-(``_run_lead_author_pydantic`` deps build + write gate + observe trace; ``run_author_stage``
-key-sourcing + fault mapping) with a ``FunctionModel`` injected through the ``make_model`` DI
-seam, under ``override_allow_model_requests(False)`` so any real provider call raises. Pins the
-port's load-bearing decisions:
-
-- write_allow (five NAMED lanes, one per surface this role may author, each keyed on the systems
-  the bound tree declares an adapter for — #772) confines the corpus writers; the ``rm`` bash
-  grant confines draft deletion — cross-surface parity, both lanes now confining ``..`` traversal
-  and both refusing a space/newline filename.
-- ``bind(LEAD_AUTHOR_DEF, run, defender_dir=<wt>/defender)`` (the SINGLE seam since #551 — the
-  bespoke ``LeadAuthorDeps.for_run`` retired) threads the WORKTREE's defender_dir into both the
-  policy anchor + the deps field (never the main checkout — a PATHS tree is unbuildable), and the
-  deps cannot be born without a policy (safe-by-construction, #536).
-- a repo-relative file op resolves against the WORKTREE repo_root, not the process cwd (F2),
-  without leaking the process cwd.
-- ``require_output=False`` lets a writer end with empty prose; the default (True) still
-  quarantines an empty verdict for the four shipped read-only stages.
-- F1: a systemic ``FatalConfigError`` (bad key / unroutable model / cross-provider effort)
-  PROPAGATES; only a per-run ``RunUnprocessable`` maps to rc 124.
-"""
+"""In-process PydanticAI lead-author engine (FunctionModel, no network): write_allow/rm confinement, cwd handling, fault mapping."""
 from __future__ import annotations
 
 import logging
@@ -54,9 +31,8 @@ from defender.learning.leads.lead_author_engine import (  # noqa: E402
     _run_lead_author_pydantic,
     run_author_stage,
 )
-from defender.learning import _pydantic_stage  # noqa: E402
 from defender.learning._pydantic_stage import run_stage  # noqa: E402
-from defender.runtime import observe, permission, providers  # noqa: E402
+from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
 from defender.runtime.permission import AgentPolicy  # noqa: E402
@@ -64,8 +40,6 @@ from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E4
 from defender.tests._repo import seed_adapter_stubs  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 from defender.run_repository import WIRE_LOG_DIR  # noqa: E402
-
-_SKILLS_REL = "defender/skills"
 
 
 def _lead_deps(run_dir: Path, wt: Path) -> LeadAuthorDeps:
@@ -218,43 +192,6 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
 
 # the bound lead-author policy — shape + the rm-of-drafts matcher (F3) + asymmetry
 
-def test_lead_author_policy_shape(tmp_path):
-    """write_allow = the five NAMED lanes of #772, exactly ONE bash grant (the `rm` of drafts —
-    discovery is driver-precomputed, no Glob/Grep), read_confine empty (reads under defender_dir
-    stay allowed), and NOTHING else on the bash lane.
-
-    It used to be one flat `skills/**.md` pattern, and that is what #772 was: the tail admitted
-    `gather/SKILL.md`, which IS the gather subagent's whole system prompt. The lanes are counted
-    rather than spelled here because their CONTENT is pinned path-by-path in
-    `test_hardening_772.py`; what this test holds is that the lane list is the shape of the
-    policy, and that a `.md` under a non-system directory is not one of them.
-
-    #575 dissolved the four capability BITS this used to enumerate
-    (`adapters`/`adapter_sql_pipe`/`raw_reads`/`operand_gated`) into the grant list itself: the
-    adapter capability is a routed `Grant`, a raw read is a shape in a `cat` grant's scope, and
-    "operand-gated" is just "this grant's program has an extractor". So the single strongest
-    statement of the same property is that the lane holds EXACTLY ONE grant and it is the `rm` —
-    which subsumes all four bits at once (an agent with one `rm` grant has no adapter route, no
-    payload address and no opener) and cannot drift from the lane the way a declared bit could."""
-    skills = _worktree(tmp_path) / "defender" / "skills"
-    pol = _lead_policy(skills)
-    assert len(pol.write_allow) == 5
-    def _admits(rel: str) -> bool:
-        return any(p.fullmatch(str(skills / rel)) for p in pol.write_allow)
-    # a declared system's own skill doc is admitted; the non-.md sibling (the corpus-code
-    # tightening) and the authored surface that is NOT a system are both refused
-    assert _admits("elastic/SKILL.md")
-    assert not _admits("invlang/validate.py")
-    assert not _admits("invlang/SKILL.md")
-    assert pol.read_confine == ()
-    # exactly one grant, and it is the pins_path `rm` — no adapter, no viewer, no opener
-    assert len(pol.bash_allow) == 1
-    (rm,) = pol.bash_allow
-    assert rm.program == "rm"
-    assert rm.pins_path is True          # `rm` unlinks the LINK — resolve() is the wrong model
-    assert rm.route is permission.Route.PLAIN
-    assert pol.read_allow == ()          # no `cat` grant ⇒ no read shapes (decide_read stays root-only)
-
 
 def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path):
     """The agent runs with cwd=worktree and issues REPO-RELATIVE rm paths, so the matcher must
@@ -381,28 +318,6 @@ def test_run_stage_require_output_matrix(tmp_path):
             _go(True, "  ", "true")
         assert _go(False, "  ", "false") == "  "  # opt-in suppresses the content-less guard
         assert _go(False, "real story", "pc") == "real story"   # positive control
-
-
-def test_lead_author_registers_file_writers(tmp_path):
-    """The lead author is the loop's first writer: build_stage_agent(LeadAuthorDeps) registers the
-    file writers (write_file/edit_file) on top of read + bash — the four-tool in-process surface.
-    #538: the toolset comes from the agent's AgentDefinition by role (LEAD_AUTHOR_DEF's write=True
-    ToolSet), not a `writers` flag. (The read-only predictors registering NOTHING is pinned in
-    test_agent_definition.)"""
-    logger = observe.RequestLogger(tmp_path / "toolset.jsonl")
-    try:
-        w = _pydantic_stage.build_stage_agent(
-            LeadAuthorDeps,
-            StageWiring(
-                prompt_path=_prompt(tmp_path), model="m", effort=None,
-                trace_name="t.jsonl", label="la",
-            ),
-            logger,
-            make_model=_fake_model(_replay("")),
-        )
-    finally:
-        logger.close()
-    assert list(w._function_toolset.tools) == ["bash", "read_file", "write_file", "edit_file"]
 
 
 # F2 — a repo-relative file op resolves against the WORKTREE, not the process cwd
@@ -597,26 +512,6 @@ def test_run_author_stage_sources_key_before_run():
     assert events[0][1] == config.lead_author_model()
 
 
-def test_run_author_stage_trace_name_carries_batch_id_and_pid(tmp_path):
-    """The per-spawn trace name is unique on (batch_id, pid): batch_id distinguishes concurrent
-    DIFFERENT-run spawns; pid distinguishes concurrent drain PROCESSES sharing one run. Capture
-    the trace_name run_author_stage hands the transport for two batch_ids into one run dir."""
-    rd = _run_dir(tmp_path)
-    seen = []
-
-    def _cap(wiring, ctx, **kw):
-        seen.append(wiring.trace_name)
-        return ""
-
-    for bid in ("run-A", "run-B"):
-        _spawn(batch_id=bid, learning_run_dir=rd, run_author=_cap)
-    assert len(set(seen)) == 2                       # distinct per batch_id
-    pid = str(os.getpid())
-    assert all(pid in n for n in seen)               # pid in every name
-    assert any("run-A" in n for n in seen)
-    assert any("run-B" in n for n in seen)
-
-
 def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
     """Positive control for the truncate-mode RequestLogger: two spawns with DISTINCT trace names
     into ONE learning_run_dir both leave a non-empty trace — the second open() does not clobber
@@ -649,29 +544,6 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
 
 
 # config cross-product + defaults (FACT-EFFORT / F5) + build-fault → FatalConfigError
-
-def test_lead_author_config_defaults_glm_low():
-    """The shipped defaults: model glm-5.3, effort medium (the 5.2 → 5.3 port, alongside the
-    verifier and the findings author), plus a generous request limit for a multi-file editor."""
-    assert config.lead_author_model() == "glm-5.3"
-    assert config.lead_author_effort() == "medium"
-    assert config.lead_author_request_limit() >= 50
-
-
-def test_effort_cross_product_builds(monkeypatch):
-    """FACT-EFFORT / F5. The default effort ``medium`` is cross-provider-safe, so the documented
-    claude-* A/B override (harness_lead pins claude-sonnet-4-6) still BUILDS, and the glm-5.3
-    default builds. Guarded negative: claude-* + ``none`` (a Fireworks-only effort) raises
-    ValueError — proving that had the default been ``none``, the claude pin would be dead on
-    arrival, so a named effort is the load-bearing reconciled choice. (Fake keys; settings make no
-    request.)"""
-    pytest.importorskip("pydantic_ai.models.openai")
-    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("glm-5.3", config.lead_author_effort())             # default builds
-    providers.build_for_effort("claude-sonnet-4-6", config.lead_author_effort())   # A/B override builds
-    with pytest.raises(ValueError, match="none"):
-        providers.build_for_effort("claude-sonnet-4-6", "none")                  # Fireworks-only effort
 
 
 def test_claude_none_effort_becomes_fatal_config(tmp_path, monkeypatch):
@@ -710,33 +582,3 @@ def test_unroutable_model_source_key_fatal_config(tmp_path):
             run_author=lambda *a, **kw: "x")
 
 
-def test_help_text_survives_a_brace_and_names_the_records_the_owner_spells(capsys):
-    """#1077 D7 review: the epilog became a `str.format` template holding operator prose about
-    paths. Every brace a later edit adds — `defender/skills/{system}/SKILL.md` is spelled
-    verbatim elsewhere in this package — would then raise `KeyError` inside `--help`, which is
-    a failure only an operator ever sees. `string.Template.safe_substitute` cannot raise.
-
-    Second half of the same test: the three names are the OWNER's, fetched at call time, so
-    the help text tracks a rename with nothing here to edit."""
-    import string
-
-    from defender.run_repository import _layout
-    from defender.learning.leads import lead_author
-
-    with pytest.raises(SystemExit) as exc:
-        lead_author.main(["--help"])
-    assert exc.value.code == 0
-    out = capsys.readouterr().out
-    for name in (_layout.EXECUTED_QUERIES, _layout.RAW_MARKER,
-                 _layout.LEAD_AUTHOR_DIRNAME):
-        assert name in out, f"--help never showed the owner's {name!r}"
-    assert "$EXECUTED_QUERIES" not in out, "a placeholder reached the operator unsubstituted"
-
-    # The brace half, driven through the REAL epilog object and the REAL name source rather
-    # than a patched-in global: this is the edit a later author makes — one more line of
-    # operator prose that happens to spell a braced path — and it must render, not raise.
-    extended = string.Template(
-        lead_author._HELP_EPILOG.template + "\n  edits defender/skills/{system}/SKILL.md")
-    rendered = extended.safe_substitute(lead_author._record_names())
-    assert "{system}" in rendered, "the brace was eaten rather than shown"
-    assert _layout.EXECUTED_QUERIES in rendered

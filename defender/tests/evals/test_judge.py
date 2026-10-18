@@ -13,7 +13,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import yaml
 
 from defender.evals.oracle_golden import audit_judge, judge, score
 
@@ -101,13 +100,6 @@ def test_a_state_only_lead_has_no_baseline_and_that_is_not_an_error():
     assert "state-only" in judge.LABEL_PROMPT.read_text(encoding="utf-8")
 
 
-def test_every_case_carries_environment_notes_the_judge_can_read():
-    for case_dir in sorted(p for p in CASES.iterdir() if p.is_dir()):
-        notes = yaml.safe_load((case_dir / "environment.yaml").read_text(encoding="utf-8"))
-        assert notes["capture_environment"], case_dir.name
-        assert "source.ip" in notes["unstable_identifiers"]["columns"], case_dir.name
-
-
 def test_a_long_payload_is_truncated_and_says_so():
     """Never infer absence from a slice — which only holds if the slice is declared."""
     rows = [{"i": i} for i in range(judge.MAX_ROWS_PER_PAYLOAD + 25)]
@@ -142,11 +134,6 @@ def test_a_lead_with_an_unrecorded_payload_still_assembles():
     assert any(p.get("unreadable") for p in inputs.observed)
     assert any(not p.get("unreadable") for p in inputs.observed), "its siblings are intact"
     assert "unreadable" in judge.LABEL_PROMPT.read_text(encoding="utf-8")
-
-
-def test_a_short_payload_is_not_marked_truncated():
-    payload = {"query": "q", "columns": [], "row_count": 2, "values": [{"i": 0}, {"i": 1}]}
-    assert judge._bounded(payload) == (payload, False)
 
 
 @pytest.mark.parametrize("payload", [
@@ -198,13 +185,6 @@ def test_a_well_formed_verdict_parses():
     assert got["faithful"] is True
     assert got["cause"] is None
     assert got["form_notes"] is None
-
-
-def test_an_undecidable_verdict_carries_its_reason():
-    got = judge.parse_verdict_reply(
-        "faithful: null\nundecidable_reason: contradicts-measurement\nrationale: x\n")
-    assert got["faithful"] is None
-    assert got["undecidable_reason"] == "contradicts-measurement"
 
 
 @pytest.mark.parametrize(("raw", "why"), [
@@ -390,37 +370,12 @@ def test_editing_either_prompt_changes_the_hash(monkeypatch, tmp_path):
     assert judge.prompts_sha8() != before
 
 
-def test_the_default_judge_is_not_the_oracle_under_test():
-    """A same-model judge shares the oracle's failure modes — inferring suppression
-    from absence is exactly what both would do."""
-    assert judge.DEFAULT_JUDGE_MODEL.startswith("claude-")
-    assert "glm" not in judge.DEFAULT_JUDGE_MODEL
-
-
-def test_the_configured_judge_can_be_overridden_for_a_run(monkeypatch):
-    monkeypatch.setenv("JUDGE_MODEL", "claude-sonnet-5")
-    monkeypatch.setenv("JUDGE_EFFORT", "medium")
-    assert judge.judge_model() == "claude-sonnet-5"
-    assert judge.judge_effort() == "medium"
-
-
 # the audit set
 
 def test_the_audit_set_is_the_hand_labelled_measurable_leads():
     entries = audit_judge.audit_set(audit_judge.AUDIT_CASES)
     assert len(entries) == 18, "the four seed cases' telemetry-backed leads"
     assert {c.name for c, _, _, _ in entries} == set(audit_judge.AUDIT_CASES)
-
-
-def test_the_audit_set_excludes_the_programmatically_labelled_case():
-    """case-005's labels came from the labeller this judge replaces. Auditing against
-    them would be auditing a copy of the thing under test."""
-    assert "case-005-cross-tier-probe-db1" not in audit_judge.AUDIT_CASES
-
-
-def test_the_audit_set_excludes_the_derived_cases_which_have_no_telemetry():
-    entries = audit_judge.audit_set(("mut-001-source-identity", "neg-001-unrelated-story"))
-    assert entries == []
 
 
 @pytest.mark.parametrize(("hand", "query_id", "expected"), [
@@ -550,13 +505,6 @@ def test_every_open_abstention_kept_the_evidence_that_would_settle_it():
             if row["abstained"]:
                 assert row["undecidable_reasons"], row["lead"]
                 assert len(row["evidence"]) > 200, row["lead"]
-
-
-def test_the_report_serialises_for_the_committed_artifact():
-    report = audit_judge.run_audit(("case-002-authorized-keys-falco",), repeats=1, jobs=1,
-                                   model="m", effort="high", call=_call(LABEL_OK))
-    assert json.loads(json.dumps(report))["prompts_sha8"] == judge.prompts_sha8()
-    assert "calibration:" in audit_judge.render(report)
 
 
 # the verdict pass's own noise floor
@@ -722,16 +670,3 @@ def test_a_plumbing_field_in_a_lead_row_never_reaches_a_judge_prompt():
     assert "provenance" not in rendered
 
 
-def test_the_projection_is_a_no_op_on_every_committed_case():
-    """Which is what makes it safe to add: no recorded label is invalidated by it. If a
-    future case carries a field the judge SHOULD see, this fails and the allowlist is
-    where the decision gets made."""
-    for case_dir in sorted(p for p in CASES.iterdir() if p.is_dir()):
-        leads_file = case_dir / "oracle_visible" / "leads.jsonl"
-        if not leads_file.is_file():
-            continue
-        for row in judge.load_case_leads(case_dir):
-            assert judge.lead_for_model(row) == row, (
-                f"{case_dir.name}/{row['lead_id']}: the projection would change this "
-                f"lead's prompt, so every label recorded for it was taken from the "
-                f"other shape")

@@ -1,8 +1,5 @@
 """#796 — how the composer's finding plus host state becomes one gate outcome.
 
-The reviewer never picks the outcome. Whether a gap becomes `challenged` or
-`forced-inconclusive` turns on the turn count, the raised-ask state and the cap, none of
-which a review role is shown — so these are the arms that live entirely on the host side.
 """
 
 from __future__ import annotations
@@ -114,12 +111,7 @@ def test_a_measurable_gap_spends_a_turn_and_hands_the_ask_back(tmp_path):
 
 
 def test_an_unmeasurable_gap_forces_inconclusive_without_spending_a_turn(tmp_path):
-    """A gap the reviewer cannot name a measurement for. Spending a forced turn on it would
-    tax the investigation for a question nobody has.
-
-    #923: the gate's overrule now records `unresolved` — the host's own verdict — not
-    `inconclusive`, which is reserved for the model's own close and now carries an entry
-    price."""
+    """A gap the reviewer cannot name a measurement for."""
     deps, _run_dir = _deps(tmp_path)
     verdict = _run(deps, _bundle(composer=_composer("gap", ask=None)))
     assert verdict.outcome == FORCED_INCONCLUSIVE
@@ -153,12 +145,7 @@ def test_repeating_an_ask_that_bought_nothing_does_not_spend_another_turn(tmp_pa
 
 
 def test_a_repeat_is_fresh_again_once_the_turn_bought_something(tmp_path):
-    """The half that makes the rule about VALUE rather than about repetition: the same target
-    asked twice is only wasteful when the first ask changed nothing.
-
-    Driven by moving the recorded watermark rather than by editing the document, because what
-    the rule reads is the PARSED record — prose a turn adds outside the invlang fences is not
-    something the investigation recorded, and the rule is right to ignore it."""
+    """The half that makes the rule about VALUE rather than about repetition."""
     deps, _run_dir = _deps(tmp_path)
     target = _a_real_target(deps)
     bundle = _bundle(composer=_composer("gap", ask={"target": target, "prose": "provenance"}))
@@ -213,10 +200,7 @@ def test_an_empty_lens_reading_fails_the_review_closed(tmp_path):
 
 
 def test_a_fault_on_the_second_pass_does_not_report_a_run_that_spent_no_turn(tmp_path):
-    """`turns_used` rides into the numbered review record. A challenged close comes back and
-    reviews again, so a fault on that second pass wrote down a run that had spent no forced
-    turn — the very turn the investigation had already been made to spend. Same defect as the
-    hardcoded trace round, one field over."""
+    """`turns_used` rides into the numbered review record."""
     deps, _run_dir = _deps(tmp_path)
     target = _a_real_target(deps)
     challenged = _run(deps, _bundle(
@@ -251,9 +235,7 @@ def test_every_dispatched_role_leaves_its_own_trace(tmp_path):
 
 def test_a_lens_that_was_never_dispatched_is_not_recorded_as_one_that_answered(tmp_path):
     """A record with no strong belief movement has no edge to withhold, so the ablation lens
-    is skipped. Its row must not claim `ok` — every trace reader (the replay's own "the
-    reviewer really ran" assertion among them) takes `ok: true` as "this stage answered", so a
-    skipped lens spelled that way is a call the run dir says was made and was not."""
+    is skipped."""
     deps, run_dir = _deps(tmp_path)
     (run_dir / "investigation.md").write_text(
         "```invlang\n"
@@ -338,12 +320,7 @@ def test_the_record_reaches_each_lens_inside_that_calls_own_fresh_salt(tmp_path)
 
 def test_every_dispatched_lens_leaves_a_row_even_when_an_earlier_one_faults(tmp_path):
     """The lenses run CONCURRENTLY, so by the time the first fault is seen the other has
-    already answered. Returning on the fault mid-walk threw that reply away, and the run dir
-    recorded a subset of the calls that were made.
-
-    SUPPORT is the one made to fault, because it is dispatched first and the walk is ordered:
-    faulting the last lens would leave the bug this pins — a `return` before the survivors are
-    written — undetectable, since there would be no survivor after it."""
+    already answered."""
     deps, run_dir = _deps(tmp_path)
 
     async def _raising(_request):
@@ -401,17 +378,7 @@ def test_no_stage_reply_stands_as_a_trace_row_whatever_shape_it_arrives_in(tmp_p
 def test_the_writer_and_the_reader_agree_about_a_nested_reply_from_any_stack_depth(
     tmp_path, depth,
 ):
-    """The writer asks the row predicate from deep inside the gate; the readers ask it from the
-    top. `json.loads` spends the caller's stack budget once per nested container, so before
-    `_io` judged nesting from the bytes, a reply nested past what the DEEP stack had left was
-    "not a row" to the writer (a caught `RecursionError`) and a row to every reader — the
-    writer put it out raw, on the strength of a skip that never happened. Written here from a
-    stack with almost no budget left: the file holds exactly one row, the gate's own, at
-    both depths — a 20-deep object is a row (framed inside the gate's value), a 500-deep one
-    is past the bound for writer and reader alike (raw line, skipped by both).
-
-    Observed failing by: a predicate that catches `RecursionError` — at depth 500 the writer
-    emits the raw line and `read_jsonl_rows` counts two rows."""
+    """The writer asks the row predicate from deep inside the gate;"""
     from defender.tests.test_1032_json_artifact import from_a_deep_stack
 
     reply = '{"finding": "holds", "review": ' + "[" * depth + "]" * depth + "}"
@@ -448,12 +415,7 @@ def test_the_composers_json_reply_does_not_stand_as_a_trace_row_of_its_own(tmp_p
 
 
 def test_moving_the_generic_subagent_deadline_does_not_move_the_reviews(monkeypatch):
-    """The two default to the same NUMBER and must not move together.
-
-    A reviewer that fans out three lenses and a composer inside one close is exactly when
-    someone reaches for whichever timeout knob they can find. The pin went with the #774
-    suite; #797 flagged the separation as unwitnessed and this is it re-pinned.
-    """
+    """The two default to the same NUMBER and must not move together."""
     from defender.learning.core import config
 
     monkeypatch.delenv(challenge_gate.REVIEW_TIMEOUT_ENV, raising=False)

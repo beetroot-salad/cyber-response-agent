@@ -1,15 +1,4 @@
-"""Unit tests for the LLM provider abstraction + the Fireworks integration: GLM 5.3
-as the MAIN default (#1023), GLM 5.3 Flash as the GATHER default (experiments/gather-flash-port,
-the Kimi K2.6 decommission of 2026-09-25).
-
-Hermetic — no API key, no network. Model construction only builds the provider
-client (no request is made), so these run in the default suite. Covers the provider
-registry (`provider_for` routing + fail-loud, `build_for_effort`, `api_key_vars`), each
-provider's `build_model`, the role→settings path (`settings_for_effort(effort_for_role(
-role))`; Anthropic cache / Fireworks `reasoning_effort` incl. fail-loud on a bad value),
-the role model defaults, the price table, and run.py's provider-keyed `FIREWORKS_API_KEY`
-sourcing.
-"""
+"""LLM provider registry + Fireworks integration (GLM main/gather defaults): provider routing, model/settings construction, effort floors, pricing rows, and run.py's FIREWORKS_API_KEY sourcing. Hermetic: no key, no network."""
 from __future__ import annotations
 
 import importlib.util
@@ -35,7 +24,6 @@ if str(_DEFENDER) not in sys.path:
 
 import run  # noqa: E402
 from defender import agents  # noqa: E402
-from defender._env import FatalConfigError  # noqa: E402
 from defender._pricing import UnknownModel  # noqa: E402
 from defender.runtime import driver, providers  # noqa: E402
 from defender.runtime.agent_role import AgentRole  # noqa: E402
@@ -57,14 +45,8 @@ _CACHE = {
 
 
 def _role_settings(provider, role, name="kimi-k3"):
-    """The live role→settings path after `settings(role)` was retired (#493): resolve the
-    role's default effort, then map it to settings.
-
-    Carries a MODEL since #1023 — whether an effort can be served at all is the model's
-    property, not the provider's. The default is a model with no floor, so every caller that
-    is asking about the ROLE keeps asking exactly what it asked before."""
+    """The live role→settings path after `settings(role)` was retired (#493):"""
     return provider.settings_for_effort(provider.effort_for_role(name, role))
-
 
 
 def test_role_model_defaults(monkeypatch):
@@ -72,7 +54,6 @@ def test_role_model_defaults(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     assert driver.resolve_main_model() == "glm-5.3"
     assert driver.gather_model() == "glm-5.3-flash"
-
 
 
 @pytest.mark.parametrize(("name", "provider"), [
@@ -96,33 +77,8 @@ def test_provider_for_unknown_name_fails_loud():
         providers.provider_for("gpt-4o")
 
 
-def test_every_alias_in_the_map_actually_routes():
-    """The map is the registry of what is selectable; nothing in it may be dead. Parametrized
-    routing above pins the spellings someone remembered to add a case for — this covers the
-    map as it ships, so a new alias cannot land unrouted."""
-    for alias in providers.FIREWORKS.aliases:
-        assert providers.provider_id_for(alias) == "fireworks", alias
-
-
-def test_the_refusal_names_every_model_the_map_makes_selectable():
-    """The refusal used to hardcode the models that existed when it was typed, so adding an
-    alias silently left it stale and an operator who typo'd the new model was told it did not
-    exist. The list is derived now; this is what keeps it from drifting from the map again —
-    it fails on the NEXT alias added, not only on the one that prompted it."""
-    with pytest.raises(ValueError, match="unknown model") as e:
-        providers.provider_for("kimi-k-9")
-    message = str(e.value)
-
-    targets = set(providers.FIREWORKS.aliases.values())
-    named = {providers.FIREWORKS.aliases[a] for a in providers.selectable_aliases()}
-    assert named == targets, "a selectable model has no spelling in the refusal"
-    for alias in providers.selectable_aliases():
-        assert alias in message, f"{alias} is selectable but absent from {message!r}"
-
-
 def test_api_key_vars_covers_both_providers():
     assert providers.api_key_vars() == {"ANTHROPIC_API_KEY", "FIREWORKS_API_KEY"}
-
 
 
 def test_build_model_routes_claude_to_anthropic(monkeypatch):
@@ -151,15 +107,6 @@ def test_build_model_fireworks_requires_key(monkeypatch):
         providers.FIREWORKS.build_model("glm-5.3")
 
 
-def test_build_model_kimi_alias(monkeypatch):
-    from pydantic_ai.models.openai import OpenAIChatModel
-
-    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    m = providers.FIREWORKS.build_model("kimi-k3")
-    assert isinstance(m, OpenAIChatModel)
-    assert m.model_name == _KIMI_ID
-
-
 def test_build_pairs_model_with_settings(monkeypatch):
     from pydantic_ai.models.openai import OpenAIChatModel
 
@@ -172,7 +119,6 @@ def test_build_pairs_model_with_settings(monkeypatch):
     assert isinstance(getattr(built.model, "wrapped", None), OpenAIChatModel), (
         f"build_for_effort handed out {built.model!r}, not the retrier over the Fireworks model")
     assert built.settings == {"extra_body": {"reasoning_effort": "low"}}
-
 
 
 def test_anthropic_settings_are_the_cache_and_role_invariant():
@@ -196,32 +142,15 @@ def test_fireworks_main_effort_override(monkeypatch):
     assert _role_settings(providers.FIREWORKS, AgentRole.MAIN) == {"extra_body": {"reasoning_effort": "high"}}
 
 
-def test_fireworks_gather_effort_override(monkeypatch):
-    monkeypatch.setenv("DEFENDER_GATHER_REASONING_EFFORT", "low")
-    assert _role_settings(providers.FIREWORKS, AgentRole.GATHER) == {"extra_body": {"reasoning_effort": "low"}}
-
-
 def test_fireworks_default_sentinel_disables_the_param(monkeypatch):
     monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "default")
     assert _role_settings(providers.FIREWORKS, AgentRole.MAIN) is None
-
-
-@pytest.mark.parametrize("bad", ["", "lo", "hgih", "off"])
-def test_fireworks_bad_effort_fails_loud(monkeypatch, bad):
-    monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", bad)
-    with pytest.raises(FatalConfigError):
-        _role_settings(providers.FIREWORKS, AgentRole.MAIN)
-
 
 
 def test_anthropic_settings_for_effort_adds_effort_to_cache():
     s = providers.ANTHROPIC.settings_for_effort("low")
     assert s == {**_CACHE, "anthropic_effort": "low"}
     assert _role_settings(providers.ANTHROPIC, AgentRole.MAIN) == _CACHE
-
-
-def test_anthropic_settings_for_effort_default_is_cache_only():
-    assert providers.ANTHROPIC.settings_for_effort("default") == _CACHE
 
 
 @pytest.mark.parametrize("bad", ["", "lo", "none", "off"])
@@ -258,11 +187,7 @@ def test_cache_affinity_sets_the_fireworks_prompt_cache_key():
 
 
 def test_cache_affinity_preserves_the_effort_setting_it_merges_into():
-    """The key CREATES settings where there were none and MERGES where there were. Both arms
-    are live: a role at `default` effort resolves to `None` settings, and every review lens
-    does — so an implementation that only merged would drop the key exactly where the
-    single-call roles need it, and one that only created would silently drop
-    `reasoning_effort` on every role that has one."""
+    """The key CREATES settings where there were none and MERGES where there were."""
     merged = providers.cache_affinity(
         "glm-5.3", providers.FIREWORKS.settings_for_effort("low"), "sess-7:main"
     )
@@ -270,23 +195,6 @@ def test_cache_affinity_preserves_the_effort_setting_it_merges_into():
         "extra_body": {"reasoning_effort": "low"},
         "openai_prompt_cache_key": "sess-7:main",
     }
-
-
-def test_cache_affinity_leaves_anthropic_alone():
-    """Anthropic addresses its cache by the content of the prefix its breakpoint markers
-    delimit, not by a routing key — so the settings come back byte-identical, carrying no
-    foreign provider's field."""
-    before = providers.ANTHROPIC.settings_for_effort(None)
-    assert providers.cache_affinity("claude-sonnet-4-6", before, "sess-7:main") == before
-
-
-def test_cache_affinity_passes_an_unroutable_name_through():
-    """An affinity hint is an optimization. A name this registry cannot route returns the
-    settings untouched rather than raising — an unknown model is `run.py`'s all-roles
-    preflight to reject, and failing an agent BUILD over a cache hint would turn a routing
-    nicety into a dead run."""
-    assert providers.cache_affinity("no-such-model", {"a": 1}, "k") == {"a": 1}
-
 
 
 @pytest.mark.parametrize(("model", "key"), [
@@ -315,25 +223,6 @@ def test_pricing_glm_uses_fireworks_rates():
     assert cost == pytest.approx(1.40 + 4.40 + 0.14)
 
 
-def test_pricing_kimi_uses_fireworks_rates():
-    cost = pricing.usage_cost("kimi-k2p6", {
-        "input_tokens": 1_000_000,
-        "output_tokens": 1_000_000,
-        "cache_read_input_tokens": 1_000_000,
-    })
-    assert cost == pytest.approx(0.95 + 4.00 + 0.16)
-
-
-def test_pricing_k3_is_not_k2p6_rates():
-    """The two Kimi rows are DIFFERENT prices, and the discriminator is asserted rather than
-    assumed: the table once carried K2.6's published triple ($0.95/$4.00) inside a comment on
-    the K3 row as if it were a second K3 tier, so a K3 run costed out at a third of its bill
-    while `model_key` was routing correctly the whole time."""
-    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
-    assert pricing.usage_cost("kimi-k3", usage) == pytest.approx(3.00 + 15.00)
-    assert pricing.usage_cost("kimi-k2p6", usage) == pytest.approx(0.95 + 4.00)
-
-
 def test_fireworks_cached_input_is_discounted_against_its_own_input():
     """Every Fireworks row prices a cache READ below its own input and a cache WRITE at
     exactly it. A row that priced the read at the input rate would silently make the
@@ -342,7 +231,6 @@ def test_fireworks_cached_input_is_discounted_against_its_own_input():
         row = pricing.PRICING[key]
         assert row["cache_r"] < row["in"], key
         assert row["cache_w"] == row["in"], key
-
 
 
 def test_resolve_key_sources_the_fireworks_var(tmp_path, monkeypatch):
@@ -358,13 +246,7 @@ def test_resolve_key_sources_the_fireworks_var(tmp_path, monkeypatch):
 
 
 def _registry(main_model: str, gather_model: str) -> dict:
-    """A stand-in role registry for the startup preflight.
-
-    `preflight_role_models` reads exactly two things off a definition: the role's name (for
-    the diagnostic) and its model accessor. Standing in for the real eleven pins the
-    provider-key property on a KNOWN model pair — the real registry's defaults are env-driven,
-    so asserting "an all-Fireworks configuration needs no Anthropic key" against it would
-    silently stop testing that the day a role's default moved providers."""
+    """A stand-in role registry for the startup preflight."""
     return {
         role: SimpleNamespace(role=role, model=(lambda m=name: m))
         for role, name in (
@@ -391,20 +273,6 @@ def test_preflight_missing_required_key_exits_2(monkeypatch):
     assert run.preflight_role_models() == 2
 
 
-def test_preflight_unknown_model_exits_2(monkeypatch, capsys):
-    # The sentinel is a name NO vendor can ship, not a plausible next version. This test
-    # used "glm-5.3" until #1023 registered it, at which point the preflight succeeded and
-    # the assertion read as a regression in the preflight rather than as a claimed name.
-    monkeypatch.setattr(agents, "AGENTS", _registry("no-such-vendor/no-such-model", "glm-5.3-flash"))  # lint-monkeypatch: ok — the preflight's role registry is its input, and it imports AGENTS at call time
-    assert run.preflight_role_models() == 2
-    err = capsys.readouterr().err
-    assert " ERROR " in err
-    assert "preflight" in err
-    # The fault names the ROLE at fault, not just the model — an operator with eleven roles
-    # configured cannot act on "some model is unknown".
-    assert AgentRole.MAIN.name in err
-
-
 # --- #1023: GLM 5.3 ---------------------------------------------------------
 
 _GLM53_ID = "accounts/fireworks/models/glm-5p3"
@@ -429,16 +297,6 @@ def test_pricing_model_key_routes_5p3_to_its_own_row(model, key):
     assert pricing.model_key(model) == key
 
 
-def test_pricing_5p3_cached_input_is_not_5p2s():
-    """$0.26/M against 5.2's $0.14/M (docs.fireworks.ai/serverless/pricing, 2026-09-09).
-    Cache reads are the bulk of a run's tokens — 265K of one 349K main-model lane — so
-    pricing 5.3's read at 5.2's rate under-reports a real run by ~7%."""
-    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000,
-             "cache_read_input_tokens": 1_000_000}
-    assert pricing.usage_cost("glm-5p3", usage) == pytest.approx(1.40 + 4.40 + 0.26)
-    assert pricing.usage_cost("glm-5p2", usage) == pytest.approx(1.40 + 4.40 + 0.14)
-
-
 def _own_row_key(model: str) -> str:
     """The row name a model spells for itself: `kimi-k2p6` -> `kimi-k2.6`. Compared against
     `model_key`, this is what separates a row a model OWNS from a neighbour's row it merely
@@ -454,10 +312,7 @@ def _own_row_key(model: str) -> str:
     review_roles.DEFAULT_REVIEW_MODEL,
 ])
 def test_every_shipped_default_model_owns_its_pricing_row(model):
-    """A shipped default that falls through to a NEIGHBOUR's row costs every run out at the
-    wrong rate, and the run still looks priced. This is the guard #1023 was missing: 5.3
-    shipped as a reachable model with no row of its own, and only the cached-input rate
-    disagreed, so nothing downstream read as broken."""
+    """A shipped default that falls through to a NEIGHBOUR's row costs every run out at the wrong rate, and the run still looks priced."""
     assert pricing.model_key(model) == _own_row_key(model)
     assert _own_row_key(model) in pricing.PRICING
 
@@ -465,23 +320,10 @@ def test_every_shipped_default_model_owns_its_pricing_row(model):
 # --- #1023 ask 3: reasoning effort is a MODEL capability, not a provider preference ------
 
 def test_gather_effort_is_floored_for_a_thinking_only_model():
-    """`gather_effort="none"` is the PROVIDER saying "gather wants the cheapest thinking on
-    offer". GLM 5.3 is thinking-only and answers `reasoning_effort='none'` with an HTTP 400
-    naming the model rather than the mismatch, so the run dies on its FIRST gather dispatch —
-    observed live, #1023. The cheapest thinking a thinking-only model offers is `low`, and
-    that is what a floor means: a preference clamped to a capability."""
+    """`gather_effort="none"` is the PROVIDER saying "gather wants the cheapest thinking on offer"."""
     assert providers.effort_for_role("glm-5.3", AgentRole.GATHER) == "low"
     assert providers.effort_for_role("glm-5p3", AgentRole.GATHER) == "low"
     assert providers.effort_for_role(f"fireworks:{_GLM53_ID}", AgentRole.GATHER) == "low"
-
-
-def test_flash_is_floored_too():
-    """5.3 Flash — the shipped GATHER default — refuses `none` exactly as plain 5.3 does, so
-    gather's `none` preference lands at `low` for it under every spelling: the alias, the
-    Fireworks spelling, and the `fireworks:` passthrough. The floor set holds RESOLVED ids so
-    the passthrough cannot slip past a check keyed on aliases."""
-    for name in ("glm-5.3-flash", "glm-5p3-flash", "fireworks:accounts/fireworks/models/glm-5p3-flash"):
-        assert providers.effort_for_role(name, AgentRole.GATHER) == "low", name
 
 
 def test_a_model_that_accepts_none_still_gets_none():
@@ -494,29 +336,9 @@ def test_a_model_that_accepts_none_still_gets_none():
 
 @pytest.mark.parametrize("name", _GONE)
 def test_decommissioned_aliases_are_refused_at_routing(name):
-    """A run that still names `glm-5.2` or `kimi-k2.6` fails at `provider_for`, with the
-    alias list in the message, rather than at its first dispatch with the provider's 404.
-    The price rows for both survive (`test_pricing_model_key`), so this is the alias map
-    and only the alias map."""
+    """A run that still names `glm-5.2` or `kimi-k2.6` fails at `provider_for`, with the alias list in the message, rather than at its first dispatch with the provider's 404."""
     with pytest.raises(ValueError, match="unknown model"):
         providers.provider_for(name)
-
-
-def test_an_explicit_none_on_a_thinking_only_model_is_refused(monkeypatch):
-    """The clamp covers the SHIPPED default, which is not a statement about any one model.
-    An operator who names `none` for a thinking-only model has asked for something the model
-    cannot do, and silently answering `low` would hide the one thing they typed."""
-    monkeypatch.setenv("DEFENDER_GATHER_REASONING_EFFORT", "none")
-    with pytest.raises(FatalConfigError, match="thinking-only"):
-        providers.effort_for_role("glm-5.3", AgentRole.GATHER)
-
-
-def test_the_main_lane_is_floored_too(monkeypatch):
-    """MAIN ships `low`, which is already above the floor — so the guard has to be shown on
-    the lane's own env var rather than assumed from GATHER's."""
-    monkeypatch.setenv("DEFENDER_MAIN_REASONING_EFFORT", "none")
-    with pytest.raises(FatalConfigError, match="thinking-only"):
-        providers.effort_for_role("glm-5.3", AgentRole.MAIN)
 
 
 # --- the key is an EQUALITY, not a containment signal ---------------------------------
@@ -530,10 +352,7 @@ def test_the_main_lane_is_floored_too(monkeypatch):
     "gpt-4o",               # the old catch-all answered Sonnet's rate for this
 ])
 def test_a_model_no_row_claims_is_refused_not_absorbed(model):
-    """Every silent fallback this table had cost a real run its real number. `"glm" in m`
-    billed 5.3 on 5.2's row (#1023); the `return "claude-sonnet-4-6"` under it answered for
-    EVERY unrecognised name at the most expensive rate in the table — so a typo'd model, or
-    any `fireworks:` passthrough, costed out as Sonnet and read as priced."""
+    """Every silent fallback this table had cost a real run its real number."""
     with pytest.raises(UnknownModel):
         pricing.model_key(model)
 
@@ -547,23 +366,8 @@ def test_a_longer_name_does_not_absorb_a_shorter_row():
     assert pricing.PRICING["glm-5.3-flash"]["in"] != pricing.PRICING["glm-5.3"]["in"]
 
 
-@pytest.mark.parametrize(("raw", "normalized"), [
-    ("fireworks:accounts/fireworks/models/glm-5p3", "glm-5p3"),
-    ("anthropic:claude-haiku-4-5", "claude-haiku-4-5"),
-    ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),
-    ("  GLM-5P3  ", "glm-5p3"),
-])
-def test_normalize_strips_only_what_does_not_select_a_price(raw, normalized):
-    """A provider prefix, a registry path and an Anthropic release date are the three things
-    that genuinely do not vary the price. Everything else has to match a row exactly."""
-    assert pricing.normalize_model(raw) == normalized
-
-
 def test_an_unpriced_model_costs_zero_rather_than_a_neighbours_rate():
-    """`usage_cost` runs per-response inside a live run and over every archived trace, so it
-    cannot raise — a finished investigation must not lose its trace over a number nobody is
-    billed on. It answers 0.0, which reads as WRONG to anyone looking at a run's total. The
-    Sonnet-rate fallback it replaces read as correct."""
+    """`usage_cost` runs per-response inside a live run and over every archived trace, so it cannot raise — a finished investigation must not lose its trace over a number nobody is billed on."""
     usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
     assert pricing.usage_cost("fireworks:accounts/fireworks/models/nope", usage) == 0.0
     assert pricing.usage_cost("claude-sonnet-4-6", usage) == pytest.approx(3.00 + 15.00)

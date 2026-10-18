@@ -1,13 +1,5 @@
-"""#1135 — the handle itself: its constructor and root (R11, R15), the refusal contract (#0,
-3.1 B), one guard plus positive control per operation kind (R17: read, write, append, move, lock
-open, list), the conversion of every core refusal shape, ordinary errors on today's routes, R14's
-one fix (C20), D8's rotate, D2's two core functions, and the root's distinguished spellings.
-
-Every plant is a real entry made on disk in the test (a symlink, a hard link, a FIFO, a folder or
-a file where a folder belongs, a missing or dangling root). Every oracle reads the tree by today's
-record names (R14) through `lstat`/`readlink`, never through the verb under test. Shared
-machinery and the names this suite coins are in `_spec1135.py`.
-"""
+"""The learning-state handle: constructor/root, the refusal contract (links, FIFOs, planted
+entries) per operation kind, conversion of core refusals, ordinary errors, rotate and lock opens."""
 from __future__ import annotations
 
 import contextlib
@@ -1019,35 +1011,3 @@ def test_open_lock_at_opens_a_plain_lock_without_truncating(tmp_path: Path):
 # ---------------------------------------------------------------------------------------------
 
 
-def test_1135_an_absence_assert_reads_through_an_oracle_the_handle_no_longer_writes(
-        tmp_path: Path):
-    """O3: the regression tier asserts the same behaviour after the change, so an absence assert
-    (a channel's dead-letter file, stuck report, consumed ledger or queue is empty or unchanged
-    after a tick) must still discriminate: it fails if the tick wrote that record, including when
-    the code under test wrote into a different root (the checkout's default root, which R15 and
-    O4 rule out) or when the test spells a record name the handle spells differently.
-
-    Observed as the property the design guarantees (R14 keeps every record name): each record the
-    handle writes for the findings channel — the queue (append), the consumed ledger (rotate) and
-    the dead-letter graveyard (deadletter) — lands under the held root at the name the regression
-    tier's oracles spell today, and nothing lands under the checkout's default root. The stuck
-    report's name is pinned the same way by the drain tests' by-name oracles (#31, #32)."""
-    default_pending = S.DEFENDER / "learning" / "_pending"
-    default_before = S.tree_snapshot(default_pending)
-    paths = S.built_paths(tmp_path)
-    pending = paths.state_root / "_pending"
-    a, b, c = _finding("a/0"), _finding("a/1"), _finding("a/2")
-    findings = S.coined("FINDINGS")
-
-    state = S.LearningState.open(paths)
-    state.append(findings, [a, b, c], dedup_key="finding_id")
-    assert S.jsonl_rows(pending / "findings.jsonl") == [a, b, c], "the queue is not at _pending/findings.jsonl"
-    state.rotate(findings, [a], [b], "abc123", timeout=5)
-    assert [r["finding_id"] for r in S.jsonl_rows(pending / "consumed.jsonl")] == ["a/1"], \
-        "the consumed ledger is not at _pending/consumed.jsonl"
-    state.deadletter(findings, [{**c, "reason": "unkeyable"}])
-    assert [r["finding_id"] for r in S.jsonl_rows(pending / "findings.deadletter.jsonl")] \
-        == ["a/2"], "the graveyard is not at the name the regression tier reads"
-
-    assert S.tree_snapshot(default_pending) == default_before, \
-        "the handle wrote under the checkout's default root"

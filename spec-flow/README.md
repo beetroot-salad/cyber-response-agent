@@ -21,7 +21,7 @@ issue → discuss-issue → write-tests → write-code-from-tests → code revie
 
 The implementation stage dispatches honest workers and contract adversaries against the same
 immutable tests ref. `finalize` remains the plugin's existing post-implementation review stage.
-`write-code-from-spec` is a compatibility entry; `write-code-with-no-spec` is retained for old runs.
+`write-code-with-no-spec` is retained for old runs.
 Small changes use the same pipeline with fewer workers and targeted review.
 
 Human attention goes to consequential design choices: behavior, scope, models, flows,
@@ -35,9 +35,8 @@ every edge case. The merge remains human-approved.
 | Skill | What it does |
 |---|---|
 | `/spec-flow:discuss-issue` | Opens with only the problem and open questions, then grounds and reviews a design covering behavior, scope, data models, flows, and architecture. Groups findings into fixes or dissolving design choices; hands off a human-facing intent+design doc with supporting probed claims. Also handles design amendments discovered by tests or code. |
-| `/spec-flow:write-tests` | Authors contract tests early, independently reviews fidelity and discrimination, and iterates through patches or design amendments. Commits tests before implementation with a compact coverage/review record. Known blockers prevent a ready handoff. |
+| `/spec-flow:write-tests` | Authors contract tests with Opus at medium effort, reviews fidelity and discrimination with Opus at high effort plus two or three lensed Sonnet reviewers at high effort, and iterates through patches or design amendments. Commits tests before implementation with a compact coverage/review record. Known blockers prevent a ready handoff. |
 | `/spec-flow:write-code-from-tests` | Dispatches honest implementers and test-breaking adversaries from the same committed contract. Reconciles findings, completes deferred verification, ships and repairs CI. |
-| `/spec-flow:write-code-from-spec` | Compatibility entry delegating to write-code-from-tests for older invocations and historical resumes. |
 | `/spec-flow:write-code-with-no-spec` | Legacy combined lane for existing runs; new small changes use write-tests then write-code-from-tests. |
 | `/spec-flow:finalize` | Meets the shipped PR **cold**: applies every fix it's confident in, files the rest, feeds process findings back to the human, and re-greens the PR. |
 | `/spec-flow:ship` | Branch, commit, push, open a PR. Used by the phases above; useful on its own. |

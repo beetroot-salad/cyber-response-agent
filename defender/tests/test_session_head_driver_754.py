@@ -55,16 +55,7 @@ SALT = "0011223344556677"
 
 
 def test_a_gather_leg_session_carries_its_own_head_like_any_other_session(tmp_path):
-    """    A dispatched gather leg gets a `session` row of its own, so it carries a head like any
-    other session: the leg's head advances linearly onto its own rows as the leg runs, its
-    path is its own chain, it contributes NO log entry — and the main agent's head advances
-    independently, on the same shared connection, with neither session's head reflecting the
-    other's rows.
-
-    Legs get a head like any session; what they do not get is fork/fold semantics. That is a
-    statement about what production code calls, NOT a constraint the store enforces — nothing
-    in the schema or the rule distinguishes a leg's session_id — which is the control this
-    test ends on."""
+    """A dispatched gather leg gets a `session` row of its own, so it carries a head like any"""
     # provenance: correction C3 (binding): the design's scope sentence 'gather legs are not
     # sessions and get no head of their own' is false as written — driver.py:428 runs
     # new_session per dispatched leg (c11, refuted). P93, P91 (two sessions moving their own
@@ -115,17 +106,7 @@ def test_a_gather_leg_session_carries_its_own_head_like_any_other_session(tmp_pa
 
 
 def test_a_store_error_during_setup_ends_the_run_through_the_handled_exit(tmp_path):
-    """    A store failure raised while the run is still being SET UP ends the run through the same
-    handled exit the run loop uses: `run_investigation` returns its summary dict carrying
-    `truncated_by` of "store" and no output, rather than letting the exception escape and take
-    the process down. Not one model turn is driven.
-
-    In production the store is opened during setup, OUTSIDE the run loop's handler whose whole
-    purpose is to end a run through that exit — so moving the version check into the opener
-    converts a stale file from a partial trace into an unhandled exception. The failure shape
-    the design intends is "the run ends cleanly", not "the process dies". The subject is a real
-    store file at the version this change refuses, opened through the real opener behind the
-    real factory seam."""
+    """A store failure raised while the run is still being SET UP ends the run through the same"""
     # provenance: c19/C11. This is the one demand in the spec that binds the driver rather than
     # the store.
     ss = store_mod()

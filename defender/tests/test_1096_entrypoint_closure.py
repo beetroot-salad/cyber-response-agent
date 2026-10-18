@@ -1,22 +1,4 @@
-"""#1096 — the box entrypoint's per-exec import closure stays stdlib.
-
-`bash_exec` run as `__main__` is the process every `docker exec` inside a box starts, and
-there is one `docker exec` per command an agent issues. Since #1092 the `defender.runtime.box`
-package door pulls `defender._model` and with it pydantic, which is paid on that path, per
-command. The entrypoint only ever needed the wire codec and the env allowlist, so those live
-in `box_codec.py` (stdlib) and the entrypoint imports that module directly. The package keeps
-re-exporting the constants; there is still one owner.
-
-TWO RULES, and #1092's d26 retired the first one, not this one:
-
-  * the AVAILABILITY rule — "pydantic is not installed in a box, so the closure must not
-    import it" — is GONE. The owned image installs it, `BoxSpec` is a `@model` dataclass, and
-    d26 (`test_1092_box_mark_env.py`) pins that retirement.
-  * the COST rule below is #1096's and is new. Pydantic RESOLVES in a box; it is just
-    expensive, and the entrypoint has no use for it. The guard is therefore about what the
-    entrypoint's closure REACHES FOR, which is why it may not be relaxed by the fact that the
-    import would now succeed.
-"""
+"""The box entrypoint (bash_exec as __main__) keeps a stdlib-only import closure: it runs once per agent command."""
 from __future__ import annotations
 
 import subprocess

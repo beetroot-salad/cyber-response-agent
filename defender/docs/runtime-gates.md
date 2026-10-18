@@ -138,8 +138,9 @@ hooks). The gates:
   again (#855 F-12). The same module also imports `_untrusted.wrap` (salted
   untrusted-data tagging of adapter/alert reads + the gather return); the
   progressive-disclosure descriptor catalog it renders
-  (`inject_system_skill_description.descriptor_catalog`) is read once by
-  `run_investigation` at run start and handed down as `catalog=` (#1031); its parent
+  (`inject_system_skill_description.descriptor_index`) is read once by
+  `run_investigation` at run start and handed down as `catalog=` (#1031), each dispatch
+  rendering it with the systems down at that moment marked (#1256); its parent
   `runtime/tools.py` imports `record_lesson_load.lesson_name` (lesson→outcome
   traceability into `lessons_loaded.jsonl`). These anchor on the run dir from
   `AgentDeps`.

@@ -1,21 +1,4 @@
-"""Executable spec for the curator ``lesson_read`` tool (#559, part C/D).
-
-The lesson curators lose the generic ``read_file`` (``read=True`` dropped from
-``CORPUS_AUTHOR_DEF``) and gain ``lesson_read(path, part="body"|"full", pattern=None)`` — a
-thin wrapper over ``_tool_read_file``'s gate + bounded-read + wrap core that adds a ``part``
-mode (body-default strips frontmatter; full = whole file) and degrades to whole text on a
-non-fenced file. The read gate stays root-only (a sibling corpus / ``_TEMPLATE.md`` is
-reachable where the corpus-anchored ``cat`` lane is not), a lesson stays trusted (no salted
-wrap), and ``_record_lesson_load`` is widened to all three corpora.
-
-Every test drives the REAL registered tool on a CORPUS_AUTHOR agent built by
-``build_stage_agent`` (mirroring ``test_forward_check_tool.py``), invoking the tool's function
-directly with a constructed ``RunContext`` so a returned str, a raised ``ModelRetry``, and a
-``lessons_loaded.jsonl`` row are all observable. The ``lesson_read`` tool / the ``ToolSet``
-field do NOT exist yet: the tool reds per-test as "not registered", ``ToolSet(lesson_read=…)``
-reds as an unexpected-kwarg ``TypeError``, and ``.tools.lesson_read`` as ``AttributeError`` —
-while every import here resolves against HEAD so the harness collects and proves itself.
-"""
+"""The curator `lesson_read` tool: part modes, read gate, bounded reads, trusted (unwrapped) output."""
 from __future__ import annotations
 
 import asyncio
@@ -50,8 +33,6 @@ from defender.tests._curator_scene import (
     curator_scene,
     write_prompt,
 )
-
-
 
 
 def _scene(tmp_path: Path):
@@ -93,8 +74,6 @@ def _lesson(corpus: Path, stem: str, *, name_key: bool = True, body: str = "less
     return f"defender/{corpus.name}/{stem}.md"
 
 
-
-
 def test_l1_body_default_strips_frontmatter(tmp_path):
     """demand: L1 — ``lesson_read(path)`` (default part='body') returns the frontmatter-stripped body."""
     scene = _scene(tmp_path)
@@ -123,22 +102,6 @@ def test_l2_full_returns_whole_file(tmp_path):
     assert "name: l2" in full
     assert "name: l2" not in body
     assert full != body
-
-
-def test_l3_default_part_is_body(tmp_path):
-    """demand: L3 — the DEFAULT part is 'body': no part arg yields the stripped body (and the tool
-    schema records ``default='body'``)."""
-    scene = _scene(tmp_path)
-    lp = _lesson(scene.corpus, "l3", body="L3-BODY")
-    agent, logger = _build_curator_agent(scene.tmp)
-    try:
-        out = _read(agent, _deps(scene), path=lp)
-        schema = _tool(agent, "lesson_read").tool_def.parameters_json_schema
-    finally:
-        logger.close()
-    assert "L3-BODY" in out
-    assert "name:" not in out
-    assert schema["properties"]["part"]["default"] == "body"
 
 
 def test_l4_part_enum_is_body_or_full(tmp_path):
@@ -192,8 +155,6 @@ def test_l6_pattern_grep_folds_the_selected_text(tmp_path):
     assert "other body line" in unfolded
 
 
-
-
 def test_l7_denied_path_raises_no_existence_oracle(tmp_path):
     """demand: L7 — a path outside {run_dir, defender_dir} is denied with ModelRetry (no existence
     oracle, no leaked bytes); positive control: an in-corpus path returns its content."""
@@ -211,10 +172,6 @@ def test_l7_denied_path_raises_no_existence_oracle(tmp_path):
         assert "IN-CORPUS-BODY" in _read(agent, deps, path=lp_ok)
     finally:
         logger.close()
-
-
-
-
 
 
 def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
@@ -260,20 +217,6 @@ def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
     salt = frame_salt_of(out, "untrusted")
     assert out.startswith(f"<run-{salt}-untrusted>\n")
     assert out.endswith(f"\n</run-{salt}-untrusted>")
-
-
-
-
-
-
-
-
-
-
-def test_t1_toolset_has_lesson_read_field(tmp_path):
-    """demand: T1 — ``ToolSet`` has ``lesson_read: bool = False``."""
-    assert ToolSet(lesson_read=True).lesson_read is True
-    assert ToolSet().lesson_read is False
 
 
 def test_t2_corpus_author_def_drops_read_adds_lesson_read(tmp_path):

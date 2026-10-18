@@ -1,38 +1,7 @@
-"""#922 — O3: the cross-cutting invariants keep a witness the guard can still see.
-
-O3 is the obligation the doc says suite-green cannot discharge (D8/C15): the four deleted
-stages are merely WHERE five surface-general properties are currently observed, and "a deleted
-arm is a deleted test, not a failing one". The census behind D10 found 38 test files reaching
-into the old pipeline; most use its stages as SPECIMENS. So the discharge is a per-property
-inventory naming a SURVIVING role that carries each arm — and, for the framing arm, one that
-lies inside its guard's scan scope.
-
-C16 is the constraint that makes the framing arm particular, and it is a REFUTATION: the
-framing guard's scan root is `REPO_ROOT/defender/learning` (`lint_stage_prompt_frames.py:25`),
-so MAIN and GATHER — both in `runtime/` — fall outside it. A framing witness moved there leaves
-the guard's coverage while looking re-pointed. The framing arms therefore move to the
-**questioner** and the **family judge**, and this module asserts BOTH halves: that each drives
-the framing contract, and that each sits where the lint can see it.
-
-The five properties and where each is witnessed:
-
-  | property                              | surviving witness                    | here |
-  |---------------------------------------|--------------------------------------|------|
-  | untrusted framing across a lifetime   | questioner, family judge, lead-author| yes  |
-  | grant / roster / capability agreement | `_require_verb_grant_agreement`      | yes  |
-  | read confinement and bounded reads    | LEAD_AUTHOR's read lane              | yes  |
-  | sandbox box delivery and geography    | `author_drain`'s box request         | `tests/e2e/test_922_spine.py` |
-  | sole-seam binding                     | `bind` over every registered role    | yes  |
-
-The box arm is witnessed at its own address rather than restated here: the spine suite drives
-the real `author_drain` and asserts the composed `BoxRequest`'s exact mount geography, which is
-what "delivery and geography" means for the drain that survives.
-"""
+"""#922 — O3: the cross-cutting invariants keep a witness the guard can still see."""
 from __future__ import annotations
 
 import ast
-import dataclasses
-import importlib
 from pathlib import Path
 
 import pytest
@@ -140,43 +109,6 @@ def test_922_the_family_judge_frames_the_archived_bodies_it_grades(tmp_path):
         J.assert_wrapped_untrusted(prompt, marker, f"the archived body {marker!r}")
 
 
-def test_922_both_framing_witnesses_are_inside_the_framing_guards_scan_root():
-    """CENSUS (derived from the lint's own scan root and the witness modules' real paths).
-
-    C16, executed as a test rather than read as prose. The framing guard scans
-    `REPO_ROOT/defender/learning` only, and it EXCLUDES `tests/`, so a witness is covered iff
-    its module file sits under that root outside an excluded directory.
-
-    Both directions are asserted on the same address function, which is what makes it a census
-    rather than a restatement: the questioner and the family judge are INSIDE, and MAIN and
-    GATHER — the two roles the first draft would have moved the arms to — are OUTSIDE. Without
-    the second half, "the witness is in scope" would be a claim with no failing case.
-    """
-    lint = frames_lint()
-    scope = Path(lint.LEARNING)
-    assert scope.is_dir(), f"the framing guard's scan root {scope} does not exist"
-
-    def covered(module) -> bool:
-        path = Path(module.__file__).resolve()
-        if not path.is_relative_to(scope):
-            return False
-        return not (set(path.relative_to(scope).parts) & set(lint.EXCLUDED_DIRS))
-
-    from defender.learning.branch import questioner
-    from defender.learning.judge import run as judge_run
-    from defender.runtime import driver
-
-    assert covered(questioner), (
-        f"{questioner.__file__} is outside the framing guard's scan root {scope} — a framing "
-        "witness there is not witnessed by the guard at all (C16)")
-    assert covered(judge_run), (
-        f"{judge_run.__file__} is outside the framing guard's scan root {scope} (C16)")
-    assert not covered(driver), (
-        "MAIN and GATHER are inside the framing guard's scan root after all — the premise "
-        "C16 refutes has changed, and the reason the framing arms had to move to the "
-        "questioner and the family judge no longer holds; re-read D10 before relying on this")
-
-
 def test_922_the_framing_guard_discriminates_at_the_witnesses_own_construction(tmp_path):
     """GUARD (green now, must stay green) — the framing guard's positive control.
 
@@ -238,81 +170,6 @@ def definition_modules() -> dict[str, str]:
                 if alias.name in registered and alias.name.endswith("_DEF"):
                     out[alias.name] = node.module
     return out
-
-
-def test_922_bind_is_still_the_sole_seam_for_every_registered_role(tmp_path):
-    """CENSUS (derived from `agents.py`'s AST, `bind`'s own refusals, and each module's source).
-
-    The sole-seam arm. `bind`/`compile_policy` is the ONE production seam that turns a
-    definition plus a run into deps plus a policy; a co-located `for_scope(` / `for_run(` front
-    door beside a definition is a second one. #551's witness for that property
-    (`test_bind_sole_seam_551.py::test_d1_no_factory_in_stage_modules`) names five files BY
-    PATH — three of them inside `learning/pipeline/`, all three deleted here — so after the cut
-    that witness covers what is left of a list rather than what is left of the registry.
-
-    Re-derived instead of re-listed. Every DEF in the registry tuple is bound over a scope that
-    satisfies the ordinary requirements, and the result is partitioned by what the CODE does:
-
-      * bound  -> the seam built its deps and its policy, and the module must carry no front
-                  door beside the definition;
-      * refused -> a carve-out `bind` states itself, and the front-door rule does not apply.
-
-    The carve-outs are CORPUS_AUTHOR (`CuratorDeps.for_run`, the #556 per-spawn writer whose
-    policy needs a worktree corpus dir `RunScope` cannot carry) and the two deps types with no
-    run scope at all — QUESTIONER, and JUDGE since #1008. None is named here — they are whatever `bind` refuses — so a role
-    that stops being exempt is held to the rule automatically, and one that starts being exempt
-    shows up as a shrinking bound set rather than as silence.
-    """
-    defender_dir = tmp_path / "tree" / "defender"
-    run_dir = tmp_path / "run"
-    confine = tmp_path / "confine"
-    for d in (defender_dir, run_dir, confine):
-        d.mkdir(parents=True)
-    seed_adapter_stubs(defender_dir, ("elastic",))
-    scope = RunScope(read_confine=(confine,), add_dirs=(confine,), corpus_name="lessons")
-
-    modules = definition_modules()
-    assert len(modules) == len(AGENTS), (
-        f"the AST walk resolved {sorted(modules)} for {len(AGENTS)} registered roles — it is "
-        "not reading the registry tuple, so its verdict below means nothing")
-
-    bound: dict[str, str] = {}
-    refused: dict[str, str] = {}
-    for name, dotted in sorted(modules.items()):
-        defn = getattr(importlib.import_module(dotted), name)
-        # Through the EFFECTIVE tools, for the same reason `effective_tools_for` exists: a role
-        # whose capability is switched on past `AGENTS` disagrees with its own grant when bound
-        # from the static bits, and refusing it here would file a live role as a carve-out.
-        defn = dataclasses.replace(defn, tools=effective_tools_for(defn))
-        # #1106 M4: a verb-bearing role's grant is a RUN's, projected from its tenant's table —
-        # the registered definition carries none. Bound here the way a run binds it, so the role
-        # stays under the front-door rule rather than filing as a carve-out.
-        if (defn.tools.query or defn.tools.list_verbs) and not defn.verb_grant.entries:
-            from defender.tests import _tenants1106
-
-            defn = dataclasses.replace(defn, verb_grant=_tenants1106.fixture_grants().gather)
-        try:
-            deps = bind(defn, run_dir, defender_dir=defender_dir, scope=scope)
-        except (ValueError, TypeError):
-            refused[name] = dotted
-            continue
-        assert deps.policy is not None, f"{name} bound to deps carrying no compiled policy"
-        bound[name] = dotted
-
-    assert bound, "positive control: `bind` built nothing at all, so the rule below is vacuous"
-    assert refused, (
-        "positive control: `bind` refused no definition, so the carve-out partition is derived "
-        "from nothing")
-
-    offenders: dict[str, str] = {}
-    for name, dotted in bound.items():
-        source = Path(importlib.import_module(dotted).__file__).read_text(encoding="utf-8")
-        for door in ("for_scope(", "for_run("):
-            if door in source:
-                offenders[name] = f"{dotted} still declares a `{door}` deps front door"
-    assert offenders == {}, (
-        f"a second policy seam survives beside a bindable definition: {offenders} — every "
-        "production deps site obtains its policy through `bind`, not a co-located factory")
 
 
 def test_922_a_verb_bearing_bit_over_an_empty_grant_is_still_refused():

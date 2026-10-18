@@ -1,35 +1,6 @@
-"""#631 — the enforced posture driven END TO END through the real
-`driver.run_investigation` loop.
-
-It lives FLAT under `defender/tests/` rather than under `tests/e2e/` — where the
-harness it builds on lives — for one mechanical reason: `check_binds` globs the suite
-dir non-recursively, so a `discharged_by` pointing into `tests/e2e/` resolves to
-nothing and 23 demands' prose becomes unscannable. `pytestmark = pytest.mark.e2e`
-keeps it in the same marker lane as the other replay scripts.
-
-Every scenario here is a few lines of `Turn(...)` against `_replay_harness`: the real
-agent loop, the real generic tools, the real permission gate, the real observability
-projection, the real budget hooks — with three injected VALUES and nothing patched
-(the model, the verb registry, and the cap table). The enforcement posture is set
-through the real environment the real `env_bool` reads.
-
-RED AGAINST HEAD IS THE EXPECTED STATE. At `483b5809` there is no trip seam at all —
-PO57 executed the tree-state check and got "hooks.on.tool_execute registered in
-driver: False; DEFENDER_BUDGET_ENFORCE anywhere in driver: False" — so the only budget
-hook is the warning-only `after_tool_execute` accountant.
-
-THE LIVE MECHANISM IS SHORT-CIRCUIT ONLY. There is no `prepare_tools` withdrawal arm
-anywhere in this design, and nothing here may assert one: X1 refuted the withdrawal
-mechanism (each re-issue comes back as `RetryPromptPart('Unknown tool name')` counted
-against the same per-tool ceiling, raising `UnexpectedModelBehavior` at turn 11), X2
-refuted the `before_tool_execute` backstop (it fired ZERO times across 10 re-issues,
-because the framework resolves the tool name UPSTREAM of the execute-family hooks),
-and X6 refuted the combined form — withdrawal SHADOWS the wrap seam, so adding it
-strictly REMOVES the property the mechanism exists for.
-"""
+"""#631 — the enforced posture driven END TO END through the real `driver.run_investigation` loop."""
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -61,8 +32,7 @@ SALT = "0011223344556677"
 
 @pytest.fixture
 def enforced(monkeypatch):
-    """The enforcing posture, set the only way production sets it: the real
-    environment variable the real `env_bool` reads in-process."""
+    """The enforcing posture, set the only way production sets it: the real environment variable the real..."""
     monkeypatch.setenv(FLAG, "true")
 
 
@@ -76,16 +46,12 @@ def caps(**over) -> dict:
 
 
 def budget(summary: dict) -> dict:
-    """The run's budget counters: a snapshot of the run's own `RunState`, which `drive` hands
-    back on the summary (#1235 round 2 — no `budget.json`, no table keyed by the folder)."""
+    """The run's budget counters: a snapshot of the run's own `RunState`, which `drive` hands back on the summary..."""
     return summary["run_state"].budget_snapshot()
 
 
 def own_rows(run_dir: Path) -> list[dict]:
-    """The queries-table rows written by this test's own scripted `gather`/`query`
-    calls — excluding lead-0's harness-executed rows (`RESERVED_LEAD_IDS`), which are
-    written on every `drive()` call that injects a `verbs=` registry regardless of
-    anything this test scripts."""
+    """The queries-table rows written by this test's own scripted `gather`/`query` calls — excluding lead-0's..."""
     return [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl")
             if r["lead_id"] not in RESERVED_LEAD_IDS]
 
@@ -105,14 +71,7 @@ def tail_turns(run_dir: Path, n: int) -> list[Turn]:
 
 
 def refusal_stem() -> str:
-    """The placeholder-free literal prefix of the refusal message, GUARDED non-empty.
-
-    Blind reader R5: five tests derived their expected refusal text from
-    `BUDGET_REFUSAL_MESSAGE.split("{",1)[0]`, and if the implementer front-loads a
-    `{tool}` placeholder that prefix is `""` — `"" in history` then passes everywhere
-    and four delivery checks silently stop testing. This guard fails loudly on that
-    authoring, and the message's CONTENT is pinned separately, structurally, in
-    test_refusal_message_content — so no delivery check rests on the constant's wording."""
+    """The placeholder-free literal prefix of the refusal message, GUARDED non-empty."""
     stem = BUDGET_REFUSAL_MESSAGE.split("{", 1)[0].strip()
     assert stem, (
         "BUDGET_REFUSAL_MESSAGE begins with an interpolated field — its literal prefix "
@@ -122,19 +81,8 @@ def refusal_stem() -> str:
     return stem
 
 
-
 def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
-    """When a cap trips with enforcement on, run_investigation returns its normal
-    summary dict — {output, model, requests, truncated_by} — and the trace and the
-    request log are on disk; it never raises past its caller.
-
-    THIS TEST OBSERVES A TRIP (blind reader R3): it is cited by name as the positive
-    control for test_flag_off_leaves_run_unenforced and
-    the accounting-only property for the learning stages, so it must exercise the mechanism, not
-    merely finish. It drives the SAME two-bash-then-text script under the SAME injected
-    caps those two tests use, and asserts a refusal was delivered — proving enforcement
-    fired here, which is exactly the difference the controlled tests observe the
-    absence of."""
+    """When a cap trips with enforcement on, run_investigation returns its normal summary dict — {output, model,..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='trip')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -157,9 +105,7 @@ def test_budget_trip_returns_summary_and_writes_trace(tmp_path, enforced):
 
 
 def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
-    """A run ended by the budget kill carries truncated_by: "budget", so the post-run
-    pipeline can see that enforcement stopped the run rather than the defender
-    concluding, and does not score a truncated investigation as a complete one."""
+    """A run ended by the budget kill carries truncated_by: "budget", so the post-run pipeline can see that..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='trunc')
     summary = drive(run_dir, run_id="trunc",
                     main=ReplayFn(tail_turns(run_dir, 15)),
@@ -176,18 +122,7 @@ def test_a_budget_killed_run_carries_truncated_by_budget(tmp_path, enforced):
 
 
 def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
-    """Only the budget kill sets truncated_by: "budget" — the PRE-EXISTING
-    request-limit termination (UsageLimitExceeded, which run_investigation already
-    catches) sets its OWN distinct value, so a run that ends because the model would
-    not stop is not mislabelled as budget-truncated.
-
-    R27 (as originally written) pinned truncated_by's domain at {"budget", None} and
-    this exercised the None member; #705 (R4/R11) widens the domain to name every
-    caught exit distinctly — {"budget", "request-limit", "aborted", "store", None} — so
-    a request-limit termination stamps "request-limit", not None. The property this
-    test actually protects — a non-budget exit is never mislabelled "budget" — is
-    unchanged; only the non-budget value's spelling is. The positive control is
-    test_a_budget_killed_run_carries_truncated_by_budget."""
+    """Only the budget kill sets truncated_by: "budget" — the PRE-EXISTING request-limit termination..."""
     from defender.tests.e2e._replay_harness import NeverEndsModel
 
     run_dir = materialize(tmp_path, GOLDEN, run_id='reqlimit')
@@ -202,20 +137,7 @@ def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
 
 
 def test_budget_kill_writes_partial_trace(tmp_path, enforced):
-    """Tail exhaustion raises the budget kill's own exception type — not RunAborted,
-    whose constructor is circuit-breaker-specific — and run_investigation's catch
-    writes the partial trace exactly like the request-limit path.
-
-    P6 (executed 5x plus a 3x asyncio.shield adversarial arm): under CONCURRENT raises
-    both callers genuinely raise, yet exactly ONE kill propagates and it propagates
-    UNWRAPPED — a plain `except BudgetKill` catches it, which is the shape driver.py's
-    catch already has. The single-exception shape IS what this asserts end-to-end: the
-    script drives a turn of many PARALLEL tail-tier calls so several become
-    kill-eligible at once, and the run returns a clean summary rather than raising.
-    If a pydantic-ai bump stopped collapsing the anyio TaskGroup's BaseExceptionGroup,
-    the driver's plain `except BudgetKill` would MISS the group and `drive()` would
-    raise the group past its caller — this test would then fail LOUDLY at that raise,
-    which is exactly the guard P6 bought."""
+    """Tail exhaustion raises the budget kill's own exception type — not RunAborted, whose constructor is..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='kill')
     burst = [Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})] * 15)]
     summary = drive(run_dir, run_id="kill", main=ReplayFn(burst),
@@ -231,18 +153,7 @@ def test_budget_kill_writes_partial_trace(tmp_path, enforced):
 
 
 def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, capsys):
-    """The tail-exhaustion kill is raised from a seam OUTSIDE after_tool_execute's
-    broad exception guard, so the guard added specifically so that budget accounting
-    could never itself break a run does not swallow the kill: the run ends and is
-    marked, and no "budget accounting skipped" line is emitted for it.
-
-    FF11: after_tool_execute's whole body is wrapped in `except Exception`
-    (driver.py:121, "budget must never break the run"). A kill raised inside that body
-    is invisible. "budget accounting skipped: {e!r}" is the EXACT string that guard
-    prints when it swallows an exception (driver.py:121), so the string IS producible —
-    the negative is falsifiable: an implementation that raised the kill from inside the
-    guard would emit it. The positive control is test_budget_kill_writes_partial_trace,
-    where the kill DOES reach the driver's catch and DOES write the trace."""
+    """The tail-exhaustion kill is raised from a seam OUTSIDE after_tool_execute's broad exception guard, so the..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='guard')
     summary = drive(run_dir, run_id="guard",
                     main=ReplayFn(tail_turns(run_dir, 15)),
@@ -256,15 +167,7 @@ def test_kill_exception_reaches_uncaught_driver_handling(tmp_path, enforced, cap
 
 
 def test_only_one_shutdown_path_writes_the_run_dir_artifacts(tmp_path, enforced):
-    """Exactly one shutdown path writes the run-dir artifacts, whichever kill fires
-    and whether or not both fire: the trace and the request log are projected ONCE,
-    not raced or written twice.
-
-    Kept separate from the decoupling demand because it survives any answer to it —
-    this is the demand that keeps two independent kills from both projecting the
-    trace. The observable is the artifact, not the code path: `tool_trace.jsonl` ends
-    with exactly one `type: result` event and the request log has no duplicated
-    request ids."""
+    """Exactly one shutdown path writes the run-dir artifacts, whichever kill fires and whether or not both fire:..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='shutdown')
     summary = drive(run_dir, run_id="shutdown",
                     main=ReplayFn(tail_turns(run_dir, 15)),
@@ -282,20 +185,7 @@ def test_only_one_shutdown_path_writes_the_run_dir_artifacts(tmp_path, enforced)
 
 
 def test_budget_kill_and_breaker_kill_are_independent(tmp_path, enforced):
-    """The budget kill and the circuit-breaker kill are independent — first fires
-    wins, and neither consults the other's state — so neither one's correctness
-    depends on the other's.
-
-    Driven both ways round: a run whose budget trips while the breaker's own state
-    already sits at a nonzero failure count still ends on the budget, with the
-    breaker's record untouched; and a breaker abort on an un-tripped budget still ends
-    the run with the budget's counters intact and no truncated_by mark.
-
-    The nonzero breaker state is charged INSIDE the run, the way production charges it: the
-    run's first call is a gather whose one query hits a dead backend, so `record_outcome` counts
-    one elastic failure on the run's own state (#1235 round 2: the driver starts that state, so
-    nothing seeded before `drive` can reach it). The budget then trips on the tail reads, and
-    the breaker's record at the end is exactly that one charge."""
+    """The budget kill and the circuit-breaker kill are independent — first fires wins, and neither consults the..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='both')
     dead = FakeVerbs({"elastic": {"esql": _dead_verb()}})
     charge = ReplayFn([Turn(tool_calls=[("query", {
@@ -342,24 +232,8 @@ def _dead_verb():
     return esql
 
 
-
 def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
-    """After a cap trips, the budget-stopped tool is STILL OFFERED to the model, and
-    every call to it is refused at the tool_execute hook — which returns without
-    awaiting the handler, so the tool's body never runs and the model receives a
-    ToolReturnPart rather than a framework retry.
-
-    SCOPE, narrowed by P3 (executed): pydantic-ai validates a ToolCallPart's args
-    against the tool's schema BEFORE dispatching to ANY execute-family hook — on
-    missing / wrong-typed / extra-field args the seam fires before=0 wrap=0 after=0
-    and a RetryPromptPart appears instead. This demand is therefore true for calls
-    whose args are SCHEMA-VALID, and the script below binds valid args.
-
-    REJECTED, and this test must not be rewritten to assert either: withdrawing the
-    tool in prepare_tools (X6 — it shadows the execute seam and reintroduces the very
-    retry crash the mechanism exists to avoid), and a before_tool_execute backstop for
-    stale calls (X2 — with nothing withdrawn there are no stale calls, and that hook
-    never fires for a tool the framework has already rejected)."""
+    """After a cap trips, the budget-stopped tool is STILL OFFERED to the model, and every call to it is refused..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='refuse')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -379,17 +253,8 @@ def test_stopped_tool_is_refused_not_withdrawn(tmp_path, enforced):
     )
 
 
-
 def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
-    """A model that re-issues a budget-stopped tool many more times than MAIN's
-    ten-retry ceiling accumulates NO retries at all: the run completes normally, no
-    UnexpectedModelBehavior is raised, and the trace reaches disk.
-
-    THE DISCRIMINATING DEMAND — exactly the property withdrawal destroys (X6: the
-    combined arm raised UnexpectedModelBehavior at turn 13 with the wrap firing once)
-    and short-circuit-only preserves (X4: 14 consecutive short-circuits with zero
-    retry accumulation, re-confirmed at 15). It is driven well past ten consecutive
-    re-issues below, because at ten or fewer it proves nothing."""
+    """A model that re-issues a budget-stopped tool many more times than MAIN's ten-retry ceiling accumulates NO..."""
     from pydantic_ai.exceptions import UnexpectedModelBehavior
 
     run_dir = materialize(tmp_path, GOLDEN, run_id='reissue')
@@ -414,64 +279,8 @@ def test_repeated_reissue_accumulates_no_retries(tmp_path, enforced):
     assert (run_dir / "tool_trace.jsonl").is_file()
 
 
-def test_refusal_message_content(tmp_path, enforced):
-    """EVERY refusal — not merely the first — returns M1b's message to the model: that
-    the stop is PERMANENT for the rest of the run, WHAT REMAINS AVAILABLE to it, and
-    that it should WRITE ITS REPORT NOW.
-
-    The quantifier is the load-bearing part: under the superseded combined form the
-    text was delivered exactly once (X6 — the wrap fired for the single in-flight
-    stale call and every re-issue after it came back as the framework's stock
-    "Unknown tool name").
-
-    This is a `kind: shape` demand, so it pins the payload's INVARIANTS two ways
-    (mechanical leaf F12, blind reader R4): (1) the CONTENT requirement — permanence,
-    what remains, write-the-report — is asserted against the CONSTANT itself, because
-    the flattened request history contains the whole system prompt (SKILL.md carries
-    "report" 11× and "remain" 1×), so `"report" in history` is pre-satisfied and pins
-    nothing; and (2) the DELIVERY requirement — every refusal, not merely the first —
-    is asserted by counting the message's guarded literal stem in the captured inbound
-    history, which the system prompt does NOT contain."""
-    run_dir = materialize(tmp_path, GOLDEN, run_id='msg')
-    replay = ReplayFn([
-        Turn(tool_calls=[("bash", {"command": "echo hi"})]),
-        *[Turn(tool_calls=[("bash", {"command": f"echo {i}"})]) for i in range(6)],
-        Turn(text="ok"),
-    ])
-    drive(run_dir, run_id="msg", main=replay,
-          limits=caps(max_tool_calls=1, wall_clock_timeout=3600, grace_seconds=600))
-
-    constant = BUDGET_REFUSAL_MESSAGE.lower()
-    assert "permanent" in constant, "the message does not state the stop is permanent"
-    assert "report" in constant, "the message does not tell the model to write its report"
-    assert re.search(r"still (available|allowed)|remain", constant), (
-        "the message does not say what remains available"
-    )
-    assert "{" in BUDGET_REFUSAL_MESSAGE, "the refusal message interpolates nothing"
-
-    final = replay.seen[-1]
-    stem = refusal_stem()
-    assert final.count(stem) >= 6, (
-        f"only {final.count(stem)} of 6 refusals carried the message"
-    )
-
-
 def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
-    """A call refused at the execute seam leaves tool_calls unchanged in the run's budget
-    AND emits NOTHING on the stderr channel — across a long run of consecutive
-    refusals no budget warning or exceeded line appears — so a model looping on a
-    stopped tool can neither spend the ten-call tail band MAIN needs for its report
-    nor bury the real signal under repeated warnings.
-
-    X7 (executed) refuted the free version of this: a short-circuit DOES reach
-    after_tool_execute — it fired 16 times against 15 short-circuits — so "not
-    counted" is a property the implementation must add DELIBERATELY. NF2 then settled
-    the channel: the refusal path calls neither the counting (`account_call`) nor
-    check_budgets, because a refusal is not an executed call. P2 (executed) is why
-    silence is the right assertion rather than a stylistic preference: check_budgets
-    is PURE — no memory, no per-run "already warned" state — so against a frozen
-    at-cap counter it re-emits BYTE-IDENTICAL text on every single refusal, five for
-    five, burying the real signal under its own repetition."""
+    """A call refused at the execute seam leaves tool_calls unchanged in the run's budget AND emits NOTHING on..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='silent')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -492,16 +301,7 @@ def test_refused_call_does_not_increment_tool_calls(tmp_path, enforced, capsys):
 
 
 def test_a_refused_call_writes_an_explicit_refusal_record(tmp_path, enforced):
-    """A call refused at the budget seam writes its OWN explicit refusal record rather
-    than borrowing QueryCapture's row shape, so a refusal that leaves no queries-table
-    row is still legible in the run's durable record.
-
-    P4 (executed): under the live capability order the budget short-circuit preempts
-    QueryCapture ENTIRELY — no breaker record, no queries-table row, no pre-call trip
-    check — so the refusal has no carrier unless the seam mints one. The capability
-    ORDER is unchanged (M11's no-phantom-row intent survives); what is added is the
-    record. ACCEPTED RESIDUAL, recorded not fixed: the circuit breaker still does not
-    observe refusals."""
+    """A call refused at the budget seam writes its OWN explicit refusal record rather than borrowing..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='record')
     drive(run_dir, run_id="record",
           main=ReplayFn([
@@ -518,19 +318,8 @@ def test_a_refused_call_writes_an_explicit_refusal_record(tmp_path, enforced):
     assert refusals[0].get("agent_id") == "main"
 
 
-
 def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
-    """The hermetic replay suite drives a full run with INJECTED LOW LIMITS until a
-    cap actually trips, and observes the outcome: the expensive tools stop being
-    usable, the report is still written inside the bounded tail, and the trace is on
-    disk.
-
-    This test cannot pass vacuously, and the cross-check that guarantees it is
-    test_an_injected_cap_of_zero_trips_immediately_rather_than_disabling: PB6 executed
-    the incumbent behaviour where an injected cap of 0 makes check_budgets return []
-    silently, so a harness that injected 0 and observed "no report tail needed" would
-    go green having driven no enforcement at all. The assertions below therefore
-    require the refusal to be OBSERVED, not merely for the run to finish."""
+    """The hermetic replay suite drives a full run with INJECTED LOW LIMITS until a cap actually trips, and..."""
     # #774/R1: report.md left MAIN's write allow-list entirely (the close tool is now its
     # only writer), so the tail-tier artifact this scenario funds is investigation.md.
     run_dir = materialize(tmp_path, GOLDEN, run_id='e2e')
@@ -555,16 +344,7 @@ def test_replay_run_crosses_budget_and_still_reports(tmp_path, enforced):
 
 
 def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
-    """Every trip limb opens the SAME bounded report tail — the count limb, the spawn
-    limb and the clock limb alike — and crossing the spawn cap produces an observable
-    refusal of a gather while the run still reports.
-
-    D7/D10/D12: O2 names no limb, and the CLOCK limb is the one that fires first in
-    production, so denying it the tail guts O2 in the common case. This resolves the
-    M1/M4 text conflict: M1's tier-agnostic wall-clock sentence is the STALE one.
-    X8, re-probed executed by PB11, confirms the spawn counter is live for "gather"
-    ONLY — the retired Task/Agent names increment tool_calls but not subagent_spawns —
-    so the spawn arm below is written against a live counter."""
+    """Every trip limb opens the SAME bounded report tail — the count limb, the spawn limb and the clock limb..."""
     verbs = FakeVerbs({"elastic": {"esql": lambda ctx, *, index: {"rows": []}}})
     inv_text = (GOLDEN / "investigation.md").read_text()
 
@@ -606,20 +386,7 @@ def test_each_trip_limb_opens_the_same_bounded_report_tail(tmp_path, enforced):
 
 
 def test_kill_lands_between_two_report_writes(tmp_path, enforced):
-    """The run's tail-tier artifact is written across more than one call and the tail is
-    exhausted partway through: content from COMPLETED prior writes persists on disk, and
-    the run's summary and trace still land — "whatever is on disk survives" is the whole
-    contract, and no further granularity is specified for a write interrupted mid-flight.
-
-    #774/R1: report.md left MAIN's write allow-list entirely, so both writes this scenario
-    is about now target investigation.md (still tail-tier, still model-writable across more
-    than one call).
-
-    #810 made both of them `append_block`. The scenario needs the artifact built over MORE
-    THAN ONE CALL and the tail exhausted after them; it never needed the second call to be a
-    splice, and a splice is no longer expressible — the document is append-only and its verb
-    has no anchor. Two appends, and the contract is the same one: whatever completed before
-    the kill is still on disk."""
+    """The run's tail-tier artifact is written across more than one call and the tail is exhausted partway..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='between')
     inv = run_dir / "investigation.md"
     inv_text = (GOLDEN / "investigation.md").read_text()
@@ -641,13 +408,8 @@ def test_kill_lands_between_two_report_writes(tmp_path, enforced):
     assert (run_dir / "tool_trace.jsonl").is_file()
 
 
-
 def test_main_and_gather_share_one_budget(tmp_path, unenforced):
-    """MAIN and every GATHER subagent increment the ONE budget on the run's `RunState`, so
-    the caps bound the pool rather than each agent separately — and the state the subagent's
-    calls land in is the same object MAIN's do (#1235 round 2), not a second one: MAIN's
-    bash, MAIN's gather dispatch and the subagent's own query all count in it. No
-    `budget.json` is written anywhere."""
+    """MAIN and every GATHER subagent increment the ONE budget on the run's `RunState`, so the caps bound the..."""
     recorder = VerbRecorder()
 
     def esql(ctx, *, index: str) -> dict:
@@ -681,18 +443,7 @@ def test_main_and_gather_share_one_budget(tmp_path, unenforced):
 
 
 def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
-    """Counter increments AND stderr warnings happen on every tool call that ACTUALLY
-    EXECUTES, whether or not the posture bit enables enforcement — accounting is
-    unconditional with respect to POSTURE, which is a different axis from whether a
-    given call did any work.
-
-    F3(b) narrowed the quantifier to executed calls and NF2 confirmed the narrowing:
-    the refusal path calls neither the counting (`account_call`) nor check_budgets, and the
-    stderr-SILENCE assertion that implies lives on
-    test_refused_call_does_not_increment_tool_calls rather than here (a reader arriving
-    here must not write a second, conflicting assertion about the same channel). Here
-    the calls all EXECUTE (three under a cap of four → the 75% line), so the warning
-    fires under BOTH postures — the unconditional-with-respect-to-posture half."""
+    """Counter increments AND stderr warnings happen on every tool call that ACTUALLY EXECUTES, whether or not..."""
     def script():
         return ReplayFn([*[Turn(tool_calls=[("bash", {"command": f"echo {i}"})])
                            for i in range(3)], Turn(text="done")])
@@ -714,13 +465,7 @@ def test_accounting_runs_regardless_of_posture(tmp_path, monkeypatch, capsys):
 
 
 def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
-    """With the flag off, a run that crosses every cap observes no refusal and no kill
-    — only the existing stderr warnings — and completes exactly as it does today.
-
-    The positive control is test_budget_trip_returns_summary_and_writes_trace: the
-    SAME two-bash-then-text script under the SAME injected caps with the flag ON
-    delivers a refusal, which this run does not — the complementary condition on the
-    same address (blind reader R3 required aligning the two)."""
+    """With the flag off, a run that crosses every cap observes no refusal and no kill — only the existing stderr..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='off')
     replay = ReplayFn([
         Turn(tool_calls=[("bash", {"command": "echo hi"})]),
@@ -739,14 +484,7 @@ def test_flag_off_leaves_run_unenforced(tmp_path, unenforced, capsys):
 
 
 def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
-    """A budget-refused `gather` call never dispatches a subagent, and the refusal
-    still reaches the accounting hook that carries the spawn branch — so
-    subagent_spawns does NOT advance for it, by the same F3(b) reasoning that excludes
-    tool_calls.
-
-    The warrant is F3(b) rather than the design doc: the analogy is tight and the
-    consensus was 3/3-by-inference, so it is cited as such rather than dressed up as
-    doc-direct."""
+    """A budget-refused `gather` call never dispatches a subagent, and the refusal still reaches the accounting..."""
     verbs = FakeVerbs({"elastic": {"esql": lambda ctx, *, index: {"rows": []}}})
     run_dir = materialize(tmp_path, GOLDEN, run_id='spawn')
     gather = ReplayFn([Turn(text="summary")])
@@ -778,17 +516,7 @@ def test_refused_gather_and_the_spawn_counter(tmp_path, enforced):
 
 
 def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
-    """A gather dispatched into an already-tripped pool is refused at MAIN's own
-    tool_execute seam — `gather` is core-tier, so its "very first call" (the dispatch
-    itself) is refused BEFORE any subagent is constructed — and no work is ever done:
-    the inner model is never invoked, no query row, no payload, and MAIN reads the
-    gather refusal.
-
-    The `gather.calls == 0` assertion is the discriminator (blind reader R8): the
-    absence assertions (`recorder.calls == []`, no queries table) hold BOTH when the
-    subagent is dispatched-then-refused AND when it is never dispatched, and this
-    scenario's whole point is that on a tripped pool the core-tier dispatch is refused
-    UPSTREAM of construction, so the inner replay must never run."""
+    """A gather dispatched into an already-tripped pool is refused at MAIN's own tool_execute seam — `gather` is..."""
     recorder = VerbRecorder()
 
     def esql(ctx, *, index: str) -> dict:
@@ -828,30 +556,8 @@ def test_subagent_dispatched_into_an_already_stopped_pool(tmp_path, enforced):
     )
 
 
-
 def test_stopped_query_writes_no_row(tmp_path, enforced):
-    """A query stopped by the budget writes NO row into the queries table —
-    `_make_hooks` is prepended ahead of QueryCapture, so the budget's tool_execute
-    wrapper returns its refusal without ever entering QueryCapture's, and a call that
-    never ran leaves no record claiming it did.
-
-    P4 executed the ordering BOTH ways: under the live order (hooks first,
-    driver.py:205) the short-circuit preempts QueryCapture entirely — no
-    record_outcome, no queries-table row, and no pre-call breaker check. The order is
-    KEPT and the refusal's own record is minted separately
-    (test_a_refused_call_writes_an_explicit_refusal_record) rather than borrowing
-    QueryCapture's row shape.
-
-    THE SUBAGENT GENUINELY RUNS AND ISSUES BOTH QUERIES (blind reader R8): pre-tripping
-    the pool and making `gather` MAIN's first call would refuse the DISPATCH and never
-    reach QueryCapture at all, so the absence of a row would prove nothing about the
-    ordering. Instead the cap is 1: the subagent's FIRST query executes and writes its
-    row (crossing the cap), and its SECOND query is the one the budget stops — so the
-    stopped query, having reached the seam, must leave no row while the executed one
-    did. The executed row is the in-test control that the subagent's queries reach
-    QueryCapture at all.
-
-    The positive control is test_executed_query_writes_a_row."""
+    """A query stopped by the budget writes NO row into the queries table — `_make_hooks` is prepended ahead of..."""
     recorder = VerbRecorder()
 
     def esql(ctx, *, index: str) -> dict:
@@ -891,9 +597,7 @@ def test_stopped_query_writes_no_row(tmp_path, enforced):
 
 
 def test_executed_query_writes_a_row(tmp_path, unenforced):
-    """A query that actually executes under the same harness DOES write its
-    queries-table row and its by-ref payload — the control that keeps the phantom-row
-    demand from passing vacuously."""
+    """A query that actually executes under the same harness DOES write its queries-table row and its by-ref..."""
     recorder = VerbRecorder()
 
     def esql(ctx, *, index: str) -> dict:
@@ -923,29 +627,12 @@ def test_executed_query_writes_a_row(tmp_path, unenforced):
     assert recorder.only().params == {"index": "logs"}
 
 
-
 def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
-    """A gather subagent that runs into its own request limit is converted to the
-    measurement-shaped string, so MAIN reads an incomplete lead and reasons on rather
-    than the run dying with no report — and a BUDGET REFUSAL inside GATHER is a
-    DIFFERENT path that does not produce that string at all.
-
-    P1 (executed) re-targeted this demand: at the GATHER boundary a budget refusal is
-    an ordinary ToolReturnPart, NOT an exception — the inner run completes and MAIN
-    reads the subagent's own degraded summary ("PARTIAL SUMMARY: got 1 result, then
-    refused"). The measurement-shaped string comes from the PRE-EXISTING
-    UsageLimitExceeded limb, reached only when the subagent re-issues the refused tool
-    until the request limit. TWO DISTINCT CODE PATHS — a test written against "a
-    refusal becomes a measurement string" would assert a conversion that never
-    happens."""
+    """A gather subagent that runs into its own request limit is converted to the measurement-shaped string, so..."""
     verbs = FakeVerbs({"elastic": {"esql": lambda ctx, *, index: {"rows": []}}})
     query_turn = Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                              "params": {"index": "logs"},
                                              "query_id": "elastic.probe"})])
-    # #807's repeat guard refuses a lead's THIRD identical request before it ever reaches
-    # the backend, so 200 byte-identical calls would end this lead at occurrence 3 rather
-    # than exhausting the request limit this demand is about — a distinct request per call
-    # (varying `index`) keeps every call in-domain for the request-limit path.
     distinct_query_turns = [
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "esql",
                                     "params": {"index": f"logs-{i}"},
@@ -988,16 +675,7 @@ def test_gather_abort_becomes_measurement_string(tmp_path, enforced):
 
 
 def test_gather_has_no_per_call_timeout(tmp_path, unenforced):
-    """No per-call wall clock is imposed on a gather dispatch: a lead whose work runs
-    well past any short per-call bound is NOT cut off, because a legitimate
-    six-dimension lead needs roughly twenty-six turns.
-
-    C9 (read) records why an outer wall-clock timeout on `query` was deliberately
-    removed and must not be reinstated as a wrapper: `asyncio.wait_for` cancels the
-    await, not the thread, so a hung verb leaks a thread and synthesizes an exit-124
-    row reporting a kill that never happened. The positive control is
-    test_gather_keeps_its_request_limit — the bound that DOES exist is still enforced,
-    so this negative cannot pass by the dispatch being unbounded in every direction."""
+    """No per-call wall clock is imposed on a gather dispatch: a lead whose work runs well past any short..."""
     def slow(ctx, *, index: str) -> dict:
         import time
         time.sleep(1.5)

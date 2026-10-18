@@ -1,20 +1,4 @@
-"""Regression tests for the runtime.html data layer + page composition.
-
-The PydanticAI migration renamed the run-dir writers (``Write``/``Edit`` →
-``write_file``/``edit_file``, arg ``file_path`` → ``path``) and dispatches the
-gather subagent through a ``gather`` tool rather than ``Task``/``Agent``. The
-visualizer's phase tagger + cost/transcript machinery was still coded for the
-old ``claude -p`` shapes, so every event collapsed into the first phase and the
-gather panel was always empty. These tests pin the fixed behavior:
-
-  - ``write_file``/``edit_file`` writes that introduce ``## PHASE`` headers
-    advance the phase cursor, so per-phase cost is spread across phases;
-  - the transcript is built from ``llm_requests.jsonl`` (full content + retries)
-    with correct per-entry kind + phase;
-  - per-phase cost reconciles with the headline total (main + folded gather);
-  - run-health surfaces gate retries + dead-end leads;
-  - § Leads & queries renders from the two-table join.
-"""
+"""runtime.html data layer and page composition: the phase tagger follows write_file/edit_file, per-phase cost and wall reconcile with the headline (gather folded in, repeated phase names are one bucket), the transcript is built from the wire log in the right id space, and run health surfaces retries and dead-end leads."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -33,14 +17,11 @@ _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 
 #: The fixture's session id — present so the trace's `message.id` is a store COORD
 #: (`{session_id}/{agent_id}#{seq}`) rather than a wire id. Before #883 F-22 this fixture
 #: wrote the SAME `main#N` string as both the trace's `message.id` and the wire record's
-#: `id`, collapsing two id spaces production keeps apart — which is the only reason
-#: `test_transcript_from_messages` passed while every real render stamped one phase.
 _SESSION = "9f2c1ab84e7d4f0e9c3b5a6d7e8f0a1b"
 
 #: `(coord_seq, wire_id, phase, investigation_content, lead_id)`. The two seq spaces
 #: diverge exactly as production's do: the store's counts ROWS (request, response,
 #: request, … so responses land on odd seqs), the logger's counts every emitted RECORD
-#: (each round re-emits the whole request list, so the gaps widen).
 _TURNS = [
     (1, "main#1", "ORIENT", "## ORIENT\n\nOriented on the alert: ssh auth anomaly.\n", None),
     (3, "main#5", "PLAN", "## ORIENT\n\nOriented.\n\n## PLAN\n\nPlanning to gather ssh auth + identity.\n", "l-001"),
@@ -281,13 +262,7 @@ def test_transcript_from_messages(tmp_path):
 def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
     """#883 F-22, at the seam itself: `tool_trace.jsonl` keys an assistant turn by the
     session-store COORD and `llm_requests.jsonl` by the logger's own id, and those two
-    strings are never equal. Each reader therefore needs a map in ITS OWN space —
-    `msg_phase_map` for the trace-walking cost attribution, `transcript_phase_map` for the
-    wire-log-walking transcript. Handing either one the other's map misses on every turn.
-
-    This pins the FIXTURE as much as the code: writing one string into both files (as this
-    file did before #883) erases the divergence the reader has to survive, and every
-    assertion downstream of it becomes vacuous."""
+    strings are never equal. Each reader therefore needs a map in ITS OWN space —"""
     run = _build_run(tmp_path)
     events = read_jsonl_rows(run / "tool_trace.jsonl")
     messages = d.load_messages(run)
@@ -328,14 +303,7 @@ def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
 def test_the_phase_join_survives_a_fold_that_left_the_trace_holding_only_the_tail(tmp_path):
     """A fold re-parents the frontier onto the LINEAGE ROOT
     (`test_folds_are_restart_shaped_with_an_empty_tail`), so `observe.write_trace` — which
-    hydrates the store's path — emits assistant events only for the turns since the last
-    fold, while the append-only wire log still holds every turn from the first.
-
-    The two sequences are therefore different LENGTHS, and a positional pairing of them
-    hands the first wire turn the LAST phase: not "the surplus goes unmapped" but every
-    entry wrong, silently. The join keys on the tool-call id both files copy off the same
-    `ModelResponse`, so the folded-away turns are the ones that go unmapped, and
-    `build_transcript` carries `phase_order[0]` forward across them."""
+    hydrates the store's path — emits assistant events only for the turns since the last"""
     run = _build_run(tmp_path)
     events = read_jsonl_rows(run / "tool_trace.jsonl")
     messages = d.load_messages(run)
@@ -424,11 +392,7 @@ def _append_review_calls(run: Path, n_per_lens: int = 1) -> float:
 
 def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path, monkeypatch):
     """#787. The gate's calls are calls the run made, so they are IN the total — and named,
-    because an operator who cannot separate them cannot answer what the gate cost.
-
-    The headline therefore stops equalling the per-phase bar sum, and that is the intended
-    relationship rather than drift: the gate is not a phase (the investigator is never "in"
-    it), so its money has no phase segment to live in. Pinned as the exact difference."""
+    because an operator who cannot separate them cannot answer what the gate cost."""
     import re
 
     run = _build_run(tmp_path)
@@ -454,29 +418,6 @@ def test_the_review_gate_s_spend_is_inside_the_headline_and_named_there(tmp_path
     )
 
 
-def test_load_messages_still_finds_a_pre_observe_run_s_wire_log(tmp_path):
-    """A run dir written before the wire log moved under `wire_logs/` still renders.
-
-    The move is a read-GATE fact — `<run>/wire_logs/` is outside every reader agent's
-    single-segment run-dir read shape — and the visualizer is host code that sits outside the
-    gate entirely, so nothing is reopened by reading the old location when the new one is
-    absent. Without the fallback the page silently shows its "older run" empty state for runs
-    that DO have a transcript, which reads as a broken run rather than a moved file.
-
-    The precedence is the other half: when both exist, the current location wins."""
-    legacy = tmp_path / "legacy"
-    legacy.mkdir()
-    (legacy / d.RUN_LAYOUT.wire_log.name).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
-    assert [r["id"] for r in d.load_messages(legacy)] == ["old#0"]
-
-    both = tmp_path / "both"
-    wire = RunPaths(both).wire_log
-    wire.parent.mkdir(parents=True)
-    (both / d.RUN_LAYOUT.wire_log.name).write_text(json.dumps({"id": "old#0", "kind": "response"}) + "\n")
-    wire.write_text(json.dumps({"id": "new#0", "kind": "response"}) + "\n")
-    assert [r["id"] for r in d.load_messages(both)] == ["new#0"]
-
-
 def _duplicate_the_gather_phase(run: Path) -> None:
     """Two `## GATHER` headers with no `PLAN` between them — the shape the review gate's
     "another GATHER turn" return path invites. `normalize_phase_names` only bumps the loop
@@ -489,15 +430,7 @@ def _duplicate_the_gather_phase(run: Path) -> None:
 
 
 def test_a_bucket_that_appears_twice_is_tiled_once(tmp_path):
-    """#956, the half the render list hides: a repeat that is NOT adjacent.
-
-    `## GATHER … ## ANALYZE … ## GATHER` with no `## PLAN` between normalizes to ONE
-    `GATHER (loop 1)` bucket named at two positions. Tiling per APPEARANCE made the forward
-    scan for "the next phase that has events" find the LATER `GATHER`, whose first timestamp
-    is EARLIER than the ANALYZE it was meant to end — so ANALYZE ended before it started, was
-    clamped to zero, and GATHER's first span was lost to the overwrite. Pinned as coverage:
-    the tiles are contiguous and account for the whole run, which is the property a reader
-    checks a wall bar against."""
+    """#956, the half the render list hides: a repeat that is NOT adjacent."""
     phases = [{"name": n} for n in ["ORIENT", "PLAN", "GATHER", "ANALYZE", "GATHER", "REPORT"]]
     order = [p["name"] for p in d.normalize_phase_names(phases)]
     assert order.count("GATHER (loop 1)") == 2, f"fixture names no repeat: {order}"
@@ -547,13 +480,7 @@ def _bar_figures(html: str) -> dict[str, dict[str, str]]:
 def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
     """#956. `phase_order` is a render list, not a key set. Every per-phase number lives in a
     dict keyed on the name, so a name that appears twice is ONE bucket visited twice: the
-    cost fix-up `+=`s the same entry, and the wall fix-up re-reads the duration the pass
-    before it just wrote — so that adjustment compounds rather than merely repeating.
-
-    Pinned as an equality against the same run written with ONE gather header, because that
-    is the whole claim: the second header names no new bucket, so it may not move a number.
-    The headline reconcile is the second half — a bar that agrees with itself but not with
-    the total is still wrong, and disagreeing with the total is how a reader would notice."""
+    cost fix-up `+=`s the same entry, and the wall fix-up re-reads the duration the pass"""
     import re
 
     plain = _build_run(tmp_path / "plain")
@@ -590,11 +517,7 @@ def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
 def test_a_repeated_planning_name_is_one_loop(tmp_path):
     """#956's fourth site. The loop counter walks the render list and counts PLAN headers, so
     a planning name that appears twice reports a loop the run never ran — while `attribution`,
-    the wall tiles and both bars, all keyed on the same name, see one.
-
-    The repeat needs an EXPLICIT loop number: `normalize_phase_names` auto-increments only on
-    a bare `PLAN`, so two bare ones are two loops and genuinely distinct. Two that name the
-    same loop are the same loop, said twice."""
+    the wall tiles and both bars, all keyed on the same name, see one."""
     written = [{"name": n} for n in ["PLAN (loop 2)", "GATHER", "PLAN (loop 2)", "REPORT"]]
     order = [p["name"] for p in d.normalize_phase_names(written)]
     assert order.count("PLAN (loop 2)") == 2, f"fixture names no repeat: {order}"

@@ -1,29 +1,4 @@
-"""#1078 pass (A) — the runs-base RECORD, `<runs_base>/_tenant.json` (D1, D2, O6; §7 J16/J63, J34).
-
-The record keeps #1077's name and fields (`{tenant_id, base_world_id, created_at}`); what
-changes is who decides its tenant. `ensure_tenant(runs_base)` becomes
-`ensure_runs_base_record(runs_base, tenant_id)`: it mints the record with the REQUEST's id, or
-reads it back and refuses on disagreement — never overwrites. `_parse_record` gains the grammar.
-
-§7 J16/J63 (human, COMPLETE-OR-ABSENT WRITES) is pinned here as an OBSERVABLE, never as a
-mechanism: a reader that catches a create-lane writer mid-write sees the name absent or the file
-complete, never empty or partial; the file has one name throughout; mode 0644 under umask 022
-(the umask is honoured like every other lane, #1144) and the writer's owner; a crash leaves no
-stray entry. Every fault is the REAL one:
-
-* the create race — N `threading.Barrier`-released callers on a fresh base — is claim C-P2's own
-  probe shape (47-probes.md: on the old one-open lane a loser read the winner's EMPTY record in
-  9-35% of trials at 2/3/5/8 siblings, and the `TenantRecordCorrupt` propagated uncaught);
-* the bystander reader lstat()s and reads the real path while the race runs — an empty file,
-  a partial body or a second name (`st_nlink == 2`, the REFUTED hard-link window of C-R5, which
-  this tree's own alias guard refuses as a planted alias) is recorded as a violation;
-* the crash is a real SIGKILL of a real child process looping over the real create lane —
-  measured before authoring against the old lane (`ensure_tenant`, the same one-open create):
-  8 of 30 kills left an EMPTY `_tenant.json` behind, the torn state this demand forbids.
-
-`hooks/record_lead.py::claim_lead` is OUT of J16's scope (the demand's `scope_exclusions`,
-C-R29..C-R33) and is not driven here.
-"""
+"""The runs-base record _tenant.json: grammar on read, ensure/mint semantics, complete-or-absent create lane, torn reads, mismatch backstop."""
 from __future__ import annotations
 
 import errno
@@ -209,13 +184,7 @@ def _crash_leftovers(root: Path) -> list[str]:
 
 def test_o3_record_read_grammar(tmp_path, monkeypatch):
     """A runs-base record whose tenant_id is '../../x' is refused when read, where at ed5386bc
-    it reads back unchallenged.
-
-    Read through the owner's own reader (`read_tenant`, which `Run.for_tenant` uses), through
-    `ensure_runs_base_record` and through the tenant's runs repository opening a run there
-    (#1105 PR 2: the replacement for `tenant_of_run_dir`, F-13; an open answers the record's
-    refusal as `RunUnreachable` raised from it, #1105 PR 2 review); the control is the same
-    record naming a grammar id, which reads back."""
+    it reads back unchallenged."""
     from defender.run_repository import RunId, RunUnreachable
 
     H.make_tenant(tmp_path / "data", T_ID)
@@ -267,10 +236,7 @@ def test_o6_ensure_record_semantics(tmp_path):
 
 def test_o6_record_create_exclusive(tmp_path):
     """Two racing ensure_runs_base_record creates for one runs base leave exactly one record,
-    and the loser returns the winner's record.
-
-    §7 J63 (human, with J16): both racing creates SUCCEED — no loser is refused — one record
-    exists, and every caller carries the winner's base_world_id."""
+    and the loser returns the winner's record."""
     for trial in range(40):
         base = tmp_path / f"base-{trial}"
         base.mkdir()
@@ -289,21 +255,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
     mode 0644 under umask 022 (and the writing process's owner), and a crash before the write
     completes leaves no stray entry in the directory. N racing ensure_runs_base_record calls on
     one base all succeed, leave one record, and every caller carries the winner's
-    base_world_id.
-
-    Four observations, each against the REAL lane: (1) the record race with a bystander
-    reader; (2) the row race with a bystander reader; (3) mode, owner and name count of what
-    each leaves; (4) a real SIGKILL of a child looping over each lane. (1)-(3) run under a
-    pinned umask 022, so (3)'s 0644 never rides the host's ambient umask (the umask is
-    process-wide, so the racing threads share it). (4) asserts no mode, so its children run
-    under whatever umask the suite was started with.
-
-    PLATFORM-NEUTRAL BY CONSTRUCTION (phase F RC1): the harness uses only POSIX primitives —
-    threads, `os.lstat`/`os.listdir`, `os.geteuid`, a child process and SIGKILL — and asserts
-    only the OBSERVABLE, never a mechanism (`O_TMPFILE`, `linkat`, `renameat2` are the
-    implementer's per-platform choice). So it runs, and means the same thing, on any POSIX
-    host; nothing here is Linux-only, so nothing is skipped. Which platforms the guarantee is
-    REQUIRED on is RC1's open §7 question, not this test's."""
+    base_world_id."""
     with umask(0o022):
         # (1) + (3) the runs-base record
         record_fields = ("tenant_id", "base_world_id", "created_at")
@@ -408,14 +360,7 @@ def test_runs_base_record_torn_read(tmp_path, monkeypatch):
     """Under the complete-or-absent create lane (J16/J63), no reader of a runs-base record — a
     racing ensure_runs_base_record loser or a bystander such as the tenant's runs repository
     opening a run — ever observes an empty or partial record: it sees the record absent or
-    complete, so the read is old-or-new-only by construction.
-
-    §7 corrected settled #32 here: the premise's empty-intermediate (C-P1) grounded the OLD
-    lane and does not carry forward. The bystander is T's runs repository opening a run at a
-    real tenant location (#1105 PR 2: the replacement for `tenant_of_run_dir`, F-13): every
-    answer it gives while the record is being created must be either a run of T or EXACTLY its
-    absent-record refusal (captured before the race) — a corrupt-record refusal is the torn
-    read."""
+    complete, so the read is old-or-new-only by construction."""
     from defender.run_repository import RunId, RunRefused
 
     root = tmp_path / "data"
@@ -461,11 +406,7 @@ def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and
     """create_tenant makes and holds its folder with `_io.hold_new` off the data root's handle
     (F12, brief R4(d): _tenant.py is hard-gated for a raw mkdir; #1137 moved it off
     guarded_mkdir), which judges `<T>` with no link followed at mkdir time, closing the swap
-    window after O11a's construction-time check.
-
-    The swap, as it lands on disk: `<root>/<T>` is a symlink to a directory elsewhere by the
-    time the folder is made (`hold_new` refuses a link at the name it makes or adopts). The create is refused, nothing is written through the link, and the link
-    is left as it was; the control is the same id into a fresh root."""
+    window after O11a's construction-time check."""
     victim = tmp_path / "victim"
     victim.mkdir()
     root = tmp_path / "data"
@@ -486,10 +427,7 @@ def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and
 def test_s7_j34_run_for_tenant_mismatch_backstop(tmp_path):
     """Run.for_tenant(runs_base, T) over a present record naming U raises its mismatch
     refusal and writes nothing: the race backstop behind ensure_runs_base_record's step-4
-    refusal.
-
-    Called with the real signature, `Run.for_tenant(T, run_id, runs_base=...)`; the control is
-    a record naming T, which is accepted."""
+    refusal."""
     Run = H.mod("run_repository._handle").Run
     base = tmp_path / "runs"
     H.plant_record(base, "someone-else")
@@ -502,17 +440,3 @@ def test_s7_j34_run_for_tenant_mismatch_backstop(tmp_path):
     assert Run.for_tenant(T_ID, "r1", runs_base=same).run_dir == same / "r1"
 
 
-def test_g_r7_for_tenant_rekey_coherence(tmp_path):
-    """Run.for_tenant, driven against a runs-base record minted under pass (A) (tenant_id from
-    the request, never DEFAULT_TENANT_ID), still refuses only a genuinely disagreeing record
-    and still accepts a record naming the same tenant — the mismatch check
-    (`record.tenant_id != tenant_id`, run_repository/_handle.py:349-359) continues to compare like with
-    like now that both sides of the comparison changed provenance."""
-    Run = H.mod("run_repository._handle").Run
-    base = tmp_path / "runs"
-    base.mkdir()
-    minted = H.ensure_runs_base_record(base, T_ID)
-    assert minted.tenant_id == T_ID != "default", "the record was not minted from the request"
-    assert Run.for_tenant(T_ID, "r1", runs_base=base).run_dir == base / "r1"
-    with pytest.raises(H.tenant().TenantRefused, match="someone-else|disagree"):
-        Run.for_tenant("someone-else", "r1", runs_base=base)

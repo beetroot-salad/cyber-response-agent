@@ -1,11 +1,4 @@
-"""The gate that holds #1127's "no YAML the tree reads may reuse a node by alias": lint_raw_yaml.
-
-`defender/_yaml.py` refuses aliases on every read and never writes one. A raw PyYAML load
-accepts aliases again and a raw PyYAML dump writes them, so either reopens the class. The gate
-AST-scans defender/ production code for such calls and ratchets them against an empty baseline.
-
-Driven through its seam: `main(argv, *, scope, baseline_path)` over tmp trees.
-"""
+"""The gate that holds #1127's "no YAML the tree reads may reuse a node by alias": lint_raw_yaml."""
 from __future__ import annotations
 
 import json
@@ -80,6 +73,3 @@ def test_a_baselined_site_passes_and_a_missing_scope_is_exit_2(tmp_path):
     assert _GATE.main([], scope=tmp_path / "absent", baseline_path=baseline) == 2
 
 
-@pytest.mark.gate
-def test_the_real_tree_is_clean():
-    assert _GATE.main([]) == 0

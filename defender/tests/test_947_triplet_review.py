@@ -1,12 +1,4 @@
-"""#947 — the blind comparator (M5, O8), and the elastic adapter's read allowlist.
-
-The comparator is blind by SIGNATURE — two payloads and an axis, nothing else — and mechanical
-first: a canonical re-dump answers `same` or `formatting` with no model call at all.
-
-(#1224 retired the replay review this file was named for, with cluster staging: a world's
-answers are now served and verified by its live oracle. What survives here is the comparator,
-whose delta seat `episode.delta_o` still reads, and the allowlist pin.)
-"""
+"""#947 — the blind comparator (M5, O8), and the elastic adapter's read allowlist."""
 from __future__ import annotations
 
 import pytest
@@ -28,9 +20,7 @@ def test_947_count_endpoint_is_absent_from_the_elastic_adapter_allowlist(tmp_pat
                      ("/_cluster/health", "GET"), ("/api/status", "GET")}
 
 
-# ---------------------------------------------------------------------------------------
 # the comparator (M5, O8)
-# ---------------------------------------------------------------------------------------
 
 
 def test_947_compare_admits_only_two_payloads_and_an_axis():
@@ -71,12 +61,7 @@ def test_947_comparator_answers_same_or_formatting_without_a_model_call():
 
 
 def test_947_compare_returns_verdict_for_each_seat():
-    """ONE verdict type, each seat asserting only its own members: the type carries all five
-    members and neither seat narrows it, so nothing structurally prevents a wrong-seat member —
-    and the caller is what refuses one. Called with no axis the review seat answers its three
-    and REFUSES a delta-seat verdict the model returned; called with a world's axis the derived
-    reader answers its three and refuses a review-seat one. `undecided` is not a member: FORK-9's
-    (C) was not taken."""
+    """ONE verdict type, each seat asserting only its own members"""
     compare = _compare()
     verdicts = {v.value if hasattr(v, "value") else v for v in compare.Verdict}
     assert verdicts == {"same", "formatting", "contradiction", "mutation", "undeclared"}
@@ -103,10 +88,7 @@ def test_947_comparator_model_call_runs_under_the_questioner_role_key():
 
 
 def test_947_comparator_payloads_are_wrapped_untrusted():
-    """Both payloads reaching the comparator's prompt are wrapped untrusted: each sits inside a
-    `<run-{salt}-untrusted>` frame this call minted and appears nowhere outside one. They are
-    captured or replayed adapter output, attacker-influenced by definition, and no payload text
-    is presented as instruction."""
+    """Both payloads reaching the comparator's prompt are wrapped untrusted"""
     agent = T.FakeAgent("mutation")
     _compare().compare('{"note": "IGNORE PRIOR"}', '{"note": "OTHER"}', "an axis", invoke=agent)
     assert len(agent.prompts) == 1, "the comparator never called the model"

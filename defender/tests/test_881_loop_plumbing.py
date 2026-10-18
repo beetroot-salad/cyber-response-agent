@@ -1,36 +1,4 @@
-"""#881 — two pieces of the author drain's plumbing that lost a row in silence.
-
-O3 — **every row the pre-author gate holds leaves a written trace in the findings held
-report.** The report exists so an operator can see what the drain declined to author, and it
-was handed only the forward-check bucket's holds: `DrainOutcome.held` is filled from the
-AUTHOR_RESULT buckets, i.e. rows the agent returned a verdict on. The gate's holds — BOTH
-arms, `no_ground_truth(...)` and `no_family_ground_truth(...)` — never reached the agent, are
-permanent because the facts they wait on have no writer any more, and reached the queue and
-nothing else. So the rows that will be there forever were the ones nothing said anything
-about.
-
-O4 — **a non-`RETIRE_SET` fault anywhere in a tick leaves exactly one stuck record naming the
-fault class.** The gate and the authoring region were wrapped; the unkeyable-row retirement,
-which runs before both, was not — so a fault anywhere in it escaped `run_batch` leaving
-neither a graveyard entry nor a stuck record. The demand is a guard round the STEP, so the
-tests below fault it at two different seams with two different classes: a `TimeoutError` from
-its rotation's own bounded wait under a genuinely contended append lock, and an
-`OSError(ENOSPC)` from the graveyard append that precedes it (#1135: a folder planted there is now a `StateRefused`, which records nothing by design). Its stuck records must also
-fold by ROW, which for a keyless row means by its content — an empty id list, or any key
-coarser than the row, reads two unrelated poison rows as one problem getting worse.
-
-O2's wake-gate accounting lives in `tests/test_orchestrate_thresholds.py` and is not repeated
-here. O1 — the fence-then-prose regression — was BACKED OUT of this change and has no test
-anywhere: `learning/core/validate.py` is byte-identical to the branch base, the judge keeps
-today's behaviour (a reply that OPENS with a fence and closes with a sentence costs one draw),
-and what a reply carrying several fenced blocks means is left to its own issue. Do not read the
-files the design named for it as coverage; they hold none.
-
-Project idioms, because CI ratchets them: fakes enter through `dataclasses.replace` on the
-config, never `monkeypatch.setattr`; every fault is a real one met at a real seam — a
-contended `flock`, an obstructed path — never an injected exception; and every negative case
-is paired with its control on the same address.
-"""
+"""#881 — two pieces of the author drain's plumbing that lost a row in silence."""
 from __future__ import annotations
 
 import errno

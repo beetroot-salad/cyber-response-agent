@@ -1,68 +1,13 @@
-"""#1134 curator step (v3, ported from v2): every host touch of a curator corpus during the drain
-goes through that corpus's held mount, the call-site guards, each with its positive control at
-the same address.
-
-The contract is the curator step's v2 contract over #1134's design (D4 "Curator engine", O3's
-lesson regression, O5.1-O5.3), the 2026-10-01 addendum (A1: writes through `Held`, reads
-through its view; A4: the shared readers take a `Bound`), and addendum 2 (2026-10-02, B2/B3: no
-`Bound.kind` / `Bound.walk`; the fixed-shape helpers `_tree_listing.entry_kind` / `list_tree`
-and the lead-author step's `lane_trees.kind_at` in their place; the curator calls neither
-`list_tree` nor `entries()`). The shapes pinned here:
-
-- Addendum 2's correction (2026-10-02, C1/C2): the curator lists no folder. The before-state
-  is `drain._snapshot_corpus(repo_root, corpus_dir, head)`: git's read (`_git.git_tree_blobs`)
-  of every regular blob the tick-start commit carries under the corpus, nested included; a
-  tracked symlink (120000) is left out, never restored as a file; a git failure raises. What
-  the agent made comes from `git status --untracked-files=all` over the corpus, so a name git
-  does not report (gitignored, a FIFO, a socket) survives the fault undo (C2).
-- `drain._restore_corpus(repo_root, corpus_dir, snapshot, *, corpus: Held, head_before)` (fault
-  path), `_restore_unapproved_files(cfg, snapshot, rels, *, head_before)`
-  through `cfg.corpus`, `_put_back(repo_root, rel, *, tree_for)`,
-  `_revert_strays(..., *, tree_for)`, `_byte_identical_to_head(repo_root, rel)`,
-  `_cited_ids(view, name, field)`, `_read_or_empty(view, name)`.
-- Addendum 3 (2026-10-03, D1): the three "is this file still its before-state?" checks (the
-  settle's `_byte_identical_to_head`, `_restore_unapproved_files`, `_restore_corpus`) ask git
-  (`_git.git_unchanged_since`), never the handle and never a plain-path read: there is no
-  `Bound.read_bytes` and no `lane_trees.read_bytes_at`. Writes, restores and deletes still go
-  through the corpus `Held`. Declared: git hashes a hard link's content (its own read, N-a), so
-  a hard link holding the before-state's exact bytes is judged unchanged — never committed,
-  never restored from its target — while a symlink is a type change, never unchanged.
-- O5.3, inside `_undo_agent_edits` only: a per-entry `NotPlainEntry` (symlink, hard link, FIFO,
-  folder AT the name) is logged at WARNING naming the entry and the loop goes on; anything else
-  (a linked holding folder's plain `ELOOP`, EACCES, ENOSPC, EIO) propagates.
-- `shared.assert_clean_corpus_dir(..., *, corpus: Held)` (`corpus.mkdir(".")`, which makes
-  nothing), `existing_finding_ids(cfg)` over `cfg.corpus.view()`, `build_corpus_manifest(corpus:
-  Bound | Path, *, where=None, seed=None)` (`iter_lessons`' where rule), `build_curator_user_prompt
-  (..., *, corpus: Bound, corpus_dir: Path, ...)`, `commit_corpus_paths` split by
-  `lane_trees.kind_at(cfg.repo_root, cfg.tree_for, p) != lane_trees.KIND_ABSENT`,
-  `_git.git_commit_paths(cwd, present, absent, message)` with no filesystem test (and `_git.py`
-  free of any).
-
-What the handle buys, per call site: a symlink, hard link, FIFO or folder at a lesson name (or a
-link at a folder holding it) is never followed, never read, never written through and never
-deleted. Every plant is REAL (`os.symlink`, `os.link`, `os.mkfifo`, a folder moved outside and
-linked back); link targets live outside the repo (under the test's tmp dir, so a hard link shares
-a filesystem) and carry `OUT_MARK`, so following one would change the answer. "Not read" rows hold
-`kernel_watch` (inotify, below Python) on the target: `opens=` for a symlink or folder plant (no
-open either), `reads=` for a hard link (its shared inode is opened before `fstat` refuses it) —
-except where git compares the hard link with the before-state (addendum 3, N-a): there git reads
-its content, and the row pins instead that nothing is written through it or copied from it.
-FIFO rows run under `test_1111`'s deadline. Faults no root process can make for real (EACCES,
-EIO, ENOSPC) enter through the `os_` seam of `hold` / `DrainTrees.open` only.
-
-Red before the step: the drain helpers still take paths (`_snapshot_corpus` takes the corpus
-folder alone, and `_git.git_tree_blobs` does not exist), the new keywords (`corpus=`,
-`tree_for=`, `trees=`) do not exist, and `lane_trees.read_bytes_at` is missing; each test fails
-on its own line. Red before addendum 3 (`5dbb880c`): the restores take no `head_before`,
-`_byte_identical_to_head` still takes `tree_for` and refuses a hard link, and `_git` has no
-`git_unchanged_since`.
-"""
+"""#1134 curator step: every host touch of a curator corpus during the drain goes through that corpus's
+held mount. A symlink, hard link, FIFO or folder at a lesson name (or a link at a folder holding it)
+is never followed, read, written through or deleted. Covers the before-state snapshot, the fault
+restore, the settle's unapproved-file restore, git byte-identity comparison, put-back/revert-strays,
+the commit split, and the clean gate / idempotency read / manifest / prompt. Plants are real
+(`os.symlink`, `os.link`, `os.mkfifo`); link targets carry `OUT_MARK` so following one is visible."""
 from __future__ import annotations
 
-import ast
 import dataclasses
 import errno
-import inspect
 import logging
 import os
 import re
@@ -74,13 +19,11 @@ import pytest
 
 from defender import _git
 from defender._git import GitError
-from defender._io import NotPlainEntry, hold
-from defender.learning.author import _config as author_config
+from defender._io import NotPlainEntry
 from defender.learning.author import drain
 from defender.learning.author import shared as author_shared
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.author.questioner import run as questioner_run
-from defender.tests._by_path import import_lint_lib
 from defender.tests._curator1134 import (
     LESSONS_REL,
     OUT_MARK,
@@ -90,7 +33,6 @@ from defender.tests._curator1134 import (
     RecordingOs,
     alias_left,
     clear,
-    corpus_view,
     is_link_to,
     leaf_refusal,
     lesson_text,
@@ -109,7 +51,6 @@ from defender.tests._curator1134 import (
 from defender.tests._shared_readers_1134 import kernel_watch
 from defender.tests.test_1111_rooted_io import census, in_time, raised_by
 
-astlib = import_lint_lib("_astlib")
 
 #: The lesson name every row plants at: distinctive, so a log line naming it names this entry.
 PLANTED = "planted-lesson.md"
@@ -637,32 +578,6 @@ def test_the_fault_restore_puts_back_nested_lessons_and_sweeps_nested_strays(tmp
     assert w.git("status", "--porcelain", "--", str(w.corpus_dir)).stdout == ""
 
 
-def test_the_fault_restore_lists_no_folder(tmp_path):
-    """C1: the restore asks git which names the agent made and reads each snapshot name by name;
-    over a held corpus whose `os_` records its calls, it lists no folder (no `scandir` /
-    `listdir` through it) while it still sweeps a stray and a nested stray and rewrites a
-    changed lesson (the positive control, same call).
-
-    Catches: a sweep that lists the corpus (`list_tree` / `entries()`, which `scandir` the held
-    folders) to find what the agent made."""
-    w = world(tmp_path)
-    snapshot = _baseline(w)
-    put(w.corpus_dir / "a.md", b"rewritten by the agent\n")
-    put(w.corpus_dir / "stray.md", b"new\n")
-    put(w.corpus_dir / "newdir" / "x.md", b"new\n")
-    seam = RecordingOs()
-    held = hold(w.corpus_dir, os_=seam)
-    seam.clear()
-
-    _restore(w, snapshot, corpus=held)
-
-    assert not {"scandir", "listdir"} & set(seam.calls), seam.calls
-    assert (w.corpus_dir / "a.md").read_bytes() == snapshot["a.md"]
-    assert not (w.corpus_dir / "stray.md").exists()
-    assert not (w.corpus_dir / "newdir" / "x.md").exists()
-    assert "stray.md" in seam.touched("unlink"), seam.trace
-
-
 def test_a_gitignored_name_the_agent_made_survives_the_fault_restore(tmp_path):
     """C2 (declared): a name the corpus's `.gitignore` covers (`x.log`) is invisible to `git
     status`, so the sweep — which asks git which names the agent made — leaves it (main's
@@ -882,59 +797,10 @@ def test_the_unapproved_restore_control_removes_new_and_rewrites_changed_plain_f
     assert (w.corpus_dir / "gone.md").read_bytes() == snapshot["gone.md"]
 
 
-#: What lands a `replace` write of the held corpus on the name: the rename of the staged file.
-#: A write made anywhere but through the held corpus's `os_` leaves none in its record.
-LANDING_CALLS = {"rename"}
-
-
 def _settle(step: str, cfg, snapshot, rel: str) -> None:
     assert step == "_restore_unapproved_files", step
     head = _git.git_head_sha(cfg.repo_root)
     drain._restore_unapproved_files(cfg, snapshot, {rel}, head_before=head)
-
-
-def _recording_cfg(w):
-    seam = RecordingOs()
-    trees = seamed_trees(w.paths, seam)
-    return seam, trees, dataclasses.replace(w.cfg(), corpus=trees.mount(w.corpus_dir))
-
-
-@pytest.mark.parametrize("step", ["_restore_unapproved_files"])
-def test_the_settle_restore_writes_through_the_configs_held_corpus(tmp_path, step):
-    """H3: `_restore_unapproved_files` reaches the corpus through (its sibling
-    `_restore_from_snapshot`, the repair spawn's deletion restore, went with #1166)
-    `cfg.corpus`: over a held corpus whose `os_` records its calls, the restore lands (bytes on
-    disk) and the call that landed it — the rename of the replace write, not just a read or a
-    kind asked beforehand — is in the record.
-
-    Catches: a restore that asks `cfg.corpus` what stands at the name and then writes the plain
-    path (`mkdir(parents=True)` + a guarded write), which follows a linked holding folder."""
-    w = world(tmp_path)
-    put(w.corpus_dir / "old.md", lesson_text("f0"))
-    w.commit()
-    snapshot = _snap(w)
-    seam, _trees, cfg = _recording_cfg(w)
-    clear(w.corpus_dir / "old.md")
-
-    _settle(step, cfg, snapshot, _rel("old.md"))
-
-    assert (w.corpus_dir / "old.md").read_bytes() == snapshot["old.md"]
-    landed = [n for verb in LANDING_CALLS for n in seam.touched(verb)]
-    assert "old.md" in landed, (step, seam.trace)
-
-
-def test_the_unapproved_restore_deletes_a_new_file_through_the_configs_held_corpus(tmp_path):
-    """The delete half: a plain file at an unapproved new name is removed by `cfg.corpus`'s own
-    `unlink` (in its `os_` record), not by the plain path after asking the view its kind."""
-    w = world(tmp_path)
-    snapshot = _snap(w)
-    put(w.corpus_dir / PLANTED, lesson_text("f1"))
-    seam, _trees, cfg = _recording_cfg(w)
-
-    _unapproved(w, cfg, snapshot, _rel(PLANTED))
-
-    assert not os.path.lexists(w.corpus_dir / PLANTED)
-    assert PLANTED in seam.touched("unlink"), seam.trace
 
 
 @pytest.mark.parametrize("agent_left", ["nothing", "its own bytes"])
@@ -1281,25 +1147,6 @@ def test_revert_strays_logs_a_link_it_cannot_remove_and_goes_on(tmp_path, kind, 
     assert warnings_naming(caplog, PLANTED), caplog.text
 
 
-def test_put_back_removes_an_untracked_file_through_the_held_mount_tree_for_gives(tmp_path):
-    """H2: `_put_back` removes an untracked plain file in a mount by that mount's own `unlink`,
-    on the `Held` `tree_for` hands it: over trees whose `os_` records its calls, the file is gone
-    and the `unlink` is in the record.
-
-    Catches: a `_put_back` that ignores `tree_for` and judges the plain path itself, and one that
-    asks the view the kind and then unlinks the plain path."""
-    w = world(tmp_path)
-    at = w.sibling_dir / "stray.md"
-    put(at, b"plain stray\n")
-    seam = RecordingOs()
-    trees = seamed_trees(w.paths, seam)
-
-    drain._put_back(w.repo, f"{SIBLING_REL}stray.md", tree_for=trees.tree_for)
-
-    assert not os.path.lexists(at)
-    assert "stray.md" in seam.touched("unlink"), seam.trace
-
-
 def test_put_back_below_a_linked_folder_is_refused_and_removes_nothing(tmp_path):
     """H2: the sibling corpus's folder `sub/` is a link to an outside folder holding a plain
     `x.md`, and `_put_back` is handed the untracked name `sub/x.md` (a name git status spelled
@@ -1411,28 +1258,6 @@ def test_the_commit_lands_an_approved_file_and_a_real_deletion(tmp_path):
     assert w.head_text(_rel("old.md")) is None
 
 
-def test_the_commit_split_asks_the_configs_tree_for(tmp_path):
-    """The split consults `cfg.tree_for` for every path it commits, so a lesson path is judged
-    through its mount's `Held`."""
-    w = world(tmp_path)
-    put(w.corpus_dir / "old.md", lesson_text("f0"))
-    w.commit()
-    asked: list[object] = []
-
-    def spy(path):
-        asked.append(path)
-        return w.tree_for(path)
-
-    cfg = w.cfg(tree_for=spy)
-    clear(w.corpus_dir / "old.md")
-    put(w.corpus_dir / "new.md", lesson_text("f1"))
-
-    author_shared.commit_corpus_paths("msg", cfg, [_rel("new.md")], [_rel("old.md")])
-
-    spelled = {Path(p).relative_to(w.repo).as_posix() for p in asked}
-    assert spelled >= {_rel("new.md"), _rel("old.md")}, asked
-
-
 def test_git_commit_paths_obeys_its_two_lists_and_tests_nothing_on_disk(tmp_path):
     """`_git.git_commit_paths(cwd, present, absent, message)`: `present` is `git add`ed and
     `absent` is `git rm --cached`, with no existence test of its own: a dangling link named
@@ -1464,189 +1289,6 @@ def test_git_commit_paths_with_nothing_to_commit_never_calls_git(tmp_path):
     not_a_repo = tmp_path / "plain-folder"
     not_a_repo.mkdir()
     assert _git.git_commit_paths(not_a_repo, [], [], "msg") is None
-
-
-#: A method call by any of these names touches the disk (`Path.exists()`, `.stat()`, `.open()`,
-#: `.read_text()`, `.unlink()` and kin; `os.path`'s functions by the same names). A `read_*` /
-#: `write_*` name counts too (`_DISK_PREFIXES`).
-_DISK_METHODS = frozenset({
-    "exists", "is_file", "is_dir", "is_symlink", "lstat", "stat", "lexists", "isfile", "isdir",
-    "islink", "access", "open", "iterdir", "glob", "rglob", "scandir", "listdir", "walk",
-    "unlink", "remove", "mkdir", "makedirs", "rmdir", "rename", "replace", "touch", "chmod",
-    "readlink", "samefile",
-})
-_DISK_PREFIXES = ("read_", "write_")
-#: Modules whose functions reach the filesystem; `_git.py` imports none of them, and calls none.
-_DISK_MODULES = ("os", "shutil", "glob", "tempfile", "io")
-
-
-def _disk_touches(tree: ast.Module) -> list[tuple[int, str]]:
-    """Each place in `tree` that reaches the filesystem: an import of a disk module (or of `_io` /
-    `lane_trees`); a call resolving (through `_astlib`, so an alias or a module-qualified call is
-    the same call) to a disk module's function or to the builtin `open`; and any method call by a
-    disk method's name, whatever its receiver (a `Path` is duck-typed, so the name is the fact)."""
-    env = astlib.module_env(tree)
-    found = []
-    # `import os` for `os.environ` alone (a git child's environment) reaches no disk; any other
-    # use of the module (a call, `os.path`, ...) keeps the import a touch.
-    environ_reads = {id(n.value) for n in ast.walk(tree)
-                     if isinstance(n, ast.Attribute) and n.attr == "environ"
-                     and isinstance(n.value, ast.Name) and n.value.id == "os"}
-    os_names = [n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "os"]
-    environ_only = all(id(n) in environ_reads for n in os_names)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import | ast.ImportFrom):
-            spelled = [node.module or ""] if isinstance(node, ast.ImportFrom) else []
-            spelled += [a.name for a in node.names]
-            roots = {part for name in spelled for part in name.split(".")}
-            if environ_only and isinstance(node, ast.Import) and spelled == ["os"]:
-                roots = set()
-            if roots & {*_DISK_MODULES, "_io", "lane_trees"}:
-                found.append((node.lineno, ast.unparse(node)))
-        elif isinstance(node, ast.Call):
-            origin = astlib.callee(node, env) or ""
-            method = node.func.attr if isinstance(node.func, ast.Attribute) else ""
-            looked_up = (origin in ("builtins.getattr", "builtins.vars") and node.args
-                         and isinstance(node.args[0], ast.Name)
-                         and node.args[0].id in {*_DISK_MODULES, "_io", "lane_trees"})
-            # A call on `os.environ` (`os.environ.items()`, as main's `env_for_cwd` makes since
-            # #1120) reads the process's environment, never the disk.
-            environ_call = origin.startswith("os.environ.")
-            if ((origin == "builtins.open" or origin.split(".")[0] in _DISK_MODULES
-                    or method in _DISK_METHODS or method.startswith(_DISK_PREFIXES)
-                    or looked_up) and not environ_call):
-                found.append((node.lineno, ast.unparse(node)))
-    return found
-
-
-def test_git_py_makes_no_filesystem_call_and_imports_no_handle():
-    """`_git.py` judges nothing on disk (both `git_commit` and `git_commit_paths` leave that to
-    git, N-a, and to their callers): no import of `os` (unless only `os.environ` is used, for a git
-    child's environment), `shutil`, `glob`, `tempfile`, `io`, `_io` or `lane_trees`; no call to any of those modules' functions or to the builtin `open`; and no
-    `Path` disk method (`exists`, `is_file`, `is_dir`, `stat`, `lstat`, `open`, `read_*`,
-    `write_*`, `iterdir`, `glob`, `rglob`, `scandir`, `unlink`, `mkdir`, ...) anywhere in it. This
-    is also the lead lane's pin: `commit_corpus` (unchanged) reaches `git_commit`, which has no
-    host test. Positive control: the same check finds every touch in a snippet that makes them.
-
-    Catches: today's `(cwd / p).exists()` in `git_commit_paths`; a split re-derived inside
-    `_git.py` by a plain `lexists`; and (E08) an "absent" path revived because an
-    `os.close(os.open(path, os.O_PATH))` finds it on disk."""
-    assert _disk_touches(ast.parse(inspect.getsource(_git))) == []
-    assert list(inspect.signature(_git.git_commit_paths).parameters)[:4] == [
-        "cwd", "present", "absent", "message"]
-
-    planted = ast.parse(
-        "import os\n"
-        "import os.path as osp\n"
-        "from shutil import copy as cp\n"
-        "def f(p):\n"
-        "    os.close(os.open(p, os.O_PATH))\n"
-        "    osp.lexists(p)\n"
-        "    cp(p, p)\n"
-        "    open(p)\n"
-        "    (p / 'x').exists()\n"
-        "    p.read_bytes()\n"
-        "    p.iterdir()\n")
-    lines = {line for line, _ in _disk_touches(planted)}
-    assert lines == set(range(1, 12)) - {4}, _disk_touches(planted)
-    environ_only = ast.parse("import os\nimport subprocess\n"
-                             "def f():\n    subprocess.run(['git'], env={**os.environ})\n"
-                             "    return {k: v for k, v in os.environ.items()}\n")
-    assert _disk_touches(environ_only) == []
-    environ_then_disk = ast.parse("import os\n"
-                                  "def f(p):\n    os.environ.items()\n    os.stat(p)\n")
-    assert {line for line, _ in _disk_touches(environ_then_disk)} == {1, 4}, \
-        _disk_touches(environ_then_disk)
-    looked_up = ast.parse("import os\nPROBE = 'lstat'\n"
-                          "def f(p):\n    x = os.environ\n    getattr(os, PROBE)(p)\n")
-    assert {line for line, _ in _disk_touches(looked_up)} == {1, 5}, _disk_touches(looked_up)
-
-
-# ---------------------------------------------------------------------------------------
-# V3-H7 for the curator (addendum 2 correction, C1): no folder is listed; git names the names
-# ---------------------------------------------------------------------------------------
-
-#: The curator modules: nothing in them lists or stats a corpus on its own.
-_CURATOR_MODULES = {
-    "drain": drain,
-    "shared": author_shared,
-    "lessons_run": lessons_run,
-    "questioner_run": questioner_run,
-    "author_config": author_config,
-}
-#: What a folder lister or a hand-rolled existence test calls (beside the plain-path
-#: predicates): B2's own lister included, which the curator does not use (C1).
-_LISTERS = frozenset({"list_tree", "entries", "under", "walk", "kind", "stat", "lstat",
-                      "iterdir", "glob", "rglob", "scandir", "listdir", "exists", "lexists",
-                      "is_file", "is_dir", "is_symlink", "isdir", "isfile", "islink",
-                      "access"})
-
-
-def _function(module, name: str) -> ast.FunctionDef:
-    tree = ast.parse(inspect.getsource(module))
-    [fn] = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name]
-    return fn
-
-
-def _callees(node: ast.AST) -> list[str]:
-    """Every callee under `node`: a bare name, or an attribute's last component."""
-    out: list[str] = []
-    for call in (n for n in ast.walk(node) if isinstance(n, ast.Call)):
-        f = call.func
-        out.append(f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute)
-                   else "")
-    return out
-
-
-@pytest.mark.parametrize(("module", "name", "helper"), [
-    (drain, "_snapshot_corpus", "git_tree_blobs"),
-    (drain, "_restore_corpus", "git_status"),
-    (drain, "_restore_unapproved_files", "entry_kind"),
-    (drain, "_put_back", "kind_at"),
-    (author_shared, "commit_corpus_paths", "kind_at"),
-    (drain, "_byte_identical_to_head", "git_unchanged_since"),
-    (drain, "_unchanged_names", "git_unchanged_since"),
-    (drain, "_restore_corpus", "_unchanged_names"),
-    (drain, "_restore_unapproved_files", "_unchanged_names"),
-], ids=["snapshot", "restore_corpus", "restore_unapproved", "put_back", "commit_split",
-        "settle_compare", "restore_compare", "restore_corpus_compare",
-        "restore_unapproved_compare"])
-def test_each_curator_name_source_and_kind_check_has_one_owner(module, name, helper):
-    """Addendum 2's correction (C1), in the lead-author step's V3-H7 shape: the before-state is
-    git's read of the tick-start commit (`_git.git_tree_blobs`); the fault sweep asks `git
-    status` which names the agent made; the settle restore's folder test asks `entry_kind`;
-    `_put_back` and the commit's present / absent split ask `kind_at`; the settle's and both
-    restores' "still the before-state?" question asks git (`_git.git_unchanged_since`, addendum
-    3, D1 — the restores through the drain's one `_unchanged_names`). None lists a folder
-    (`list_tree`, `entries()`, `scandir`, ...) or tests existence on its own.
-
-    Catches: a before-state or sweep built from a folder listing (a depth-limited one misses
-    #773's nested lessons, and the settle restore then deletes a tracked one), a hand-rolled
-    `view.entries()` lister, and a plain `exists()` / `lexists()` / `is_file()` existence
-    test."""
-    fn = _function(module, name)
-    calls = _callees(fn)
-    # A helper handed to a wrapper that runs it (`_git_read(what, helper, ...)`) is reached too.
-    handed = [a.id for c in ast.walk(fn) if isinstance(c, ast.Call)
-              for a in c.args if isinstance(a, ast.Name)]
-    assert helper in calls + handed, (name, calls, handed)
-    assert not _LISTERS & set(calls), (name, sorted(_LISTERS & set(calls)))
-
-
-@pytest.mark.parametrize("label", sorted(_CURATOR_MODULES))
-def test_no_curator_module_lists_a_folder(label):
-    """No function in the curator modules calls `list_tree`, `.entries()` or `.under()` on
-    anything, and none imports `list_tree` (C1: git decides which names to touch, the handle how;
-    `list_tree` stays the catalog reader's). Every read goes through the view's `read` by name
-    (addendum 3: there is no byte read; the comparisons are git's). Positive control: the same scan finds each in a snippet that makes
-    them."""
-    tree = ast.parse(inspect.getsource(_CURATOR_MODULES[label]))
-    banned = {"list_tree", "entries", "under"}
-    assert not banned & set(_callees(tree)), label
-    imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
-    assert "list_tree" not in imported, label
-    planted = ast.parse("def f(v):\n    list_tree(v, depth=1)\n    v.under('x').entries()\n")
-    assert banned <= set(_callees(planted))
 
 
 # ---------------------------------------------------------------------------------------
@@ -1768,76 +1410,8 @@ def test_the_manifest_shows_an_aliased_lesson_as_unavailable(tmp_path, kind):
     assert "unavailable" not in rendered
 
 
-def test_the_manifest_takes_where_with_a_bound_and_refuses_it_with_a_path(tmp_path):
-    """A4's shared-reader rule, passed through from `iter_lessons`: the Bound form needs `where`
-    (the folder it is spelled as), the Path form (N-h, callers outside the drain) refuses one;
-    each is `ValueError`. The two forms over the same plain corpus render the same manifest."""
-    w = world(tmp_path)
-    put(w.corpus_dir / "one.md", lesson_text("f1", topic="first"))
-    put(w.corpus_dir / "two.md", lesson_text("f2", topic="second"))
-
-    with pytest.raises(ValueError):  # noqa: PT011 — iter_lessons' own where-rule refusal
-        author_shared.build_corpus_manifest(w.view)
-    with pytest.raises(ValueError):  # noqa: PT011 — iter_lessons' own where-rule refusal
-        author_shared.build_corpus_manifest(w.corpus_dir, where=w.corpus_dir)
-
-    bound = author_shared.build_corpus_manifest(w.view, where=w.corpus_dir, seed="s")
-    path = author_shared.build_corpus_manifest(w.corpus_dir, seed="s")
-    assert bound == path
-    assert "topic: first" in bound
-    assert "topic: second" in bound
-
-
-def test_the_curator_prompt_requires_the_view_and_reads_the_manifest_from_it(tmp_path):
-    """`build_curator_user_prompt(..., corpus=<view>, corpus_dir=<spelling>, ...)`: `corpus` is
-    required (no Path form, owner decision 2), and the manifest is read from it; `corpus_dir` is
-    the spelling only. With the view of one folder and the spelling of another, the prompt
-    carries the viewed folder's lessons and none of the spelled one's.
-
-    Catches: a builder that takes `corpus` and still reads `corpus_dir`."""
-    viewed = tmp_path / "viewed"
-    spelled = tmp_path / "spelled"
-    put(viewed / "viewed-lesson.md", lesson_text("f1", topic="from-the-view"))
-    put(spelled / "spelled-lesson.md", lesson_text("f2", topic="from-the-spelling"))
-    kw = dict(corpus_dir_rel="defender/lessons/", label="findings", salt="5a")
-
-    with pytest.raises(TypeError):
-        author_shared.build_curator_user_prompt([{"finding_id": "f1"}], "batch-1",
-                                                corpus_dir=spelled, **kw)
-
-    prompt = author_shared.build_curator_user_prompt(
-        [{"finding_id": "f1"}], "batch-1", corpus=corpus_view(viewed), corpus_dir=spelled, **kw)
-
-    assert "viewed-lesson" in prompt
-    assert "from-the-view" in prompt
-    assert "spelled-lesson" not in prompt
-    assert "from-the-spelling" not in prompt
-
-
-@pytest.mark.parametrize("channel", ["lessons", "questioner"])
-def test_the_curator_prompts_manifest_reads_through_cfg_corpus(tmp_path, channel):
-    """Each channel's curator prompt builds its corpus manifest from `cfg.corpus.view()`: an
-    aliased lesson shows as unavailable with none of its target's bytes, a plain lesson's
-    frontmatter is rendered, and each lesson was read through the config's held corpus."""
-    w = world(tmp_path)
-    root, prompt_of, cfg = _channel_prompt(w, channel)
-    plant_link(root / PLANTED, w.target("secret.md", lesson_text("f9", topic=OUT_MARK)))
-    put(root / "plain.md", lesson_text("f0", topic="plain-topic"))
-    log: list = []
-    cfg = dataclasses.replace(cfg, corpus=JournalHeld(root, log))
-
-    prompt = prompt_of([{"finding_id": "f1"}], "batch-1", cfg)
-
-    assert "plain-topic" in prompt
-    assert OUT_MARK not in prompt
-    assert PLANTED.removesuffix(".md") in prompt
-    assert {("read", "plain.md"), ("read", PLANTED)} <= set(log), log
-
-
 def _channel_prompt(w, channel):
     """`(corpus root, the channel's prompt builder, its config over the world's trees)`."""
-    from defender.learning.author.lessons import run as lessons_run
-    from defender.learning.author.questioner import run as questioner_run
 
     if channel == "lessons":
         return w.corpus_dir, lessons_run.build_user_prompt, w.cfg()

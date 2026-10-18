@@ -1,25 +1,4 @@
-"""#852 — the drain treats its queue as best-effort, in five places, without saying so.
-
-The through-line the register names: **a marker leaves the queue only when work provably
-happened for it, and a write to the corpus is attributable to the finding that justified
-it.** Each test below names the register ref it pins.
-
-Two of the five are pinned where their siblings already live rather than here, because the
-property is shared and a lone copy would be the one that rots:
-
-* **F-18** (a marker whose `run_dir` is not a string) joins the dead-letter tables in
-  `tests/learning/test_loop.py` — both queues run the one `claim_markers` protocol, so both
-  tables carry the case.
-* **F-21** (`_SAFE_ID_SEGMENT`'s `$` anchor) joins `tests/test_lead_author_synth.py`, beside
-  the traversal case it is the same guard as.
-
-Fakes enter through the shipped injection seams — `dataclasses.replace(cfg, invoke_agent=)`
-for the corpus author, `run_lead_author=` / `branch=` / the box lifecycle for the drain — so
-no `monkeypatch.setattr` is needed to drive any of this. The one real resource a test takes
-is the lead-author QUEUE LOCK, held with a plain `flock` exactly as a second lead-author
-process would hold it: F-03 is a fact about that lock, and injecting the skip would assert
-the shipped `rc` contract nowhere.
-"""
+"""Queue drains are best-effort only where proven: markers leave the queue only after work happened; lock-held skip; requeue never clobbers."""
 from __future__ import annotations
 
 import fcntl
@@ -50,10 +29,7 @@ from defender.tests import _state1135
 
 
 def _write_corpus_file(corpus_dir: Path, stem: str, field: str, cited: list[str]) -> Path:
-    """One curator-written corpus file, citing `cited` under `field` (or nothing at all).
-
-    `field` is the caller's, not derived, because the point of two of these tests is that
-    the citation is read under the CHANNEL's own provenance key."""
+    """One curator-written corpus file, citing `cited` under `field` (or nothing at all)."""
     provenance = f"{field}:\n" + "".join(f"  - {c}\n" for c in cited) if cited else ""
     path = corpus_dir / f"{stem}.md"
     path.write_text(
@@ -74,21 +50,7 @@ def _commits(repo: Path) -> int:
 
 
 def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp_path: Path):
-    """F-02. A lesson the curator wrote and then reported `held_forward_bad` must not reach
-    the corpus on the back of its batch-mates.
-
-    MIXED is the whole finding. The homogeneous case was already caught: with `committed`
-    empty and a file left behind, `verify_agent_state`'s aggregate check fires, the corpus is
-    restored and the rows are re-queued. But that check is one bit for the whole batch — and
-    a batch is >= LEARNING_AUTHOR_THRESHOLD (5) rows, so mixed GOOD/BAD is the NORMAL shape.
-    One legitimately committed lesson satisfies the aggregate bit, and the pathspec-wide
-    `git add -- defender/lessons` then commits the rejected lesson beside it. The forward
-    check said that lesson would flip a correctly-resolved case; nothing downstream reads its
-    verdict back, so the corpus was the last place it could be stopped.
-
-    The disposition is the one the aggregate check already established: `AuthorError` ->
-    the corpus is restored (both files gone, nothing committed) -> the batch is bumped and
-    stays queued for the next tick."""
+    """F-02."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
@@ -122,19 +84,7 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
 def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     tmp_path: Path,
 ):
-    """F-02's control, and its second half.
-
-    The control: a curator that DOES delete the rejected lesson commits normally — one file,
-    the one its committed finding vouches for — while the OTHER finding, mentioned in no
-    bucket at all, is left exactly as it was (§773 C3). A gate that also blocked this would
-    have replaced a durability bug with a wedge.
-
-    #773 M1 retires the `held_forward_bad` bucket the curator used to self-report into — the
-    forward check is the drain's own now, and a curator that reports NOTHING for a row it
-    never wrote a lesson for is the honest, expected shape (not a retryable hold this
-    module's own held-report half used to cover); that half now lives in
-    `tests/test_773_gap_ledger.py`, against the drain-computed `consumed_forward_bad`/
-    `deferred` groups."""
+    """F-02's control, and its second half."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
@@ -165,17 +115,7 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
 def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
     tmp_path: Path,
 ):
-    """The exemption's edge. A fold that APPENDS an id — the one the forward check then
-    rejected — has claimed new provenance, so "unchanged since HEAD" does not cover it and
-    the file must still be vouched for by the committed set. Without this the exemption
-    would reopen F-02 for every fold onto an existing lesson.
-
-    Driven on the FINDINGS channel, not an observation one, so that the attribution gate is
-    the only thing that can fault this tick: `held_forward_bad` is a bucket only this channel
-    declares, and a result naming it on an observation channel is rejected by the partition
-    validator two steps earlier — which returns the same rc=2 and restores the same corpus,
-    for a reason that has nothing to do with attribution. Checked by deletion: with the gate
-    call removed, this test fails."""
+    """The exemption's edge."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "run-G/0"), h.row_for("findings", "run-B/0")])
@@ -240,25 +180,7 @@ def _drain(paths, tmp_path: Path, **overrides):
 
 
 def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path):
-    """F-03. A lead-author tick that never ran because another one holds the per-author
-    queue lock must not read as a completed serve.
-
-    `lead_author.run` used to return 0 for that skip — the same value a finished curation
-    returns — so the drain unlinked every marker it had claimed in the pass. The whole
-    queued batch deleted: no work done, no dead letter in `failed/`, no retry, and
-    `_has_lead_author_work` false afterwards. The window is the full agent spawn
-    (LEAD_AUTHOR_TIMEOUT_SECONDS, default 1800s), and the documented trigger is an operator
-    running `lead_author.py <run_dir>` by hand — which the CLI's own help calls a precondition
-    violation, not something the queue may punish by discarding requests.
-
-    Driven through the REAL chain: the real `_invoke_lead_author`, the real module `run`, and
-    a real `flock` on the real queue-lock file — held here the way a second lead-author
-    process holds it. Nothing about the skip is faked, so the `rc` contract between the two
-    modules is what the assertions rest on.
-
-    The batch costs nothing: no `attempts` bump (a skip is not a failed attempt, and three
-    ticks under a 30-minute manual hold would otherwise dead-letter healthy requests) and the
-    marker that WAS claimed is put straight back in the slot the claim freed."""
+    """F-03."""
     paths = loop_paths(tmp_path)
     _queued_run("case-1", "run-1", paths)
     _queued_run("case-2", "run-2", paths)
@@ -291,13 +213,7 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
 
 
 def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
-    """F-03's seam, stated directly: the value `run` returns for "another tick holds the
-    queue lock" is not the value it returns for a finished curation, and not the value it
-    returns for a fault (rc=2, which the drain quarantines on).
-
-    Bound here rather than left implicit in the test above because it is the whole
-    mechanism: `_invoke_lead_author` cannot tell a skip from a serve by any other means —
-    it sees an integer and nothing else."""
+    """F-03's seam, stated directly: the value `run` returns for "another tick holds the"""
     run_dir = _state1135.curation_run_dir("run-1")
     paths = loop_paths(tmp_path)
 
@@ -323,20 +239,7 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
 
 
 def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: Path):
-    """F-04. The claim frees the top-level slot so a re-ask that lands mid-serve has
-    somewhere to go (#791 P2). A retry that re-queues by atomic REPLACE destroys exactly
-    that request.
-
-    Both halves are ordinary operation, and each is already treated as real on its own: the
-    mid-drain re-ask is `test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed`
-    ("the operator re-investigates the case while the lane is curating it"), and the
-    swallowed transient is a first-class designed path (`_run_curator_module` catching the
-    spawn's OSError, `attempts`, LEAD_AUTHOR_MAX_RETRIES). Composed, the older run's spec
-    lands on top of the newer one and the case is re-served off the STALE run dir — the newer
-    investigation's leads, drafts and pitfalls never curated, with nothing recording it.
-
-    Create-if-absent instead, and the queue's documented contract decides the collision: the
-    later run always wins, so the retry is dropped rather than written over the re-ask."""
+    """F-04."""
     paths = loop_paths(tmp_path)
     first = _queued_run("case-A", "run-1", paths)
     second = _state1135.curation_run_dir("run-2")
@@ -369,16 +272,7 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
 
 
 def test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file(tmp_path: Path):
-    """F-04's primitive. `rewrite_marker` (the replace) stays for the callers that mean it;
-    the re-queue path needs the other answer, and it needs to REPORT which one it got so the
-    caller can drop its stale spec rather than silently lose the fresh one.
-
-    The staging half is not decoration: the re-queue writes through a temp file so the slot
-    goes from absent to fully-written in one step, and a temp file left behind in a directory
-    the drain globs is a marker-shaped object nothing owns.
-
-    #1135: the primitive is the handle's `requeue` verb over a claim (`markers.requeue_marker`
-    took a bare path and is gone), so the free slot is the one a claim just freed."""
+    """F-04's primitive."""
     state = _state1135.state_over(tmp_path / "state")
     run_dir = _state1135.curation_run_dir("run-1")
     state.enqueue_curation("case-A", _state1135.curation_row("case-A", run_dir))

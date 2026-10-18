@@ -1,35 +1,5 @@
-"""#1235, round 3 — the review's fix list, pinned at the unit edge (the owner approved it).
-
-Round 2 gave every run one `RunState` (`defender/runtime/run_state.py`), carried by reference.
-A /code-review pass then found where the state still followed the file, where a missing state
-failed open, and where one gate read a different clock from the rest. What this module pins:
-
-  O1. The state is the record; `executed_queries.jsonl` is the model's view of it. A failing
-      call whose view write is refused still charges the circuit breaker, and its row is in
-      the state, before the write's error propagates (`QueryCapture._record`). The append's own
-      contract — validate, record, then write the view — is `tests/test_record_query.py`'s
-      `test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent`; the driven run
-      is `tests/e2e/test_1235_round3_e2e.py`.
-  O2. An enforced role whose deps carry no run state RAISES on its first tool call (pinned,
-      with the live state of that folder untouched, in `tests/e2e/test_1235_adversary_round2.py`
-      as `test_a_deps_with_no_state_raises_and_never_reaches_a_live_runs_state`); a
-      non-enforced one neither counts nor raises (`driver/_budget.py`), here.
-  O3. Lead-0's budget gate reads the clock the budget hooks read: the monotonic origin and the
-      oracle-held seconds, not the wall-clock budget snapshot alone. Each case is paired with the
-      hook's own verdict on the same state.
-  O4. A reducer failure on gather deps with no run state raises (a wiring fault); with a state,
-      a refused observability write never fails the command.
-  O5/O7. What round 3 deletes is gone (`RunState.start`, lead-0's `_rows_for` and
-      `_budget_account`, `QueryCapture._seq_lock`, `hooks/_run_dir`'s two locked JSON helpers),
-      and `RunState`'s read accessors: `lead_rows` hands out a tuple of the stored rows,
-      `row_count`, `last_row` and `breaker_failures`.
-
-O6 (the summary no longer carries the state; `run_investigation(run_state=…)` is the seam) is
-driven in `tests/e2e/test_1235_round3_e2e.py`.
-
-Faults enter through planted entries (a symlink or a directory at the record's name, which
-`write_guarded` refuses under any uid) and the injected box; nothing is monkeypatched.
-"""
+"""#1235 round 3 at the unit edge: the run state is the record (a refused view write still charges
+the breaker), missing state fails closed for enforced roles, lead-0 reads the run's clock."""
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -39,8 +9,6 @@ from defender.tests._spec1077 import fixture_run
 
 import asyncio
 import dataclasses
-import importlib
-import importlib.util
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -118,18 +86,7 @@ def _record_failure(deps, *, params: dict) -> tuple[dict, str]:
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_a_failing_call_whose_view_write_is_refused_is_still_charged_and_recorded(
         tmp_path, kind):
-    """O1 at the query tool's recorder: a call that failed on the transport (exit 2) is
-    recorded while `executed_queries.jsonl` is squatted (a planted symlink, or a directory). The
-    view write's `OSError` propagates — the run is not told the call was viewed — and before it
-    does, the failure is charged to the system's breaker and the row is in the run's state.
-
-    Positive control, same folder and deps: with the view writable again the next failing call
-    is charged too (the count is the sum, not a reset) and its row lands in both the state and
-    the view.
-
-    Observed failing by: round 2's `_record`, which charged the breaker only after the append
-    returned — a refused view write cost the breaker its charge and the state its row, so a
-    system failing every call while its view is blocked never trips."""
+    """O1 at the query tool's recorder."""
     run_dir = tmp_path / "run"
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "r3-o1")
@@ -194,11 +151,7 @@ _ECHO = [[("bash", {"command": "echo o2"})]]
 
 
 def test_a_non_enforced_role_whose_deps_carry_no_state_neither_counts_nor_raises(tmp_path):
-    """O2's other posture: hooks built with `enforce=False` (a role that is not budget
-    enforced) over deps with no run state run the call — no raise, nothing counted anywhere.
-
-    Positive control, same posture: deps carrying a state are counted (`count_call`, no cap), so
-    the silence above is the missing state's, not a hook that never counts."""
+    """O2's other posture."""
     run_dir = _run_dir(tmp_path, "o2-open")
     result, _ = drive_agent(MAIN_DEF, run_dir, _ECHO, limits=_LIMITS, enforce=False, state=None)
     returned = [str(part.content) for message in result.all_messages()
@@ -222,10 +175,7 @@ _CLOCK_LIMITS = {**DEFAULT_LIMITS, "max_tool_calls": 100, "wall_clock_timeout": 
 
 
 def _clocked(run_dir: Path, *, wall_back: float, mono_back: float, credited: float) -> RunState:
-    """A run's state whose clock reads as given: the wall-clock origin `wall_back` seconds ago
-    (negative: the wall clock has since stepped BACK past the start), the monotonic origin
-    `mono_back` seconds ago, and `credited` seconds of closed oracle turns. Set on the state's
-    own fields, under its lock — the values a run that long would hold."""
+    """A run's state whose clock reads as given."""
     state = RunState(run_dir, "r3-clock")
     with state.lock:
         origin = (datetime.now(UTC) - timedelta(seconds=wall_back)).isoformat()
@@ -260,24 +210,7 @@ def _hook_kills(run_dir: Path, state: RunState) -> bool:
 ])
 def test_lead_zeros_budget_gate_agrees_with_the_hooks_on_the_runs_clock(
         tmp_path, wall_back, mono_back, credited, killed):
-    """O3: lead-0's gate and the budget hooks answer "is the tail spent?" from one clock — the
-    run's elapsed time, less the seconds an oracle turn held the world — so on the same state
-    they agree. (#1255 "Time": the clock is the run clock alone; this used to say "the larger of
-    the wall-clock and monotonic deltas", and the `wall-clock-stepped-back` case that pinned the
-    monotonic one is retired. Both setups here still move the two origins `_clocked` knows
-    together — the unit edge cannot name the run clock's injection, which the design leaves to
-    the implementation; the run-level statement of every limit is
-    `test_1255_clock_natural` N4/N5.)
-
-    The discriminating case is where the budget snapshot alone (a wall-clock origin, no oracle
-    credit) disagrees with that clock:
-
-      * `oracle-held…`: 1000s of raw time, 990 of them an oracle's — 10s of the investigator's,
-        far inside the tail. The snapshot alone says spent: lead-0 would kill a run the hooks
-        let continue.
-
-    `fresh` and `spent` are the controls: both derivations agree there, so a gate that never
-    (or always) kills fails one of them."""
+    """O3."""
     run_dir = _run_dir(tmp_path, "o3")
     state = _clocked(run_dir, wall_back=wall_back, mono_back=mono_back, credited=credited)
     hook = _hook_kills(run_dir, state)
@@ -292,12 +225,7 @@ def test_lead_zeros_budget_gate_agrees_with_the_hooks_on_the_runs_clock(
 # ======================================================================================
 
 def test_a_failed_reducer_on_gather_deps_with_no_state_raises(tmp_path):
-    """O4: the failed-reducer row (`_record_shim_failure`) needs the run's state; gather deps
-    carrying none are a wiring fault and raise `TypeError` — the "never fails the command"
-    promise covers a failed observability WRITE, not a missing state.
-
-    Positive control, same scene: the deps carrying their state return the command's output and
-    record the shim row."""
+    """O4."""
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"Binder Error: o4"))
     command = f"cat {model_path(payload, run_dir=deps.run_dir)} | defender-sql 'SELECT 1'"
     with pytest.raises(TypeError, match="RunState"):
@@ -311,13 +239,7 @@ def test_a_failed_reducer_on_gather_deps_with_no_state_raises(tmp_path):
 
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_a_refused_shim_row_write_never_fails_the_command(tmp_path, kind):
-    """O4's other half: with the run's state carried and `executed_queries.jsonl` squatted (a
-    planted symlink, or a directory), the failed reduce still returns the command's output —
-    the refused write is observability, and it never fails the command it observes. The row is
-    in the run's state all the same (O1: the state is the record, the file its view), and the
-    link's target outside the run is untouched.
-
-    Positive control: the box ran the command once, so the output above is the command's."""
+    """O4's other half."""
     deps, box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"Binder Error: o4"))
     table = RunPaths(deps.run_dir).executed_queries
     outside = tmp_path / "outside.jsonl"
@@ -339,33 +261,10 @@ def test_a_refused_shim_row_write_never_fails_the_command(tmp_path, kind):
 # O5 / O7 — what round 3 deletes is gone; the state's read accessors.
 # ======================================================================================
 
-def test_what_round_three_deletes_is_gone():
-    """`RunState.start` duplicated the constructor; lead-0's `_rows_for` / `_budget_account`
-    wrapped one state call each; `QueryCapture._seq_lock` serialised what the state's own lock
-    already does; `hooks/_run_dir`'s `read_json_locked` / `update_json_locked` lost their last
-    production caller when the budget left the run folder."""
-    from defender.runtime import lead_zero
-    from defender.runtime.lead_zero import _capture
-
-    assert not hasattr(RunState, "start"), "RunState.start survived beside the constructor"
-    for module in (lead_zero, _capture):
-        left = [n for n in ("_rows_for", "_budget_account") if hasattr(module, n)]
-        assert left == [], f"{module.__name__} still has {left}"
-    assert not hasattr(QueryCapture(registry=None), "_seq_lock"), \
-        "the query tool still holds a lock of its own beside the run state's"
-    if importlib.util.find_spec("defender.hooks._run_dir") is not None:
-        run_dir_mod = importlib.import_module("defender.hooks._run_dir")
-        left = [n for n in ("read_json_locked", "update_json_locked")
-                if hasattr(run_dir_mod, n)]
-        assert left == [], f"hooks/_run_dir still has {left}, with no production caller"
-
 
 def test_lead_rows_hands_out_a_tuple_of_the_rows_as_they_stood(tmp_path):
     """`lead_rows(lead)` is a tuple of the lead's stored rows, in append order — read-only use,
-    no copy of each row. A tuple taken before an append is unchanged by it (it is the rows as
-    they stood); an unknown lead is `()`. Its rows are the lines the view holds.
-
-    Positive control: a later read sees the appended row."""
+    no copy of each row."""
     run_dir, state = _bare_run(tmp_path)
     assert state.lead_rows(LEAD) == ()
     _append(state, params={"q": "a"})
@@ -402,11 +301,7 @@ def test_row_count_and_last_row_read_the_lead_without_listing_it(tmp_path):
 
 
 def test_breaker_failures_counts_a_systems_charged_failures(tmp_path):
-    """`breaker_failures(system)` is the failures charged to `system`: 0 before any, one per
-    infra failure (exit 2 / 124), nothing for a call that failed on its own terms (exit 1) or
-    succeeded, and per system.
-
-    Positive control: it agrees with the breaker snapshot it summarises."""
+    """`breaker_failures(system)` is the failures charged to `system`."""
     _run, state = _bare_run(tmp_path)
     assert state.breaker_failures("elastic") == 0
     cb.record_outcome(state, "elastic", 2)

@@ -1,23 +1,4 @@
-"""#851 — five findings where a hostile or merely odd input value reaches code that assumes it
-is well-formed, and the process RAISES instead of returning the typed refusal the surrounding
-machinery was built to produce.
-
-Every one is the same shape: validation is missing, or ordered after the operation that raises.
-The gate already owns a refusal path (`Decision(False)` / `RESOLVE_ERRORS` / the correctable
-`ModelRetry` protocol); these inputs route around it and take the run with them. So each section
-below asserts the SAME thing in its own lane — a refusal the caller can act on, never a
-propagating exception — plus the positive control that keeps "refuse everything" from passing.
-
-They share a file because none is large enough to own one, and the roll-up issue is the record
-they trace back to (the #776 hardening precedent).
-
-| Ref  | Site                        | The raise that escaped                              |
-| F-07 | `runtime/box.py:113`        | `encode_request` -> bare `ValueError` out of the box |
-| F-10 | `runtime/tools.py:289`      | the same, ALLOWED first by the gate for OPENS_NOTHING |
-| F-25 | `runtime/tools.py:508`      | `p.resolve()` ahead of the gate's fail-closed guard  |
-| F-26 | `runtime/tools.py:529`      | `write_guarded` -> `UnicodeEncodeError`              |
-| F-23 | `runtime/orient.py:77`      | a numeric `rule.id` -> `TypeError` in `re.escape`    |
-"""
+"""#851: hostile or odd input reaches code that assumed it was well-formed (NUL in a bash/write/edit operand, a symlink-loop operand, a lone surrogate, a numeric rule id or odd alert signature); each must return a typed refusal the caller can act on, never raise, with a positive control that the clean input still works."""
 from __future__ import annotations
 
 import os
@@ -86,7 +67,6 @@ def _curator_scene(tmp_path: Path):
 #: One per OPENS_NOTHING family that gather actually holds a grant for — a plain program, a
 #: reducer, and a `defender-*` shim. Each of these was ALLOWED before the fix; a program the
 #: gate refuses for an unrelated shape reason (`wc` takes no operand at all) would prove
-#: nothing here.
 _NUL_COMMANDS = (
     "echo a\x00b",
     "grep -n a\x00b",
@@ -110,13 +90,7 @@ def test_f10_a_nul_in_an_opens_nothing_argv_is_denied_by_the_gate(command, tmp_p
 
 def test_f10_the_cat_lane_still_denies_a_nul_operand(tmp_path):
     """Regression guard on the one lane that already refused (`test_grant_gate_575.py`'s a9):
-    the new whole-string check must not have moved that deny somewhere it can be lost.
-
-    Driven at BOTH altitudes on purpose. The whole-string check sits ahead of the parse, so
-    through `decide_bash` it is now the only arm a NUL can ever reach — an assertion there
-    would pass with `_in_scope`'s `RESOLVE_ERRORS` arm deleted, and would not be a guard on
-    the cat lane at all. `_decide_readers` is therefore driven directly, below the new check,
-    where that arm is still the thing answering."""
+    the new whole-string check must not have moved that deny somewhere it can be lost."""
     from defender.runtime.permission import bash as bash_gate
 
     deps, run, _box = _box_scene(tmp_path, MAIN_DEF)
@@ -259,11 +233,7 @@ def test_f26_encodable_content_on_the_same_path_still_commits(tmp_path):
 def test_f26_an_undecodable_baseline_denies_rather_than_raising(tmp_path):
     """The OTHER exception `decide_write` could still hand its caller. investigation.md's
     schema takes the on-disk text as its append-only baseline, and the gate reads it — so
-    an investigation.md that is not UTF-8 made `read_text` raise `UnicodeDecodeError` out of
-    the gate, the same "propagate instead of decide" shape F-26 is about, one branch over.
-
-    It DENIES rather than falling back to `current=None`: no baseline means no append-only
-    check, which would let the faulting write replace the committed document."""
+    an investigation.md that is not UTF-8 made `read_text` raise `UnicodeDecodeError` out of"""
     deps, _run, _box = _box_scene(tmp_path, MAIN_DEF)
     inv = deps.run_dir / "investigation.md"
     inv.write_bytes(b"\xff\xfe not utf-8\n")

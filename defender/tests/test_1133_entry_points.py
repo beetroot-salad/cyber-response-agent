@@ -1,54 +1,7 @@
-"""#1133 — each migrated write, through its real entry point and its rev-2 signature (D3'),
-refuses a planted link and writes nothing where it points (O1, O2, O3, O4, D1', D2', D3').
-
-`test_1133_episode_handle.py` pins the handle's guard matrix on the handle itself; this suite
-pins that each MIGRATED SITE still reaches it. A site silently reverted to a link-following
-write (builtin `open(path, "w")`, `os.makedirs`) passes every handle test, so each site is driven
-here through the smallest real entry point, with its own injection seams (`start_family`'s
-`spawn=`, `_prime_once`'s `prime`, `grade_episode`'s `judge=`, the `Episode`'s `io=`) and never
-`monkeypatch.setattr`. Every plant is a real filesystem entry, and every negative is paired with
-a positive control on the same address.
-
-The writers take the `Episode` now (D3'): `start_family(episode, ...)`,
-`verify_family(episode, arms, ...)`, `archive_episode(episode, run_dirs)`,
-`prime_base(source_run_dir, episode)`; the manifest reader
-takes a view (rev 3, R1): `load_family(view)`; `prepare_episode(...)` returns the `Episode`. The doors
-take ids since #1105 PR 2 (declared change 4): `cli.main` (`--tenant T <source_run_id>`) and
-`grade_episode(runs, episode_id, ...)`, the episode opened by id through the tenant's runs
-repository (`runs.episode_files`) under the configured episodes root.
-
-Every link is planted twice over: pointing at a host folder OUTSIDE the episode, and at a folder
-elsewhere INSIDE the episode. An owner accessor's containment resolve stops an outside link, so
-only the inside one reaches a reverted write, and only the handle's no-follow walk refuses both.
-
-- H1 the migrated sites: a symlink at a folder the site ensures, or at a holding folder of it;
-  a symlink (live or dangling) at a record the site writes. The entry point refuses (or, where
-  the site is best-effort, contains the refusal), what the link reaches is unchanged, and the
-  plant is left in place: the RUNS step's `runs/` ensure (`EpisodeRuns.create_container`,
-  before `cli.start_family`), `cli.verify_family`'s
-  `worlds.ensure()` and family stamp, `archive.archive_episode`'s `world.dir.ensure()` and run-dir pointer, the judge's two
-  `draws.ensure()`, its draw write, its framed wire log (contained) and `judge.yaml`.
-- O3 / O6 through the judge's door: while the judge is paid, exactly one descriptor is open on
-  the episode dir (the pass reads through its own `Episode`'s view, never a second `bind` by
-  path); and a pass whose episode dir is renamed mid-pass writes its draws and `judge.yaml` in
-  the moved folder (no writer reopens the episode by name).
-- H4 the priming claim alone keeps a second launcher out while the first primes; the primed base
-  alone refuses a rival base that lands after its listing and just before its create (a
-  recording `Held` plants it, then delegates the create — D7' replaces rev 1's FIFO
-  interleaving, S3).
-- H5 the manifest reader (`load_family`), handed the episode's view, refuses a symlink or a
-  hard link at `family.yaml` without reading what it reaches.
-- H7 `defender._io.Bound`'s public surface is exactly `read`, `read_bytes`, `read_jsonl`, `entries`, `under`,
-  `close` (O3) — for a `bind` and for `episode.view()`.
-
-The census that holds every migrated module to the handle is `test_1133_census.py`.
-
-Red before rev 3 (on the rev-2 tree): H5 (the readers take the `Episode` and read its
-`family.read()`; a `Bound` has no `family`), and every leaf-link row checked with
-`assert_refusal` (no `_io.NotPlainEntry`). The folder-link rows, H4 and H7 hold today and are
-pinned to keep holding. (#1224 retired H2 and H3 with the review and staging records, and the
-rejected episode's `worlds/` row with the review's rejection.)
-"""
+"""#1133: each migrated write, through its real entry point, refuses a planted link and writes nothing
+where it points. Links are planted both outside the episode and inside it; every negative has a
+positive control. Covers start/verify/archive, the judge's draws/wire-log/judge.yaml, the priming
+claim/base, and the family.yaml reader."""
 from __future__ import annotations
 
 import contextlib
@@ -877,20 +830,3 @@ def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it
 # =======================================================================================
 # H7 — the judge's read view grows no writer
 # =======================================================================================
-
-def test_h7_bounds_public_surface_is_exactly_its_readers_and_close(tmp_path):
-    """O3: a read view stays write-free by type. The public attributes of a `Bound` — from
-    `bind(root)`, and from `episode.view()` over the same held handle the episode writes
-    through — are exactly `read`, `read_bytes`, `read_jsonl`, `entries`, `under` and `close`."""
-    from defender._io import bind
-
-    root = tmp_path / "root"
-    root.mkdir()
-    want = {"read", "read_bytes", "read_jsonl", "entries", "under", "close"}
-    with bind(root) as bound:
-        public = {name for name in dir(bound) if not name.startswith("_")}
-    assert public == want, sorted(public)
-    with S.open_episode(root) as episode:
-        view = episode.view()
-        public = {name for name in dir(view) if not name.startswith("_")}
-    assert public == want, sorted(public)

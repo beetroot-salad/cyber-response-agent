@@ -10,8 +10,7 @@ it in 3.12; 3.11 still honours it, but only through a deprecated fallback that e
 `requires-python` is `>=3.11`, so on 3.12 those finders are simply skipped — the package
 imports fine, the body passes, and the test goes green having blocked nothing. That is the
 failure this module exists to make impossible: it emits `find_spec` and nothing else, and
-`test_import_blocker.py` pins that the mechanism fires by blocking a module that is certainly
-importable and watching the import fail.
+it blocks a module that is certainly importable, and the import then fails.
 
 Two shapes, because the tests want opposite things:
 

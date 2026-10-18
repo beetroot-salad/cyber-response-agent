@@ -1,25 +1,4 @@
-"""#1105 PR 1 — the holes the spec adversary and the guard probes found, closed (owner's ruling).
-
-Each test pins a clause the design states and the rest of this suite drove only by its first
-named representative (a link), so an implementation refusing that one state and degrading on
-its neighbours (a plain file, a FIFO, a badly named file) stayed green:
-
-* A  — run setup over a non-directory runs folder (O5.4, OP-2);
-* B1 — every READER over a linked or file `_episodes` (NM-04, R1, MF-17), and run setup's
-       claimed-id check over it;
-* B2 — every lookup and record function over a file or FIFO at `tenant.runs` (H2, P2);
-* B3 — `runs.open` (PR 1's `open_run`) over a file or FIFO at the run's name (H6 step 4);
-* C  — a sidecar-suffixed regular file whose owner `RunId.parse` refuses (rev 4.1, H4);
-* S  — a link or FIFO wearing a sidecar's name (rev 4.1: sidecars are regular files; H4);
-* D1 — a JSON-escaped lone surrogate in a record (NM-04);
-* D2 — a surrogate-escaped run id at `RunId.parse` and run setup (D12.2, P2);
-* E  — a foreign `_tenant.json` beside an unexpected entry (NF-8: the tenant check comes first
-       and the refusal never carries the folder's entries).
-
-Every input is real on disk. Red against the adversary's exploits (`RUNSETUP_LINK_ONLY`,
-`EPISODES_NONDIR_ABSENT`, `ENOTDIR_ABSENT`, `OPENRUN_LINK_ONLY`, `SIDECAR_NO_STEM`,
-`SURROGATE_BOUND_FIRST`, `ORDER_LIST_FIRST`) and the guard probe's sidecar-kind mutation.
-"""
+"""Edge cases: non-directory runs folders and episodes, sidecar names, surrogate escapes."""
 from __future__ import annotations
 
 import os

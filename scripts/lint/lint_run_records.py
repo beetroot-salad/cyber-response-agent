@@ -488,7 +488,7 @@ def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> 
 
 #: Migration-in-flight mechanism: a module named here (relative to `DEFENDER`, as
 #: `sweep_files` spells it) is skipped by `scan` entirely. The terminal state is empty;
-#: `test_gate_passes_with_an_empty_allow_list` pins that.
+#: CI's lint step pins that.
 ALLOW_LIST: dict[str, int] = {}
 
 

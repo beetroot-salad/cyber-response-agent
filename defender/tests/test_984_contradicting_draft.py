@@ -1,20 +1,4 @@
-"""#984: a draft that CONTRADICTS a claim already shipped in a system's SKILL.md must not
-wait behind the lift-threshold queue depth.
-
-The issue's own case: `defender/skills/elastic/SKILL.md` told the orchestrator to group
-Falco alerts on `falco.output_fields.container.name`; a verified draft sitting in
-`elastic/_draft/` since 2026-05-27 said that field is `<NA>` on every alert and the
-container id is the only field that resolves. The correction sat queued for three months
-because `LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD` (default 5) counts the WHOLE pending-draft
-queue and this system never had enough unrelated drafts to cross it — so a knowledge
-surface that was actively wrong queued behind unrelated, merely-incomplete drafts with no
-relation to the defect.
-
-Scope: `_draft_contradicts_skill` (the frontmatter read) and its effect on
-`_prepare_handoffs`'s threshold gate. Not the corpus of real elastic drafts — the
-contradiction this issue reported is fixed directly in `SKILL.md` and the stale draft
-removed as part of the same change (see the diff, not a test here).
-"""
+"""#984: a draft that CONTRADICTS a claim already shipped in a system's SKILL.md must not wait behind the lift-threshold queue depth."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,10 +12,7 @@ from defender.tests._lead_author_1134 import skills_view
 
 @pytest.fixture
 def run_dir(tmp_path: Path) -> Path:
-    """Mirrors `test_lead_author.run_dir` — kept local rather than imported so the fixture
-    name (used as a parameter in every test below) never collides with a module-level import
-    binding of the same name (ruff F811: a same-named parameter "redefines" an unused import
-    on every occurrence, not just the second)."""
+    """Mirrors `test_lead_author.run_dir` — kept local rather than imported so the fixture name (used as a..."""
     rd = tmp_path / "test-run-001"
     rd.mkdir()
     (rd / "gather_raw").mkdir()
@@ -57,8 +38,7 @@ def _one_draft(tmp_path: Path, **kw) -> Path:
 
 
 def test_contradicting_draft_bypasses_threshold_alone(run_dir: Path, monkeypatch, tmp_path):
-    """One draft flagged `contradicts_skill: true`, alone, far below threshold=5 — surfaces
-    anyway rather than waiting for four more unrelated drafts to accumulate."""
+    """One draft flagged `contradicts_skill: true`, alone, far below threshold=5 — surfaces anyway rather than..."""
     draft = _one_draft(tmp_path, contradicts_skill=True)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
     deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
@@ -73,23 +53,18 @@ def test_contradicting_draft_bypasses_threshold_alone(run_dir: Path, monkeypatch
 def test_non_contradicting_draft_stays_silenced_below_threshold(
     run_dir: Path, monkeypatch, tmp_path
 ):
-    """Same queue depth, flag explicitly false — the pre-#984 behavior is unchanged: a
-    merely-incomplete draft still waits for the queue to fill."""
+    """Same queue depth, flag explicitly false — the pre-#984 behavior is unchanged: a merely-incomplete draft..."""
     draft = _one_draft(tmp_path, contradicts_skill=False)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
     deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
 
-    # No executed leads either, so a correctly-silenced draft hits the pre-existing
-    # "nothing to do" exit (rc=0, `test_prepare_handoffs_both_empty_exits_zero`) — the
-    # point under test is `pending == []`, not this shared exit code.
     _, pending, rc = lead_author._prepare_handoffs(run_dir, deps)
     assert rc == 0
     assert pending == []
 
 
 def test_draft_with_no_contradicts_field_stays_silenced(run_dir: Path, monkeypatch, tmp_path):
-    """A draft written before this field existed (no `contradicts_skill:` key at all) takes
-    the ORIGINAL threshold-gated path — the field is opt-in, never inferred."""
+    """A draft written before this field existed (no `contradicts_skill:` key at all) takes the ORIGINAL..."""
     draft = _one_draft(tmp_path)  # no contradicts_skill key at all
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "5")
     deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
@@ -100,8 +75,7 @@ def test_draft_with_no_contradicts_field_stays_silenced(run_dir: Path, monkeypat
 
 
 def test_unparseable_draft_does_not_bypass(run_dir: Path, monkeypatch, tmp_path):
-    """A draft with no frontmatter fence (malformed) must not crash the gate and must not
-    silently bypass it — an unreadable flag is not evidence of contradiction."""
+    """A draft with no frontmatter fence (malformed) must not crash the gate and must not silently bypass it — an..."""
     skills = tmp_path / "defender" / "skills"
     draft_dir = skills / "elastic" / "_draft"
     draft_dir.mkdir(parents=True)
@@ -116,10 +90,7 @@ def test_unparseable_draft_does_not_bypass(run_dir: Path, monkeypatch, tmp_path)
 
 
 def test_one_contradicting_draft_lifts_the_whole_batch(run_dir: Path, monkeypatch, tmp_path):
-    """The handoff is all-or-nothing, same as the at/above-threshold path: one contradicting
-    draft among several ordinary ones surfaces the WHOLE batch, not just the flagged file —
-    `_prepare_handoffs` has never handed out a partial system-draft batch, and the author
-    still needs the neighboring drafts' context to fold correctly."""
+    """The handoff is all-or-nothing, same as the at/above-threshold path: one contradicting draft among several..."""
     skills = tmp_path / "defender" / "skills"
     draft_dir = skills / "elastic" / "_draft"
     draft_dir.mkdir(parents=True)
@@ -138,9 +109,7 @@ def test_one_contradicting_draft_lifts_the_whole_batch(run_dir: Path, monkeypatc
 def test_contradicting_draft_at_threshold_uses_ordinary_path(
     run_dir: Path, monkeypatch, tmp_path
 ):
-    """At/above threshold, a contradicting draft surfaces through the SAME path an ordinary
-    draft would — the flag only matters below threshold; it isn't a second, different way
-    to build the handoff once the queue is already big enough."""
+    """At/above threshold, a contradicting draft surfaces through the SAME path an ordinary draft would — the..."""
     draft = _one_draft(tmp_path, contradicts_skill=True)
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     deps = _deps(tmp_path, discover_system_drafts=lambda: [draft])
@@ -151,10 +120,7 @@ def test_contradicting_draft_at_threshold_uses_ordinary_path(
 
 
 def test_body_text_mentioning_the_flag_does_not_bypass(run_dir: Path, monkeypatch, tmp_path):
-    """The flag is a FRONTMATTER key, not a substring anywhere in the file. A draft whose
-    `## Notes` prose happens to quote `contradicts_skill: true` (documenting the mechanism,
-    say) while its own frontmatter never sets the key must stay on the ordinary path — a
-    predicate that just greps the whole file for that string would wrongly bypass here."""
+    """The flag is a FRONTMATTER key, not a substring anywhere in the file. A draft whose `## Notes` prose..."""
     skills = tmp_path / "defender" / "skills"
     draft_dir = skills / "elastic" / "_draft"
     draft_dir.mkdir(parents=True)
@@ -176,9 +142,7 @@ def test_body_text_mentioning_the_flag_does_not_bypass(run_dir: Path, monkeypatc
 def test_frontmatter_string_value_mentioning_the_flag_does_not_bypass(
     run_dir: Path, monkeypatch, tmp_path
 ):
-    """Same idea, one layer closer: the substring appears inside a DIFFERENT frontmatter
-    key's string value, never as the `contradicts_skill:` key itself. Only the real key
-    counts."""
+    """Same idea, one layer closer: the substring appears inside a DIFFERENT frontmatter key's string value,..."""
     skills = tmp_path / "defender" / "skills"
     draft_dir = skills / "elastic" / "_draft"
     draft_dir.mkdir(parents=True)
@@ -196,9 +160,7 @@ def test_frontmatter_string_value_mentioning_the_flag_does_not_bypass(
 
 
 def test_quoted_true_string_does_not_bypass(run_dir: Path, monkeypatch, tmp_path):
-    """`contradicts_skill: "true"` is a YAML STRING, not the boolean `true` — the schema
-    calls for a real boolean, and a predicate that treats any truthy-looking value as a
-    bypass is looser than the field is documented to be."""
+    """`contradicts_skill: "true"` is a YAML STRING, not the boolean `true` — the schema calls for a real..."""
     skills = tmp_path / "defender" / "skills"
     draft_dir = skills / "elastic" / "_draft"
     draft_dir.mkdir(parents=True)

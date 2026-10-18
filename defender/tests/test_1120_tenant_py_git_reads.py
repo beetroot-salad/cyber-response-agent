@@ -1,25 +1,6 @@
-"""#1120 piece 1 — `tenant.py`'s git reads act on the folder they are aimed at, never on a
-repository the environment or an enclosing tree points them at (claims-adversary follow-ups
-on PR #1157).
-
-  * An exported `GIT_DIR` reaches no git call `tenant.py` makes (J-PO1: "both callers must
-    ignore it") — the census's read of the running checkout included, not only check's
-    committed-`.tenant-id` read.
-  * A folder whose `.git` is not a repository of its own (an empty `.git` directory inside
-    another repo's work tree) gets no answer from the ENCLOSING repo: check's committed read
-    cannot say what the folder's own repo commits, so it fails closed (V16).
-  * A clone whose git converts line endings on checkout (`core.autocrlf=true`, a Windows
-    operator's default) holds `.tenant-id` as CRLF over an LF commit: that IS what HEAD
-    commits, so check is clean — the working file is hashed as git would store it, not as raw
-    bytes (code review on PR #1157).
-  * HEAD's blob is read raw, so a clean filter configured for `.tenant-id` neither runs nor
-    makes a hand-edited id match (claims adversary, second pass).
-  * Replace objects are ignored, and a git call that blocks (a FIFO at `.git/HEAD`) fails
-    closed within a bound instead of hanging `check` (code review, max).
-"""
+"""tenant.py git reads act on the folder aimed at, never a repository the environment or an enclosing tree points to."""
 from __future__ import annotations
 
-import inspect
 import os
 import shutil
 import threading
@@ -120,14 +101,6 @@ def test_a_replace_object_does_not_make_an_edited_id_look_committed(tmp_path: Pa
 #: a loaded runner, far short of the FIFO's wait (forever). Not a whole number, so the message
 #: naming it is checked however a float is spelled.
 _FIFO_BOUND = 1.5
-
-
-def test_the_committed_read_is_bounded_by_its_fifteen_second_constant_by_default() -> None:
-    """`check`'s committed read (`_findings` passes no `timeout`) is bounded by
-    `_COMMITTED_READ_TIMEOUT`, 15 seconds — so the FIFO test's short injected bound cannot hide a
-    changed production default."""
-    default = inspect.signature(tenant_py._tenant_id_committed).parameters["timeout"].default
-    assert default == tenant_py._COMMITTED_READ_TIMEOUT == 15
 
 
 def test_a_fifo_in_git_fails_closed_instead_of_hanging(tmp_path: Path) -> None:

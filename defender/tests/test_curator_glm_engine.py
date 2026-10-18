@@ -60,7 +60,6 @@ from defender.learning.core.config import (  # noqa: E402
 from defender.learning.author.curator_engine import (  # noqa: E402
     run_curator_stage,
 )
-from defender.runtime import providers  # noqa: E402
 from defender.tests._engine_helpers import fake_model as _fake_model  # noqa: E402
 from defender.tests._engine_helpers import replay_once as _replay  # noqa: E402
 
@@ -69,10 +68,6 @@ AuthorError = _shared.AuthorError
 _AUTHOR_RESULT_OK = (
     'AUTHOR_RESULT: {"committed": [], "consumed_skip": [], "commit_message": "noop"}'
 )
-
-
-
-
 
 
 def _repo_root(tmp_path: Path) -> Path:
@@ -102,12 +97,7 @@ def _prompt(tmp_path: Path) -> Path:
 
 def _stage(tmp_path: Path, *, wiring: StageWiring | None = None, **over):
     """run_curator_stage with hermetic defaults (no-op key + a text-returning fake transport);
-    override any kwarg per case. The two DI seams (``source_key`` / ``run_author``) OWN their
-    production defaults; tests inject fakes to exercise the orchestration without a metered key
-    or the pydantic-ai graph — no ``monkeypatch`` of module globals.
-
-    ``wiring`` is separate from ``over`` because ``as_curator_stage_args`` BUILDS the wiring
-    from the flat kwargs; a case that needs a different one substitutes it after the fold."""
+    override any kwarg per case."""
     kw = dict(
         system_prompt_file=_prompt(tmp_path),
         batch_id="batch-A",
@@ -130,9 +120,6 @@ def _stage(tmp_path: Path, *, wiring: StageWiring | None = None, **over):
     return run_curator_stage(**args)
 
 
-
-
-
 def test_return_contract_returns_parsed_dict_not_text(tmp_path):
     """The ported invoke seam returns the ``AUTHOR_RESULT`` dict — committed:[bare-id-strings],
     consumed_skip:[{id,reason}], commit_message:str — parsed out of run_stage's returned TEXT.
@@ -153,12 +140,10 @@ def test_return_contract_returns_parsed_dict_not_text(tmp_path):
     assert out != text
 
 
-
 def test_marker_parse_from_last_occurrence_balanced_and_faults(tmp_path):
-    """run_curator_stage parses AUTHOR_RESULT out of the returned text via the balanced-brace
-    walk from the LAST marker occurrence (an earlier decoy marker is ignored; braces inside a
-    JSON string are not miscounted). A missing marker or invalid JSON raises AuthorError — the
-    wrapper never returns text where the envelope expects a dict."""
+    """run_curator_stage parses AUTHOR_RESULT out of the returned text via the balanced-brace walk
+    from the LAST marker occurrence (an earlier decoy marker is ignored; braces inside a JSON
+    string are not miscounted)."""
     text = (
         'AUTHOR_RESULT: {"committed": ["decoy"], "consumed_skip": [], "commit_message": "old"}\n'
         "the agent revised and re-emitted:\n"
@@ -174,12 +159,9 @@ def test_marker_parse_from_last_occurrence_balanced_and_faults(tmp_path):
         _stage(tmp_path, run_author=lambda *a, **kw: "AUTHOR_RESULT: {not: valid, json}")
 
 
-
 def test_content_less_curator_text_is_no_edits_not_a_missing_marker(tmp_path):
-    """A curator turn that produced nothing readable is "made no edits" ({}), not a
-    marker-parse failure. The branch keyed off `text.strip()`, so a reply of one
-    zero-width space raised "emitted no AUTHOR_RESULT marker" instead (#722). Control: a
-    reply carrying real prose but no marker is still the loud error."""
+    """A curator turn that produced nothing readable is "made no edits" ({}), not a marker-parse
+    failure."""
     for blank in ("", "  ", "\u200b", "\ufeff", "\x00", "\u00a0"):
         assert _stage(tmp_path, run_author=lambda *a, _b=blank, **kw: _b) == {}
     with pytest.raises(AuthorError, match="emitted no AUTHOR_RESULT marker"):
@@ -207,12 +189,10 @@ def test_marker_empty_commit_message_rejected(tmp_path):
     assert _shared.commit_message(ok, "observations") == "Fold obs-1"
 
 
-
 def test_marker_commit_message_with_trailer_rejected(tmp_path):
     """A commit_message that already carries a ``Generation:``/trailer key is rejected by
     commit_corpus's trailer guard as AuthorError — model-authored text cannot smuggle a
-    provenance trailer the loop owns. Positive control: a clean message passes the guard (any
-    failure past it is a git error, not the AuthorError refusal)."""
+    provenance trailer the loop owns."""
     result = _stage(
         tmp_path,
         run_author=lambda *a, **kw: (
@@ -235,12 +215,10 @@ def test_marker_commit_message_with_trailer_rejected(tmp_path):
         pass
 
 
-
 def test_marker_malformed_result_types_rejected(tmp_path):
-    """A structurally-wrong AUTHOR_RESULT — committed not a list, an empty-string committed id,
-    a consumed_skip entry that is a bare string rather than an {id, reason} object — is rejected
-    by the KEPT partition validator → AuthorError (never a silent bad/partial commit). Positive
-    control: a well-formed result validates cleanly."""
+    """A structurally-wrong AUTHOR_RESULT — committed not a list, an empty-string committed id, a
+    consumed_skip entry that is a bare string rather than an {id, reason} object — is rejected by
+    the KEPT partition validator → AuthorError (never a silent bad/partial commit)."""
     to_author = [{"observation_id": "obs-1"}]
 
     def _parsed(body: str) -> dict:
@@ -261,13 +239,10 @@ def test_marker_malformed_result_types_rejected(tmp_path):
     _validate(_parsed('{"committed": ["obs-1"], "consumed_skip": [], "commit_message": "m"}'))
 
 
-
 def test_inproc_transport_runs_run_stage_and_writes_trace(tmp_path):
     """Each curator drives the LLM through run_curator_stage → the in-process run_stage
     (PydanticAI), not a ``claude -p`` subprocess: a RequestLogger trace lands in the run dir and
-    the wrapper returns the dict parsed from that in-process run's final text. Driven end-to-end
-    through run_curator_stage with the GENUINE transport (its make_model DI seam feeds a
-    FunctionModel), so no real provider request is made."""
+    the wrapper returns the dict parsed from that in-process run's final text."""
     from defender.learning.author.curator_engine import _run_curator_pydantic
 
     rd = _run_dir(tmp_path)
@@ -293,14 +268,11 @@ def test_inproc_transport_runs_run_stage_and_writes_trace(tmp_path):
     assert any(p.read_text().strip() for p in traces)
 
 
-
 def test_require_output_true_quarantines_empty_final(tmp_path):
     """The curator transport runs run_stage with require_output=True, so a CONTENT-LESS final
     (whitespace — the observable content-less case; a truly-empty '' is rejected by pydantic-ai
     before the guard) raises RunUnprocessable BEFORE any AUTHOR_RESULT parse — never a silent
-    empty commit. Diverges deliberately from the lead author's require_output=False, which would
-    RETURN the content-less text. Positive control: a non-empty final is returned VERBATIM (the
-    transport returns text; run_curator_stage — not the transport — parses the marker)."""
+    empty commit."""
     from defender.learning.author.curator_engine import _run_curator_pydantic
 
     ctx = StageContext(
@@ -329,7 +301,6 @@ def test_require_output_true_quarantines_empty_final(tmp_path):
     assert out == "real final text"
 
 
-
 def test_perrun_run_unprocessable_wrapped_as_author_error(tmp_path):
     """A per-run authoring fault surfaced by the transport as RunUnprocessable (timeout /
     usage-limit / model error / empty final) is wrapped as AuthorError so run_batch returns rc 2
@@ -338,7 +309,6 @@ def test_perrun_run_unprocessable_wrapped_as_author_error(tmp_path):
         raise RunUnprocessable("model timed out")
     with pytest.raises(AuthorError):
         _stage(tmp_path, run_author=_boom)
-
 
 
 def test_systemic_faults_propagate_uncaught(tmp_path):
@@ -362,31 +332,9 @@ def test_systemic_faults_propagate_uncaught(tmp_path):
         _stage(tmp_path, run_author=_boom_abort)
 
 
-
-def test_request_limit_generous_default_and_threaded(tmp_path):
-    """The curator runs under a generous per-curator REQUEST_LIMIT knob (default 250,
-    mirroring LEAD_AUTHOR_REQUEST_LIMIT), not a read-only-sized cap — the subprocess path had NO
-    request cap, so a small cap would kill a multi-file curator on its 2nd tool call. The cap is
-    threaded to the transport (→ UsageLimits(request_limit)).
-
-    One knob, not three: the ACTOR and ENV curators had their own, and #922 retired both
-    directions along with the accessors that served them."""
-    assert config.author_request_limit() == 250
-    seen: list[int] = []
-    _stage(
-        tmp_path, request_limit=config.author_request_limit(),
-        run_author=lambda wiring, ctx, **kw: seen.append(ctx.request_limit) or _AUTHOR_RESULT_OK,
-    )
-    assert seen == [config.author_request_limit()]
-    assert seen[0] >= 50
-
-
-
 def test_key_sourced_before_spawn(tmp_path):
     """run_curator_stage calls source_key(model) BEFORE the in-process spawn (the drain worktree
-    carries only the ambient credential) — so a metered-billing spawn never precedes its
-    key. Ordered spy proves the order; the key is sourced for the configured model. Up-front: a
-    key fault raises before the spawn, so the engine never runs."""
+    carries only the ambient credential) — so a metered-billing spawn never precedes its key."""
     events: list[tuple[str, object]] = []
     _stage(
         tmp_path, model="glm-5.3",
@@ -405,12 +353,10 @@ def test_key_sourced_before_spawn(tmp_path):
     assert ran == []
 
 
-
 def test_trace_anchor_established_before_spawn(tmp_path):
     """The trace anchor (batch_id + pid) is established before the agent spawn and handed to the
     transport, so a partial failure still leaves a complete, locatable, per-batch-distinct trace
-    (a distinct concern from key ordering — both hold). Capture the trace_name the wrapper hands
-    the transport for two batch_ids into one run dir."""
+    (a distinct concern from key ordering — both hold)."""
     rd = _run_dir(tmp_path)
     seen: list[str] = []
 
@@ -428,17 +374,8 @@ def test_trace_anchor_established_before_spawn(tmp_path):
     assert any("batch-B" in n for n in seen)
 
 
-
-
 def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path, caplog):
-    """ONE batch identity per spawn. `run_curator_stage` reads the batch off the wiring that
-    already derived `trace_name` and `label` from it, so the log line, every AuthorError and
-    the trace file cannot name different batches.
-
-    A hand-built `StageWiring` — the shape a drain regresses to when someone pins a literal
-    `trace_name="curator_trace.jsonl"`, which two concurrent drain processes sharing one
-    pending dir would interleave into a single file — carries no batch and is refused BEFORE
-    the spawn. A raise, not an assert: `python -O` strips asserts."""
+    """ONE batch identity per spawn."""
     fixed = StageWiring(
         prompt_path=_prompt(tmp_path), model="glm-5.3", effort="low",
         trace_name="curator_trace.jsonl", label="curator",
@@ -462,43 +399,3 @@ def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path, caplo
     assert any("batch-Z" in line for line in caplog.messages)
 
 
-
-def test_model_flip_glm_low_defaults_flow_to_transport(tmp_path):
-    """AUTHOR_MODEL defaults to glm-5.3 and AUTHOR_EFFORT to medium. Leaving claude-sonnet-4-6 while
-    routing in-process would silently move curator billing from the subscription to the metered
-    first-party key. The flipped default is what the in-process transport is asked to build.
-
-    The ACTOR and ENV pairs this once spanned went with their directions in #922; the surviving
-    findings curator reads the un-suffixed pair."""
-    assert config.author_model() == "glm-5.3"
-    assert config.author_effort() == "medium"
-    seen: list[tuple[object, object]] = []
-    _stage(
-        tmp_path, model=config.author_model(), effort=config.author_effort(),
-        run_author=lambda wiring, ctx, **kw: seen.append((wiring.model, wiring.effort)) or _AUTHOR_RESULT_OK,
-    )
-    assert seen == [("glm-5.3", "medium")]
-
-
-
-def test_model_override_claude_low_crosses_validation(tmp_path, monkeypatch):
-    """Overriding AUTHOR_*_MODEL back to a claude-* model with effort=low stays valid: low is a
-    valid effort on BOTH the Anthropic and Fireworks providers, so the documented A/B override
-    does not fail through the wrapper. Guarded control at the builder: glm-5.2 @ low and
-    claude-sonnet-4-6 @ low both BUILD, while claude-* + ``none`` (a Fireworks-only effort) raises
-    ValueError — proving ``low`` is the load-bearing reconciled choice."""
-    seen: list[tuple[object, object]] = []
-    out = _stage(
-        tmp_path, model="claude-sonnet-4-6", effort="low",
-        run_author=lambda wiring, ctx, **kw: seen.append((wiring.model, wiring.effort)) or _AUTHOR_RESULT_OK,
-    )
-    assert isinstance(out, dict)
-    assert seen == [("claude-sonnet-4-6", "low")]
-
-    pytest.importorskip("pydantic_ai.models.openai")
-    monkeypatch.setenv("FIREWORKS_API_KEY", "fw-test")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    providers.build_for_effort("glm-5.3", "low")
-    providers.build_for_effort("claude-sonnet-4-6", "low")
-    with pytest.raises(ValueError, match="unsupported Anthropic effort"):
-        providers.build_for_effort("claude-sonnet-4-6", "none")

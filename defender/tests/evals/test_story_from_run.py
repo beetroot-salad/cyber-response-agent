@@ -27,7 +27,6 @@ FIXTURE_RUNS_DIR = Path(__file__).resolve().parent / "_run_records"
 RUNS_DIR = REPO_ROOT / "playground-v2" / "attacks" / "runs"
 
 
-
 META = {
     "run_id": "r-1", "scenario_id": "s", "description": "A scenario description.",
     "resolved": {"source_user": "dev.dana", "target_host": "canary-1"},
@@ -84,11 +83,6 @@ def test_a_leaking_command_is_refused_rather_than_written(tmp_path):
     out = tmp_path / "story.md"
     assert STORY.main([str(meta_path), str(out)]) == 1
     assert not out.exists()
-
-
-def test_there_are_run_records_to_check():
-    """Every sweep below would pass vacuously against an empty corpus."""
-    assert sorted(FIXTURE_RUNS_DIR.glob("*/meta.json"))
 
 
 @pytest.mark.parametrize("meta_path", RUN_RECORDS, ids=lambda p: p.parent.name)

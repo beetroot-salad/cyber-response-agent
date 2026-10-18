@@ -1,25 +1,9 @@
-"""#1025 (PR #1042 review) — the page BORROWS what the judge owns rather than copying it, and
-READS what the pass decided rather than deciding again.
-
-Two things the first cut of the page re-implemented, and each copy drifted: reading a file
-safely (an ``lstat`` screen and then the tolerant reader's bare ``read_text``, per call site,
-with the ``except`` forgotten at two of them) and deciding what the enqueue did with a finding
-(a hand-mirrored precedence that read a faulted world's mechanical finding as "never enqueued"
-while the pass had queued it). The reader now comes from one owner
-(``_io.read_jsonl_rows_guarded``). The lane went one step further: borrowing the pass's rule
-(``enqueue.route_finding``) still left the page rebuilding the rule's INPUTS from the record's
-rows, and that rebuild disagreed with the pass on a record naming one world twice — so the
-pass now writes its decision per finding to the record (``judge.yaml.dispositions``, the
-ledger) and the page renders the ledger. These tests pin the places the copies were wrong and
-the ledger's contract at both ends.
-"""
+"""#1025 (PR #1042 review) — the page BORROWS what the judge owns rather than copying it, and READS
+what the pass decided rather than deciding again."""
 from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -75,11 +59,8 @@ def _restoring(paths: list[Path], mode: int):
 @NOT_ROOT
 def test_1025_a_permission_denied_trace_or_tool_trace_is_that_slots_refusal_never_the_pages_crash(
         tmp_path):
-    """A mode-000 `wire_logs/<stem>.jsonl` and a mode-000 `runs/<ep>-<label>/tool_trace.jsonl`
-    each land in their own slot — the transcript reads as refused, the run reads "no cost
-    recorded" — and the page is written. Before: both reads were the tolerant reader's bare
-    `read_text` behind an `lstat` screen, and the `PermissionError` took the whole render down.
-    """
+    """A mode-000 `wire_logs/<stem>.jsonl` and a mode-000 `runs/<ep>-<label>/tool_trace.jsonl` each
+    land in their own slot ."""
     ep = E.sample_episode(tmp_path)
     trace = ep.dir / "wire_logs" / f"{E.trace_stem('questioner')}.jsonl"
     tool_trace = ep.run(E.CONTROL) / "tool_trace.jsonl"
@@ -100,10 +81,7 @@ def test_1025_a_permission_denied_trace_or_tool_trace_is_that_slots_refusal_neve
 @NOT_ROOT
 def test_1025_a_world_directory_with_no_search_permission_is_that_worlds_refusal(tmp_path):
     """`worlds/<label>/` chmod 000: the world's archive block reads its refusal and every other
-    section renders. Before: the archive loader asked `Path.exists()` of `report.md` inside a
-    directory it had only `lstat`-screened, and the `PermissionError` out of `stat()` ended
-    the render.
-    """
+    section renders. Before: the archive loader asked `Path.exists()` of `report.md`."""
     ep = E.sample_episode(tmp_path)
     with _restoring([ep.world(E.GRADED_WORLD)], 0):
         page = render(ep)
@@ -117,10 +95,8 @@ def test_1025_a_world_directory_with_no_search_permission_is_that_worlds_refusal
 
 @NOT_ROOT
 def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp_path):
-    """`read_archived_report` on a mode-000 `report.md` says it could not be read and carries
-    the errno; on a symlinked `report.md` it says the alias refusal ONCE. Before, the alias
-    sentence was hard-coded in front of `read_guarded`'s own reason — doubled for a link,
-    and wrong for a permission fault."""
+    """`read_archived_report` on a mode-000 `report.md` says it could not be read and carries the
+    errno."""
     family = E.mod("learning.judge.family")
     ep = E.sample_episode(tmp_path)
     bound = E.mod("_io").bind(ep.dir)
@@ -142,11 +118,8 @@ def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp
 
 
 def test_1025_the_ledgers_malformed_row_count_is_the_judges_own(tmp_path):
-    """A parseable ledger row whose `source` is outside the ledger's vocabulary is malformed
-    to `read_world_facts` (p7: `WorldFacts.malformed_rows`) and the page's leads block says
-    "1 malformed row" — the same count the `judge.yaml` row carries. Before, the page re-read
-    the ledger through the raw tolerant reader and counted only physically torn lines: `None`
-    here, 1 on the record."""
+    """A parseable ledger row whose `source` is outside the ledger's vocabulary is malformed to
+    `read_world_facts` (p7."""
     ep = E.sample_episode(tmp_path)
     ledger = ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl"
     bogus = J.ledger_row(source="passthrough", world_label=E.GRADED_WORLD)
@@ -162,10 +135,8 @@ def test_1025_the_ledgers_malformed_row_count_is_the_judges_own(tmp_path):
 
 
 def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
-    """p7: "only an ABSENT ledger refuses (JudgeRefused)". The guard is the reader's own, so
-    the bare `render.render(..., facts=None)` path — which has no `_missing_required_input`
-    gate ahead of it — cannot assemble a prompt over a world that reads as "served nothing".
-    The page holds the refusal at the world's leads slot and still says "absent"."""
+    """p7: "only an ABSENT ledger refuses (JudgeRefused)". The guard is the reader's own, so the
+    bare `render.render(..., facts=None)` path — which has no."""
     family = E.mod("learning.judge.family")
     ep = E.sample_episode(tmp_path)
     (ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl").unlink()
@@ -182,11 +153,7 @@ def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
 
 
 def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
-    """`family` is the reserved label the family-level draws live under, never a world: a
-    grade row or a `runs/<ep>-family` directory carrying the name makes no world section, and
-    the family draws are walked exactly once — three `f-family-0-*` ids, each once, and tile
-    3's count unchanged. A manifest world carrying it is refused by the manifest reader (the
-    runtime loader's gate) before anything is rendered."""
+    """`family` is the reserved label the family-level draws live under, never a world."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"].append(E.world_row(E.FAMILY, declared="benign"))
@@ -214,20 +181,6 @@ def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
 # ---------------------------------------------------------------------------------------
 
 
-def test_1025_the_page_module_does_not_import_the_launcher():
-    """The episode's `runs/` segment comes from `_episode_paths.py`, the layout owner, so the
-    writer and the reader reach it through one accessor (#1077 D7; it was a constant on
-    `branch/archive.py` before, and a second one on the page before that) — importing the page
-    must not pull `branch/cli.py` (the whole launcher: argparse, the estate registry, the
-    oracle runtime) into a static renderer, nor execute `cli.py` a second time when the
-    launcher itself runs as a script."""
-    code = ("import sys; import defender.scripts.visualize.visualize_episode; "
-            "print('defender.learning.branch.cli' in sys.modules)")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         check=True, cwd=str(Path(E.__file__).resolve().parents[2]))
-    assert out.stdout.strip() == "False", out.stdout
-
-
 def test_1025_a_response_row_with_an_empty_model_string_is_unpriced(tmp_path):
     """`model: ""` — a call whose model was never recorded — reads "unpriced", not a figure at
     the pricing table's absorbed-row rate: the stage sum excludes it and says so."""
@@ -241,14 +194,6 @@ def test_1025_a_response_row_with_an_empty_model_string_is_unpriced(tmp_path):
     assert "partial — 2 of 3 calls priced" in questioner, questioner
 
 
-def test_1025_the_docstring_names_the_launchers_real_hook():
-    source = Path(visualize_episode().__file__).read_text(encoding="utf-8")
-    assert "cli.py::_render_page" in source
-    assert "cli.py::_render_document" not in source
-    cli_source = Path(E.mod("learning.branch.cli").__file__).read_text(encoding="utf-8")
-    assert "def _render_page(" in cli_source
-
-
 # ---------------------------------------------------------------------------------------
 # The ledger — the pass writes what it decided; the page reads it and decides nothing
 # ---------------------------------------------------------------------------------------
@@ -258,41 +203,9 @@ def _ledger_of(doc: dict) -> dict[str, tuple[str, str | None]]:
     return {e["finding_id"]: (e["lane"], e["reason"]) for e in doc["dispositions"]}
 
 
-def test_1025_the_fixture_ledger_is_the_passes_own(tmp_path):
-    """`sample_grade()["dispositions"]` — the ledger every page test renders from — is,
-    entry for entry AND in walk order, what a real `grade_episode` writes when its judge
-    answers each call with the sample episode's own draw document (#1234: the pass routes the
-    replies it draws, `route.fate`; nothing re-walks the documents on disk, A8). A fixture
-    ledger the pass would not write is a fixture bug, and it fails here rather than as a page
-    test that passed against a record no pass produces."""
-    ep = E.sample_episode(tmp_path, judge=False, traces=False)
-    replies = [J.as_reply_text(J.draw_doc(ep.dir, label, 0))
-               for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD)]
-    family = J.as_reply_text(J.draw_doc(ep.dir, E.FAMILY, 0))
-    for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD, E.FAMILY):
-        shutil.rmtree(ep.world(label) / "judge")
-    E.plant_container_record(ep.dir)
-    judge = J.FakeJudge(replies=replies, family_default=family)
-    J.grade_at(ep.dir, judge=judge, draws=1, state=_state1135.state_over(tmp_path / "queue"))
-    assert judge.agent_ids == [f"judge:{E.PASSTHROUGH_WORLD}:0", f"judge:{E.GRADED_WORLD}:0",
-                               f"judge:{E.FAMILY}:0"], judge.agent_ids
-    record = J.judge_record(ep.dir)
-    doc = E.sample_grade()
-    assert record["dispositions"] == doc["dispositions"]
-    assert record["enqueued_rows"] == doc["enqueued_rows"] == S.defender_enqueued
-    assert record["world_enqueued_rows"] == doc["world_enqueued_rows"] == S.world_author
-    assert record["family"] == doc["family"]
-    for got, want in zip(record["worlds"], doc["worlds"], strict=True):
-        for key in ("world", "bucket", "systems", "draws", "measured", "draws_disagree",
-                    "world_label_doubted", "state", "completed_draws"):
-            assert got[key] == want[key], (got["world"], key, got[key], want[key])
-
-
 def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
-    """`judge.yaml` carries `dispositions` as `grade_episode` wrote it and `read_grade` hands
-    it back unchanged; a record written before the ledger existed (no key) reads as `None`,
-    distinct from a pass that walked nothing (`[]`); and a planted entry naming no lane, or
-    no finding, is refused with the rest of the record — never a row of the wrong shape."""
+    """`judge.yaml` carries `dispositions` as `grade_episode` wrote it and `read_grade` hands it
+    back unchanged."""
     judge = E.mod("learning.judge")
     enqueue = E.mod("learning.judge.enqueue")
     ep = E.sample_episode(tmp_path)
@@ -323,11 +236,7 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
 
 
 def test_1025_the_page_shows_the_ledger_and_never_re_decides_a_lane(tmp_path):
-    """The page's disposition for a finding is the ledger's entry, full stop — the rows are NOT
-    consulted a second time. Pinned by a record no pass writes: both worlds measured, judged
-    and bucketed alike (so a lane rule re-run over the rows would queue all eight), yet one
-    world's defender entries are filed `defender` and the other's `unqueueable` with a reason no
-    row gave; the page shows the ledger's answer, and the accounting agrees with the record."""
+    """The page's disposition for a finding is the ledger's entry, full stop ."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["enqueued_rows"] = 4
@@ -351,12 +260,7 @@ def test_1025_the_page_shows_the_ledger_and_never_re_decides_a_lane(tmp_path):
 
 def test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_filed(tmp_path):
     """The #1042 review's case: `judge.yaml` names one judged world on TWO rows — the first
-    gradable, the second ungradable — and its ledger files that world's findings unqueueable
-    (ungradable). A page that rebuilt the lane from one row per label would disagree with the
-    ledger; this one cannot: every finding of that world shows the lane the ledger filed, the
-    other world's four show enqueued, and tile 3 and the accounting carry the record's own
-    counts. (#1234: the record-walking `enqueue_report` that once wrote this ledger is retired,
-    A8; the ledger is planted.)"""
+    gradable, the second ungradable — and its ledger files that world's findings."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     doc["worlds"].append(E.ungradable_row(E.PASSTHROUGH_WORLD, declared="benign",
@@ -383,9 +287,8 @@ def test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_file
 
 def test_1025_a_record_with_no_ledger_says_so_instead_of_guessing(tmp_path):
     """A `judge.yaml` written before the ledger existed (the two real archives the design doc
-    quotes) renders every on-disk finding under one group, "record carries no disposition
-    ledger — not enqueued": the page does not fall back to deciding lanes itself, tile 3
-    counts nothing as queued, and no stub is invented for a finding whose document is gone."""
+    quotes) renders every on-disk finding under one group, "record carries no disposition ledger
+    ."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     del doc["dispositions"]

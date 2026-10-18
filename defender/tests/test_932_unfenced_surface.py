@@ -1,17 +1,4 @@
-"""#932 — a block written outside a ```invlang fence is invisible, not merely unchecked.
-
-`INVLANG_FENCE_RE` matches ```invlang ... ``` pairs and the tokenizer reads only what those
-pairs enclose, so rows written outside one never become records. Every hypothesis-side rule
-then passes on an empty companion, and `_check_append_only` — which counts fence pairs and
-refuses a DECREASE — sees none, because the write added no pair rather than removing one.
-
-The shape that cost a run (`live-867-old`): fence opens at `## ORIENT`, closes after the
-prologue, prose follows, and `## PLAN` continues with `:H` blocks without reopening. The
-document reads correctly to a human and parses to nothing.
-
-Each block below pairs the violation with a LIVENESS CONTROL — the same bytes, fenced —
-so a check that stopped running fails here rather than passing vacuously.
-"""
+"""#932 — a block written outside a ```invlang fence is invisible, not merely unchecked."""
 
 from __future__ import annotations
 
@@ -85,10 +72,7 @@ def test_a_first_write_has_no_baseline_to_grandfather() -> None:
 
 
 def test_committed_unfenced_rows_do_not_wedge_the_next_write() -> None:
-    """`investigation.md` is append-only, so bytes already committed unfenced cannot be
-    fenced after the fact. Refusing the whole document for them would deny every later write
-    with no repair available — the wedge the v2.22 delta closed on rules #6 and #17. The rule
-    is scoped to what THIS write introduces, so a clean append onto a broken file lands."""
+    """`investigation.md` is append-only, so bytes already committed unfenced cannot be fenced after the fact."""
     followup = (
         f"{_UNFENCED_PLAN}\n```invlang\n"
         ":L findings [id|loop|name|target|tests|system|window]\n"
@@ -108,11 +92,7 @@ def test_fix_row_style_rewrite_adds_no_header_and_is_not_refused() -> None:
 
 
 def test_a_model_cut_off_mid_block_is_not_refused() -> None:
-    """The other way a fence goes wrong, and it stays accepted. An unterminated trailing
-    ```invlang is a write that stopped mid-block: the next append closes it and the rows
-    parse. `test_frontier_recall_919` fixes that shape as accepted-by-design. Only rows
-    orphaned AFTER a closed fence are refused, because no later append can reach back and
-    wrap bytes already committed."""
+    """The other way a fence goes wrong, and it stays accepted."""
     truncated = f"{_ORIENT_ONLY}\n```invlang\n:H hypothesize.hypotheses [id|name|attached_to"
     assert _surface_errors(truncated, _ORIENT_ONLY) == []
 
@@ -128,22 +108,14 @@ def test_the_continuation_that_closes_a_truncated_block_lands() -> None:
 
 
 def test_the_fenced_append_onto_a_truncated_baseline_lands() -> None:
-    """The continuation `append_block` ACTUALLY sends. The tool carries one fenced block per
-    call, so the append onto a mid-block baseline opens its own ```invlang — which
-    `INVLANG_FENCE_RE` then pairs with the open one on disk, leaving the NEW block reading as
-    orphaned. Refusing that would name a repair the model had already made, and every retry
-    would be refused identically: a wedge on the one tool it has. The baseline's `open_tail`
-    is the state that exempts it."""
+    """The continuation `append_block` ACTUALLY sends."""
     truncated = f"{_ORIENT_ONLY}\n```invlang\n:H hypothesize.hypotheses [id|name|attached_to"
     appended = f"{truncated}\n```invlang\n:H h-001.preds [id|subject|claim]\np1|x|\"y\"\n```\n"
     assert _surface_errors(appended, truncated) == []
 
 
 def test_a_prose_mention_of_the_fence_does_not_disarm_the_gate() -> None:
-    """The exemption is a whole LINE that is the opener, never `str.find`. The refusal this
-    module tests prints ```invlang inside its own repair instruction, so a model that echoes
-    it into the document would otherwise open a phantom fence to end-of-document and hide
-    every orphaned header written under it."""
+    """The exemption is a whole LINE that is the opener, never `str.find`."""
     mentioned = f"{_ORIENT_ONLY}\nNote: blocks go inside ```invlang fences.\n\n{_PLAN_ROWS}"
     errors = _surface_errors(mentioned, _ORIENT_ONLY)
     assert len(errors) == 1
@@ -176,10 +148,7 @@ def test_a_write_that_drops_one_orphan_and_adds_two_reports_both() -> None:
 
 
 def test_a_committed_document_validated_whole_is_not_refused_for_its_own_bytes() -> None:
-    """`learning/core/persist.py` validates the FINISHED investigation on the copy path. The
-    bytes are committed and no repair reaches them, so the document is its own baseline —
-    a `None` there would read every orphan as newly written and fail the run into
-    `queue/failed/`."""
+    """`learning/core/persist.py` validates the FINISHED investigation on the copy path."""
     assert _surface_errors(_UNFENCED_PLAN, _UNFENCED_PLAN) == []
 
 

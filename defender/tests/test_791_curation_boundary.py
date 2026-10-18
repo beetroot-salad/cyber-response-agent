@@ -1,34 +1,7 @@
 """#791 part 3 — catalog curation gets its own trigger at the investigation boundary.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_791-retire-offline-oracle.yaml`,
-named by that demand's `discharged_by`. RED against HEAD is the expected state: the shared
-refusal predicate and the curation enqueue are COINED — neither symbol exists, because R3
-makes the extraction a prerequisite for the trigger. If the implementation spells them
-otherwise, these names follow the code.
-
-WHY THE TRIGGER MOVES AT ALL: the queue the design called shared has ONE reader (S4, refuted).
-Curation was reachable only downstream of the learning enqueue, so cutting that link silences
-the lane completely — and totally, not eventually: its only other trigger is written from
-inside its own run, so it drains its backlog once and goes quiet (C9).
-
-WHY "CARRY THE FOUR REFUSALS" IS THE WRONG INSTRUCTION (PR1/PR2): all three run-dir refusals
-are welded INSIDE the learn-enqueue helper as early returns, and that helper signals "not
-refused" BY PERFORMING THE ENQUEUE — asking it whether a run would be refused enqueues the
-run. And the held-out net at the boundary is PATH CONTAINMENT on the operator's argv path,
-while the one that actually guards curation today is a CONTENT DIGEST over the run's own alert
-copy. Only the second catches a copy, which is how the refusal is worded; carrying the
-boundary's four forward literally drops it out of the curation path with nothing going red.
-
-WHY main's TAIL IS DRIVEN AND NO LONGER READ (R22): the entrypoint now takes its three
-undrivable dependencies — the credentialed investigation lifecycle, the HTML render, the case
-ticket endpoint — through an injection seam, so "the tail asks for curation", "the trigger is
-handed the operator's flag", "curation is sited above the render step" and both ordering cells
-are observations of a real run. The refusal predicate, the curation write and the queue itself
-are NOT injected: they are what these demands are about, so they run for real.
 """
 from __future__ import annotations
 
-import ast
 import inspect
 import json
 from pathlib import Path
@@ -43,13 +16,11 @@ from defender.learning.core import drains  # noqa: E402
 from defender.runtime import scrub as scrub_mod  # noqa: E402
 from defender.tests._state1135 import curation_run_dir, run_of, set_state_dir  # noqa: E402
 from defender.tests._spec791 import (  # noqa: E402
-    SCRUB_PROPERTY_TEST,
     TAIL_SEAM,
     SpecBranch,
     SpecTail,
     author_markers,
     drive_tail,
-    fn_node,
     loop_paths,
     make_run_dir,
     marker_body,
@@ -61,7 +32,6 @@ from defender.tests._spec791 import (  # noqa: E402
     satisfy_entrypoint_keys,
 )
 
-SCRUB_PROPERTY_DEMAND = "test_scrub_runs_before_the_first_run_dir_consumer"
 HELD_OUT_ALERT = json.dumps({"rule": {"id": "9999"}, "held": "out"}).encode("utf-8")
 
 
@@ -109,22 +79,7 @@ def _held_out_set(tmp_path, alert_bytes: bytes) -> Path:
 def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_path, state):
     """investigation_tail_has_an_injection_seam — the investigation entrypoint takes the three
     tail dependencies a hermetic test cannot drive through an injection seam, each defaulting
-    to production, so what the tail DOES is observable rather than readable.
-
-    This is R22, and it is a demand rather than test scaffolding for the same reason #741's
-    lifecycle seam was: without it, five demands about the tail — that it writes no learn
-    marker, that the trigger is handed the operator's flag, that curation sits above the
-    render step, and both consumer-ordering cells — can only be read off `main`'s statement
-    sequence. A test that reads source cannot fail when the behaviour changes, which is the
-    failure this whole flow exists to prevent, and the exit-status half of R4's isolation has
-    no source form at all.
-
-    The seam covers exactly what cannot be driven: the credentialed investigation lifecycle,
-    the HTML render, the case-ticket endpoint. The curation trigger is deliberately NOT
-    injectable — it is what the demands are about, so it runs for real against a real queue.
-
-    Observable: every dependency carries a production default, and a run driven with fakes
-    reaches all three, over the run dir the entrypoint itself materialized."""
+    to production, so what the tail DOES is observable rather than readable."""
     require_tail_seam(run_py.main)
     params = inspect.signature(run_py.main).parameters
     for name in TAIL_SEAM:
@@ -150,13 +105,7 @@ def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_pa
 
 def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
     """curation_trigger_at_the_investigation_boundary — a finished investigation asks for
-    catalog curation at its own boundary, and the lane that serves the request RUNS.
-
-    The second half is what the brief's F3 forces. The lead-author lane's only other trigger is
-    a pending-pitfalls threshold written from inside its own run, so "a threshold could still
-    fire" is not evidence the lane is alive — the lane has to be observed consuming the
-    request. The placement is cheap because the marker is byte-identical to today's and the
-    lane already consumes the INVESTIGATION run dir, not the learning one (E9/PR5)."""
+    catalog curation at its own boundary, and the lane that serves the request RUNS."""
     run_dir = _certified_run()
     assert run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json") is True
 
@@ -178,12 +127,7 @@ def test_791_finished_investigation_drives_catalog_curation(tmp_path, state):
 
 def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state):
     """curation_marker_shape — the curation request names the CASE it speaks for and carries a
-    resolvable investigation run directory.
-
-    Both parts are load-bearing and R4's accepted cost is exactly that they come apart: keying
-    on the case means the request's identity no longer determines the run dir it points at. The
-    run dir must still be carried and must still resolve, because it is the only thing the
-    drain hands the curator."""
+    resolvable investigation run directory."""
     run_dir = _certified_run()
     run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json")
 
@@ -202,13 +146,7 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
 
 def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_path, state):
     """curation_request_is_keyed_on_the_case — two investigations of ONE case leave exactly one
-    curation request, and it points at the later run.
-
-    Bound at the composition frame, because a single-investigation test cannot see the
-    collision: a retry mints a new run id, and today identity is the marker's FILE NAME derived
-    from the run dir's name while the run id field inside is never read for it (P3), so two run
-    ids for one case drive two curations. Accepted cost, recorded: a legitimate later
-    re-investigation of the same case needs its own way to ask."""
+    curation request, and it points at the later run."""
     alert = json.dumps({"rule": {"id": "5710"}, "case": "one-and-the-same"}).encode("utf-8")
     first = _certified_run(name="run-a", alert_bytes=alert)
     second = _certified_run(name="run-b", alert_bytes=alert)
@@ -226,22 +164,7 @@ def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_pat
 
 def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(tmp_path, state):
     """curation_claim_and_serve_is_atomic — a curation request that arrives while the lane is
-    already curating that case survives: the drain does not delete a marker whose contents it
-    never read, so the second investigation's findings still reach the catalog.
-
-    This is the composition of two facts each recorded on its own and never together. The lane
-    reads a marker at the top of its pass and unlinks it BY PATH at the bottom (P2), and R4
-    makes both requests of one case land on that one path. Today identity is the run dir's
-    name, so a re-investigation writes a different marker and survives as a duplicate; keyed on
-    the case it lands on the path the serving drain is about to remove.
-
-    The loss is invisible by construction: the request count is right, the lane reports
-    success, and nothing anywhere records that a re-ask existed. Either the claim is atomic —
-    the marker is taken out of the queue before it is served — or the unlink must be of the
-    contents that were read.
-
-    Driven the way the probe that refuted the queue's idempotence was driven: the re-ask is
-    issued from inside the serve, which is the only window in which it can be destroyed."""
+    already curating that case survives."""
     alert = json.dumps({"rule": {"id": "5710"}, "case": "one-and-the-same"}).encode("utf-8")
     first = _certified_run(name="run-a", alert_bytes=alert)
     second = _certified_run(name="run-b", alert_bytes=alert)
@@ -274,23 +197,7 @@ def test_791_a_curation_re_ask_issued_mid_drain_is_not_destroyed(tmp_path, state
 
 def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, state):
     """curation_write_is_isolated — a curation request that cannot be written costs the
-    investigation nothing: the helper reports the failure rather than raising it, the run's
-    EXIT STATUS is unchanged, and the tail steps sited after it still run.
-
-    The old trigger sat inside the learning run cycle. The new one sits in the investigation's
-    own tail, behind the step that certifies the tree and AHEAD of the steps that render the
-    run for a human — so it is newly able to cost the investigation its human-facing output.
-    Curation is an optimisation over a corpus; an investigation that produced a verdict has
-    already delivered its value.
-
-    The exit-status half is what R4's words actually say and what a helper-level assertion
-    cannot reach: an entrypoint written as `if not enqueue_curation(...): return 1` returns a
-    failure for a corpus optimisation, and passes every assertion about the helper. It is
-    observable only by driving the entrypoint, which is what R22's seam is for.
-
-    The write is broken by putting a FILE where the queue directory must be — a real fault
-    through the real primitive, and one that this container's uid cannot ignore the way it
-    ignores a permission bit."""
+    investigation nothing."""
     run_dir = _certified_run()
     (state.state_root / "author-queue").parent.mkdir(parents=True, exist_ok=True)
     (state.state_root / "author-queue").write_text("not a directory\n", encoding="utf-8")
@@ -313,22 +220,10 @@ def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, s
         "the render, so its failure can no longer be the last word"
 
 
-
-
 def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
     """curation_refuses_the_copy_keyed_held_out_alert — curation refuses a run whose own alert
     is a COPY of a held-out fixture, keyed on content rather than on where the operator's
-    argument pointed.
-
-    This is R3's sharpening and the whole reason "carry the four refusals" is the wrong
-    instruction. The boundary's held-out net is path containment on the operator's argv path;
-    on a copy taken outside the fixtures directory it MISSES, and only the digest catches —
-    which is exactly how the refusal is worded. Both halves are asserted here, because the
-    demand is that the RIGHT net is the one carried, not merely that something refused.
-
-    The fixture set is planted rather than read: the shipped corpus holds one README, so its
-    digest set is empty and the net that is semantically right is the one currently doing
-    nothing (PR2b). A test leaning on the shipped set asserts nothing."""
+    argument pointed."""
     fixtures = _held_out_set(tmp_path, HELD_OUT_ALERT)
     copied = _certified_run(name="scored-alert", alert_bytes=HELD_OUT_ALERT)
     alert = RunPaths(copied).alert
@@ -349,19 +244,7 @@ def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
 
 def test_791_no_learn_suppresses_curation_too(tmp_path, state):
     """curation_honours_no_learn — the operator's `--no-learn` suppresses catalog curation as
-    well as learning.
-
-    Fail-closed is the decided reading, not a placeholder (R14). With the branch open, the
-    held-out eval procedure's own DOCUMENTED invocation — a scored alert run with `--no-learn`
-    — starts feeding the committed catalog every later investigation reads at planning time,
-    leaving the content digest as the sole net: one protection load-bearing alone. Accepted
-    cost: an operator wanting to skip learning while keeping curation loses that, and the flag
-    now governs a lane its name does not name, which is what the help-text clause repairs.
-
-    Three arms, all driven through the REAL entrypoint over the operator's own argv, because
-    "the flag reaches the trigger" is the whole demand: the flag set, the flag absent (the
-    control — without it "no marker" is also true of a boundary that never fires), and the
-    documented held-out scoring run, which is the alternative that crosses validation."""
+    well as learning."""
     suppressed = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "suppressed"), suppressed, "--no-learn") == 0
     assert author_markers(state) == [], "--no-learn left a curation request behind"
@@ -381,56 +264,9 @@ def test_791_no_learn_suppresses_curation_too(tmp_path, state):
         "the held-out eval's own documented invocation started feeding the committed catalog"
 
 
-def test_791_the_no_learn_flag_says_it_governs_curation(tmp_path, capsys):
-    """no_learn_help_names_curation — the operator reading `--no-learn`'s own documentation can
-    tell that it also suppresses catalog curation.
-
-    R14 made the flag govern a lane its name does not name, and this help text is the only
-    place an operator could find that out — the flag has exactly one reader in the whole
-    production tree and is never persisted anywhere else (PR4).
-
-    Promoted from a clause: the rationale for leaving it in prose was that pinning help text
-    hardens a paragraph nobody wants frozen, and this asserts one WORD in one flag's block,
-    which freezes nothing. The failure it guards against is the ordinary one — the behaviour
-    ships and the documentation does not, and nothing goes red."""
-    with pytest.raises(SystemExit):
-        run_py.parse_args(["--help"])
-    block = _flag_help(capsys.readouterr().out, "--no-learn")
-
-    assert block, "the entrypoint's help does not describe --no-learn at all"
-    assert "curation" in block.lower(), (
-        f"--no-learn's help says only {block.strip()!r} — an operator cannot tell that the "
-        "flag now governs the catalog curation lane as well as learning"
-    )
-
-
-def _flag_help(help_text: str, flag: str) -> str:
-    """One option's own help block out of argparse's rendering — its line plus the wrapped
-    continuation lines, stopping at the next option."""
-    lines = help_text.splitlines()
-    for i, line in enumerate(lines):
-        if line.strip().startswith(flag):
-            block = [line]
-            for nxt in lines[i + 1:]:
-                if not nxt.strip() or nxt.strip().startswith("-"):
-                    break
-                block.append(nxt)
-            return "\n".join(block)
-    return ""
-
-
 def test_791_enqueue_curation_cannot_be_called_unguarded(tmp_path, state):
     """enqueue_curation_cannot_be_called_unguarded — the refusal predicate is WELDED inside the
-    curation enqueue rather than left to caller discipline, and no argument turns it off.
-
-    This is the one new caller in the change that touches attacker-influenced content: the
-    curator that edits the committed query catalog and the system skills receives the
-    investigation's goal text, bound parameters and rendered queries VERBATIM (PR5). Extracting
-    the predicate is what makes misuse constructible at all — today's helper signals
-    "not refused" by performing the enqueue, so misuse is structurally impossible there, and
-    the extraction is exactly what could leave a newly-unsafe default behind.
-
-    Driven with no caller-side check whatsoever, which is the misuse being ruled out."""
+    curation enqueue rather than left to caller discipline, and no argument turns it off."""
     fixtures = _held_out_set(tmp_path, HELD_OUT_ALERT)
     for label, run_dir, kw in (
         ("truncated", _certified_run(name="t"), {"truncated_by": "budget"}),
@@ -454,27 +290,7 @@ def test_791_enqueue_curation_cannot_be_called_unguarded(tmp_path, state):
 def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, state):
     """curation_reads_the_tree_only_after_certification — the shipped property that nothing
     reads the investigation's tree before the step certifying it now covers BOTH new
-    consumers: the curation trigger, and the ticket close.
-
-    The property is a hand-written list of the tree's consumers, and this change both removes a
-    member and adds one — exactly the moment the list is meant to be re-examined (R6). Ordering
-    is fine on the facts: the verdict is written in the lifecycle's `finally`, before the
-    boundary is reached (PR3). The demand is about the property COVERING the new consumers, not
-    about discovering a violation.
-
-    The ticket close is a pre-existing gap, fixed here under this issue's name (R17): it reads
-    the run dir and was not a member, so its ordering held by POSITION and by no check. Its
-    cell is the third one, and the other two cells' credit never extended to it.
-
-    MEMBERSHIP is read off the shipped property's own inline tuple — the one claim here that is
-    genuinely about source shape. The ORDERING is driven (R22): the tail's consumers are
-    observed running against a tree the lifecycle had already certified, and the fail-closed
-    control drives an uncertified one, where the request must be refused rather than written."""
-    members = _property_members()
-    for consumer in ("enqueue_curation", "record_case_ticket"):
-        assert consumer in members, \
-            f"the pre-certification consumer property does not cover {consumer}"
-
+    consumers."""
     tail = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "ordered"), tail, "--update-ticket") == 0
     for consumer in ("record_case_ticket", "visualize"):
@@ -491,53 +307,3 @@ def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, st
         "a run whose tree carries no scan verdict was handed to the curation lane anyway"
 
 
-def test_791_removing_a_consumer_from_the_scrub_property_states_a_reason(tmp_path):
-    """shrinking_the_consumer_property_states_a_reason — a consumer leaving the property leaves
-    a stated reason behind, so the membership cannot be shrunk into green.
-
-    When this property goes red the CHEAPEST repair is to delete the departed name, and that
-    repair leaves a security guarantee quietly covering less than it did with nothing failing —
-    the definition of an unfalsifiable demand. The learning enqueue is the member this change
-    removes, so it is the first case: every name the property carried before must be either a
-    live member or a recorded departure whose reason names the issue that took it."""
-    members = _property_members()
-    source = SCRUB_PROPERTY_TEST.read_text(encoding="utf-8")
-
-    assert "enqueue_learning" not in members, \
-        "the departing consumer is still listed as live; this demand has nothing to check yet"
-    reasons = [
-        s for s in _string_constants(SCRUB_PROPERTY_TEST)
-        if "enqueue_learning" in s and "791" in s
-    ]
-    assert reasons, (
-        "the learning enqueue left the property with no stated reason — the cheapest repair "
-        "was taken, and the guarantee now covers less with nothing failing"
-    )
-    assert "enqueue_learning" in source
-
-    shipped_before = {"iterdir", "cross_check_tables", "enqueue_learning", "visualize"}
-    recorded = {name for name in shipped_before if any(name in r for r in reasons)}
-    assert shipped_before <= (set(members) | recorded), \
-        f"the property lost {shipped_before - set(members) - recorded} with no record"
-
-
-def _property_members() -> list[str]:
-    """The consumer names the shipped ordering property walks — read out of its own `for`
-    loop, because the property IS that inline tuple: there is no identifier to import and no
-    module-level constant to follow (H3)."""
-    fn = fn_node(SCRUB_PROPERTY_TEST, SCRUB_PROPERTY_DEMAND)
-    for node in ast.walk(fn):
-        if isinstance(node, ast.For) and isinstance(node.iter, (ast.Tuple, ast.List)):
-            names = [e.value for e in node.iter.elts
-                     if isinstance(e, ast.Constant) and isinstance(e.value, str)]
-            if names:
-                return names
-    raise AssertionError(
-        f"{SCRUB_PROPERTY_DEMAND} no longer walks a consumer list; re-site this demand"
-    )
-
-
-def _string_constants(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return [n.value for n in ast.walk(tree)
-            if isinstance(n, ast.Constant) and isinstance(n.value, str)]

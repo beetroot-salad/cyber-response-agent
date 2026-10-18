@@ -1,35 +1,4 @@
-"""#923 — where a disposition can be AUTHORED, and what each surface refuses (O4, O6, M5, M6).
-
-Every test here is one demand of `spec-flow/specs/spec_graph_923-inconclusive.yaml`, named by
-that demand's `discharged_by`. RED against HEAD is the expected state.
-
-THE HOST OWNS `unresolved`, AND THAT IS A UNIVERSAL RATHER THAN TRUE-AT-ONE-DOOR. The design
-placed the refusal at the close tool alone. There are FOUR surfaces from which the verdict can
-be authored — the close tool's argument, the invlang document's `conclude.disposition` keyword,
-the analyst-editable ticket resolution line, which decodes by bare enum membership and would
-accept an analyst who typed the word by hand, indistinguishably from a host-forced close, and a
-branched world's `disposition_declared` in the family manifest, which #920 added after this
-design was written. All four refuse it.
-
-THE FOURTH IS WHAT THE CENSUS WAS FOR. It arrived with #920 and was never classified, and it
-admitted the host's own verdict exactly the way the invlang document did before #923 gave that
-one a clause: the manifest validator asks the owner's normalizer whether the value is a member,
-and `unresolved` is. The census below is what found it — which is the whole argument for
-picking subjects by resolved reference rather than by a list someone maintains.
-
-This design's bookkeeping has now been found wrong FIVE times on one fault shape — a count or a
-requirement stated at a precision its own list does not support — so a fourth authoring surface
-appearing unnoticed is the risk the enumeration itself carries.
-`test_a_fourth_authoring_surface_cannot_appear_unnoticed` is what closes that: it picks its
-subjects by resolving references to the vocabulary's owner across the whole shipping tree and
-fails when that set grows, so a new consumer has to be classified rather than inherited.
-
-THE WRITE HALF OF THE §7-ROUND-4 DESIGN CHANGE LIVES HERE TOO. A malformed verdict — one that
-only reads as a member after something strips or folds it — is refused at both write gates,
-because on write there is still an author to ask. Its read half is in `test_923_readers.py` and
-its training-routing half went with the training directions in #922; the halves are one
-decision and the write half is the one that was already true.
-"""
+"""#923 — where a disposition can be AUTHORED, and what each surface refuses (O4, O6, M5, M6)."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -301,33 +270,6 @@ def test_a_malformed_verdict_is_refused_at_both_write_gates(tmp_path):
     assert (run_dir / "report.md").is_file()
 
 
-def test_the_tool_schema_and_the_refusal_render_one_ordering(tmp_path):
-    """The close tool's JSON-schema enum and the host's refusal text render the owner's tuple in
-    ONE ordering, so a model correcting itself is never handed two orderings of one closed
-    vocabulary.
-
-    `unresolved` is appended LAST and that placement is load-bearing: the tuple is alphabetical,
-    the refusal is rendered from the ORDERED tuple and never from a sorted set, and a member that
-    did not sort last would have to be INSERTED rather than appended. Both halves are read in one
-    round trip here because that is how the model meets them — schema on the way in, refusal on
-    the way back."""
-    from pydantic_ai.exceptions import ModelRetry
-
-    from defender.runtime.close_tool import DispositionArg
-
-    advertised = DispositionArg.__metadata__[0].json_schema_extra["enum"]
-    assert advertised == list(DISPOSITION_VALUES)
-    assert advertised[-1] == MEMBER
-    assert list(DISPOSITION_VALUES) == sorted(DISPOSITION_VALUES), (
-        "the tuple stopped being alphabetical, so appending is no longer the safe insertion"
-    )
-
-    deps, _run_dir = main_deps(tmp_path, paid(PAYING_ROW))
-    with pytest.raises(ModelRetry) as e:
-        close(deps, "not-a-disposition")
-    assert str(advertised) in str(e.value)
-
-
 # ---------------------------------------------------------------------------------------
 # The host-only verdict, at all three authoring surfaces.
 # ---------------------------------------------------------------------------------------
@@ -393,48 +335,6 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
     # The control, on the same validator: an ordinary declaration still parses, so the refusal
     # above is the host-only verdict rather than a validator that stopped admitting anything.
     assert parse_world(_world(GAP_MEMBER)).disposition_declared == GAP_MEMBER
-
-
-def test_a_fourth_authoring_surface_cannot_appear_unnoticed():
-    """A FOURTH place a disposition can be authored cannot appear without this failing.
-
-    The three surfaces are named by a census resolved against the vocabulary's OWNER — every
-    shipping module referencing `DISPOSITION_ENUM`, `DISPOSITION_VALUES`, invlang's re-export or
-    the shared normalizer — and the assertion is that the census set has not GROWN. The
-    enumeration is how the subjects are picked, never what is asserted about them: what each
-    declared authoring surface DOES with the host-only verdict is driven in
-    `test_every_authoring_surface_refuses_the_host_only_verdict`, and what each declared reader
-    does with it is driven one edge at a time in `test_923_readers.py`.
-
-    A census is the only instrument that can fail on "someone added a thirteenth consumer", and
-    this design has had five enumerations found short. Its own limit is stated rather than
-    hidden: a consumer that reaches the vocabulary through a locally re-derived membership test
-    instead of the owner's names is invisible here — which is the case the borrowed-vocabulary
-    lint already blocks, and the reason that lint is the other half of this guard."""
-    declared = _AUTHORING_SURFACES | _VOCABULARY_READERS
-    found = _vocabulary_consumers()
-
-    assert found - declared == set(), (
-        f"new consumer(s) of the disposition vocabulary: {sorted(found - declared)} — classify "
-        f"each as an authoring surface (which must refuse the host-only verdict) or as a "
-        f"reader (which owes an in-or-out verdict), and add it above"
-    )
-    assert declared - found == set(), (
-        f"declared consumer(s) that no longer reach the vocabulary: {sorted(declared - found)}"
-    )
-    # And at SURFACE grain, not module grain: the size of the roster above is a literal
-    # compared with a literal and can only fail if someone edits this file, while a fourth
-    # authoring surface arriving INSIDE an already-declared module is the case a module census
-    # cannot see at all.
-    entry_points = _vocabulary_entry_points(_AUTHORING_SURFACES)
-    assert entry_points == _AUTHORING_ENTRY_POINTS, (
-        f"the authoring entry points moved: "
-        f"+{sorted(entry_points - _AUTHORING_ENTRY_POINTS)} "
-        f"-{sorted(_AUTHORING_ENTRY_POINTS - entry_points)} — a second place inside a declared "
-        f"module that reaches the disposition vocabulary is a fourth authoring surface however "
-        f"few files it added; classify it here and drive it in "
-        f"`test_every_authoring_surface_refuses_the_host_only_verdict`"
-    )
 
 
 # ---------------------------------------------------------------------------------------

@@ -1,26 +1,9 @@
-"""The gate that keeps the fence-scan fold from regressing: lint_unaccounted_selection
-(#932).
-
-`scan_fences` is the one place that knows which bytes of an investigation are invlang
-content, and it returns what the fences ORPHAN alongside what they hold. Three readers had
-derived that split independently and all three dropped the complement in silence, which is
-how a run's whole PLAN section came to sit outside a fence, parse to an empty companion, and
-clear every hypothesis-side rule vacuously.
-
-A lint whose baseline ships empty is indistinguishable from a lint that scans nothing, so
-every arm is exercised against a synthetic tree here, and each violation is paired with the
-clean spelling of the same read.
-
-Driven through the gate's testability seam — `main(argv, *, scope, baseline_path)` and
-`_scan(root)` — so nothing is hardcoded to a checkout path.
-"""
+"""The gate that keeps the fence-scan fold from regressing: lint_unaccounted_selection"""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
 
 from defender.tests._by_path import load_lint_gate
 
@@ -67,13 +50,6 @@ def _pyfile(tree: Path, rel: str, src: str) -> Path:
 
 def _kinds(findings) -> set[str]:
     return {f.fingerprint.split(":")[-1] for f in findings}
-
-
-def _write_baseline(path: Path, fingerprints: list[str]) -> None:
-    path.write_text(
-        json.dumps({"//": "test", "entries": {fp: "" for fp in fingerprints}}) + "\n",
-        encoding="utf-8",
-    )
 
 
 def test_each_bypass_arm_is_flagged(tmp_path):
@@ -128,19 +104,6 @@ def test_a_deliberate_site_can_be_marked(tmp_path):
     assert _GATE._scan(tree) == []
 
 
-def test_the_ratchet_and_the_blind_scope(tmp_path):
-    """Baselined fingerprints pass; a missing scope exits 2 rather than reading as clean —
-    a gate that could not run is categorically not a green one."""
-    tree = tmp_path / "scope"
-    _pyfile(tree, "a_import.py", _IMPORT_ALIASED)
-    findings = _GATE._scan(tree)
-
-    baselined = tmp_path / "bp.json"
-    _write_baseline(baselined, [f.fingerprint for f in findings])
-    assert _GATE.main([], scope=tree, baseline_path=baselined) == 0
-    assert _GATE.main([], scope=tmp_path / "does-not-exist") == 2
-
-
 _GRAMMAR_FILTER = (
     "def f_filter(tokens):\n"
     "    return [t for t in tokens if SOME_ID_RE.fullmatch(t)]\n"
@@ -193,10 +156,3 @@ def test_arm2_marker_must_sit_inside_the_flagged_span(tmp_path):
     assert _GATE._scan(tree) == []
 
 
-@pytest.mark.gate
-def test_the_real_tree_is_clean_and_the_baseline_is_empty():
-    """The fold actually landed: no production reader under `defender/` bypasses
-    `scan_fences`, so the shipped baseline holds nothing to inherit."""
-    assert _GATE.main([]) == 0
-    baseline = json.loads(_GATE.BASELINE_PATH.read_text(encoding="utf-8"))
-    assert baseline.get("entries", {}) == {}

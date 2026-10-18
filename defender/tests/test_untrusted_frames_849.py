@@ -1,22 +1,4 @@
-"""#849 — the three read-surface findings left in the defect register's first cluster.
-
-The fourth (F-01, the run's wire log sitting inside MAIN's read shape) closed in #847 and is
-pinned by `test_wire_log_read_gate.py`. What remains is one theme: bytes that came from OUTSIDE
-reach a model without the two properties every other lane gives them — the salt frame that says
-"this is data, not instruction", and the ceiling that says how much of it may arrive at once.
-
-* **F-08** — `ticket_reads/` was a captured payload for the read CAP and not for the FRAME, so
-  the benign judge's re-read of its own closed-ticket capture was the single lane delivering an
-  elided span bare, on text the package's own `_predates_case` treats as attacker-influenced.
-* **F-11** — a learning stage's own run dir IS the shared cross-stage directory (the host's
-  `past_tickets.txt`, the sibling leg's actor story, the judge's captures), and `read_file`
-  framed nothing in it while `_tool_bash` framed the same file.
-* **F-24** — the `cat` lane had no ceiling of any kind, so the capture cap `read_file` enforces
-  on a persisted payload was bypassable on the identical file, one lane over.
-
-Each section carries its positive control. A frame that is always present carries no signal, and
-a cap that always fires is a truncating tool rather than a bound.
-"""
+"""#849 read surfaces: captured ticket payloads and host-written run-dir artifacts reach a learning stage inside one untrusted frame (while a runtime agent's own run-dir reads stay bare), and the bash `cat` lane is held to the same capture ceiling as `read_file` (overflow hints, stderr, cap inside the frame)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -93,10 +75,7 @@ def test_a_captured_ticket_is_an_untrusted_read():
 def test_every_captured_payload_is_an_untrusted_read():
     """The relation `is_captured_payload`'s docstring claims and #849 F-08 broke: a capture is a
     COPY of bytes that arrived from outside, so a path the cap treats as a payload and the frame
-    treats as trusted is exactly a payload delivered unlabeled.
-
-    Falsification: the ⊆ is vacuous over an empty subset, so the corpus is asserted to actually
-    contain both payload families before the relation is checked."""
+    treats as trusted is exactly a payload delivered unlabeled."""
     corpus = [
         RUN / "gather_raw" / "l-001" / "0.json",
         RUN / "ticket_reads" / "7.json",
@@ -137,30 +116,10 @@ def test_a_host_written_run_dir_artifact_reaches_a_learning_stage_framed(tmp_pat
     assert_one_frame(out, body, "untrusted")
 
 
-def test_the_sibling_legs_actor_story_reaches_the_judge_framed(tmp_path):
-    """The other cross-stage artifact in the same directory: one stage's model output, read as
-    input by the next (`benign_actor/run.py:47`)."""
-    body = "the actor's story, model-authored"
-    out = _drive_learning_read(tmp_path, body, name="actor_benign_story.md", in_run_dir=True)
-    assert_one_frame(out, body, "untrusted")
-
-
 def test_the_read_and_cat_lanes_agree_on_a_run_dir_artifact(tmp_path):
     """The disagreement that made this a defect rather than a preference: `_tool_bash` framed
     every learning-stage return already, so the SAME file arrived framed through `cat` and bare
-    through `read_file`. A boundary two lanes disagree about is not a boundary.
-
-    DRIVEN AT THE CORPUS SINCE #922, not at the run dir. The address moved because the ROLE
-    did: the pipeline judge was the learning stage whose bash grant reached a run dir, and it
-    is deleted. Of the roles that survive, none can `cat` a run dir — the curator's grant is
-    its own corpus, which is the whole point of that grant. So the two lanes are compared where
-    a surviving role can actually stand.
-
-    The run-dir half of the property is NOT dropped with the address: the read lane still frames
-    a run-dir artifact, and `test_a_host_written_run_dir_artifact_reaches_a_learning_stage_framed`
-    above is the assertion that says so. What this test still owns is the AGREEMENT — that the
-    two lanes answer the same way about one file — which is the half a single-lane test cannot
-    see."""
+    through `read_file`. A boundary two lanes disagree about is not a boundary."""
     body = "cross-stage text"
     deps, corpus = _learning_read_deps(tmp_path, box=Box(BoxResult(0, body.encode(), b"")))
     artifact = deps.corpus_dir / "lesson.md"

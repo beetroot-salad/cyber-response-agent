@@ -1,36 +1,9 @@
-"""#1080 group `queryrules` — the query-id / request-key rules leave `record_query`.
-
-`defender/scripts/gather_tools/record_query.py` holds, at base 80888efb, the rules every
-queries-table reader and writer must agree on: the request key (`_request_key`), the params
-normaliser and its nesting bound (`_json_safe_params`, `PARAMS_NESTING_LIMIT`, `ParamsTooDeep`),
-the reserved `∅.` query ids and their prefix test, the query-id screen (`resolve_query_id`), the
-argv-to-system rule (`derive_system`, `_ADAPTER_RE`) and the payload-operand-to-system rule. The
-move sends the request-key and query-id rules to the flat `defender/_*.py` tier under their
-BASE names (values byte-identical, because request keys are persisted); `record_query` keeps
-everything else and imports the rules from there.
-
-SCOPE CUT (2026-10-04, human): dF11's public rename, `derive_system`'s move to
-`runtime/verbs.py` and the guards' and writers' moves are parked (#1165, #1172), with their tests
-(`spec-flow/specs/parked/1080/parked_query_rules.py`). `S.QUERY_RULE_PUBLIC` is the identity map;
-every lookup of a rule goes through `_flat_rule`, which reads that table, so a later rename is
-made there, never here. The guard and the writers are reached at `record_query`'s staying path
-(`S.module_at`, E5).
-
-Every "as today" expectation is `goldens/queryrules.json`, captured at the base by running
-`record_query` (and the unmoved learning / runtime readers) over the input tables and fixture
-builders defined at module level below — the same builders the tests drive, so the input is
-written once. Fixture runs written "before the move" are frozen in the golden as the exact
-bytes the base writer produced; a test materialises them into `tmp_path` and drives the moved
-code over them. The tmp root never appears in a golden: outputs are system names, keys, row
-columns (run-relative paths only) and verdicts.
-
-Underscore helpers here are private to this file; the shared machinery is `_spec1080`.
-"""
+"""Query-id / request-key rules: model-supplied query ids and params normalisation.
+Goldens: `goldens/queryrules.json`."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165
 
-import ast
 import datetime as _dt
 import hashlib
 import importlib
@@ -49,14 +22,6 @@ GOLDEN = "queryrules"
 #: cut). Read from the shared table so every file of the suite agrees.
 _JSP = "_json_safe_params"
 _RK = "_request_key"
-
-#: The flat-tier names t_query_rules_in_flat_tier pins, as the base spells them.
-_FLAT_RULES = (
-    _JSP, _RK, "is_reserved_query_id",
-    "ABOVE_GUARD_QUERY_ID", "BASH_SHIM_QUERY_ID", "DENIED_QUERY_ID", "REPEAT_TRIP_QUERY_ID",
-)
-_RESERVED_IDS = ("ABOVE_GUARD_QUERY_ID", "BASH_SHIM_QUERY_ID", "DENIED_QUERY_ID",
-                 "REPEAT_TRIP_QUERY_ID")
 
 
 def _g() -> Any:
@@ -123,21 +88,6 @@ def _trip(t: Any) -> Any:
     if t is None:
         return None
     return {"type": type(t).__name__, "first_seq": t.first_seq, "occurrence": t.occurrence}
-
-
-def _snapshot(run_dir: Path) -> dict[str, str]:
-    """Every regular file under `run_dir`, run-relative POSIX path -> text."""
-    return {p.relative_to(run_dir).as_posix(): p.read_text(encoding="utf-8")
-            for p in sorted(run_dir.rglob("*")) if p.is_file() and not p.is_symlink()}
-
-
-def _materialize(run_dir: Path, files: dict[str, str]) -> Path:
-    """Write a frozen run (`_snapshot`'s shape) under `run_dir`, byte for byte."""
-    for relpath, text in files.items():
-        p = run_dir / relpath
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(text.encode("utf-8"))
-    return run_dir
 
 
 # ======================================================================================
@@ -283,24 +233,6 @@ QUERY_ID_CASES: dict[str, tuple[str, str, Any]] = {
     "s165/ten_thousand_plus_hyphen": ("elastic", "esql", "elastic.-" + "a" * 9_999),
 }
 
-#: Ids s087 runs the reserved-prefix test over: case id -> id.
-RESERVED_PROBES: dict[str, str] = {
-    "above_guard": "∅.above-repeat-guard",
-    "bash_shim": "∅.bash-shim",
-    "denied": "∅.denied",
-    "repeat_trip": "∅.repeat-trip",
-    "unknown_sentinel": "∅.future-kind",
-    "prefix_alone": "∅.",
-    "empty_set_alone": "∅",
-    "no_dot": "∅bash-shim",
-    "mid_id": "elastic.∅.x",
-    "leading_space": " ∅.denied",
-    "latin_o_stroke": "\xd8.denied",
-    "diameter_sign": "⌀.denied",
-    "near_miss_system_id": "elastic.bash-shim",
-    "empty": "",
-}
-
 
 def nested_params(kind: str, levels: int) -> Any:
     """Params `levels` containers deep, the params map itself counting as one level, the
@@ -345,26 +277,6 @@ def nesting_cases(limit: int) -> dict[str, tuple[Any, dict[str, str]]]:
 # ======================================================================================
 
 
-#: s086's earlier run: the calls the base writer recorded, (lead, system, verb, query id,
-#: params, payload text). Their live params are rebuilt per call (`stored_call_params`).
-def stored_calls() -> list[dict[str, Any]]:
-    return [
-        {"lead_id": "l-1", "system": "elastic", "verb": "query", "query_id": "elastic.hunt",
-         "params": {"index": "logs-*", "size": 10, "ids": (1, 2), "by": {1: "a", "2": "b"}},
-         "payload_text": json.dumps({"hits": [{"host": "h1", "n": 1}]})},
-        {"lead_id": "l-1", "system": "cmdb", "verb": "get-host", "query_id": "cmdb.get-host",
-         "params": {"host": "canary-1", "threshold": float("inf"), "zero": -0.0,
-                    "since": _dt.date(2026, 1, 2)},
-         "payload_text": json.dumps({"owner": "estate", "role": "canary"})},
-        {"lead_id": "l-2", "system": "elastic", "verb": "esql", "query_id": "elastic.esql",
-         "params": {"z": {"b": 1, "a": 2}, "tags": {"y", "x"}, "nan": float("nan")},
-         "payload_text": json.dumps({"columns": [{"name": "a"}], "values": [[1]]})},
-        {"lead_id": "l-2", "system": "identity", "verb": "user", "query_id": "identity.user",
-         "params": {"user": "\xfc​", "flags": [True, 1, 1.0]},
-         "payload_text": json.dumps({"user": "u"})},
-    ]
-
-
 def write_calls(append: Any, run: Any, calls: list[dict[str, Any]]) -> list[dict]:
     """Record each call through `append` (the queries-table writer), as a granted query. `run`
     is what the writer takes first: the run's state (`RunState`, #1235)."""
@@ -379,100 +291,6 @@ def write_calls(append: Any, run: Any, calls: list[dict[str, Any]]) -> list[dict
             payload_digest=c.get("payload_digest", f"{len(text)} bytes, 1 line(s)"),
             system_key=""))
     return out
-
-
-#: s087's earlier run: rows carrying each reserved id, with the exit code its writer uses.
-def reserved_calls() -> list[dict[str, Any]]:
-    def call(lead: str, system: str, verb: str, qid: str, rc: int, **kw: Any) -> dict:
-        ok = rc == 0
-        return {"lead_id": lead, "system": system, "verb": verb, "query_id": qid,
-                "params": kw.pop("params", {"q": "x"}),
-                "payload_text": json.dumps({"hits": []}) if ok else "", "exit_code": rc,
-                "payload_status": "ok" if ok else "error",
-                "payload_digest": "13 bytes, 1 line(s)" if ok else f"exit={rc}; refused", **kw}
-    return [
-        call("l-1", "elastic", "query", "elastic.query", 0),
-        call("l-1", "elastic", "query", "∅.above-repeat-guard", 64),
-        call("l-1", "elastic", "query", "∅.above-repeat-guard", 2),
-        call("l-1", "ticket", "get-ticket", "∅.denied", 77),
-        call("l-1", "elastic", "query", "∅.repeat-trip", 64),
-        call("l-1", "", "bash", "∅.bash-shim", 1, params={"command": "defender-sql 'x'"}),
-        call("l-1", "elastic", "query", "elastic.bash-shim", 1),
-        call("l-1", "elastic", "query", "∅.future-kind", 64),
-        call("l-1", "elastic", "query", "∅bash-shim", 1),
-        call("l-2", "ticket", "get-ticket", "∅.denied", 77),
-        call("l-3", "cmdb", "get-host", "∅.bash-shim", 1),
-    ]
-
-
-def classify_reserved(run_dir: Path) -> dict[str, Any]:
-    """Learning's classification of every row of `run_dir`: the repository's query/sentinel
-    split, the judge's refused entries, the pitfall lane's reducer test and the extractor's
-    reducer-failure test — the unmoved readers of the reserved ids."""
-    from defender.learning import lead_repository
-    from defender.learning.core import persist
-    from defender.learning.judge import family
-    from defender.learning.leads import lead_extraction
-
-    joined = lead_repository.joined(run_dir)
-    leads = []
-    for jl in joined:
-        entries = family.refused_entries(jl)
-        leads.append({
-            "lead_id": jl.lead_id, "orphan": jl.orphan,
-            "queries": [[q.seq, q.query_id] for q in jl.queries],
-            "sentinels": [[q.seq, q.query_id] for q in jl.sentinels],
-            "refused": S.canon(entries), "rendered": family.render_refused(entries),
-            "rows": [{"seq": q.seq, "query_id": q.query_id, "is_sentinel": q.is_sentinel,
-                      "error_class": q.error_class,
-                      "is_reducer_row": persist.is_reducer_row(q.record()),
-                      "pitfall_owner": persist.pitfall_key(q.record())[0]} for q in jl.rows],
-        })
-    extracted = [[e.lead_id, e.query_index, e.query_id, e.is_sentinel,
-                  lead_extraction._is_reducer_failure(e)]
-                 for e in lead_extraction.extract_from_joined(joined)]
-    return {"leads": leads, "extracted": extracted}
-
-
-def drive_stored_run(run_dir: Path, episode_dir: Path, *, request_key: Any, state: Any,
-                     repeat_trip: Any, append: Any) -> dict[str, Any]:
-    """s086 over a materialised earlier run: today's key per stored call, the repeat guard's
-    verdict over the stored rows, learning's ledger replaying the run (prime the family base
-    from the run's capture, then serve each live call from it), and the run resumed — one more
-    identical call recorded after the stored rows, then the guard's default verdict.
-
-    The guard reads a run's state, never a file (#1235), so `state` is the RESUMED run's: a
-    branch sibling whose seeding inherited `run_dir`'s stored rows (round 2). The guard's
-    verdicts are over those rows, and the resumed call is recorded through it."""
-    from defender._episode_handle import Episode
-    from defender.learning.branch import capture, ledger
-
-    calls = stored_calls()
-    keys = [request_key(c["system"], c["verb"], c["params"]) for c in calls]
-    guard = [_trip(repeat_trip(state.lead_rows(c["lead_id"]), c["lead_id"],
-                               system=c["system"], verb=c["verb"], params=c["params"],
-                               threshold=2)) for c in calls]
-    stored_rows = [json.loads(line) for line in
-                   (run_dir / "executed_queries.jsonl").read_text(encoding="utf-8").splitlines()]
-    with Episode.create(episode_dir) as episode:
-        report = capture.prime_base(run_dir, episode)
-        world = ledger.Ledger.for_world(episode, "w-1")
-        served = [world.base_payload(c["system"], c["verb"], c["params"]) for c in calls]
-    ledger_keys = [ledger.request_key(c["system"], c["verb"], c["params"]) for c in calls]
-    row_keys = [ledger.correlation_key_of(r) for r in stored_rows]
-    first = calls[0]
-    resumed = write_calls(append, state, [first])[0]
-    resumed_trip = _trip(repeat_trip(state.lead_rows(first["lead_id"]), first["lead_id"],
-                                     system=first["system"], verb=first["verb"],
-                                     params=first["params"]))
-    return {
-        "keys": keys, "guard_threshold_2": guard,
-        "prime": {"primed": report.primed, "duplicates": report.duplicates,
-                  "failed": report.failed, "sentinels": report.sentinels,
-                  "unreadable": report.unreadable},
-        "served": served, "ledger_keys": ledger_keys, "row_keys": row_keys,
-        "resumed_row": S.canon(resumed), "resumed_trip": resumed_trip,
-    }
 
 
 #: s168's live call: a tuple and an int-keyed map among its params.
@@ -515,204 +333,9 @@ def drive_roundtrip(state: Any, *, request_key: Any, append: Any,
 # ======================================================================================
 
 
-def _names_taken_from(importer_rel: str, home_rel: str, root: Path = S.REPO_ROOT) -> set[str]:
-    """The names `importer_rel` takes from the module at `home_rel`: every name a
-    `from <home> import …` binds, plus — when it imports the home module itself
-    (`import defender._x`, `from defender import _x`) — every attribute name it reads."""
-    src = (root / importer_rel).read_bytes()
-    home_mod = S.dotted(home_rel)
-    pkg, _, leaf = home_mod.rpartition(".")
-    names: set[str] = set()
-    module_imported = False
-    for st in S.import_statements(importer_rel, src):
-        if st.module == home_mod:  # lint-ast-resolve: ok — a static census over a fixed module's own source; its import spellings are the observation
-            if st.names:
-                names.update(st.names)
-            else:
-                module_imported = True
-        elif st.module == pkg and leaf in st.names:  # lint-ast-resolve: ok — a static census over a fixed module's own source; its import spellings are the observation
-            module_imported = True
-    if module_imported:
-        names.update(n.attr for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Attribute))
-    return names
-
-
-#: Who takes which flat-tier rule today (claims P8 / G13 / F31): importer -> base names. Pure
-#: re-exports are left out (query_tool's `_json_safe_params`, kept for a test's import).
-_IMPORTERS: dict[str, tuple[str, ...]] = {
-    "defender/learning/branch/ledger.py": (_JSP, _RK),
-    "defender/learning/branch/estate/registry.py": (_JSP,),
-    "defender/learning/judge/family.py": _RESERVED_IDS,
-    "defender/learning/core/persist.py": ("BASH_SHIM_QUERY_ID",),
-    "defender/learning/leads/lead_extraction.py": ("BASH_SHIM_QUERY_ID",),
-    "defender/learning/lead_repository.py": ("is_reserved_query_id",),
-    "defender/runtime/branch/__init__.py": ("is_reserved_query_id",),
-    "defender/runtime/query_tool.py": ("ABOVE_GUARD_QUERY_ID", "DENIED_QUERY_ID",
-                                       "REPEAT_TRIP_QUERY_ID"),
-    "defender/runtime/tools/_bash.py": ("BASH_SHIM_QUERY_ID",),
-}
-
-
-def _census_misses(importers: dict[str, tuple[str, ...]]) -> list[str]:
-    misses = []
-    for importer, base_names in importers.items():
-        for base_name in base_names:
-            home, name = _flat_rule(base_name)
-            if name not in _names_taken_from(importer, home):
-                misses.append(f"{importer} does not take `{name}` from {home}")
-    return misses
-
-
 # ======================================================================================
 # The tests
 # ======================================================================================
-
-
-def test_1080_query_id_and_request_key_rules_live_in_the_flat_tier_with_todays_values():
-    """The request-key and query-id rules are defined in a flat-tier `defender/_*.py` module:
-    `_json_safe_params`, `_request_key`, `is_reserved_query_id` and the reserved ids
-    `ABOVE_GUARD_QUERY_ID`, `BASH_SHIM_QUERY_ID`, `DENIED_QUERY_ID` and `REPEAT_TRIP_QUERY_ID`.
-    Their importers in learning and runtime take them from there. The request key for a fixed
-    (system, verb, params) table is byte-identical to the base's, because request keys are
-    persisted.
-
-    Every rule keeps its base name (the 2026-10-04 scope cut parks dF11's public rename with
-    #1165; `S.QUERY_RULE_PUBLIC` is the identity map). The values come first (the reserved strings and the key table against the base golden), then
-    the census: each importer the ledger (P8, G13) names imports the rule from the one flat-tier
-    home, by name or through the home module."""
-    g = _g()
-    for n in _FLAT_RULES:
-        _flat_rule(n)  # one flat-tier definition each (fails naming the symbol otherwise)
-    for n in _RESERVED_IDS:
-        assert _flat(n) == g["constants"][n], n
-    is_reserved = _flat("is_reserved_query_id")
-    assert [is_reserved(v) for v in RESERVED_PROBES.values()] == \
-        [g["reserved_probe"][k] for k in RESERVED_PROBES]
-
-    request_key = _flat(_RK)
-    for case, (system, verb, params) in awkward_cases().items():
-        got = _out(request_key, system, verb, params)
-        assert got == g["awkward"][case]["key"], case
-        if "returns" in got:  # byte-identical, not merely equal as text
-            assert got["returns"].encode("utf-8", "surrogatepass") == \
-                g["awkward"][case]["key"]["returns"].encode("utf-8", "surrogatepass"), case
-
-    misses = _census_misses(_IMPORTERS)
-    assert not misses, "\n".join(misses)
-
-
-def test_query_rules_are_imported_by_learning_and_runtime_under_the_private_names():
-    """The request-key and params-normalising rules are defined once, under their base names
-    (`_json_safe_params`, `_request_key`), in the flat tier; the repeat guard, the ledger, the
-    estate registry all import that one definition, and no local copy exists — none is left in
-    `record_query`. (10-03 flat-tier placement; F30. dF11's public rename is parked with #1165
-    by the 2026-10-04 scope cut. The branch family's envelope normaliser went with the
-    envelope, #1224.)
-
-    Structural: each rule, spelled as `S.QUERY_RULE_PUBLIC` gives it (the identity map), has
-    exactly one definition in the whole tree (`defender/scripts/` included), and it is in the
-    flat tier; the ledger, the estate registry and the module holding the repeat guard — `record_query`, which stays, reached at its staying path (E5) — take the
-    rule from that home."""
-    guard = "defender/scripts/gather_tools/record_query.py"
-    S.module_at(guard)
-    assert guard in S.definitions("repeat_trip"), "the repeat guard left record_query"
-    homes = {}
-    for base_name, name in S.QUERY_RULE_PUBLIC.items():
-        home = S.home_of(name, home=S.FLAT_TIER)
-        homes[base_name] = home
-        assert S.definitions(name) == (home,), (
-            f"`{name}` is defined at {list(S.definitions(name))}: one definition, in the flat "
-            f"tier, and no local copy left in {guard}")
-
-    importers = {
-        "defender/learning/branch/ledger.py": (_JSP, _RK),
-        "defender/learning/branch/estate/registry.py": (_JSP,),
-        guard: (_RK,),
-    }
-    misses = _census_misses(importers)
-    assert not misses, "\n".join(misses)
-
-
-def test_request_keys_stored_before_the_move_are_compared_with_keys_computed_after_it(tmp_path):
-    """The request key for a given request is byte-identical before and after the move, so a
-    key stored in an earlier run compares equal to the key computed today by the repeat guard
-    and by learning's ledger replaying that run, and a run resumed across the move behaves the
-    same. The move changes the rule's module, not its output (O5; F30).
-
-    The earlier run is the golden's frozen `stored_run`: the queries table, payload sidecars and
-    lead claims the base writer produced for `stored_calls()`, with the keys the base computed
-    for those calls. Today's rule must reproduce each stored key byte for byte; the guard,
-    reading the stored rows, must find each live call's row; learning's ledger, priming a family
-    base from that run and serving each live call from it, must hit every stored answer; and one
-    more identical call recorded by the writer must continue the stored table's seq and trip the
-    guard on the pre-move row. The guard and the writer stay in `record_query` under the
-    2026-10-04 scope cut, so they are reached at its staying path (E5)."""
-    g = _g()["stored_run"]
-    request_key = _flat(_RK)
-    rq = S.module_at("defender/scripts/gather_tools/record_query.py")
-    repeat_trip = rq.repeat_trip
-    append = rq.append_query_row
-    for call, stored in zip(stored_calls(), g["keys"], strict=True):
-        assert request_key(call["system"], call["verb"], call["params"]) == stored, call
-
-    run_dir = _materialize(tmp_path / "run", g["files"])
-    # The run resumed across the move is a branch sibling: its seeding inherits the stored
-    # table's rows onto its state, and the writer allocates the resumed call's seq after them
-    # (#1235 round 2 — no file is read into a state any other way).
-    from defender.runtime.branch._seed import _inherit_evidence
-    from defender.runtime.run_state import RunState
-
-    sibling = tmp_path / "resumed"
-    sibling.mkdir()
-    state = RunState(sibling, "r1080-resumed")
-    _inherit_evidence(_writer_run_1165(run_dir), state, {c["lead_id"] for c in stored_calls()}, run=_writer_run_1165(state.run_dir))
-    (tmp_path / "episodes").mkdir()
-    got = drive_stored_run(run_dir, tmp_path / "episodes" / "ep-1", request_key=request_key,
-                           state=state, repeat_trip=repeat_trip, append=append)
-    assert got["keys"] == g["keys"]
-    assert got["ledger_keys"] == g["keys"]
-    assert got["row_keys"] == g["keys"]
-    assert all(s is not None for s in got["served"]), "the ledger missed a stored answer"
-    assert got == g["replay"]
-
-
-def test_reserved_query_ids_are_read_by_learning_from_rows_written_before_the_move(tmp_path):
-    """Learning classifies each pre-move row carrying the shim, guard-trip or denied reserved
-    ids exactly as before, row by row, reading the constants and the prefix test from the flat
-    tier: the reserved id strings and the prefix are unchanged. (F31.)
-
-    The pre-move rows are the golden's frozen `reserved_run` (written by the base writer for
-    `reserved_calls()`: each reserved id, an unknown `∅.` id, a near-miss `elastic.bash-shim`, a
-    dotless `∅bash-shim`, an ordinary row, and a sentinel-only lead). The classification is
-    learning's own — the repository's split, the judge's refused entries and rendering, the
-    pitfall lane's reducer test, the extractor's reducer-failure test — compared with the base
-    golden row by row; the constants and the prefix test are the flat-tier ones, the prefix
-    test is the very function the repository calls, and each reader takes its constant from the
-    flat-tier home."""
-    g = _g()
-    for n in _RESERVED_IDS:
-        assert _flat(n) == g["constants"][n], n
-    assert _flat("RESERVED_QUERY_ID_PREFIX") == g["constants"]["RESERVED_QUERY_ID_PREFIX"]
-    is_reserved = _flat("is_reserved_query_id")
-    for case, value in RESERVED_PROBES.items():
-        assert is_reserved(value) == g["reserved_probe"][case], case
-
-    from defender.learning import lead_repository
-
-    assert getattr(lead_repository, "is_reserved_query_id", is_reserved) is is_reserved
-    misses = _census_misses({
-        "defender/learning/lead_repository.py": ("is_reserved_query_id",),
-        "defender/learning/core/persist.py": ("BASH_SHIM_QUERY_ID",),
-        "defender/learning/leads/lead_extraction.py": ("BASH_SHIM_QUERY_ID",),
-        "defender/learning/judge/family.py": _RESERVED_IDS,
-    })
-    assert not misses, "\n".join(misses)
-
-    run_dir = _materialize(tmp_path / "run", g["reserved_run"]["files"])
-    got = classify_reserved(run_dir)
-    assert got == g["reserved_run"]["classified"]
-    sentinel_ids = {qid for lead in got["leads"] for _, qid in lead["sentinels"]}
-    assert {g["constants"][n] for n in _RESERVED_IDS} <= sentinel_ids  # every id was classified
 
 
 def _query_id_verdicts() -> dict[str, dict[str, Any]]:
@@ -765,28 +388,6 @@ def test_model_query_id_with_forbidden_characters_and_lookalikes():
     Observed as in s162: the screen's refusal text and the recorded id, per id, against the
     base golden."""
     _assert_query_ids("s163")
-
-
-def test_model_query_id_prefix_that_nearly_matches_the_system():
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). A query-id prefix that nearly matches the system (case,
-    normalization, trailing dot, extra segment, hyphen versus underscore) is judged as today by
-    the same rule (probe PO5).
-
-    Observed as in s162. The exact-match row is the positive control: a well-formed id on its own
-    system is kept verbatim, so the near misses are refused by the rule, not by everything."""
-    _assert_query_ids("s164")
-    assert _g()["query_ids"]["s164/exact"]["recorded"] == {"returns": "elastic.hunt"}
-
-
-def test_model_query_id_segment_shapes():
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). Segments starting with a hyphen, all digits, with a
-    trailing newline, non-ASCII digits, a single character or ten thousand characters are
-    accepted or rejected as today.
-
-    Observed as in s162; a recorded id of ten thousand characters is compared by digest."""
-    _assert_query_ids("s165")
 
 
 def test_params_nested_exactly_at_the_depth_limit():

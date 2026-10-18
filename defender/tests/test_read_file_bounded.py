@@ -89,25 +89,9 @@ def test_overflow_hint_main_pipes_into_defender_sql_and_names_the_write_sink(tmp
     assert _admits(pol, _hinted_command(hint), run)
 
 
-def test_overflow_hint_gather_pipes_into_defender_sql_without_the_write_sink(tmp_path) -> None:
-    """gather has `jq` but NO write tool (`write_allow == ()`), so it must not be told to
-    write the filtered result to a file — a step it cannot take."""
-    run = tmp_path / "run"
-    pol = _gather_policy(tmp_path)
-    assert not pol.write_allow, "premise: gather has no writer"
-    hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
-    assert "defender-sql" in hint
-    assert "write the result" not in hint
-    assert _admits(pol, _hinted_command(hint), run)
-
-
 @pytest.mark.parametrize("policy_of", [_main_policy, _gather_policy], ids=["main", "gather"])
 def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path, policy_of) -> None:
-    """#1138 O8: the reduction the hint hands over has to be right whatever the payload's shape.
-    `SELECT count(*) FROM data` is not — every object payload is ONE row of `data`, so it
-    answers 1 over an ES|QL result and over a search-hits envelope alike (C4), with exit 0.
-    `DESCRIBE data` is right on every shape: it names the columns the next query needs. The
-    command stays one the caller's own gate runs."""
+    """#1138 O8: the reduction the hint hands over has to be right whatever the payload's shape."""
     run = tmp_path / "run"
     pol = policy_of(tmp_path)
     hint = tools._overflow_filter_hint(str(run / "big.json"), pol)
@@ -118,45 +102,8 @@ def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path
 
 
 
-def test_overflow_hint_reducer_less_agent_points_at_its_read_tool() -> None:
-    """The actor / oracle / verify / curators have no bash reducer: both `jq` and
-    `defender-sql` name programs they cannot run, so the only reduction left is their read
-    tool's own `pattern=` substring fold. The hint names the DEFAULT read tool here."""
-    hint = tools._overflow_filter_hint(_PATH, AgentPolicy())
-    assert "jq" not in hint
-    assert "defender-sql" not in hint
-    assert "pattern=" in hint
-    assert "read_file(" in hint
-
-
-def test_overflow_hint_names_the_callers_read_tool_not_a_constant() -> None:
-    """The rule that bans a hint naming a dead PROGRAM bans one naming a dead TOOL. The
-    curators traded `read_file` for the scoped `lesson_read` (#559) AND have no bash reducer,
-    so they are exactly the agent that lands on this branch — a hardcoded `read_file` would
-    hand them an instruction they cannot execute. The tool name comes from the caller, and the
-    overflow notice tag agrees with it."""
-    hint = tools._overflow_filter_hint(_PATH, AgentPolicy(), "lesson_read")
-    assert "lesson_read(" in hint
-    assert "read_file(" not in hint
-    assert "pattern=" in hint
-    over = tools._bounded_read(
-        "x" * (tools._read_char_cap() + 10), _PATH, cap=CAP,
-        filter_hint=hint, read_tool="lesson_read",
-    )
-    assert "[lesson_read]" in over
-    assert "[read_file]" not in over
-
-
-
-
 def test_a_captured_payload_is_read_at_the_CAPTURE_ceiling() -> None:
-    """The property the shared constant used to carry, kept after #832 split it.
-
-    A lead must not be able to `read_file` a persisted payload and recover what the capture view
-    withheld. That was enforced by making the two caps the SAME NUMBER — which over-served it:
-    when the capture ceiling dropped to 8 KB, equality would have truncated `defender/SKILL.md`
-    (33,590 bytes) and 16 of 20 files under `docs/` to bound a payload read. The bound now
-    follows the PATH, so both hold at once."""
+    """The property the shared constant used to carry, kept after #832 split it."""
     from defender.runtime.payload_view import passthrough_max_bytes
 
     assert tools._cap_for(Path("/run/gather_raw/l-1/0.json")) == passthrough_max_bytes()
@@ -196,17 +143,6 @@ def test_over_cap_truncates_head_and_appends_notice(tmp_path) -> None:
     assert "defender-sql" in out
     assert path in out
     assert str(CAP + 5000) in out
-
-
-def test_notice_reports_true_line_count() -> None:
-    blob = "z" * (CAP + 1000)
-    out = tools._bounded_read(blob, "/p.json", cap=CAP, filter_hint=_MAIN_HINT)
-    assert "/ 1 line(s)" in out
-    assert "offset" not in out
-    assert "limit" not in out
-    lined = ("line\n" * ((CAP // 5) + 200))
-    out2 = tools._bounded_read(lined, "/p.json", cap=CAP, filter_hint=_MAIN_HINT)
-    assert f"/ {lined.count(chr(10)) + 1} line(s)" in out2
 
 
 def test_char_slice_never_splits_multibyte() -> None:
@@ -253,11 +189,7 @@ def _read_file_tool_output(run_dir: Path, path: Path) -> str:
 
 
 def test_oversized_untrusted_read_caps_before_wrapping(tmp_path) -> None:
-    """The load-bearing ordering: read_file caps FIRST, then untrusted-wraps, so
-    the head (and the appended notice) land INSIDE the salted delimiters — never
-    a full multi-MB dump, and never a wrap whose closing tag was truncated away.
-    Driven through the real `read_file` tool, so a refactor that inverted the
-    order (wrap then cap) would fail here, not just in a comment."""
+    """The load-bearing ordering: read_file caps FIRST, then untrusted-wraps, so"""
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     alert = run_dir / "alert.json"

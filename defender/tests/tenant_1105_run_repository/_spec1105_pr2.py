@@ -1,34 +1,4 @@
-"""Shared machinery for #1105 PR 2's tests-before-code commit. NO test functions.
-
-PR 2 (design rev 5.1, #1105 comments 6099907018 / 6099907229 / 6099907462, amended by the
-owner's fork decisions 6100061869) is a pure refactor: every production site that reaches run or
-episode records by path moves behind a tenant-scoped run repository (`tenant.runs_repository()`),
-and every edge takes ids. The existing suite is the contract for unchanged behaviour; the three
-files beside this one cover what it leaves:
-
-* `test_1105_pr2_guards.py` — guard-table rows (G1–G25) no existing test pins through an
-  observable that survives the move. GREEN at base `301f196c`.
-* `test_1105_pr2_declared_changes.py` — the declared changes. RED at base, each for its own
-  stated reason.
-* `test_1105_pr2_repository.py` — the new surface (decision C). RED at base: the names do not
-  exist yet, and every test asserts behaviour once they do.
-
-THE BUILDERS BELOW ARE TODAY'S CALL SHAPE, AND THE ONE PLACE PR 2 CHANGES IT. A guard test (and a
-declared-change test whose reason is NOT an argument change) drives the real entry point
-through `launch_argv` / `sibling_argv` / `page_argv` / `run_page_argv`, so it is green or red at
-base for its behavioural reason alone, never for an argparse one. When PR 2 lands its edges
-(declared changes 1, 4, 6 and 7), the implementer re-points each builder HERE to the declared
-shape — `new_launch_argv` and its siblings below spell it, from the design's own text — and
-never edits the tests that call them. The `new_*` builders are used directly only by the tests
-whose declared change IS the edge's argument shape.
-
-Every fault is a real input through the real primitive (links, files, records naming another
-tenant, a truncated manifest), planted on the real filesystem. Fakes enter only through the
-entry points' own seams (`spawn=`, `judge=`, `questioner=`, `preflight=`, `materialize=`,
-`lifecycle=`, the drain's `run_lead_author` argument), never `monkeypatch.setattr`.
-
-Underscore-prefixed so pytest does not collect it.
-"""
+"""Shared helpers for the PR 2 run-repository tests (tenant fixtures, CLI/process drivers). No test functions."""
 from __future__ import annotations
 
 import io
@@ -38,7 +8,6 @@ from collections.abc import Iterable
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from defender.tests import _judge_921 as J
@@ -485,9 +454,6 @@ def loop_paths(tmp_path: Path) -> Any:
 def ids(values: Iterable[Any]) -> list[str]:
     return [str(v) for v in values]
 
-
-def namespace(**kw: Any) -> SimpleNamespace:
-    return SimpleNamespace(**kw)
 
 
 __all__ = ["H78"]

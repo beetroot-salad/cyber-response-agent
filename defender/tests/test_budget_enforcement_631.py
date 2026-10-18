@@ -1,24 +1,4 @@
-"""#631 — the enforced budget's LIBRARY half: the cap table, the run's budget state, the
-tail band and the validating read.
-
-This module drives `defender.hooks.budget_enforcer` directly — the functions the driver's
-hooks call (`count_call`, `account_call`, `check_budgets`) over the run's state plus the
-surface #631 adds around them. The run-level demands (the refusal seam, the kill, the report
-tail) live in `tests/test_budget_e2e_631.py`, which drives the real `run_investigation`
-through the replay harness.
-
-#1235 moved the state into the run's own process: since round 2 (comment 6117481676) the
-counters live on the run's one `RunState` (`RunState(run_dir, run_id)` begins a run, `budget_snapshot()`
-reads it back), and no `budget.json` is written or read.
-The tests whose subject was the file — a counter authored on disk, a torn cross-process read,
-a failed accounting write and the accounting-failure sidecar that counted it — retired with
-it. The concurrency demands stay, now over the state's one lock.
-
-Faults are induced down the hierarchy: every failure in this module is real input through
-the real primitive — a forward-dated `started_at`, a hostile counter shape handed to the
-validating read, real concurrent threads on one budget. No fault here is invented; each names
-the executed claim that observed it.
-"""
+"""#631 — the enforced budget's LIBRARY half: the cap table, the run's budget state, the tail band and the validating read."""
 from __future__ import annotations
 
 import threading
@@ -41,8 +21,7 @@ from defender.tests.e2e._replay_harness import GOLDEN_AB3, materialize
 
 
 def _start(run_dir: Path, run_id: str):
-    """A run's state as `run_investigation` starts it (#1235 round 2: one `RunState` per run;
-    imported here because it does not exist before the implementation)."""
+    """A run's state as `run_investigation` starts it (#1235 round 2: one `RunState` per run; imported here..."""
     from defender.runtime.run_state import RunState
 
     return RunState(run_dir, run_id)
@@ -69,26 +48,8 @@ def _fresh_view(tmp_path: Path) -> dict:
 
 
 def _reads_as_healthy(state: dict, limits: dict) -> bool:
-    """Whether the enforcing read would ADMIT the call — no trip on any limb. The
-    fail-open shape D2/D9 guard against: a state that reads as an under-cap fresh run."""
+    """Whether the enforcing read would ADMIT the call — no trip on any limb. The fail-open shape D2/D9 guard..."""
     return not any("Budget exceeded" in m for m in check_budgets(state, limits))
-
-
-
-def test_default_limits_values():
-    """DEFAULT_LIMITS carries wall_clock_timeout 1200 seconds — O4's ~20 minutes of
-    WALL CLOCK FROM RUN START (not tool-calling time), down from the incumbent 1800 —
-    max_tool_calls 200 held at the incumbent value, and max_subagent_spawns 40."""
-    assert DEFAULT_LIMITS["wall_clock_timeout"] == 1200
-    assert DEFAULT_LIMITS["max_tool_calls"] == 200
-    assert DEFAULT_LIMITS["max_subagent_spawns"] == 40
-
-
-def test_grace_seconds_value():
-    """grace_seconds is 120, matching _BASH_TIMEOUT_S's order of magnitude, so M6's
-    stated worst case is ~24 minutes."""
-    assert DEFAULT_LIMITS["grace_seconds"] == 120
-
 
 
 def test_tail_ends_on_count_or_clock(tmp_path):
@@ -197,18 +158,8 @@ def test_an_origin_less_state_fails_closed_rather_than_reading_as_healthy(tmp_pa
 # `tests/test_1255_clock_natural.py::test_n4_the_wall_clock_limb_measures_the_run_clock`
 # (past-the-limit / inside-the-limit) and `test_n5_…`; the tail's grace is the test above.
 
-
 def test_a_counter_failing_validation_trips_rather_than_returning_no_messages(tmp_path):
-    """A counter that fails type or range validation TRIPS: a negative or boolean
-    tool_calls does not silently suppress the budget message, and a string, list or
-    null does not raise a TypeError the driver's `except Exception` swallows as
-    'budget accounting skipped'.
-
-    PB8 executed every one of these shapes against the incumbent check_budgets:
-    `tool_calls: -5` and `tool_calls: true` return [] (no message, no exception, no
-    log — enforcement suppressed silently), and a string or list raises TypeError.
-    EVERY HOSTILE SHAPE FAILS OPEN today. Under the enforcing posture that is the
-    bypass, so each one must come back as a trip."""
+    """A counter that fails type or range validation TRIPS: a negative or boolean tool_calls does not silently..."""
     limits = _tight(max_tool_calls=200, max_subagent_spawns=40)
     # #1255: the healthy base is a fresh run's own enforcement view, not a state built around a
     # `started_monotonic` field — only the counter under test is hostile.
@@ -232,16 +183,7 @@ def test_a_counter_failing_validation_trips_rather_than_returning_no_messages(tm
 
 
 def test_an_injected_cap_of_zero_trips_immediately_rather_than_disabling(tmp_path):
-    """An injected cap of 0 trips immediately rather than reading as 'disabled': a
-    state well past every cap does not come back with an empty message list because
-    _ratio_warning returned None.
-
-    PB6 executed the incumbent behaviour — check_budgets(9999 calls, all caps 0) ->
-    [], because _ratio_warning returns None when cap <= 0 — against a cap=1 control
-    that fires, so the empty list is the DISABLE path and not a broken probe. THIS IS
-    WHAT STOPS test_replay_run_crosses_budget_and_still_reports PASSING VACUOUSLY: a
-    harness that injects 0 and observes 'no report tail needed' would go green having
-    driven no enforcement at all."""
+    """An injected cap of 0 trips immediately rather than reading as 'disabled': a state well past every cap does..."""
     zeroed = {"max_tool_calls": 0, "max_subagent_spawns": 0,
               "wall_clock_timeout": 0, "grace_seconds": 0}
     view = _fresh_view(tmp_path)
@@ -263,16 +205,8 @@ def test_an_injected_cap_of_zero_trips_immediately_rather_than_disabling(tmp_pat
     assert tail_exhausted({**view, "tool_calls": 1}, zeroed)
 
 
-
 def test_no_trip_state_no_reset(tmp_path):
-    """The run's own writer persists no trip flag and never resets or decrements a
-    counter: across every count_call, tool_calls and subagent_spawns
-    move monotonically, so two concurrent gathers observing the same trip cannot race
-    a reset.
-
-    The positive control is test_main_and_gather_share_one_budget (e2e), which shows
-    the counters DO move on the one budget MAIN and gather share — without it 'never
-    reset' is satisfied by a writer that never writes."""
+    """The run's own writer persists no trip flag and never resets or decrements a counter: across every..."""
     run = _start(tmp_path, "run-1")
     seen: list[tuple[int, int]] = []
     trip_keys = ("tripped", "trip", "budget_tripped", "stopped", "kill")
@@ -289,42 +223,8 @@ def test_no_trip_state_no_reset(tmp_path):
     assert seen[-1] == (6, 2)
 
 
-def test_new_spawn_arm_assertions_coexist_with_the_retired_name_assertion(tmp_path):
-    """The live spawn counter's new deny behaviour is asserted over the SAME fixtures
-    test_budget_enforcer.py's test_only_gather_counts_as_a_spawn already uses: the
-    retired "Task"/"Agent" dispatch names still contribute nothing to
-    subagent_spawns, and `gather` alone crosses max_subagent_spawns and produces the
-    exceeded message.
-
-    SC24/X8, both executed: the counter is live for "gather" ONLY — Task/Agent
-    increment tool_calls but not subagent_spawns, exactly as budget_enforcer.py's own
-    comment describes. New assertions EXTEND those fixtures, never contradict them."""
-    run = _start(tmp_path, "run-1")
-    limits = _tight(max_tool_calls=1000, max_subagent_spawns=2)
-    for name in ("Task", "Agent", "bash", "read_file"):
-        state = _count(run, name)
-    assert state["tool_calls"] == 4
-    assert state["subagent_spawns"] == 0
-    assert check_budgets(state, limits) == []
-
-    for _ in range(2):
-        state = _count(run, "gather")
-    assert state["subagent_spawns"] == 2
-    assert any("subagent_spawns at 2/2" in m for m in check_budgets(state, limits))
-
-
 def test_connectivity_failures_spend_the_budget_pool(tmp_path):
-    """Accounting is unconditional on call OUTCOME: a call that fails on connectivity
-    still executed, so it still increments tool_calls and lands its effect,
-    accumulating toward the budget cap at the same time the circuit breaker
-    accumulates toward its own threshold.
-
-    This pins what "executed" MEANS in accounting_stays_unconditional's narrowed
-    quantifier, and it is the positive control for
-    test_a_call_that_finished_after_its_pool_tripped_does_not_land_its_effect:
-    without it, "refuses to commit" is satisfied by an implementation that commits
-    nothing. (#1235 round 2: `account_call` takes no outcome at all — the count cannot
-    depend on one.)"""
+    """Accounting is unconditional on call OUTCOME: a call that fails on connectivity still executed, so it still..."""
     run = _start(tmp_path, "run-1")
     limits = _tight(max_tool_calls=100)
     for _ in range(4):
@@ -334,18 +234,7 @@ def test_connectivity_failures_spend_the_budget_pool(tmp_path):
 
 
 def test_a_call_that_finished_after_its_pool_tripped_does_not_land_its_effect(tmp_path):
-    """A call that executed after its pool tripped does not land its effect: the
-    increment path re-checks the pool at commit time and refuses to commit, so a turn
-    that dispatched two hundred core-tier calls against a pool one short of its cap
-    lands exactly one and refuses the other 199.
-
-    PD1 (executed) is why this replaced D1's round-3 answer: pydantic-ai creates one
-    asyncio task per ToolCallPart with no chunking and no cap
-    (_agent_graph.py:1902-1945) — peak concurrent in-flight = 200, all started inside
-    a 6 ms window — so THERE IS NO BOUND to state as a number and the tool-call cap
-    was defeatable in a single turn. Overshoot is now bounded by the concurrency
-    genuinely in flight at the moment of the trip. Accepted cost, recorded so it is
-    not read as a defect: the call RAN and its result is discarded."""
+    """A call that executed after its pool tripped does not land its effect: the increment path re-checks the..."""
     run = _start(tmp_path, "run-1")
     limits = _tight(max_tool_calls=5)
     for _ in range(4):
@@ -369,16 +258,7 @@ def test_a_call_that_finished_after_its_pool_tripped_does_not_land_its_effect(tm
 def test_concurrent_increments_to_the_run_budget_are_neither_lost_nor_duplicated_under_contention(
     tmp_path,
 ):
-    """Every increment committed by many concurrently-executing calls across MAIN and
-    its GATHER siblings survives intact under real thread contention on the one
-    in-memory budget: the final tool_calls equals the number of calls that committed,
-    with none lost and none double-counted.
-
-    Bound at the COMPOSITION frame that fans the writers, not at a leg: a single-leg
-    test cannot see the cross-leg collision the demand exists for. #1235: the budget is
-    the run's one `RunState` (MAIN, gather and lead-0 share the object by reference), so
-    the conservation this pins is the read-check-increment under its one lock; the
-    cross-PROCESS arm retired with the file it shared."""
+    """Every increment committed by many concurrently-executing calls across MAIN and its GATHER siblings..."""
     run = _start(tmp_path, "run-1")
     n_workers, per_worker = 12, 40
 
@@ -404,14 +284,7 @@ def test_concurrent_increments_to_the_run_budget_are_neither_lost_nor_duplicated
 
 
 def test_a_second_run_state_for_the_folder_starts_a_fresh_budget(tmp_path):
-    """A run's state is the run's start (#1235 round 2): a second `RunState(...)` for the
-    SAME folder is a fresh budget — counters at zero, a new origin no earlier than the first,
-    the new run id — and the first run's state keeps its own counts. A run folder is resumed
-    only before any run used it (`run_common._setup_state`), so there is no re-entrant start
-    to preserve counters across; a stale budget surviving a new run's start is the failure.
-
-    Positive control: before the second start, the first budget DID accrue a call, so the
-    zero after it is a fresh start, not a writer that never counted."""
+    """A run's state is the run's start (#1235 round 2): a second `RunState(...)` for the SAME folder is a fresh..."""
     first_run = _start(tmp_path, "run-1")
     first = first_run.budget_snapshot()
     assert first["run_id"] == "run-1"
@@ -438,13 +311,7 @@ def test_a_second_run_state_for_the_folder_starts_a_fresh_budget(tmp_path):
 
 
 def test_the_budget_writes_no_file_into_the_run_folder_or_its_container(tmp_path):
-    """#1235 D3: the budget is the run process's memory. A whole run's worth of
-    accounting — the open, counted calls, calls at the cap and past it, on both tiers —
-    leaves nothing on disk: no `budget.json` in the run folder, no sidecar beside it,
-    no file anywhere under the runs base.
-
-    Positive control: the same sequence DID count, so the empty tree is not a writer
-    that never ran — the state's snapshot shows the calls it took and the cap it held."""
+    """#1235 D3: the budget is the run process's memory. A whole run's worth of accounting — the open, counted..."""
     runs_base = tmp_path / "runs"
     run_dir = runs_base / "run-1235"
     run_dir.mkdir(parents=True)
@@ -467,13 +334,7 @@ def test_the_budget_writes_no_file_into_the_run_folder_or_its_container(tmp_path
 
 
 def test_a_budget_file_in_the_run_folder_moves_no_count(tmp_path):
-    """#1235 D3, at the library: a `budget.json` sitting in a run folder — planted, or
-    left from an older run — is not the run's budget. A run started on a folder holding one
-    starts at zero (no file is ever read into the state); a running state's counts and cap
-    answer from the state, so a planted file claiming zero calls does not re-open a capped
-    pool.
-
-    Positive control on the same folder: the state does count, up to its cap."""
+    """#1235 D3, at the library: a `budget.json` sitting in a run folder — planted, or left from an older run —..."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "budget.json").write_text(

@@ -27,12 +27,14 @@ DENIED_ERROR_CLASS = "denied"
 
 #: What a breaker charge can mean, after its count in both messages that name a cause (the
 #: down message and the run kill). It sees exit codes alone, and one code covers many causes —
-#: exit 2 is a missing config, a refused connection, a 5xx, an adapter crash (#1246) — so the
-#: causes are examples, never a closed list.
+#: exit 2 is a refused connection, a 5xx, a garbled reply, an adapter crash (#1246) — so the
+#: causes are examples, never a closed list. Whether a system is configured is not among them:
+#: that is decided at run start, and a system its settings do not make usable is down from the
+#: start and never charged (#1256, `system_status`). The breaker counts only what can change
+#: during a run (DP2).
 INFRA_CAUSES = (
     f"infra failures (adapter exit {' / '.join(str(c) for c in sorted(INFRA_EXIT_CODES))}: "
-    f"the system could not answer, e.g. unreachable, erroring, timed out, or not configured "
-    f"for this tenant)")
+    f"the system could not answer, e.g. unreachable, erroring or timed out)")
 
 
 def is_infra_failure(exit_code: int) -> bool:
@@ -55,7 +57,7 @@ class RunAborted(Exception):
         super().__init__(
             f"run aborted by circuit breaker: {total_failures} {INFRA_CAUSES} across "
             f"systems {self.systems} — "
-            f"the environment appears unreachable or unconfigured. Escalate with the "
+            f"the environment appears unreachable. Escalate with the "
             f"visibility gap named."
         )
 

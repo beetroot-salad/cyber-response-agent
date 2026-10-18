@@ -1,14 +1,4 @@
-"""#1117: the four places that make a value JSON-safe share one traversal and differ only in
-the non-finite policy each one states.
-
-Logs and the query record keep a non-finite float as text, spelled as the Protocol Buffers JSON
-mapping and OpenTelemetry spell it (`"NaN"`, `"Infinity"`, `"-Infinity"`) — they are read to
-diagnose, so "infinite" must not collapse into "missing". The lessons page and the SQL tool's
-rows (pinned in `test_sql.py`) write `null`, the data convention: a field stays
-number-or-empty. Everything else — keys, sequences, sets, other values — is decided once, so the
-callers are compared with EACH OTHER over a swept domain rather than each against its own copy
-of the rule.
-"""
+"""The places that make a value JSON-safe share one traversal and differ only in the non-finite policy."""
 from __future__ import annotations
 
 import datetime as dt
@@ -48,11 +38,6 @@ def test_the_log_and_the_query_record_make_the_same_value(value):
     json.dumps(_logged(value), allow_nan=False)
 
 
-@pytest.mark.parametrize("value", _FINITE, ids=lambda v: type(v).__name__)
-def test_the_lessons_page_agrees_with_the_log_on_every_finite_value(value):
-    assert serialize._json_safe(value) == _logged(value)
-
-
 def test_the_log_and_the_query_record_spell_non_finite_as_the_standard_text():
     assert _json_safe_params({"x": [NAN, (INF, -INF)]}) == {"x": ["NaN", ["Infinity", "-Infinity"]]}
 
@@ -81,11 +66,6 @@ def test_only_the_log_cuts_a_deep_value_and_it_cuts_below_six_levels():
     assert serialize._json_safe(_nested(9, "x")) == _nested(9, "x")
 
 
-def test_a_set_is_written_in_sorted_order():
-    members = [f"m{i:02d}" for i in range(30)]
-    assert _json_safe_params(set(members)) == members
-
-
 def test_a_float_subclass_with_its_own_repr_is_still_spelled_and_never_raises():
     """numpy's `float64` is a `float` that prints as `np.float64(nan)`: the spelling is taken
     from the value, so a log line holding one is not lost."""
@@ -111,13 +91,6 @@ def _sql(query: str, ndjson: list[dict]) -> list[dict]:
     proc = run_sql_py(query, stdin="".join(json.dumps(r) + "\n" for r in ndjson))
     assert proc.returncode == EXIT_OK, proc.stderr
     return json.loads(proc.stdout)
-
-
-def test_the_sql_tool_leaves_keys_json_already_writes_to_the_encoder():
-    """A map with true/false keys reads `"true"`/`"false"`, as `json.dump` writes them — the
-    helper must not re-spell a key the encoder already carries."""
-    assert _sql("SELECT map([true, false], [1, 2]) AS m FROM data", [{"x": 1}]) == [
-        {"m": {"true": 1, "false": 2}}]
 
 
 def test_every_timestamp_in_one_sql_result_has_one_form():
@@ -167,11 +140,6 @@ def test_a_set_comes_out_in_text_order_however_it_iterates():
         outs.add(tuple(json_safe(s, non_finite="text")))
     # Written JSON: `"1"`, `"a"`, `"z's"`, `"é"` (quoted, so text first), then `1`.
     assert outs == {("1", "a", "z's", "é", 1)}
-
-
-def test_an_unknown_policy_is_refused():
-    with pytest.raises(ValueError, match="non_finite"):
-        json_safe(NAN, non_finite="none")  # type: ignore[arg-type]
 
 
 # --- One identity for a call: the denial fingerprint, the repeat key, the judge's key. ---

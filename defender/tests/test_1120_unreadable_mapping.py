@@ -1,11 +1,4 @@
-"""#1120 piece 1 — an unreadable case-history mapping is a refusal, never a traceback (code
-review on PR #1157, finding 9).
-
-`tenant.py setup` and `check` parse the mapping (the one settings file no run reads before its
-post-run ticket write). Its loader turned a missing file into `CaseTicketError` but let a read
-error escape, so an operator whose mapping is mode 000 got a traceback instead of
-`[tenant.py] … could not be read`.
-"""
+"""An unreadable case-history mapping is a refusal, never a traceback."""
 from __future__ import annotations
 
 import os

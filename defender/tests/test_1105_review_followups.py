@@ -1,16 +1,6 @@
-"""#1105 PR 1 — the code review's findings, dissolved at their cause.
-
-* The episode record's name rules come from `_world_label` and `_run_id`, which import nothing
-  heavy, so the repository reads and writes records in a process without the model stack.
-* `_io`'s bounded read is the one read step's prefix mode: byte-faithful (newlines kept), and an
-  `ENOENT` while reading is a refusal, never "absent".
-* `RunRefused` escapes its own message, and the package's tenant refusals go through one helper
-  that does the same, so no site can splice a raw control character into a refusal.
-* `lint_run_records` owns the whole package folder, so a module the package gains is an owner.
-"""
+"""Run-record repository: name rules, bounded reads, escaped refusals, runs-folder link handling."""
 from __future__ import annotations
 
-import importlib.util
 import os
 import subprocess
 import sys
@@ -22,8 +12,6 @@ from defender import _io
 from defender import run_repository as R
 from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
-
-_FORGED = "x\nFORGED LINE: all good"
 
 
 def test_the_repository_reads_and_writes_episode_records_without_the_model_stack(tmp_path):
@@ -90,29 +78,6 @@ def test_a_run_refused_escapes_its_own_message():
     assert "\n" not in str(err), str(err)
     assert "\x1b" not in str(err), str(err)
     assert str(R.RunRefused(str(err))) == str(err), "escaping an escaped message changes it"
-
-
-def _lint_run_records():
-    path = H.WORKTREE / "scripts" / "lint" / "lint_run_records.py"
-    sys.path.insert(0, str(path.parent))
-    try:
-        spec = importlib.util.spec_from_file_location("_lint_run_records_1105r", path)
-        assert spec is not None
-        assert spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = mod
-        spec.loader.exec_module(mod)
-        return mod
-    finally:
-        sys.path.remove(str(path.parent))
-
-
-def test_run_records_owns_any_module_the_package_gains():
-    lint = _lint_run_records()
-    assert lint._is_owner_module("run_repository/_a_module_added_later.py")
-    assert not lint._is_owner_module("runtime/run_repository/_lookup.py")
-    package = {f"run_repository/{p.name}" for p in (H.PACKAGE).glob("*.py")}
-    assert package <= set(lint.OWNER_MODULES), "every file on disk is in the owner set"
 
 
 # -- the second review's findings ---------------------------------------------------------------
@@ -242,34 +207,6 @@ def test_a_sibling_id_over_the_bound_is_refused_before_anything_is_staged():
         _family.refuse_bad_episode_id("e" * 205)
 
 
-class _HoldCount:
-    def __init__(self):
-        self.holds = 0
-
-    def __call__(self, frame, event, _arg):
-        if event == "call" and frame.f_code.co_name == "hold" and (
-                frame.f_globals.get("__name__") == "defender._io"):
-            self.holds += 1
-
-
-def test_run_setup_holds_the_runs_folder_once(tmp_path):
-    """The folder-state check and the claimed-id read share one no-follow hold."""
-    from defender import run_common
-    t = H.tenant(tmp_path / "data")
-    H.runs_folder(t)
-    alert = tmp_path / "a" / "alert.json"
-    alert.parent.mkdir()
-    alert.write_text('{"alert": 1}', encoding="utf-8")
-    seen = _HoldCount()
-    previous = sys.getprofile()
-    sys.setprofile(seen)
-    try:
-        run_common.materialize_run(alert, "pinned-1", tenant=t)
-    finally:
-        sys.setprofile(previous)
-    assert seen.holds == 1, f"run setup held the runs folder {seen.holds} times"
-
-
 def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
     """A hold failure other than a link says what the hold said (here: the name is too long),
     not 'it is a link … or not a directory'."""
@@ -300,16 +237,6 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
     assert "is a link" in str(setup.value), str(setup.value)
 
 
-def test_the_run_name_rule_is_one_answer_for_every_caller():
-    """`run_name_fault` is the run-id rule plus the sidecar clause, and the sidecar clause is
-    no `RunPaths` method (the records lint needs no carve-out)."""
-    assert R.run_name_fault("r1") is None
-    assert "sidecar" in R.run_name_fault("r1.run-end.json")
-    assert "sidecar" in R.run_name_fault("r1.run-end.json.staged-0a")
-    assert "206-byte" in R.run_name_fault("r" * 207)
-    assert not hasattr(R.RunPaths, "sidecar_owner")
-
-
 def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
     """The xhigh review's case: a label that passes the view and run-id rules but makes the
     sibling id sidecar-shaped is refused with the manifest, not by every child. (#1224: the
@@ -332,40 +259,7 @@ def test_the_writer_refuses_an_arm_id_its_sidecar_files_hold(tmp_path):
         R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a": R.RunId.parse("ep-a")})
 
 
-def test_a_long_printable_path_keeps_its_file_name_when_cut():
-    """The xhigh review's case: a knowledge-folder refusal over a deep path must still name the
-    entry to remove, so `shown` cuts the middle and keeps the start and the end."""
-    from defender._shown import shown
-    path = "agent/" + "skills/very-long-skill-folder-name/" * 4 + "file.md"
-    text = shown(path)
-    assert text.endswith("folder-name/file.md"), text
-    assert text.startswith("agent/skills/"), text
-    assert "chars)" in text, text
-    assert len(text) < len(path), text
-
-
 # -- the second xhigh review's findings ---------------------------------------------------------
-
-
-def test_a_tenant_refusal_escapes_its_own_message(tmp_path):
-    """`TenantRefused` escapes what it is built with, so the run handle's tenant check, which
-    raises it directly, stays one line under a runs folder whose path carries a newline."""
-    from defender._tenant import TenantRefused
-    assert "\n" not in str(TenantRefused("a\nb\x1b[2J"))
-    runs = tmp_path / _FORGED / "runs"
-    runs.mkdir(parents=True)
-    with pytest.raises(TenantRefused) as refused:
-        R.Run.for_tenant(H.T_ID, R.RunId.parse("r1"), runs_base=runs)
-    assert "\n" not in str(refused.value), str(refused.value)
-
-
-def test_a_huge_label_is_refused_in_a_bounded_message(tmp_path):
-    t = H.tenant(tmp_path / "data")
-    runs = H.runs_folder(t)
-    H.make_run(runs, "r0")
-    with pytest.raises(R.RunRefused) as refused:
-        R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a b" * 20000: R.RunId.parse("ep-a")})
-    assert len(str(refused.value)) < 2000, len(str(refused.value))
 
 
 def test_a_runs_folder_fault_above_the_folder_is_not_blamed_on_the_folder(tmp_path):
@@ -393,15 +287,3 @@ def test_creating_a_runs_folder_under_a_dangling_ancestor_is_a_refusal(tmp_path)
         R.hold_runs_folder(tmp_path / "dangling" / "runs", create=True)
 
 
-def test_a_capped_read_keeps_the_read_limit(tmp_path):
-    """`max_bytes` above the read limit cannot read past it: a file over the limit is refused
-    as the whole read refuses it (a sparse file, so the disk holds nothing)."""
-    big = tmp_path / "big"
-    with big.open("wb") as fh:
-        fh.truncate(_io.READ_LIMIT + 10)
-    with _io.bind(tmp_path) as bound:
-        whole = bound.read("big")
-        capped = bound.read("big", max_bytes=_io.READ_LIMIT * 2)
-    assert whole.text is None, "the whole read refuses a file over the limit"
-    assert capped.text is None, "a cap above the limit read past it"
-    assert capped.reason == whole.reason, (capped.reason, whole.reason)

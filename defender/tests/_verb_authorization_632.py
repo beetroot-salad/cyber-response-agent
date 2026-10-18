@@ -382,6 +382,9 @@ class ScopedFakeVerbs(VerbRegistry):
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
 
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        return frozenset(self._table.get(system, {}))
+
     def verbs(self, system: str) -> Mapping[str, Callable[..., Any]]:
         return self._table[system]
 
@@ -550,7 +553,7 @@ DONE = Turn(text="Summary: measured the lead.")
 
 
 def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elastic",
-               run_id: str = "vauth632", watch: bool = False) -> _Run:
+               run_id: str = "vauth632", watch: bool = False, tenant: Any = None) -> _Run:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns` against the INJECTED scoped registry. Everything between the two fakes —
     dispatch, the query tool, the grant decision, the capture capability, the breaker, the
@@ -567,7 +570,7 @@ def run_gather(tmp_path: Path, *, verbs, turns: list[Turn], system: str = "elast
         Turn(text="Investigation complete."),
     ])
     gather = WatchingReplay(turns, run_dir) if watch else ReplayFn(turns)
-    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, tenant=tenant)
     return _Run(run_dir, main, gather, summary)
 
 

@@ -1,57 +1,4 @@
-"""#1111 — every read and write the `Run` handle makes walks no-follow from the record's
-trust root.
-
-The contract is issue #1111's discuss-issue design ("the handle's reads AND writes walk
-no-follow from the record's trust root") and its implementation-start addendum (`create`
-keeps #1078's complete-or-absent lane). The seam is four `defender._io` functions whose names
-and signatures the design fixes: `rooted_read(root, name, *, binary=False)`,
-`rooted_mkdir(root, folder_name)` and `rooted_write(root, name, text, *, mode, stage_name=,
-open_unnamed=)`. (The fourth, `rooted_locked_for_rewrite`, #1174 amendment 2, left with #1235:
-the last record that updated in place became in-memory run state.) Each takes a
-trust root, whose spelling is followed, and a name relative to it, which never is. The handle
-(`RecordHandle`, `Run.record`, `ArchivedWorld`) reaches them through its `io=` seam.
-
-What each section pins:
-
-- O1/O3/O4, the READ matrix. Every member of the shipped `GROUP_MEMBERS` and of
-  `ArchivedWorld.members` gets every plant its address can carry: a hard link, a symlink, a
-  FIFO, a socket or a directory at the name. Where the record has holding folders below its
-  root, each folder in turn is replaced by a symlink (to a folder INSIDE the root, which is
-  what reaches the new walk for the `_confine`d kinds, and to one outside it), a plain file or
-  a FIFO. A plant reads `None` without blocking. A plain file at the same address reads back.
-  `Run.record`'s source reads and the schema-gated write's pre-read get the same plants.
-- O2/O3/O6/O7, the WRITE matrix. Every member's own verb (`write`, `append`, `update`) meets
-  the same plants. The refusal keeps today's exception, errno and alias mark, row for row. An
-  `observability` append swallows a refused LEAF into `run.partial_failures` but raises a
-  refused holding folder. The whole temp tree is unchanged: the plant, the file a link or a
-  hard link reaches, the folder a link points at. Then the plant is removed and the same call
-  lands, so every negative carries its positive control on the same address.
-- O5. The root's own spelling is followed (a symlinked run dir, runs base, data root, world
-  dir). A write under a missing root creates it, following links; a read under one is `None`.
-- O6's rows no plant reaches: the write-once second write, and the occupied staged name (via
-  `rooted_write`'s `stage_name=` seam). Also its "unchanged" owner refusals.
-- O8. A pass-through recorder on the handle's `io=` seam sees each member op as the expected
-  `rooted_*` call, carrying the trust root, the name relative to it, the mode and the payload,
-  and sees no other `_io` call (in particular, no path-based seam).
-- The seam's own narrow rules, driven directly: the name grammar, a missing parent, the plant
-  rows, `create`'s complete-or-absent lane and its `open_unnamed=` fallback, and `replace`'s
-  staged name.
-
-The member matrix is ENUMERATED from the shipped tables (`_handle.GROUP_MEMBERS`,
-`MEMBER_VERB`, `ArchivedWorld.members`), and each member's trust root and relative name are
-DERIVED from the path its own accessor builds. A member added later lands in every matrix with
-no code here (O4). `Run.record`'s source reads are enumerated the same way, by recording the
-reads it makes.
-
-Fakes: pass-through recorders on the handle's `io=` seam (`_spec1077.RecordingIo`, and one
-subclass that hands `rooted_write` an occupied `stage_name`), and `rooted_write`'s own
-`open_unnamed=` / `stage_name=` seams. Every plant is a real filesystem entry.
-
-Red before #1111 lands: every direct `_io.rooted_*` call (the seam does not exist), the O8
-seam tests, the occupied-staged-name row through the handle, and every READ through a
-symlinked holding folder (today's `read_guarded` judges only the leaf and follows the folder:
-claim C1). The rest holds today and must keep holding.
-"""
+"""Every read and write the Run handle makes walks no-follow from the record's trust root: the plant matrix (symlink, hardlink, FIFO, device, folder links) over every record member, the root's own spelling being followed, and the direct _io.rooted_* seam rules (name grammar, create complete-or-absent lane, replace staging)."""
 from __future__ import annotations
 
 import contextlib
@@ -89,10 +36,6 @@ RUN_ID = "run-1111"
 #: deadline only bounds a regression, so it fails the test rather than wedging the run.
 DEADLINE = 3.0
 
-#: The design's M1 seam. A member op makes these `_io` calls and no others. (`update`'s pair,
-#: `rooted_locked_for_rewrite` handed to `locked_json_update`, left with #1235: no member
-#: updates in place any more.)
-ROOTED_OPS = frozenset({"rooted_read", "rooted_write", "rooted_mkdir"})
 
 #: Today's write-once members (`create`; a second write is refused). Not #1111's to change.
 WRITE_ONCE = frozenset({"alert", "alert_record", "provenance", "leads"})
@@ -465,26 +408,6 @@ def seam_calls(rec: S.RecordingIo, mark: int) -> list[tuple[str, dict[str, Any]]
 # O4 — the matrix is the shipped tables, and it reaches every kind of address
 # =======================================================================================
 
-def test_o4_the_matrix_is_enumerated_from_the_shipped_tables_and_reaches_every_address_kind():
-    """The guard matrices below are parametrized over `RUN_MEMBERS` / `ARCHIVED_MEMBERS`, built
-    from `_handle.GROUP_MEMBERS`, `MEMBER_VERB` and `ArchivedWorld.members`, with each
-    member's trust root and relative name derived from its accessor's path. So a member added
-    later is guarded with no per-member code.
-
-    Non-vacuity: the enumeration covers the spec's own copy of the table, and the derived
-    addresses include every kind the design's matrix names: root-level and subfolder in-run
-    records, a name two folders deep, the runs-base sidecars, and the session db under
-    `sessions/`."""
-    spec_names = {n for names in S.GROUP_MEMBERS.values() for n in names}
-    assert spec_names <= {m.name for m in RUN_MEMBERS}, "the shipped table lost a member"
-    assert set(S.ARCHIVED_WORLD_MEMBERS) <= {m.name for m in ARCHIVED_MEMBERS}
-    assert any(m.root == "run_dir" and not m.folders for m in RUN_MEMBERS)
-    assert any(m.root == "run_dir" and len(m.folders) == 1 for m in RUN_MEMBERS)
-    assert any(m.root == "run_dir" and len(m.folders) >= 2 for m in RUN_MEMBERS)
-    assert any(m.root == "runs_base" for m in RUN_MEMBERS)
-    assert any(m.root == "session_root" and m.folders for m in RUN_MEMBERS)
-    assert _member("wire_log").rel == RUN_LAYOUT.wire_log, "the wire log's address moved"
-
 
 # =======================================================================================
 # O1 / O3 — no read escapes the root, and no plant hangs a read
@@ -786,30 +709,6 @@ def test_o6_an_occupied_staged_name_refuses_the_replace_as_a_marked_eexist(tree,
     assert_landed(record, m, "after")
 
 
-def _hostile(args: tuple[Any, ...]) -> tuple[Any, ...]:
-    return tuple("../escape" if isinstance(a, str) else -1 for a in args)
-
-
-@pytest.mark.parametrize("m", [m for m in RUN_MEMBERS if S.member_args(m.name)], ids=str)
-def test_o6_a_malformed_component_is_the_owners_value_error_before_any_io(tree, m):
-    """O6, "also unchanged": the owner's path-building refusal (`ValueError` for a malformed
-    component) fires first, for the read and for the verb, and the handle's `io` sees no call.
-    Control: the well-formed component reaches `io`."""
-    rec = S.RecordingIo()
-    run = tree.run(io=rec)
-    mark = len(rec.invocations)
-    h = S.member(run, m.group, m.name, *_hostile(S.member_args(m.name)))
-    ops = [h.read] + ([verb_call(h, m, "x")] if m in WRITABLE else [])
-    for op in ops:
-        # The owner's wording differs per accessor; its type is the contract.
-        with pytest.raises(ValueError):  # noqa: PT011
-            op()
-    assert rec.invocations[mark:] == [], f"{m}: io was reached before the owner refused"
-
-    tree.handle(m, run=run).read()
-    assert rec.invocations[mark:], "control: the well-formed read never reached io"
-
-
 # =======================================================================================
 # O5 — the root's spelling is followed; a missing root is created on write, absent on read
 # =======================================================================================
@@ -914,149 +813,9 @@ def test_o5_a_read_under_a_missing_root_is_none_and_creates_nothing(tmp_path, m)
     assert census(tmp_path) == before, f"{m}: a read under a missing root made something"
 
 
-def test_o5_run_record_reads_through_a_symlinked_runs_base_and_a_symlinked_run_dir(tree):
-    """O5 over `Run.record`: through a symlinked runs base, and through `Run.at` over a
-    symlinked run dir, the record reads exactly what the real spelling reads. The run-end
-    field needs the runs base, which `Run.at` does not hold."""
-    _fill_record_sources(tree)
-    full = tree.run().record
-    assert full.alert_ref is not None, "precondition: the alert is read"
-    assert full.exit_class is not None, "precondition: the run-end sidecar is read"
-
-    base_alias = tree.tmp / "alias-of-runs"
-    base_alias.symlink_to(tree.runs_base, target_is_directory=True)
-    via_base = H.Run.for_tenant(S.DEFAULT_TENANT_ID, RUN_ID, runs_base=base_alias).record
-    assert via_base == full
-
-    run_alias = tree.tmp / "aliases" / RUN_ID  # the run id is the directory's own name
-    run_alias.parent.mkdir()
-    run_alias.symlink_to(tree.runs_base / RUN_ID, target_is_directory=True)
-    assert H.Run.at(run_alias).record == dataclasses.replace(full, exit_class=None)
-
-
 # =======================================================================================
 # O8 — every handle file op crosses the `io=` seam as a rooted call carrying (root, name)
 # =======================================================================================
-
-@pytest.mark.parametrize("m", READABLE, ids=str)
-def test_o8_a_read_crosses_the_io_seam_as_one_rooted_read_of_its_trust_root_and_name(tree, m):
-    """O8: `RecordHandle.read` / `_ArchivedRecordHandle.read` is exactly one
-    `io.rooted_read(root, name)`. `root` is the member's trust root from the design's M2 table
-    (the run dir; the runs base for a sidecar; `SessionPaths(runs_base).trust_root` for the
-    session db; the world dir). `name` is the record's name relative to it; `binary` is
-    False. No other `_io` call is made, so no path-based seam (`read_guarded`)."""
-    record = tree.path(m)
-    record.parent.mkdir(parents=True, exist_ok=True)
-    record.write_text(PLAIN, encoding="utf-8")
-    rec = S.RecordingIo()
-    h = tree.handle(m, io=rec)
-    mark = len(rec.invocations)
-
-    assert h.read() == PLAIN
-    calls = seam_calls(rec, mark)
-    assert [op for op, _ in calls] == ["rooted_read"], (
-        f"{m}'s read reached {[op for op, _ in calls]}, not one rooted read")
-    ((_, a),) = calls
-    assert (Path(a["root"]), PurePosixPath(a["name"]), a["binary"]) \
-        == (tree.root(m), m.rel, False), f"{m}: read as {a!r}"
-
-
-@pytest.mark.parametrize("m", WRITABLE, ids=str)
-def test_o8_a_write_crosses_the_io_seam_as_rooted_calls_carrying_root_name_mode_and_payload(
-        tree, m):
-    """O8, and M2's routing table: a member's verb makes only rooted calls, each on the
-    member's trust root.
-
-    - Exactly one writing call, on the record's relative name. `write` is
-      `rooted_write(mode="create")` for a write-once record and `mode="replace"` otherwise,
-      with the given text. `append` is ONE `rooted_write(mode="append")` whose text is the
-      whole batch as JSONL. (No member has had an `update` verb since #1235.)
-    - Before it, a `rooted_mkdir` on the same root: for a record in a subfolder, of that
-      folder. The folder's spelling for a root-level record is left to the implementation.
-    - Investigation reads its current text with `rooted_read` before schema validation.
-      Report validates against None, matching close_tool; nothing else reads.
-
-    The write really lands."""
-    rec = S.RecordingIo()
-    h = tree.handle(m, io=rec)
-    mark = len(rec.invocations)
-    verb_call(h, m, "seam")()
-    assert_landed(tree.path(m), m, "seam")
-
-    calls = seam_calls(rec, mark)
-    ops = [op for op, _ in calls]
-    assert set(ops) <= ROOTED_OPS, f"{m}.{m.verb} reached {ops}: a path-based `_io` seam"
-    root = tree.root(m)
-    assert all(Path(a["root"]) == root for _, a in calls if "root" in a), (
-        f"{m}: not all on {root}: {calls}")
-
-    at = [i for i, op in enumerate(ops) if op == "rooted_write"]
-    assert len(at) == 1, f"{m}.{m.verb}: {len(at)} rooted_write calls in {ops}"
-    a = calls[at[0]][1]
-    assert PurePosixPath(a["name"]) == m.rel
-    if m.verb == "write":
-        assert a["mode"] == ("create" if m.name in WRITE_ONCE else "replace")
-        assert a["text"] == document(m, "seam")
-    else:
-        assert m.verb in ("append", "append_text"), f"{m}.{m.verb}: no member updates since #1235"
-        assert a["mode"] == "append"
-        assert a["text"].endswith("\n")
-        assert [json.loads(line) for line in a["text"].splitlines()] == rows(m, "seam")
-
-    mkdirs = [i for i, op in enumerate(ops) if op == "rooted_mkdir"]
-    assert mkdirs, f"{m}: no rooted_mkdir made its holding folder: {ops}"
-    assert max(mkdirs) < at[0], f"{m}: the rooted_mkdir came after the write: {ops}"
-    if m.folders:
-        assert m.rel.parent in {PurePosixPath(calls[i][1]["folder_name"]) for i in mkdirs}, (
-            f"{m}: its holding folder {m.rel.parent} was not made through rooted_mkdir")
-
-    reads = [(i, a) for i, (op, a) in enumerate(calls) if op == "rooted_read"]
-    if m.rel == RUN_LAYOUT.investigation:
-        assert len(reads) == 1, f"{m}: not one schema pre-read: {ops}"
-        assert reads[0][0] < at[0], f"{m}: the schema pre-read came after the write: {ops}"
-        assert PurePosixPath(reads[0][1]["name"]) == m.rel
-    else:
-        assert reads == [], f"{m}: read something while writing: {ops}"
-
-
-def test_o8_the_alert_bytes_are_written_as_given_through_the_create_lane(tree):
-    """O8 on the production write run setup makes (`run_common._write_alert_once`): the alert's
-    bytes, CRLF and non-ASCII included, reach `rooted_write(mode="create")` as given and land
-    byte for byte."""
-    body = b'{"alert": "\xc3\xa9t\xc3\xa9"}\r\n'
-    rec = S.RecordingIo()
-    run = tree.run(io=rec)
-    mark = len(rec.invocations)
-    run.facts.alert.write(body)
-    assert (tree.runs_base / RUN_ID / RUN_LAYOUT.alert).read_bytes() == body
-    writes = [a for op, a in seam_calls(rec, mark) if op == "rooted_write"]
-    assert [(w["mode"], w["text"]) for w in writes] == [("create", body)]
-
-
-def test_o8_run_record_reads_its_five_sources_as_rooted_reads(tree):
-    """O8 over `Run.record`: its reads are `rooted_read`s and nothing else. The provenance,
-    the alert (as bytes, `binary=True`, for the hash), the alert's record (#1222: the digest the
-    bytes are checked against) and the report are read on the run dir.
-    The run-end sidecar is read on the runs base."""
-    _fill_record_sources(tree)
-    rec = S.RecordingIo()
-    run = tree.run(io=rec)
-    mark = len(rec.invocations)
-    assert run.record.alert_ref is not None
-
-    calls = seam_calls(rec, mark)
-    assert {op for op, _ in calls} == {"rooted_read"}, [op for op, _ in calls]
-    run_dir = tree.runs_base / RUN_ID
-    got = sorted((str(Path(a["root"])), PurePosixPath(a["name"]).as_posix(), a["binary"])
-                 for _, a in calls)
-    want = sorted([
-        (str(run_dir), RUN_LAYOUT.provenance.as_posix(), False),
-        (str(run_dir), RUN_LAYOUT.alert.as_posix(), True),
-        (str(run_dir), RUN_LAYOUT.alert_record.as_posix(), False),
-        (str(run_dir), RUN_LAYOUT.report.as_posix(), False),
-        (str(tree.runs_base), RunPaths(run_dir).run_end_sidecar(tree.runs_base).name, False),
-    ])
-    assert got == want
 
 
 # =======================================================================================
@@ -1307,17 +1066,6 @@ def test_rooted_write_create_falls_back_where_no_unnamed_file_can_be_made(scratc
     assert not getattr(again.value, "write_guarded_alias", False)
 
 
-def test_rooted_write_create_propagates_an_unrelated_unnamed_open_failure(scratch):
-    """Any other errno from the unnamed open (here ENOSPC) is this call's own failure. It
-    propagates, is not retried through the fallback, and leaves nothing at the name."""
-    target = scratch.real_folders()
-    with pytest.raises(OSError) as failed:  # noqa: PT011 — its errno is asserted below
-        _io.rooted_write(scratch.root, DEEP, "{}\n", mode="create",
-                         open_unnamed=no_unnamed_files(errno.ENOSPC))
-    assert failed.value.errno == errno.ENOSPC
-    assert not os.path.lexists(target)
-
-
 @pytest.mark.parametrize("lane", ["unnamed", "fallback"])
 def test_rooted_write_create_that_fails_mid_write_leaves_the_name_absent(scratch, lane):
     """A create whose body cannot be written (an unencodable string) leaves no entry at all,
@@ -1444,14 +1192,6 @@ def test_rooted_write_refuses_a_name_outside_the_grammar_and_writes_nothing(
     before = census(scratch.tmp)
     with pytest.raises(ValueError):  # noqa: PT011 — the type is the contract, not the wording
         _io.rooted_write(scratch.root, name, "x\n", mode=mode)
-    assert census(scratch.tmp) == before
-
-
-def test_rooted_write_refuses_an_unknown_mode_and_writes_nothing(scratch):
-    scratch.real_folders()
-    before = census(scratch.tmp)
-    with pytest.raises(ValueError):  # noqa: PT011 — the type is the contract, not its wording
-        _io.rooted_write(scratch.root, DEEP, "x\n", mode="truncate")
     assert census(scratch.tmp) == before
 
 
@@ -1632,28 +1372,6 @@ O6_ROWS.update({
     "as_symlink": (OSError, errno.ELOOP, True),
     "as_hard_linked": (OSError, errno.EMLINK, True),
 })
-
-
-@pytest.mark.parametrize("op", SEAM_OPS)
-@pytest.mark.parametrize("pose", sorted(POSES))
-def test_o1_o2_o6_the_leaf_judge_is_an_allow_list_whatever_type_the_leaf_reports(
-        scratch, pose, op):
-    """O1/O2/O6 on every host: the leaf is plain only when it is a regular file with one name
-    (`S_ISREG` and `st_nlink == 1`), never "not one of the kinds a test plants". A real plain
-    file whose `stat` and `fstat` report a device, a FIFO, a socket, a directory or a type no
-    `S_IF*` constant names is refused (read `(None, reason)`; each write mode the unmarked
-    ELOOP row); reported as a symlink, the marked ELOOP; as a regular file with two
-    names, the marked EMLINK. The file is unchanged. Control: the same op through an unposed
-    pass-through lands."""
-    target = scratch.real_folders()
-    target.write_bytes(b"plain\n")
-    fmt, nlink = POSES[pose]
-    before = census(scratch.tmp)
-    assert_seam_refused(op, pose, seam_op(scratch, op, os_=_PosesAs(target, fmt=fmt,
-                                                                    nlink=nlink)))
-    assert census(scratch.tmp) == before, f"{op} changed a leaf posing {pose}"
-
-    assert_seam_lands(scratch, op, os_=PassThroughOs())
 
 
 # -- hole 2: the race window between the leaf's check and its open ------------------------

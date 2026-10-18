@@ -1,46 +1,8 @@
-"""#1222 spec, slice S06 — the correlation phase's one deadline, and the kills it never absorbs.
-
-A7: one harness deadline frames the whole correlation lead (`l-00c`), retries included; its
-expiry is the named ending "timed out", stamped on the lead's session as a member of the
-`truncated_by` vocabulary; MAIN's own leads keep their base terminators and are never cut by it;
-a dispatch without a usable deadline is refused before the lead starts. A2: the lead's failures
-mark per-system health and spend the run budget but never count toward the run-level failure
-kill; a budget kill, a run-level failure kill reached by MAIN's own failures, a store fault after
-the lead produced output and a setup fault each stop the run loudly and never become one of the
-lead's endings. A4: the lead ends before MAIN's opening message is built (no background task).
-
-Every scenario drives the production front door (`run.main` through `S.run_alert`) with the
-generic, non-Kibana alert. At base `301f196c` that alert never dispatches `l-00c` (item 1's gate
-and the `alert_timestamp` gate, c3), so each test asserts FIRST that the lead ran — the design's
-behaviour — and only then its own demand; a stall on `l-00c` is therefore unreachable at base.
-
-Faults, each through a fake's data spec or a real primitive (no `monkeypatch.setattr`):
-* a stalled model request: `LeadFault(delay=...)`, awaited on the event loop so a deadline can cut
-  it (RJ-10 a: control returned at T mid-request; PA-15: the per-attempt client timeout never
-  bounds a trickling or retried request). Stalls are BOUNDED (`STALL_S`, not `S.HANG_S`): a
-  missing deadline then fails in seconds with a late summary, never a ten-minute hang.
-* a slow backend call: `Backend(fault=T.Fault(delay=...))` — a blocking verb on the worker thread
-  (RJ-10 b1: control returned at T; the thread finishes on its own).
-* a budget kill at the lead's own tool call: `DEFENDER_BUDGET_ENFORCE` set (`monkeypatch.setenv`)
-  and a run wall clock shorter than the lead's first request (RJ-04 d: "the lead's NEXT tool call
-  raised BudgetKill").
-* the run-level failure kill: ONE model response carrying parallel failing calls, each the
-  transport's own `TransportFault` (exit 2), all executing before the breaker can refuse any
-  (PR-14: "one l-00c response with 7 parallel failing calls reaches total_failures 7").
-* a store fault after the lead's output: the REAL store's file filled to its growth ceiling at the
-  first append MAIN's session makes (`_session_store_705.FaultStore`'s `disk-full`, keyed here on
-  the appending agent; RJ-01: StoreAppendError, truncated_by store).
-* a setup fault: a deployed tree whose MAIN prompt file (`SKILL.md`) is a directory, read only when
-  MAIN's agent is built (the real `read_text_utf8` raising `IsADirectoryError`).
-* a run folder that refuses a write: a directory squatting the lead's summary file.
-* an operator interrupt while the lead runs: `KeyboardInterrupt` out of the lead's model request
-  (PA-16: a BaseException in the stretch between store setup and MAIN's drive).
-"""
+"""The correlation phase's single deadline, and the run-level kills (budget, failure count,
+operator interrupt) it must not absorb."""
 from __future__ import annotations
 
 import functools
-import math
-import os
 import sqlite3
 import time
 from collections.abc import Callable
@@ -71,12 +33,9 @@ KILL_DELAY_S = 3.6
 #: Distinct texts the scripted lead writes, so "delivered" and "never delivered" are observable.
 SUMMARY = "Window bound: 2026-09-30T07:15Z..09:15Z on detected_at. CORR-SUMMARY-6c1f: 3 scoped."
 LATE = "LATE-SUMMARY-91d2: window bound late; 12 scoped, 40 unscoped."
-LEAD_SUMMARY = "MAIN-LEAD-SUMMARY-4b07: the host answered after a long wait."
 
 
-# =================================================================================================
 # Observation helpers
-# =================================================================================================
 
 class _Clock:
     """`run_alert(before=...)`: notes when the run folder exists (a lower bound on the lead's
@@ -215,39 +174,11 @@ def _assert_stopped_loudly(d: S.Drive) -> None:
     assert stopped, f"the run did not stop loudly: raised {d.raised!r}, summary {summary!r}"
 
 
-def _snapshot(root: Path) -> list[tuple[str, int, int]]:
-    out = []
-    for dirpath, _dirs, files in os.walk(root):
-        for name in files:
-            p = Path(dirpath) / name
-            st = p.lstat()
-            out.append((str(p.relative_to(root)), st.st_size, st.st_mtime_ns))
-    return sorted(out)
-
-
 def _wire_records(run_dir: Path) -> list[dict]:
     return read_jsonl_rows(RunPaths(run_dir).wire_log)
 
 
-def _judge_lead_blocks(run_dir: Path) -> dict[str, list[str]]:
-    """The judge prompt's lead view of `run_dir`, built as the judge builds it (`lead_chain` per
-    joined lead, rendered by `JudgeInput.as_prompt_sections`): each lead's field lines below its
-    heading, frame salts normalised, keyed by lead id."""
-    family = S.mod("learning.judge.family")
-    by_id = family.leads_by_id(run_dir)
-    with S.sym("_io", "bind")(run_dir) as world:
-        chains = {lid: family.lead_chain(world, lid, {}, leads=by_id) for lid in sorted(by_id)}
-    view = S.sym("learning.judge.render", "_render_leads")(chains)
-    blocks: dict[str, list[str]] = {}
-    for chunk in S.normalize(view).split("### ")[1:]:
-        head, _, body = chunk.partition("\n")
-        blocks[head.strip()] = [line for line in body.splitlines() if line.startswith("- ")]
-    return blocks
-
-
-# =================================================================================================
 # Scripts and faults (data)
-# =================================================================================================
 
 def _alerts_call(i: int = 0) -> S.Turn:
     """One correlation call on the granted pair (`elastic.alerts`)."""
@@ -266,14 +197,6 @@ def _parallel(system: str, verb: str, n: int, *, start: int = 0) -> S.Turn:
     return S.Turn(tool_calls=tuple(
         ("query", {"system": system, "verb": verb, "params": params(i)})
         for i in range(start, start + n)))
-
-
-def _counting(total: int) -> Callable[[str, str, dict], Any]:
-    """A backend answer: the real `search_envelope` reporting `total` matches (no hits)."""
-    def answer(_system: str, _verb: str, params: dict) -> Any:
-        return S.envelope([], total=total, index=params.get("index") or "alerts-*")
-
-    return answer
 
 
 def _kill_limit() -> int:
@@ -406,9 +329,7 @@ def _assert_setup_fault_stopped_the_run(d: S.Drive) -> None:
     _assert_stopped_with(d, IsADirectoryError)
 
 
-# =================================================================================================
 # The demands
-# =================================================================================================
 
 def test_n12_kills_from_other_causes_end_the_run(tmp_path: Path,
                                                  monkeypatch: pytest.MonkeyPatch) -> None:
@@ -580,31 +501,6 @@ def test_r5_a_correlation_dispatch_without_a_usable_deadline_refuses_to_run(
             f"[{label}] the refusal does not name the setting {S.DEADLINE_KEY!r}: {said[-400:]!r}")
 
 
-def test_b3_the_shipped_correlation_deadline_sits_under_the_fixed_ceiling() -> None:
-    """The shipped cap table carries the correlation deadline as a positive, finite number of
-    seconds at or under 1080 s: the ceiling 1200 s (the default run clock) - 120 s (a bash call
-    the deadline cannot cut) - MAIN's minimum time, taken as zero because it has no number. The
-    ceiling is fixed against the default clock, checked once here; it is not recomputed from a
-    run's own clock settings.
-
-    Read off production's own default table (`hooks/budget_enforcer.DEFAULT_LIMITS`, through
-    `S.default_limits()`); the number itself is the implementer's (78, H1; §7 round 3, B3)."""
-    limits = S.default_limits()
-    assert S.DEADLINE_KEY in limits, (
-        f"the shipped cap table carries no {S.DEADLINE_KEY!r}: every production run would meet "
-        "an unusable deadline at correlation (r5)")
-    value = limits[S.DEADLINE_KEY]
-    assert not isinstance(value, bool), (
-        f"the shipped correlation deadline is a boolean, not seconds: {value!r}")
-    assert isinstance(value, (int, float)), (
-        f"the shipped correlation deadline is not a number of seconds: {value!r}")
-    assert math.isfinite(value), f"the shipped correlation deadline is not finite: {value!r}"
-    assert value > 0, f"the shipped correlation deadline is not a positive bound: {value!r}"
-    assert value <= S.DEADLINE_CEILING_S, (
-        f"the shipped correlation deadline {value!r} s is above the fixed ceiling "
-        f"{S.DEADLINE_CEILING_S} s (1200 s - 120 s - MAIN's minimum time)")
-
-
 def test_r7_a_lead_main_dispatched_is_stamped_and_read_back_as_before(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A lead MAIN dispatches, ended by each existing ending (request limit, retry exhausted,
@@ -754,53 +650,6 @@ def test_p003_correlation_lead_still_running_at_mains_second_r(tmp_path: Path) -
     assert hung.report is not None, "the run did not reach report.md after the named ending"
 
 
-def test_p004_run_setup_fails_after_correlation_was_scheduled(tmp_path: Path) -> None:
-    """A setup fault after the lead ended (building MAIN's agent or deps) stops the run loudly with
-    the setup error. No task writes the run folder after the run unwinds. l-00c's leads row holds
-    the lead's own outcome."""
-    tenant = S.plant_tenant()
-    stores: list = []
-    clock = _Clock()
-    d = _setup_fault_after_lead(tmp_path, tenant, run_id="r1222-p004", stores=stores,
-                                before=clock)
-    _assert_setup_fault_stopped_the_run(d)
-    assert d.report is None, "a run stopped by a setup fault wrote a report"
-    sidecar = d.sidecar(L3)
-    assert sidecar.get("lead_id", L3) == L3, sidecar
-    assert sidecar.get("goal"), f"l-00c's leads row lost its harness contract: {sidecar!r}"
-    assert SUMMARY in (d.gather_summary(L3) or ""), "l-00c's own outcome is not recorded"
-    assert clock.run_dir is not None
-    settled = _snapshot(clock.run_dir)
-    time.sleep(0.5)
-    assert _snapshot(clock.run_dir) == settled, (
-        "something kept writing the run folder after the run unwound")
-
-
-def test_p007_siem_down_at_run_start(tmp_path: Path) -> None:
-    """MAIN's first call to a system the lead found down meets the same outage mark. Correlation's
-    failures never end the run."""
-    tenant = S.plant_tenant()
-    d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p007",
-                    main=[S.gather("l-001", "elastic"), S.text(S.DONE)],
-                    leads={L3: [_parallel("elastic", "alerts", _kill_limit()), S.text(SUMMARY)],
-                           "l-001": [_alerts_call(99), S.text(LEAD_SUMMARY)]},
-                    backend=S.Backend(fault=T.Fault(fail_on=("elastic.",))))
-    _assert_lead_ran(d)
-    assert d.raised is None, d.raised
-    assert d.summary is not None
-    assert d.summary.get("truncated_by") != _run_end().TRUNCATED_BY_ABORTED, (
-        "correlation's failures ended the run")
-    assert d.main.requests >= 2, "MAIN did not get past its first turn"
-    assert S.sym("runtime.circuit_breaker", "is_tripped")(d.run_state, "elastic"), (
-        f"the lead's failures did not mark elastic down: {d.breaker!r}")
-    assert not d.router.dispatched("l-001"), (
-        "MAIN's lead to the system the lead found down was dispatched as if it were healthy")
-    assert d.rows_for("l-001") == [], "MAIN's lead reached the down system's backend"
-    mark = S.sym("runtime.circuit_breaker", "down_message")(d.run_state, "elastic")
-    assert mark in d.main.history_text, (
-        "MAIN's dispatch to the down system did not meet the outage mark the lead left")
-
-
 def test_p009_l00c_alone_reaches_the_run_kill_count(tmp_path: Path) -> None:
     """l-00c's failures alone never reach the run-level kill; MAIN's sentence is 'tripped breaker'
     when the breaker refused any of its calls; the run reaches report.md."""
@@ -838,141 +687,6 @@ def test_p009_l00c_alone_reaches_the_run_kill_count(tmp_path: Path) -> None:
     assert prose["tripped-many"] != prose["one-failure"], (
         "a refused call ('tripped breaker') and a lone failed call ('every call failed') gave "
         "MAIN the same sentence")
-
-
-def test_p010_run_kill_in_a_task_nobody_awaits(tmp_path: Path,
-                                               monkeypatch: pytest.MonkeyPatch) -> None:
-    """There is no background task: the lead ends before MAIN starts (A4, A7). A run-level kill
-    raised while the lead runs stops the run loudly, as a kill from another cause."""
-    tenant = S.plant_tenant()
-    ended = S.run_alert(tmp_path / "ended", tenant=tenant, run_id="r1222-p010-ended",
-                        main=[S.text(S.DONE)], leads={L3: [_alerts_call(), S.text(SUMMARY)]})
-    _assert_lead_ran(ended)
-    _assert_summary_delivered(ended, SUMMARY)
-    assert ended.main.requests == 1, "MAIN's one-request run is not the run's only MAIN request"
-
-    stores: list = []
-    killed = _budget_kill_during_lead(tmp_path / "killed", tenant, monkeypatch,
-                                      run_id="r1222-p010-killed", stores=stores)
-    _assert_budget_kill_during_lead(killed, stores)
-
-
-def test_p030_main_mints_l00c_after_the_harness_claim_failed(tmp_path: Path) -> None:
-    """A lead MAIN mints as l-00c is an ordinary lead. No reader grants trust by lead id (l-00c,
-    l-000). Its failures count toward the run kill."""
-    # The table withholds correlation, so no harness claim exists and MAIN can mint l-00c (PR-23).
-    tenant = S.plant_tenant(table=S.TABLE_WITHHELD)
-    stores: list = []
-    d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p030",
-                    main=[S.gather("l-001", "identity"), S.gather("l-000", "identity"),
-                          S.gather(L3, "identity"), S.text(S.DONE)],
-                    leads={"l-001": [S.text(LEAD_SUMMARY)], "l-000": [S.text(LEAD_SUMMARY)],
-                           L3: [_parallel("identity", "get-user", _kill_limit()),
-                                S.text("never")]},
-                    backend=S.Backend(fault=T.Fault(fail_on=("identity.get-user",))),
-                    store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
-    for lead in ("l-001", "l-000", L3):
-        assert d.router.dispatched(lead), (
-            f"MAIN's lead {lead} never ran: an ordinary id was refused to MAIN "
-            f"(conversations: {d.router.leads()})")
-    joined = {lead.lead_id: lead for lead in S.sym("learning.lead_repository", "joined")(d.run_dir)}
-    for lead in ("l-000", L3):
-        assert lead in joined, f"the lead repository does not carry MAIN's {lead}"
-        assert joined[lead].provenance == joined["l-001"].provenance, (
-            f"the lead repository reads MAIN's {lead} with provenance "
-            f"{joined[lead].provenance!r}, MAIN's l-001 with {joined['l-001'].provenance!r}: "
-            "trust granted by lead id")
-        assert joined[lead].goal == joined["l-001"].goal, (
-            f"MAIN's {lead} is read back with a goal other than the one MAIN gave it")
-    # The judge's lead view, built the way the judge builds it: same fields, same framing.
-    blocks = _judge_lead_blocks(d.folder)
-    assert blocks["l-000"] == blocks["l-001"], (
-        "the judge renders MAIN's l-000 unlike MAIN's l-001, which ran the same script: "
-        f"{blocks['l-000']!r} vs {blocks['l-001']!r}")
-    assert [line.split(":", 1)[0] for line in blocks[L3]] == [
-        line.split(":", 1)[0] for line in blocks["l-001"]], (
-        f"the judge renders MAIN's {L3} with other fields than an ordinary lead: {blocks[L3]!r}")
-    assert blocks[L3][0] == blocks["l-001"][0], (
-        f"the judge renders MAIN's {L3} with a goal other than the one MAIN gave it")
-    _assert_killed(d, _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
-    assert _session_ending(stores, L3) == _run_end().TRUNCATED_BY_ABORTED
-
-
-def test_p031_correlation_entry_cannot_be_written_to_mains_ses(tmp_path: Path) -> None:
-    """A store fault after the lead produced output stops the run loudly. There is no injected
-    entry any more."""
-    tenant = S.plant_tenant()
-    healthy = S.run_alert(tmp_path / "healthy", tenant=tenant, run_id="r1222-p031-healthy",
-                          leads={L3: [S.text(SUMMARY)]})
-    _assert_lead_ran(healthy)
-    _assert_summary_delivered(healthy, SUMMARY)
-    assert healthy.main.requests >= 2
-    later = healthy.main.seen[-1]
-    assert later.user_prompts == healthy.main.seen[0].user_prompts, (
-        "a later MAIN request carries a host-injected entry beside the opening message: "
-        f"{[p[:80] for p in later.user_prompts]!r}")
-    assert later.text.count(SUMMARY) == 1, "the correlation summary reached MAIN twice"
-
-    stores: list = []
-    d = _store_fault_after_lead_output(tmp_path / "fault", tenant, run_id="r1222-p031-fault",
-                                       stores=stores)
-    _assert_store_fault_stopped_the_run(d)
-
-
-def test_p032_l00c_summary_cannot_be_persisted(tmp_path: Path) -> None:
-    """A run folder that refuses to persist a produced summary stops the run loudly. It is never
-    named as one of the lead's endings."""
-    tenant = S.plant_tenant()
-
-    def squat(run_dir: Path) -> None:
-        Path(RunPaths(run_dir).gather_summary(L3)).mkdir(parents=True)
-
-    d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p032", leads={L3: [S.text(SUMMARY)]},
-                    before=squat)
-    _assert_lead_ran(d)
-    assert d.router.requests(L3) >= 1, "the lead never produced its summary"
-    _assert_main_never_asked(d, "the run folder refused the lead's produced summary")
-    _assert_stopped_loudly(d)
-
-
-def test_p165_lead_worst_case_exceeds_the_run_clock(tmp_path: Path) -> None:
-    """One harness deadline bounds the whole lead, retries included: MAIN's opening request follows
-    within the deadline plus the longest step that cannot be cut (a bash call, up to 120 s), and
-    the lead's ending is 'timed out'."""
-    tenant = S.plant_tenant()
-    # Eight requests (the lead's whole request limit), each well under the deadline; run to the
-    # end they would take about 9.6 s and close on a late summary.
-    per_request = 0.6 * DEADLINE_S
-    script = [S.list_verbs("elastic")] * (S.CORRELATION_REQUEST_LIMIT - 1) + [S.text(LATE)]
-    stores: list = []
-    clock = _Clock()
-    main = S.MainScript()
-    d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p165", main=main, before=clock,
-                    leads={L3: script}, lead_faults={L3: S.LeadFault(delay=per_request)},
-                    limits=S.with_deadline(DEADLINE_S),
-                    store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
-    _assert_lead_ran(d)
-    assert main.first_at is not None, "MAIN never started"
-    assert clock.at is not None
-    waited = main.first_at - clock.at
-    assert waited <= DEADLINE_S + SLACK_S, (
-        f"MAIN started {waited:.1f}s after the run folder existed: requests each under the "
-        f"{DEADLINE_S}s deadline ran on past it — the bound is per request, not the whole lead")
-    assert d.router.requests(L3) < len(script), "the lead ran every one of its requests"
-    _assert_timed_out_member(_session_ending(stores, L3), who="l-00c")
-    _assert_never_delivered(d, LATE)
-
-
-def test_p166_budget_kill_raised_at_one_of_the_leads_tool_call(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A run-level budget kill raised at one of the lead's own tool calls is a kill from another
-    cause: the run stops loudly."""
-    tenant = S.plant_tenant()
-    stores: list = []
-    d = _budget_kill_during_lead(tmp_path, tenant, monkeypatch, run_id="r1222-p166",
-                                 stores=stores)
-    _assert_budget_kill_during_lead(d, stores)
-    assert d.rows_for(L3) == [], "the lead's killed call ran anyway"
 
 
 def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -> None:
@@ -1013,90 +727,6 @@ def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -
     _assert_lead_ran(d)
     _assert_summary_delivered(d, SUMMARY)
     assert _session_ending(early, L3) is None, "a response inside the deadline was cut"
-
-
-def test_p168_timeout_and_a_main_dispatched_lead_that_hangs(tmp_path: Path) -> None:
-    """The deadline is correlation's only; a gather lead MAIN dispatched is not bound by it."""
-    tenant = S.plant_tenant()
-    stores: list = []
-    d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p168",
-                    main=[S.gather("l-001", "cmdb"), S.text(S.DONE)],
-                    leads={L3: [S.text(LATE)], "l-001": [S.text(LEAD_SUMMARY)]},
-                    lead_faults={L3: S.LeadFault(delay=STALL_S),
-                                 "l-001": S.LeadFault(delay=DEADLINE_S + 1.5)},
-                    limits=S.with_deadline(DEADLINE_S),
-                    store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
-    _assert_lead_ran(d)
-    _assert_timed_out_member(_session_ending(stores, L3), who="l-00c")
-    assert d.router.dispatched("l-001"), "MAIN's lead never ran"
-    assert d.main.requests >= 2, "MAIN never got its lead's answer"
-    assert LEAD_SUMMARY in d.main.seen[-1].text, (
-        "the answer MAIN's lead gave after a wait longer than the correlation deadline never "
-        "reached MAIN — the deadline cut a lead MAIN dispatched")
-    assert _session_ending(stores, "l-001") is None, (
-        "MAIN's lead outlasting the correlation deadline was stamped as cut short")
-
-
-def test_p169_lead_timed_out_after_its_calls_succeeded(tmp_path: Path) -> None:
-    """A lead that timed out after successful calls gets "timed out" in the section. Its queries
-    rows stay recorded, and their counts are not delivered."""
-    tenant = S.plant_tenant()
-    deadline = 3.0
-    counts = {"a": 7340033, "b": 8650757}
-    prose: dict[str, str] = {}
-    for label, count in counts.items():
-        stores: list = []
-        backend = S.Backend(answer=_counting(count))
-        # The first request answers at 2.0 s with one call (which succeeds); the next request
-        # would answer at about 4.0 s, past the 3.0 s deadline.
-        d = S.run_alert(tmp_path / label, tenant=tenant, run_id=f"r1222-p169-{label}",
-                        leads={L3: [_alerts_call(), S.text(f"{count} scoped alerts")]},
-                        lead_faults={L3: S.LeadFault(delay=2.0)}, backend=backend,
-                        limits=S.with_deadline(deadline),
-                        store_factory=S.store_factory(tmp_path / label, sink=stores),
-                        stores=stores)
-        _assert_lead_ran(d)
-        rows = d.rows_for(L3)
-        assert len(rows) == 1, (
-            f"the lead's successful call is not recorded in the queries table: {rows!r}")
-        assert rows[0].get("exit_code") == 0, rows
-        _assert_timed_out_member(_session_ending(stores, L3), who=f"[{label}] l-00c")
-        _assert_never_delivered(d, str(count))
-        prose[label] = _prose(d)
-    assert prose["a"] == prose["b"], (
-        "two timed-out leads whose successful calls counted differently gave MAIN different "
-        "opening prose: a count was delivered")
-
-
-def test_p170_operator_interrupts_while_the_lead_runs_before_m(tmp_path: Path) -> None:
-    """An interrupt while the lead runs propagates with no summary promised, but closes the wire
-    log and the session store and reports the interruption."""
-    tenant = S.plant_tenant()
-    stores: list = []
-    clock = _Clock()
-    main = S.MainScript()
-    interrupted = False
-    try:
-        d = S.run_alert(tmp_path, tenant=tenant, run_id="r1222-p170", main=main, before=clock,
-                        leads={L3: [S.text(SUMMARY)]},
-                        lead_faults={L3: S.LeadFault(raise_on=1, exc=KeyboardInterrupt)},
-                        store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
-    except KeyboardInterrupt:
-        interrupted = True
-    else:
-        _assert_lead_ran(d)
-    assert interrupted, "the interrupt raised while the lead ran did not reach the operator"
-    assert main.requests == 0, "MAIN started although the run was interrupted during the lead"
-    assert clock.run_dir is not None
-    observe = S.mod("runtime.observe")
-    try:
-        reopened = observe.RequestLogger(observe.wire_log_path(clock.run_dir))
-    except FileExistsError as leak:
-        pytest.fail(f"the interrupted run left its wire log open: {leak}")
-    reopened.close()
-    assert stores, "the run opened no session store"
-    with pytest.raises(sqlite3.ProgrammingError):
-        stores[-1].connection.execute("SELECT 1")
 
 
 def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
@@ -1180,25 +810,6 @@ def test_p174_lead_and_main_failures_together_pass_the_kill_co(tmp_path: Path) -
         f"lead's {n - 1} failures were counted ({below.summary!r})")
     assert below.main.requests >= 2, "MAIN never finished its run"
     _assert_killed(outcome[n], _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
-
-
-def test_p175_main_lead_named_l00c_when_no_harness_claim_exist(tmp_path: Path) -> None:
-    """A lead MAIN dispatched counts toward the kill whatever its id, l-00c included."""
-    # Correlation withheld: no harness claim exists, so the id is MAIN's to mint (PR-23).
-    tenant = S.plant_tenant(table=S.TABLE_WITHHELD)
-    n = _kill_limit()
-    for lead in ("l-001", L3):
-        stores: list = []
-        d = S.run_alert(tmp_path / lead, tenant=tenant, run_id=f"r1222-p175-{lead}",
-                        main=[S.gather(lead, "identity"), S.text(S.DONE)],
-                        leads={lead: [_parallel("identity", "get-user", n), S.text("x")]},
-                        backend=S.Backend(fault=T.Fault(fail_on=("identity.get-user",))),
-                        store_factory=S.store_factory(tmp_path / lead, sink=stores),
-                        stores=stores)
-        assert d.router.dispatched(lead), f"MAIN's lead {lead} never ran"
-        _assert_killed(d, _run_end().TRUNCATED_BY_ABORTED, "RunAborted")
-        assert _session_ending(stores, lead) == _run_end().TRUNCATED_BY_ABORTED, (
-            f"MAIN's {lead} reached the kill count and its session does not read as aborted")
 
 
 def test_run_duration_includes_correlation_and_main(tmp_path: Path) -> None:

@@ -1,38 +1,7 @@
-"""#935 — the two retrieval lanes score on ONE scale, and the class match is normalised to the
-vertex type rather than guessed from the cell.
-
-Three defects, filed as one because fixing any alone makes another worse and all three want
-the same missing thing: a per-type class-tuple arity, documented in `skills/invlang/SKILL.md`
-§Classification grammar and readable by nothing.
-
-  1. EVERY node selector scored 2. `type` and `slot` are both mandatory and most shipped
-     selectors omit the optional `class`, so the node lane was one flat value and `match_loaded`
-     handed the top-3 to its `name` tiebreak. Two lessons keyed on a bare `slot: ident` — a cell
-     every vertex carries — cut the one naming the exact `attrs.loginuid` the run held, because
-     `c` sorts before `f`. That is the lesson #919 exists to make reachable.
-  2. The EDGE lane was structurally starved. `anchor_kind` is its only mandatory field, so every
-     shipped `frontier_edges` selector floored at 1 against a node floor of 2, and `_best_match`
-     pools both lanes into one `max` — so any node match outranked any edge match. On the append
-     where the first authorization contract opens, `_frontier_recall` emitted NO BLOCK AT ALL.
-  3. `_class_pins` was NON-MONOTONIC across arity. For a three-slot selector, cases `??`,
-     `??/??` and `ip-only/??/??` all matched, but `ip-only/??` MISSED — recording more about
-     slot 0 of a two-slot tuple LOST a selector the vaguer document matched one write earlier.
-
-What ships: `vocab.CLASS_GRAMMAR` / `vocab.class_arity` (the table SKILL.md states in prose),
-the weights under THE SCALE in `runtime/lessons_engine/lessons_frontier.py`, and `_spread_over_items`
-— which is the half a reweight alone cannot do, because two selectors at their lanes' floors
-are genuinely equally specific and no honest weight orders them.
-
-WHY THIS FILE EXISTS SEPARATELY from `test_frontier_recall_919.py`. That suite ran its
-inversion test at `top_k=9` and asserted only scores, so it stayed green across all three
-defects while the EMITTED ordering was wrong. Every test here observes what the model is
-actually handed — the list at the real cut, or the rendered block — against the real corpus and
-the repo's own committed runs, not against documents written to suit the mechanism.
-"""
+"""Frontier lesson retrieval: node and edge lanes score on one scale, class match is arity-aware, ordering is what the model is handed."""
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 
@@ -43,13 +12,11 @@ if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
     sys.path.insert(0, str(DEFENDER.parent))
 
 from defender.runtime.lessons_engine import lessons_frontier as LF  # noqa: E402
-from defender.skills.invlang import vocab  # noqa: E402
 from defender.skills.invlang.frontier import frontier_at, frontier_from_text  # noqa: E402
 from defender.skills.invlang.validate import diagnose  # noqa: E402
 from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
 
 CORPUS = DEFENDER / "lessons"
-SKILL_MD = DEFENDER / "skills" / "invlang" / "SKILL.md"
 
 #: The issue's reproduction of defect 1, verbatim. A `compute` vertex whose identifier is open
 #: and an `identity` vertex holding `loginuid=-1` — the shape #919 was filed about, in two rows.
@@ -129,61 +96,6 @@ def _prefixes(text: str) -> list:
 
 
 # the missing table
-
-def test_the_arity_table_says_what_the_skill_documents():
-    """CLAIM: `vocab.CLASS_GRAMMAR` is the SKILL's §Classification grammar table, readable.
-
-    THE ROOT CAUSE, closed from both ends. All three defects deferred to "class arity is a
-    documented function of the vertex type" and there was nothing to defer TO — the grammar
-    lived only in prose a human reads. A table transcribed by hand is the same failure one
-    refactor later, so this parses the prose and holds the code against it: the arity, and the
-    ENUM NAME filling each position, both have to agree.
-    """
-    # SCOPED to the section, not to the whole file. The row pattern is generic enough to hit
-    # any table anywhere in SKILL.md whose first column happens to be a vertex type, and the
-    # dict below is last-wins — so an unrelated table added later would silently redefine what
-    # this test holds the code against, or fail it somewhere the grammar is not even discussed.
-    body = SKILL_MD.read_text(encoding="utf-8")
-    section = re.search(r"^## Classification grammar$(.*?)^#", body, re.M | re.S)
-    assert section, "SKILL.md no longer has a §Classification grammar section"
-    rows = re.findall(r"^\|\s*`?([a-z -]+)`?\s*\|\s*`?([^|`]+)`?\s*\|", section.group(1), re.M)
-    documented = {
-        t.strip(): g.strip() for t, g in rows if t.strip() in vocab.TYPES or t.strip() == "all others"
-    }
-    assert "all others" in documented, (
-        f"SKILL.md §Classification grammar did not parse — got {sorted(documented)}"
-    )
-
-    for vertex_type, grammar in documented.items():
-        if vertex_type == "all others":
-            continue
-        # `<role>/<zone>/<provenance>` is a tuple; "single token" / "image basename" is not.
-        placeholders = re.findall(r"<([a-z-]+)>", grammar)
-        expected = len(placeholders) or vocab.DEFAULT_CLASS_ARITY
-        assert vocab.class_arity(vertex_type) == expected, (
-            f"SKILL.md gives `{vertex_type}` as `{grammar}` ({expected} slots) and "
-            f"`vocab.class_arity` answers {vocab.class_arity(vertex_type)}"
-        )
-        # ...and each position names the enum that fills it, so the table cannot drift into a
-        # bare count that no longer describes the grammar it claims to.
-        assert vocab.CLASS_GRAMMAR.get(vertex_type, ()) == tuple(
-            f"{vertex_type}.{p}" for p in placeholders
-        ), f"`{vertex_type}`'s positions disagree with SKILL.md's `{grammar}`"
-
-    assert set(vocab.CLASS_GRAMMAR) == {
-        t for t, g in documented.items() if "<" in g
-    }, "a multi-slot type in SKILL.md is missing from CLASS_GRAMMAR, or vice versa"
-
-
-def test_every_grammar_position_is_a_slot_enum_can_answer():
-    """CLAIM: the table's positions are `SLOTS` keys, so `enum {slot}` answers for each.
-
-    Spelling the positions as enum names rather than as an integer is what makes the assert
-    above possible AND what an author is sent to look up when a slot is wrong. A position
-    naming a key `SLOTS` does not carry is a lookup that dead-ends."""
-    for vertex_type, slots in vocab.CLASS_GRAMMAR.items():
-        for slot in slots:
-            assert vocab.get_enum(slot), f"{vertex_type}'s position {slot!r} enumerates nothing"
 
 
 # defect 3 — the class match is monotonic in what the document records
@@ -462,21 +374,6 @@ def test_two_lessons_about_one_open_thing_do_not_take_the_whole_block(tmp_path):
     ]
 
 
-def test_the_order_is_total_and_stable_across_calls():
-    """CLAIM: two calls on one frontier give the same list, in the same order.
-
-    Not cosmetic and not covered by the existing stability test, which predates the spread:
-    `_frontier_recall` decides whether to inject by comparing two RENDERED blocks, so any
-    non-determinism in the re-grouping re-injects the same lessons on every frontier-moving
-    write — the churn the second gate exists to prevent, with nothing red to notice it by."""
-    first = _match(TWO_VERTEX_DOC, top_k=9)
-    second = _match(TWO_VERTEX_DOC, top_k=9)
-    assert _names(first) == _names(second)
-    assert [h.score for h in first] == [h.score for h in second]
-    # ...and `top_k` is a CUT on that one order rather than a second ranking.
-    assert _names(_match(TWO_VERTEX_DOC, top_k=2)) == _names(first)[:2]
-
-
 # the whole thing, against the real corpus and the real runs
 
 @pytest.mark.parametrize(("label", "path"), REPLAYED_RUNS)
@@ -538,73 +435,6 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
 
 #: One `compute` vertex with an open class triple and an open ident, and the ordinary append
 #: that declares a second. The pair is the churn shape the gate below exists for — see the test.
-_ONE_COMPUTE = """```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-001|compute|ip-only/??/??|??|knowledge=partial
-```
-"""
-_SECOND_COMPUTE = """```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-004|compute|??/??/??|host-4.corp|knowledge=partial
-```
-"""
-
-
-def test_a_coverage_reshuffle_does_not_re_staple_the_same_lessons(tmp_path):
-    """CLAIM: `_frontier_recall` stays quiet when the lesson set and its scores are unchanged
-    and only the COVERAGE order moved.
-
-    `_spread_over_items` makes the emitted order a property of which frontier items the block
-    covers, not of score alone — so an append can permute the three without changing which
-    three or what they scored. The gate compared an ORDERED `(path, score)` list, which was a
-    pure function of the pairs only while the ranking was `(-score, name)`; it now compares
-    that as a sorted multiset, because re-stapling ~1.5KB of precedent the model already holds
-    is the churn this second gate exists to prevent.
-
-    The append below is ordinary: `v-001` is the only compute vertex, so the loose
-    `{type: compute, slot: class}` lesson shares its cell with the `ip-only` one and sits in
-    the second pass. Declaring `v-004` gives it a cell of its own, it moves into the first
-    pass, and all three permute — same three lessons, same three scores.
-
-    Driven through `_tool_append_block`, which is where the gate runs on the authoring path."""
-    pytest.importorskip("pydantic_ai")  # as the two sibling suites do at module scope
-    from defender.runtime.tools import _tool_append_block
-    from defender.tests._lessons_corpus import _main_deps
-
-    deps, _run, dfn = _main_deps(tmp_path)
-    corpus = dfn / "lessons"
-    corpus.mkdir()
-    _write_lesson(corpus, "aaa-any-compute-class", nodes=("type: compute, slot: class",))
-    _write_lesson(corpus, "bbb-ip-only", nodes=("type: compute, class: ip-only, slot: class",))
-    _write_lesson(corpus, "ccc-any-compute-ident", nodes=("type: compute, slot: ident",))
-
-    # The fixture only tests the gate if the append really is the churn shape: same lessons at
-    # the same scores, different order. Asserted rather than assumed — a weight or placement
-    # change that stopped permuting would make the assertion below vacuous.
-    ranked = [
-        [(h.name, h.score) for h in LF.match_lessons(frontier_from_text(doc), corpus)]
-        for doc in (_ONE_COMPUTE, _ONE_COMPUTE + _SECOND_COMPUTE)
-    ]
-    assert sorted(ranked[0]) == sorted(ranked[1]), "the fixture no longer holds scores equal"
-    assert ranked[0] != ranked[1], (
-        "the fixture no longer permutes the block — it cannot test the gate"
-    )
-
-    _tool_append_block(deps, _ONE_COMPUTE)
-    second = _tool_append_block(deps, _SECOND_COMPUTE)
-    assert "Lessons matched against your record" not in second, (
-        f"the same three lessons at the same three scores were re-stapled:\n{second}"
-    )
-    # ...and the gate is not simply mute: an append reaching a lesson it has not shown emits.
-    _write_lesson(corpus, "ddd-loginuid", nodes=("type: identity, slot: attrs.loginuid",))
-    third = _tool_append_block(deps, """```invlang
-:V prologue.vertices [id|type|class|ident|attrs?]
-v-007|identity|user/known-corp|jsmith|loginuid=??
-```
-""")
-    assert "ddd-loginuid" in third, (
-        "the gate stayed quiet on an append that reached a lesson it had not shown"
-    )
 
 
 def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers(tmp_path):

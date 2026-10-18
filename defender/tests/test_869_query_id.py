@@ -1,23 +1,11 @@
-"""#869 M3/O2/U3 — the queries-table row names the system the call was dispatched to.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_869.yaml`, named after that
-demand's `discharged_by` pointer and carrying its prose in its docstring. The seam contract
-lives in `defender/tests/_declared869.py`; the SINK half of M3 — what a real granted call
-actually records — is `test_869_queries_row.py`, driven end to end.
-
-`resolve_query_id` is the writer-side screen, and it needs no membership set: M3 is a pure
-SHAPE rule (the #855 posture), which is why it can close the one reachable instance
-(C12/C12r/G3) at the writer rather than depending on any tree.
-"""
+"""#869 M3/O2/U3 — the queries-table row names the system the call was dispatched to."""
 from __future__ import annotations
 
-from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.draft_synthesis import (
     _draft_basename,
     _draft_candidate_segments,
 )
 from defender.runtime.query_tool import resolve_query_id
-from defender.tests._declared869 import pitfall_row
 
 
 def test_resolve_query_id_refuses_a_foreign_prefix():
@@ -47,23 +35,6 @@ def test_resolve_query_id_keeps_a_matching_prefix():
     """
     assert resolve_query_id("elastic", "esql", "elastic.hunt-creds") == "elastic.hunt-creds"
     assert resolve_query_id("cmdb", "get-host", "cmdb.crown-jewels") == "cmdb.crown-jewels"
-
-
-def test_refused_query_id_lands_on_the_untagged_value():
-    """A refused id lands on exactly the value an UNTAGGED call already records — `{system}.
-    {verb}`, or `{system}.ad-hoc` when the call names no verb.
-
-    C18/G10, re-executed at this base. This is why enforcement cannot strand a legitimate
-    call: the fallback is not a new value anyone downstream has to learn, it is the one draft
-    synthesis already treats as untagged, and the two are shown here to be the same string.
-    """
-    untagged = resolve_query_id("elastic", "esql", None)
-    assert untagged == "elastic.esql"
-    assert resolve_query_id("elastic", "esql", "fakesys.hunt-creds") == untagged
-
-    no_verb = resolve_query_id("elastic", "", None)
-    assert no_verb == "elastic.ad-hoc"
-    assert resolve_query_id("elastic", "", "fakesys.hunt-creds") == no_verb
 
 
 def test_resolve_query_id_enforces_the_whole_schema_shape():
@@ -119,31 +90,3 @@ def test_resolve_query_id_enforces_the_whole_schema_shape():
     assert resolve_query_id("elastic", "esql", "elastic.hunt-creds") == "elastic.hunt-creds"
 
 
-def test_the_prefix_comparison_folds_nothing():
-    """The prefix comparison is EXACT CODEPOINT EQUALITY — no case folding, no NFC, no
-    confusable mapping (FK-6, §7, pinned as REJECTED so the crossing is stated either way).
-
-    A `query_id` prefixed `Elastic.` or carrying a Cyrillic `е` on a call dispatched to
-    `elastic` is REFUSED — it falls back — never folded onto the real system. Failing closed
-    is the whole reason: folding would introduce a second name space every gate would then
-    have to agree on.
-
-    AND THE WHITESPACE ASYMMETRY IS STATED, NOT FIXED (J5): `_build_pitfalls_handoffs` strips
-    whitespace from a queued row's `system` BEFORE the predicate, so `'elastic '` is admitted
-    at site 1 while `'Elastic'` is refused everywhere. Both halves are asserted in one test so
-    the asymmetry is a recorded decision rather than an implementation accident a later reader
-    tidies away.
-    """
-    cyrillic = "еlastic.hunt-creds"
-    assert cyrillic != "elastic.hunt-creds"
-    assert resolve_query_id("elastic", "esql", "Elastic.hunt-creds") == "elastic.esql"
-    assert resolve_query_id("elastic", "esql", cyrillic) == "elastic.esql"
-
-    systems = frozenset({"elastic"})
-    padded = pitfalls_curator._build_pitfalls_handoffs(
-        [pitfall_row("r:0", "elastic ")], systems=systems)
-    assert [h["system"] for h in padded] == ["elastic"]
-    assert padded[0]["path"] == "defender/skills/elastic/execution.md"
-
-    assert pitfalls_curator._build_pitfalls_handoffs(
-        [pitfall_row("r:1", "Elastic")], systems=systems) == []

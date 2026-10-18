@@ -1,18 +1,4 @@
-"""The `:L findings` `tests` column stops losing tokens between two regexes (#932 follow-up).
-
-The column is MIXED — a lead names the hypotheses it discriminates and the commitments it was
-run for — and both readers used to SELECT their kind with a `fullmatch` inside a comprehension.
-A token in neither namespace was therefore skipped by both and validated clean. Three shapes
-had that property, and one of them is not even a defect:
-
-* `h_888` / `H-888` — malformed, and the old docstring accepted them as the price of the gate;
-* `h-001.ac1` — the QUALIFIED spelling spec rule #7 blesses, written by `.defender-runs/turnN-A`
-  l-003 as its entire `tests` cell, which meant that lead's whole column reached no rule at all.
-
-`_classify_tests_token` resolves every token exhaustively and the residue is a finding, not a
-silence. Each violation below is paired with a LIVENESS CONTROL so a check that stopped running
-fails here rather than passing vacuously.
-"""
+"""The `:L findings` `tests` column stops losing tokens between two regexes (#932 follow-up)."""
 
 from __future__ import annotations
 

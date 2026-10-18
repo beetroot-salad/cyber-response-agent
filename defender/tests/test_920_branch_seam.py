@@ -1,51 +1,10 @@
-"""#920 PR 1 — the turn-N branch seam: what may be branched from, and where the fork lands.
-
-`defender/runtime/branch.py` does not exist at the base this spec forks from, so the module
-is reached through `branch_mod()` (the `_session_store_705.store_mod()` idiom) rather than a
-top-level import: a missing target then produces one failure *per test* instead of one
-collection error for the whole file.
-
-WHAT THIS FILE OWNS, AND WHAT IT DELIBERATELY DOES NOT
-------------------------------------------------------
-Three things, matching the three halves of the runtime PR:
-
-1. **The caller contract around `fork`** (issue O1, claim C4). `session_store.fork()` is NOT
-   under test here and is NOT re-pinned: `tests/test_session_head_fork_754.py:311`
-   (`test_a_fresh_fork_renders_its_inherited_prefix_exactly_once`) already owns its
-   `last_render_len` seeding, and #920's own first trap is "do not fix `fork`". What is
-   demanded here is the OTHER half of the same number — that `hydrate(role="send")` produces
-   exactly the list `fork` already charged the child for, so an `agent.iter` handed that list
-   as `message_history` ingests one row per genuinely new message and none for the prefix.
-   The negative arm (a fresh, empty framework list underflowing) is what makes the positive
-   arm mean something, and #754 pins neither.
-
-2. **The store factory** (design M1). A sibling gets its own run dir but must fork INTO the
-   source run's database — the prefix rows are there and `fork` walks parents inside one
-   transaction. The observable is a PATH, compared against `session_store.resolve_store_path`
-   of the source run dir, because "it opened a store" is satisfied by opening the wrong one:
-   `open_store` creates-if-missing, so a factory that mis-derives `runs_base` succeeds, hands
-   back an empty database, and fails much later with an error naming neither.
-
-3. **Branch-point legality** (design M1's precondition) — MOVED by #1255 onto driven sources
-   (`tests/e2e/test_1255_snapshot_legality.py`; the section below says where each went). A branch point exists to carry a pair
-   of worlds that are both consistent with the captured evidence and that differ on something
-   still open. With no capture the consistency claim is vacuous — that is the generated-world
-   design #920 rejected, reached by branching too early — and with an empty frontier there is
-   nothing for the pair to divide. The frontier is read AT THE BRANCH POINT, not at the end of
-   the run, and that arm is what separates a real implementation from one that reads the
-   finished document and calls it the frontier.
-
-The driver wiring itself (`resume=`, `message_history=`) is driven end-to-end in
-`tests/e2e/test_920_branch_resume.py`; only the two named seams are checked here, and only as
-signatures, so a rename is loud rather than silently uncovered.
-"""
+"""#920 PR 1 — the turn-N branch seam: what may be branched from, and where the fork lands."""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 from defender.tests._spec1077 import fixture_run
 
-import dataclasses
 import importlib
 import inspect
 from pathlib import Path
@@ -329,37 +288,3 @@ def test_a_fresh_run_seeds_no_document(tmp_path):
 
 # the two named seams
 
-def test_branch_spec_carries_no_continuation_prompt():
-    """    `BranchSpec` is the whole of what a resume is told: which run to read from, which of its
-    MAIN responses to fork at, and WHEN the branch point was. Since #1255 (D1, P4) it carries
-    no continuation prompt: an arm resumes with no user message at all, so there is nothing to
-    say on arrival and nothing in the instrument whose wording could bias the siblings.
-
-    Before #1255 this test pinned `continuation_prompt` as a required field ("the prompt is
-    part of the measured instrument"); P4 removes the instrument instead of measuring it.
-    `as_of`'s own demands — the derivation, and `validate`'s cross-check — are
-    `test_947_clock.py`'s."""
-    branch = branch_mod()
-    names = [f.name for f in dataclasses.fields(branch.BranchSpec)]
-    assert {"source_run_dir", "branch_message_id", "as_of"} <= set(names), (
-        f"BranchSpec lost a branch coordinate: {names}")
-    assert "continuation_prompt" not in names, (
-        f"BranchSpec still declares the operator's continuation prompt (P4): {names}")
-
-
-def test_the_driver_carries_the_two_resume_seams():
-    """    `run_investigation` accepts `resume`, and `_drive_agent` accepts `message_history` — the
-    two parameters #920's discussion corrected the issue on ("no driver change is needed is
-    wrong; three are").
-
-    A signature check, deliberately: what those parameters DO is driven end-to-end in
-    `tests/e2e/test_920_branch_resume.py`, and this exists so a rename fails loudly here
-    rather than leaving the e2e file the only thing that names them."""
-    # provenance: claim C3 (executed) — "agent.iter(prompt, deps=deps, usage_limits=...) — no
-    # message_history"; the discussion's three corrected driver sites.
-    driver = importlib.import_module("defender.runtime.driver")
-    assert "resume" in inspect.signature(driver.run_investigation).parameters, (
-        "run_investigation has no `resume` parameter — a branch has no supported entry point")
-    assert "message_history" in inspect.signature(driver._drive_agent).parameters, (
-        "_drive_agent cannot be handed an inherited prefix, so a resumed run's first request "
-        "starts from an empty framework list and underflows at ingest")

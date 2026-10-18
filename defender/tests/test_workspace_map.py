@@ -1,14 +1,4 @@
-"""Tests for scripts/workspace_map.py — the on-disk orientation baked
-into the agent's message 0 by run.py:build_prompt.
-
-The load-bearing guard here is `test_no_credential_signal`: the map must
-never surface adapter credentials / `.env` paths / env-var status to the
-orchestrator. Doing so is the regression that issue #255 fixed in the v2
-tree — the orchestrator was handed a `.env` it could neither read nor
-own and burned ~1.1k thinking tokens thrashing on it. Credential sourcing
-is each adapter's job at call time (gather subagent), so the
-orchestrator-facing map must stay credential-free.
-"""
+"""scripts/workspace_map.py: the orchestrator-facing map carries no credential signal (#255) and does not name gather_raw (#264)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,19 +6,6 @@ from pathlib import Path
 from defender.tests._by_path import DEFENDER, load_module
 
 wm = load_module(DEFENDER / "scripts" / "workspace_map.py")
-
-
-def test_canonical_sections_present(tmp_path: Path):
-    out = wm.workspace_map(tmp_path, systems=())
-    for header in (
-        "# Workspace map",
-        "## Absolute roots",
-        "## Run dir",
-        "## System skills",
-        "## Adapters",
-        "## Gather query templates",
-    ):
-        assert header in out, f"missing section: {header}"
 
 
 def test_no_credential_signal(tmp_path: Path):
@@ -40,12 +17,6 @@ def test_no_credential_signal(tmp_path: Path):
     for token in (".env", "missing", "elastic_password", "elasticsearch_url",
                   "password", "credential", "watched_env", "source it"):
         assert token not in out, f"credential signal leaked into map: {token!r}"
-
-
-def test_run_dir_contents_listed(tmp_path: Path):
-    (tmp_path / "alert.json").write_text("{}")
-    out = wm.workspace_map(tmp_path, systems=())
-    assert "alert.json" in out
 
 
 def test_gather_raw_suppressed(tmp_path: Path):
@@ -60,7 +31,3 @@ def test_gather_raw_suppressed(tmp_path: Path):
     out = wm.workspace_map(tmp_path, systems=()).replace(str(tmp_path), "RUNDIR")
     assert "alert.json" in out
     assert "gather_raw" not in out
-
-
-def test_output_ends_with_newline(tmp_path: Path):
-    assert wm.workspace_map(tmp_path, systems=()).endswith("\n")

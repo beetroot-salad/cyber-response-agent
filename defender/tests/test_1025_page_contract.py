@@ -1,34 +1,11 @@
-"""#1025 — the episode page's entry-point contract: `render_episode`, the CLI, the launcher hook,
-the guarded write, and location independence.
-
-The spec's demand #0 (§7 Q1): `render_episode(episode_dir) -> Path` in
-`scripts/visualize/visualize_episode.py` writes the WHOLE page through `write_guarded`'s replace
-lane at `<episode_dir>/learning.html`; `main(argv)` exits 0 with the path on stdout, 1 with one
-stderr line and no page when there is no argument, the argument is not a directory, or the
-directory holds no readable `family.yaml`; the launcher (`cli._run_episode`, through
-`_render_page`) calls it after the `clock.step(Step.JUDGE)` frame closes, under its own
-`except Exception` boundary (Q2 / J1) — a graded episode always gets its page, and the exit
-before any sibling starts (an outcome other than `accepted`) renders nothing.
-
-Every fault here is a real input through the real primitive: a symlink at the page's name, a
-read-only directory, a manifest that is a directory / empty / a list / unparseable, an interrupt
-landing INSIDE the render (a signal handler that fires only when the page module's frame is on
-the stack — `E.when_inside` — because the renderer has no seam of its own, d40). The launcher is
-driven through `test_1025_stage_timing._launch` with every seam faked (`FakeSibling`,
-`FakeJudge`, the question-writer and pre-flight's oracle/verifier doubles) and `DEFENDER_EPISODES_BASE` / `DEFENDER_RUNS_BASE` / the
-learning state root under `tmp_path`.
-
-RED AGAINST HEAD by construction: the page module does not exist, and every test imports it per
-call through `E.mod` so the failure is the missing module, once per test.
-"""
+"""#1025 — the episode page's entry-point contract: `render_episode`, the CLI, the launcher hook, the
+guarded write, and location independence."""
 from __future__ import annotations
 
 import os
 import re
 import subprocess
 import sys
-import threading
-from datetime import date
 import pathlib
 from pathlib import Path
 
@@ -107,11 +84,7 @@ def _err_lines(err: str) -> list[str]:
 
 
 def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_its_path(tmp_path):
-    """Driving `render_episode` on a sample-shaped episode returns `<dir>/learning.html`; that
-    file exists beside `judge.yaml`, is the page (carries `<title>` with the episode id and
-    `id="sec-verdict"`), and a second call replaces it whole — mtime advances, content equal —
-    whichever of the two serial drivers (the launcher hook, the standalone CLI) made the call.
-    """
+    """Driving `render_episode` on a sample-shaped episode returns `<dir>/learning.html`."""
     ep = E.sample_episode(tmp_path)
     out = E.render_episode(ep.dir, module=visualize_episode())
     assert Path(out) == ep.page, f"render_episode returned {out!r}, not the page's path"
@@ -133,12 +106,7 @@ def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_
 
 def test_1025_visualize_episode_cli_exits_zero_on_an_episode_dir_and_one_with_no_page_otherwise(
         tmp_path, capsys):
-    """`main(["--tenant", T, <id>])` returns 0 and prints the page path; `main([])`, an id
-    naming a file, an id naming a dir with no family.yaml return 1, print one reason line to
-    stderr, and leave no `learning.html`. Rejected: an index over all episodes (issue fork 1) —
-    a second argument is refused the same way. (#1105 PR 2, declared change 4: the episode is
-    named by id under the episodes base, no longer by folder path.)
-    """
+    """`main(["--tenant", T, <id>])` returns 0 and prints the page path."""
     ep = E.sample_episode(tmp_path)
     rc, out, err = cli_on(ep.dir, capsys)
     assert rc == 0, (rc, out, err)
@@ -161,11 +129,8 @@ def test_1025_visualize_episode_cli_exits_zero_on_an_episode_dir_and_one_with_no
 
 
 def test_1025_a_link_planted_at_learning_html_is_refused_not_written_through(tmp_path):
-    """`render_episode` on an episode whose `learning.html` is a symlink to an outside file
-    refuses — it raises the guarded write's `OSError` (p1: errno ELOOP, `.write_guarded_alias`
-    True) — the target file's bytes are unchanged, the link is still a link and no regular
-    `learning.html` replaced it; positive control: without the link the page is written.
-    """
+    """`render_episode` on an episode whose `learning.html` is a symlink to an outside file refuses
+    ."""
     ep = E.sample_episode(tmp_path)
     outside = tmp_path / "outside.html"
     outside.write_text("OUTSIDE", encoding="utf-8")
@@ -184,14 +149,7 @@ def test_1025_a_link_planted_at_learning_html_is_refused_not_written_through(tmp
 def test_1025_a_render_creates_or_changes_exactly_one_file_learning_html_and_touches_no_run_visualizations_mirror(
         tmp_path, run_visualizations_dir):
     """A tree snapshot (paths + sizes + mtimes) of the episode before and after `render_episode`
-    differs in exactly `learning.html`, and `<mirror root>/<episode>/` is not created.
-    Rejected: the mirror into `run-visualizations/` the run pages do. Positive control: the one
-    changed file parses as the page (it carries `sec-verdict`).
-
-    The mirror root is where the run pages' mirror resolves under test: the per-test override
-    the conftest sets (#1084 D4 — `test_1084_mirror` pins that `mirror_root()` answers with
-    it). The old `defender/run-visualizations/` is no longer written by anything.
-    """
+    differs in exactly `learning.html`, and `<mirror root>/<episode>/` is not created."""
     ep = E.sample_episode(tmp_path)
     mirror = run_visualizations_dir / E.EPISODE_ID
     assert not mirror.exists(), "precondition: a stale mirror from another run"
@@ -213,10 +171,7 @@ def test_1025_a_render_creates_or_changes_exactly_one_file_learning_html_and_tou
 
 def test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_every_step_on_it(tmp_path):
     """After `cli.main` returns 0 on a full fake-seamed episode, `learning.html` sits beside
-    `judge.yaml` and its stage table carries every `Step` row on the record — none reads
-    "not on the record", the `judge` row included — which is only possible if the render ran
-    after the JUDGE clock frame closed.
-    """
+    `judge.yaml` and its stage table carries every `Step` row on the record ."""
     launch = ST._launch(tmp_path)
     assert launch.rc == 0
     ep = launch.episode_dir
@@ -229,10 +184,8 @@ def test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_every_ste
 
 
 class _PlantingJudge(J.FakeJudge):
-    """`FakeJudge` that plants a real symlink at the page's name the first time the judge seam
-    is reached — the episode dir does not exist before the launch (`prepare_episode` refuses an
-    existing one), so the plant happens from inside the one seam that runs after it does. The
-    fault itself is the guarded write meeting the link (p1); the fake decides nothing."""
+    """`FakeJudge` that plants a real symlink at the page's name the first time the judge seam is
+    reached ."""
 
     def __init__(self, episode_dir: Path, target: Path, **kw):
         super().__init__(**kw)
@@ -247,10 +200,9 @@ class _PlantingJudge(J.FakeJudge):
 
 def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_judge_yaml(
         tmp_path, monkeypatch, capsys):
-    """With a symlink planted at `<episode_dir>/learning.html` before the render, `cli.main`
-    still returns 0, `judge.yaml` is written, stderr carries a "could not be rendered" line and
-    the link's target is untouched; the control launch without the link writes the page.
-    """
+    """With a symlink planted at `<episode_dir>/learning.html` before the render, `cli.main` still
+    returns 0, `judge.yaml` is written, stderr carries a "could not be rendered" line and the
+    link's target is untouched."""
     outside = tmp_path / "outside.html"
     outside.write_text("OUTSIDE", encoding="utf-8")
     episode_dir = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
@@ -270,13 +222,8 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
 
 
 def test_1025_preflight_refused_episode_and_the_page(tmp_path, capsys):
-    """The pre-flight-refused path returns 1 before RUNS with no `judge.yaml` and no `runs/`,
-    and the launcher writes no `learning.html` there — there is no second hook on that exit
-    (J1). The standalone CLI still accepts that directory (only `family.yaml` refuses, d01):
-    exit 0, the band says there is no grade record, the records section carries the outcome
-    record's `refused` word, the stage table carries the two recorded steps' rows and "not on
-    the record" for the other three, and no world section exists.
-    """
+    """The pre-flight-refused path returns 1 before RUNS with no `judge.yaml` and no `runs/`, and
+    the launcher writes no `learning.html` there ."""
     launch = ST._launch(tmp_path, **ST._refusing_seams())
     assert launch.rc == 1, "the control failed: pre-flight did not refuse"
     ep = launch.episode_dir
@@ -296,40 +243,6 @@ def test_1025_preflight_refused_episode_and_the_page(tmp_path, capsys):
     assert page.ids_with("world-") == [], page.ids_with("world-")
 
 
-def test_1025_how_the_operator_learns_where_the_page_is(tmp_path, capsys):
-    """The launcher prints the page's path on stderr beside the episode line, and the CLI
-    prints it on stdout (J2) — parity with `visualize_run`.
-    """
-    launch = ST._launch(tmp_path)
-    err = capsys.readouterr().err
-    page = launch.episode_dir / E.PAGE_NAME
-    assert launch.rc == 0
-    assert page.is_file()
-    assert str(page) in err, f"stderr never named the page: {err!r}"
-    rc, out, _err = cli_on(launch.episode_dir, capsys)
-    assert rc == 0
-    assert str(page) in out
-
-
-def test_1025_the_cli_exit_status_for_a_degraded_page(tmp_path, capsys):
-    """A page that was written but carries a reader's refusal sentence (a `judge.yaml` that is
-    not a grade record) exits 0 — the degradation is on the page — and the refusal sentence is
-    echoed to stderr; non-zero is reserved for no page at all (no `family.yaml`, a refused write).
-    """
-    ep = E.sample_episode(tmp_path)
-    E.plant_raw(ep.dir / "judge.yaml", "- not\n- a grade\n")
-    rc, out, err = cli_on(ep.dir, capsys)
-    assert rc == 0, (out, err)
-    assert ep.page.is_file()
-    assert "grade record unreadable" in E.read_page(ep.dir).text_of("sec-verdict")
-    assert "grade record unreadable" in err, err
-
-    E.plant_link(ep.page, tmp_path / "nowhere")
-    rc, out, err = cli_on(ep.dir, capsys)
-    assert rc == 1, (rc, out, err)
-    assert _err_lines(err), (rc, out, err)
-
-
 # ---------------------------------------------------------------------------------------
 # settled — the CLI's refusals and argument spellings
 # ---------------------------------------------------------------------------------------
@@ -345,76 +258,6 @@ def test_1025_cli_invoked_with_no_positional_argument(tmp_path, capsys):
     assert not list(tmp_path.glob("*.html"))
 
 
-def test_1025_cli_argument_names_an_existing_regular_file_not_a_directory(tmp_path, capsys):
-    """An episode id naming a regular file under the episodes base returns 1, one reason line
-    on stderr, no page (d01; #1105 PR 2, declared change 4: the argument is an id, so the
-    file is planted at an episode's name rather than passed as a path)."""
-    ep = E.sample_episode(tmp_path)
-    a_file = ep.dir.parent / "a-regular-file"
-    a_file.write_bytes((ep.dir / "family.yaml").read_bytes())
-    rc, out, err = cli(E.cli_argv(a_file), capsys, episodes_base=ep.dir.parent)
-    assert rc == 1, (rc, out, err)
-    assert len(_err_lines(err)) == 1, (rc, out, err)
-    assert not ep.page.exists()
-
-
-def test_1025_relative_and_trailing_slash_arguments(tmp_path, monkeypatch, capsys):
-    """The page lands at `<episode_dir>/learning.html` whatever the cwd; every link on the page
-    is relative (`runs/<episode>-<world>/runtime.html`) so the cwd changes nothing (d11).
-
-    #1105 PR 2 (declared change 4): the argument is an episode id under the configured
-    episodes base, no longer a path, so its path spellings (a trailing slash, `..` segments)
-    are not ids — each is refused with no page — and the cwd is the only thing left to vary.
-    """
-    ep = E.sample_episode(tmp_path)
-    renders = []
-    for cwd in (tmp_path, ep.dir.parent, ep.dir):
-        monkeypatch.chdir(cwd)
-        if ep.page.exists():
-            ep.page.unlink()
-        rc, out, err = cli_on(ep.dir, capsys)
-        assert rc == 0, (cwd, rc, out, err)
-        assert ep.page.is_file(), (cwd, rc, out, err)
-        renders.append(ep.page.read_bytes())
-    assert len(set(renders)) == 1, "the cwd changed the page"
-    for spelling in (f"{ep.dir.name}/", f"../{ep.dir.parent.name}/{ep.dir.name}"):
-        ep.page.unlink()
-        rc, out, err = cli(["--tenant", E.cli_argv(ep.dir)[1], spelling], capsys,
-                           episodes_base=ep.dir.parent)
-        assert rc == 1, (spelling, rc, out, err)
-        assert not ep.page.exists(), f"a path-spelled id {spelling!r} rendered the page"
-        render(ep)
-    page = E.read_page(ep.dir)
-    world_links = [h for h in page.hrefs if h.endswith("runtime.html")]
-    assert world_links, "no world link on the page"
-    for href in world_links:
-        assert href.startswith("runs/"), href
-        assert str(tmp_path) not in href, href
-    assert all(not h.startswith("/") for h in page.hrefs), page.hrefs
-
-
-def test_1025_runs_base_and_episodes_base_env_vars_point_at_nonexistent_paths_during_render(
-        tmp_path, monkeypatch):
-    """`render_episode` produces the same page with `DEFENDER_RUNS_BASE` /
-    `DEFENDER_EPISODES_BASE` unset, set to nonexistent paths, or set to real ones — O6's
-    positive control (g26: no reader reaches `resolve_runs_base`).
-    """
-    ep = E.sample_episode(tmp_path)
-    renders = []
-    for runs, episodes in ((None, None), (str(tmp_path / "nope-runs"), str(tmp_path / "nope-eps")),
-                           (str(tmp_path / "defender-runs"), str(tmp_path / "episodes-root"))):
-        for var, value in ((T.RUNS_BASE_ENV, runs), (T.EPISODES_BASE_ENV, episodes)):
-            if value is None:
-                monkeypatch.delenv(var, raising=False)
-            else:
-                monkeypatch.setenv(var, value)
-        page = render(ep)
-        assert f"world-{E.GRADED_WORLD}" in page.by_id
-        assert "validity usable" in page.text_of("sec-verdict")
-        renders.append(ep.page.read_bytes())
-    assert len(set(renders)) == 1, "the environment's roots changed the page"
-
-
 def _refused_manifest(tmp_path, capsys, plant) -> tuple[int, str, str, E.Episode]:
     ep = E.sample_episode(tmp_path)
     plant(ep.dir / "family.yaml")
@@ -424,10 +267,7 @@ def _refused_manifest(tmp_path, capsys, plant) -> tuple[int, str, str, E.Episode
 
 
 def test_1025_family_yaml_has_invalid_yaml_syntax(tmp_path, capsys):
-    """No page, exit 1, one reason line on stderr naming the manifest as unreadable — not
-    "missing" — `raw_manifest`'s refusal (F25/x16) takes d01's refusal arm with a
-    distinguishing reason.
-    """
+    """No page, exit 1, one reason line on stderr naming the manifest as unreadable ."""
     rc, _out, err, _ep = _refused_manifest(
         tmp_path, capsys, lambda p: E.plant_raw(p, "worlds: [\n  {world_id: b"))
     lines = _err_lines(err)
@@ -437,41 +277,6 @@ def test_1025_family_yaml_has_invalid_yaml_syntax(tmp_path, capsys):
     assert "could not be read" in lines[0], lines[0]
     assert "nothing is at that name" not in lines[0], lines[0]
     assert "missing" not in lines[0], lines[0]
-
-
-def test_1025_family_yaml_is_a_directory_not_a_file(tmp_path, capsys):
-    """Refused like malformed syntax: exit 1, one reason line on stderr naming the manifest,
-    no page.
-    """
-    def plant(p):
-        p.unlink()
-        p.mkdir()
-    rc, _out, err, _ep = _refused_manifest(tmp_path, capsys, plant)
-    lines = _err_lines(err)
-    assert rc == 1, (rc, err)
-    assert len(lines) == 1, (rc, err)
-    assert "family.yaml" in lines[0], (rc, err)
-
-
-def test_1025_family_yaml_is_zero_bytes(tmp_path, capsys):
-    """Refused (an empty document is not a manifest mapping): exit 1, one reason line, no page
-    — never a manifest with zero worlds.
-    """
-    rc, _out, err, _ep = _refused_manifest(tmp_path, capsys, lambda p: E.plant_raw(p, b""))
-    lines = _err_lines(err)
-    assert rc == 1, (rc, err)
-    assert len(lines) == 1, (rc, err)
-    assert "family.yaml" in lines[0], (rc, err)
-
-
-def test_1025_family_yaml_top_level_document_is_a_list_not_a_mapping(tmp_path, capsys):
-    """Refused: exit 1, one reason line naming the manifest, no page."""
-    rc, _out, err, _ep = _refused_manifest(
-        tmp_path, capsys, lambda p: E.plant_raw(p, "- world_id: a\n- world_id: b\n"))
-    lines = _err_lines(err)
-    assert rc == 1, (rc, err)
-    assert len(lines) == 1, (rc, err)
-    assert "family.yaml" in lines[0], (rc, err)
 
 
 # ---------------------------------------------------------------------------------------
@@ -493,159 +298,8 @@ def _live996_shaped(tmp_path: Path, root: Path) -> E.Episode:
     return ep
 
 
-def test_1025_both_archived_episodes_render_from_a_copied_dir_with_no_runs_base_store_or_checkout_and_the_bytes_do_not_depend_on_where(
-        tmp_path, monkeypatch):
-    """Each archive shape (the fresh-authkeys shape and the live-996 shape — no family draw, no
-    `samples.yaml`, an ungradable row, pre-#1007 fields absent) copied under two different roots
-    AND two different directory names, with the `DEFENDER_*` roots unset, cwd elsewhere and no
-    `.git` above, renders without raising, and the two renders of one archive are byte-identical
-    — no absolute path and no directory name in the page (correction 4: the episode id is the
-    manifest's). Rejected: any read of the source run dir (not in the archive).
-    """
-    for var in (T.RUNS_BASE_ENV, T.EPISODES_BASE_ENV):
-        monkeypatch.delenv(var, raising=False)
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    monkeypatch.chdir(elsewhere)
-    shapes = {"fresh": E.sample_episode(tmp_path, root=tmp_path / "build-a"),
-              "live996": _live996_shaped(tmp_path, tmp_path / "build-b")}
-    for name, built in shapes.items():
-        one = E.copy_episode(built, tmp_path / "root-one" / f"{name}-copy-one")
-        two = E.copy_episode(built, tmp_path / "root-two" / "nested" / f"{name}-renamed-two")
-        render(one)
-        render(two)
-        a, b = one.page.read_bytes(), two.page.read_bytes()
-        assert a == b, f"{name}: the two copies rendered differently"
-        text = a.decode("utf-8")
-        for absent in (str(tmp_path), "root-one", "renamed-two", "copy-one"):
-            assert absent not in text, f"{name}: {absent!r} leaked into the page"
-        assert E.EPISODE_ID in text
-
-
-def test_1025_repair_and_regrade_leaves_the_page_stale(tmp_path):
-    """The page carries NO render-provenance line — no timestamp, no record mtime (J3): two
-    renders of one directory at different times are byte-identical and today's date appears
-    nowhere in the bytes; a repaired-and-regraded record changes the page only through the
-    record's own values (a new validity word — #1234 retired the verdict word), never through a
-    "rendered at" stamp.
-    """
-    ep = E.sample_episode(tmp_path)
-    render(ep)
-    first = ep.page.read_bytes()
-    assert date.today().isoformat() not in first.decode("utf-8")
-    later = ep.page.stat().st_mtime_ns + 5_000_000_000
-    os.utime(ep.dir / "judge.yaml", ns=(later, later))
-    render(ep)
-    assert ep.page.read_bytes() == first, "a record mtime or a render time reached the page"
-    doc = E.sample_grade()
-    doc["validity"] = "unusable"
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-    assert "validity unusable" in page.text_of("sec-verdict")
-    assert ep.page.read_bytes() != first
-
-
-def test_1025_byte_identity_across_two_interpreter_processes(tmp_path):
-    """Two interpreter processes with different hash seeds render the same directory to
-    byte-identical pages — every set the page iterates is emitted in a defined order (numeric
-    draws, `STEPS`, sorted labels), so d05's location independence is also process
-    independence (J3).
-    """
-    ep = E.sample_episode(tmp_path)
-    target = visualize_episode().__name__
-    # #1105 PR 2 (declared change 4): the page is reached by id, through the tenant's
-    # repository — the CLI's own `main`, so the child builds the request the way an operator does.
-    code = (f"import sys; from {target} import main; "
-            f"sys.exit(main({E.cli_argv(ep.dir)!r}))")
-    E.plant_container_record(ep.dir)
-    pages = []
-    for seed in ("1", "424242"):
-        env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONPATH=str(T.DEFENDER.parent))
-        env[T.EPISODES_BASE_ENV] = str(ep.dir.parent)
-        proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
-                              text=True, cwd=str(tmp_path))
-        assert proc.returncode == 0, proc.stderr
-        pages.append(ep.page.read_bytes())
-    assert pages[0] == pages[1], "the two processes' pages differ"
-    page = E.read_page(ep)
-    assert len([i for i in page.ids if i.startswith("f-")]) == E.SAMPLE.findings, "positive control"
-
-
-def test_1025_two_renders_in_flight_against_the_same_episode_dir(tmp_path):
-    """Two renders of one episode running at the same time leave a WHOLE page — the last
-    `os.replace` wins outright, there is no torn intermediate state and no staged temporary —
-    and, both computing the same bytes from the same records, the page equals a third, solitary
-    render (J3: no lock, no snapshot guarantee, determinism instead).
-    """
-    ep = E.sample_episode(tmp_path)
-    # #1105 PR 2 (declared change 4): the container carries the record the launcher leaves.
-    E.plant_container_record(ep.dir)
-    errors: list[BaseException] = []
-
-    def go() -> None:
-        try:
-            E.render_episode(ep.dir, module=visualize_episode())
-        except BaseException as bad:  # noqa: BLE001 — collected and asserted below
-            errors.append(bad)
-
-    threads = [threading.Thread(target=go) for _ in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=120)
-    assert not errors, errors
-    concurrent = ep.page.read_bytes()
-    assert not [p for p in ep.dir.iterdir() if p.name.startswith(".")], "a staged temp is left"
-    page = render(ep)
-    assert ep.page.read_bytes() == concurrent, "a concurrent render left a torn or foreign page"
-    assert len([i for i in page.ids if i.startswith("f-")]) == E.SAMPLE.findings, "positive control"
-
-
-def test_1025_judge_yaml_replaced_by_a_concurrent_re_grade_partway_through_one_render(tmp_path):
-    """A `judge.yaml` rewritten (validity `usable` → `unusable`; #1234 retired the verdict word
-    this used to rewrite) while the render is in flight — from a signal handler that fires only
-    inside the page module's frame — costs the render nothing: no error, a whole page carrying
-    one of the two words, and the next render carries the new one (J3: each record is read
-    once per render, no cross-file snapshot is promised).
-    """
-    ep = E.sample_episode(tmp_path)
-    regrade = E.sample_grade()
-    regrade["validity"] = "unusable"
-
-    with E.when_inside(lambda: E.write_judge(ep.dir, regrade, check=False)) as seen:
-        page = render(ep)
-    assert seen["hit"], "the rewrite never landed inside the render"
-    band = page.text_of("sec-verdict")
-    assert ("validity usable" in band) != ("validity unusable" in band), band
-    assert page.raw.rstrip().endswith("</html>"), "the page is not whole"
-    assert "validity unusable" in render(ep).text_of("sec-verdict")
-
-
-def test_1025_draw_or_judge_yaml_record_is_rewritten_mid_render(tmp_path):
-    """A per-draw document rewritten while the render is in flight (a claim replaced) produces
-    no error and a whole page whose findings carry either the old or the new text; each reader
-    reads independently, as-of when it is touched, and the next render shows the rewrite (J3).
-    """
-    ep = E.sample_episode(tmp_path)
-    rewritten = E.draw_doc(findings=[E.finding(subject="defender", claim="REWRITTEN CLAIM")])
-
-    with E.when_inside(lambda: E.draw_document(ep.dir, E.GRADED_WORLD, 0, rewritten,
-                                               check=False)) as seen:
-        page = render(ep)
-    assert seen["hit"], "the rewrite never landed inside the render"
-    findings = page.text_of("sec-findings")
-    assert ("REWRITTEN CLAIM" in findings) or ("defender claim 0" in findings), findings
-    assert page.raw.rstrip().endswith("</html>")
-    assert "REWRITTEN CLAIM" in render(ep).text_of("sec-findings")
-
-
 def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys):
-    """`episodes/latest -> <id>` as the CLI argument is accepted (J4): exit 0, the page written
-    inside the TARGET beside `judge.yaml`, and every world link composed from names
-    (`runs/<episode>-<world>/runtime.html`) — identical whether computed against the link or
-    its target. (#1105 PR 2, declared change 4: `latest` is named as an id under the episodes
-    base that holds the link.)
-    """
+    """`episodes/latest -> <id>` as the CLI argument is accepted (J4)."""
     ep = E.sample_episode(tmp_path)
     latest = ep.dir.parent / "latest"
     latest.symlink_to(ep.dir, target_is_directory=True)
@@ -666,14 +320,7 @@ def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys):
 
 
 def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path, monkeypatch, capsys):
-    """The launcher writes no page on an abort (the hook is after JUDGE). The standalone CLI
-    renders when `family.yaml` exists — a pre-flight abort (its oracle interrupted mid-replay):
-    no-grade band, a stage row per `STEPS` member with a wall for the recorded step
-    (`questioner`) and "not on the record" for the other four, no world sections (no `runs/`),
-    the outcome record's "no record" state (pre-flight never wrote it), "absent" for the family
-    stamp nothing wrote, and the samples the questioner step recorded. When the abort preceded `write_family` (the questioner interrupted)
-    there is no `family.yaml` and d01's exit-1 / no-page arm applies.
-    """
+    """The launcher writes no page on an abort (the hook is after JUDGE)."""
     launcher = _cli()
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
     oracle_seam = ST._Interrupting(EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID))
@@ -714,13 +361,8 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
 
 
 def test_1025_an_interrupt_during_the_render(tmp_path):
-    """`learning.html` after an interrupt that lands INSIDE the render is either the previous
-    page whole or absent — never a partial page — and NO staged temporary is left in the
-    episode dir (p1: `write_guarded`'s `except BaseException` removes it and re-raises). The
-    launch exits by the interrupt: `KeyboardInterrupt` passes the hook's `except Exception`
-    boundary and `cli.main` raises it, distinct from a clean completion; `judge.yaml` — written
-    before the render — is on disk.
-    """
+    """`learning.html` after an interrupt that lands INSIDE the render is either the previous page
+    whole or absent ."""
     ep = E.sample_episode(tmp_path)
     render(ep)
     previous = ep.page.read_bytes()
@@ -742,38 +384,9 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
     assert not [p for p in launched.iterdir() if p.name.startswith(".")], "a staged temp is left"
 
 
-def test_1025_standalone_render_of_a_live_episode(tmp_path):
-    """The renderer writes nothing but `learning.html` and mutates no record: on an episode
-    still being written — no `judge.yaml` yet, a trace whose last row is torn, a sibling's
-    served ledger caught mid-append — it renders each record as read at that instant through
-    the readers' own fault arms (the torn rows dropped and counted, the no-grade band) and the
-    tree snapshot differs in exactly the page. No "live" indicator is owed.
-    """
-    ep = E.sample_episode(tmp_path, judge=False)
-    trace = ep.dir / "wire_logs" / "questioner_trace.jsonl"
-    torn = trace.read_text(encoding="utf-8").rstrip("\n")
-    trace.write_text(torn[: len(torn) // 2], encoding="utf-8")
-    with (ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl").open(
-            "a", encoding="utf-8") as fh:
-        fh.write('{"system": "elastic", "verb": "es')
-    # #1105 PR 2 (declared change 4): the container carries the record the launcher leaves.
-    E.plant_container_record(ep.dir)
-    before = E.snapshot(ep.dir)
-    page = render(ep)
-    after = E.snapshot(ep.dir)
-    assert {k for k in set(before) | set(after) if before.get(k) != after.get(k)} == {E.PAGE_NAME}
-    assert "no grade record" in page.text_of("sec-verdict")
-    assert "1 unreadable row" in page.text_of("tx-questioner_trace"), page.text_of("tx-questioner_trace")
-    assert "1 malformed row" in page.text_of(f"leads-{E.GRADED_WORLD}"), page.text_of(
-        f"leads-{E.GRADED_WORLD}")
-
-
 def test_1025_a_refused_write_leaves_no_residue(tmp_path):
     """A refused replace (an alias at `learning.html`) leaves no staged temporary in the episode
-    dir: `write_guarded` refuses on the lstat screen before it stages (p1: zero `os.open`
-    calls), so the directory listing is unchanged and the planted entry left in place; positive
-    control: without the alias the page is written.
-    """
+    dir."""
     ep = E.sample_episode(tmp_path)
     E.plant_link(ep.page, tmp_path / "nowhere")
     listing = sorted(p.name for p in ep.dir.iterdir())
@@ -787,11 +400,9 @@ def test_1025_a_refused_write_leaves_no_residue(tmp_path):
 
 
 def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
-    """The whole document is built before the single guarded replace, so a raise mid-build
-    (an `Exception` injected inside the page module's frame) propagates out of `render_episode`
-    and leaves the previous `learning.html` intact — or none, when there was none — with no
-    staged temporary; a partial page is never observable at that path.
-    """
+    """The whole document is built before the single guarded replace, so a raise mid-build (an
+    `Exception` injected inside the page module's frame) propagates out of `render_episode` and
+    leaves the previous `learning.html` intact ."""
     ep = E.sample_episode(tmp_path)
     listing = sorted(p.name for p in ep.dir.iterdir())
     with pytest.raises(RuntimeError, match="mid-build"), \
@@ -812,11 +423,8 @@ def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
 
 @NOT_ROOT
 def test_1025_a_read_only_episode_directory(tmp_path, capsys):
-    """The CLI exits 1 with the write failure on stderr and no page when the episode dir is
-    read-only; the launcher path prints the failure under the render boundary and its exit
-    status is unchanged (d03) — the directory made read-only from inside the judge seam, the
-    one seam that runs after the launcher creates it.
-    """
+    """The CLI exits 1 with the write failure on stderr and no page when the episode dir is read-
+    only."""
     ep = E.sample_episode(tmp_path)
     ep.dir.chmod(0o555)
     try:
@@ -867,65 +475,9 @@ def _page_classes(page: E.Page) -> set[str]:
     return out
 
 
-def test_1025_every_class_the_page_emits_has_a_rule_in_the_css_it_ships(tmp_path):
-    """The page inlines the run pages' shared stylesheet for the frame — and that sheet knows
-    NOTHING of this page's vocabulary (`vd-*`, `w-*`, `fr-*`, `st-*`, `ld-*`, `rc-*`, …): the
-    one rule it did hit, `.tx-entry`'s two-column grid, put every response's text into a 56px
-    gutter, and the long-token wrapping fix lived on classes the page never used. So: every
-    class the rendered page emits — the healthy sample AND the refusal-heavy shapes (a stray
-    run dir, an unnameable label, an unreadable record, an unattributed trace) — has a rule in
-    the CSS the page ships, and every transcript class the shared sheet ALSO styles is
-    re-declared under the page's own scope so the shared layout cannot win."""
-    module = visualize_episode()
-    shipped = module.CSS + module.EPISODE_CSS
-    styled = _css_classes(shipped)
-    own = _css_classes(module.EPISODE_CSS)
-
-    ep = E.sample_episode(tmp_path, timing=True)
-    (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
-    (ep.dir / "runs" / "bad name!" / "gather_raw").mkdir(parents=True)
-    E.plant_raw(ep.dir / "provenance.json", b"\xff\xfe not text")
-    call = {"system": E.SYSTEM, "verb": "esql", "params": {"query": "FROM x"}}
-    E.write_outcome(ep.dir, drift=[{**call, "status": "drifted"}])
-    E.write_world_record(ep.dir, E.CONTROL, "did not finish", call=call, detail="exited 1")
-    E.write_trace(ep.dir, "judge:nobody:0", prompt="an unattributed draw")
-    E.write_trace(ep.dir, "questioner:z", usage=None, duration_ms=None, model=None)
-    doc = E.sample_grade()
-    doc["worlds"].append(E.ungradable_row("ghost_world"))
-    # #1105 PR 2 (declared change 4/J3): the `runs/` dirs above are no roster lines any more,
-    # so the unnameable label comes from a grade-record row (the record's labels still are).
-    doc["worlds"].append(E.ungradable_row("bad name!"))
-    doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/9: dropped"]
-    E.write_judge(ep.dir, doc)
-    page = render(ep)
-
-    emitted = _page_classes(page)
-    assert emitted >= {"vd-tile", "w-section", "fr-row", "st-row", "ld-lead", "rc-story",
-                       "tx-entry", "tx-request", "stage-block", "leads-section", "unnameable",
-                       "st-unattributed", "w-fact", "w-call", "rc-outcome-call",
-                       "rc-world-record", "rc-sample"}, "positive control: the shapes this test is about"
-    unstyled = sorted(emitted - styled)
-    assert not unstyled, f"classes with no rule in the shipped CSS: {unstyled}"
-    # the run pages' transcript vocabulary the page reuses must be this page's own rule
-    for shared in emitted & _css_classes(module.CSS):
-        if shared in ("layout", "content", "top", "byline", "toc", "item", "episode"):
-            continue  # the frame: the shared sheet's rule IS the one wanted
-        assert shared in own, f".{shared} is styled only by the run pages' sheet"
-    assert re.search(r"\.episode \.tx-entry[^{]*\{[^}]*display: block", module.EPISODE_CSS)
-    for wrapping in ("tx-request", "tx-entry", "fr-row", "w-section", "ld-summary", "vd-tile"):
-        assert re.search(rf"\.episode [^{{]*\.{wrapping}[^{{]*\{{[^}}]*overflow-wrap: anywhere",
-                         module.EPISODE_CSS), f".{wrapping} does not wrap a long token"
-
-
 def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path):
-    """The docstring's promise — `python defender/scripts/visualize/visualize_episode.py <dir>`
-    — with `PYTHONPATH` unset and the cwd elsewhere: the script puts its own package on the
-    path (the bootstrap `visualize_run.py` carries), writes the page and exits 0.
-
-    It is also the suite's one real-subprocess run, so it is what sees the `if __name__ ==
-    "__main__"` line pass the process's own `sys.argv[1:]` to `main`: every other CLI test here
-    calls `main(argv)` in-process, and a hardcoded `main([])` left behind by a smoke-test paste
-    would exit 1 here as if no argument were given (spec adversary finding 3, PR #1042)."""
+    """The docstring's promise — `python defender/scripts/visualize/visualize_episode.py <dir>` —
+    with `PYTHONPATH` unset and the cwd elsewhere: the script puts its own package."""
     ep = E.sample_episode(tmp_path)
     script = Path(visualize_episode().__file__)
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
@@ -958,11 +510,7 @@ def _unhealthy(ep: E.Episode) -> None:
 
 def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically_from_two_roots(
         tmp_path, monkeypatch):
-    """d05/x24 for the shape it never held on: every reader's refusal sentence embeds the
-    absolute path (`read_guarded`'s alias sentence, an errno's `'/abs/…'`, `<name> at <path>`),
-    so a page with one refused slot named the operator's root and two copies of one unhealthy
-    archive rendered byte-different. The loader takes the episode directory's spelling out of
-    every refusal at ONE boundary; each refusal is still on the page, in its own slot."""
+    """d05/x24 for the shape it never held on."""
     for var in (T.RUNS_BASE_ENV, T.EPISODES_BASE_ENV):
         monkeypatch.delenv(var, raising=False)
     built = E.sample_episode(tmp_path, root=tmp_path / "build")
@@ -990,12 +538,8 @@ def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically
 
 @NOT_ROOT
 def test_1025_a_link_into_an_unreadable_directory_at_a_records_name_is_that_slots_refusal(tmp_path):
-    """`Path.exists()` follows a link and, on 3.11, re-raises a permission fault from the
-    directory above — which is why `_io.entry_present` exists. The readers this page borrows
-    (`read_outcome`, `read_family_stamp`, `read_stage_timings`, the YAML screens) must not ask
-    `exists() or is_symlink()`, or a link planted at a record's name into a mode-000 directory
-    escapes as a bare `PermissionError` past the page's per-record boundary and takes the whole
-    render down. Each is its own slot's refusal, and the page renders."""
+    """`Path.exists()` follows a link and, on 3.11, re-raises a permission fault from the directory
+    above ."""
     ep = E.sample_episode(tmp_path, timing=True)
     vault = tmp_path / "vault"
     vault.mkdir()

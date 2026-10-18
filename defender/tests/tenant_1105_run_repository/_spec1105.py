@@ -1,51 +1,4 @@
-"""Shared machinery for #1105 PR 1's spec — the runs repository. NO test functions.
-
-The change (`spec-flow/specs/spec_graph_1105-pr1-run-repository.yaml`; design rev 4 as amended
-by rev 4.1, `.spec-flow/design-rev4.md`, read through `.spec-flow/frontiers/70-resolutions.md`):
-a package `defender/run_repository/` absorbs the run handle (`_run_handle.py` -> `_handle.py`)
-and the layout owner (`_run_paths.py` -> `_layout.py`), and gains `RunId` (`_id.py`), the
-lookups (`_lookup.py`; PR 1's four Tenant-taking functions, the tenant-scoped repository's
-methods since #1105 PR 2), the
-episode -> runs record (`_record.py`: `record_episode_runs`, `episode_runs`,
-`sibling_run_ids`, `episode_sibling_ids`) and `RunRefused` (`_errors.py`). The door
-(`__init__.py`) serves the public surface lazily. Every lookup and tenant-keyed record function
-takes an accepted `Tenant` and, where it names a run, a `RunId`; it opens `tenant.runs` ONCE
-with `_io.hold(tenant.runs, follow=False)` and works only relative to that handle (amendment A).
-
-P1 and P2 (owner, round 4) bind every test here. P1: the host is not malicious (mid-call
-changes are outside the threat model), but nothing read from disk is trusted. P2: an unexpected
-state raises ONE named error — `TenantRefused` for the runs folder and its `_tenant.json`,
-`RunRefused` for everything else — naming the path and the fault, never a raw `OSError`, at the
-first failed check, before any write. The expected states, and only these, answer normally: the
-runs folder absent (empty answers), `_episodes` absent (no claims), and the known sidecar files
-beside run folders (a staged one included).
-
-NONE OF THE NEW NAMES EXISTS AT BASE 80888efb. Every test imports what it drives from
-`defender.run_repository` INSIDE ITS OWN BODY, so a missing package is one failure per test
-(`ModuleNotFoundError` at the seam the test needs), never a collection error that hides every
-other test in the file, and the tests that pin unchanged behaviour stay green at base.
-
-THE REFUSAL CHECK. No test wraps a door name in `pytest.raises(...)`, and no helper here
-asserts on a demand's behalf. `raised()` hands back what a call raised (or `None`), `is_a()`
-answers whether that is an instance of a class — `False` when the "class" is not a class — and
-the TEST asserts, with the demand's own content (the error type, the path the message names, no
-raw control character). That keeps every assertion in the test that owns it: a shared helper's
-assert would certify one test's discrimination for every test that funnels through it.
-
-EVERY FAULT IS A REAL INPUT THROUGH THE REAL PRIMITIVE: the links, FIFOs, truncated records,
-stray names, other-tenant records and deep-nested records are made on the real filesystem by
-the test that needs them. The repository's injected `io=` seam (NM-10) is used here to OBSERVE
-calls (`RecordingIO`), never to inject a fault (the owner's test shape; `w_fault_injected_io`).
-
-COINED NAMES. The design names every public function, `RunId.parse` / `RunId.mint(label, *,
-clock=)`, the held listing's `absent`, `_io.hold(root, *, follow=)` and
-`Bound.read(name, *, max_bytes=)`. It names the injected seam only as "a keyword-only injected
-I/O seam, default the real `defender._io`, as `Run.for_tenant` takes" — this suite spells it
-`io=` (`Run.for_tenant(..., io=)`'s own name, ledger 20-demands F-2). If write-code-from-spec
-names anything differently it renames it HERE and in the tests, never through an alias.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared helpers for the run-repository tests (tenant/runs-folder planting, record writers, error probes). No test functions."""
 from __future__ import annotations
 
 import datetime as _dt
@@ -53,7 +6,7 @@ import json
 import os
 import shutil
 import stat
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -330,8 +283,3 @@ class RecordingIO:
         return [(a, k) for n, a, k in self.calls if n == name]
 
 
-def iter_py(root: Path) -> Iterator[Path]:
-    """Every `.py` under `root`, caches skipped."""
-    for p in sorted(Path(root).rglob("*.py")):
-        if "__pycache__" not in p.parts:
-            yield p

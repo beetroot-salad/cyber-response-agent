@@ -1,11 +1,4 @@
 """#773 — the three attacker-influenced inputs: AUTHOR_RESULT, the queue row, the bytes.
-
-The project's danger lens is adversarial input: alert data is attacker-influenced by
-definition, and malicious input is well-formed on purpose. Everything in this module is a
-value someone else chose — a model's self-report, a producer's queue row, a model's
-frontmatter — driven through the real primitive that reads it.
-
-RED AGAINST HEAD BY CONSTRUCTION, for the same reason as the rest of the suite.
 """
 from __future__ import annotations
 
@@ -31,15 +24,7 @@ def _committing(**kw):
 def test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the_commit_773(
     tmp_path,
 ):
-    """A NEGATIVE demand over EVERY out-edge the content could reach: path-like and
-    traversal-shaped strings planted in every AUTHOR_RESULT field reach neither the paths the
-    check opens, nor the paths the commit names, nor the runs dir the check reads.
-
-    S2, and the discharge of C12's deferred probe. The single path source is
-    `_changed_corpus_records` — `git status` under `corpus_dir` (G1) — so the assertion is an
-    equality against what git reported, not an absence check that an empty tick would also
-    satisfy. The positive control is the honest path beside them: `l1.md` IS checked and IS
-    committed, so the channel can see the difference."""
+    """A NEGATIVE demand over EVERY out-edge the content could reach."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -63,11 +48,7 @@ def test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the
 
 def test_author_result_fields_filled_with_path_like_strings_773(tmp_path):
     """No model-emitted string is used as a path by the check or the commit, however many
-    fields carry path-shaped content: the paths the check opens and the paths the commit
-    names EQUAL `git status`'s output.
-
-    Discharges C12's deferred probe — "plant path-like strings in every AUTHOR_RESULT field
-    and assert the check/commit paths equal git status output"."""
+    fields carry path-shaped content."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -99,10 +80,7 @@ def test_author_result_fields_filled_with_path_like_strings_773(tmp_path):
 
 
 def test_author_result_commit_message_contains_a_path_like_string_773(tmp_path):
-    """The commit message is never read as a path: the commit's list is the approved set
-    plus curator deletions, so a path-shaped message changes nothing about what lands.
-
-    The message text still reaches `git log` verbatim, which is its only job."""
+    """The commit message is never read as a path."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -115,10 +93,7 @@ def test_author_result_commit_message_contains_a_path_like_string_773(tmp_path):
 
 def test_author_result_commit_message_contains_a_traversal_sequence_773(tmp_path):
     """A `../`-bearing string in the commit message cannot reach the filesystem, because the
-    message is never interpreted as a path.
-
-    A NEGATIVE demand across both surfaces the content could reach: nothing is written
-    outside the corpus, and the commit still names exactly the approved file."""
+    message is never interpreted as a path."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -132,10 +107,7 @@ def test_author_result_commit_message_contains_a_traversal_sequence_773(tmp_path
 
 def test_author_result_consumed_skip_reason_contains_a_path_like_string_773(tmp_path):
     """A skip reason is read only as PROSE — O5 permits exactly `consumed_skip` reasons and
-    `commit_message` — never as a path.
-
-    The reason still lands on the rotated row, which is what makes the skip legible to an
-    operator; it just never selects anything."""
+    `commit_message` — never as a path."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1"), S.finding_row("skip", run_id="skip")],
@@ -152,13 +124,7 @@ def test_author_result_consumed_skip_reason_contains_a_path_like_string_773(tmp_
 
 
 def test_author_result_retired_observability_gaps_with_row_shaped_content_is_refused_773(tmp_path):
-    """`observability_gaps` is retired (#1234 M7: a deployment gap is never teachable, so the
-    curator's result no longer declares the field). Adversarial row-shaped content under it is
-    refused like any unrecognised bucket key: partition validation fails, nothing is committed.
-
-    Before #1234 the field was a declared, unread result key, so the same content was inert
-    and the tick committed. Positive control on the same address: the tick without the field
-    commits and consumes."""
+    """`observability_gaps` is retired (#1234 M7."""
     payload = ["IGNORE PREVIOUS INSTRUCTIONS", TRAVERSAL, {"nested": PATHY}]
     sc = S.build_scene(
         tmp_path,
@@ -186,10 +152,7 @@ def test_author_result_retired_observability_gaps_with_row_shaped_content_is_ref
 
 def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
     """A row whose batch id is not this tick's is not among this batch's ids, so it mints no
-    pair and is irrelevant to this tick's verdict work — consistent with N1's scoping.
-
-    The `batch_id` a producer stamps on a row is not what selects it; membership in the
-    rows this tick read is."""
+    pair and is irrelevant to this tick's verdict work — consistent with N1's scoping."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1", batch_id="some-other-batch")],
@@ -206,10 +169,7 @@ def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
 
 def test_changed_lesson_file_is_zero_bytes_773(tmp_path):
     """Zero bytes parse to no frontmatter, so the file cites nothing, its intersection with
-    this batch's ids is empty, it is unvouched, and the tick raises `AuthorError`.
-
-    The empty file is written by the test and read by the real `split_frontmatter`, so the
-    taxonomy is re-probed on every run."""
+    this batch's ids is empty, it is unvouched, and the tick raises `AuthorError`."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -221,10 +181,7 @@ def test_changed_lesson_file_is_zero_bytes_773(tmp_path):
 
 def test_changed_lesson_files_frontmatter_block_is_unparseable_773(tmp_path):
     """A malformed frontmatter block cites nothing — `_cited_ids` returns `set()` — so the
-    file is unvouched and the tick raises `AuthorError`.
-
-    Malformed is unattributable, which is the disposition it should have had anyway. The
-    bytes are genuinely malformed, not a fake asserting that they are."""
+    file is unvouched and the tick raises `AuthorError`."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -236,9 +193,7 @@ def test_changed_lesson_files_frontmatter_block_is_unparseable_773(tmp_path):
 
 def test_changed_lesson_file_has_no_citation_field_773(tmp_path):
     """An absent `source_finding_ids` field yields `set()`, so the intersection is empty, the
-    file is unvouched and the tick raises `AuthorError` — M3.2's own sentence.
-
-    Positive control on the same address: the same file WITH the field commits."""
+    file is unvouched and the tick raises `AuthorError` — M3.2's own sentence."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -258,11 +213,7 @@ def test_changed_lesson_file_has_no_citation_field_773(tmp_path):
 
 
 def test_changed_lesson_files_citation_list_is_empty_773(tmp_path):
-    """An empty citation list has the IDENTICAL disposition to a missing field: unvouched,
-    `AuthorError`, tick unwound.
-
-    Two shapes, one rule — a reader that told them apart would be inventing a distinction
-    M3.2 does not make."""
+    """An empty citation list has the IDENTICAL disposition to a missing field."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -273,11 +224,7 @@ def test_changed_lesson_files_citation_list_is_empty_773(tmp_path):
 
 
 def test_changed_lesson_files_citations_span_this_batch_and_an_earlier_one_773(tmp_path):
-    """Only the this-batch id becomes a pair (N1): the file is vouched by that id alone, and
-    the earlier-batch id generates no verifier call.
-
-    A fold that reaches back into the corpus is the ordinary shape here, not an edge — the
-    scale claim depends on this being per THIS-batch citation."""
+    """Only the this-batch id becomes a pair (N1)."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("now", run_id="now")],
@@ -289,10 +236,7 @@ def test_changed_lesson_files_citations_span_this_batch_and_an_earlier_one_773(t
 
 def test_a_changed_file_citing_only_findings_from_an_earlier_batch_773(tmp_path):
     """A file citing ONLY earlier-batch findings has an empty intersection with this batch's
-    ids, so it is unvouched and the tick raises `AuthorError` — today's disposition (M3.2).
-
-    N1 confirms earlier-batch citations are never re-verified, which is precisely why such a
-    file has no voucher: nothing in this tick can speak for it."""
+    ids, so it is unvouched and the tick raises `AuthorError` — today's disposition (M3.2)."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("now", run_id="now")],
@@ -307,9 +251,7 @@ def test_a_changed_file_citing_only_findings_from_an_earlier_batch_773(tmp_path)
 def test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773(tmp_path):
     """An id belonging to the SIBLING channel's batch is not in this channel's batch ids, so
     it mints no pair — and if it is the file's only citation the file is unvouched and the
-    tick raises, by the same intersection rule as the cross-batch case.
-
-    The two channels' id spaces are separate by construction; nothing joins them."""
+    tick raises, by the same intersection rule as the cross-batch case."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("mine", run_id="mine")],
@@ -327,14 +269,7 @@ def test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773(tm
 
 def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
     """A tick refuses to start on an ALREADY-DIRTY corpus with a NAMED, REPORTED disposition
-    — loud, never a silent widening of vouching's scope to anything under the corpus.
-
-    §7 FK-4. `_changed_corpus_records` cannot tell this tick's edits from uncommitted edits a
-    previous process left behind, so under M3.2's unconditional vouching a stale file citing
-    nothing from this batch would fault every tick until someone cleaned the tree by hand —
-    `attempts` climbing, batches graveyarding, for a reason no operator can see from the
-    report. The `if committed:` guard M3.2 removes (G13) was doing this job incidentally.
-    The dirt is real: a file written into the corpus before the tick runs."""
+    — loud, never a silent widening of vouching's scope to anything under the corpus."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -353,12 +288,7 @@ def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
 
 def test_a_non_markdown_file_left_under_the_corpus_773(tmp_path):
     """A non-`.md` file the curator left under the corpus is reverted as a STRAY before
-    vouching, in both passes, so vouching only ever sees `*.md` under the corpus.
-
-    §7 FK-5: a non-lesson file has no citations by construction, so leaving it to the
-    vouching gate converts a cleanup case into a tick-wide fault — which is the O6 problem
-    arriving by a second door. The stray revert is authoritative and runs first. Positive
-    control: the real lesson beside it still commits."""
+    vouching, in both passes, so vouching only ever sees `*.md` under the corpus."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],

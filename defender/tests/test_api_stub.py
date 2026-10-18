@@ -1,13 +1,4 @@
-"""#1131 — the platform API's HTTP layer: the route set, the login seam, and how each port's
-answer maps onto a response.
-
-WHAT IS DRIVEN. The real app (`api.app.create_app`) through starlette's `TestClient`, over a
-SCRIPTED fake: every port method answers what the test says, and a call the test did not script
-fails it. So each test pins what the API does with an answer, never what a store would answer.
-The data rules behind the answers (request-id replay, one live investigation per alert, what may
-be cancelled, deleted or learned from) are the store's (`api/ports.py`, #1082) and are tested
-there, against the real implementation — not here against a re-derivation of them.
-"""
+"""The platform API HTTP layer over a scripted fake: routes, login seam, port-answer to response mapping."""
 from __future__ import annotations
 
 import base64
@@ -145,14 +136,7 @@ TX_WRITES = {"create_investigation", "cancel_investigation", "delete_investigati
 
 
 class Scripted:
-    """Every port the routes call. `answers` maps a port method's name to what it returns, an
-    exception it raises, or a function of its arguments. Each call is recorded; an unscripted
-    one fails the test, so a test states exactly what the API may ask of the platform.
-
-    `transaction` is built in: it records `(tenant, actor)` as it opens, sends writes to the
-    answers like any call, and keeps the audit events written through it in `audits` only when
-    its block exits normally — what a store commits. `answers["audit"]`, an exception, fails the
-    audit write."""
+    """Every port the routes call. `answers` maps a port method's name to what it returns, an exception it..."""
 
     def __init__(self, answers: dict[str, Any]) -> None:
         self.answers = answers

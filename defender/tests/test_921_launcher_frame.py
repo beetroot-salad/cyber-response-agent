@@ -1,18 +1,4 @@
-"""#921 — where the judge runs, what it is triggered by, and what it leaves behind.
-
-**J10, settled at the §7 human seam: the judge runs at the TAIL of the step runner**
-(`cli._run_episode`), after the archive step (`verify_family`) and before the return — NOT in
-`_launch`'s post-teardown cleanup path. The design's own sentence said "after teardown"; a probe
-found that frame production-dead on this route (teardown fires in `_launch`'s `finally`, after
-`_run_episode` has already returned, and `_run_episode`'s own teardown at `cli.py:931` is never
-reached), and A9 removed the reason the design preferred it — every sibling is waited for before
-the archive step, so no container is live either side of the slot. Demand #0 was provisional on
-that fork and is settled by it: every drive point in this suite hangs off this answer.
-
-RED against `d1b8b06a`: `cli.main` has no `judge=` seam, `learning/judge/` does not exist, and
-nothing at base reads the episode's outcome to decide what to do next (since #1224 that is
-pre-flight's `outcome.yaml`).
-"""
+"""#921 — where the judge runs, what it is triggered by, and what it leaves behind."""
 from __future__ import annotations
 
 from pathlib import Path

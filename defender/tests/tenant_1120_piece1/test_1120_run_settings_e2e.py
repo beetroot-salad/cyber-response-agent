@@ -1,23 +1,5 @@
-"""#1120 piece 1 — O1/D2 end to end: a run reads its tenant's settings from the DATA ROOT,
-whatever checkout runs the code, and the replay harness runs as the fixture tenant (H2).
-
-Two lanes, each driven through the REAL runtime on the replay harness
-(`defender/tests/e2e/_replay_harness.py`), with the models faked at the harness's own
-`make_model` seam and every registry either the production one or the harness's `FakeVerbs`:
-
-  * O1 — `run.main` resolves the run's tenant from `DEFENDER_DATA_ROOT` (never from the
-    checkout's `knowledge/`), and the gather lead the run then drives is granted exactly that
-    tenant's table. The data-root tenant carries the retired lab's OWN id (`playground`) and a
-    table that differs from the committed fixture's (the lab's frozen copy) by one gather
-    verb, so a lane that read a checkout copy is caught by value, not only by path.
-  * H2 (the replay harness's R5 survival) — a replay that names no tenant runs as the fixture
-    tenant (`knowledge/tenant-fixture/`) set up under the test's own data root, never as the
-    checkout's lab resolved through the removed `tenant_dir`.
-
-Every fault is a real input on disk; the only fakes are the harness's model and verb seams,
-which RECORD what they are handed. No `monkeypatch.setattr`. See `_spec1120.py` for the coined
-names.
-"""
+"""O1/D2 end to end: a run reads its tenant's settings from the DATA ROOT, whatever checkout runs the
+code, and the replay harness runs as the fixture tenant (H2)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,7 +16,6 @@ from defender.tests.tenant_1120_piece1 import _spec1120 as H  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 #: The retired lab's own id: the data-root tenant carries it, so reading a checkout copy would
-#: be caught by the table's value.
 LAB_ID = "playground"
 
 #: The one gather pair the data-root table withholds and the checkout's fixture grants.
@@ -89,19 +70,9 @@ def _under(path: Path, parent: Path) -> bool:
 
 def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_root_copy(
         data_root: Path, tmp_path: Path) -> None:
-    """This drives run.main over an alert with --tenant playground from this checkout, whose
-    committed fixture (knowledge/tenant-fixture/settings, the retired lab's frozen copy) grants
-    gather change-mgmt list-changes. A tmp data root holds the same id, whose
-    knowledge/settings/verb-grants.yaml differs from the fixture's by that one gather verb
-    (withheld, with a reason). The RunTenant
-    run.main hands its lifecycle reads the data-root copy: its tenant's settings is
-    <root>/playground/knowledge/settings, its table path lies there, and its gather grant is
-    exactly the fixture's census minus the withheld pair. No path the run resolved for its
-    tenant (settings, agent, knowledge, the table) lies under the checkout's knowledge/ tree.
-    The gather lead the run then drives, through the real driver on that tenant and those
-    grants, is granted exactly the data-root table: list_verbs for change-mgmt publishes
-    active-changes but not list-changes, and a query for list-changes is refused as not
-    granted — the fixture's grant would have admitted it."""
+    """This drives run.main over an alert with --tenant playground from this checkout, whose committed
+    fixture (knowledge/tenant-fixture/settings, the retired lab's frozen copy) grants gather change-
+    mgmt list-changes."""
     checkout_table = (H.FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8")
     assert "    list-changes: {roles: [gather]}" in checkout_table, (
         "precondition: the checkout's fixture no longer grants change-mgmt list-changes, so "
@@ -158,15 +129,10 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
 
 def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_the_data_root(
         data_root: Path, tmp_path: Path) -> None:
-    """A replay driven through the harness with no tenant named completes, and the tenant it
-    ran as is the fixture tenant (knowledge/tenant-fixture) set up under the test's own
-    DEFENDER_DATA_ROOT — never the checkout's lab resolved through the removed tenant_dir
-    (H2; the replay harness is the tenant_dir's surviving dependent). Afterwards the data
-    root holds exactly one tenant folder, with its row naming it and a knowledge/settings
-    tree byte-equal to the fixture's, and an agent/.tenant-id naming it. The query verb the
-    gather lead calls is handed that folder's settings path, which lies under the data root
-    and not under the checkout's knowledge/ tree, and the gather dispatch advertises exactly
-    the systems the fixture's gather grant reaches (its census)."""
+    """A replay driven through the harness with no tenant named completes, and the tenant it ran as is
+    the fixture tenant (knowledge/tenant-fixture) set up under the test's own DEFENDER_DATA_ROOT —
+    never the checkout's lab resolved through the removed tenant_dir (H2; the replay harness is the
+    tenant_dir's surviving dependent)."""
     rec = R.VerbRecorder()
 
     def get_host(ctx, *, host: str = "web-1") -> dict:

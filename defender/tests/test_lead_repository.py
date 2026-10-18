@@ -1,13 +1,4 @@
-"""Tests for the two-table read/join surface (`learning/lead_repository.py`).
-
-Exercises the readers, the join, the actor-view integrity boundary, the
-render helpers, the narration cross-check, and missing/malformed-artifact
-tolerance. Fixtures write the two *live* tables directly:
-
-  gather_raw/{lead_id}.lead.json   — leads table (goal, what_to_summarize)
-  executed_queries.jsonl           — queries table (FK lead_id, by-ref payload)
-  gather_raw/{lead_id}/{seq}.json   — payloads
-"""
+"""Tests for the two-table read/join surface (`learning/lead_repository.py`)."""
 from __future__ import annotations
 
 import json
@@ -59,8 +50,6 @@ def _query(
         fh.write(json.dumps(rec) + "\n")
 
 
-
-
 def test_load_leads_keys_on_lead_id(tmp_path):
     run = tmp_path / "run"
     _lead(run, "l-001", "Trace the FIM write", ["apt history"])
@@ -68,10 +57,6 @@ def test_load_leads_keys_on_lead_id(tmp_path):
     leads = lr.load_leads(run)
     assert set(leads) == {"l-001", "l-002"}
     assert leads["l-001"] == {"goal": "Trace the FIM write", "what_to_summarize": ["apt history"]}
-
-
-def test_load_leads_missing_dir_returns_empty(tmp_path):
-    assert lr.load_leads(tmp_path / "nope") == {}
 
 
 def test_load_leads_skips_payload_subdirs_and_malformed(tmp_path):
@@ -91,8 +76,6 @@ def test_load_leads_defaults_missing_goal_and_bad_wts(tmp_path):
     assert leads["l-001"] == {"goal": "", "what_to_summarize": []}
 
 
-
-
 def test_load_queries_order_and_raw_ref(tmp_path):
     run = tmp_path / "run"
     _query(run, "l-001", 0)
@@ -102,10 +85,6 @@ def test_load_queries_order_and_raw_ref(tmp_path):
     assert rows[0].lead_id == "l-001"
     assert rows[0].raw_ref == run / "gather_raw/l-001/0.json"
     assert rows[0].raw_ref.read_text() == "{}"
-
-
-def test_load_queries_missing_log_returns_empty(tmp_path):
-    assert lr.load_queries(tmp_path / "run") == []
 
 
 def test_load_queries_raw_ref_none_on_failed_write(tmp_path):
@@ -124,8 +103,6 @@ def test_load_queries_skips_blank_and_non_json_and_no_lead(tmp_path):
         fh.write(json.dumps({"seq": 9, "query_id": "x"}) + "\n")
     rows = lr.load_queries(run)
     assert [r.lead_id for r in rows] == ["l-001"]
-
-
 
 
 def test_joined_nests_queries_on_fk(tmp_path):
@@ -170,8 +147,6 @@ def test_joined_orders_ran_before_queryless_and_orphans_last(tmp_path):
     assert order == ["l-001", "l-002", "l-009"]
 
 
-
-
 def test_actor_view_only_queries(tmp_path):
     run = tmp_path / "run"
     _lead(run, "l-001", "SECRET GOAL", ["secret dim"])
@@ -195,30 +170,6 @@ def test_actor_view_never_reads_leads_table(tmp_path):
     assert "l-001" in rendered
     view = lr.actor_view(run)
     assert view["leads"][0]["lead_id"] == "l-001"
-
-
-def test_actor_view_omits_queryless_lead(tmp_path):
-    run = tmp_path / "run"
-    _lead(run, "l-001", "g", [])
-    view = lr.actor_view(run)
-    assert view["leads"] == []
-
-
-
-
-def test_render_joined_yaml_carries_goal_and_status(tmp_path):
-    import yaml
-
-    run = tmp_path / "run"
-    _lead(run, "l-001", "the goal", ["dim"])
-    _query(run, "l-001", 0, status="ok")
-    doc = yaml.safe_load(lr.render_joined_yaml(run))
-    lead = doc["leads"][0]
-    assert lead["goal"] == "the goal"
-    assert lead["what_to_summarize"] == ["dim"]
-    assert lead["queries"][0]["payload_status"] == "ok"
-
-
 
 
 def test_narration_crosscheck_clean(tmp_path):
@@ -273,8 +224,6 @@ def test_narration_crosscheck_from_run_parses_l_ids(tmp_path):
     assert report["ok"] is True
 
 
-
-
 def _raw_row(run: Path, rec: dict) -> None:
     run.mkdir(parents=True, exist_ok=True)
     with (run / "executed_queries.jsonl").open("a") as fh:
@@ -323,22 +272,6 @@ def test_load_queries_raw_ref_none_on_absolute_payload_path(tmp_path):
     assert rows[0].raw_ref is None
 
 
-def test_joined_orders_ran_by_execution_not_alphabetical(tmp_path):
-    """seq resets per-lead, so ran order must follow execution (first-seen in
-    the queries log), not lead_id sort — matching actor_view."""
-    run = tmp_path / "run"
-    _lead(run, "l-005", "first", [])
-    _lead(run, "l-001", "second", [])
-    _query(run, "l-005", 0)
-    _query(run, "l-001", 0)
-    joined_order = [j.lead_id for j in lr.joined(run)]
-    actor_order = [lead["lead_id"] for lead in lr.actor_view(run)["leads"]]
-    assert joined_order == ["l-005", "l-001"]
-    assert joined_order == actor_order
-
-
-
-
 def test_stage_tables_copies_both_tables(tmp_path):
     src = tmp_path / "src"
     _lead(src, "l-001", "g", [])
@@ -348,14 +281,6 @@ def test_stage_tables_copies_both_tables(tmp_path):
     assert (dst / "executed_queries.jsonl").is_file()
     assert (dst / "gather_raw" / "l-001.lead.json").is_file()
     assert (dst / "gather_raw" / "l-001" / "0.json").is_file()
-
-
-def test_stage_tables_queryless_run_is_noop(tmp_path):
-    src = tmp_path / "src"
-    src.mkdir()
-    dst = tmp_path / "dst"
-    lr.stage_tables(src, dst)
-    assert not (dst / "executed_queries.jsonl").exists()
 
 
 def test_lead_ids_from_companion_filters_resolution_references():

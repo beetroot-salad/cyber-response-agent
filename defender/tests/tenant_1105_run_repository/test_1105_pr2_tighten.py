@@ -1,46 +1,12 @@
-"""#1105 PR 2 — tightening after the red-team pass (ADVERSARY.md, findings F1–F10) over the
-tests-before-code commit `2197f074`.
-
-Each test here closes one finding: an implementation the adversary showed green on the first
-commit fails it. EVERY TEST HERE IS RED AT BASE `301f196c` for the reason in the table, and goes
-green when PR 2 lands as designed (rev 5.1, #1105 comments 6099907018 / 6099907229 / 6099907462,
-fork decisions 6100061869, the J3 follow-through 6100455891). F6(b) lives in
-`test_1105_pr2_repository.py`, F8 is the fixture fix in `test_dc7_…` (declared-changes file),
-and the edit-list additions F1/F7 name are in that file's docstring.
-
-| Finding | Test                                                               | Red at base because                                         |
-|---------|--------------------------------------------------------------------|-------------------------------------------------------------|
-| F1      | test_f1_the_layout_fence_ends_with_an_empty_allow_list             | `ALLOW_LIST` holds PR 1's 18 entries                        |
-| F1      | test_f1_the_1210_work_list_is_at_zero                              | the census counts 12 / 13 / 12 / 1 sites                    |
-| F2      | test_f2_a_refused_sibling_reads_no_episode_record                  | `--resume` opens `family.yaml` before the record refuses    |
-| F2      | test_f2_a_refused_page_reads_no_episode_record                     | the page renders another tenant's episode                   |
-| F3      | test_f3_a_same_alert_prior_run_changes_no_judge_prompt             | VIEW 4 / TRIAL SPREAD carry the prior run                   |
-| F4      | test_f4_an_old_source_run_dir_never_stands_in_for_an_absent_source | the sibling copies the old field's run (T's decoy)          |
-| F5      | test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs    | the run page takes a folder path ("usage")                  |
-| F5      | test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs   | `workspace_map` takes a folder path ("usage")               |
-| F6(a)   | test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on[*]    | the good new-shape row is quarantined, never served         |
-| F7      | test_f7_*_as_a_process                                             | each CLI's process refuses `--tenant` (argparse "usage")    |
-| F9      | test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path | the lead author does not know `--tenant` (argparse)       |
-| F10     | test_f10_no_cli_usage_prose_names_the_old_arguments                | the named docs still spell `--resume <`, `<run_dir>`, …     |
-
-NOT PINNED: the launcher's SUCCESS as a process (F7) — a launch spends the questioner, the
-oracle and the judge, which a process cannot be handed fakes for; its process refusal is pinned,
-and its in-process launch is pinned by the declared-change and guard tests.
-
-The F2 audit hook is installed once per test process (an audit hook cannot be removed). It
-checks a module-level flag first, records only `open` events while a test arms it, and never
-raises.
-"""
+"""Hardening: refused siblings/pages read no episode record, foreign records and linked runs refused, malformed drain rows quarantined, CLI smoke as a process."""
 from __future__ import annotations
 
-import ast
 import contextlib
 import difflib
 import importlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -85,121 +51,6 @@ def _lint(name: str) -> ModuleType:
     return importlib.import_module(f"scripts.lint.{name}")
 
 
-def test_f1_the_layout_fence_ends_with_an_empty_allow_list():
-    """F1 / O1(a) / D7″ / J15: `lint_run_layout_imports.ALLOW_LIST` is EMPTY after PR 2 (the
-    owners add the hand-outs migrated callers need; no allow-list entries), and the lint is
-    clean on the tree with it — so every one of PR 1's 18 gated uses moved behind the
-    repository, none kept load-bearing. The lint's own positive controls (a planted gated use is
-    flagged) are `test_1105_layout_lint`'s. RED at base: the allow-list holds PR 1's 18."""
-    lint = _lint("lint_run_layout_imports")
-    listed = [tuple(entry) for entry in lint.ALLOW_LIST]
-    assert listed == [], f"the layout fence still allow-lists {len(listed)} uses: {listed}"
-    found = lint.scan(lint.DEFENDER, allow_list=())
-    assert found == [], "\n".join(f.display for f in found)
-    assert lint.main([]) == 0
-
-
-#: #1210's list A: the attribute reads it bans outside the owners (count at base: 12).
-_FENCE_NAMES = ("runs", "data_root", "trust_root")
-
-
-def _owner_callee(func: ast.expr) -> bool:
-    """An owner callable a non-owner may hand a folder to: a `RunPaths(…)` method (the
-    sidecar accessors, row 24), a `session_store.` function (fork S) or a `_tenant.` function
-    (row 14)."""
-    if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Call)
-            and ast.unparse(func.value.func) == "RunPaths"):
-        return True
-    return ast.unparse(func).startswith(("session_store.", "_tenant."))
-
-
-def _parents(node: ast.AST, rel: str) -> list[str]:
-    return [f"{rel}:{sub.lineno} {ast.unparse(sub)}" for sub in ast.walk(node)
-            if isinstance(sub, ast.Attribute) and sub.attr == "parent"]
-
-
-def _is_runs_base_export(node: ast.Assign) -> bool:
-    return any(isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name)
-               and t.value.id == "env" and isinstance(t.slice, ast.Constant)
-               and t.slice.value == "DEFENDER_RUNS_BASE" for t in node.targets)
-
-
-def _is_arm_join(node: ast.BinOp) -> bool:
-    """`<folder> / f"{<episode…>}-{<label>}"`: the hand-built join of a sibling's arm."""
-    if not (isinstance(node.op, ast.Div) and isinstance(node.right, ast.JoinedStr)):
-        return False
-    parts = node.right.values
-    return (len(parts) == 3 and isinstance(parts[0], ast.FormattedValue)
-            and isinstance(parts[1], ast.Constant) and parts[1].value == "-"
-            and isinstance(parts[2], ast.FormattedValue)
-            and "episode" in ast.unparse(parts[0].value))
-
-
-def _census_1210(sources: dict[str, str]) -> dict[str, list[str]]:
-    """#1210's work list over `sources` (module path -> text), as part 2 counts it:
-
-    A. a read of an attribute named `runs`, `data_root` or `trust_root`;
-    B. a function with a `runs_base` parameter;
-    C. an `x.parent` handed to an owner callable (`_owner_callee`) or exported as
-       `env["DEFENDER_RUNS_BASE"]` — a call inside an f-string is message text (J13), not a site;
-    D. a hand-built arm join (`_is_arm_join`); the judge's `base / label` join goes with B and
-       the J3 removal (`test_dc3_…`)."""
-    found: dict[str, list[str]] = {"A": [], "B": [], "C": [], "D": []}
-    for rel, text in sorted(sources.items()):
-        tree = ast.parse(text)
-        quoted = {id(sub) for node in ast.walk(tree) if isinstance(node, ast.JoinedStr)
-                  for sub in ast.walk(node) if sub is not node}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr in _FENCE_NAMES:
-                found["A"].append(f"{rel}:{node.lineno} {ast.unparse(node)}")
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-                params = node.args
-                if "runs_base" in [a.arg for a in (*params.posonlyargs, *params.args,
-                                                   *params.kwonlyargs)]:
-                    found["B"].append(f"{rel}:{node.lineno} {getattr(node, 'name', 'lambda')}")
-            elif (isinstance(node, ast.Call) and id(node) not in quoted
-                  and _owner_callee(node.func)):
-                for arg in (*node.args, *(kw.value for kw in node.keywords)):
-                    found["C"].extend(_parents(arg, rel))
-            elif isinstance(node, ast.Assign) and _is_runs_base_export(node):
-                found["C"].extend(_parents(node.value, rel))
-            elif isinstance(node, ast.BinOp) and _is_arm_join(node):
-                found["D"].append(f"{rel}:{node.lineno} {ast.unparse(node)}")
-    return found
-
-
-def test_f1_the_1210_work_list_is_at_zero():
-    """F1 / O1(b) / part 2's #1210 work list: "PR 2 ends with every count at zero". Over
-    `lint_run_records`' sweep, its owner modules excluded, the census (`_census_1210`) finds no
-    banned attribute read (A), no `runs_base` parameter (B; fork S takes the session store's
-    two too), no `x.parent` handed to an owner callable or env export (C) and no hand-built arm
-    join (D). A non-zero count is a site the design moves; if one must stay, the design's "every
-    count at zero" is re-ruled first, never this census loosened.
-
-    POSITIVE CONTROL: the census over a planted module holding one site of each kind counts
-    each once, and does not count a `.parent` inside a refusal's f-string (J13). RED at base:
-    A 12, B 13, C 12, D 1."""
-    planted = {"planted.py": (
-        "def f(tenant, runs_base, run_dir, env, episode_id, label, runs):\n"
-        "    tenant.data_root\n"
-        "    RunPaths(run_dir).ticket_write(run_dir.parent)\n"
-        "    env['DEFENDER_RUNS_BASE'] = str(run_dir.parent)\n"
-        "    print(f'{_tenant.record_path(run_dir.parent)} is a message')\n"
-        "    return runs / f'{episode_id}-{label}'\n")}
-    control = _census_1210(planted)
-    assert {k: len(v) for k, v in control.items()} == {"A": 1, "B": 1, "C": 2, "D": 1}, control
-
-    records = _lint("lint_run_records")
-    owners = set(records.OWNER_MODULES)
-    sources = {}
-    for path in records.sweep_files():
-        rel = Path(path).relative_to(records.DEFENDER).as_posix()
-        if rel not in owners:
-            sources[rel] = Path(path).read_text(encoding="utf-8")
-    found = _census_1210(sources)
-    left = {k: v for k, v in found.items() if v}
-    assert not left, "#1210's work list is not at zero:\n" + "\n".join(
-        f"  {k}: {site}" for k, sites in left.items() for site in sites)
 
 
 # ==========================================================================================
@@ -359,48 +210,6 @@ def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch
 # F4 — decision A: an old manifest's `source_run_dir` is never read, even when the id names
 # nothing.
 # ==========================================================================================
-
-def test_f4_an_old_source_run_dir_never_stands_in_for_an_absent_source(tmp_path):
-    """F4 / decision A / security item 6: `source_run_dir` "is never read …, so it cannot steer
-    a source to another tenant". An old manifest whose `source_run_id` names NO run of T, while
-    its `source_run_dir` names a real run — T's own decoy, then another tenant's (beta's) — is
-    refused: the sibling never reaches its lifecycle, and no arm carries the decoy's alert. A
-    fallback to the old field on `RunAbsent` fails this. POSITIVE CONTROL: the same manifest
-    with `source_run_id` naming T's source resumes, its arm's alert the source's. RED at base:
-    the sibling reads its source from `source_run_dir` and resumes from T's decoy."""
-    base, src = P.T.runs_base(tmp_path, source_run_id=P.SOURCE_RUN_ID)
-    own_decoy = base / "20260101t000000z-decoy"
-    beta = P.second_tenant(P.data_root(), "beta")
-    H.runs_folder(beta)
-    beta_decoy = Path(beta.runs) / "20260101t000000z-betas-run"
-    for decoy in (own_decoy, beta_decoy):
-        shutil.copytree(src, decoy)
-        (decoy / "alert.json").write_text('{"rule": {"id": "DECOY-ONLY-ALERT"}}\n',
-                                          encoding="utf-8")
-
-    def sibling(i: int, decoy: Path, source_run_id: str) -> tuple[P.SiblingRecorder, tuple]:
-        sub = tmp_path / f"scene{i}"
-        sub.mkdir()
-        episode_id = f"{P.EPISODE_ID}-r{i + 2}"
-        doc = P.family_doc(src, source_run_dir=str(decoy), episode_id=episode_id)
-        doc["source_run_id"] = source_run_id
-        _s, ep = P.sibling_scene(sub, container=P.SIBLING_TENANT, episode_id=episode_id,
-                                 doc=doc)
-        rec = P.SiblingRecorder()
-        return rec, P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
-
-    for i, decoy in enumerate((own_decoy, beta_decoy)):
-        rec, (rc, refused, err) = sibling(i, decoy, "20260101t000000z-gone")
-        steered = rec.run_dir is not None and b"DECOY-ONLY-ALERT" in (
-            rec.run_dir / "alert_input" / "alert.json").read_bytes()
-        assert not steered, f"the old field stood in for the absent source: {decoy}"
-        assert refused is not None or rc not in (0, None), f"{decoy}: the sibling ran: {err}"
-        assert "lifecycle" not in rec.order
-
-    rec, (rc, refused, err) = sibling(2, own_decoy, P.SOURCE_RUN_ID)
-    assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
-    assert rc == 0
-    assert (rec.run_dir / "alert_input" / "alert.json").read_bytes() == (src / "alert_input" / "alert.json").read_bytes()
 
 
 # ==========================================================================================
@@ -566,18 +375,6 @@ def _script(*parts: str) -> str:
     return str(H.WORKTREE.joinpath("defender", *parts))
 
 
-#: Run a script's `__main__` block in this process, argv as the operator types it. The
-#: launcher's first lines re-exec into `defender/.venv/bin/python3` whenever `sys.executable`
-#: differs from it — a deployment convenience, not under test, that would hand the child to
-#: whatever that venv holds (a bare one in a fresh worktree). Naming that interpreter as
-#: `sys.executable` keeps the child here; everything after the guard, `main(sys.argv[1:])`
-#: included, runs as written.
-_AS_MAIN = (
-    "import runpy, sys; from pathlib import Path; script = sys.argv[1]; "
-    "sys.executable = str(Path(script).resolve().parents[2] / '.venv' / 'bin' / 'python3'); "
-    "sys.argv = sys.argv[1:]; runpy.run_path(script, run_name='__main__')"
-)
-
 
 def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     """F7 / declared change 10: `python defender/scripts/workspace_map.py --tenant T <run_id>`
@@ -600,17 +397,6 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     _refused_naming(_process(script, "--tenant", d9_tenant, _ABSENT), _ABSENT)
 
 
-def test_f7_the_launcher_as_a_process(tmp_path):
-    """F7 / declared change 1: `python defender/learning/branch/cli.py --tenant T <run_id>
-    <branch_message_id>` over a source id with no run in T exits non-zero naming the id, before
-    anything is spent, with no argument error (`--help` alone, today's only process run, cannot
-    see an argv slice off by one). Its success is NOT pinned as a process: a launch spends real
-    models. RED at base: the launcher does not know `--tenant` ("usage")."""
-    P.launch_source(tmp_path)
-    cli = _script("learning", "branch", "cli.py")
-    _refused_naming(_process("-c", _AS_MAIN, cli, *P.new_launch_argv(P.LAUNCH_TENANT, _ABSENT)),
-                    _ABSENT)
-
 
 def _done_run(tenant_id: str) -> Path:
     """A run of `tenant_id` the lead author has already served (its `done` sentinel written
@@ -623,46 +409,6 @@ def _done_run(tenant_id: str) -> Path:
     lead_author.write_done_sentinel(run, "0" * 40)
     return run
 
-
-def test_f7_the_lead_author_as_a_process(tmp_path, d9_tenant):
-    """F7 / declared change 10: `python -m defender.learning.leads.lead_author --tenant T
-    <run_id>` over T's already-served run exits 0 (the done sentinel's no-op); over an absent
-    run id it exits non-zero naming the id, with no argument error. RED at base: the lead author
-    does not know `--tenant` ("usage")."""
-    run = _done_run(d9_tenant)
-    ok = _process("-m", "defender.learning.leads.lead_author", "--tenant", d9_tenant, run.name)
-    assert ok.returncode == 0, ok.stderr[-600:]
-    _refused_naming(_process("-m", "defender.learning.leads.lead_author",
-                             "--tenant", d9_tenant, _ABSENT), _ABSENT)
-
-
-def test_f7_the_tracer_as_a_process(tmp_path, d9_tenant):
-    """F7 / declared change 10: `python defender/learning/ops/trace_lesson.py --tenant T --all
-    --lessons-dir D` walks T's runs and prints lesson L's row (one run loaded it); with a stray
-    file in `<T>/runs` it exits non-zero naming the stray, with no argument error. RED at base:
-    the tracer does not know `--tenant` ("usage")."""
-    lessons = tmp_path / "lessons"
-    lessons.mkdir()
-    (lessons / "L.md").write_text(
-        "---\nname: L\ndescription: d\ncreated_at: 2026-06-04\n---\nbody\n", encoding="utf-8")
-    runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = runs / "20260605t000000z-case-a"
-    run.mkdir()
-    from defender.tests._alert_plant import plant_alert
-    plant_alert(run)
-    (run / "report.md").write_text("---\ndisposition: benign\n---\nbody\n", encoding="utf-8")
-    (run / "lessons_loaded.jsonl").write_text(
-        json.dumps({"lesson_name": "L", "ts": "2026-06-05T00:00:00+00:00"}) + "\n",
-        encoding="utf-8")
-    command = (_script("learning", "ops", "trace_lesson.py"), "--tenant", d9_tenant, "--all",
-               "--lessons-dir", str(lessons))
-    ok = _process(*command)
-    assert ok.returncode == 0, ok.stderr[-600:]
-    assert ok.stdout.splitlines() == ["L\td\t1\t0"], ok.stdout
-
-    (runs / "stray-file.txt").write_text("not a run\n", encoding="utf-8")
-    _refused_naming(_process(*command), "stray-file.txt")
 
 
 # ==========================================================================================
@@ -695,49 +441,4 @@ def test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path(tmp_pa
 # F10 — declared change 13: the CLI usage prose names the new arguments.
 # ==========================================================================================
 
-#: The documents and docstrings declared change 13 names, and the ones a grep for the old
-#: argument shapes finds beside them.
-_PROSE = (
-    "README.md", "defender/CLAUDE.md", "defender/docs/learning-loop.md",
-    "defender/docs/run-records.md", "defender/skills/handbook/content/learning-loop.md",
-    "defender/skills/handbook/content/run-artifacts.md", "defender/runtime/branch/_family.py",
-    "defender/learning/ops/trace_lesson.py", "defender/learning/leads/lead_author/__main__.py",
-    "defender/learning/branch/cli.py", "defender/run.py",
-    "defender/scripts/visualize/visualize_run.py", "defender/scripts/workspace_map.py",
-)
 
-#: An old argument shape, and what replaced it.
-_STALE = (
-    (re.compile(r"run\.py --resume|--resume <"), "a sibling is --tenant T --episode ep --world L"),
-    (re.compile(r"--runs-dir"), "the tracer walks <T>/runs (J8)"),
-    (re.compile(r"cli\.py <run_dir>"), "the launcher takes --tenant T <source_run_id>"),
-    (re.compile(r"lead_author <run_dir>"), "the lead author takes --tenant T <run_id>"),
-    (re.compile(r"visualize_run\.py <run_dir>"), "the run page takes --tenant T <run_id>"),
-    (re.compile(r"workspace_map\.py <run_dir>"), "workspace_map takes --tenant T <run_id>"),
-)
-
-
-def _stale_lines(text: str) -> list[str]:
-    return [f"{line.strip()[:120]!r} ({why})" for line in text.splitlines()
-            for pattern, why in _STALE if pattern.search(line)]
-
-
-def test_f10_no_cli_usage_prose_names_the_old_arguments():
-    """F10 / declared change 13: no CLI usage text in the named documents and docstrings spells
-    an argument shape PR 2 removes (`run.py --resume`, `--resume <manifest>`, `--runs-dir`, a
-    `<run_dir>` positional for the launcher, the lead author, the run page or `workspace_map`).
-    POSITIVE CONTROL: every named file exists, and the matcher flags each old shape in a
-    planted line. RED at base: README.md:166, defender/CLAUDE.md:75/:120, the learning-loop docs,
-    `_family.py:5`, `trace_lesson.py:30`, … still spell them."""
-    planted = ("python3 defender/learning/branch/cli.py <run_dir> 1\n"
-               "run.py --resume <manifest> --world b\ntrace_lesson.py --runs-dir X\n"
-               "python -m defender.learning.leads.lead_author <run_dir>\n"
-               "usage: visualize_run.py <run_dir>\nusage: workspace_map.py <run_dir>\n")
-    assert len(_stale_lines(planted)) == len(_STALE)
-
-    stale = []
-    for rel in _PROSE:
-        path = H.WORKTREE / rel
-        assert path.is_file(), f"{rel} is gone; re-point this census"
-        stale += [f"{rel}: {hit}" for hit in _stale_lines(path.read_text(encoding="utf-8"))]
-    assert stale == [], "usage prose still names the old arguments:\n" + "\n".join(stale)

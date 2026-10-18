@@ -5,6 +5,7 @@ import datetime
 import json
 import re
 import subprocess
+from typing import TYPE_CHECKING
 
 import sys as _sys
 from pathlib import Path as _Path
@@ -17,6 +18,9 @@ from defender.runtime.verbs import VerbContext
 from defender.scripts.adapters import _stub_transport as transport
 from defender.scripts.adapters.confinement import ConfinementFault
 from defender.scripts.adapters.faults import TransportFault, UpstreamFault
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.run_tenant import RunTenant
 
 SYSTEM = "host-state"
 KNOWN_HOSTS = (
@@ -94,6 +98,14 @@ def _captured_at(ctx: VerbContext) -> str:
     state = getattr(ctx, "run_state", None)
     at = state.now() if state is not None else datetime.datetime.now(datetime.UTC)
     return _clock.z_seconds(at)
+
+
+def check_settings(tenant: RunTenant) -> None:  # lint-dup: ok — every adapter declares its own settings check (#1256 O-5)
+    """This system's settings check (#1256 O-5). Host-state holds no keys of its own: every verb
+    reaches its hosts through the docker transport, so the one `ConfigFault` any of them can
+    raise is the access method's (`access_context`), raised here over the run's record. None
+    when the system is usable."""
+    transport.record_access_context(tenant, SYSTEM)
 
 
 def health_check(ctx: VerbContext) -> dict:
