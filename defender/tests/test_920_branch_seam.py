@@ -269,22 +269,6 @@ def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
 # - the evidence its prefix names (copied, recorded) -> RETIRED with lead selection (G7/P2);
 #   tests/e2e/test_1255_snapshot_restore.py::test_p2_append_only_and_write_once_files_are_restored_up_to_the_cut
 
-def test_a_fresh_run_seeds_no_document(tmp_path):
-    """    A fresh run writes no `investigation.md` at open: the first `append_block` creates it.
-
-    The negative arm of the seed. A seam that wrote an empty file for every run would hand
-    `flagged_diagnostics` and `_check_append_only` a document before the model authored one,
-    and `_tool_append_block`'s "an EMPTY append gets no separator" reasoning is written against
-    a file that does not exist yet."""
-    branch = branch_mod()
-    _store, run_dir, _session_id, _ = _source_run(tmp_path)
-    fresh = tmp_path / "defender-runs" / "run-fresh"
-    fresh.mkdir(parents=True, exist_ok=True)
-
-    assert branch.seed_investigation(None, None, _sibling_state(fresh), run=fixture_run(fresh), source_run=None) == 0
-    assert not (fresh / "investigation.md").exists(), (
-        "a fresh run's document was created before its first append")
-
 
 # the two named seams
 

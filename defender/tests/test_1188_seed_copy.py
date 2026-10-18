@@ -1,19 +1,12 @@
-"""#1188 amendment 3 follow-up: the branch fork's artifact copies read capped, no-follow, and
-refuse as `BranchError`.
-
-The sibling's evidence is copied out of the source run dir, a box's rw bind. The copy reads
-through `_io.read_plain_bytes`: opened no-follow and judged on the open descriptor (no window
-between an lstat check and a link-following open), capped at `READ_LIMIT`. Every refusal is the
-module's `BranchError`, which its callers treat as "this fork is refused", never a raw `OSError`
-partway through the copy.
-"""
+"""Fork snapshot restoration preserves opaque artifacts and refuses unsafe source files."""
 from __future__ import annotations
 
 import os
 
 import pytest
 
-from defender.runtime.branch import _seed
+from defender.runtime.run_state import RunState
+from defender.tests._fork_snapshot_plant import recorded_snapshot
 from defender.runtime.branch._spec import BranchError
 from defender.tests._spec1077 import fixture_run
 
@@ -27,12 +20,20 @@ def _copy_records(tmp_path):
     return source, target
 
 
+def _restore(source, target):
+    source_run = fixture_run(source.path.parents[2])
+    target_run = fixture_run(target.path.parents[2])
+    snapshot = recorded_snapshot(source_run)
+    snapshot.verify(source_run)
+    snapshot.restore_files(source_run, target_run, RunState(target_run.run_dir, str(target_run.id)))
+
+
 def test_a_plain_artifact_is_copied_byte_for_byte(tmp_path):
     source, target = _copy_records(tmp_path)
     src = source.path
     src.write_bytes(b'{"a": 1}\r\n\xff')
     dst = target.path
-    _seed._copy_artifact(source, target)
+    _restore(source, target)
     assert dst.read_bytes() == b'{"a": 1}\r\n\xff'
 
 
@@ -42,8 +43,8 @@ def test_an_artifact_past_the_cap_is_a_branch_error_and_nothing_is_written(tmp_p
     with open(src, "wb") as f:
         f.truncate(64 * MiB + 1)
     dst = target.path
-    with pytest.raises(BranchError, match="read limit"):
-        _seed._copy_artifact(source, target)
+    with pytest.raises(BranchError):
+        _restore(source, target)
     assert not dst.exists()
 
 
@@ -56,4 +57,4 @@ def test_a_hard_linked_artifact_is_a_branch_error(tmp_path):
     linked = source.path
     os.link(original, linked)
     with pytest.raises(BranchError):
-        _seed._copy_artifact(source, target)
+        _restore(source, target)

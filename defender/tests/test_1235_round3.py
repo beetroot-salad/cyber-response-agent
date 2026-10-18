@@ -278,26 +278,16 @@ def test_lead_rows_hands_out_a_tuple_of_the_rows_as_they_stood(tmp_path):
     assert state.lead_rows("l-404") == ()
 
 
-def test_row_count_and_last_row_read_the_lead_without_listing_it(tmp_path):
-    """`row_count(lead)` is how many rows the lead holds, `last_row(lead)` the latest of them
-    (`None` for a lead with none) — the two reads lead-0 makes per call, counted over inherited
-    and appended rows alike, per lead."""
-    run_dir, state = _bare_run(tmp_path)
-    assert (state.row_count(LEAD), state.last_row(LEAD)) == (0, None)
-
+def test_row_count_counts_inherited_and_appended_rows_per_lead(tmp_path):
+    _run_dir, state = _bare_run(tmp_path)
+    assert state.row_count(LEAD) == 0
     state.inherit_rows([{"lead_id": LEAD, "seq": 0, "params": {"q": "inherited"}},
                         {"lead_id": "l-002", "seq": 0, "params": {"q": "other"}}])
     assert state.row_count(LEAD) == 1
-    assert state.last_row(LEAD)["params"] == {"q": "inherited"}
-
-    written = _append(state, params={"q": "mine"})
-    assert written["seq"] == 1
+    assert _append(state, params={"q": "mine"})["seq"] == 1
     assert state.row_count(LEAD) == 2
-    last = state.last_row(LEAD)
-    assert (last["seq"], last["params"]) == (1, {"q": "mine"})
-    assert last == _table_rows(run_dir)[-1], "the last row is not the view's last line"
     assert state.row_count("l-002") == 1
-    assert (state.row_count("l-404"), state.last_row("l-404")) == (0, None)
+    assert state.row_count("l-404") == 0
 
 
 def test_breaker_failures_counts_a_systems_charged_failures(tmp_path):

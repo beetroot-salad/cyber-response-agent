@@ -292,7 +292,7 @@ def test_1234_contrast_row_counts_calls_leads_and_external_refusals(tmp_path: Pa
     ∅.bash-shim included, I-1), and as unmapped each ledger row whose id is in no table row; a
     sibling's seeded lead-zero row is inherited, not unserved (I-2).
 
-    render reads executed_queries (its inherited rows seeded by _inherit_evidence) and the
+    render reads executed_queries (its inherited rows seeded by ForkSnapshot.restore_files) and the
     served_ledger into the JudgeContext. World b runs: a reject; a repeat of the inherited
     call; QP (altered); the withheld edr lookup (refused); an outage (BOB); a failing reduce
     (∅.bash-shim); three identical failing calls (the repeat guard trips: ∅.repeat-trip, and
@@ -846,10 +846,6 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "writes_by": "append", "via": (), "failed_write": "records state, then raises OSError",
         "call_id": "none on the row (#1255 G4)",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "runtime/branch/_seed.py::_inherit_evidence": {
-        "writes_by": "seed", "via": (), "failed_write": "refuses the seed",
-        "call_id": "none of this run's (seeded)",
-        "driven_by": "test_1234_every_query_table_writer_writes_this_runs_call_id"},
     # #1255 P2: an arm's queries table is restored from the source's fork snapshot (the table
     # cut to the length it held when the branch response arrived) — the production seeder of a
     # sibling's table. Its rows are the source's, so none carries this run's call id.

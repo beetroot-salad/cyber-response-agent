@@ -27,7 +27,7 @@ The behaviour stays with each concern's own module, which takes the state first:
 `system_status` (a system down at start, or on an escaped config fault) and `record_query` (the
 row append, the seq, the repeat note). Each does its read-modify-write under
 the state's one `lock`. Outside readers take the budget and breaker snapshots, which are copies,
-and the row accessors (`lead_rows`, `row_count`, `last_row`), which hand out the stored rows:
+and the row accessors (`lead_rows`, `row_count`), which hand out the stored rows:
 a row is never changed once recorded. Nothing process-wide refers to a state, so it lives
 exactly as long as the run that holds it.
 """
@@ -209,12 +209,6 @@ class RunState:
         """How many rows `lead` holds, inherited ones included."""
         with self.lock:
             return len(self.rows.get(lead, ()))
-
-    def last_row(self, lead: str) -> dict | None:
-        """`lead`'s latest row (read-only, as `lead_rows`), or `None` when it holds none."""
-        with self.lock:
-            rows = self.rows.get(lead)
-            return rows[-1] if rows else None
 
     def fork_counters(self) -> dict:
         """What a fork snapshot records of this state (#1255 P2, D2): the counters the model can

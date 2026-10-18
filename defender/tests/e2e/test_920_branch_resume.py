@@ -234,7 +234,7 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
     Regression over the new branch point (D1): it passes once D1 lands, fork snapshot or not,
     so it is not evidence for the snapshot (P2)."""
     # provenance: `_opening_prompt`'s own docstring names the problem it cannot solve alone;
-    # `branch.seed_investigation` is the other half.
+    # `ForkSnapshot.restore_files` is the other half.
     sink: list = []
     source = _source_run(tmp_path, sink, docs=NO_DOCS)
     spec, _prefix_ids = _spec(source, sink[0])

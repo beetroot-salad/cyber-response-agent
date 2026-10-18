@@ -81,13 +81,15 @@ def _searchable_row(seq: int, **overrides) -> dict:
 def _inherited_state(source: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
     """A branch sibling's run state after seeding inherited `source`'s table for `LEAD` — the
     one way a run's state holds rows it did not write (#1235 round 2)."""
-    from defender.runtime.branch._seed import _inherit_evidence
+    from defender.tests._fork_snapshot_plant import recorded_snapshot
     from defender.runtime.run_state import RunState
 
     sibling = source / "sibling"
     sibling.mkdir()
     state = RunState(sibling, "r1017-sibling")
-    _inherit_evidence(_writer_run_1165(source), state, {LEAD}, run=_writer_run_1165(state.run_dir))
+    source_run = _writer_run_1165(source)
+    snapshot = recorded_snapshot(source_run)
+    snapshot.restore_files(source_run, _writer_run_1165(state.run_dir), state)
     return state
 
 

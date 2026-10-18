@@ -68,7 +68,6 @@ from ._frontier import (
     _utc,
     branch_point_time,
     fence_count_at,
-    frontier_at_branch,
     leads_at,
     main_session,
     session_for_run,
@@ -76,15 +75,10 @@ from ._frontier import (
 )
 from ._seed import (
     _inherited,
-    _copy_artifact,
     _holds_content,
-    _inherit_evidence,
-    _inherit_lead_dir,
-    _not_a_plain_file,
     refuse_seeded_run_dir,
     restore_run_folder,
     source_alert,
-    seed_investigation,
 )
 
 
@@ -118,7 +112,7 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
     Every legality check reads the source as of the branch point's snapshot, never the whole
     finished source (rev 5 C7).
     """
-    from defender.skills.invlang.frontier import frontier_at
+    from defender.skills.invlang.frontier import frontier_from_text
     from defender.skills.invlang.parser import scan_fences
 
     run_dir = Path(spec.source_run_dir)
@@ -187,7 +181,7 @@ def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
 
     document = snapshot.document if snapshot.document is not None else ""
     fences = len(scan_fences(document).bodies)
-    open_state = frontier_at(document, fences).frontier
+    open_state = frontier_from_text(document)
     if not open_state.slots and not open_state.contracts:
         raise BranchError(
             f"nothing is open in the frontier at message {spec.branch_message_id} "
@@ -316,14 +310,10 @@ __all__ = [
     "_as_of_of",
     "_call_args",
     "_clock",
-    "_copy_artifact",
     "_drop_refused_dispatch",
     "_holds_content",
-    "_inherit_evidence",
-    "_inherit_lead_dir",
     "_known_leads",
     "_lead_of",
-    "_not_a_plain_file",
     "_prefix_stamps",
     "_refuse_bad_as_of",
     "_utc",
@@ -337,7 +327,6 @@ __all__ = [
     "datetime",
     "fence_count_at",
     "framework_view",
-    "frontier_at_branch",
     "guarded_mkdir",
     "is_reserved_query_id",
     "json",
@@ -351,7 +340,6 @@ __all__ = [
     "refuse_seeded_run_dir",
     "restore_run_folder",
     "source_alert",
-    "seed_investigation",
     "session_for_run",
     "session_store",
     "source_session",

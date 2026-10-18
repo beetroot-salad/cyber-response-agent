@@ -43,7 +43,10 @@ def source_and_sibling(tmp_path, *, document=None, plant=None):
 
 
 def seed(store, spec, source, target, state):
-    return branch.seed_investigation(store, spec, state, run=target, source_run=source)
+    snapshot = branch.snapshot_at(store, spec, source_run=source)
+    assert snapshot is not None
+    snapshot.verify(source)
+    branch.restore_run_folder(snapshot, state, run=target, source_run=source)
 
 
 def test_fork_retains_current_alert_bytes_for_the_same_id_and_inherits_verified_fallback(tmp_path):
@@ -245,6 +248,6 @@ def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup
 # factory tests above branch `_branch_947.planted_source` (not the N4 fixture) at a tool RETURN.
 # After #1255 they need the implementer's fixture-only snapshot planting on that source, and a
 # D1 branch point (`LEGACY_BRANCH_CALL`) once the restore's entry point replaces
-# `seed_investigation`. The opaque-bytes and payload-refusal tests plant their files through
+# `ForkSnapshot.restore_files`. The opaque-bytes and payload-refusal tests plant their files through
 # `source_and_sibling(plant=…)`, BEFORE `planted_source` builds the source, so whatever
 # snapshots it (at or after `planted_source` returns, on what it returns) sees them.

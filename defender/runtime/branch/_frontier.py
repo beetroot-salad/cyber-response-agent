@@ -28,15 +28,15 @@ def fence_count_at(
 ) -> int:
     """How many invlang fences the document held at `branch_message_id`.
 
-    Counted in fences, the unit `frontier_at` indexes, not `append_block` calls: one call can
-    carry several fences, one turn several calls, and lead-0's block is written by the host
-    before the model's first turn. Under-counting is silent (`snapped` only fires past the end).
+    Counted in fences, not `append_block` calls: one call can carry several fences,
+    one turn several calls, and lead-0's block is written by the host before the model's
+    first turn.
 
     Fences no append accounts for (`total - overall`) were on disk before the model wrote and
     count at every branch point; appended fences count when their tool return (the half the
     prefix carries) is at or before the branch point, joined to the call's text by
-    `tool_call_id`. The clamp at 0 lets a truncated document run past `total`, so
-    `frontier_at` reports the disagreement.
+    `tool_call_id`. The initial contribution is clamped at zero when the recorded
+    appends exceed the current document.
     """
     from defender.skills.invlang.parser import scan_fences
 
@@ -196,22 +196,6 @@ def _refuse_bad_as_of(spec: BranchSpec, derived: datetime) -> None:
             f"{spec.source_run_dir} was written at {derived.isoformat()} — a spec carrying "
             "another branch point's clock yields an episode whose siblings agree with each "
             "other and with nothing else")
-
-
-def frontier_at_branch(store: Any, spec: BranchSpec, *, source_run: Run):
-    """The investigation's open state as it stood at the branch point.
-
-    `frontier_at` is imported lazily: the driver imports this package, and the invlang frontier
-    subtree costs ~100ms at import for every process when only a resume needs it.
-    """
-    from defender.skills.invlang.frontier import frontier_at
-
-    text = source_run.documents.investigation.read()
-    # No document reads as the empty frontier, which `validate` refuses.
-    document = text if text is not None else ""
-    return frontier_at(
-        document,
-        fence_count_at(store, source_session(store, spec, source_run=source_run), spec.branch_message_id, document))
 
 
 #: The tool whose call/return pair is the only join from a message id to a run's evidence — the

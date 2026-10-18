@@ -358,7 +358,7 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
     ordinary conduct row of the run and does not make a finding gap-only.
 
     The REAL path: the source run's table carries the pre-branch denial, which the real
-    `_inherit_evidence` seeds into every sibling; b's gather also calls an unresolvable verb,
+    `ForkSnapshot.restore_files` seeds into every sibling; b's gather also calls an unresolvable verb,
     which the real query tool rejects with exit 64 and no ledger row. The pair of b's reject
     with the control's J3 row is the positive control: it queues. On the refused-call clause:
     every refused call in the archive the judge reads has its ledger row, joined to its table

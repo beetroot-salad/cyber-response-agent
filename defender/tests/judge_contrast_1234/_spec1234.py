@@ -39,7 +39,7 @@ TWO EPISODE BUILDERS — pick by the demand, as `80-survey.md` assigns:
    `run.main --tenant T --episode <id> --world L`, run in-process by `InProcessSiblings` (the
    launcher's `spawn=` seam); then the real `verify_family` -> `archive_episode` -> family
    stamp. The call records are written by the real writers (registry `authorize_call`/`_deliver`/
-   `_record_beside`, query tool `append_query_row`/`_record_denied`, `_inherit_evidence`), so a
+   `_record_beside`, query tool `append_query_row`/`_record_denied`, `ForkSnapshot.restore_files`), so a
    test reads the call id OFF the rows (`call_ids`) and never plants it. Every A12/A14
    situation, d03b-d03d, d08a and the n_t8_* runtime demands use this path. The launcher's own
    JUDGE step is suppressed (its learning-state root is absent for the launch, so `cli._grade`
@@ -1736,7 +1736,7 @@ def capture_sentinel(src: Path, *, system: str = "edr", verb: str = "lookup",  #
                      query_id: str = DENIED_QUERY_ID, exit_code: int = DENIED_EXIT,
                      lead: str = "l-001") -> None:
     """Append one pre-branch sentinel row to the SOURCE run's table in the writer's own column
-    set (J3's inherited `∅.denied` by default) — a real row the real `_inherit_evidence` seeds
+    set (J3's inherited `∅.denied` by default) — a real row the real `ForkSnapshot.restore_files` seeds
     into every sibling."""
     rq = mod(RECORD_QUERY)
     breaker = mod("runtime.circuit_breaker")

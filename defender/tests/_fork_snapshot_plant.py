@@ -34,3 +34,30 @@ def plant_fork_snapshots(store: Any, session_id: str, run_dir: Path) -> None:
             # that planted nothing must say so here, not as "no fork snapshot" downstream.
             assert store.fork_snapshot(session_id, request) is not None, (
                 f"the fixture planted no fork snapshot for request {request} of {run_dir}")
+
+
+def recorded_snapshot(run: Any) -> Any:
+    """Capture fixture files through the real writer/store/loader, with fresh run state."""
+    import tempfile
+
+    from defender.hooks.budget_enforcer import DEFAULT_LIMITS
+    from defender.runtime import challenge_gate
+    from defender.runtime.branch import SnapshotWriter
+    from defender.runtime.branch._snapshot import load
+    from defender.runtime.run_state import RunState
+    from defender.tests._session_store_705 import store_factory
+
+    with tempfile.TemporaryDirectory() as folder:
+        store = store_factory(Path(folder))(run.run_dir.name, run.run_dir)
+        try:
+            session = store.new_session(agent_id="main")
+            bounds = challenge_gate.default_bounds()
+            SnapshotWriter(
+                store, session, run=run, state=RunState(run.run_dir, str(run.id)),
+                limits=DEFAULT_LIMITS, base_request_limit=bounds.base_request_limit,
+                extra_turns=bounds.extra_turns).record(1, challenge_gate.ReviewState())
+            snapshot = load(store, session, 1)
+            assert snapshot is not None, "fixture snapshot was not recorded"
+            return snapshot
+        finally:
+            store.close()
