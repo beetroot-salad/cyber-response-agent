@@ -359,6 +359,49 @@ def down_notes(state: RunState, systems: Iterable[str]) -> dict[str, str]:
 NONE_DOWN: Mapping[str, str] = MappingProxyType({})
 
 
+def snapshot_down(state: RunState) -> dict[str, dict[str, str]]:
+    """The permanent down causes at the fork boundary, as JSON-shaped values.
+
+    Reasons already passed their source run's `ReasonScope`; the scope itself belongs
+    to the current run and is never copied into an arm.
+
+    @owns fork_system_down"""
+    with state.lock:
+        return {
+            system: {"kind": "not_configured" if isinstance(cause, NotConfigured)
+                     else "adapter_broken", "reason": cause.reason}
+            for system, cause in state.system_down.items()
+        }
+
+
+def restore_down(state: RunState, recorded: dict) -> None:
+    """Inherit the source's permanent causes without losing the arm's startup verdict.
+
+    The inherited cause came first for a system both runs found down. New startup
+    failures still apply; later escaped faults use the arm's own reason scope.
+    """
+    inherited = down_from_snapshot(recorded)
+    with state.lock:
+        state.system_down.update(inherited)
+
+
+def down_from_snapshot(recorded: object) -> dict[str, StartCause]:
+    """Decode the fork's permanent causes, refusing an incomplete or unknown cause."""
+    kinds: dict[str, Callable[[str], StartCause]] = {
+        "not_configured": NotConfigured, "adapter_broken": AdapterBroken}
+    inherited: dict[str, StartCause] = {}
+    if not isinstance(recorded, dict):
+        raise ValueError("the recorded system-down state is not an object")
+    for system, entry in recorded.items():
+        if (not isinstance(system, str) or not isinstance(entry, dict)
+                or set(entry) != {"kind", "reason"}
+                or not isinstance(entry["kind"], str) or entry["kind"] not in kinds
+                or not isinstance(entry["reason"], str)):
+            raise ValueError("the recorded system-down state contains an invalid cause")
+        inherited[system] = kinds[entry["kind"]](entry["reason"])
+    return inherited
+
+
 def _mark(state: RunState, system: str, cause: StartCause) -> None:
     """Hold `cause` for `system` on the run's state; a system already down keeps its first
     cause (it does not come back up, and its cause does not change)."""
@@ -380,6 +423,7 @@ __all__ = [
     "cause_text",
     "down_cause",
     "down_notes",
+    "down_from_snapshot",
     "granted_systems",
     "held_refusal",
     "hold_at_start",
@@ -389,4 +433,6 @@ __all__ = [
     "message_for",
     "refusal_if_down",
     "require_usable",
+    "restore_down",
+    "snapshot_down",
 ]

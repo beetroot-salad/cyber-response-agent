@@ -219,14 +219,17 @@ class RunState:
     def fork_counters(self) -> dict:
         """What a fork snapshot records of this state (#1255 P2, D2): the counters the model can
         feel — the budget's tool-call and spawn counts, the circuit breaker and the run clock's
-        reading and elapsed time — as one
+        reading and elapsed time, and permanent system-down causes — as one
         JSON-shaped copy. `restore_fork_counters` is its inverse.
 
         @owns fork_counters"""
+        from .system_status import snapshot_down
+
         with self.lock:
             return {"tool_calls": self.budget["tool_calls"],
                     "subagent_spawns": self.budget["subagent_spawns"],
                     "breaker": copy.deepcopy(self.breaker),
+                    "system_down": snapshot_down(self),
                     "clock": {"reading": self.now().isoformat(),
                               "elapsed": self.elapsed()}}
 
@@ -234,7 +237,10 @@ class RunState:
         """Start a branch arm's state where its source's stood at the branch point: the
         counters `fork_counters` recorded there. A key missing from `counters` is a
         `KeyError` — a snapshot that does not carry a counter cannot restore it."""
+        from .system_status import restore_down
+
         with self.lock:
+            restore_down(self, counters["system_down"])
             self.budget["tool_calls"] = int(counters["tool_calls"])
             self.budget["subagent_spawns"] = int(counters["subagent_spawns"])
             self.breaker = copy.deepcopy(counters["breaker"])

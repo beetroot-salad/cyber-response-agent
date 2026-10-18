@@ -3,7 +3,8 @@
 When a MAIN model response that called tools arrives, before any of its calls run, the host
 records (`SnapshotWriter.record`):
 
-  * every per-run counter the model can feel — the budget counters and the circuit breaker
+  * every per-run counter the model can feel — the budget counters, permanent system-down
+    causes and the circuit breaker
     (`RunState.fork_counters`), the challenge gate's rounds and raised asks, main's request
     count (this response included, the snapshot's key), and the caps the run runs under (its
     limits and its request ceiling, rev 5 C3);
@@ -44,13 +45,14 @@ from pydantic_ai.messages import ModelResponse
 
 from .. import session_store
 from ..run_state import RunState
+from ..system_status import down_from_snapshot
 from ._frontier import lead_records, source_session
 from ._spec import BranchError, BranchSpec
 
 _logger = logging.getLogger(__name__)
 
 #: The snapshot body's shape version; a body of any other version is not one this reader knows.
-SNAPSHOT_VERSION = 1
+SNAPSHOT_VERSION = 2
 
 
 def _queries(run: Run) -> RecordHandle:
@@ -382,8 +384,9 @@ def load(store: Any, session_id: str, request: int) -> ForkSnapshot | None:
         body = json.loads(raw)
         if not isinstance(body, dict) or body.get("version") != SNAPSHOT_VERSION:
             raise ValueError(f"version {body.get('version') if isinstance(body, dict) else body!r}")
+        down_from_snapshot(body["counters"]["system_down"])
         digest = body["document"]
-    except (ValueError, KeyError) as error:
+    except (ValueError, KeyError, TypeError) as error:
         raise BranchError(
             f"the fork snapshot at request {request} cannot be read: {error!r}") from error
     document = None
