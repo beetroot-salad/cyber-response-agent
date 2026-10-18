@@ -1,17 +1,6 @@
-"""#1255 deferred verification 4 — the FIXTURE-ONLY fork-snapshot planter for hand-planted sources.
+"""Make hand-planted source sessions branchable through the production snapshot writer.
 
-A source whose store rows a suite writes directly (`_branch_947.planted_source`,
-`_triplet_947.seed_source_session`) was never driven, so production recorded no fork snapshot
-for any of its responses, and after #1255 no arm is launched from it (N4). The suites that need
-such a source to be BRANCHABLE (state a driven run cannot reach) plant the snapshot here, through
-production's own writer (`runtime.branch.SnapshotWriter`), as of the source folder's current
-files — the state the hand-planted run "held" at every one of its tool-calling responses.
-
-This builds test inputs; it is not evidence the driver records snapshots. It is never applied to
-`_branch_947.legal_source` or a `pre_snapshot=True` source (the N4/C2 fixtures), and no
-`test_1255_snapshot_*` module imports it: those observe snapshots only through driven runs.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
+Driven-source snapshot tests do not use this fixture: they verify recording by the driver.
 """
 from __future__ import annotations
 
@@ -20,9 +9,7 @@ from typing import Any
 
 
 def plant_fork_snapshots(store: Any, session_id: str, run_dir: Path) -> None:
-    """Record a fork snapshot for every tool-calling MAIN response on `session_id`'s path, each
-    describing `run_dir` as it stands now, with a fresh run's counters, review gate and the
-    shipped caps."""
+    """Snapshot the current fixture folder at each tool-calling MAIN response."""
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS

@@ -1,32 +1,4 @@
-"""#1255 slice C shared machinery — query ids, served bytes and the control world's oracle.
-
-NO test functions; underscore-prefixed so pytest never collects it. Imported as
-`from defender.tests import _1255_world as W` by `test_1255_queries_*.py` and
-`test_1255_world_*.py`.
-
-Everything here is a FIXTURE or a RECORDING DOUBLE; none of it decides anything the design
-assigns to production:
-
-  * `OrderedEstate` is #1224's fixture estate (`_spec1224.Estate`) with one change: its answers
-    table is written WITHOUT `sort_keys`, so a stub adapter hands back each payload in the key
-    order the scenario wrote it — the order a real adapter's own output has. #1224's estate
-    sorts every stored answer, which makes "served byte-for-byte as the adapter produced it"
-    (G8) and "re-serialised with sorted keys" indistinguishable; every served-bytes demand here
-    first asserts its payload is NOT key-sorted (the fixture's own discriminating power).
-  * `ReturnsSeen` is the replay harness's `ReplayFn` that also records, per model request, the
-    tool returns and retry prompts the request opens with — what the model was handed back for
-    its previous calls. It records; it answers exactly as `ReplayFn` does.
-  * `normalized` removes the two things two otherwise-identical runs differ by on the model's
-    channel and nothing else: the per-frame untrusted salt (random by #680's design) and each
-    run's own run-dir path (the two runs sit in different tmp folders; the model-view mapping
-    that makes those paths equal is slice B's).
-  * `world_registry_with_source` is `_spec1224.build_registry` plus the registry's existing
-    `source_run=` keyword (the seam through which a sibling's registry already reads the source
-    run's alert), which `_spec1224.build_registry` does not pass.
-
-Every model double is #1224's `ScriptedModel` (`_spec1224.oracle` / `passing_verifier`) or
-#1234's `Routed`; every fault is a real input. Nothing here uses `monkeypatch.setattr`.
-"""
+"""Fixtures for query-row and world-serving tests."""
 from __future__ import annotations
 
 import json
@@ -38,9 +10,6 @@ from typing import Any
 from defender.tests.e2e._replay_harness import ReplayFn
 from defender.tests.live_oracle_1224 import _spec1224 as S24
 
-#: The query table's columns once the call id leaves it (G4): #1017's fourteen writer columns,
-#: without the fifteenth (`call_id`) #1234 A12 added — in writer order. A literal, never read off
-#: the writer under test, so a column that carries the id under another name fails too.
 ROW_COLUMNS = (
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command", "payload_path",
     "exit_code", "error_class", "payload_status", "payload_digest", "payload_sha256",
@@ -50,16 +19,11 @@ ROW_COLUMNS = (
 #: The column name the design removes from the model's table (G4/G5).
 CALL_ID = "call_id"
 
-#: The fork time every #1224 fixture episode records (`_triplet_947.AS_OF`) as the oracle is
-#: told it: an ISO-8601 instant with a `Z`.
 FORK_TIME = S24.T.AS_OF
 
 
 def configure_roots(tmp_path: Path, monkeypatch: Any) -> Path:
-    """The configured roots a #1224 / #1234 scenario needs, under the test's own `tmp_path`:
-    the episodes root (created, as #1234's conftest does), the learning-state root, and an
-    oracle rate high enough that no oracle-side query sleeps. The same three settings the two
-    suites' own conftests apply; this file's tests sit at the suite root, outside them."""
+    """Isolate episode and learning roots; disable oracle throttling."""
     root = tmp_path / "episodes-root"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv(S24.T.EPISODES_BASE_ENV, str(root))
@@ -69,11 +33,7 @@ def configure_roots(tmp_path: Path, monkeypatch: Any) -> Path:
 
 
 class OrderedEstate(S24.Estate):
-    """#1224's fixture estate whose stub adapters answer in the key order the scenario wrote.
-
-    The parent writes its answers table with `sort_keys=True`, so every stub answer comes back
-    key-sorted whatever the scenario wrote. This one writes it as written; `json.loads` keeps a
-    file's key order, so the adapter returns the payload exactly as scripted."""
+    """Preserve adapter key order so byte comparisons detect reserialization."""
 
     def _put(self, key: str, entry: dict) -> None:
         table = self._table()
@@ -86,14 +46,12 @@ def ordered_estate(tmp_path: Path, **kw: Any) -> OrderedEstate:
 
 
 def is_key_sorted(text: str) -> bool:
-    """Whether `text` (one JSON document) already spells every object's keys sorted — the
-    fixture check every served-bytes demand makes before it can mean anything."""
+    """Check whether JSON keys already have canonical order."""
     return text == json.dumps(json.loads(text), sort_keys=True)
 
 
 def _part_text(part: Any) -> str:
-    """One request part as the model reads it: a tool return's or retry prompt's own
-    model-facing rendering when the part offers one, else its content."""
+    """Render a request part as the model sees it."""
     for name in ("model_response_str", "model_response"):
         render = getattr(part, name, None)
         if callable(render):
@@ -106,9 +64,7 @@ def _part_text(part: Any) -> str:
 
 
 class ReturnsSeen(ReplayFn):
-    """`ReplayFn` that also records, for each model request, the tool returns and retry prompts
-    it carries in its LAST message — what the model was handed back for its previous turn's
-    calls, in call order. `returns[i]` is request i's list."""
+    """Replay scripted turns and record inbound tool returns and retry prompts."""
 
     __name__ = "ReturnsSeen"
 
@@ -132,8 +88,7 @@ _SALT = re.compile(r"run-[0-9a-f]+-untrusted")
 
 
 def normalized(text: str, *run_dirs: Path) -> str:
-    """`text` with the frame salt spelled alike and each of `run_dirs` written `<RUN>` (longest
-    first, so a run dir nested in another is replaced whole)."""
+    """Normalize frame salts and run paths, replacing longer paths first."""
     out = _SALT.sub("run-SALT-untrusted", text)
     for run_dir in sorted({str(d) for d in run_dirs}, key=len, reverse=True):
         out = out.replace(run_dir, "<RUN>")
@@ -142,9 +97,7 @@ def normalized(text: str, *run_dirs: Path) -> str:
 
 def drive_lead(tmp_path: Path, *, verbs: Any, est: Any, turns: list[Any], system: str = "idp",
                run_id: str = "run-1255") -> tuple[Path, ReturnsSeen]:
-    """One investigation through the replay harness (`_spec1224.drive_gather`'s shape) whose
-    gather model is a `ReturnsSeen`: main dispatches ONE lead on `system`, the lead runs
-    `turns`. Returns `(run dir, the gather double)`."""
+    """Drive one lead through the real query tool and record model-visible returns."""
     H = S24.replay_harness()
     run_dir = H.materialize(Path(tmp_path) / run_id, H.GOLDEN_AB3, run_id=run_id)
     main = H.ReplayFn([
@@ -182,8 +135,7 @@ def row_for(rows: Iterable[Mapping[str, Any]], params: Mapping[str, Any]) -> dic
 
 
 def arm_identities(episode_dir: Path, labels: Iterable[str] = S24.WORLDS) -> list[str]:
-    """The arm-identity strings O2 names, for a #1224 fixture episode: its id, its token and
-    each world's token (`<episode token>.<label>`)."""
+    """Return the episode id, episode token, and world tokens."""
     token = S24.sym(S24.FAMILY, "episode_token_for")(Path(episode_dir).name)
     return [Path(episode_dir).name, token, *(f"{token}.{label}" for label in labels)]
 
@@ -194,10 +146,7 @@ def identities_in(text: str, identities: Iterable[str]) -> list[str]:
 
 def world_registry_with_source(ep: Path, label: str, est: Any, *, source_run: Any,
                                oracle: Any, verifier: Any, **knobs: Any) -> Any:
-    """`WorldRegistry` for world `label` of episode `ep` exactly as `_spec1224.world_registry`
-    builds it (the fixture estate's roster and gather grant, the doubles through the settled
-    oracle side, a recording sandboxed box), plus `source_run=` — the registry's own keyword
-    for the source run it serves the sibling of (today it reads that run's alert there)."""
+    """Build the fixture registry with its source-run context."""
     box, _log = S24.sandboxed_box()
     rt = est.run_tenant()
     world = S24.load_world(ep, label)

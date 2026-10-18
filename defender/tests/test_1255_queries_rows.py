@@ -1,29 +1,4 @@
-"""#1255 slice C — the model's query table names no call and no arm (G4, G5, O2), and the judge's
-join of a table row to what the world served survives without it (G6, P3).
-
-The design (issue #1255, design rev 4, "Query ids"): the `call_id` column leaves the
-model-readable query table (`executed_queries.jsonl`). On an arm it is `<world token>/<n>` — the
-episode token and the world's label, in a file the model reads with plain `cat` — and on every
-run it is a column nothing model-facing uses (G5). The join between a query row and the served
-ledger moves to a host-only record keyed by the row's `(lead_id, seq)`, holding the call id and
-the world token; natural runs use the same shape (P1). A row's position in the table is not used:
-the table is box-writable, and a refused view write leaves the run's memory and the file
-disagreeing.
-
-Where things enter (all real entry points, nothing monkey-patched):
-  * a NATURAL run: the replay harness driving the real driver, query tool and record writer over
-    the plain module registry (`_spec1224.plain_registry`);
-  * an ARM's serving: the same drive over the real `WorldRegistry` of a #1224 fixture episode,
-    in the control world and in a world with facts;
-  * a whole ARM with inherited rows: #1234's `real_family` — the real launcher, real pre-flight,
-    each sibling the real `run.main --tenant T --episode <id> --world L` in-process, the real
-    seed, the real archive;
-  * the JOIN: the judge's own render of that archived episode (`_spec1234.render_context`), the
-    one reader of both call records.
-
-The host-only join record's location and shape are NOT named here (the dossier leaves them to
-the implementer); the join is observed only through the judge.
-"""
+"""Query rows hide call identities while the judge retains its host-side join."""
 from __future__ import annotations
 
 import base64
@@ -50,8 +25,6 @@ BOB = S24.query_params("user:bob")
 CAROL = S24.query_params("user:carol")
 BASE_ALICE = {"rows": [{"action": "logon", "event_id": "e-100", "user": "alice"}]}
 BOB_BASE = {"rows": [{"action": "logon", "event_id": "e-200", "user": "bob"}]}
-#: A verb every fixture system declares and the fixture grant withholds from gather: the grant
-#: refuses it, so it leaves a `∅.denied` table row and (on an arm) a `refused` ledger row.
 WITHHELD = ("edr", "lookup")
 
 
@@ -61,11 +34,7 @@ def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _assert_only_listed_files(run_dir: Path, where: str) -> None:
-    """Every file under `run_dir` is one of the records a run holds, BY NAME
-    (`_1255_run_records.unlisted`: the layout's named records, each table row's lead claim,
-    summary and own payload, the numbered review records — no `wire_logs/*` or other wildcard;
-    contract-repair findings F-Q1 and F2-Q), with its positive control on planted join
-    records under `gather_raw/`, at the root and under `wire_logs/`."""
+    """Reject unlisted records, including encoded join sidecars."""
     rows = W.table_rows(run_dir)
     assert rows, f"fixture: {where} left no query table"
     RR.assert_only_run_records(run_dir, where, rows)
@@ -82,18 +51,7 @@ def _assert_no_call_id(rows: list[dict], where: str) -> None:
         f"the id under another name is the same leak): {shaped[:2]}")
 
 
-# ======================================================================================
-# G4 / P1 — a natural run's table carries no call id.
-# ======================================================================================
-
-
 def test_1255_a_natural_runs_query_rows_carry_no_call_id(tmp_path: Path) -> None:
-    """G4, P1 — on a natural run every query-table row the run writes (an answered call, a
-    rejected verb, a grant refusal) carries exactly the fourteen writer columns and no
-    `call_id`: natural runs and arms share one table shape.
-
-    Positive control on the same channel: the rows are there, one per call, keyed by
-    `(lead_id, seq)` — so the absence is the column's, not an empty table's."""
     est = S24.estate(tmp_path, withheld=(WITHHELD,))
     est.answer("idp", "query", ALICE, BASE_ALICE)
     run_dir, _gather = W.drive_lead(tmp_path / "natural", verbs=S24.plain_registry(est), est=est,
@@ -107,21 +65,11 @@ def test_1255_a_natural_runs_query_rows_carry_no_call_id(tmp_path: Path) -> None
     assert [r["seq"] for r in own] == [0, 1, 2], "the rows are keyed by (lead_id, seq)"
     assert W.row_for(own, ALICE)["system"] == "idp"
     _assert_no_call_id(rows, "natural run")
-    # P1/P3: natural runs keep the join in the same host-only place as arms — not in a file of
-    # their own run folder under some other name.
     _assert_only_listed_files(run_dir, "natural run")
 
 
-# ======================================================================================
-# G4 / O2 — an arm's table names neither the call nor the arm.
-# ======================================================================================
-
-
 def _arm_drive(tmp_path: Path, label: str) -> tuple[Path, Path]:
-    """World `label` of a #1224 fixture episode served through the real `WorldRegistry`, its
-    investigator driven through the real query tool: a recorded call (ALICE), a call the source
-    never asked (BOB) and a withheld verb (the grant refuses it). Every oracle turn passes the
-    base unchanged. Returns `(episode dir, the arm's run dir)`."""
+    """Serve a recorded call, a new call, and a grant refusal through the real registry."""
     est = S24.estate(tmp_path, withheld=(WITHHELD,))
     est.answer("idp", "query", BOB, BOB_BASE)
     ep = S24.episode_v2(tmp_path, base_rows=[S24.captured("idp", "query", ALICE, BASE_ALICE)])
@@ -139,10 +87,7 @@ def _arm_drive(tmp_path: Path, label: str) -> tuple[Path, Path]:
 
 
 def _positive_control_host_names_the_arm(ep: Path, label: str) -> list[str]:
-    """The world's served ledger — host-side, outside the model's reach — names the world on
-    every row (`world_id`) and carries each call's id: the identity detector does find an
-    identity where one is written, and the host keeps what it joins on. Returns the
-    identities."""
+    """Verify the host ledger retains identities and the identity detector finds them."""
     identities = W.arm_identities(ep)
     ledger = S24.ledger_rows(ep, label)
     token = S24.world_token(label)
@@ -154,53 +99,14 @@ def _positive_control_host_names_the_arm(ep: Path, label: str) -> list[str]:
 
 
 @pytest.mark.parametrize("label", ["a", "b"], ids=["control-world", "world-with-facts"])
-def test_1255_an_arms_query_rows_carry_no_call_id_and_no_arm_identity(tmp_path: Path,
-                                                                      label: str) -> None:
-    """G4, O2 — an arm's query rows carry no `call_id`, and no row anywhere in the table names the
-    episode or the world (its id, its token, any world's token), in the control world and in a
-    world with facts alike.
-
-    Today each row carries `<episode token>.<label>/<n>`: the arm's identity, in a file the model
-    reads by `cat`. Positive control on the same detector: the world's served ledger still names
-    the world and each call (`_positive_control_host_names_the_arm`)."""
+def test_1255_no_file_in_an_arms_run_folder_names_the_arm_or_its_calls(
+        tmp_path: Path, label: str) -> None:
     ep, run_dir = _arm_drive(tmp_path, label)
     identities = _positive_control_host_names_the_arm(ep, label)
     rows = W.table_rows(run_dir)
     _assert_no_call_id(rows, f"world {label}")
-    leaked = W.identities_in(json.dumps(rows), identities)
-    assert not leaked, f"world {label}'s query table names the arm: {leaked}"
-
-
-def test_1255_no_file_in_an_arms_run_folder_names_the_arm_or_its_calls(tmp_path: Path) -> None:
-    """P3, G6 — the join between a query row and the served ledger lives in a host-only record
-    OUTSIDE the run folder (the tree the box mounts): after an arm's investigation no file
-    anywhere under its run folder holds the episode id, the episode token, a world token or a
-    call id the ledger carries — wherever the implementation keeps the join, it is not there.
-
-    Held two ways, because a substring scan is lexical (contract-repair finding F-Q1: a join
-    record base64-encoded into `gather_raw/.calls` passed it; F2-Q: one zlib-compressed into
-    `wire_logs/call_join.jsonl` passed both scans of the first repair):
-
-      * by STRUCTURE, first: the folder holds no file that is not one of a run's records, by
-        name (`_1255_run_records.unlisted`: the table, each row's own payload, each lead's
-        claim and summary, the documents, logs and observability streams, and the layout's
-        named wire logs — never a `wire_logs/*` shape) — so the join cannot sit there under a
-        name of its own, in any encoding;
-      * by ENCODING: each identity and call id is also looked for as a derived form (its hex
-        and base64 bytes, its digests, uuid3/uuid5 over it) and inside every base64/hex run of
-        every file, decoded and, where compressed (zlib, gzip, raw deflate), inflated
-        (`_1255_identity.encoded_hits`) — for a join appended inside a record the run does
-        hold.
-
-    Positive controls on the same scans: they read every file of the folder (the arm's own call
-    params are found in it), the ledger they are compared against does carry the identities,
-    the encoded scan finds a call id written base64-encoded inside a JSON record — plain, and
-    zlib-, gzip- or raw-deflate-compressed, base64 or hex — and the listing flags planted join
-    records. Today the only file that names the arm is the query table (its `call_id`
-    column)."""
-    ep, run_dir = _arm_drive(tmp_path, "b")
-    identities = _positive_control_host_names_the_arm(ep, "b")
-    call_ids = [str(r[W.CALL_ID]) for r in S24.ledger_rows(ep, "b")]
+    assert not W.identities_in(json.dumps(rows), identities)
+    call_ids = [str(r[W.CALL_ID]) for r in S24.ledger_rows(ep, label)]
     _assert_only_listed_files(run_dir, "the arm")
     files = [(p.relative_to(run_dir).as_posix(), p.read_bytes())
              for p in sorted(run_dir.rglob("*")) if p.is_file()]
@@ -223,14 +129,6 @@ def test_1255_no_file_in_an_arms_run_folder_names_the_arm_or_its_calls(tmp_path:
 
 def test_1255_every_siblings_table_seeded_and_own_carries_no_call_id_or_arm_identity(
         tmp_path: Path) -> None:
-    """G4, O2 — through the whole real path (launcher, pre-flight, each sibling's `run.main
-    --episode --world`, the seed, the archive), no row of any world's query table — the rows
-    seeded from the source and the rows the sibling wrote — carries `call_id` or names the
-    episode or a world, in the sibling's own run folder and in the archived copy alike.
-
-    Positive controls: every table holds the seeded prefix AND rows of its own (the default
-    triad repeats the pre-branch call, asks the post-branch call and is refused one call), and
-    every world's served ledger names that world on each row."""
     built = S34.real_family(tmp_path)
     assert built.rc == 0, f"fixture: the launch failed ({built.rc}, {built.message!r})"
     identities = W.arm_identities(built.ep)
@@ -252,11 +150,6 @@ def test_1255_every_siblings_table_seeded_and_own_carries_no_call_id_or_arm_iden
             assert not leaked, f"world {label}'s {where} query table names the arm: {leaked}"
 
 
-# ======================================================================================
-# G6 — the judge's join reads the host, never a row's position in the table.
-# ======================================================================================
-
-
 def _contrast_row(built: Any, label: str) -> Any:
     ctx = S34.render_context(built, label)
     rows = ctx[S34.COINED["ctx.contrast"]] if isinstance(ctx, dict) else getattr(
@@ -271,18 +164,6 @@ def _field(row: Any, name: str) -> Any:
 
 def test_1255_the_judges_join_survives_a_row_missing_from_the_middle_of_the_table(
         tmp_path: Path) -> None:
-    """G6 ("a row's position in the table is not used") — when a row is missing from the MIDDLE
-    of a sibling's archived query table (what a refused view write leaves: the call was made,
-    served and rowed in the ledger, and its table line never landed), the judge still pairs
-    every remaining row with its own served-ledger row: the altered call after the gap is named
-    at its line in the table as it now stands, nothing is listed unserved, and the call whose
-    line is gone is the one unmapped ledger row (`passthrough`, no call number).
-
-    A join by position (the n-th own row is the n-th call) pairs the altered call's row with
-    the missing call's ledger row instead; today's join by the id on the row holds, and so must
-    the host-only record that replaces it. World b asks the pre-branch call again, a fresh call
-    (CAROL) and the post-branch call its oracle alters; CAROL's line is then removed from the
-    archived table (`_spec1234.rewrite_jsonl`)."""
     est = S34.Estate1234(tmp_path / "estate", withheld=(WITHHELD,))
     est.answer("idp", "query", CAROL, S34.BASE_ANSWER)
     built = S34.real_family(tmp_path, {"b": S34.RealWorld("b", turns=[
