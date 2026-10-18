@@ -152,8 +152,8 @@ def test_p1_control_the_investigators_own_seconds_count_in_full(tmp_path):
 
     assert C.lesson_reads(run_dir, L1) == [C.at(START, 35 + WORLD_SECONDS)], (
         f"the investigator's own seconds did not reach the visible time: {C.lesson_rows(run_dir)}")
-    assert _bash_refused(main) and "wall-clock" in main.seen[3], (
-        "935 s of investigator time against a 600 s limit refused nothing")
+    assert _bash_refused(main), "935 s of investigator time against a 600 s limit refused nothing"
+    assert "wall-clock" in main.seen[3], "935 s of investigator time against a 600 s limit refused nothing"
 
 
 def test_p2_a_rate_limit_wait_moves_no_visible_time_and_no_elapsed_time(tmp_path):

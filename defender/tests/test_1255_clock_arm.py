@@ -88,8 +88,8 @@ def launch_arm(tmp_path: Path, tenant_id: str, source: Path, *steps: C.Step,  # 
 
 def _launched(out: C.Launched) -> None:
     """The arm ran its investigation (it was not refused at launch or at store setup)."""
-    assert out.exit == 0 and out.summary is not None, (
-        f"the arm did not run: exit={out.exit} refusal={out.refusal} summary={out.summary}")
+    assert out.exit == 0, f"the arm did not run: exit={out.exit} refusal={out.refusal} summary={out.summary}"
+    assert out.summary is not None, f"the arm did not run: exit={out.exit} refusal={out.refusal} summary={out.summary}"
     assert out.summary.get("truncated_by") != "store", (
         "the arm ended at store setup — today `branch.validate` refuses a branch point at a "
         f"response whose calls are unanswered (D1 flips it): {out.summary}")
@@ -165,8 +165,9 @@ def test_a2_an_arm_reaches_the_wall_clock_limit_where_its_source_would_have(
     assert len(main.seen) >= 2, f"the arm stopped before its bash call was answered: {main.seen}"
     shown = main.seen[1]
     if refused:
-        assert C.refusal_stem() in shown and "wall-clock" in shown, (
-            f"610 s at the fork + {arm_seconds} s in the arm passes a 900 s limit and nothing "
+        assert C.refusal_stem() in shown, (f"610 s at the fork + {arm_seconds} s in the arm passes a 900 s limit and nothing "
+            "was refused — the arm's clock or its budget origin restarted at the fork")
+        assert "wall-clock" in shown, (f"610 s at the fork + {arm_seconds} s in the arm passes a 900 s limit and nothing "
             "was refused — the arm's clock or its budget origin restarted at the fork")
         assert "arm-call-ran" not in shown, "the refused call ran anyway"
     else:
@@ -260,8 +261,9 @@ def test_a4_an_arms_host_state_capture_is_stamped_with_its_run_clock(tmp_path, m
 
     rows = [r for r in read_jsonl_rows(out.run_dir / "executed_queries.jsonl")
             if r.get("lead_id") == "l-002" and r.get("verb") == "proc-tree"]
-    assert len(rows) == 1 and rows[0].get("exit_code") == 0 and rows[0].get("payload_path"), (
-        f"the arm's host-state question was not served to its lead: {rows}")
+    assert len(rows) == 1, f"the arm's host-state question was not served to its lead: {rows}"
+    assert rows[0].get("exit_code") == 0, f"the arm's host-state question was not served to its lead: {rows}"
+    assert rows[0].get("payload_path"), f"the arm's host-state question was not served to its lead: {rows}"
     assert oracle.submissions() == 1, (
         f"the control world's new question took {oracle.submissions()} oracle turns (D3: one)")
     payload = json.loads((out.run_dir / rows[0]["payload_path"]).read_text(encoding="utf-8"))

@@ -140,14 +140,15 @@ def test_the_tail_ends_on_the_run_clocks_grace_not_on_real_time(tmp_path, monkey
                                             max_tool_calls=50))
 
     assert len(main.seen) >= 3, f"the run ended before the 119 s call was answered: {main.seen}"
-    assert C.refusal_stem() in main.seen[2] and "wall-clock" in main.seen[2], (
-        "119 s of run-clock time past a 100 s limit refused nothing — the control failed")
+    assert C.refusal_stem() in main.seen[2], "119 s of run-clock time past a 100 s limit refused nothing — the control failed"
+    assert "wall-clock" in main.seen[2], "119 s of run-clock time past a 100 s limit refused nothing — the control failed"
     assert "second-ran" not in main.seen[2]
     assert (summary["truncated_by"] == "budget") is killed, (
         f"{119 + second_step} s of run-clock time against 100 s + 20 s of grace: "
         f"truncated_by={summary['truncated_by']!r}")
     if not killed:
-        assert len(main.seen) >= 4 and "third-ran" not in main.seen[3]
+        assert len(main.seen) >= 4
+        assert "third-ran" not in main.seen[3]
 
 
 @pytest.mark.parametrize("bad_origin", [

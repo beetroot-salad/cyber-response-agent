@@ -136,9 +136,10 @@ def test_b3_message_zero_is_the_same_under_two_host_layouts(tmp_path, monkeypatc
         _drive(layout, V.natural_run(layout, ALERT, run_id), main, monkeypatch)
         seen.append(_SALT.sub("run-<SALT>-", main.first_user_text()))
     ma, mb = seen
-    assert RULE_ID in ma and RULE_ID in mb, "control: both are opening prompts"
+    assert RULE_ID in ma, "control: both are opening prompts"
+    assert RULE_ID in mb, "control: both are opening prompts"
     if ma != mb:
-        diff = [(x, y) for x, y in zip(ma.splitlines(), mb.splitlines()) if x != y]
+        diff = [(x, y) for x, y in zip(ma.splitlines(), mb.splitlines(), strict=False) if x != y]
         raise AssertionError("message 0 depends on the host layout:\n"
                              + "\n".join(f"  A: {x}\n  B: {y}" for x, y in diff[:12]))
 
@@ -165,8 +166,9 @@ def test_b6_o3_message_zero_lessons_section_shows_no_host_layout(tmp_path, monke
     _drive(layout, run_dir, main, monkeypatch, orient_shim=orient._shim)
 
     m0 = main.first_user_text()
-    assert "## Lessons" in m0 and HITS_HEADER in m0, (
-        "control: the signature lookup's hits are not in message 0 — the shims did not run, or "
+    assert "## Lessons" in m0, ("control: the signature lookup's hits are not in message 0 — the shims did not run, or "
+        "the corpus no longer holds a lesson for this signature")
+    assert HITS_HEADER in m0, ("control: the signature lookup's hits are not in message 0 — the shims did not run, or "
         "the corpus no longer holds a lesson for this signature")
     hits = V.scan(m0, V.host_tokens(layout))
     assert not hits, "message 0's lessons section shows host layout:\n" + "\n".join(hits)
@@ -485,7 +487,8 @@ def test_b2_g10_proc_stays_outside_read_scope(tmp_path, monkeypatch):
     for i in (1, 2):
         kind, text = main.answer_to(i)
         assert kind == "retry", f"/proc/self/mountinfo was readable: {text[:400]}"
-        assert " - " not in text and "rw," not in text, "a mount table reached the model"
+        assert " - " not in text, "a mount table reached the model"
+        assert "rw," not in text, "a mount table reached the model"
     # Positive control on the same channel: a read the gate admits comes back as content.
     kind, text = main.answer_to(3)
     assert (kind, RULE_ID in text) == ("return", True), (kind, text[:300])
@@ -566,7 +569,8 @@ def test_b3_gather_is_dispatched_and_answered_in_the_model_view(tmp_path, monkey
 
     kind, raw = gather.answer_to(2)
     assert kind == "return", f"the payload is not readable at the path the line gave: {raw[:400]}"
-    assert FOREIGN_HOST_PATH in raw and "dev.dana" in raw, raw[:400]
+    assert FOREIGN_HOST_PATH in raw, raw[:400]
+    assert "dev.dana" in raw, raw[:400]
     missing = [line for line in planted if line not in raw]
     assert not missing, f"the payload read back with its evidence rewritten: {missing}"
 
@@ -599,8 +603,8 @@ def test_b3_the_lessons_block_names_lessons_by_model_path(tmp_path, monkeypatch)
 
     kind, block = main.answer_to(1)
     assert kind == "return", block[:400]
-    assert WRITE_RETURN_HEADER in block and CLASS_LESSON in block, (
-        f"control: the write returned no lessons block naming the lesson:\n{block}")
+    assert WRITE_RETURN_HEADER in block, f"control: the write returned no lessons block naming the lesson:\n{block}"
+    assert CLASS_LESSON in block, f"control: the write returned no lessons block naming the lesson:\n{block}"
     assert f"- {model_lesson} — matched" in block, f"the block does not name the model path:\n{block}"
     hits = V.scan(block, V.host_tokens(layout))
     assert not hits, "the lessons block shows host layout:\n" + "\n".join(hits)
@@ -692,7 +696,8 @@ def test_b5_unboxed_sql_reduces_a_payload_gathered_mid_run_by_its_model_path(tmp
     _drive(layout, run_dir, main, monkeypatch, gather=gather, verbs=_elastic(payload))
 
     q_kind, answer = gather.answer_to(1)
-    assert q_kind == "return" and "dev.dana" in answer, f"control: the query answered: {answer[:400]}"
+    assert q_kind == "return", f"control: the query answered: {answer[:400]}"
+    assert "dev.dana" in answer, f"control: the query answered: {answer[:400]}"
     on_disk = run_dir / RUN_LAYOUT.gather_raw / LEAD / "0.json"
     assert json.loads(on_disk.read_text(encoding="utf-8")) == payload, (
         "control: the query wrote its payload to the host's run folder")
@@ -738,8 +743,8 @@ def test_c5_the_bash_overflow_hint_names_the_payload_by_its_model_path(tmp_path,
 
     kind, out = gather.answer_to(2)
     assert kind == "return", f"control: the cat ran: {out[:400]}"
-    assert "too large to read whole" in out and "DESCRIBE data" in out, (
-        f"control: the return overflowed and carries the reduce hint:\n{out[-800:]}")
+    assert "too large to read whole" in out, f"control: the return overflowed and carries the reduce hint:\n{out[-800:]}"
+    assert "DESCRIBE data" in out, f"control: the return overflowed and carries the reduce hint:\n{out[-800:]}"
     hint = out[out.index("too large to read whole"):]
     m = re.search(r"\bcat\s+(\S+)\s+\|", hint)
     assert m, f"control: the reduce hint names the file its `cat` reads:\n{hint}"

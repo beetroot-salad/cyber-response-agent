@@ -187,8 +187,8 @@ def test_c7_the_capture_is_the_one_the_branch_points_snapshot_holds(tmp_path, ca
     x, y = calls[1], calls[3]
     for row, word in ((x, "echo x"), (y, "echo y")):
         (call,) = S.calls_of(S.message_at(source.store, row))
-        assert call.tool_name == "bash" and call.args_as_dict()["command"] == word, (
-            f"branch point {row} is not `{word}`: {call}")
+        assert call.tool_name == "bash", f"branch point {row} is not `{word}`: {call}"
+        assert call.args_as_dict()["command"] == word, f"branch point {row} is not `{word}`: {call}"
     caplog.set_level(logging.INFO)
 
     early = S.drive_arm(tmp_path, S.spec_for(source, x), S.Recorder([S.done()]),
@@ -427,8 +427,9 @@ def test_d4_a_source_folded_before_its_branch_point_is_refused_at_launch(
     folded = S.drive_source(tmp_path / "folded", FOLD_SCRIPT, before=_plant_folding_document)
     point = S.tool_calling_responses(folded.store)[1]  # `echo b`
     tip = session_store.displaced_tip(folded.store, session_store.main_session_id(folded.store))
-    assert tip is not None and tip <= point, (
-        f"the source did not fold at or before its branch point (displaced tip {tip}, branch "
+    assert tip is not None, (f"the source did not fold at or before its branch point (displaced tip {tip}, branch "
+        f"point {point}) — the refusal below would not be about a fold")
+    assert tip <= point, (f"the source did not fold at or before its branch point (displaced tip {tip}, branch "
         f"point {point}) — the refusal below would not be about a fold")
     caplog.set_level(logging.INFO)
 

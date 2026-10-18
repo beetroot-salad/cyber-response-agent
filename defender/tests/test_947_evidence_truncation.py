@@ -111,7 +111,8 @@ def _source(tmp_path) -> tuple[S.Driven, int]:
         leads={EARLY: _lead(EARLY), LATE: _lead(LATE)})
     point = S.tool_calling_responses(source.store)[2]  # `echo x`
     message = S.message_at(source.store, point)
-    assert isinstance(message, ModelResponse) and S.calls_of(message), "the branch point moved"
+    assert isinstance(message, ModelResponse), "the branch point moved"
+    assert S.calls_of(message), "the branch point moved"
     return source, point
 
 

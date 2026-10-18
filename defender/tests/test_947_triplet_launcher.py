@@ -228,7 +228,8 @@ def test_947_all_siblings_in_one_family_are_launched_from_one_manifest_and_no_pr
 
     rc, spawn, ep, _message = _launch(tmp_path)
     manifest = yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    assert manifest["base_story"] and manifest["worlds"], "the manifest was not the family's"
+    assert manifest["base_story"], "the manifest was not the family's"
+    assert manifest["worlds"], "the manifest was not the family's"
     assert "continuation_prompt" not in manifest
     assert len(spawn.launches) >= 2
     for la in spawn.launches:

@@ -57,8 +57,8 @@ def test_a_hard_link_read_is_a_retry_and_the_run_reads_and_appends_on(tmp_path):
         "read_file handed the bytes of a hard-linked host file to the model"
     )
     kind, text = main.answer_to(2)
-    assert kind == "return" and alert_marker in text, (
-        f"the plain read after the refusal returned nothing: {kind} {text[:300]}")
+    assert kind == "return", f"the plain read after the refusal returned nothing: {kind} {text[:300]}"
+    assert alert_marker in text, f"the plain read after the refusal returned nothing: {kind} {text[:300]}"
     assert (run_dir / "investigation.md").read_text(encoding="utf-8") == (
         "+ recovered after a refused read\n"
     )

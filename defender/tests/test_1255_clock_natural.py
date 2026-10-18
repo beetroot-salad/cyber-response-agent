@@ -93,8 +93,9 @@ def test_n1_a_natural_runs_lessons_log_is_stamped_with_the_run_clocks_readings(t
 
     C.drive_clocked(run_dir, clock=clock, main=main)
 
-    assert C.lesson_reads(run_dir, L1) and C.lesson_reads(run_dir, L2), (
-        f"the reads left no lessons-log rows, so nothing below is observed: "
+    assert C.lesson_reads(run_dir, L1), (f"the reads left no lessons-log rows, so nothing below is observed: "
+        f"{C.lesson_rows(run_dir)}")
+    assert C.lesson_reads(run_dir, L2), (f"the reads left no lessons-log rows, so nothing below is observed: "
         f"{C.lesson_rows(run_dir)}")
     assert C.lesson_reads(run_dir, L1) == [C.at(START, 10)], (
         "L1's row is not stamped with the run clock's reading at the read (START+10s) — "
@@ -118,7 +119,8 @@ def test_n6_a_source_stepping_back_never_makes_a_visible_time_run_backwards(tmp_
 
     first, second = C.lesson_reads(run_dir, L1), C.lesson_reads(run_dir, L2)
     assert first == [C.at(START, 10)], f"the first read is not the run clock's reading: {first}"
-    assert len(second) == 1 and second[0] is not None, f"the second read left no row: {second}"
+    assert len(second) == 1, f"the second read left no row: {second}"
+    assert second[0] is not None, f"the second read left no row: {second}"
     assert second[0] >= first[0], (
         f"a visible time ran backwards: the model already holds {first[0]} and was then shown "
         f"{second[0]}")
@@ -204,7 +206,8 @@ def test_n3_every_host_state_capture_on_a_natural_run_is_stamped_with_the_run_cl
         f"the six captures did not all run through the query tool: {rows}")
     stamps = []
     for row in rows:
-        assert row["exit_code"] == 0 and row["payload_path"], f"a capture failed: {row}"
+        assert row["exit_code"] == 0, f"a capture failed: {row}"
+        assert row["payload_path"], f"a capture failed: {row}"
         payload = json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
         stamps.append(payload.get("captured_at"))
     expected = [_clock.z_seconds(C.at(START, 10 + 7 * (k + 1))) for k in range(6)]
@@ -230,7 +233,8 @@ def _channel_stamps(run_dir: Path, channel: str) -> list[dt.datetime | None]:
     for row in read_jsonl_rows(run_dir / "executed_queries.jsonl"):
         if row.get("lead_id") != "l-001":
             continue
-        assert row.get("exit_code") == 0 and row.get("payload_path"), f"a capture failed: {row}"
+        assert row.get("exit_code") == 0, f"a capture failed: {row}"
+        assert row.get("payload_path"), f"a capture failed: {row}"
         payload = json.loads((run_dir / row["payload_path"]).read_text(encoding="utf-8"))
         stamps.append(C.instant(payload.get("captured_at")))
     return stamps
@@ -327,8 +331,9 @@ def test_n4_the_wall_clock_limb_measures_the_run_clock(tmp_path, enforced, advan
     assert len(main.seen) >= 3, f"the run stopped before its second call was answered: {main.seen}"
     shown = main.seen[2]
     if refused:
-        assert C.refusal_stem() in shown and "wall-clock" in shown, (
-            f"{advance} s of run-clock time past a 600 s limit refused nothing — the wall-clock "
+        assert C.refusal_stem() in shown, (f"{advance} s of run-clock time past a 600 s limit refused nothing — the wall-clock "
+            "limb does not read the run clock")
+        assert "wall-clock" in shown, (f"{advance} s of run-clock time past a 600 s limit refused nothing — the wall-clock "
             "limb does not read the run clock")
         assert "second-call-ran" not in shown, "the refused call ran anyway"
     else:
@@ -397,8 +402,9 @@ def test_the_wall_clock_limb_never_shrinks_when_the_source_steps_back(
             "the source stepping back an hour lifted a wall-clock limit already reached")
         assert C.lesson_reads(run_dir, L1), (
             "the metered tail call after the step-back did not run (no lessons-log row)")
-        assert measured and measured[-1] >= 601, (
-            f"after the step-back the budget measures {measured} — less than the 601 s it had "
+        assert measured, (f"after the step-back the budget measures {measured} — less than the 601 s it had "
+            "already counted")
+        assert measured[-1] >= 601, (f"after the step-back the budget measures {measured} — less than the 601 s it had "
             "already counted")
     else:
         assert not refused(2, "second-call-ran"), (
@@ -406,8 +412,8 @@ def test_the_wall_clock_limb_never_shrinks_when_the_source_steps_back(
         assert refused(3, "third-call-ran"), (
             "500 s, a step back, then 200 s more is 700 s of a 600 s limit, and nothing was "
             "refused — the step-back extended the limit")
-        assert len(measured) >= 2 and measured[0] >= 500, (
-            f"the budget reported no elapsed for the two calls that ran: {measured}")
+        assert len(measured) >= 2, f"the budget reported no elapsed for the two calls that ran: {measured}"
+        assert measured[0] >= 500, f"the budget reported no elapsed for the two calls that ran: {measured}"
     assert measured == sorted(measured), f"the elapsed the budget measures decreased: {measured}"
 
 

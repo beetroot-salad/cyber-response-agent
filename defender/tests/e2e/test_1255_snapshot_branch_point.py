@@ -124,8 +124,9 @@ def test_d1_p4_an_arm_resumes_a_tool_calling_response_with_no_user_message(tmp_p
     natural = source.main.requests[2]   # the request the source sent right after R2's calls ran
     tail = first[-1]
     assert isinstance(tail, ModelRequest), f"the arm's first request ends on {type(tail).__name__}"
-    assert tail.parts and all(isinstance(p, ToolReturnPart | RetryPromptPart) for p in tail.parts), (
-        f"the arm's first request ends on a message carrying {[type(p).__name__ for p in tail.parts]}"
+    assert tail.parts, (f"the arm's first request ends on a message carrying {[type(p).__name__ for p in tail.parts]}"
+        " — a natural run's request after a tool-calling turn carries only that turn's answers")
+    assert all(isinstance(p, ToolReturnPart | RetryPromptPart) for p in tail.parts), (f"the arm's first request ends on a message carrying {[type(p).__name__ for p in tail.parts]}"
         " — a natural run's request after a tool-calling turn carries only that turn's answers")
     assert {p.tool_call_id for p in tail.parts} == {
         c.tool_call_id for c in S.calls_of(S.message_at(source.store, r2))}, (
@@ -273,8 +274,8 @@ def test_d1_a_gather_dispatched_at_the_branch_turn_reruns_fresh_against_the_arms
         source.gather.leads[LEAD].requests[0], replace=rep), (
         "the arm's l-001 dispatch is not the one the source's lead started from")
     returned = messages_text([arm.main.requests[0][-1]])
-    assert "ARM-SUMMARY" in returned and "SOURCE-SUMMARY" not in returned, (
-        "the arm's main request does not carry the arm's own l-001 summary")
+    assert "ARM-SUMMARY" in returned, "the arm's main request does not carry the arm's own l-001 summary"
+    assert "SOURCE-SUMMARY" not in returned, "the arm's main request does not carry the arm's own l-001 summary"
     arm_rows = [r for r in read_jsonl_rows(RunPaths(arm.run_dir).executed_queries)
                 if r.get("lead_id") == LEAD]
     assert len(arm_rows) == 1, (
@@ -282,7 +283,8 @@ def test_d1_a_gather_dispatched_at_the_branch_turn_reruns_fresh_against_the_arms
     assert "ARM-WORLD" in S.read_text(RunPaths(arm.run_dir).payload(LEAD, 0)), (
         "the arm's l-001 payload is not what the arm's world answered")
     summary = S.read_text(RunPaths(arm.run_dir).gather_summary(LEAD))
-    assert "ARM-SUMMARY" in summary and "SOURCE-SUMMARY" not in summary
+    assert "ARM-SUMMARY" in summary
+    assert "SOURCE-SUMMARY" not in summary
 
 
 # --------------------------------------------------------------------------------------
@@ -312,7 +314,8 @@ def test_d1_only_a_tool_calling_main_response_is_a_branch_point(tmp_path, point)
            "text-only response": S.responses(source.store)[-1]}[point]
     message = S.message_at(source.store, row)
     if point == "text-only response":
-        assert isinstance(message, ModelResponse) and not S.calls_of(message), message
+        assert isinstance(message, ModelResponse), message
+        assert not S.calls_of(message), message
     if point == "its tool return":
         assert isinstance(message, ModelRequest), message
 

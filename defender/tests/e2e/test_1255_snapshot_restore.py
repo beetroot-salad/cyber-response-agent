@@ -138,7 +138,8 @@ def test_d2_the_tool_call_budget_is_restored(tmp_path, monkeypatch):
     script = [S.append(CHUNKS[0]), *(S.echo(w) for w in ECHOES), S.done()]
     source = S.drive_source(tmp_path, script, limits=CAP)
     ran = _ran(source.main)
-    assert ran and set(ran) != set(ECHOES), f"the cap did not split the source's echoes: {ran}"
+    assert ran, f"the cap did not split the source's echoes: {ran}"
+    assert set(ran) != set(ECHOES), f"the cap did not split the source's echoes: {ran}"
     point = S.tool_calling_responses(source.store)[1]  # `echo ran-1`
 
     arm = S.drive_arm(tmp_path, S.spec_for(source, point),
@@ -216,7 +217,8 @@ def test_c3_an_arm_runs_under_the_sources_caps_not_its_own(tmp_path, monkeypatch
         script = [S.append(CHUNKS[0]), *(S.echo(w) for w in ECHOES), S.done()]
         source = S.drive_source(tmp_path, script, limits=CAP)
         ran = _ran(source.main)
-        assert ran and set(ran) != set(ECHOES), ran
+        assert ran, ran
+        assert set(ran) != set(ECHOES), ran
         arm = S.drive_arm(tmp_path, S.spec_for(source, S.tool_calling_responses(source.store)[1]),
                           S.Recorder([*(S.echo(w) for w in ECHOES[1:]), S.done()]), limits=LOOSE)
         _arm_launched(arm)
@@ -326,8 +328,8 @@ def test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored(
     bounds = challenge_gate.Bounds(extra_turns=extra_turns)
     stages = _gap_on(target)
     head = CHUNKS[0] + CHUNKS[1]
-    assert target in head and (target in CHUNKS[2]) == (state == "rounds"), (
-        "the fixture's fences no longer name the target the way this arm needs")
+    assert target in head, "the fixture's fences no longer name the target the way this arm needs"
+    assert (target in CHUNKS[2]) == (state == "rounds"), "the fixture's fences no longer name the target the way this arm needs"
     source = S.drive_source(
         tmp_path, (S.append(head), S.close(), S.append(CHUNKS[2]), S.close(), S.done()),
         review_stages=stages, bounds=bounds)
@@ -343,8 +345,9 @@ def test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored(
     _arm_launched(arm)
     assert S.read_bytes(arm.paths.review_record(1)) == S.read_bytes(source.paths.review_record(1)), (
         "the arm's review_record.1.json is not the source's — the arm's gate re-ran round 1")
-    assert S.read_text(arm.paths.report) and cause in S.read_text(arm.paths.report), (
-        f"the arm's close was not forced for `{cause}`: "
+    assert S.read_text(arm.paths.report), (f"the arm's close was not forced for `{cause}`: "
+        f"{S.read_text(arm.paths.report)[:300] or '(no report: the close was challenged again)'}")
+    assert cause in S.read_text(arm.paths.report), (f"the arm's close was not forced for `{cause}`: "
         f"{S.read_text(arm.paths.report)[:300] or '(no report: the close was challenged again)'}")
 
 
@@ -448,8 +451,9 @@ def test_p2_append_only_and_write_once_files_are_restored_up_to_the_cut(tmp_path
         ours = _rows(getattr(source.paths, name))
         assert ours[:n] == _rows(getattr(prefix.paths, name)), (
             f"the source's {name} does not open on the rows a run stopped at the branch point holds")
-        assert n and len(ours) > n, (
-            f"the source's {name} holds {len(ours)} row(s), {n} through the cut — it must grow on "
+        assert n, (f"the source's {name} holds {len(ours)} row(s), {n} through the cut — it must grow on "
+            "both sides of the branch point, or an exact cut is indistinguishable from a copy")
+        assert len(ours) > n, (f"the source's {name} holds {len(ours)} row(s), {n} through the cut — it must grow on "
             "both sides of the branch point, or an exact cut is indistinguishable from a copy")
     queries_before = [line for line in _lines(source.paths.executed_queries)
                       if json.loads(line).get("lead_id") != "l-002"]  # everything before the cut
@@ -485,8 +489,8 @@ def test_p2_append_only_and_write_once_files_are_restored_up_to_the_cut(tmp_path
             f"the arm's own rows reached the SOURCE's {name} — the restore shared the file")
     restored = [json.loads(line) for line in queries_before
                 if json.loads(line).get("lead_id") == S.CORRELATION_LEAD]
-    assert restored and list(arm.state.lead_rows(S.CORRELATION_LEAD)) == restored, (
-        "the arm's run state does not hold the correlation lead's restored rows")
+    assert restored, "the arm's run state does not hold the correlation lead's restored rows"
+    assert list(arm.state.lead_rows(S.CORRELATION_LEAD)) == restored, "the arm's run state does not hold the correlation lead's restored rows"
 
 
 def test_p2_the_investigation_document_is_restored_by_content(tmp_path):
@@ -504,8 +508,8 @@ def test_p2_the_investigation_document_is_restored_by_content(tmp_path):
         tmp_path, (S.append(CHUNKS[0]), S.append(attr_block(WARN_ROW)),
                    Turn(tool_calls=[("fix_row", {"old_row": WARN_ROW, "new_row": REPAIRED_ROW_ATTRS})]),
                    S.append(CHUNKS[1]), S.done()))
-    assert REPAIRED_ROW_ATTRS in source.document and WARN_ROW not in source.document, (
-        "the source's repair did not land in place")
+    assert REPAIRED_ROW_ATTRS in source.document, "the source's repair did not land in place"
+    assert WARN_ROW not in source.document, "the source's repair did not land in place"
     point = S.tool_calling_responses(source.store)[2]  # the `fix_row`
 
     arm = S.drive_arm(tmp_path, S.spec_for(source, point),

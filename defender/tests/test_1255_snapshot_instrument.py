@@ -108,7 +108,8 @@ def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
         ["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", world],
         lifecycle=lifecycle, visualize=lambda *_a, **_k: None,
         preflight=lambda *_a, **_k: 0)
-    assert rc == 0 and lifecycle.run_dir is not None, f"the arm never reached its lifecycle (rc={rc})"
+    assert rc == 0, f"the arm never reached its lifecycle (rc={rc})"
+    assert lifecycle.run_dir is not None, f"the arm never reached its lifecycle (rc={rc})"
     return lifecycle.run_dir, ep, base
 
 
@@ -176,8 +177,8 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
     assert carriers == {}, f"the arm's run folder carries its lineage in {carriers}"
 
     record = (ep / "family.yaml").read_text(encoding="utf-8")
-    assert T.SOURCE_RUN_ID in record and str(T.BRANCH_MESSAGE_ID) in record, (
-        "the episode's host-side record no longer names the source run and branch point")
+    assert T.SOURCE_RUN_ID in record, "the episode's host-side record no longer names the source run and branch point"
+    assert str(T.BRANCH_MESSAGE_ID) in record, "the episode's host-side record no longer names the source run and branch point"
 
 
 # --------------------------------------------------------------------------------------

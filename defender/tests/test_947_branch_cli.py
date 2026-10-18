@@ -237,5 +237,6 @@ def test_p4_the_branch_help_offers_no_continuation_prompt(capsys):
         cli_mod().parse_branch_args(["--help"])
 
     out = capsys.readouterr().out
-    assert exc.value.code == 0 and "--tenant" in out, out
+    assert exc.value.code == 0, out
+    assert "--tenant" in out, out
     assert "continuation" not in out.lower(), out
