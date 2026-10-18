@@ -817,9 +817,9 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
     _base, src = H.tenant_source(data_root, TENANT_ID, row=False)
     episode_dir = tmp_path / "episodes" / T.EPISODE_ID
     manifest = H.family_for(src, episode_dir)
-    # The fixture gives the episode its own runs-container record; its neutral world is
-    # independent of the tenant's natural runs container.
-    neutral_world = T.mod("_tenant").read_tenant(episode_dir / "runs").base_world_id
+    # tenant_source plants the source tenant's natural runs-container record. The fork
+    # keeps that neutral world; its episode container must not become run-local lineage.
+    neutral_world = T.mod("_tenant").read_tenant(src.parent).base_world_id
     with Episode.open(manifest.parent) as episode:
         world = H.run_py().resume_world(
             episode, "b", tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
