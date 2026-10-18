@@ -141,7 +141,7 @@ DONE = H.Turn(text="Investigation complete.")
 
 
 def append_first_fence() -> H.Turn:
-    """MAIN lands the golden sshd investigation's FIRST block (2 open slots, so a branch point after it has a question to divide — `_triplet_947.branchable_investigation`'s measure)."""
+    """Append the first golden block, leaving two open slots for a legal branch."""
     from defender.skills.invlang.parser import scan_fences
 
     golden = DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md"
@@ -224,13 +224,13 @@ class Launched:
 
 
 def _no_daemon(argv: list[str], **_kw: Any) -> Any:
-    """No docker daemon: `start_box` turns this into its startup fault, which the `DEFENDER_ALLOW_UNSANDBOXED` opt-out turns into production's unboxed mode."""
+    """Fail Docker startup so the explicit opt-out selects the real unboxed executor."""
     raise FileNotFoundError("docker")
 
 
 def _driver_call(out: Launched, *, clock: Callable[[], dt.datetime], main: Any, gather: Any,
                  limits: dict | None, review_stages: Any) -> Callable[..., dict]:
-    """The innermost `investigate`: `driver.run_investigation(**kw, make_model=…, review_stages=…, clock=…)`, everything else exactly as `_drive_investigation` hands it."""
+    """Inject scripted models and the clock into the production driver inputs."""
 
     def investigate(**kw: Any) -> dict:
         out.run_dir = Path(kw["run"].run_dir)
@@ -318,7 +318,7 @@ def opened_source(run_dir: Path) -> Any:
 
 @contextlib.contextmanager
 def _source_main_session(source_run_dir: Path) -> Iterator[list[tuple[int, Any]]]:
-    """The source's own MAIN session as `(row id, message)` pairs in path order, read off the store the run wrote (the store is closed on exit)."""
+    """Read source MAIN rows in path order and close the store on exit."""
     from defender.runtime import branch as branch_mod
     from defender.runtime import session_store as ss
 
@@ -336,7 +336,7 @@ def _source_main_session(source_run_dir: Path) -> Iterator[list[tuple[int, Any]]
 
 
 def branch_response(source_run_dir: Path, *, tool: str, arg_suffix: str) -> int:
-    """The row id, on the source's own MAIN session, of the response that called `tool` with an argument ending `arg_suffix` — the scenario's branch point (D1: a tool-calling response)."""
+    """Find the source MAIN response calling tool with an argument ending in arg_suffix."""
     with _source_main_session(source_run_dir) as rows:
         hits = [rid for rid, m in rows
                 if isinstance(m, ModelResponse) and any(
@@ -348,7 +348,7 @@ def branch_response(source_run_dir: Path, *, tool: str, arg_suffix: str) -> int:
 
 
 def source_message_times(source_run_dir: Path) -> list[dt.datetime]:
-    """Every timestamp the FRAMEWORK stamped on the source's MAIN session (each message's and each part's, truncated to whole seconds, distinct, sorted)."""
+    """Sorted distinct whole-second framework timestamps from source MAIN messages and parts."""
     found: set[dt.datetime] = set()
     with _source_main_session(source_run_dir) as rows:
         for _rid, message in rows:

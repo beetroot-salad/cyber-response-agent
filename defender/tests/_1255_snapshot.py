@@ -71,7 +71,7 @@ def append(text: str) -> Turn:
 
 
 def echo(word: str) -> Turn:
-    """A pathless, always-granted MAIN call (`echo` is one of the inert programs every role may run): a tool-calling response with a deterministic result."""
+    """A pathless, always-granted tool call with deterministic output."""
     return Turn(tool_calls=[("bash", {"command": f"echo {word}"})])
 
 
@@ -204,7 +204,7 @@ def drive_source(  # noqa: PLR0913 — one keyword per seam a source scenario va
 
 
 def main_rows(store: Any, session_id: str | None = None) -> list[tuple[int, Any]]:
-    """`(row id, message)` for every row on a MAIN session's path, in order (the source's own main session when `session_id` is omitted)."""
+    """MAIN path rows in order; default to the source session."""
     ss = store_mod()
     session = session_id if session_id is not None else ss.main_session_id(store)
     ids = ss.path_row_ids(store, session)
@@ -218,7 +218,7 @@ def calls_of(message: Any) -> list[ToolCallPart]:
 
 
 def tool_calling_responses(store: Any) -> list[int]:
-    """The row ids of every MAIN response that called tools — D1's admissible branch points (before the retry-streak and snapshot conditions), in order."""
+    """MAIN response row ids with tool calls, in path order."""
     return [rid for rid, m in main_rows(store)
             if isinstance(m, ModelResponse) and calls_of(m)]
 
@@ -233,7 +233,7 @@ def message_at(store: Any, row_id: int) -> Any:
 
 
 def spec_for(source: Driven, row_id: int) -> Any:
-    """The `BranchSpec` for branching `source` at `row_id`: source, branch point and the derived moment (`_branch_947.spec_at`) — and no continuation prompt (D1)."""
+    """Build a branch spec with its time derived from the recorded response."""
     return spec_at(source.store, source.run_dir, row_id)
 
 
@@ -296,7 +296,7 @@ def _content(part: Any) -> str:
 
 
 def project(messages: list[Any], *, replace: dict[str, str] | None = None) -> list[tuple]:
-    """A request as the provider receives it, minus what is never sent (part timestamps, response metadata) and with O4's fresh frame salts normalised."""
+    """Compare provider-visible messages, excluding metadata and normalizing frame salts."""
     rep = replace or {}
     out: list[tuple] = []
     for m in messages:

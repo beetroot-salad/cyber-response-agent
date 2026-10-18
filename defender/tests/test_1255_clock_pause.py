@@ -22,7 +22,7 @@ LIMITS = C.caps(wall_clock_timeout=600, grace_seconds=600, max_tool_calls=50)
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """#1224's configured roots (`live_oracle_1224/conftest.py`), and the enforcing posture."""
+    """Isolate configured roots and enable the real unboxed executor."""
     monkeypatch.setenv(S.T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     S.T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv(S.KNOB_RATE, "1e6")
@@ -60,7 +60,7 @@ class WaitingLimiter:
 
 def _drive(tmp_path: Path, clock: C.FakeClock, registry: Any, est: Any, *,
            lead_seconds: float = 20, params: dict = ALICE) -> tuple[Path, C.Clocked]:
-    """MAIN dispatches one `idp` lead after 10 s; the lead asks `params` after `lead_seconds`; MAIN then reads L1 after 5 s and runs one `bash` call."""
+    """Dispatch an idp lead, read a lesson, then call bash to observe elapsed time."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="run-1255-pause")
     main = C.script(clock, (10, C.gather_turn("l-001", "idp")), (5, C.read_lesson(L1)),
                     (0, C.bash("echo after-the-lead")), (0, C.DONE))

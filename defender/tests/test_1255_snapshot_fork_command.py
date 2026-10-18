@@ -8,7 +8,7 @@ from defender.tests import _triplet_947 as T
 
 @pytest.fixture(autouse=True)
 def _tmp_roots(tmp_path, monkeypatch):
-    """Both configured roots inside `tmp_path` (`test_947_triplet_launcher._tmp_roots`'s reasoning: otherwise the episode directory checked below is the developer's real one)."""
+    """Isolate configured episode and learning roots under tmp_path."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     T.isolate_learning_state(tmp_path, monkeypatch)

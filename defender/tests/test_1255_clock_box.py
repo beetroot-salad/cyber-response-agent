@@ -35,7 +35,7 @@ def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class Captured:
-    """One `run.main` start through the recording docker: the create argv and what the investigation was handed (the run's folder and tenant)."""
+    """Create arguments and investigation inputs captured from a recording-daemon run."""
 
     def __init__(self) -> None:
         self.docker = RecordingDocker()
@@ -50,7 +50,7 @@ class Captured:
         return Path(self.kwargs["run"].run_dir)
 
     def trees(self) -> tuple[Path, ...]:
-        """The run's own bound trees, as host paths: the run folder (its input directory lies under it), the checkout, the tenant agent half."""
+        """Host paths bound for the run, checkout, and tenant agent."""
         return (self.run_dir, C.DEFENDER, Path(self.kwargs["tenant"].agent))
 
     def clock_mounts(self) -> list[dict]:
@@ -191,7 +191,7 @@ def _clock_file_after_a_command(argv: list[str], clock: C.FakeClock, *,
 
 def _assert_clock_file_reads(seen: dict[str, Any], out: C.Launched, reading: dt.datetime,
                              not_reading: dt.datetime | None = None) -> None:
-    """The clock file `seen` read decodes to `reading` (within `_FILE_SLACK`), and — when given — to nothing near `not_reading` (the arm's own clock source)."""
+    """Require the expected clock reading and reject the arm clock when supplied."""
     assert "mounts" in seen, (
         f"the run never reached the probe turn: exit={out.exit} refusal={out.refusal} "
         f"summary={str(out.summary)[:300]}")
@@ -263,7 +263,7 @@ def test_k1_a_natural_runs_clock_file_follows_the_run_clock_between_commands(tmp
 
 
 def _file_written(reading: dt.datetime, spelling: str) -> str:
-    """The clock file's text for `reading` in one spelling the K1 file check accepts, written now (an offset is from the wall clock at the write)."""
+    """Write the reading as an absolute time or an offset from the current wall clock."""
     return {"iso": reading.isoformat(),
             "libfaketime absolute": "@" + reading.strftime("%Y-%m-%d %H:%M:%S"),
             "epoch seconds": f"{reading.timestamp():.0f}",

@@ -79,7 +79,7 @@ ECHOES = [f"ran-{i}" for i in range(1, 7)]
 
 
 def _ran(model: S.Recorder) -> list[str]:
-    """Which echoes RAN: an `echo` that ran prints its word into its tool result; a refused one appears only as the call's arguments, which `seen` does not flatten."""
+    """Echo words present in tool results; refused call arguments do not count."""
     return [word for word in ECHOES if word in model.seen[-1]]
 
 
@@ -102,7 +102,7 @@ def test_d2_the_tool_call_budget_is_restored(tmp_path, monkeypatch):
 
 
 def _counters(state) -> dict:
-    """The budget's COUNTERS — every key but the run's identity and its clock stamps (the clock's restore is slice D's: `test_1255_clock_*`)."""
+    """Budget counters without run identity or clock stamps."""
     return {k: v for k, v in state.budget_snapshot().items()
             if k not in {"run_id", "created_at", "started_at"}}
 
@@ -171,7 +171,7 @@ def test_c3_an_arm_runs_under_the_sources_caps_not_its_own(tmp_path, monkeypatch
 
 
 def _faulting_query(verb: str, params: dict):
-    """The elastic backend's answer: the correlation lead's `alerts` call is answered, a lead's `query` fails as an infrastructure fault (exit 2), which the breaker charges."""
+    """Answer correlation alerts; fail lead queries with a charged transport fault."""
     if verb == "query":
         raise TransportFault("docker exec failed")
     return envelope(S.DOCS)
@@ -252,7 +252,7 @@ def test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored(
 
 
 class _Withholding(FakeVerbs):
-    """An injected registry whose grant withholds named pairs it still declares — so a lead's call to one is DENIED (and logged to the denials log), not undeclared."""
+    """Registry declaring verbs while withholding selected pairs from its grant."""
 
     def __init__(self, table, withheld: set[tuple[str, str]]):
         super().__init__(table)
