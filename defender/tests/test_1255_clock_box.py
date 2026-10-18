@@ -75,6 +75,7 @@ import datetime as dt
 import functools
 import re
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +87,7 @@ from defender.tests import _1255_clock as C
 from defender.tests import _1255_view as V
 from defender.tests import _triplet_947 as T
 from defender.tests._spec1092 import STOCK_ROOTFS
-from defender.tests.e2e._box665 import RecordingDocker, requires_live_box
+from defender.tests.e2e._box665 import RecordingDocker, reaped_after_create, requires_live_box
 
 pytestmark = pytest.mark.e2e
 
@@ -750,3 +751,39 @@ def test_k4_live_an_arms_in_box_time_reads_its_run_clock_not_its_source(tmp_path
                out=out)
 
     _box_reads(seen, C.at(C.BRANCH_READING, 20), out)
+
+
+@pytest.mark.parametrize("fault", ["missing", "wrong-token"])
+def test_a_clock_mount_must_round_trip_before_the_box_is_returned(tmp_path, monkeypatch, fault):
+    """A healthy run bind cannot certify an absent or misdirected clock bind.
+
+    The daemon double keeps every ordinary startup read healthy and corrupts only reads
+    through the clock mount. The clock must fail closed before a usable box escapes.
+    """
+    monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    docker = RecordingDocker(existing_token="self")
+    clock_reads = []
+
+    def faulty_clock_mount(argv, **kwargs):
+        args = list(argv)
+        clock_mounts = [m for m in docker.mounts()
+                        if m["target"] == "/clock"] if docker.create_argv is not None else []
+        if (len(args) > 1 and args[1] == "exec" and clock_mounts
+                and Path(args[-1]).is_relative_to(Path("/clock"))):
+            docker.calls.append(args)
+            clock_reads.append(args)
+            return subprocess.CompletedProcess(
+                args, 1 if fault == "missing" else 0,
+                stdout="" if fault == "missing" else "ANOTHER-CLOCK-TREE",
+                stderr="missing clock bind" if fault == "missing" else "")
+        return docker(args, **kwargs)
+
+    with pytest.raises(box_mod.BoxFault):
+        box_mod.start_box(run_dir, C.DEFENDER, docker=faulty_clock_mount,
+                          spec=box_mod.BoxSpec(rootfs=STOCK_ROOTFS))
+    assert clock_reads, "startup never verified the clock bind independently of the run bind"
+    assert reaped_after_create(docker.calls), "a box with an unverified clock survived startup"
+    clock_mount, = [m for m in docker.mounts() if m["target"] == "/clock"]
+    assert not Path(clock_mount["source"]).exists(), "the failed startup leaked its clock tree"
