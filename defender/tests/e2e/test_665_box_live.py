@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -38,9 +39,10 @@ def _run_cycle_box(tmp_path):
     req = BoxRequest(
         name="defender-runcycle-live", workdir=REPO_ROOT, env={},
         mounts=(
-            Mount(source=run_dir, target=run_dir, writable=False),
-            Mount(source=DEFENDER, target=DEFENDER, writable=False),
-            Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False),
+            Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
+            Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
+            Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False,
+                  kind="data"),
         ),
     )
     return run_dir, start_box_request(req, docker=box_mod._docker)
@@ -78,9 +80,13 @@ def test_two_mounts_with_nested_or_overlapping_sources_and_targets(tmp_path):
     outer = tmp_path / "wt"
     inner = outer / "defender" / "lessons"
     inner.mkdir(parents=True)
+    # The outer worktree is the drain's `code` mount (#1108 D7 amended): it carries the
+    # product's committed check file at its legacy `<workdir>/defender`, as a checkout does.
+    check = box_mod.CODE_CHECK_FILE
+    shutil.copyfile(DEFENDER / check, outer / "defender" / check)
     req = BoxRequest(
         name="defender-nested-live", workdir=outer, env={},
-        mounts=(Mount(source=outer, target=outer, writable=False),
+        mounts=(Mount(source=outer, target=outer, writable=False, kind="code"),
                 Mount(source=inner, target=inner, writable=True)),
         # `outer` is a tmp tree with none of the three hash inputs; a real-daemon request
         # pins the name of THIS checkout's image, never the stock one (#1092, #94) — on the

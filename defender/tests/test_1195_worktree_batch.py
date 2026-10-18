@@ -66,7 +66,7 @@ LABELS = [pytest.param(AUTHOR_DRAIN_LABEL, id="lessons"),
 class TreedBranch(GitWorktreeBranch):
     """`GitWorktreeBranch` (a real git worktree holding the image inputs, its HEAD the cut
     commit) whose worktree also holds the lessons lane's writable trees, so the real
-    `start_box` can plant and read back a sentinel in each of the drain's mounts."""
+    `start_box` can read the existing product probe and plant sentinels in writable mounts."""
 
     def start_batch(self, batch_id: str) -> Path:
         wt = super().start_batch(batch_id)

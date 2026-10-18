@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 from pathlib import Path
 
-from defender._io import READ_LIMIT, sweep_staged, write_guarded
+from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_staged, write_guarded
 from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
 from defender.run_repository import RUN_LAYOUT
@@ -35,7 +35,7 @@ from defender.runtime.scrub import (  # noqa: F401 — re-exported: run.py/drain
     mark_unsandboxed,
     write_did_not_run,
 )
-from ._spec import ALIAS_PROFILE_PATH, BoxExecutor, BoxRequest, BoxSpec, Mount
+from ._spec import ALIAS_PROFILE_PATH, CODE_CHECK_FILE, BoxExecutor, BoxRequest, BoxSpec, Mount
 from ._alias import _probe_alias_ban
 from ._docker import Create, DockerFn, START_TOKEN_LABEL, SharedMountsFn, _ALLOW_UNSANDBOXED, _LOCALE_ENV, _call, _covered, _inspect_field, _daemon_source, _docker, _reap_on_fault, _reap_stale_before_create, _remove_container, _render_env, _shared_mounts, _uncovered_fault, container_name, infra_env, require_image, resolve_rootfs
 from ._spec import DEFAULT_SPEC, _HostTransport
@@ -148,14 +148,18 @@ def _plant(sentinel: Path, token: str) -> None:
 
 def _probe_sentinel(
     source: Path, target: Path, docker: DockerFn, name: str, sentinel_name: str,
-    *, unlink_on_fault: bool,
+    *, unlink_on_fault: bool, exact: bool = False,
 ) -> None:
+    """Plant a fresh random token at `source / sentinel_name`, read it back through the box at
+    `target`, and remove it. The answer is compared after trimming surrounding whitespace, or,
+    when `exact`, byte for byte (a staged copy's token: no prefix, suffix or padding passes)."""
     token = uuid.uuid4().hex
     sentinel = source / sentinel_name
     _plant(sentinel, token)
     try:
         proc = _call(docker, ["docker", "exec", name, "cat", str(target / sentinel_name)])
-        if proc.returncode != 0 or (proc.stdout or "").strip() != token:
+        answer = proc.stdout or ""
+        if proc.returncode != 0 or (answer if exact else answer.strip()) != token:
             raise BoxFault(
                 f"the box could not read back the startup sentinel at {sentinel} — the tree "
                 "inside the box does not match the host"
@@ -174,13 +178,146 @@ def _plant_sentinel(run_dir: Path, docker: DockerFn, name: str) -> None:
                     unlink_on_fault=False)
 
 
-def _check_mount_sentinel(mount: Mount, docker: DockerFn, name: str) -> None:
-    """Probe one mount: a host-planted token read back through the box proves the bind mapped
-    the right tree (an absent source is already caught at create)."""
+def _data_probe_file(source: Path) -> Path | None:
+    """A `data` mount's read-back file: its first regular file by name, or `None` for an empty
+    folder, which #665 Decision 9 permits (its host inode is the non-absence evidence)."""
+    try:
+        info = source.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise BoxFault(f"read-only mount source is not a real directory: {source}")
+        entries = sorted(source.iterdir(), key=lambda entry: entry.name)
+        if not entries:
+            _logger.debug("empty read-only mount source %s: device=%s inode=%s",
+                          source, info.st_dev, info.st_ino)
+            return None
+        for entry in entries:
+            if stat.S_ISREG(entry.lstat().st_mode):
+                return Path(entry.name)
+    except OSError as e:
+        raise BoxFault(f"could not read mount probe source {source}: {e}") from e
+    raise BoxFault(f"read-only mount has no regular file for its readback probe: {source}")
+
+
+def _readonly_probe_file(mount: Mount, code_dir: Path | None) -> Path | None:
+    """The file a read-only mount is checked by, relative to both its source and its target,
+    chosen by the kind the mount declares (#1108 D7) and never by its name or path. `None`
+    only for an empty `data` mount. A mount that declares no kind is refused."""
+    if mount.kind == "code":
+        target = Path(mount.target)
+        if code_dir is None:
+            raise BoxFault(f"the read-only code mount at {target} was checked without the "
+                           "request's code root — the box's code could not be checked")
+        # By path components, not a string prefix, and with no `..` climbing back out: the
+        # check file is read at the same relative path on the host source and in the box.
+        if not code_dir.is_relative_to(target) or ".." in code_dir.relative_to(target).parts:
+            raise BoxFault(
+                f"the code root {code_dir} does not lie inside the read-only code mount at "
+                f"{target} — the box's code could not be checked"
+            )
+        return code_dir.relative_to(target) / CODE_CHECK_FILE
+    if mount.kind == "data":
+        return _data_probe_file(Path(mount.source))
+    raise BoxFault(
+        f"read-only mount {mount.source} declares no kind (code, data or staged) — box start "
+        f"cannot tell how to check it (got {mount.kind!r})"
+    )
+
+
+#: What a host-made copy's root may hold besides the token a start plants there (#1108
+#: amendment 2): its `agent/` half always, and a run copy's `settings/` half. Each must be a real
+#: folder; anything else (a stray file, a `.git`, a link) means the bind is not the copy the host
+#: made for this start.
+_STAGED_HALVES = frozenset({"agent", "settings"})
+
+
+def _check_staged_root(mount: Mount, docker: DockerFn, name: str) -> None:
+    """A `staged` mount is the root of a copy the host made (a drain's draft, a run's
+    knowledge): it holds exactly `agent/` (a real folder), at most a `settings/` beside it, and
+    nothing else, judged on the host without following any entry (so no earlier start's token
+    remains). Then a fresh random token is planted at the root, outside `agent/`, read back
+    through the box byte for byte, and removed, so a box bound to another copy, or to an empty
+    or stale folder, refuses before any workload runs. The
+    copy's `agent/` is never written and `.tenant-id` is never a probe: identity was checked
+    once, when the copy's commit was published."""
+    source = Path(mount.source)
+    with bind(source) as root:
+        listed = stat_entries(root)
+    if listed.stats is None:
+        raise BoxFault(f"could not list the staged copy's root {source}: "
+                       f"{listed.refusal or 'it is absent'}")
+    halves = {entry: st for entry, st in listed.stats.items() if entry in _STAGED_HALVES}
+    strays = sorted(set(listed.stats) - set(halves))
+    if "agent" not in halves or strays or not all(stat.S_ISDIR(st.st_mode) for st in halves.values()):
+        raise BoxFault(
+            f"the staged copy's root {source} must hold exactly a real agent/ folder (and a run "
+            f"copy's settings/); it holds {sorted(listed.stats)} — not the copy made for this start"
+        )
+    _probe_sentinel(
+        source, Path(mount.target), docker, name,
+        f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True, exact=True,
+    )
+
+
+def _check_mount_sentinel(
+    mount: Mount, docker: DockerFn, name: str, *, code_dir: Path | None = None,
+) -> None:
+    """Check one mount through the started box. A writable source gets a planted sentinel. A
+    read-only source is never written: an existing file, chosen by the mount's kind, is read
+    back through the box and compared with the host's own read of it, line endings
+    normalized on both sides and exact otherwise. `code_dir` is the request's code root,
+    which a `code` mount must contain. A `staged` mount, a host-made copy's root, gets a token
+    planted at its root for this start (`_check_staged_root`). A writable mount declares no
+    kind: a writable `staged` mount, or any writable mount with a kind, is refused."""
+    if mount.writable and mount.kind is not None:
+        raise BoxFault(
+            f"the writable mount {mount.source} declares the kind {mount.kind!r} — a writable "
+            "mount is checked by its planted sentinel and declares none (a staged copy's root "
+            "is never writable)"
+        )
+    if mount.kind == "staged":
+        _check_staged_root(mount, docker, name)
+        return
+    if not mount.writable:
+        source = Path(mount.source)
+        relative = _readonly_probe_file(mount, code_dir)
+        if relative is None:
+            return
+        try:
+            if not stat.S_ISREG((source / relative).lstat().st_mode):
+                raise BoxFault(f"mount readback probe is not a regular file: {source / relative}")
+            expected = read_text_utf8(source / relative)
+            proc = _call(docker, ["docker", "exec", name, "cat", str(Path(mount.target) / relative)])
+        except (OSError, UnicodeError) as e:
+            raise BoxFault(f"could not read mount probe at {source / relative}: {e}") from e
+        # Known limit: the box answers over Docker's text channel, which translates line
+        # endings, so both sides are compared with universal newlines (the host read applies
+        # them; the answer is put through the same translation) and a CR-only difference is
+        # invisible. Every other difference, a trailing newline or whitespace included,
+        # refuses; catching a wrong mapping does not depend on line endings.
+        if proc.returncode != 0 or _universal_newlines(proc.stdout) != expected:
+            raise BoxFault(f"could not read back the startup sentinel at {source / relative} — "
+                           "the mount probe does not match the host")
+        return
     _probe_sentinel(
         Path(mount.source), Path(mount.target), docker, name,
         f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
     )
+
+
+def _universal_newlines(text: object) -> str | None:
+    """`text` with CRLF and lone CR read as LF, as a text-mode subprocess reads its output;
+    `None` for anything that is not text, which then matches no host read."""
+    return text.replace("\r\n", "\n").replace("\r", "\n") if isinstance(text, str) else None
+
+
+def _refuse_a_second_code_mount(request: BoxRequest) -> None:
+    """A request has one code root, so it declares at most one `code` mount (#1108 D7)."""
+    code_targets = [str(m.target) for m in request.mounts if m.kind == "code"]
+    if len(code_targets) > 1:
+        raise BoxFault(
+            f"the box request {request.name} declares {len(code_targets)} code mounts "
+            f"({', '.join(code_targets)}) — a request declares at most one"
+        )
 
 
 def _check_tenant_identity(path: Path, expected: TenantId, docker: DockerFn, name: str) -> None:
@@ -296,18 +433,25 @@ def _render_argv(
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={request.spec.tmpfs_size}",
         "--workdir", str(request.workdir),
     ]
-    env = _render_env(request.env, Path(request.workdir))
+    env = _render_env(request.env, Path(request.workdir), defender_dir=request.code_dir)
     for key in sorted(env):
         argv += ["--env", f"{key}={env[key]}"]
     # Resolved here, never at BoxRequest construction.
-    rootfs = resolve_rootfs(request.spec.rootfs, Path(request.workdir) / "defender")
+    rootfs = resolve_rootfs(request.spec.rootfs, request.code_dir)
     argv += [rootfs.image, "sleep", "infinity"]
     return Create(argv, rootfs)
 
 
 def _did_not_run_for_request(request: BoxRequest, reason: str) -> None:
     """The did-not-run marker for the request lane: one per writable mount source, since a
-    tree needs a verdict exactly when the box could write it. Best-effort per tree."""
+    tree needs a verdict exactly when the box could write it. Best-effort per tree.
+
+    None for a request that requires a sandbox (#1108 amendment 3, C3): its start fault raises
+    and nothing runs, sandboxed or not, so there is no workload to judge, and its writable
+    sources (a tenant draft's lanes, the oracle's scratch folder) are the host's own copies,
+    judged or discarded by their owner; a marker beside one would be a stray file there."""
+    if request.require_sandbox:
+        return
     for m in request.mounts:
         if m.writable:
             write_did_not_run(Path(m.source), reason)
@@ -346,8 +490,12 @@ def _start_boxed_request(
             f"could not create the box {request.name}: {(created.stderr or '').strip()}"
         )
     try:
+        # Each read-only mount is checked by the kind it declares; a second code mount, or a
+        # read-only mount with no kind, is refused here, after create, so the container is
+        # reaped and the trees marked like any other startup fault.
+        _refuse_a_second_code_mount(request)
         for m in request.mounts:
-            _check_mount_sentinel(m, docker, request.name)
+            _check_mount_sentinel(m, docker, request.name, code_dir=request.code_dir)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException as e:
         # The box is ours; best-effort reap, then mark (sentinels were already planted).
@@ -394,13 +542,13 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     for var in providers.api_key_vars():
         env.pop(var, None)
     env.update({k: v for k, v in request.env.items() if k in BOX_ENV_ALLOWLIST})
-    defender_dir = Path(request.workdir) / "defender"
+    defender_dir = request.code_dir
     env["DEFENDER_DIR"] = str(defender_dir)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
     # Prepended, keeping the operator's PYTHONPATH.
     inherited = env.get("PYTHONPATH")
     env["PYTHONPATH"] = (
-        f"{request.workdir}{os.pathsep}{inherited}" if inherited else str(request.workdir)
+        f"{defender_dir.parent}{os.pathsep}{inherited}" if inherited else str(defender_dir.parent)
     )
     # A host lane never carries the in-box mark.
     env.pop("DEFENDER_BOX", None)
@@ -439,6 +587,8 @@ def start_box(
         try:
             return _start_boxed_request(request, docker)
         except BoxFault as e:
+            if request.require_sandbox:
+                raise
             _opt_out_or_raise(e)
         return unboxed_executor(request.spec, env=_host_fallback_env(request))
 

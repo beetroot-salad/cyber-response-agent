@@ -28,6 +28,8 @@ dependencies = [
 # is the default provider; openai backs the Fireworks OpenAI-compatible path (GLM 5.3, selected
 # via a `fireworks:`/`glm-*` model id). Install with: uv pip install -e '.[runtime]'.
 runtime = [
+    # Host-side Forgejo tenant delivery; kept outside the sandbox's core+box closure.
+    "httpx",
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.43",
     # toons — the TOON encoder behind the tool-boundary view gate (#872,
     # scripts/gather_tools/): a foreign toolset's dict/list result is re-encoded

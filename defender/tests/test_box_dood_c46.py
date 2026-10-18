@@ -118,7 +118,8 @@ def test_render_argv_translates_request_mounts_too():
         name="defender-runcycle-r1",
         mounts=(
             Mount(source=Path("/workspace/defender/learning"), target=Path("/workspace/defender/learning"), writable=True),
-            Mount(source=Path("/workspace/defender/lessons"), target=Path("/workspace/defender/lessons")),
+            Mount(source=Path("/workspace/defender/lessons"), target=Path("/workspace/defender/lessons"),
+                  kind="data"),
         ),
         workdir=Path("/workspace"),
         spec=PINNED,
@@ -139,7 +140,7 @@ def test_render_argv_refuses_an_uncovered_request_mount():
 
     request = BoxRequest(
         name="defender-runcycle-r1",
-        mounts=(Mount(source=Path("/srv/elsewhere"), target=Path("/srv/elsewhere")),),
+        mounts=(Mount(source=Path("/srv/elsewhere"), target=Path("/srv/elsewhere"), kind="data"),),
         workdir=Path("/workspace"),
     )
     with pytest.raises(BoxFault) as e:
@@ -176,7 +177,7 @@ def test_render_argv_refuses_a_traversal_mount_source():
 
     request = BoxRequest(
         name="defender-runcycle-r1",
-        mounts=(Mount(source=Path("/workspace/../etc"), target=Path("/etc")),),
+        mounts=(Mount(source=Path("/workspace/../etc"), target=Path("/etc"), kind="data"),),
         workdir=Path("/workspace"),
     )
     with pytest.raises(BoxFault) as e:
@@ -366,7 +367,7 @@ def test_the_discovered_table_reaches_the_request_render_argv():
     request = BoxRequest(
         name="defender-runcycle-r1",
         mounts=(Mount(source=Path("/workspace/defender/lessons"),
-                      target=Path("/workspace/defender/lessons")),),
+                      target=Path("/workspace/defender/lessons"), kind="data"),),
         workdir=Path("/workspace"),
         spec=PINNED,
     )
