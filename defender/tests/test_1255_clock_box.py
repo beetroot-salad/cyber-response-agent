@@ -8,7 +8,7 @@ the run clock from a small read-only file in its own mount (e.g. `/clock`), read
 preload but outside the permission gate's read shapes. A natural run reads an offset of zero,
 so the shape is the same." U4 (the preload under gVisor) is unprobed; no gVisor on this host.
 
-CI has no box, so the CI half is STATIC, over the `docker run` argv the REAL `start_box`
+The ordinary CI shards exercise the recording-daemon checks over the `docker run` argv the REAL `start_box`
 composes (the recording docker fake, `_box665.RecordingDocker`) when the REAL `run.main` starts
 a run through the dossier's composition — for a natural run and for an arm of it:
 
@@ -46,7 +46,7 @@ word — six instructions, no `ENV`, one `COPY` of the two lock files, the box e
 `duckdb` and `pytz` — which leaves no recipe route for a preload at all; that conflict is the
 owner's to settle, not this file's).
 
-The live half (`live` marker, skipped in CI and here) is K4: inside a real box, the six SQL
+The live half (`live` marker, exercised explicitly by CI's native-box job) is K4: inside a real box, the six SQL
 spellings U3 found and python's own clock read the run clock, not the wall clock — for a
 natural run, and for an arm, whose in-box time is the source's reading at the branch point plus
 the arm's own seconds (rev 5 C4), never its own clock source's.
