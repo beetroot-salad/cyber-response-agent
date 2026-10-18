@@ -20,7 +20,7 @@ would be a store nobody built; and the branch-point checks read the source run's
 queries and its invlang document, which a hand-planted store would not have. Both come from a
 real run through the #808 scenario builder, whose correlation lead issues one real call
 against an injected elastic backend. The document is authored one `append_block` per fence,
-because that is the authoring path `frontier_at` describes and the only one under which the
+because that is the append-only authoring path and the only one under which the
 branch point's message index says anything about how much of the document had landed.
 
 Since #1222 the correlation summary rides MAIN's opening message instead of being injected as
