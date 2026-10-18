@@ -433,6 +433,12 @@ def _start_boxed(
         )
     try:
         _plant_sentinel(run_dir, docker, name)
+        # A missing clock file makes libfaketime silently use the wall clock. Prove
+        # this separate bind maps the directory we prepared, just as for the run tree.
+        _probe_sentinel(
+            clock_file.parent, CLOCK_TARGET, docker, name,
+            f"{RUN_LAYOUT.box_sentinel.name}-{uuid.uuid4().hex}", unlink_on_fault=True,
+        )
         if tenant_agent is not None:
             assert tenant_id is not None
             # Read through the bind, where the box sees the agent half (`/agent`).
