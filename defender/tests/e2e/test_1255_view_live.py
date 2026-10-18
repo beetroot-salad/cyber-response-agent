@@ -1,8 +1,8 @@
 """#1255 slice B — what only a real box shows (design rev 4: "A gated live test covers what only a
 real box shows: the shims' environment and `/proc/self/mountinfo`").
 
-`live`-marked (deselected in CI by `-m "not live"`, per the dossier) and skipped without a native
-daemon (`_box665.requires_live_box`). Each test starts the run box through the real `start_box`
+`live`-marked and exercised explicitly by CI's native-box job. The ordinary test shards
+deselect live tests; this file skips without a native daemon (`_box665.requires_live_box`). Each test starts the run box through the real `start_box`
 for a natural run made under a set-up tenant, and asks the box itself — `box.run_parsed`, the
 executor's own transport, below the permission gate on purpose: the gate is not what is being
 observed here.
