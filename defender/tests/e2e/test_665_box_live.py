@@ -56,7 +56,7 @@ def test_single_non_overlapping_readonly_mount_refuses_a_direct_in_box_write(tmp
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
-        res = _run(box, f"printf x > {DEFENDER / 'spec-probe'}", cwd=run_dir)
+        res = _run(box, "printf x > /defender/spec-probe", cwd=Path("/runs/current"))
         assert res.rc != 0, "a write to the ro defender mount was NOT refused"
     finally:
         box_mod.stop_box(box)
@@ -107,8 +107,8 @@ def test_tmpfs_contents_persist_across_execs_within_one_box_lifetime(tmp_path):
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
-        _run(box, "printf shared > /tmp/spec-shared", cwd=run_dir)
-        res = _run(box, "cat /tmp/spec-shared", cwd=run_dir)
+        _run(box, "printf shared > /tmp/spec-shared", cwd=Path("/runs/current"))
+        res = _run(box, "cat /tmp/spec-shared", cwd=Path("/runs/current"))
         assert res.rc == 0, "the tmpfs read-back exec failed"
         assert b"shared" in res.out, "tmpfs did not persist across execs"
     finally:
@@ -147,7 +147,7 @@ def test_box_start_probes_the_granted_repertoire_by_running_it(
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
-        res = _run(box, cmd, cwd=REPO_ROOT)
+        res = _run(box, cmd, cwd=Path("/runs/current"))
         assert res.rc == 0, rc_why
         if contains is not None:
             assert contains in res.out, contains_why
@@ -166,11 +166,11 @@ def test_pinned_lesson_scripts_reject_arbitrary_argv_read(tmp_path):
         # frontmatter pattern), exits 0, and returns its corpus content — so the hostile-argv
         # negative below only passes once the script has DEMONSTRABLY executed (a bare no-leak
         # check passes vacuously if the script errored on a bad path and printed nothing).
-        allowed = _run(box, "defender/bin/defender-lessons .", cwd=REPO_ROOT)
+        allowed = _run(box, "/defender/bin/defender-lessons .", cwd=Path("/runs/current"))
         assert allowed.rc == 0, "the pinned lesson script did not run on its intended operand (positive control)"
         assert allowed.out, "the pinned lesson script returned no corpus content on its intended operand"
-        hostile = _run(box, "defender/bin/defender-lessons /etc/passwd",
-                       cwd=REPO_ROOT)
+        hostile = _run(box, "/defender/bin/defender-lessons /etc/passwd",
+                       cwd=Path("/runs/current"))
         assert b"root:" not in hostile.out, "a pinned lesson script leaked an arbitrary file via argv"
     finally:
         box_mod.stop_box(box)
