@@ -114,8 +114,11 @@ def prime_base(source_run_dir: Path, episode: Episode, *,
     except (FileExistsError, NotPlainEntry) as taken:
         raise _already_primed(episode) from taken
     # After the base, by the same exclusive create: a key the base answers is never unrecorded.
-    episode.served_unrecorded.create("".join(
-        unrecorded_line(row) for row in _unrecorded(skipped, primed=seen)))
+    # Only when a call was skipped: an absent record reads as no unrecorded key, which is what
+    # an empty one would say, so a clean capture's prime stays the one write of its base.
+    unrecorded = _unrecorded(skipped, primed=seen)
+    if unrecorded:
+        episode.served_unrecorded.create("".join(unrecorded_line(row) for row in unrecorded))
     # Named fields, not `**counts`: a field mismatch would raise after the base file is
     # written, leaving the episode id permanently unusable.
     return PrimeReport(
