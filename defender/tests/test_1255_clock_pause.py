@@ -1,27 +1,4 @@
-"""#1255 slice D — the run clock pauses while the world, not the run, is working.
-
-Design rev 4, "Time": the run clock "advances only while the run does work a natural run would
-also do; it pauses during oracle turns and branch rate-limit waits, as today's elapsed-time
-accounting already pauses for oracle turns. Every time the model can see comes from it". So an
-oracle turn and a rate-limit wait leave NO trace in any time the model can see, and none in
-the budget's elapsed measure — while the same seconds spent by the investigator itself count in
-full.
-
-Today's code already pauses the BUDGET for an oracle turn (`budget_enforcer.oracle_held`,
-#1224 S12-S15, `test_1224_concurrency_and_clock.py` — real sleeps, real elapsed). What is new
-here is that the pause is a pause of the ONE clock: the times the model is shown move with it.
-
-Drive shape: the REGISTRY drive #1224's clock tests use — a natural-shaped run through the real
-driver whose verb registry is a real `WorldRegistry` (the oracle and verifier doubles injected
-through its coined seams, `_spec1224.world_registry`) — plus `clock=`. The oracle double is a
-`ScriptedModel` that advances the run clock's SOURCE while it holds the turn (the world took
-that long); the limiter's injected `sleep` does the same for a rate-limit wait. The visible
-channel is MAIN's lessons-log row after the lead returns; the budget channel is a `bash` call
-under a 600 s limit.
-
-Every expected instant is the test's own sum of the INVESTIGATOR's advances. RED until
-`run_investigation` accepts `clock=` (class a); see the report for the no-clock scratch runs.
-"""
+"""Oracle work and rate-limit waits pause the investigator clock."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -39,8 +16,6 @@ START = C.SOURCE_START
 L1 = C.LESSONS[0]
 ALICE = S.query_params("user:alice")
 EMPTY: dict = {"rows": []}
-#: What the world takes, in run-clock-source seconds: more than the whole 600 s limit, so a
-#: clock that counted it would refuse the next call.
 WORLD_SECONDS = 900
 LIMITS = C.caps(wall_clock_timeout=600, grace_seconds=600, max_tool_calls=50)
 
@@ -55,8 +30,7 @@ def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class WorldTakesTime(S.ScriptedModel):
-    """An oracle double that holds its turn for `seconds` of the run clock's SOURCE time on
-    every request (a slow provider): it advances the source, then answers its script."""
+    """Oracle model that advances the source clock to simulate a slow provider."""
 
     def __init__(self, *moves: Any, clock: C.FakeClock, seconds: float, then: Any = None) -> None:
         super().__init__(*moves, then=then, name="oracle")
@@ -68,9 +42,7 @@ class WorldTakesTime(S.ScriptedModel):
 
 
 class WaitingLimiter:
-    """The rate limiter's two injected primitives: a monotonic reading that moves only when
-    the limiter sleeps, and a `sleep` that records the wait and advances the run clock's source
-    by `seconds` (the wait took that long in the world)."""
+    """Rate limiter whose wait advances the source clock instead of sleeping."""
 
     def __init__(self, clock: C.FakeClock, seconds: float) -> None:
         self.clock, self.seconds = clock, seconds
@@ -88,8 +60,7 @@ class WaitingLimiter:
 
 def _drive(tmp_path: Path, clock: C.FakeClock, registry: Any, est: Any, *,
            lead_seconds: float = 20, params: dict = ALICE) -> tuple[Path, C.Clocked]:
-    """MAIN dispatches one `idp` lead after 10 s; the lead asks `params` after `lead_seconds`;
-    MAIN then reads L1 after 5 s and runs one `bash` call. Returns the run dir and MAIN."""
+    """MAIN dispatches one `idp` lead after 10 s; the lead asks `params` after `lead_seconds`; MAIN then reads L1 after 5 s and runs one `bash` call."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="run-1255-pause")
     main = C.script(clock, (10, C.gather_turn("l-001", "idp")), (5, C.read_lesson(L1)),
                     (0, C.bash("echo after-the-lead")), (0, C.DONE))
@@ -102,8 +73,7 @@ def _drive(tmp_path: Path, clock: C.FakeClock, registry: Any, est: Any, *,
 
 def _counterfactual(tmp_path: Path, clock: C.FakeClock, oracle: S.ScriptedModel,
                     **knobs: Any) -> tuple[Any, Any]:
-    """World `b` (a fact) of an episode whose recording holds ALICE's answer: ALICE takes an
-    oracle turn."""
+    """World `b` (a fact) of an episode whose recording holds ALICE's answer: ALICE takes an oracle turn."""
     est = S.estate(tmp_path)
     ep = S.episode_v2(tmp_path, base_rows=[S.captured("idp", "query", ALICE, EMPTY)])
     return est, S.world_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier(),
@@ -116,13 +86,6 @@ def _bash_refused(main: C.Clocked) -> bool:
 
 
 def test_p1_an_oracle_turn_moves_no_visible_time_and_no_elapsed_time(tmp_path):
-    """Time: the run clock pauses for an oracle turn. The lead's call holds a 900 s oracle turn;
-    afterwards MAIN's lessons-log row reads `START + 10 + 20 + 5` — the investigator's own
-    seconds only — and its `bash` call under a 600 s limit is not refused.
-
-    Positive controls on the same run: the oracle took exactly one turn and really advanced the
-    source by 900 s (so the source DID move under the run). The complementary case —
-    the investigator spending those 900 s itself — is `test_p1_control_…`."""
     clock = C.FakeClock(START)
     oracle = WorldTakesTime(S.submit(EMPTY, S.EMPTY_CLAIM), clock=clock, seconds=WORLD_SECONDS,
                             then=S.submit(EMPTY, S.EMPTY_CLAIM))
@@ -139,10 +102,6 @@ def test_p1_an_oracle_turn_moves_no_visible_time_and_no_elapsed_time(tmp_path):
 
 
 def test_p1_control_the_investigators_own_seconds_count_in_full(tmp_path):
-    """Positive control for P1 on both channels: the same 900 s spent by the INVESTIGATOR (its
-    lead's model took that long before the call) show up in MAIN's lessons-log row
-    (`START + 10 + 920 + 5`) and refuse the `bash` call past the 600 s limit, naming the
-    wall-clock limb. The oracle here takes no time."""
     clock = C.FakeClock(START)
     oracle = WorldTakesTime(S.submit(EMPTY, S.EMPTY_CLAIM), clock=clock, seconds=0,
                             then=S.submit(EMPTY, S.EMPTY_CLAIM))
@@ -157,13 +116,6 @@ def test_p1_control_the_investigators_own_seconds_count_in_full(tmp_path):
 
 
 def test_p2_a_rate_limit_wait_moves_no_visible_time_and_no_elapsed_time(tmp_path):
-    """Time: the run clock pauses for a branch rate-limit wait. The oracle explores twice
-    through a one-query-a-second limiter whose wait takes 900 s of source time; afterwards
-    MAIN's row still reads `START+35` and its `bash` call is not refused.
-
-    Positive control: the limiter really waited (and so really advanced the source). Today
-    the only limiter waits on this path sit inside an oracle turn; the assertion is over the
-    observable, so it holds wherever an implementation puts a wait."""
     clock = C.FakeClock(START)
     waiting = WaitingLimiter(clock, WORLD_SECONDS)
     limiter = S.sym("learning.branch.estate.limiter", "RateLimiter")(
@@ -185,13 +137,6 @@ def test_p2_a_rate_limit_wait_moves_no_visible_time_and_no_elapsed_time(tmp_path
 
 
 def test_p3_the_control_worlds_oracle_turn_also_moves_no_visible_time(tmp_path):
-    """Time + D3: in the CONTROL world a question the source never asked takes an oracle turn
-    (D3), and that turn, like every oracle turn, is invisible on the run clock: MAIN's row reads
-    `START+35` and the `bash` call is not refused.
-
-    Positive control: the control world's oracle took exactly one turn and advanced the source
-    (today the control world passes a live read straight through and takes none — that
-    assertion is the one today's code fails; the world-serving half of D3 is slice C's)."""
     clock = C.FakeClock(START)
     oracle = WorldTakesTime(S.submit(EMPTY, S.EMPTY_CLAIM), clock=clock, seconds=WORLD_SECONDS,
                             then=S.submit(EMPTY, S.EMPTY_CLAIM))

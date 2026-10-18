@@ -1,43 +1,4 @@
-"""#1255 slice D — an arm's run clock starts at its source's reading at the branch point.
-
-Design rev 4, "Time" and "Fork snapshot": the run clock is host-owned; "on an arm it starts at
-the source's reading in the fork snapshot" (the snapshot is taken when the branch response
-arrives, before any of its tool calls run), and from there advances by what the arm's own clock
-source advances while the arm does work. O4: "Time must be consistent, not equal. Every time the
-model can see agrees with every other one and never runs earlier than the history's last
-timestamp." D2: "an arm hits its limits where the source would have, not with a fresh budget" —
-for the wall-clock limit, that is the source's elapsed time at the fork plus the arm's own.
-
-Composition (dossier, FIXED): the source is a natural `run.main([alert, --tenant T])` run and the
-arm is `run.main([--tenant T, --episode E, --world a])`, both through
-`lifecycle=partial(run._run_investigation_lifecycle, investigate=partial(run._drive_investigation,
-investigate=<driver call with clock=>), …)`. The episode is the control world, laid out as the
-sibling suites lay one out, its derived half the launcher's own derivation (`_1255_clock`).
-
-The scenario, in source-clock seconds from `SOURCE_START`:
-  * source (`_1255_clock.record_source`): MAIN dispatches one lead at +5 (one elastic query
-    reaching the system, so the source is branchable), reads L1 at +10; its next response (at
-    +610) calls `read_file(L2)` — the branch point B (D1: a tool-calling MAIN response); then it
-    stops at +615.
-  * arm: its own clock source starts at `ARM_START` (2040, nowhere near the source's). It
-    resumes at B with no new message (D1), so `read_file(L2)` runs again first, before any arm
-    model request; the arm's first model request then takes 20 s and reads L3.
-Expected, the test's own sums: the arm's L2 read at `R = SOURCE_START+610`, its L3 read at
-`R+20`. One equality rejects every wrong origin at once: reading the arm's own source gives
-2040; starting at a fork time taken from the framework's message timestamps gives the wall
-clock's day; starting fresh gives the arm's launch wall time.
-
-Rev 5 C4: "the fork time handed to the oracle and the arm's cut-off (`as_of`) are the
-snapshot's run-clock reading" — on this faked clock, `R`, never a framework message's wall
-timestamp. A3–A5 carry the arm's time onto the channels beyond the lessons log: the denials
-log, a host-state capture served through the control world's oracle path (D3, D6), and the
-fork time the oracle is handed.
-
-RED until (a) `run_investigation` accepts `clock=`, (b) slice A's branch point (a tool-calling
-response is admitted; today `branch.validate` refuses it, and the arm ends at store setup) and
-fork snapshot exist; A4/A5 also await slice C's D3 (the control world's new question takes an
-oracle turn). Those assertion groups are named in each test.
-"""
+"""Forked runs continue the source clock and elapsed budget."""
 from __future__ import annotations
 
 import json
@@ -58,14 +19,12 @@ pytestmark = pytest.mark.e2e
 
 START = C.SOURCE_START
 L1, L2, L3 = C.LESSONS
-#: The source clock's reading when the branch response arrived: 10 s, then 600 s of MAIN work.
 R = C.BRANCH_READING
 
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The configured episodes root, the learning state inside `tmp_path`, and production's
-    unboxed mode (the box start finds no daemon and the operator opt-out takes it)."""
+    """The configured episodes root, the learning state inside `tmp_path`, and production's unboxed mode (the box start finds no daemon and the operator opt-out takes it)."""
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     T.isolate_learning_state(tmp_path, monkeypatch)
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
@@ -74,10 +33,7 @@ def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def launch_arm(tmp_path: Path, tenant_id: str, source: Path, *steps: C.Step,  # noqa: PLR0913 — the arm's seams, one keyword each
                clock: C.FakeClock, limits: dict | None = None, gather: Any = None,
                oracle: Any = None, verifier: Any = None) -> tuple[C.Launched, C.Clocked]:
-    """Fork the control world at B (the response that called `read_file(L2)`) and run the arm
-    through `run.main --episode`, its MAIN scripted by `steps` over the arm's own `clock`
-    (`gather`, `oracle`, `verifier`: the arm's gather double and the world's oracle-side model
-    doubles, `run.main`'s own seams)."""
+    """Launch a recorded source at its L2 read, with scripted clocked main and gather models."""
     branch = C.branch_response(source, tool="read_file", arg_suffix=f"/{L2}.md")
     ep = C.control_episode(tmp_path, source, branch)
     main = C.Clocked(clock, steps)
@@ -96,20 +52,6 @@ def _launched(out: C.Launched) -> None:
 
 
 def test_a1_an_arms_visible_times_start_at_the_sources_reading_at_the_branch_point(tmp_path):
-    """O4 / Time / P2: the arm's first visible time is `R` — the source's run-clock reading
-    when the branch response arrived — and its next is `R` plus the arm's own 20 s; never its
-    own source's absolute reading, never earlier than anything the arm's history holds.
-
-    Channel: the arm's lessons log (model-readable). The re-run `read_file(L2)` stamps `R`
-    (no arm model request has run yet); the arm's L3 read stamps `R+20`. Exactly ONE L2 row:
-    the source's own L2 read ran after the cut and is ALSO stamped `R`, so an arm that copied
-    the source's whole log would show two (R1-2). Positive control on the same channel: the
-    inherited L1 row (before the cut, `START+10`) is there, so the ordering check below compares
-    across the cut. O4's ordering: the whole log the arm can read — the inherited prefix (slice
-    A restores it to the cut) followed by the arm's own rows — never runs backwards, and no row
-    names a time at or after the arm source's `ARM_START`.
-
-    Awaiting: `clock=` (all), A's branch point (the arm launching at all)."""
     tenant_id, source = C.record_source(tmp_path)
     arm_clock = C.FakeClock(C.ARM_START)
     out, main = launch_arm(tmp_path, tenant_id, source,
@@ -140,19 +82,6 @@ def test_a1_an_arms_visible_times_start_at_the_sources_reading_at_the_branch_poi
                               "configured-longer-still-the-sources-limit"])
 def test_a2_an_arm_reaches_the_wall_clock_limit_where_its_source_would_have(
         tmp_path, monkeypatch, arm_seconds, arm_timeout, refused):
-    """D2 + Time: with a 900 s wall-clock limit, the source had used 610 s of run-clock time at
-    the branch point. An arm whose first turn takes `arm_seconds` before a `bash` call is
-    refused — shown the budget refusal naming `wall-clock` — exactly when 610 + `arm_seconds`
-    passes 900 (300 s: 910, refused; 200 s: 810, runs). Today an arm's budget starts fresh, so
-    300 s refuses nothing.
-
-    C3 (limits are inherited: "the arm runs under the source's caps (recorded in the
-    snapshot), not caps re-read from the arm's own configuration"): the third case configures
-    the ARM with `wall_clock_timeout=3600` (the driver's `limits=` seam, how a run is handed
-    its caps) and it is still refused at 910 s — the source's 900 s cap governs.
-
-    The cases are each other's control on the same channel (the second shows the call's own
-    output reaching the model). Awaiting: `clock=`, A's branch point and snapshot restore."""
     monkeypatch.setenv(C.FLAG, "true")
     limits = C.caps(wall_clock_timeout=900, grace_seconds=600, max_tool_calls=50)
     arm_limits = C.caps(wall_clock_timeout=arm_timeout, grace_seconds=600, max_tool_calls=50)
@@ -176,11 +105,6 @@ def test_a2_an_arm_reaches_the_wall_clock_limit_where_its_source_would_have(
         assert "arm-call-ran" in shown, "the call inside the limit did not run"
 
 
-# ---------------------------------------------------------------------------------------
-# A3–A5 — the arm's time on the channels beyond the lessons log (R1-5)
-# ---------------------------------------------------------------------------------------
-
-#: A pair the fixture tenant's grant withholds from gather (`verb-grants.yaml`: `roles: []`).
 DENIED = ("ticket", "get-ticket")
 
 
@@ -189,14 +113,6 @@ def _summary(text: str = "Summary: measured the lead.") -> Any:
 
 
 def test_a3_an_arms_denial_log_continues_from_the_sources_reading_at_the_branch_point(tmp_path):
-    """O4 / Time / P2, on the denials log: the arm's first model request takes 20 s and
-    dispatches a lead whose model takes 10 s before calling a verb its grant withholds
-    (`ticket.get-ticket`). The `policy_denials.jsonl` row carries `R+30` — the source's reading
-    at the branch point plus the arm's own seconds — not the arm source's 2040 time and not the
-    wall clock.
-
-    Positive control on the same channel: exactly one row for the denied verb (the source made
-    no denied call, so none is inherited). Awaiting: `clock=`, A's branch point."""
     tenant_id, source = C.record_source(tmp_path)
     arm_clock = C.FakeClock(C.ARM_START)
     system, verb = DENIED
@@ -216,21 +132,11 @@ def test_a3_an_arms_denial_log_continues_from_the_sources_reading_at_the_branch_
 
 def _new_host_state_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                              ) -> tuple[C.Launched, S.ScriptedModel, Path]:
-    """The arm asks the control world a host-state question the source never asked: its first
-    model request takes 20 s and dispatches lead `l-002`, whose model takes 10 s before calling
-    `host-state.proc-tree`. The world's base for it is a live read (D6) — the real adapter body
-    over a `docker` planted on the run's PATH, as `test_947_clock` drives it — served through
-    the control world's oracle path (D3) by a PASS-THROUGH oracle double: it submits the base
-    unchanged (`BASE_HANDLE`, the oracle's own "serve the base answer unchanged" spelling) with
-    an empty claim, and the verifier passes. Neither double moves the clock. Returns the arm,
-    the oracle double and the source run folder."""
+    """Launch an arm whose host-state question needs a new oracle answer."""
     from defender.tests.test_947_clock import DOCKER_LOG, fake_docker
 
     monkeypatch.setenv(S.KNOB_RATE, "1e6")
     tenant_id, source = C.record_source(tmp_path)
-    # Real time, not run-clock time: every wall second the arm can stamp is then later than
-    # every second the framework stamped on the source's messages, so A5's negative cannot
-    # match a wall time the arm hands the oracle for some other reason.
     time.sleep(1.1)
     monkeypatch.setenv("PATH", f"{fake_docker(tmp_path)}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("DOCKER_CALL_LOG", str(tmp_path / DOCKER_LOG))
@@ -248,15 +154,6 @@ def _new_host_state_question(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 
 
 def test_a4_an_arms_host_state_capture_is_stamped_with_its_run_clock(tmp_path, monkeypatch):
-    """Time ("capture stamps use the run clock") on an ARM — slice D's N3 where the control
-    world serves: the `proc-tree` capture the arm's lead is handed carries
-    `captured_at == R + 30` (`Z` seconds) — the source's reading at the branch point plus the
-    arm's own 20 + 10 s. Not the cut-off (`as_of`), not the arm source's 2040, not the wall.
-
-    Positive controls on the same call: the capture is a served row of the lead (exit 0, a
-    persisted payload) and it went through the control world's oracle — one submission (D3;
-    the pass-through double changes nothing, so the stamp is the base read's own). Awaiting:
-    `clock=`, A's branch point, C's D3."""
     out, oracle, _source = _new_host_state_question(tmp_path, monkeypatch)
 
     rows = [r for r in read_jsonl_rows(out.run_dir / "executed_queries.jsonl")
@@ -274,15 +171,6 @@ def test_a4_an_arms_host_state_capture_is_stamped_with_its_run_clock(tmp_path, m
 
 def test_a5_the_oracle_is_handed_the_snapshots_run_clock_reading_as_the_fork_time(
         tmp_path, monkeypatch):
-    """C4: "the fork time handed to the oracle … [is] the snapshot's run-clock reading". On this
-    faked clock that is `R` (`SOURCE_START+610`): what the control world's oracle is shown
-    names `R`, and names none of the timestamps the framework stamped on the source's messages
-    (wall times, today's derivation of the branch-point clock). Spelling-free: the whole-second
-    date-time is matched, whatever zone suffix follows it.
-
-    Positive controls: the oracle was consulted (D3) and the source does carry framework
-    timestamps (so the negative has values to reject). Awaiting: `clock=`, A's branch point,
-    C's D3."""
     out, oracle, source = _new_host_state_question(tmp_path, monkeypatch)
 
     assert oracle.requests >= 1, "the control world's oracle was never consulted (D3)"

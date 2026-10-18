@@ -1,32 +1,4 @@
-"""#1255 slice A — an arm is a continuation, not a restart (P2, D2, P3, N4).
-
-Design rev 4, "Fork snapshot (P2, P3)": when a MAIN response arrives, before any of its tool calls
-run, the host records what the run holds — every counter the model can feel (budget, breaker,
-the challenge gate's rounds and raised asks, main's request count including this response), the
-length of each append-only model-readable file (queries table, lessons log, denials log, review
-records), the content of each rewritable one (`investigation.md`), the hash of each write-once
-one (gather summaries, raw payloads) — keyed by that response, OUTSIDE the run folder. An arm
-restores it: files cut to the recorded length or content, counters restored, main's request
-count entering the framework as its starting usage. A restore that does not match refuses the
-arm at launch; a source with no snapshot (recorded before this change, N4) is refused.
-
-THE OBSERVABLE IS ALWAYS THE NATURAL CONTINUATION. Each arm below is scripted to make exactly
-the calls its source made after the branch point, so "restored" has an oracle that is not this
-file's opinion: the arm must hit its limits, write its records and end up holding its files
-exactly where the source did (D2: "an arm hits its limits where the source would have"). Today
-an arm restarts every counter at zero and inherits only the queries table and the selected
-leads' files (G7, G16) — the reversal each test names.
-
-Nothing here reads, plants or names the snapshot. Its location and shape are not fixed by the
-design; the P3 test below observes "outside the run folder" by what still restores when
-everything else in the run folder is gone.
-
-RED TODAY (expected): every arm is taken at a D1 branch point, which `branch.validate` refuses
-("unanswered"), so the restore assertions are masked until D1 lands; the N4 test is the
-exception (see its docstring). Unlike the D1 regression tests (`test_1255_snapshot_branch_point`,
-`test_1255_snapshot_legality`), every test here except P3's stays red under D1 alone: each
-needs the snapshot's restore (P2, D2, rev 5 C3).
-"""
+"""Forks restore files, counters, limits, and permanent refusals at the branch point."""
 from __future__ import annotations
 
 import json
@@ -79,24 +51,11 @@ def _arm_launched(arm: S.Driven) -> None:
         "snapshot) and the branch point is a tool-calling MAIN response outside any retry streak")
 
 
-# --------------------------------------------------------------------------------------
-# D2: every counter the model can feel is restored.
-# --------------------------------------------------------------------------------------
-
-#: A request ceiling small enough to reach in a handful of turns (base 6 + one forced turn).
 SMALL_CEILING = challenge_gate.Bounds(extra_turns=1, base_request_limit=6)
 
 
 @pytest.mark.parametrize("k", [2, 4])
 def test_d2_mains_request_count_enters_the_arm_as_its_starting_usage(tmp_path, k):
-    """D2 (G18): a source that never stops calling tools runs into its request ceiling after
-    `L` model requests. Branched at its `k`-th response — whose request is the `k`-th, counted
-    in the snapshot ("including this response") — the arm makes exactly `L - k` more requests
-    and stops at the same ceiling for the same reason. Today the arm starts its count at zero
-    and makes `L` requests of its own.
-
-    Two branch points of ONE kind of source, so the restored count is keyed by the response
-    the arm is branched at, not a single number the arm happens to carry."""
     source = S.drive_source(tmp_path, (), main=S.Forever(opening=[S.append(CHUNKS[0])]),
                             bounds=SMALL_CEILING)
     assert source.summary.get("truncated_by") == session_store.TRUNCATED_BY_REQUEST_LIMIT, (
@@ -115,25 +74,16 @@ def test_d2_mains_request_count_enters_the_arm_as_its_starting_usage(tmp_path, k
         f"request {k}, had {natural - k} left — the arm's request count restarted")
 
 
-#: The call cap (`max_tool_calls`) that leaves the source two `echo`s and refuses the rest.
 CAP = {**DEFAULT_LIMITS, "max_tool_calls": 5, "wall_clock_timeout": 3600, "grace_seconds": 600}
 ECHOES = [f"ran-{i}" for i in range(1, 7)]
 
 
 def _ran(model: S.Recorder) -> list[str]:
-    """Which echoes RAN: an `echo` that ran prints its word into its tool result; a refused one
-    appears only as the call's arguments, which `seen` does not flatten."""
+    """Which echoes RAN: an `echo` that ran prints its word into its tool result; a refused one appears only as the call's arguments, which `seen` does not flatten."""
     return [word for word in ECHOES if word in model.seen[-1]]
 
 
 def test_d2_the_tool_call_budget_is_restored(tmp_path, monkeypatch):
-    """D2: under the enforced budget, the source's call cap refuses its later `echo`s. Branched
-    at the response that called `echo ran-1`, the arm — making the same calls — is refused at
-    the SAME call: the same echoes run, the same are refused, and the run's tool-call count
-    ends where the source's did. Today the arm's count restarts at zero and every echo runs.
-
-    Positive control: the source's own script both runs and refuses echoes, so the cap is in
-    reach of the branch."""
     monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "true")
     script = [S.append(CHUNKS[0]), *(S.echo(w) for w in ECHOES), S.done()]
     source = S.drive_source(tmp_path, script, limits=CAP)
@@ -152,34 +102,21 @@ def test_d2_the_tool_call_budget_is_restored(tmp_path, monkeypatch):
 
 
 def _counters(state) -> dict:
-    """The budget's COUNTERS — every key but the run's identity and its clock stamps (the
-    clock's restore is slice D's: `test_1255_clock_*`)."""
+    """The budget's COUNTERS — every key but the run's identity and its clock stamps (the clock's restore is slice D's: `test_1255_clock_*`)."""
     return {k: v for k, v in state.budget_snapshot().items()
             if k not in {"run_id", "created_at", "started_at"}}
 
 
-#: A spawn cap the source reaches after the branch: the correlation lead, `l-001` and `l-002`
-#: are spawned; `l-003` is refused ("the subagent-spawn cap is reached").
 SPAWN_CAP = {**DEFAULT_LIMITS, "max_subagent_spawns": 3, "wall_clock_timeout": 3600,
              "grace_seconds": 600}
 QUIET_LEADS = {lead: (Turn(text=f"{lead}: nothing to add"),)
                for lead in ("l-001", "l-002", "l-003")}
 SPAWN_SCRIPT = (S.append(CHUNKS[0]), S.dispatch("l-001"), S.echo("x"), S.dispatch("l-002"),
                 S.dispatch("l-003"), S.done())
-#: The arm's script: the source's calls after its branch point (`echo x`, which it re-runs).
 SPAWN_ARM = (S.dispatch("l-002"), S.dispatch("l-003"), S.done())
 
 
 def test_d2_the_subagent_spawn_count_is_restored(tmp_path, monkeypatch):
-    """D2 (R1-3): under the enforced budget the source's spawn cap admits the correlation lead,
-    `l-001` and — after the branch point — `l-002`, and refuses `l-003`. The arm, branched at
-    `echo x` (between the two dispatches) and dispatching `l-002` then `l-003` as the source
-    did, is refused at the SAME dispatch: only `l-002` reaches a gather model, and its budget
-    counters end where the source's did. Today the arm's spawn count restarts at zero and both
-    leads run.
-
-    Positive control: the source's own run both admits and refuses a dispatch after the branch,
-    so the cap is in reach of the arm."""
     monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "true")
     source = S.drive_source(tmp_path, SPAWN_SCRIPT, leads=QUIET_LEADS, limits=SPAWN_CAP)
     assert source.gather.asked == [S.CORRELATION_LEAD, "l-001", "l-002"], (
@@ -196,22 +133,12 @@ def test_d2_the_subagent_spawn_count_is_restored(tmp_path, monkeypatch):
     assert _counters(arm.state) == _counters(source.state)
 
 
-#: Each cap with the arm configured LOOSER than the source (C3): the arm must still stop where
-#: the source would, because it runs under the caps its snapshot recorded.
 LOOSE = {**DEFAULT_LIMITS, "max_tool_calls": 500, "max_subagent_spawns": 40,
          "wall_clock_timeout": 3600, "grace_seconds": 600}
 
 
 @pytest.mark.parametrize("cap", ["tool-call cap", "subagent-spawn cap", "request ceiling"])
 def test_c3_an_arm_runs_under_the_sources_caps_not_its_own(tmp_path, monkeypatch, cap):
-    """D2 / rev 5 C3: "arms inherit budget and limits" means the arm runs under the SOURCE's
-    caps, recorded in the snapshot — not caps re-read from the arm's own configuration. Each
-    arm here is launched with a far looser configuration than its source (`LOOSE`, or a request
-    base ten times the source's) and still stops exactly where the source would have: the same
-    echoes run, the same dispatch is refused, the same number of requests is made.
-
-    The source halves are the D2 tests' own (their positive controls hold here too); only the
-    arm's configuration differs."""
     monkeypatch.setenv("DEFENDER_BUDGET_ENFORCE", "true")
     if cap == "tool-call cap":
         script = [S.append(CHUNKS[0]), *(S.echo(w) for w in ECHOES), S.done()]
@@ -244,8 +171,7 @@ def test_c3_an_arm_runs_under_the_sources_caps_not_its_own(tmp_path, monkeypatch
 
 
 def _faulting_query(verb: str, params: dict):
-    """The elastic backend's answer: the correlation lead's `alerts` call is answered, a lead's
-    `query` fails as an infrastructure fault (exit 2), which the breaker charges."""
+    """The elastic backend's answer: the correlation lead's `alerts` call is answered, a lead's `query` fails as an infrastructure fault (exit 2), which the breaker charges."""
     if verb == "query":
         raise TransportFault("docker exec failed")
     return envelope(S.DOCS)
@@ -255,23 +181,11 @@ LEAD_QUERY = Turn(tool_calls=[("query", {"system": "elastic", "verb": "query",
                                          "params": {"native_query": "user.name:dev.dana"}})])
 
 
-#: The breaker source: one faulting lead BEFORE the branch point (`echo after`) and one after it,
-#: so the source's FINISHED breaker differs from its breaker at the cut.
 BREAKER_SCRIPT = (S.append(CHUNKS[0]), S.dispatch("l-001"), S.echo("after"), S.dispatch("l-002"),
                   S.done())
 
 
 def test_d2_the_circuit_breaker_is_restored(tmp_path):
-    """D2: a lead's infrastructure failure charges `elastic`'s breaker before the branch point,
-    and a second lead's failure charges it again AFTER it. The arm, branched between the two
-    (`echo after`), holds the breaker AT THE CUT — one failure, not tripped — not the source's
-    finished breaker (two failures, tripped), and not an empty one (today's).
-
-    The count at the cut is derived from the script, not read from any snapshot: one faulting
-    `query` precedes `echo after` (`l-001`'s) and one follows it (`l-002`'s), and the source's
-    finished breaker pins one charge per failing query (two failures, two counted toward the
-    run). Below `PER_SYSTEM_FAIL_LIMIT` a system record carries its count alone (`tripped_at` is
-    stamped only at the limit), so the cut's breaker is a plain value."""
     from defender.runtime import circuit_breaker
 
     failed = Turn(text="the backend did not answer")
@@ -306,25 +220,11 @@ def _gap_on(target: str):
 
 
 @pytest.mark.parametrize(("state", "target", "extra_turns", "cause"), [
-    # `v-001` is named again by the fence appended after the challenge, so the ask is not
-    # spent; with one forced turn, the second close finds the turn budget gone.
     ("rounds", "v-001", 1, CAUSE_TURN_BUDGET_SPENT),
-    # `h-001` is not named again, so the second close finds the ask already raised and
-    # nothing new recorded — with a turn still left.
     ("raised asks", "h-001", 2, CAUSE_NOTHING_LEFT_TO_ASK),
 ], ids=["rounds", "raised-asks"])
 def test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored(
         tmp_path, state, target, extra_turns, cause):
-    """D2 (G16): the source closes, the review challenges it (round 1, the ask recorded), it
-    appends a fence (the branch point) and closes again — and the gate forces the close
-    (`cause`). The arm, branched at that fence and closing the same way, is forced the same way
-    with the same cause, because it holds the round count and the raised ask; and it inherits
-    the source's `review_record.1.json` byte for byte (the review record is append-only, cut at
-    the branch). Today the arm's gate restarts: its close is challenged again, and the record it
-    writes is its own round 1.
-
-    Positive control: the source's first record is the challenge and its report carries
-    `cause`, so the second close is decided by exactly the state this test says is restored."""
     bounds = challenge_gate.Bounds(extra_turns=extra_turns)
     stages = _gap_on(target)
     head = CHUNKS[0] + CHUNKS[1]
@@ -351,14 +251,8 @@ def test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored(
         f"{S.read_text(arm.paths.report)[:300] or '(no report: the close was challenged again)'}")
 
 
-# --------------------------------------------------------------------------------------
-# P2: model-readable files are restored up to the cut (append-only, write-once, rewritable).
-# --------------------------------------------------------------------------------------
-
-
 class _Withholding(FakeVerbs):
-    """An injected registry whose grant withholds named pairs it still declares — so a lead's
-    call to one is DENIED (and logged to the denials log), not undeclared."""
+    """An injected registry whose grant withholds named pairs it still declares — so a lead's call to one is DENIED (and logged to the denials log), not undeclared."""
 
     def __init__(self, table, withheld: set[tuple[str, str]]):
         super().__init__(table)
@@ -381,12 +275,7 @@ DENIED = Turn(tool_calls=[("query", {"system": "identity", "verb": "list-authori
 
 
 def _planted_tree(root: Path) -> Path:
-    """A defender tree the run reads (`defender_dir=`): this checkout, linked entry by entry,
-    except `lessons/`, which holds only the three lessons below — so which lessons a write
-    pushes is this test's, not the checked-in corpus's. Golden fence 1 leaves `v-001`'s
-    (compute) and `v-002`'s (identity) `class` open, so the first two match it; only golden
-    fence 2 opens contract `ac2` (anchor `approved-source-list`), so the third is pushed by
-    that later write and no earlier one."""
+    """Create a checkout mirror with fixture lessons for the restored file checks."""
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
     for entry in DEFENDER.iterdir():
@@ -406,14 +295,10 @@ def _lines(path: Path) -> list[bytes]:
 
 
 def _rows(path: Path) -> list[dict]:
-    """A log's rows with their timestamp dropped: the one field a re-made row may differ in
-    (the run clock's restore is slice D's)."""
+    """A log's rows with their timestamp dropped: the one field a re-made row may differ in (the run clock's restore is slice D's)."""
     return [{k: v for k, v in json.loads(line).items() if k != "ts"} for line in _lines(path)]
 
 
-#: The source's script and the arm's: the arm re-runs `echo x` (its branch point) and then makes
-#: exactly the calls the source made after it — a denied dispatch and the fence that pushes the
-#: third lesson.
 LOG_SCRIPT_HEAD = (S.append(CHUNKS[0]), S.dispatch("l-001"), S.echo("x"))
 LOG_SCRIPT_TAIL = (S.dispatch("l-002"), S.append(CHUNKS[1]))
 LOG_LEADS = {"l-001": (DENIED, Turn(text="l-001: denied")),
@@ -421,25 +306,6 @@ LOG_LEADS = {"l-001": (DENIED, Turn(text="l-001: denied")),
 
 
 def test_p2_append_only_and_write_once_files_are_restored_up_to_the_cut(tmp_path):
-    """P2 (reverses G7; R1-2 exact cut): before the branch point (`echo x`) the source's first
-    fence pushes two lessons, a lead's denied call is logged, and the correlation lead's rows
-    and files are written; AFTER it the source logs a second denial and its next fence pushes a
-    third lesson. So both logs grow past the cut, and "restored up to the cut" has an exact
-    oracle: the rows a run of the same script that STOPS at the branch point holds (`prefix`,
-    driven separately — not production's answer). The arm, branched at `echo x` and making the
-    source's later calls itself:
-
-    - opens its lessons and denials logs on the source's rows through the cut, byte for byte,
-      and holds after them exactly its own rows — the same rows (timestamps aside) the source
-      wrote after the cut, once. A whole-file copy (the source's post-cut rows, then the arm's
-      own again) or a restart (no inherited rows) is each a different log;
-    - holds the source's query rows through the cut and the correlation lead's payload, claim
-      and summary byte for byte (write-once evidence written before the cut);
-    - holds them as COPIES: its own later rows land in its files, never the source's, and its
-      run state holds the restored rows its table holds (#1235: the live run reads a lead's
-      rows from the run state, so a table restored without them is two answers).
-
-    Today the lessons and denials logs are not inherited at all (G7) — the arm's are its own."""
     tree = _planted_tree(tmp_path)
     prefix = S.drive_source(tmp_path / "prefix", (*LOG_SCRIPT_HEAD, S.done()), leads=LOG_LEADS,
                             verbs=_registry(), defender_dir=tree, run_id="prefix-1255")
@@ -494,16 +360,6 @@ def test_p2_append_only_and_write_once_files_are_restored_up_to_the_cut(tmp_path
 
 
 def test_p2_the_investigation_document_is_restored_by_content(tmp_path):
-    """P2: `investigation.md` is REWRITABLE (`fix_row` edits a flagged row in place), so it is
-    restored by content, not by length. The source lands a block with a flagged row, repairs it
-    (the branch point), then appends. The arm, branched at the repair and re-running it, gets
-    the source's own answer to the repair ("repaired 1 flagged row(s)…") and ends holding the
-    source's document.
-
-    The violations it rejects: a cut by LENGTH (the post-repair document is longer than the one
-    the repair was made against, so the cut keeps a torn tail and the re-run finds nothing to
-    repair) and today's fence-count cut of the FINISHED document (it already holds the repair,
-    so the re-run is refused with "nothing is currently flagged")."""
     source = S.drive_source(
         tmp_path, (S.append(CHUNKS[0]), S.append(attr_block(WARN_ROW)),
                    Turn(tool_calls=[("fix_row", {"old_row": WARN_ROW, "new_row": REPAIRED_ROW_ATTRS})]),
@@ -523,11 +379,6 @@ def test_p2_the_investigation_document_is_restored_by_content(tmp_path):
     assert arm.document == source.document
 
 
-# --------------------------------------------------------------------------------------
-# Refusals at launch.
-# --------------------------------------------------------------------------------------
-
-
 def _truncate_last_line(path: Path) -> None:
     lines = _lines(path)
     assert len(lines) >= 1, f"{path.name} holds no row to cut"
@@ -540,10 +391,7 @@ def _rewrite(path: Path) -> None:
 
 
 def _rewrite_in_place(path: Path, old: bytes | None = None, new: bytes = b"") -> None:
-    """Rewrite a write-once file IN PLACE at the SAME LENGTH (adversary pass 2, F2-A1: every
-    other rewrite above changes the size, so a snapshot that recorded sizes alone refused them
-    all; the design records a content hash for these files). The first `old` becomes `new`, of
-    its own length — or, with no `old`, the first ASCII letter is flipped to another one."""
+    """Replace file bytes without changing length, exposing size-only validation."""
     data = S.read_bytes(path)
     assert data, f"{path} is not there to rewrite"
     if old is None:
@@ -556,16 +404,12 @@ def _rewrite_in_place(path: Path, old: bytes | None = None, new: bytes = b"") ->
     path.write_bytes(changed)
 
 
-#: Each way a source's files can stop matching what was recorded at the branch point, applied to
-#: a file the branch point's snapshot covers (each exists, with content, before the cut).
 TAMPERS = {
     "queries table shorter than recorded": lambda p: _truncate_last_line(p.executed_queries),
     "lessons log shorter than recorded": lambda p: _truncate_last_line(p.lessons_loaded),
     "denials log shorter than recorded": lambda p: _truncate_last_line(p.policy_denials),
     "gather summary rewritten": lambda p: _rewrite(p.gather_summary(S.CORRELATION_LEAD)),
     "raw payload rewritten": lambda p: _rewrite(p.payload(S.CORRELATION_LEAD, 0)),
-    # Same length, other content: the payload's user (the probe's own tamper) and one byte of
-    # the summary. Only a content hash tells these apart from what was recorded.
     "gather summary rewritten at the same length": lambda p: _rewrite_in_place(
         p.gather_summary(S.CORRELATION_LEAD)),
     "raw payload rewritten at the same length": lambda p: _rewrite_in_place(
@@ -575,12 +419,6 @@ TAMPERS = {
 
 @pytest.mark.parametrize("tamper", sorted(TAMPERS))
 def test_p2_a_restore_that_does_not_match_refuses_the_arm_at_launch(tmp_path, tamper):
-    """P2: "A restore that does not match refuses the arm at launch." The source finishes, one
-    file its branch point's snapshot covers is changed (an append-only file left SHORTER than
-    recorded, a write-once file rewritten — grown, or changed in place at the same length, which
-    only the content hash the design records can tell), and the arm is refused before its model
-    is asked for anything and before anything is forked. Positive control in the same test: the
-    same branch point of the same source, untampered, launches."""
     tree = _planted_tree(tmp_path)
     source = S.drive_source(
         tmp_path, (S.append(CHUNKS[0]), S.dispatch("l-001"), S.echo("x"), S.done()),
@@ -607,11 +445,6 @@ def _halve(path: Path) -> None:
     path.write_bytes(data[: len(data) // 2])
 
 
-#: The review records are append-only snapshot-covered files too (design rev 4: "for
-#: append-only files in the model's read scope, their length (query table, lessons log, denials
-#: log, review records)") — each way the source's first review record can stop matching what
-#: was recorded at a branch point after it (contract-repair finding R-3: the tamper set above
-#: had no review record, so a restore that copied whatever the source folder now holds passed).
 REVIEW_TAMPERS = {
     "review record shorter than recorded": lambda p: _halve(p.review_record(1)),
     "review record missing": lambda p: p.review_record(1).unlink(),
@@ -620,15 +453,6 @@ REVIEW_TAMPERS = {
 
 @pytest.mark.parametrize("tamper", sorted(REVIEW_TAMPERS))
 def test_p2_a_review_record_that_does_not_match_refuses_the_arm_at_launch(tmp_path, tamper):
-    """P2: "A restore that does not match refuses the arm at launch" — for the review record
-    as for every other covered file. The source closes, the review challenges it (round 1:
-    `review_record.1.json`), it appends a fence (the branch point) and closes again — the
-    `test_d2_the_challenge_gates_rounds_and_raised_asks_are_restored` source. Its first review
-    record is then cut short or removed, and the arm is refused before its model is asked for
-    anything and before anything is forked.
-
-    Positive controls in the same test: the source's first close left a review record, and the
-    same branch point of the same source, untampered, launches."""
     bounds = challenge_gate.Bounds(extra_turns=1)
     stages = _gap_on("v-001")
     source = S.drive_source(
@@ -655,16 +479,6 @@ def test_p2_a_review_record_that_does_not_match_refuses_the_arm_at_launch(tmp_pa
 
 
 def test_n4_a_source_with_no_fork_snapshot_is_refused_at_launch(tmp_path, caplog):
-    """N4: a source recorded before this change has no fork snapshot, and forking it is refused
-    — at a branch point D1 admits (its trailing `bash` CALL, after its document landed:
-    `_branch_947.LEGACY_BRANCH_CALL`), so nothing else about the branch is wrong. The fork
-    command's own refusal of the same kind of source (rev 5 C2) is
-    `tests/test_1255_snapshot_fork_command.py`. `legal_source` is exactly that run: its store rows were written directly, with no
-    driver to record a snapshot. The refusal names the missing snapshot (a refusal names its
-    reason). Positive control: a DRIVEN source branched at the same kind of point launches.
-
-    TODAY this arm is refused too, but for the D1 reason ("unanswered"), so only the
-    `snapshot` wording is red; the control is red on D1."""
     driven = S.drive_source(tmp_path / "driven", (S.append(CHUNKS[0]), S.echo("x"), S.done()))
     control = S.drive_arm(tmp_path / "driven", S.spec_for(driven, S.tool_calling_responses(driven.store)[1]),
                           S.Recorder([S.done()]))
@@ -686,18 +500,8 @@ def test_n4_a_source_with_no_fork_snapshot_is_refused_at_launch(tmp_path, caplog
         f"the refusal does not name the missing fork snapshot: {caplog.text[-400:]!r}")
 
 
-# --------------------------------------------------------------------------------------
-# P3: the snapshot lives outside the run folder (and outside every box mount).
-# --------------------------------------------------------------------------------------
-
-
 def _model_readable_records(paths: RunPaths) -> set[Path]:
-    """The source's files an arm restores from — the model-readable records the snapshot
-    describes — plus the case input. Under the gather folders that is EXACTLY what the queries
-    table accounts for: each payload a row names (`payload_path`) and each table lead's claim
-    and summary — not the folders whole (contract-repair finding R-1: a snapshot kept under any
-    name in `gather_raw/`, say `gather_raw/.fork/<message>.json`, survived a prune that kept
-    both folders entire). Everything else in the run folder is host bookkeeping."""
+    """The source's files an arm restores from — the model-readable records the snapshot describes — plus the case input."""
     keep = {paths.investigation, paths.executed_queries, paths.lessons_loaded,
             paths.policy_denials, paths.alert, paths.alert_record}
     rows = [json.loads(line) for line in _lines(paths.executed_queries) if line.strip()]
@@ -714,21 +518,6 @@ def _tree(root: Path) -> list[str]:
 
 
 def test_p3_the_fork_snapshot_is_not_kept_in_the_run_folder_or_the_tenant_agent_half(tmp_path):
-    """P3: the snapshot is host bookkeeping, kept where no box mount reaches. Observed by what
-    still restores: after the source finishes, EVERY entry of its run folder that is not one of
-    the model-readable records an arm restores from (the documents, the logs, the queries table,
-    the payloads it names and each of its leads' claim and summary, the case input) is deleted —
-    today that is the wire-log folder and the tool trace; after #1255 it is also whatever else
-    the run left there, `gather_raw/` and `gather_summaries/` included. The arm still launches
-    and restores exactly (a snapshot kept in the run folder under any other name would be
-    gone, and the arm refused as N4 — so a refusal HERE, unlike in the other tests, is the
-    violation). And neither the source run nor the arm wrote into the tenant's agent half —
-    the other mount besides the run folder and the checkout.
-
-    What this is evidence for: only "the snapshot is not in the run folder". On its own it
-    also passes over a branch with NO snapshot at all (bare D1 plus today's file-based seed),
-    so it carries P3 only together with the N4 test, which shows a source without a snapshot
-    is refused."""
     agent = _tenants1106.fixture_tenant().agent
     agent_before = _tree(agent)
     source = S.drive_source(tmp_path, (S.append(CHUNKS[0]), S.echo("x"), S.append(CHUNKS[1]),
@@ -764,13 +553,7 @@ def test_p3_the_fork_snapshot_is_not_kept_in_the_run_folder_or_the_tenant_agent_
         f"the arm did not restore exactly after the run folder lost {removed}")
 
 
-
 def test_d2_a_call_time_configuration_fault_stays_down_after_the_fork(tmp_path):
-    """#1255 D2 + #1256 O-5b: a fork continues a run's permanent system refusal.
-
-    The source starts healthy, then a real query raises ConfigFault before the cut.
-    A newly healthy adapter in the arm must not reopen that system or dispatch its lead.
-    """
     from pydantic_ai.messages import RetryPromptPart, ToolReturnPart
 
     from defender.scripts.adapters.faults import ConfigFault

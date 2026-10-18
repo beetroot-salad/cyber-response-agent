@@ -1,33 +1,4 @@
-"""#1255 slice A — machinery for the fork-snapshot / branch-point / no-injected-opening contract.
-
-NO tests here (underscore-prefixed, never collected). Three things, all observing production
-through its real entry points:
-
-1. **`Recorder`** — a scripted MAIN (or gather) model that keeps every request's raw message list
-   (deep copies). "The arm resumes with no user message" and "the model's next request is
-   exactly the natural one" are statements about message OBJECTS — which part kinds the last
-   request carries, which `tool_call_id`s it answers — so the flattened text `ReplayFn.seen`
-   holds is not enough. It still fills `seen`, so the harness's text idioms work too.
-
-2. **`drive_source`** — a REAL source run through the replay harness (`drive`): the correlation
-   lead issues one real call against an injected elastic backend (so the source has a capture,
-   which `validate` requires), then MAIN runs its script. The fork snapshot is whatever
-   production writes while that run is driven; nothing here plants, names or reads one. A
-   source built any other way (store rows written directly, as `_branch_947.legal_source`
-   does) is the shape of a run recorded BEFORE #1255 — N4's refused case.
-
-3. **`tool_calling_responses` / `spec_for` / `drive_arm`** — where a branch may be taken (D1: a
-   MAIN response that called tools), the `BranchSpec` for it (no continuation prompt), and the
-   arm driven through `drive(resume=spec)`, i.e. `driver.run_investigation(resume=…)`. The
-   production arm (`run.main --episode … --world …`) composes exactly that call; the composed
-   path is driven by `test_1255_snapshot_instrument.py` (P3: what an arm's run folder holds).
-
-Paths in the scripts: every tool call a script makes here is PATHLESS (`append_block`,
-`fix_row`, `gather`, `close_investigation`, `bash echo`). Slice B moves the model's view of
-paths (`/runs/current/…`); a script that spelled host paths would break on B's change for a
-reason this slice is not about. Where a test must hand a path, it derives the path from what
-the model was shown.
-"""
+"""Driven sources, forked replays, and request comparisons."""
 from __future__ import annotations
 
 import copy
@@ -73,30 +44,20 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     messages_text,
 )
 
-#: The correlation lead's reserved id: the one lead every source run dispatches before MAIN.
 CORRELATION_LEAD = "l-00c"
 
-#: `l-00c`'s script: one real call (so the source has a capture — `validate` refuses a branch
-#: without one) and its summary.
 CORRELATION_TURNS = (
     Turn(tool_calls=[("query", {"system": "elastic", "verb": "alerts",
                                 "params": {"native_query": "user.name:dev.dana"}})]),
     Turn(text=CORRELATION_SUMMARY),
 )
 
-#: What the source's backend answers by default.
 DOCS = [hit(ts="2026-05-25T15:20:00.000Z"), hit(ts="2026-05-25T15:21:00.000Z")]
 
-#: The golden investigation every source authors, cut on fence boundaries so every running
-#: concatenation is a document the gate accepts (`_replay_harness._split_at_fences`).
 GOLDEN_DOCUMENT = (GOLDEN / "investigation.md").read_text(encoding="utf-8")
 
-#: Matches the dispatch block every gather lead's first request carries (the harness's own
-#: `_DISPATCHED_LEAD` shape): how a router tells which lead is asking.
 _DISPATCHED_LEAD = re.compile(r"\n## Dispatch\n```yaml\n(?:.*\n)*?lead_id: (\S+)\n")
 
-#: Every frame delimiter (`<run-<salt>-<kind>>`): `wrap_fresh` mints a fresh salt per frame, a
-#: fresh random id O4 names as an allowed difference between any two runs.
 _FRAME_TAG = re.compile(r"<(/?)run-[0-9a-f]+-([a-z_-]+)>")
 
 
@@ -110,8 +71,7 @@ def append(text: str) -> Turn:
 
 
 def echo(word: str) -> Turn:
-    """A pathless, always-granted MAIN call (`echo` is one of the inert programs every role
-    may run): a tool-calling response with a deterministic result."""
+    """A pathless, always-granted MAIN call (`echo` is one of the inert programs every role may run): a tool-calling response with a deterministic result."""
     return Turn(tool_calls=[("bash", {"command": f"echo {word}"})])
 
 
@@ -129,11 +89,6 @@ def done(text: str = "Holding here; the evidence is in hand.") -> Turn:
     return Turn(text=text)
 
 
-# --------------------------------------------------------------------------------------
-# The recording models.
-# --------------------------------------------------------------------------------------
-
-
 class Recorder(ReplayFn):
     """`ReplayFn` that also keeps each request's raw messages, deep-copied at the call."""
 
@@ -149,10 +104,7 @@ class Recorder(ReplayFn):
 
 
 class Forever(Recorder):
-    """A MAIN that never stops calling tools: after its `opening` turns, every request answers
-    with one `bash echo`, so the loop only ends at the request ceiling. `calls` is the number of
-    model requests made. A source opens with a fence (so the frontier is open where it is
-    branched); an arm needs no opening."""
+    """Scripted opening followed by bash calls until the request ceiling stops the run."""
 
     __name__ = "Forever"
 
@@ -170,20 +122,14 @@ class Forever(Recorder):
 
 
 class LeadRouter:
-    """The gather model for a run with several leads: routes each request to its lead's own
-    scripted `Recorder` by the lead id the dispatch block names.
-
-    `serves_correlation` tells the harness this router answers `l-00c` itself (it does — the
-    correlation script is one of its leads), so the harness does not wrap it in its default."""
+    """Route gather requests to a separate scripted model for each lead."""
 
     __name__ = "LeadRouter"
     serves_correlation = True
 
     def __init__(self, scripts: dict[str, Any]):
-        #: Each lead's model: its script as a `Recorder`, or a model passed as is (a callable).
         self.leads: dict[str, Any] = {
             lead: script if callable(script) else Recorder(script) for lead, script in scripts.items()}
-        #: Every lead id that asked, in order of its FIRST request.
         self.asked: list[str] = []
 
     def __call__(self, messages, info) -> ModelResponse:
@@ -196,15 +142,9 @@ class LeadRouter:
         return self.leads[lead](messages, info)
 
 
-# --------------------------------------------------------------------------------------
-# A driven source and its branch points.
-# --------------------------------------------------------------------------------------
-
-
 @dataclass
 class Driven:
-    """One driven run: its folder, its models, the backend recorder, the harness's result and
-    the store handle the run wrote (a source's; an arm shares its source's database)."""
+    """Replay result with its run folder, models, backend recorder, and session store."""
 
     run_dir: Path
     main: Any
@@ -234,9 +174,7 @@ class Driven:
 
 
 def correlation_backend(rec: VerbRecorder, *, answer: Callable[[str, dict], Any] | None = None):
-    """The elastic registry every source is driven with: the correlation lead's real call lands
-    a captured row. `answer` overrides what calls 2..n return (the shell fetch is answered by
-    the backend itself)."""
+    """The elastic registry every source is driven with: the correlation lead's real call lands a captured row."""
     return elastic_backend(rec, answer if answer is not None else answer_hits(DOCS))
 
 
@@ -246,9 +184,7 @@ def drive_source(  # noqa: PLR0913 — one keyword per seam a source scenario va
         limits: dict | None = None, bounds: Any = None, review_stages: Any = None,
         defender_dir: Path | None = None, main: Any = None, run_id: str = "src-1255",
         before: Callable[[Path], None] | None = None) -> Driven:
-    """Drive a REAL source run (see the module docstring). `main` overrides the scripted
-    `Recorder` built from `main_turns` (e.g. a `Forever`). `before(run_dir)` runs on the
-    materialized folder just before the driver starts."""
+    """Drive a source that records real branch snapshots; before runs just before the driver."""
     run_dir = materialize_alert(root / "source", alert_doc())
     rec = VerbRecorder()
     registry = verbs if verbs is not None else correlation_backend(rec, answer=answer)
@@ -268,8 +204,7 @@ def drive_source(  # noqa: PLR0913 — one keyword per seam a source scenario va
 
 
 def main_rows(store: Any, session_id: str | None = None) -> list[tuple[int, Any]]:
-    """`(row id, message)` for every row on a MAIN session's path, in order (the source's own
-    main session when `session_id` is omitted)."""
+    """`(row id, message)` for every row on a MAIN session's path, in order (the source's own main session when `session_id` is omitted)."""
     ss = store_mod()
     session = session_id if session_id is not None else ss.main_session_id(store)
     ids = ss.path_row_ids(store, session)
@@ -283,9 +218,7 @@ def calls_of(message: Any) -> list[ToolCallPart]:
 
 
 def tool_calling_responses(store: Any) -> list[int]:
-    """The row ids of every MAIN response that called tools — D1's admissible branch points
-    (before the retry-streak and snapshot conditions), in order. Index `k-1` is the response to
-    MAIN's `k`-th model request."""
+    """The row ids of every MAIN response that called tools — D1's admissible branch points (before the retry-streak and snapshot conditions), in order."""
     return [rid for rid, m in main_rows(store)
             if isinstance(m, ModelResponse) and calls_of(m)]
 
@@ -300,8 +233,7 @@ def message_at(store: Any, row_id: int) -> Any:
 
 
 def spec_for(source: Driven, row_id: int) -> Any:
-    """The `BranchSpec` for branching `source` at `row_id`: source, branch point and the
-    derived moment (`_branch_947.spec_at`) — and no continuation prompt (D1)."""
+    """The `BranchSpec` for branching `source` at `row_id`: source, branch point and the derived moment (`_branch_947.spec_at`) — and no continuation prompt (D1)."""
     return spec_at(source.store, source.run_dir, row_id)
 
 
@@ -311,12 +243,7 @@ def drive_arm(  # noqa: PLR0913 — one keyword per seam an arm scenario varies
         review_stages: Any = None, defender_dir: Path | None = None,
         name: str = "arm", run_id: str = "arm-1255",
         before: Callable[[Path], None] | None = None) -> Driven:
-    """Drive an arm of `spec` through `run_investigation(resume=spec)`.
-
-    No `store_factory=`: a resume derives its store from the spec (the harness refuses the two
-    together). Escapes are NOT turned into failures here — a refusal at launch is something
-    several tests assert — so a caller that expects the arm to run checks `summary` itself.
-    `before(run_dir)` runs on the arm's materialized folder just before the driver starts."""
+    """Resume spec through the real driver, preserving launch refusals in the result."""
     run_dir = materialize_alert(root / name, alert_doc())
     if before is not None:
         before(run_dir)
@@ -333,11 +260,9 @@ def drive_arm(  # noqa: PLR0913 — one keyword per seam an arm scenario varies
 
 def child_sessions(store: Any) -> list[str]:
     """The sessions forked off the source's main session (one per arm driven from it)."""
-    ss = store_mod()
     source_session = sql(
         store, "SELECT session_id FROM session WHERE agent_id = 'main' "
                "AND parent_session_id IS NULL ORDER BY rowid")[0][0]
-    del ss
     return [row[0] for row in sql(
         store, "SELECT session_id FROM session WHERE parent_session_id = ? ORDER BY rowid",
         (source_session,))]
@@ -349,18 +274,10 @@ def launched(arm: Driven) -> bool:
 
 
 def refused_at_launch(arm: Driven) -> str | None:
-    """`None` when the arm launched; otherwise a description of how it was stopped, for a
-    failure message. A refusal at launch is: the model never asked for a turn, and the run's
-    summary names the branch refusal as its exit (`BranchError`, the class every branch
-    refusal is raised as)."""
+    """`None` when the arm launched; otherwise a description of how it was stopped, for a failure message."""
     if launched(arm):
         return None
     return f"exit_reason={arm.summary.get('exit_reason')!r} truncated_by={arm.summary.get('truncated_by')!r}"
-
-
-# --------------------------------------------------------------------------------------
-# Comparing requests: the projection that drops only what is never sent or always differs.
-# --------------------------------------------------------------------------------------
 
 
 def _norm(text: str, replace: dict[str, str]) -> str:
@@ -379,9 +296,7 @@ def _content(part: Any) -> str:
 
 
 def project(messages: list[Any], *, replace: dict[str, str] | None = None) -> list[tuple]:
-    """A request as the provider receives it, minus what is never sent (part timestamps,
-    response metadata) and with O4's fresh frame salts normalised. `replace` maps host
-    spellings to a placeholder (each test says which and why)."""
+    """A request as the provider receives it, minus what is never sent (part timestamps, response metadata) and with O4's fresh frame salts normalised."""
     rep = replace or {}
     out: list[tuple] = []
     for m in messages:

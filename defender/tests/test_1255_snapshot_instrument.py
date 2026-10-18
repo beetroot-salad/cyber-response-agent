@@ -1,19 +1,4 @@
-"""#1255 slice A — the instrument adds nothing (P4) and arm-only facts live outside the box (P3).
-
-Design rev 4: "Continuation prompt gone from BranchSpec, family manifest and branch CLI" (D1,
-P4); "`provenance.json` (world id, parent run, fork turn) moves out of the run folder into the
-episode's host-side record. The handbook page that explains branching
-(`skills/handbook/content/learning-loop.md`) leaves the investigator's read scope" (P3).
-
-The BranchSpec half of the first sentence is `test_920_branch_seam::
-test_branch_spec_carries_no_continuation_prompt`; the CLI half is `test_947_branch_cli`. This
-file holds the manifest half, the arm's run-folder stamp, and the read scope.
-
-Entry surfaces: the manifest's own parser (`_family.parse_family`, what `load_family` runs),
-the sibling's real entry point `run.main(--episode … --world …)` with the lifecycle recorded
-(the stamp is written before any investigation starts, so no driver is needed to observe it),
-and a driven natural run whose MAIN and gather models ask the gate for the page.
-"""
+"""Fork lineage stays host-side and model-visible run records stay neutral."""
 from __future__ import annotations
 
 import dataclasses
@@ -27,27 +12,13 @@ from defender.run_repository import RunPaths
 from defender.tests import _triplet_947 as T
 
 LEARNING_LOOP_PAGE = "skills/handbook/content/learning-loop.md"
-#: The branching page by more than one spelling of its path (contract-repair finding F-P3a):
-#: P3 takes the PAGE out of read scope, not one string — a gate that refuses an operand by its
-#: unresolved spelling passed a probe that asked only by the canonical one. Each `..` climb
-#: below names the same file under the checkout.
 PAGE_SPELLINGS = (LEARNING_LOOP_PAGE,
                   "skills/handbook/content/../content/learning-loop.md",
                   "skills/handbook/../handbook/content/learning-loop.md")
-#: A neighbouring handbook page in the same folder: the positive control for the refusal —
-#: the read scope must lose ONE page, not the handbook.
 CONTROL_PAGE = "skills/handbook/content/runtime-loop.md"
 
 
-# --------------------------------------------------------------------------------------
-# P4: the family manifest carries no continuation prompt.
-# --------------------------------------------------------------------------------------
-
-
 def test_p4_the_family_manifest_declares_no_continuation_prompt():
-    """P4/D1: the loaded `Family` has no `continuation_prompt` — there is nothing for an arm to
-    be told on arrival, so nothing in the manifest to carry it. Positive control: the fields
-    the arm IS launched from (source run, branch point, T0) are still declared."""
     family = T.sym("runtime.branch._family", "Family")
     names = {f.name for f in dataclasses.fields(family)}
     assert {"source_run_id", "branch_message_id", "as_of"} <= names, names
@@ -57,9 +28,6 @@ def test_p4_the_family_manifest_declares_no_continuation_prompt():
 
 
 def test_p4_a_manifest_without_a_continuation_prompt_loads():
-    """P4/D1: a manifest that carries no `continuation_prompt` is a complete manifest — the
-    parser `load_family` runs accepts it. Today the parser refuses it ("must be a non-empty
-    string"), which is the reversed rule."""
     parse = T.sym("runtime.branch._family", "parse_family")
     doc = T.family_doc()
     doc.pop("continuation_prompt", None)
@@ -68,11 +36,6 @@ def test_p4_a_manifest_without_a_continuation_prompt_loads():
 
     assert family.branch_message_id == T.BRANCH_MESSAGE_ID
     assert [w.world_id for w in family.worlds] == list(T.WORLDS)
-
-
-# --------------------------------------------------------------------------------------
-# P3: no lineage in the arm's run folder.
-# --------------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -94,8 +57,7 @@ class _Lifecycle:
 
 
 def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
-    """`run.main --tenant T --episode <id> --world <world>` over the fixture episode, lifecycle
-    recorded. Returns `(arm run folder, episode dir, the source's runs base)`."""
+    """`run.main --tenant T --episode <id> --world <world>` over the fixture episode, lifecycle recorded."""
     from defender import _tenant
 
     base, src = T.runs_base(tmp_path)
@@ -116,30 +78,6 @@ def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
 @pytest.mark.usefixtures("_tmp_roots")
 @pytest.mark.parametrize("world", ["a", "b"])
 def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
-    """P3/O2: the arm's run folder — the box's mount — holds no arm-only fact. Its stamp
-    names no parent run and no fork turn and is not stamped with the arm's world token, and no
-    file in the folder carries that token. The control world (`a`) and a counterfactual one
-    (`b`) alike.
-
-    The stamp's world id is the design's too ("`provenance.json` (world id, parent run, fork
-    turn) moves out of the run folder"): an arm's stamp, where it keeps one, carries no world
-    id, or the one a NATURAL run of its tenant is stamped with (the tenant's base world) — the
-    natural shape. A world id that merely avoids spelling the episode token (contract-repair
-    finding F-P3b: the lineage base64-encoded into `world_id`) is neither.
-
-    And "no file carries the lineage" is held by STRUCTURE, then under ENCODING. The folder
-    holds only a run's records, by name (`_1255_run_records.assert_only_run_records`: the
-    layout's named records, each table row's lead claim, summary and own payload — no
-    `wire_logs/*` or other wildcard; positive control: it flags planted records), since a
-    lineage record under a name of its own passed an encoded scan zlib-compressed
-    (contract-repair finding F2-P3b: `wire_logs/lineage.jsonl`). And each of the arm's lineage
-    identities (world token, episode token, episode id) is also looked for as a derived form
-    and inside every base64/hex run of every file, decoded and, where compressed, inflated
-    (`_1255_identity.encoded_hits`; positive control: it finds the world token in an encoded
-    lineage record, plain and zlib-compressed).
-
-    The lineage is not lost, it is host-side: the episode's own record still names the source
-    run and the branch point (the positive control — the facts exist, just not in the box)."""
     import base64
     import json
     import zlib
@@ -153,13 +91,13 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
 
     stamp = _provenance.read(RunPaths(arm).provenance)
     if stamp is not None:
-        assert getattr(stamp, "parent_run_id", None) is None, (
+        assert stamp.parent_run_id is None, (
             f"the arm's stamp names its parent run {stamp.parent_run_id!r} inside the box")
-        assert getattr(stamp, "fork_turn", None) is None, (
+        assert stamp.fork_turn is None, (
             f"the arm's stamp names its fork turn {stamp.fork_turn!r} inside the box")
-        assert T.EPISODE_TOKEN not in str(getattr(stamp, "world_id", None) or ""), (
+        assert T.EPISODE_TOKEN not in str(stamp.world_id or ""), (
             f"the arm's stamp names its episode's world {stamp.world_id!r} inside the box")
-        assert getattr(stamp, "world_id", None) in (None, natural_world), (
+        assert stamp.world_id in (None, natural_world), (
             f"the arm's stamp carries a world id {stamp.world_id!r} that is neither absent nor "
             f"a natural run's ({natural_world!r}) — the world id moves out of the run folder")
     RR.assert_only_run_records(arm, f"world {world}'s arm", RR.table_rows(arm))
@@ -181,19 +119,8 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
     assert str(T.BRANCH_MESSAGE_ID) in record, "the episode's host-side record no longer names the source run and branch point"
 
 
-# --------------------------------------------------------------------------------------
-# P3: the page explaining branching is outside the investigator's read scope.
-# --------------------------------------------------------------------------------------
-
-
 def _checkout_as_shown(first_request: str) -> str:
-    """The checkout path as the model is shown it.
-
-    The model view (slice B, P1) fixes the checkout at `/defender` and the run folder at
-    `/runs/current`; before it lands, the model is shown host paths. Which world this run is in
-    is read off the opening prompt's own `run_dir:` coordinate, so the probe below asks for the
-    page by the path the MODEL would use either way — a host path handed to a run under the
-    model view is refused for a different reason and would make the refusal arm vacuous."""
+    """The checkout path as the model is shown it."""
     from defender.tests.e2e._replay_harness import DEFENDER
 
     for line in first_request.splitlines():
@@ -203,10 +130,7 @@ def _checkout_as_shown(first_request: str) -> str:
 
 
 class _PageReader:
-    """A scripted model that reads the branching page by each of `PAGE_SPELLINGS`, then the
-    control page, then stops — by the checkout path the model is shown (`shown()`: the request
-    text that shows it; by default this model's own first request). Keeps every request so each
-    answer can be inspected."""
+    """Model that reads requested pages using the checkout path shown in its prompt."""
 
     __name__ = "PageReader"
 
@@ -274,10 +198,6 @@ def _assert_page_refused(reader: _PageReader, who: str) -> None:
 @pytest.mark.e2e
 @pytest.mark.parametrize("tool", ["read_file", "bash"])
 def test_p3_main_cannot_read_the_page_that_explains_branching(tmp_path, tool):
-    """P3 (G11 reversed): MAIN's request to read `learning-loop.md` — by `read_file`, or by the
-    granted `cat`, and by each of `PAGE_SPELLINGS` (the canonical path and two `..` climbs that
-    name the same file) — is refused by the gate; the same request for a neighbouring handbook
-    page is answered with its content (the positive control: the refusal is about the page)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests import _1255_snapshot as S
 
@@ -289,10 +209,6 @@ def test_p3_main_cannot_read_the_page_that_explains_branching(tmp_path, tool):
 
 @pytest.mark.e2e
 def test_p3_a_gather_lead_cannot_read_the_page_that_explains_branching(tmp_path):
-    """P3: the gather role is an investigator too — a lead's `read_file` of `learning-loop.md`,
-    by each of `PAGE_SPELLINGS`, is refused, while the neighbouring page reads (positive
-    control). The lead reads by the checkout path MAIN's opening shows (a lead's own prompt
-    names none)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests import _1255_snapshot as S
 
