@@ -231,7 +231,15 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
 
 def test_d2_sibling_runs_base(tmp_path, tenant_root):
     """A sibling's materialize puts its run dir under EpisodePaths(world.episode_dir).runs and
-    reads that base's record for T."""
+    reads that base's record for T.
+
+    #1105 PR 2 (declared change 6, G5): the container is the launcher's to make — run setup
+    never creates it — so over an ABSENT container a sibling's materialize is refused and
+    nothing is made. Once the launcher has made it with T's record
+    (`EpisodeRuns.create_container`), two worlds of one pass-(A) episode both land in it and
+    preserve its one container record, and neither lands under `<root>/T/runs/` (O4's
+    gap until (B)). #1255 keeps run-local provenance neutral using the source tenant's
+    natural base world rather than the episode world."""
     src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b", container=None)
     world_c = H.run_py().resume_world(
         Episode.open(ep), "c", tenant=lambda: H.T1106.run_tenant(H.accept(tenant_root, T_ID)))
@@ -251,7 +259,7 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
     assert rc == ep / "runs" / world_c.run_id
     assert minted["tenant_id"] == T_ID
     assert json.loads(record_path.read_text(encoding="utf-8")) == minted, "the record changed"
-    assert _stamp(rb)["world_id"] == world_b.world_id
+    assert _stamp(rb)["world_id"] in (None, H.mod("_tenant").read_tenant(src.parent).base_world_id)
     # #1235 F2: the source run's case link is a host sidecar beside its run dir.
     assert H.entries(tenant_root / T_ID / "runs") == sorted(
         [H.RECORD_NAME, src.name, RunPaths(src).session_pointer().name])
