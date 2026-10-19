@@ -889,13 +889,20 @@ def test_1105_the_spec_flow_profile_names_the_moved_symbols_at_their_new_paths()
     old = [r for r in rows if r.split("::")[0] in ("defender/_run_paths.py",
                                                     "defender/_run_handle.py")]
     assert old == [], f"profile rows still name the moved files: {old}"
-    # #1187 (R1): `Run.for_tenant` goes with the record it read (replaced by `Run.under`), so
-    # its profile row is not pinned here; the two other moved rows are.
+    # #1187 declared change 6 / R1 retires the tenant-record readers, including these
+    # record-only wrapper below. This ARCHIVED profile preserves their historical rows;
+    # it does not require compatibility methods after their policy is removed. Retained
+    # moved APIs still meet every path/symbol/identity assertion below.
     expected = {"defender/run_repository/_layout.py::contained_payload",
                 "defender/run_repository/_handle.py::Run._exit_class"}
     assert expected <= set(rows), f"the moved rows are missing: {sorted(expected - set(rows))}"
-    retired = "defender/run_repository/_handle.py::Run.for_tenant"  # lint-stale-ref: ok — archived profile row retired by #1187 R1
-    for row in (r for r in rows if r.startswith("defender/run_repository/") and r != retired):
+    retired = {
+        "defender/run_repository/_handle.py::Run.for_tenant": "R1: no tenant record is read by Run.under",  # lint-stale-ref: ok — explicit #1187 retirement
+        "defender/run_repository/_held.py::HeldRuns.judged": "R1: no held-folder tenant record to judge",  # lint-stale-ref: ok — explicit #1187 retirement
+    }
+    assert set(retired) <= set(rows), "a declared historical retirement no longer names a profile row"
+    # EpisodeRuns._judge retains container-state work after R1; preserve its symbol check.
+    for row in (r for r in rows if r.startswith("defender/run_repository/") and r not in retired):
         rel, symbol = row.split("::")
         tree = ast.parse((H.WORKTREE / rel).read_text(encoding="utf-8"))
         head, _, member = symbol.partition(".")

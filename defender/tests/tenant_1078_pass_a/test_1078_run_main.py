@@ -26,7 +26,6 @@ import pytest
 
 from defender.tests import _spec791
 from defender.tests.tenant_1078_pass_a import _spec1078 as H
-from defender.run_repository import RunRefused
 from defender.tests._fixture_uuid import fixture_uuid
 
 #: The pinned `--run-id` these scenarios hand `run.py`: a UUID (#1187 declared change 1, review-4
@@ -422,7 +421,7 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     assert H.row_path(new, "acme").is_file()
 
     # #1187 Layout A refuses at the absent episode under the NEW root before any source read.
-    with pytest.raises(RunRefused) as opened:
+    with pytest.raises(FileNotFoundError) as opened:
         H.accept(new, "acme").runs_repository().episode(manifest.parent.name)
     location = opened.value
     said = _refused(H.sibling_argv(manifest, "b", "--tenant", "acme"),

@@ -1316,7 +1316,7 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
     # R5: the same archive under a renamed folder is refused (the variants above, copies that
     # keep the folder name, are the positive control on the same door).
     renamed_id = str(uuid.uuid4())
-    renamed = tmp_path / "variant-renamed" / renamed_id
+    renamed = S.tenant_episodes(tmp_path / "variant-renamed") / renamed_id
     shutil.copytree(real.ep, renamed, symlinks=True)
     before = H5.tree_state(renamed)
     judge = S.judge()
