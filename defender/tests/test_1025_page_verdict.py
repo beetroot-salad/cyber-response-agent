@@ -1163,11 +1163,11 @@ def test_1025_an_episode_with_only_the_control(tmp_path):
     manifest = E.sample_manifest()
     manifest["worlds"] = manifest["worlds"][:1]
     T.write_family(ep.dir, manifest)
-    # This scene reached RUNS with only the control: the host roster matches its manifest.
-    T.write_roster(ep.dir, {E.CONTROL: T.read_roster(ep.dir)[E.CONTROL]})
     for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
         shutil.rmtree(ep.world(label))
         shutil.rmtree(ep.run(label))
+    # This scene reached RUNS with only the control: the host roster matches its manifest.
+    T.write_roster(ep.dir, {E.CONTROL: T.read_roster(ep.dir)[E.CONTROL]})
     doc = E.sample_grade()
     doc["worlds"], doc["enqueued_rows"], doc["world_enqueued_rows"] = [], 0, 3
     for label in (E.PASSTHROUGH_WORLD, E.GRADED_WORLD):
