@@ -894,7 +894,8 @@ def test_1105_the_spec_flow_profile_names_the_moved_symbols_at_their_new_paths()
     expected = {"defender/run_repository/_layout.py::contained_payload",
                 "defender/run_repository/_handle.py::Run._exit_class"}
     assert expected <= set(rows), f"the moved rows are missing: {sorted(expected - set(rows))}"
-    for row in (r for r in rows if r.startswith("defender/run_repository/")):
+    retired = "defender/run_repository/_handle.py::Run.for_tenant"  # lint-stale-ref: ok — archived profile row retired by #1187 R1
+    for row in (r for r in rows if r.startswith("defender/run_repository/") and r != retired):
         rel, symbol = row.split("::")
         tree = ast.parse((H.WORKTREE / rel).read_text(encoding="utf-8"))
         head, _, member = symbol.partition(".")

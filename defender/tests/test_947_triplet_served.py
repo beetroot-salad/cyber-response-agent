@@ -59,7 +59,8 @@ def _faulting_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
         rec.record("query", ctx, {"native_query": native_query, "limit": limit})
         raise UpstreamFault(detail)
 
-    return FakeVerbs({"elastic": {"query": query}})
+    return FakeVerbs({"elastic": {"query": query}},
+                     known_ids=frozenset({T.EPISODE_ID, T.EPISODE_TOKEN, TOKEN_A}))
 
 
 LEAD = "l-001"

@@ -1121,8 +1121,14 @@ def oracle_rows(ep: Path, label: str, name: str) -> list[dict]:
     return read_jsonl(oracle_dir(ep, label) / f"{name}.jsonl")
 
 
+def _episode_world_token(ep: Path, label: str) -> str:
+    """The world's token belongs to this scene's episode, including a launch's fresh UUID."""
+    token = sym(FAMILY, "episode_token_for")(Path(ep).name)
+    return world_token(label, episode_token=token)
+
+
 def ledger_path(ep: Path, label: str) -> Path:
-    return Path(ep) / "served" / f"{world_token(label)}.jsonl"
+    return Path(ep) / "served" / f"{_episode_world_token(ep, label)}.jsonl"
 
 
 def ledger_rows(ep: Path, label: str) -> list[dict]:
@@ -1149,7 +1155,7 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     rq = mod("scripts.gather_tools.record_query")
     breaker = mod("runtime.circuit_breaker")
     world = Path(ep) / "worlds" / label
-    token = world_token(label)
+    token = _episode_world_token(ep, label)
     lines: list[str] = []
     for i, row in enumerate(ledger):
         cid = row.get(J.CALL_ID, f"{token}/{i}")
@@ -1282,7 +1288,7 @@ def world_ledger(ep: Path, label: str) -> Any:
     episode = mod("_episode_handle").Episode.create(Path(ep))
     with contextlib.suppress(FileExistsError):
         episode.served_base.create("")
-    return sym(LEDGER, "Ledger").for_world(episode, world_token(label)).declare()
+    return sym(LEDGER, "Ledger").for_world(episode, _episode_world_token(ep, label)).declare()
 
 
 def serving(*, oracle: Any = None, verifier: Any = None, box: Callable[[], Any] | None = None,
