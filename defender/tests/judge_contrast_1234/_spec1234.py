@@ -1101,9 +1101,11 @@ def scratch_copy(tmp_path: Path, src: Path, name: str) -> Path:
 
 
 def copy_episode(src: Path, dest_root: Path) -> Path:
-    """An archived episode copied under another episodes root, links kept as links (one real
-    launch reused across variants)."""
-    dest = Path(dest_root) / Path(src).name
+    """An archived episode copied into a scene's tenant episodes folder, links kept as links.
+
+    `dest_root` is the scene's data root; the copied episode keeps its manifest-matching id.
+    """
+    dest = tenant_episodes(Path(dest_root)) / Path(src).name
     shutil.copytree(src, dest, symlinks=True)
     return dest
 
