@@ -565,6 +565,7 @@ from pathlib import Path
 from defender.evals import held_out
 index, elsewhere, fixtures = map(Path, sys.argv[1:4])
 slug, mode = sys.argv[4:6]
+swap_kind = sys.argv[6]
 aside = index.parent.with_name(index.parent.name + '-held-original')
 active, swapped, calls = True, False, []
 def audit(event, args):
@@ -575,12 +576,16 @@ def audit(event, args):
     if not isinstance(path, (str, bytes, os.PathLike)):
         return
     targets = {str(index), index.name}
-    if mode != 'held-control':
+    if mode != 'held-control' and swap_kind == 'parent':
         targets.update({str(index.parent), index.parent.name})
     if os.fsdecode(path) in targets:
         swapped = True
-        index.parent.rename(aside)
-        index.parent.symlink_to(elsewhere, target_is_directory=True)
+        if swap_kind == 'index':
+            index.rename(index.with_name(index.name + '-held-original'))
+            index.symlink_to(elsewhere / index.name)
+        else:
+            index.parent.rename(aside)
+            index.parent.symlink_to(elsewhere, target_is_directory=True)
 def spawn(argv, *, env=None):
     calls.append(list(map(str, argv)))
     return 0
@@ -617,7 +622,8 @@ print('INDEX_SWAP_RESULT ' + json.dumps(dict(swapped=swapped, calls=calls, rc=rc
 """
 
 
-def _index_swap_child(scene: Scene, index: Path, elsewhere: Path, mode: str) -> dict:
+def _index_swap_child(scene: Scene, index: Path, elsewhere: Path, mode: str,
+                      *, swap_kind: str = "parent") -> dict:
     """The audit hook runs only in a child; the launcher's only injected dependency is spawn."""
     import subprocess
     import sys
@@ -628,7 +634,7 @@ def _index_swap_child(scene: Scene, index: Path, elsewhere: Path, mode: str) -> 
                                                        os.environ.get("PYTHONPATH")]))}
     child = subprocess.run(  # noqa: S603 — this interpreter, a fixed script
         [sys.executable, "-c", _INDEX_SWAP_CHILD, str(index), str(elsewhere),
-         str(scene.fixtures), SLUG, mode],
+         str(scene.fixtures), SLUG, mode, swap_kind],
         capture_output=True, text=True, encoding="utf-8", check=False, env=env,
         cwd=str(worktree), timeout=300)
     rows = [line.removeprefix("INDEX_SWAP_RESULT ") for line in child.stdout.splitlines()
@@ -647,10 +653,12 @@ def _index_swap_scene(scene: Scene, name: str) -> tuple[Path, Path, Path, bytes]
     return index, elsewhere, canary, canary.read_bytes()
 
 
-def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene):
+@pytest.mark.parametrize("swap_kind", ["parent", "index"])
+def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene, swap_kind):
     """S-roster / Flow 5: a path check before an absolute open cannot secure the index.
     Immediately before launch opens the operator folder or its index, a child audit hook
-    redirects that folder's spelling into a simulated run folder. The run's canary index must
+    redirects that folder's spelling, or the final index entry, into a simulated run folder.
+    The run's canary index must
     remain byte-identical. A no-follow walk may refuse; a parent already held before the swap
     may append to its original folder safely. Neither may append through the new link.
     The no-swap launch is the positive control, and the separate recorder controls below prove
@@ -667,11 +675,12 @@ def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene
 
     index, other, canary, before = _index_swap_scene(scene, "index-race-ops")
     prefix = index.read_bytes()
-    outcome = _index_swap_child(scene, index, other, "swap")
+    outcome = _index_swap_child(scene, index, other, "swap", swap_kind=swap_kind)
     assert outcome["swapped"], f"launch never reached the index's open: {outcome}"
     assert outcome["crashed"] is None, f"launch crashed instead of refusing: {outcome}"
     assert canary.read_bytes() == before, "launch appended through the swapped index parent"
-    original = index.parent.with_name(index.parent.name + "-held-original") / index.name
+    original = (index.with_name(index.name + "-held-original") if swap_kind == "index" else
+                index.parent.with_name(index.parent.name + "-held-original") / index.name)
     if outcome["rc"] in (0, None):
         assert len(outcome["calls"]) == 1, outcome
         run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert())
@@ -684,11 +693,12 @@ def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene
 
 def test_the_index_swap_hook_distinguishes_a_path_append_from_a_held_parent(scene):
     """Prove the attack fires during open, and observes the unsafe and safe destinations."""
-    index, other, canary, before = _index_swap_scene(scene, "unsafe-index-ops")
-    outcome = _index_swap_child(scene, index, other, "unsafe-control")
-    assert outcome["swapped"], outcome
-    assert outcome["crashed"] is None, outcome
-    assert canary.read_bytes() == before + b"UNSAFE FOLLOW\n"
+    for swap_kind in ("parent", "index"):
+        index, other, canary, before = _index_swap_scene(scene, "unsafe-ops-" + swap_kind)
+        outcome = _index_swap_child(scene, index, other, "unsafe-control", swap_kind=swap_kind)
+        assert outcome["swapped"], outcome
+        assert outcome["crashed"] is None, outcome
+        assert canary.read_bytes() == before + b"UNSAFE FOLLOW\n"
 
     index, other, canary, before = _index_swap_scene(scene, "held-index-ops")
     # Open the original parent first, then redirect at the leaf open, like a secure walk.
