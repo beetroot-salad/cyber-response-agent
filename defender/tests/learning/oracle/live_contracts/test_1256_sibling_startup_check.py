@@ -232,8 +232,7 @@ def _resume(tmp_path: Path, label: str, source: Path, monkeypatch: Any,
     for system, key in down:
         S7.drop_key(folder, system, key)
     doc = T947.family_doc(source_run_dir=str(source), worlds=_identity_worlds())
-    episode = _sibling_episode(tmp_path, doc, root=tmp_path / f"episodes-{label}",
-                               monkeypatch=monkeypatch)
+    episode = _sibling_episode(tmp_path, doc, label=f"1256-{label}")
     before = _episode_census(episode)
     rec = S7.RunRecorder(tmp_path / f"sibling-{label}")
     rc, refused = S7.drive_run(_resume_argv(episode / "family.yaml"), rec,

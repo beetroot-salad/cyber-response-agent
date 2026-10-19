@@ -56,6 +56,7 @@ NOT_IN_DEV_JOB = ("pydantic_ai*", "pydantic_graph", "pydantic_evals", "anthropic
                   "mcp", "fastmcp", "logfire", "toons", "duckdb", "pytz", "fastapi", "uvicorn",
                   "starlette")
 
+# Deliberately stale imports must be reported with their original module spelling.
 PLANT_IMPORT = "from defender.scripts.policy_cli import main\n"
 
 
@@ -176,7 +177,7 @@ def test_1080_no_module_outside_scripts_imports_a_module_under_it():
     planted = "defender/runtime/verbs.py"
     overlay = _overlay_with(planted, PLANT_IMPORT)
     line = _line_of(overlay[planted], PLANT_IMPORT.strip())
-    assert (planted, line, "defender.cli.policy_cli") in _rel_edges(
+    assert (planted, line, "defender.scripts.policy_cli") in _rel_edges(
         C.o1_violations(overlay=overlay))
 
 
@@ -189,8 +190,8 @@ def test_1080_the_import_census_flags_a_planted_edge_and_exempts_tests(tmp_path)
     beside_line = C.plant(root, "defender/runtime/test_spec1080_beside.py", PLANT_IMPORT)
     after = set(_rel_edges(C.census(root)))
     assert after - before == {
-        ("defender/runtime/verbs.py", runtime_line, "defender.cli.policy_cli"),
-        ("defender/runtime/test_spec1080_beside.py", beside_line, "defender.cli.policy_cli"),
+        ("defender/runtime/verbs.py", runtime_line, "defender.scripts.policy_cli"),
+        ("defender/runtime/test_spec1080_beside.py", beside_line, "defender.scripts.policy_cli"),
     }
     assert before - after == set()
 
@@ -205,7 +206,7 @@ def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale
               **_overlay_with(example, "from defender.scripts.adapters.cmdb_adapter import VERBS\n")}
     reported = {(e.importer, e.target) for e in C.o1_violations(overlay=fourth)}
     assert ("defender/runtime/verbs.py", "defender.scripts.adapters") in reported
-    assert (example, "defender.integrations.cmdb_adapter") in reported
+    assert (example, "defender.scripts.adapters.cmdb_adapter") in reported
     assert C.tracked_files(S.REPO_ROOT, C.ADAPTERS) == sorted(C.adapters_expected())
 
 
@@ -334,9 +335,9 @@ def test_census_meets_an_edge_seen_only_on_a_rare_path():
     assert _rel_edges(C.o1_violations()) == []
     rel = "defender/runtime/_spec1080_rare.py"
     got = {(e.line, e.target) for e in C.census(overlay={rel: _RARE}) if e.importer == rel}
-    assert got == {(4, "defender.scripts.pricing"), (6, "defender.presentation.workspace_map"),
-                   (9, "defender.cli.tenant"), (13, "defender.cli.tacit_cli"),
-                   (14, "defender.box.image_cli")}
+    assert got == {(4, "defender.scripts.pricing"), (6, "defender.scripts.workspace_map"),
+                   (9, "defender.scripts.tenant"), (13, "defender.scripts.tacit_cli"),
+                   (14, "defender.scripts.box_image")}
 
 
 def _pointer_verdict(root: Path):
@@ -616,7 +617,7 @@ def test_new_home_directory_with_no_package_marker_among_packages_that_have_one(
     C.plant(root, "defender/scripts/nomark_d/stray.py", "X = 1\n")
     for d in ("runtime/nomark_a", "scripts/nomark_d"):
         assert not (root / "defender" / d / "__init__.py").exists()
-    assert ("defender/runtime/nomark_a/m.py", a, "defender.cli.policy_cli") in _rel_edges(
+    assert ("defender/runtime/nomark_a/m.py", a, "defender.scripts.policy_cli") in _rel_edges(
         C.census(root))
     assert "defender/scripts/nomark_d/stray.py" in C.placement_findings(root)
 
@@ -655,8 +656,8 @@ def test_import_aliased_or_wildcard():
     rel = "defender/runtime/_spec1080_alias.py"
     got = [(e.line, e.target) for e in C.census(overlay={rel: _ALIASES}) if e.importer == rel]
     assert {line for line, _ in got} == {1, 2, 3, 4}
-    expected = {1: "defender.scripts.pricing", 2: "defender.presentation.workspace_map",
-                3: "defender.scripts.visualize", 4: "defender.cli.tenant"}
+    expected = {1: "defender.scripts.pricing", 2: "defender.scripts.workspace_map",
+                3: "defender.scripts.visualize", 4: "defender.scripts.tenant"}
     assert all(t.startswith(expected[line]) for line, t in got), got
 
 
@@ -732,7 +733,7 @@ def test_python_files_in_caches_vendored_trees_and_build_output(tmp_path):
         _git.git(["add", "-f", "--", rel], cwd=root)
     assert _rel_edges(C.census(root)) == clean
     line = C.plant(root, "defender/runtime/_spec1080_src.py", PLANT_IMPORT)
-    assert ("defender/runtime/_spec1080_src.py", line, "defender.cli.policy_cli") in \
+    assert ("defender/runtime/_spec1080_src.py", line, "defender.scripts.policy_cli") in \
         _rel_edges(C.census(root))
 
 
@@ -751,7 +752,7 @@ def test_the_other_scripts_package():
     assert [e for e in C.census(overlay={rel: _OTHER_SCRIPTS}) if e.importer == rel] == []
     real = _OTHER_SCRIPTS + "from defender.scripts.tenant import main\n"
     assert [(e.line, e.target) for e in C.census(overlay={rel: real})
-            if e.importer == rel] == [(7, "defender.cli.tenant")]
+            if e.importer == rel] == [(7, "defender.scripts.tenant")]
 
 
 def test_importer_inside_scripts_of_a_moved_module():

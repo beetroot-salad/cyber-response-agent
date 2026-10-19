@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender import run_common
@@ -53,7 +55,7 @@ def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-64
     # The D9 tenant: the replay harness's `drive` runs the run under the fixture tenant it sets
     # up in this same data root, and a data root holds one tenant (O10).
     tenant = set_up_tenant(data_root)
-    return run_common.materialize_run(golden / "alert.json", run_id, tenant=tenant).run_dir
+    return run_common.materialize_run(golden / "alert.json", fixture_uuid(run_id), tenant=tenant).run_dir
 
 
 def tokens(*transcripts: str) -> set[str]:

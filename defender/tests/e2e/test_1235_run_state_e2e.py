@@ -104,7 +104,7 @@ def _real_rows(root: Path, gather_turns: list[Turn]) -> tuple[list[dict], dict[s
 
 #: The planted source's run folder name (`_branch_947.planted_source`'s `name=`), so its files
 #: can be written into it before the source is built.
-SOURCE_RUN = "run-source-001"
+SOURCE_RUN = fixture_uuid("run-source-001")
 
 
 class Branched:

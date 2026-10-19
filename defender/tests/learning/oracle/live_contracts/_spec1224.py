@@ -1235,7 +1235,8 @@ def strings_in(value: Any) -> list[str]:
 def judged_episode(tmp_path: Path, *, doc: dict | None = None,
                    labels: tuple[str, ...] = WORLDS, outcome: str | None = "accepted",
                    ledgers: dict[str, list[dict]] | None = None,
-                   root: Path | None = None, samples: bool = True, **world_kw: Any) -> Path:
+                   root: Path | None = None, samples: bool = True,
+                   episode_id: str = EPISODE_ID, **world_kw: Any) -> Path:
     """A fully archived v2 episode — the judge's and the page's whole input: v2 manifest, a
     base recording, every world archived under `worlds/<X>/` (the #921 archive builder), the
     world ledgers with the query-table rows they answered (`write_call_table`), each planted
@@ -1248,7 +1249,7 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
     world sections (design Flow 4: manifest present, roster absent = never reached RUNS), a
     state this fixture's archived worlds contradict. No roster is planted when no world is
     archived (`labels=()`)."""
-    ep = episode_v2(tmp_path, doc=doc, root=root, base_rows=[
+    ep = episode_v2(tmp_path, doc=doc, root=root, episode_id=episode_id, base_rows=[
         captured("idp", "query", query_params("user:alice"),
                  {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]})])
     manifest = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))

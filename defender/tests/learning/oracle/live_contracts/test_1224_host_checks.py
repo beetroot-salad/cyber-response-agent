@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import json
@@ -522,7 +524,7 @@ def _sid_attempt(fid: str, event_id: str, *, base_rows: tuple = (SID_ROW,),
 def _plant_alert(tmp_path: Path) -> Path:
     """The source run's alert and its record (#1222), in the source run dir the manifest names
     and in the sibling's run dir, which resumes from it."""
-    src = tmp_path / "source-run"
+    src = tmp_path / fixture_uuid("1224-source-run")
     for where in (src, tmp_path / "run"):
         where.mkdir(parents=True, exist_ok=True)
         plant_alert(where, json.dumps(ALERT).encode("utf-8"))

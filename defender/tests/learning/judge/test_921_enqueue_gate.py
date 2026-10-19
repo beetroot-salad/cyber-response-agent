@@ -1,6 +1,8 @@
 """#921 — the queue row, the appender that writes it, and the family partition inside the gate."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 import threading
 from pathlib import Path
@@ -158,7 +160,7 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
 
     retry = tmp_path / "retry"
     retry.mkdir()
-    ep_retry = retry / ep.name
+    ep_retry = T.tenant_episodes(retry / "data-root") / ep.name
     shutil.copytree(ep, ep_retry, symlinks=True)
     (ep_retry / "judge.yaml").unlink()
     shutil.rmtree(ep_retry / "worlds" / "b" / "judge")

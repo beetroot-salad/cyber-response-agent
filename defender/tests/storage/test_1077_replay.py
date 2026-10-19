@@ -241,14 +241,8 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     # And this is the trade-off O3's second exemption pays for: the wire log's BYTES change.
     assert "writer_id" in S.RunPaths(run_dir).wire_log.read_text(encoding="utf-8")
 
-    # RG-9 — the reader leg. `load_messages` (`defender/scripts/visualize/visualize_messages.py`
-    # :27-34) reads through `defender/_io.py::read_jsonl_rows` (:643-644), the reader whose own
-    # sibling's docstring says "most artifact readers are deliberately tolerant" (:650). Handed
-    # a log whose every record carries the new key, it must return those records unchanged —
-    # neither dropping them nor validating a key set.
-    # `visualize_data` re-exports names from `visualize_messages` at its foot while the latter
-    # imports `visualize_data` at its head: imported in THIS order the cycle resolves, in the
-    # other it does not (a pre-existing cycle outside #1077's scope).
+    # The reader retains writer IDs on every record in the shared wire log.
+    # Import data first to resolve its existing import cycle with messages.
     import defender.presentation.visualize_data  # noqa: F401
     from defender.presentation.visualize_messages import load_messages
     assert load_messages(run_dir) == rows, (

@@ -21,8 +21,9 @@ def _on_stderr_only(proc: subprocess.CompletedProcess, *names: str, rc: int = 1)
         assert name in proc.stderr, f"stderr does not name {name!r}:\n{proc.stderr}"
 
 
-def _held_out(*args: str, encoding: str = "") -> subprocess.CompletedProcess:
-    return H.run_script(H.script_of(held_out), *args, root=None, PYTHONIOENCODING=encoding)
+def _held_out(*args: str, index: Path, encoding: str = "") -> subprocess.CompletedProcess:
+    return H.run_script(H.script_of(held_out), *args, "--index", str(index),
+                        root=None, PYTHONIOENCODING=encoding)
 
 
 def test_tenant_check_refusal_is_on_stderr(tmp_path: Path) -> None:
@@ -42,17 +43,21 @@ def test_tenant_check_finding_is_on_stderr(tmp_path: Path) -> None:
 
 
 def test_held_out_refusals_are_on_stderr(tmp_path: Path) -> None:
+    index = tmp_path / "index.jsonl"
+    index.write_text("", encoding="utf-8")
     runs = tmp_path / "runs"
-    _on_stderr_only(_held_out(str(tmp_path / "absent")), "runs dir does not exist", rc=2)
+    _on_stderr_only(_held_out(str(tmp_path / "absent"), index=index), "runs dir does not exist", rc=2)
     runs.mkdir()
     empty = tmp_path / "no-fixtures"
     empty.mkdir()
-    _on_stderr_only(_held_out(str(runs), "--fixtures-dir", str(empty)),
+    _on_stderr_only(_held_out(str(runs), "--fixtures-dir", str(empty), index=index),
                     "no held-out fixtures found")
 
 
-def test_a_path_that_is_not_utf8_is_refused_not_crashed() -> None:
+def test_a_path_that_is_not_utf8_is_refused_not_crashed(tmp_path: Path) -> None:
     _on_stderr_only(
         H.check(tenant_py, None, "--folder", _NOT_UTF8, PYTHONIOENCODING=_STRICT_STDOUT),
         "[tenant.py]")
-    _on_stderr_only(_held_out(_NOT_UTF8, encoding=_STRICT_STDOUT), "runs dir does not exist", rc=2)
+    _on_stderr_only(
+        _held_out(_NOT_UTF8, index=tmp_path / "index.jsonl", encoding=_STRICT_STDOUT),
+        "runs dir does not exist", rc=2)

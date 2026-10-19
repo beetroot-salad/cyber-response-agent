@@ -984,6 +984,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     that refused only after handing the daemon a split spec would not be a refusal."""
     from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+    from defender.runtime.model_view import MODEL_RUN
     from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
 
     data_root = tmp_path / "data"
@@ -1019,7 +1020,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     specs = [value for call in docker.calls
              for flag, value in zip(call.argv[:-1], call.argv[1:], strict=True)
              if flag == "--mount"]
-    assert any(spec.endswith(f",target={run.run_dir}") for spec in specs), (
+    assert any(spec == f"type=bind,source={run.run_dir},target={MODEL_RUN}" for spec in specs), (
         f"the create bound no run folder: {specs}")
     for spec in specs:
         keys = sorted(field.split("=", 1)[0] for field in spec.split(","))

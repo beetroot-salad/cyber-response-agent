@@ -133,7 +133,7 @@ def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(worl
     assert _names(text, world["root"] / "ghost"), text
 
 
-def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base_record(world, capsys):
+def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base(world, capsys):
     """O4's second named case:"""
     T.place_tenant(world["root"], T.PLAYGROUND_ID,
                    omit=("systems/case-history/mapping.yaml",))
@@ -142,7 +142,7 @@ def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base_record(wor
     assert _names(
         text, world["root"] / T.PLAYGROUND_ID / "knowledge" / "settings" / "systems"
         / "case-history" / "mapping.yaml"), text
-    assert not T.mod("tenancy._tenant").record_path(base).exists(), "a refused run minted a record"
+    assert not base.exists(), "a refused run created its runs base"
 
 
 @pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])

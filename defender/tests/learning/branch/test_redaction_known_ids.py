@@ -177,7 +177,7 @@ def test_a_natural_registry_knows_no_branch_identity():
     from defender.runtime.verb_grant import DENY_ALL
     from defender.runtime.verbs import ModuleVerbRegistry, read_roster
 
-    registry = ModuleVerbRegistry(read_roster(T.DEFENDER / "scripts" / "adapters"), DENY_ALL)
+    registry = ModuleVerbRegistry(read_roster(T.DEFENDER / "integrations"), DENY_ALL)
     assert registry.branch_identities() == frozenset()
 
 

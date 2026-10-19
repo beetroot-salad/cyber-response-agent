@@ -1,7 +1,7 @@
 {
   "issue": 1187,
   "pull_request": 1269,
-  "status": "PUBLISHED: main layout preserved and affected local verification passed; hosted CI pending.",
+  "status": "PUBLISHED MERGE; CI FIXTURES REPAIRED: all affected local reruns passed; hosted full-suite rerun required.",
   "main_ref": "55dd2bee8c4a4391d9c358493d63f371eea6de73",
   "pre_merge_ref": "f37eb3124e0983c43617c96ec8c23dc80d46819d",
   "history": "Merge main without rebasing the immutable contract ancestry recorded in 1187-implementation.json.",
@@ -51,12 +51,20 @@
     "post_merge_censuses": "28 tests passed, including failed main I/O census and repository-only episode-door synthetic controls.",
     "final_omitted_ports": "Learning: 330 passed; tenancy: 178 passed, 4 skipped; remaining audited modules: 243 passed, 1 skipped across initial+repaired reruns, plus 53 globals/case checks passed. Permission skips are expected under root; CI runs nonroot.",
     "ci_gate_tests": "Initial 4 passed, 1 failed; repaired I/O census passed in 28-test focused run. The other 4 gate tests had passed; no suppression/baseline added.",
-    "atomic_create_normalizer": "All 40 roster/sibling tests passed after routing through the extracted filesystem normalizer."
+    "atomic_create_normalizer": "All 40 roster/sibling tests passed after routing through the extracted filesystem normalizer.",
+    "F6": {
+      "revision": "77e88a09",
+      "result": "1 passed in 0.32s",
+      "environment": "Existing defender-box:v2-9ccdb906c05f image, network disabled, checkout mounted read-only, one temporary host directory independently bind-mounted at /data and /other. Pytest basetemp=/data/pytest; DEFENDER_TEST_SAME_FS_OTHER_MOUNT=/other/second.",
+      "test": "test_1187_s_move_an_exdev_at_rename_time_refuses_naming_both_paths_and_a_rerun_is_safe",
+      "discrimination": "The test first proves equal device IDs and actual EXDEV across the two mounts, then exercises real retirement refusal, source/destination diagnostic paths, byte conservation, and an unchanged rerun. No mocked filesystem result.",
+      "log": "/tmp/1187-f6-docker.log"
+    },
+    "hosted_arm_boxes": "All four #1187 arm-boundary cases passed in run 39277017581 (runc and runsc, writes and visibility). Dedicated box-native and box-dood jobs also passed."
   },
   "limitations": [
-    "Full unit suite belongs to hosted CI.",
-    "Local daemon has runc only; gVisor boundary variants require CI.",
-    "Same-filesystem second mount unavailable locally; F6 requires its provisioned environment."
+    "Full hosted unit suite must pass on the repaired branch; repository policy reserves this suite for CI.",
+    "Independent code review and prerequisite PR1257 remain subsequent obligations."
   ],
   "retired_test_evidence": {
     "test_1105_episode_record.py": "21 functions, no main-added functions or executable function/class differences versus original merge base after stripping docstrings; follows pre-merge1187 deletion. Replaced by tenant-owned roster contract.",
@@ -83,14 +91,51 @@
       "Remove unused old1105record helpers and composite-bound case only after exact historical proof and current callsite census."
     ]
   },
-  "recorded_at_utc": "2026-10-19T15:19:35.136341+00:00",
+  "recorded_at_utc": "2026-10-19T15:37:56.330723+00:00",
   "publication": {
     "branch": "impl/1187",
     "remote": "origin (github.com/beetroot-salad/cyber-response-agent)",
     "pull_request": 1269,
     "pushed": true,
-    "next_action": "Watch hosted CI and repair failures. Keep draft until verification and review obligations close.",
+    "next_action": "Push verified fixture/census repairs, watch the full hosted CI rerun, and repair failures. Keep draft until verification and review obligations close.",
     "verified_source_ref": "da714250",
     "authorization": "User explicitly approved pushing the verified branch and updating PR1269."
+  },
+  "ci_repair": {
+    "initial_run": 39277017581,
+    "revision": "77e88a09",
+    "shards": [
+      {
+        "shard": 1,
+        "failed": 43,
+        "passed": 9953,
+        "skipped": 128,
+        "xfailed": 14
+      },
+      {
+        "shard": 2,
+        "failed": 109,
+        "passed": 7687,
+        "skipped": 9
+      }
+    ],
+    "other_jobs": "box-native, box-dood, lint and code-smells passed.",
+    "status_observation": "GitHub job-status responses lagged the authoritative completed job logs; downloaded job logs directly. gh run view --log-failed also encountered a jobs API 502.",
+    "production_changes": false,
+    "causes": [
+      "Valid fixture directories and callback matchers still used labels instead of canonical fixture UUIDs.",
+      "Main-added snapshot and multi-scene fixtures needed tenant-owned episode IDs/rosters and scene isolation.",
+      "Frozen layout census controls intentionally plant old forbidden imports; preserve their literal diagnostics rather than auto-relocating only expected strings.",
+      "Reader-refusal fixtures need the required host index to reach the intended path/refusal checks."
+    ],
+    "root_curation_fix": "Match the case label through fixture_uuid when selecting its run directory; queue case IDs and all held-claim invariants stay unchanged. All 119 tests across four 1175 files passed.",
+    "historical_record": "The 232-entry pre-port conflict list remains at f37eb312:spec-flow/records/1187-implementation.json; current record keeps count+immutable reference so it does not advertise a retired command path.",
+    "local_results": {
+      "curation_1175": "119 passed",
+      "learning": "115 passed",
+      "layout_and_reader_checks": "56 passed across original 55-pass and final 1-pass rerun",
+      "runtime_and_replay": "384 passed in first batch; nine failures fixed via canonical shared source constants, then both replay files passed all 35 cases. All 393 cases validated across runs."
+    },
+    "assertion_integrity": "No production changes, no gate implementation or baseline changes. The six runtime fixture files retain 132 test functions, 562 asserts and 46 parametrizations; only creator/callback IDs and current mount paths changed. The 1175 claim helper retains all queue/attempt/refusal assertions and now finds its UUID-named fixture directory."
   }
 }

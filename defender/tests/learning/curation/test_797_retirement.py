@@ -2,6 +2,8 @@
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from dataclasses import replace as _with_live_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
 
@@ -20,7 +22,7 @@ def _main_deps(tmp_path: Path):
     from defender.agents import MAIN_DEF
     from defender.runtime.agent_definition import bind
 
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("797-run")
     (run_dir / "gather_raw").mkdir(parents=True)
     (run_dir / "alert.json").write_bytes((GOLDEN / "alert.json").read_bytes())
     dfn = tmp_path / "defender"

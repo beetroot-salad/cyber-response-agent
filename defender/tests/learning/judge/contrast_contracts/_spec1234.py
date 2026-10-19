@@ -1002,7 +1002,7 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
     doc = manifest_doc(worlds, served_systems=systems, predicate=predicate,
                        base_story=base_story, episode_id=episode_id, **dict(manifest_over or {}))
     ep = T.episode(tmp_path, doc=doc, root=_scene_root(root) if root is not None else
-                   episodes_root(tmp_path), episode_id=episode_id)
+                   None, episode_id=episode_id)
     if base_rows is not None:
         T.base_capture(ep, base_rows)
     token = sym(FAMILY_LOADER, "episode_token_for")(episode_id)

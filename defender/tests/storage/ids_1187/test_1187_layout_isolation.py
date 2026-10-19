@@ -953,7 +953,7 @@ def test_no_production_module_spells_the_rosters_name_but_its_owner(tmp_path):
     files = {
         "episodes/_episode_paths.py": f'ARM_ROSTER_NAME = "{S.ROSTER_NAME}"\n',
         "run_repository/_lookup.py": f'ROSTER = "{S.ROSTER_NAME}"\n',
-        "scripts/visualize/page.py": (
+        "presentation/page.py": (
             f'def roster(ep):\n    """Reads {S.ROSTER_NAME}."""\n'
             f'    return f"{{ep}}/{S.ROSTER_NAME}"\n'),
         "clean.py": f'"""Mentions {S.ROSTER_NAME} in a docstring only."""\nX = "family.yaml"\n',
@@ -962,4 +962,4 @@ def test_no_production_module_spells_the_rosters_name_but_its_owner(tmp_path):
         (planted / rel).parent.mkdir(parents=True, exist_ok=True)
         (planted / rel).write_text(text, encoding="utf-8")
     assert _roster_name_spellings(planted) == [
-        "run_repository/_lookup.py:1", "scripts/visualize/page.py:3"]
+        "presentation/page.py:3", "run_repository/_lookup.py:1"]

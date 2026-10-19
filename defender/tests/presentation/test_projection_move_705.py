@@ -245,7 +245,9 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     # negative below for the wrong reason (#1187 sweep: pass-by-accident).
     run_dir, store, _replay = _driven_run(tmp_path, run_id=fixture_uuid(f"failclosed-{breakage}"))
     tenant, run_dir = _into_tenant_runs(run_dir)
-    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
+    from defender.presentation import visualize_run
+
+    script = Path(visualize_run.__file__)
 
     # positive control — intact, the standalone re-render exits 0 on the same argv, and the
     # post-run step renders the page and does not raise

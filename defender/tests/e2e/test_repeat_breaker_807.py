@@ -11,6 +11,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
@@ -154,7 +155,7 @@ def _run(
 
 #: The planted source's run folder name (`_branch_947.planted_source`'s `name=`), so the table
 #: can be written into it before the source is built.
-SOURCE_RUN = "run-source-001"
+SOURCE_RUN = fixture_uuid("run-source-001")
 
 
 def _run_inherited(
@@ -172,7 +173,6 @@ def _run_inherited(
         GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
     )
     from defender.tests.support.storage._session_store_705 import runs_base
-    from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
     source = runs_base(root) / SOURCE_RUN
     RunPaths(source).executed_queries.parent.mkdir(parents=True, exist_ok=True)

@@ -657,7 +657,7 @@ def test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_wo
     expected = [
         "python3 " + S.current_path(command[len("python3 "):])
         if command.startswith("python3 ")
-        else command.replace("defender.cli.tacit_cli", "defender.cli.tacit_cli")
+        else command.replace("defender.scripts.tacit_cli", "defender.cli.tacit_cli")
         for command in _golden()["ci_staying_runs"]
     ]
     assert runs == expected, f"CI's staying-command steps changed: {runs}"

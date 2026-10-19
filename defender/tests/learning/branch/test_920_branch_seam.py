@@ -1,6 +1,8 @@
 """#920 PR 1 — the turn-N branch seam: what may be branched from, and where the fork lands."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
@@ -139,7 +141,7 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path, case_id=case_id)
-    run_dir = runs_base(tmp_path) / "run-source-001"
+    run_dir = runs_base(tmp_path) / fixture_uuid("run-source-001")
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     plant_alert(run_dir, ALERT_DOC.encode("utf-8"))

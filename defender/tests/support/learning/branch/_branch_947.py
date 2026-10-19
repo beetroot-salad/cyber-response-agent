@@ -214,7 +214,10 @@ def _hand_planted_source(tmp_path: Path, *, investigation: str | None, queries: 
     layer (the implementer's fixture-only helper, applied to what this returns), never here."""
     ss = store_mod()
     store = make_store(tmp_path, case_id=case_id)
-    run_dir = runs_base(tmp_path) / name
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
+
+    run_id = name if is_fixture_uuid_shape(name) else fixture_uuid(name)
+    run_dir = runs_base(tmp_path) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     plant_alert(run_dir, ALERT_DOC.encode("utf-8"))
