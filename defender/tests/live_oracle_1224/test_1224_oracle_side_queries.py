@@ -831,9 +831,10 @@ def test_1224_launcher_read_side_left_after_the_change_refuses_ungranted_calls(t
     ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)), base_rows=[
         S.captured(c.system, c.verb, c.params, c.payload)
         for c in (CALL_IDP, WRITE_CALL, UNGRANTED_CALL)])
-    S.sym(S.CLI, S.COINED["fn.preflight"])(
-        ep, source=T.open_source(src), roster=est.roster(), tenant=est.run_tenant(),
-        oracle=S.oracle(then=S.submit(BASE)).model, verifier=S.passing_verifier().model)
+    with T.mod("_episode_handle").Episode.open(ep) as episode:
+        S.sym(S.CLI, S.COINED["fn.preflight"])(
+            episode, source=T.open_source(src), roster=est.roster(), tenant=est.run_tenant(),
+            oracle=S.oracle(then=S.submit(BASE)).model, verifier=S.passing_verifier().model)
 
     tenant_adapter = est.calls()
     assert [r for r in tenant_adapter if r["verb"] == S.WRITE_VERB] == [], (

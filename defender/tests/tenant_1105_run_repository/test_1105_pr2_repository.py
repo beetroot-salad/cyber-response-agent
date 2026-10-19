@@ -503,11 +503,15 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
     assert Path(arm.run_dir) == ep / "runs" / ids[LABEL]
     assert str(arm.tenant_id) == H.T_ID
 
+    # create hands out the Run; materializing its folder is the run writer's job.
+    Path(arm.run_dir).mkdir()
+    (Path(arm.run_dir) / "PLANTED").write_text("arm bytes\n", encoding="utf-8")
     roster_bytes = (ep / "arms.json").read_bytes()
     again = H.raised(t.runs_repository().episode(episode_id).start_runs, list(T.WORLDS))
     assert isinstance(again, _refusal_classes()), f"a second start_runs gave {again!r}"
     assert (ep / "arms.json").read_bytes() == roster_bytes
     assert (ep / "runs" / ids[LABEL]).is_dir()
+    assert (Path(arm.run_dir) / "PLANTED").read_text(encoding="utf-8") == "arm bytes\n"
 
 
 def test_an_unreadable_container_is_recorded_not_raised_and_never_written_through(

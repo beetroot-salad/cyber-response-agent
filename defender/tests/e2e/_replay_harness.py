@@ -233,12 +233,17 @@ class FakeVerbs(VerbRegistry):
     built from its own table (#632 — pre-dating the per-role grant, this pre-authorization-era
     fake grants itself full access rather than making every #611-era scenario author one)."""
 
-    def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]]):
+    def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]], *,
+                 known_ids: frozenset[str] = frozenset()):
         self._table = {s: dict(v) for s, v in table.items()}
+        self._known_ids = known_ids
         super().__init__(VerbGrant(
             role="fake",
             entries=tuple((s, v, "r") for s, verbs in self._table.items() for v in verbs),
         ))
+
+    def branch_identities(self) -> frozenset[str]:
+        return self._known_ids
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))

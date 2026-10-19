@@ -434,7 +434,8 @@ def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_nam
     """
     redaction = S.mod("learning.branch.redaction")
     def redact(text):
-        return redaction.redact_model_visible(text, frozenset())
+        return redaction.redact_model_visible(
+            text, frozenset({S.EPISODE_ID, S.EPISODE_TOKEN, S.world_token("b")}))
     token_text = f"refused: index for run {S.EPISODE_TOKEN}.b is unavailable after 2026-07-28"
     masked = redact(token_text)
     assert S.EPISODE_TOKEN not in masked, masked

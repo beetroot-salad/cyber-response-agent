@@ -504,10 +504,11 @@ def judge_grade(tmp: Path, label: str) -> Any:
     of the source run's alert and record a launch leaves in it (A1) — the judge's whole input,
     which names no tenant."""
     root = tmp / f"judge-{label}"
-    ep = J.accepted_episode(root)
-    S.plant_episode_copy(ep, alert=S.generic_alert(), facts={"signature": "R-1001"})
     from defender.tests._data_root_1078 import set_up_tenant
-    repository = set_up_tenant(root / "judge-data", "acme").runs_repository()
+    tenant = set_up_tenant(root / "judge-data", "acme")
+    ep = J.accepted_episode(root, root=tenant.episodes)
+    S.plant_episode_copy(ep, alert=S.generic_alert(), facts={"signature": "R-1001"})
+    repository = tenant.runs_repository()
     return J.grade(ep, runs=repository)
 
 

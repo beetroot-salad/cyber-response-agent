@@ -78,7 +78,9 @@ def _resume(ep: Path, label: str) -> Any:
 
 def _judge_read(ep: Path) -> dict:
     """The judge's raw manifest reader (`read_manifest` through its own bind)."""
-    return S.sym("learning.judge.family", "raw_manifest")(Path(ep))
+    with _episode_cls().open(Path(ep)) as handle:
+        return S.sym("learning.judge.family", "read_manifest")(
+            handle.view(), expected_episode_id=Path(ep).name)
 
 
 def _page(ep: Path, capsys: Any) -> tuple[int, str]:
@@ -942,7 +944,7 @@ def test_p067_manifest_alias_bomb_or_pathological_nesting(tmp_path, capsys):
 
     It neither hangs nor exhausts memory. The readers it protects are O15's two manifest read
     paths — the runtime loader (`load_family` over `parse_family`) and the judge's raw
-    `read_manifest` (`learning.judge.family.raw_manifest`), which the episode page reads
+    `read_manifest` (`learning.judge.family.read_manifest`), which the episode page reads
     through — so the old-field refusal O15 demands of them is reached only if a hostile manifest
     cannot hang or exhaust them first. Asserted per reader: a refusal of the reader's own class
     with a non-empty reason within 10 s (the page: a non-zero exit with a stderr reason within
