@@ -198,7 +198,10 @@ def launch(slug: str, index: Path, fixtures_dir: Path, *, spawn: Spawn) -> int:
                                    "write it")
         run_id = str(RunId.mint())
         row = json.dumps({"slug": slug, "run_id": run_id})  # lint-jsonl-io: ok — one row through the held folder's no-follow append; `append_jsonl` follows the spelling
-        held.write(leaf, row + "\n", mode="append", durable=True)
+        try:
+            held.write(leaf, row + "\n", mode="append", durable=True)
+        except OSError as exc:
+            raise IndexRefused(f"its row could not be appended: {exc.strerror or exc}") from None
     print(f"{slug} {run_id}")
     return spawn([sys.executable, str(RUN_PY), str(fixture.alert_path),
                   "--tenant", LAUNCH_TENANT, "--run-id", run_id, "--no-learn"])
