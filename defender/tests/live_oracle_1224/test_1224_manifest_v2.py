@@ -520,7 +520,9 @@ def test_input_facts_share_a_fact_id_across_worlds(tmp_path):
     forged_b = {"forged_id": "fb-901x", "fact_id": "f1", "system": "idp",
                 "row": {"user": "alice", "event_id": "e-77901", "action": "logon",
                         "host": "db-1", "ts": "2026-07-28T15:22:00Z"}}
-    store_b = S.oracle_dir(tmp_path / "episodes" / S.EPISODE_ID, "b")
+    # Claim the fixture's actual tenant episode before planting its world-b store.
+    ep = _episode(tmp_path, doc=doc)
+    store_b = S.oracle_dir(ep, "b")
     store_b.mkdir(parents=True, exist_ok=True)
     (store_b / "forged.jsonl").write_text(json.dumps(forged_b) + "\n", encoding="utf-8")
 

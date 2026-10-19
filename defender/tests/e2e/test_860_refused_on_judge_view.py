@@ -935,11 +935,15 @@ def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_
     params/world, or the queries-table row gone."""
     from defender.learning.branch.ledger import REFUSED
     from defender.tests.test_920_estate_seam import (
-        FAKE_GRANT, SERVED_FILE, World, fake_estate, served_rows, world_registry,
+        FAKE_GRANT, SERVED_FILE, fake_estate, served_rows, world_registry,
     )
 
+    from defender.tests.live_oracle_1224 import _spec1224 as S24
+
     ledger_path = tmp_path / SERVED_FILE
-    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
+    ep = J.accepted_episode(tmp_path / "episode")
+    world = S24.load_world(ep, "a")
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=world)
     asked = {"host": "web-01"}
     # `elastic.get-host` is declared by the fake estate and withheld by FAKE_GRANT.
     r = run_gather(tmp_path, verbs=reg, turns=[q("elastic", "get-host", asked), DONE],
@@ -949,7 +953,7 @@ def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_
     assert [row["source"] for row in rows] == [REFUSED], \
         f"the sibling's ledger holds {[row['source'] for row in rows]}, not the denial"
     assert (rows[0]["system"], rows[0]["verb"], rows[0]["params"]) == ("elastic", "get-host", asked)
-    assert rows[0]["world_id"] == "w1"
+    assert rows[0]["world_id"] == world.world_id
     assert r.own_evidence == [], "a denied call wrote an evidence row"
     (own,) = r.own_denied_rows
     assert (own["lead_id"], own["system"], own["verb"]) == (LEAD, "elastic", "get-host")

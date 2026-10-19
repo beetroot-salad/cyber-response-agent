@@ -31,6 +31,7 @@ from defender._episode_handle import Episode
 from defender._episode_paths import EpisodePaths
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
+from defender.tests._fixture_uuid import fixture_uuid
 from defender.tests.judge_contrast_1234 import _spec1234 as S34
 from defender.tests import _record_1049 as R
 from defender.tests import _triplet_947 as T
@@ -994,12 +995,17 @@ def test_1049_no_reader_in_the_census_receives_a_root_and_every_sub_bind_is_deri
 
     sample = E.sample_episode(tmp_path / "page")
     absolute = E.render(sample).raw
-    link = tmp_path / "episode-by-link"
+    # #1187 declared change 8: the episode door refuses a symlink even under a valid UUID.
+    # Its primitive bind may follow a whole path (above); an episode reader uses the walk.
+    sample.page.unlink()
+    link = sample.dir.parent / fixture_uuid("1049-linked-episode")
     link.symlink_to(sample.dir)
-    through_link = E.render(link).raw
+    with pytest.raises(R.refused_class()):
+        E.render(link)
+    assert not sample.page.exists(), "the refused link wrote a page in its target"
     monkeypatch.chdir(sample.dir)
-    relative = E.render(Path(".")).raw
-    assert absolute == through_link == relative, "three spellings of one directory rendered differently"
+    relative = E.render(sample).raw
+    assert absolute == relative, "the cwd changed the page of the same tenant episode"
     for spelling in (str(sample.dir), str(link), str(tmp_path)):
         assert spelling not in absolute, spelling
 
