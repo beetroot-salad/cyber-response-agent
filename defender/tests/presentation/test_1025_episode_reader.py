@@ -162,7 +162,7 @@ def _string_constants(source: str, path: str) -> set[str]:
 
 
 _MOVED = (
-    ("_raw_manifest", "raw_manifest"),
+    ("_raw_manifest", "read_manifest"),  # lint-stale-ref: ok — assert the retired private spelling stays absent
     ("_leads_by_id", "leads_by_id"),
     ("_lead_chain", "lead_chain"),
 )

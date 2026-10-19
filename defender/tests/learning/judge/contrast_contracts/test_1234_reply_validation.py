@@ -1,6 +1,8 @@
 """#1234 judge contrast: judge reply validation and finding-type admission."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -18,7 +20,7 @@ EPISODE_OUTCOME = "episode_outcome"
 #: Main's per-draw drop count, which A13's one-lane-per-filed-finding replaces.
 DROP_COUNT = S.EXISTING["draw.dropped_findings"]
 #: A second episode id, for the one scenario that needs two passes at different draw counts.
-SECOND_EPISODE_ID = "20260728t161845z-fresh-case-n61"
+SECOND_EPISODE_ID = fixture_uuid("fresh-case-n61")  # a UUID, as every episode id after #1187
 
 
 def _judge_refused() -> type[BaseException]:

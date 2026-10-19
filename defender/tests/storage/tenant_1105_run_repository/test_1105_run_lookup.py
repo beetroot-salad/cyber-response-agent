@@ -36,25 +36,6 @@ def _ids(answer) -> list[str]:
     return [str(i) for i in answer]
 
 
-def _every_function(t, *, run_id: str = "r1", episode_id: str = "ep9"):
-    """`(name, thunk)` per lookup (a method of `t`'s repository) and tenant-keyed record
-    function, each over `t`."""
-    from defender.run_repository import RunId, episode_runs, record_episode_runs, sibling_run_ids
-
-    return [
-        ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id))),
-        ("runs.list", lambda: t.runs_repository().list()),
-        ("record_episode_runs", lambda: record_episode_runs(
-            t, episode_id, RunId.parse(run_id), {"a": RunId.parse(f"{episode_id}-a")})),
-        ("episode_runs", lambda: episode_runs(t, "ep")),
-        ("sibling_run_ids", lambda: sibling_run_ids(t)),
-    ]
-
-
-def _hold_calls(rec: H.RecordingIO):
-    return rec.named("hold")
-
-
 def _container_refusal(name: str, err: object) -> bool:
     """Whether `err` is how the function `name` refuses a container fault: `TenantRefused`, but
     for an open, `RunUnreachable` raised from that `TenantRefused` (#1105 PR 2 review: opening

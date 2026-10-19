@@ -143,16 +143,6 @@ def _family_doc(episode_id: str, label: str) -> dict:
                         worlds=[world])
 
 
-def test_a_sibling_id_over_the_bound_is_refused_before_anything_is_staged():
-    from defender.runtime.branch import _family
-    episode = "e" * 190
-    with pytest.raises(_family.FamilyError, match="206-byte bound"):
-        _family.check_identities(_family.parse_family(_family_doc(episode, "a" * 20)))
-    _family.check_identities(_family.parse_family(_family_doc(episode, "a" * 15)))
-    with pytest.raises(_family.FamilyError, match="no room"):
-        _family.refuse_bad_episode_id("e" * 205)
-
-
 def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
     """A hold failure other than a link says what the hold said (here: the name is too long),
     not 'it is a link … or not a directory'."""

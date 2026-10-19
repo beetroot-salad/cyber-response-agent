@@ -1,7 +1,8 @@
 """#947 — the launcher: what it checks, what it starts, what it refuses (preflight, `Step.RUNS`, `Step.VERIFY`"""
 from __future__ import annotations
 
-from defender.run_repository import Run
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 
 import json
 import re
@@ -9,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.episodes import _episode_handle as EH
 from defender.episodes._episode_handle import Episode
 from defender._io import bind
 from defender.run_repository import RunPaths
@@ -31,6 +31,8 @@ def _cli():
 
 def _verify_family(ep_dir, plant=T.arm_run_dir, **kw):
     """`cli.verify_family` over an `Episode` opened on `ep_dir`"""
+    if not (ep_dir / T.ROSTER_NAME).exists():  # once per episode (a loop may re-verify one)
+        T.plant_roster(ep_dir)
     for world in T.WORLDS:
         plant(ep_dir, world)
     with Episode.open(ep_dir) as episode:
@@ -366,7 +368,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         "git-failed": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED},
     }
     for name, stamp in waivable.items():
-        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
+        ep = T.episode(tmp_path, episode_id=fixture_uuid(f"947-launcher-{name}"))
 
         def dirs(ep, w, stamp=stamp):
             return T.arm_run_dir(ep, w, **(stamp if w == "b" else {}))
@@ -375,7 +377,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         assert report["comparable"] is False, name
         assert "b" in report["reason"], (name, report["reason"])
         assert not (ep / "provenance.json").exists(), name
-        ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}-ok")
+        ok = T.episode(tmp_path, episode_id=fixture_uuid(f"947-launcher-{name}-ok"))
         waived = _verify_family(ok, dirs, source=T.provenance_record(), allow_dirty=True)
         assert waived["comparable"] is True, name
         assert (ok / "provenance.json").is_file(), name
@@ -385,9 +387,9 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         return T.arm_run_dir(ep, w, **(silent if w == "b" else {}))
 
     for allow_dirty in (False, True):
-        # A case-folded id: an episode id is a run id (`refuse_bad_episode_id`).
+        # #1187 declared change 1: an episode id is a canonical lowercase uuid4 text.
         ep = T.episode(tmp_path,
-                       episode_id=f"{T.EPISODE_ID}-silent-{str(allow_dirty).lower()}")
+                       episode_id=fixture_uuid(f"947-launcher-silent-{str(allow_dirty).lower()}"))
         report = _verify_family(ep, silent_dirs, source=T.provenance_record(),
                                 allow_dirty=allow_dirty)
         assert report["comparable"] is False, f"allow_dirty={allow_dirty}"
@@ -445,18 +447,21 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
 
 def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     """The episode directory's creation is an exclusive create, not a check-then-act"""
+    import os
     import threading
 
-    base, src = T.runs_base(tmp_path)
-    cli = _cli()
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    T.runs_base(tmp_path)
+    tenant = _tenant_paths()
     results: list = []
     barrier = threading.Barrier(2)
 
     def attempt():
         barrier.wait()
         try:
-            with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=_tenant_paths().data_root) as episode:
-                results.append(episode)
+            with tenant.runs_repository().create_episode() as view:
+                results.append(view.episode_id)
         except Exception as e:  # noqa: BLE001 — the refusal is the observation
             results.append(e)
 
@@ -466,11 +471,13 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     for t in threads:
         t.join()
     assert not any(isinstance(r, Exception) for r in results), results
-    first = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-    assert sorted(r.dir for r in results) == [first, first.parent / f"{T.EPISODE_ID}-r2"]
-    for episode in results:
-        lines = (episode.dir / "served" / "base.jsonl").read_text(encoding="utf-8").splitlines()
-        assert len(lines) == len(set(lines)) == 1, (episode.dir, lines)
+    assert len(set(results)) == 2, f"two launchers claimed one episode: {results}"
+    episodes = S.episodes_dir(tenant.data_root, str(tenant.id))
+    assert sorted(os.listdir(episodes)) == sorted(results), sorted(os.listdir(episodes))
+    for episode_id in results:
+        assert S.is_canonical_uuid(episode_id), f"{episode_id!r} is not a canonical uuid"
+        assert (episodes / episode_id).is_dir(), episode_id
+        assert not (episodes / episode_id).is_symlink(), episode_id
 
 
 # the one shared mutable resource D1 newly contends

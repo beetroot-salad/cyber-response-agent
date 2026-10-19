@@ -72,7 +72,7 @@ def test_the_roster_is_the_construction_time_one_after_the_directory_is_removed(
 
 def test_the_query_tool_consults_the_snapshot_not_the_disk(tmp_path):
     adapters = _adapters(tmp_path, "elastic")
-    capture = QueryCapture(ModuleVerbRegistry(read_roster(adapters), DENY_ALL))
+    capture = QueryCapture(ModuleVerbRegistry(read_roster(adapters), DENY_ALL), known_ids=frozenset())
     ghost_pair = ("", system_fingerprint("ghostone", ""))
     assert ghost_pair[1], "the ghost mints no fingerprint, so the control below is vacuous"
 
@@ -88,6 +88,7 @@ def test_the_query_tool_consults_the_snapshot_not_the_disk(tmp_path):
     assert capture._coarsen("elastic") == ("elastic", ""), \
         "the forbidden pair: a declared name coarsened away and fingerprinted"
     assert capture._coarsen("ghostone") == ghost_pair
+
 
 
 def test_an_adapter_added_after_construction_is_not_on_the_roster(tmp_path):

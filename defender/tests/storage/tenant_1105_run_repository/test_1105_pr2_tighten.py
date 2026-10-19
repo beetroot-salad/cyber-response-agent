@@ -28,10 +28,6 @@ def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
 
 
-def _episodes() -> Path:
-    return Path(os.environ[P.EPISODES_BASE_ENV])
-
-
 def _launched(got: P.Launched) -> bool:
     return got.raised is None and got.rc == 0 and got.questioner.calls > 0
 
@@ -180,21 +176,6 @@ def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch
                                            lineterm="", n=0)))
 
 
-def _swap_record(runs: Path, tenant_id: str) -> bytes:
-    """Re-plant `<runs>/_tenant.json` naming `tenant_id`; returns the record it replaced."""
-    record = runs / "_tenant.json"
-    own = record.read_bytes()
-    record.unlink()
-    P.plant_record(runs, tenant_id)
-    return own
-
-
-def _restore_record(runs: Path, own: bytes) -> None:
-    record = runs / "_tenant.json"
-    record.unlink()
-    record.write_bytes(own)
-
-
 def _link_runs(runs: Path, elsewhere: Path) -> Path:
     runs.rename(elsewhere)
     os.symlink(elsewhere, runs)
@@ -275,7 +256,7 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
     assert Path(t.runs) / _F6_R2 in again.run_dirs, f"the next tick served {again.run_dirs}"
 
 
-_ABSENT = "20990101t000000z-pr2-absent"
+_ABSENT = fixture_uuid("pr2-absent")
 
 
 def _process(*command: str) -> subprocess.CompletedProcess:

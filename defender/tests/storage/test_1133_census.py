@@ -467,7 +467,7 @@ NB_READERS = frozenset({
     ("learning.judge", "_grade_from_document"),
     ("learning.judge.enqueue", "enqueue"),
     ("learning.judge.enqueue", "enqueue_report"),
-    ("learning.judge.family", "raw_manifest"),
+    # read_manifest consumes the walked Bound; it needs no path-construction exception.
     ("learning.judge.family", "grade_family"),
     ("learning.judge.family", "_grade_world"),
     ("learning.judge.family", "_repository_leads"),
@@ -483,23 +483,13 @@ NB_READERS = frozenset({
 })
 _O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
 
-DOORS = frozenset({
-    ("learning.branch.cli", "prepare_episode"),
-    ("run", "main"),
-    ("learning.judge", "grade_episode"),
-    ("learning.judge", "_grade_episode"),
-    ("presentation.visualize_episode", "render_episode"),
-    ("learning.branch.preflight", "preflight_replay"),
-})
-DOORS_TOLERATED = frozenset({
-    ("presentation.visualize_episode", "main"),
-})
-#: What the doors must call, so the scan is not vacuous: `(module, function-or-alternatives,
-#: verb)`.
-DOORS_REQUIRED = (
-    ("learning.branch.cli", ("prepare_episode",), "create"),
-    ("run", ("main",), "open"),
-    ("learning.branch.preflight", ("preflight_replay",), "open"),
+DOORS: frozenset[tuple[str, str]] = frozenset()
+DOORS_TOLERATED: frozenset[tuple[str, str]] = frozenset()
+WALK_OWNER_DIR = "run_repository"
+WALK_DOORS_REQUIRED = ("create", "open")
+WALK_CALLS_REQUIRED = (
+    ("learning.branch.cli", "create_episode", None),
+    ("run", "episode", "roster_label"),
 )
 
 
@@ -725,17 +715,55 @@ def test_o5_episode_paths_base_file_and_staged_path_are_called_only_by_root_read
         "record, or a view):\n" + "".join(f"  {e}\n" for e in extra))
 
 
+def _method_calls(module: str, tree: ast.Module) -> set[tuple[str, str, frozenset[str]]]:
+    out = set()
+    for _where, call in _scoped_calls(tree):
+        if isinstance(call.func, ast.Attribute):
+            out.add((module, call.func.attr,
+                     frozenset(k.arg for k in call.keywords if k.arg is not None)))
+    return out
+
+
+def _walk_calls_missing(found: set[tuple[str, str, frozenset[str]]]) -> list[tuple[str, str, Any]]:
+    return [(module, method, keyword) for module, method, keyword in WALK_CALLS_REQUIRED
+            if not any(m == module and name == method and (keyword is None or keyword in kws)
+                       for m, name, kws in found)]
+
+
 def test_o5_only_the_doors_open_or_create_an_episode():
     found = _o5_collect(o5_doors)
     extra = sorted(hit for hit in found if not _allowed(hit, DOORS | DOORS_TOLERATED))
-    missing = [
-        (module, fns, verb) for module, fns, verb in DOORS_REQUIRED
-        if not any(hit[0] == module and hit[2] == verb and any(_within(hit[1], fn) for fn in fns)
-                   for hit in found)]
+    owner: set[tuple[str, str, str]] = set()
+    for path in sorted((PACKAGE / WALK_OWNER_DIR).glob("*.py")):
+        owner |= o5_doors(_module_name(f"{WALK_OWNER_DIR}/{path.name}"), _parse(path))
+    owner_missing = [verb for verb in WALK_DOORS_REQUIRED if not any(h[2] == verb for h in owner)]
+    calls: set[tuple[str, str, frozenset[str]]] = set()
+    for rel in O5_MODULES:
+        calls |= _method_calls(_module_name(rel), _parse(PACKAGE / rel))
+    missing = _walk_calls_missing(calls)
     assert not extra, (
-        "opens or creates an Episode outside a door (take the door's Episode instead):\n"
-        + "".join(f"  {e}\n" for e in extra))
-    assert not missing, f"a door that must open or create its Episode does not: {missing}"
+        "opens or creates an Episode outside the runs repository's walk (take the walked "
+        "view's episode instead):\n" + "".join(f"  {e}\n" for e in extra))
+    assert not owner_missing, (
+        f"the walk owner ({WALK_OWNER_DIR}/) does not call Episode.{owner_missing} — the episode "
+        f"is opened or created somewhere the door scans do not look: {sorted(owner)}")
+    assert not missing, f"a former door does not reach the runs repository's walk: {missing}"
+
+
+def test_o5_the_walk_call_census_finds_what_it_is_meant_to_find():
+    good_cli = ast.parse("def launch(runs):\n    return runs.create_episode()\n")
+    good_run = ast.parse("def main(runs, ep, label):\n"
+                         "    return runs.episode(ep, roster_label=label)\n")
+    assert _walk_calls_missing(_method_calls("learning.branch.cli", good_cli)
+                               | _method_calls("run", good_run)) == []
+    bare_ref = ast.parse("def launch(runs):\n    door = runs.create_episode\n    return door\n")
+    no_kw = ast.parse("def main(runs, ep):\n    return runs.episode(ep)\n")
+    assert _walk_calls_missing(_method_calls("learning.branch.cli", bare_ref)
+                               | _method_calls("run", no_kw)) == [
+        ("learning.branch.cli", "create_episode", None), ("run", "episode", "roster_label")]
+    elsewhere = _method_calls("learning.judge", good_cli) | _method_calls("learning.judge", good_run)
+    assert len(_walk_calls_missing(elsewhere)) == 2
+
 
 
 def test_o5_the_episodes_only_constructors_are_its_two_doors():

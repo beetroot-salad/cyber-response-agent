@@ -38,12 +38,10 @@ class _Preflight:
 
 def _layout(tmp_path: Path, data_root: Path, monkeypatch, *,
             marker: str) -> tuple[Path, Path, Path, Path]:
-    """A branchable source at TID's tenant location, TID's complete #1107 knowledge folder set
-    up under `data_root` (this test's, the one the launcher reads), and a configured episodes
-    root. Returns (src, data root, knowledge folder, episodes)."""
+    """A branchable tenant source, complete settings, and its canonical episodes folder."""
     for name in _CONFIG_VARS:
         monkeypatch.delenv(name, raising=False)
-    episodes = tmp_path / "episodes"
+    episodes = data_root / TID / "episodes"
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
     _base, src = H.tenant_source(data_root, TID)
     folder = S.plant(data_root, TID, marker=marker)
@@ -90,10 +88,6 @@ def _sans_paths(text: str, *paths: Path) -> str:
     return text
 
 
-def _episode_dir(episodes: Path) -> Path:
-    return episodes / cli.episode_id_for(T.SOURCE_RUN_ID, T.BRANCH_MESSAGE_ID)
-
-
 def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, monkeypatch):
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
     src, outside, _folder, episodes = _layout(tmp_path, data_root, monkeypatch, marker="mf13")
@@ -105,29 +99,24 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
     assert control["preflight"].calls == [None], \
         "the control launch (tenants root outside both trees) never reached the role preflight"
 
-    for arm, root in (("inside the episodes base", episodes / "tenants-in-episodes"),):
-        root.mkdir(parents=True)
-        H.set_data_root(monkeypatch, root)
-        _base, src_in = H.tenant_source(root, TID)
-        S.plant(root, TID, marker="mf13")
-        resolved = run_tenant.resolve_tenant(root, TID, defender_dir=S.DEFENDER,
-                                             dispatches_lead_zero=False)
-        assert resolved.tenant_id == TID, f"{arm}: the resolver alone refuses this root"
-        seams = _seams()
-        rc, refused = _launch(src_in, root, seams)
-        assert isinstance(refused, cli.LauncherRefused), \
-            f"{arm}: the launcher accepted a box-mounted tenants root (rc={rc}, {refused!r})"
-        text = H.refusal_text(refused)
-        assert TID in _sans_paths(text, src, src_in, root / TID, outside / TID, data_root / TID), \
-            f"{arm}: the refusal does not name the tenant: {text!r}"
-        # The launcher's own episodes-base guard also refuses a base containing the data root;
-        # the refusal observed here is acceptance's, over the launcher's `box_mounted`.
-        assert "which a box mounts" in text, \
-            f"{arm}: the refusal is not the box-mounted settings refusal: {text!r}"
-        assert seams["preflight"].calls == [], f"{arm}: the role preflight was spent: {text!r}"
-        assert seams["spawn"].launches == [], f"{arm}: a sibling started"
-        assert seams["questioner"].prompts == [], f"{arm}: the questioner was asked"
-        assert not _episode_dir(episodes).exists(), f"{arm}: an episode dir exists"
+    episodes.symlink_to(_folder, target_is_directory=True)
+    before = set(episodes.iterdir())
+    resolved = run_tenant.resolve_tenant(outside, TID, defender_dir=S.DEFENDER,
+                                         dispatches_lead_zero=False)
+    assert resolved.tenant_id == TID, "the resolver alone refuses this root"
+    seams = _seams()
+    rc, refused = _launch(src, outside, seams)
+    assert isinstance(refused, cli.LauncherRefused), \
+        f"the launcher accepted box-mounted settings (rc={rc}, {refused!r})"
+    text = H.refusal_text(refused)
+    assert TID in _sans_paths(text, src, outside / TID, data_root / TID), \
+        f"the refusal does not name the tenant: {text!r}"
+    assert "which a box mounts" in text, \
+        f"the refusal is not the box-mounted settings refusal: {text!r}"
+    assert seams["preflight"].calls == [], f"the role preflight was spent: {text!r}"
+    assert seams["spawn"].launches == [], "a sibling started"
+    assert seams["questioner"].prompts == [], "the questioner was asked"
+    assert set(episodes.iterdir()) == before, "the refused launch claimed an episode"
 
 
 def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatch):
@@ -138,7 +127,7 @@ def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatc
     _base, src = H.tenant_source(data_root, TID)
     root = data_root
     folder = S.plant(root, TID, marker="mf17")
-    manifest = H.family_for(src, tmp_path / "episodes" / T.EPISODE_ID, monkeypatch=monkeypatch)
+    manifest = H.family_for(src)
     # At launch the Elastic part was whole ...
     assert "ELASTIC_ES_CONTAINER" in _resolve(root).systems["elastic"], \
         "the tenant's Elastic part was not whole at launch"

@@ -343,13 +343,9 @@ def test_921_draw_count_is_a_knob_and_the_family_record_reports_the_spread(tmp_p
 def _prompt(ep, label: str = "b") -> str:
     """World `label`'s prompt, built by the real assembler over the real render (#1234:
     `_build_prompt(ctx, manifest)` returns the prompt and its layout)."""
-    from defender._io import bind
-
     run_mod = J.mod("learning.judge.run")
-    render = J.mod("learning.judge.render")
-    with bind(ep) as bound:
-        manifest = J.mod("learning.judge.family").read_manifest(bound)
-    return run_mod._build_prompt(render.render(ep, label), manifest)[0]
+    manifest = J.read_manifest_at(ep)
+    return run_mod._build_prompt(J.render_at(ep, label), manifest)[0]
 
 
 def test_921_a_prose_evidence_value_is_refused_rather_than_silently_empty(tmp_path):

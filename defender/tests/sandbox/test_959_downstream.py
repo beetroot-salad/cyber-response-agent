@@ -1,5 +1,6 @@
 """#959 - everything downstream of the decision"""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from dataclasses import replace as _with_live_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
@@ -70,12 +71,15 @@ def _argv_of(decision):
 
 def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     """A real gather deps over a real run dir, with the box seam handed a fake."""
-    run = tmp_path / "run"
+    run = tmp_path / fixture_uuid("run")
     dfn = tmp_path / "tree" / "defender"
     (run / "gather_raw" / lead_id).mkdir(parents=True)
     dfn.mkdir(parents=True)
     payload = run / "gather_raw" / lead_id / "0.json"
     payload.write_text("{}", encoding="utf-8")
+    # The run's state, as the driver starts it and hands it to gather deps (#1235): the
+    # shim-failure row's seq and its `system=` attribution are read from it, and this folder
+    # went through no driver.
     from defender.runtime.run_state import RunState
 
     box = Box(result)
@@ -84,6 +88,7 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
         run_state=RunState(run, "r959-downstream"),
     )
     return deps, box, payload
+
 
 
 # FK8 - the operand set the four post-decision consumers read.

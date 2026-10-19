@@ -1,6 +1,7 @@
 """Query-id / request-key rules: model-supplied query ids and params normalisation.
 Goldens: `goldens/queryrules.json`."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
 
@@ -317,7 +318,7 @@ def _query_id_verdicts() -> dict[str, dict[str, Any]]:
     is_reserved = _flat("is_reserved_query_id")
     assert query_tool.resolve_query_id is resolve, (
         "the query tool must apply the one moved rule, not a copy")
-    screen = query_tool.QueryCapture(None)
+    screen = query_tool.QueryCapture(None, known_ids=frozenset())
     out = {}
     for case, (system, verb, qid) in QUERY_ID_CASES.items():
         out[case] = {
@@ -326,6 +327,7 @@ def _query_id_verdicts() -> dict[str, dict[str, Any]]:
             "reserved": None if qid is None else is_reserved(qid),
         }
     return out
+
 
 
 def _assert_query_ids(group: str) -> None:
@@ -371,9 +373,8 @@ def test_same_call_live_and_after_the_row_is_read_back(tmp_path):
     rq = S.module_at("defender/runtime/record_query.py")
     # Never driven: the writer takes the run's state, started as a run's start starts it (#1235).
     from defender.runtime.run_state import RunState
-
-    (tmp_path / "run").mkdir()
-    got = drive_roundtrip(RunState(tmp_path / "run", "r1080-roundtrip"),
+    (tmp_path / fixture_uuid("run")).mkdir()
+    got = drive_roundtrip(RunState(tmp_path / fixture_uuid("run"), "r1080-roundtrip"),
                           request_key=request_key, append=rq.append_query_row,
                           repeat_trip=rq.repeat_trip)
     assert got["live_key"] == got["learning_row_key"] == got["learning_record_key"] \

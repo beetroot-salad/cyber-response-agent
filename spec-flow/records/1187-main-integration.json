@@ -1,7 +1,7 @@
 {
   "issue": 1187,
   "pull_request": 1269,
-  "status": "Main layout preserved; local affected gates passed. Hosted CI pending.",
+  "status": "LOCAL MERGE COMPLETE: main layout preserved and affected verification passed; external push approval and hosted CI pending.",
   "main_ref": "55dd2bee8c4a4391d9c358493d63f371eea6de73",
   "pre_merge_ref": "f37eb3124e0983c43617c96ec8c23dc80d46819d",
   "history": "Merge main without rebasing the immutable contract ancestry recorded in 1187-implementation.json.",
@@ -39,15 +39,19 @@
     "scope": "Initial prose-only edit of the ten feature suite files, before separately reviewed fixture/API integration. Subsequent prose polish also checked per-file executable AST identity."
   },
   "verification": {
-    "collection": "18038 tests collected, no errors",
-    "ruff": "Both exact CI commands pass",
-    "mypy": "Success: no issues found in 348 source files",
+    "collection": "17,991 tests collected without errors after all fixture ports and proven obsolete-case retirements.",
+    "ruff": "Both exact CI commands passed after all fixture repairs.",
+    "mypy": "Success: no issues found in 348 source files after all fixture repairs.",
     "feature": "307 passed, 3 skipped in83.17s; complete moved #1187 suite plus six startup status integration regressions. Skips: two runsc variants and same-filesystem second-mount case.",
     "main_1255": "Twin/snapshot instrument 31 passed; snapshot branch point 13 passed; clock/fork-command22passed2skipped; view integrations19passed plus corrected case rerun.",
     "legacy_regressions": "69 corpus/presentation1110 tests passed;40 moved1105 repository tests passed;37 page/spec-hole/boundary regressions passed2skipped.",
     "main_1256": "250 passed in initial startup/provider batch; two obsolete provider fixtures repaired in29pass rerun; cold authorization and estate seam22passed across21pass plus1pass rerun.",
     "remaining_moved_tests": "62 tenant/replay cases passed; package/live-contract/natural-boundary16passed2skipped, then six reader cases passed.",
-    "custom_lints": "33 checks completed:32passed initially; borrowed-vocabulary finding repaired by existing unnamed_files_unavailable helper and rerun passed. Stale-reference check must run after merge commit so its base includes main refactor."
+    "custom_lints": "All 34 custom CI gates passed together at the final working tree; /tmp/1187-final-all-lints.json. No baseline changes or new suppressions.",
+    "post_merge_censuses": "28 tests passed, including failed main I/O census and repository-only episode-door synthetic controls.",
+    "final_omitted_ports": "Learning: 330 passed; tenancy: 178 passed, 4 skipped; remaining audited modules: 243 passed, 1 skipped across initial+repaired reruns, plus 53 globals/case checks passed. Permission skips are expected under root; CI runs nonroot.",
+    "ci_gate_tests": "Initial 4 passed, 1 failed; repaired I/O census passed in 28-test focused run. The other 4 gate tests had passed; no suppression/baseline added.",
+    "atomic_create_normalizer": "All 40 roster/sibling tests passed after routing through the extracted filesystem normalizer."
   },
   "limitations": [
     "Full unit suite belongs to hosted CI.",
@@ -57,5 +61,35 @@
   "retired_test_evidence": {
     "test_1105_episode_record.py": "21 functions, no main-added functions or executable function/class differences versus original merge base after stripping docstrings; follows pre-merge1187 deletion. Replaced by tenant-owned roster contract.",
     "test_1078_records.py": "Only Run.for_tenant mismatch backstop retired; all tenant-row/write-race coverage kept."
+  },
+  "merge_commit": "3d758a46e1a3e0c28c59759030530fed34f699a1",
+  "omitted_port_audit": {
+    "base": "f821f19da25b98d3ec983725c956879bf5caac2c",
+    "pre_merge": "f37eb3124e0983c43617c96ec8c23dc80d46819d",
+    "criterion": "Per top-level function/class, executable current==main==base while pre-merge differs; documentation ignored. Does not replace review of concurrently modified main functions.",
+    "production_candidates": 0,
+    "test_candidates": {
+      "files": 39,
+      "functions_and_classes": 80
+    },
+    "disposition": "Restore missed1187 fixture deltas only in unchanged-main functions, retain main module structure/additions and current concise docstrings; validate affected files.",
+    "production_global_candidates": 0,
+    "final_function_candidates": 0,
+    "final_global_candidates": 0,
+    "additional_dispositions": [
+      "Keep main-used1107fixture helpers even though the older1187branch removed them.",
+      "Retire1078external-episode-root knob cases only after proving unchangedmain/base bodies and premerge1187absence; retain ignored-knob controls.",
+      "Keep J42absolute tenant episode resolution assertions using current tenant APIs and relative/symlink external knob decoys.",
+      "Remove unused old1105record helpers and composite-bound case only after exact historical proof and current callsite census."
+    ]
+  },
+  "recorded_at_utc": "2026-10-19T13:27:18.670412+00:00",
+  "publication": {
+    "branch": "impl/1187",
+    "remote": "origin (github.com/beetroot-salad/cyber-response-agent)",
+    "pull_request": 1269,
+    "pushed": false,
+    "blocked_by": "Automatic approval review rejected git push because external publication requires explicit user authorization; no workaround or alternate publication attempted.",
+    "next_action": "Request permission for the concrete committed branch, then push, update PR1269description from prepared body, watch hosted CI and repair failures. Keep draft until verification/review obligations close."
   }
 }

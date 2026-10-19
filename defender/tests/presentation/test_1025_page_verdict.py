@@ -494,8 +494,10 @@ def test_1025_one_draw_document_is_a_symlink_to_a_file_outside_the_episode(tmp_p
 
 
 def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
-    """The join is on the `(world, draw, index)` suffix of the recorded `finding_id` (J9e)."""
+    from defender.tests.storage.ids_1187._spec1187 import roster_for_arms
+
     ep = E.sample_episode(tmp_path)
+    roster = roster_for_arms(ep.dir, {label: ep.run(label) for label in E.WORLDS})
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable", "a reason")
     for row in doc["dispositions"]:
         row["finding_id"] = row["finding_id"].replace(E.EPISODE_ID, "old-name-before-repair")
@@ -505,8 +507,9 @@ def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
     assert f"old-name-before-repair/{E.GRADED_WORLD}/0/4" in text, text
     assert "enqueued" in _group_of(page, f"f-{E.GRADED_WORLD}-0-4").text()
     assert "unqueueable" in _group_of(page, f"f-{E.GRADED_WORLD}-0-1").text()
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" in page.hrefs
+    assert f"runs/{roster[E.GRADED_WORLD]}/runtime.html" in page.hrefs
     assert not [h for h in page.hrefs if "old-name-before-repair" in h]
+
 
 
 def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path):

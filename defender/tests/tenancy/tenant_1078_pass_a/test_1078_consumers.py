@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import json
+import uuid
 import importlib
 from pathlib import Path
 from typing import Any
@@ -33,12 +34,21 @@ def _fixtures(tmp_path: Path, slug: str = "slug-one", disposition: str = "benign
     return fx.parent
 
 
-def _scored_run(runs: Path, disposition: str, slug: str = "slug-one") -> Path:
-    run = runs / slug
+def _scored_run(runs: Path, disposition: str, run_id: str, slug: str = "slug-one") -> Path:
+    run = runs / run_id
     run.mkdir(parents=True, exist_ok=True)
     plant_alert(run, {"rule": {"id": slug}})
     (run / "report.md").write_text(T.report_text(disposition), encoding="utf-8")
     return run
+
+
+
+def _held_out_index(tmp_path: Path, run_id: str, slug: str = "slug-one") -> Path:
+    """Write the operator's launch-index input independently of the production writer."""
+    index = tmp_path / "ops" / "held-out-index.jsonl"
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_text(json.dumps({"slug": slug, "run_id": run_id}) + "\n", encoding="utf-8")
+    return index
 
 
 def _drive_held_out(argv: list[str], capsys) -> tuple[Any, str]:
@@ -91,13 +101,14 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, TENANT)
     fixtures = _fixtures(tmp_path)
-    _scored_run(H.runs_dir(root, TENANT), "benign")
+    run_id = str(uuid.uuid4())
+    _scored_run(H.runs_dir(root, TENANT), "benign", run_id)
     stale = tmp_path / "stale-runs"
-    _scored_run(stale, "malicious")
+    _scored_run(stale, "malicious", run_id)
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(stale))
     positional = tmp_path / "given-dir"
-    _scored_run(positional, "inconclusive")
-    fx = ["--fixtures-dir", str(fixtures)]
+    _scored_run(positional, "inconclusive", run_id)
+    fx = ["--index", str(_held_out_index(tmp_path, run_id)), "--fixtures-dir", str(fixtures)]
 
     status, out = _drive_held_out([str(positional), *fx], capsys)
     assert status == 0, out
@@ -111,20 +122,24 @@ def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
         assert SCORED not in out, f"held_out with {what} scored something before refusing:\n{out}"
 
 
+
 def test_s7_j50_held_out_positional_ignores_data_root(tmp_path, monkeypatch, capsys):
-    """held_out <runs_dir> scores the directory it is given under DEFENDER_DATA_ROOT=rel/ (and
-    with it unset): the positional branch never resolves the data root or a tenant."""
+    'held_out <runs_dir> scores the directory it is given under DEFENDER_DATA_ROOT=rel/ (and\nwith it unset): the positional branch never resolves the data root or a tenant.'
     monkeypatch.chdir(tmp_path)
     fixtures = _fixtures(tmp_path)
+    run_id = str(uuid.uuid4())
     given = tmp_path / "given-dir"
-    _scored_run(given, "benign")
+    _scored_run(given, "benign", run_id)
+    _scored_run(tmp_path / "stale-knob", "malicious", run_id)
+    index = _held_out_index(tmp_path, run_id)
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(tmp_path / "stale-knob"))
     for value in ("rel/", None):
         if value is None:
             H.set_data_root(monkeypatch, None)
         else:
             monkeypatch.setenv(H.DATA_ROOT_ENV, value)
-        status, out = _drive_held_out([str(given), "--fixtures-dir", str(fixtures)], capsys)
+        status, out = _drive_held_out(
+            [str(given), "--index", str(index), "--fixtures-dir", str(fixtures)], capsys)
         assert status == 0, f"DEFENDER_DATA_ROOT={value!r}: {out}"
         assert "slug-one: predicted='benign'" in out, out
         assert "WRONG" not in out, out

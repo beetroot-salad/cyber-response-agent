@@ -305,7 +305,6 @@ def test_d17_stdout_stays_a_json_protocol(tmp_path, capsys):
 
 
 def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
-    """demand: d21 (parity) — ``trace_lesson --all`` walks through ``iter_lessons``, so it inherits the discovery..."""
     tl = load_trace_lesson("trace_lesson_584")
     _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     corpus = _corpus_of(tmp_path, "alpha", "beta")
@@ -315,7 +314,7 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
 
     rc = tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID])  # #1105 PR 2 (J8, declared change 10)
     captured = capsys.readouterr()
-    assert rc == 0
+    assert rc == 0, captured.err
 
     lines = [ln for ln in captured.out.splitlines() if ln.strip()]
     assert [ln.split("\t")[0] for ln in lines] == ["alpha", "beta", "undecodable", "unfenced"]
@@ -325,6 +324,7 @@ def test_d21_trace_all_walks_the_shared_iterator(tmp_path, capsys):
     assert "_TEMPLATE" not in captured.out
     assert "unfenced.md" in captured.err
     assert "undecodable.md" in captured.err
+
 
 
 def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
@@ -340,7 +340,6 @@ def test_d22_missing_lessons_dir_follows_the_seam(tmp_path, capsys):
 
 
 def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
-    """demand: d23 (uniqueness, R2) — lesson identity is the file STEM, pinned CROSS-MODULE against the co-writer..."""
     tl = load_trace_lesson("trace_lesson_584")
     _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     corpus = _corpus_of(tmp_path / "defender", "foo-bar")
@@ -349,13 +348,14 @@ def test_d23_lesson_identity_is_the_stem_cross_module(tmp_path, capsys):
     oracle = record_lesson_load.lesson_name(str(lesson_path))
     assert oracle == "foo-bar"
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0  # #1105 PR 2 (J8, declared change 10)
+    # #1105 PR 2 (J8, declared change 10)
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
     first_column = capsys.readouterr().out.splitlines()[0].split("\t")[0]
     assert first_column == oracle
 
 
+
 def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
-    """demand: d23b — the paired positive control for d23, end to end through ``main()``."""
     tl = load_trace_lesson("trace_lesson_584")
     corpus = tmp_path / "defender" / "lessons"
     corpus.mkdir(parents=True)
@@ -366,8 +366,9 @@ def test_d23b_stem_wins_when_the_frontmatter_name_disagrees(tmp_path, capsys):
     _mk_run(runs, "case-a", disposition="malicious",
             loads=[{"lesson_name": "foo-bar", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
     assert capsys.readouterr().out.splitlines() == ["foo-bar\td\t1\t0"]
+
 
 
 def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
@@ -389,5 +390,3 @@ def test_d24_single_lesson_path_keeps_its_own_guarded_read(tmp_path, capsys):
 
     assert tl.main(["good", *base]) == 0
     assert capsys.readouterr().out.startswith("# good")
-
-

@@ -31,8 +31,8 @@ IDP_LOOKUP = {"entity": "alice"}
 WITHHELD = (("edr", "lookup"), ("idp", "lookup"))
 #: The source run's pre-branch calls on the held lead (`S.source_calls(post=False)`).
 PRE_BRANCH = len(S.source_calls(post=False))
-LEDGER_GLOB = "*/served/*.{label}.jsonl"
-TABLE_GLOB = "*/runs/*-{label}/executed_queries.jsonl"
+LEDGER_GLOB = "served/*.{label}.jsonl"
+TABLE_GLOB = "runs/{arm}/executed_queries.jsonl"
 #: `Estate1234.break_write` patterns (filled per call by the adapter).
 BREAK_LEDGER = "{episode}/served/*.{label}.jsonl"
 
@@ -68,8 +68,20 @@ class _Between:
         return (self._make() if self._make is not None else self._turn).tool_calls
 
 
+def _arms(label: str) -> list[tuple[Path, str]]:
+    """`(episode folder, arm id)` for `label` in every episode under the tenant's episodes
+    folder that has a roster naming it (#1187: the arm is at the roster's id)."""
+    out = []
+    for ep in sorted(S.episodes_root().iterdir()) if S.episodes_root().is_dir() else []:
+        arm = S.T.read_roster(ep).get(label)
+        if arm is not None:
+            out.append((ep, arm))
+    return out
+
+
+
 def _run_dir(label: str) -> Path:
-    return next(p for p in S.episodes_root().glob(f"*/runs/*-{label}") if p.is_dir())
+    return next(ep / "runs" / arm for ep, arm in _arms(label) if (ep / "runs" / arm).is_dir())
 
 
 def reducer_make(label: str = "b") -> Callable[[], Any]:
@@ -97,8 +109,9 @@ def plant_dir_at(glob: str, label: str = "b") -> Callable[[], None]:
     """The host action: the record at `glob` (this world's) becomes a directory, so the real
     writer's next open of it fails (mode bits cannot do it as root)."""
     def plant() -> None:
-        for path in S.episodes_root().glob(glob.format(label=label)):
-            S.plant_dir(path)
+        for ep, arm in _arms(label):
+            for path in ep.glob(glob.format(label=label, arm=arm)):
+                S.plant_dir(path)
     return plant
 
 

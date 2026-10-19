@@ -5,10 +5,13 @@ import json
 import re
 import threading
 from pathlib import Path
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import pytest
 
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
+
+RUN_ID = fixture_uuid("r1")
 
 GRAMMAR = re.compile(H.GRAMMAR)
 
@@ -71,10 +74,11 @@ def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
     assert H.require_tenant(root, tenant_id).tenant_id == tenant_id
     assert H.TenantPaths(root, tenant_id).runs == root / tenant_id / "runs"
     base = H.runs_dir(root, tenant_id)
-    H.plant_record(base, tenant_id)
-    run_dir = base / "r1"
-    run_dir.mkdir()
-    assert _opened_tenant(root, tenant_id, "r1") == tenant_id
+    # #1187 R1 (review-4 F42): no container record — the run's tenant is where it sits.
+    run_dir = base / RUN_ID
+    run_dir.mkdir(parents=True)
+    assert _opened_tenant(root, tenant_id, RUN_ID) == tenant_id
+
 
 
 def _opened_tenant(root: Path, tenant_id: str, run_id: str) -> str:

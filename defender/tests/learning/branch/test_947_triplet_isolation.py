@@ -14,7 +14,8 @@ TOKEN_C = T.world_token("c")
 
 def _model_text(detail: str) -> str:
     """The text a fault's detail becomes on the model's side of the tool boundary."""
-    return T.mod("learning.branch.redaction").redact_model_visible(detail)
+    return T.mod("learning.branch.redaction").redact_model_visible(
+        detail, frozenset((TOKEN_A, TOKEN_C, T.EPISODE_TOKEN, T.EPISODE_ID)))
 
 
 @pytest.mark.parametrize("detail", [

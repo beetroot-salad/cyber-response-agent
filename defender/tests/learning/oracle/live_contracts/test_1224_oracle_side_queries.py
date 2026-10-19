@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.learning.judge import _judge_921 as J
+
 import dataclasses
 import gc
 import importlib
@@ -16,7 +18,6 @@ from typing import Any
 
 import pytest
 
-from defender.episodes import _episode_handle as EH
 from defender import _yaml
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
 from defender.integrations import faults
@@ -218,6 +219,8 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
     spawn = S.FakeSpawn()
     cli = S.mod(S.CLI)
     message = ""
+    root = S.tenant_episodes(src.parent.parent.name)
+    already = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
@@ -227,7 +230,7 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
                       oracle=oracle.model, verifier=verifier.model)
     except SystemExit as stop:
         rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))
-    ep = EH.episode_dir(T.current_tenant().data_root, S.EPISODE_ID)
+    ep = S.new_episode(root, already)
     return S.Launch(rc=rc, message=message, spawn=spawn, ep=ep)
 
 
@@ -598,15 +601,18 @@ def test_1224_preflight_reader_cannot_be_built_without_a_gather_grant(tmp_path):
     preflight_replay = S.sym(S.CLI, S.COINED["fn.preflight"])
     grant_error = S.sym("runtime.verb_grant", "GrantError")
 
-    with pytest.raises(grant_error):
-        preflight_replay(ep, source=T.open_source(src), roster=est.roster(), tenant=grantless,
-                         oracle=S.oracle(then=S.submit(BASE)).model,
+    # Review-3 F32 ruling (#1187 S-iso): pre-flight takes the walked view's held episode
+    # (`preflight_replay(view.episode, ...)`), never a path.
+    with J.walked_view(ep) as view, pytest.raises(grant_error):
+        preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(),
+                         tenant=grantless, oracle=S.oracle(then=S.submit(BASE)).model,
                          verifier=S.passing_verifier().model)
     assert est.calls() == [], "a reader with no gather grant sent a call"
 
-    preflight_replay(ep, source=T.open_source(src), roster=est.roster(), tenant=rt,
-                     oracle=S.oracle(then=S.submit(BASE)).model,
-                     verifier=S.passing_verifier().model)
+    with J.walked_view(ep) as view:
+        preflight_replay(view.episode, source=T.open_source(src), roster=est.roster(), tenant=rt,
+                         oracle=S.oracle(then=S.submit(BASE)).model,
+                         verifier=S.passing_verifier().model)
     assert _hits(est, "idp", "query", ALICE), "positive control: the granted replay was sent"
 
 

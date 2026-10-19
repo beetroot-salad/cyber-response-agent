@@ -47,12 +47,14 @@ def state(tmp_path, monkeypatch):
 
 def _certified_run(*, name="case-791", alert_bytes=None) -> Path:
     """A finished, certified natural run `name`, where run setup leaves one (#1105 PR 2):
-    `<data root>/<T>/runs/<name>` under a real tenant (`curation_run_dir`), so the curation row
-    it files is an address the drain can rehydrate. Hand it to run end as `run_of(run_dir)`."""
-    run_dir = make_run_dir(curation_run_dir(name).parent, name=name, disposition="benign",
+`<data root>/<T>/runs/<name>` under a real tenant (`curation_run_dir`), so the curation row
+it files is an address the drain can rehydrate. Hand it to run end as `run_of(run_dir)`."""
+    planted = curation_run_dir(name)
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign",
                            alert_bytes=alert_bytes)
     scrub_mod.scrub(run_dir)
     return run_dir
+
 
 
 def _opened(body: dict) -> Path:
@@ -261,14 +263,13 @@ def test_791_no_learn_suppresses_curation_too(tmp_path, state):
 
 
 def test_791_enqueue_curation_cannot_be_called_unguarded(tmp_path, state):
-    """enqueue_curation_cannot_be_called_unguarded — the refusal predicate is WELDED inside the
-    curation enqueue rather than left to caller discipline, and no argument turns it off."""
     fixtures = _held_out_set(tmp_path, HELD_OUT_ALERT)
+    unverified = curation_run_dir("u")
     for label, run_dir, kw in (
         ("truncated", _certified_run(name="t"), {"truncated_by": "budget"}),
         ("held-out-copy",
          _certified_run(name="h", alert_bytes=HELD_OUT_ALERT), {}),
-        ("unverified", make_run_dir(curation_run_dir("u").parent, name="u",
+        ("unverified", make_run_dir(unverified.parent, name=unverified.name,
                                     disposition="benign"), {}),
     ):
         assert run_common.enqueue_curation(
@@ -281,6 +282,7 @@ def test_791_enqueue_curation_cannot_be_called_unguarded(tmp_path, state):
     params = set(inspect.signature(run_common.enqueue_curation).parameters)
     assert not (params & {"force", "skip_refusals", "unguarded", "check", "gate"}), \
         f"the curation enqueue offers a way to bypass its own guard: {sorted(params)}"
+
 
 
 def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, state):

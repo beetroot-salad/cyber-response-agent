@@ -1,6 +1,8 @@
 """#1047 — the readers this piece does NOT move, observed at their own edges."""
 from __future__ import annotations
 
+from defender.tests.support.learning.judge import _judge_921 as J
+
 
 from defender.tests.support.shared.filesystem import _spec1047 as S
 
@@ -95,7 +97,7 @@ def test_the_episode_reader_and_the_graded_record_disagree_about_a_cut_short_wor
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
     (ep / "worlds" / "b" / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
     row = S.graded(ep)["b"]
-    said = episode_mod.verdicts(ep)
+    said = J.through_view(ep, episode_mod.verdicts)
     assert row.get("ungradable") is True, "the cut-short world graded as a verdict"
     assert row.get("cut_short") == "request-limit"
     assert said.get("b") == "unresolved", (

@@ -349,7 +349,7 @@ def test_d1_a_records_write_verb_takes_str_or_bytes_only(tree, opened, key, verb
 
 _BAD_NAMES = [
     pytest.param(lambda ep: ep.world("B").draw(0).write("x"), id="label-not-case-stable-draw"),
-    pytest.param(lambda ep: ep.world("B").run_dir_pointer.write("x"), id="label-pointer"),
+    pytest.param(lambda ep: ep.world("B").draw(0).delete(), id="label-not-case-stable-delete"),
     pytest.param(lambda ep: ep.world("B").dir.ensure(), id="label-dir-ensure"),
     pytest.param(lambda ep: ep.world("B").draws.ensure(), id="label-draws-ensure"),
     pytest.param(lambda ep: ep.world("a/b").draw(0).write("x"), id="label-two-components"),

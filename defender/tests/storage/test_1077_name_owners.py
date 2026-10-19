@@ -216,17 +216,15 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
 # Decision 12 — composed-identifier collisions
 
 def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_dir):
-    """The LABEL carrying the composition's own delimiter is refused at mint time, for
-    `<episode_id>-<label>` and `<episode token>.<label>` alike."""
-    owner = S.EpisodePaths(episode_dir)
-    assert owner.sibling_run_dir(S.EPISODE_ID, "plain").name == f"{S.EPISODE_ID}-plain", (
-        "positive control: a delimiter-free label composes, byte for byte as today (O3)")
+    from defender.episodes._world_label import world_label_fault
+
+    assert world_label_fault("plain") is None, "positive control: a delimiter-free label passes"
     for label in ("has-dash", "a-b"):
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011
-            owner.sibling_run_dir(S.EPISODE_ID, label)
-        assert "-" in str(excinfo.value), (
-            "the refusal names the delimiter the component carries; two distinct pairs "
-            "composing to one sibling run id is what decision 12 closes")
+        fault = world_label_fault(label)
+        assert fault is not None, (
+            f"the label rule admitted {label!r}: N8 keeps the view-name rule's `-` refusal")
+        assert "-" in fault, f"the label rule's refusal does not name the delimiter: {fault!r}"
+    owner = S.EpisodePaths(episode_dir)
     # The world token is minted by `_family.world_token_for`; the owner's `served_world` takes
     # the minted token, so the `.` refusal is asked of the label THERE.
     from defender.runtime.branch import _family
@@ -236,6 +234,7 @@ def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_di
         with pytest.raises(_family.FamilyError) as excinfo:
             _family.world_token_for("ep.2026", label)
         assert "." in str(excinfo.value)
+
 
 
 def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stability_refusal(

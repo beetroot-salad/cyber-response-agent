@@ -1,5 +1,6 @@
 """#1165 O1/O4/O7: fork reads belong to the opened source Run."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 import pytest
@@ -15,7 +16,7 @@ from defender.tests.e2e._replay_harness import ReplayFn, Turn
 
 #: The source's run folder name — `planted_source`'s, passed to it explicitly so `plant` can be
 #: handed the same folder before the source is built.
-SOURCE_RUN = "run-source-001"
+SOURCE_RUN = fixture_uuid("run-source-001")
 
 
 def source_and_sibling(tmp_path, *, document=None, plant=None):
@@ -36,7 +37,7 @@ def source_and_sibling(tmp_path, *, document=None, plant=None):
         plant(source)
     store, directory, _session, ids = planted_source(tmp_path, investigation=text, name=SOURCE_RUN)
     assert directory == source.run_dir, (directory, source.run_dir)
-    target = run_handle(directory.parent / "run-sibling", target_io)
+    target = run_handle(directory.parent / fixture_uuid("run-sibling"), target_io)
     spec = spec_at(store, directory, ids[-1])
     state = RunState(target.run_dir, str(target.id))
     return store, spec, source, target, state, source_io, target_io
@@ -50,7 +51,6 @@ def seed(store, spec, source, target, state):
 
 
 def test_fork_retains_current_alert_bytes_for_the_same_id_and_inherits_verified_fallback(tmp_path):
-    """O7: a materialized current alert wins; a sibling lacking one gets verified source bytes."""
     store, spec, source, target, state, _source_io, _target_io = source_and_sibling(tmp_path)
     # Same alert identifier, changed content: seeding must not compare digest and overwrite it.
     source_bytes = b'{"id":"same-alert","generation":"source"}\n'
@@ -61,11 +61,11 @@ def test_fork_retains_current_alert_bytes_for_the_same_id_and_inherits_verified_
     seed(store, spec, source, target, state)
     assert target.facts.alert.path.read_bytes() == target_bytes
     assert target.facts.alert_record.path.read_bytes() == target_record
-
-    fallback = run_handle(target.run_dir.parent / "run-fallback")
+    fallback = run_handle(target.run_dir.parent / fixture_uuid("run-fallback"))
     seed(store, spec, source, fallback, RunState(fallback.run_dir, str(fallback.id)))
     assert fallback.facts.alert.path.read_bytes() == source_bytes
     assert fallback.facts.alert_record.path.read_bytes() == source.facts.alert_record.path.read_bytes()
+
 
 
 def test_missing_alert_fallback_replaces_a_stale_record_through_target_run(tmp_path):
@@ -178,7 +178,7 @@ def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup
     driven.store.close()
     source_io, target_io = RecordIO(), RecordIO()
     source = run_handle(driven.run_dir, source_io)
-    target = run_handle(tmp_path / "sibling" / "run-sibling", target_io)
+    target = run_handle(tmp_path / "sibling" / fixture_uuid("run-sibling"), target_io)
     plant_alert(target.run_dir, RunPaths(driven.run_dir).alert.read_bytes())
     state = RunState(target.run_dir, str(target.id))
     model = ReplayFn([Turn(text="Resumed from held evidence")])

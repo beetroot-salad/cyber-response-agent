@@ -182,7 +182,7 @@ RESIDUE = {
     ("box._scrub", "tree_unsandboxed", "read_text_utf8"): (1, "non_run", ('verdict_path(tree)',)),
     ("box._scrub", "tree_verified", "read_text_utf8"): (1, "non_run", ('p',)),
     # Extracted from session_store.py; the count, target and classification are unchanged.
-    ("runtime.session_store", "open_store", "guarded_mkdir"): (1, "session_store", ('path.parent',)),
+    ("runtime.session_store._write", "open_store", "guarded_mkdir"): (1, "session_store", ('path.parent',)),
     # The SQL shim reads the model's file operands and operates only inside the box.
     ("runtime.sql_engine.sql", "_inferred_load", "builtins.open"): (1, "model_tools"),
     ("runtime.sql_engine.sql", "_load_rows", "builtins.open"): (1, "model_tools"),

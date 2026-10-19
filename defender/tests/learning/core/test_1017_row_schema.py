@@ -1,6 +1,8 @@
 """#1017 — the queries row's ONE schema, and the read surface that projects all of it."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
 
 import dataclasses
@@ -72,7 +74,7 @@ def _inherited_state(source: Path):  # noqa: ANN202 — a `RunState` (#1235: not
     from defender.tests.support.runtime.state._fork_snapshot_plant import recorded_snapshot
     from defender.runtime.run_state import RunState
 
-    sibling = source / "sibling"
+    sibling = source / fixture_uuid("sibling")
     sibling.mkdir()
     state = RunState(sibling, "r1017-sibling")
     source_run = _writer_run_1165(source)
@@ -121,21 +123,27 @@ def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref
 def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
     """D2/O2 — `QueryRow.record()` returns the parsed JSON record retained on the row: dict equality
     with the raw line, key for key and value for value, on a row carrying every."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
     full = _row(0, system_key=KEY_MARKER)
     pre_871 = _row(1)
     for key in ("system_key", "payload_sha256"):
         pre_871.pop(key)
     no_class = _row(2, exit_code=64, payload_status="error", payload_digest="exit=64; x")
     no_class.pop("error_class")
+    # NON-CANONICAL BYTES in every column the typed view coerces: a re-projection of the typed
+    # fields over the retained dict agrees with the raw line on writer-canonical rows and
+    # differs on this one (adversary H6) — the record must be the line, coercions and all.
     odd = _row(3, system=None, verb=7, params="not-a-dict", exit_code="64",
                payload_digest=5, payload_status=None)
     odd["seq"] = "3"
-    _table(tmp_path, [full, pre_871, no_class, odd])
+    _table(run_dir, [full, pre_871, no_class, odd])
 
-    rows = load_queries(tmp_path)
+    rows = load_queries(run_dir)
     assert [r.record() for r in rows] == [full, pre_871, no_class, odd], \
         "record() is not the row as read"
-    state = _inherited_state(tmp_path)
+    state = _inherited_state(run_dir)
     assert json.dumps([r.record() for r in rows]) == json.dumps(state.lead_rows(LEAD)), \
         "record() is not what seeding put on the guard's state from these lines"
     assert (rows[3].seq, rows[3].system, rows[3].params, rows[3].exit_code) == (3, "None", {}, 64), \
@@ -154,6 +162,9 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
 def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path):
     """D2/O2, C16 executed — two exit-64 `∅.above-repeat-guard` rows written WITHOUT an
     `error_class` key (a table from before the column existed). The guard's domain predicate."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
     call = {"system": "", "verb": "query", "params": {"native_query": "FROM logs"}}
     old = [
         _row(seq, query_id=ABOVE_GUARD_QUERY_ID, exit_code=64, payload_status="error",
@@ -163,16 +174,16 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
     for rec in old:
         rec.pop("error_class")
         rec.pop("system_key")
-    _table(tmp_path, old)
-    raw = _inherited_state(tmp_path).lead_rows(LEAD)
-    on_file = [r for r in read_jsonl_rows(RunPaths(tmp_path).executed_queries)
+    _table(run_dir, old)
+    raw = _inherited_state(run_dir).lead_rows(LEAD)
+    on_file = [r for r in read_jsonl_rows(RunPaths(run_dir).executed_queries)
                if r.get("lead_id") == LEAD]
     assert json.dumps(raw) == json.dumps(on_file), \
         "seeding put rows other than the file's on the state — the guard reads what it did not see"
     assert [("error_class" in r) for r in raw] == [False, False], \
         "the fixture did not land as two class-less rows, so the claim below is vacuous"
 
-    rows = load_queries(tmp_path)
+    rows = load_queries(run_dir)
     assert [r.error_class for r in rows] == [AGENT_FIXABLE_ERROR_CLASS] * 2, \
         "the surface stopped deriving error_class — the typed view is no longer a reader's view"
     # The re-projection C16 warns against, spelled out so the test says what it refutes: it

@@ -127,13 +127,14 @@ def test_setup_re_run_after_the_tenant_already_has_runs(tmp_path):
     base = H.runs_dir(root, TID)
     (base / "r1").mkdir(parents=True)
     (base / "r1" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
-    H.plant_record(base, TID)
+    # #1187 R1 (review-4 F42): no runs-base record — a used tenant's runs/ holds runs only.
     H.sessions_dir(root, TID).mkdir()
     (H.sessions_dir(root, TID) / "case-1.db").write_bytes(b"SQLite format 3\x00")
     before = H.census(root)
     again = H.run_setup(root, TID)
     assert again.returncode == 0, f"a re-run over a used tenant was refused:\n{H.setup_output(again)}"
     assert H.census(root) == before, "the re-run changed something under <T>/"
+
 
 
 def test_data_root_holds_a_dangling_symlink_entry(tmp_path):

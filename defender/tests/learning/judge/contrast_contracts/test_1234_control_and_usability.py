@@ -1,6 +1,8 @@
 """#1234 judge contrast: control/reference usability checks and damaged-archive handling."""
 from __future__ import annotations
 
+from defender.tests.support.learning.judge import _judge_921 as J
+
 import dataclasses
 import re
 from collections.abc import Callable
@@ -535,7 +537,7 @@ def test_1234_malformed_planted_report_does_not_refuse_the_episode(tmp_path, dam
     assert _shows(judge.prompt_for("b"), "a"), "b was not graded against the control"
     _assert_no_host_text(built, judge)
     with pytest.raises(S.sym(S.EPISODE_MOD, "EpisodeError")):
-        S.mod(S.EPISODE_MOD).verdicts(built.ep)
+        J.through_view(built.ep, S.mod(S.EPISODE_MOD).verdicts)
 
 
 @pytest.mark.parametrize("case", [
@@ -607,6 +609,11 @@ def _ledger_file(ep: Path, label: str, token: str) -> Path:
 
 
 def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
+    import shutil
+    import uuid
+
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+
     real = S.real_family(tmp_path)
     token = real.token
     refused_b = next(r for r in real.ledger_rows("b") if r.get("source") == "refused")
@@ -664,6 +671,21 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
         f"control: b's own refused call is not a found gap: {S.found_gaps(clean)}")
     assert not any(_carries(e, GHOST_PARAMS) or _names_run(e, GHOST)
                    for e in S.found_gaps(clean)), "the undeclared label's file was read"
+
+    # R5: the same archive under a renamed folder is refused (the variants above, copies that
+    # keep the folder name, are the positive control on the same door).
+    renamed_id = str(uuid.uuid4())
+    renamed = S.tenant_episodes(tmp_path / "variant-renamed") / renamed_id
+    shutil.copytree(real.ep, renamed, symlinks=True)
+    before = H5.tree_state(renamed)
+    judge = S.judge()
+    err = H5.raised(S.grade, renamed, judge)
+    assert err is not None, "a renamed copy was graded (R5)"
+    said = H5.message(err)
+    assert renamed_id in said, f"the R5 refusal does not name the folder's id: {said!r}"
+    assert real.ep.name in said, f"the R5 refusal does not name the manifest's id: {said!r}"
+    assert judge.calls == 0, f"a renamed copy reached the model: {judge.agent_ids}"
+    assert H5.tree_state(renamed) == before, "the refused pass wrote into the renamed copy"
 
 
 #: The seeded prefix every hand-built table opens with: an ordinary pre-branch row and J3's

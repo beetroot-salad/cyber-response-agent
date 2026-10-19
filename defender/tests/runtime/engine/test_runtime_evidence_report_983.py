@@ -1,6 +1,7 @@
 """The baseline consultation's carrier into report.md through the close fields."""
 
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
@@ -134,7 +135,6 @@ def test_runtime_evidence_consultation_lands_in_report_body():
 
 
 def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
-    """#767 SUPERSEDES this demand's premise (`baseline_not_wired_to_ticket`, non-obligation 3)"""
     from defender.runtime import case_ticket
 
     receipts = _receipts(BENIGN_DOC)
@@ -143,8 +143,7 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
         runtime_evidence=receipts,
     )
     assert "1500 occurrences" in _body(report), "fixture control: the body carries the baseline"
-
-    run_dir = tmp_path / "case-983"
+    run_dir = tmp_path / fixture_uuid("case-983")
     (run_dir / "gather_raw").mkdir(parents=True)
     (run_dir / "alert.json").write_text(
         json.dumps({"rule": {"id": "5710", "key": "spec.rule"},
@@ -164,6 +163,7 @@ def test_baseline_context_now_reaches_the_recorded_comment(tmp_path):
             f"report body into it now, deliberately, gated by D4's approval screen on the "
             f"read side rather than by anything withheld on the write side"
         )
+
 
 
 def test_the_projection_and_the_render_read_one_set():

@@ -145,7 +145,7 @@ def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, 
     assert manifest.is_file(), "the prepared episode dir is not the sibling's to remove"
 
 
-def test_s7_j42_resume_manifest_resolved_at_entry(tmp_path, data_root, monkeypatch):
+def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root, monkeypatch):
     _src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
     episode = manifest.parent.resolve()
     expected_runs = H.S.EpisodePaths(episode).runs
@@ -154,13 +154,13 @@ def test_s7_j42_resume_manifest_resolved_at_entry(tmp_path, data_root, monkeypat
     monkeypatch.chdir(tmp_path)
     for n, base in enumerate((Path("episodes"), link)):
         monkeypatch.setenv(T.EPISODES_BASE_ENV, str(base))
-        spelling = base / T.EPISODE_ID / "family.yaml"
-        got = _accepted(H.sibling_argv(spelling, "b", "--tenant", "acme"),
+        # #1187 opens by id through the tenant; the external-root spelling is a decoy.
+        got = _accepted(H.sibling_argv(manifest, "b", "--tenant", "acme"),
                         H.Recorder(tmp_path / "sib" / str(n)))
         world = got["world"]
-        assert Path(world.episode_dir).is_absolute(), f"{spelling}: {world.episode_dir}"
+        assert Path(world.episode_dir).is_absolute(), f"{base}: {world.episode_dir}"
         assert Path(world.episode_dir) == episode, (
-            f"{spelling}: the manifest was not resolved at entry ({world.episode_dir})")
+            f"{base}: the episode was not resolved through its tenant ({world.episode_dir})")
         assert H.S.EpisodePaths(world.episode_dir).runs == expected_runs
 
 

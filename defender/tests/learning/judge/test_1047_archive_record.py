@@ -205,9 +205,13 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
     faults: list[BaseException] = []
 
     def spawn(argv, *, env=None, **_kw):
+        # `start_family` records a thread that died as a NON-ZERO exit rather than re-raising,
+        # so a fault in here would otherwise reach the assertions below as "the launcher fanned
+        # nothing" — a message about the wrong thing.
         try:
             label = next(argv[i + 1] for i, tok in enumerate(argv) if tok == "--world")
-            run_dir = runs / f"{S.EPISODE_ID}-{label}"
+            # #1187: the child's run folder is the arm id the roster names for its label.
+            run_dir = runs / T.read_roster(ep)[label]
             run_dir.mkdir(parents=True, exist_ok=True)
             S.plant_sidecar(run_dir, truncated_by="aborted")
             written[label] = run_dir

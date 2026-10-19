@@ -396,9 +396,9 @@ D4 = {
     "model": "constant",
     "dirty": "dedicated", "tenant_id": "dedicated",
     "dirty_paths": "informational", "dirty_path_count": "informational",
-    "unavailable": "informational",
+    "unavailable": "informational", "alert_label": "informational",
     "world_id": "expected_to_differ", "parent_run_id": "expected_to_differ",
-    "fork_turn": "expected_to_differ",
+    "fork_turn": "expected_to_differ", "started_at": "expected_to_differ",
 }
 CLASSES = {"anchored", "constant", "dedicated", "informational", "expected_to_differ"}
 

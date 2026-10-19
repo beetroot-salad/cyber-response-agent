@@ -153,8 +153,6 @@ def test_lesson_raw_is_the_slice_the_parser_consumed(tmp_path):
 
 
 def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
-    """demand (review) — ``--all`` must window each lesson's case count to loads at/after that
-    lesson's ``created_at`` (its CURRENT incarnation), not report a lifetime total."""
     tl = _load_trace_lesson()
     corpus = tmp_path / "lessons"
     corpus.mkdir()
@@ -167,6 +165,6 @@ def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
     _mk_run(runs, "case-new", disposition="malicious",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
 
     assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1\t0"]

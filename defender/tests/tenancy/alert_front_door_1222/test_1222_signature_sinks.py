@@ -12,6 +12,7 @@ import shlex
 import stat
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from typing import Any
 
 
@@ -220,13 +221,13 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
             record: bool | Mapping[str, Any] = True,
             runs_base: Path | None = None, worlds_alert: bool = True,
             alter: Callable[[Path], None] | None = None) -> tuple[Path, J.FakeJudge, list[dict]]:
-    """An accepted episode carrying the launch's copies of the source run's alert and record
-    (A1), graded end to end by `grade_episode`; returns the episode, the judge seam (holding
-    every prompt it was shown) and the rows the pass appended to the findings queue."""
+    "An accepted episode carrying the launch's copies of the source run's alert and record\n(A1), graded end to end by `grade_episode`; returns the episode, the judge seam (holding\nevery prompt it was shown) and the rows the pass appended to the findings queue."
+    # Separate episode roots still share finding identity on the queue (#1241), so each pass
+    # gets an episode id of its own — a uuid, given to the folder and the manifest together
+    # (#1187 R5: a manifest's `episode_id` is its folder's name).
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
-                            alert=worlds_alert)
-    # Separate episode roots still share finding identity on the queue (#1241).
-    ep = ep.rename(ep.with_name(f"{ep.name}-{tmp_path.name}"))
+                            alert=worlds_alert,
+                            episode_id=fixture_uuid(f"1222-signature-sinks:{tmp_path}"))
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     S.plant_episode_copy(ep, alert=alert, record=record, facts=facts)
     if alter is not None:
@@ -242,6 +243,7 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
     rows = J.enqueued_rows(record)[-appended:] if appended else []
     assert rows, "the graded episode enqueued no finding row to read a key from"
     return ep, judge, rows
+
 
 
 def _keys(rows: Iterable[Mapping[str, Any]]) -> set[Any]:
@@ -323,11 +325,11 @@ def test_o8_main_system_prompt_takes_the_signature_from_orientation(tmp_path: Pa
 def test_o10_orientation_names_the_missing_signature(tmp_path: Path) -> None:
     planted = S.plant_tenant(alert_mapping=MAPPING)
     signed = S.run_alert(tmp_path / "signed", alert=_alert(), tenant=planted,
-                         orient_shim=S.RecordingShim(fail=("--tags",)), run_id="o10-signed")
+                         orient_shim=S.RecordingShim(fail=("--tags",)), run_id=fixture_uuid("o10-signed"))
     S.remap(planted, NO_SIG_MAPPING)
     shim = S.RecordingShim(fail=("--tags",))
     d = S.run_alert(tmp_path / "unsigned", alert=_alert(), orient_shim=shim, tenant=planted,
-                    run_id="o10-unsigned")
+                    run_id=fixture_uuid("o10-unsigned"))
     section = S.lessons_section(d.opening_message)
     assert S.missing_signature_lines(d.opening_message, signed.opening_message), (
         f"the Lessons section names no missing signature the signed run's did not: {section!r}")
@@ -336,6 +338,7 @@ def test_o10_orientation_names_the_missing_signature(tmp_path: Path) -> None:
     assert not _argv_carries(shim.lessons_lookups(), RULE_ID), (
         f"a lessons lookup fell back to rule.id: {shim.lessons_lookups()}")
     assert d.recorded("signature") is None
+
 
 
 def test_o10_no_reader_falls_back_to_a_vendor_field(tmp_path: Path) -> None:
@@ -487,7 +490,7 @@ def test_p056_alert_key_names_are_hostile_and_the_harness_name(tmp_path: Path) -
 def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -> None:
     holding = S.HoldingTicketStore()
     signed, _ = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
-                          mapping=S.DEFAULT_MAPPING_GENERIC, store=holding, run_id="p082-signed")
+                          mapping=S.DEFAULT_MAPPING_GENERIC, store=holding, run_id=fixture_uuid("p082-signed"))
     opened = holding.only_open()
     assert _sig_label(opened) == RULE_ID, "the sig: label is not the recorded signature verbatim"
     assert _labels(opened, "evt:") == [f"evt:{DETECTED_AT}"], (
@@ -500,12 +503,13 @@ def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -
     alert = S.generic_alert(rule={"id": RULE_ID, "name": name, "description": DESCRIPTION})
     d, store = _ticketed(tmp_path / "unsigned", alert=alert,
                          mapping={**S.DEFAULT_MAPPING_GENERIC, "signature": "rule.name"},
-                         run_id="p082-unsigned")
+                         run_id=fixture_uuid("p082-unsigned"))
     payload = store.only_open()
     assert _sig_label(payload) == S.CASE_FALLBACK_SIGNATURE
     assert _labels(payload, "evt:") == [f"evt:{DETECTED_AT}"]
     assert payload.get("summary") == DESCRIPTION
     assert d.recorded("signature") is None
+
 
 
 #: An event time a ticket store may refuse as a label: carried as-is (C16), it holds spaces.
@@ -519,7 +523,7 @@ def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
 
     accepting = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
     ok, _ = _ticketed(tmp_path / "accepted", alert=S.generic_alert(rule_id=RULE_ID),
-                      mapping=S.DEFAULT_MAPPING_GENERIC, store=accepting, run_id="b1-accepted")
+                      mapping=S.DEFAULT_MAPPING_GENERIC, store=accepting, run_id=fixture_uuid("b1-accepted"))
     assert accepting.refused == [], f"the control's ticket was refused: {accepting.refused}"
     assert accepting.find(f"sig:{RULE_ID}") == [str(accepting.only_open().get("key"))], (
         "the control's case is not found by its sig: label")
@@ -529,7 +533,7 @@ def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
     refusing = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
     d, _ = _ticketed(tmp_path / "refused",
                      alert=S.generic_alert(rule_id=RULE_ID, detected_at=SPACED_EVENT_TIME),
-                     mapping=S.DEFAULT_MAPPING_GENERIC, store=refusing, run_id="b1-refused")
+                     mapping=S.DEFAULT_MAPPING_GENERIC, store=refusing, run_id=fixture_uuid("b1-refused"))
     label = f"evt:{SPACED_EVENT_TIME}"
     assert refusing.refused == [label], (
         "the store never refused the create: the evt: label did not carry the event time "
@@ -559,13 +563,13 @@ def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -
         shim = S.RecordingShim()
         d, store = _ticketed(tmp_path / value, alert=S.generic_alert(rule_id=value),
                              mapping=S.DEFAULT_MAPPING_GENERIC, shim=shim, lessons=lessons,
-                             run_id=f"p089-{value.lower()}-{1 if value == upper else 2}")
+                             run_id=fixture_uuid(f"p089-{value.lower()}-{1 if value == upper else 2}"))
         assert _sig_label(store.only_open()) == value
         assert _listed(d.opening_message, lessons) == {f"fd1222-p089-{'upper' if value == upper else 'lower'}"}, (
             f"the lessons lookup for {value!r} folded case into {other!r}")
     for i, value in enumerate((LOOKALIKE, "Ré", "Ré", "R-1 ")):
         d, store = _ticketed(tmp_path / f"nonkey-{i}", alert=S.generic_alert(rule_id=value),
-                             mapping=S.DEFAULT_MAPPING_GENERIC, run_id=f"p089-nonkey-{i}")
+                             mapping=S.DEFAULT_MAPPING_GENERIC, run_id=fixture_uuid(f"p089-nonkey-{i}"))
         assert _sig_label(store.only_open()) == S.CASE_FALLBACK_SIGNATURE, (
             f"{value!r} (not a key under A6) became a ticket label")
         assert d.recorded("signature") is None
@@ -578,6 +582,7 @@ def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -
     _ep, _judge, rows = _graded(tmp_path / "judge", alert=S.generic_alert(rule_id=upper),
                                 facts={"signature": upper})
     assert _keys(rows) == {upper}, "the findings key folded or slugged the signature"
+
 
 
 def _rewrite_alert_mid_run(run_dir: Path, raw: bytes) -> None:

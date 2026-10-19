@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.episodes import _episode_handle as EH
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -45,10 +44,10 @@ def render(ep) -> E.Page:
     return E.render(ep, module=visualize_episode())
 
 
-def cli(argv, capsys, *, episodes_base=None):
-    """`visualize_episode().main(argv)` with its stdout / stderr captured, under the episodes
-    base `episodes_base` when given."""
-    return E.cli(argv, capsys, module=visualize_episode(), episodes_base=episodes_base)
+def cli(argv, capsys):
+    """`visualize_episode().main(argv)` with its stdout / stderr captured (#1187 O9: an id
+    names an episode under its tenant's own `<T>/episodes/`; no episodes base is set)."""
+    return E.cli(argv, capsys, module=visualize_episode())
 
 
 def cli_on(episode_dir, capsys):
@@ -79,7 +78,6 @@ def _err_lines(err: str) -> list[str]:
 
 
 def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_its_path(tmp_path):
-    """Driving `render_episode` on a sample-shaped episode returns `<dir>/learning.html`."""
     ep = E.sample_episode(tmp_path)
     out = E.render_episode(ep.dir, module=visualize_episode())
     assert Path(out) == ep.page, f"render_episode returned {out!r}, not the page's path"
@@ -101,7 +99,6 @@ def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_
 
 def test_1025_visualize_episode_cli_exits_zero_on_an_episode_dir_and_one_with_no_page_otherwise(
         tmp_path, capsys):
-    """`main(["--tenant", T, <id>])` returns 0 and prints the page path."""
     ep = E.sample_episode(tmp_path)
     rc, out, err = cli_on(ep.dir, capsys)
     assert rc == 0, (rc, out, err)
@@ -115,7 +112,7 @@ def test_1025_visualize_episode_cli_exits_zero_on_an_episode_dir_and_one_with_no
     bare.mkdir()
     ep.page.unlink()
     for argv in ([], E.cli_argv(a_file), E.cli_argv(bare), [*E.cli_argv(ep.dir), bare.name]):
-        rc, out, err = cli(argv, capsys, episodes_base=base)
+        rc, out, err = cli(argv, capsys)
         assert rc == 1, f"main({argv}) returned {rc}: out={out!r} err={err!r}"
         assert len(_err_lines(err)) == 1, f"main({argv}) wrote {err!r} to stderr, not one line"
         assert not (bare / E.PAGE_NAME).exists()
@@ -124,8 +121,6 @@ def test_1025_visualize_episode_cli_exits_zero_on_an_episode_dir_and_one_with_no
 
 
 def test_1025_a_link_planted_at_learning_html_is_refused_not_written_through(tmp_path):
-    """`render_episode` on an episode whose `learning.html` is a symlink to an outside file refuses
-    ."""
     ep = E.sample_episode(tmp_path)
     outside = tmp_path / "outside.html"
     outside.write_text("OUTSIDE", encoding="utf-8")
@@ -143,13 +138,9 @@ def test_1025_a_link_planted_at_learning_html_is_refused_not_written_through(tmp
 
 def test_1025_a_render_creates_or_changes_exactly_one_file_learning_html_and_touches_no_run_visualizations_mirror(
         tmp_path, run_visualizations_dir):
-    """A tree snapshot (paths + sizes + mtimes) of the episode before and after `render_episode`
-    differs in exactly `learning.html`, and `<mirror root>/<episode>/` is not created."""
     ep = E.sample_episode(tmp_path)
     mirror = run_visualizations_dir / E.EPISODE_ID
     assert not mirror.exists(), "precondition: a stale mirror from another run"
-    # #1105 PR 2 (declared change 4): the container carries the record the launcher leaves.
-    E.plant_container_record(ep.dir)
     before = E.snapshot(ep.dir)
     page = render(ep)
     after = E.snapshot(ep.dir)
@@ -160,8 +151,6 @@ def test_1025_a_render_creates_or_changes_exactly_one_file_learning_html_and_tou
 
 
 def test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_every_step_on_it(tmp_path):
-    """After `cli.main` returns 0 on a full fake-seamed episode, `learning.html` sits beside
-    `judge.yaml` and its stage table carries every `Step` row on the record ."""
     launch = ST._launch(tmp_path)
     assert launch.rc == 0
     ep = launch.episode_dir
@@ -174,15 +163,20 @@ def test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_every_ste
 
 
 class _PlantingJudge(J.FakeJudge):
-    """`FakeJudge` that plants a real symlink at the page's name the first time the judge seam is
-    reached ."""
+    """`FakeJudge` that plants a real symlink at the page's name the first time the judge seam
+    is reached — the episode dir does not exist before the launch (`prepare_episode` refuses an
+    existing one), so the plant happens from inside the one seam that runs after it does. The
+    fault itself is the guarded write meeting the link (p1); the fake decides nothing.
 
-    def __init__(self, episode_dir: Path, target: Path, **kw):
+    #1187: the launcher mints the episode's id, so the folder is the one `ST._NextEpisode`
+    finds when the seam is reached, not a composed `<episodes root>/<id>`."""
+
+    def __init__(self, episode: ST._NextEpisode, target: Path, **kw):
         super().__init__(**kw)
-        self.episode_dir, self.target = Path(episode_dir), Path(target)
+        self.episode, self.target = episode, Path(target)
 
     def __call__(self, prompt, **kw):
-        page = self.episode_dir / E.PAGE_NAME
+        page = self.episode.dir / E.PAGE_NAME
         if not page.is_symlink():
             E.plant_link(page, self.target)
         return super().__call__(prompt, **kw)
@@ -192,8 +186,7 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
         tmp_path, monkeypatch, capsys):
     outside = tmp_path / "outside.html"
     outside.write_text("OUTSIDE", encoding="utf-8")
-    episode_dir = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
-    judge = _PlantingJudge(episode_dir, outside, default=J.as_reply_text(J.reply_doc()))
+    judge = _PlantingJudge(ST._NextEpisode(), outside, default=J.as_reply_text(J.reply_doc()))
     launch = ST._launch(tmp_path, judge=judge)
     err = capsys.readouterr().err
     assert launch.rc == 0, "a render fault changed the launch's exit status"
@@ -202,15 +195,12 @@ def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_
     assert outside.read_text(encoding="utf-8") == "OUTSIDE"
     assert (launch.episode_dir / E.PAGE_NAME).is_symlink()
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-control"))
     control = ST._launch(tmp_path)
     assert control.rc == 0
     assert hook_page(control.episode_dir).by_id, "the control launch did not write a real page"
 
 
 def test_1025_preflight_refused_episode_and_the_page(tmp_path, capsys):
-    """The pre-flight-refused path returns 1 before RUNS with no `judge.yaml` and no `runs/`, and
-    the launcher writes no `learning.html` there ."""
     launch = ST._launch(tmp_path, **ST._refusing_seams())
     assert launch.rc == 1, "the control failed: pre-flight did not refuse"
     ep = launch.episode_dir
@@ -231,7 +221,6 @@ def test_1025_preflight_refused_episode_and_the_page(tmp_path, capsys):
 
 
 def test_1025_cli_invoked_with_no_positional_argument(tmp_path, capsys):
-    """`main([])` returns 1, prints one reason line to stderr, writes no page (d01)."""
     ep = E.sample_episode(tmp_path)
     rc, out, err = cli([], capsys)
     assert rc == 1, (rc, out, err)
@@ -249,7 +238,6 @@ def _refused_manifest(tmp_path, capsys, plant) -> tuple[int, str, str, E.Episode
 
 
 def test_1025_family_yaml_has_invalid_yaml_syntax(tmp_path, capsys):
-    """No page, exit 1, one reason line on stderr naming the manifest as unreadable ."""
     rc, _out, err, _ep = _refused_manifest(
         tmp_path, capsys, lambda p: E.plant_raw(p, "worlds: [\n  {world_id: b"))
     lines = _err_lines(err)
@@ -275,27 +263,32 @@ def _live996_shaped(tmp_path: Path, root: Path) -> E.Episode:
     return ep
 
 
-def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys):
-    """`episodes/latest -> <id>` as the CLI argument is accepted (J4)."""
-    ep = E.sample_episode(tmp_path)
-    latest = ep.dir.parent / "latest"
-    latest.symlink_to(ep.dir, target_is_directory=True)
-    E.plant_container_record(ep.dir)
-    rc, out, err = cli(E.cli_argv(latest), capsys, episodes_base=ep.dir.parent)
+def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys, monkeypatch):
+    from defender.tests.storage.ids_1187 import _spec1187 as R
+
+    monkeypatch.delenv(R.EPISODES_BASE_ENV, raising=False)
+    tenant = E.page_tenant()
+    episodes = R.episodes_dir(tenant.data_root, str(tenant.id))
+    episode_id = R.new_id()
+    built = E.sample_episode(tmp_path, root=episodes, runs=False)
+    target = episodes / episode_id
+    built.dir.rename(target)
+    T.write_family(target, E.sample_manifest(episode_id=episode_id))
+    latest = episodes / "latest"
+    latest.symlink_to(target, target_is_directory=True)
+    rc, out, err = cli(E.cli_argv(latest), capsys)
+    assert rc == 1, (out, err)
+    assert "latest" in err, err
+    assert R.EPISODES_BASE_ENV not in err, f"refused for the retired variable, not the id: {err}"
+    assert not (target / E.PAGE_NAME).exists()
+    rc, out, err = cli(E.cli_argv(target), capsys)
     assert rc == 0, (out, err)
-    assert ep.page.is_file()
-    assert not ep.page.is_symlink()
-    page = E.read_page(ep.dir)
-    for label in E.WORLDS:
-        assert f"runs/{E.EPISODE_ID}-{label}/runtime.html" in page.hrefs, page.hrefs
-    assert "latest" not in page.raw
+    assert (target / E.PAGE_NAME).is_file()
 
 
 def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path, monkeypatch, capsys):
-    """The launcher writes no page on an abort (the hook is after JUDGE)."""
     launcher = _cli()
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-preflight"))
-    oracle_seam = ST._Interrupting(EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID))
+    oracle_seam = ST._Interrupting(ST._NextEpisode())
     ep, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused,
                            oracle=ST.S.oracle(then=ST.S.Move(None, raises=oracle_seam)))
     assert oracle_seam.calls > 0, "the control failed: pre-flight's oracle was never reached"
@@ -317,10 +310,13 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     assert records.count("absent") == 2, records
     assert page.elements(cls="rc-sample-system"), records
 
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-questioner"))
-    questioner = ST._Interrupting(EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID))
+    questioner = ST._Interrupting(ST._NextEpisode())
     ep2, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused, questioner=questioner)
     assert not (ep2 / "family.yaml").exists(), "the control failed: the manifest was written"
+    # The abort above still primes the capture before the interrupt lands (priming precedes the
+    # questioner in the launcher's own order) and that print is real launcher stderr, not the
+    # standalone CLI's — drained here so the assertion below is about the CLI's OWN report,
+    # not noise the launcher run left sitting in the shared capsys buffer.
     capsys.readouterr()
     rc, out, err = cli_on(ep2, capsys)
     assert rc == 1, (out, err)
@@ -329,8 +325,6 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
 
 
 def test_1025_an_interrupt_during_the_render(tmp_path):
-    """`learning.html` after an interrupt that lands INSIDE the render is either the previous page
-    whole or absent ."""
     ep = E.sample_episode(tmp_path)
     render(ep)
     previous = ep.page.read_bytes()
@@ -342,19 +336,18 @@ def test_1025_an_interrupt_during_the_render(tmp_path):
     assert ep.page.read_bytes() == previous, "a partial page replaced the previous one"
     assert sorted(p.name for p in ep.dir.iterdir()) == listing, "a staged temporary was left"
 
+    nxt = ST._NextEpisode()
     with pytest.raises(KeyboardInterrupt), \
             E.when_inside(E.raise_now(KeyboardInterrupt("mid-render"))) as seen:
         ST._launch(tmp_path)
     assert seen["hit"], "the interrupt never landed inside the launcher's render"
-    launched = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
+    launched = nxt.dir
     assert (launched / "judge.yaml").is_file(), "the grade was not on disk before the render"
     assert not (launched / E.PAGE_NAME).exists(), "a partial page was left by the interrupt"
     assert not [p for p in launched.iterdir() if p.name.startswith(".")], "a staged temp is left"
 
 
 def test_1025_a_refused_write_leaves_no_residue(tmp_path):
-    """A refused replace (an alias at `learning.html`) leaves no staged temporary in the episode
-    dir."""
     ep = E.sample_episode(tmp_path)
     E.plant_link(ep.page, tmp_path / "nowhere")
     listing = sorted(p.name for p in ep.dir.iterdir())
@@ -388,8 +381,6 @@ def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
 
 @NOT_ROOT
 def test_1025_a_read_only_episode_directory(tmp_path, capsys):
-    """The CLI exits 1 with the write failure on stderr and no page when the episode dir is read-
-    only."""
     ep = E.sample_episode(tmp_path)
     ep.dir.chmod(0o555)
     try:
@@ -401,22 +392,25 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
     assert not ep.page.exists(), (rc, out, err)
 
     class _ReadOnlyJudge(J.FakeJudge):
-        def __init__(self, episode_dir, **kw):
+        def __init__(self, episode, **kw):
             super().__init__(**kw)
-            self.episode_dir = Path(episode_dir)
+            self.episode = episode
 
         def __call__(self, prompt, **kw):
             reply = super().__call__(prompt, **kw)
-            self.episode_dir.chmod(0o555)
+            self.episode.dir.chmod(0o555)
             return reply
 
-    launched = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
-    judge = _ReadOnlyJudge(launched, default=J.as_reply_text(J.reply_doc()))
+    # #1187: the launcher mints the episode's id — the folder is the one the launch makes.
+    nxt = ST._NextEpisode()
+    judge = _ReadOnlyJudge(nxt, default=J.as_reply_text(J.reply_doc()))
     try:
         launch = ST._launch(tmp_path, judge=judge)
         err = capsys.readouterr().err
     finally:
-        launched.chmod(0o755)
+        for made in ST._episodes_now() - nxt.before:
+            made.chmod(0o755)
+    launched = nxt.dir
     assert launch.rc == 0, "a refused page write changed the exit status"
     assert "could not be rendered" in err, err
     assert not (launched / E.PAGE_NAME).exists()
@@ -435,14 +429,12 @@ def _page_classes(page: E.Page) -> set[str]:
 
 
 def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path):
-    """The docstring's promise — `python defender/presentation/visualize_episode.py <dir>` —
-    with `PYTHONPATH` unset and the cwd elsewhere: the script puts its own package."""
     ep = E.sample_episode(tmp_path)
     script = Path(visualize_episode().__file__)
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-    # #1105 PR 2 (declared change 4): `--tenant T <episode id>` under the episodes base.
-    env[T.EPISODES_BASE_ENV] = str(ep.dir.parent)
-    E.plant_container_record(ep.dir)
+    # #1105 PR 2 (declared change 4): `--tenant T <episode id>`; #1187 (O9): the episode is
+    # found under the tenant's own `<T>/episodes/`, so the child is handed no episodes base.
+    env.pop(T.EPISODES_BASE_ENV, None)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     proc = subprocess.run([sys.executable, str(script), *E.cli_argv(ep.dir)], env=env,
@@ -469,18 +461,18 @@ def _unhealthy(ep: E.Episode) -> None:
 
 def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically_from_two_roots(
         tmp_path, monkeypatch):
-    """d05/x24 for the shape it never held on."""
     for var in (T.RUNS_BASE_ENV, T.EPISODES_BASE_ENV):
         monkeypatch.delenv(var, raising=False)
-    built = E.sample_episode(tmp_path, root=tmp_path / "build")
+    built = E.sample_episode(tmp_path, root=T.tenant_episodes(tmp_path / "build"))
     _unhealthy(built)
-    one = E.copy_episode(built, tmp_path / "root-one" / "copy-one")
-    two = E.copy_episode(built, tmp_path / "root-two" / "nested" / "renamed-two")
+    one = E.copy_episode(built, tmp_path / "root-one" / built.dir.name)
+    two = E.copy_episode(built, tmp_path / "root-two" / "nested" / built.dir.name)
     page = render(one)
     render(two)
     text = one.page.read_text(encoding="utf-8")
-    for absent in (str(tmp_path), "root-one", "copy-one", "renamed-two"):
+    for absent in (str(tmp_path), "root-one", "root-two", "nested"):
         assert absent not in text, f"{absent!r} leaked into the page"
+    _assert_a_renamed_copy_is_refused(built, tmp_path / "root-three", "unhealthy")
     assert one.page.read_bytes() == two.page.read_bytes(), "the two copies rendered differently"
     # positive control: every refusal is still said, in its slot
     records = page.text_of("sec-records")
@@ -497,8 +489,6 @@ def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically
 
 @NOT_ROOT
 def test_1025_a_link_into_an_unreadable_directory_at_a_records_name_is_that_slots_refusal(tmp_path):
-    """`Path.exists()` follows a link and, on 3.11, re-raises a permission fault from the directory
-    above ."""
     ep = E.sample_episode(tmp_path, timing=True)
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -517,3 +507,23 @@ def test_1025_a_link_into_an_unreadable_directory_at_a_records_name_is_that_slot
         assert slot in records, records
     assert "timing record unreadable" in page.text_of("sec-stages")
     assert str(tmp_path) not in page.raw
+
+
+def _assert_a_renamed_copy_is_refused(built: E.Episode, root: Path, name: str) -> None:
+    """R5 / #1187 declared change 10: `built` copied under `root` to a folder named by a FRESH
+    UUID — a well-formed episode id (declared change 1), so only the manifest check can refuse
+    it — is refused, the refusal naming both the folder's id and the id its manifest carries,
+    and no page is written for it."""
+    from defender.tests.storage.ids_1187 import _spec1187 as R
+
+    folder_id = R.new_id()
+    renamed = E.copy_episode(built, root / folder_id)
+    manifest_id = T.mod("_yaml").safe_load(
+        (renamed.dir / "family.yaml").read_text(encoding="utf-8"))["episode_id"]
+    assert manifest_id != folder_id, "the scene needs a manifest naming another episode"
+    err = R.raised(E.render_episode, renamed.dir, module=visualize_episode())
+    assert err is not None, f"{name}: a copy renamed to {folder_id} rendered (R5)"
+    text = R.message(err)
+    assert manifest_id in text, f"{name}: the refusal does not name the manifest's id: {text}"
+    assert folder_id in text, f"{name}: the refusal does not name the folder's id: {text}"
+    assert not renamed.page.exists(), f"{name}: a page was written for a renamed copy"

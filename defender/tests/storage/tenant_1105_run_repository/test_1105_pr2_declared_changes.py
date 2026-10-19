@@ -29,10 +29,6 @@ def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
 
 
-def _episodes() -> Path:
-    return Path(os.environ[P.EPISODES_BASE_ENV])
-
-
 def _episode_names() -> set[str]:
     """Every entry under any tenant's `<data root>/<T>/episodes/` — #1187 Layout A, where every
     launch claims its episode (O9: no configured episodes root)."""

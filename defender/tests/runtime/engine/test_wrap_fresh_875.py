@@ -1,5 +1,6 @@
 """A tool return from the gather subagent is framed with a salt minted after its content is known (wrap_fresh), so the framed party cannot close its own frame (#875)."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from dataclasses import replace as _with_live_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
@@ -61,17 +62,17 @@ class _Output:
 
 def _main_deps(tmp_path: Path):
     """MAIN's real deps, bound the way the driver binds them — and WITHOUT a `salt=` kwarg,
-    which is the parameter this change deletes. Today `_for_run` mints a uuid4 for it; after
-    the change there is no field to mint. They carry the run's one `RunState` (#1235 round 2),
-    as the driver hands them: the dispatch's breaker screen reads it."""
+which is the parameter this change deletes. Today `_for_run` mints a uuid4 for it; after
+the change there is no field to mint. They carry the run's one `RunState` (#1235 round 2),
+as the driver hands them: the dispatch's breaker screen reads it."""
     from dataclasses import replace
 
     from defender.runtime.run_state import RunState
-
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     return run_dir, replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=_DEFENDER), run=_live_run_1165(run_dir)),
                             run_state=RunState(run_dir, "r-875"))
+
 
 
 def _drive(tmp_path: Path, lead_id: str = "l-001"):

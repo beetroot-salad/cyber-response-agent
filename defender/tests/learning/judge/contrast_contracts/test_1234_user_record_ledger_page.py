@@ -503,7 +503,7 @@ def test_1234_every_new_fate_appears_on_the_ledger_and_the_page(tmp_path: Path) 
     check = S.sym(S.JUDGE_ENQUEUE, "check_disposition_entry")
     for entry in S.ledger(built):
         check(entry)
-    assert S.sym(S.JUDGE, "read_grade")(built.ep) is not None, "the record's reader learns them"
+    assert S.J.read_grade_at(built.ep) is not None, "the record's reader learns them"
     pg = _page(built)
     _assert_headings_follow_lanes(pg, observed)
     for coord in observed:

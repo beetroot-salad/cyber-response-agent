@@ -68,7 +68,6 @@ def _sections(page: E.Page) -> dict[str, str]:
 
 def test_1025_each_record_in_the_records_section_renders_as_absent_when_missing_and_its_content_when_present(
         tmp_path):
-    """The live-996 shape renders `samples.yaml` as "absent" and the other records present."""
     ep = E.sample_episode(tmp_path)
     call = {"system": E.SYSTEM, "verb": "esql", "params": {"query": "FROM drifted-index"}}
     E.write_outcome(ep.dir, drift=[{**call, "status": "the live answer drifted"}],
@@ -105,8 +104,6 @@ def test_1025_each_record_in_the_records_section_renders_as_absent_when_missing_
 
 
 def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_section(tmp_path):
-    """A copied episode with `<script>alert(1)</script><img src=x onerror=alert(1)>` planted in a
-    finding's `claim`, `root_cause`, `anchor`, `topic`, `evidence[0]`, a world's."""
     ep = E.sample_episode(tmp_path)
     manifest = E.sample_manifest(base_story=f"story {MARKUP}")
     manifest["worlds"][2]["axis"] = f"axis {MARKUP}"
@@ -139,7 +136,6 @@ def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_sect
 
 
 def test_1025_non_ascii_and_control_characters_in_rendered_strings(tmp_path):
-    """The page declares and writes UTF-8."""
     ep = E.sample_episode(tmp_path)
     exotic = "a—b​c‮d"
     E.draw_document(ep.dir, E.GRADED_WORLD, 0, E.draw_doc(
@@ -168,8 +164,6 @@ def test_1025_non_ascii_and_control_characters_in_rendered_strings(tmp_path):
 
 
 def test_1025_the_page_encodes_with_errors_replace_before_the_guarded_write(tmp_path):
-    """The R6 hole, resolved: the page encodes its document with `errors="replace"` before the
-    guarded write, so a lone surrogate in a record becomes the encoder's replacement."""
     ep = E.sample_episode(tmp_path)
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable",
                      "x\ud800y and n\x00l")
@@ -184,7 +178,6 @@ def test_1025_the_page_encodes_with_errors_replace_before_the_guarded_write(tmp_
 
 
 def test_1025_judge_yaml_has_invalid_yaml_syntax(tmp_path):
-    """A present-but-corrupt `judge.yaml` is a different state from absence."""
     ep = E.sample_episode(tmp_path)
     intact_page = render(ep)
     intact = _sections(intact_page)
@@ -198,7 +191,6 @@ def test_1025_judge_yaml_has_invalid_yaml_syntax(tmp_path):
 
 
 def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_path):
-    """A `timing.json` that is not the record's shape ."""
     ep = E.sample_episode(tmp_path)
     intact = _sections(render(ep))
     for raw in ('{"steps": [{"step": "questioner"}]}', '{"steps": [{"step": "questioner", "st'):
@@ -207,13 +199,16 @@ def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_pat
         stages = page.text_of("sec-stages")
         assert "timing record unreadable" in stages, stages
         assert "not on the record" not in stages, stages
+        # Scoped to the TABLE (`stage-timing`), not the whole section: `sec-stages` also holds
+        # every call's own transcript block, and the sample's real judge response durations
+        # legitimately format to "1m00s" there — unrelated to whether `timing.json` itself
+        # parsed. The docstring's own claim is about the table's wall column, not the section.
         assert "1m00s" not in page.text_of("stage-timing")
         assert page.text_of("sec-verdict") == intact["sec-verdict"]
         assert page.text_of("sec-worlds") == intact["sec-worlds"]
 
 
 def test_1025_an_alias_planted_at_each_record_name(tmp_path):
-    """A symlink planted at each record's name ."""
     ep = E.sample_episode(tmp_path)
     outside = tmp_path / "outside.txt"
     outside.write_text("OUTSIDE-TARGET-CONTENT", encoding="utf-8")
@@ -234,18 +229,18 @@ def test_1025_an_alias_planted_at_each_record_name(tmp_path):
 
 
 def test_1025_a_malformed_record_versus_an_absent_one(tmp_path):
-    """For each of `samples.yaml`, `provenance.json`, `outcome.yaml` the page shows two DIFFERENT
-    states."""
     ep = E.sample_episode(tmp_path)
     for name, absent, sentence in (
             ("samples.yaml", "absent", "samples record unreadable"),
             ("provenance.json", "absent", "provenance record unreadable"),
             ("outcome.yaml", "no record: outcome.yaml is absent", "does not parse")):
-        fresh = E.copy_episode(ep, tmp_path / f"absent-{name}")
+        # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its
+        # manifest's episode id); only its root differs.
+        fresh = E.copy_episode(ep, tmp_path / f"absent-{name}" / ep.dir.name)
         (fresh.dir / name).unlink()
         assert absent in _records(render(fresh)), name
         assert sentence not in _records(render(fresh)), name
-        broken = E.copy_episode(ep, tmp_path / f"broken-{name}")
+        broken = E.copy_episode(ep, tmp_path / f"broken-{name}" / ep.dir.name)
         E.plant_raw(broken.dir / name, "{\n  [")
         text = _records(render(broken))
         assert sentence in text, (name, text)
@@ -254,7 +249,6 @@ def test_1025_a_malformed_record_versus_an_absent_one(tmp_path):
 
 @NOT_ROOT
 def test_1025_an_unreadable_regular_file_at_a_record_name(tmp_path):
-    """A permission-denied regular file at each record's name takes that record's refusal slot ."""
     ep = E.sample_episode(tmp_path)
     names = ("judge.yaml", "timing.json", "outcome.yaml", "samples.yaml", "provenance.json")
     E.write_timing(ep.dir, E.every_step())
@@ -286,7 +280,6 @@ def test_1025_an_unreadable_regular_file_at_a_record_name(tmp_path):
 
 
 def test_1025_one_malformed_sidecar_record_sits_beside_otherwise_intact_ones(tmp_path):
-    """Only the section fed by the bad record carries a refusal sentence."""
     ep = E.sample_episode(tmp_path, timing=True)
     intact = _sections(render(ep))
     never_timing = _sections(render(E.sample_episode(tmp_path / "never-timing")))
@@ -304,8 +297,6 @@ def _refused():
 
 
 def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_page(tmp_path):
-    """`grade_episode` reads `world_archive` through `read_world_facts`, and the symlink/FIFO screen
-    on `report.md` / `investigation.md` now lives in that reader (O8)."""
     family = E.mod("learning.judge.family")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [E.served_row("b", "oracle")], "c": []})
     outside = tmp_path / "outside"
@@ -335,14 +326,11 @@ def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_p
 
 
 def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_page(tmp_path):
-    """The judge's input builder (`judge/render.py::render`) reads `world_archive` through the same
-    `read_world_facts`, so it inherits the reader's screen."""
-    render_mod = E.mod("learning.judge.render")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [E.served_row("b", "oracle")], "c": []})
     fifo = E.plant_fifo(ep / "worlds" / "b" / "investigation.md")
     started = time.monotonic()
     with E.Rescue(fifo, after=2.0) as rescue, pytest.raises(_refused()):
-        render_mod.render(ep, "b")
+        J.render_at(ep, "b")
     assert time.monotonic() - started < 2.0, "the input builder blocked on the FIFO"
     assert not rescue.fed, "the input builder blocked on the FIFO"
 
@@ -351,19 +339,14 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
     outside = tmp_path / "outside-report.md"
     outside.write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
     E.plant_link(ep / "worlds" / "c" / "report.md", outside)
-    rendered = render_mod.render(ep, "b")
+    rendered = J.render_at(ep, "b")
     assert "OUTSIDE-REPORT-BODY" not in repr(rendered.__dict__)
     assert "c" not in rendered.contrast_rows, "the linked world is a reference run"
 
 
 def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malformed(tmp_path):
-    """The page's strict reading of `samples.yaml` is the page's alone (71-resolutions-f F-4)."""
-    render_mod = E.mod("learning.judge.render")
     ep = E.sample_episode(tmp_path, judge=False)
     E.plant_raw(ep.dir / "samples.yaml", "logs-*: [\n  {")
-    # The judge's door judges the container's tenant record (#1105 PR 2, second review round),
-    # as the page's view does: the record the launcher leaves, planted before the grade.
-    E.plant_container_record(ep.dir)
     grade = J.grade_at(
         ep.dir, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc(
             bucket="none", systems=[E.SYSTEM]))),
@@ -374,7 +357,7 @@ def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malfor
     assert sorted(graded) == sorted([E.PASSTHROUGH_WORLD, E.GRADED_WORLD]), rows
     for label in graded:
         assert rows[label]["completed_draws"] == 1, (label, rows[label])
-    assert render_mod.render(ep.dir, graded[0]) is not None
+    assert J.render_at(ep.dir, graded[0]) is not None
 
     page = render(ep)
     records = _records(page)
