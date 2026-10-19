@@ -35,7 +35,7 @@ def test_p4_a_manifest_without_a_continuation_prompt_loads():
     family = parse(doc)
 
     assert family.branch_message_id == T.BRANCH_MESSAGE_ID
-    assert [w.world_id for w in family.worlds] == list(T.WORLDS)
+    assert [w.label for w in family.worlds] == list(T.WORLDS)
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
     from defender.tests.support.runtime.state import _1255_run_records as RR
 
     arm, ep, base = _launch_arm(tmp_path, world)
-    token = T.world_token(world)
+    token = T.world_id(ep, world)
 
     stamp = _provenance.read(RunPaths(arm).provenance)
     if stamp is not None:
@@ -90,12 +90,10 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
             f"the arm's stamp names its parent run {stamp.parent_run_id!r} inside the box")
         assert stamp.fork_turn is None, (
             f"the arm's stamp names its fork turn {stamp.fork_turn!r} inside the box")
-        assert T.EPISODE_TOKEN not in str(stamp.world_id or ""), (
-            f"the arm's stamp names its episode's world {stamp.world_id!r} inside the box")
         assert stamp.world_id is None, (
             f"the arm's stamp carries a world id {stamp.world_id!r} inside the box")
     RR.assert_only_run_records(arm, f"world {world}'s arm", RR.table_rows(arm))
-    lineage = {"world token": token, "episode token": T.EPISODE_TOKEN, "episode id": ep.name}
+    lineage = {"world id": token, "episode id": ep.name, "source run id": T.SOURCE_RUN_ID}
     record = json.dumps([token, T.SOURCE_RUN_ID]).encode()
     for how, raw in (("plain", record), ("zlib", zlib.compress(record))):
         planted = base64.b64encode(raw).decode("ascii")

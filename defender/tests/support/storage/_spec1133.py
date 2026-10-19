@@ -57,8 +57,8 @@ Handle, ``defender.episodes._episode_handle`` (D2'):
 
 Address grammar: an address is an attribute path on an ``Episode``. A bare name (``family``,
 ``served_world``) is an attribute of the episode; ``world.<name>`` one of
-``episode.world(label)``. A method takes the record's components (``served_world(token)``,
-``wire_log(name)``, ``world(label).draw(n)``); anything else is a property.
+``episode.world(world_id)``. A method takes the record's components (``served_world(world_id)``,
+``wire_log(name)``, ``world(world_id).draw(n)``); anything else is a property.
 
 Entry points, with the signatures the suite calls (D3', rev 3):
 
@@ -77,7 +77,7 @@ Entry points, with the signatures the suite calls (D3', rev 3):
   ``archive.archive_episode(episode, run_dirs)``;
 * ``capture.prime_base(source_run_dir, episode, *, allow_empty=False)``;
 * ``ledger.Ledger.for_world(episode, world_id)`` (``LedgerError`` at construction for a bad or
-  non-case-stable id, the WHOLE token judged); ``_episode_paths.check_minted_token(token)``;
+  noncanonical UUID); world-path admission validates the same UUID identity;
 * ``_family.load_family(view, ...)`` -- ``view`` a ``Bound`` (``episode.view()`` or a
   reader's own ``bind``);
 * ``episode.delta_o(view, *, invoke=)`` / ``episode.verdicts(view)`` (the episode's walked
@@ -85,8 +85,9 @@ Entry points, with the signatures the suite calls (D3', rev 3):
 * ``run._resume_target(ns, *, episode, tenant)`` (``--episode`` with no held episode is
   ``SystemExit``); ``run.py``'s sibling door is ``--tenant T --episode <episode_id> --world L``
   since #1105 PR 2 (``--resume`` is gone);
-* ``enqueue.draws_on_disk(view, label)`` / ``draws_on_disk_report(view, label)``;
-* ``judge._run_world_draws(episode, label, *, judge, draws, model, effort, prompt)`` (S1) ->
+* ``enqueue.draws_on_disk(view, world_id)`` / ``draws_on_disk_report(view, world_id)``
+  (``None`` selects episode-level family draws);
+* ``judge._run_world_draws(episode, label, *, world_id, judge, draws, model, effort, prompt)`` (S1) ->
   ``(completed, documents, malformed)``;
 * the doors ``judge.grade_episode(runs, episode_id, ...)`` (by id since #1105 PR 2),
   ``visualize_episode.render_episode(...)``, ``run.main([...], ...)`` and ``cli.main``.
@@ -94,6 +95,8 @@ Entry points, with the signatures the suite calls (D3', rev 3):
 Underscore-prefixed so pytest does not collect it.
 """
 from __future__ import annotations
+
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
 import errno
@@ -125,16 +128,15 @@ from defender.tests.shared.filesystem.test_1111_rooted_io import (  # noqa: F401
 HANDLE_MODULE = "defender.episodes._episode_handle"
 
 #: The world, token, wire-log name and draw index the composing records are addressed with.
-LABEL = "b"
-TOKEN = "e1133.b"
-WIRE_NAME = WIRE_LOG_NAMES.agent_framed_trace("judge:b:0")
+WORLD_ID = fixture_uuid("world:1133:b")
+WIRE_NAME = WIRE_LOG_NAMES.agent_framed_trace(f"judge:{WORLD_ID}:0")
 DRAW_N = 0
 
 #: D1's record table (kept by D2'), row for row: address -> the verbs that row grants. Rev 3
 #: (R1): records are write-only, so `family` and `review` lose `read`; reading a record is the
 #: view's `read(LAYOUT.<record>)`.
 RECORD_VERBS: dict[str, tuple[str, ...]] = {
-    "family": ("write",),
+    "family": ("create",),
     "family_stamp": ("write",),
     "review": ("write",),
     "samples": ("write",),
@@ -146,6 +148,7 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "priming_lock": ("create", "delete"),
     "wire_log": ("write",),
     "world.draw": ("write", "delete"),
+    "family_draw": ("write", "delete"),
     # #1187 R8 (declared change 12): the archive pointer `world.run_dir_pointer` is retired with
     # its write — nothing reads it, and the arm roster supersedes it — so the row is gone.
     # #1224: the episode outcome and each world's own record, both created once.
@@ -163,7 +166,7 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
 #: `world(label).draws`. `runs` is the handle's PRIVATE `_runs` since #1105 PR 2 (F-13): the
 #: container and its arms are the runs repository's episode view, built on this handle, and
 #: the one public hand-out of its path is `box_mounted_container` (`PRIVATE_FOLDERS`).
-FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws")
+FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws", "family_draws")
 #: The folders the handle serves under a private attribute (the key's name, `_`-prefixed).
 PRIVATE_FOLDERS: tuple[str, ...] = ("runs",)
 
@@ -177,10 +180,11 @@ WRITE_MODE = {"write": "replace", "create": "create", "append": "append"}
 
 #: The components each composing record is addressed with.
 RECORD_ARGS: dict[str, tuple[Any, ...]] = {
-    "served_world": (TOKEN,),
+    "family_draw": (DRAW_N,),
+    "served_world": (WORLD_ID,),
     "wire_log": (WIRE_NAME,),
     "world.draw": (DRAW_N,),
-    "world_record": (LABEL,),
+    "world_record": (WORLD_ID,),
 }
 
 
@@ -228,7 +232,7 @@ def mod(dotted: str) -> Any:
 def expected_record_rel(key: str) -> PurePosixPath:
     """The record's name relative to the episode dir, from `_episode_paths.LAYOUT` (the only
     place names are spelled)."""
-    world = LAYOUT.world(LABEL)
+    world = LAYOUT.world(WORLD_ID)
     return {
         "family": lambda: LAYOUT.family,
         "family_stamp": lambda: LAYOUT.family_stamp,
@@ -238,11 +242,12 @@ def expected_record_rel(key: str) -> PurePosixPath:
         "timing": lambda: LAYOUT.timing,
         "learning_html": lambda: LAYOUT.learning_html,
         "served_base": lambda: LAYOUT.served_base,
-        "served_world": lambda: LAYOUT.served_world(TOKEN),
+        "served_world": lambda: LAYOUT.served_world(WORLD_ID),
         "priming_lock": lambda: LAYOUT.priming_lock,
         "wire_log": lambda: LAYOUT.wire_log(WIRE_NAME),
         "world.draw": lambda: world.draw(DRAW_N),
-        "world_record": lambda: LAYOUT.world_record(LABEL),
+        "family_draw": lambda: LAYOUT.family_draw(DRAW_N),
+        "world_record": lambda: LAYOUT.world_record(WORLD_ID),
         "outcome": lambda: LAYOUT.outcome,
         "not_comparable": lambda: LAYOUT.not_comparable,
         "served_unrecorded": lambda: LAYOUT.served_unrecorded,
@@ -250,17 +255,18 @@ def expected_record_rel(key: str) -> PurePosixPath:
 
 
 def expected_folder_rel(key: str) -> PurePosixPath:
-    world = LAYOUT.world(LABEL)
+    world = LAYOUT.world(WORLD_ID)
     return {
         "served": LAYOUT.served, "runs": LAYOUT.runs, "worlds": LAYOUT.worlds,
         "world.dir": world.dir, "world.draws": world.draws,
+        "family_draws": LAYOUT.family_draws,
     }[key]
 
 
 def resolve(episode: Any, key: str) -> Any:
     """The record or folder at `key` on `episode` (the address grammar in the docstring)."""
     head, dot, rest = key.partition(".")
-    owner, attr = (episode.world(LABEL), rest) if (head == "world" and dot) else (episode, key)
+    owner, attr = (episode.world(WORLD_ID), rest) if (head == "world" and dot) else (episode, key)
     if owner is episode and attr in PRIVATE_FOLDERS:
         attr = f"_{attr}"
     got = getattr(owner, attr)
@@ -295,7 +301,7 @@ LEAF_PLANTS = ("symlink", "dangling", "hardlink", "fifo", "directory")
 FOLDER_PLANTS = ("folder_link_outside", "folder_link_inside", "folder_file", "folder_fifo")
 
 #: What an owner's name check or the core's name grammar says.
-NAME_REFUSAL = (r"not a valid path component|not a non-negative integer|is not case-stable|"
+NAME_REFUSAL = (r"not a valid path component|not a valid world id|not a non-negative integer|is not case-stable|"
                 r"not a valid relative name")
 #: What the core's refusals say: a non-plain or aliased leaf, a symlinked folder, a
 #: non-directory folder.

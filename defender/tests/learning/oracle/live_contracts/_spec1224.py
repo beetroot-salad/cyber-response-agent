@@ -298,7 +298,6 @@ def judge_refused_cls() -> type[BaseException]:
 
 # Re-exported from the #947 / #921 machinery, unchanged.
 EPISODE_ID = T.EPISODE_ID
-EPISODE_TOKEN = T.EPISODE_TOKEN
 SOURCE_RUN_ID = T.SOURCE_RUN_ID
 #: The run id a direct (unbranched) investigation fixture runs under (#1187: a uuid4 — `RunId`
 #: admits canonical lowercase UUID text only).
@@ -319,7 +318,7 @@ def no_preflight(*_args: Any, **_kw: Any) -> int:
     refuse with a TypeError."""
     return 0
 
-world_token = T.world_token
+fixture_world_id = T.fixture_world_id
 untrusted_frames = T.untrusted_frames
 outside_untrusted_frames = T.outside_untrusted_frames
 assert_wrapped_untrusted = T.assert_wrapped_untrusted
@@ -331,16 +330,16 @@ def judge_reply(*, systems: tuple[str, ...] = ("idp",), bucket: str = "lead-set"
     return as_reply_text(J.reply_doc(findings=[], bucket=bucket, systems=list(systems)))
 
 
-def judge_label(agent_id: str) -> str | None:
-    """The world a judge call is about, from its agent id: `judge:<label>:<n>` -> `<label>`
+def judge_identity(agent_id: str) -> str | None:
+    """The persisted UUID a judge call names: `judge:<world UUID>:<n>`
     (the family-scope call is `judge:family:<n>`)."""
     parts = str(agent_id).split(":")
     return parts[1] if len(parts) >= 3 and parts[0] == "judge" else None
 
 
-def judge_called_for(judge: FakeJudge, label: str) -> bool:
-    """Whether the judge model was called for world `label` (agent id `judge:<label>:<n>`)."""
-    return any(str(a).startswith(f"judge:{label}:") for a in judge.agent_ids)
+def judge_called_for(judge: FakeJudge, world_id: str) -> bool:
+    """Whether a model call names the explicit world UUID."""
+    return any(str(a).startswith(f"judge:{world_id}:") for a in judge.agent_ids)
 archived_judge_world = J.archived_judge_world
 
 
@@ -977,7 +976,7 @@ def world_v2(label: str, *, facts: list[dict] | None = None, role: str = "B",
              disposition_declared: str = "malicious", label_basis: str = "policy-rule",
              **over: Any) -> dict:
     """One v2 world. `facts=None` gives one default fact; pass `[]` for a control world."""
-    doc = {"world_id": label, "role": role, "story": story, "axis": axis,
+    doc = {"label": label, "world_id": T.fixture_world_id(label), "role": role, "story": story, "axis": axis,
            "disposition_declared": disposition_declared, "label_basis": label_basis,
            "facts": [fact()] if facts is None else facts}
     doc.update(over)
@@ -1098,16 +1097,16 @@ def read_outcome(ep: Path) -> dict | None:
 
 def world_record(ep: Path, label: str, reason: str = REASON_UNSERVABLE, *,
                  call: Mapping[str, Any] | None = None, detail: str = "") -> Path:
-    path = Path(ep) / WORLD_RECORDS / f"{label}.yaml"
+    path = Path(ep) / WORLD_RECORDS / f"{T.world_id(ep, label)}.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_yaml.safe_dump({"world": label, "reason": reason,
+    path.write_text(_yaml.safe_dump({"world": label, "world_id": T.world_id(ep, label), "reason": reason,
                                      "call": dict(call) if call else None, "detail": detail}),
                     encoding="utf-8")
     return path
 
 
 def read_world_record(ep: Path, label: str) -> dict | None:
-    path = Path(ep) / WORLD_RECORDS / f"{label}.yaml"
+    path = Path(ep) / WORLD_RECORDS / f"{T.world_id(ep, label)}.yaml"
     if not path.is_file():
         return None
     return _yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -1127,7 +1126,7 @@ def read_samples(ep: Path) -> dict | None:
 
 
 def oracle_dir(ep: Path, label: str) -> Path:
-    return Path(ep) / ORACLE_DIRNAME / label
+    return Path(ep) / ORACLE_DIRNAME / T.world_id(ep, label)
 
 
 def oracle_rows(ep: Path, label: str, name: str) -> list[dict]:
@@ -1135,14 +1134,12 @@ def oracle_rows(ep: Path, label: str, name: str) -> list[dict]:
     return read_jsonl(oracle_dir(ep, label) / f"{name}.jsonl")
 
 
-def _episode_world_token(ep: Path, label: str) -> str:
-    """The world's token belongs to this scene's episode, including a launch's fresh UUID."""
-    token = sym(FAMILY, "episode_token_for")(Path(ep).name)
-    return world_token(label, episode_token=token)
+def _episode_world_id(ep: Path, label: str) -> str:
+    return T.world_id(ep, label)
 
 
 def ledger_path(ep: Path, label: str) -> Path:
-    return Path(ep) / "served" / f"{_episode_world_token(ep, label)}.jsonl"
+    return Path(ep) / "served" / f"{_episode_world_id(ep, label)}.jsonl"
 
 
 def ledger_rows(ep: Path, label: str) -> list[dict]:
@@ -1172,8 +1169,8 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     `(lead_id, seq)` — written even when the ledger is empty."""
     rq = mod("runtime.record_query")
     breaker = mod("runtime.circuit_breaker")
-    world = Path(ep) / "worlds" / label
-    token = _episode_world_token(ep, label)
+    world = Path(ep) / "worlds" / T.world_id(ep, label)
+    token = _episode_world_id(ep, label)
     lines: list[str] = []
     joined: list[dict] = []
     for i, row in enumerate(ledger):
@@ -1209,7 +1206,7 @@ def ledger_row(source: str, *, system: str = "idp", verb: str = "query",
     row = {"system": system, "verb": verb, "params": dict(params or query_params()),
            "payload_text": json.dumps(payload if payload is not None else {"rows": []},
                                       sort_keys=True),
-           "source": source, "world_id": world_token(label)}
+           "source": source, "world_id": fixture_world_id(label)}
     row.update(extra)
     return row
 
@@ -1255,9 +1252,9 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
         captured("idp", "query", query_params("user:alice"),
                  {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]})])
     manifest = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    declared = {w["world_id"]: w.get("disposition_declared", "malicious")
+    declared = {w["label"]: w.get("disposition_declared", "malicious")
                 for w in manifest["worlds"]}
-    planted = {w["world_id"] for w in manifest["worlds"] if w.get("role") != "A"}
+    planted = {w["label"] for w in manifest["worlds"] if w.get("role") != "A"}
     for label in labels:
         J.archived_judge_world(ep, label, disposition=declared.get(label, "malicious"),
                                **world_kw)
@@ -1309,7 +1306,7 @@ def world_ledger(ep: Path, label: str) -> Any:
     episode = mod("episodes._episode_handle").Episode.create(Path(ep))
     with contextlib.suppress(FileExistsError):
         episode.served_base.create("")
-    return sym(LEDGER, "Ledger").for_world(episode, _episode_world_token(ep, label)).declare()
+    return sym(LEDGER, "Ledger").for_world(episode, _episode_world_id(ep, label)).declare()
 
 
 def serving(*, oracle: Any = None, verifier: Any = None, box: Callable[[], Any] | None = None,
@@ -1683,8 +1680,9 @@ def questioner_for(doc: dict | None = None) -> FakeAgent:
     """The question-writer double: call 1 answers the family, then one call per authored seat
     (`author_family`'s protocol), each reply a document."""
     doc = doc if doc is not None else family_v2()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
-    seats = [w for w in doc["worlds"] if w.get("role") != "A"]
-    return FakeAgent(doc, *seats)
+    authored = T.declaration(doc)
+    seats = [w for w in authored["worlds"] if w.get("role") != "A"]
+    return FakeAgent(authored, *seats)
 
 
 def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,

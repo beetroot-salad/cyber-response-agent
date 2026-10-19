@@ -39,8 +39,8 @@ def _concrete(template: str, acc: S.Accessor) -> str:
     """The TSV's path template with this suite's own component values substituted in."""
     subs = {
         "<lead>": S.LEAD_ID, "<seq>": str(S.SEQ), "<turn>": str(S.TURN), "<role>": S.ROLE,
-        "<label>": S.LABEL, "<n>": "1",
-        "<stage>": S.STAGE, "<token>": S.WORLD_TOKEN, "<episode_id>": S.EPISODE_ID,
+        "<world UUID>": S.WORLD_ID, "<n>": "1",
+        "<stage>": S.STAGE, "<episode_id>": S.EPISODE_ID,
     }
     out = template.split(",")[0].strip()
     for k, v in subs.items():
@@ -225,15 +225,11 @@ def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_di
             f"the label rule admitted {label!r}: N8 keeps the view-name rule's `-` refusal")
         assert "-" in fault, f"the label rule's refusal does not name the delimiter: {fault!r}"
     owner = S.EpisodePaths(episode_dir)
-    # The world token is minted by `_family.world_token_for`; the owner's `served_world` takes
-    # the minted token, so the `.` refusal is asked of the label THERE.
-    from defender.runtime.branch import _family
-    assert owner.served_world(_family.world_token_for("ep.2026", "plain")).name == (
-        "ep.2026.plain.jsonl"), "positive control: a dotted episode TOKEN is the normal case"
+    assert owner.served_world(S.WORLD_ID).name == f"{S.WORLD_ID}.jsonl"
     for label in ("has.dot", "a.b"):
-        with pytest.raises(_family.FamilyError) as excinfo:
-            _family.world_token_for("ep.2026", label)
-        assert "." in str(excinfo.value)
+        fault = world_label_fault(label)
+        assert fault is not None
+        assert "." in fault
 
 
 
@@ -245,9 +241,8 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
     assert is_case_stable_id("plain"), by_reference
     assert not is_case_stable_id("Plain"), by_reference
 
-    for label in ("Overlay", "OVERLAY", "oVerlay"):
-        with pytest.raises(Exception):  # noqa: B017,PT011
-            owner.sibling_run_dir(S.EPISODE_ID, label)
+    assert owner.world_dir(S.WORLD_ID).name == S.WORLD_ID
+    for label in ("Overlay", "OVERLAY", "oVerlay", S.WORLD_ID.upper()):
         with pytest.raises(Exception):  # noqa: B017,PT011
             owner.world_dir(label)
     with pytest.raises(Exception):  # noqa: B017,PT011

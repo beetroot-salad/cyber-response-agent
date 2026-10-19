@@ -40,7 +40,8 @@ from typing import Any
 
 from defender.episodes._episode_handle import Episode
 from defender._io import Bound, entry_present, read_text_utf8
-from defender.episodes._episode_paths import LAYOUT, WorldPaths
+from defender.episodes._episode_paths import LAYOUT, EpisodePaths, WorldPaths
+from defender.runtime.branch._family import load_family
 from defender.run_repository import (
     RunPaths,
     artifact_dir,
@@ -215,7 +216,7 @@ def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
 
 
 def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Path]:
-    """Archive each world's run dir into the episode's `worlds/<label>/`; return what was
+    """Archive each world's run dir into the episode's `worlds/<world-uuid>/`; return what was
     written.
 
     `run_dirs` is keyed by short world label and chosen by the caller: an `incomplete` episode
@@ -225,12 +226,13 @@ def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Pa
     leaves the same prefix.
     """
     archived: dict[str, Path] = {}
+    family = load_family(episode.view(), expected_episode_id=episode.dir.name)
     for world in sorted(run_dirs):
         run_dir = Path(run_dirs[world])
-        # The label passes the handle's minting check; the copy lane's own paths are the
-        # world's, under the episode dir the handle holds.
-        handle = episode.world(world)
-        dest = WorldPaths(episode.dir, LAYOUT.world(world))
+        # Resolve the selector through the persisted mapping before constructing UUID paths.
+        world_id = family.world(world).world_id
+        handle = episode.world(world_id)
+        dest = EpisodePaths(episode.dir).world(world_id)
         sources = _screened_sources(world, run_dir, dest)
         world_dir = dest.dir
         handle.dir.ensure()

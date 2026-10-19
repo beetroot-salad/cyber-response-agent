@@ -2,6 +2,8 @@
 corpus and held-out index reading past runs by their record."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 import re
 import shlex
@@ -297,7 +299,7 @@ def _queued_row(finding_id: str, key: str, *, pre_change: bool = False, **over: 
         "alert_rule_key": key, "direction": "family", "subject": "defender", "type": "lead-set",
         "subject_anchor": "l-001", "subject_topic": "coverage",
         "finding": "the holding system was never re-queried",
-        "contrast_evidence": ["worlds/a/report.md", "worlds/b/report.md"],
+        "contrast_evidence": [f"worlds/{T.fixture_world_id('a')}/report.md", f"worlds/{T.fixture_world_id('b')}/report.md"],
         "on_verdict_path": True, "world_label_doubted": False,
         "citations": ["investigation.md#l-001"],
         "source_run_dir": f"episodes/{finding_id.split('/')[0]}/worlds/b",

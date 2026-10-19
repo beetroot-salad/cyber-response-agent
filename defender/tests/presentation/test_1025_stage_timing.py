@@ -602,7 +602,7 @@ def test_1025_a_record_that_cannot_be_written_does_not_end_the_episode(tmp_path,
     assert _outcome(launch.episode_dir)["outcome"] == "accepted", (
         "the family was not calibrated after the refused write")
     for label in ("a", "b", "c"):
-        assert (launch.episode_dir / "worlds" / label / "report.md").is_file(), (
+        assert (launch.episode_dir / "worlds" / T.world_id(launch.episode_dir, label) / "report.md").is_file(), (
             f"world {label} was not archived after the refused write")
     assert launch.judge.calls > 0, "the judge was never reached after the refused write"
     assert (launch.episode_dir / "judge.yaml").exists(), "the grade did not land"

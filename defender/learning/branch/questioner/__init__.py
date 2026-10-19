@@ -73,7 +73,7 @@ WORLD_SEATS: tuple[str, ...] = ("B", "C")
 
 #: World A is not authored: it is the capture (no facts, null axis), which makes it the
 #: control.
-BASE_WORLD_ID = "a"
+BASE_WORLD_LABEL = "a"
 BASE_WORLD_ROLE = "A"
 
 _PROMPTS = Path(__file__).resolve().parent
@@ -317,6 +317,10 @@ def _reply_document(reply: Any, *, what: str) -> dict[str, Any]:
             f"{what}: the questioner returned {type(doc).__name__}, not a document — "
             "the family cannot be composed from it"
         )
+    worlds = doc.get("worlds")
+    if "world_id" in doc or (isinstance(worlds, list) and any(
+            isinstance(world, dict) and "world_id" in world for world in worlds)):
+        raise BranchError(f"{what}: world_id is host-assigned; author descriptive fields only")
     return dict(doc)
 
 
@@ -340,7 +344,7 @@ def _declared_base_world(family: dict[str, Any]) -> dict[str, Any]:
     for entry in worlds:
         if not isinstance(entry, dict):
             continue
-        if entry.get("role") == BASE_WORLD_ROLE or entry.get("world_id") == BASE_WORLD_ID:
+        if entry.get("role") == BASE_WORLD_ROLE or entry.get("label") == BASE_WORLD_LABEL:
             return dict(entry)
     return {}
 
@@ -368,7 +372,7 @@ def _base_world(family: dict[str, Any], source_run_dir: Path) -> dict[str, Any]:
         world["label_basis"] = family["base_label_basis"]
     world.setdefault("story", family.get("base_story"))
     world.update({
-        "world_id": BASE_WORLD_ID,
+        "label": BASE_WORLD_LABEL,
         "role": BASE_WORLD_ROLE,
         "axis": None,
         # M07=A: the control world carries an explicit empty fact list.
@@ -452,7 +456,7 @@ def read_frontier(source_run_dir: Path, *, fences_at: int) -> str:
     return "\n\n".join(f"```invlang\n{body}\n```" for body in kept)
 
 
-#: The fields a seat authors. Everything else (world id, facts) is Call 1's plan, which must be
+#: The fields a seat authors. Everything else (label, facts) is Call 1's plan, which must be
 #: coherent across worlds; a seat elaborates, it does not re-plan.
 SEAT_AUTHORED_FIELDS: frozenset[str] = frozenset({"story", "axis", "disposition_declared",
                                                   "label_basis"})
@@ -461,7 +465,7 @@ SEAT_AUTHORED_FIELDS: frozenset[str] = frozenset({"story", "axis", "disposition_
 def _planned_worlds(family: dict[str, Any]) -> list[dict[str, Any]]:
     """The non-base worlds Call 1 planned, in order.
 
-    Call 1 decides ids, axes and facts so the worlds form one comparison around a
+    Call 1 decides labels, axes and facts so the worlds form one comparison around a
     discriminator; each seat call then writes one world's story. The fan-out is as wide as the
     plan.
     """
@@ -471,7 +475,7 @@ def _planned_worlds(family: dict[str, Any]) -> list[dict[str, Any]]:
     return [dict(entry) for entry in worlds
             if isinstance(entry, dict)
             and entry.get("role") != BASE_WORLD_ROLE
-            and entry.get("world_id") != BASE_WORLD_ID]
+            and entry.get("label") != BASE_WORLD_LABEL]
 
 
 def _seat_letter(index: int) -> str:
@@ -496,8 +500,8 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
 ) -> dict[str, Any]:
     """Author one family document: one family call plus one call per planned world.
 
-    Returns the raw composed dict; the launcher validates it with `parse_family`, the single
-    validator, before anything is served.
+    Returns the raw composed declaration; the launcher assigns world UUIDs and validates
+    through `accept_family` before publication or preflight.
 
     `source_run_dir` and `episode_dir` are only named in the prompt, never read. The captured
     inputs arrive already read: the host owns every read of a model-writable tree.
@@ -557,7 +561,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
 
 
 __all__ = [
-    "BASE_WORLD_ID",
+    "BASE_WORLD_LABEL",
     "BASE_WORLD_ROLE",
     "QUESTIONER_DEF",
     "QUESTIONER_REQUEST_LIMIT",

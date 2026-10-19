@@ -128,7 +128,7 @@ def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path
 def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_path):
     """A bare `runs/<ep>-x` world — no manifest entry, no grade row — is a section with no findings:
     the walk never opens its draws. Its `dropped_findings: 4` was still summed."""
-    ep = E.sample_episode(tmp_path)
+    ep = E.sample_episode(tmp_path, extra_worlds=(T.world_doc("x", role="B", axis="ungraded"),))
     E.run_dir(ep.dir, "x", arm_id=str(uuid.uuid4()))
     E.draw_document(ep.dir, "x", 0, E.draw_doc(
         findings=[E.finding(claim="one"), E.finding(claim="two")], dropped=4))
@@ -138,8 +138,8 @@ def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_
     assert "0 dropped" in tile, tile
     assert not [d for d in page.elements(cls="fr-dropped") if " of x:" in d.text()], \
         page.text_of("sec-findings")
-    assert f"Worlds ({len(E.WORLDS)})" in page.text_of("sec-worlds")
-    assert "world-x" not in page.by_id
+    assert f"Worlds ({len(E.WORLDS) + 1})" in page.text_of("sec-worlds")
+    assert "world-x" in page.by_id
 
 
 def test_1025_a_finding_row_refuses_an_unknown_field():

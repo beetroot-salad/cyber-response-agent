@@ -38,16 +38,16 @@ from typing import Any
 
 from defender import _io as _real_io
 from defender.episodes._episode_paths import (
-    LAYOUT, EpisodeRefused, _check_label, check_minted_token, refuse_bad_episode_id,
+    LAYOUT, EpisodeRefused, _check_world_id, refuse_bad_episode_id,
 )
 
 #: Every record the handle hands out, keyed by its address (a bare name is an attribute of the
-#: episode, `world.<name>` one of `episode.world(label)`), mapped to the verbs its row grants.
+#: episode, `world.<name>` one of `episode.world(world_id)`), mapped to the verbs its row grants.
 #: `write` replaces (stage + rename), `create` is exclusive, `append` appends, `delete` removes a
 #: plain file.
 #: No record reads: reading is the view's (`episode.view().read(LAYOUT.<record>)`).
 RECORD_VERBS: dict[str, tuple[str, ...]] = {
-    "family": ("write",),
+    "family": ("create",),
     "family_stamp": ("write",),
     "review": ("write",),
     "samples": ("write",),
@@ -60,13 +60,14 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "priming_lock": ("create", "delete"),
     "wire_log": ("write",),
     "world.draw": ("write", "delete"),
+    "family_draw": ("write", "delete"),
     "world_record": ("create",),
     "outcome": ("create",),
     "not_comparable": ("write",),
 }
 
 #: Every folder the handle hands out, keyed the same way.
-FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws")
+FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws", "family_draws")
 
 
 class EpisodeRecord:
@@ -143,23 +144,25 @@ class EpisodeFolder:
 
 
 class EpisodeWorld:
-    """One archived world's records and folders, `worlds/<label>/`. The label passes the
-    minting check (case-stable), as `EpisodePaths.world` requires of a writer."""
+    """One archived world's records and folders, `worlds/<world UUID>/`.
 
-    def __init__(self, episode: Episode, label: str) -> None:
+    The UUID passes the same admission rule as `EpisodePaths.world`.
+    """
+
+    def __init__(self, episode: Episode, world_id: str) -> None:
         self._episode = episode
-        self._label = _check_label(label)
+        self._world_id = _check_world_id(world_id)
 
     @property
     def dir(self) -> EpisodeFolder:
-        return self._episode._folder(LAYOUT.world(self._label).dir)
+        return self._episode._folder(LAYOUT.world(self._world_id).dir)
 
     @property
     def draws(self) -> EpisodeFolder:
-        return self._episode._folder(LAYOUT.world(self._label).draws)
+        return self._episode._folder(LAYOUT.world(self._world_id).draws)
 
     def draw(self, n: int) -> WriteDeleteRecord:
-        return WriteDeleteRecord(*self._episode._at(LAYOUT.world(self._label).draw(n)))
+        return WriteDeleteRecord(*self._episode._at(LAYOUT.world(self._world_id).draw(n)))
 
 
 class Episode:
@@ -215,8 +218,8 @@ class Episode:
     # -- episode-root records ----------------------------------------------------------------
 
     @property
-    def family(self) -> WriteRecord:
-        return WriteRecord(*self._at(LAYOUT.family))
+    def family(self) -> CreateRecord:
+        return CreateRecord(*self._at(LAYOUT.family))
 
     @property
     def family_stamp(self) -> WriteRecord:
@@ -275,19 +278,25 @@ class Episode:
     def priming_lock(self) -> CreateDeleteRecord:
         return CreateDeleteRecord(*self._at(LAYOUT.priming_lock))
 
-    def served_world(self, token: str) -> AppendRecord:
-        """`served/<token>.jsonl`, a world's replay ledger; the token's label must be
-        case-stable (the minting check)."""
-        return AppendRecord(*self._at(LAYOUT.served_world(check_minted_token(token))))
+    def served_world(self, world_id: str) -> AppendRecord:
+        """A world UUID's replay ledger, independent of its descriptive label."""
+        return AppendRecord(*self._at(LAYOUT.served_world(_check_world_id(world_id))))
 
-    def world_record(self, label: str) -> CreateRecord:
-        """`world_records/<label>.yaml`, written once (#1224): a second write is refused, so a
+    def world_record(self, world_id: str) -> CreateRecord:
+        """`world_records/<world UUID>.yaml`, written once (#1224): a second write is refused, so a
         resumed sibling never rewrites its world's record."""
-        return CreateRecord(*self._at(LAYOUT.world_record(label)))
+        return CreateRecord(*self._at(LAYOUT.world_record(world_id)))
 
     def wire_log(self, name: str) -> WriteRecord:
         """`wire_logs/<name>`, by the full file name `WIRE_LOG_NAMES` gives."""
         return WriteRecord(*self._at(LAYOUT.wire_log(name)))
+
+    def family_draw(self, n: int) -> WriteDeleteRecord:
+        return WriteDeleteRecord(*self._at(LAYOUT.family_draw(n)))
+
+    @property
+    def family_draws(self) -> EpisodeFolder:
+        return self._folder(LAYOUT.family_draws)
 
     # -- folders -----------------------------------------------------------------------------
 
@@ -318,8 +327,8 @@ class Episode:
     def worlds(self) -> EpisodeFolder:
         return self._folder(LAYOUT.worlds)
 
-    def world(self, label: str) -> EpisodeWorld:
-        return EpisodeWorld(self, label)
+    def world(self, world_id: str) -> EpisodeWorld:
+        return EpisodeWorld(self, world_id)
 
 
 _DOOR = object()

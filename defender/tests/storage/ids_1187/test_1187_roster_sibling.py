@@ -562,7 +562,7 @@ class _Scene:
                                 episode_id=self.episode_id)
         self.ep = T.episode(tmp_path, doc=self.doc, root=S.episodes_dir(root, owner),
                             episode_id=self.episode_id)
-        self.roster = {w["world_id"]: S.new_id() for w in self.doc["worlds"]}
+        self.roster = {w["label"]: S.new_id() for w in self.doc["worlds"]}
 
     def poison(self) -> None:
         T.write_family(self.ep, {**self.doc, SENTINEL: "read"})

@@ -34,10 +34,10 @@ def failed_row(world: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
     so no prompt reads a failed world's reason — the noise context names failed worlds from
     pre-flight's record without it (`render.render_family_text`, `render.excluded_text`)."""
     detail = entry.get("detail")
-    reason = f"world {world['world_id']!r}: {entry.get('reason')}"
+    reason = f"world {world['label']!r}: {entry.get('reason')}"
     if isinstance(detail, str) and detail:
         reason += f" — {detail}"
-    return {"world": world["world_id"],
+    return {"world": world["label"],
             "declared": normalized_disposition(world.get("disposition_declared")),
             "ungradable": True, "failed_world": entry, "ungradable_reason": reason}
 
@@ -49,7 +49,6 @@ class RunSet:
     (the control's included); `excluded` the reason each unusable run carries."""
 
     control: str
-    episode_token: str
     usable: Annotated[dict[str, WorldFacts], SkipValidation]
     rows: Annotated[dict[str, dict[str, Any]], SkipValidation]
     excluded: dict[str, str] = field(default_factory=dict)
@@ -74,7 +73,7 @@ class RunSet:
         A22)."""
         labels = list(self.usable) if focus is None else [focus, *self.references(focus)]
         return PointerScope(
-            bound=bound, episode_token=self.episode_token,
+            bound=bound,
             run_facts={label: self.usable[label] for label in labels}, manifest=manifest,
             outcome=dict(outcome or {}), samples=None if focus is None else dict(samples or {}),
             j3=self.j3, served_systems=frozenset(served_systems))
@@ -86,22 +85,18 @@ def read_run_set(bound: Bound, manifest: dict[str, Any], *, episode_dir: Path,
     control included; an O5-failed world gets its failed row and no read. A world whose query
     table's inherited rows differ from the family's (`calls.table_refusals`, A21) is malformed
     whatever its own read says."""
-    from defender.runtime.branch._family import episode_token_for
-
-    token = episode_token_for(family_mod.episode_id_of(manifest))
     control = family_mod.control_world(manifest)
     worlds = [control, *family_mod.non_control_worlds(manifest)]
     usable: dict[str, WorldFacts] = {}
     rows: dict[str, dict[str, Any]] = {}
     excluded: dict[str, str] = {}
-    edited = table_refusals(bound, manifest, episode_token=token)
+    edited = table_refusals(bound, manifest)
     for world in worlds:
-        label = world["world_id"]
+        label = world["label"]
         if label in failed:
             rows[label] = failed_row(world, failed[label])
         else:
-            rows[label], facts = family_mod.read_world(bound, world, episode_dir=episode_dir,
-                                                        episode_token=token)
+            rows[label], facts = family_mod.read_world(bound, world, episode_dir=episode_dir)
             if facts is not None and label in edited:
                 # A table that reads whole but whose inherited rows differ from the family's
                 # is a failed read too (A21): only the family's tables together can show it.
@@ -114,8 +109,8 @@ def read_run_set(bound: Bound, manifest: dict[str, Any], *, episode_dir: Path,
         excluded[label] = str(rows[label].get("ungradable_reason"))
     # J3's rows are identified over every readable table (A12), not only the usable runs':
     # the found gaps read the same tables, so a row is J3's in every view or in none.
-    j3 = inherited_denials(readable_tables(bound, manifest, episode_token=token)[0])
-    return RunSet(control=control["world_id"], episode_token=token, usable=usable, rows=rows,
+    j3 = inherited_denials(readable_tables(bound, manifest)[0])
+    return RunSet(control=control["label"], usable=usable, rows=rows,
                   excluded=excluded, j3=j3)
 
 

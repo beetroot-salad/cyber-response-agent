@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 pytest.importorskip("pydantic_ai")
 
 from defender._io import parse_jsonl_row, read_jsonl_rows  # noqa: E402
@@ -39,6 +41,7 @@ from defender.tests.learning.branch.test_920_estate_seam import (  # noqa: E402
 #: The registry module's logger — the only place a FAULT row the ledger then refused would
 #: leave a trace (`_record_beside` logs and drops a failed write).
 REGISTRY_LOGGER = "defender.learning.branch.estate.registry"
+WORLD_ID = fixture_uuid("world:w1")
 
 
 def params_of_depth(depth: int, key: str = "host") -> dict:
@@ -53,7 +56,7 @@ def raw_lines(path: Path) -> list[str]:
     return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def served(params: dict, *, source: str = PASSTHROUGH, world_id: str | None = "w1",
+def served(params: dict, *, source: str = PASSTHROUGH, world_id: str | None = WORLD_ID,
            asked_params: dict | None = None) -> ServedCall:
     return ServedCall(
         system="cmdb", verb="get-host", params=params,
@@ -77,7 +80,7 @@ def assert_ledger_refused(err: Exception | None, what: str) -> None:
 def test_a_ledger_row_at_or_under_the_limit_is_recorded_whole_and_read_back(tmp_path, depth):
     """The positive control: at the limit the row is written, its reader returns it, and the
     params are the params served — whole, never cut (#1117's promise holds on this table too)."""
-    path = tmp_path / "served" / "w1.jsonl"
+    path = tmp_path / "served" / f"{WORLD_ID}.jsonl"
     ledger = fresh_ledger(path)
     params = params_of_depth(depth)
 
@@ -95,7 +98,7 @@ def test_a_ledger_row_at_or_under_the_limit_is_recorded_whole_and_read_back(tmp_
 @pytest.mark.parametrize("depth", [LIMIT + 1, FAR])
 def test_a_deep_served_call_is_refused_before_the_estate_and_files_nothing(
         tmp_path, caplog, depth):
-    ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
+    ledger_path = tmp_path / "ep" / "served" / f"{WORLD_ID}.jsonl"
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
     ctx = run_ctx(tmp_path)
     host = chain(depth - 1)
@@ -117,7 +120,7 @@ def test_a_deep_served_call_is_refused_before_the_estate_and_files_nothing(
 
 
 def test_a_served_call_at_the_limit_records_its_row_and_keeps_its_base_read(tmp_path):
-    ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
+    ledger_path = tmp_path / "ep" / "served" / f"{WORLD_ID}.jsonl"
     host = chain(LIMIT - 1)
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
                          **control_oracle(estate_host(host)))
@@ -132,9 +135,9 @@ def test_a_served_call_at_the_limit_records_its_row_and_keeps_its_base_read(tmp_
     assert len(lines) == 1
     rows = [parse_jsonl_row(line) for line in lines]
     assert all(row is not None for row in rows), "a row at the limit is unreadable"
-    assert [(row["source"], row["world_id"]) for row in rows] == [(PASSTHROUGH, "w1")]
+    assert [(row["source"], row["world_id"]) for row in rows] == [(PASSTHROUGH, WORLD_ID)]
     kept = [parse_jsonl_row(line) for line in raw_lines(OracleStorePaths(
-        ledger_path.parent / LAYOUT.oracle_dir("w1")).base)]
+        ledger_path.parent / LAYOUT.oracle_dir(WORLD_ID)).base)]
     assert len(kept) == 1
     assert kept[0] is not None, "the kept base read at the limit is unreadable"
     assert all(row["params"] == {"host": host} for row in rows + kept)
@@ -146,7 +149,7 @@ def test_a_served_call_at_the_limit_records_its_row_and_keeps_its_base_read(tmp_
 @pytest.mark.parametrize("depth", [LIMIT + 1, FAR])
 def test_a_deep_call_to_a_denied_verb_is_refused_before_the_decision_and_files_nothing(
         tmp_path, caplog, depth):
-    ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
+    ledger_path = tmp_path / "ep" / "served" / f"{WORLD_ID}.jsonl"
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
 
     with caplog.at_level(logging.WARNING, logger=REGISTRY_LOGGER):

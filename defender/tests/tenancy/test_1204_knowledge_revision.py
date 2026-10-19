@@ -641,8 +641,8 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
 RICH: dict[str, Any] = {
     "commit": "a" * 40, "dirty": True, "dirty_paths": ["x.md", "y.md"], "dirty_path_count": 3,
     "unavailable": "git status: a note beside the dirt", "scope": "defender", "model": "m-1",
-    "tenant_id": fixture_uuid("tenant:acme"), "world_id": "20260728t161845z-fresh-case-n59.b",
-    "parent_run_id": "20260728T161845Z-fresh-case", "fork_turn": 59,
+    "tenant_id": fixture_uuid("tenant:acme"), "world_id": fixture_uuid("world:knowledge-revision:b"),
+    "parent_run_id": fixture_uuid("run:knowledge-revision:source"), "fork_turn": 59,
     "started_at": "2026-07-28T16:18:45+00:00", "alert_label": "fresh-case",
 }
 

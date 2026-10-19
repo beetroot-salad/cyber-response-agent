@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -798,7 +800,7 @@ def _judged_in_place(ep: Path) -> None:
     registry wrote stay as they are."""
     doc = S.family_v2()
     for world in doc["worlds"]:
-        label = world["world_id"]
+        label = world["label"]
         S.archived_judge_world(ep, label,
                                disposition=world.get("disposition_declared", "malicious"))
         if not S.ledger_path(ep, label).is_file():
@@ -863,7 +865,7 @@ def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp
     judge = S.FakeJudge(default=_JUDGE_REPLY)
     _grade(sc.ep, judge, tmp_path)
     world_b = "\n".join(p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)
-                        if a.startswith("judge:b:"))
+                        if a.startswith(f"judge:{T.fixture_world_id('b')}:"))
     assert world_b, f"world b was never graded (agent ids: {judge.agent_ids})"
     assert S.ORACLE_DECISION in world_b, (
         "world b's ledger rows (two `oracle` rows) reached the judge (positive control, PCO-08)")

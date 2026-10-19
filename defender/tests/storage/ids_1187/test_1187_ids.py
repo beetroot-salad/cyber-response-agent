@@ -133,7 +133,8 @@ def _family_doc_for(episode_id: str, *labels: str) -> dict:
     return T947.family_doc(episode_id=episode_id, worlds=worlds)
 
 
-@pytest.mark.parametrize("label", ["b", LONG_LABEL, "a-b"], ids=["short", "long", "invalid"])
+@pytest.mark.parametrize("label", ["b", LONG_LABEL, "w" * 220, "w" * 1000, "a-b"],
+                         ids=["short", "200-bytes", "220-bytes", "1000-bytes", "invalid"])
 def test_1187_o3_labels_follow_their_own_rule(label):
     from defender.runtime.branch import _family
 
@@ -145,7 +146,7 @@ def test_1187_o3_labels_follow_their_own_rule(label):
     else:
         family = _family.parse_family(doc)
         _family.check_identities(family)
-        assert [w.world_id for w in family.worlds] == ["a", label]
+        assert [w.label for w in family.worlds] == ["a", label]
 
 
 def _attribute(obj: object, name: str) -> tuple[str, object]:
@@ -233,7 +234,8 @@ def test_1187_o2_run_py_refuses_a_pinned_id_that_is_not_a_canonical_uuid(
 #: Functions production must neither call nor pass around (C1 of the design): the stamp-label
 #: minter, the `-n<message>` episode-id deriver, the held-out folder-name matcher, and #1257's
 #: composer of an arm id. A *definition* alone is not flagged: the contract is "nothing calls".
-BANNED_FUNCTIONS = frozenset({"mint_run_id", "episode_id_for", "_claimed_slug", "arm_run_id_for"})
+BANNED_FUNCTIONS = frozenset({"mint_run_id", "episode_id_for", "_claimed_slug", "arm_run_id_for",
+                              "world_token_for", "episode_token_for"})
 #: The 206-byte bound's constant: neither defined nor read.
 BANNED_CONSTANT = "RUN_ID_MAX_BYTES"
 
@@ -445,6 +447,10 @@ IDENTITY_SYNTAX = [
     ("import-alias", "return m('x')", [("ref", "mint_run_id")]),
     ("module-attribute", "return _run_id.mint_run_id('y')", [("ref", "mint_run_id")]),
     ("local-deriver", "return episode_id_for(label)", [("ref", "episode_id_for")]),
+    ("world-deriver", "return family_model.world_token_for(episode_id, label)",
+     [("ref", "world_token_for")]),
+    ("episode-deriver", "return family_model.episode_token_for(episode_id)",
+     [("ref", "episode_token_for")]),
     ("labelled-mint", "return RunId.mint(label)", [("mint-args", "defender.run_repository.RunId.mint")]),
     ("add", "return family.episode_id + '-' + label", [("concat", "family.episode_id + '-'")]),
     ("join", "return '-'.join([episode_id, label])", [("concat", "'-'.join([episode_id, label])")]),
@@ -502,6 +508,7 @@ def test_1187_o1_census_syntax_partitions(tmp_path, name, source, expected):
     import textwrap
 
     prefix = ("from defender._run_id import mint_run_id as m\n"
+              "from defender.runtime.branch import _family as family_model\n"
               "from defender import _run_id\nfrom defender.run_repository import RunId\n"
               "def episode_id_for(src):\n    return src\n"
               "def compose(eid, label):\n    joined = eid\n    return f'{joined}-{label}'\n")

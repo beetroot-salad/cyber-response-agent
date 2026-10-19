@@ -44,11 +44,9 @@ from defender.learning.branch.ledger import (
 from defender.run_repository import EpisodeRuns
 from defender.runtime.branch._family import (
     BASE_ROLE,
-    episode_token_for,
     family_identities,
-    is_reserved_world_label,
+    Family, FamilyError,
     load_family,
-    world_token_for,
 )
 
 #: What a difference is called when nothing attributed it: "differs, and not shown to be the
@@ -75,7 +73,7 @@ class EpisodeError(ValueError):
 # ---------------------------------------------------------------------------------------
 
 
-def _recorded_outcome(bound: Bound) -> tuple[str, str]:
+def _recorded_outcome(bound: Bound, family: Family) -> tuple[str, str]:
     """The episode's outcome word and its reason, from pre-flight's outcome record
     (`outcome.yaml`). An absent, torn or refused record is the "no record" state, refused
     rather than read as any word (M05=A). An `accepted` record whose O5 count
@@ -86,16 +84,16 @@ def _recorded_outcome(bound: Bound) -> tuple[str, str]:
         raise EpisodeError(
             f"the episode has no outcome record to read ({missing}) — an episode is comparable "
             "only once pre-flight recorded it accepted") from None
-    unusable = outcome_mod.unusable_reason(outcome_mod.failed_worlds(bound, record))
+    unusable = outcome_mod.unusable_reason(outcome_mod.failed_worlds(bound, record, family=family))
     if record["outcome"] == outcome_mod.ACCEPTED and unusable is not None:
         return outcome_mod.UNUSABLE, unusable
     return record["outcome"], record["reason"]
 
 
-def _refuse_incomplete(bound: Bound) -> None:
+def _refuse_incomplete(bound: Bound, family: Family) -> None:
     """Refuse an episode whose outcome record is not exactly `accepted`, naming the word and
     its reason, or the missing record — and an accepted one with no readable family stamp."""
-    word, reason = _recorded_outcome(bound)
+    word, reason = _recorded_outcome(bound, family)
     if word != outcome_mod.ACCEPTED:
         raise EpisodeError(
             f"the episode's outcome is {word!r}{f' ({reason})' if reason else ''} — only an "
@@ -108,20 +106,13 @@ def _refuse_incomplete(bound: Bound) -> None:
             "its worlds would read as a measurement nobody made")
 
 
-def _archived_labels(bound: Bound) -> list[str]:
-    """Every archived world's label, sorted — the single definition of "this episode's worlds".
-
-    Taken from the archive, not the manifest: an incomplete family archives only its clean
-    siblings, and the readers answer about what is on disk. Listed through the bind, so an entry
-    is judged on what it is rather than what it points at.
-
-    Reserved labels are skipped: the grading pass archives its own draws under
-    `worlds/family/`, which no manifest can declare, and counting it would make `delta_o`
-    refuse every graded episode. Asked through `is_reserved_world_label` so both gates agree on
-    what is reserved.
-    """
-    return [label for label in bound.under(LAYOUT.worlds).entries().dirs()
-            if not is_reserved_world_label(label)]
+def _archived_labels(bound: Bound, family: Family) -> list[str]:
+    """Archived UUID directories resolved through the host-written manifest."""
+    try:
+        return sorted(family.world_by_id(world_id).label
+                      for world_id in bound.under(LAYOUT.worlds).entries().dirs())
+    except FamilyError as refused:
+        raise EpisodeError(str(refused)) from refused
 
 
 # ---------------------------------------------------------------------------------------
@@ -166,14 +157,16 @@ def verdicts(view: EpisodeRuns) -> dict[str, str]:
     A value outside the vocabulary refuses, naming it: a headline that cannot be read is not the
     same as no headline.
     """
-    return _verdicts(_walked(view))
+    bound = _walked(view)
+    family = load_family(bound, expected_episode_id=view.episode_id)
+    return _verdicts(bound, family)
 
 
-def _verdicts(bound: Bound) -> dict[str, str]:
-    _refuse_incomplete(bound)
+def _verdicts(bound: Bound, family: Family) -> dict[str, str]:
+    _refuse_incomplete(bound, family)
     out: dict[str, str] = {}
-    for label in _archived_labels(bound):
-        name = LAYOUT.world(label).report
+    for label in _archived_labels(bound, family):
+        name = LAYOUT.world(family.world(label).world_id).report
         # Absent and unreadable differ. The archive deliberately archives a world with no
         # report (a sibling that died before writing one), even on an accepted episode, so it
         # is skipped rather than taking every other world's headline down. A present but
@@ -311,17 +304,16 @@ def delta_o(view: EpisodeRuns, *, invoke: Invoke | None = None) -> dict[str, dic
 
 def _delta_o(bound: Bound, view: EpisodeRuns,
              invoke: Invoke | None) -> dict[str, dict[str, str]]:
-    _refuse_incomplete(bound)
-    labels = _archived_labels(bound)
+    family = load_family(bound, expected_episode_id=view.episode_id)
+    _refuse_incomplete(bound, family)
+    labels = _archived_labels(bound, family)
     if not labels:
         return {}
-    family = load_family(bound, expected_episode_id=view.episode_id)
     # No roster: the episode never reached RUNS, so it has no arm ids to keep out of a prompt
     # (the design's S-red: the question does not arise). A roster that is there but refused
     # raises its own refusal here.
     arm_ids = view.arm_ids() or {}
-    token = episode_token_for(family.episode_id)
-    control = next((w.world_id for w in family.worlds if w.role == BASE_ROLE), None)
+    control = next((w.label for w in family.worlds if w.role == BASE_ROLE), None)
 
     base_rows, _malformed, base_rec = bound.read_jsonl(LAYOUT.served_base)
     if base_rec.text is None:
@@ -335,12 +327,12 @@ def _delta_o(bound: Bound, view: EpisodeRuns,
     base = _answers(base_rows)
     served: dict[str, dict[str, str]] = {}
     for label in labels:
-        if label not in {w.world_id for w in family.worlds}:
+        if label not in {w.label for w in family.worlds}:
             raise EpisodeError(
                 f"the archive holds a world {label!r} the manifest does not declare "
-                f"({[w.world_id for w in family.worlds]}) — its axis is what a difference is "
+                f"({[w.label for w in family.worlds]}) — its axis is what a difference is "
                 "classified against, so there is nothing to classify it with")
-        name = LAYOUT.served_world(world_token_for(token, label))
+        name = LAYOUT.served_world(family.world(label).world_id)
         rows, _malformed, rec = bound.read_jsonl(name)
         if rec.text is None and not rec.absent:
             # Absent is a world that served nothing; refused is not, and reading it as nothing

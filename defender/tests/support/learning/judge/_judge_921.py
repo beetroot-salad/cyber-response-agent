@@ -90,7 +90,6 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
     BRANCH_MESSAGE_ID,
     CLEAN,
     EPISODE_ID,
-    EPISODE_TOKEN,
     EPISODES_BASE_ENV,
     EVENTS_PATTERN,
     ROSTER_NAME,
@@ -115,7 +114,8 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
     sym,
     untrusted_frames,
     world_doc,
-    world_token,
+    fixture_world_id,
+    world_id,
     write_family,
 )
 
@@ -182,8 +182,7 @@ ROW_KEYS = (
 
 def ledger_row(*, source: str, system: str = HOLDING_SYSTEM, verb: str = "esql",
                world_label: str | None = "b", params: dict | None = None,
-               asked_params: dict | None = None, payload: str = '{"hits": []}',
-               episode_token: str = EPISODE_TOKEN) -> dict:
+               asked_params: dict | None = None, payload: str = '{"hits": []}') -> dict:
     """One `ServedCall.row()`-shaped ledger row.
 
     `world_label=None` spells the FAMILY tier (`world_id: null`), which `record` pairs with
@@ -196,8 +195,8 @@ def ledger_row(*, source: str, system: str = HOLDING_SYSTEM, verb: str = "esql",
         "system": system, "verb": verb,
         "params": params if params is not None else {"index": EVENTS_PATTERN},
         "payload_text": payload, "source": source,
-        "world_id": None if world_label is None else world_token(
-            world_label, episode_token=episode_token),
+        "world_id": None if world_label is None else fixture_world_id(
+            world_label),
     }
     if asked_params is not None:
         row["asked_params"] = asked_params
@@ -221,8 +220,8 @@ staged_row = oracle_row
 
 
 def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
-                 episode_token: str | None = None, raw: str | None = None) -> Path:
-    """Land `served/<world_token>.jsonl` for one world and return its path.
+                 raw: str | None = None) -> Path:
+    """Land `served/<fixture_world_id>.jsonl` for one world and return its path.
 
     `raw=` writes the file's bytes verbatim, for the two states J3's reader posture is about: a
     torn JSON line mid-file and a duplicate pair-key whose rows disagree on `source`.
@@ -233,22 +232,14 @@ def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
     `<token>/<i>`, `i` its line index (a copy: the caller's dict is not touched); a row that
     spells the key — `None` included — is written as given, for the scenarios about the id.
 
-    #1187: with no `episode_token=`, the token is the EPISODE'S — its folder's uuid with every
-    `-` as `.` (R2-03) — so a test's second scene (`T.episode` gives it its own id) gets its own
-    ledgers; a row built for the default episode (`ledger_row`'s `world_id`, the default token)
-    is re-pointed at this episode's token for its world.
+    Rows carrying the fixture world's default UUID are rebound to the manifest's actual
+    identity. Explicit foreign or malformed identities remain untouched for refusal cases.
     """
-    from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
-
     served = Path(episode_dir) / "served"
     served.mkdir(parents=True, exist_ok=True)
-    if episode_token is None:
-        name = Path(episode_dir).name
-        episode_token = name.replace("-", ".") if is_fixture_uuid_shape(name) else EPISODE_TOKEN
-    token = world_token(world_label, episode_token=episode_token)
-    if episode_token != EPISODE_TOKEN:
-        default = world_token(world_label)
-        rows = [{**r, "world_id": token} if r.get("world_id") == default else r for r in rows]
+    token = world_id(episode_dir, world_label)
+    default = fixture_world_id(world_label)
+    rows = [{**r, "world_id": token} if r.get("world_id") == default else r for r in rows]
     path = served / f"{token}.jsonl"
     stamped = [r if CALL_ID in r else {**r, CALL_ID: f"{token}/{i}"}
                for i, r in enumerate(rows)]
@@ -491,7 +482,7 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
     }
     ep = episode(tmp_path, doc=doc, root=root, episode_id=episode_id)
     base_capture(ep, [captured_row(system=holding_system, verb="esql")])
-    planted = {w.get("world_id") for w in worlds if w.get("role") != "A"}
+    planted = {w.get("label") for w in worlds if w.get("role") != "A"}
     for label in labels:
         archived_judge_world(ep, label, disposition=declared[label], **world_kw)
         rows = (ledgers or {}).get(label)
@@ -502,7 +493,7 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
         if label in planted:
             # #1234 A3: a planted world's built layer (`oracle/<X>/`) is part of what it is
             # judged on — no directory is a malformed world; an empty one is an empty store.
-            (ep / "oracle" / label).mkdir(parents=True, exist_ok=True)
+            (ep / "oracle" / world_id(ep, label)).mkdir(parents=True, exist_ok=True)
     outcome_record(ep, outcome, family_stamp=family_stamp)
     from defender.tests.support.learning.branch import _triplet_947
 
@@ -677,7 +668,8 @@ def draw_files(episode_dir: Path, world_label: str) -> list[Path]:
     moment a scenario asked for ten draws — `['0','1','10','11','2', ...]` — so an assertion
     indexed off this list was paired with a different draw's document than the code under test
     had read."""
-    d = Path(episode_dir) / "worlds" / world_label / "judge"
+    d = (Path(episode_dir) / "judge" if world_label == "family" else
+         Path(episode_dir) / "worlds" / world_id(episode_dir, world_label) / "judge")
     if not d.is_dir():
         return []
     numbered = [p for p in d.glob("*.yaml") if p.stem.isascii() and p.stem.isdigit()]
@@ -685,10 +677,9 @@ def draw_files(episode_dir: Path, world_label: str) -> list[Path]:
 
 
 def draw_doc(episode_dir: Path, world_label: str, draw: int) -> dict:
-
-    return _yaml.safe_load(
-        (Path(episode_dir) / "worlds" / world_label / "judge" / f"{draw}.yaml").read_text(
-            encoding="utf-8")) or {}
+    directory = (Path(episode_dir) / "judge" if world_label == "family" else
+                 Path(episode_dir) / "worlds" / world_id(episode_dir, world_label) / "judge")
+    return _yaml.safe_load((directory / f"{draw}.yaml").read_text(encoding="utf-8")) or {}
 
 
 def wire_logs(episode_dir: Path) -> list[Path]:
@@ -710,7 +701,7 @@ def wire_logs(episode_dir: Path) -> list[Path]:
 #: answers, the list holds a conduct pointer in that world and one in another usable run, the
 #: two-run pair the resolver requires (`pointers.Assessment.has_two_run_pair`); a pointer at a
 #: run outside the call's scope is merely unresolved, never the finding's drop.
-DEFAULT_CONTRAST = ("worlds/a/report.md", "worlds/b/report.md", "worlds/c/report.md")
+DEFAULT_CONTRAST = tuple(f"worlds/{fixture_world_id(label)}/report.md" for label in ("a", "b", "c"))
 #: #1234 A1/A15: the default world finding's `evidence` — the manifest's family-level
 #: discriminator, a plan pointer that names no run, so the finding routes to the questioner
 #: lane from any world's draw.
@@ -1073,7 +1064,7 @@ def refusals() -> tuple[type[BaseException], ...]:
 
 __all__ = [
     "ALERT_ID", "AS_OF", "BRANCH_MESSAGE_ID", "CAP_KNOB", "CLEAN", "DRAWS_KNOB",
-    "EFFORT_KNOB", "EPISODES_BASE_ENV", "FAMILY_AGENT_PREFIX", "EPISODE_ID", "EPISODE_TOKEN", "EVENTS_PATTERN",
+    "EFFORT_KNOB", "EPISODES_BASE_ENV", "FAMILY_AGENT_PREFIX", "EPISODE_ID", "EVENTS_PATTERN",
     "STATE_DIR_ENV",
     "HOLDING_SYSTEM", "MODEL_KNOB", "PER_WORLD_FACTS", "ROW_KEYS", "RUNS_BASE_ENV",
     "SOURCE_RUN_ID",
@@ -1088,5 +1079,5 @@ __all__ = [
     "request_key", "review_record",
     "runs_base",
     "oracle_row", "sibling_run_dir", "staged_row", "sym", "untrusted_frames", "wire_logs", "world_doc",
-    "rows", "word_of", "world_rows", "world_token", "write_family", "write_ledger",
+    "rows", "word_of", "world_rows", "fixture_world_id", "write_family", "write_ledger",
 ]

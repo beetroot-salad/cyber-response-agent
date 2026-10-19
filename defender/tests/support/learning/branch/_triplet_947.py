@@ -71,14 +71,8 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[4]
 
-#: The fixture episode's id and its token (#1187, design rev 2: every run, arm and episode id is
-#: a random canonical lowercase uuid4, minted by the host and carrying no meaning — O1/O2). A
-#: FIXED uuid4 here, so a hand-built scene and its expectations spell one id; a launch mints its
-#: own (`runs.create_episode()`), and a test that drives the launcher reads the one episode it
-#: made off `<data root>/<T>/episodes/`, never this constant. `EPISODE_TOKEN` is what
-#: `episode_token_for` renders it to: the id with every `-` as `.` (R2-03).
+#: Fixed identity for hand-built scenes; real launches mint and persist their own UUIDs.
 EPISODE_ID = "6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5"
-EPISODE_TOKEN = EPISODE_ID.replace("-", ".")
 #: The fixture source run's id (#1187: a uuid4, as `RunId.parse` admits and `RunId.mint()` mints).
 #: The launcher and the sibling open the source by id through the tenant's repository.
 SOURCE_RUN_ID = "3b8d5e2a-1c4f-4a7b-9d6e-2f0c1a3b5d7e"
@@ -144,9 +138,25 @@ def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:
     return 0
 
 
-def world_token(world_id: str, *, episode_token: str = EPISODE_TOKEN) -> str:
-    """`f"{episode_token}.{X}"` — the ONE spelling the four comparing sites use."""
-    return f"{episode_token}.{world_id}"
+def fixture_world_id(label: str) -> str:
+    """Explicit identity for fixed fixture worlds; launcher worlds are read from disk."""
+    return fixture_uuid(f"world:{label}")
+
+
+def world_id(episode_dir: Path, label: str) -> str:
+    """Read the persisted identity bound to exactly one manifest label."""
+    doc = _yaml.safe_load((Path(episode_dir) / "family.yaml").read_text(encoding="utf-8"))
+    matches = [world for world in doc["worlds"] if world["label"] == label]
+    assert len(matches) == 1, (label, matches)
+    return matches[0]["world_id"]
+
+
+def declaration(doc: dict) -> dict:
+    """Questioner-authored fields, before the host assigns world identities."""
+    authored = {k: v for k, v in doc.items() if k != "world_id"}
+    if "worlds" in authored:
+        authored["worlds"] = [declaration(world) for world in authored["worlds"]]
+    return authored
 
 
 # --------------------------------------------------------------------------------------
@@ -407,12 +417,13 @@ def fact(fact_id: str = "f1", statement: str = "web-1's owner is the platform te
     return {"fact_id": fact_id, "statement": statement, "entities": list(entities)}
 
 
-def world_doc(world_id: str, *, role: str = "B", story: str = "a story",
+def world_doc(label: str, *, world_id: str | None = None, role: str = "B", story: str = "a story",
               axis: str | None = "an axis", disposition_declared: str = "malicious",
               label_basis: str = "policy-rule", facts: list[dict] | None = None) -> dict:
     """One v2 world. `facts=None` gives one default fact; pass `[]` for the control world."""
     return {
-        "world_id": world_id, "role": role, "story": story, "axis": axis,
+        "label": label, "world_id": fixture_world_id(label) if world_id is None else world_id,
+        "role": role, "story": story, "axis": axis,
         "disposition_declared": disposition_declared, "label_basis": label_basis,
         "facts": [fact()] if facts is None else facts,
     }
@@ -466,7 +477,7 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
             base_world(),
             world_doc("b", facts=[fact("f1", "a second login to web-1 came from 10.0.0.9",
                                        ("web-1", "10.0.0.9"))]),
-            world_doc("c", facts=[fact("f2")]),
+            world_doc("c", role="C", facts=[fact("f2")]),
         ],
     }
     declared = _declared_family_fields()
@@ -1066,17 +1077,17 @@ def report_text(disposition: str, *, extra: str = "", body: str = "") -> str:
     )
 
 
-def archived_world(episode_dir: Path, world_id: str, *, disposition: str = "malicious",
+def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicious",
                    scrub_ran: bool = True, commit: str | None = "deadbee",
                    dirty: bool | None = False, unavailable: str | None = None) -> Path:
     """One `worlds/<X>/` directory carrying every artifact M8's row declares. No
     `worlds/<X>/run_dir` pointer: #1187 (R8, declared change 12) stops the archive writing it
     (nothing reads it; the arm roster supersedes it), so a scenario about an OLD archive's
     leftover pointer plants one itself."""
-    w = episode_dir / "worlds" / world_id
+    w = episode_dir / "worlds" / world_id(episode_dir, label)
     (w / "gather_raw").mkdir(parents=True, exist_ok=True)
     (w / "report.md").write_text(report_text(disposition), encoding="utf-8")
-    (w / "investigation.md").write_text(f"# world {world_id}\n", encoding="utf-8")
+    (w / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (w / "executed_queries.jsonl").write_text("", encoding="utf-8")
     (w / "provenance.json").write_text(
         json.dumps(provenance_record(commit=commit, dirty=dirty, unavailable=unavailable)),
@@ -1110,7 +1121,7 @@ def _manifest_labels(episode_dir: Path) -> list[str]:
         return []
     doc = _yaml.safe_load(path.read_text(encoding="utf-8"))
     worlds = doc.get("worlds") if isinstance(doc, dict) else None
-    return [str(w["world_id"]) for w in worlds or [] if isinstance(w, dict) and "world_id" in w]
+    return [str(w["label"]) for w in worlds or [] if isinstance(w, dict) and "label" in w]
 
 
 def plant_roster(episode_dir: Path) -> dict[str, str]:
@@ -1415,7 +1426,7 @@ def refusals() -> tuple[type[BaseException], ...]:
 
 __all__ = [
     "ALERTS_PATTERN", "AS_OF", "BRANCH_MESSAGE_ID", "CLEAN", "CONFIGURED", "DEFENDER",
-    "EPISODE_ID", "EPISODE_TOKEN", "EPISODES_BASE_ENV", "EVENTS_PATTERN",
+    "EPISODE_ID", "EPISODES_BASE_ENV", "EVENTS_PATTERN",
     "GIT_STATUS_FAILED", "GIT_UNAVAILABLE", "GOLDEN_INVESTIGATION", "RUNS_BASE_ENV",
     "KNOWLEDGE_SHA", "NO_KNOWLEDGE_KEY", "OTHER_KNOWLEDGE_SHA",
     "branchable_investigation",
@@ -1432,5 +1443,5 @@ __all__ = [
     "FakeCapture", "source_capture", "source_stamp", "isolate_learning_state", "LEARNING_STATE_ENV",
     "lesson_row", "mod", "refusals", "replace", "runs_base",
     "arm_run_dir", "sibling_run_dir",
-    "sym", "world_doc", "world_token", "write_family",
+    "sym", "world_doc", "fixture_world_id", "world_id", "declaration", "write_family",
 ]

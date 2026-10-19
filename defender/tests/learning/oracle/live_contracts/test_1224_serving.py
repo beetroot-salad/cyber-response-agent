@@ -39,7 +39,7 @@ EDR_BASE = {"events": [{"event_id": "x-7", "host": "db-1", "process": "sshd",
                         "ts": "2026-07-28T15:10:00Z"}]}
 SIEM_BASE = {"entity": "alice", "record_id": "r-0001", "risk": "low"}
 
-TOKEN_B = S.world_token("b")
+TOKEN_B = S.fixture_world_id("b")
 
 
 def _text(payload: Any) -> str:

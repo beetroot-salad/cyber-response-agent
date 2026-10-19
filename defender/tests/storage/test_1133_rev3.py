@@ -111,7 +111,7 @@ def test_r1_a_record_is_read_through_the_view_present_absent_or_refused(tmp_path
 
         planted.remove()
         assert episode.view().read(rel).absent, "control: an absent record did not read absent"
-        getattr(episode, key).write(f"{key}: plain\n")
+        getattr(getattr(episode, key), "create" if key == "family" else "write")(f"{key}: plain\n")
         assert episode.view().read(rel).text == f"{key}: plain\n"
         assert not hasattr(getattr(episode, key), "read"), (
             f"the {key} record still answers `read`: records are write-only (R1)")
@@ -301,7 +301,7 @@ def _delta_episode(tmp_path: Path) -> Path:
 
 
 def _world_file(ep: Path, label: str) -> Path:
-    return ep / LAYOUT.served_world(T.world_token(label))
+    return ep / LAYOUT.served_world(T.world_id(ep, label))
 
 
 def episode_mod() -> Any:
@@ -491,7 +491,7 @@ def _draw0_asks() -> list[str]:
     """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply (N22,
     `judge._REPLY_ATTEMPTS` asks per draw)."""
     attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
-    return ["judge:b:0", *(f"judge:b:0:{a}" for a in range(1, attempts))]
+    return [f"judge:{T.fixture_world_id('b')}:0", *(f"judge:{T.fixture_world_id('b')}:0:{a}" for a in range(1, attempts))]
 
 
 class SwappingJudge:
@@ -516,7 +516,7 @@ class SwappingJudge:
         return self.good
 
     def called_for(self, label: str) -> list[str]:
-        return [a for a in self.agent_ids if a.startswith(f"judge:{label}:")]
+        return [a for a in self.agent_ids if a.startswith(f"judge:{T.fixture_world_id(label)}:")]
 
 
 def _grade(tmp_path: Path, ep: Path, judge: Any) -> Any:
@@ -532,7 +532,7 @@ def _grade(tmp_path: Path, ep: Path, judge: Any) -> Any:
 def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_draw_removal(
         tmp_path, roots, host, reach):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    judge_dir = ep / "worlds" / "b" / "judge"
+    judge_dir = ep / "worlds" / T.world_id(ep, "b") / "judge"
     stale = b"findings: [{bucket: stale}]\n"
     reached: dict[str, Path] = {}
 
@@ -558,7 +558,7 @@ def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_d
     judge = SwappingJudge()
     got = _grade(tmp_path, ep, judge)
     assert not isinstance(got, BaseException), f"the control pass was refused: {got!r}"
-    assert judge.called_for("b") == [*_draw0_asks(), "judge:b:1"]
+    assert judge.called_for("b") == [*_draw0_asks(), f"judge:{T.fixture_world_id('b')}:1"]
     assert sorted(p.name for p in judge_dir.iterdir()) == ["1.yaml"]
 
 
@@ -864,17 +864,19 @@ def test_r4_a_durable_append_into_a_missing_holding_folder_makes_nothing(tmp_pat
     pytest.param("Control", False, id="dotless-not-case-stable"),
     pytest.param("E1133.b", False, id="head-not-case-stable"),
     pytest.param("e1133.B", False, id="label-not-case-stable"),
-    pytest.param("control", True, id="dotless-case-stable"),
-    pytest.param("e1133.b", True, id="a-world-token"),
+    pytest.param("control", False, id="dotless-case-stable"),
+    pytest.param("e1133.b", False, id="a-world-token"),
+    pytest.param(T.fixture_world_id("b"), True, id="world-uuid"),
 ])
-def test_patch_the_minting_check_judges_the_whole_token(token, minted):
-    from defender.episodes._episode_paths import check_minted_token
+def test_patch_the_minting_check_judges_the_whole_token(tmp_path, token, minted):
+    from defender.episodes._episode_paths import EpisodePaths
 
+    paths = EpisodePaths(tmp_path)
     if minted:
-        assert check_minted_token(token) == token
+        assert paths.served_world(token).name == f"{token}.jsonl"
     else:
-        with pytest.raises(ValueError, match="not case-stable"):
-            check_minted_token(token)
+        with pytest.raises(ValueError, match="not a valid world id"):
+            paths.served_world(token)
 
 
 def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_path):

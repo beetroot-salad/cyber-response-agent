@@ -2,6 +2,8 @@
 failed folder, display readers of the describe strings, and the pitfalls stage's own root."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import copy
 import functools
 import json
@@ -56,7 +58,7 @@ def _gradable_episode(tmp_path: Path) -> Path:
     """One accepted episode whose grade enqueues finding rows (the e2e spine's episode)."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     return ep
 
 

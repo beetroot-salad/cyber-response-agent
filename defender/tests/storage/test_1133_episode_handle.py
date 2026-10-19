@@ -181,7 +181,7 @@ def test_n_g_create_refuses_a_plant_at_the_episode_dirs_own_name(tmp_path, kind)
 
     planted.remove()
     with S.create_episode(ep) as episode:
-        episode.family.write("family: made\n")
+        episode.family.create("family: made\n")
     assert stat.S_ISDIR(os.lstat(ep).st_mode)
     with S.create_episode(ep) as episode:
         assert episode.view().read(LAYOUT.family).text == "family: made\n", (
@@ -189,7 +189,7 @@ def test_n_g_create_refuses_a_plant_at_the_episode_dirs_own_name(tmp_path, kind)
 
     fresh = tmp_path / "fresh-root" / EPISODE_ID
     with S.create_episode(fresh) as episode:
-        episode.family.write("family: fresh\n")
+        episode.family.create("family: fresh\n")
     assert (fresh / "family.yaml").read_text(encoding="utf-8") == "family: fresh\n"
     assert not fresh.is_symlink()
 
@@ -200,7 +200,7 @@ def test_n_g_open_follows_the_episode_dirs_own_spelling_and_create_does_not(tmp_
     alias = tmp_path / "alias-ep"
     alias.symlink_to(real, target_is_directory=True)
     with S.open_episode(alias) as episode:
-        episode.family.write("family: through the root's spelling\n")
+        episode.family.create("family: through the root's spelling\n")
         assert episode.view().read(LAYOUT.family).text == "family: through the root's spelling\n"
         episode.served.ensure()
     assert (real / "family.yaml").read_text(encoding="utf-8") == (
@@ -239,7 +239,7 @@ def test_o6_open_refuses_a_missing_dir_or_a_non_directory_and_makes_nothing(
         ep.unlink()
     ep.mkdir(parents=True, exist_ok=True)
     with S.open_episode(ep) as episode:
-        episode.family.write("family: control\n")
+        episode.family.create("family: control\n")
 
 
 def _write_verbs():
@@ -312,10 +312,10 @@ def test_d1_a_write_after_close_raises_ebadf_and_lands_nowhere(tree):
     """Once the episode is closed its records do not reopen it: a write raises
     `OSError(EBADF)` and nothing is written anywhere."""
     episode = S.open_episode(tree.ep)
-    family = episode.family
+    review = episode.review
     episode.close()
     before = S.census(tree.tmp)
-    closed = S.raised_by(lambda: family.write("family: after close\n"))
+    closed = S.raised_by(lambda: review.write("review: after close\n"))
     assert isinstance(closed, OSError), f"a write after close raised {closed!r}"
     assert closed.errno == errno.EBADF, closed
     assert S.census(tree.tmp) == before
@@ -365,10 +365,10 @@ _BAD_NAMES = [
     pytest.param(lambda ep: ep.wire_log("a/b.jsonl").write("x"), id="wire-log-two-components"),
     pytest.param(lambda ep: ep.wire_log("../escape.jsonl").write("x"), id="wire-log-climbs"),
     pytest.param(lambda ep: ep.wire_log("..").write("x"), id="wire-log-dotdot"),
-    pytest.param(lambda ep: ep.world("b").draw(-1).write("x"), id="draw-negative"),
-    pytest.param(lambda ep: ep.world("b").draw("0").write("x"), id="draw-string"),
-    pytest.param(lambda ep: ep.world("b").draw(True).write("x"), id="draw-bool"),
-    pytest.param(lambda ep: ep.world("b").draw(-1).delete(), id="draw-negative-delete"),
+    pytest.param(lambda ep: ep.world(S.WORLD_ID).draw(-1).write("x"), id="draw-negative"),
+    pytest.param(lambda ep: ep.world(S.WORLD_ID).draw("0").write("x"), id="draw-string"),
+    pytest.param(lambda ep: ep.world(S.WORLD_ID).draw(True).write("x"), id="draw-bool"),
+    pytest.param(lambda ep: ep.world(S.WORLD_ID).draw(-1).delete(), id="draw-negative-delete"),
 ]
 
 

@@ -16,7 +16,6 @@ pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 NOT_ROOT = R.NOT_ROOT
 
-TOKEN = T.EPISODE_TOKEN
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +50,7 @@ def _grade(ep: Path, tmp_path: Path):
 
 
 def _ledger_name(label: str) -> str:
-    return f"served/{T.world_token(label)}.jsonl"
+    return f"served/{T.fixture_world_id(label)}.jsonl"
 
 
 def _rows(grade) -> dict[str, dict]:
@@ -117,27 +116,27 @@ def test_1049_the_world_ledger_refusal_names_served_token_label_jsonl(tmp_path):
     name = _ledger_name("b")
     ledger = ep / name
 
-    rows, malformed, read = family.read_world_ledger(bound, "b", episode_token=TOKEN)
+    rows, malformed, read = family.read_world_ledger(bound, T.world_id(ep, "b"))
     assert len(rows) == 1
     assert malformed == 0
     assert R.state(read) == 'present'
 
     with ledger.open("a", encoding="utf-8") as fh:
         fh.write('{"torn": ')
-    rows, malformed, read = family.read_world_ledger(bound, "b", episode_token=TOKEN)
+    rows, malformed, read = family.read_world_ledger(bound, T.world_id(ep, "b"))
     assert len(rows) == 1
     assert malformed == 1
     assert R.state(read) == 'present'
 
     ledger.unlink()
-    rows, malformed, read = family.read_world_ledger(bound, "b", episode_token=TOKEN)
+    rows, malformed, read = family.read_world_ledger(bound, T.world_id(ep, "b"))
     assert (rows, malformed, R.state(read)) == ([], 0, "absent")
 
     for arm, plant in (("alias", lambda: R.plant_link(ledger, ep / "family.yaml")),
                        ("directory", lambda: ledger.mkdir())):
         plant()
         with pytest.raises(refused) as caught:
-            family.read_world_ledger(bound, "b", episode_token=TOKEN)
+            family.read_world_ledger(bound, T.world_id(ep, "b"))
         sentence = str(caught.value)
         assert sentence.count(name) == 1, (arm, sentence)
         assert R.ALIAS in sentence, (arm, sentence)
@@ -148,7 +147,7 @@ def test_1049_the_world_ledger_refusal_names_served_token_label_jsonl(tmp_path):
     served.rename(ep / "served-real")
     R.plant_link(served, ep / "served-real")
     with pytest.raises(refused) as caught:
-        family.read_world_ledger(bound, "b", episode_token=TOKEN)
+        family.read_world_ledger(bound, T.world_id(ep, "b"))
     sentence = str(caught.value)
     assert sentence.count(name) == 1, sentence
     assert R.ALIAS in sentence, sentence
@@ -164,8 +163,8 @@ def test_1049_the_world_ledger_refusal_names_served_token_label_jsonl(tmp_path):
 def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_scrub(tmp_path):
     ep = _episode(tmp_path)
     family = R.family()
-    world_dir = ep / "worlds" / "b"
-    world = R.bind(ep).under("worlds/b")
+    world_dir = ep / "worlds" / T.world_id(ep, "b")
+    world = R.bind(ep).under('worlds/' + T.fixture_world_id('b'))
     by_id = family.leads_by_id(world_dir)
     summary = world_dir / "gather_summaries" / "l-001.md"
     name = "gather_summaries/l-001.md"
@@ -243,24 +242,25 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
     family = R.family()
     refused = R.refused_class()
     manifest = J.read_manifest_at(ep)
+    sound = {**manifest, "worlds": list(manifest["worlds"])}
     manifest["worlds"].append({**manifest["worlds"][1], "world_id": "../../elsewhere"})
     T.write_family(ep, manifest)
     for read in (lambda: J.read_manifest_at(ep), lambda: _grade(ep, tmp_path)):
-        with pytest.raises(refused, match="outside the world-token alphabet"):
+        with pytest.raises(refused, match="canonical lowercase UUID"):
             read()
-    assert not family.world_label_names_directory("../../elsewhere")
-    assert family.world_label_names_directory("b")
+    T.write_family(ep, sound)
+    assert J.read_manifest_at(ep)["worlds"][1]["world_id"] == T.world_id(ep, "b")
 
-    world = R.bind(ep).under("worlds/b")
-    by_id = family.leads_by_id(ep / "worlds" / "b")
-    sibling = ep / "worlds" / "c" / "gather_summaries" / "l-001.md"
+    world = R.bind(ep).under('worlds/' + T.fixture_world_id('b'))
+    by_id = family.leads_by_id(ep / "worlds" / T.world_id(ep, "b"))
+    sibling = ep / "worlds" / T.world_id(ep, "c") / "gather_summaries" / "l-001.md"
     assert "world c" in sibling.read_text(encoding="utf-8")
     for traversing in ("../../c/gather_summaries/l-001", "../c", "a/../../c", "l-0\x00x"):
         assert not family.names_one_file(traversing), traversing
         chain = family.lead_chain(world, traversing, {}, leads=by_id)
         assert "does not name a file inside this world" in chain["summary"], chain
         assert "world c" not in chain["summary"]
-    summaries = ep / "worlds" / "b" / "gather_summaries"
+    summaries = ep / "worlds" / T.world_id(ep, "b") / "gather_summaries"
     for odd in (" spaced", "<b>bold", "two\nlines", "\udcff", "back\\slash", ".hidden"):
         assert family.names_one_file(odd), odd
         R.write_bytes(summaries / f"{odd}.md", f"summary of {odd!r}\n".encode("utf-8", "surrogateescape"))
@@ -277,8 +277,8 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
 def test_1049_a_symlinked_gather_summary_or_directory_is_the_chains_sentence_and_an_absent_one_is_none(tmp_path):
     ep = _episode(tmp_path)
     family = R.family()
-    world_dir = ep / "worlds" / "b"
-    world = R.bind(ep).under("worlds/b")
+    world_dir = ep / "worlds" / T.world_id(ep, "b")
+    world = R.bind(ep).under('worlds/' + T.fixture_world_id('b'))
     by_id = family.leads_by_id(world_dir)
     summary = world_dir / "gather_summaries" / "l-001.md"
 
@@ -336,11 +336,11 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     for good in ("l-001", "l-0.md", ".hidden", " spaced", "<b>", "a\nb", "\udcff", "back\\slash"):
         assert family.names_one_file(good), repr(good)
 
-    world_dir = ep / "worlds" / "b"
+    world_dir = ep / "worlds" / T.world_id(ep, "b")
     doc = J.investigation_document("b").replace("[l-001 r1", f"[{nul} r1", 1)
     (world_dir / "investigation.md").write_text(doc, encoding="utf-8")
     bound = R.bind(ep)
-    facts = family.read_investigation_facts(bound, world="b")
+    facts = family.read_investigation_facts(bound, world=T.world_id(ep, "b"))
     assert nul in facts.resolutions_by_lead, "the fixture's NUL id did not parse (rg12)"
 
     grade = _grade(ep, tmp_path)

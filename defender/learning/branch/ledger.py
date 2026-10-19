@@ -262,9 +262,8 @@ class Ledger:
 
         Deriving the file from the world id makes "two worlds never share a file" structural.
 
-        The id passes the episode's minting check (a single, case-stable filename component:
-        nothing upstream refuses `../base`), as a `LedgerError`. That check does not stop the
-        bare id `base` from naming the capture; `__post_init__` refuses that collision.
+        The episode owner requires the host-minted world UUID before constructing a path;
+        a refused identity is reported as `LedgerError`.
         """
         try:
             served = episode.served_world(world_id)

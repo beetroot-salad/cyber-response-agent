@@ -16,14 +16,19 @@ import json
 import sys
 from pathlib import Path
 
+from defender import _yaml
+from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.episodes._episode_handle import Episode
 from defender.episodes._episode_paths import LAYOUT, EpisodePaths
 from defender._io import bind
 from defender.run_repository import RunPaths
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+WORLD_ID = fixture_uuid("world:rename-proof:b")
 
 
 def main(root: Path) -> int:
-    episode_dir = root / "ep"
+    episode_dir = root / fixture_uuid("episode:rename-proof")
     run_dir = root / "runs" / "src-b"
     run = RunPaths(run_dir)
     run_dir.mkdir(parents=True)
@@ -45,10 +50,12 @@ def main(root: Path) -> int:
     episode_dir.mkdir(parents=True)
     # `archive_episode` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
     with Episode.open(episode_dir) as episode:
+        episode.family.create(_yaml.safe_dump(T.family_doc(
+            episode_id=episode_dir.name, worlds=[T.base_world(), T.world_doc("b", world_id=WORLD_ID)])))
         archived = archive_episode(episode, {"b": run_dir})
     assert set(archived) == {"b"}, archived
 
-    world = EpisodePaths(episode_dir).world("b")
+    world = EpisodePaths(episode_dir).world(WORLD_ID)
 
     # THE ROUND TRIP: every record the archive projected, read back through the accessor that
     # names it — never a path this script composed.
@@ -67,16 +74,16 @@ def main(root: Path) -> int:
     # the tree the gate was blind to before D7, because a relative name carries no root a
     # dataflow pass can trace.
     with bind(episode_dir) as bound:
-        rec = bound.read(LAYOUT.world("b").report)
+        rec = bound.read(LAYOUT.world(WORLD_ID).report)
         assert rec.text is not None, f"bound read of the report failed: {rec.reason}"
         assert "body" in rec.text, "the bound read returned the wrong bytes"
-        summaries = bound.under(LAYOUT.world("b").gather_summaries).entries()
+        summaries = bound.under(LAYOUT.world(WORLD_ID).gather_summaries).entries()
         assert summaries.files() == ["l-001.md"], summaries.files()
 
     from defender.learning.judge import family
 
     with bind(episode_dir) as bound:
-        read = family.read_archived_report(bound, LAYOUT.world("b").report)
+        read = family.read_archived_report(bound, LAYOUT.world(WORLD_ID).report)
         assert read.disposition == "benign", f"the judge read no disposition: {read.reason}"
 
     # Say which tree this actually loaded. `python -m` puts the CWD first on

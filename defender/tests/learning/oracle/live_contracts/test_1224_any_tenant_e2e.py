@@ -78,8 +78,10 @@ def _branch_end_to_end(tmp_path: Path, est: S.Estate, *, doc: dict, calls: list,
                                 verifier=S.passing_verifier(), box=box, retry_cap=3)
     got = S.call(registry, system, "query", est.ctx(tmp_path / "sibling-run"), **sibling_params)
 
+    published = S.mod("_yaml").safe_load(
+        (launch.ep / "family.yaml").read_text(encoding="utf-8"))
     judged = S.judged_episode(tmp_path / "judged",
-                              doc={**doc, "episode_id": launch.ep.name},
+                              doc=published,
                               episode_id=launch.ep.name,
                               root=S.T.tenant_episodes(tmp_path / "judged-data-root"),
                               ledgers={"b": S.ledger_rows(launch.ep, "b")})

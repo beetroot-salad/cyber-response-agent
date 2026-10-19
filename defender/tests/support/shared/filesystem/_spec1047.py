@@ -23,7 +23,7 @@ would be written against two refuted readings:
 * **F2 reading A (human).** The archive does NOT read a session store. The sibling's own
   host-side process writes a SIDECAR beside its run dir — `verdict_path`'s shape
   (`tree.parent / f"{tree.name}<suffix>"`, `runtime/scrub.py:124-129`) — and
-  `archive_episode` copies it in as `worlds/<label>/run_end.json`. Reading B (pre-minted
+  `archive_episode` copies it in as `worlds/<world-uuid>/run_end.json`. Reading B (pre-minted
   session ids threaded through argv) was rejected.
 * **F-A/F-B reading B (human, §7 round 2).** The record carries a SECOND field,
   `closed_before_cut`, saying whether the model had already closed
@@ -82,6 +82,7 @@ from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
+from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
 import re
@@ -92,7 +93,6 @@ from typing import Any
 from defender.tests.support.learning.judge._judge_921 import (  # noqa: F401 — re-exported vocabulary
     ALERT_ID,
     EPISODE_ID,
-    EPISODE_TOKEN,
     EPISODES_BASE_ENV,
     FAMILY_AGENT_PREFIX,
     RUNS_BASE_ENV,
@@ -116,6 +116,7 @@ from defender.tests.support.learning.judge._judge_921 import (  # noqa: F401 —
     sym,
     word_of,
     world_doc,
+    world_id,
     write_ledger,
 )
 from defender.tests.support.learning.core._state1135 import state_over
@@ -203,9 +204,9 @@ def record_doc(truncated_by: str | None, closed_before_cut: bool = False) -> dic
 def plant_archived_record(episode_dir: Path, label: str, *, truncated_by: str | None = None,
                           closed_before_cut: bool = False,
                           raw: str | bytes | None = None) -> Path:
-    """Land `worlds/<label>/run_end.json` directly, for the scenarios about what the JUDGE does
+    """Land `worlds/<world-uuid>/run_end.json` directly, for the scenarios about what the JUDGE does
     with a record rather than about how the archive produced one."""
-    world = Path(episode_dir) / "worlds" / label
+    world = Path(episode_dir) / "worlds" / T.world_id(episode_dir, label)
     world.mkdir(parents=True, exist_ok=True)
     path = world / run_end_name()
     if raw is None:
@@ -293,9 +294,10 @@ def family_view(episode_dir: Path) -> dict[str, str]:
     return graded_with_view(episode_dir)[1]
 
 
-def judge_calls_for(judge: Any, label: str) -> list[str]:
-    """The agent ids of every judge call made for world `label` (`judge:<label>:<n>[:k]`)."""
-    return [a for a in judge.agent_ids if str(a).startswith(f"judge:{label}:")]
+def judge_calls_for(judge: Any, label: str, *, episode_dir: Path) -> list[str]:
+    """The judge calls bound to the selected world's persisted UUID."""
+    prefix = f"judge:{world_id(episode_dir, label)}:"
+    return [a for a in judge.agent_ids if str(a).startswith(prefix)]
 
 
 def world_facts(episode_dir: Path, label: str) -> Any:
@@ -305,7 +307,7 @@ def world_facts(episode_dir: Path, label: str) -> Any:
 
     with bind(Path(episode_dir)) as bound:
         return mod("learning.judge.family").read_world_facts(
-            bound, label, episode_token=EPISODE_TOKEN, absent_ledger_ok=True)
+            bound, label, world_id=world_id(episode_dir, label), absent_ledger_ok=True)
 
 
 # --------------------------------------------------------------------------------------

@@ -61,7 +61,7 @@ def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
     with Episode.open(ep) as episode:
         _archive().archive_episode(episode, dirs)
     for w in T.WORLDS:
-        world = ep / "worlds" / w
+        world = ep / "worlds" / T.world_id(ep, w)
         for name in ("report.md", "investigation.md", "executed_queries.jsonl", "gather_raw",
                      "provenance.json", "scrub_verdict.json"):
             assert (world / name).exists(), f"{w} is missing {name}"
@@ -79,7 +79,7 @@ def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_pa
     (run_dir / "report.md").symlink_to(secret)
     with Episode.open(ep) as episode, pytest.raises(T.refusals()):
         _archive().archive_episode(episode, {"b": run_dir})
-    assert not (ep / "worlds" / "b" / "report.md").exists()
+    assert not (ep / "worlds" / T.world_id(ep, "b") / "report.md").exists()
     src_text = (T.DEFENDER / "learning" / "branch" / "archive.py").read_text(encoding="utf-8")
     assert "stage_tables" in src_text
     assert "artifact_file" in src_text
@@ -93,7 +93,7 @@ def test_947_archive_reads_the_scrub_verdict_at_its_sidecar_path(tmp_path):
     assert not (run_dir / "scrub-verdict.json").exists()
     with Episode.open(ep) as episode:
         _archive().archive_episode(episode, {"b": run_dir})
-    copied = json.loads((ep / "worlds" / "b" / "scrub_verdict.json").read_text(encoding="utf-8"))
+    copied = json.loads((ep / "worlds" / T.world_id(ep, "b") / "scrub_verdict.json").read_text(encoding="utf-8"))
     assert copied["ran"] is True
 
 
@@ -107,7 +107,7 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
         _archive().archive_episode(episode, dirs)
-    pointer = ep / "worlds" / "b" / "run_dir"
+    pointer = ep / "worlds" / T.world_id(ep, "b") / "run_dir"
     assert not os.path.lexists(pointer), "the archive wrote the run_dir pointer"
     before = J.through_view(ep, _episode().verdicts)
     import shutil
@@ -126,7 +126,7 @@ def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path
     with Episode.open(ep) as episode:
         _archive().archive_episode(episode, dirs)
     T.base_capture(ep, [T.captured_row(key="k1")])
-    (ep / "served" / f"{T.world_token('b')}.jsonl").write_text(
+    (ep / "served" / f"{T.fixture_world_id('b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "planted"}]})) + "\n",
         encoding="utf-8")
     before = (J.through_view(ep, _episode().delta_o), J.through_view(ep, _episode().verdicts))
@@ -155,7 +155,7 @@ def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
 def test_947_delta_o_returns_class_per_shared_correlation_key(tmp_path):
     ep = _archived(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1"), T.captured_row(key="k2")])
-    (ep / "served" / f"{T.world_token('b')}.jsonl").write_text(
+    (ep / "served" / f"{T.fixture_world_id('b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1")) + "\n" +
         json.dumps(T.captured_row(key="k2", payload={"hits": [{"_id": "planted"}]})) + "\n",
         encoding="utf-8")
@@ -169,7 +169,7 @@ def test_947_delta_o_subtracts_the_controls_drift_keys(tmp_path):
     T.base_capture(ep, [T.captured_row(key="k1"), T.captured_row(key="k2")])
     drifted = json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "drift"}]}))
     for world in ("a", "b"):
-        (ep / "served" / f"{T.world_token(world)}.jsonl").write_text(
+        (ep / "served" / f"{T.fixture_world_id(world)}.jsonl").write_text(
             drifted + "\n" + json.dumps(T.captured_row(key="k2")) + "\n", encoding="utf-8")
     out = J.through_view(ep, _episode().delta_o, invoke=T.FakeAgent(*["mutation"] * 6))
     assert "k1" not in out.get("b", {})
@@ -253,6 +253,7 @@ def _relocated(tmp_path, monkeypatch):
     with tenant.runs_repository().create_episode() as view:
         arms = view.start_runs(list(T.WORLDS))
         ep = S.episodes_dir(tenant.data_root, str(tenant.id)) / view.episode_id
+        T.write_family(ep, T.family_doc(episode_id=view.episode_id))
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w, arm_id=str(arms[w]))
     return base, src, root, ep
@@ -372,6 +373,7 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
     tenant = _tenant_paths()
     with tenant.runs_repository().create_episode() as view:
         ep = S.episodes_dir(tenant.data_root, str(tenant.id)) / view.episode_id
+        T.write_family(ep, T.family_doc(episode_id=view.episode_id))
     T.write_family(ep)
     S.make_run(ep / "runs", S.new_id())
     assert ep.is_dir(), ep

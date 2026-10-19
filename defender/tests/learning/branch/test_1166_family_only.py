@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import pytest
 
 from defender.tests.support.learning.curation import _drain719 as D
@@ -21,7 +23,7 @@ def _family_row(fid: str, **over) -> dict:
                type="decision-discipline", subject="defender",
                subject_anchor="l-001", subject_topic="holding-system coverage",
                source_run_dir="episodes/ep-1/worlds/b",
-               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
                on_verdict_path=True, world_label_doubted=False)
     row.pop("judge_outcome", None)
     row.update(over)

@@ -72,7 +72,6 @@ PAGE_NAME = "learning.html"
 #: The episode identity every fixture here carries — the harness's, so `episode_dir_for`,
 #: `world_token` and the served-ledger names all agree with the launcher's own.
 EPISODE_ID = T.EPISODE_ID
-EPISODE_TOKEN = T.EPISODE_TOKEN
 
 #: The sample's three worlds, in manifest order. Underscored labels ON PURPOSE (g2): the judge
 #: trace stem `judge_no_remote_session_0_trace` is ambiguous to a filename parser, which is what
@@ -105,8 +104,8 @@ SYSTEM = "elastic"
 #: #1234 A1: the default `contrast_evidence` of a sample defender finding — each sibling's report
 #: and the control's, so whichever sibling's draw files it, it rests on a two-run conduct pair
 #: (a pointer at the other sibling is merely one more resolving conduct pointer).
-SAMPLE_CONTRAST = (f"worlds/{GRADED_WORLD}/report.md", f"worlds/{PASSTHROUGH_WORLD}/report.md",
-                   f"worlds/{CONTROL}/report.md")
+SAMPLE_CONTRAST = (f"worlds/{T.fixture_world_id(GRADED_WORLD)}/report.md", f"worlds/{T.fixture_world_id(PASSTHROUGH_WORLD)}/report.md",
+                   f"worlds/{T.fixture_world_id(CONTROL)}/report.md")
 
 
 @dataclass(frozen=True)
@@ -200,7 +199,8 @@ def draw_document(episode_dir: Path, label: str, draw: int | str, doc: dict[str,
     """`worlds/<label>/judge/<draw>.yaml` — the per-draw document `_run_world_draws` writes —
     read back through `enqueue.draws_on_disk` (the ONE reader, c27) unless the stem is one the
     reader is meant to ignore (`check=False`: `01.yaml`, a non-ASCII digit)."""
-    draw_dir = Path(episode_dir) / "worlds" / label / "judge"
+    draw_dir = (Path(episode_dir) / "judge" if label == FAMILY else
+                Path(episode_dir) / "worlds" / T.world_id(episode_dir, label) / "judge")
     draw_dir.mkdir(parents=True, exist_ok=True)
     path = draw_dir / f"{draw}.yaml"
     path.write_text(_yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
@@ -208,7 +208,7 @@ def draw_document(episode_dir: Path, label: str, draw: int | str, doc: dict[str,
         # `draws_on_disk` now takes the episode-root view plus the label (#1133 rev 2), never a
         # draw dir path directly.
         with bind(Path(episode_dir)) as ep_view:
-            on_disk = J.sym("learning.judge.enqueue", "draws_on_disk")(ep_view, label)
+            on_disk = J.sym("learning.judge.enqueue", "draws_on_disk")(ep_view, None if label == FAMILY else T.world_id(episode_dir, label))
         assert int(draw) in on_disk, f"fixture bug: draw {draw} did not read back"
     return path
 
@@ -486,8 +486,8 @@ def write_world_record(episode_dir: Path, label: str, reason: str = "oracle unse
     (`outcome.write_world_record`)."""
     with _EpisodeHandle.open(Path(episode_dir)) as episode:
         assert J.mod("learning.branch.outcome").write_world_record(
-            episode, label, reason, call=call, detail=detail), "fixture bug: record exists"
-    return Path(episode_dir) / "world_records" / f"{label}.yaml"
+            episode, T.world_id(episode_dir, label), reason, call=call, detail=detail), "fixture bug: record exists"
+    return Path(episode_dir) / "world_records" / f"{T.world_id(episode_dir, label)}.yaml"
 
 
 def served_row(label: str | None, source: str, *, system: str = SYSTEM, verb: str = "esql",
@@ -500,7 +500,7 @@ def served_row(label: str | None, source: str, *, system: str = SYSTEM, verb: st
         "system": system, "verb": verb,
         "params": params if params is not None else {"query": "FROM logs-system.auth-* | LIMIT 5"},
         "payload_text": payload, "source": source,
-        "world_id": None if label is None else T.world_token(label),
+        "world_id": None if label is None else T.fixture_world_id(label),
     }
     row.update(extra)
     return row
@@ -536,7 +536,7 @@ def _world_findings_rows(label: str = GRADED_WORLD) -> list[dict[str, Any]]:
     rows = [finding(subject="defender", bucket=b, claim=f"defender claim {i}",
                     root_cause=f"defender root cause {i}", topic=f"defender topic {i}",
                     anchor=f"l-00{i + 1}",
-                    evidence=[f"worlds/{label}/report.md", f"worlds/{CONTROL}/report.md"])
+                    evidence=[f"worlds/{T.fixture_world_id(label)}/report.md", f"worlds/{T.fixture_world_id(CONTROL)}/report.md"])
             for i, b in enumerate(SIBLING_BUCKETS[label])]
     rows.append(finding(subject="world", bucket=SIBLING_WORLD_BUCKET,
                         claim="the fact never reached the defender as a readable answer",
@@ -720,7 +720,7 @@ class Episode:
         return self.dir / PAGE_NAME
 
     def world(self, label: str) -> Path:
-        return self.dir / "worlds" / label
+        return self.dir / "worlds" / T.world_id(self.dir, label)
 
     def run(self, label: str) -> Path:
         """The arm folder of `label`: `runs/<the id the arm roster holds for it>` (#1187)."""
@@ -769,7 +769,7 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
         {"alert_id": ALERT_ID, "rule": {"id": "v2-falco-authorized-keys-modification",
                                         "name": ALERT_RULE}}).encode("utf-8"))
     for label in WORLDS:
-        _leads(ep / "worlds" / label, label)
+        _leads(ep / "worlds" / T.world_id(ep, label), label)
     for label in (PASSTHROUGH_WORLD, GRADED_WORLD):
         draw_document(ep, label, 0, draw_doc(findings=_world_findings_rows(label),
                                              bucket=SIBLING_BUCKET[label], systems=[SYSTEM]))
@@ -784,7 +784,7 @@ def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = Tr
                         prompt=f"questioner prompt for {agent_id}", reply=f"reply of {agent_id}")
         labels = ((FAMILY, 0), (PASSTHROUGH_WORLD, 0), (GRADED_WORLD, 0))
         for (label, n), usage, ms in zip(labels, SAMPLE.judge_usage, SAMPLE.judge_ms, strict=True):
-            agent_id = f"judge:{label}:{n}"
+            agent_id = f"judge:{(label if label == FAMILY else T.fixture_world_id(label))}:{n}"
             write_trace(ep, agent_id, usage=usage, duration_ms=float(ms),
                         prompt=f"judge prompt for {label}", reply=f"judge reply for {label}")
             write_framed(ep, agent_id, prompt=f"framed prompt for {label}",
@@ -1154,7 +1154,7 @@ def escaped(s: str) -> str:
 
 __all__ = [
     "AXIS_GRADED", "AXIS_PASSTHROUGH", "ALERT_ID", "ALERT_RULE", "BASE_STORY", "CONTROL",
-    "ENQUEUED_TO", "EPISODE_ID", "EPISODE_TOKEN", "FACT_GRADED", "FACT_PASSTHROUGH", "FAMILY",
+    "ENQUEUED_TO", "EPISODE_ID", "FACT_GRADED", "FACT_PASSTHROUGH", "FAMILY",
     "GRADED_WORLD", "LESSONS_COMMIT", "MODEL", "OUTCOME_REASON", "PAGE_MODULE", "PAGE_NAME",
     "PASSTHROUGH_WORLD", "SAMPLE", "SYSTEM", "WORLD_ENQUEUED_TO", "WORLDS",
     "Episode", "Node", "Page", "Rescue", "PAGE_FILE", "raise_now", "when_inside",

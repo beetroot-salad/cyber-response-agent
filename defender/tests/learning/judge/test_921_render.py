@@ -107,7 +107,7 @@ def test_921_no_sibling_facts_reach_the_prompt(tmp_path):
                             ledgers={"b": [J.oracle_row("b")], "c": [J.oracle_row("c")]})
 
     judge = _prompts(tmp_path, ep, draws=1)
-    graded_b = judge.prompts[judge.agent_ids.index("judge:b:0")]
+    graded_b = judge.prompts[judge.agent_ids.index(f"judge:{T.fixture_world_id('b')}:0")]
     assert secret in graded_b, "the reference run's facts never reached the judged world's prompt"
     assert ("Each reference run's facts sit only in that run's labelled section of the "
             "computed header; they are never facts about the judged world") in graded_b, (
@@ -126,7 +126,7 @@ def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
                             dispositions={"a": "benign", "b": "malicious"},
                             ledgers={"b": [J.oracle_row("b")]})
     judge = _prompts(tmp_path, ep, draws=1)
-    prompt = judge.prompts[judge.agent_ids.index("judge:b:0")]
+    prompt = judge.prompts[judge.agent_ids.index(f"judge:{T.fixture_world_id('b')}:0")]
 
     assert mine in prompt, "the graded world's own facts were withheld from its own grading"
     assert "withheld" not in prompt.lower(), "the graded world's facts were marked withheld"
@@ -225,7 +225,7 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
         "the control failed: the intact episode did not grade world b at all")
     # The control's final grade would short-circuit the re-grade (`judge.yaml` is idempotent).
     (partial / "judge.yaml").unlink()
-    (partial / "worlds" / "b" / "gather_summaries" / "l-001.md").unlink()
+    (partial / "worlds" / T.world_id(partial, "b") / "gather_summaries" / "l-001.md").unlink()
 
     rows = J.rows(J.grade(partial))
     assert rows["b"].get("malformed") is True, (
@@ -247,7 +247,7 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
     assert git_show.asked == [("deadbee", "defender/lessons/L1.md")], (
         "the lesson body was not read at the sibling's recorded commit")
     assert "the body" in _lessons_view(view)
-    assert not list((ep / "worlds" / "b").glob("**/L1.md")), (
+    assert not list((ep / "worlds" / T.world_id(ep, "b")).glob("**/L1.md")), (
         "a lesson BODY was archived; D7 keeps them out of the archive on purpose")
 
 
@@ -259,7 +259,7 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
         {"lesson_name": "L2", "ts": "2026-07-28T17:02:00Z", "kind": "push", "role": "main"},
         {"lesson_name": "L1", "ts": "2026-07-28T17:03:00Z", "kind": "push", "role": "main"},
     ]
-    (ep / "worlds" / "b" / "lessons_loaded.jsonl").write_text(
+    (ep / "worlds" / T.world_id(ep, "b") / "lessons_loaded.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     git_show = J.FakeGitShow(bodies={
         ("deadbee", "defender/lessons/L1.md"): "# L1\n\nthe first body\n",
@@ -284,7 +284,7 @@ def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothin
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
 
     for commit, note in (("cafebabe", "absent commit"), ("deadbee", "absent path")):
-        (ep / "worlds" / "b" / "provenance.json").write_text(
+        (ep / "worlds" / T.world_id(ep, "b") / "provenance.json").write_text(
             json.dumps(J.provenance_record(commit=commit)), encoding="utf-8")
         git_show = J.FakeGitShow(bodies={})
         lessons = _lessons_view(J.render_at(ep, "b", git_show=git_show))

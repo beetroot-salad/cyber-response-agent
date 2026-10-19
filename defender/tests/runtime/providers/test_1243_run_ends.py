@@ -296,9 +296,9 @@ def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
             episode, ["a", "b"], spawn=spawn, tenant_id=T.SOURCE_TENANT)
     assert exits.get("b") == P.PROVIDER_DOWN_EXIT
     records = {p.stem: p.read_text(encoding="utf-8") for p in ep.rglob("world_records/*.yaml")}
-    assert "b" in records, f"no world record for the sibling that exited 4: {sorted(records)}"
-    assert P.sym("learning.branch.outcome", "DID_NOT_FINISH") in records["b"]
-    assert "a" not in records, "a sibling that exited 0 was recorded as failed"
+    assert T.world_id(ep, "b") in records, f"no world record for the sibling that exited 4: {sorted(records)}"
+    assert P.sym("learning.branch.outcome", "DID_NOT_FINISH") in records[T.world_id(ep, "b")]
+    assert T.world_id(ep, "a") not in records, "a sibling that exited 0 was recorded as failed"
 
 
 @pytest.mark.parametrize(("kill", "member"), [

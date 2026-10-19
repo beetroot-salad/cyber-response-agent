@@ -1,6 +1,8 @@
 """#947 Part B — priming the captured base out of the source run's own evidence."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import datetime as dt
 import importlib
 import json
@@ -34,6 +36,8 @@ UNSORTED_PAYLOAD = {"zebra": 1, "alpha": {"n": 2, "m": 3}, "beta": [3, 1]}
 _LIVE_ADAPTER = '''\
 """A verb body that answers `live-estate` and logs that it ran at all."""
 from __future__ import annotations
+
+from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
 from pathlib import Path
@@ -152,7 +156,7 @@ def test_a_captured_call_becomes_a_family_row_the_ledger_can_read(tmp_path):
     assert (rows[0]["system"], rows[0]["verb"], rows[0]["params"]) == (
         "cmdb", "get-host", {"host": "canary-1"})
     with Episode.open(root) as ep:
-        hit = Ledger.for_world(ep, "w1").base_payload("cmdb", "get-host", {"host": "canary-1"})
+        hit = Ledger.for_world(ep, T.fixture_world_id("w1")).base_payload("cmdb", "get-host", {"host": "canary-1"})
     assert hit is not None, "the primed row is not reachable through the key a sibling asks with"
     assert json.loads(hit) == {"owner": "estate", "role": "canary"}
 
@@ -169,7 +173,7 @@ def test_a_primed_payload_is_the_sidecars_own_bytes(tmp_path):
 
     assert read_jsonl_rows(base)[0]["payload_text"] == sidecar
     with Episode.open(root) as ep:
-        hit = Ledger.for_world(ep, "w1").base_payload("cmdb", "get-host", {"host": "canary-1"})
+        hit = Ledger.for_world(ep, T.fixture_world_id("w1")).base_payload("cmdb", "get-host", {"host": "canary-1"})
     assert hit == sidecar, "the sibling's lookup is not handed the sidecar's own bytes"
 
 
@@ -184,12 +188,13 @@ def test_a_primed_key_is_served_without_the_estate_being_asked(tmp_path):
     _prime(run_dir, root)
 
     class World:
-        world_id = "w1"
+        label = "w1"
+        world_id = T.fixture_world_id("w1")
         touches = ()
 
     with Episode.open(root) as ep:
         reg = build_registry(read_roster(fake_estate(tmp_path)), LIVE_GRANT, world=World(),
-                            ledger=Ledger.for_world(ep, "w1"), as_of=T0)
+                            ledger=Ledger.for_world(ep, T.fixture_world_id("w1")), as_of=T0)
         ctx = run_ctx(tmp_path)
 
         payload = reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
@@ -329,7 +334,7 @@ def test_priming_an_existing_base_is_refused_without_changing_its_first_capture(
 
     assert base.read_bytes() == original
     with Episode.open(root) as ep:
-        payload = Ledger.for_world(ep, "w1").base_payload(
+        payload = Ledger.for_world(ep, T.fixture_world_id("w1")).base_payload(
             "cmdb", "get-host", {"host": "canary-1"})
     assert payload is not None
     assert json.loads(payload) == {"owner": "first"}
@@ -369,4 +374,4 @@ def test_a_refused_priming_leaves_no_base_a_sibling_could_open(tmp_path):
         "a refused priming left a base file behind — every later sibling opens it, finds "
         "nothing, and goes live for the whole episode with nothing red anywhere")
     with Episode.open(root) as ep, pytest.raises(LedgerError):
-        Ledger.for_world(ep, "w1")
+        Ledger.for_world(ep, T.fixture_world_id("w1"))

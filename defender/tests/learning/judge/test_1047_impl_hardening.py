@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 from defender.episodes._episode_handle import Episode
 from defender.tests.support.shared.filesystem import _spec1047 as S
 from defender.tests.support.sandbox._spec791 import (
@@ -105,11 +107,11 @@ def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp
     S.plant_sidecar(run_dir, truncated_by="aborted")
     with Episode.open(ep) as episode:
         archive.archive_episode(episode, {"b": run_dir})
-        assert (ep / "worlds" / "b" / S.run_end_name()).is_file(), "the control did not archive"
+        assert (ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).is_file(), "the control did not archive"
 
         S.sidecar_path(run_dir).unlink()
         archive.archive_episode(episode, {"b": run_dir})
-    assert not (ep / "worlds" / "b" / S.run_end_name()).exists(), (
+    assert not (ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).exists(), (
         "a stale run-end record survived a re-archive whose run has none")
     assert S.graded(S.cut_short_episode(tmp_path / "control"))["b"].get("cut_short") is None
 

@@ -34,7 +34,7 @@ MARK = "[a run id]"
 
 #: An operator-pinned source run id and the episode forked from it: no UTC stamp anywhere.
 PINNED_SOURCE = "live-lever-up-20260930-sudo"
-PINNED_EPISODE = f"{PINNED_SOURCE}-n5"
+PINNED_EPISODE = T.EPISODE_ID
 #: The brief's probe: the world ledger's filename and the arm's run id, as a fault relays them.
 PROBE = ("ledger live.lever.up.20260930.sudo.n5.a.jsonl missing; "
          "run live-lever-up-20260930-sudo-n5-a")
@@ -50,7 +50,7 @@ ROSTER = {"a": "0b5c7e2a-4d1f-4a8e-9c3b-2f6d8e1a7c40",
           "c": "c4d2e6f8-1a3b-4c5d-9e7f-8a0b2c4d6e81"}
 #: The probe as a fault relays it after #1187: the world ledger's filename and an arm's
 #: roster id.
-ROSTER_PROBE = f"ledger live.lever.up.20260930.sudo.n5.a.jsonl missing; run {ROSTER['a']}"
+ROSTER_PROBE = f"ledger {T.fixture_world_id('a')}.jsonl missing; run {ROSTER['a']}"
 
 
 def _family(episode_id: str):
@@ -89,14 +89,14 @@ def test_family_identities_are_every_arms_run_id_and_token_plus_the_episodes_own
     """
     fam = T.mod("runtime.branch._family")
     family = _family(PINNED_EPISODE)
-    expected = {PINNED_EPISODE, fam.episode_token_for(PINNED_EPISODE), *ROSTER.values()}
+    expected = {PINNED_EPISODE, *ROSTER.values()}
     for world in family.worlds:
-        expected.add(fam.resume_world_from(family, world.world_id, T.DEFENDER).token)
+        expected.add(fam.resume_world_from(family, world.label, T.DEFENDER).world_id)
     known = {str(member) for member in fam.family_identities(family, _arm_ids())}
     assert known == expected, (
         f"missing {sorted(expected - known)}; unexpected {sorted(known - expected)}")
     assert "live-lever-up-20260930-sudo-n5-c" not in known
-    assert "live.lever.up.20260930.sudo.n5.b" in known
+    assert T.fixture_world_id("b") in known
 
 
 # ---------------------------------------------------------------------------------------
@@ -120,9 +120,8 @@ def test_a_uuid_episode_and_its_arms_are_redacted_when_known_in_any_case():
     all go.
     #1187 declared change 15
     """
-    token = T.sym("runtime.branch._family", "episode_token_for")(UUID_EPISODE)
-    detail = (f"run {ROSTER['b']} refused; sibling {token}.c served; "
-              f"episode {UUID_EPISODE} at {token.upper()}.A; arm {ROSTER['c'].upper()}")
+    detail = (f"run {ROSTER['b']} refused; sibling {T.fixture_world_id('c')} served; "
+              f"episode {UUID_EPISODE} at {T.fixture_world_id('a').upper()}; arm {ROSTER['c'].upper()}")
     assert _redact(detail, _known(UUID_EPISODE)) == (
         f"run {MARK} refused; sibling {MARK} served; episode {MARK} at {MARK}; arm {MARK}")
 
@@ -214,8 +213,7 @@ def test_a_world_registry_knows_its_whole_family(tmp_path):
     R.write_roster(ep, ROSTER)
     registry = S.world_registry(ep, "b", est)
     known = {str(member) for member in registry.branch_identities()}
-    token = UUID_EPISODE.replace("-", ".")
-    expected = {UUID_EPISODE, token, *(f"{token}.{label}" for label in ROSTER), *ROSTER.values()}
+    expected = {UUID_EPISODE, *(T.fixture_world_id(label) for label in ROSTER), *ROSTER.values()}
     assert known == expected, (
         f"missing {sorted(expected - known)}; unexpected {sorted(known - expected)}")
     assert f"{UUID_EPISODE}-c" not in known
@@ -230,9 +228,9 @@ def test_the_comparator_prompt_redacts_known_identities_in_both_payloads_and_the
     comparator = T.mod("learning.branch.comparator")
     known = _known(PINNED_EPISODE)
     prompt = comparator.build_prompt(
-        a=json.dumps({"error": PROBE}),
-        b=json.dumps({"note": "served by live.lever.up.20260930.sudo.n5.b"}),
-        axis="whether live-lever-up-20260930-sudo-n5-c saw the login",
+        a=json.dumps({"error": ROSTER_PROBE}),
+        b=json.dumps({"note": f"served by {T.fixture_world_id('b')}"}),
+        axis=f"whether {ROSTER['c']} saw the login",
         known_ids=known)
     for leak in sorted(known):
         assert leak not in prompt, f"{leak!r} reached the comparator prompt"
@@ -271,9 +269,8 @@ def test_delta_o_hands_the_comparator_the_familys_identities(data_root):
     for w in T.WORLDS:
         T.archived_world(ep, w)
     T.base_capture(ep, [T.captured_row(key="k1")])
-    token = T.sym("runtime.branch._family", "episode_token_for")(UUID_EPISODE)
     leaked = {"hits": [{"_id": "x", "note": f"seen by {ROSTER['c']} on host web-7"}]}
-    (ep / "served" / f"{token}.b.jsonl").write_text(
+    (ep / "served" / f"{T.world_id(ep, 'b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload=leaked)) + "\n", encoding="utf-8")
     agent = T.FakeAgent("mutation")
     with runs.episode(UUID_EPISODE) as view:

@@ -1,6 +1,8 @@
 """#1234 judge contrast: queue gates and appender guards for judge rows."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import os
 import re
 from collections.abc import Iterable, Mapping
@@ -280,8 +282,8 @@ def test_1234_lesson_writer_reads_citations_and_contrast_evidence(tmp_path):
     assert sorted(row[S.CONTRAST]) == sorted(PAIR), row
     assert row[CITATIONS], row
     assert set(row[CITATIONS]) <= set(PAIR), row
-    assert row["source_run_dir"].endswith("/worlds/b"), row["source_run_dir"]
-    assert any(p.startswith("worlds/a/") for p in row[S.CONTRAST]), (
+    assert row["source_run_dir"].endswith(f"/worlds/{T.fixture_world_id('b')}"), row["source_run_dir"]
+    assert any(p.startswith(f"worlds/{T.fixture_world_id('a')}/") for p in row[S.CONTRAST]), (
         "no pointer names the reference run on its own")
 
     prompt = _lesson_prompt(_paths(tmp_path), [row])

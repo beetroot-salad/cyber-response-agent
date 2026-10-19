@@ -2,6 +2,8 @@
 reader of it."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -478,7 +480,7 @@ class _Views:
         payloads, persisted summary and queries rows, merged beside the world's own; plus the
         copies launch puts in the episode (A1: the source run's alert and record)."""
         ep = J.accepted_episode(self.tmp / "judged")
-        world = ep / "worlds" / "b"
+        world = ep / "worlds" / T.world_id(ep, "b")
         raw = self.run_dir / "gather_raw"
         shutil.copy2(raw / f"{S.L3}.lead.json", world / "gather_raw" / f"{S.L3}.lead.json")
         if (raw / S.L3).is_dir():
@@ -495,7 +497,7 @@ class _Views:
         table.write_text(table.read_text(encoding="utf-8")
                          + "".join(f"{json.dumps(r)}\n" for r in own), encoding="utf-8")
         J.write_call_join(world, [J.call_join_entry(r["lead_id"], r["seq"],
-                                                    f"{J.world_token('b')}/{n}")
+                                                    f"{J.fixture_world_id('b')}/{n}")
                                   for n, r in enumerate(own, start=100)], append=True)
         alert = self._alert_bytes if self._alert_bytes is not None else self.d.stored_alert
         S.plant_episode_copy(ep, alert=alert, record=S.read_record(self.run_dir))

@@ -141,7 +141,7 @@ def _judge_cap() -> int:
     return env_int(CAP_KNOB, 20000)
 
 
-def _gate(bound: Bound) -> tuple[str, str, dict[str, Any] | None, dict[str, dict[str, Any]]]:
+def _gate(bound: Bound, manifest: dict[str, Any]) -> tuple[str, str, dict[str, Any] | None, dict[str, dict[str, Any]]]:
     """Pre-flight's outcome word and reason, the record itself, and every world O5 counts as
     failed. An absent, empty or torn record is the "no record" state (`outcome.NO_RECORD`):
     never `accepted`, its reason naming the missing record (M05=A, PCO-02)."""
@@ -150,11 +150,11 @@ def _gate(bound: Bound) -> tuple[str, str, dict[str, Any] | None, dict[str, dict
     except outcome_mod.OutcomeUnreadable as missing:
         return outcome_mod.NO_RECORD, str(missing), None, {}
     return (str(record["outcome"]), record["reason"], record,
-            outcome_mod.failed_worlds(bound, record))
+            outcome_mod.failed_worlds(bound, record, family=family_mod.parse_family(manifest)))
 
 
 def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their bounded re-asks
-    episode: Episode, label: str, *, judge: Any, draws: int, model: str, effort: str,
+    episode: Episode, label: str, *, world_id: str | None, judge: Any, draws: int, model: str, effort: str,
     prompt: str, scope: str = "world", served_systems: list[str] | None = None,
     shown_its_facts: bool | None = None,
 ) -> tuple[int, dict[int, dict[str, Any]], int, str | None]:
@@ -171,7 +171,12 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
     from defender.learning.core.config import StageWiring
     from defender.runtime.agent_role import AgentRole
 
-    world = episode.world(label)
+    if (scope == "family") != (world_id is None):
+        raise JudgeRefused("only the family judge scope has no world UUID")
+    world = episode.world(world_id) if world_id is not None else None
+    if world is None:
+        episode.family_draws.ensure()
+    scope_id = world_id if world_id is not None else FAMILY_LABEL
     completed = 0
     documents: dict[int, dict[str, Any]] = {}
     malformed = 0
@@ -182,9 +187,10 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             # A23: a call refused for its size is asked once — every later draw sends the same
             # prompt, which would only be refused again.
             break
+        sink = world.draw(n) if world is not None else episode.family_draw(n)
         doc: dict[str, Any] | None = None
         for attempt in range(_REPLY_ATTEMPTS):
-            agent_id = f"judge:{label}:{n}" if attempt == 0 else f"judge:{label}:{n}:{attempt}"
+            agent_id = f"judge:{scope_id}:{n}" if attempt == 0 else f"judge:{scope_id}:{n}:{attempt}"
             wiring = StageWiring(
                 prompt_path=run_mod._ROLE_PROMPT, model=model, effort=effort,
                 trace_name=WIRE_LOG_NAMES.agent_trace(agent_id), label=agent_id)
@@ -222,14 +228,14 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
             # an earlier pass's file at this index is removed so the page never shows it as
             # this pass's.
             try:
-                world.draw(n).delete()
+                sink.delete()
             except NotPlainEntry as stuck:
-                _logger.warning(f"world {label!r}: the earlier draw {world.draw(n).path.name} "
+                _logger.warning(f"world {label!r}: the earlier draw {sink.path.name} "
                                 f"was not removed ({stuck})")
             continue
         documents[n] = doc
         # Not contained: a link planted at this sink refuses the pass.
-        world.draw(n).write(_yaml.safe_dump(doc, sort_keys=False))
+        sink.write(_yaml.safe_dump(doc, sort_keys=False))
     return completed, documents, malformed, refusal
 
 
@@ -443,8 +449,8 @@ def _refuse_undeclared_records(manifest: dict[str, Any],
     """Refuse a failed-world entry (a world record, or pre-flight's) for a label the manifest
     does not declare: it is no world of this family, so it is neither counted toward O5 nor
     listed as a failed world, and the archive holding it is not graded around it."""
-    declared = {family_mod.control_world(manifest)["world_id"]} | {
-        w["world_id"] for w in family_mod.non_control_worlds(manifest)}
+    declared = {family_mod.control_world(manifest)["label"]} | {
+        w["label"] for w in family_mod.non_control_worlds(manifest)}
     undeclared = sorted(label for label in failed if label not in declared)
     if undeclared:
         raise JudgeRefused(
@@ -492,12 +498,14 @@ class _Pass:
         try:
             manifest = family_mod.read_manifest(bound, expected_episode_id=episode.dir.name)
         except JudgeRefused as refused:
-            if isinstance(refused.__cause__, ManifestPredatesOracle) \
-                    and _gate(bound)[0] == outcome_mod.NO_RECORD:
-                return _stamp_not_graded(episode, MANIFEST_REFUSED, str(refused),
-                                         prior=self.prior)
+            if isinstance(refused.__cause__, ManifestPredatesOracle):
+                try:
+                    outcome_mod.read_outcome(bound)
+                except outcome_mod.OutcomeUnreadable:
+                    return _stamp_not_graded(episode, MANIFEST_REFUSED, str(refused),
+                                             prior=self.prior)
             raise
-        word, reason, record, failed = _gate(bound)
+        word, reason, record, failed = _gate(bound, manifest)
         _refuse_undeclared_records(manifest, failed)
         # The found gaps (A2), once per pass, as soon as the manifest is read and before any
         # gate can stamp: every write this pass makes — a stamp, each A6 commit, the last
@@ -517,8 +525,8 @@ class _Pass:
         if unusable is not None:
             return _stamp_not_graded(episode, outcome_mod.UNUSABLE, unusable, validity=UNUSABLE,
                                      worlds=[
-                failed_row(w, failed[w["world_id"]]) if w["world_id"] in failed else
-                {"world": w["world_id"], "ungradable": True,
+                failed_row(w, failed[w["label"]]) if w["label"] in failed else
+                {"world": w["label"], "ungradable": True,
                  "ungradable_reason": "the family is unusable (O5): not judged"}
                 for w in worlds], found_gaps=found, prior=self.prior)
         not_comparable = outcome_mod.not_comparable_reason(bound)
@@ -530,7 +538,7 @@ class _Pass:
                 episode, CONTROL_UNUSABLE,
                 f"the control run {runs.control!r} is not usable "
                 f"({runs.excluded.get(runs.control)}): every world is judged against it, so "
-                "none is judged", worlds=[runs.rows[w["world_id"]] for w in worlds],
+                "none is judged", worlds=[runs.rows[w["label"]] for w in worlds],
                 found_gaps=found, prior=self.prior)
         if self.prior is not None:
             # Past every gate, before any model call or append: only a grading pass meets it.
@@ -563,7 +571,7 @@ class _Pass:
         # record when the loop reaches it, so a write never shows a world not yet attempted.
         committed, _family = _committed(prior)
         kept = {label for label, r in committed.items() if r.get(STATE_KEY) == QUEUED}
-        self.order = [w["world_id"] for w in family_mod.non_control_worlds(manifest)]
+        self.order = [w["label"] for w in family_mod.non_control_worlds(manifest)]
         self.rows = {label: committed[label] for label in self.order if label in kept}
         if self.family is not None and self.family.get(STATE_KEY) == QUEUED:
             kept.add(FAMILY_LABEL)
@@ -576,7 +584,7 @@ class _Pass:
             self.queue_malformed = prior.queue_malformed_rows
             self.world_queue_malformed = prior.world_queue_malformed_rows
 
-        self.lessons_commit = _pass_lessons_commit(bound, runs.planted)
+        self.lessons_commit = _pass_lessons_commit(bound, [runs.usable[label].token for label in runs.planted])
         if self.lessons_commit is None and prior is not None:
             self.lessons_commit = prior.lessons_commit
         for label in self.order:
@@ -606,14 +614,14 @@ class _Pass:
                 facts=self.run_set.usable[label], samples=self.samples, manifest=self.manifest,
                 bound=self.bound, family_text=self.noise, runs=self.run_set)
             prompt, placed = run_mod._build_prompt(ctx, self.manifest)
-            self.episode.world(label).draws.ensure()
+            self.episode.world(self.run_set.usable[label].token).draws.ensure()
         except (JudgeRefused, OSError, ValueError, TimeoutError) as world_failed:
             reason = f"{type(world_failed).__name__}: {world_failed}"
             row.update(completed_draws=0, malformed_replies=0, bucket=None, measured=False,
                        not_measured_reason=reason, draws_failed_reason=reason)
             return
         completed, documents, malformed, refusal = _run_world_draws(
-            self.episode, label, judge=self.judge, draws=self.draws, model=self.model,
+            self.episode, label, world_id=self.run_set.usable[label].token, judge=self.judge, draws=self.draws, model=self.model,
             effort=self.effort, prompt=prompt, served_systems=self.served_systems,
             shown_its_facts=ctx.shown_its_facts)
         # g18: a `samples.yaml#<system>` pointer resolves exactly when this prompt showed that
@@ -672,7 +680,9 @@ class _Pass:
         if lane in (route_mod.LANE_DEFENDER, route_mod.LANE_QUESTIONER):
             defender = lane == route_mod.LANE_DEFENDER
             row = enqueue_mod.build_finding_row(
-                run_id=self.run_id, label=label, draw=str(item.draw), index=item.index,
+                run_id=self.run_id, label=label,
+                world_id=None if label == FAMILY_LABEL else self.run_set.usable[label].token,
+                draw=str(item.draw), index=item.index,
                 subject=run_mod.SUBJECT_DEFENDER if defender else run_mod.SUBJECT_WORLD,
                 finding=finding, alert_rule_key=alert_key, citations=a.citations,
                 recorded_signature=self.alert_identity.facts.signature,
@@ -752,12 +762,12 @@ class _Pass:
     def _judge_family(self) -> None:
         family: dict[str, Any] = {"completed_draws": 0, "malformed_replies": 0}
         self.family = family
+        episode = self.episode
         try:
             prompt = run_mod._build_family_prompt(self.manifest, self.run_set, self.noise,
                                                   cap=self.cap)
-            self.episode.world(FAMILY_LABEL).draws.ensure()
             completed, documents, malformed, refusal = _run_world_draws(
-                self.episode, FAMILY_LABEL, judge=self.judge, draws=self.draws,
+                episode, FAMILY_LABEL, world_id=None, judge=self.judge, draws=self.draws,
                 model=self.model, effort=self.effort, prompt=prompt, scope="family",
                 served_systems=self.served_systems)
         except Exception as family_failed:  # noqa: BLE001 — the family call's own fault costs only itself, never the already-committed worlds
@@ -828,12 +838,12 @@ def _memoized_show(show: Any) -> Any:
     return invoke
 
 
-def _pass_lessons_commit(bound: Bound, labels: list[str]) -> str | None:
+def _pass_lessons_commit(bound: Bound, world_ids: list[str]) -> str | None:
     """The commit every lesson body in this pass is read at: the first graded world's
     provenance stamp, resolved once so the record and every render agree."""
-    for label in labels:
+    for world_id in world_ids:
         commit = render_mod._read_provenance(
-            bound.under(LAYOUT.world(label).dir)).get("commit")
+            bound.under(LAYOUT.world(world_id).dir)).get("commit")
         if commit is not None:
             return str(commit)
     return None

@@ -60,7 +60,6 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
     CONFIGURED,
     DEFENDER,
     EPISODE_ID,
-    EPISODE_TOKEN,
     EPISODES_BASE_ENV,
     EVENTS_PATTERN,
     RUNS_BASE_ENV,
@@ -93,7 +92,8 @@ from defender.tests.support.learning.branch._triplet_947 import (  # noqa: F401 
     sym,
     untrusted_frames,
     world_doc,
-    world_token,
+    fixture_world_id,
+    world_id,
     write_family,
 )
 
@@ -447,7 +447,7 @@ def questioner_lesson_raw(paths: Any, name: str, *, frontmatter: str,
 
 __all__ = [
     "ALERTS_PATTERN", "AS_OF", "BRANCH_MESSAGE_ID", "CLEAN", "CONFIGURED", "DEFENDER",
-    "DEFENDER_CURATOR_MODULE", "EPISODES_BASE_ENV", "EPISODE_ID", "EPISODE_TOKEN",
+    "DEFENDER_CURATOR_MODULE", "EPISODES_BASE_ENV", "EPISODE_ID",
     "EVENTS_PATTERN", "JUDGE_NAME", "OUTCOME_NAME",
     "QUESTIONER_CORPUS_DIRNAME", "QUESTIONER_CORPUS_REL", "QUESTIONER_CURATOR_MODULE",
     "QUESTIONER_QUEUE_FILENAME", "RAW_ES_RESPONSE", "RUNS_BASE_ENV", "SERVED_SYSTEMS",
@@ -464,6 +464,6 @@ __all__ = [
     "questioner_lesson", "questioner_lesson_raw",
     "read_yaml", "refusals", "report_text",
     "runs_base", "samples_document", "served_row", "sibling_run_dir", "sym",
-    "untrusted_frames", "world_doc", "world_token", "write_family",
+    "untrusted_frames", "world_doc", "fixture_world_id", "write_family",
     "write_outcome", "write_samples", "write_served", "write_yaml",
 ]

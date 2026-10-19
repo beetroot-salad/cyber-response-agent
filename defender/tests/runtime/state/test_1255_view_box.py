@@ -94,11 +94,15 @@ def test_b1_two_host_layouts_render_the_same_create_command(tmp_path):
 def _arm_run(layout: V.Layout, tmp_path: Path, monkeypatch) -> object:
     """Create a materialized arm in the episode-owned runs container."""
     from defender.tests.support.storage import _alert_plant
+    from defender import _yaml
+    from defender.tests.support.learning.branch import _triplet_947 as T
 
     ep_dir = layout.data_root / layout.tenant_id / "episodes" / EPISODE_ID
     ep_dir.parent.mkdir(parents=True, exist_ok=True)
     with Episode.create(ep_dir) as episode:
-        episode.family.write(f"episode_id: {EPISODE_ID}\nworlds:\n- world_id: b\n")
+        episode.family.create(_yaml.safe_dump(T.family_doc(
+            episode_id=EPISODE_ID, worlds=[T.world_doc("b", world_id=fixture_uuid("world:view-box:b"),
+                                                       role="A", axis=None, facts=[])])))
         view = layout.tenant.runs_repository().episode(EPISODE_ID, held=episode)
         view.start_runs(("b",))
         arm = view.create(view.arm_id("b"))

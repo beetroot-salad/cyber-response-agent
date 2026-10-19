@@ -633,7 +633,7 @@ class _ArchivedRecordHandle:
 
 
 class ArchivedWorld:
-    """A read-only projection of an archived `worlds/<label>/` directory — exactly the copied
+    """A read-only projection of an archived `worlds/<world UUID>/` directory — exactly the copied
     set. Not a `Run`: no `.record`, not addressed by `(tenant_id, run_id)`."""
 
     def __init__(self, world_dir: Path, *, io: Any = _real_io) -> None:

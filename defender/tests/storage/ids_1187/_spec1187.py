@@ -103,10 +103,14 @@ def make_run(container: Path, run_id: str | None = None, *,
 
 def manifest_text(episode_id: str, labels: Iterable[str], *,
                   source_run_id: str | None = None, extra: str = "") -> str:
-    """Build a minimal manifest for roster checks, not a fully loadable family."""
-    worlds = "".join(f"  - world_id: {label}\n" for label in labels)
+    """A complete persisted manifest, including each label's distinct world UUID."""
+    from defender import _yaml
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    worlds = [T.world_doc(label, world_id=new_id(), role="A" if index == 0 else None,
+                          axis=None, facts=[]) for index, label in enumerate(labels)]
     src = source_run_id if source_run_id is not None else new_id()
-    return (f"episode_id: {episode_id}\nsource_run_id: {src}\nworlds:\n{worlds}{extra}")
+    return _yaml.safe_dump(T.family_doc(episode_id=episode_id, source_run_id=src, worlds=worlds)) + extra
 
 
 def make_episode(data_root: Path, tenant_id: str, episode_id: str | None = None, *,

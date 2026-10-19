@@ -153,7 +153,7 @@ class RunProvenance:
     #: constant like the commit. `None` means the record does not say.
     model: str | None = None
     #: The tenant that owns this run and the world it was stamped into: a forked sibling's world
-    #: token `<episode token>.<label>`, `None` for a natural run (#1187 R1b retired the base
+    #: opaque world UUID, `None` for a natural run (#1187 R1b retired the base
     #: world a natural run used to copy from its tenant record). On read, absent or
     #: wrong-typed values fold to `None`, as `scope`/`model` do.
     tenant_id: str | None = None

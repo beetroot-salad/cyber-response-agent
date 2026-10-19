@@ -1,6 +1,8 @@
 """#921 — a world's row: the facts read off X's own archived record (`family.read_world`)."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 
 import pytest
@@ -76,7 +78,7 @@ def test_921_an_empty_or_absent_ledger_is_a_world_that_served_nothing(tmp_path):
     assert rows["b"]["served_nothing"] is True
     assert rows["b"].get("ungradable") is not True, "an EMPTY ledger was read as a missing input"
 
-    (ep / "served" / f"{J.world_token('c')}.jsonl").unlink()
+    (ep / "served" / f"{J.fixture_world_id('c')}.jsonl").unlink()
     absent = _rows(ep)["c"]
     assert absent.get("ungradable") is not True, (
         "an ABSENT ledger set the world aside; S8 makes it a world no call reached")
@@ -102,7 +104,7 @@ def test_921_resolution_moved_needs_a_row_past_fences_at_with_before_ne_after(tm
         "an oscillating lead's first qualifying row was discarded in favour of the net state")
 
     # A document whose row does not move: false by construction, not an error.
-    (ep / "worlds" / "c" / "investigation.md").write_text(
+    (ep / "worlds" / T.world_id(ep, "c") / "investigation.md").write_text(
         J.investigation_document("c", moved=False), encoding="utf-8")
     unmoved = _rows(ep)["c"]
     assert unmoved["resolution_moved"] is False
@@ -112,7 +114,7 @@ def test_921_resolution_moved_needs_a_row_past_fences_at_with_before_ne_after(tm
 def test_921_verdict_is_read_off_the_archived_report_against_the_manifest(tmp_path):
     ep = J.accepted_episode(tmp_path,
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     rows = _rows(ep)
 
     assert rows["b"]["verdict"] == "benign"
@@ -121,7 +123,7 @@ def test_921_verdict_is_read_off_the_archived_report_against_the_manifest(tmp_pa
 
     # The vocabulary is read through the shipped normalizer, and that normalizer coerces
     # nothing: a zero-width-laced headline renders as `malicious` to a human and is NOT one.
-    (ep / "worlds" / "c" / "report.md").write_text(
+    (ep / "worlds" / T.world_id(ep, "c") / "report.md").write_text(
         J.report_text("mali​cious"), encoding="utf-8")
     laced = _rows(ep)
     assert laced["c"].get("malformed") is True, (
@@ -132,7 +134,7 @@ def test_921_verdict_is_read_off_the_archived_report_against_the_manifest(tmp_pa
 
     # Positive control on the same drive: the same world with a CLEAN headline grades, so the
     # exclusion above cannot pass on a reader that excludes everything.
-    (ep / "worlds" / "c" / "report.md").write_text(
+    (ep / "worlds" / T.world_id(ep, "c") / "report.md").write_text(
         J.report_text("malicious"), encoding="utf-8")
     assert _rows(ep)["c"]["verdict"] == "malicious"
 
@@ -142,7 +144,7 @@ def test_921_a_world_missing_an_input_is_ungradable_named_and_excluded_from_the_
     import yaml
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    (ep / "worlds" / "b" / "report.md").unlink()
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").unlink()
     grade = _grade(ep)
     row = J.rows(grade)["b"]
     assert row["ungradable"] is True
@@ -151,7 +153,7 @@ def test_921_a_world_missing_an_input_is_ungradable_named_and_excluded_from_the_
 
     fresh = J.accepted_episode(tmp_path / "gone-investigation",
                                ledgers={"b": [J.oracle_row("b")], "c": []})
-    (fresh / "worlds" / "c" / "investigation.md").unlink()
+    (fresh / "worlds" / T.world_id(fresh, "c") / "investigation.md").unlink()
     gone = J.rows(_grade(fresh))["c"]
     assert gone["ungradable"] is True
     assert "investigation" in json.dumps(gone)
@@ -159,7 +161,7 @@ def test_921_a_world_missing_an_input_is_ungradable_named_and_excluded_from_the_
     both = J.accepted_episode(tmp_path / "no-declared")
     doc = yaml.safe_load((both / "family.yaml").read_text(encoding="utf-8"))
     for world in doc["worlds"]:
-        if world["world_id"] != "a":
+        if world["label"] != "a":
             world.pop("disposition_declared", None)
     (both / "family.yaml").write_text(yaml.safe_dump(doc), encoding="utf-8")
     with pytest.raises(J.refusals()) as raised:
@@ -182,17 +184,17 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
         return rows["b"]
 
     for name, mutate in (
-        ("vocab", lambda ep: (ep / "worlds" / "b" / "report.md").write_text(
+        ("vocab", lambda ep: (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(
             J.report_text("probably-bad"), encoding="utf-8")),
-        ("unreadable", lambda ep: (ep / "worlds" / "b" / "report.md").write_bytes(
+        ("unreadable", lambda ep: (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_bytes(
             b"\xff\xfe\x00not utf-8")),
-        ("truncated", lambda ep: (ep / "worlds" / "b" / "investigation.md").write_text(
+        ("truncated", lambda ep: (ep / "worlds" / T.world_id(ep, "b") / "investigation.md").write_text(
             "# investigation b\n\n```invlang\n:T resolutions\n"
             "h-001  open → held    [l-001 r1 severe ⟂ e-001 :: cut off here\n",
             encoding="utf-8")),
         # F-7 — the partially archived world.
         ("partial", lambda ep: (
-            ep / "worlds" / "b" / "gather_summaries" / "l-001.md").unlink()),
+            ep / "worlds" / T.world_id(ep, "b") / "gather_summaries" / "l-001.md").unlink()),
     ):
         row = _malform(name, mutate)
         assert row.get("ungradable") is True, f"{name}: the malformed world still graded"
@@ -203,7 +205,7 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
         assert "b" in row["ungradable_reason"], f"{name}: the reason does not name the world"
 
     short = J.accepted_episode(tmp_path / "named", ledgers={"b": [J.oracle_row("b")], "c": []})
-    (short / "worlds" / "b" / "gather_summaries" / "l-001.md").unlink()
+    (short / "worlds" / T.world_id(short, "b") / "gather_summaries" / "l-001.md").unlink()
     said = _rows(short)["b"]["ungradable_reason"]
     assert "gather_summaries" in said, (
         "a world left short by a mid-copy fault was excluded without naming the input that was "
@@ -211,7 +213,7 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
 
     # An ABSENT input is tier 1 and is NOT marked malformed — the two tiers stay separable.
     absent = J.accepted_episode(tmp_path / "absent", ledgers={"b": [J.oracle_row("b")], "c": []})
-    (absent / "worlds" / "b" / "report.md").unlink()
+    (absent / "worlds" / T.world_id(absent, "b") / "report.md").unlink()
     gone = _rows(absent)["b"]
     assert gone.get("ungradable") is True, "an absent report.md still graded"
     assert gone.get("malformed") is not True, (
@@ -270,7 +272,7 @@ def test_921_the_family_pass_reader_takes_the_first_row_and_counts_a_torn_line(t
 
     with bind(ep) as bound:
         kept, malformed, _read = _family().read_world_ledger(
-            bound, "b", episode_token=J.EPISODE_TOKEN)
+            bound, T.world_id(ep, "b"))
     assert [row["source"] for row in kept] == ["oracle", "passthrough"], (
         "a row of a repeated pair-key was dropped; each row is its own call (A2)")
     assert malformed == 2, (
@@ -278,6 +280,6 @@ def test_921_the_family_pass_reader_takes_the_first_row_and_counts_a_torn_line(t
 
     rows = _rows(ep)
     assert rows["b"]["malformed"] is True, "a partly-read ledger was graded (A3)"
-    assert J.world_token("b") in rows["b"]["ungradable_reason"], (
+    assert J.fixture_world_id("b") in rows["b"]["ungradable_reason"], (
         "the refusal does not name the ledger file it refused")
     assert rows["c"].get("ungradable") is not True, "world b's torn ledger took world c's grade"

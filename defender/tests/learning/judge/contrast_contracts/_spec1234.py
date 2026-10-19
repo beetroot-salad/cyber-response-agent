@@ -29,7 +29,7 @@ TWO EPISODE BUILDERS — pick by the demand, as `80-survey.md` assigns:
 1. `family(...)` — a HAND-BUILT archived episode (`Built`): manifest v2, pre-flight's outcome
    record + family stamp, samples, and per world `worlds/<X>/` (report, investigation, alert,
    lessons record, gather summaries, provenance, the query table with payload sidecars and lead
-   claims), the served ledger `served/<token>.<X>.jsonl`, the oracle store `oracle/<X>/`. A
+   claims), the served ledger `served/<world UUID>.jsonl`, the oracle store `oracle/<X>/`. A
    scenario is a few `World(...)` / `CallRow(...)` lines. Ledger rows carry the COINED call id
    (`call_id()`), because A3/A12 make a ledger row without one malformed; since #1255 (G4/G6)
    table rows carry none, and the world's host-only call-join record `worlds/<X>/call_join.jsonl`
@@ -386,10 +386,9 @@ FAMILY = "family"
 # --------------------------------------------------------------------------------------
 
 EPISODE_ID = T.EPISODE_ID
-EPISODE_TOKEN = T.EPISODE_TOKEN
 SYSTEMS = S24.SYSTEMS                       # ("edr", "idp", "siem-x") — the fixture tenant's
 FIXTURE_TENANT = S24.FIXTURE_TENANT
-world_token = T.world_token
+fixture_world_id = T.fixture_world_id
 report_text = T.report_text
 provenance_record = T.provenance_record
 investigation_document = J.investigation_document
@@ -444,11 +443,11 @@ def normalized_prompt(prompt: str, where: Any) -> str:
     return unsalted(prompt).replace(str(_ep(where).parent), "<ROOT>")
 
 
-def call_id(label: str, n: int, *, episode_token: str = EPISODE_TOKEN) -> str:
+def call_id(label: str, n: int) -> str:
     """COINED (A12): the host-written id of call `n` of world `label`'s run — it names the run
     (the world token every ledger row of that run carries as `world_id`) and the call. The
     hand-built archive writes ONLY this spelling; a real-path archive is read, never planted."""
-    return f"{world_token(label, episode_token=episode_token)}/{n}"
+    return f"{fixture_world_id(label)}/{n}"
 
 
 def call_ids(rows: Iterable[Mapping[str, Any]]) -> list[Any]:
@@ -469,7 +468,7 @@ def found_run(label: str) -> str:
 def conduct(label: str, leaf: str = "report.md", frag: str | None = None) -> str:
     """A conduct pointer into world `label`'s archive (`worlds/<X>/<leaf>[#frag]`): report,
     investigation, gather summaries, query-table rows."""
-    return f"worlds/{label}/{leaf}" + (f"#{frag}" if frag is not None else "")
+    return f"worlds/{T.fixture_world_id(label)}/{leaf}" + (f"#{frag}" if frag is not None else "")
 
 
 def table_ptr(label: str, row: int) -> str:
@@ -477,16 +476,16 @@ def table_ptr(label: str, row: int) -> str:
     return conduct(label, "executed_queries.jsonl", str(row))
 
 
-def served_ptr(label: str, row: int | None, *, episode_token: str = EPISODE_TOKEN) -> str:
-    """A1's served form, `served/<token>.<X>.jsonl#<row>` (0-based line index); `row=None`
+def served_ptr(label: str, row: int | None) -> str:
+    """A1's served form, `served/<world UUID>.jsonl#<row>` (0-based line index); `row=None`
     drops the fragment (NA03: unresolved)."""
-    base = f"served/{world_token(label, episode_token=episode_token)}.jsonl"
+    base = f"served/{fixture_world_id(label)}.jsonl"
     return base if row is None else f"{base}#{row}"
 
 
 def oracle_ptr(label: str, leaf: str = "forged.jsonl", frag: str | None = None) -> str:
     """A built-layer pointer (`oracle/<X>/<leaf>[#frag]`) — its own class, never conduct."""
-    return f"oracle/{label}/{leaf}" + (f"#{frag}" if frag is not None else "")
+    return f"oracle/{T.fixture_world_id(label)}/{leaf}" + (f"#{frag}" if frag is not None else "")
 
 
 def plan_ptr(label: str | None = None) -> str:
@@ -509,7 +508,7 @@ def outcome_ptr(frag: str = "not_replayable") -> str:
 
 def never_resolving(label: str = "b") -> list[str]:
     """A1's never-resolve list, spelled for world `label`."""
-    return [p.format(label=label) for p in NEVER_RESOLVE]
+    return [p.format(label=fixture_world_id(label)) for p in NEVER_RESOLVE]
 
 
 # --------------------------------------------------------------------------------------
@@ -693,12 +692,12 @@ def pair(**per_world: dict[str, Any]) -> list[World]:
 
 @dataclass
 class Built:
-    """A hand-built archived episode: its directory, token and worlds, and the addresses into it
+    """A hand-built archived episode: its directory, persisted identities and worlds, and the addresses into it
     a test needs (every one episode-relative unless it ends in `_path`)."""
 
     ep: Path
-    token: str
     worlds: dict[str, World]
+    world_ids: dict[str, str]
     inherited: list[CallRow]
 
     @property
@@ -706,28 +705,31 @@ class Built:
         return self.ep.name
 
     def world_dir(self, label: str) -> Path:
-        return self.ep / "worlds" / label
+        return self.ep / "worlds" / self.world_ids[label]
 
     def table_path(self, label: str) -> Path:
         return self.world_dir(label) / "executed_queries.jsonl"
 
     def ledger_path(self, label: str) -> Path:
-        return self.ep / "served" / f"{world_token(label, episode_token=self.token)}.jsonl"
+        return self.ep / "served" / f"{self.world_ids[label]}.jsonl"
 
     def oracle_path(self, label: str, leaf: str = "forged.jsonl") -> Path:
-        return self.ep / "oracle" / label / leaf
+        return self.ep / "oracle" / self.world_ids[label] / leaf
 
     def conduct(self, label: str, leaf: str = "report.md", frag: str | None = None) -> str:
-        return conduct(label, leaf, frag)
+        path = f"worlds/{self.world_ids[label]}/{leaf}"
+        return path if frag is None else f"{path}#{frag}"
 
     def table(self, label: str, row: int) -> str:
-        return table_ptr(label, row)
+        return self.conduct(label, "executed_queries.jsonl", str(row))
 
     def served(self, label: str, row: int | None) -> str:
-        return served_ptr(label, row, episode_token=self.token)
+        path = f"served/{self.world_ids[label]}.jsonl"
+        return path if row is None else f"{path}#{row}"
 
     def oracle(self, label: str, leaf: str = "forged.jsonl", frag: str | None = None) -> str:
-        return oracle_ptr(label, leaf, frag)
+        path = f"oracle/{self.world_ids[label]}/{leaf}"
+        return path if frag is None else f"{path}#{frag}"
 
     def plan(self, label: str | None = None) -> str:
         return plan_ptr(label)
@@ -843,11 +845,11 @@ def table_row(call: CallRow, *, seq: int) -> dict:
     return out
 
 
-def ledger_row(call: CallRow, *, label: str, token: str, cid: Any) -> dict:
+def ledger_row(call: CallRow, *, label: str, cid: Any) -> dict:
     """One world-ledger row (`ServedCall.row()` shape plus the oracle fields), carrying the
     coined call id where `cid` is not `None`."""
     payload = call.payload if call.payload is not None else {"rows": []}
-    wid = world_token(label, episode_token=token) if call.world_id is AUTO else call.world_id
+    wid = fixture_world_id(label) if call.world_id is AUTO else call.world_id
     out: dict[str, Any] = {
         "system": call.system, "verb": call.verb, "params": call.the_params,
         "payload_text": json.dumps(payload, sort_keys=True), "source": call.source,
@@ -913,7 +915,7 @@ def _write_leads(wd: Path, w: World, leads: list[str]) -> None:
 
 
 def _write_store(ep: Path, w: World) -> None:
-    store = ep / "oracle" / w.label
+    store = ep / "oracle" / T.world_id(ep, w.label)
     store.mkdir(parents=True, exist_ok=True)
     facts = w.facts if w.facts is not None else [fact(f"f-{w.label}", label=w.label)]
     forged = w.forged if w.forged is not None else [
@@ -928,10 +930,11 @@ def _write_store(ep: Path, w: World) -> None:
         {"entity": "alice", "field": "logon_host", "value": "db-1"}) + "\n", encoding="utf-8")
 
 
-def _archive_world(ep: Path, w: World, *, token: str, inherited: list[CallRow]) -> None:
+def _archive_world(ep: Path, w: World, *, inherited: list[CallRow]) -> None:
     """`worlds/<X>/` plus its ledger and oracle store, as `archive_episode` and the sibling
     leave them."""
-    wd = ep / "worlds" / w.label
+    identity = T.world_id(ep, w.label)
+    wd = ep / "worlds" / identity
     wd.mkdir(parents=True, exist_ok=True)
     _write_texts(wd, w)
     calls = list(w.calls or [])
@@ -945,7 +948,7 @@ def _archive_world(ep: Path, w: World, *, token: str, inherited: list[CallRow]) 
         if call.inherited:
             cid = None if call.call_id is AUTO else call.call_id
         else:
-            cid = (call_id(w.label, own_n, episode_token=token) if call.call_id is AUTO
+            cid = (f"{identity}/{own_n}" if call.call_id is AUTO
                    else call.call_id)
             own_n += 1
         if call.table:
@@ -962,12 +965,15 @@ def _archive_world(ep: Path, w: World, *, token: str, inherited: list[CallRow]) 
             if cid is not None and entry not in joined:
                 joined.append(entry)
         if call.source is not None and not call.inherited:
-            ledger_out.append(ledger_row(call, label=w.label, token=token, cid=cid))
+            row = ledger_row(call, label=w.label, cid=cid)
+            if call.world_id is AUTO:
+                row["world_id"] = identity
+            ledger_out.append(row)
     _write_table(wd, table)
     J.write_call_join(wd, joined)
     served = ep / "served"
     served.mkdir(exist_ok=True)
-    (served / f"{world_token(w.label, episode_token=token)}.jsonl").write_text(
+    (served / f"{identity}.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in ledger_out), encoding="utf-8")
     if (not w.is_control) if w.oracle is AUTO else w.oracle:
         _write_store(ep, w)
@@ -1005,10 +1011,9 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
                    None, episode_id=episode_id)
     if base_rows is not None:
         T.base_capture(ep, base_rows)
-    token = sym(FAMILY_LOADER, "episode_token_for")(episode_id)
     for w in worlds:
         if w.archived:
-            _archive_world(ep, w, token=token, inherited=list(inherited))
+            _archive_world(ep, w, inherited=list(inherited))
         if w.world_record is not None:
             S24.world_record(ep, w.label, w.world_record, detail=w.world_record_detail)
     if samples is AUTO:
@@ -1022,8 +1027,8 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
                            drift=drift, family_stamp=family_stamp, **extra)
     if any(w.archived for w in worlds):
         T.plant_roster(ep)
-    return Built(ep=ep, token=token, worlds={w.label: w for w in worlds},
-                 inherited=list(inherited))
+    return Built(ep=ep, worlds={w.label: w for w in worlds},
+                 world_ids={w["label"]: w["world_id"] for w in doc["worlds"]}, inherited=list(inherited))
 
 
 # --------------------------------------------------------------------------------------
@@ -1374,6 +1379,14 @@ class RoutedJudge:
     agent_ids: list[str] = field(default_factory=list)
     kwargs: list[dict] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    world_labels: dict[str, str] = field(default_factory=dict, repr=False)
+
+    def bind_worlds(self, world_ids: Mapping[str, str]) -> None:
+        self.world_labels = {identity: label for label, identity in world_ids.items()}
+
+    def coordinate(self, agent_id: str):
+        identity, draw, attempt = parse_agent_id(agent_id)
+        return self.world_labels.get(identity, identity), draw, attempt
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
                  **kw: Any) -> str:
@@ -1381,7 +1394,7 @@ class RoutedJudge:
             self.prompts.append(prompt)
             self.agent_ids.append(agent_id)
             self.kwargs.append({"role": role, "agent_id": agent_id, **kw})
-        label, n, attempt = parse_agent_id(agent_id)
+        label, n, attempt = self.coordinate(agent_id)
         if agent_id in self.fail or label in self.fail or (label, n) in self.fail:
             raise self._unprocessable(agent_id, RuntimeError("TransportFault"))
         if agent_id in self.overflow or label in self.overflow or (label, n) in self.overflow:
@@ -1422,7 +1435,7 @@ class RoutedJudge:
 
     def calls_for(self, label: str) -> list[str]:
         """Agent ids of every call about world `label` (or `"family"`), in call order."""
-        return [a for a in self.agent_ids if parse_agent_id(a)[0] == label]
+        return [a for a in self.agent_ids if self.coordinate(a)[0] == label]
 
     def called(self, label: str) -> bool:
         return bool(self.calls_for(label))
@@ -1430,26 +1443,30 @@ class RoutedJudge:
     def prompt_for(self, label: str, draw: int = 0, attempt: int = 0) -> str:
         """The prompt handed to the call `(label, draw, attempt)`."""
         for agent, prompt in zip(self.agent_ids, self.prompts, strict=True):
-            if parse_agent_id(agent) == (label, draw, attempt):
+            if self.coordinate(agent) == (label, draw, attempt):
                 return prompt
         raise AssertionError(f"RoutedJudge: no call for {(label, draw, attempt)}; "
                              f"calls were {self.agent_ids}")
 
     def prompts_for(self, label: str) -> list[str]:
         return [p for a, p in zip(self.agent_ids, self.prompts, strict=True)
-                if parse_agent_id(a)[0] == label]
+                if self.coordinate(a)[0] == label]
 
     def system_prompts(self) -> list[Any]:
         """The system turn each call's wiring carried (`StageWiring.prompt_path`), in order."""
         return [getattr(k.get("wiring"), "prompt_path", None) for k in self.kwargs]
 
 
-def judge(replies: Mapping[Any, Any] | None = None, **kw: Any) -> RoutedJudge:
+def judge(replies: Mapping[Any, Any] | None = None, *,
+          world_ids: Mapping[str, str] | None = None, **kw: Any) -> RoutedJudge:
     """A `RoutedJudge` answering every unrouted world call `QUIET` and the family call
     `QUIET_FAMILY` unless told otherwise."""
     kw.setdefault("default", QUIET)
     kw.setdefault("family_default", QUIET_FAMILY)
-    return RoutedJudge(replies=dict(replies or {}), **kw)
+    recording = RoutedJudge(replies=dict(replies or {}), **kw)
+    if world_ids is not None:
+        recording.bind_worlds(world_ids)
+    return recording
 
 
 # --------------------------------------------------------------------------------------
@@ -1484,7 +1501,10 @@ def grade(where: Any, judge_seam: Any = None, *, draws: int | None = 1, **kw: An
     kw.setdefault("state", env_state())
     if draws is not None:
         kw["draws"] = draws
-    return J.grade_at(_ep(where), judge=judge_seam if judge_seam is not None else judge(), **kw)
+    judge_seam = judge_seam if judge_seam is not None else judge()  # lint-default: ok — fresh per-call recording double; never a provider
+    if hasattr(judge_seam, "bind_worlds") and hasattr(where, "world_ids"):
+        judge_seam.bind_worlds(where.world_ids)
+    return J.grade_at(_ep(where), judge=judge_seam, **kw)
 
 
 def grade_refused(where: Any, judge_seam: Any = None, **kw: Any) -> BaseException:
@@ -1522,19 +1542,17 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000,
     fam = mod(JUDGE_FAMILY)
     rnd = mod(JUDGE_RENDER)
     outcome = mod(OUTCOME)
-    token_for = sym(FAMILY_LOADER, "episode_token_for")
     with J.episode_runs_for(ep).episode_files(ep.name) as episode:
         bound = episode.view()
         manifest = fam.read_manifest(bound, expected_episode_id=ep.name)
         samples = fam.read_samples_record(bound)
         try:
             pre = outcome.read_outcome(bound)
-            failed = outcome.failed_worlds(bound, pre)
+            failed = outcome.failed_worlds(bound, pre, family=T.sym("runtime.branch._family", "parse_family")(manifest))
         except outcome.OutcomeUnreadable:
             pre, failed = None, {}
-        world = next(w for w in manifest["worlds"] if w["world_id"] == label)
-        _row, facts = fam.read_world(bound, world, episode_dir=ep,
-                                     episode_token=token_for(fam.episode_id_of(manifest)))
+        world = next(w for w in manifest["worlds"] if w["label"] == label)
+        _row, facts = fam.read_world(bound, world, episode_dir=ep)
         return rnd.render(ep, label, git_show=git_show if git_show is not None else FakeGitShow(),
                           payload_cap=payload_cap, facts=facts, lessons_commit=None,
                           manifest=manifest, samples=samples,
@@ -1934,8 +1952,13 @@ _ADAPTER_1234 = S24._ADAPTER.replace(
     "        roster_path = episode / \"arms.json\"\n"
     "        roster = json.loads(roster_path.read_text()) if roster_path.is_file() else {{}}\n"
     "        label = next((label for label, arm in roster.items() if arm == run_dir.name), None)\n"
+    "        from defender import _yaml as _fixture_yaml\n"
+    "        world_id = None\n"
+    "        if label is not None:\n"
+    "            manifest = _fixture_yaml.safe_load((episode / \"family.yaml\").read_text())\n"
+    "            world_id = next(w[\"world_id\"] for w in manifest[\"worlds\"] if w[\"label\"] == label)\n"
     "        pattern = entry[\"replace_with_dir\"].format(\n"
-    "            run_dir=run_dir, episode=episode, label=label) if label is not None else None\n"
+    "            run_dir=run_dir, episode=episode, label=label, world_id=world_id) if label is not None else None\n"
     "        for hit in _glob.glob(pattern) if pattern is not None else []:\n"
     "            p = Path(hit)\n"
     "            if p.is_dir() and not p.is_symlink():\n"
@@ -2058,20 +2081,24 @@ class RealBuilt:
     spawn: InProcessSiblings
     rc: int
     message: str
+    world_ids: dict[str, str]
 
     @property
     def episode_id(self) -> str:
         return self.ep.name
 
-    @property
-    def token(self) -> str:
-        return sym(FAMILY_LOADER, "episode_token_for")(self.ep.name)
+    def conduct(self, label: str, leaf: str = "report.md", frag: str | None = None) -> str:
+        path = f"worlds/{self.world_ids[label]}/{leaf}"
+        return path if frag is None else f"{path}#{frag}"
+
+    def table(self, label: str, row: int) -> str:
+        return f"worlds/{self.world_ids[label]}/executed_queries.jsonl#{row}"
 
     def table_path(self, label: str) -> Path:
-        return self.ep / "worlds" / label / "executed_queries.jsonl"
+        return self.ep / "worlds" / self.world_ids[label] / "executed_queries.jsonl"
 
     def ledger_path(self, label: str) -> Path:
-        return self.ep / "served" / f"{world_token(label, episode_token=self.token)}.jsonl"
+        return self.ep / "served" / f"{self.world_ids[label]}.jsonl"
 
     def table_rows(self, label: str) -> list[dict]:
         return read_jsonl(self.table_path(label))
@@ -2084,7 +2111,8 @@ class RealBuilt:
         return read_jsonl(self.spawn.run_dirs[label] / "executed_queries.jsonl")
 
     def served(self, label: str, row: int | None) -> str:
-        return served_ptr(label, row, episode_token=self.token)
+        path = f"served/{self.world_ids[label]}.jsonl"
+        return path if row is None else f"{path}#{row}"
 
     def finding_id(self, label: str, draw: int, index: int) -> str:
         return f"{self.ep.name}/{label}/{draw}/{index}"
@@ -2154,7 +2182,9 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
     if len(fresh) != 1:
         raise AssertionError(f"real_family: the launch made {len(fresh)} episodes "
                              f"(rc={rc}, {message!r})")
-    return RealBuilt(ep=fresh[0], est=est, spawn=spawn, rc=rc, message=message)
+    published = _yaml.safe_load((fresh[0] / "family.yaml").read_text(encoding="utf-8"))
+    return RealBuilt(ep=fresh[0], est=est, spawn=spawn, rc=rc, message=message,
+                     world_ids={w["label"]: w["world_id"] for w in published["worlds"]})
 
 
 # --------------------------------------------------------------------------------------

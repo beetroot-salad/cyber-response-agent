@@ -28,6 +28,7 @@ from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 #: #1187: an episode id is a uuid4 (`fixture_uuid` of the readable label).
 EPISODE_ID = fixture_uuid("ep-1133")
+WORLD_B = T.fixture_world_id("b")
 #: Where a primer waits for its rival, and a launcher for the other: generous, since a wedged
 #: wait costs one failed test, never a hung worker.
 WAIT = 10.0
@@ -179,6 +180,7 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
         tmp_path, host, reach):
     ep = tmp_path / "episodes" / EPISODE_ID
     ep.mkdir(parents=True)
+    T.write_family(ep, T.family_doc(episode_id=EPISODE_ID))
     planted = link_folder(ep / "runs", reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
     spawn = Spawned()
@@ -235,7 +237,7 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
     assert report["comparable"] is scrub_ran, report
     assert_real_folder(ep / "worlds")
     if scrub_ran:
-        assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.WORLDS)
+        assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.world_id(ep, label) for label in T.WORLDS)
 
 
 @pytest.mark.parametrize("reach", REACH)
@@ -272,7 +274,7 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
 
 
 @pytest.mark.parametrize("reach", REACH)
-@pytest.mark.parametrize("at", ["worlds", "worlds/b"])
+@pytest.mark.parametrize("at", ["worlds", f"worlds/{WORLD_B}"])
 def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through_it(
         tmp_path, host, at, reach):
     archive = T.mod("learning.branch.archive")
@@ -281,7 +283,7 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
     # the arm planter reads the roster and never writes one (review-3 F33).
     T.plant_roster(ep)
     run_dir = T.sibling_run_dir(ep / "runs", "b")
-    if at == "worlds/b":
+    if at == f"worlds/{WORLD_B}":
         (ep / "worlds").mkdir(exist_ok=True)
     planted = link_folder(ep / at, reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
@@ -297,7 +299,7 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
     planted.remove()
     with S.open_episode(ep) as episode:
         archived = archive.archive_episode(episode, {"b": run_dir})
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / WORLD_B
     assert archived == {"b": world}
     assert_real_folder(world)
     assert (world / "report.md").is_file()
@@ -315,7 +317,7 @@ class ScriptedJudge:
     def __init__(self, on_first: Any = None, *, failing: tuple[str, ...] = ()) -> None:
         self.reply = J.as_reply_text(J.reply_doc())
         self.on_first = on_first
-        self.failing = failing
+        self.failing = {"family" if label == "family" else T.fixture_world_id(label) for label in failing}
         self.agent_ids: list[str] = []
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
@@ -329,7 +331,8 @@ class ScriptedJudge:
         return self.reply
 
     def called_for(self, label: str) -> list[str]:
-        return [a for a in self.agent_ids if a.startswith(f"judge:{label}:")]
+        identity = "family" if label == "family" else T.fixture_world_id(label)
+        return [a for a in self.agent_ids if a.startswith(f"judge:{identity}:")]
 
 
 def judged_episode(tmp_path: Path) -> Path:
@@ -359,7 +362,7 @@ def regrade(tmp_path: Path, ep: Path, judge: ScriptedJudge) -> Any:
 def test_h1_a_linked_world_draws_folder_is_refused_before_any_draw_is_paid_for(
         tmp_path, roots, host, reach):
     ep = judged_episode(tmp_path)
-    planted = link_folder(ep / "worlds" / "b" / "judge", reach=reach, ep=ep, host=host)
+    planted = link_folder(ep / "worlds" / WORLD_B / "judge", reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
     judge = ScriptedJudge()
 
@@ -380,19 +383,17 @@ def test_h1_a_linked_world_draws_folder_is_refused_before_any_draw_is_paid_for(
     planted.remove()
     judge = ScriptedJudge()
     regrade(tmp_path, ep, judge)
-    assert judge.called_for("b") == ["judge:b:0", "judge:b:1"]
-    draws = ep / "worlds" / "b" / "judge"
+    assert judge.called_for("b") == [f"judge:{WORLD_B}:0", f"judge:{WORLD_B}:1"]
+    draws = ep / "worlds" / WORLD_B / "judge"
     assert_real_folder(draws)
     assert sorted(p.name for p in draws.iterdir()) == ["0.yaml", "1.yaml"]
 
 
 @pytest.mark.parametrize("reach", REACH)
-@pytest.mark.parametrize("at", ["worlds/family", "worlds/family/judge"])
 def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_call(
-        tmp_path, roots, host, at, reach):
+        tmp_path, roots, host, reach):
     ep = judged_episode(tmp_path)
-    if at == "worlds/family/judge":
-        (ep / "worlds" / "family").mkdir(parents=True, exist_ok=True)
+    at = LAYOUT.family_draws
     planted = link_folder(ep / at, reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
     judge = ScriptedJudge(failing=("family",))
@@ -414,7 +415,7 @@ def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_
     judge = ScriptedJudge(failing=("family",))
     regrade(tmp_path, ep, judge)
     assert judge.called_for("family") == ["judge:family:0", "judge:family:1"]
-    draws = ep / "worlds" / "family" / "judge"
+    draws = ep / LAYOUT.family_draws
     assert_real_folder(draws)
     assert sorted(p.name for p in draws.iterdir()) == ["0.yaml", "1.yaml"]
 
@@ -424,7 +425,7 @@ def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_
 def test_h1_a_link_at_a_draws_name_refuses_the_pass_and_is_written_through_by_nothing(
         tmp_path, roots, host, kind, reach):
     ep = judged_episode(tmp_path)
-    planted = link_file(ep / "worlds" / "b" / "judge" / "0.yaml", kind, reach=reach, ep=ep,
+    planted = link_file(ep / "worlds" / WORLD_B / "judge" / "0.yaml", kind, reach=reach, ep=ep,
                         host=host)
     before, host_before = planted.state(), S.census(host)
 
@@ -439,12 +440,12 @@ def test_h1_a_link_at_a_draws_name_refuses_the_pass_and_is_written_through_by_no
 
     planted.remove()
     regrade(tmp_path, ep, ScriptedJudge())
-    draw = ep / "worlds" / "b" / "judge" / "0.yaml"
+    draw = ep / "worlds" / WORLD_B / "judge" / "0.yaml"
     assert_plain_file(draw)
     assert yaml.safe_load(draw.read_text(encoding="utf-8"))["investigator_findings"]
 
 
-FRAMED = WIRE_LOG_NAMES.agent_framed_trace("judge:b:0")
+FRAMED = WIRE_LOG_NAMES.agent_framed_trace(f"judge:{WORLD_B}:0")
 
 
 @pytest.mark.parametrize("reach", REACH)
@@ -469,14 +470,14 @@ def test_h1_the_framed_wire_log_refuses_a_link_contains_it_and_writes_nothing_th
     assert S.census(host) == host_before
     planted.assert_left()
     assert warned(caplog, "wire log"), "the refused wire log was not logged"
-    assert (ep / "worlds" / "b" / "judge" / "0.yaml").is_file(), "the draw itself was lost"
+    assert (ep / "worlds" / WORLD_B / "judge" / "0.yaml").is_file(), "the draw itself was lost"
 
     planted.remove()
     regrade(tmp_path, ep, ScriptedJudge())
     trace = ep / "wire_logs" / FRAMED
     assert_real_folder(ep / "wire_logs")
     assert_plain_file(trace)
-    assert json.loads(trace.read_text(encoding="utf-8").splitlines()[0])["agent_id"] == "judge:b:0"
+    assert json.loads(trace.read_text(encoding="utf-8").splitlines()[0])["agent_id"] == f"judge:{WORLD_B}:0"
 
 
 @pytest.mark.parametrize("reach", REACH)
@@ -533,7 +534,7 @@ def test_o6_a_judge_pass_whose_episode_dir_is_renamed_mid_pass_records_in_the_mo
     assert not os.path.lexists(ep), "the pass recreated the episode dir's old name"
     assert_plain_file(moved / "judge.yaml")
     assert J.world_rows(J.judge_record(moved))["b"]["completed_draws"] == 2
-    assert sorted(p.name for p in (moved / "worlds" / "b" / "judge").iterdir()) == [
+    assert sorted(p.name for p in (moved / "worlds" / WORLD_B / "judge").iterdir()) == [
         "0.yaml", "1.yaml"]
 
 

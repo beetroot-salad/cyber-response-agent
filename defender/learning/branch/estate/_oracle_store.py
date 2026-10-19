@@ -84,7 +84,7 @@ def _trace_spent(rows: list[dict]) -> float:
 
 
 class OracleStore:
-    """`oracle/<label>/`: frozen forged rows, recorded facts, the served-answer cache, the
+    """`oracle/<world-uuid>/`: frozen forged rows, recorded facts, the served-answer cache, the
     oracle-side ledger, this world's live base answers and the oracle's spend trace."""
 
     def __init__(self, root: Path) -> None:
@@ -179,7 +179,7 @@ class OracleStore:
         """Append each frozen-row collision not already recorded (M12=A), keyed on
         `(forged_id, column, value)` — the judge reads them off `collisions.jsonl`.
 
-        @owns collisions — the shipped `oracle/<label>/collisions.jsonl` rows are produced here."""
+        @owns collisions — the shipped `oracle/<world-uuid>/collisions.jsonl` rows are produced here."""
         with self._lock:
             new = [e for e in entries
                    if (e["forged_id"], e["column"], e["value"]) not in self._collided]

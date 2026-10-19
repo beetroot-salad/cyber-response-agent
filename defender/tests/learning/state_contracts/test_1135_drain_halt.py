@@ -2,6 +2,8 @@
 real `drains.author_drain` through `cli._run_stage` over a created state root and a real git repo."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 import logging
 import os
@@ -78,7 +80,7 @@ def _defender_row(fid: str, judge_outcome: str) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"), subject="defender",
                type="lead-set", subject_anchor="l-001", subject_topic="coverage",
                source_run_dir="episodes/ep-1/worlds/b",
-               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
                on_verdict_path=True, world_label_doubted=False)
     row.pop("judge_outcome", None)
     return row

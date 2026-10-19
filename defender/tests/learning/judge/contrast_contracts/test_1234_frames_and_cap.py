@@ -411,7 +411,7 @@ def test_1234_raised_size_failure_is_asked_once_and_recorded(tmp_path, monkeypat
     built = S.family(tmp_path, _worlds())
     seam = _grade(built, monkeypatch,
                   judge=S.judge({FOCUS: _queueing_reply(FOCUS)}, overflow={FOCUS}))
-    assert seam.calls_for(FOCUS) == [f"judge:{FOCUS}:0"], (
+    assert seam.calls_for(FOCUS) == [f"judge:{built.world_ids[FOCUS]}:0"], (
         f"a size failure that raised was re-asked: {seam.calls_for(FOCUS)}")
     row = S.row(built, FOCUS)
     assert row.get(S.EXISTING["row.draws_failed_reason"]), f"the failure is not recorded: {row}"
@@ -737,7 +737,7 @@ def test_1234_hostile_run_text_reaches_the_wire_log_and_page_unframed(tmp_path):
     seam = S.judge()
     S.grade(built, seam)
     assert seam.called(FOCUS), f"world {FOCUS} was never asked"
-    stored = [r for r in S.wire_log_records(built) if r["agent_id"] == f"judge:{FOCUS}:0"]
+    stored = [r for r in S.wire_log_records(built) if r["agent_id"] == f"judge:{built.world_ids[FOCUS]}:0"]
     assert len(stored) == 1, f"{len(stored)} wire-log records for judge:{FOCUS}:0"
     assert stored[0]["prompt"] == seam.prompt_for(FOCUS), (
         "the wire log holds a different text from the prompt the judge was handed")

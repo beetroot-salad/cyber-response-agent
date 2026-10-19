@@ -86,7 +86,7 @@ def test_1025_a_scalar_findings_field_in_a_draw_document_is_that_draws_own_absen
 
 def test_1025_non_numeric_usage_and_odd_message_shapes_in_a_wire_log_leave_that_call_unpriced(tmp_path):
     ep = E.sample_episode(tmp_path)
-    agent_id = f"judge:{E.GRADED_WORLD}:1"
+    agent_id = f"judge:{T.fixture_world_id(E.GRADED_WORLD)}:1"
     rows = E.trace_rows(agent_id)
     for row in rows:
         if row.get("kind") == "request":
@@ -228,7 +228,7 @@ def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk
     manifest["worlds"].append(T.world_doc(label, role="B", axis="planted"))
     T.write_family(ep.dir, manifest)
     with pytest.raises(E.sym("learning.judge", "JudgeRefused"),
-                       match="world-token alphabet") as refused:
+                       match="world-label alphabet") as refused:
         E.render_episode(ep.dir, module=visualize_episode())
     assert "PLANTED-OUTSIDE" not in str(refused.value)
     assert not ep.page.exists(), "a page was written for a manifest the loader refused"
@@ -236,8 +236,8 @@ def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permission bits")
 @pytest.mark.parametrize("rel", [
-    "runs", "worlds", "wire_logs", f"worlds/{E.GRADED_WORLD}/gather_summaries",
-    f"worlds/{E.GRADED_WORLD}/judge",
+    "runs", "worlds", "wire_logs", f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/gather_summaries",
+    f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/judge",
 ])
 def test_1025_an_unlistable_directory_is_its_own_slots_absence(tmp_path, rel):
     ep = E.sample_episode(tmp_path)

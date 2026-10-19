@@ -345,7 +345,7 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
 
 def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
     """Name the run in every call id its writers allocate (A12, #1234): the registry's own
-    `call_run` when it serves a branched world (the world token its served-ledger rows carry
+    `call_run` when it serves a branched world (the world UUID its served-ledger rows carry
     as `world_id`), else the run id. Bound before any writer runs, lead zero's included."""
     from ..query_tool import bind_call_ids
 

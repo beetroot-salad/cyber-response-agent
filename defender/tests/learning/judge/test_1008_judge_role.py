@@ -248,7 +248,7 @@ def test_1008_the_real_selection_step_builds_the_judges_agent_with_no_tool_at_al
 
     wiring = StageWiring(prompt_path=JUDGE_ROLE_PROMPT, model=judge_model(),
                          effort=judge_effort(), trace_name="judge_b_0_trace.jsonl",
-                         label="judge:b:0")
+                         label=f"judge:{T.fixture_world_id('b')}:0")
     logger = observe.RequestLogger(tmp_path / "seam_trace.jsonl")
     try:
         agent = build_stage_agent(deps_cls, wiring, logger, make_model=make_model)
@@ -286,7 +286,7 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
         "is vacuous")
     assert J.draw_files(ep, "b"), "the pass wrote no draw file, so nothing was really graded"
     assert judge.agent_ids == [
-        "judge:b:0", "judge:b:1", "judge:c:0", "judge:c:1",
+        f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:1", f"judge:{T.fixture_world_id('c')}:0", f"judge:{T.fixture_world_id('c')}:1",
         "judge:family:0", "judge:family:1",
     ], f"the `judge:<world>:<n>` / `judge:family:<n>` agent ids changed: {judge.agent_ids}"
     for i, kw in enumerate(judge.kwargs):

@@ -157,7 +157,7 @@ def _loads(doc: dict) -> Any:
     family = _parse(doc)
     assert _served(family) == list(doc["served_systems"]), _served(family)
     for world in doc["worlds"]:
-        assert _facts(family, world["world_id"]) == [_fact_view(f) for f in world["facts"]]
+        assert _facts(family, world["label"]) == [_fact_view(f) for f in world["facts"]]
     return family
 
 
@@ -483,8 +483,8 @@ def test_p055_system_name_spelled_as_a_yaml_boolean_null_or_number(tmp_path):
             msg = _refused(lambda ep=ep: _load(ep), FamilyError)
             assert "served_systems" in msg, (literal, msg)
 
-    ep = _episode(tmp_path / "quoted", _doc())
-    with _episode_cls().open(ep) as handle:
+    ep = tmp_path / "quoted" / S.EPISODE_ID
+    with _episode_cls().create(ep) as handle:
         S.sym(S.FAMILY, "write_family")(handle, _doc(served_systems=["on", "no", "null",
                                                                      "1e3"]))
     served = _served(_load(ep))
@@ -512,10 +512,10 @@ def test_p056_entity_or_fact_id_spelled_as_a_yaml_literal(tmp_path):
                 msg = _refused(lambda ep=ep: _load(ep), FamilyError)
                 assert field_name in msg, (literal, field_name, msg)
 
-    ep = _episode(tmp_path / "quoted", _doc())
+    ep = tmp_path / "quoted" / S.EPISODE_ID
     distinct = _doc(("b", [S.fact("007", "alice logged on", ("007", "7")),
                            S.fact("7", "bob logged on", ("bob",))]), ("c", [_F2]))
-    with _episode_cls().open(ep) as handle:
+    with _episode_cls().create(ep) as handle:
         S.sym(S.FAMILY, "write_family")(handle, distinct)
     facts = _facts(_load(ep), "b")
     assert [f["fact_id"] for f in facts] == ["007", "7"]

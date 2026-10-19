@@ -41,7 +41,7 @@ def _leads(page: E.Page, label: str) -> str:
 
 
 def _ledger_name(label: str) -> str:
-    return f"served/{T.world_token(label)}.jsonl"
+    return f"served/{T.fixture_world_id(label)}.jsonl"
 
 
 #: The two spare worlds the every-arm fixture names through judge rows of their own (no
@@ -78,7 +78,7 @@ def _plant_per_copy_arms(copy: E.Episode) -> None:
     R.plant_hard_link(copy.world(E.GRADED_WORLD) / "investigation.md",
                       copy.dir / "scratch" / "investigation-target.md")
     E.plant_link(copy.world(LINKED_WORLD), copy.world(E.CONTROL))
-    E.plant_link(copy.world(DANGLING_WORLD), copy.world("nowhere-at-all"))
+    E.plant_link(copy.world(DANGLING_WORLD), copy.dir / "worlds" / T.fixture_world_id("nowhere-at-all"))
 
 
 def _write_grade_over(copy: E.Episode) -> None:
@@ -93,8 +93,7 @@ def _write_grade_over(copy: E.Episode) -> None:
     with J.episode_runs_for(copy.dir).episode_files(copy.dir.name) as episode:
         bound = episode.view()
         manifest = family.read_manifest(bound, expected_episode_id=copy.dir.name)
-        rows = [family.read_world(bound, world, episode_dir=copy.dir,
-                                  episode_token=E.EPISODE_TOKEN)[0]
+        rows = [family.read_world(bound, world, episode_dir=copy.dir)[0]
                 for world in family.non_control_worlds(manifest)]
     doc = E.sample_grade()
     doc["worlds"] = rows
@@ -103,7 +102,10 @@ def _write_grade_over(copy: E.Episode) -> None:
 
 
 def _every_arm(tmp_path: Path) -> tuple[E.Episode, E.Episode, E.Episode]:
-    built = E.sample_episode(tmp_path, root=T.tenant_episodes(tmp_path / "build"))
+    built = E.sample_episode(
+        tmp_path, root=T.tenant_episodes(tmp_path / "build"),
+        extra_worlds=tuple(T.world_doc(label, role="B", axis=f"{label} fact")
+                           for label in (LINKED_WORLD, DANGLING_WORLD)))
     _plant_shared_arms(built)
     # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its manifest's
     # episode id); the two copies differ only in where they sit.
@@ -164,11 +166,11 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
     assert R.ALIAS in stages, stages
 
     passthrough_report = page.section(f"world-{E.PASSTHROUGH_WORLD}").find_all(cls="w-report")[0].text()
-    assert f'worlds/{E.PASSTHROUGH_WORLD}/report.md' in passthrough_report, passthrough_report
+    assert f'worlds/{T.fixture_world_id(E.PASSTHROUGH_WORLD)}/report.md' in passthrough_report, passthrough_report
     assert R.ALIAS in passthrough_report, passthrough_report
     graded_leads = _leads(page, E.GRADED_WORLD)
     assert "investigation record unavailable" in graded_leads, graded_leads
-    assert f'worlds/{E.GRADED_WORLD}/investigation.md' in graded_leads, graded_leads
+    assert f'worlds/{T.fixture_world_id(E.GRADED_WORLD)}/investigation.md' in graded_leads, graded_leads
     assert R.ALIAS in graded_leads, graded_leads
     assert "served ledger: absent" in _leads(page, E.PASSTHROUGH_WORLD)
     control_leads = _leads(page, E.CONTROL)
@@ -182,7 +184,7 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
 
     graded_world = _world(page, E.GRADED_WORLD)
     assert 'ungradable' in graded_world, graded_world
-    assert f'worlds/{E.GRADED_WORLD}/investigation.md' in graded_world, graded_world
+    assert f'worlds/{T.fixture_world_id(E.GRADED_WORLD)}/investigation.md' in graded_world, graded_world
     passthrough_world = _world(page, E.PASSTHROUGH_WORLD)
     assert 'ungradable' in passthrough_world, passthrough_world
     assert 'gather_summaries' in passthrough_world, passthrough_world
@@ -190,17 +192,17 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
 
     for label in (LINKED_WORLD, DANGLING_WORLD):
         world = _world(page, label)
-        assert f'worlds/{label}/report.md' in world, (label, world)
+        assert f'worlds/{T.fixture_world_id(label)}/report.md' in world, (label, world)
         assert R.ALIAS in world, (label, world)
         assert "not archived" not in world, (label, world)
         # The leads block is refused ONCE, at the directory: a `worlds/<w>` that is not a real
         # directory rosters nothing beneath it, so the one sentence names `worlds/<w>` itself.
         leads = _leads(page, label)
-        assert f'worlds/{label}' in leads, (label, leads)
+        assert f'worlds/{T.fixture_world_id(label)}' in leads, (label, leads)
         assert leads.count(R.ALIAS) == 1, (label, leads)
         assert "not archived" not in leads, (label, leads)
     linked_leads = _leads(page, LINKED_WORLD)
-    assert f"worlds/{LINKED_WORLD}" in linked_leads, linked_leads
+    assert f"worlds/{T.fixture_world_id(LINKED_WORLD)}" in linked_leads, linked_leads
     assert "gather_summaries/l-001.md" not in linked_leads, "the leads under a symlinked world dir were read through the link"
     assert str(one.dir) not in page.raw
     assert str(tmp_path) not in page.raw
@@ -283,8 +285,8 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
     (ep.world(E.GRADED_WORLD) / "investigation.md").unlink()
     shutil.rmtree(ep.world(E.PASSTHROUGH_WORLD))
     control = ep.world(E.CONTROL)
-    control.rename(ep.dir / "worlds" / "control-real")
-    E.plant_link(control, ep.dir / "worlds" / "control-real")
+    control.rename(ep.dir / "control-real")
+    E.plant_link(control, ep.dir / "control-real")
     page = E.render(ep)
 
     graded = _world(page, E.GRADED_WORLD)
@@ -300,11 +302,11 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
     assert "not archived" in _leads(page, E.PASSTHROUGH_WORLD)
 
     linked = _world(page, E.CONTROL)
-    assert f'worlds/{E.CONTROL}/report.md' in linked, linked
+    assert f'worlds/{T.fixture_world_id(E.CONTROL)}/report.md' in linked, linked
     assert R.ALIAS in linked, linked
     assert "not archived" not in linked, linked
     linked_leads = _leads(page, E.CONTROL)
-    assert f'worlds/{E.CONTROL}' in linked_leads, linked_leads  # the directory's own refusal, said once
+    assert f'worlds/{T.fixture_world_id(E.CONTROL)}' in linked_leads, linked_leads  # the directory's own refusal, said once
     assert linked_leads.count(R.ALIAS) == 1, linked_leads
     assert "not archived" not in linked_leads, linked_leads
     assert str(ep.dir) not in page.raw

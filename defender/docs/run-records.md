@@ -28,13 +28,11 @@ census) and the page's former per-kind reader/writer tables retired with it.
   request (#1078, no default); the tenant exists once its row `<data root>/<T>/tenant.json` does.
   Where a run or an episode sits says whose it is (#1187 R1): `<T>/runs/` and `<T>/episodes/`
   are reached only through the tenant's own walk, so no record in a runs base restates it.
-- **World** — an environment as investigated. A *base* world is the capture unchanged
-  (`role: "A"`, `runtime/branch/_family.py:59`, exactly one per family, `:503-507`); an
-  *overlay* world is a base world plus a one-axis overlay (`World.overlay`, `:289-300`). Two
-  strings name a world: the short **label** (`World.world_id`, `:292`, keys `worlds/<label>/`
-  in an archive) and the episode-qualified **token** `<episode>.<label>`
-  (`ResumeWorld.world_id`, keys `served/<token>.jsonl`). An unforked run stamps no world
-  (`world_id: null`, #1187 R1b).
+- **World** — the capture unchanged (`role: "A"`, exactly one per family) or a
+  counterfactual declaration. `World.label` is a descriptive selector. The host assigns
+  `World.world_id` once before preflight, persists it in `family.yaml`, and uses that UUID
+  for the archive, ledger, oracle store, world record and judge artifacts. Readers reuse the
+  persisted mapping. An unforked run stamps `world_id: null` (#1187 R1b).
 - **Episode** — a family of runs forked from one source run at one message. It is a grouping,
   not an ownership level: the fork point is declared once in `family.yaml` (`source_run_id`,
   `branch_message_id`, `fences_at`; #1105 PR 2 stopped writing `source_run_dir` and never reads
@@ -45,7 +43,7 @@ census) and the page's former per-kind reader/writer tables retired with it.
   tenant's run repository (`Tenant.runs_repository()`; an episode's arms through
   `runs.episode(episode_id)`).
   Every forked sibling is a run with its own run dir under the episode
-  (`<episode>/runs/<arm uuid>`, the id the arm roster `arms.json` holds for its world). The archive's `worlds/<label>/`
+  (`<episode>/runs/<arm uuid>`, the id the arm roster `arms.json` holds for its world). The archive's `worlds/<world UUID>/`
   is a screened *projection* of that run dir (`ArchivedWorld`), not a `Run` itself (section 5).
 - **Alert → run** is one-to-many.
 
@@ -95,30 +93,30 @@ unreachable by root containment rather than by a named deny.
 | scrub_verdict | 2 | `<run>.scrub-verdict.json` | — | scrub_verdict.json (renamed, `archive.py:79`) | run.facts.scrub_verdict |  |
 | ticket_write | 2 | `<run>.ticket-write.json` | — | — | run.observability.ticket_write | the case-ticket write's receipt, written by the host's record step (`ticket_writer._write_receipt`); moved out of the run dir by #1107 so the box can neither plant nor block it |
 | session_pointer | 2 | `<run>.session-pointer.json` | — | — | run.observability.session_pointer | the run -> case link (which case's session store holds this run), written by the driver before the first turn; moved out of the run dir by #1235 so the box can neither forge nor delete it |
-| call_join | 2 | `<run>.call-join.jsonl` | — | call_join.jsonl | run.tables.call_join | one line per query-table row the run wrote, `(lead_id, seq)` -> the call's host-written id, appended by `record_query.append_query_row`; beside the run folder so the model's table carries no id (#1255 G4/G6); archived as `worlds/<label>/call_join.jsonl` |
+| call_join | 2 | `<run>.call-join.jsonl` | — | call_join.jsonl | run.tables.call_join | one line per query-table row the run wrote, `(lead_id, seq)` -> the call's host-written id, appended by `record_query.append_query_row`; beside the run folder so the model's table carries no id (#1255 G4/G6); archived as `worlds/<world UUID>/call_join.jsonl` |
 | ticket_comments | 2 | `<run>.ticket-comments.jsonl` | — | — | run.observability.ticket_comments | every comment the record step got the store to accept, `{key, body}`, appended by `ticket_writer._record_posted_comment`; the run's own writes to the world, handed to a branched world's oracle (#1255 P5) |
 | session_db | 3 | `<sessions>/<lineage id>.db` | — | — | run.session.session_db | SQLite; the connection at `_bare_connect` carries every read and append |
-| family | 4 | `family.yaml` | — | — | episode.family | the fork point, declared once per episode |
+| family | 4 | `family.yaml` | — | — | episode.family | the fork point and host-assigned world UUIDs, declared once per episode before preflight |
 | arm_roster | 4 | `arms.json` | — | — | episode.arm_roster | #1187 R2: `{label: arm uuid}`, written once by the host at the start of RUNS through the complete-or-absent lane, after `runs/`; no box mounts it |
 | family_stamp | 4 | `provenance.json` | — | — | episode.family_stamp | a different shape from the run stamp; written by `verify_family` |
 | review_yaml | 4 | `review.yaml` | — | — | episode.review | written at `Step.REVIEW`, before the siblings run; the outcome is merged in at the end (`cli.py:1120`) |
 | samples | 4 | `samples.yaml` | — | — | episode.samples | written at `Step.QUESTIONER`, before the model call |
 | judge_yaml | 4 | `judge.yaml` | — | — | episode.judge |  |
-| judge_draw | 4 | `worlds/<label>/judge/<n>.yaml, worlds/family/judge/<n>.yaml` | — | — | episode.judge_draw |  |
+| judge_draw | 4 | `worlds/<world UUID>/judge/<n>.yaml, judge/<n>.yaml` | — | — | episode.judge_draw |  |
 | timing | 4 | `timing.json` | — | — | episode.timing | per launcher step |
 | staged | 4 | `staged.yaml` | — | — | episode.staged | the sole record that a cluster write happened |
-| served | 4 | `served/base.jsonl, served/unrecorded.jsonl, served/<token>.jsonl` | — | — | episode.served | base: primed once by the host before any sibling; <token>: appended live per sibling; unrecorded: the primer's skip record (#1255 D6), created once beside base — calls the source asked whose answer base lacks (failed or unreadable) |
+| served | 4 | `served/base.jsonl, served/unrecorded.jsonl, served/<world UUID>.jsonl` | — | — | episode.served | base: primed once by the host before any sibling; <world UUID>: appended live per sibling; unrecorded: the primer's skip record (#1255 D6), created once beside base — calls the source asked whose answer base lacks (failed or unreadable) |
 | priming_lock | 4 | `served/.priming` | — | — | episode.priming_lock | `O_CREAT\|O_EXCL`; never unlinked, so a crashed priming leaves the episode permanently claimed |
 | stage_trace | 4 | `wire_logs/<stage>.trace.jsonl, wire_logs/<agent>_framed_trace.jsonl` | — | — | episode.stage_trace | episode-root wire traces of the learning stages |
 | learning_html | 4 | `learning.html` | — | — | episode.learning_html |  |
 | episode_runs | 4 | `runs/<uuid>/` | — | — | episode.episode_runs | an arm's real run dir, named by its roster uuid (never its label); its files take their table-1 kinds |
-| archive_proj | 4 | `worlds/<label>` | — | — | episode.archive_proj | the archive copy itself (section 5) |
+| archive_proj | 4 | `worlds/<world UUID>` | — | — | episode.archive_proj | the archive copy itself (section 5) |
 | tool_seam |  | `(the role's declared read/write targets)` | — | — | — | the model's generic read/write/edit file tools; the kind is decided by the gate at the call |
 | tenant_row | 5 | `<tenant>/tenant.json` | — | — | tenant.row | #1078 D1: the tenant's own row, created once per data root by the tenant setup command |
 
 <!-- end generated -->
 
-## 5. The archive projection (`<episode>/worlds/<label>/`)
+## 5. The archive projection (`<episode>/worlds/<world UUID>/`)
 
 `learning/branch/archive.archive_episode` copies **exactly** the set `_single_files` declares:
 `report.md`, `investigation.md`, `provenance.json`, the scrub verdict (as `scrub_verdict.json`),

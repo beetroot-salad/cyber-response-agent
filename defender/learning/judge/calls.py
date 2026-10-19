@@ -1,7 +1,7 @@
 """One run's two call records, joined by the host-written call id (A2, A12), and the one
 definition of a BLOCKED CALL (A2, A14).
 
-The served ledger (`served/<token>.<X>.jsonl`, the host's) owns what was served or blocked; the
+The served ledger (`served/<world-uuid>.jsonl`, the host's) owns what was served or blocked; the
 query table (`worlds/<X>/executed_queries.jsonl`) owns call order and the pre-branch rows. The
 two are joined on the call id — exactly, never on `(system, verb, params)`. The ledger row
 carries the id; the table row does not (#1255 G4: the model reads that table), and the id a
@@ -39,7 +39,6 @@ from defender.knowledge._query_rules import DENIED_QUERY_ID
 from defender.learning.branch.ledger import FAULT, REFUSED
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import mapping_key
-from defender.runtime.branch._family import episode_token_for, world_token_for
 
 #: The field both call records carry the host-written id under (A12).
 CALL_ID = "call_id"
@@ -158,7 +157,7 @@ def _call_tally(entries: dict[tuple[str, str], tuple[int, Mapping[str, Any]]],
     entries[key] = (count + n, first)
 
 
-def _present_tables(bound: Bound, manifest: Mapping[str, Any], *, episode_token: str,
+def _present_tables(bound: Bound, manifest: Mapping[str, Any],
                     ) -> tuple[list[tuple[str, str, list[dict[str, Any]]]], list[str]]:
     """Every manifest world's query table that reads whole, as `(label, token, rows)` in
     manifest order (control first), and why each other present one could not be read. A world
@@ -168,14 +167,14 @@ def _present_tables(bound: Bound, manifest: Mapping[str, Any], *, episode_token:
     tables: list[tuple[str, str, list[dict[str, Any]]]] = []
     unread: list[str] = []
     for world in [control_world(dict(manifest)), *non_control_worlds(dict(manifest))]:
-        label = world["world_id"]
+        label = world["label"]
         try:
-            rows = read_query_table(bound, label)
+            rows = read_query_table(bound, world["world_id"])
         except JudgeRefused as refused:
             unread.append(str(refused))
             continue
         if rows is not None:
-            tables.append((label, world_token_for(episode_token, label), rows))
+            tables.append((label, world["world_id"], rows))
     return tables, unread
 
 
@@ -195,33 +194,33 @@ def inherited_prefix_outliers(tables: Sequence[tuple[str, str, Sequence[Mapping[
         return {}
     top, n = Counter(copies.values()).most_common(1)[0]
     family_copy = top if 2 * n > len(copies) else None
-    return {label: (f"world {label!r}: {LAYOUT.world(label).executed_queries} holds inherited "
+    world_ids = {label: world_id for label, world_id, _rows in tables}
+    return {label: (f"world {label!r}: {LAYOUT.world(world_ids[label]).executed_queries} holds inherited "
                     "(pre-branch) rows that differ from the other readable query tables' — "
                     "every sibling inherits the same rows from the one source, so this table "
                     "was edited after its run")
             for label, copy in copies.items() if copy != family_copy}
 
 
-def readable_tables(bound: Bound, manifest: Mapping[str, Any], *, episode_token: str,
+def readable_tables(bound: Bound, manifest: Mapping[str, Any],
                     ) -> tuple[list[tuple[str, list[dict[str, Any]]]], list[str]]:
     """Every manifest world's query table that reads well-formed — whole, and with the
     inherited rows the family's tables share (`inherited_prefix_outliers`) — as `(token, rows)`
     pairs in manifest order (control first), and why each other present one could not be read.
     A world with no table at all (not archived) is in neither list. The tables J3's rows are
     identified over (A12: "every readable run's table")."""
-    tables, unread = _present_tables(bound, manifest, episode_token=episode_token)
+    tables, unread = _present_tables(bound, manifest)
     outliers = inherited_prefix_outliers(tables)
     return ([(token, rows) for label, token, rows in tables if label not in outliers],
             [*unread, *outliers.values()])
 
 
-def table_refusals(bound: Bound, manifest: Mapping[str, Any], *, episode_token: str,
+def table_refusals(bound: Bound, manifest: Mapping[str, Any],
                    ) -> dict[str, str]:
     """The worlds whose query table reads whole but whose inherited rows differ from the
     family's (`inherited_prefix_outliers`), by label: failed reads the usability read cannot
     see from one run alone (A21)."""
-    return inherited_prefix_outliers(_present_tables(bound, manifest,
-                                                     episode_token=episode_token)[0])
+    return inherited_prefix_outliers(_present_tables(bound, manifest)[0])
 
 
 def found_gaps(bound: Bound, manifest: Mapping[str, Any], *,
@@ -242,14 +241,13 @@ def found_gaps(bound: Bound, manifest: Mapping[str, Any], *,
     than two readable tables, one entry naming that unread — and pre-flight's `not_replayable`
     calls. Entries come in manifest order, control first, then the family's."""
     from defender.learning.judge.family import (
-        control_world, episode_id_of, non_control_worlds, read_served_ledger)
+        control_world, non_control_worlds, read_served_ledger)
 
-    token = episode_token_for(episode_id_of(dict(manifest)))
     out: list[dict[str, Any]] = []
     for world in [control_world(dict(manifest)), *non_control_worlds(dict(manifest))]:
-        label = world["world_id"]
+        label = world["label"]
         try:
-            ledger = read_served_ledger(bound, label, episode_token=token)
+            ledger = read_served_ledger(bound, world["world_id"])
         except JudgeRefused as refused:
             out.append({"run": label, UNREAD: str(refused)})
             continue
@@ -260,7 +258,7 @@ def found_gaps(bound: Bound, manifest: Mapping[str, Any], *,
         out += [{"run": key[0], **key_fields(first), "count": count}
                 for key, (count, first) in entries.items()]
     family: dict[tuple[str, str], tuple[int, Mapping[str, Any]]] = {}
-    tables, unread_tables = readable_tables(bound, manifest, episode_token=token)
+    tables, unread_tables = readable_tables(bound, manifest)
     if len(tables) < 2:
         why = "; ".join(unread_tables) or (
             "no run's table is archived" if not tables else "no other run's table is archived")

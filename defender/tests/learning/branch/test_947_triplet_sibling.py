@@ -19,7 +19,7 @@ from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S1224
 
-TOKEN_B = T.world_token("b")
+TOKEN_B = T.fixture_world_id("b")
 
 
 @pytest.fixture(autouse=True)
@@ -250,7 +250,7 @@ def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     ep = _episode(tmp_path, src)
     world = _run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant)
-    assert world.token == TOKEN_B
+    assert world.label == "b"
     assert world.world_id == TOKEN_B
     assert world.ledger_path.name == f"{TOKEN_B}.jsonl"
     with Episode.open(ep) as episode:

@@ -454,8 +454,8 @@ def _unhealthy(ep: E.Episode) -> None:
     E.plant_raw(ep.dir / "timing.json", b"[not the record")
     E.plant_link(ep.world(E.GRADED_WORLD) / "report.md", ep.dir / "family.yaml")
     E.plant_raw(ep.world(E.PASSTHROUGH_WORLD) / "investigation.md", b"\xff\xfe\x00 not text")
-    (ep.dir / "served" / f"{T.world_token(E.CONTROL)}.jsonl").unlink()
-    E.plant_link(ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl",
+    (ep.dir / "served" / f"{T.fixture_world_id(E.CONTROL)}.jsonl").unlink()
+    E.plant_link(ep.dir / "served" / f"{T.fixture_world_id(E.GRADED_WORLD)}.jsonl",
                  ep.dir / "family.yaml")
 
 

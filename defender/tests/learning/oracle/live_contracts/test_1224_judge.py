@@ -1,6 +1,8 @@
 """The judge model decides each world's bucket from the served-world prompt; host-side gate, reply validation and finding enqueue around it."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 import re
 from dataclasses import dataclass, field
@@ -42,7 +44,7 @@ class _JudgeByScope(S.FakeJudge):
 
     def __call__(self, prompt: str, *, role: Any = None, agent_id: str = "judge",
                  **kw: Any) -> str:
-        label = S.judge_label(agent_id)
+        label = S.judge_identity(agent_id)
         scripted = self.family if label == "family" else self.worlds.get(label)
         if scripted is None:
             return super().__call__(prompt, role=role, agent_id=agent_id, **kw)
@@ -100,7 +102,7 @@ def _judge(worlds: dict[str, Any] | None = None, *,
         return value if isinstance(value, str) else _text(value)
 
     return _JudgeByScope(
-        worlds={label: as_text(v) for label, v in (worlds or {}).items()},
+        worlds={T.fixture_world_id(label): as_text(v) for label, v in (worlds or {}).items()},
         family=family_text if family_text is not None else _text(_family_reply()),
         default=default if default is not None else _text(
             _world_reply("none", (), findings=[])),
@@ -153,7 +155,7 @@ def _from_world(rows: list[dict], label: str) -> list[dict]:
 def _prompt_for(judge: Any, label: str) -> str:
     """The first prompt the double was handed for world `label`."""
     for prompt, agent_id in zip(judge.prompts, judge.agent_ids, strict=True):
-        if str(agent_id).startswith(f"judge:{label}:"):
+        if str(agent_id).startswith(f"judge:{T.fixture_world_id(label)}:"):
             return prompt
     raise AssertionError(
         f"the judge model was never called for world {label!r} (calls: {judge.agent_ids})")
@@ -208,7 +210,7 @@ def _call(q: str, system: str = "idp") -> dict:
 
 def _sibling_says(ep: Path, label: str, disposition: str) -> None:
     """The sibling's archived verdict (the close gate's report shape)."""
-    (Path(ep) / "worlds" / label / "report.md").write_text(
+    (Path(ep) / "worlds" / T.world_id(Path(ep), label) / "report.md").write_text(
         J.report_text(disposition), encoding="utf-8")
 
 
@@ -277,7 +279,7 @@ def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_find
         {"world": "b", "reason": S.REASON_UNSERVABLE, "call": _call("user:alice")}])
     judge1 = _judge({"c": _world_reply("decision-discipline", ("edr",))})
     _grade(one, ep1, judge1, state=_state1135.state_over(one / "state"))
-    assert S.judge_called_for(judge1, "c"), "the positive control: a one-unservable family was not graded"
+    assert S.judge_called_for(judge1, T.fixture_world_id("c")), "the positive control: a one-unservable family was not graded"
     assert _record(ep1).get("validity") == "usable"
 
     # The judge site: pre-flight's failed world plus a world whose own record says it did not
@@ -357,7 +359,7 @@ def test_1224_world_whose_facts_sit_only_on_unserved_systems_is_never_lead_set(t
     _grade(tmp_path, ep, judge)
 
     assert _row(ep, "b").get("bucket") == "lead-set", "the positive control: b was not lead-set"
-    assert S.judge_called_for(judge, "c"), "a couldn't-look world was not admitted to the judge (M20=A)"
+    assert S.judge_called_for(judge, T.fixture_world_id("c")), "a couldn't-look world was not admitted to the judge (M20=A)"
     assert _row(ep, "c").get("bucket") != "lead-set", (
         "a world whose facts sit only on unserved systems was recorded lead-set (O11)")
     assert _row(ep, "c").get("bucket") is None, (
@@ -403,7 +405,7 @@ def test_1224_world_whose_change_never_reached_the_investigator_is_judged_not_wi
                                       findings=[_finding("never-queried", bucket="lead-set")])})
     _grade(tmp_path, ep, judge)
 
-    assert S.judge_called_for(judge, "b"), "a world whose change never reached the investigator was not judged"
+    assert S.judge_called_for(judge, T.fixture_world_id("b")), "a world whose change never reached the investigator was not judged"
     row = _row(ep, "b")
     assert row.get("bucket") == "lead-set"
     assert "never-queried" in _topics(_filed(ep, "b"))
@@ -524,7 +526,7 @@ def test_1224_judge_grades_only_an_accepted_outcome(tmp_path):
         f"{no_record}")
 
     ep, judge = _gate_case(tmp_path / "accepted", "accepted")
-    assert S.judge_called_for(judge, "b"), "the positive control: an accepted episode was not graded"
+    assert S.judge_called_for(judge, T.fixture_world_id("b")), "the positive control: an accepted episode was not graded"
     assert "not_graded" not in _record(ep), "the positive control: an accepted episode was stamped"
 
 
@@ -598,7 +600,7 @@ def test_p078_judge_reply_lead_set_for_a_world_whose_facts_are_only_partly_serva
     assert _row(ep, "b").get("bucket") == "lead-set", (
         "a world whose reply touches one served system was refused lead-set")
     for label in ("c", "d"):
-        assert S.judge_called_for(judge, label), f"world {label} was not admitted to the judge"
+        assert S.judge_called_for(judge, T.fixture_world_id(label)), f"world {label} was not admitted to the judge"
         assert _row(ep, label).get("bucket") != "lead-set", (
             f"world {label}, whose reply touches no served system, was recorded lead-set")
         assert _row(ep, label).get("bucket") is None, (
@@ -693,7 +695,7 @@ def test_judge_reads_a_family_whose_unservable_sibling_left_a_partial_ledger(tmp
 
 def test_input_judge_gives_an_unservable_world_a_bucket(tmp_path):
     def plant(ep: Path, label: str) -> None:
-        draws = ep / "worlds" / label / "judge"
+        draws = ep / "worlds" / T.world_id(ep, label) / "judge"
         draws.mkdir(parents=True, exist_ok=True)
         (draws / "0.yaml").write_text(_text(_world_reply(
             "lead-set", ("idp",), findings=[_finding(f"{label}-planted", bucket="lead-set")])),
@@ -758,7 +760,7 @@ def test_1224_original_call_unservable_in_preflight_and_the_worlds_ledger(tmp_pa
     # #1234 A5: the discipline buckets are unavailable to a world never shown its facts.
     judge = _judge({"c": _world_reply("lead-quality", ("edr",))})
     _grade(root, ep, judge)
-    assert not S.judge_called_for(judge, "b"), "the unservable world was graded"
+    assert not S.judge_called_for(judge, T.fixture_world_id("b")), "the unservable world was graded"
     assert not _row(ep, "b").get("bucket"), "the unservable world was bucketed"
     assert _row(ep, "c").get("bucket") == "lead-quality", "the rest of the family was not graded"
     assert _record(ep).get("validity") == "usable", "one unservable world made the family unusable"
@@ -789,7 +791,7 @@ def test_judge_model_call_fails_for_one_world_but_not_the_rest(tmp_path):
     reply_b = _world_reply("lead-set", ("idp",), findings=[_finding("b-later", bucket="lead-set")])
     reply_c = _world_reply("lead-quality", ("edr",), findings=[_finding("c-now")])
     ep = S.judged_episode(tmp_path)
-    first = _judge({"b": reply_b, "c": reply_c}, fault=S.Fault(fail_on=("judge:b:",)))
+    first = _judge({"b": reply_b, "c": reply_c}, fault=S.Fault(fail_on=(f"judge:{T.fixture_world_id('b')}:",)))
     _grade(tmp_path, ep, first)
 
     assert not _row(ep, "b").get("bucket"), (
@@ -801,8 +803,8 @@ def test_judge_model_call_fails_for_one_world_but_not_the_rest(tmp_path):
 
     second = _judge({"b": reply_b, "c": reply_c})
     _grade(tmp_path, ep, second)
-    world_calls = {S.judge_label(a) for a in second.agent_ids if S.judge_label(a) != "family"}
-    assert world_calls == {"b"}, f"a bare re-run regraded {sorted(world_calls)}, not only b"
+    world_calls = {S.judge_identity(a) for a in second.agent_ids if S.judge_identity(a) != "family"}
+    assert world_calls == {T.world_id(ep, "b")}, f"a bare re-run regraded {sorted(world_calls)}, not only b"
     assert _row(ep, "b").get("bucket") == "lead-set", "the re-run did not grade b"
     assert _row(ep, "c").get("bucket") == "lead-quality", "the re-run disturbed c's grade"
 
@@ -956,7 +958,7 @@ def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
     ep = S.judged_episode(tmp_path / "graded")
     first = _judge({"b": _world_reply(findings=[_finding("once")])})
     _grade(tmp_path, ep, first)
-    assert S.judge_called_for(first, "b"), "the positive control: the first pass did not grade"
+    assert S.judge_called_for(first, T.fixture_world_id("b")), "the positive control: the first pass did not grade"
     before, queued = _record(ep), _all_queued()
 
     S.outcome_record(ep, "unusable", reason="rewritten after grading")

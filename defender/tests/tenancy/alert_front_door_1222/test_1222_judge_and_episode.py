@@ -289,7 +289,7 @@ def test_o11_episode_alert_is_the_episodes_copy(tmp_path):
     source = _alert("o11-source")
     _trial(planted.runs, T.SOURCE_RUN_ID, source, facts={"signature": "SIG-SOURCE-O11"})
     _trial(planted.runs, "trial-copy", raw, facts={"signature": "SIG-COPY-O11"})
-    decoy = (ep / "worlds" / "b" / "alert.json").read_bytes()
+    decoy = (ep / "worlds" / T.world_id(ep, "b") / "alert.json").read_bytes()
     _trial(planted.runs, "trial-decoy", decoy, facts={"signature": "SIG-DECOY-O11"})
 
     _grade_, judge = _grade(ep, planted.runs)
@@ -357,7 +357,7 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
     archive = S.mod(ARCHIVE)
     with S.sym(EPISODE_HANDLE, "Episode").open(ep) as handle:
         archive.archive_episode(handle, {"b": sib})
-    archived = set(_files_under(ep / "worlds" / "b").values())
+    archived = set(_files_under(ep / "worlds" / T.world_id(ep, "b")).values())
     assert raw in archived, "the world archive does not keep the alert"
     assert record_bytes in archived, "the world archive does not keep the record"
 

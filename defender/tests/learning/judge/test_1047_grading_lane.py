@@ -1,6 +1,8 @@
 """#1047 O1 — a world whose run the host cut short is never graded as a verdict about the case."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 
 
@@ -13,7 +15,7 @@ FORCED_REPORT = S.report_text("unresolved")
 def _forced_close(episode_dir, label="b"):
     """Overwrite one archived world's report with the host's forced `unresolved` close — claim
     h2's configuration, reproduced as a real document through the real reader."""
-    (episode_dir / "worlds" / label / "report.md").write_text(FORCED_REPORT, encoding="utf-8")
+    (episode_dir / "worlds" / T.world_id(episode_dir, label) / "report.md").write_text(FORCED_REPORT, encoding="utf-8")
 
 
 # the third row shape
@@ -50,7 +52,7 @@ def test_a_cut_short_world_does_not_reach_the_family_call_as_a_verdict(tmp_path)
     _forced_close(fixed_ep)
     judge = S.scripted_judge()
     assert S.graded(fixed_ep, judge=judge)["b"].get("verdict") is None
-    assert S.judge_calls_for(judge, "b") == [], (
+    assert S.judge_calls_for(judge, "b", episode_dir=fixed_ep) == [], (
         "world b's run was cut short and still bought a world call")
     fixed = S.family_view(fixed_ep)
     assert fixed["b"] == "NOT JUDGED", (
@@ -62,7 +64,7 @@ def test_a_cut_short_world_does_not_reach_the_family_call_as_a_verdict(tmp_path)
 
 def test_the_third_row_shape_keeps_the_two_tiers_separable(tmp_path):
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
-    (ep / "worlds" / "c" / "report.md").unlink()
+    (ep / "worlds" / T.world_id(ep, "c") / "report.md").unlink()
     graded = S.graded(ep)
     assert "malformed" not in graded["b"], "the cut-short row claims tier 2"
     assert graded["c"].get("ungradable") is True
@@ -76,7 +78,7 @@ def test_the_third_row_shape_keeps_the_two_tiers_separable(tmp_path):
 def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_report(tmp_path):
     for exit_class in S.NO_REPORT_EXITS:
         ep = S.cut_short_episode(tmp_path / exit_class, cut={"b": exit_class})
-        (ep / "worlds" / "b" / "report.md").unlink()
+        (ep / "worlds" / T.world_id(ep, "b") / "report.md").unlink()
         row = S.graded(ep)["b"]
         assert row.get("cut_short") == exit_class, (
             f"{exit_class}: the row does not name the exit class")
@@ -115,7 +117,7 @@ def test_a_world_whose_model_closed_and_was_then_cut_short(tmp_path):
 def test_the_record_must_distinguish_a_host_written_close_from_the_models_own(tmp_path):
     ep = S.cut_short_episode(tmp_path, cut={"b": "aborted", "c": "aborted"}, closed=("c",))
     for label in ("b", "c"):
-        (ep / "worlds" / label / "report.md").write_text(
+        (ep / "worlds" / T.world_id(ep, label) / "report.md").write_text(
             S.report_text("malicious"), encoding="utf-8")
     graded = S.graded(ep)
     assert graded["b"].get("cut_short") == "aborted", (
@@ -128,7 +130,7 @@ def test_the_record_must_distinguish_a_host_written_close_from_the_models_own(tm
         "the world that decided before it was cut short recorded no verdict at all")
 
     record = json.loads(
-        (ep / "worlds" / "c" / S.run_end_name()).read_text(encoding="utf-8"))
+        (ep / "worlds" / T.world_id(ep, "c") / S.run_end_name()).read_text(encoding="utf-8"))
     assert record["closed_before_cut"] is True
     assert set(record) >= {"truncated_by", "closed_before_cut"}, (
         "the record's field set is short of what F-A reading B requires")
@@ -203,7 +205,7 @@ def test_a_cut_short_world_and_a_malformed_world_in_the_same_episode(tmp_path):
         dispositions={"a": "benign", "b": "malicious", "c": "malicious", "d": "malicious"},
         ledgers={"b": [S.staged_row("b")], "c": [], "d": []},
         cut={"b": "request-limit"})
-    (ep / "worlds" / "c" / "report.md").write_text(
+    (ep / "worlds" / T.world_id(ep, "c") / "report.md").write_text(
         S.report_text("not-a-disposition"), encoding="utf-8")
     graded = S.graded(ep)
     assert graded["b"].get("cut_short") == "request-limit"

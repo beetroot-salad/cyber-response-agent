@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 import threading
 import time
@@ -1045,9 +1047,9 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     assert S.RETIRED_OUTCOME not in text
     assert not (run.ep / "review.yaml").exists()
 
-    assert S.judge_called_for(judge, "b"), (
+    assert S.judge_called_for(judge, T.world_id(run.ep, "b")), (
         f"positive control: the judge never graded archived world b ({judge.agent_ids})")
-    assert not S.judge_called_for(judge, "c"), "the world whose archive failed was graded (S10)"
+    assert not S.judge_called_for(judge, T.world_id(run.ep, "c")), "the world whose archive failed was graded (S10)"
     assert not _judge_rows(run.ep).get("c", {}).get("findings"), "world c carries findings"
     archived = _snapshot(run.ep / "worlds") if (run.ep / "worlds").is_dir() else {}
     assert not [n for n, body in archived.items() if "MARKER-1224-NOT-THE-REPORT" in body], (

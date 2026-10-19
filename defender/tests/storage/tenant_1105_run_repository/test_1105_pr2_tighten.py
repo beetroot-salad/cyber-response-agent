@@ -88,7 +88,7 @@ def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
     src, ep = P.sibling_scene(tmp_path, roster=False)
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     (ep / "runs").mkdir(exist_ok=True)
-    S.write_roster(ep, {w["world_id"]: S.new_id() for w in doc["worlds"]})
+    S.write_roster(ep, {w["label"]: S.new_id() for w in doc["worlds"]})
     P.second_tenant(P.data_root(), H.U_ID)
     records = _episode_records(ep)
     assert {"family.yaml", S.ROSTER_NAME} <= records
@@ -136,37 +136,54 @@ def test_f2_a_refused_page_reads_no_episode_record(tmp_path, d9_tenant):
 _SALT = re.compile(r"run-[0-9a-f]{16}-")
 
 
-def _judge_prompts(root: Path, monkeypatch, *, prior: bool) -> dict[str, str]:
-    """One launch under fresh roots at `root`, its judge's prompts by agent id, with the
-    roots' path and the per-run frame salt normalised (the only bytes two identical launches
-    differ in). `prior`: a FINISHED run of the same alert sits in T's runs folder."""
-    P.roots(root, monkeypatch)
-    monkeypatch.setenv(P.DATA_ROOT_ENV, str(root / "data-root"))
-    est, src = P.launch_source(root)
-    if prior:
-        other = src.parent / fixture_uuid("f3-prior-trial")  # #1187 dc1: a uuid run id
-        other.mkdir()
-        (other / "alert.json").write_text(json.dumps({"alert_id": P.J.ALERT_ID}),
-                                          encoding="utf-8")
-        (other / "report.md").write_text(
-            P.T.report_text("benign") + "\nPRIOR-RUN-ONLY-MARKER\n", encoding="utf-8")
-    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
-    assert _launched(got), f"the launch did not run: {got.message!r}"
-    assert len(got.judge.agent_ids) == len(got.judge.prompts)
-    return {agent: _SALT.sub("run-SALT-", prompt.replace(str(root), "<ROOT>"))
-            for agent, prompt in zip(got.judge.agent_ids, got.judge.prompts, strict=True)}
+def _judge_prompts(ep: Path) -> dict[str, str]:
+    """Grade one published family afresh; normalize only each call's fresh frame salt."""
+    from defender.tests.support.learning.core._state1135 import env_state
+
+    (ep / "judge.yaml").unlink(missing_ok=True)
+    judge = P.quiet_judge()
+    P.J.grade_at(ep, judge=judge, state=env_state())
+    assert len(judge.agent_ids) == len(judge.prompts)
+    assert len(set(judge.agent_ids)) == len(judge.agent_ids)
+    return {agent: _SALT.sub("run-SALT-", prompt)
+            for agent, prompt in zip(judge.agent_ids, judge.prompts, strict=True)}
 
 
 def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch):
-    bare = _judge_prompts(tmp_path / "bare", monkeypatch, prior=False)
-    with_prior = _judge_prompts(tmp_path / "prior", monkeypatch, prior=True)
+    from defender.records import _alert_input
+    from defender.run_repository import RunPaths
+    from defender.tests.support.storage._alert_plant import plant_alert
+
+    P.roots(tmp_path, monkeypatch)
+    est, src = P.launch_source(tmp_path)
+    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
+    assert _launched(got), f"the launch did not run: {got.message!r}"
+    (ep,) = P.launched_episodes()
+    bare = _judge_prompts(ep)
+
+    other = src.parent / fixture_uuid("f3-prior-trial")
+    other.mkdir()
+    source_paths, prior_paths = RunPaths(src), RunPaths(other)
+    source_raw, source_record = _alert_input.verified_alert(
+        source_paths.alert, source_paths.alert_record, run_name=src.name)
+    plant_alert(other, source_raw)
+    prior_raw, prior_record = _alert_input.verified_alert(
+        prior_paths.alert, prior_paths.alert_record, run_name=other.name)
+    assert prior_raw == source_raw
+    assert prior_record == source_record
+    assert prior_record.facts.signature == json.loads(source_raw)["rule"]["id"]
+    assert prior_record.facts.signature is not None
+    (other / "report.md").write_text(
+        P.T.report_text("benign") + "\nPRIOR-RUN-ONLY-MARKER\n", encoding="utf-8")
+    with_prior = _judge_prompts(ep)
     assert bare, "the judge was never asked"
     worlds = [agent for agent in bare if not agent.startswith("judge:family:")]
     assert worlds
     from defender.learning.judge.layout import FOCUS_VIEW_TITLES
 
     # #1234 M3/A10: the focus world's report view is titled, in host text, by its world label.
-    assert all(f"world {agent.split(':')[1]} — {FOCUS_VIEW_TITLES['report']}" in bare[agent]
+    labels = {P.T.world_id(ep, label): label for label in P.T.WORLDS}
+    assert all(f"world {labels[agent.split(':')[1]]} — {FOCUS_VIEW_TITLES['report']}" in bare[agent]
                for agent in worlds)
     assert sorted(with_prior) == sorted(bare)
     for agent, prompt in sorted(with_prior.items()):

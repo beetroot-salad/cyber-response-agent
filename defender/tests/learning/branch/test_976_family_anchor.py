@@ -292,7 +292,7 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
     assert "source" in report["reason"], report["reason"]
     assert "commit" in report["reason"], report["reason"]
     assert not (ep / "provenance.json").exists()
-    assert sorted(p.name for p in (ep / "worlds").iterdir()) == list(T.WORLDS)
+    assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.world_id(ep, label) for label in T.WORLDS)
     assert not (ep / "outcome.yaml").exists(), "verify wrote the outcome pre-flight owns"
 
     # EQUALITY, NOT PREFIX (adversary H2): siblings at `cafe10` and at `cafe` are not siblings

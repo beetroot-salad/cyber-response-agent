@@ -130,7 +130,7 @@ def _disposition_heading_raw(f: _Finding) -> str:
 def _render_worlds(ep: _Episode) -> str:
     guide_rows = []
     for w in ep.manifest_worlds:
-        label = w.get("world_id")
+        label = w.get("label")
         if not isinstance(label, str):
             guide_rows.append(_unnameable(str(label), what="world label"))
             continue

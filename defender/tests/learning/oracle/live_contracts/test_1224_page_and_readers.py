@@ -39,7 +39,8 @@ class _ScopedJudge(J.FakeJudge):
 
     def __init__(self, world: dict[str, str], family: str) -> None:
         super().__init__()
-        self.world_text = world
+        self.world_text = {T.fixture_world_id(label) if label != "*" else "*": reply
+                           for label, reply in world.items()}
         self.family_text = family
 
     def __call__(self, prompt, *, role=None, agent_id: str = "judge", **kw):

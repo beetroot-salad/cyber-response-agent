@@ -178,17 +178,20 @@ def _archive_worlds(
     arm is among `unverified`."""
     from defender.learning.branch import archive as archive_mod
 
+    from defender.runtime.branch._family import load_family
+
+    family = load_family(episode.view(), expected_episode_id=episode.dir.name)
     episode.worlds.ensure()
     archived: list[str] = []
     for label in sorted(refused):
         per_world.append(f"world {label}'s run folder was refused ({refused[label]})")
         outcome_mod.write_world_record(
-            episode, label, outcome_mod.NOT_ARCHIVED,
+            episode, family.world(label).world_id, outcome_mod.NOT_ARCHIVED,
             detail=f"its run folder was refused, so nothing was read from it: {refused[label]}")
     for label in sorted({*runs, *unverified}):
         if label in unverified:
             outcome_mod.write_world_record(
-                episode, label, outcome_mod.NOT_ARCHIVED,
+                episode, family.world(label).world_id, outcome_mod.NOT_ARCHIVED,
                 detail="no scrub verdict records a completed walk of its tree, so it was not "
                        "archived")
             continue
@@ -197,7 +200,7 @@ def _archive_worlds(
         except Exception as refusal:  # noqa: BLE001 — one world's archive, recorded; the rest go on
             per_world.append(f"world {label}'s tree could not be archived ({refusal})")
             outcome_mod.write_world_record(
-                episode, label, outcome_mod.NOT_ARCHIVED,
+                episode, family.world(label).world_id, outcome_mod.NOT_ARCHIVED,
                 detail=f"the archive refused its finished tree: {refusal}")
             continue
         archived.append(label)
@@ -265,7 +268,7 @@ def _write_family_stamp(
     # sibling's value, except where an unknown is its own waived fault — there the agreed value
     # is one a sibling actually named, or `None` when none did. Dirt fields may differ under
     # `--allow-dirty` and here are the first sibling's; each sibling's own is archived in
-    # `worlds/<label>/provenance.json`. `verify_family` guarantees at least one sibling.
+    # `worlds/<world-uuid>/provenance.json`. `verify_family` guarantees at least one sibling.
     agreed = {k: v for k, v in present[0].items() if k != "world_id"}
     for field, rule in _HELD.items():
         if rule.unknown_kind is not None:

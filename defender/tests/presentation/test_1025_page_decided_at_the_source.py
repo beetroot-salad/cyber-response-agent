@@ -53,17 +53,17 @@ def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
     ep = E.sample_episode(tmp_path)
     copy = E.copy_episode(ep, tmp_path / "re" / ep.dir.name)
     short = copy.dir
-    (short / "worlds" / E.GRADED_WORLD / "report.md").unlink()
-    (short / "worlds" / E.GRADED_WORLD / "report.md").mkdir()
+    (short / "worlds" / T.world_id(short, E.GRADED_WORLD) / "report.md").unlink()
+    (short / "worlds" / T.world_id(short, E.GRADED_WORLD) / "report.md").mkdir()
     with contextlib.chdir(tmp_path):
         page = render(short)
     world = _world(page, E.GRADED_WORLD)
     assert "report.md could not be read" in world, world
     assert "<episode>port" not in world, world
     assert "<episode>ad" not in world, world
-    assert f"worlds/{E.GRADED_WORLD}/report.md" in world, world
+    assert f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md" in world, world
     # said bare — never as a quoted filename cut down from an absolute path
-    assert f"'worlds/{E.GRADED_WORLD}/report.md'" not in world, world
+    assert f"'worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md'" not in world, world
     assert "re/worlds" not in page.raw
 
 
@@ -118,10 +118,15 @@ def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_coun
     """A world whose draw directory holds one unparsable document."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / f"{E.EPISODE_ID}-orphan").mkdir()
-    E.plant_raw(ep.dir / "worlds" / "orphan" / "judge" / "0.yaml", b"- not: [a mapping")
-    page = render(ep)
-    assert "world-orphan" not in page.by_id, page.ids
-    assert "1 draw documents unreadable" not in page.text_of("sec-findings")
+    orphan = T.fixture_world_id("orphan")
+    E.plant_raw(ep.dir / "worlds" / orphan / "judge" / "0.yaml", b"- not: [a mapping")
+    with pytest.raises(T.sym("runtime.branch._family", "FamilyError"), match="not declared"):
+        render(ep)
+    manifest = E.sample_manifest()
+    manifest["worlds"].append(T.world_doc("orphan", role="B", axis="orphan fact"))
+    T.write_family(ep.dir, manifest)
+    (ep.dir / T.ROSTER_NAME).unlink()
+    T.plant_roster(ep.dir)
     doc = E.sample_grade()
     doc["worlds"].append(E.world_row("orphan", declared="benign"))
     E.write_judge(ep.dir, doc)
@@ -184,7 +189,7 @@ def test_1025_an_unreadable_gather_summary_is_the_chains_own_sentence_for_the_ju
     summary = world / "gather_summaries" / "l-001.md"
     summary.chmod(0)
     try:
-        chain = family.lead_chain(E.mod("_io").bind(ep.dir).under(f"worlds/{E.GRADED_WORLD}"),
+        chain = family.lead_chain(E.mod("_io").bind(ep.dir).under(f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}"),
                                   "l-001", {}, leads=family.leads_by_id(world))
         page = render(ep)
     finally:

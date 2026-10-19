@@ -41,7 +41,7 @@ def test_947_the_comparator_prompt_builder_has_no_parameter_for_world_or_disposi
     # removed from the prompt, never rendered into it — it cannot name which world is which.
     assert params <= {"a", "b", "axis", "known_ids"}
     prompt = builder(a='{"x": 1}', b='{"x": 2}', axis="an axis", known_ids=frozenset())
-    for leak in ("world", "wv-", T.EPISODE_TOKEN, "disposition", "trajectory"):
+    for leak in ("world", "wv-", T.EPISODE_ID, "disposition", "trajectory"):
         assert leak not in prompt
 
 

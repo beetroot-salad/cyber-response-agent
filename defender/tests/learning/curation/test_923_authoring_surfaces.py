@@ -1,6 +1,8 @@
 """#923 — where a disposition can be AUTHORED, and what each surface refuses (O4, O6, M5, M6)."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import ast
@@ -186,7 +188,8 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
     from defender.runtime.branch._family import FamilyError, parse_world
 
     def _world(disposition: str) -> dict:
-        return {"world_id": "b", "role": "b", "story": "a sibling's story",
+        return {"label": "b", "world_id": T.fixture_world_id("b"), "role": "B",
+                "label_basis": "policy-rule", "story": "a sibling's story",
                 "axis": "an axis", "disposition_declared": disposition,
                 "facts": [{"fact_id": "f1", "statement": "web-1's owner is the platform team",
                            "entities": ["web-1"]}]}

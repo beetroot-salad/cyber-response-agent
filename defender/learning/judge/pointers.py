@@ -8,7 +8,7 @@ nothing ("unresolved"):
 
 * CONDUCT of run X — `worlds/<X>/report.md`, `worlds/<X>/investigation.md`,
   `worlds/<X>/gather_summaries/<lead>.md`, `worlds/<X>/executed_queries.jsonl#<row>`,
-  `served/<token>.<X>.jsonl#<row>` (a row fragment is required and must index a line);
+  `served/<world-uuid>.jsonl#<row>` (a row fragment is required and must index a line);
 * BUILT layer of run X — `oracle/<X>/<leaf>[#frag]`;
 * PLAN — `family.yaml#worlds/<X>` (names X) or `family.yaml#<key>` for a family-level key of
   the manifest (names no run);
@@ -70,7 +70,6 @@ class PointerScope:
     shown none, A22). `j3` is the request keys of the inherited pre-branch denial (A12, A14)."""
 
     bound: Annotated[Bound, SkipValidation]
-    episode_token: str
     run_facts: Annotated[dict[str, WorldFacts], SkipValidation]
     manifest: Annotated[dict[str, Any], SkipValidation]
     outcome: Annotated[dict[str, Any], SkipValidation] = field(default_factory=dict)
@@ -136,12 +135,16 @@ def _reads_plain(bound: Bound, name: str) -> bool:
 def _world_pointer(scope: PointerScope, pointer: str, parts: list[str],
                    fragment: str | None) -> Resolution | None:
     """`worlds/<X>/<leaf>`: conduct or context of run X, when X is in the scope."""
-    label, leaf = parts[1], "/".join(parts[2:])
-    run = scope.run_facts.get(label)
+    world_id, leaf = parts[1], "/".join(parts[2:])
+    match = next(((label, facts) for label, facts in scope.run_facts.items()
+                  if facts.token == world_id), None)
+    if match is None:
+        return None
+    label, run = match
     if run is None or not leaf:
         return None
     if leaf in _CONDUCT_LEAVES:
-        name = f"{LAYOUT.world(label).dir}/{leaf}"
+        name = f"{LAYOUT.world(world_id).dir}/{leaf}"
         return Resolution(pointer=pointer, kind=CONDUCT, run=label) \
             if _reads_plain(scope.bound, name) else None
     if len(parts) == 4 and parts[2] == str(WORLD_LEAVES.gather_summaries) \
@@ -163,7 +166,7 @@ def _world_pointer(scope: PointerScope, pointer: str, parts: list[str],
             if blocked else None,
             blocked_row=dict(row) if blocked else None)
     if leaf in _CONTEXT_LEAVES:
-        name = f"{LAYOUT.world(label).dir}/{leaf}"
+        name = f"{LAYOUT.world(world_id).dir}/{leaf}"
         return Resolution(pointer=pointer, kind=CONTEXT, run=None) \
             if _reads_plain(scope.bound, name) else None
     return None
@@ -171,7 +174,7 @@ def _world_pointer(scope: PointerScope, pointer: str, parts: list[str],
 
 def _served_pointer(scope: PointerScope, pointer: str, name: str,
                     fragment: str | None) -> Resolution | None:
-    """`served/<token>.<X>.jsonl#<row>`: a ledger row of run X (conduct; blocked when it is a
+    """`served/<world-uuid>.jsonl#<row>`: a ledger row of run X (conduct; blocked when it is a
     `refused`/`fault` row). `served/base.jsonl` is the family tier, never a run."""
     for label, run in scope.run_facts.items():
         if name != f"{run.token}.jsonl":
@@ -193,7 +196,7 @@ def _plan_pointer(scope: PointerScope, pointer: str, fragment: str | None) -> Re
         return None
     if fragment.startswith(_PLAN_WORLD_PREFIX):
         label = fragment[len(_PLAN_WORLD_PREFIX):]
-        declared = {w.get("world_id") for w in scope.manifest.get("worlds") or ()
+        declared = {w.get("label") for w in scope.manifest.get("worlds") or ()
                     if isinstance(w, dict)}
         return Resolution(pointer=pointer, kind=PLAN, run=label) if label in declared else None
     if fragment != str(LAYOUT.worlds) and fragment in scope.manifest:
@@ -232,10 +235,11 @@ def _resolves(  # noqa: C901 — one rule per pointer class, kept in the one res
         return _world_pointer(scope, pointer, parts, fragment)
     if head == str(LAYOUT.served) and len(parts) == 2:
         return _served_pointer(scope, pointer, parts[1], fragment)
-    if len(parts) >= 3 and parts[1] in scope.run_facts \
-            and "/".join(parts[:2]) == str(LAYOUT.oracle_dir(parts[1])):
+    built_label = next((label for label, facts in scope.run_facts.items()
+                        if facts.token == parts[1]), None) if len(parts) >= 3 else None
+    if built_label is not None and "/".join(parts[:2]) == str(LAYOUT.oracle_dir(parts[1])):
         name = "/".join(parts)
-        return Resolution(pointer=pointer, kind=BUILT, run=parts[1]) \
+        return Resolution(pointer=pointer, kind=BUILT, run=built_label) \
             if _reads_plain(scope.bound, name) else None
     if len(parts) != 1:
         return None

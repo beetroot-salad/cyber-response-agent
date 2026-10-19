@@ -133,7 +133,8 @@ def test_a_shown_name_is_bounded_by_what_is_shown(name):
 
 
 def _family_doc(episode_id: str, label: str) -> dict:
-    world = {"world_id": label, "role": "A", "story": "s", "axis": None,
+    world = {"label": label, "world_id": T.fixture_world_id(label),
+             "role": "A", "story": "s", "axis": None,
              "disposition_declared": "malicious", "label_basis": "policy-rule", "facts": []}
     # #1255 (D1, P4): `T.family_doc` writes the continuation prompt and the fence count only while
     # `Family` still declares them, so this stays about the bound on both sides.
@@ -180,7 +181,7 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
 
 def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
     from defender.runtime.branch import _family
-    with pytest.raises(_family.FamilyError, match="world-token alphabet"):
+    with pytest.raises(_family.FamilyError, match="world-label alphabet"):
         _family.check_identities(_family.parse_family(
             _family_doc("ep", "x.accounting_failures.json")))  # lint-stale-ref: ok — the reserved sidecar suffix, not the removed `RunPaths.accounting_failures()`
 

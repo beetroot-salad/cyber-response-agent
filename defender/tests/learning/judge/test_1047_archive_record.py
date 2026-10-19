@@ -24,7 +24,7 @@ def _episode_with(tmp_path, worlds=("b", "c"), **kw):
 
 
 def _record(episode_dir, label):
-    path = episode_dir / "worlds" / label / S.run_end_name()
+    path = episode_dir / "worlds" / T.world_id(episode_dir, label) / S.run_end_name()
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
@@ -74,7 +74,7 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     own record; a pre-existing HARD LINK there is refused rather than written through."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="budget")
-    dest = ep / "worlds" / "b"
+    dest = ep / "worlds" / T.world_id(ep, "b")
     dest.mkdir(parents=True, exist_ok=True)
     (dest / S.run_end_name()).write_text('{"truncated_by": "PRE-EXISTING"}', encoding="utf-8")
     with Episode.open(ep) as episode:
@@ -87,7 +87,7 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     victim.write_text("VICTIM\n", encoding="utf-8")
     linked_ep, linked_dirs, _b2 = _episode_with(tmp_path / "linked", worlds=("b",))
     S.plant_sidecar(linked_dirs["b"], truncated_by="budget")
-    world = linked_ep / "worlds" / "b"
+    world = linked_ep / "worlds" / T.world_id(linked_ep, "b")
     world.mkdir(parents=True, exist_ok=True)
     (world / S.run_end_name()).hardlink_to(victim)
     with pytest.raises(S.refusals()), Episode.open(linked_ep) as episode:
@@ -106,10 +106,10 @@ def test_an_unreadable_sidecar_is_copied_verbatim_and_the_judge_reads_no_record(
         S.plant_sidecar(dirs["b"], raw=raw)
         with Episode.open(ep) as episode:
             _archive().archive_episode(episode, dirs)
-        archived = ep / "worlds" / "b" / S.run_end_name()
+        archived = ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()
         assert archived.read_text(encoding="utf-8") == raw, (
             f"{name}: the archive rewrote the sidecar's bytes instead of copying them")
-        assert (ep / "worlds" / "b" / "report.md").is_file(), (
+        assert (ep / "worlds" / T.world_id(ep, "b") / "report.md").is_file(), (
             f"{name}: an unreadable sidecar cost the world its other artifacts")
         graded = S.cut_short_episode(tmp_path / f"{name}-graded")
         S.plant_archived_record(graded, "b", raw=raw)
@@ -125,7 +125,7 @@ def test_a_directory_squatting_the_sidecars_name_refuses_the_world_like_any_plan
     S.sidecar_path(dirs["b"]).mkdir(parents=True, exist_ok=True)
     with pytest.raises(S.refusals()), Episode.open(ep) as episode:
         _archive().archive_episode(episode, dirs)
-    assert not (ep / "worlds" / "b" / "report.md").exists(), (
+    assert not (ep / "worlds" / T.world_id(ep, "b") / "report.md").exists(), (
         "the archive copied part of the world before refusing it")
 
 
@@ -139,7 +139,7 @@ def test_a_destination_side_symlink_at_the_run_end_path_pointing_outside_the_arc
     outside.write_text("OUTSIDE\n", encoding="utf-8")
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="store")
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / T.world_id(ep, "b")
     world.mkdir(parents=True, exist_ok=True)
     (world / S.run_end_name()).symlink_to(outside)
     with pytest.raises(S.refusals() + (OSError,)), Episode.open(ep) as episode:
@@ -317,7 +317,7 @@ def test_one_world_is_cut_short_while_a_sibling_archive_is_refused(tmp_path):
         _archive().archive_episode(episode, dirs)
     assert _record(ep, "b") == {"truncated_by": "request-limit", "closed_before_cut": False}, (
         "world c's refusal cost world b the record its own run produced")
-    assert not (ep / "worlds" / "c" / "report.md").exists()
+    assert not (ep / "worlds" / T.world_id(ep, "c") / "report.md").exists()
 
 
 def test_a_run_dir_emptied_or_corrupted_by_the_box_at_run_end_still_grades_a_genuinely_cut_short_world_correctly(
@@ -354,5 +354,5 @@ def test_a_path_traversal_style_value_written_by_the_box_anywhere_in_the_run_dir
         _archive().archive_episode(episode, dirs)
     assert _record(ep, "b") == {"truncated_by": "aborted", "closed_before_cut": False}
     landed = sorted(p.relative_to(ep) for p in ep.rglob(S.run_end_name()))
-    assert [str(p) for p in landed] == [f"worlds/b/{S.run_end_name()}"], (
+    assert [str(p) for p in landed] == [f"worlds/{T.fixture_world_id('b')}/{S.run_end_name()}"], (
         f"the feature's write landed at {landed} — a path derived from box-written content")

@@ -52,8 +52,6 @@ from defender.runtime.branch import _family
 
 from defender.runtime.branch._family import (
     Family,
-    check_identities,
-    parse_family,
 )
 
 
@@ -250,8 +248,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
         # the judge, lessons and question-writer read them from here (M21).
         "served_systems": list(served),
     })
-    family = parse_family(document)
-    check_identities(family)
+    document, family = _family.accept_family(document)
     _family.write_family(episode, document)
     return family
 

@@ -393,9 +393,9 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     settings = oracle_settings_with(**knobs)
     limiter = RateLimiter(settings.rate)
     ctx = _preflight_context(episode.dir, source, tenant, family.as_of)
-    resumed = {w.world_id: _family.resume_world_from(family, w.world_id, episode.dir)
+    resumed = {w.label: _family.resume_world_from(family, w.label, episode.dir)
                for w in fact_worlds}
-    recording = Ledger.for_world(episode, resumed[fact_worlds[0].world_id].world_id)
+    recording = Ledger.for_world(episode, resumed[fact_worlds[0].label].world_id)
     # The family's base recording, parsed once for every world's registry.
     family_answers = read_family_answers(recording.base_path)
     # M01=A's fixed prefix, by the one rule the sibling's registry is handed too (`run.py`).
@@ -485,7 +485,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     # is written once, from every world's result. Each runs in a copy of this context, so its
     # log lines keep the run and tenant.
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(fact_worlds)) as pool:
-        futures = [pool.submit(contextvars.copy_context().run, calibrate, w.world_id)
+        futures = [pool.submit(contextvars.copy_context().run, calibrate, w.label)
                    for w in fact_worlds]
     for future in futures:
         # Anything but a world's own failure is the launch's (it stopped every other world's

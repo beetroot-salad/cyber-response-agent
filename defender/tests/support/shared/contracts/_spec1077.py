@@ -313,15 +313,12 @@ LEAD_ID = "l-abc123"
 SEQ = 7
 TURN = 3
 ROLE = "support"
-#: Delimiter-free, as every production label is: `_world_label.world_label_fault` refuses `-`
-#: (the sibling run id's delimiter) and `.` (the world token's), and the sibling run id
-#: `<episode>-<label>` is recoverable only because of it.
+#: Descriptive metadata is kept separate from the world's storage identity.
 LABEL = "overlay_a"
-#: The fixture episode's id (#1187: a uuid4, as every episode id is) and the world token
-#: `world_token_for(episode_token_for(id), label)` renders for it — the id's `-` as `.` (R2-03).
+#: The fixture episode's opaque identity.
 EPISODE_ID = "1d7e3c5b-2a4f-4b6c-9e8d-7f6a5b4c3d2e"
 LINEAGE_ID = "case-0011223344556677"
-WORLD_TOKEN = f"{EPISODE_ID.replace('-', '.')}.{LABEL}"
+WORLD_ID = fixture_uuid("world:overlay_a")
 #: The fixture run's id (#1187: `RunId` admits canonical lowercase UUID text only) — the name
 #: `make_run_dir` gives a run folder by default, and an arm's folder name in the `episode_runs`
 #: row (an arm is named by the id the episode's roster holds for it, never `<episode>-<label>`).
@@ -369,7 +366,7 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     Accessor("review_yaml", "episode", "review"),
     Accessor("samples", "episode", "samples"),
     Accessor("judge_yaml", "episode", "judge"),
-    Accessor("judge_draw", "episode", "judge_draw", (LABEL, 1), composing=True),
+    Accessor("judge_draw", "episode", "judge_draw", (WORLD_ID, 1), composing=True),
     Accessor("timing", "episode", "timing"),
     Accessor("staged", "episode", "staged"),
     Accessor("served", "episode", "served_base"),
@@ -380,7 +377,7 @@ ACCESSOR_FOR_KIND: tuple[Accessor, ...] = (
     # layout owns the container, never an `<episode>-<label>` composition (`sibling_run_dir`
     # is deleted, design C1).
     Accessor("episode_runs", "episode_arm", "runs", (ARM_ID,)),
-    Accessor("archive_proj", "episode", "world_dir", (LABEL,), composing=True),
+    Accessor("archive_proj", "episode", "world_dir", (WORLD_ID,), composing=True),
     # #1187 (R2, Sequencing §4): the host-written arm roster, named by `_episode_paths.LAYOUT`.
     Accessor("arm_roster", "episode", "arm_roster"),
     # (#1187 R1 and R6 retired the `tenant` row — `_tenant.json` — and the `episode_runs_record`
@@ -415,7 +412,7 @@ def upward_root(attr: str, runs_base: Path) -> Path:
 #: Every accessor that builds a path from a caller-supplied component, with an ordinary value
 #: and the component index decision 2's one rule must check. g10's census subjects.
 COMPOSING = tuple(a for a in ACCESSOR_FOR_KIND if a.composing) + (
-    Accessor("served", "episode", "served_world", (WORLD_TOKEN,), composing=True),
+    Accessor("served", "episode", "served_world", (WORLD_ID,), composing=True),
     # #1187 R8: `EpisodePaths.run_dir_pointer(label)` is retired with the archive pointer's write.
     Accessor("gather_raw", "run", "payload_relpath", (LEAD_ID, SEQ), composing=True),
 )

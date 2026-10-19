@@ -1,6 +1,8 @@
 """#1007 — D3/M7: the second authored corpus, its curator, and the one drain tick they share."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import dataclasses
 from pathlib import Path
 
@@ -81,7 +83,7 @@ def defender_queue_row(fid: str = "ep-1/b/0/1", **extra) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"),
                subject=W.SUBJECT_DEFENDER, type="lead-set",
                subject_anchor="l-001", subject_topic="coverage",
-               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
                on_verdict_path=True, world_label_doubted=False,
                source_run_dir="episodes/ep-1/worlds/b")
     row.pop("judge_outcome", None)          # #1234 A4: a row carrying the retired name is held
@@ -326,7 +328,7 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
     after = {p.relative_to(ep) for p in ep.rglob("*") if p.is_file()}
     allowed = {Path(W.JUDGE_NAME), Path(W.OUTCOME_NAME), Path(W.SAMPLES_NAME)}
     new = {p for p in after - before
-           if p not in allowed and p.parts[0] not in ("served", "worlds", "draws", "wire_logs")}
+           if p not in allowed and p.parts[0] not in ("served", "worlds", "judge", "wire_logs")}
     assert new == set(), (
         f"the pass wrote artifacts outside the declared set: {sorted(map(str, new))}")
     queue_files = {p.name for p in (paths.state_root / FINDINGS.queue).parent.glob("*") if p.is_file()}

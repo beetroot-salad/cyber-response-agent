@@ -30,7 +30,7 @@ from defender import _yaml
 from defender.episodes._episode_handle import Episode
 from defender.episodes._episode_paths import LAYOUT
 from defender._io import Bound
-from defender.records._run_id import episode_id_fault
+from defender.records._run_id import episode_id_fault, mint_uuid, uuid_id_fault
 from defender._shown import quoted
 from defender.episodes._world_label import (
     RESERVED_WORLD_LABELS, is_reserved_world_label, reserved_label_fault, world_label_fault,
@@ -71,7 +71,7 @@ _FAMILY_FIELDS = (
 
 #: Every field a world entry declares.
 _WORLD_FIELDS = (
-    "world_id", "role", "story", "axis", "disposition_declared", "label_basis", "facts",
+    "label", "world_id", "role", "story", "axis", "disposition_declared", "label_basis", "facts",
 )
 
 #: Every field a fact declares.
@@ -280,6 +280,7 @@ def _parse_facts(raw: Any, at: str) -> tuple[Fact, ...]:
 class World:
     """One sibling's declaration: what it is, what it asserts, and the facts that make it differ."""
 
+    label: str
     world_id: str
     role: str | None
     story: str
@@ -293,12 +294,15 @@ def parse_world(raw: Any, *, where: str = "worlds") -> World:
     """Validate one world entry, naming the field that refused."""
     if not isinstance(raw, dict):
         raise FamilyError(f"{where} entry must be a mapping, got {type(raw).__name__}")
-    world_id = raw.get("world_id")
-    if world_id is None or world_id == "":
-        raise FamilyError(f"{where} entry carries no world_id")
-    if (why := world_label_fault(world_id, at=where)) is not None:
+    label = raw.get("label")
+    if (why := world_label_fault(label, at=where)) is not None:
         raise FamilyError(why)
-    at = f"{where}[{quoted(world_id)}]"
+    world_id = raw.get("world_id")
+    if (why := uuid_id_fault(world_id, "world")) is not None:
+        raise FamilyError(f"{where}[{quoted(label)}]: {why}")
+    assert isinstance(label, str)
+    assert isinstance(world_id, str)
+    at = f"{where}[{quoted(label)}]"
     unknown = [quoted(k) for k in raw if k not in _WORLD_FIELDS]
     if unknown:
         raise FamilyError(f"{at} names unknown field(s) {', '.join(unknown)}")
@@ -314,7 +318,7 @@ def parse_world(raw: Any, *, where: str = "worlds") -> World:
             f"{at} is the control world (role {BASE_ROLE!r}) but declares facts — the control "
             "is served the base answers with no oracle, so it declares `facts: []`")
     return World(
-        world_id=world_id, role=role, story=story,
+        label=label, world_id=world_id, role=role, story=story,
         axis=_check_axis(raw.get("axis"), at, role),
         disposition_declared=_check_disposition(raw.get("disposition_declared"), at),
         label_basis=_check_label_basis(raw.get("label_basis"), at),
@@ -394,13 +398,19 @@ class Family:
     discriminator: dict
     worlds: list[World]
 
-    def world(self, world_id: str) -> World:
+    def world(self, label: str) -> World:
         for candidate in self.worlds:
-            if candidate.world_id == world_id:
+            if candidate.label == label:
                 return candidate
         raise FamilyError(
-            f"the manifest declares no world {quoted(world_id)}; it declares "
-            f"{[w.world_id for w in self.worlds]}")
+            f"the manifest declares no world {quoted(label)}; it declares "
+            f"{[w.label for w in self.worlds]}")
+
+    def world_by_id(self, world_id: str) -> World:
+        for world in self.worlds:
+            if world.world_id == world_id:
+                return world
+        raise FamilyError(f"world UUID {quoted(world_id)} is not declared by this manifest")
 
 
 def parse_as_of(raw: Any, *, where: str = "as_of") -> dt.datetime:
@@ -490,8 +500,11 @@ def _parse_worlds(raw_worlds: Any) -> list[World]:
             "the manifest declares no worlds — the questioner's flow produces the base plus "
             "two by construction, and the family would have nothing to run")
     worlds = [parse_world(entry) for entry in raw_worlds]
-    _check_labels([w.world_id for w in worlds])
-    bases = [w.world_id for w in worlds if w.role == BASE_ROLE]
+    _check_labels([w.label for w in worlds])
+    ids = [w.world_id for w in worlds]
+    if len(set(ids)) != len(ids):
+        raise FamilyError("the manifest assigns one world UUID to multiple worlds")
+    bases = [w.label for w in worlds if w.role == BASE_ROLE]
     if len(bases) != 1:
         raise FamilyError(
             f"exactly one world must carry the base role {BASE_ROLE!r}; {len(bases)} do "
@@ -500,21 +513,14 @@ def _parse_worlds(raw_worlds: Any) -> list[World]:
 
 
 def _check_labels(labels: list[str]) -> None:
-    """The world-token rule over a family's labels: each in the alphabet and not reserved
-    (`_world_label.world_label_fault`), and no two one label wherever the filesystem folds case.
-    A label names no run (#1187 O3: an arm's folder is the roster's UUID), so no run-name rule
-    is asked of it."""
-    seen: dict[str, str] = {}
+    """Labels are distinct selectors; they never name filesystem entries."""
+    seen: set[str] = set()
     for label in labels:
         if (why := world_label_fault(label)) is not None:
             raise FamilyError(why)
-        folded = label.casefold()
-        if folded in seen:
-            raise FamilyError(
-                f"world labels {quoted(seen[folded])} and {quoted(label)} are one label "
-                "wherever the filesystem folds case, and each names a run dir, a ledger file "
-                "and an oracle-side store")
-        seen[folded] = label
+        if label in seen:
+            raise FamilyError(f"world label {quoted(label)} is declared twice")
+        seen.add(label)
 
 
 def parse_family(doc: Any) -> Family:
@@ -568,21 +574,16 @@ def load_manifest_document(view: Bound, *, expected_episode_id: str) -> dict:
 
 
 def manifest_world_labels(view: Bound, *, expected_episode_id: str) -> list[str]:
-    """The world labels the manifest declares, in its order, for a reader that holds something
-    else to them (the arm roster, #1187 R2) without loading the whole family: the manifest read
-    through the one loader (`_read_document`: R5, the pre-oracle refusal), required to name
-    `expected_episode_id` itself, and only its `worlds` narrowed — a list of mappings, each with
-    a text `world_id`. Every other rule is `load_family`'s. Anything else is `FamilyError`."""
+    """Return labels in declaration order after validating the persisted manifest.
+
+    The rooted loader binds it to the expected episode; the full family schema validates
+    the label-to-UUID mapping before a reader compares it with the arm roster.
+    """
     doc = _read_document(view, expected_episode_id=expected_episode_id)
     if not isinstance(doc, dict) or doc.get("episode_id") != expected_episode_id:
         raise FamilyError(f"the manifest ({LAYOUT.family}) does not name episode "
                           f"{quoted(expected_episode_id)}")
-    worlds = doc.get("worlds")
-    if not isinstance(worlds, list) or not all(
-            isinstance(w, dict) and isinstance(w.get("world_id"), str) for w in worlds):
-        raise FamilyError(f"the manifest ({LAYOUT.family}) declares no list of worlds, each "
-                          "with a text world_id")
-    return [w["world_id"] for w in worlds]
+    return [world.label for world in parse_family(doc).worlds]
 
 
 def _read_manifest(view: Bound) -> str:
@@ -619,6 +620,39 @@ def _read_document(view: Bound, *, expected_episode_id: str) -> object:
     return doc
 
 
+def accept_family(document: dict) -> tuple[dict, Family]:
+    """Assign identities to an authored declaration once, before publication or preflight.
+
+    The questioner supplies labels and facts. A declaration supplying any world UUID is
+    refused; every subsequent reader requires the persisted UUID and never mints one.
+    """
+    doc = dict(document)
+    entries = doc.get("worlds")
+    if isinstance(entries, list):
+        worlds = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                worlds.append(entry)
+                continue
+            if "world_id" in entry:
+                raise FamilyError("world_id is host-assigned; a declaration supplies label only")
+            worlds.append({**entry, "world_id": mint_uuid()})
+        doc["worlds"] = worlds
+    family = parse_family(doc)
+    check_identities(family)
+    return doc, family
+
+
+def world_id_for(document: Mapping[str, Any], label: str) -> str:
+    """Resolve a label through the manifest's persisted, strictly validated identity map."""
+    return parse_family(dict(document)).world(label).world_id
+
+
+def label_for_world_id(document: Mapping[str, Any], world_id: str) -> str:
+    """Resolve a stored world UUID; an unrelated archive entry is never a world label."""
+    return parse_family(dict(document)).world_by_id(world_id).label
+
+
 def write_family(episode: Episode, doc: dict) -> Path:
     """Render the manifest into `episode` through a structured dumper, never by hand.
 
@@ -626,8 +660,12 @@ def write_family(episode: Episode, doc: dict) -> Path:
     on a second line inject a key. The dumper quotes any string YAML would read as something
     else (`on`, `null`, `007`), so every name reads back as the text it was.
     """
+    family = parse_family(doc)
+    if family.episode_id != episode.dir.name:
+        raise FamilyError(f"the manifest names episode {quoted(family.episode_id)}, "
+                          f"but publication targets {quoted(episode.dir.name)}")
     manifest = episode.family
-    manifest.write(
+    manifest.create(
         _yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False))
     return manifest.path
 
@@ -644,80 +682,29 @@ def refuse_reserved_world_label(label: str, *, at: str) -> None:
 
 
 def check_identities(family: Family) -> None:
-    """One gate over every identity rule, before anything is launched.
-
-    Roles must be distinct; and, as defense in depth for a `Family` built directly rather than
-    loaded, the labels are held to the world-token rule `parse_family` applies and each
-    composed world token is built once.
-    """
-    # Roles first: that rule is the family's, and two arms sharing a role make every report
-    # unreadable — the more fundamental fault to report.
+    """Hold directly constructed families to the same label, UUID and role rules."""
     roles: dict[str, str] = {}
+    ids: set[str] = set()
+    _check_labels([world.label for world in family.worlds])
     for world in family.worlds:
-        if world.role is None:
-            continue
-        if world.role in roles:
-            raise FamilyError(
-                f"worlds {roles[world.role]!r} and {world.world_id!r} both declare role "
-                f"{world.role!r} — a family is a set of DIFFERENT worlds, and two arms sharing "
-                "a role cannot be told apart in any report")
-        roles[world.role] = world.world_id
-    labels = [w.world_id for w in family.worlds]
-    _check_labels(labels)
-    token_head = episode_token_for(family.episode_id)
-    for label in labels:
-        world_token_for(token_head, label)
-
-
-#: What an episode token may be: the run-id alphabet with `-` folded away, lower case.
-_EPISODE_TOKEN = re.compile(r"\A[a-z0-9][a-z0-9._]*\Z")
-
-
-def episode_token_for(episode_id: str) -> str:
-    """The episode's own token: the id with `-` folded to `.`, injectively.
-
-    The run-id grammar admits `-`, `_` and `.`, so `_` escapes to `__` and `.` to `_p` before
-    `-` folds onto `.`; otherwise two ids (e.g. `...-2026.01-n5` and `...-2026-01-n5`) would
-    share a token, and two episodes' world ledgers would be one file.
-
-    Takes no override: an episode's namespace derives from its id alone, and ids this could
-    refuse are already refused by `refuse_bad_episode_id`.
-    """
-    # Casefolded: injectivity holds for launcher-accepted ids, which `refuse_bad_episode_id`
-    # requires to be case-stable.
-    # Order matters: `_` doubles first, then `.` becomes `_p`, then `-` takes the freed `.`.
-    token = episode_id.replace("_", "__").replace(".", "_p").replace("-", ".").casefold()
-    if not _EPISODE_TOKEN.match(token):
-        raise FamilyError(
-            f"episode id {quoted(episode_id)} does not render to a usable episode token "
-            f"({quoted(token)}) — name a fresh source run or branch point; every world token "
-            "is built from it")
-    return token
-
-
-def world_token_for(episode_token: str, world_label: str) -> str:
-    """The one spelling of a world's identity: `f"{episode_token}.{label}"`.
-
-    Used by every site that compares worlds (ledger filename and rows). The label may not
-    contain `.`: the episode token already does, so a dotted label would let two
-    (episode, label) pairs compose to one token.
-    """
-    if "." in world_label:
-        raise FamilyError(
-            f"world label {quoted(world_label)} carries '.', the world token's own delimiter — "
-            "two distinct (episode, label) pairs would compose to one world token")
-    return f"{episode_token}.{world_label}"
+        if (why := uuid_id_fault(world.world_id, "world")) is not None:
+            raise FamilyError(why)
+        if world.world_id in ids:
+            raise FamilyError("the manifest assigns one world UUID to multiple worlds")
+        ids.add(world.world_id)
+        if world.role is not None:
+            if world.role in roles:
+                raise FamilyError(f"worlds {roles[world.role]!r} and {world.label!r} "
+                                  f"both declare role {world.role!r}")
+            roles[world.role] = world.label
 
 
 @model(frozen=True)
 class ResumeWorld:
-    """What a sibling process is, from its manifest and the episode's arm roster.
+    """A sibling's persisted world UUID, label, declaration and optional arm-run roster.
 
-    `world_id` is the composed token, not the short label: it names the world's ledger file and
-    row keys, which must carry the episode. `label` is what the manifest, the arm roster and the
-    archive directory are keyed on. `arm_ids` is the episode's arm roster (`{label: RunId}`, as
-    the episode view's `arm_ids()` reads it) when the caller holds it — a sibling does, after its
-    roster check — and `None` otherwise: no arm's id is ever composed from the labels (#1187).
+    The world UUID exists before preflight and survives independently of whether any arm runs.
+    The label selects a declaration; only UUIDs name its files or served call IDs.
     """
 
     world_id: str
@@ -727,11 +714,6 @@ class ResumeWorld:
     as_of: dt.datetime
     family: Family
     arm_ids: dict[str, RunId] | None = None
-
-    @property
-    def token(self) -> str:
-        """The composed world token (same as `world_id`)."""
-        return self.world_id
 
     @property
     def ledger_path(self) -> Path:
@@ -749,7 +731,7 @@ def resume_world_from(family: Family, world_label: str, episode_dir: Path, *,
     """
     world = family.world(world_label)
     return ResumeWorld(
-        world_id=world_token_for(episode_token_for(family.episode_id), world_label),
+        world_id=world.world_id,
         label=world_label, episode_dir=Path(episode_dir), facts=world.facts,
         as_of=family.as_of, family=family,
         arm_ids=None if arm_ids is None else dict(arm_ids),
@@ -757,25 +739,13 @@ def resume_world_from(family: Family, world_label: str, episode_dir: Path, *,
 
 
 def family_identities(family: Family, arm_ids: Mapping[str, RunId]) -> frozenset[str]:
-    """Every spelling of this family's identity a sibling's text could carry: the episode id
-    and its token, each declared world's token — composed by the same helpers `ResumeWorld`
-    names itself by, so the two cannot drift — and every arm's run id, as the episode's arm
-    roster holds it (`arm_ids`, `{label: RunId}`; required, so no caller builds the set and
-    silently leaves the arms out, #1187 S-red).
+    """Known opaque identities for redaction: episode, worlds and arm runs.
 
-    The redaction filter's known set (`learning/branch/redaction.py`). Whole-family, not one
-    world's: a sibling's token in a relayed fault discloses the scheme as surely as one's own.
-    A world label alone is not a member — a one-letter label would shred ordinary prose — and
-    neither is the source run id, which the resumed transcript already carried before the fork.
-    The ledger filename and call ids (`<world token>.jsonl`, `<world token>/<n>`) contain a
-    member, so the filter's substring match covers them.
+    Labels are descriptive selectors and are not redaction targets. Source run IDs remain
+    available in the resumed transcript and are not added here.
     """
-    token_head = episode_token_for(family.episode_id)
-    out = {family.episode_id, token_head}
-    for world in family.worlds:
-        out.add(world_token_for(token_head, world.world_id))
-    out.update(str(arm) for arm in arm_ids.values())
-    return frozenset(out)
+    return frozenset({family.episode_id, *(world.world_id for world in family.worlds),
+                      *(str(arm) for arm in arm_ids.values())})
 
 
 def refuse_bad_episode_id(episode_id: str) -> None:
@@ -796,7 +766,6 @@ __all__ = [
     "ResumeWorld",
     "World",
     "check_identities",
-    "episode_token_for",
     "family_identities",
     "is_reserved_world_label",
     "refuse_reserved_world_label",
@@ -810,6 +779,8 @@ __all__ = [
     "refuse_predating_text",
     "resume_world_from",
     "runnable_worlds",
-    "world_token_for",
     "write_family",
+    "accept_family",
+    "world_id_for",
+    "label_for_world_id",
 ]

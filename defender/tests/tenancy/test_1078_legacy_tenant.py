@@ -73,16 +73,16 @@ def test_the_stamp_spells_tenant_id_and_world_id_on_the_wire():
     prov = S.provenance_mod()
     record = prov.RunProvenance(
         commit="c0ffee", dirty=False, scope="defender", model="m-1",
-        tenant_id=fixture_uuid("tenant:acme"), world_id="ep.1.overlay_a")
+        tenant_id=fixture_uuid("tenant:acme"), world_id=fixture_uuid("world:overlay_a"))
     on_the_wire = json.loads(record.as_json())
     assert on_the_wire["tenant_id"] == fixture_uuid("tenant:acme")
-    assert on_the_wire["world_id"] == "ep.1.overlay_a", (
+    assert on_the_wire["world_id"] == fixture_uuid("world:overlay_a"), (
         f"`as_json` hand-spells its keys, so a new field is silent unless it is added there: "
         f"{sorted(on_the_wire)}")
     back = prov.RunProvenance.from_obj(on_the_wire)
     assert back is not None
     assert back.tenant_id == fixture_uuid("tenant:acme")
-    assert back.world_id == "ep.1.overlay_a"
+    assert back.world_id == fixture_uuid("world:overlay_a")
     folded = prov.RunProvenance.from_obj({**on_the_wire, "tenant_id": 17, "world_id": []})
     assert folded is not None
     assert folded.tenant_id is None
@@ -222,12 +222,10 @@ def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_
                                       natural_world=None)
 
     recorded = _recorded_world(ep, "b")
-    assert recorded.world_id == world.world_id == T.world_token("b"), (
+    assert recorded.world_id == world.world_id == T.fixture_world_id("b"), (
         "the episode's record no longer names the token the sibling ran as — the one "
         "`served/<token>.jsonl` keys on")
-    assert "-" not in recorded.world_id, (
-        "the token is the ESCAPED spelling (`episode_token_for`), never `<episode_id>.<label>` "
-        "re-composed from the run id — that spelling joins to nothing")
+    assert recorded.world_id == T.world_id(ep, "b")
     assert recorded.family.source_run_id == src.name, (
         "the episode's host-side record no longer names the run the sibling forked")
     assert recorded.family.branch_message_id == T.BRANCH_MESSAGE_ID, (

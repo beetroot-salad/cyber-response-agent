@@ -867,7 +867,7 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     assert rec["reason"] == S.REASON_UNSERVABLE
     assert _names_call(rec.get("call"), "idp", "query", "user:bob"), rec
     after_abort = sorted(p.name for p in (ep / S.WORLD_RECORDS).iterdir())
-    assert after_abort == ["b.yaml"], f"the abort left {after_abort}, not one record for b"
+    assert after_abort == [f"{T.world_id(ep, 'b')}.yaml"], f"the abort left {after_abort}, not one record for b"
     assert first.run is not None
     from defender.tests.support.storage._alert_plant import unseal_fixture_input
     unseal_fixture_input(first.run.run_dir)
@@ -881,7 +881,7 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     assert _served_rows(ep, "b", "user:bob") == []
     assert again.record("b") == rec, "the resume rewrote the world's validity record"
     records = sorted(p.name for p in (ep / S.WORLD_RECORDS).iterdir())
-    assert records == ["b.yaml"], records
+    assert records == [f"{T.world_id(ep, 'b')}.yaml"], records
 
 
 def test_disk_full_while_freezing_forged_rows(tmp_path):

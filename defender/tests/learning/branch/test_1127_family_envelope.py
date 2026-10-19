@@ -38,7 +38,7 @@ def spliced(doc: dict, splices: dict[str, str]) -> str:
 
 def _world_b(doc: dict) -> dict:
     world = doc["worlds"][1]
-    assert world["world_id"] == "b"
+    assert world["label"] == "b"
     return world
 
 
@@ -361,8 +361,8 @@ def _author(tmp_path: Path, agent: T.FakeAgent) -> dict:
 
 
 def _seats() -> tuple[str, str]:
-    return (_fenced(yaml.safe_dump(T.world_doc("b"), sort_keys=False)),
-            _fenced(yaml.safe_dump(T.world_doc("c"), sort_keys=False)))
+    return (_fenced(yaml.safe_dump(T.declaration(T.world_doc("b")), sort_keys=False)),
+            _fenced(yaml.safe_dump(T.declaration(T.world_doc("c")), sort_keys=False)))
 
 
 _ALIASED_REPLIES: dict[str, Callable[[], str]] = {
@@ -401,7 +401,7 @@ def _cyclic_facts_doc() -> dict:
 @pytest.mark.parametrize("build", [_shared_facts_doc, _cyclic_facts_doc],
                          ids=["shared", "cyclic"])
 def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tmp_path, build):
-    agent = T.FakeAgent(build(), T.world_doc("b"), T.world_doc("c"))
+    agent = T.FakeAgent(build(), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
 
     err = raised(lambda: _author(tmp_path, agent))
 
@@ -413,11 +413,11 @@ def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tm
 
 
 #: Seat B's reply (call 2) with its story's text reused as its axis through an alias.
-_SEAT_B_ALIASED = ("world_id: b\nrole: B\nstory: &s a story\naxis: *s\n"
+_SEAT_B_ALIASED = ("story: &s a story\naxis: *s\n"
                    "disposition_declared: malicious\nlabel_basis: policy-rule\n")
 #: Seat B's reply carrying the bomb under a key the questioner never reads — so no check of
 #: the COMPOSED world would ever see it; only the loader can refuse it.
-_SEAT_B_BOMB = ("world_id: b\nrole: B\nstory: a story\naxis: an axis\n"
+_SEAT_B_BOMB = ("story: a story\naxis: an axis\n"
                 "disposition_declared: malicious\nlabel_basis: policy-rule\n"
                 "scratch: {" + _bomb_members() + "}\n")
 
@@ -425,7 +425,7 @@ _ALIASED_SEAT_REPLIES = {"reused-scalar": _SEAT_B_ALIASED, "bomb-in-an-unread-ke
 
 
 def _family_reply() -> str:
-    return _fenced(yaml.safe_dump(T.family_doc(), sort_keys=False))
+    return _fenced(yaml.safe_dump(T.declaration(T.family_doc()), sort_keys=False))
 
 
 @pytest.mark.parametrize("kind", list(_ALIASED_SEAT_REPLIES))

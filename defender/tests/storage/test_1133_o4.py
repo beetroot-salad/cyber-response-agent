@@ -25,7 +25,8 @@ from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.core._state1135 import env_state
 
 EPISODE_ID = "ep-1133"
-TOKEN = "e1133.b"
+WORLD_B = T.fixture_world_id("b")
+WORLD_C = T.fixture_world_id("c")
 
 
 @pytest.fixture
@@ -117,7 +118,7 @@ def _ledger_episode(tmp_path: Path) -> tuple[Path, Path]:
     return ep, host
 
 
-def _call(ledger: Any, world_id: str = TOKEN) -> Any:
+def _call(ledger: Any, world_id: str = WORLD_B) -> Any:
     return ledger.ServedCall(system="cmdb", verb="get-host", params={"host": "canary-1"},
                              payload_text=json.dumps({"owner": "live"}),
                              source=ledger.PASSTHROUGH, world_id=world_id)
@@ -127,10 +128,10 @@ def _call(ledger: Any, world_id: str = TOKEN) -> Any:
 def test_o4_4_a_plant_at_the_world_ledger_refuses_declare_and_record(tmp_path, kind):
     ledger = T.mod("learning.branch.ledger")
     ep, host = _ledger_episode(tmp_path)
-    world_file = ep / "served" / f"{TOKEN}.jsonl"
+    world_file = ep / "served" / f"{WORLD_B}.jsonl"
     planted = S.plant_leaf(world_file, kind, host=host)
     with S.open_episode(ep) as episode:
-        book = ledger.Ledger.for_world(episode, TOKEN)
+        book = ledger.Ledger.for_world(episode, WORLD_B)
         before = S.census(tmp_path)
         S.assert_refusal(S.raised_by(book.declare, fifo=planted.fifo), kind,
                          where="declare() into a plant")
@@ -139,7 +140,7 @@ def test_o4_4_a_plant_at_the_world_ledger_refuses_declare_and_record(tmp_path, k
         assert S.census(tmp_path) == before, "a refused ledger write changed the tree"
 
         planted.remove()
-        book = ledger.Ledger.for_world(episode, TOKEN)
+        book = ledger.Ledger.for_world(episode, WORLD_B)
         assert book.declare() is book
         assert world_file.read_bytes() == b""
         book.record(_call(ledger))
@@ -156,7 +157,7 @@ def test_o4_4_a_linked_served_folder_refuses_the_world_ledgers_declare(tmp_path)
     (elsewhere / "base.jsonl").write_text("", encoding="utf-8")
     (ep / "served").symlink_to(elsewhere, target_is_directory=True)
     with S.open_episode(ep) as episode:
-        book = ledger.Ledger.for_world(episode, TOKEN)
+        book = ledger.Ledger.for_world(episode, WORLD_B)
         before = S.census(tmp_path)
         S.assert_refusal(S.raised_by(book.declare), "folder_link_outside",
                          where="declare() through a linked served/")
@@ -191,11 +192,11 @@ def test_o4_8_1_a_bad_world_id_is_a_ledger_error_at_construction(tmp_path, world
             ledger.Ledger.for_world(episode, world_id)
         assert S.census(tmp_path) == before, "for_world wrote before refusing its id"
 
-        book = ledger.Ledger.for_world(episode, TOKEN)
-        assert Path(book.path) == ep / "served" / f"{TOKEN}.jsonl"
+        book = ledger.Ledger.for_world(episode, WORLD_B)
+        assert Path(book.path) == ep / "served" / f"{WORLD_B}.jsonl"
         assert Path(book.base_path) == ep / "served" / "base.jsonl"
         book.declare()
-    assert (ep / "served" / f"{TOKEN}.jsonl").read_bytes() == b""
+    assert (ep / "served" / f"{WORLD_B}.jsonl").read_bytes() == b""
 
 
 class Primed:
@@ -472,7 +473,7 @@ def _draw0_asks() -> list[str]:
     """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply (N22,
     `judge._REPLY_ATTEMPTS` asks per draw)."""
     attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
-    return ["judge:b:0", *(f"judge:b:0:{a}" for a in range(1, attempts))]
+    return [f"judge:{WORLD_B}:0", *(f"judge:{WORLD_B}:0:{a}" for a in range(1, attempts))]
 
 
 def _malformed_first() -> ScriptedJudge:
@@ -493,9 +494,9 @@ def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_th
         tmp_path, roots, caplog, target):
     enqueue = J.mod("learning.judge.enqueue")
     ep = _judged_episode(tmp_path)
-    draw_dir = ep / "worlds" / "b" / "judge"
+    draw_dir = ep / "worlds" / WORLD_B / "judge"
     draw_dir.mkdir(parents=True, exist_ok=True)
-    outside = (ep / "worlds" / "b" / "planted-draw.yaml" if target == "inside"
+    outside = (ep / "worlds" / WORLD_B / "planted-draw.yaml" if target == "inside"
                else tmp_path / "outside-draw.yaml")
     outside.write_text("findings: [{bucket: planted}]\n", encoding="utf-8")
     (draw_dir / "0.yaml").symlink_to(outside)
@@ -504,7 +505,7 @@ def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_th
     judge = _malformed_first()
     J.grade_at(ep, judge=judge, draws=2, state=env_state())
 
-    assert "judge:b:1" in judge.agent_ids, "the draw loop stopped at the refused removal"
+    assert f"judge:{WORLD_B}:1" in judge.agent_ids, "the draw loop stopped at the refused removal"
     link = draw_dir / "0.yaml"
     assert link.is_symlink(), "the link planted at the malformed draw's name was removed"
     assert os.readlink(link) == str(outside), "the planted link was repointed"
@@ -514,7 +515,7 @@ def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_th
     assert (row["malformed_replies"], row["completed_draws"]) == (len(_draw0_asks()), 1), row
     assert S.warned(caplog, "0.yaml", "aliased"), "the refused draw removal was not logged"
     with _io.bind(ep) as view:
-        draws, report = enqueue.draws_on_disk_report(view, "b")
+        draws, report = enqueue.draws_on_disk_report(view, WORLD_B)
     assert sorted(draws) == [1], f"the disk read picked up {sorted(draws)}"
     assert report.unreadable == 1, f"the linked draw was not counted unreadable: {report}"
 
@@ -523,7 +524,7 @@ def test_o4_6_a_plain_stale_draw_at_a_malformed_index_is_still_removed(tmp_path,
     """Positive control on the same address: a plain file an earlier pass left at
     `worlds/b/judge/0.yaml` is removed when this pass's draw 0 is malformed."""
     ep = _judged_episode(tmp_path)
-    draw_dir = ep / "worlds" / "b" / "judge"
+    draw_dir = ep / "worlds" / WORLD_B / "judge"
     draw_dir.mkdir(parents=True, exist_ok=True)
     (draw_dir / "0.yaml").write_text("findings: [{bucket: stale}]\n", encoding="utf-8")
 
@@ -537,12 +538,12 @@ def _run_draws(episode: Any, judge: ScriptedJudge) -> Any:
     """`judge._run_world_draws(episode, "b", ...)`: the draw loop, handed the pass's Episode.
     Returns its `(completed, documents, malformed, last refusal's reason)` (#1234)."""
     return J.mod("learning.judge")._run_world_draws(
-        episode, "b", judge=judge, draws=2, model="judge-model", effort="low",
+        episode, "b", world_id=WORLD_B, judge=judge, draws=2, model="judge-model", effort="low",
         prompt="the framed prompt")
 
 
 def _stale_draw(ep: Path) -> Path:
-    draw = ep / "worlds" / "b" / "judge" / "0.yaml"
+    draw = ep / "worlds" / WORLD_B / "judge" / "0.yaml"
     draw.parent.mkdir(parents=True, exist_ok=True)
     draw.write_text("findings: [{bucket: stale}]\n", encoding="utf-8")
     return draw
@@ -555,7 +556,7 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
         tmp_path, code):
     ep = _judged_episode(tmp_path)
     draw = _stale_draw(ep)
-    rel = LAYOUT.world("b").draw(0)
+    rel = LAYOUT.world(WORLD_B).draw(0)
 
     def fault(method: str, args: tuple, kwargs: dict) -> None:
         name = args[0] if args else kwargs.get("name")
@@ -575,7 +576,7 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
     judge = _malformed_first()
     with S.open_episode(ep) as episode:
         completed, documents, malformed, _last_refusal = _run_draws(episode, judge)
-    assert judge.agent_ids == [*_draw0_asks(), "judge:b:1"]
+    assert judge.agent_ids == [*_draw0_asks(), f"judge:{WORLD_B}:1"]
     assert (completed, malformed) == (1, len(_draw0_asks()))
     assert sorted(documents) == [1]
     assert not os.path.lexists(draw), "control: the stale plain draw survived"
@@ -584,7 +585,7 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo", "directory"])
 def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind):
     ep = _judged_episode(tmp_path)
-    draw = ep / "worlds" / "b" / "judge" / "0.yaml"
+    draw = ep / "worlds" / WORLD_B / "judge" / "0.yaml"
     host = tmp_path / "host"
     host.mkdir()
     planted = S.plant_leaf(draw, kind, host=host)
@@ -594,7 +595,7 @@ def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind
     with S.open_episode(ep) as episode:
         completed, _docs, malformed, _last_refusal = S.in_time(
             lambda: _run_draws(episode, judge), fifo=planted.fifo)
-    assert judge.agent_ids == [*_draw0_asks(), "judge:b:1"], (
+    assert judge.agent_ids == [*_draw0_asks(), f"judge:{WORLD_B}:1"], (
         "the loop stopped at a contained row")
     assert (completed, malformed) == (1, len(_draw0_asks()))
     assert os.path.lexists(draw), f"the {kind} at the draw's name was removed"
@@ -604,7 +605,7 @@ def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind
 def test_d3_draws_on_disk_report_counts_every_yaml_entry_of_any_kind(tmp_path):
     enqueue = J.mod("learning.judge.enqueue")
     ep = tmp_path / "episodes" / EPISODE_ID
-    draw_dir = ep / "worlds" / "b" / "judge"
+    draw_dir = ep / "worlds" / WORLD_B / "judge"
     draw_dir.mkdir(parents=True)
     host = tmp_path / "host"
     host.mkdir()
@@ -617,16 +618,16 @@ def test_d3_draws_on_disk_report_counts_every_yaml_entry_of_any_kind(tmp_path):
     S.plant_leaf(draw_dir / "4.yaml", "hardlink", host=host, body=b"findings: []\n")
 
     with _io.bind(ep) as view:
-        draws, report = S.in_time(lambda: enqueue.draws_on_disk_report(view, "b"),
+        draws, report = S.in_time(lambda: enqueue.draws_on_disk_report(view, WORLD_B),
                                   fifo=draw_dir / "3.yaml")
-        assert enqueue.draws_on_disk(view, "b") == draws
+        assert enqueue.draws_on_disk(view, WORLD_B) == draws
     assert draws == {0: {"findings": []}}
     assert (report.unreadable, report.skipped) == (5, 1), report
     with S.open_episode(ep) as episode:
-        assert enqueue.draws_on_disk(episode.view(), "b") == {0: {"findings": []}}
+        assert enqueue.draws_on_disk(episode.view(), WORLD_B) == {0: {"findings": []}}
 
 
-@pytest.mark.parametrize("at", ["worlds", "worlds/b", "worlds/b/judge"])
+@pytest.mark.parametrize("at", ["worlds", f"worlds/{WORLD_B}", f"worlds/{WORLD_B}/judge"])
 def test_d3_a_link_at_worlds_or_the_world_or_its_draws_folder_yields_no_draws(tmp_path, at):
     enqueue = J.mod("learning.judge.enqueue")
     ep = tmp_path / "episodes" / EPISODE_ID
@@ -639,28 +640,28 @@ def test_d3_a_link_at_worlds_or_the_world_or_its_draws_folder_yields_no_draws(tm
                                                            encoding="utf-8")
         (ep / "worlds").symlink_to(elsewhere, target_is_directory=True)
     else:
-        c_judge = ep / "worlds" / "c" / "judge"
+        c_judge = ep / "worlds" / WORLD_C / "judge"
         c_judge.mkdir(parents=True)
         (c_judge / "0.yaml").write_text(yaml.safe_dump(c_draw), encoding="utf-8")
-        if at == "worlds/b":
-            (ep / "worlds" / "b").symlink_to(ep / "worlds" / "c", target_is_directory=True)
+        if at == f"worlds/{WORLD_B}":
+            (ep / "worlds" / WORLD_B).symlink_to(ep / "worlds" / WORLD_C, target_is_directory=True)
         else:
-            (ep / "worlds" / "b").mkdir()
-            (ep / "worlds" / "b" / "judge").symlink_to(c_judge, target_is_directory=True)
+            (ep / "worlds" / WORLD_B).mkdir()
+            (ep / "worlds" / WORLD_B / "judge").symlink_to(c_judge, target_is_directory=True)
 
     with _io.bind(ep) as view:
-        assert enqueue.draws_on_disk(view, "b") == {}, f"a link at {at} yielded draws under b"
-        draws, _report = enqueue.draws_on_disk_report(view, "b")
+        assert enqueue.draws_on_disk(view, WORLD_B) == {}, f"a link at {at} yielded draws under b"
+        draws, _report = enqueue.draws_on_disk_report(view, WORLD_B)
         assert draws == {}
         if at != "worlds":
-            assert enqueue.draws_on_disk(view, "c") == {0: c_draw}, "control: c's own draws"
+            assert enqueue.draws_on_disk(view, WORLD_C) == {0: c_draw}, "control: c's own draws"
 
     (ep / at).unlink()
-    real = ep / "worlds" / "b" / "judge"
+    real = ep / "worlds" / WORLD_B / "judge"
     real.mkdir(parents=True, exist_ok=True)
     (real / "0.yaml").write_text("findings: [{bucket: b-own}]\n", encoding="utf-8")
     with _io.bind(ep) as view:
-        assert enqueue.draws_on_disk(view, "b") == {0: {"findings": [{"bucket": "b-own"}]}}
+        assert enqueue.draws_on_disk(view, WORLD_B) == {0: {"findings": [{"bucket": "b-own"}]}}
 
 
 @pytest.mark.parametrize("kind", ["missing", "missing-parent", "file"])

@@ -1,6 +1,8 @@
 """#1234 judge contrast: judge reply validation and finding-type admission."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from collections.abc import Iterable, Mapping
@@ -124,7 +126,7 @@ def test_1234_world_reply_carries_bucket_systems_and_three_finding_kinds(tmp_pat
     built = S.family(tmp_path, S.triad(b=_with_refusal("b")))
     blocked = built.served("b", built.served_row("b", 2))
     unresolved_first = _inv("b", claim="filed first, no pointer resolves",
-                            contrast=["worlds/b/judge/0.yaml", "worlds/a/judge/0.yaml"])
+                            contrast=[f"worlds/{T.fixture_world_id('b')}/judge/0.yaml", f"worlds/{T.fixture_world_id('a')}/judge/0.yaml"])
     kept_second = _inv("b", claim="filed second, a two-run pair")
     world_third = S.wf("mislabelled", systems=["idp"], evidence=[built.plan("b")],
                        claim="filed third, the label reads wrong")
@@ -137,7 +139,7 @@ def test_1234_world_reply_carries_bucket_systems_and_three_finding_kinds(tmp_pat
     S.grade(built, seam, draws=2)
 
     # A valid reply: each draw asked once.
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:1"]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:1"]
     every_lane = set(S.LANES.values())
     for n in (0, 1):
         doc = S.draw_doc(built, "b", n)
@@ -186,12 +188,12 @@ def test_1234_world_bucket_is_an_investigator_bucket_or_none(tmp_path: Path) -> 
 
     S.grade(built, seam, draws=len(admitted))
 
-    assert seam.calls_for("b") == [f"judge:b:{n}" for n in range(len(admitted))]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:{n}" for n in range(len(admitted))]
     for n, bucket in enumerate(admitted):
         assert S.draw_doc(built, "b", n).get(BUCKET) == bucket
     asked_c = seam.calls_for("c")
-    assert "judge:c:0:1" in asked_c, asked_c
-    assert "judge:c:1:1" in asked_c, asked_c
+    assert f"judge:{T.fixture_world_id('c')}:0:1" in asked_c, asked_c
+    assert f"judge:{T.fixture_world_id('c')}:1:1" in asked_c, asked_c
     assert S.draw_doc(built, "c", 0).get(BUCKET) == "lead-quality"
     assert S.draw_doc(built, "c", 1).get(BUCKET) == "lead-quality"
     recorded = [d.get(BUCKET) for d in S.row(built, "c").get(S.COINED["row.draws"]) or []
@@ -222,8 +224,8 @@ def test_1234_investigator_finding_requires_contrast_evidence_and_on_verdict_pat
 
     S.grade(built, seam)
 
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:0:1"]
-    assert seam.calls_for("c") == ["judge:c:0", "judge:c:0:1"]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
+    assert seam.calls_for("c") == [f"judge:{T.fixture_world_id('c')}:0", f"judge:{T.fixture_world_id('c')}:0:1"]
     assert _draw_claims(built, "b", 0, S.INVESTIGATOR) == ["b asked again"]
     assert _draw_claims(built, "c", 0, S.INVESTIGATOR) == ["c asked again"]
 
@@ -252,7 +254,7 @@ def test_1234_world_finding_bucket_is_unreachable_incoherent_or_mislabelled(
     S.grade(built, seam)
 
     # Refused and asked again — never de-duplicated into the first reply (X12).
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:0:1"]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
     landed = _by_claim(S.draw_doc(built, "b", 0).get(S.WORLD_FINDINGS), "idp named once")
     assert landed.get("systems") == ["idp"]
     assert "idp named twice" not in _draw_claims(built, "b", 0, S.WORLD_FINDINGS)
@@ -281,7 +283,7 @@ def test_1234_deployment_gap_names_what_how_and_evidence(tmp_path: Path) -> None
 
     S.grade(built, seam)
 
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:0:1"]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
     doc = S.draw_doc(built, "b", 0)
     gaps = [g for g in (doc.get(S.GAPS) or []) if isinstance(g, Mapping)]
     assert len(gaps) == 1, doc.get(S.GAPS)
@@ -314,7 +316,7 @@ def test_1234_lead_set_refused_when_world_systems_include_no_served_system(
 
     S.grade(built, seam)
 
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:0:1"]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
     assert S.row(built, "b").get(BUCKET) == "lead-quality"
     assert [r.get("type") for r in _queued(built, "b")] == ["lead-quality"]
 
@@ -344,14 +346,14 @@ def test_1234_discipline_bucket_for_a_world_never_shown_its_facts(tmp_path: Path
     S.grade(built, seam)
 
     # The world shown its facts keeps its discipline bucket at the first ask (the control).
-    assert seam.calls_for("b") == ["judge:b:0"]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0"]
     assert S.row(built, "b").get(BUCKET) == "analyze-discipline"
     assert [r.get("type") for r in _queued(built, "b")] == ["analyze-discipline"]
     # The worlds never shown their facts are refused and asked again, at world level and on a
     # finding alike; no discipline word survives on any surface the pass writes.
     discipline = {"analyze-discipline", "decision-discipline"}
     for label in ("c", "d"):
-        assert seam.calls_for(label) == [f"judge:{label}:0", f"judge:{label}:0:1"]
+        assert seam.calls_for(label) == [f"judge:{built.world_ids[label]}:0", f"judge:{built.world_ids[label]}:0:1"]
         row = S.row(built, label)
         assert row.get(BUCKET) == "lead-quality"
         assert _draw_claims(built, label, 0, S.INVESTIGATOR) == [f"{label}, again"]
@@ -377,7 +379,7 @@ def test_1234_world_finding_systems_carry_hostile_text(tmp_path: Path) -> None:
 
     S.grade(built, seam)
 
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:0:1"]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
     # The clean name reaches the questioner row (the control); the hostile text reaches no
     # queue and no draw document.
     assert [r.get("systems") for r in _queued(built, "b", questioner=True)] == [["idp"]]
@@ -403,10 +405,10 @@ def test_1234_evidence_pointers_and_contrast_pair_disagree(tmp_path: Path) -> No
         # 0: a resolving two-run pair beside one pointer that never resolves.
         _inv("b", claim="kept", contrast=[S.conduct("b"), S.conduct("a"), "judge.yaml"]),
         # 1: names b and a, but neither pointer resolves.
-        _inv("b", claim="unresolved", contrast=["worlds/b/judge/0.yaml",
-                                                "worlds/a/judge/0.yaml"]),
+        _inv("b", claim="unresolved", contrast=[f"worlds/{T.fixture_world_id('b')}/judge/0.yaml",
+                                                f"worlds/{T.fixture_world_id('a')}/judge/0.yaml"]),
         # 2: the a half never resolves, so the resolved set holds one run.
-        _inv("b", claim="half a pair", contrast=[S.conduct("b"), "worlds/a/judge/0.yaml"]),
+        _inv("b", claim="half a pair", contrast=[S.conduct("b"), f"worlds/{T.fixture_world_id('a')}/judge/0.yaml"]),
         # 3: resolves to two refusal rows (served-ledger rows are conduct, NA08/AM6); its third
         # pointer names run b but never resolves.
         _inv("b", claim="refusals only", contrast=[blocked_b, blocked_a, never]),
@@ -417,7 +419,7 @@ def test_1234_evidence_pointers_and_contrast_pair_disagree(tmp_path: Path) -> No
 
     S.grade(built, seam)
 
-    assert seam.calls_for("b") == ["judge:b:0", "judge:b:0:1"]
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:0:1"]
     fid = [built.finding_id("b", 0, i) for i in range(len(filed))]
     assert S.lane_of(built, fid[0]) == S.LANES["defender"]
     assert S.lane_of(built, fid[1]) == S.LANES["dropped_unresolved"]
@@ -448,7 +450,7 @@ def test_1234_reference_text_steers_the_judged_world_to_bucket_none(
     seam = S.judge({"b": steered_none, "c": measured("c", "edr")})
     S.grade(one, seam, draws=None)
     assert steer in seam.prompt_for("b"), "the reference's text reaches the judged prompt"
-    assert seam.calls_for("b") == ["judge:b:0"], "nothing rejects an evidence-less none"
+    assert seam.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0"], "nothing rejects an evidence-less none"
     assert S.row(one, "b").get(BUCKET) == S.NO_BUCKET
     assert _queued(one, "b") == []
     assert _ids(_queued(one, "c")) == [one.finding_id("c", 0, 0)]  # rows flow otherwise
@@ -458,7 +460,7 @@ def test_1234_reference_text_steers_the_judged_world_to_bucket_none(
     seam3 = S.judge({("b", 0): measured("b", "idp"), ("b", 1): measured("b", "idp"),
                      ("b", 2): steered_none, "c": measured("c", "edr")})
     S.grade(three, seam3, draws=None)
-    assert seam3.calls_for("b") == ["judge:b:0", "judge:b:1", "judge:b:2"]
+    assert seam3.calls_for("b") == [f"judge:{T.fixture_world_id('b')}:0", f"judge:{T.fixture_world_id('b')}:1", f"judge:{T.fixture_world_id('b')}:2"]
     row_b = S.row(three, "b")
     assert row_b.get(BUCKET) is None, row_b
     assert row_b.get(S.COINED["row.draws_disagree"]) is True, row_b

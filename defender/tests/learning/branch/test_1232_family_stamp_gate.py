@@ -197,10 +197,10 @@ def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["agreed"]["commit"] == "deadbee", stamp
     assert not (ep / "not_comparable.yaml").exists()
-    assert (ep / "world_records" / "c.yaml").exists(), "the unwalked world has no record of its own"
+    assert (ep / "world_records" / f"{T.world_id(ep, 'c')}.yaml").exists(), "the unwalked world has no record of its own"
 
     judge = _judge()
     _grade(tmp_path, ep, judge)
     assert not _not_graded(ep), J.judge_record(ep)
-    assert S.judge_called_for(judge, "b"), judge.agent_ids
-    assert not S.judge_called_for(judge, "c"), judge.agent_ids
+    assert S.judge_called_for(judge, T.world_id(ep, "b")), judge.agent_ids
+    assert not S.judge_called_for(judge, T.world_id(ep, "c")), judge.agent_ids

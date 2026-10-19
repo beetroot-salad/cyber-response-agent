@@ -533,12 +533,12 @@ def _pointer_rules() -> str:
     """Host-owned episode-relative pointer grammar (A1)."""
     return (
         "EVERY EVIDENCE POINTER IS EPISODE-RELATIVE, never prose and never a quotation, optionally "  # lint-run-records: ok — the pointer grammar the model writes; it must spell each record's own name (A1)
-        "with a `#fragment`:\n"
-        "- a run's conduct: `worlds/<run>/report.md`, `worlds/<run>/investigation.md`, "
-        "`worlds/<run>/gather_summaries/<lead>.md`, `worlds/<run>/executed_queries.jsonl#<row>` "
-        "and its served answers `served/<token>.<run>.jsonl#<row>` (row = 0-based line index);\n"
-        "- a run's built layer: `oracle/<run>/forged.jsonl#<row>`;\n"
-        f"- the plan: `{LAYOUT.family}#worlds/<run>` (one world's entry) or `{LAYOUT.family}#discriminator` "
+        "with a `#fragment`. World UUIDs are listed in the computed headers; labels name plan entries only:\n"
+        "- a run's conduct: `worlds/<world-uuid>/report.md`, `worlds/<world-uuid>/investigation.md`, "
+        "`worlds/<world-uuid>/gather_summaries/<lead>.md`, `worlds/<world-uuid>/executed_queries.jsonl#<row>` "
+        "and its served answers `served/<world-uuid>.jsonl#<row>` (row = 0-based line index);\n"
+        "- a run's built layer: `oracle/<world-uuid>/forged.jsonl#<row>`;\n"
+        f"- the plan: `{LAYOUT.family}#worlds/<label>` (one world's entry) or `{LAYOUT.family}#discriminator` "
         "(the family-level part);\n"
         f"- context: `{LAYOUT.samples}#<system>`, `{LAYOUT.outcome}#<key>`.\n"
         "A pointer outside these, or into a run that is not one of the runs below, does not "

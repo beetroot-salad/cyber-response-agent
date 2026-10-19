@@ -117,7 +117,7 @@ def test_1025_markup_in_every_model_authored_field_renders_as_text_on_every_sect
     doc["enqueued_to"] = f"/queue/{MARKUP}"
     doc["unqueueable_findings"] = [f"{E.EPISODE_ID}/{E.GRADED_WORLD}/0/1: {MARKUP}"]
     E.write_judge(ep.dir, doc)
-    E.write_framed(ep.dir, f"judge:{E.GRADED_WORLD}:0", prompt=f"prompt {MARKUP}", reply=f"reply {MARKUP}")
+    E.write_framed(ep.dir, f"judge:{T.fixture_world_id(E.GRADED_WORLD)}:0", prompt=f"prompt {MARKUP}", reply=f"reply {MARKUP}")
     world = ep.world(E.GRADED_WORLD)
     (world / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": f"goal {MARKUP}"}), encoding="utf-8")
@@ -255,7 +255,7 @@ def test_1025_an_unreadable_regular_file_at_a_record_name(tmp_path):
     # Every path denied is restored — the ledger and the summary included, or they stay
     # mode 000 for the rest of the tmp tree's life.
     denied = [ep.dir / name for name in names] + [
-        ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl",
+        ep.dir / "served" / f"{T.fixture_world_id(E.GRADED_WORLD)}.jsonl",
         ep.world(E.GRADED_WORLD) / "gather_summaries" / "l-001.md"]
     for path in denied:
         path.chmod(0)
@@ -303,14 +303,14 @@ def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_p
     outside.mkdir()
     (outside / "report.md").write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
     (outside / "investigation.md").write_text("# OUTSIDE-INVESTIGATION\n", encoding="utf-8")
-    E.plant_link(ep / "worlds" / "b" / "report.md", outside / "report.md")
+    E.plant_link(ep / "worlds" / T.world_id(ep, "b") / "report.md", outside / "report.md")
     bound = E.mod("_io").bind(ep)
-    facts = family.read_world_facts(bound, "b", episode_token=T.EPISODE_TOKEN)
+    facts = family.read_world_facts(bound, "b", world_id=T.world_id(ep, "b"))
     assert facts.report.disposition is None
     assert "OUTSIDE-REPORT-BODY" not in facts.report.text
-    E.plant_link(ep / "worlds" / "c" / "investigation.md", outside / "investigation.md")
+    E.plant_link(ep / "worlds" / T.world_id(ep, "c") / "investigation.md", outside / "investigation.md")
     with pytest.raises(_refused()):
-        family.read_world_facts(bound, "c", episode_token=T.EPISODE_TOKEN)
+        family.read_world_facts(bound, "c", world_id=T.world_id(ep, "c"))
 
     grade = J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
@@ -327,7 +327,7 @@ def test_1025_grade_episode_reads_world_archive_through_the_same_screen_as_the_p
 
 def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_page(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [E.served_row("b", "oracle")], "c": []})
-    fifo = E.plant_fifo(ep / "worlds" / "b" / "investigation.md")
+    fifo = E.plant_fifo(ep / "worlds" / T.world_id(ep, "b") / "investigation.md")
     started = time.monotonic()
     with E.Rescue(fifo, after=2.0) as rescue, pytest.raises(_refused()):
         J.render_at(ep, "b")
@@ -338,7 +338,7 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
                             ledgers={"b": [E.served_row("b", "oracle")], "c": []})
     outside = tmp_path / "outside-report.md"
     outside.write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
-    E.plant_link(ep / "worlds" / "c" / "report.md", outside)
+    E.plant_link(ep / "worlds" / T.world_id(ep, "c") / "report.md", outside)
     rendered = J.render_at(ep, "b")
     assert "OUTSIDE-REPORT-BODY" not in repr(rendered.__dict__)
     assert "c" not in rendered.contrast_rows, "the linked world is a reference run"

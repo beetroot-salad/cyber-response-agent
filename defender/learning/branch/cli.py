@@ -80,6 +80,7 @@ from defender.run_common import REPO_ROOT
 from defender.runtime import branch, session_store
 from defender.runtime.branch._family import (
     FamilyError,
+    load_family,
     runnable_worlds,
 )
 from defender.runtime.verb_grant import GrantError
@@ -376,6 +377,7 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
     stop = threading.Event()
     start = functools.partial(_default_spawn, stop=stop) if spawn is None else spawn
     labels = list(world_labels)
+    family = load_family(episode.view(), expected_episode_id=episode.dir.name)
     if not labels:
         return {}
     ready = threading.Barrier(len(labels))
@@ -387,7 +389,7 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
         exits[label] = code
         if not code:
             return
-        if outcome_mod.write_world_record(episode, label, outcome_mod.DID_NOT_FINISH,
+        if outcome_mod.write_world_record(episode, family.world(label).world_id, outcome_mod.DID_NOT_FINISH,
                                           detail=why):
             _logger.warning(f"world {label}: {why}; recorded as did not finish")
         with tally:
@@ -649,14 +651,14 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
                      f"({record['reason']})")
         return 1
     unservable = {entry["world"] for entry in record["unservable_worlds"]}
-    labels = [w.world_id for w in runnable_worlds(family) if w.world_id not in unservable]
+    labels = [w.label for w in runnable_worlds(family) if w.label not in unservable]
     started.set()
     with clock.step(Step.RUNS):
         # The arm container, then the roster — one fresh id for EVERY manifest world, the
         # unservable and the `role: null` replicate included — before the first sibling
         # starts: each sibling's run start checks the roster names its world, and takes its
         # run id from it.
-        view.start_runs([world.world_id for world in family.worlds])
+        view.start_runs([world.label for world in family.worlds])
         exits = start_family(episode, labels, spawn=spawn, model=ns.model,
                              tenant_id=tenant.tenant_id, rate=process_oracle_settings().rate,
                              failed_before=len(unservable))

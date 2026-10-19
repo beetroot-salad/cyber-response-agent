@@ -260,7 +260,7 @@ def sibling_scene(tmp_path: Path, *, roster: bool = True,
 
     _base, src = T.runs_base(tmp_path, source_run_id=SOURCE_RUN_ID)
     doc = doc if doc is not None else family_doc(src)  # lint-default: ok — a test builder's fresh per-call manifest
-    labels = [w["world_id"] for w in doc.get("worlds", [])]
+    labels = [w["label"] for w in doc.get("worlds", [])]
     ep = R.make_episode(data_root(), SIBLING_TENANT, episode_id, manifest=_yaml.safe_dump(doc),
                         labels=labels, roster=False)
     (ep / "served").mkdir(exist_ok=True)

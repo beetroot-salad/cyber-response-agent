@@ -56,7 +56,7 @@ def _doc(episode_id: str, *, null_world: bool = False) -> dict:
 
 
 def _labels(doc: dict) -> list[str]:
-    return [w["world_id"] for w in doc["worlds"]]
+    return [w["label"] for w in doc["worlds"]]
 
 
 def _episode(data_root: Path, *, roster: Any = True,
@@ -429,7 +429,7 @@ def test_r8_the_archive_writes_no_run_dir_pointer(data_root):
     runs = R.tenant(data_root).runs_repository()
     with runs.episode(episode_id) as view:
         archive.archive_episode(view.episode, {"b": ep / "runs" / roster["b"]})
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / T.world_id(ep, "b")
     assert (world / "report.md").is_file(), "the control failed: nothing was archived"
     assert not os.path.lexists(world / "run_dir"), "the archive wrote the run_dir pointer"
 
@@ -464,11 +464,11 @@ def test_a_launch_verifies_finished_arms_by_roster_id_archives_no_pointer_and_pa
     roster = R.read_roster(ep)
     finished = [label for label in _spawn_worlds(spawn) if label != "c"]
     for label in finished:
-        world = ep / "worlds" / label
+        world = ep / "worlds" / T.world_id(ep, label)
         assert (world / "report.md").is_file(), f"finished world {label} was not archived"
         assert not os.path.lexists(world / "run_dir"), f"world {label}: a run_dir pointer"
     assert (ep / "runs" / roster["c"]).is_dir(), "the control failed: c left no arm"
-    assert not (ep / "worlds" / "c" / "report.md").exists(), "VERIFY opened an unfinished arm"
+    assert not (ep / "worlds" / T.world_id(ep, "c") / "report.md").exists(), "VERIFY opened an unfinished arm"
 
     page = ep / E.PAGE_NAME
     assert page.is_file(), "the launcher rendered no page"
@@ -578,7 +578,7 @@ def test_a_launch_whose_preflight_does_not_accept_writes_no_roster_and_its_sibli
     assert R.tree(data_root) == before, "the refused sibling wrote under the data root"
 
     (ep / "runs").mkdir()
-    R.write_roster(ep, {w["world_id"]: R.new_id() for w in doc["worlds"]})
+    R.write_roster(ep, {w["label"]: R.new_id() for w in doc["worlds"]})
     rc, refused, said, rec = _hand_sibling(ep.name, "b")
     assert refused is not None, f"the poisoned manifest was not read past the gate: rc {rc}"
     assert SENTINEL in said, f"past the gate the refusal should name {SENTINEL}: {said!r}"
@@ -610,7 +610,7 @@ def test_a_launch_rosters_every_manifest_world_and_starts_only_the_servable_ones
     assert oracle.hits["c"] > 0, "control: c's pre-flight never asked its oracle"
     assert spawn.faults == [], spawn.faults
 
-    labels = {w["world_id"] for w in _manifest_of(ep)["worlds"]}
+    labels = {w["label"] for w in _manifest_of(ep)["worlds"]}
     assert labels == {"a", "b", "c"}, labels
     roster = R.read_roster(ep)
     assert set(roster) == labels, f"the roster names {sorted(roster)}, the manifest {sorted(labels)}"
@@ -618,8 +618,8 @@ def test_a_launch_rosters_every_manifest_world_and_starts_only_the_servable_ones
     assert len(set(roster.values())) == len(roster), f"two labels share an id: {roster}"
     assert sorted(_spawn_worlds(spawn)) == ["a", "b"], f"started {_spawn_worlds(spawn)}"
     for label in ("a", "b"):
-        assert (ep / "worlds" / label / "report.md").is_file(), f"{label} was not archived"
-    assert not (ep / "worlds" / "c" / "report.md").exists(), "the unservable world was archived"
+        assert (ep / "worlds" / T.world_id(ep, label) / "report.md").is_file(), f"{label} was not archived"
+    assert not (ep / "worlds" / T.world_id(ep, "c") / "report.md").exists(), "the unservable world was archived"
 
 
 @pytest.mark.parametrize("variable", ["unset", "decoy"])
@@ -745,16 +745,22 @@ def test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder(
         f"control: the launch made no one episode under <T>/episodes: {_episodes_made(data_root)}")
 
 
-def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name():
-    from defender.learning.judge import family
+def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name(tmp_path):
+    from defender import _io
+    from defender.learning.judge import JudgeRefused, family
 
-    for long in ("w" * 200, "w" * 230):
-        assert family.world_label_names_directory(long), (
-            f"a valid {len(long)}-character label was refused for its composed name")
-    assert family.world_label_names_directory("b")
-    for bad in ("-a", "_a", ".a", "", "../x", "a/b", "..", "a\x00b"):
-        assert not family.world_label_names_directory(bad), (
-            f"{bad!r} was admitted: the label's own rule no longer applies")
+    episode_id = R.new_id()
+    ep = tmp_path / episode_id
+    good = ("w" * 200, "w" * 220, "w" * 230, "w" * 1000, "b")
+    bad = ("-a", "_a", ".a", "", "../x", "a/b", "..", "a\x00b")
+    for label in (*good, *bad):
+        T.write_family(ep, T.family_doc(episode_id=episode_id,
+                                       worlds=[T.base_world(), T.world_doc(label)]))
+        with _io.bind(ep) as view:
+            err = R.raised(family.read_manifest, view, expected_episode_id=episode_id)
+        assert (err is None) is (label in good), (label, err)
+        if label in bad:
+            assert isinstance(err, JudgeRefused), err
 
 
 # S-red — the redaction set is the roster's
@@ -769,19 +775,14 @@ def _arm_ids(roster: dict[str, str]) -> dict[str, Any]:
     return {label: RunId.parse(text) for label, text in roster.items()}
 
 
-def _token(episode_id: str) -> str:
-    """A UUID episode's token, as the design states it (R2-03): its hyphens rendered as dots."""
-    return episode_id.replace("-", ".")
-
-
 def test_family_identities_is_the_episode_its_tokens_and_every_roster_arm_id():
     from defender.runtime.branch._family import family_identities
 
     episode_id = R.new_id()
     roster = {label: R.new_id() for label in LABELS}
-    token = _token(episode_id)
-    expected = {episode_id, token, *(f"{token}.{label}" for label in LABELS), *roster.values()}
-    known = {str(member) for member in family_identities(_family(episode_id), _arm_ids(roster))}
+    family = _family(episode_id)
+    expected = {episode_id, *(world.world_id for world in family.worlds), *roster.values()}
+    known = {str(member) for member in family_identities(family, _arm_ids(roster))}
     assert known == expected, (
         f"missing {sorted(expected - known)}; unexpected {sorted(known - expected)}")
 
@@ -817,7 +818,7 @@ def test_the_comparator_prompt_never_carries_a_roster_arm_id(data_root):
         T.archived_world(ep, label)
     T.base_capture(ep, [T.captured_row(key="k1")])
     leaked = {"hits": [{"_id": "x", "note": f"seen by {roster['c']} near {UNRELATED_UUID}"}]}
-    (ep / "served" / f"{_token(episode_id)}.b.jsonl").write_text(
+    (ep / "served" / f"{T.world_id(ep, 'b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload=leaked)) + "\n", encoding="utf-8")
     delta_o = T.sym("learning.branch.episode", "delta_o")
     runs = R.tenant(data_root).runs_repository()
@@ -892,7 +893,7 @@ def test_the_siblings_query_tool_knows_every_roster_arm_id(tmp_path, monkeypatch
                    episode_id=episode_id)
     # The natural container in #1187's shape: no `_tenant.json` (R1).
     (src.parent / "_tenant.json").unlink(missing_ok=True)
-    roster = {w["world_id"]: R.new_id() for w in doc["worlds"]}
+    roster = {w["label"]: R.new_id() for w in doc["worlds"]}
     (ep / "runs").mkdir()
     R.write_roster(ep, roster)
 
@@ -902,8 +903,7 @@ def test_the_siblings_query_tool_knows_every_roster_arm_id(tmp_path, monkeypatch
                                       lifecycle=probe)
     assert probe.known is not None, (
         f"the sibling never built its registry: rc={rc} {P.refusal_text(refused)} {err[-2000:]}")
-    token = _token(episode_id)
-    expected = {episode_id, token, *(f"{token}.{label}" for label in roster), *roster.values()}
+    expected = {episode_id, *(world["world_id"] for world in doc["worlds"]), *roster.values()}
     assert probe.known == expected, (
         f"missing {sorted(expected - probe.known)}; unexpected {sorted(probe.known - expected)}")
     assert f"{episode_id}-c" not in probe.known

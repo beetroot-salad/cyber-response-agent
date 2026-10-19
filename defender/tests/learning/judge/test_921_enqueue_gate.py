@@ -41,7 +41,7 @@ def _family_row(fid: str = "ep-1/b/0/0", **over) -> dict:
                type="decision-discipline", subject="defender",
                subject_anchor="l-001", subject_topic="holding-system coverage",
                source_run_dir="episodes/ep-1/worlds/b",
-               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
                on_verdict_path=True, world_label_doubted=False)
     # `D.finding_row` is the adversarial channel's shape, which still spells the retired word.
     row.pop("judge_outcome", None)
@@ -54,7 +54,7 @@ def _graded(tmp_path, **kw):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"},
                             **kw)
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         draws=1, state=env_state())
@@ -163,8 +163,8 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     ep_retry = T.tenant_episodes(retry / "data-root") / ep.name
     shutil.copytree(ep, ep_retry, symlinks=True)
     (ep_retry / "judge.yaml").unlink()
-    shutil.rmtree(ep_retry / "worlds" / "b" / "judge")
-    shutil.rmtree(ep_retry / "worlds" / "c" / "judge")
+    shutil.rmtree(ep_retry / "worlds" / T.world_id(ep_retry, "b") / "judge")
+    shutil.rmtree(ep_retry / "worlds" / T.world_id(ep_retry, "c") / "judge")
     retry_root = retry / "queue"
     retry_root.mkdir()
     retry_state = LearningState.open(LoopPaths(repo_root=retry, state_dir=retry_root))
@@ -179,7 +179,7 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
         J.finding_doc(topic="first"), J.finding_doc(topic="second", anchor="l-002")]))
     ep2 = J.accepted_episode(tmp_path / "two", ledgers={"b": [J.staged_row("b")], "c": []},
                              dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep2 / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep2 / "worlds" / T.world_id(ep2, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     own_root = tmp_path / "two" / "queue"
     own_root.mkdir(parents=True)
     own = LearningState.open(LoopPaths(repo_root=tmp_path / "two", state_dir=own_root))
@@ -315,7 +315,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     J.grade_at(
         ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())),
         draws=1, state=LearningState.open(paths))
@@ -384,7 +384,7 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
 
 def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
     gap = {"what": "elastic esql", "how": "the served system does not hold the field",
-           "evidence": ["worlds/b/report.md"], "kept_facts_from_investigator": True}
+           "evidence": [f"worlds/{T.fixture_world_id('b')}/report.md"], "kept_facts_from_investigator": True}
     kept = J.as_reply_text(J.reply_doc(gaps=[gap]))
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             labels=("a", "b"))

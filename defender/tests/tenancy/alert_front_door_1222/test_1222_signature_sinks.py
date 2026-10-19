@@ -2,6 +2,8 @@
 signature exactly; hostile signature text stays inert."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import html
@@ -228,7 +230,7 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             alert=worlds_alert,
                             episode_id=fixture_uuid(f"1222-signature-sinks:{tmp_path}"))
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     S.plant_episode_copy(ep, alert=alert, record=record, facts=facts)
     if alter is not None:
         alter(ep)
@@ -404,7 +406,7 @@ def test_o11_a_rewritten_alert_changes_neither_union_nor_key(tmp_path: Path) -> 
 
     def rewrite_worlds(ep: Path) -> None:
         for label in ("a", "b", "c"):
-            (ep / "worlds" / label / "alert.json").write_text(json.dumps(decoy),
+            (ep / "worlds" / T.world_id(ep, label) / "alert.json").write_text(json.dumps(decoy),
                                                               encoding="utf-8")
 
     _ep, judge, rows = _graded(tmp_path, alert=ALERT_A, facts={"signature": MAPPED},

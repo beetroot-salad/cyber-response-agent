@@ -96,7 +96,7 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
 
 
 def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path: Path):
-    world = tmp_path / "episodes" / S.EPISODE_ID / "worlds" / S.LABEL
+    world = tmp_path / "episodes" / S.EPISODE_ID / "worlds" / S.WORLD_ID
     world.mkdir(parents=True)
     aw = S.ArchivedWorld().at(world)
 

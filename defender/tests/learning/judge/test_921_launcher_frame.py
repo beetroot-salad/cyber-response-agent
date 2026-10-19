@@ -169,7 +169,7 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
 
     # The per-draw sink, same guarantee, same refusal.
     (ep / "judge.yaml").unlink()
-    draw_dir = ep / "worlds" / "b" / "judge"
+    draw_dir = ep / "worlds" / T.world_id(ep, "b") / "judge"
     draw_dir.mkdir(parents=True, exist_ok=True)
     (draw_dir / "0.yaml").symlink_to(outside)
     with pytest.raises(J.refusals()):
@@ -232,7 +232,7 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
 
     ep = J.accepted_episode(tmp_path)
     # One lead whose joined payload cannot fit the cap, through the real archived artifact.
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / T.world_id(ep, "b")
     (world / "gather_summaries" / "l-001.md").write_text(
         "x" * 4000 + "\nTAIL-OF-THE-OVERSIZED-LEAD\n", encoding="utf-8")
 

@@ -120,8 +120,8 @@ def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
         doc = yaml.safe_load(good)
         # A deep copy: a shared node would be dumped as a YAML alias, which the manifest
         # reader refuses before any label is judged.
-        seat = copy.deepcopy(next(w for w in doc["worlds"] if w.get("world_id") == "c"))
-        doc["worlds"].append({**seat, "world_id": bad})
+        seat = copy.deepcopy(next(w for w in doc["worlds"] if w.get("label") == "c"))
+        doc["worlds"].append({**seat, "label": bad, "world_id": fixture_uuid("world:invalid:" + bad)})
         manifest.write_text(yaml.safe_dump(doc), encoding="utf-8")
         with pytest.raises(J.refusals()) as refused:
             P.grade(ep, P.LAUNCH_TENANT)
@@ -243,7 +243,7 @@ def test_dc5_an_arm_entry_that_is_a_link_is_never_archived(tmp_path, monkeypatch
     est2, src2 = P.launch_source(control_root)
     clean = P.drive_launch(est2, P.launch_argv(P.LAUNCH_TENANT, src2))
     assert _launched(clean), f"the control did not launch: {clean.message!r}"
-    assert (_the_launched_episode() / "worlds" / "b" / "report.md").is_file()
+    assert (_the_launched_episode() / "worlds" / P.T.world_id(_the_launched_episode(), "b") / "report.md").is_file()
 
 
 def test_dc6_a_sibling_over_an_absent_container_is_refused(tmp_path):
@@ -503,7 +503,7 @@ def _roster_by_hand(ep: Path) -> dict[str, str]:
     if (ep / P.T.ROSTER_NAME).is_file():
         return S.read_roster(ep)
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    roster = {w["world_id"]: S.new_id() for w in doc["worlds"]}
+    roster = {w["label"]: S.new_id() for w in doc["worlds"]}
     runs = ep / "runs"
     runs.mkdir(exist_ok=True)
     for label, arm_id in roster.items():
@@ -522,7 +522,7 @@ def _start_runs_by_hand(ep: Path) -> dict[str, str]:
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    roster = {w["world_id"]: S.new_id() for w in doc["worlds"]}
+    roster = {w["label"]: S.new_id() for w in doc["worlds"]}
     (ep / "runs").mkdir(exist_ok=True)
     S.write_roster(ep, roster)
     return roster

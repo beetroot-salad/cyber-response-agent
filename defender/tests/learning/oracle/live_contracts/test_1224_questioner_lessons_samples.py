@@ -171,7 +171,8 @@ class _ScopedJudge:
     def __init__(self, *, world: str, family: str,
                  by_world: Mapping[str, str] | None = None) -> None:
         self.world, self.family = world, family
-        self.by_world = dict(by_world or {})
+        self.by_world = {T.fixture_world_id(label): reply
+                         for label, reply in (by_world or {}).items()}
         self.prompts: list[str] = []
         self.agent_ids: list[str] = []
 
@@ -333,7 +334,7 @@ def test_1224_question_writer_authors_world_facts_not_telemetry(tmp_path, monkey
 
     family = _manifest(good.ep)
     assert family is not None, f"no family.yaml was written (rc={good.rc}, {good.message!r})"
-    worlds = {w["world_id"]: w for w in family["worlds"]}
+    worlds = {w["label"]: w for w in family["worlds"]}
     assert worlds["b"].get("facts") == [fact_b], f"world b's facts: {worlds['b'].get('facts')!r}"
     assert worlds["c"].get("facts") == [fact_c], f"world c's facts: {worlds['c'].get('facts')!r}"
     assert worlds["a"].get("facts") == [], f"the control world's facts: {worlds['a']!r}"

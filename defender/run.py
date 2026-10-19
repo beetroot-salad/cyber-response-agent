@@ -915,7 +915,7 @@ def _record_unservable_world(episode: Episode, world: Any, abort: ServingAbort) 
     system, verb, params = call if isinstance(call, tuple) and len(call) == 3 else ("", "", {})
     reason = getattr(abort, "reason", "")
     written = outcome_mod.write_world_record(
-        episode, world.label,
+        episode, world.world_id,
         outcome_mod.BUDGET if reason == "budget" else outcome_mod.ORACLE_UNSERVABLE,
         call={"system": system, "verb": verb, "params": dict(params)},
         detail=str(getattr(abort, "detail", "") or reason))

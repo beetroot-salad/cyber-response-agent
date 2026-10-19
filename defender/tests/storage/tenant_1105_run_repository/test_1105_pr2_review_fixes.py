@@ -234,7 +234,7 @@ def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
     assert isinstance(got.rc, int)
     (ep,) = P.launched_episodes()
     reasons = _world_reasons(ep)
-    assert sorted(reasons) == sorted(P.T.WORLDS), reasons
+    assert sorted(reasons) == sorted(P.T.world_id(ep, label) for label in P.T.WORLDS), reasons
     assert set(reasons.values()) == {"not archived"}, reasons
     assert "judge" in _steps(ep), f"the judge step was not reached after VERIFY: {_steps(ep)}"
     archived = [q for q in (ep / "worlds").rglob("report.md")] if (ep / "worlds").is_dir() else []
@@ -250,7 +250,7 @@ def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
     assert clean.rc == 0, f"the control did not launch: {clean!r}"
     (ep2,) = P.launched_episodes()
     assert "not archived" not in _world_reasons(ep2).values()
-    assert (ep2 / "worlds" / "b" / "report.md").is_file()
+    assert (ep2 / "worlds" / P.T.world_id(ep2, "b") / "report.md").is_file()
     assert (ep2 / "judge.yaml").is_file()
     assert clean.judge.prompts
 

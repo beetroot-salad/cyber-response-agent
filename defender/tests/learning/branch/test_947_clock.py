@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import re
 
 import contextlib
@@ -97,6 +99,8 @@ _CLOCK_ADAPTER = '''\
 """Verb bodies that record what the seam put on their ctx."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 from pathlib import Path
 
@@ -148,7 +152,8 @@ class World:
     """The world object the seam reads: an id, and the systems it declares it touches."""
 
     def __init__(self, world_id: str, touches: tuple[str, ...] = ()):
-        self.world_id = world_id
+        self.label = world_id
+        self.world_id = T.fixture_world_id(world_id)
         self.touches = touches
 
 
@@ -175,14 +180,17 @@ def _held_episodes():
             _HELD.pop()
 
 
-def primed_ledger(tmp_path: Path, name: str = "served.jsonl") -> Ledger:
-    """A ledger over `name`, with the primed capture beside it that #947 makes REQUIRED."""
+CLOCK_WORLD_ID = T.fixture_world_id("w1")
+
+
+def primed_ledger(tmp_path: Path, *, world_id: str = CLOCK_WORLD_ID) -> Ledger:
+    """A ledger over an explicit world UUID, with the primed capture beside it that #947 makes REQUIRED."""
     served = tmp_path / SERVED_DIRNAME
     served.mkdir(parents=True, exist_ok=True)
     base = served / BASE_FILENAME
     base.touch()
     episode = _HELD[-1].enter_context(Episode.open(tmp_path))
-    return Ledger.for_world(episode, name.removesuffix(".jsonl"))
+    return Ledger.for_world(episode, world_id)
 
 
 def fake_docker(tmp_path: Path) -> Path:
@@ -358,11 +366,11 @@ def test_the_clock_rides_every_served_call_on_every_system(tmp_path):
 def test_the_clock_never_perturbs_the_params_a_call_records(tmp_path):
     ctx = docker_ctx(tmp_path)
     reg = build_registry(read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=World("A", ("cmdb",)),
-                        ledger=primed_ledger(tmp_path), as_of=T0, **pass_through())
+                        ledger=primed_ledger(tmp_path, world_id=T.fixture_world_id("A")), as_of=T0, **pass_through())
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
-    own = [r for r in served_rows(reg.ledger) if r["world_id"] == "A"]
+    own = [r for r in served_rows(reg.ledger) if r["world_id"] == T.fixture_world_id("A")]
     assert len(own) == 1, f"one served call, one world row; got {own}"
     assert "asked_params" not in own[0], (
         f"an unstaged call recorded a second identity: {own[0]}")

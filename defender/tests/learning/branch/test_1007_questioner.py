@@ -31,8 +31,8 @@ def three_replies():
     return [
         {"base_story": "s", "discriminator": {"predicate": "p"},
          "axes": ["a1", "a2"],
-         "worlds": [{"world_id": "b", "axis": "a1", "facts": [W.fact("f1")]},
-                    {"world_id": "c", "axis": "a2", "facts": [W.fact("f2")]}]},
+         "worlds": [{"label": "b", "axis": "a1", "facts": [W.fact("f1")]},
+                    {"label": "c", "axis": "a2", "facts": [W.fact("f2")]}]},
         {"story": "b", "axis": "a1", "disposition_declared": "malicious",
          "label_basis": "policy-rule"},
         {"story": "c", "axis": "a2", "disposition_declared": "benign",

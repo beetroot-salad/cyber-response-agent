@@ -184,6 +184,7 @@ def _fact_parts(facts: list[dict[str, Any]]) -> list[Part]:
 
 def _run_header_block(run: RunView) -> Block:
     return (f"run {run.label}", [
+        f"storage world UUID: {run.world_id}\n",
         "its manifest entry (role, story, axis, declared verdict, label basis): ",
         _run(_entry(run)), f"\nreached verdict (its archived {WORLD_LEAVES.report}): ",
         _run(run.reached) if run.reached is not None

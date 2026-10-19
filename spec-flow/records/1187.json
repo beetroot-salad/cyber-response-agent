@@ -1,9 +1,10 @@
 {
   "issue": 1187,
-  "design_revision": 2,
+  "design_revision": 3,
   "user_amendments": [
     "Preserve main layout and consolidate tests and metadata.",
-    "Tenant IDs join run, arm and episode IDs as opaque UUIDs; require explicit migration, without aliases."
+    "Tenant IDs join run, arm and episode IDs as opaque UUIDs; require explicit migration, without aliases.",
+    "World labels are descriptive metadata; host-minted persisted world UUIDs name all world artifacts, removing label-derived filename bounds. Family judge draws have an episode-level namespace."
   ],
   "contract": {
     "base": "d50c16ad",
@@ -27,9 +28,6 @@
     "gvisor": "Both dedicated hosted box jobs and all4feature arm-boundary cases passed in run39277017581.",
     "cleanup": "Consolidation baseline ownership batches passed: 234, 84 (3 skipped), and 148 cases. Original scenario-to-case maps independently inspected; exact duplicate witnesses retained in existing suites.",
     "uuid_probe": "100 arbitrary canonical UUIDs admitted by tenant/row/run/episode owners; 900 noncanonical tenant variants refused.",
-    "previous_ci": "https://github.com/beetroot-salad/cyber-response-agent/actions/runs/39279519288",
-    "previous_ci_status": "Cancelled after partial success; not a full-suite pass. New hosted run required after publication.",
-    "hosted_after_publication": "f1969346 / run39288627741: box-native, box-dood, lint and code-smells passed. Shard1 10235 passed/4 fixture failures; shard2 7790 passed/13 fixture or golden failures. All 17 repaired; affected file reruns 51, 24, 43 and 43 passed. New hosted rerun pending at publication; see PR checks.",
     "local_gates": "Both CI Ruff commands, mypy (348 files), and all 34 custom CI linters pass without new baselines/suppressions.",
     "affected_runs": {
       "root": "819 cases covered by passing runs (817 initially, both failures repaired in 46-case rerun).",
@@ -38,22 +36,40 @@
       "learning_evaluation": "1337 passed/80 skipped initially; three held-out harness failures repaired and whole held-out file 38 passed.",
       "tenancy_api": "1864 passed/14 skipped initially; all 26 fixture failures repaired: 286 passed in focused rerun, final repository-name decoupling verified by 2 delivery/second-tenant-lock controls. Six representative 1222 real-driver cases passed. Full expensive 1222 matrix and 2 unavailable runsc cases reserved for hosted CI."
     },
-    "collection": "18241 tests collected without errors after final amendments."
+    "collection": "18287 tests collect without errors after the world UUID amendment.",
+    "last_green_before_world_amendment": "c50af87bca5bbf887c1b7f3c464bfb32af1ec55e: all six CI jobs passed at https://github.com/beetroot-salad/cyber-response-agent/actions/runs/39290206245 . This run does not certify the subsequent world UUID amendment.",
+    "affected_runs_scope": "The affected_runs entries are the tenant/consolidation baseline; world amendment batches are recorded separately."
   },
   "review": {
     "adversary_dispositions": "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-contract-review.json",
     "scope": "F1-F13 dispositions and sampled attack discrimination retained at immutable ref; bounded sampling is not proof.",
-    "next": "Independent review after updated tests, tenant amendment and CI pass. Do not merge.",
-    "tenant_amendment": "Independent source/migration review found no aliases, normalization or historical-ID mutation; retirement documentation ambiguity repaired. Tenant amendment tests were authored during implementation. Nonidentity adapter, repository and scenario names retained; migration uses chosen UUID without rewriting historical records."
+    "next": "Independent review after world UUID amendment and updated CI. Keep draft; do not merge.",
+    "tenant_amendment": "Independent source/migration review found no aliases, normalization or historical-ID mutation; retirement documentation ambiguity repaired. Tenant amendment tests were authored during implementation. Nonidentity adapter, repository and scenario names retained; migration uses chosen UUID without rewriting historical records.",
+    "world_amendment": "Independent source and filesystem probes found no label-derived path/identity fallback; old F1-F13 evidence is historical and does not certify changed world namespaces. Pre-existing role-uniqueness validation asymmetry recorded outside this amendment."
   },
   "tenant_migration": "Offline: archive entire named tenant outside data root; copy knowledge only to chosen UUID folder, update and commit marker, run setup/check. Historical records retain old identity and bytes. See defender/docs/development-operations.md.",
   "consolidation": {
-    "feature_lines": "6483 before; current 5572 (911 fewer).",
+    "feature_lines": "6483 before; 5572 after consolidation; 5583 after world amendment (900 fewer than original).",
     "method": "Shared existing fixture oracles/FakeSibling, explicit parameter matrices, common retirement probes and shared refusal scenarios; retain race, decoy, spend-order, actual-launch and byte/inode controls.",
     "duplicate_witnesses": [
       "test_1105_pr2_repository.py::test_episode_files_is_the_owners_handle_alone_and_creates_nothing",
       "test_1105_run_lookup.py::test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidecar_files"
     ],
     "historical_graph": "Restored unchanged main graph; no generated historical metadata added."
+  },
+  "world_identity": {
+    "lifecycle": "Questioner supplies labels; host stamps distinct UUID4 values before create-only family publication and preflight. Reads require persisted UUIDs; no derivation, alias or mint-on-read. Existing world manifests require fresh episodes.",
+    "selectors": "CLI, reports and arm roster retain manifest labels as selectors; each artifact path binds through the validated label-to-UUID mapping.",
+    "publication": "Strict UUID/duplicate checks, expected episode binding and create-only manifest publication preserve the mapping. Authored world_id fields are refused.",
+    "layout": "Ledger, world record, oracle, archive and per-world judge paths use world UUIDs; family draws are episode judge/<n>.yaml. Labels impose no filename-length constraint.",
+    "verification": "Independent actual-filesystem/source probe passed 11 checks with a 4102-character label and changed-mapping republish refusal. Owner/storage matrix 306 passed; storage 523 passed/3 skipped, all three failures repaired in focused reruns; presentation 228 passed/12 skipped; shared filesystem 750 passed plus sole repaired file 9 passed. Oracle 254 passed with eight fixture failures repaired in a 166-case green manifest/questioner/oracle/tenant/judge batch. Final remaining consumers 652 passed with all three fixture failures repaired and verified in a 31-case green rerun. Current F6 Docker EXDEV rerun 1 passed.",
+    "readers": "Persisted-manifest readers, including roster label census, reuse the strict family validator instead of maintaining a second partial world schema.",
+    "test_provenance": "World UUID amendment regressions were authored during implementation and independently reviewed; the original tests-first ancestry remains pinned above.",
+    "regressions": [
+      "learning/branch/test_947_triplet_manifest.py: long labels, UUID faults, binding and reminted replacement refusal",
+      "learning/branch/test_1007_namespace.py: 220/1000-character actual launch, preflight/oracle and archive",
+      "learning/branch/test_947_triplet_questioner.py: absent/null/explicit host IDs, early refusal and file immutability"
+    ],
+    "hosted_ci": "Pending publication; c50af87b baseline is green but does not certify this amendment."
   }
 }

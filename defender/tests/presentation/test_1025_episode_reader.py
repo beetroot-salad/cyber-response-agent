@@ -1,6 +1,8 @@
 """#1025 O8 (prep 2) — one episode reader and one home for each file name."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import ast
 import json
 from pathlib import Path
@@ -37,7 +39,7 @@ def _family():
 def _world(ep: Path, label: str):
     """The reader `lead_chain` takes: the episode's bound primitive, bound one directory down
     at `worlds/<label>` by derivation (#1049 D-V2) — never a path it could format."""
-    return J.mod("_io").bind(ep).under(f"worlds/{label}")
+    return J.mod("_io").bind(ep).under(f"worlds/{T.fixture_world_id(label)}")
 
 
 def _render():
@@ -172,8 +174,8 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     """The per-lead chain the judge is SHOWN is the chain `family.lead_chain` computes ."""
     family = _family()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    world_dir = ep / "worlds" / "b"
-    token = J.world_token("b")
+    world_dir = ep / "worlds" / T.world_id(ep, "b")
+    token = J.fixture_world_id("b")
     rows = [
         {"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "query",
          "query_id": "q1", "params": {"index": "logs-*"}, "payload_digest": "d1"},
@@ -188,7 +190,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     base, _src = J.runs_base(tmp_path)
 
     shown = J.render_at(ep, "b").focus.leads
-    facts = family.read_world_facts(J.mod("_io").bind(ep), "b", episode_token=J.EPISODE_TOKEN)
+    facts = family.read_world_facts(J.mod("_io").bind(ep), "b", world_id=T.world_id(ep, "b"))
     expected = family.lead_chain(_world(ep, "b"), "l-001", facts.resolutions_by_lead,
                                  leads=family.leads_by_id(world_dir))
 
@@ -204,7 +206,7 @@ def test_leads_by_id_is_the_canonical_surface_indexed_once(tmp_path):
     id ."""
     family = _family()
     ep = J.accepted_episode(tmp_path)
-    world_dir = ep / "worlds" / "b"
+    world_dir = ep / "worlds" / T.world_id(ep, "b")
     rows = [
         {"lead_id": "l-001", "seq": 2, "query_id": "q2", "params": {"index": "logs-2"},
          "payload_digest": "d2"},
@@ -243,7 +245,7 @@ def test_lead_chain_joins_goal_params_payload_summary_rows_and_resolutions_per_l
     """`lead_chain(world, lead_id, resolutions_by_lead, *, leads=...)` ."""
     family = _family()
     ep = J.accepted_episode(tmp_path)
-    world_dir = ep / "worlds" / "b"
+    world_dir = ep / "worlds" / T.world_id(ep, "b")
     rows = [
         {"lead_id": "l-001", "query_id": "q1", "params": {"index": "logs-*"},
          "payload_digest": "d1"},
@@ -278,7 +280,7 @@ def test_lead_chain_never_reads_outside_the_graded_world_for_a_traversing_lead_i
     world reads nothing — not the sibling's lead file, not the sibling's summary."""
     family = _family()
     ep = J.accepted_episode(tmp_path)
-    b_dir, c_dir = ep / "worlds" / "b", ep / "worlds" / "c"
+    b_dir, c_dir = ep / "worlds" / T.world_id(ep, "b"), ep / "worlds" / T.world_id(ep, "c")
     (b_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "OWN GOAL"}), encoding="utf-8")
     (c_dir / "gather_raw" / "l-001.lead.json").write_text(
@@ -333,17 +335,17 @@ def test_json_mapping_refuses_a_planted_link_and_reads_the_same_bytes_as_a_regul
     assert family.json_mapping(bound, "linked.json") is None, "a symlink at the artifact's name was followed"
 
     ep = J.accepted_episode(tmp_path)
-    stamp = ep / "worlds" / "b" / "provenance.json"
+    stamp = ep / "worlds" / T.world_id(ep, "b") / "provenance.json"
     stamp.unlink()
     stamp.symlink_to(outside)
     episode = _io().bind(ep)
-    assert render._read_provenance(episode.under("worlds/b")) == {}, (
+    assert render._read_provenance(episode.under('worlds/' + T.fixture_world_id('b'))) == {}, (
         "a planted link at provenance.json handed the pass the planted commit")
-    (ep / "worlds" / "b").rename(ep / "worlds" / "b-real")
-    (ep / "worlds" / "b-real" / "provenance.json").unlink()
-    (ep / "worlds" / "b-real" / "provenance.json").write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
-    (ep / "worlds" / "b").symlink_to(ep / "worlds" / "b-real")
-    assert render._read_provenance(episode.under("worlds/b")) == {}, (
+    (ep / "worlds" / T.world_id(ep, "b")).rename(ep / "b-real")
+    (ep / "b-real" / "provenance.json").unlink()
+    (ep / "b-real" / "provenance.json").write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b")).symlink_to(ep / "b-real")
+    assert render._read_provenance(episode.under('worlds/' + T.fixture_world_id('b'))) == {}, (
         "a planted link at worlds/<X> handed the pass the planted commit")
 
 
@@ -352,7 +354,7 @@ def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path)
     surface's own."""
     family = _family()
     ep = J.accepted_episode(tmp_path)
-    world_dir = ep / "worlds" / "b"
+    world_dir = ep / "worlds" / T.world_id(ep, "b")
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
     chain = family.lead_chain(_world(ep, "b"), "l-001", {}, leads=family.leads_by_id(world_dir))
@@ -498,7 +500,7 @@ def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):
     owner = J.mod("episodes._episode_paths")
     episode_dir = tmp_path / "ep"
     label = "b"
-    draw_dir = owner.EpisodePaths(episode_dir).world(label).draws
+    draw_dir = owner.EpisodePaths(episode_dir).world(T.fixture_world_id(label)).draws
     draw_dir.mkdir(parents=True)
     outside = tmp_path / "outside.yaml"
     outside.write_text("findings: [{bucket: planted}]\n", encoding="utf-8")
@@ -506,12 +508,12 @@ def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):
     (draw_dir / "1.yaml").symlink_to(outside)
 
     with bind(episode_dir) as view:
-        assert enqueue.draws_on_disk(view, label) == {0: {"findings": []}}, (
+        assert enqueue.draws_on_disk(view, T.fixture_world_id(label)) == {0: {"findings": []}}, (
             "a link planted at a draw's name was followed: its target's findings were read "
             "back as this episode's draw")
 
     (draw_dir / "1.yaml").unlink()
     (draw_dir / "1.yaml").write_text(outside.read_text(encoding="utf-8"), encoding="utf-8")
     with bind(episode_dir) as view:
-        assert sorted(enqueue.draws_on_disk(view, label)) == [0, 1], (
+        assert sorted(enqueue.draws_on_disk(view, T.fixture_world_id(label))) == [0, 1], (
             "positive control: the same bytes as a regular file were not read")

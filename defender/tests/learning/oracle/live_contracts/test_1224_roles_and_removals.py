@@ -94,8 +94,8 @@ def _assert_spent_nothing(launch: Any, est: Any, oracle: Any, verifier: Any) -> 
     if outcome is not None:
         assert not outcome.get("unservable_worlds"), outcome
         assert outcome.get("outcome") != "unusable", outcome
-    for label in S.WORLDS:
-        assert S.read_world_record(launch.ep, label) is None, label
+    assert not (launch.ep / "family.yaml").exists(), "identities were published before preflight"
+    assert not (launch.ep / S.WORLD_RECORDS).exists(), "preflight wrote world validity records"
 
 
 def test_1224_oracle_and_its_verifier_are_their_own_roles_with_their_own_model_knobs(
@@ -182,10 +182,10 @@ def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_nam
     redaction = S.mod("learning.branch.redaction")
     def redact(text):
         return redaction.redact_model_visible(
-            text, frozenset({S.EPISODE_ID, S.EPISODE_TOKEN, S.world_token("b")}))
-    token_text = f"refused: index for run {S.EPISODE_TOKEN}.b is unavailable after 2026-07-28"
+            text, frozenset({S.EPISODE_ID, S.fixture_world_id("b")}))
+    token_text = f"refused: index for run {S.fixture_world_id('b')} is unavailable after 2026-07-28"
     masked = redact(token_text)
-    assert S.EPISODE_TOKEN not in masked, masked
+    assert S.fixture_world_id("b") not in masked, masked
     assert masked.startswith("refused: index for run "), masked
     assert masked.endswith(" is unavailable after 2026-07-28"), masked
     view_text = "index 'wv-b-logs-' not found; tried [logs-*,-wv-b-logs-]"
@@ -226,13 +226,13 @@ def test_1224_elastic_confine_index_admits_the_same_indices_for_a_run_and_a_sibl
                           env={})
     sibling = {"as_of": S.AS_OF_DT}
     if "world_id" in {f.name for f in fields(VerbContext)}:
-        sibling["world_id"] = S.world_token("b")
+        sibling["world_id"] = S.fixture_world_id("b")
     sibling_ctx = replace(run_ctx, **sibling)
     elastic = S.mod("integrations.elastic_adapter")
     assert _confinement_gate(elastic, run_ctx, "logs-*") == "passed"
     assert _confinement_gate(elastic, run_ctx, ".security-7") == "refused"
     for index in ("logs-*", "logs-system.auth-*", "security-audit-*", ".security-7",
-                  f"wv-{S.world_token('b')}-logs-", "wv-b-logs-", "wv-a-logs-",
+                  f"wv-{S.fixture_world_id('b')}-logs-", "wv-b-logs-", "wv-a-logs-",
                   "wv-b-security-audit-"):
         on_run = _confinement_gate(elastic, run_ctx, index)
         on_sibling = _confinement_gate(elastic, sibling_ctx, index)

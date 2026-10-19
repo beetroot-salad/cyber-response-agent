@@ -34,7 +34,7 @@ def _seams(**over):
     """Every launcher seam a scenario is not about, faked: nothing here decides a refusal."""
     seams = {
         "spawn": T.FakeSpawn(),
-        "questioner": T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c")),
+        "questioner": T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c"))),
         "live_tree": T.source_capture(), **H.serving_oracle(),
     }
     seams.update(over)
@@ -166,8 +166,8 @@ def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):
         (H.runs_dir(root, TID) / "b").mkdir()
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     result = H.drive_launch(src, spawn=J.FakeSibling(data_root=root), judge=judge,
-                            questioner=T.FakeAgent(T.family_doc(), T.world_doc("b"),
-                                                   T.world_doc("c")),
+                            questioner=T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")),
+                                                   T.declaration(T.world_doc("c"))),
                             live_tree=T.source_capture(), **H.serving_oracle())
     made = sorted((root / TID / "episodes").glob("*"))
     assert len(made) <= 1, f"one launch made {made}"

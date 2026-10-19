@@ -34,7 +34,7 @@ Load only the references relevant to the task. Historical explanations live in `
 
 ## Upgrade from before #1187
 
-Tenant, run and episode ids are opaque UUIDs and episodes live under each tenant's data root. Before upgrading a
+Tenant, run, episode and world ids are opaque UUIDs and episodes live under each tenant's data root. Before upgrading a
 shared data root, stop every run, fork, and drain, and drain or clear its curation queue with
 the old code. Upgrade every checkout using that root together; mixed versions are unsupported.
 For a tenant already identified by a UUID, run
@@ -47,3 +47,7 @@ retired.
 Named tenants instead require the explicit offline UUID migration in
 `docs/development-operations.md` before UUID tenant setup; their old directories remain archived
 and are not passed to the retirement command. No legacy name is an alias.
+
+World declarations use `label` as metadata. The host assigns `world_id` UUIDs once before
+preflight and publishes the manifest create-only; every world artifact uses that UUID.
+Pre-UUID world manifests require a fresh episode; readers never derive or mint missing IDs.

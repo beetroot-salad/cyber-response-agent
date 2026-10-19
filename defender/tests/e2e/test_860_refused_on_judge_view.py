@@ -350,7 +350,7 @@ def test_m6_the_chain_and_each_refused_entry_carry_exactly_their_named_keys(
     # The unknown-id arm: referenced by the document, unknown to the surface.
     ep2 = J.accepted_episode(tmp_path / "unknown", ledgers={"b": [J.oracle_row("b")], "c": []})
     base2, _src = J.runs_base(tmp_path / "unknown")
-    world2 = ep2 / "worlds" / "b"
+    world2 = ep2 / "worlds" / J.world_id(ep2, "b")
     assert not (world2 / "gather_raw" / "l-001.lead.json").exists()
     leads2, _text2 = _leads_view(ep2, base2)
     assert leads2["l-001"]["goal"] is None, "the arm's lead is known to the surface after all"
@@ -532,11 +532,11 @@ def _prompt_for_world_b(ep: Path, base: Path) -> str:
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.grade_at(
         ep, judge=judge, state=_state1135.env_state())
-    return judge.prompts[judge.agent_ids.index("judge:b:0")]
+    return judge.prompts[judge.agent_ids.index(f"judge:{J.world_id(ep, 'b')}:0")]
 
 
 #: World b's run as its call ids name it (`_triplet_947.world_token`).
-B_RUN = J.world_token("b", episode_token=J.EPISODE_TOKEN)
+B_RUN = J.fixture_world_id("b")
 
 
 def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, judge_roots):
@@ -554,7 +554,7 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
     oracle = {**J.oracle_row("b"), J.CALL_ID: f"{B_RUN}/99"}
     ep = J.accepted_episode(tmp_path, ledgers={"b": [oracle], "c": []})
     base, _src = J.runs_base(tmp_path)
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / J.world_id(ep, "b")
     for name in ("report.md", "lessons_loaded.jsonl"):
         if (world / name).is_file():
             (r.run_dir / name).write_text((world / name).read_text(encoding="utf-8"),
