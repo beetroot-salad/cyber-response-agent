@@ -67,10 +67,6 @@ def _root_free(sentence: str, ep: Path) -> None:
 
 
 def test_1049_screened_yaml_mapping_says_the_name_on_all_three_arms_and_none_on_absence(tmp_path):
-    """screened_yaml_mapping(bound, name, what=…) raises JudgeRefused whose text names `name` and
-    not the root on the read, parse and shape arms, and answers None when nothing is at the name
-    — None being the typed absent answer of a value-returning parsing reader, decided by
-    branching on RecordRead.absent, never on a sentence (RF-R1 / RF-V4)."""
     ep = _episode(tmp_path)
     family = R.family()
     bound = R.bind(ep)
@@ -114,11 +110,6 @@ def test_1049_screened_yaml_mapping_says_the_name_on_all_three_arms_and_none_on_
 
 
 def test_1049_the_world_ledger_refusal_names_served_token_label_jsonl(tmp_path):
-    """read_world_ledger reads through bound.read_jsonl('served/<token>.<label>.jsonl') and answers
-    (rows, malformed, RecordRead): an absent ledger is the absent state (D-J2 — no rows, no
-    refusal, RecordRead.absent True); an alias, a directory, or a SYMLINKED served/ makes it
-    raise JudgeRefused naming served/<token>.<label>.jsonl (composed f'{token}.{label}.jsonl',
-    RF-V3) and not the root; a torn line is still one counted malformed row, never a refusal."""
     ep = _episode(tmp_path)
     family = R.family()
     bound = R.bind(ep)
@@ -171,15 +162,6 @@ def test_1049_the_world_ledger_refusal_names_served_token_label_jsonl(tmp_path):
 
 
 def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_scrub(tmp_path):
-    """lead_chain reads gather_summaries/<lead>.md through the world's DERIVED sub-bind
-    (bound.under('worlds/<w>'), D-V2) with errors='replace', with NO artifact_dir(summaries_dir)
-    and NO artifact_file(summary_path) ahead of it; an unreadable summary (a hard link, a
-    symlink, a directory), or a symlinked gather_summaries/ itself, is the chain's own sentence
-    naming gather_summaries/<lead>.md once and no root, with no _without_path scrub between
-    (family has no such symbol); an undecodable summary is read with U+FFFD, not refused; a lead
-    id that collides with a record name reads gather_summaries/family.md and aliases nothing;
-    the judge prompt render.render builds carries the same root-free chain sentence, which is
-    what the framed prompt copy the page renders as the transcript request is made of."""
     ep = _episode(tmp_path)
     family = R.family()
     world_dir = ep / "worlds" / "b"
@@ -223,9 +205,6 @@ def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_
     assert family.lead_chain(world, "family", {}, leads=by_id)["summary"] == "a lead named family\n"
     assert not hasattr(family, "_without_path"), "the reader-side scrub is still there"
 
-    # #1234 A3: the judge's usability read refuses a world whose gather summary is a link, so
-    # the judge is shown none of it — the world is set aside, its reason naming the leaf and no
-    # root (before #1234 the judge was shown the page's own sentence in the lead's chain).
     R.plant_link(summary, ep / "family.yaml")
     row = _rows(_grade(ep, tmp_path))["b"]
     assert row.get("ungradable"), row
@@ -260,12 +239,6 @@ def test_1049_the_gather_summary_refusal_names_gather_summaries_lead_md_with_no_
 
 
 def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_echoed_from_a_read(tmp_path):
-    """A world label or lead id carrying a separator or `..` is refused by the grammar before any
-    name is constructed — on the grading lane (the manifest loader's world-token rule via
-    raw_manifest / grade_episode, names_one_file via lead_chain) and on the page lane
-    (names_one_file) alike — so the name a refusal echoes is never a model-authored path that
-    left the world; under the component grammar (D-V1) this is the positive control, not the
-    only defence (a traversing lead id cannot reach a sibling's summary either way)."""
     ep = _episode(tmp_path)
     family = R.family()
     refused = R.refused_class()
@@ -302,10 +275,6 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
 
 
 def test_1049_a_symlinked_gather_summary_or_directory_is_the_chains_sentence_and_an_absent_one_is_none(tmp_path):
-    """With neither lstat ahead of the read, a symlink, a hard link or (NOT_ROOT) a mode-000 file
-    at gather_summaries/<lead>.md — and a symlink AT gather_summaries/ itself — make the summary
-    the chain's own sentence naming gather_summaries/<lead>.md and no root, in the judge prompt
-    and on the page; an absent summary is the chain's absent answer (None)."""
     ep = _episode(tmp_path)
     family = R.family()
     world_dir = ep / "worlds" / "b"
@@ -359,13 +328,6 @@ def test_1049_a_symlinked_gather_summary_or_directory_is_the_chains_sentence_and
 
 
 def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_construction_on_either_lane(tmp_path):
-    """names_one_file refuses exactly what the component grammar refuses — '', '.', '..', a '/',
-    and now a NUL byte — so a model-authored lead id 'l-0\x00x' carried out of investigation.md
-    (rg12) answers lead_chain's '(this lead id does not name a file inside this world …)'
-    sentence on the grading lane (the prompt render.render builds; the world is not refused as
-    short of that id by _check_gather_summaries, which asks names_one_file first) AND on the
-    page (where _load_world_leads catches nothing), never the grammar's ValueError; a world
-    label cannot carry any of these (is_valid_run_id)."""
     ep = _episode(tmp_path)
     family = R.family()
     nul = "l-0\x00x"
@@ -400,5 +362,3 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
 
 
 # s-45 — every refusal shape reaches the served-row swallow site as JudgeRefused
-
-

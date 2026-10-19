@@ -77,9 +77,6 @@ def _held_out_set(tmp_path, alert_bytes: bytes) -> Path:
 
 
 def test_791_the_investigation_tail_takes_its_dependencies_through_a_seam(tmp_path, state):
-    """investigation_tail_has_an_injection_seam — the investigation entrypoint takes the three
-    tail dependencies a hermetic test cannot drive through an injection seam, each defaulting
-    to production, so what the tail DOES is observable rather than readable."""
     require_tail_seam(run_py.main)
     params = inspect.signature(run_py.main).parameters
     for name in TAIL_SEAM:
@@ -221,9 +218,6 @@ def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, s
 
 
 def test_791_curation_refuses_a_held_out_alert_copy_by_content(tmp_path, state):
-    """curation_refuses_the_copy_keyed_held_out_alert — curation refuses a run whose own alert
-    is a COPY of a held-out fixture, keyed on content rather than on where the operator's
-    argument pointed."""
     fixtures = _held_out_set(tmp_path, HELD_OUT_ALERT)
     copied = _certified_run(name="scored-alert", alert_bytes=HELD_OUT_ALERT)
     alert = RunPaths(copied).alert
@@ -288,9 +282,6 @@ def test_791_enqueue_curation_cannot_be_called_unguarded(tmp_path, state):
 
 
 def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, state):
-    """curation_reads_the_tree_only_after_certification — the shipped property that nothing
-    reads the investigation's tree before the step certifying it now covers BOTH new
-    consumers."""
     tail = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "ordered"), tail, "--update-ticket") == 0
     for consumer in ("record_case_ticket", "visualize"):
@@ -305,5 +296,3 @@ def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, st
     assert drive_tail(run_py.main, plant_alert(tmp_path / "uncertified"), uncertified) == 0
     assert author_markers(state) == [], \
         "a run whose tree carries no scan verdict was handed to the curation lane anyway"
-
-

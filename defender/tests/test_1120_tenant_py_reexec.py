@@ -10,9 +10,6 @@ from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
 
 def test_a_venv_without_pyvenv_cfg_is_exec_d_once_not_forever(tmp_path: Path) -> None:
-    """`.venv/bin/python3` a link to the base interpreter, no `pyvenv.cfg`: `tenant.py check
-    --folder` finishes (whatever it then says), well inside the timeout. The precondition:
-    the planted interpreter really reports a prefix other than the venv's."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     venv_bin = checkout / "defender" / ".venv" / "bin"
     venv_bin.mkdir(parents=True)

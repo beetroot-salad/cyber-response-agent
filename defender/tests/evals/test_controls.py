@@ -1,18 +1,3 @@
-"""Pins for control-window derivation (#711).
-
-The whole point of `controls.py` is that "measure a control with the lead's own
-predicate" stops being discipline and becomes construction. These tests pin that
-property directly: a derived control differs from the lead's query in its two
-timestamp literals and in NOTHING else.
-
-Pure only — no ES calls here. `run_esql` and `window_is_live` are I/O and are
-exercised by running the tool against the live stack.
-
-The last section (#1054) reads the committed corpus off disk, which is still pure in the
-sense that matters: it is the one place that can hold "what this module writes and what
-`cases/*/hidden/` holds are the same encoding", and the shape pins beside it are the
-other half of that statement.
-"""
 from __future__ import annotations
 
 import json
@@ -38,9 +23,6 @@ UNBOUNDED_Q = ('FROM logs-zeek.ssh-*\n| WHERE source.ip == "172.18.0.15"\n'
 # The same lead written on ONE line. ES|QL's `|` is a separator, not a line break, and
 # the defender model writes both shapes — `case-010-crosstier-web2/l-006` is this one.
 ONE_LINE_UNBOUNDED_Q = "FROM logs-zeek.ssh-* | LIMIT 1"
-# The same window as LEAD_Q with its bounds written upper-first, which the model is
-# equally free to do — `esql_window` sorts its answer, so only the operators say which
-# literal is which.
 UPPER_FIRST_Q = (
     'FROM logs-system.auth-*\n'
     '| WHERE @timestamp < "2026-07-25T07:48:37.065Z" '
@@ -51,9 +33,6 @@ UPPER_FIRST_Q = (
 
 
 def test_a_control_changes_the_bounds_and_nothing_else():
-    """The property the whole module exists for. If a rewrite could touch the
-    predicate, a control would describe a different envelope than the lead — the
-    exact silent failure that produced case-003's wrong `-noise` label."""
     start = datetime(2026, 7, 18, 7, 45, 35, tzinfo=UTC)
     end = datetime(2026, 7, 18, 7, 48, 37, tzinfo=UTC)
     shifted = CONTROLS.shift_esql_window(LEAD_Q, start, end)
@@ -65,18 +44,6 @@ def test_a_control_changes_the_bounds_and_nothing_else():
 
 
 def test_a_control_binds_each_bound_to_its_own_operator_not_its_position():
-    """`esql_window` sorts its pair low-then-high on purpose, so the ONLY thing saying
-    which literal is the start is each match's operator. Substituting `[start, end]`
-    positionally crossed them for a query that wrote its upper bound first, producing
-    `< 19:45 AND >= 20:45` — unsatisfiable. ES|QL runs that happily and returns
-    nothing, `window_is_live` probes the window separately and still answers true, so
-    the record stores `live: true` with zero rows: the same empty baseline F-20
-    produces, and `judge._control` drops the query string, so nothing downstream can
-    see the inversion.
-
-    All 510 two-bound queries in the committed cases happen to write the lower bound
-    first — an LLM habit, not an invariant this module is entitled to assume.
-    """
     start = datetime(2026, 7, 18, 7, 45, 35, tzinfo=UTC)
     end = datetime(2026, 7, 18, 7, 48, 37, tzinfo=UTC)
     shifted = CONTROLS.shift_esql_window(UPPER_FIRST_Q, start, end)
@@ -92,9 +59,6 @@ def test_a_control_binds_each_bound_to_its_own_operator_not_its_position():
 
 
 def test_a_pair_of_bounds_pointing_the_same_way_is_not_a_window():
-    """Two literals are not a window. `>= A AND > B` bounds nothing above, so there is
-    no start to shift onto one and no end onto the other — refused at both the
-    `esql_window` read and the rewrite, in the spirit of the odd-bound-count guard."""
     same_way = ('FROM logs-* | WHERE @timestamp >= "2026-07-25T07:00:00Z" '
                 'AND @timestamp > "2026-07-25T08:00:00Z"')
     assert CONTROLS.esql_window(same_way) is None
@@ -116,18 +80,12 @@ def test_a_same_way_bound_pair_is_refused_rather_than_measured():
 
 
 def test_shifting_a_query_with_no_bounds_is_an_error_not_a_no_op():
-    """Silently returning the query unchanged would produce a "control" that
-    re-measures the attack window, reporting every event as baseline and turning
-    every `+event` into `+noise` — the most dangerous failure this module has."""
     with pytest.raises(ValueError, match="2 @timestamp bounds"):
         CONTROLS.shift_esql_window(UNBOUNDED_Q, datetime.now(UTC),
                                    datetime.now(UTC))
 
 
 def test_an_unbounded_query_gets_a_bound_added_after_the_source():
-    """Adding a `WHERE @timestamp` narrows the row set and cannot widen it, which
-    is the property that matters. case-001's six zeek leads carry no bound, so
-    their stored payload mixes the attack with months of history."""
     start = datetime(2026, 7, 25, 7, 45, tzinfo=UTC)
     end = datetime(2026, 7, 25, 7, 49, tzinfo=UTC)
     got = CONTROLS.add_esql_window(UNBOUNDED_Q, start, end)
@@ -139,18 +97,6 @@ def test_an_unbounded_query_gets_a_bound_added_after_the_source():
 
 
 def test_a_one_line_query_gets_its_bound_before_every_other_command():
-    """The property above, driven on the shape that broke it. This used to splice
-    after `splitlines()[0]`, so a whole pipeline written on one line got the clause
-    appended after `LIMIT` — one arbitrary row taken and THEN timestamp-filtered.
-    That is not a narrower row set but an empty one, and a zero-row control reads
-    downstream as an empty baseline against which every observed row is
-    distinguishable, so the label pass grades the lead `present`.
-
-    `case-010-crosstier-web2/hidden/controls/l-006/1.json` is the artifact: three
-    controls at `live: true, row_count: 0` for exactly this query, in a `held-out`
-    case. Its sibling `6.json` is the same index over the same three windows written
-    multi-line and returns 20 rows in each.
-    """
     start = datetime(2026, 7, 25, 7, 45, tzinfo=UTC)
     end = datetime(2026, 7, 25, 7, 49, tzinfo=UTC)
     got = CONTROLS.add_esql_window(ONE_LINE_UNBOUNDED_Q, start, end)
@@ -164,10 +110,6 @@ def test_a_one_line_query_gets_its_bound_before_every_other_command():
 
 
 def test_a_pipe_inside_a_string_literal_is_not_a_command_separator():
-    """`|` is a separator only outside a string. `WHERE message RLIKE "sshd|sudo"` carries
-    one as DATA, and splitting on it cuts the predicate in half — the clause would land
-    mid-literal and the control would not parse, while a reader counting commands off the
-    same naive split names the wrong command as the one that ran first."""
     assert CONTROLS.split_commands('FROM logs-* | WHERE m RLIKE "a|b" | LIMIT 1') == [
         "FROM logs-* ", ' WHERE m RLIKE "a|b" ', " LIMIT 1"]
     got = CONTROLS.add_esql_window('FROM "logs|weird"', datetime(2026, 7, 25, tzinfo=UTC),
@@ -192,9 +134,6 @@ def test_control_windows_keep_the_weekday():
 
 
 def test_a_short_operation_still_gets_a_long_enough_control():
-    """case-004's operation lasted 21 seconds. Duration-matched 21-second controls
-    observed almost nothing, so a routine `sre.alice` login graded `+event` — a
-    manufactured catch. Controls widen to at least MIN_CONTROL_SECONDS."""
     start = datetime(2026, 7, 25, 10, 33, 5, tzinfo=UTC)
     end = datetime(2026, 7, 25, 10, 33, 26, tzinfo=UTC)
     windows = CONTROLS.shape_matched_windows(start, end)
@@ -225,10 +164,6 @@ def test_a_query_with_one_bound_has_no_window():
 
 
 def test_a_query_with_an_odd_bound_count_is_refused_not_patched():
-    """Neither route is safe on one bound: there is nothing to shift, and ADDING a
-    window would leave the original bound in place, so the "control" would filter
-    on a mix of the attack window and the baseline window. Real defender queries
-    carry this shape — it crashed the first campaign run."""
     one = 'FROM logs-* | WHERE @timestamp >= "2026-07-25T07:00:00Z" AND host.name == "x"'
     start = datetime(2026, 7, 25, 7, 0, tzinfo=UTC)
     controls, contribution = CONTROLS.measure_controls(
@@ -240,15 +175,6 @@ def test_a_query_with_an_odd_bound_count_is_refused_not_patched():
 # One producer of the ES|QL payload shape, not two (#834).
 
 def test_controls_emit_the_adapters_payload_shape_because_they_use_its_shaper():
-    """This module's docstring promises payloads "in the SAME shape the production `esql` verb
-    stores", so `label.py` compares an attack window against its controls like with like. That
-    promise used to rest on a SECOND copy of the adapter's zip living here — two producers, one
-    invariant, and nothing keeping them equal. #834 changed the shape; a hand-maintained copy
-    would have left `label.py` comparing dicts against arrays and calling it a measurement.
-
-    Pinned at the seam rather than by re-asserting the shape: `run_esql` is I/O and untestable
-    here, but the shaping it delegates to is not.
-    """
     from defender.scripts.adapters import elastic_adapter
 
     assert CONTROLS.esql_payload is elastic_adapter.esql_payload, (
@@ -268,16 +194,6 @@ def test_the_esql_payload_leaves_rows_as_the_wire_sent_them():
 
 
 def test_the_liveness_probe_reads_its_column_by_name_not_by_luck():
-    """`named_cell` — the reader `window_is_live` runs — resolves `total`'s INDEX off
-    `columns` rather than hardcoding 0. The probe projects one column today; a positional read
-    that assumed so would misreport liveness the day it projects two, and a false "not live"
-    silently drops a case from the measurement.
-
-    Driven through the production reader, not a copy of it: an earlier version of this test
-    re-derived the index inline and asserted on its own arithmetic, so it stayed green for
-    every regression `window_is_live` could have. `window_is_live` itself is I/O and stays
-    unexercised here; what is pinned is the only part of it that decides which cell is read.
-    """
     payload = CONTROLS.esql_payload(
         "q", {"columns": [{"name": "first_seen", "type": "date"},
                           {"name": "total", "type": "long"}],
@@ -288,10 +204,6 @@ def test_the_liveness_probe_reads_its_column_by_name_not_by_luck():
 
 
 def test_a_column_the_probe_did_not_project_is_not_a_zero():
-    """An absent column and a measured zero are different facts. `named_cell` returns the
-    caller's `default` for both "no such column" and "no rows" — `window_is_live` passes 0
-    there deliberately (a window with no ingest is dead), and the day a caller needs to tell
-    the two apart it can pass `None` instead of inferring it from a fabricated zero."""
     empty = CONTROLS.esql_payload("q", {"columns": [{"name": "total", "type": "long"}],
                                         "values": []})
     assert CONTROLS.named_cell(empty, "total", default=0) == 0
@@ -302,22 +214,8 @@ def test_a_column_the_probe_did_not_project_is_not_a_zero():
     assert CONTROLS.named_cell(mismatched, "total") is None, "read a cell it cannot name"
 
 
-# ...and ONE encoding on disk, not two (#1054). The tests above pin the shape this module
-# PRODUCES; these pin the shape the committed corpus HOLDS, which is the same invariant
-# seen from the other end. #842 moved production to the wire's positional rows and routed
-# this module's writer through `esql_payload`, but the 957 files under `cases/*/hidden/`
-# were never migrated — so following `known_defects.yaml`'s own repair note ("re-run
-# `controls.py` for this case") regenerates the controls half columnar while the observed
-# half stays dict-row, and `judge.load_lead_inputs` assembles both into ONE prompt. The
-# migration is `evals/oracle_golden/migrate_esql_encoding.py`; this is what stops the tree
-# drifting back.
-
 CASES_DIR = Path(CONTROLS.__file__).resolve().parent / "cases"
 
-#: An ES|QL payload is the dict carrying ALL FOUR of these. Nothing else in `hidden/`
-#: carries `columns` and `values` at all — the lookup responses (cmdb host records,
-#: identity users, threat-intel verdicts, bare lists, `_note`/`params` stubs) are foreign
-#: shapes the judge already reads as such.
 _ESQL_PAYLOAD_KEYS = ("query", "columns", "row_count", "values")
 
 
@@ -365,20 +263,6 @@ def _rows_that_are_not_positional(cases_dir: Path) -> tuple[list[str], int]:
 
 
 def test_the_corpus_speaks_the_SAME_esql_encoding_production_does():
-    """The corpus the judge reads holds ONE ES|QL encoding, and it is the one
-    `esql_payload` produces.
-
-    Not a style rule. `judge.load_lead_inputs` builds a single label prompt from
-    `hidden/observed/<lead>/<seq>.json` and `hidden/controls/<lead>/<seq>.json`; if those
-    two halves disagree, the LLM is handed the same measurement written two ways inside
-    one `<observed>`/`<baseline>` pair and has to reconcile that itself — under a judge
-    tag that hashes only the two prompt files and so records nothing about it. Nothing
-    mechanical breaks: `_bounded` slices `values` positionally either way and
-    `validate_cases.py` reads query strings, not rows. The exposure is the prompt, which
-    is why a test is the only thing that can hold it.
-
-    The sweep is by SHAPE and recursive on purpose — see `_esql_payloads_in`.
-    """
     offenders, examined = _rows_that_are_not_positional(CASES_DIR)
 
     assert examined > 0, (
@@ -395,10 +279,6 @@ def test_the_corpus_speaks_the_SAME_esql_encoding_production_does():
 
 
 def test_a_case_built_before_the_seq_field_falls_back_to_the_position(tmp_path):
-    """The 17 committed cases carry no `seq` in `leads.jsonl`, and all predate #841 — no
-    sentinel was ever split out of their `queries`, so position IS seq for them and the
-    fallback is exact rather than a guess. Pinned so a later reader cannot mistake it for
-    a general-purpose default and start relying on it for new cases."""
     case = tmp_path / "case-legacy"
     (case / "oracle_visible").mkdir(parents=True)
     (case / "oracle_visible" / "leads.jsonl").write_text(

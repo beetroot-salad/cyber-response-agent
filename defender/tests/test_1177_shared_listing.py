@@ -1,29 +1,3 @@
-"""#1177: `stat_entries` answers a deleted folder absent, as `Bound.entries()` does (#1134
-addendum 3, D2), because both are built on one listing step; plus the four `list_tree` rows the
-#1134 reviews named.
-
-The contract is #1177's intent+design comment (discuss-issue, base `80888efb`):
-- O1: a folder no name holds any more (`st_nlink == 0` on the reopened descriptor) when its
-  listing ends is ABSENT to `stat_entries` (`absent=True`, no reason, no stats): removed
-  before its reopen, between the reopen and the scan, or mid-scan, and a held root really
-  `rmdir`ed. Judged by the link count once the scan is done (a seam flipping it at the end
-  of the scan decides), and a live folder a filesystem counts 1 link for is present.
-- O2: a live folder is unchanged: a live empty folder is present with `{}`, a live non-empty
-  one lists every entry (positive controls beside every O1 row).
-- O3: an entry vanishing from a LIVE folder mid-scan is still a refusal (the per-entry stat's
-  ENOENT); only a dead folder turns absent. A fault on the listing routes of a live folder is
-  `stat_entries`' own refusal (`_read_reason`'s words), never a raise, never absent.
-- O4: `list_tree` (a) never answers from a cache: a change between two calls on the same view
-  is seen; (b) its records refuse `setattr` and `delattr` on EVERY field; (c) holds no
-  descriptor chain at any depth: `depth=sys.maxsize` over a `CHAIN_DEPTH` chain lists the
-  leaf inside a child whose soft descriptor limit is `FD_MARGIN` above what it holds; (d)
-  never touches a device node: an audited listing of a tree holding a char and a block device
-  raises no event naming either (skips where `mknod` is refused: CI's non-root runner).
-
-Every plant is a real filesystem entry and every removal a real one; `os_` stand-ins
-(`_tree_listing_1134.py`) stand in only for the moment a removal lands, an errno on a chosen
-route, or a link count another filesystem reports. Nothing is monkeypatched.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -104,21 +78,10 @@ def _d2_tree(base: Path) -> None:
     (base / "empty").mkdir()
 
 
-# =======================================================================================
-# O1 + O2: a deleted folder is absent to stat_entries; a live one is unchanged
-# =======================================================================================
-
 @pytest.mark.parametrize("how", VIEWS)
 @pytest.mark.parametrize("moment", REMOVAL_MOMENTS)
 def test_a_folder_removed_during_its_own_listing_is_absent_to_stat_entries(
         scratch, moment, how):
-    """`sub` is REALLY removed (`shutil.rmtree`) after the step into it, at each moment of its
-    own listing: before the `"."` reopen, between the reopen and the scan, or after the scan
-    handed back its first entry. `stat_entries(view.under("sub"))` answers ABSENT, never
-    present-and-empty, never the stale names, never a refusal. `entries()` of the same removal
-    agrees (absent). Controls, through the same seam on the same view: before the removal
-    `sub` lists both entries; `peer` lists its file; the live EMPTY folder `empty` is present
-    with `{}`. No descriptor outlives the calls."""
     base = base_of(how, scratch)
     _d2_tree(base)
     with view_of(how, scratch, RealOs()) as view:
@@ -147,10 +110,6 @@ def test_a_folder_removed_during_its_own_listing_is_absent_to_stat_entries(
 
 @pytest.mark.parametrize("how", BINDERS)
 def test_a_removed_held_root_is_absent_to_stat_entries(scratch, how):
-    """A root `bind` or `hold` opened, emptied and REALLY `rmdir`ed since, is absent to
-    `stat_entries` of the view itself, on every later call, even once a new folder is made at
-    the old path (it is not the held one). Controls: before the removal the view lists its
-    entries; emptied but NOT removed it is present and empty (`{}`), never absent."""
     put_plain(scratch.root / "x.md")
     (scratch.root / "sub").mkdir()
     with opened(how, scratch.root) as view:
@@ -170,12 +129,6 @@ def test_a_removed_held_root_is_absent_to_stat_entries(scratch, how):
 @pytest.mark.parametrize("flip", ["dies-at-scan-end", "lives-at-scan-end"])
 def test_stat_entries_judges_the_folder_by_its_link_count_once_its_scan_is_done(
         scratch, flip, how):
-    """The dead mark is the link count AFTER the scan, and nothing else: through a seam whose
-    `fstat` of a listed folder's descriptor reports the real count until that descriptor's scan
-    is exhausted and 0 after it, `stat_entries` answers absent (a check made before or during
-    the scan, or none at all, would answer present); the mirror (0 until the scan is done, the
-    real count after) is present with its entries (a check made before the scan would answer
-    absent). Non-vacuity: the seam was asked after the scan."""
     base = base_of(how, scratch)
     put_plain(base / "sub" / "x.md")
     (base / "sub" / "empty").mkdir()
@@ -192,10 +145,6 @@ def test_stat_entries_judges_the_folder_by_its_link_count_once_its_scan_is_done(
 
 @pytest.mark.parametrize("how", VIEWS)
 def test_a_live_folder_counted_one_link_is_present_to_stat_entries(scratch, how):
-    """A dead folder has NO link left, not fewer than two: btrfs counts 1 for every live
-    directory. Through a seam reporting 1 link, a full and an empty live folder are present
-    (`{"x.md": file}`, `{}`). Control: the same seam reporting 0 makes both absent, so the
-    count decides."""
     base = base_of(how, scratch)
     put_plain(base / "full" / "x.md")
     (base / "empty").mkdir()
@@ -214,10 +163,6 @@ def test_a_live_folder_counted_one_link_is_present_to_stat_entries(scratch, how)
     assert_absent(full, "a full folder counted 0 links")
     assert_absent(empty, "an empty folder counted 0 links")
 
-
-# =======================================================================================
-# O3: a live folder's faults stay refusals
-# =======================================================================================
 
 class VanishesBeforeStat(RealOs):
     """The real `os`, except that the scan of the folder `folder` REALLY unlinks the entry
@@ -261,11 +206,6 @@ class _Unlinks:
 
 @pytest.mark.parametrize("how", VIEWS)
 def test_an_entry_vanishing_from_a_live_folder_mid_scan_is_a_refusal(scratch, how):
-    """`sub` stays alive while one of its entries is REALLY unlinked between the scan naming it
-    and its no-follow stat: `stat_entries` refuses (`No such file or directory`), never absent
-    (the folder is not dead) and never a raise. Control: the same seam on a folder with no
-    victim lists it whole; and `entries()` (which stats nothing) of the same vanishing lists
-    the folder, present."""
     base = base_of(how, scratch)
     put_plain(base / "sub" / "keep.md")
     put_plain(base / "sub" / "victim.md")
@@ -304,10 +244,6 @@ STAT_LISTING_FAULTS = [
 @pytest.mark.parametrize(("route", "code", "want"), STAT_LISTING_FAULTS)
 def test_a_live_folders_listing_fault_is_stat_entries_own_refusal(scratch, how, route, code,
                                                                   want):
-    """Any errno on the scan, mid-scan, or on the dead check's own `fstat` of a LIVE folder is
-    `stat_entries`' refusal in `_read_reason`'s words: never absent, never a raise, nothing
-    listed, no descriptor left open. Control: through the same seam, a sibling folder the seam
-    does not fault lists its file."""
     base = base_of(how, scratch)
     put_plain(base / "sub" / "a.md")
     put_plain(base / "sub" / "b.md")
@@ -321,19 +257,8 @@ def test_a_live_folders_listing_fault_is_stat_entries_own_refusal(scratch, how, 
     assert descriptors_under(scratch.tmp) == []
 
 
-# =======================================================================================
-# O4: the four list_tree rows
-# =======================================================================================
-
 @pytest.mark.parametrize("how", VIEWS)
 def test_list_tree_answers_from_the_disk_on_every_call_never_a_cache(scratch, how):
-    """(a) A second `list_tree(depth=3)` on the SAME view sees what changed on disk since the
-    first, at EVERY listed level: a folder added at the top, a file added and one removed in a
-    level-1 folder, and a file added and one removed in a level-2 folder (`a/n/`), so a cache of
-    any one folder's listing, nested ones included, shows. A third call after undoing the
-    changes answers the first tree again. Control: a fresh view over the changed tree answers
-    what the reused one does (independent adversary, hole 3: depth 2 alone left nested
-    listings uncovered)."""
     base = base_of(how, scratch)
     put_plain(base / "a" / "x.md")
     put_plain(base / "a" / "n" / "deep.md")
@@ -361,9 +286,6 @@ def test_list_tree_answers_from_the_disk_on_every_call_never_a_cache(scratch, ho
 
 
 def test_every_field_of_both_records_is_frozen():
-    """(b) `EntryKind` and `TreeListing` are frozen dataclasses (`__dataclass_params__.frozen`)
-    and EVERY field of each refuses both `setattr` and `delattr`, its value unchanged after.
-    Non-vacuity: each record has the fields the contract names."""
     tl = TL()
     records = [
         tl.EntryKind(name="a/x.md", folder="a", kind=FILE, absent=False, reason=None),
@@ -383,10 +305,6 @@ def test_every_field_of_both_records_is_frozen():
 
 @pytest.mark.parametrize("how", VIEWS)
 def test_the_records_the_helpers_return_are_frozen_in_every_field(scratch, how):
-    """(b), on what the helpers actually hand back (independent adversary, hole 4): the
-    `TreeListing` `list_tree` returns and the `EntryKind` `entry_kind` returns are instances of
-    the module's frozen records, and EVERY field of each refuses `setattr` and `delattr`, its
-    value unchanged after. Non-vacuity: both answers carry content."""
     from defender.tests.test_1134_tree_listing import entry_kind
     base = base_of(how, scratch)
     put_plain(base / "a" / "x.md")
@@ -408,11 +326,6 @@ def test_the_records_the_helpers_return_are_frozen_in_every_field(scratch, how):
 
 
 def test_list_tree_holds_no_descriptor_chain_at_any_depth_under_a_low_limit(tmp_path):
-    """(c) A chain `CHAIN_DEPTH` folders deep, listed at `depth=sys.maxsize` (bound and held)
-    and through a view under its 10th folder, inside a child whose soft `RLIMIT_NOFILE` is only
-    `FD_MARGIN` descriptors above what it holds (it proves the limit bites): every level is
-    listed, the leaf included. A descriptor held per level would hit EMFILE past depth
-    `FD_MARGIN`."""
     base = tmp_path / "chain"
     base.mkdir()
     build_chain(base, CHAIN_DEPTH, "leaf.md")
@@ -442,12 +355,6 @@ DEVICE_NAMES = {"chr": "char_device", "blk": "block_device"}
 
 @pytest.mark.parametrize("how", VIEWS)
 def test_an_audited_listing_never_touches_a_device_node(scratch, how):
-    """(d) The audited tree (files, FIFOs, a socket, links, a hard link) also holds a char
-    device and a block device, at the top and in a sub-folder. In a child with an audit hook,
-    `list_tree` at depths 1-3 and `entry_kind` of each device raise only folder steps, `"."`
-    reopens and scans of descriptors, and no event names a device. The kinds are right: each
-    device is `"other"`. Control: in the same child, `read` of a device through the same view
-    is caught naming it. Skips where `mknod` is refused (CI's non-root runner)."""
     base = base_of(how, scratch)
     _audit_tree(base, scratch)
     for name, kind in DEVICE_NAMES.items():
@@ -508,10 +415,6 @@ class _FailsMidwayAndFstat(RefusesListing):
 @pytest.mark.parametrize("fstat_err", [errno.EIO, errno.EBADF])
 def test_a_scan_fault_whose_dead_check_also_faults_is_still_a_refusal(scratch, how,
                                                                       fstat_err):
-    """Adversary hole (tests-only commit): a scan that faults mid-way on a live folder, whose
-    dead check's own `fstat` then faults too, is still `stat_entries`' refusal (the scan's
-    error, in `_read_reason`'s words), never a raise, never absent, no descriptor left open.
-    Non-vacuity: the dead check was asked. Control: the sibling lists its file."""
     base = base_of(how, scratch)
     put_plain(base / "sub" / "a.md")
     put_plain(base / "sub" / "b.md")
@@ -573,11 +476,6 @@ class _DiesThenFaultsIt:
 @pytest.mark.parametrize("reader", ["entries", "stat_entries"])
 def test_a_folder_that_dies_mid_scan_and_then_faults_is_absent_to_both_readers(
         scratch, how, err, reader):
-    """Independent adversary, holes 1 and 2: `sub` is REALLY removed mid-scan and the scan
-    then fails with EIO, EACCES or ENOENT. The folder is dead, so BOTH `entries()` and
-    `stat_entries` answer absent (no reason, nothing listed), whatever the errno, never the
-    scan's refusal. Non-vacuity: the seam removed `sub` and raised. Control: the same seam on
-    a live sibling it does not touch lists its file."""
     base = base_of(how, scratch)
     put_plain(base / "sub" / "a.md")
     put_plain(base / "sub" / "b.md")

@@ -45,9 +45,6 @@ CORE_OFF = "core=0:0"
 #: allocation or a real write this size lands whole rather than filling the host's disk.
 PAST = L + (1 << 20)
 
-#: Far past any cap, and cheap as a sparse extension (no data blocks). As an ALLOCATION it is
-#: not cheap: `fallocate` really reserves the blocks, so a 1 TiB allocation is only ever tried
-#: after the same primitive was refused at `PAST`.
 ONE_TIB = 1 << 40
 
 EXEC_TIMEOUT = 60.0
@@ -161,8 +158,6 @@ def test_a_lane_box_launches_with_the_read_cap_as_its_file_size_limit(tmp_path):
     assert _ulimits(lane, "fsize") == _ulimits(inv, "fsize"), (
         "the two launch paths render different file-size limits"
     )
-
-
 
 
 # ---- live boxes: the cap enforced, through the exec path, under both runtimes ---------------
@@ -324,9 +319,6 @@ def _lane_box(base: Path, runtime: str) -> Iterator[_DockerExec]:
         box_mod.stop_box(box)
 
 
-#: One in-box probe, one mode per call. Every outcome is reported as DATA (exception class and
-#: errno), exit 0 either way, so a probe that never ran reads differently from a refusal.
-#: Python ignores SIGXFSZ, so a write past the cap surfaces as OSError(EFBIG).
 _PROBE = r'''
 import json, os, resource, subprocess, sys
 
@@ -566,4 +558,3 @@ def test_a_live_lane_box_cannot_make_a_file_past_the_read_cap(runtime, base):
     _need_runtime(runtime)
     with _lane_box(base, runtime) as x:
         _assert_the_box_cannot_make_a_file_past_the_cap(x)
-

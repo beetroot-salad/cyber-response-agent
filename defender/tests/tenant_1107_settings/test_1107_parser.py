@@ -38,9 +38,6 @@ def _replacing(text: str, key: str, line: str) -> str:
 
 
 def test_d_one_parser_quote_rule(tmp_path):
-    """One parse serves every reader. A config.env value written "abc'" reaches a stub system's
-    load_config and elastic's view alike as abc' (one matched pair of quotes trimmed), where the
-    stub parser today yields abc (C12)."""
     # rejected: the stub parser's `.strip('"').strip("'")` character-set strip
     configs = S.config_texts("q1")
     configs["cmdb"] = (_replacing(configs["cmdb"], "CMDB_URL_BASE", 'CMDB_URL_BASE="abc\'"')
@@ -68,13 +65,6 @@ def test_d_one_parser_quote_rule(tmp_path):
 
 
 def test_s7_nf15_one_parser_line_rules(tmp_path):
-    """The one parser keeps today's behaviour wherever today's two parsers agree and takes
-    config_from's rule where they disagree: a mid-line # is part of the value; a CRLF file leaves no
-    trailing carriage return in a value; a leading byte-order mark does not become part of the first
-    key; an "export K=v" line and a line with no = are skipped, not keys, and never fault the whole
-    file; a duplicate key yields one value (the later line, as both parsers do today); keys match
-    case-sensitively, so cmdb_url_base leaves CMDB_URL_BASE missing and the fault names the missing
-    key."""
     configs = S.config_texts("p15")
     # identity: an `export K=v` line and a line with no `=` (both skipped; the file still parses)
     configs["identity"] = _replacing(configs["identity"], "IDENTITY_TIMEOUT_SEC",

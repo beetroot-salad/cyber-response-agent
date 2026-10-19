@@ -2,16 +2,10 @@
 from __future__ import annotations
 
 
-
 import os
 
 
 import signal
-
-
-
-
-
 
 
 import pytest
@@ -99,9 +93,6 @@ def test_refresh_refuses_local_state_without_creating_batch(repo, tmp_path, stat
 
 
 def test_publishing_after_a_batch_starts_never_changes_its_draft_or_branch(repo, tmp_path):
-    """O-F: a later publish (another drain, or `tenant.py setup`) advances the clone and
-    `current`, yet the running batch's draft, its branch and its export stay exactly as they
-    were."""
     tenant = repo[0]
     batch = delivery(repo, ForgeHTTP()).start_batch("pinned", lanes=LANES)
     _write(batch.draft_root / "agent/lessons/pinned.md", "claimed before the publish\n")
@@ -142,9 +133,6 @@ def test_start_batch_refuses_an_id_whose_draft_or_branch_exists(repo, left):
 
 
 def test_discard_removes_the_draft_and_deliver_picks_up_the_branch(repo):
-    """C2: `Batch.discard()` removes the draft and leaves no temporary entry; the branch and
-    its commits stay, and a branch with commits is deliver's to pick up: a later delivery
-    object pushes it and opens its PR."""
     tenant = repo[0]
     http = ForgeHTTP()
     d = delivery(repo, http)
@@ -161,9 +149,6 @@ def test_discard_removes_the_draft_and_deliver_picks_up_the_branch(repo):
 
 @pytest.mark.parametrize("by", ["publish", "start_batch"])
 def test_stale_draft_temporaries_are_swept_and_drafts_are_kept(repo, by):
-    """C2: a leading dot is outside the batch-id grammar, so `<T>/drafts/.<anything>` is a
-    temporary of a build that never finished. The next publish, or batch start, sweeps every
-    one (a folder holding a part-built draft, an empty folder) and keeps every draft."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     kept = d.start_batch("kept", lanes=LANES)
@@ -198,9 +183,6 @@ def test_a_draft_build_that_fails_leaves_nothing_and_its_id_can_be_retried(repo,
 @pytest.mark.parametrize("by", ["publish", "start_batch"])
 def test_a_killed_draft_build_leaves_only_a_temporary_the_next_publish_or_start_sweeps(
         repo, tmp_path, by):
-    """R3: a build killed mid-write (the write of the lesson over a file-size cap kills its
-    process, as SIGKILL or a power cut would) leaves no `drafts/<id>`, only temporary entries,
-    and no lock in the way: the next publish, or the next batch start, sweeps them."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     _publish_big_lesson(repo, tmp_path, d)
@@ -217,9 +199,6 @@ def test_a_killed_draft_build_leaves_only_a_temporary_the_next_publish_or_start_
 
 
 def test_a_crash_after_the_draft_exists_leaves_its_id_refused_for_good(repo, tmp_path):
-    """R3: batch ids are never retried. A process killed right after `start_batch` returned
-    leaves a complete draft; every later `start_batch` of that id refuses (a publish between
-    attempts changes nothing), and the draft stays as it was. Another id starts."""
     tenant = repo[0]
     code, out, err = _build_elsewhere(repo, tmp_path, "crashed", "crash")
     assert code == -signal.SIGKILL, f"{code} {out} {err}"
@@ -232,5 +211,3 @@ def test_a_crash_after_the_draft_exists_leaves_its_id_refused_for_good(repo, tmp
         d.publish()
     assert files_under(tenant.dir / "drafts" / "crashed") == draft
     assert d.start_batch("other", lanes=LANES).draft_root == tenant.dir / "drafts" / "other"
-
-

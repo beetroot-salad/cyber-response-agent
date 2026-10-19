@@ -9,10 +9,6 @@ import pytest
 from defender._vocab import DISPOSITION_ENUM
 from defender.skills.invlang.validate import validate_companion
 
-# v-001 is the alerted host, carried by the prologue — the entity the ALERT named.
-# v-006 stands for what the refutation introduced: in the real run, the source IP whose failures
-# the rule wrongly correlated. Both are legitimate investigation targets; only one of them
-# answers "was the alerted host compromised anyway".
 _PROLOGUE = (
     "```invlang\n"
     ":V prologue.vertices [id|type|class|ident|attrs?]\n"
@@ -67,19 +63,12 @@ _FAILED_LEAD = (
 )
 
 
-# Each row is one way the FP exit could be faked, and the fragment the resulting error must
-# carry. `false-positive` is a claim about the RULE, so every row is a close that failed to
-# earn that claim.
 @pytest.mark.parametrize(("case", "parts", "conclude_kwargs", "fragment"), [
     # An FP close with no `detection_notes` is a close with no reason: if the run cannot say
     # what the rule got wrong, it has not made the claim.
     ("no-stated-defect", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
      {"entity_check": "l-001"}, "detection_notes"),
 
-    # `none` / `n/a` are what a conclude row writes where it has NOTHING to say, and the parser
-    # strips them only from LIST rows — a scalar keeps them as literal text. A gate testing
-    # `notes.strip()` alone therefore reads "no defect found" as a stated defect, which is the
-    # emptiest possible FP close passing the check written to stop exactly that.
     ("empty-marker-none", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
      {"detection_notes": "none", "entity_check": "l-001"}, "detection_notes"),
     ("empty-marker-n-a", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
@@ -89,16 +78,9 @@ _FAILED_LEAD = (
     ("empty-marker-padded", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
      {"detection_notes": "  N/A  ", "entity_check": "l-001"}, "detection_notes"),
 
-    # Refuting the detector says nothing about the HOST. Without this the disposition is a
-    # cheaper `benign` — the exact substitution that closed a host carrying three
-    # `attacker@elsewhere` keys in root's `authorized_keys`.
     ("no-entity-check", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
      {"detection_notes": _NOTES}, "entity_check"),
 
-    # `:L findings`' `fail_reason` column projects into the lead's `outcome`, so a lead whose
-    # query ERRORED reads as "committed" to the loose test `_check_loop_close` uses. For
-    # closing a loop that is right — the loop was worked. Here it is the gate's own failure
-    # mode: a query that never landed tested the alerted entity for nothing.
     ("lead-whose-only-outcome-is-a-failure", (_PROLOGUE, _FAILED_LEAD),
      {"detection_notes": _NOTES, "entity_check": "l-003"}, "committed no result"),
 
@@ -111,10 +93,6 @@ _FAILED_LEAD = (
     ("planned-but-undispatched-lead", (_PROLOGUE, _LEADS, _outcome("l-001", "v-011")),
      {"detection_notes": _NOTES, "entity_check": "l-002"}, "committed no result"),
 
-    # THE regression. `l-002` is committed and real work — it just tests the source the rule
-    # wrongly implicated, not the host the alert was about. Every post-refutation lead in
-    # `pr815-rerun-0808` but one had this shape, so a gate without the prologue clause passes
-    # the run it was written for.
     ("lead-against-an-entity-the-refutation-introduced",
      (_PROLOGUE, _LEADS, _outcome("l-002", "v-012")),
      {"detection_notes": _NOTES, "entity_check": "l-002"}, "prologue does not carry"),
@@ -122,9 +100,6 @@ _FAILED_LEAD = (
 def test_a_false_positive_exit_that_was_not_earned_is_rejected(
     case, parts, conclude_kwargs, fragment
 ):
-    """The disposition is a claim about the RULE, and the close has to pay for it: a stated
-    defect that is really stated, and an entity check carried by a lead that really ran
-    against the entity the alert named. Each row here fakes one of those and is refused."""
     doc = _doc(*parts, _conclude(disposition="false-positive", **conclude_kwargs))
     errors = validate_companion(doc, None)
     assert any(fragment in e for e in errors), f"no error mentioned {fragment!r}"
@@ -150,14 +125,8 @@ def test_the_gate_is_scoped_to_the_keyword():
 
 @pytest.mark.parametrize("spelling", ["false-positive​", "​false-positive"])
 def test_a_zero_width_character_cannot_switch_the_gate_off(spelling):
-    """#722's mechanism inside a write gate: the branch decides whether the checks run at all,
-    so it matches on what the value RENDERS as. Invisibly-laced, it must not read as a
-    different, ungated keyword."""
     doc = _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"), _conclude(disposition=spelling))
     errors = validate_companion(doc, None)
-    # Asserted on the GATE's denial, not merely on `errors != []`. The vocabulary check denies
-    # this too, for a different reason, so the weaker assertion passes whether or not the gate
-    # ran — and the gate failing open on an invisible character is the whole risk here.
     assert any("false-positive blocked" in e for e in errors)
 
 
@@ -169,10 +138,6 @@ def _paid(**over: str) -> str:
     return _doc(_PROLOGUE, _LEADS, _outcome("l-001", "v-011"), _conclude(**rows))
 
 
-#: An `investigation.md` that pays NEITHER price: `v-001` carries an unresolved class and an
-#: unresolved attribute (what `benign` owes), and the conclude block states no defect and names
-#: no entity check (what `false-positive` owes). Concluded `inconclusive`, which is legitimately
-#: unpriced — so the write gate passes it, and every denial below is the CLOSE's alone.
 _UNPAID = _doc(
     "```invlang\n"
     ":V prologue.vertices [id|type|class|ident|attrs?]\n"
@@ -194,19 +159,10 @@ def test_the_reader_is_the_gate_table_and_not_one_keyword():
     for priced in _DISPOSITION_GATES:
         price = disposition_entry_price(priced, _UNPAID)
         assert price.owed, priced
-        # Every priced keyword arrives EXPLAINED as well as collected. A row carrying a check
-        # and no rationale would refuse the model without telling it why the price exists,
-        # which is what it needs to choose between paying and re-concluding.
         assert priced in price.rationale, priced
     for unpriced in DISPOSITION_ENUM - set(_DISPOSITION_GATES):
         assert not disposition_entry_price(unpriced, _UNPAID).owed, unpriced
 
-    # #722 reaches this dispatch the same way it reaches the write gate's: a keyword is judged
-    # on what it RENDERS as, so lacing it must not buy the unpriced branch. The close's own
-    # argument is enum-checked upstream, but this reader is public and the two rules stay
-    # independent on purpose — either alone would leave a hole. The rationale comes back off
-    # the SAME dispatch, so a laced keyword that owes is still explained — it cannot be looked
-    # up on a differently-normalized value than the check was.
     laced = disposition_entry_price("benign\u200b", _UNPAID)
     assert laced.owed
     assert laced.rationale
@@ -254,9 +210,6 @@ def test_the_close_cannot_be_reached_around_the_write_gate(tmp_path):
 
 
 def test_a_companion_that_paid_the_price_closes(tmp_path):
-    """Positive control, asserted on the close COMMITTING rather than on the absence of one
-    message: a price that denied everything would satisfy the test above just as well, and the
-    exit this disposition exists for has to actually be reachable."""
     result = _close(tmp_path, _paid(), "false-positive")
     assert result.outcome == "stands"
     assert (tmp_path / "run" / "report.md").exists()
@@ -274,9 +227,6 @@ def test_benigns_price_is_collected_at_the_close_too(tmp_path):
 
 
 def test_an_absent_conclude_block_does_not_buy_a_benign_close(tmp_path):
-    """The other half of the same move: an absent `:T conclude` is legal invlang, so `benign`'s
-    price used to be dodged by simply not writing the block the write gate dispatches on. The
-    close dispatches on its own ARGUMENT, so there is nothing to omit."""
     from pydantic_ai.exceptions import ModelRetry
 
     no_conclude = _doc(
@@ -290,13 +240,6 @@ def test_an_absent_conclude_block_does_not_buy_a_benign_close(tmp_path):
     assert "close blocked" in str(e.value)
 
 
-#: A log that PAYS benign's price rather than merely never owing it: `v-001`'s class tuple and
-#: attribute are both resolved, and `h-010` is live (`status active`, unrefuted) carrying an
-#: authorization contract that an `:R authz` row discharges as `authorized`. Both halves of
-#: `_check_benign_gating` therefore have something to evaluate and clear — a positive control
-#: over a document with no hypothesis at all would leave `_check_benign_authz` returning `[]`
-#: without reading a single contract, and a regression that refused every contract would still
-#: pass it.
 _PAID_BENIGN = (
     "```invlang\n"
     ":V prologue.vertices [id|type|class|ident|attrs?]\n"
@@ -439,9 +382,6 @@ def test_an_absent_companion_is_not_a_fault(tmp_path):
 
 
 def test_an_unfulfilled_authz_contract_blocks_the_benign_close(tmp_path):
-    """The authz half's negative, mirroring the slot half's above — and the discriminator for
-    the positive control: drop the `:R authz` row that discharges `ac1` and the same document
-    is refused, so the control proves the contract was CLEARED rather than never read."""
     from pydantic_ai.exceptions import ModelRetry
 
     unfulfilled = _PAID_BENIGN.replace(

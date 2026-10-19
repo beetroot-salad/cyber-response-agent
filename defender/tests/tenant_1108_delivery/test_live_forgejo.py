@@ -1,9 +1,3 @@
-"""Opt-in signed-JWT verification against a disposable real Forgejo 17 service.
-
-Provisioning contract: defender/docs/development-operations.md. No real Vault is claimed:
-its HTTP response is a double; Forgejo verifies signatures through the HTTPS fixture JWKS.
-"""
-
 from __future__ import annotations
 
 import base64

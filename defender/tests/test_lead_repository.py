@@ -241,9 +241,6 @@ def test_load_queries_tolerates_null_and_non_numeric_seq_exit_code(tmp_path):
 
 
 def test_error_class_round_trips_and_back_fills_from_exit_code(tmp_path):
-    """A row that carries error_class round-trips verbatim; a legacy row written
-    before the field existed back-fills it from the retained exit_code via the one
-    shared derivation (0/missing → None, 1/64 → agent-fixable, 2 → infra)."""
     run = tmp_path / "run"
     _raw_row(run, {"lead_id": "l-001", "seq": 0, "query_id": "s.v",
                    "exit_code": 1, "error_class": "agent-fixable"})

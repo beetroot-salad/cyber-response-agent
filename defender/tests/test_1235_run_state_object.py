@@ -47,10 +47,6 @@ def _tree(root: Path) -> dict[str, bytes | None]:
             for p in sorted(root.rglob("*"))}
 
 
-# ======================================================================================
-# A fresh start, from nothing on disk.
-# ======================================================================================
-
 def test_a_started_state_is_a_fresh_run_and_reads_and_writes_no_file(tmp_path):
     """`RunState(run_dir, run_id)` begins a run."""
     import json
@@ -128,11 +124,6 @@ def test_what_the_state_hands_out_cannot_move_the_run(tmp_path):
     assert cb.is_tripped(state, "elastic") is True
 
 
-# ======================================================================================
-# Carried, never looked up.
-# ======================================================================================
-
-
 def test_two_states_for_one_folder_and_one_run_id_share_nothing(tmp_path):
     """Two states started for the SAME folder and run id are two runs' states."""
     run_dir = _run_dir(tmp_path)
@@ -190,10 +181,6 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
     assert list(RunState(real, "r-carried").lead_rows(LEAD)) == []
 
 
-# ======================================================================================
-# One lock.
-# ======================================================================================
-
 def test_concurrent_appends_to_one_lead_take_distinct_seqs_and_agree_with_the_table(tmp_path):
     """A row append is one operation under the state's lock (seq, record, payload, view line)."""
     import sys
@@ -221,10 +208,6 @@ def test_concurrent_appends_to_one_lead_take_distinct_seqs_and_agree_with_the_ta
     assert rows == read_jsonl_rows(RunPaths(run_dir).executed_queries), \
         "the state and the table disagree"
 
-
-# ======================================================================================
-# R6 — the oracle clock lives in the state.
-# ======================================================================================
 
 def test_every_state_has_a_clock_whose_credit_is_its_own(tmp_path):
     """R6."""

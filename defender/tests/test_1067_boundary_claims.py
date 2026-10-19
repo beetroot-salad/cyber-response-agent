@@ -20,9 +20,6 @@ _ODD_KEYS = (("on", True), ("2024-01-01", datetime.date(2024, 1, 1)), ("1", 1))
 
 @pytest.mark.parametrize(("spelled", "built"), _ODD_KEYS)
 def test_read_report_stays_total_over_a_non_string_frontmatter_key(spelled, built):
-    """`parse_report_text` is documented "never raises", and the write gate lets these keys
-    through — so the read must hand back the headline and the mapping as YAML built it, not a
-    `ValidationError` from `ReportRead`'s constructor."""
     text = f"---\ndisposition: benign\n{spelled}: x\n---\nbody\n"
     read = parse_report_text(text)
     assert read.disposition == "benign"
@@ -33,9 +30,6 @@ def test_read_report_stays_total_over_a_non_string_frontmatter_key(spelled, buil
 
 @pytest.mark.parametrize(("spelled", "built"), _ODD_KEYS)
 def test_iter_lessons_yields_a_lesson_with_a_non_string_key(spelled, built, tmp_path, capsys):
-    """The walk's contract is one bad file costs that row and never the walk (#584) — and a
-    non-string key is not even a bad file to the parser, so the lesson is YIELDED, its mapping
-    as YAML built it, with nothing on stderr."""
     d = tmp_path / "lessons"
     d.mkdir()
     (d / "good.md").write_text("---\nname: good\n---\nbody\n")
@@ -56,9 +50,6 @@ def test_as_int_is_an_int_that_is_not_a_bool():
 
 
 def test_repeat_trip_ignores_a_boolean_seq_instead_of_refusing():
-    """A planted `"seq": true` in the box-writable queries table is an `int` to `isinstance`;
-    the guard must still trip (the repeat is real) and name the earliest INTEGER seq, exactly
-    as it does for a row with no `seq` at all."""
     rows = [_row(0), _row(1)]
     rows[0]["seq"] = True
     trip = rq.repeat_trip(rows, LEAD, system="elastic", verb="query",
@@ -82,9 +73,6 @@ def _case(tmp_path: Path, environment: str) -> Path:
 
 
 def test_lead_inputs_refuses_a_non_mapping_environment_naming_the_file(tmp_path):
-    """`environment.yaml` is a mapping by contract (`validate_cases.check_environment` reads keys
-    off it). A list-rooted file is refused at the load with the path in the message, before
-    `LeadInputs` is built — and a mapping still flows through unchanged."""
     ok = judge.load_lead_inputs(_case(tmp_path, "capture_environment: lab\n"), "l-001")
     assert ok.environment_notes == {"capture_environment": "lab"}
 

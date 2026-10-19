@@ -20,9 +20,6 @@ from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
 from defender.scripts.gather_tools.record_query import system_fingerprint  # noqa: E402
 from defender.tests._declared869 import ADAPTER_BODY, write  # noqa: E402
 from defender.tests._verb_authorization_632 import grant_of  # noqa: E402
-# The estate seam's own fixtures for a `WorldRegistry` — the clock, the world token and the
-# primed ledger its constructor demands — imported rather than re-spelled, so the registry
-# here is built the way `run.py:288` builds it.
 from defender.tests.test_920_estate_seam import AS_OF, SERVED_FILE, World, fresh_ledger  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
 
@@ -52,11 +49,6 @@ def _adapters(tmp_path: Path, *systems: str) -> Path:
 
 
 def test_the_roster_is_the_construction_time_one_after_the_directory_is_removed(tmp_path):
-    """O1/D1 — `systems()` after the adapters directory is `rmtree`d is the SAME tuple it was
-    before, and that tuple is the roster today's filter derives: the `*_adapter.py` names,
-    `_`→`-`, deduplicated, and passed through `_adapter_path` — so `change-mgmt_adapter.py` (a
-    hyphen in the FILENAME, which resolves to no adapter) and a DIRECTORY named `foo_adapter.py`
-    are not on it, and `host-state` derived from two filenames is on it once."""
     adapters = _adapters(tmp_path, "elastic", "cmdb", "host-state")
     write(adapters / "host-state_adapter.py", ADAPTER_BODY)     # derives `host-state` again
     write(adapters / "change-mgmt_adapter.py", ADAPTER_BODY)    # derives a name that resolves to nothing
@@ -79,10 +71,6 @@ def test_the_roster_is_the_construction_time_one_after_the_directory_is_removed(
 
 
 def test_the_query_tool_consults_the_snapshot_not_the_disk(tmp_path):
-    """O1/O3 unit — `QueryCapture._system_of_record` and `_coarsen` over a real registry whose
-    directory has since been removed answer exactly what they answered while it existed: the
-    real name with no fingerprint for a declared system, `""` with the ghost's fingerprint for
-    an undeclared one."""
     adapters = _adapters(tmp_path, "elastic")
     capture = QueryCapture(ModuleVerbRegistry(read_roster(adapters), DENY_ALL))
     ghost_pair = ("", system_fingerprint("ghostone", ""))
@@ -133,9 +121,6 @@ def test_a_missing_directory_fails_at_construction_under_deny_all(tmp_path):
 
 
 def test_a_regular_file_at_the_adapters_path_fails_at_construction(tmp_path):
-    """O2/D2, the cannot-LIST arm that needs no privilege — a regular file where the directory
-    should be: `os.scandir` raises `NotADirectoryError` (an `OSError`) for it, where `Path.glob`
-    yields nothing and raises nothing."""
     not_a_dir = tmp_path / "adapters"
     not_a_dir.write_text("VERBS = {}\n", encoding="utf-8")
     assert not_a_dir.is_file()
@@ -181,13 +166,6 @@ def test_a_symlink_loop_named_like_an_adapter_is_the_registrys_own_error(tmp_pat
 
 
 def test_decide_and_verbs_read_the_roster_not_the_disk(tmp_path):
-    """O1/D1 for the DISPATCH half — `verbs()` and `decide()` answer from the roster fixed at
-    construction, the same map `systems()` answers from, so the registry cannot contradict
-    itself once the directory is gone: a GRANTED `elastic.query` stays GRANTED after `rmtree`
-    (its module was loaded on the first decision and is memoized), the same function object both
-    times; an unknown VERB on `elastic` gets the SAME refusal it got before (the grant
-    placement's "no verb of that name", read cold off the roster), never "unknown system"; and a
-    name off the roster is `KeyError` from `verbs()` as it always was."""
     adapters = tmp_path / "loaded" / "adapters"
     write(adapters / "elastic_adapter.py", QUERY_ADAPTER)
     registry = ModuleVerbRegistry(read_roster(adapters), GRANT)
@@ -223,10 +201,6 @@ def test_decide_and_verbs_read_the_roster_not_the_disk(tmp_path):
 
 
 def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_check(tmp_path):
-    """O2/D1 through the subclass — `WorldRegistry` (the branch lane's registry, `run.py:288`)
-    overrides neither the constructor's directory check nor `systems()`: over a missing
-    directory it raises `RegistryError` naming it, and over a real one its roster survives the
-    directory's removal."""
     missing = tmp_path / "nope"
     with pytest.raises(verbs.RegistryError) as exc:
         build_registry(read_roster(missing), DENY_ALL, world=World("w1"),
@@ -245,9 +219,6 @@ def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_chec
 
 
 def test_the_scaffold_resolver_fails_at_construction_over_a_tree_with_no_adapters(tmp_path):
-    """O2/D2 through the resolver — `VerbResolver(<tree with no scripts/adapters>)` raises
-    `ScaffoldRuleError`, the module's own "could not evaluate" error and the one its two
-    production callers already catch, at CONSTRUCTION; the message names the directory."""
     with pytest.raises(_scaffold_rules.ScaffoldRuleError) as exc:
         _scaffold_rules.VerbResolver(tmp_path)
     assert str(tmp_path / "scripts" / "adapters") in str(exc.value), \
@@ -260,5 +231,3 @@ def test_the_scaffold_resolver_fails_at_construction_over_a_tree_with_no_adapter
 
 
 # D4 — the registry-cannot-list apparatus is gone
-
-

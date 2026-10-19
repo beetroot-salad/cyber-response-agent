@@ -1,37 +1,3 @@
-"""#1256 slice A — every adapter declares its settings check (O-5), and a granted adapter that is
-broken is down from the start (O-5a).
-
-Design: issue #1256, revision r2. The binding contract choices are the orchestrator's K1-K4:
-
-  * K1 — each adapter module declares `check_settings(tenant)`, a pure function of the run's
-    tenant record (`RunTenant`) that returns None when the system is usable and raises
-    `ConfigFault` naming what is wrong otherwise; tacit-knowledge declares one that never raises.
-  * K2 — the run takes the check from the adapter modules of the roster it reads (the files under
-    `<defender_dir>/scripts/adapters`), for the systems its grants name.
-  * K3 — an adapter that is broken (O-5a) is logged at ERROR or above, naming its system.
-  * K4 — observe what the agent is shown, whether a verb ran, the breaker, the query rows and the
-    logs; pin no status type, state field or module.
-
-O-5 is driven per adapter over the CHECKOUT'S roster (`read_roster`, the `checkout_roster`
-fixture), so a new adapter without a check, or one this contract's fault table has no row for,
-fails the census rather than going unexamined. Each fault family is a real planted tenant folder
-(`_spec1107.plant`) resolved by the real resolver; the premise — a REAL verb of that adapter
-raises `ConfigFault` over that record — is proven in the same test before the check is asked, so
-the table can never claim a fault the adapter does not raise. The only fake is the docker CLI
-(`_spec1107.DockerShim`, first on the PATH of the env a transport forks with).
-
-O-5a is driven through the replay harness (`drive`) over a planted defender tree whose
-`scripts/adapters` holds planted adapter files (K2), granted by the planted tenant's table. No
-verb registry is injected, so the run builds the production `ModuleVerbRegistry` over the planted
-roster and the planted module's own verb is what would run: each planted verb appends to a probe
-file, which is the "never called" observation. A well-formed planted adapter in the same run is
-the positive control (it IS called, writes its row, is the usable system that keeps the run from
-O-8's refusal).
-
-Red before #1256 is implemented, by construction: no adapter declares `check_settings`, and no
-startup check exists — a broken adapter's call runs (or fails to import) at call time, writes an
-exit-2 row and is charged to the breaker.
-"""
 from __future__ import annotations
 
 import importlib
@@ -54,14 +20,6 @@ from defender.tests.tenant_1107_settings import _spec1107 as S
 #: The declaration K1 names.
 CHECK = "check_settings"
 
-
-# =============================================================================================
-# O-5 — the fault table: one row per adapter, one entry per FILE fault family its verbs can
-# raise (code map item 2, grounded at d7b1886d); the key families are generated in
-# `test_1256_check_census.py`. A family is (a mutation of a COMPLETE planted tenant folder, the
-# token(s) the fault must name). The premise half of every case proves the family is real for
-# that adapter: no entry here is taken on trust.
-# =============================================================================================
 
 @dataclass(frozen=True)
 class Family:
@@ -97,9 +55,6 @@ def _directory_at_file(folder: Path, system: str) -> None:
     path.mkdir()
 
 
-#: The file families every settings-reading adapter shares: no folder (the system is not
-#: configured at all — `system_entry`), and a folder whose `config.env` is a stored fault the
-#: record keeps (`tenant_settings.read_systems`): absent, not UTF-8, unreadable.
 FILE_FAMILIES: tuple[Family, ...] = (
     Family("no-folder", "no-folder", ("config.env", NOT_CONFIGURED), _remove_folder),
     Family("config-env-absent", "stored", ("config.env",), _remove_file),
@@ -108,25 +63,12 @@ FILE_FAMILIES: tuple[Family, ...] = (
 )
 
 
-#: Every adapter of the checkout's roster -> the FILE families of its settings. tacit-knowledge
-#: reads no settings, so it has none (its check is driven by its own test below). A roster
-#: adapter with no row here fails `test_o5_every_roster_adapter_declares_a_settings_check`.
-#:
-#: The KEY families — every key a complete planted `config.env` carries, absent, blank, and in
-#: each grammar a loader judges — are not listed here by hand: `test_1256_check_census.py`
-#: generates them from the planted settings themselves and lets the adapter's own verbs say
-#: which of them are faults (a hand list only ever named the families its author thought of,
-#: and a check covering exactly those passed it).
 FAULTS: dict[str, tuple[Family, ...]] = {
     **{system: FILE_FAMILIES for system in (
         "cmdb", "identity", "change-mgmt", "threat-intel", "ticket", "elastic", "host-state")},
     "tacit-knowledge": (),
 }
 
-#: A value per verb parameter NAME, so every verb of every adapter can be called with its
-#: required keyword parameters (none of these is a fault the verb would raise before reaching its
-#: settings: hosts are in host-state's inventory, `at` is UTC ISO 8601, the path is absolute).
-#: An unknown name gets "x".
 _PARAM_VALUES: dict[str, str] = {
     "host": "web-1", "at": "2026-05-25T15:00:00Z", "path": "/etc/passwd", "user": "root",
     "key": "T1256-1", "cr_id": "CR-1256", "value": "203.0.113.7", "native_query": "*",
@@ -139,10 +81,6 @@ def _cases() -> list[Any]:
     return [pytest.param(system, family, id=f"{system}-{family.label}")
             for system, families in FAULTS.items() for family in families]
 
-
-# =============================================================================================
-# O-5 helpers
-# =============================================================================================
 
 def _adapter(roster: Any, system: str) -> Any:
     """`system`'s adapter module, found through the roster (the file it dispatches from) and
@@ -217,14 +155,7 @@ def _landed(record: Any, system: str, family: Family) -> bool:
     return entry.get(family.key) == family.value
 
 
-# =============================================================================================
-# O-5 — the census
-# =============================================================================================
-
 def test_o5_every_roster_adapter_declares_a_settings_check(checkout_roster):
-    """O-5 / K1: every adapter of the checkout's roster declares `check_settings`, and every one
-    has a row in this contract's fault table — a ninth adapter, or one renamed, fails here rather
-    than being skipped by the per-family cases below."""
     systems = set(checkout_roster.accepted)
     assert len(systems) >= 8, f"precondition: the roster was read: {sorted(systems)}"
     assert systems == set(FAULTS), (
@@ -239,16 +170,6 @@ def test_o5_every_roster_adapter_declares_a_settings_check(checkout_roster):
 @pytest.mark.parametrize(("system", "family"), _cases())
 def test_o5_settings_that_make_a_verb_raise_make_the_check_raise(
         tmp_path, checkout_roster, system, family):
-    """O-5: for each adapter and each distinct ConfigFault family its verbs can raise, the
-    settings that make a verb raise make `check_settings(record)` raise `ConfigFault`, naming
-    what is wrong.
-
-    Premise first, in the same test: the family's mutation landed on the record, and a REAL verb
-    of this adapter (every verb is called; at least one must raise) raises `ConfigFault` over it.
-
-    The check is a function of the RECORD (K1, DP1: the frozen settings, never re-read): before
-    it is asked, the file on disk is put back complete. The verbs still fault (they read the
-    record), so a check that re-reads `config.env` — and so finds it complete — is caught."""
     module = _adapter(checkout_roster, system)
     marker = "o5f"
     root, folder = _plant(tmp_path, marker)
@@ -280,19 +201,8 @@ def test_o5_settings_that_make_a_verb_raise_make_the_check_raise(
         f"K1: {system}'s check must name what is wrong (one of {family.names}): {fault}")
 
 
-# =============================================================================================
-# O-5 — positive controls: the check is not one that always raises
-# =============================================================================================
-
 @pytest.mark.parametrize("system", sorted(FAULTS))
 def test_o5_complete_settings_pass_every_verb_and_the_check(tmp_path, checkout_roster, system):
-    """The positive control for every case above: over a COMPLETE planted tenant, no verb of the
-    adapter raises ConfigFault and its health-check answers through the (shimmed) transport —
-    the settings are usable — and `check_settings(record)` returns without raising. A check that
-    always raises, or that judges a key no verb needs, fails here.
-
-    The system's folder is removed from disk after resolve: the record still holds it, so a
-    check that re-reads the disk (and finds nothing) is caught here too."""
     module = _adapter(checkout_roster, system)
     root, folder = _plant(tmp_path, "okc")
     record = S.resolve(root)
@@ -313,11 +223,6 @@ def test_o5_complete_settings_pass_every_verb_and_the_check(tmp_path, checkout_r
 
 
 def test_o5_elastic_without_a_kibana_container_stays_usable(tmp_path, checkout_roster):
-    """The Kibana container is optional to elastic (#1107 MF-7c, standing): only health-check reads
-    it, and it asks first and answers with a result, never a ConfigFault (#1256 non-obligation
-    "no verb-level granularity"). So no verb raises with it unset, and the system is usable:
-    `check_settings` returns without raising (K1: None when usable). A check that demanded the
-    Kibana container would take an Elasticsearch-only tenant's elastic down at start."""
     module = _adapter(checkout_roster, "elastic")
     root, folder = _plant(tmp_path, "kbn")
     S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
@@ -362,11 +267,6 @@ def _own_folder_broken(folder: Path, system: str) -> None:
 
 
 def test_o5_tacit_knowledge_needs_no_settings_and_its_check_never_raises(tmp_path, checkout_roster):
-    """O-5: "a system needing none declares that". tacit-knowledge reads no settings (its
-    registry is the defender tree's file), so no settings make its verbs raise ConfigFault — and
-    its check never raises: not over a complete tenant, not over a tenant that configures no
-    system at all, and not over one whose `systems/tacit-knowledge/config.env` is itself a stored
-    fault (a generic per-folder check would raise there)."""
     module = _adapter(checkout_roster, "tacit-knowledge")
     check = _declared_check(module, "tacit-knowledge")
     for label, mutate in (("complete", None), ("no-system-configured", _no_systems),
@@ -394,23 +294,12 @@ def test_o5_tacit_knowledge_needs_no_settings_and_its_check_never_raises(tmp_pat
         assert fault is None, f"tacit-knowledge's check must never raise ({label}): {fault!r}"
 
 
-# =============================================================================================
-# O-5a — a broken granted adapter is down from the start
-# =============================================================================================
-
 #: Not mirrored into the planted tree: nothing a run reads (and the first two are large).
 _NOT_MIRRORED = frozenset({".venv", "__pycache__", "tests", "fixtures-e2e"})
 
-#: Each planted adapter: system -> (what is wrong with it, its verb, the verb's one parameter,
-#: the value gather binds, the token the agent's refusal and the reason must carry). Real system
-#: names, so each has its shipped skill and catalog; the files are NOT the shipped adapters.
-#: `cmdb` is the well-formed control.
 _PLANTED: dict[str, dict[str, str]] = {
     "cmdb": {"verb": "get-host", "fn": "get_host", "param": "host", "arg": "web-1",
              "token": ""},
-    # Fails to import — at RUN time (a missing module), with a source the roster's cold read
-    # still parses: a file whose `VERBS` literal cannot be read would be refused at run start as
-    # a grant naming an undeclared verb (C11), which is not this obligation.
     "identity": {"verb": "get-user", "fn": "get_user", "param": "user", "arg": "dev.dana",
                  "token": "defender_planted_absent_module_1256"},
     # Declares no check: the reason names the missing declaration, K1's `check_settings`.
@@ -430,9 +319,6 @@ _LOG_CONTROL = "log-channel control for #1256 O-5a (names no system)"
 _IN_RUN_LOG_CONTROL = "in-run log-channel control for #1256 O-5a"
 
 
-#: Where the planted host-state check's fault points: a path under the DATA ROOT but outside the
-#: tenant's own folder (`<data root>/<tenant>/…`), so it is not the settings path #1106's
-#: redaction rewrites to its pointer — a reason that carries it verbatim shows a host path.
 _OUTSIDE_TENANT = Path("shared-1256", "credentials")
 
 
@@ -453,9 +339,6 @@ def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
     elif system == "threat-intel":
         declared = []
     elif system == "change-mgmt":
-        # The crash's own text carries the adapter's absolute host path (as an exception's often
-        # does), so the "no host path in what the agent is shown" negative can fail on a reason
-        # passed through verbatim.
         declared = ["def check_settings(*_a, **_k):",
                     f"    raise RuntimeError({spec['token']!r} + ': cannot read ' + __file__)"]
     elif system == "host-state":
@@ -547,26 +430,6 @@ _PATH_BEARING = ("change-mgmt", "host-state")
 
 
 def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_roster, caplog):  # noqa: C901, PLR0912, PLR0915 — one scene, every broken-adapter kind judged on the same channels
-    """O-5a: a granted adapter that fails to import, declares no check, or whose check raises
-    anything but ConfigFault (a crash, or another adapter fault) is Down(AdapterBroken(reason))
-    from the start: logged at ERROR or above naming its system before the agent's first turn
-    (K3), every dispatch and every call to it refused with a message that names it and the reason
-    — not a breaker trip and not "not configured" (DP4) — its verb never run, no query row
-    written, nothing charged to the breaker; `list_verbs` for it names it down with the reason
-    (the statuses feed `list_verbs`, design flow step 4).
-
-    The reason carries no host path on any surface the model sees (#1106's host-only rule; the
-    contract's "AdapterBroken reasons carry no host path"): not the planted tree's, not the data
-    root's — including a path under the data root outside the tenant's own folder, which no
-    settings-path redaction rewrites. Two reasons carry one as raised (`_PATH_BEARING`); each must
-    reach MAIN's opening message and gather's system index (flow step 4: the statuses feed both)
-    on a line naming it, and on every model-visible surface — those two, `list_verbs` and both
-    refusals — no line carrying the reason carries a host path. The operator log is not one of
-    them: the host-path rule covers what the model sees, and operator messages may print a path.
-
-    Positive control in the same run: the well-formed planted `cmdb` adapter IS called — its verb
-    writes the probe file and its row — so the "never called" and "no row" observations can fail;
-    it is also the usable system that keeps the run from being refused (O-8)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, Turn, drive, materialize
 
@@ -618,10 +481,6 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
         "first turn")
     assert [r for r in caplog.records if r.getMessage() == _IN_RUN_LOG_CONTROL], (
         "control: an ERROR logged inside the run (by the planted cmdb verb) reaches the capture")
-    # Every broken system's observations are collected, then judged together, so one run reports
-    # each one that does not hold. The replies are indexed by the script: MAIN's request i+1
-    # answers its dispatch of `_BROKEN[i-1]`; gather's request i+1 (lead l-001) answers its query,
-    # and its request len(order)+i answers its `list_verbs` of `_BROKEN[i-1]`.
     breaker = run_state.breaker_snapshot()
     host_paths = sorted({str(p) for base in (tmp_path / "tree", tree, root)
                          for p in (base, base.resolve())})
@@ -681,10 +540,6 @@ def test_o5a_a_broken_granted_adapter_is_down_from_the_start(tmp_path, checkout_
 
 # --- O-5a at both seams, whatever the adapter raises (#678: a catch-all discharged at one seam) --
 
-#: What a broken identity adapter does, at each seam O-5a names, with an exception class the scene
-#: above does not plant: (seam, label, module lines at import, the declared check's lines, the
-#: token its reason carries). The source always parses (C11: one that does not is a grant
-#: refusal at roster read, not this obligation).
 _ANY_BREAK: tuple[tuple[str, str, list[str], list[str] | None, str], ...] = (
     ("import", "NameError", ["planted_undefined_name_1256  # noqa: F821"], None,
      "planted_undefined_name_1256"),
@@ -715,12 +570,6 @@ _ANY_BREAK: tuple[tuple[str, str, list[str], list[str] | None, str], ...] = (
                          [pytest.param(*case, id=f"{case[0]}-{case[1]}") for case in _ANY_BREAK])
 def test_o5a_any_exception_at_import_or_from_the_check_is_adapter_broken(
         tmp_path, checkout_roster, caplog, seam, label, at_import, check, token):
-    """O-5a: an adapter that fails to import — whatever it raises — or whose declared check
-    raises anything but ConfigFault, or cannot be called as one, is Down(AdapterBroken) from the
-    start, and the run goes on: the run neither raises nor stops, identity's verb never runs, its
-    dispatch and its call are refused naming it and the reason (never "not configured", never
-    "tripped"), no row, nothing charged, an ERROR record naming it before the agent's first turn.
-    The well-formed cmdb in the same run is called (the control)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.e2e._replay_harness import GOLDEN_AB3, Turn, drive, materialize
 

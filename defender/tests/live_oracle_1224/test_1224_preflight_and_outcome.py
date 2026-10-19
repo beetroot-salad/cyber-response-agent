@@ -1,9 +1,3 @@
-"""#1224 — the launcher's pre-flight (calibration only) and the write-once episode outcome record.
-
-Every scenario drives the whole launcher (`cli.main`) over the fixture tenant. `_Routed` routes each
-oracle request to a per-world scripted double by the world's fact statement. A world's forged
-answer must land on a POST-branch call (`_POST`); pre-branch calls are served unchanged.
-"""
 from __future__ import annotations
 
 import json
@@ -39,12 +33,6 @@ def episodes_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-# --------------------------------------------------------------------------------------
-# The fixture: three pre-branch original calls (and, where a world changes an answer, one
-# post-branch call `_POST`) sharing ONE recorded answer, so a passing oracle that serves the
-# base unchanged is the same scripted move for every call in every world.
-# --------------------------------------------------------------------------------------
-
 _ROW = {"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
         "ts": "2026-07-28T15:00:00Z"}
 _BASE = {"rows": [_ROW]}
@@ -71,10 +59,6 @@ _FACT_D = S.fact("f3", "dave copied the payroll share to removable media", ("dav
 _MARK_B, _MARK_C, _MARK_D = "obtained a TGT", "reset carol", "payroll share"
 
 
-#: The source run's one POST-branch call (R-01): captured under `S.POST_BRANCH_LEAD`, whose
-#: `gather` pair lands after the branch message, so no sibling inherits its real answer and a
-#: world may change it (M01=A). It shares `_BASE`, so `_passing()` serves it unchanged with the
-#: same move as every pre-branch call; its `q` is the marker a world's double routes on.
 _POST = S.post_branch_call(payload=_BASE)
 _QP = _POST.params
 _MARK_POST = _QP["q"]
@@ -454,11 +438,6 @@ def _judge_rows(ep: Path) -> dict[str, dict]:
             if isinstance(r, dict) and "world" in r}
 
 
-# ======================================================================================
-# d06 — pre-flight results and which siblings start
-# ======================================================================================
-
-
 @pytest.mark.parametrize("failing", [("b", "c"), ("c",), ()], ids=["two", "one", "none"])
 def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_path, monkeypatch,
                                                                          failing):
@@ -484,11 +463,6 @@ def test_1224_two_preflight_failures_write_unusable_and_start_no_sibling(tmp_pat
             assert double.requests > 0, "pre-flight must have replayed through the oracle"
         else:
             assert double.submissions() == len(_calls()), f"{w} did not replay every call"
-
-
-# ======================================================================================
-# d14 — what pre-flight replays, keeps and records
-# ======================================================================================
 
 
 def test_1224_preflight_replays_every_original_call_through_each_worlds_oracle_before_any_sibling(
@@ -610,11 +584,6 @@ def test_1224_outcome_record_holds_outcome_reason_unservable_worlds_and_drift(
         assert run.spawn.launches == []
         assert record["outcome"] != "accepted"
         assert record["reason"]
-
-
-# ======================================================================================
-# Premises — launch edges (M05, N05, M04, M22)
-# ======================================================================================
 
 
 def test_input_every_world_has_no_facts(tmp_path):
@@ -964,11 +933,6 @@ def test_preflight_oracle_provider_is_down_for_every_world(tmp_path, status):
         assert S.ledger_rows(run.ep, w) == []
 
 
-# ======================================================================================
-# Premises — dead and repeated launches (N17)
-# ======================================================================================
-
-
 def test_launcher_dies_with_some_worlds_preflighted_and_others_not(tmp_path, episodes_root):
     """a relaunch after a launcher died mid pre-flight is a new episode that ignores the dead one's stores, writes its own complete outcome before any …"""
     est = S.estate(tmp_path)
@@ -1187,11 +1151,6 @@ def test_conc_34_preflight_worlds_forge_for_one_original_call(tmp_path):
         assert "e-1224-shared" not in json.dumps(S.oracle_rows(run.ep, w, "base"))
 
 
-# ======================================================================================
-# Follow-ups — the sibling's re-issue of a call pre-flight replayed (S1-S5)
-# ======================================================================================
-
-
 def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_path):
     """a sibling re-issuing a call pre-flight served changed spends a fresh oracle turn and verifier pass, reuses the frozen row, records an `oracle` …"""
     est = S.estate(tmp_path)
@@ -1217,11 +1176,6 @@ def test_1224_sibling_reissues_an_original_call_preflight_served_changed(tmp_pat
     rows = S.ledger_rows(run.ep, "b")
     assert rows
     assert rows[0]["source"] == S.ORACLE_DECISION
-
-
-# ======================================================================================
-# Obligations
-# ======================================================================================
 
 
 def test_1224_outcome_record_is_written_once_and_each_world_record_has_one_writer(
@@ -1274,5 +1228,3 @@ def test_1224_empty_gather_grant_refuses_the_launch_before_the_question_writer(t
     assert run.spawn.launches == []
     outcome = S.read_outcome(run.ep) if run.ep.is_dir() else None
     assert outcome is None or outcome["outcome"] != "accepted"
-
-

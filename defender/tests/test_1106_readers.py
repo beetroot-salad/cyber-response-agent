@@ -53,9 +53,6 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
 
 
 def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
-    """Absent stays the loud per-call `ConfigFault` (D3), naming the file by the settings
-    pointer — never a host path (#1156's review) — while the checkout's copy it could have
-    fallen back to does hold one: the fault itself is the proof there was no fallback."""
     faults = T.mod("scripts.adapters.faults")
     transport = T.mod("scripts.adapters._stub_transport")
     root = tmp_path / "injected-root"
@@ -74,9 +71,6 @@ def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming
 
 
 def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
-    """No `$DEFENDER_DIR`, no `__file__` fallback: the mapping the folder does not hold is a
-    `CaseTicketError` naming it by the settings pointer — while the checkout's copy sits right
-    there."""
     case_ticket = T.mod("runtime.case_ticket")
     settings = tmp_path / "bare" / "settings"
     settings.mkdir(parents=True)
@@ -89,10 +83,6 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
 
 def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
         injected, tmp_path):
-    """The `--update-ticket` lane (O2 names the ticket writer): the REAL writer, over a
-    recording request seam, is handed the run's record — and both the store it
-    addresses (`case-history/config.env`) and the payload it renders (`mapping.yaml`) are the
-    injected tenant's."""
     writer = T.mod("scripts.case_history.ticket_writer")
     run_dir = tmp_path / "run-1106"
     run_dir.mkdir()
@@ -125,5 +115,3 @@ def test_the_lead_zero_config_is_read_from_the_injected_tenant(injected):
         "elastic.injected-tenant-template"
     assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) != \
         "elastic.injected-tenant-template"
-
-

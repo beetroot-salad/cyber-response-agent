@@ -59,18 +59,7 @@ def _episode(*, container: str | None, arms: tuple[str, ...] = (),
     return ep
 
 
-# ==========================================================================================
-# A — one refusal family from opening a run.
-# ==========================================================================================
-
 def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(tmp_path):
-    """`runs.open` over a container that cannot be trusted or read — a corrupt `_tenant.json`,
-    none, another tenant's, a link at `<T>/runs` — refuses with `RunUnreachable`, a
-    `RunRefused`, raised from the container's `TenantRefused` (whose text it carries). An
-    absent container is `RunAbsent`: the run is gone with it. `resolve` answers the same
-    family; an address naming another tenant stays `TenantRefused` (a caller's bug). Positive
-    control: the same open over the good container hands out the run. RED before the fix: the
-    container faults are a bare `TenantRefused`, which an `except RunRefused` misses."""
     from defender.run_repository import RunAbsent, RunAddress, RunRefused, RunUnreachable
 
     t = _good(tmp_path, "r1")
@@ -116,10 +105,6 @@ def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(
 
 
 def test_a_an_arm_whose_container_goes_bad_after_the_view_opened_is_run_refused(tmp_path):
-    """An episode view's `open` answers the same family: a container whose `_tenant.json` is
-    removed or corrupted after the view opened is `RunUnreachable`; a container removed
-    outright is `RunAbsent`. Positive control: the arm opens before the fault. RED before the
-    fix: `TenantRefused`."""
     from defender.run_repository import RunAbsent, RunUnreachable
 
     t = _good(tmp_path)
@@ -141,11 +126,6 @@ def test_a_an_arm_whose_container_goes_bad_after_the_view_opened_is_run_refused(
 
 
 def test_a_verify_opens_every_finished_arm_or_hands_back_its_refusal(tmp_path):
-    """The launcher's VERIFY step opens each finished arm through `_finished_arms`, which keeps
-    a `RunRefused` as that world's own fault. With the container's record removed after the
-    siblings ran, every arm comes back as a `RunRefused` (none raises). Positive control: with
-    the record in place every arm is a `Run`. RED before the fix: the container's
-    `TenantRefused` escapes `_finished_arms`."""
     from defender.learning.branch import cli
     from defender.run_repository import Run, RunRefused
 
@@ -190,16 +170,6 @@ def _world_reasons(episode_dir: Path) -> dict[str, str]:
 
 def test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged(
         tmp_path, monkeypatch, caplog):
-    """Driven through the launcher (`learning/branch/cli.main`): the siblings ran, then their
-    container's `_tenant.json` was spoiled. VERIFY records each finished world as `not
-    archived` (its run folder refused), the launch returns a status rather than raising, and
-    the judge step is still reached — and, since PR #1236's second review round, its door
-    judges the container's record as the episode view does, so it refuses the spoiled record
-    (logged by the launcher, non-fatal) and writes no `judge.yaml`. The page then refuses the
-    spoiled container on its own, non-fatal to the launch, so it is not asserted. Positive
-    control: a clean launch under fresh roots archives the worlds, records none `not
-    archived` and grades. RED before the fix: the container's `TenantRefused` escapes VERIFY,
-    the launch raises, and neither the records nor the judge step are reached."""
     est, src = P.launch_source(tmp_path)
     ep = _episodes() / P.EPISODE_ID
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src),
@@ -230,10 +200,6 @@ def test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged(
     assert clean.judge.prompts
 
 
-# ==========================================================================================
-# B — the curation drain: gone is artifact-missing; any other refusal is transient.
-# ==========================================================================================
-
 def _queued(paths: Any, case_id: str) -> dict | None:
     row = Path(paths.state_root) / "author-queue" / f"{case_id}.json"
     return json.loads(row.read_text(encoding="utf-8")) if row.is_file() else None
@@ -241,12 +207,6 @@ def _queued(paths: Any, case_id: str) -> dict | None:
 
 def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt(
         tmp_path, monkeypatch):
-    """A row whose tenant cannot be accepted (no such tenant), whose run's name holds a link
-    (a refused entry), or whose container cannot be trusted (its `_tenant.json` removed) is
-    re-queued with `attempts: 1` — not dead-lettered, not served — and at
-    `LEAD_AUTHOR_MAX_RETRIES` quarantined `transient-exhausted`. Positive control in the same
-    ticks: a row whose run folder is GONE is `artifact-missing` at once, and a good row is
-    served. RED before the fix: every such row is `artifact-missing` on the first tick."""
     monkeypatch.setenv("LEAD_AUTHOR_MAX_RETRIES", "2")
     t = _good(tmp_path, "r1")
     u = _good(tmp_path, "r1", tenant_id=H.U_ID)
@@ -284,10 +244,6 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
             f"{case_id}: {letter!r}")
         assert not P.still_queued(paths, case_id)
 
-
-# ==========================================================================================
-# C — the data root is read only when a curation row is to be served.
-# ==========================================================================================
 
 class _Branch:
     """`AuthorBranch`'s seam for one tick, its worktree the given real git tree."""
@@ -338,9 +294,6 @@ def _tick(paths: Any, *, lane: Any, pitfalls: list[str], box: _Box) -> int:
 
 
 def test_c_a_pitfalls_only_tick_needs_no_data_root(tmp_path, monkeypatch):
-    """With `DEFENDER_DATA_ROOT` unset and only pitfalls at threshold (no curation row), the
-    lead-author tick starts its box and reaches the pitfalls step. RED before the fix: the
-    marker step resolves the data root unconditionally inside the batch and refuses it."""
     from defender.learning.core import persist
     from defender.tests._state1135 import state_for_paths
 
@@ -360,12 +313,6 @@ def test_c_a_pitfalls_only_tick_needs_no_data_root(tmp_path, monkeypatch):
 
 
 def test_c_a_tick_with_rows_and_no_data_root_refuses_before_any_box(tmp_path, monkeypatch):
-    """With a curation row queued and `DEFENDER_DATA_ROOT` unset, the tick refuses before its
-    box is started — the row still queued, not claimed. The refusal is the stage's
-    configuration refusal (`FatalConfigError`, raised from the data root's `TenantRefused`:
-    PR #1236's second review round). Positive control: the root restored, the same tick starts
-    the box and serves the row. RED before the fix: the box is started first and the refusal
-    comes from inside the batch."""
     from defender.learning.core.config import FatalConfigError
 
     t = _good(tmp_path, "r1")
@@ -387,10 +334,6 @@ def test_c_a_tick_with_rows_and_no_data_root_refuses_before_any_box(tmp_path, mo
     assert box.started, "the control never started its box"
     assert lane.run_dirs == [Path(t.runs) / "r1"]
 
-
-# ==========================================================================================
-# D — one opener for `--tenant T <run_id>`; its refusal is printed, not logged.
-# ==========================================================================================
 
 @contextmanager
 def _no_logging():
@@ -417,12 +360,6 @@ def _workspace_map_main():
 @pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map",
                                  "visualize_run --episode"])
 def test_d_each_run_id_command_prints_its_refusal_on_stderr(tmp_path, d9_tenant, cli):
-    """Each command line that takes `--tenant T <run_id>` — the lead author, the run page, the
-    workspace map (and the run page with `--episode`) — with a run id that names nothing, and
-    every log record disabled: it exits with its own refusal status and the refusal, naming the
-    run, is on stderr. RED before the fix: the lead author and the run page only LOG it (a log
-    level hides it); the workspace map already printed it (green: it moved onto the shared
-    opener unchanged in this respect)."""
     from defender.tests._state1135 import curation_run_dir
 
     curation_run_dir("r-real", tenant_id=d9_tenant)
@@ -440,10 +377,3 @@ def test_d_each_run_id_command_prints_its_refusal_on_stderr(tmp_path, d9_tenant,
     assert got.rc == status, f"{cli}: {got.rc} {got.said!r}"
     assert "nope-run" in got.err, f"{cli} did not print its refusal on stderr: {got.err!r}"
     assert got.out == ""
-
-
-
-# ==========================================================================================
-# E — the tracer's listing: one hold, every run.
-# ==========================================================================================
-

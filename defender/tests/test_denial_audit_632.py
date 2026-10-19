@@ -55,9 +55,6 @@ def _visible_html(html: str) -> str:
 
 
 def test_a_denial_appends_a_policy_event_to_the_durable_request_stream(tmp_path: Path):
-    """A denial appends its own event type to the durable policy-denial stream at the decision
-    point, flushed per record so it survives an abort, and takes its place in that stream's own
-    append ordering as its own event rather than being folded into the conversation records."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_gather_registry(rec),
                    turns=[q(*DENIED_PAIR), q(*GRANTED_PAIR), q(*DENIED_PAIR), DONE], run_id="d6")
@@ -96,9 +93,6 @@ def test_the_denial_record_carries_a_timestamp_and_a_seq_and_does_not_swallow_a_
 
 
 def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_path: Path):
-    """The denial record carries a BOUNDED PROJECTION — role, system, verb, call id and a truncated
-    or hashed parameter digest — normalized before writing, never the raw parameter blob (§7
-    R12)."""
     class Unserializable:
         pass
 
@@ -126,11 +120,6 @@ def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_pa
     line, control, other_value, repeat = path.read_text(encoding="utf-8").splitlines()
     record = json.loads(line)
 
-    # The expected side is written HERE, as literals. Comparing against the target's own
-    # DENIAL_RECORD_KEYS let the implementation define what it was being checked against —
-    # an assertion that holds whatever ships, and under which `role` and the call id (the
-    # two members nothing else in this suite pins) could be dropped and stay green. "Which
-    # role was refused" is the policy fact this record exists to carry.
     assert set(record) == {
         "event_type", "ts", "seq", "role", "system", "verb", "call_id", "params_digest",
     }, "the record's shape is not the bounded projection §7 R12 names"
@@ -174,5 +163,3 @@ def test_a_denial_is_visible_in_the_rendered_run_html(tmp_path: Path):
         "the page renders the call but never says it was refused by policy"
     assert "esql" not in _visible_html("<html><body>ok</body></html>"), \
         "the visibility filter is inert — it would pass a page with no denial in it"
-
-

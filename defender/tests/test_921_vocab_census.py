@@ -15,10 +15,6 @@ from defender.tests import _state1135
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    # The learning STATE root too, so the shared findings queue this pass appends to is
-    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
-    # here rather than in the appender: a production path that picks a different queue when
-    # an env var is unset is a pass whose rows can land where no drain reads.
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -26,29 +22,7 @@ def _vocab():
     return J.mod("_vocab")
 
 
-# ---------------------------------------------------------------------------------------
-# D1 / M4 — the vocabulary (#1234: `JUDGE_OUTCOME_ENUM` and its normalizer are retired, A4/A18)
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# the corrected security write census
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(tmp_path):
-    """Every judge call re-persists the whole framed-untrusted prompt AND the whole reply
-    VERBATIM into `<episode_dir>/wire_logs/`, multiplied by worlds x draws at 10-32K input
-    tokens per call.
-
-    The sink is already denied to the model outright (`files.names_wire_log_dir`, both read
-    surfaces, every role), so the fix is a census correction and this demand is its witness:
-    assert the denial holds for a BOX BOUND INTO THE EPISODE TREE, where a sibling's run dir is
-    `{episode_dir}/runs/<id>-<label>` and the episode dir is its parent.
-
-    Positive control: the sibling's OWN run-root artifacts still read, so the denial is one
-    directory rather than a policy that refuses everything.
-    """
     pytest.importorskip("pydantic_ai")
     from defender.agents import MAIN_DEF
     from defender.runtime import permission
@@ -81,5 +55,3 @@ def test_921_the_wire_log_holding_the_framed_prompt_is_not_reachable_from_a_box(
         assert permission.decide_read(
             run_dir / "investigation.md", run_dir=env.run, defender_dir=env.dfn,
             policy=policy).allow, "the positive control failed: nothing reads at all"
-
-

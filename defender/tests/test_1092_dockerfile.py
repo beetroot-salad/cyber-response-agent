@@ -73,16 +73,6 @@ def test_the_dockerfile_pins_its_base_by_sha256_digest():
 
 # ---- d13 (negative; positive control: d14 — the two files ARE copied and synced) -----------------
 def test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code():
-    """The Dockerfile's one `COPY` from the build context is exactly `COPY pyproject.toml
-    uv.lock ./` (the context is `defender/`, #1098), under a `WORKDIR` set before it and ahead
-    of the sync that reads them — no source tree, no `.env`, nothing else — there is no `ADD`,
-    and no `RUN` binds the build context: every `--mount` on every `RUN` names a `from=` image
-    (the uv mount), so no step can reach past the COPY list and `cp` the context into a layer
-    (#1097 adversary H6). The mount parser is not blind: it sees the uv mount on the sync.
-
-    # rejected: bind-mounting an exported package list from the context into a `uv pip
-    # install --no-deps` step (#1097 round 1): a second copy of the lock, and an install that
-    # trusts the copy's completeness (the design amendment)."""
     instructions = _instructions()
     assert not any(ins.startswith("ADD ") for ins in instructions)
     copies = [
@@ -106,19 +96,6 @@ def test_the_dockerfile_copies_exactly_pyproject_and_uv_lock_and_no_code():
 
 # ---- d16 -------------------------------------------------------------------------------------
 def test_the_box_extra_is_exactly_duckdb_and_pytz_and_the_lock_provides_it():
-    """`pyproject.toml` declares an optional-dependency extra `box` whose entries are `duckdb`,
-    `libfaketime` and `pytz` (duckdb imports pytz, undeclared, to hand back a zoned timestamp —
-    #1126), and `uv.lock` provides that extra (its `defender` package lists
-    `optional-dependencies.box = [duckdb, libfaketime, pytz]` and `provides-extras` names `box`),
-    so `--locked` resolves it instead of erroring.
-
-    #1255 K3 (owner decision, 2026-10-16): the box's clock library is the PyPI `libfaketime`
-    wheel, installed by the recipe's existing sync — a deliberate, owner-approved widening of
-    the box boundary by one package (and its own dependencies, `test_1097_image_name_closure`).
-    The test keeps its name: `spec_graph_1092.yaml` binds it.
-
-    # rejected: `--extra runtime` (byte-for-byte the host venv): ships anthropic/openai/mcp/
-    # fastmcp into the boundary for no consumer (D1)."""
     pyproject = tomllib.loads((DEFENDER / "pyproject.toml").read_text(encoding="utf-8"))
     extras = pyproject["project"]["optional-dependencies"]
     assert "box" in extras, sorted(extras)

@@ -48,9 +48,6 @@ def test_the_run_root_is_otherwise_still_readable(stamped, which):
 
 @pytest.mark.parametrize("which", READERS)
 def test_the_bash_lane_agrees_with_the_read_tool(stamped, which):
-    """Both surfaces or neither. The JUDGE's `cat` scope is `under(run, TREE)`, which
-    fullmatches a run-root file, so a deny living only in `decide_read` would leave one surface
-    admitting the very path the other refuses."""
     assert not _bash(stamped, f"cat {RunPaths(stamped.run).provenance}", which).allow
 
 
@@ -67,8 +64,5 @@ def test_the_deny_is_rooted_not_a_bare_filename(tmp_path):
 
 
 def test_the_deny_holds_for_a_stamp_that_is_not_there_yet(stamped):
-    """Keyed on the NAME, not on the file existing: a run whose stamp write failed must not
-    become a run where the path is suddenly readable, or the gate would be strongest exactly
-    when there is nothing to protect and absent when a later write lands."""
     RunPaths(stamped.run).provenance.unlink()
     assert not _read(stamped, RunPaths(stamped.run).provenance, "main").allow

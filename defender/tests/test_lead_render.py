@@ -1,9 +1,3 @@
-"""Render the ## Query body for a handoff invocation.
-
-The driver passes the rendered query to the agent so unbound
-placeholders and wrong-shape bindings surface without forcing a
-payload read.
-"""
 from __future__ import annotations
 
 from pathlib import Path

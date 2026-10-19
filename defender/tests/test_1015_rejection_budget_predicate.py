@@ -29,9 +29,6 @@ from defender.scripts.gather_tools.record_query import (  # noqa: E402
 LEAD = "l-001"
 OTHER_LEAD = "l-002"
 
-#: A `system`/`verb` pair no budget string may ever echo, and one that cannot be mistaken for
-#: prose if it leaks. The complementary control is the REPEAT branch, which is entitled to name
-#: its target and does.
 LOUD_SYSTEM = "Zq7-Wintermute-Phantom"
 LOUD_VERB = "Zq7-Sunspot-Verb"
 
@@ -182,9 +179,6 @@ def test_a_below_guard_refusal_is_not_the_budgets_either():
 
 
 def test_another_leads_rejections_are_another_leads_problem():
-    """One budget per lead (the design's "not per-run"): leads are already bounded by main's
-    request limit, and a sibling's thrashing must not end this one. The control is the same
-    rows re-labelled, so this cannot pass on a predicate that never counts."""
     borrowed = _ghosts(REJECTION_BUDGET - 1, lead=OTHER_LEAD)
     own = _ghosts(REJECTION_BUDGET - 1, lead=LEAD)
 
@@ -213,24 +207,10 @@ def test_the_budget_trip_carries_integers_and_nothing_else():
     with pytest.raises(dataclasses.FrozenInstanceError):
         trip.occurrence = 99  # type: ignore[misc]
 
-    # KEYWORD-ONLY, for the reason `rejection_dead_end`'s two `str`s are. Two adjacent `int`s
-    # with a positional constructor transpose silently, and at an ordinary stop the two are
-    # EQUAL — so no fixture built at the budget can see it. It diverges only where the `>=`
-    # rule admits `occurrence > budget`, and there the transposition makes
-    # `rejection_budget_dead_end_reason` report the allowance instead of the rejections that
-    # happened, which the arm below says it must never do. `ValidationError`, not the stdlib
-    # `TypeError`, since #1067 put the trip on the pydantic decorator — the refusal is the
-    # property, its class is the decorator's.
     with pytest.raises(ValidationError) as refused:
         RejectionBudgetTrip(REJECTION_BUDGET, REJECTION_BUDGET)  # type: ignore[misc]
     assert {e["type"] for e in refused.value.errors()} >= {"unexpected_positional_argument"}
 
-    # NOT `trip != RepeatTrip(...)`: two distinct dataclasses never compare equal (each
-    # `__eq__` returns `NotImplemented` and Python falls back to identity), so that assertion
-    # holds for every possible pair of field values and pins nothing. What both dispatchers
-    # actually rest on is `isinstance`, and THAT can be broken — by making either type a
-    # subclass of the other, at which point a budget trip takes the repeat branch and main is
-    # handed the other guard's sentence.
     repeat = rq.RepeatTrip(first_seq=0, occurrence=REJECTION_BUDGET)
     assert not isinstance(trip, rq.RepeatTrip), \
         "a budget trip answers `isinstance(..., RepeatTrip)`, so both dispatchers describe " \
@@ -320,5 +300,3 @@ def test_the_dead_end_dispatcher_hands_the_budget_no_target_to_leak():
     assert LOUD_VERB not in b.escape
     assert "turned back at seq" not in b.reason, \
         "a budget stop tells main the request repeated one already turned back — O2"
-
-

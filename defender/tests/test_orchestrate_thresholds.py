@@ -71,9 +71,6 @@ def test_lead_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
 
 
 def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkeypatch):
-    """A non-numeric lift threshold surfaces inside the per-marker run as a
-    FatalConfigError. _drain_lead_author_markers must RE-RAISE it (systemic) rather than
-    quarantine the marker (the broad-guard disposition for per-item failures)."""
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "high")
     paths = _paths(tmp_path)
     run_dir = _state1135.curation_run_dir("run-x")
@@ -89,10 +86,6 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
 
     failed_dir = paths.state_root / "author-queue" / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
-    # #791: claim-and-serve is atomic (the marker moves into `inflight/` before it is
-    # served, so a re-ask landing on the same path mid-serve is never destroyed) — a
-    # systemic re-raise leaves it there, claimed but not quarantined, rather than at the
-    # top-level path it started at.
     assert (paths.state_root / "author-queue" / "inflight" / f"{run_dir.name}.json").exists()
 
 
@@ -167,9 +160,6 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
 
 
 def test_drain_pitfalls_swallows_a_plain_curation_error(tmp_path):
-    """The dead-letter branch of _drain_pitfalls: a plain curation hiccup must not wedge the
-    drain — it is logged and swallowed, so the call returns normally (the systemic StageAbort
-    path is the sibling reraise test)."""
     paths = _paths(tmp_path)
 
     def _run_pitfalls(_paths, _state, *, box=None, **_kw):
@@ -220,9 +210,6 @@ def test_run_or_dead_letter_reraises_systemic_faults():
 
 
 def test_run_or_dead_letter_propagates_declared_control_flow():
-    """A type in `propagate` is drain-specific control flow (e.g. _LeadAuthorRetry's
-    bounded retry), not a dead-letter: it escapes the guard for the caller to handle,
-    and the callback must not fire."""
     calls: list[Exception] = []
 
     def _boom():
@@ -313,24 +300,6 @@ def test_run_stage_maps_giterror_to_exit_2():
     assert cli._run_stage(stage) == 2
 
 
-# ---------------------------------------------------------------------------------------
-# #881 / O2 — the wake gate and the threshold measure rows that can be AUTHORED
-# ---------------------------------------------------------------------------------------
-#
-# `held_reason` is the drain's own "this row is held" marker: both gates stamp it on the copy
-# they hold (`author/lessons/run.py::_gate_family` and `::_gate_findings`), the forward-check
-# bucket writes it (`FINDINGS_BUCKETS`' `held_forward_bad`, `reason_field="held_reason"`), and
-# the closing rotation writes those stamped copies back (`author/drain.py::_author_and_rotate`
-# -> `persist.rotate_queue_locked`). Cited by SYMBOL: the line numbers this comment first
-# carried were `main`'s, and the same commit that wrote them moved every one. So a row
-# carrying it is one the drain has already looked at and declined to author — it is not work,
-# and counting it wakes the drain forever for a batch it will hold again.
-#
-# The trigger is not hypothetical: a pre-cutover adversarial/benign row left in a deployed
-# queue is held on every tick (as a retired direction since #1166), and pins the gate open
-# behind it.
-
-
 def _seed_queue(paths: LoopPaths, lines: list[str]) -> None:
     (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
     (paths.state_root / FINDINGS.queue).write_text("".join(line + "\n" for line in lines), encoding="utf-8")
@@ -345,19 +314,6 @@ def _row(fid: str, **extra) -> str:
 _HELD_REASONS = (
     "no_ground_truth(direction='adversarial', disposition=None)",
     "no_family_ground_truth(judge_outcome=None)",
-    # NO `forward_bad:` REASON HERE, and its absence is a demand. That hold is RETRYABLE —
-    # `_gate_findings` re-admits the row next tick — so it is not "already declined" and must
-    # not be subtracted from the wake gate's count. It carries `forward_bad_reason`, a
-    # different field, for exactly that reason (#881/O2); a fixture listing it here would pin
-    # the regression this test exists to forbid. `test_881_a_retryable_forward_check_hold_...`
-    # below is the positive statement of the same rule.
-    # THE THIRD IS THE POINT, and the other two are nearly a trap. Enumerate only the
-    # spellings in the tree and the fixture becomes a lookup table an implementation can
-    # match prefixes against — which greens while answering "pending" for every reason it
-    # does not recognise. That is not a hypothetical reader: the design's own corrected
-    # premise says the rows this defect strands are LEGACY ones from a deployed queue,
-    # written by a gate that may since have been reworded or deleted. The field is the
-    # contract; its value is the holder's prose.
     "held_by_something_that_does_not_exist_yet",
 )
 

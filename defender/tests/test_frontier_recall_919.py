@@ -22,22 +22,7 @@ from defender.tests._invlang_warn_836 import (  # noqa: E402
     attr_block,
 )
 
-# documents
-#
-# Every fixture below was EXECUTED against the real `diagnose` while this file was written and
-# carries ZERO diagnostics — `test_the_fixture_documents_carry_no_invlang_fault` re-asserts it
-# on every run. That is not decoration: an empty frontier is the expected answer for a
-# malformed document (case 7), so a fixture that quietly failed to parse would let a
-# do-nothing implementation pass half this file.
-#
-# `PROLOGUE` (two vertices, one lead, nothing open) is the base every document extends, so
-# each fixture carries exactly the ONE open thing under test and no other — the fixture-hygiene
-# rule `_invlang_warn_836` states.
 
-#: A `process` vertex whose CLASS cell is the bare open marker. `process` class is a single
-#: token (SKILL.md §Classification grammar), so `??` is the whole cell — which makes the
-#: `OpenSlot.value` unambiguous where a `compute` triple would leave "the unresolved value"
-#: readable two ways.
 OPEN_CLASS_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -49,9 +34,6 @@ v-006|process|??|nc[pid=4242]|image=/usr/bin/nc
 #: the frontier's "post-attr_updates" clause is the only thing that can drop the slot.
 CLOSE_CLASS_ROW = "l-001|v-006|class|nc"
 
-#: The motivating miss, verbatim in shape: a `process` vertex whose class is settled and whose
-#: `attrs.loginuid` is not. Two attributes, one open and one concrete, so a match on this
-#: vertex has to be a match on the SLOT rather than on the vertex.
 OPEN_LOGINUID_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -68,9 +50,6 @@ v-006|process|nc|nc[pid=4242]|image=/usr/bin/nc
 ```
 """
 
-#: An `identity` vertex whose IDENT cell is open and whose class and attributes are not. The
-#: whole of case 3 rests on this document reading as open to the frontier and as CLEAN to
-#: `_check_benign_open_slots`.
 OPEN_IDENT_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -78,9 +57,6 @@ v-005|identity|user/known-corp|??|
 ```
 """
 
-#: A `compute` vertex with a PARTIALLY open class triple: slot 0 concrete, slots 1 and 2 open.
-#: The ranking fixture, and the one that can tell the inversion from "everything matches" — a
-#: selector naming `bastion` must still miss on slot 0.
 OPEN_TRIPLE_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -88,10 +64,6 @@ v-003|compute|ip-only/??/??|10.42.7.183|knowledge=partial
 ```
 """
 
-#: The `{a, b}` half of the three-state progression `??` -> `{a, b}` -> concrete. Slot 0 is
-#: concrete, slot 1 is an ENUMERATED CANDIDATE SET. `is_unresolved` reads both markers, and
-#: without a fixture carrying this one an implementation that only ever tests `== "??"` is
-#: indistinguishable from a correct one.
 CANDIDATE_SET_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -99,9 +71,6 @@ v-007|compute|ip-only/{internal, dmz}/known-corp|10.42.7.9|knowledge=partial
 ```
 """
 
-#: One observed edge, one live hypothesis, and one authz contract attached to that edge. The
-#: hypothesis is LIVE (`weight null`, no refuting `:T resolutions`) so the frontier and the
-#: benign gate are looking at the same contract rather than at two different questions.
 AUTHZ_DECL_BLOCK = """
 ```invlang
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
@@ -115,9 +84,6 @@ ac1|e-001|iam-policy|"jsmith permitted to authenticate to the bastion at this ti
 ```
 """
 
-#: A SECOND live hypothesis carrying its own contract `ac2` on the same edge. Without a
-#: second contract, "any authorized row clears everything" and a real join on
-#: `fulfills_contract` are the same observable.
 SECOND_CONTRACT_BLOCK = """
 ```invlang
 :H l-001.new_hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
@@ -155,19 +121,12 @@ ac2|proposed|approved-source-list|"the source host is a documented admin worksta
 ```
 """
 
-#: A model that stopped mid-block: the fence never closes. EXECUTED — the tokenizer sees no
-#: block at all, so it draws zero diagnostics and the write gate ACCEPTS it, which is what
-#: makes it the shape case 7's tool half needs. It carries a literal `??` so a regex-shaped
-#: implementation that never parses would produce a slot here.
 HALF_WRITTEN_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-007|compute|??/??
 """
 
-#: The other half-written shape: the fence CLOSES but the row is three cells against a header
-#: requiring four, so the parser drops the row. EXECUTED — this one is an error-severity parse
-#: diagnostic and the write gate refuses it, so it exercises the derivation only.
 TRUNCATED_ROW_DOC = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-007|compute|??/??
@@ -277,9 +236,6 @@ def _exit_code(main, argv: list[str]) -> int:
 # case 1 — an open slot is in the frontier until a refinement closes it
 
 def test_an_open_class_slot_matches_until_a_refinement_closes_it(tmp_path):
-    """CLAIM: the frontier is the document's state AFTER `:R attr_updates`, so the same vertex
-    retrieves a lesson while its class is `??` and retrieves nothing once a refinement row
-    settles it."""
     from defender.skills.invlang.frontier import derive_frontier
 
     corpus = _corpus(tmp_path)
@@ -294,9 +250,6 @@ def test_an_open_class_slot_matches_until_a_refinement_closes_it(tmp_path):
     assert _frontier(closed_doc).slots == (), (
         "a `:R attr_updates` row closed the slot and it is still on the OPEN half"
     )
-    # ...and it moved to the held half rather than vanishing, which is what makes the
-    # complement claim in `test_a_settled_value_is_a_held_fact_and_not_an_open_slot` real
-    # from this direction too.
     assert any(h.vertex_id == "v-006" and h.slot == "class"
                for h in _frontier(closed_doc).held), "the closed slot went nowhere"
     assert match_lessons(_frontier(closed_doc), corpus) == []
@@ -371,9 +324,6 @@ def test_an_unresolved_ident_is_in_the_frontier_but_not_in_the_benign_gate(tmp_p
 # case 4 — contracts
 
 def test_a_contract_is_open_until_a_row_authorizes_it(tmp_path):
-    """CLAIM: a contract leaves the frontier on `verdict == "authorized"` and on nothing else. A
-    declared contract with no fulfilling row is open; a row carrying any OTHER verdict leaves it
-    open."""
     declared = _FIXTURE_DOCS["authz declared"]
 
     assert _contract_tuples(declared) == [
@@ -413,10 +363,6 @@ def test_an_edge_selector_matches_only_when_every_field_it_declares_is_equal(tmp
     hits = match_lessons(_frontier(_FIXTURE_DOCS["authz declared"]), corpus, top_k=10)
 
     assert _names(hits) == ["edge-both", "edge-kind-only"]
-    # ...and each declared field adds its own weight, so the two-field selector ranks first.
-    # The numbers are the edge lane's floor plus `rel`, not a count of fields: a count floored
-    # this whole lane below the node lane's floor, which is #935's defect 2. `ANCHOR_KIND_
-    # WEIGHT` + `REL_WEIGHT` against `ANCHOR_KIND_WEIGHT` alone.
     assert [h.score for h in hits] == [4, 3]
 
 
@@ -498,9 +444,6 @@ def test_append_block_carries_the_lessons_only_when_the_append_moved_the_recall(
 
 def test_a_malformed_block_yields_an_empty_frontier_rather_than_raising(tmp_path):
     """CLAIM: `frontier_from_text` never raises — a document it cannot read has an empty frontier."""
-    # Each shape is paired with the SAME document minus the malformed block, so the claim is
-    # "the broken block contributed nothing" rather than "the document was empty" — the two
-    # differ now that a settled `:V` cell is a held fact and `PROLOGUE` carries several.
     for label, doc, intact in (
         ("unterminated fence", PROLOGUE + HALF_WRITTEN_BLOCK, PROLOGUE),
         ("short row", TRUNCATED_ROW_DOC, ""),
@@ -554,15 +497,7 @@ def test_the_relocated_corpus_must_still_be_named_lessons(tmp_path, capsys):
     assert "process-class-open" not in capsys.readouterr().out
 
 
-# hardening (#919 review) — the holes a mutation sweep found in the cases above
-#
-# Every test below was written because a WRONG implementation survived the suite as it
-# first stood. Each names the mutation it kills.
-
 def test_an_open_case_slot_matches_a_concrete_selector_and_a_settled_one_does_not(tmp_path):
-    """CLAIM: the inversion — an UNRESOLVED case slot satisfies any selector slot — and it is an
-    inversion rather than "everything matches", because a slot that is settled to a different
-    value still misses."""
     corpus = _corpus(tmp_path)
     # Slot 0 concrete (`ip-only`), slots 1 and 2 open.
     _write_lesson(corpus, "hits-through-the-open-slot",
@@ -697,13 +632,6 @@ def test_render_of_nothing_is_empty_and_the_cli_honours_top_k(tmp_path):
     assert "beta" not in out, "--top-k did not reach the retrieval"
 
 
-# hardening, round 2 — what an adversarial implementer got away with
-#
-# A throwaway implementation passed the suite above while (a) never calling
-# `match_lessons` from the tool at all, (b) never opening `--investigation`, (c) discharging
-# every contract off any one authorized row, and (d) folding only `class` refinements. Each
-# test below is the decoy that makes one of those impossible.
-
 def test_the_tool_pushes_only_the_lessons_that_matched(tmp_path):
     """CLAIM: `_tool_append_block` is wired to `match_lessons`, not to a directory listing."""
     from defender.runtime.tools import _tool_append_block
@@ -818,10 +746,6 @@ v-008|process|??|nc[pid=4242]|loginuid=??
         "a class literal the document never mentions outranked the exact open slot"
     )
 
-    # ...and STRICTLY, which is the half this test could not see (#935). It ran at `top_k=9`
-    # and asserted only scores, so it stayed green while the two TIED at 2 and the emitted
-    # top-3 was decided by the alphabet — cutting the loginuid lesson its own docstring is
-    # about. The ordering at the real cut is the observable.
     assert _names(match_lessons(_frontier(open_class), corpus, top_k=1)) == [
         "zzz-names-the-open-attribute"
     ], "the exact open slot must lead the block, not lose a coin-flip to `aaa`"
@@ -880,26 +804,6 @@ def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
 
 
 def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
-    """CLAIM: the rendered path is ABSOLUTE, and the `matched` line is part of the block.
-
-    Both were unpinned, which is why the repo-relative spelling shipped green. MAIN's
-    `cwd_anchor` is the RUN DIR, so `_resolve_operand` rebases `defender/lessons/<name>.md`
-    onto the run dir and `decide_read` refuses it — `test_grant_gate_575.py::test_a11` pins
-    that spelling as DENY, on the grounds that "nothing hands MAIN that spelling any more".
-    A block that hands it one costs a refused tool call per lesson and degrades the whole
-    push to description-only, which is the one thing SKILL.md says not to decide on.
-
-    Asserted through the REAL gate rather than against a string shape, because the property
-    is "MAIN can read this", not "this starts with a slash". The `matched` half rides along:
-    `HIDDEN_KEYS` strips the selectors, so it is the model's only account of why a lesson was
-    pushed, and every other assertion in this file is satisfied by the `name:` key inside the
-    frontmatter dump.
-
-    #1255 (design rev 4, P1 Outbound/Inbound; rev 5, C9 and C11): the block is taken where the
-    model receives it -- the write return of MAIN's own `append_block`, over deps built by
-    `bind` -- rather than from `render(hits)` called bare, which knows no run and so no model
-    view. The path it quotes is the lesson's model path under `/defender`, and MAIN's
-    `read_file` maps it back through the same deps."""
     from defender.runtime.tools import _tool_append_block, _tool_read_file
     from defender.tests._1255_view import MODEL_DEFENDER
 
@@ -953,11 +857,6 @@ def test_a_pushed_lesson_is_recorded_the_way_a_read_one_is(tmp_path):
     )
 
 
-# the in-hand axis — `observed_nodes`
-#
-# Keying only on OPEN slots made #919's own motivating lesson unreachable: the alert carries
-# `loginuid=-1` concretely, so the slot it keyed on never opened. These pin the second half.
-
 #: A `process` whose class and attributes are all SETTLED. Nothing here is open, so the whole
 #: document is invisible to `frontier_nodes` and visible only to `observed_nodes`.
 SETTLED_BLOCK = """
@@ -979,9 +878,6 @@ def test_a_settled_value_is_a_held_fact_and_not_an_open_slot(tmp_path):
     assert ("v-008", "class", "user/anonymous") in held
     assert not f.is_empty(), "a document with held facts and no open slot reported empty"
 
-    # ...and the mirror, over ALL THREE slot kinds rather than just `class`: an unresolved
-    # cell must be absent from the held half. Checking one kind let a mutation that
-    # double-counted ATTRIBUTES pass, which is the kind the motivating lesson keys on.
     for label, fixture in (
         ("class", _FIXTURE_DOCS["open class"]),
         ("attrs", _FIXTURE_DOCS["open loginuid"]),
@@ -1011,5 +907,3 @@ def test_observed_nodes_retrieves_on_a_value_the_document_settled(tmp_path):
         "the settled value reached the wrong lane — `observed_nodes` must match a concrete "
         "cell and `frontier_nodes` must not"
     )
-
-

@@ -87,10 +87,6 @@ print(json.dumps({"writes": writes, "listing": listing}))
 '''
 
 
-# ==========================================================================================
-# Whether a box can start here, and what a parameter does when it cannot.
-# ==========================================================================================
-
 def _docker_runtimes() -> frozenset[str]:
     probe = subprocess.run(
         ["docker", "info", "--format", "{{range $k, $v := .Runtimes}}{{$k}} {{end}}"],
@@ -136,10 +132,6 @@ def _skip_or_fail(reason: str, environ: Mapping[str, str]) -> NoReturn:
         pytest.fail(f"the S3 box boundary cannot skip in CI: {reason}")
     pytest.skip(reason)
 
-
-# ==========================================================================================
-# The session: one real tenant runs folder, one real box, one probe.
-# ==========================================================================================
 
 def _outside_run(state: dict[str, Any]) -> dict[str, Any]:
     """The runs folder's tree minus the run's own folder's contents (the box's rw bind, where
@@ -204,19 +196,8 @@ def _writes(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {w["label"]: w for w in probe.get("writes", [])}
 
 
-# ==========================================================================================
-# The tests.
-# ==========================================================================================
-
 def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_episodes(
         box_session):
-    """From a sandboxed box started for a run under tenant.runs whose id is exactly 206 bytes
-    (the container is named defender-run-<id>, 219 characters, under each runtime in RUNTIMES,
-    runsc included: RG-27-b), the box starts sandboxed, and a write to the runs folder (a sibling
-    folder, '../x'), to _tenant.json and to _episodes/x.json each fail and leave the host tree
-    unchanged, while a control write inside the run folder lands (the shape of GR-A1 and GR-A2).
-    The file skips with its reason where no daemon or no registered runtime can start a box. The
-    host tree is observed entry for entry and through the repository's own readers."""
     from defender.run_repository import RunId, sibling_run_ids
 
     s = box_session
@@ -246,13 +227,6 @@ def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_
 
 def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record_episodes_or_a_sibling(
         box_session):
-    """in the same sandboxed box session as the S3 writes, for a run whose id is exactly 206
-    bytes (a 219-character container name under each runtime in RUNTIMES), listing
-    run_dir.parent shows exactly the run's own folder; a planted sibling run folder,
-    _tenant.json, _episodes/ and a sidecar file beside the run are not listed; positive control:
-    the box started sandboxed, the run's own folder is listed and its control write lands. The
-    host's own view of the same folder, through the repository, holds each planted run (the
-    219-byte sidecar name, beyond RunId's bound, is checked on disk)."""
     from defender.run_repository import RunId
 
     s = box_session
@@ -271,5 +245,3 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
             f"the host's runs folder holds {name!r}, which the box must not list")
     for name in ("_tenant.json", "_episodes", f"{RUN_ID}{H.SIDECAR_SUFFIXES[0]}"):
         assert (s["runs"] / name).exists(), f"the host's runs folder holds {name}"
-
-

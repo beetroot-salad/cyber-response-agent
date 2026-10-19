@@ -95,18 +95,6 @@ def test_a_ledger_row_at_or_under_the_limit_is_recorded_whole_and_read_back(tmp_
 @pytest.mark.parametrize("depth", [LIMIT + 1, FAR])
 def test_a_deep_served_call_is_refused_before_the_estate_and_files_nothing(
         tmp_path, caplog, depth):
-    """Through the real serving frame. The deep call is refused UP FRONT — the estate adapter
-    is never entered — the registry re-raises `LedgerError` UNTOUCHED, and the ledger file
-    gains no line at all: no `base` row, no world row, and no FAULT row re-filed with the same
-    deep params.
-
-    The adapter check is what tells a refusal at the door from a backstop after the call ran:
-    a registry that only turned the ledger's late refusal (or a `RecursionError` from keying
-    the call) into `LedgerError` would still have run the call against the estate — a read the
-    family then has no record of. The warning check tells a `LedgerError` refusal from any
-    other: anything else is caught by `_served`'s `except Exception` and re-filed as a FAULT
-    row through `_record_beside`, which the ledger then refuses as well and the registry logs.
-    The at-limit control below shows the same adapter IS entered for a call it can record."""
     ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
     ctx = run_ctx(tmp_path)
@@ -129,11 +117,6 @@ def test_a_deep_served_call_is_refused_before_the_estate_and_files_nothing(
 
 
 def test_a_served_call_at_the_limit_records_its_row_and_keeps_its_base_read(tmp_path):
-    """The positive control on the same address: at the limit the same call reaches the estate
-    adapter once, is served, and leaves its readable record — the world's own `passthrough`
-    row, and its live base read kept in the world's oracle store (#1224: never a ledger row,
-    M16) — each carrying the params whole. (#1255 D3: the live read takes the world's oracle
-    turn, which serves it unchanged.)"""
     ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
     host = chain(LIMIT - 1)
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"),
@@ -163,11 +146,6 @@ def test_a_served_call_at_the_limit_records_its_row_and_keeps_its_base_read(tmp_
 @pytest.mark.parametrize("depth", [LIMIT + 1, FAR])
 def test_a_deep_call_to_a_denied_verb_is_refused_before_the_decision_and_files_nothing(
         tmp_path, caplog, depth):
-    """#1127 review: `authorize_call` files a REFUSED row for a denied verb through
-    `_record_beside`, which logs and drops a write that fails. A too-deep call there used to reach the ledger, be refused, and be dropped with a
-    warning — the call then read as never asked. It is now refused at the door, as the
-    ledger's own `LedgerError`, before the grant is decided: no row is attempted, so none is
-    dropped. The control: the same denied call, shallow, files its REFUSED row."""
     ledger_path = tmp_path / "ep" / "served" / "w1.jsonl"
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
 
@@ -191,12 +169,6 @@ def test_a_deep_call_to_a_denied_verb_is_refused_before_the_decision_and_files_n
 @pytest.mark.parametrize("depth", [LIMIT + 1, 99])
 def test_a_captured_row_too_deep_to_carry_is_unreadable_and_the_rest_still_primes(
         tmp_path, depth):
-    """#1127 review: the queries table reads rows up to its own bound (params 99 deep, the row
-    one level more), but a ledger row carries at most 32. A source run holding such a row —
-    written before the limit, or planted through the box-writable table — used to abort the
-    whole prime with an uncaught `ParamsTooDeep`, on every retry, so that branch point could
-    never be branched. It is lost evidence like any other: counted `unreadable`, and the
-    shallow call beside it is primed."""
     prime = importlib.import_module("defender.tests.test_947_capture_prime")
     run_dir = prime.source_run(tmp_path)
     deep = params_of_depth(depth)

@@ -32,47 +32,7 @@ def _ids_in(line: str, label: str) -> str:
     return found.group(1)
 
 
-# ---------------------------------------------------------------------------------------
-# O3 — a row the pre-author gate holds is named in the held report
-# ---------------------------------------------------------------------------------------
-
-
 def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_report(tmp_path):
-    """#881/O3, through the real `run_batch` on the real findings channel.
-
-    BOTH ARMS OF THE GATE HOLD, and both must be named. An adversarial finding — a direction
-    nothing authors since #1166 — is held with `retired_direction(...)`; a `direction:
-    family` row carrying a retired name (here a pre-#1234 `judge_outcome`, #1234 I10/A4) is
-    held by the family partition with `retired_name(...)`. Both are permanent — the facts they wait on have no writer
-    any more — so they sit in the queue on every tick from now on, and a report that names
-    one arm and not the other is silent about exactly the rows an operator has to move by
-    hand. Naming one reason prefix is not naming the gate's holds.
-
-    THE FIRST TICK IS MIXED — two held rows and one authorable one — because that is the
-    shape `_write_held_report_after_rotate` calls itself UNCONDITIONAL for. A report written
-    only when the tick committed nothing is invisible on every batch that did any work, which
-    is most of them; the batch where a row was declined WHILE its neighbours were authored is
-    the one an operator most needs. The agent's captured batch is asserted to be exactly the
-    authorable row, so "mixed" is a fact about the tick and not about the seeding.
-
-    THE SECOND TICK HOLDS A DIFFERENT ROW, and the first tick's line must still be there. The
-    report is an append-only ledger; a writer that opened it `"w"` would satisfy every
-    single-tick assertion above while destroying the record of the tick before — and a
-    control that only asserts the file is UNCHANGED cannot see that, because the tick it
-    checks never opens the file at all.
-
-    THE THIRD TICK IS THE PAIRED CONTROL, on the same address under the complementary
-    condition: it holds nothing, and the report gains nothing. Without it a writer that
-    appended a line every tick would pass everything above while making the report
-    unreadable — which is the same as not having one.
-
-    Each held id is also asserted NOT to be inside `deferred_ids=[...]` or
-    `skipped_ids=[...]`. `DrainOutcome.held` is typed as the AUTHOR_RESULT bucket holds, so
-    folding the gate's holds into that bucket would report a row the curator never saw as a
-    deferral, and a skip is terminal where a hold is forever. What the
-    third label IS is the implementation's to choose; that it is neither of those two is the
-    demand.
-    """
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     legacy = h.row_for("findings", "a/0", direction="adversarial")
@@ -134,11 +94,6 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
         "a tick that held nothing appended to the held report anyway; a report that grows "
         "on every tick names nothing"
     )
-
-
-# ---------------------------------------------------------------------------------------
-# O4 — the unkeyable-row retirement is inside the stuck-recording guard
-# ---------------------------------------------------------------------------------------
 
 
 class _StateThatLetsAnAppenderIn(LearningState):
@@ -233,9 +188,6 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(
     appender = h.Holder(paths.state_root / ch.append_lock)
 
     def _an_appender_arrives() -> None:
-        # Synchronous, and it must be: `Holder.__enter__` returns only once the appender
-        # OWNS the lock, which is the whole guarantee. Nothing holds it at this point in the
-        # tick, so it returns at once.
         appender.__enter__()
 
     real = LearningState.open(paths)
@@ -252,11 +204,6 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(
             "lock with no deadline, holding the repo lock while it does"
         )
     finally:
-        # CLEANUP ONLY. An assertion here replaces whatever diagnosis the block above was
-        # about to raise, and — because it raises BEFORE the release — leaves a real `flock`
-        # parked for `Holder`'s 60s wait and the drain worker unjoined, so the next call to
-        # this helper on the same channel contends with the last one's corpse. Release
-        # first so a tick still waiting on the lock can finish, then join it.
         appender.__exit__()
         tick.__exit__()
     assert appender.acquired is True, (
@@ -285,26 +232,6 @@ def _unkeyable(rid: str, **body) -> dict:
 def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_record(
     tmp_path: Path,
 ):
-    """#881/O4: the tick's THIRD fault-bearing region is inside the guard the other two are.
-
-    The reproduction is the real one. An appender arrives in the window the retirement itself
-    opens between releasing the append lock and asking for it again — an ordinary append, on
-    the real lock, with the appender's own no-deadline discipline — and the retirement's
-    rotation then expires against it. `TimeoutError` is
-    deliberately outside `RETIRE_SET` (a busy lock is not the batch's fault), so nothing
-    retires and the row stays queued; the stuck report is by construction the ONLY external
-    trace such a tick can leave.
-
-    Asserted: exactly ONE record, naming `TimeoutError`, with the graveyard holding exactly
-    the one entry the retirement had already written before it reached the lock — so the
-    fault is recorded once per tick, not once per row and not once per handler on the way
-    out.
-
-    THE PAIRED CONTROL is the second half: the same row, retired on an UNCONTENDED tick,
-    completes and writes NO further stuck record. An implementation that recorded every
-    unkeyable retirement would satisfy the first half and turn the stuck report into a log of
-    ordinary bad data, which is the one thing it must not be.
-    """
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [_unkeyable("a/0")]
@@ -331,12 +258,6 @@ def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_
         "from a broken one"
     )
 
-    # The control: the same retirement, uncontended, is ordinary work and records nothing.
-    # A FAKE AGENT even though this half cannot reach one: with an all-unkeyable batch
-    # `to_author` is empty and `_author_and_rotate` short-circuits, so the default config's
-    # REAL `invoke_agent` (the curator subagent stage) is unreached only by accident. A gate
-    # that starts emitting a row here would turn a unit test into a live model call that
-    # hangs to `author_timeout` and fails as a timeout rather than as its own assertion.
     uncontended = h.cfg_for(
         paths, "findings", repo_lock_wait_seconds=1,
         invoke_agent=h.recording(h.committing("881-o4-control")),
@@ -353,28 +274,6 @@ def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_
 def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded_too(
     tmp_path: Path,
 ):
-    """#881/O4 at the retirement's OTHER seams — the demand is a GUARD ROUND THE STEP, not a
-    clause round its last line.
-
-    The retirement crosses several seams before it reaches the rotation: it derives the
-    graveyard path, appends the retiring rows to it, and logs. A guard wrapped round the
-    rotation alone — or one that names only `TimeoutError`, the class the sibling test
-    injects — passes that test and leaves every earlier seam exactly as it was: the fault
-    escapes `run_batch`, nothing is graveyarded, nothing is recorded, and the channel is
-    wedged in silence. That is the shape this suite has shipped before (PR #678: a catch-all
-    fault demand discharged at one seam and believed of the whole region).
-
-    The fault is met at a real seam: the graveyard append, on the very file the retirement
-    exists to write, answers `ENOSPC` (`_StateWhoseDiskIsFull`; before #1135 it was a folder
-    planted at the graveyard path, which the handle now refuses as `StateRefused` and records
-    nothing for, by design). `OSError` is not in `RETIRE_SET`, so nothing retires and the row
-    stays queued.
-
-    THE PAIRED CONTROL is the second half: with the obstruction removed the same retirement
-    completes, graveyards its row and records nothing further — so the guard cannot be
-    satisfied by recording every retirement, and the channel is shown to be recoverable
-    rather than merely loud.
-    """
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [_unkeyable("a/0")]
@@ -421,26 +320,6 @@ def test_881_a_fault_before_the_rotation_in_the_unkeyable_retirement_is_recorded
 def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_list(
     tmp_path: Path,
 ):
-    """#881/O4's counter: `consecutive_ticks` is what turns "this failed" into "this has been
-    stuck for N ticks", and it folds on `(fault_class, row_ids)`.
-
-    A keyless row has no id to contribute. So the two halves below are the same to a dedup key
-    built from ids alone, and they must not be: the FIRST is one queue stuck across two ticks
-    (fold — the count rises to 2), the SECOND is two unrelated ticks over different bad rows
-    (do not fold — two records, each at 1). Folding them would report a channel that ate two
-    different poison rows as one problem that has been going on for a while; splitting the
-    first would reset the count on every tick and never let a stuck queue look stuck.
-
-    THE TWO DIFFERENT ROWS SHARE A `run_id` AND DIFFER ONLY IN THEIR BODY. A row's other
-    fields are the obvious place to reach for a stand-in id, and `run_id` is the nearest to
-    hand — but one run yields many findings, so a key built on it folds two unrelated poison
-    rows from the same run into one rising count: the exact misreading this test exists to
-    prevent, wearing a different name. Only the row's own content tells them apart.
-
-    Written as one test over two repos because neither half is an oracle alone — the pair is
-    what discriminates a content fingerprint from an empty id list, or from any key coarser
-    than the row.
-    """
     same = h.make_paths(tmp_path / "same")
     same_ch = h.channel_of("findings")
     h.seed(same, same_ch, [_unkeyable("a/0")])
@@ -486,33 +365,7 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
     )
 
 
-# ---------------------------------------------------------------------------------------
-# O2's other half, in the drain — a tick does not return early on a queue it cannot parse
-# ---------------------------------------------------------------------------------------
-
-
 def test_881_a_queue_of_only_unreadable_lines_is_cleared_by_the_tick_it_wakes(tmp_path: Path):
-    """#881/O2 at the drain end: `_tick` must NOT return on an empty batch while unreadable
-    lines remain.
-
-    The two halves of this contract live in two modules and only one of them was pinned.
-    `core/drains._pending_queue_counts` counts an unreadable line as work — so the wake gate
-    fires for a queue of nothing but junk — and the tick it wakes is the only thing that can
-    clear it, because a line the tolerant reader could not turn into a row has no id, cannot
-    be matched, and cannot be graveyarded. A tick that returned early on `not batch` would
-    leave the junk counted and uncleared: the gate re-firing on the same bytes every pass,
-    fetching, minting a worktree and starting a box to read them again, forever. That is
-    #881/O2's own defect wearing the other mask, and restoring the early return is the
-    obvious cleanup for anyone who reads "run a whole tick for no rows" as waste.
-
-    THE PAIRED CONTROL is a genuinely empty queue on the same address: it returns without
-    reaching the author, so "falls through" is a fact about the junk and not about `_tick`
-    having stopped short-circuiting at all.
-
-    The agent is asserted UNREACHED on both halves. There are no rows to author either way,
-    and a fall-through that started handing the curator an empty batch would spend a real
-    model call on nothing.
-    """
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     (paths.state_root / ch.queue).parent.mkdir(parents=True, exist_ok=True)
@@ -537,11 +390,6 @@ def test_881_a_queue_of_only_unreadable_lines_is_cleared_by_the_tick_it_wakes(tm
 
 
 def test_881_unreadable_lines_beside_a_real_row_do_not_take_it_with_them(tmp_path: Path):
-    """The mixed queue: the rotation that drops the junk rewrites the file from the rows it
-    CAN read, so a well-formed row sharing the queue with a torn line must survive it.
-
-    Without this the sibling above is satisfied by a tick that simply truncates the queue,
-    which would delete every queued finding the moment one appender tore a line."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     keep = h.row_for("findings", "a/0", direction="adversarial")  # held, so it stays queued
@@ -559,28 +407,6 @@ def test_881_unreadable_lines_beside_a_real_row_do_not_take_it_with_them(tmp_pat
 def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sticks(
     tmp_path: Path,
 ):
-    """#881/O4's guard has to NAME the rows the phase in flight is stuck on, and the phase
-    the wide guard covers last is not the authoring one.
-
-    `_author_and_rotate` runs the closing rotation and the held-report write after the agent
-    region, and on a tick the gate held whole there is no agent region at all — the rows in
-    flight are the gate's holds, which that rotation is what writes back. Labelling the whole
-    call with `to_author` names `[]` for exactly that tick: none of the stuck rows reported,
-    and — because `_record_stuck` folds on `(fault_class, row_ids)` and an empty list is a
-    foldable key — every such tick on every queue merging into one rising `consecutive_ticks`.
-    An operator paging on "stuck for N ticks" would read one problem where there are several,
-    and could not say which rows any of them is about.
-
-    The fault is met at a real seam: the held report's append answers `ENOSPC`
-    (`_StateWhoseDiskIsFull`; before #1135 it was a folder planted at the report's path, which
-    the handle now refuses as `StateRefused` and records nothing for, by design) — `OSError` is
-    not in `RETIRE_SET`, so nothing retires. It fires only because the gate held something, which is the same
-    condition that empties `to_author`, so the two halves cannot be separated by the fixture.
-
-    THE PAIRED CONTROL is the same tick unobstructed: it holds the same rows, writes its
-    report, and records nothing — so the guard cannot be satisfied by naming rows on every
-    tick that holds anything.
-    """
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     held = [h.row_for("findings", f"a/{i}", direction="adversarial") for i in range(3)]

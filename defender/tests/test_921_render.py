@@ -14,10 +14,6 @@ from defender.tests import _state1135
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    # The learning STATE root too, so the shared findings queue this pass appends to is
-    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
-    # here rather than in the appender: a production path that picks a different queue when
-    # an env var is unset is a pass whose rows can land where no drain reads.
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -56,27 +52,7 @@ def _prompts(tmp_path, ep, **kw):
     return judge
 
 
-# ---------------------------------------------------------------------------------------
-# O4 / D4 / M1 — the joined views and the correlating prompt
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread(tmp_path):
-    """The rendered input carries, PER LEAD, goal -> params -> payload -> summary ->
-    resolutions, plus coverage against the discriminator and the lessons loaded.
-
-    A judge input built from the two documents alone is O4's stated failing mode and is exactly
-    what scored 0.2-0.3/3 while inventing 2.0-2.8 false findings per reply (C9). Every view
-    is asserted as present, because the measured collapse was of the whole set. (#1105 PR 2,
-    J3: the same-alert sibling union and its trial spread left the judge's input — the judge
-    reads only the episode it is handed — so their two assertions went with them.)
-
-    `document_rows` — the lead's raw queries-table rows, stringified whole — left the chain with
-    #1017 (D3): nothing in the prompt can act on `system_key`, `payload_sha256`, `payload_path`,
-    `raw_command`, `exit_code` or `error_class`, and under an operator's cap the dump crowded
-    out real evidence. `params` and `payload` are the semantic content and stay;
-    `tests/e2e/test_1017_query_row_surface.py` pins what the leads view may and may not carry.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     ctx = _render().render(ep, "b")
     judge_input = ctx.focus
@@ -91,15 +67,6 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
 
 
 def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_path):
-    """Every call the judged world made reaches the prompt with its decision word and the
-    params it ran with — window and scope key included — beside the family's discriminator.
-
-    Those two columns are what M1 added to the ported view; since #1224 the per-call view
-    (`JudgeInput.calls`, never cut by the cap) carries them, and the discriminator is the
-    family's predicate (`holding_system` is retired with cluster staging). #1234: the call
-    list is the joined one (`JudgeContext.focus_calls`, A12), and what reaches the model is
-    read off the real prompt.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     ctx = _render().render(ep, "b")
 
@@ -116,13 +83,6 @@ def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_
 
 
 def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
-    """The prompt demands the correlation, scope and derivation passes before findings, and a
-    reply without the three pass tables is refused.
-
-    This is the half the experiment measured directly: the cadence break, never noticed in ten
-    replies, went 0/5 -> 5/5 once a derivation pass was demanded (C10). The demand has both
-    halves — the prompt ASKS for the three passes, and a reply that omits them does not stand.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     judge = _prompts(tmp_path, ep)
     prompt = judge.prompts[0]
@@ -136,19 +96,7 @@ def test_921_reply_without_the_three_pass_tables_is_refused(tmp_path):
     assert run_mod.validate_reply(J.as_reply_text(J.reply_doc())).bucket == "lead-set"
 
 
-# ---------------------------------------------------------------------------------------
-# O5 / N10 — counterfactual siblings, empty unions
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_no_sibling_facts_reach_the_prompt(tmp_path):
-    """#1234 rewrite (design M1, M3): the withholding this pinned is REVERSED. A world is now
-    judged against its reference runs, so a sibling's facts DO reach its prompt — but only as
-    that reference run's facts, in its own labelled section, and the task says so; no sentence
-    claims any world's facts are withheld (the retired framing). The measured failing mode the
-    withholding answered (C11: sibling facts cited as facts about the judged world) is now
-    answered by the label and that sentence.
-    """
     secret = "SIBLING-ONLY-INJECTED-FACT"
     worlds = [
         J.world_doc("a", role="A", axis=None, disposition_declared="benign", facts=[]),
@@ -169,12 +117,6 @@ def test_921_no_sibling_facts_reach_the_prompt(tmp_path):
 
 
 def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
-    """The paired positive control: the graded world keeps its OWN facts and nothing marks them
-    withheld (#1234: no world's facts are; the withholding framing is retired, M3).
-
-    Without it, `assert secret in prompt` above is also green on a render that dumps every
-    world's facts under the judged world's own label.
-    """
     mine = "GRADED-WORLD-OWN-INJECTED-FACT"
     worlds = [
         J.world_doc("a", role="A", axis=None, disposition_declared="benign", facts=[]),
@@ -191,19 +133,7 @@ def test_921_graded_world_keeps_its_own_facts_and_is_not_withheld(tmp_path):
     assert "withheld" not in prompt.lower(), "the graded world's facts were marked withheld"
 
 
-# ---------------------------------------------------------------------------------------
-# O8 / D7 — reproducible from the archive, the runs base and the checkout
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_render_reads_no_sibling_run_dir(tmp_path):
-    """The render builds its input with every sibling run dir under `{episode_dir}/runs/`
-    DELETED — #947's D3 says they may be gone.
-
-    That is what D7's three archived inputs buy, and DELETING THE RUN DIRS IS THE DRIVE, not a
-    mock: a render that still reached for one would fail on a path that is not there, rather
-    than pass against a stub that answers.
-    """
     import shutil
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
@@ -218,13 +148,6 @@ def test_921_render_reads_no_sibling_run_dir(tmp_path):
 
 
 def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_commit(tmp_path):
-    """The paired positive control: with the run dirs PRESENT or ABSENT the render produces the
-    same input, built from the archived world dir, the runs base and the checkout at the
-    sibling's recorded commit.
-
-    Without it, "the render reads no sibling run dir" is also satisfied by a render that reads
-    nothing at all.
-    """
     import shutil
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
@@ -242,13 +165,6 @@ def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_comm
 
 
 def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_path):
-    """Each archived world gains `gather_summaries/`, `lessons_loaded.jsonl` and `alert.json`
-    beside the four single files and two screened tables it already carries (C17).
-
-    `_single_files` has TWO readers — the screen and the copy — so a name in one and not the
-    other is an artifact that is checked and not copied (run1/G28); both halves are exercised by
-    driving the real `archive_episode` over a real sibling run dir and reading the archive back.
-    """
     archive = J.mod("learning.branch.archive")
     ep = J.episode(tmp_path)
     runs = ep / "runs"
@@ -273,32 +189,6 @@ def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_p
 
 def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps_the_rest(
         tmp_path):
-    """`gather_summaries/` is a directory of model-written `{lead_id}.md` files and takes the
-    per-entry-screened `stage_tables` walk, not a blind `copytree` and not `_screen` + `copy2`:
-    a non-artifact entry at any depth is REFUSED AND REPORTED, and the rest of the world still
-    archives.
-
-    P10, executed: the screen IS all-or-nothing and `stage_tables` IS per-entry-screened — but
-    the single-file `copy2` loop has NO rollback, so a genuine mid-copy I/O fault still leaves a
-    half-populated `worlds/<label>/`. The archive's docstring guarantee ("archives NOTHING
-    rather than a half-world") covers only screen-detected refusals, which is why J5's tier rule
-    has to cover a partially archived world rather than relying on M7 to prevent one.
-
-    The fault is real input through the real primitive: a symlink is planted inside the
-    directory, pointing outside the tree.
-
-    BOTH HALVES ARE DRIVEN, and the second is F-7, settled at the phase-F seam. The screen path
-    keeps the world whole (first half). The path the screen does NOT cover leaves the world
-    short, and that state is MALFORMED: the judge pass excludes that world, marks it malformed
-    and names the input that was short, rather than grading it normally on a thinner view. This
-    test used to cite the half-populated world in its docstring and drive only the screen — the
-    one path P10 says IS all-or-nothing — so the state the citation is about reached no
-    assertion at all.
-
-    The exclusion is the WORLD's, not the pass's: a sibling whose own archive is whole still
-    grades, because one world's bad artifact is not a reason to throw away a clean sibling's
-    grade and leave no record of either.
-    """
     archive = J.mod("learning.branch.archive")
     ep = J.episode(tmp_path)
     runs = ep / "runs"
@@ -320,11 +210,6 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
         "a link's TARGET was copied into the archive as if the world had written it")
     assert (world / "report.md").exists(), "the rest of the world stopped archiving"
 
-    # F-7 — the half the screen does not cover. The `copy2` loop has no rollback, so the state
-    # a mid-copy I/O fault leaves is a world holding its five required inputs with a supporting
-    # directory SHORT. P10 established that state is reachable; it is written to disk here
-    # rather than induced by an imagined disk fault, and the assertion is that the pass excludes
-    # that world LOUDLY and says which input was short.
     partial = J.accepted_episode(tmp_path / "partial",
                                  ledgers={"b": [J.oracle_row("b")], "c": []})
     assert J.rows(J.grade(partial))["b"].get(
@@ -346,14 +231,6 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
 
 
 def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(tmp_path):
-    """Lesson BODIES are not archived: they are read from the checkout at the sibling's recorded
-    commit, through the sanctioned git facade (`_git.git_show_file`).
-
-    Any new `["git", …]` list literal under `defender/` is a new `lint_raw_git_subprocess`
-    finding, so the facade is the contract and not a preference. Positive control on the same
-    render: the body IS carried into the lessons view, so "not archived" cannot pass on a render
-    that shows no lesson at all.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     git_show = J.FakeGitShow(
         bodies={("deadbee", "defender/lessons/L1.md"): "# L1\n\nthe body\n"})
@@ -367,14 +244,6 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
 
 
 def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_how_it_reached_the_model(tmp_path):
-    """`lessons_loaded.jsonl` is an EVENT log — a row per time a lesson reached an agent, and
-    since #936 the compaction fold writes a `push` row per matching lesson at every boundary
-    on top of the read and write-return rows — while this view is the SET of what was in
-    front of the model. Rendered per row, a lesson the run kept matching would put its whole
-    body in the judge's prompt once per boundary, weighting the judge toward it by repetition;
-    and a `push` row means the model saw a description, not the body, which the judge must be
-    told or it weighs the body as read. Control on the same render: two DIFFERENT lessons
-    still render two bodies."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     rows = [
         {"lesson_name": "L1", "ts": "2026-07-28T17:00:00Z", "kind": "read", "role": "main"},
@@ -395,9 +264,6 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
     assert lessons.count("the second body") == 1, "control: the other lesson still renders"
     assert lessons.index("the first body") < lessons.index("the second body"), (
         "first-occurrence order — the order the lessons reached the model")
-    # HOW each reached the model, beside its body — the record's one reader
-    # (`hooks.record_lesson_load.exposures`) says `read` for L1 and `push` for L2, and a push
-    # showed the model a description and dimensions, not the body the judge is handed here.
     l1 = lessons[lessons.index("### L1"):lessons.index("### L2")]
     l2 = lessons[lessons.index("### L2"):]
     assert "read by the model at 2026-07-28T17:00:00Z" in l1, l1
@@ -407,18 +273,6 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
 
 
 def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothing(tmp_path):
-    """`git_show_file` RAISES NOTHING: a fabricated rev and a real-rev/absent-path both return a
-    plain `None`, indistinguishable from each other AND from a legitimately empty lesson body
-    (P1, the one probe in the set that actually ran anything).
-
-    So the render cannot be written to catch anything here, and an unavailable lesson is SILENT
-    unless the render marks it — a silently absent body changes what the judge concludes, which
-    is D7's own stated hazard arriving with no signal anywhere in the system. J8, settled: the
-    slot renders as an explicit `unavailable: <reason>` line rather than failing the world.
-
-    Both indistinguishable causes are driven, because the demand is that the render marks the
-    absence without being able to tell them apart.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
 
     for commit, note in (("cafebabe", "absent commit"), ("deadbee", "absent path")):
@@ -434,16 +288,6 @@ def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothin
 
 
 def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_caveat(tmp_path):
-    """J8, settled with the human: the sibling's recorded ref is resolved to a SHA ONCE per
-    episode-grading pass and threaded to every world's render, and an `allow_dirty` family — one
-    whose siblings did not demonstrably run against the recorded tree — is surfaced in the
-    lessons view as a CAVEAT.
-
-    O8 says grading is reproducible from "the episode dir plus the runs base plus the checkout
-    at the sibling's recorded commit". A ref that moves mid-invocation makes that sentence false
-    with nothing saying so, and `allow_dirty` appears nowhere in the design at all — so both
-    halves are contract rather than style.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
                                                "c": [J.oracle_row("c")]})
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})

@@ -1,6 +1,3 @@
-"""#1047 implementation hardening — defects found by the two adversaries the write-code-from- spec
-skill runs against the honest implementation (never against the committed spec), fixed here with
-their own regression pins."""
 from __future__ import annotations
 
 from defender._episode_handle import Episode
@@ -49,12 +46,6 @@ def test_run_py_tail_takes_both_record_fields_off_the_summary(tmp_path, monkeypa
 
 
 def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
-    """When the record write fails on a forced-close exit, the forced report is skipped
-    (`test_a_failed_run_end_write_is_a_reason_not_to_write_the_forced_report`) — and the summary
-    SAYS so, beside the real exit rather than in place of it: an ordinary `retry-exhausted` exit
-    that should carry a report and mysteriously does not is exactly the shape this must not look
-    like, and an exit reason that lost `UnexpectedModelBehavior` would be the same loss the
-    other way round."""
     from defender.runtime import challenge_gate
     from defender.tests import _spec923
 
@@ -75,10 +66,6 @@ def test_a_failed_record_write_names_itself_in_the_exit_reason(tmp_path):
 
 
 def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path, monkeypatch):
-    """A run id whose dir was removed and reused (the operator's retry) starts with NO run-end
-    record beside it: `materialize_run` clears a stale sidecar host-side, before the box exists,
-    so an attempt that ends before writing its own (a setup failure, an unhandled fault) cannot
-    be archived under the previous attempt's exit class."""
     from defender.tests._data_root_1078 import set_up_tenant
 
     alert = tmp_path / "fixture.json"
@@ -104,10 +91,6 @@ def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path,
 
 
 def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp_path):
-    """A world archived once WITH a record and archived again without a sidecar ends with no
-    `run_end.json` — the archive makes the destination agree with "a missing artifact means the
-    run did not produce one", instead of leaving the earlier attempt's record for the judge to
-    read as this run's."""
     base, _src = S.runs_base(tmp_path)
     ep = S.episode(tmp_path)
     run_dir = S.sibling_run_dir(base, "b")
@@ -126,10 +109,6 @@ def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp
 
 
 def test_parse_record_is_strict_as_a_whole():
-    """`run_end.parse_record` reads exactly the shape the writer writes and nothing else: an
-    unrecognized exit class or a non-boolean `closed_before_cut` is NOT a record, rather than
-    folding to "not cut short" / "the model had closed" — a corrupted record must fail toward
-    "the host said nothing", never toward a verdict."""
     run_end = S.mod("runtime.run_end")
     ok = run_end.parse_record({"truncated_by": "aborted", "closed_before_cut": False})
     assert ok == run_end.RunEnd("aborted", False)
@@ -151,12 +130,6 @@ def test_parse_record_is_strict_as_a_whole():
 
 
 def test_run_py_tail_threads_the_exit_class_into_record_case_ticket(tmp_path, monkeypatch):
-    """The spec adversary's F1: an implementation that satisfies all 106 committed `test_1047_*`
-    tests while leaving `defender.run.main`'s `--update-ticket` call site on the OLD no-argument
-    `record_case_ticket(run_dir)` shape ships undetected — every one of
-    `test_1047_ticket_lane.py`'s 20 tests drives the real `record_case_ticket` directly, never
-    through `run.py`'s tail, and `test_791_curation_boundary.py` only asserts the step was
-    REACHED, never with what it was called with."""
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     paths = loop_paths(tmp_path)
@@ -175,10 +148,6 @@ def test_run_py_tail_threads_the_exit_class_into_record_case_ticket(tmp_path, mo
 
 
 def test_cut_short_reason_names_the_actual_world_not_a_hardcoded_label(tmp_path):
-    """The spec adversary's F8: `read_world`'s cut-short reason string is only ever asserted for a
-    world literally named `b` anywhere in the committed suite, so an implementation that
-    hardcodes `"world 'b': ..."` instead of interpolating the real label satisfies every one of
-    them."""
     ep = S.cut_short_episode(tmp_path, cut={"c": "aborted"})
 
     rows = S.graded(ep)

@@ -1,8 +1,3 @@
-"""The lead author and pitfalls curator reach `skills/` only through the drain's held mount: readers and
-post-agent rules never follow a symlink, hard link, FIFO or planted holding folder, the draft writer mints through
-the `Held`, and the held trees live exactly as long as each drain seam call. Real filesystem plants; faults that
-need root go through the `os_` seam of `DrainTrees.open`.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -103,11 +98,6 @@ def scene(tmp_path: Path):
 
 def resolver(s: Scene) -> _scaffold_rules.VerbResolver:
     return _scaffold_rules.VerbResolver(s.repo / "defender")
-
-
-# ---------------------------------------------------------------------------------------
-# The rows: every reader and rule step 6 moves onto the held mount
-# ---------------------------------------------------------------------------------------
 
 
 def _lead(query_id: str, *, system: str, verb: str, params: dict | None = None,
@@ -283,9 +273,6 @@ ROWS = [
             s.view, "elastic", SKILL_MD_NAME)],
         took=lambda s, got: got == ("returned", []),
         refused=lambda s, got: got == ("returned", ["skill-unreadable"])),
-    # N-h: the `Path` form (`skills/connect/validate_scaffold.py`, unchanged) reads `path.name`
-    # under `bind(path.parent)`, so a link AT the name is refused too. Its root is the path it
-    # was given, followed by spelling, so no folder plant applies.
     Row("check_system_skill_path_form", SKILL_MD_NAME,
         f"---\nname: defender-elastic\n---\n# {OUT_MARK}\n",
         lambda s: [f.code for f in _scaffold_rules.check_system_skill(
@@ -311,9 +298,6 @@ def _read_events(seen: list[tuple[str, str]], at: Path) -> list[tuple[str, str]]
 
 @pytest.mark.parametrize("row", ROWS, ids=lambda r: r.id)
 def test_a_plain_file_at_the_entry_is_read(scene: Scene, row: Row):
-    """The positive control: the bytes every guard plants behind a link, as a plain file at the
-    same address. The reader takes them (`took`), the rest of the tree is read as before, and
-    the kernel watch saw the entry read (so the guards' empty watch is not a blind one)."""
     row.prepare(scene)
     place(scene, row.name, row.text, "plain")
 
@@ -340,9 +324,6 @@ def _guarded(scene: Scene, row: Row, got: tuple, caplog, *, verdict, always: boo
 
 @pytest.mark.parametrize("row", ROWS, ids=lambda r: r.id)
 def test_a_symlink_at_the_entry_is_not_followed(scene: Scene, row: Row, caplog):
-    """A symlink at the name, to an outside file holding the control's bytes: the reader gives
-    its "not read" answer, the kernel saw no open and no read of the target, none of it reaches
-    the answer or the log, and the target and the link are as they were."""
     caplog.set_level(logging.DEBUG)
     row.prepare(scene)
     target = place(scene, row.name, row.text, "link")
@@ -361,10 +342,6 @@ def test_a_symlink_at_the_entry_is_not_followed(scene: Scene, row: Row, caplog):
 
 @pytest.mark.parametrize("row", ROWS, ids=lambda r: r.id)
 def test_a_hard_link_at_the_entry_is_not_read(scene: Scene, row: Row, caplog):
-    """A hard link at the name to an outside file holding the control's bytes (H1). The kernel
-    saw no read of the shared inode (by either name); the answer is the "not read" one (`hard`
-    where an `entry_kind` gate calls the hard link a file, as it is one: the read then refuses it); no
-    mark leaks; both names are left."""
     caplog.set_level(logging.DEBUG)
     row.prepare(scene)
     target = place(scene, row.name, row.text, "hardlink")
@@ -386,10 +363,6 @@ def test_a_hard_link_at_the_entry_is_not_read(scene: Scene, row: Row, caplog):
 @pytest.mark.parametrize(("row", "site", "kind"), FOLDER_ROWS)
 def test_a_planted_holding_folder_is_not_followed(scene: Scene, row: Row, site: str, kind: str,
                                                   caplog):
-    """The control's bytes at the same name, with one holding folder below the mount moved
-    outside the repo and replaced by a symlink to it (`link`) or by a plain file (`file`): the
-    reader neither descends the plant nor reaches the moved entry (no open, no read), gives its
-    "not read" answer, leaks no mark, and leaves the plant."""
     caplog.set_level(logging.DEBUG)
     row.prepare(scene)
     place(scene, row.name, row.text, "plain")
@@ -406,15 +379,6 @@ def test_a_planted_holding_folder_is_not_followed(scene: Scene, row: Row, site: 
     assert not row.took(scene, got), got
     _guarded(scene, row, got, caplog, verdict=row.refused, always=False)
     assert (census(scene.outside), plant_state(scene.at(site))) == before
-
-
-# ---------------------------------------------------------------------------------------
-# `_skills_content_rule`: its gates' answer on a link must not depend on the link's target
-# ---------------------------------------------------------------------------------------
-#
-# The rule gates on "is there a file here" (the twin probe, the template and SKILL.md checks).
-# A no-follow gate calls a link "other" whatever it points at, so the verdict cannot depend on
-# the target: a good document, a bad one, or nothing. A follower's verdict does.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -446,9 +410,6 @@ def content_verdict(s: Scene, name: str) -> tuple:
 
 @pytest.mark.parametrize("case", CONTENT_CASES, ids=lambda c: c.id)
 def test_the_content_rule_reads_a_plain_file_and_refuses_a_bad_one(scene: Scene, case):
-    """The control: plain good bytes pass, plain bad bytes are refused for what they say (the
-    SKILL.md row through `check_system_skill`'s view form, the template row through
-    `_check_promoted_template`)."""
     place(scene, case.name, case.good, "plain")
     assert content_verdict(scene, case.name) == ("returned", None)
 
@@ -458,11 +419,6 @@ def test_the_content_rule_reads_a_plain_file_and_refuses_a_bad_one(scene: Scene,
 
 @pytest.mark.parametrize("case", CONTENT_CASES, ids=lambda c: c.id)
 def test_the_content_rule_gives_a_link_one_verdict_whatever_it_points_at(scene: Scene, case):
-    """A symlink at the name, to the good bytes, to the bad bytes, and to nothing: one verdict
-    for all three, none naming what the bad bytes say, no target opened or read, the link left.
-
-    Catches: a gate that follows (`is_file()`), whose verdict is pass / refuse / skip for the
-    three, and a check that reads the target."""
     verdicts: dict[str, str] = {}
     for label, text in (("good", case.good), ("bad", case.bad)):
         target = place(scene, case.name, text, "link")
@@ -497,9 +453,6 @@ def test_the_half_promote_twin_probe_refuses_a_plain_twin_and_passes_an_absent_o
 @pytest.mark.parametrize("plant", ["link", "dangling_link", "folder", "fifo", "hardlink"])
 def test_anything_at_the_twin_refuses_the_half_promote_and_nothing_is_followed(
         scene: Scene, plant: str):
-    """`kind_at(twin) != "absent"` refuses: a live or dangling symlink, a folder, a FIFO or a
-    hard link at the twin is a half-promote, the same verdict a plain twin gets; nothing is
-    opened through it and the plant is left."""
     place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain")
     at = scene.at(TWIN_NAME)
     target = None
@@ -524,10 +477,6 @@ def test_anything_at_the_twin_refuses_the_half_promote_and_nothing_is_followed(
     assert (census(scene.outside), plant_state(at)) == before
 
 
-# ---------------------------------------------------------------------------------------
-# `_departed_drafts`: departed means nothing at the name, not "not followable"
-# ---------------------------------------------------------------------------------------
-
 MINTED_IDS = ("wazuh.0a1b2c3d4e5f", OUT_ID)
 
 
@@ -536,10 +485,6 @@ MINTED_IDS = ("wazuh.0a1b2c3d4e5f", OUT_ID)
     ("hardlink", False),
 ])
 def test_a_minted_draft_departs_only_when_nothing_stands_at_its_name(scene, state, departed):
-    """`_departed_drafts` answers "departed" for a minted draft whose name holds nothing
-    (`kind_at == "absent"`), and only then; `_covers_rule` refuses a departure nothing
-    attributes. A link at the name (live or dangling) or a hard link is left for the scrub,
-    not counted as a departure."""
     minted = {scene.at(MINTED_NAME): MINTED_IDS}
     if state in ("plain", "link", "hardlink"):
         place(scene, MINTED_NAME, marked_template("wazuh.0a1b2c3d4e5f", "draft"), state)
@@ -558,11 +503,6 @@ def test_a_minted_draft_departs_only_when_nothing_stands_at_its_name(scene, stat
     if state in ("link", "dangling_link"):
         assert scene.at(MINTED_NAME).is_symlink(), "the plant was not left in place"
 
-
-# ---------------------------------------------------------------------------------------
-# The draft writer: rooted at the `skills/` mount (O5.4), never redirected outside it (O3),
-# a refused write logged and the claim going on (O5.5)
-# ---------------------------------------------------------------------------------------
 
 SYSTEMS = frozenset({"elastic", "wazuh"})
 WAZUH_LEAD = _lead("wazuh.hunt-creds", system="wazuh", verb="esql", params={"query": "FROM logs"})
@@ -627,10 +567,6 @@ def said_for(caplog, lead: ExecutedLead, skills_dir: Path) -> list[str]:
 
 
 def test_the_writer_mints_each_draft_under_the_skills_mount_with_its_bytes(bare: Scene, caplog):
-    """The positive control for every writer row (O5.4): on a plain tree each lead's draft
-    lands at `skills/gather/queries/<sys>/_draft/<hex>.md` with exactly `_draft_skeleton`'s
-    bytes, `created` names exactly those, spelled `where / name` (`skills_dir / name`, today's
-    spelling of the same file), and nothing else is written or logged."""
     before = census(bare.tmp)
 
     created = mint(bare, [WAZUH_LEAD, ELASTIC_LEAD])
@@ -646,11 +582,6 @@ def test_the_writer_mints_each_draft_under_the_skills_mount_with_its_bytes(bare:
     assert errors(caplog) == []
 
 
-
-
-#: Every folder a draft's write passes below the mount. `gather` and `gather/queries` lie on
-#: every system's path (O3: the old root, `catalog_dir`, was opened through them by spelling);
-#: `wazuh` and `_draft` only on wazuh's (O5.4/O5.5: the other system's claim goes on).
 WRITER_SITES = ("gather", "gather/queries", "gather/queries/wazuh", "gather/queries/wazuh/_draft")
 
 
@@ -660,11 +591,6 @@ WRITER_SITES = ("gather", "gather/queries", "gather/queries/wazuh", "gather/quer
 def test_a_planted_folder_on_the_drafts_path_refuses_the_write_and_the_claim_goes_on(
     bare: Scene, site: str, kind: str, catalog, caplog,
 ):
-    """A folder on a draft's path moved outside the repo and replaced by a symlink to it, or
-    by a plain file: no draft is written behind it, nothing outside the repo (or anywhere
-    behind the link) changes or is opened, the refusal is logged at ERROR naming the draft and
-    its query id, and the plant stays. A draft whose path does not cross the plant still lands,
-    with its bytes (O5.5). With `catalog=None` the writer's own load reads through the same view."""
     moved = plant_folder(bare, site, kind)
     plant_before = plant_state(bare.at(site))
     before = census(bare.tmp)
@@ -697,11 +623,6 @@ def test_a_planted_folder_on_the_drafts_path_refuses_the_write_and_the_claim_goe
 def test_an_occupied_draft_name_is_skipped_and_a_non_plain_one_is_refused(
     bare: Scene, kind: str, caplog,
 ):
-    """The exists test and replace semantics at the draft's own name. A plain file, a hard link
-    or a directory there is `kind` "file" / "dir": somebody's draft, skipped in silence, nothing
-    opened. A symlink (live or dangling) or a FIFO is "other": it falls through to the write,
-    which refuses it (`NotPlainEntry`): logged at ERROR, the target untouched, the plant left.
-    Either way the name is not in `created`, and the other system's draft still lands."""
     w_name, _ = draft_of(WAZUH_LEAD)
     e_name, e_text = draft_of(ELASTIC_LEAD)
     at = bare.at(w_name)
@@ -736,15 +657,6 @@ def test_an_occupied_draft_name_is_skipped_and_a_non_plain_one_is_refused(
         assert len(said) == 1, errors(caplog)
 
 
-
-
-# ---------------------------------------------------------------------------------------
-# The existence-probe fault decision: an EACCES / EIO at a draft's holding folder refuses that
-# folder's listing (`entry_kind`'s `reason`, never a raise); the probe falls through to the write,
-# which is refused and logged, and the mint and the claim go on (today's `draft.exists()`
-# re-raised it and unwound the claim)
-# ---------------------------------------------------------------------------------------
-
 #: The holding folders of the wazuh draft that only wazuh's path crosses.
 WAZUH_FOLDERS = ("gather/queries/wazuh/_draft", "gather/queries/wazuh")
 
@@ -754,11 +666,6 @@ WAZUH_FOLDERS = ("gather/queries/wazuh/_draft", "gather/queries/wazuh")
 @pytest.mark.parametrize("site", WAZUH_FOLDERS)
 def test_a_kind_fault_at_a_drafts_holding_folder_is_logged_and_the_mint_goes_on(
         tmp_path: Path, site: str, err: int | None, caplog):
-    """The trees held over an `os_` that refuses the open of one of the wazuh draft's holding
-    folders with EACCES or EIO (as root, no permission bit can make that fault for real): the
-    wazuh draft is not written, the fault is logged at ERROR naming the draft, its query id and
-    the errno's words, and the elastic draft, minted after it in the same call, lands with its
-    bytes. `control`: the same trees over the real `os` mint both."""
     repo = bare_skills(tmp_path)
     skills_dir = repo / "defender" / "skills"
     refuser = RefusesFolder(skills_dir / site, "step", err) if err is not None else None
@@ -821,11 +728,6 @@ NO_MODEL = "no-such-model-1134"
 @pytest.mark.parametrize("err", [None, errno.EACCES], ids=["control", "EACCES"])
 def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_lock(
         tmp_path: Path, err: int | None, monkeypatch, caplog):
-    """`run_under_held_queue_lock(trees=...)` with the trees held over an `os_` refusing the
-    wazuh draft's `_draft` folder (EACCES): the run reads its real tables (a wazuh row, then an
-    elastic row, both coined), logs the wazuh draft's fault, mints the elastic draft, and goes
-    on to its agent: the spawn is reached (`FatalConfigError` from the unroutable model).
-    `control`: over the real `os`, both drafts land and the agent is reached the same way."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
@@ -855,22 +757,10 @@ def test_a_kind_fault_does_not_unwind_the_claim_through_run_under_held_queue_loc
     assert [m for m in wrote_errors(caplog) if str(w_draft) in m and "wazuh.hunt-creds" in m]
 
 
-
-
-# ---------------------------------------------------------------------------------------
-# Through the lead-author entry points: `run(label=, deps=)` and
-# `run_under_held_queue_lock(trees=)` over a seeded worktree (O3, O5.4, O5.5)
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("site", [None, "gather", "gather/queries"])
 def test_run_writes_no_draft_outside_skills_through_a_linked_catalog(
     tmp_path: Path, site: str | None, caplog,
 ):
-    """O3 through `lead_author.run`. With `skills/gather` or `skills/gather/queries` replaced by
-    a link to where the real folder now lies: both drafts are refused and logged, nothing outside
-    the repo changes or is opened, the catalog reads as empty so no lead resolves, and the run is
-    recorded done with no commit and no agent spawned."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     run_dir = _run_dir()
@@ -904,10 +794,6 @@ def test_run_writes_no_draft_outside_skills_through_a_linked_catalog(
 
 @pytest.mark.parametrize("kind", ["file", "link"])
 def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, caplog):
-    """O5.5 through `lead_author.run`: `gather/queries/wazuh/_draft` is a plain file, or a link
-    to an empty folder outside the repo. The wazuh draft is refused and logged; the elastic claim
-    goes on: its draft lands with its bytes and is the one handoff the agent gets, with the plant
-    still in place and nothing outside the repo changed."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     run_dir = _run_dir()
@@ -938,13 +824,6 @@ def test_run_goes_on_past_a_refused_draft_folder(tmp_path: Path, kind: str, capl
                and repr(WAZUH_LEAD.query_id) in m for m in errors(caplog)), errors(caplog)
 
 
-
-
-# ---------------------------------------------------------------------------------------
-# Through the drain, with its REAL default seams (the label bound into them)
-# ---------------------------------------------------------------------------------------
-
-
 class PlantingBranch(SpecBranch):
     """`SpecBranch` whose batch worktree is a seeded tree with `plant` applied to it: the state
     a box process running beside the lead author leaves before the claim's host work runs."""
@@ -971,9 +850,6 @@ def _failed(paths: LoopPaths) -> list[dict]:
 def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skills(
     tmp_path: Path, monkeypatch, caplog,
 ):
-    """O3 through `drains.lead_author_drain` with its production `run_lead_author` and
-    `run_pitfalls` (neither injected): the batch worktree's `skills/gather/queries` is a link to
-    a folder outside the repo, and the queued run holds one executed lead with a coined id."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     paths = loop_paths(tmp_path)
     outside = tmp_path / "outside"
@@ -1011,11 +887,6 @@ def test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skill
 
 
 def test_a_seam_that_cannot_hold_skills_dead_letters_the_claim(tmp_path: Path, caplog):
-    """The open's own fault routing (declared): the batch worktree has no `skills/`, so the
-    lead-author seam's `open_drain_trees` fails to hold it (`FileNotFoundError`). That fault
-    propagates out of the seam to the lane's dead-letter guard, which quarantines the claim
-    naming it, rather than being swallowed into a transient retry (`_LeadAuthorRetry`, which
-    would re-queue the marker with its attempts bumped)."""
     paths = loop_paths(tmp_path)
 
     def plant(wt: Path) -> None:
@@ -1038,12 +909,6 @@ def test_a_seam_that_cannot_hold_skills_dead_letters_the_claim(tmp_path: Path, c
     assert not (run_dir / "lead_author").exists()
 
 
-# ---------------------------------------------------------------------------------------
-# Lifetime (A3): one `DrainTrees` per seam call, open while the curator call runs, closed when
-# the seam returns or raises; nothing below the seam keeps a handle
-# ---------------------------------------------------------------------------------------
-
-
 def _lifetime_paths(tmp_path: Path) -> tuple[LoopPaths, Path]:
     repo = _worktree(tmp_path)
     return LoopPaths(repo_root=repo, state_dir=tmp_path / "state"), repo
@@ -1057,11 +922,6 @@ def _unresolved_run() -> Path:
 
 
 def test_the_lead_author_seam_holds_skills_only_while_its_call_runs(tmp_path: Path, caplog):
-    """`drains._invoke_lead_author(..., label=LEAD)` over a worktree: while the curator call
-    runs (seen from `on_done`, which the run calls inside it) this process holds exactly the
-    worktree's `skills/` (one descriptor); once the seam returns it holds nothing under the
-    worktree; and no handle was used after a close (no `Bad file descriptor` anywhere in the
-    log of a normal claim, which reads the catalog, the drafts and the handoff through it)."""
     caplog.set_level(logging.DEBUG)
     paths, repo = _lifetime_paths(tmp_path)
     run_dir = _unresolved_run()
@@ -1081,9 +941,6 @@ def test_the_lead_author_seam_holds_skills_only_while_its_call_runs(tmp_path: Pa
 
 @pytest.mark.parametrize("fault", ["RuntimeError", "OSError"])
 def test_the_lead_author_seam_releases_skills_when_its_call_raises(tmp_path: Path, fault: str):
-    """The curator call raises inside the seam (from `on_done`): a `RuntimeError` propagates
-    out of the seam as itself, an `OSError` is the seam's swallowed transient
-    (`_LeadAuthorRetry`). Either way the trees were held while it ran and are closed after."""
     paths, repo = _lifetime_paths(tmp_path)
     run_dir = _unresolved_run()
     during: list[list[str]] = []
@@ -1102,26 +959,11 @@ def test_the_lead_author_seam_releases_skills_when_its_call_raises(tmp_path: Pat
     assert descriptors_under(repo) == [], "a handle on the leaf outlived the raising seam"
 
 
-
-
-
-
-
-
-# ---------------------------------------------------------------------------------------
-# The label and the trees: required, and consulted (owner decision 1; the contract's Shape)
-# ---------------------------------------------------------------------------------------
-
-
 def _lessons(paths: LoopPaths) -> None:
     """The author drain's two corpora, made in the leaf, so its trees can be opened there (the
     refusal under test is then the lane's, not the open's)."""
     for tree in AUTHOR_DRAIN_LABEL.writable_trees(paths):
         tree.mkdir(parents=True, exist_ok=True)
-
-
-
-
 
 
 def _refusing_trees(tmp_path: Path) -> dict[str, Callable[[], tuple[LoopPaths, DrainTrees]]]:
@@ -1147,10 +989,6 @@ REFUSALS = ("author_label", "moved_mount", "mount_above", "mount_below")
 @pytest.mark.parametrize("how", REFUSALS)
 def test_trees_that_do_not_hold_skills_exactly_are_refused(tmp_path: Path, how: str, caplog,
                                                            monkeypatch):
-    """`build_lead_author_deps` and `run_pitfalls` refuse trees that hold no mount at
-    `paths.skills_dir` itself (`LeadAuthorError`): never a handle rooted elsewhere, above or
-    below, and never a fallback to the plain path. `run_pitfalls` refuses up front, before it
-    reads its queue, even a queue over the threshold, whose curator (`invoke`) is never called."""
     from defender.learning.core import persist
     from defender.tests._declared869 import Spawn, pitfall_row
 
@@ -1165,41 +1003,3 @@ def test_trees_that_do_not_hold_skills_exactly_are_refused(tmp_path: Path, how: 
             pitfalls_curator.run_pitfalls(paths=paths, trees=trees, invoke=spawn)
     assert spawn.calls == []
     assert [r["pitfall_id"] for r in persist.read_pitfalls(state_for_paths(paths))] == ["r:l-000:0"]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------------------
-# The shared helpers: `kind_at` / `read_at` / `view_at`, `lane_skills`, `load_lane_catalog`
-# ---------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-

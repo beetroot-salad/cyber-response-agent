@@ -86,9 +86,6 @@ def test_a_falsy_value_prints_and_matches_in_one_spelling(tmp_path):
 
 
 def test_the_loader_refuses_a_lesson_file_whose_name_is_not_one_printable_line(tmp_path, caplog):
-    """A listed path is one the model can Read as printed. A lesson whose file name holds a line
-    break or a control character is refused as an error and handed to `on_skip`, as an
-    unreadable lesson is; the walk carries on with the rest (review of #1226)."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     body = "---\nname: x\n---\nb\n"
@@ -108,9 +105,6 @@ def test_the_loader_refuses_a_lesson_file_whose_name_is_not_one_printable_line(t
 
 
 def test_the_frontier_block_frames_lesson_text_and_keeps_the_lead_outside():
-    """The block pushed on a write and on the fold carries lesson frontmatter a model wrote.
-    The lead (host text) stays a plain first line; every hit sits inside one salted untrusted
-    frame."""
     from defender.runtime.lessons_engine.lessons_frontier import FOLD_LEAD, Hit, render
 
     hit = Hit(path=Path("/c/lessons/a.md"), name="a",

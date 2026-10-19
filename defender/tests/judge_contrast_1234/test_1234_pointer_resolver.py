@@ -37,11 +37,6 @@ BASE_ROWS = [{"system": "idp", "verb": "query", "params": {"q": "user:alice"},
 _WATCHDOG_S = 45
 
 
-# --------------------------------------------------------------------------------------
-# Local helpers: scripting the reply, reading the pass's outputs, planting damage.
-# --------------------------------------------------------------------------------------
-
-
 def _claim(label: str, tag: str) -> str:
     """A finding's claim, carrying a unique marker so a test can ask which surface it reached."""
     return f"the lead was never revisited {S.marker(label, tag)}"
@@ -147,10 +142,6 @@ def _failed_d() -> dict[str, Any]:
     """`d` as an O5-failed world: its world record on disk and no archive."""
     return _d_spec(archived=False, world_record=S.sym(S.OUTCOME, "DID_NOT_FINISH"))
 
-
-# --------------------------------------------------------------------------------------
-# The probe: one pointer under test, filed three ways in b's reply.
-# --------------------------------------------------------------------------------------
 
 #: How the probe pointer is filed: as the reference half of b's pair, or riding beside a
 #: resolving pair (a built-layer pointer is never a half, so it rides).
@@ -293,21 +284,7 @@ def _manifest_expected(*, damaged: bool) -> dict[str, Any]:
             "questioner_world": "b", "defender_rows": 0}
 
 
-# --------------------------------------------------------------------------------------
-# d01a / d01b — the two-run contrast pair.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_queued_defender_row_contrast_pointers_resolve_into_two_runs(tmp_path: Path) -> None:
-    """Every defender row a pass queues carries contrast_evidence whose resolving pointers include
-    a conduct pointer in the judged world's run and a conduct pointer in one reference run of this
-    episode (A1's classes: conduct, never a built-layer, plan or context pointer).
-
-    World b files two investigator findings and reference world c one: b's report against the
-    control's; b's query-table row against c's served-ledger row, with b's plan entry and b's
-    oracle store riding along; c's investigation against b's report (b is a reference run for
-    c). Exactly those three rows queue, each carrying contrast_evidence, and each row's
-    citations are its conduct pair (plus the resolving ride-alongs)."""
     built = S.family(tmp_path)
     b_reports = [S.conduct("b"), S.conduct("a")]
     b_rows = [_table(built, "b", 0), _served(built, "c", 0), S.plan_ptr("b"), S.oracle_ptr("b")]
@@ -326,19 +303,6 @@ def test_1234_queued_defender_row_contrast_pointers_resolve_into_two_runs(tmp_pa
 
 
 def test_1234_finding_without_a_resolving_two_run_pair_is_dropped(tmp_path: Path) -> None:
-    """An investigator finding whose contrast_evidence has no conduct pointer in the focus run
-    paired with one in a reference run (both pointers in the judged world, the reference pointer
-    unresolvable, or a built-layer or plan pointer offered as a half) is dropped with exactly one
-    ledger lane (A13's precedence: pointers unresolved, names only another run, no two-run pair),
-    keeps its filed index and queues no defender row, while a sibling finding in the same reply
-    with a resolving two-run conduct pair is queued.
-
-    Two draws (I-6): draw 0 files seven findings, draw 1 files the resolving pair first and the
-    both-in-b pair second, so each id is that draw's filing index. The lanes: both pointers in b,
-    the reference half unresolvable, b's oracle store or b's plan entry as the focus half — no
-    two-run pair; nothing resolving — pointers unresolved; the control and c only — names only
-    another run (ahead of no two-run pair). No dropped finding's claim reaches either queue or
-    the user record; both resolving pairs are queued."""
     built = S.family(tmp_path)
     draw0 = [
         _inv([S.conduct("b"), S.conduct("b", "investigation.md")], tag="d0-both-in-b"),
@@ -367,28 +331,8 @@ def test_1234_finding_without_a_resolving_two_run_pair_is_dropped(tmp_path: Path
     assert _surfaces(built, S.marker("b", "d0-pair")) == ["defender queue"]
 
 
-# --------------------------------------------------------------------------------------
-# d05f / d05g / d12d — what resolves, what never does, and the one resolver.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_evidence_resolves_into_reference_runs_manifest_and_oracle_store(
         tmp_path: Path) -> None:
-    """An evidence pointer resolves when it is episode-relative and names, with no link followed,
-    a plain file of one of A1's classes for a run in this episode's reference set: the focus or a
-    reference run's conduct (worlds/<X>/ conduct files, served/<token>.<X>.jsonl#<row>), its built
-    layer (oracle/<X>/), the plan (family.yaml#...) or context (samples.yaml#...,
-    outcome.yaml#...); judge.yaml, worlds/*/judge/, wire_logs/, world_records/,
-    not_comparable.yaml and served/base.jsonl never resolve.
-
-    b's resolving pair rides along every class of pointer — c's investigation, gather summary,
-    query-table row and served row, the control's served row, b's and c's oracle stores, b's
-    plan entry and the plan's family-level part, a shown samples section, pre-flight's record —
-    and A1's never-resolve list (the capture ledger with a row, a wire log and
-    not_comparable.yaml planted as real files; judge.yaml and the other world's draw file exist
-    for whichever of b and c is judged second, and both cite them). The queued rows' citations
-    are exactly the resolving pointers. A world finding citing b's plan entry is design
-    (questioner queue); one citing only the two context pointers is serving (user record)."""
     built = S.family(tmp_path, base_rows=BASE_ROWS)
     (built.ep / "wire_logs").mkdir(exist_ok=True)
     (built.ep / "wire_logs" / "x_framed_trace.jsonl").write_text(
@@ -464,26 +408,8 @@ def _no_follow_case(tmp_path: Path, case: str, *, damaged: bool) -> tuple[Any, s
 @pytest.mark.parametrize("case", _NO_FOLLOW)
 def test_1234_evidence_never_resolves_through_a_link_or_outside_the_reference_set(
         tmp_path: Path, case: str, damaged: bool) -> None:
-    """A pointer naming a symbolic link (even one whose target is inside the episode), a path
-    under a linked directory, a hard-linked file, an absolute path, a traversal out of the
-    episode, a file of a world outside the reference set (O5-failed, cut short or malformed), or a
-    file outside A1's classes does not resolve (today an in-world leaf link and a hard link
-    resolve, E-27).
-
-    Each case files the pointer as the reference half of b's pair and alone in a world finding.
-    Damaged, the pair has no two-run partner and the lone finding has nothing resolving; the
-    plain twin (the plain file, the relative spelling, an ordinary world d, a conduct file) is a
-    resolving pair and a finding naming only another run. b's resolving sibling pair is queued
-    either way."""
     built, pointer = _no_follow_case(tmp_path, case, damaged=damaged)
     assert _probe(built, pointer, HALF) == _probe_expected(pointer, HALF, resolves=not damaged)
-
-
-
-
-# --------------------------------------------------------------------------------------
-# s_A7 / s_A10 / s_A12 / s_A13 / s_A14 — the never-resolve list, ledgers, context.
-# --------------------------------------------------------------------------------------
 
 
 def _draw_file_replies(framed: Any) -> dict:
@@ -506,17 +432,6 @@ def _draw_file_replies(framed: Any) -> dict:
 
 def test_1234_contrast_pointer_naming_a_reference_worlds_judge_draw(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A pointer into any judge draw document, judge.yaml, or any file the judge itself wrote
-    does not count as a run's archived content: it does not resolve as evidence or as either half
-    of a contrast pair, so b's finding's fate is the same whether c was judged before b (P-c, I2).
-
-    b cites c's draw file and c's wire log as its reference half (and c's draw file alone in a
-    world finding); c cites b's the same way, so in one pass whichever world is judged second
-    meets the other's files on disk. A second episode (its own learning state, so the two
-    passes share no queue) has both draw files and both wire logs already on disk before its
-    pass. In both episodes every such finding takes the same drop lane (no two-run pair;
-    pointers unresolved for the lone world finding) and each world's resolving sibling pair is
-    queued."""
     framed = S.sym("run_repository._layout", "WIRE_LOG_NAMES").agent_framed_trace
     natural = S.family(tmp_path)
     judged_before = S.family(tmp_path, root=tmp_path / "judged-before")
@@ -541,22 +456,6 @@ def test_1234_contrast_pointer_naming_a_reference_worlds_judge_draw(
 
 
 def test_1234_pointer_naming_judge_yaml_or_a_wire_log_record(tmp_path: Path) -> None:
-    """`judge.yaml`, `worlds/*/judge/`, `wire_logs/`, `world_records/`, `not_comparable.yaml` and
-    `served/base.jsonl` never resolve (A1's list). `staged.yaml`, `review.yaml`, the episode's
-    top-level `provenance.json` and `runs/<sibling>/...` lie outside A1's episode-relative grammar
-    and are unresolved; a run's own `worlds/<X>/provenance.json` is a context pointer (T1's class
-    list), names no run and never counts as a half. A finding loses only the unresolved pointer,
-    and is dropped when no resolving pointer remains.
-
-    Asked for an investigator finding, a world finding and a family finding. The family carries
-    a failed fourth world (its world record on disk), the capture ledger with a row, a wire log,
-    not_comparable.yaml, staged.yaml and review.yaml as real files beside the top-level family
-    stamp provenance.json; judge.yaml and the other world's draw file exist when the second of b
-    and c is judged. A resolving pair keeping every such pointer queues citing only the pair and
-    b's own provenance.json; a pair of two worlds' provenance.json files has no two-run pair;
-    findings citing only the list (b's investigator and world findings, a family finding) are
-    dropped as unresolved and reach no output, while a family finding citing the plan's
-    family-level part is design."""
     built = S.family(tmp_path, S.triad(d=_failed_d()), base_rows=BASE_ROWS)
     for name, text in (("staged.yaml", "staged: true\n"), ("review.yaml", "outcome: accepted\n"),
                        ("not_comparable.yaml", "reason: planted\n")):
@@ -595,13 +494,6 @@ def test_1234_pointer_naming_judge_yaml_or_a_wire_log_record(tmp_path: Path) -> 
 
 
 def test_1234_pointer_naming_a_served_ledger_row(tmp_path: Path) -> None:
-    """Served ledgers are citable (A1): `served/<token>.<X>.jsonl#<row>` resolves to run X, class
-    conduct. It counts as a conduct pointer of X; a pointer at a `refused`/`fault` row is a
-    blocked-call row for the gap-only rule. `served/base.jsonl` does not resolve.
-
-    b's served row against c's served row is a two-run conduct pair (queued, citing both); b's
-    refused row against the control's refused row is gap-only (the user record, never the
-    defender queue); b's report against a row of the capture ledger has no two-run pair."""
     built = S.family(tmp_path, _refusal_calls(), base_rows=BASE_ROWS)
     rows_pair = [_served(built, "b", 0), _served(built, "c", 0)]
     _run(built, {"b": _reply(investigator=[
@@ -615,33 +507,6 @@ def test_1234_pointer_naming_a_served_ledger_row(tmp_path: Path) -> None:
     assert _row_on(S.defender_queue(), fid[1]) is None
 
 
-
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# s_A16 / s_A17 / s_D28 / s_AM6 — which pairs are two-run pairs.
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# s_A24 / s_A25 / s_A27 / s_AM2 / s_AM3 — a finding in b's reply about another run (A15).
-# --------------------------------------------------------------------------------------
-
 #: case -> (the mislabelled finding's pointers, its lane, kept for b)
 _MISLABELLED = {
     "about_c_only": ([S.conduct("c"), S.plan_ptr("c")], OTHER_RUN, False),
@@ -653,17 +518,6 @@ _MISLABELLED = {
 @pytest.mark.parametrize("case", sorted(_MISLABELLED))
 def test_1234_focus_reply_files_mislabelled_about_a_reference_world(tmp_path: Path,
                                                                     case: str) -> None:
-    """A finding in b's reply is dropped only when it has at least one run-naming pointer and
-    every run-naming pointer names another run (c) (A1, A15): it does not mark b doubted and
-    reaches no queue. A mislabelled finding that also has a pointer naming b stays b's; one with
-    no run-naming pointer is not dropped by this rule.
-
-    b files a mislabelled world finding about c's declared verdict. Citing only c's report and
-    c's plan entry it is dropped (names only another run): b is not doubted, c is not doubted,
-    and its claim reaches no output. Also citing b's report and b's plan entry it is kept and
-    design: b is doubted and the questioner row carries world b. Citing only the plan's
-    family-level part (no run-naming pointer) it is kept and design under world b, b doubted.
-    c's own reply files nothing, so c is never doubted."""
     evidence, lane, kept = _MISLABELLED[case]
     built = S.family(tmp_path)
     _run(built, {"b": _reply(world=[_wf(evidence, tag="mislabelled-c")])})
@@ -679,19 +533,7 @@ def test_1234_focus_reply_files_mislabelled_about_a_reference_world(tmp_path: Pa
                     "surfaces": ["questioner queue"] if kept else []}
 
 
-
-
-
-
 def test_1234_investigator_finding_judging_a_reference_runs_conduct(tmp_path: Path) -> None:
-    """A finding in b's reply whose two conduct pointers are both about c's conduct has no conduct
-    pointer in the focus run and at least one run-naming pointer, every one naming another run:
-    it is dropped (A1, A15). c's own call filing the same flaw yields its own row; nothing
-    combines across worlds.
-
-    b's finding citing c's report and c's investigation is dropped (names only another run);
-    c's own reply files the same claim against the control and it queues. Exactly one defender
-    row carries that claim, and it is c's."""
     built = S.family(tmp_path)
     flaw = _claim("c", "the-flaw")
     about_c = [S.conduct("c"), S.conduct("c", "investigation.md")]
@@ -708,32 +550,9 @@ def test_1234_investigator_finding_judging_a_reference_runs_conduct(tmp_path: Pa
     assert _surfaces(built, S.marker("c", "the-flaw")) == ["defender queue"]
 
 
-
-
-
-
-# --------------------------------------------------------------------------------------
-# s_AM4 / s_AM5 / s_D37 — served-ledger granularity, runs outside the reference set.
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
 @pytest.mark.parametrize("d_state", ["malformed_world", "not_archived_world", "plain_twin"])
 def test_1234_am_reference_half_in_a_run_outside_the_reference_set(tmp_path: Path,
                                                                    d_state: str) -> None:
-    """The reference half must be a conduct pointer in a run that is a reference for b (A1: a
-    conduct pointer in the focus run and one in a reference run); a planted world excluded as
-    malformed leaves every reference set (A3) and a not-archived world is not a reference, so a
-    pair using either fails the two-run rule and the finding is dropped.
-
-    A fourth world d is malformed (its report carries two dispositions), or not archived (its
-    own record says so; its served ledger is on disk, written by its run), or an ordinary
-    gradable world (the twin). b's report against d's investigation, and against d's served row,
-    are dropped for no two-run pair and reach no output unless d is the ordinary twin, where
-    both queue; b's resolving sibling pair queues in every case."""
     if d_state == "not_archived_world":
         built = S.family(tmp_path, _with_d(archived=False,
                                            world_record=S.sym(S.OUTCOME, "NOT_ARCHIVED")))
@@ -760,15 +579,6 @@ def test_1234_am_reference_half_in_a_run_outside_the_reference_set(tmp_path: Pat
 @pytest.mark.parametrize("d_state", ["failed_world", "cut_short_world", "malformed_world",
                                      "plain_twin"])
 def test_1234_pointer_into_an_excluded_worlds_oracle_store(tmp_path: Path, d_state: str) -> None:
-    """A pointer into an excluded world's oracle store does not resolve; the control's store
-    resolves only if the control is a reference run.
-
-    A fourth world d is O5-failed (its world record on disk beside its archive), cut short, or
-    malformed — or an ordinary world (the twin). The control carries an oracle store too. Beside
-    b's resolving pair, d's forged rows are cited only for the twin, the control's store always
-    (a graded family's control is a reference run). Alone in a world finding, d's forged rows
-    are unresolved when d is excluded and name only d otherwise; the control's store alone names
-    only the control."""
     over = {"failed_world": {"world_record": S.sym(S.OUTCOME, "DID_NOT_FINISH")},
             "cut_short_world": {"run_end": {"truncated_by": "budget",
                                             "closed_before_cut": False}}}.get(d_state, {})
@@ -789,10 +599,6 @@ def test_1234_pointer_into_an_excluded_worlds_oracle_store(tmp_path: Path, d_sta
         OTHER_RUN if plain else UNRESOLVED, OTHER_RUN)
 
 
-# --------------------------------------------------------------------------------------
-# s_D30 / s_D33 — hostile pointers; a manifest that is a link.
-# --------------------------------------------------------------------------------------
-
 #: D30's hostile pointers: empty, whitespace, only a fragment, absolute, home-relative, a URL, a
 #: glob, an embedded newline, an embedded NUL, and one far longer than any path.
 _HOSTILE = ["", "   ", "#worlds/b", "/etc/passwd", "~/worlds/b/report.md",
@@ -802,12 +608,6 @@ _HOSTILE = ["", "   ", "#worlds/b", "/etc/passwd", "~/worlds/b/report.md",
 
 
 def test_1234_pointer_with_hostile_syntax(tmp_path: Path) -> None:
-    """A hostile pointer is an unresolved pointer: the finding is dropped for its evidence; the
-    reply is valid, the pass does not stop.
-
-    Every hostile pointer rides beside b's resolving pair (queued, citing only the pair), and
-    another finding cites only hostile pointers (dropped, pointers unresolved). The reply passes
-    validation, b is asked once (no re-ask), and the pass goes on to judge c and the family."""
     built = S.family(tmp_path)
     pair = [S.conduct("b"), S.conduct("a")]
     reply = _reply(investigator=[_inv([*pair, *_HOSTILE], tag="pair-and-hostile"),
@@ -825,15 +625,6 @@ def test_1234_pointer_with_hostile_syntax(tmp_path: Path) -> None:
 @pytest.mark.parametrize("link", ["to_a_byte_copy_of_itself", "to_a_reference_runs_report",
                                   "plain_twin"])
 def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, link: str) -> None:
-    """A manifest that is a link is not resolved (no-follow, principle 1): a pointer to it does not
-    resolve, so the finding is not design-routed and the questioner queue gets nothing from it;
-    the pass refuses the family load if the manifest itself is a link.
-
-    family.yaml is replaced by a link — to a byte copy of itself outside the episode (a reader
-    that followed it would load a valid manifest), or to reference run c's report.md. The pass
-    refuses by naming the manifest, asks the model nothing, and queues nothing. The twin: the
-    plain manifest, where b's world finding citing its plan entry is design and reaches the
-    questioner queue under world b."""
     built = S.family(tmp_path)
     manifest = built.ep / "family.yaml"
     if link == "to_a_byte_copy_of_itself":
@@ -844,10 +635,6 @@ def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, li
     assert _manifest_case(built, damaged=damaged) == _manifest_expected(damaged=damaged)
 
 
-# --------------------------------------------------------------------------------------
-# g06 / g07 / g08 / g09 — the R3 parity cells.
-# --------------------------------------------------------------------------------------
-
 _FIVE = ("manifest", "conduct", "oracle", "served", "table")
 
 
@@ -855,18 +642,6 @@ _FIVE = ("manifest", "conduct", "oracle", "served", "table")
 @pytest.mark.parametrize("where", _FIVE)
 def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: Path, where: str,
                                                                      damaged: bool) -> None:
-    """A file larger than the reader's limit, planted at each of the five boundaries (family.yaml,
-    a run's conduct file, an oracle store, a served ledger, a query table), is refused by name on
-    both access cells: the bounded fs-read reader refuses it, and an evidence pointer naming it
-    does not load it, resolves to nothing and drops the finding without hanging or exhausting
-    memory; the other worlds are still graded. The control is the same file under the limit,
-    which reads and resolves.
-
-    The file is a sparse one, one byte over the reader's limit, in reference run c (or the
-    manifest itself). An oversize manifest refuses the family load by name before any model
-    call. Otherwise c's row names the refused file, b's pointer at it does not resolve (no
-    two-run pair as a half, not cited riding along, unresolved alone) and b's sibling pair
-    queues; the twin resolves."""
     if where == "manifest":
         built = S.family(tmp_path)
         if damaged:
@@ -882,15 +657,6 @@ def test_1234_an_oversize_file_is_refused_by_name_on_every_read_cell(tmp_path: P
 @pytest.mark.parametrize("where", _FIVE)
 def test_1234_pointer_naming_a_fifo_or_directory_does_not_resolve_and_does_not_hang(
         tmp_path: Path, where: str, kind: str | None) -> None:
-    """An evidence pointer naming a FIFO, a directory or a device node in each of the five classes
-    (manifest plan, conduct file, oracle store, served ledger, query table), and a manifest that
-    is itself such a file, is unresolved or refused by name: the pass never blocks on it and no
-    finding rests on it. The control is a plain file in the same position, which resolves.
-
-    Every pass runs under the watchdog, so a blocking open fails the test by name. A manifest
-    that is a FIFO, a directory or a device node refuses the family load by name before any
-    model call; a pointer at such a file in reference run c does not resolve (no two-run pair as
-    a half, not cited riding along, unresolved alone) while b's sibling pair queues."""
     if where == "manifest":
         built = S.family(tmp_path)
         if kind is not None:
@@ -909,15 +675,6 @@ _MALFORMED_CELLS = {"table": "torn", "oracle": "torn", "report": "second_disposi
 @pytest.mark.parametrize("where", sorted(_MALFORMED_CELLS))
 def test_1234_pointer_into_a_file_the_reader_refuses_as_malformed_does_not_resolve(
         tmp_path: Path, where: str, damaged: bool) -> None:
-    """A pointer into a file the fs-read reader refuses as malformed (a torn query table or
-    oracle-store row, a report with a second disposition key) does not resolve and names no run,
-    in the same pass in which that run is malformed and out of every reference set (A3); the
-    pointer cannot reach rows the reader would not. The control is the same pointer into a
-    well-formed file, which resolves.
-
-    Planted in reference run c: alone in a world finding the pointer is unresolved (it names no
-    run) rather than naming only c, it is no two-run half and is not cited riding along, and c's
-    row is not gradable in that pass, naming the file. The twin resolves and names c."""
     seen, expected, built, path = _cell(tmp_path, where,
                                         _MALFORMED_CELLS[where] if damaged else None)
     assert (seen, _c_row_names(built, path)) == (expected, damaged)
@@ -932,15 +689,5 @@ _LINK_CELLS = [("oracle", "symlink"), ("oracle", "linked_dir"), ("oracle", "hard
                          ids=[f"{w}-{k or 'plain-twin'}" for w, k in _LINK_CELLS])
 def test_1234_pointer_through_a_link_is_unresolved_in_the_oracle_store_and_served_ledger_classes(
         tmp_path: Path, where: str, kind: str | None) -> None:
-    """A pointer naming a symbolic link, a path under a linked directory or a hard-linked file
-    inside oracle/<X>/ or served/<token>.<X>.jsonl does not resolve, as in the conduct and
-    query-table classes; the control is the plain file, which resolves.
-
-    In reference run c: c's oracle store replaced by a symlink, reached under a linked
-    directory, or hard-linked; c's served ledger replaced by a symlink or hard-linked (served/
-    is the one directory above a ledger, and linking it would put the control's ledger behind a
-    link too). Every link target is a byte copy outside the episode. The pointer does not
-    resolve (not cited riding along, no two-run half, unresolved alone); the plain twin
-    resolves."""
     seen, expected, _built, _path = _cell(tmp_path, where, kind)
     assert seen == expected

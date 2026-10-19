@@ -1,20 +1,9 @@
-"""Pins for the interval arithmetic the calibration report is built on (#711).
-
-These are not "does the formula compute" tests — they are the numbers #711's issue
-body and design doc quote as the reason the suite cannot certify anything yet. If
-`required_n(0.90)` stops being 35, the sizing argument in
-`defender/docs/oracle-calibration.md` is silently wrong and the resolver's
-threshold goes back to being a picked number rather than a derived one.
-"""
 from __future__ import annotations
 
 
 import pytest
 
 from defender.evals.oracle_golden import stats as STATS
-
-
-
 
 
 def _rounded(k: int, n: int) -> tuple[float, float]:
@@ -54,9 +43,6 @@ def test_required_n_derives_the_resolver_threshold(rate, expected_n):
 
 
 def test_required_n_is_none_when_the_rate_cannot_reach_the_bound():
-    """The lower bound converges to the rate from below, so 0.90 at an observed
-    0.85 is unsatisfiable at any n. Returning a huge n instead would read as
-    "keep recruiting" when the honest answer is "this slice cannot qualify"."""
     assert STATS.required_n(0.90, 0.85) is None
 
 

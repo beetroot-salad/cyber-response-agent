@@ -39,9 +39,6 @@ RULE_ID = "v2-sshd-success-after-failures"
 #: Not mirrored into the planted tree: the venv, caches, this suite, the replay goldens —
 #: nothing a run reads, and the first two are large.
 _NOT_MIRRORED = frozenset({".venv", "__pycache__", "tests", "fixtures-e2e"})
-#: Copied for real rather than symlinked: the tree a scenario edits. `skills/` holds the
-#: catalog. The config and the table are NOT in the tree since #1106 — they are the run's
-#: TENANT's (`drive(tenant=…)`), so a scenario varying the config plants a tenant.
 _COPIED = frozenset({"skills"})
 
 ANCESTORS = [
@@ -78,10 +75,6 @@ def _rebind_verb(tree: Path, verb: str) -> None:
     path.write_text(text.replace("\nverb: alerts\n", f"\nverb: {verb}\n"), encoding="utf-8")
 
 
-# =========================================================================================
-# O2 / O3 — a mismatch between the run's catalog and the table refuses the run at start.
-# =========================================================================================
-
 def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_before_anything_is_spent(tmp_path):
     """The reproduced silent burn, closed where the design puts the check."""
     tree = planted_defender(tmp_path / "ok")
@@ -89,9 +82,6 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
     assert res.has_sidecar(L3), f"positive control: the planted tree did not dispatch l-00c ({res.gather_raw_names()})"
     assert res.gather is not None
     assert len(res.gather.seen) == 1, "positive control: item 3 was not dispatched"
-    # #1255 P1/O3: the dispatch names the run's checkout as the model holds it (`/defender`),
-    # never its host path — so the planted tree is no longer told apart from this checkout in the
-    # dispatch text; the refusal below (the planted edit's doing) is what pins the tree read.
     assert re.search(rf"^defender_dir: {re.escape(MODEL_DEFENDER)}$", res.gather.seen[0],
                      re.MULTILINE), "positive control: the lead was not dispatched with its checkout"
     assert res.budget, "positive control: the budget did not open"
@@ -114,9 +104,6 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
     assert "elastic.query" in message, f"the template's pair is not named:\n{message}"
     assert "elastic.alerts" in message, f"the table's pair is not named:\n{message}"
 
-    # #1235 round 2: "no budget opened" has no read left — the run's budget lives on a
-    # `RunState` that writes nothing and that a raising run hands back to no one. What the
-    # budget would have counted (a backend call, a model turn) is read directly below.
     assert not (run_dir / "wire_logs").exists(), "the wire log opened before the check"
     assert not (run_dir / "gather_raw" / f"{L3}.lead.json").exists(), "l-00c was claimed before the check"
     assert rec.calls == [], f"a backend call was issued before the check: {rec.verbs}"
@@ -157,9 +144,6 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
     )
     assert source.summary_dict.get("truncated_by") is None, source.summary_dict
     store = sink[0]
-    # #1255 (D1, P4): an arm is told nothing on arrival, so no continuation prompt is offered,
-    # and it branches at a MAIN response that CALLED tools — the source's last append (its tip
-    # is a text-only response, which D1 refuses).
     from defender.tests._1255_snapshot import tool_calling_responses
 
     spec = spec_at(store, source.run_dir, tool_calling_responses(store)[-1])
@@ -173,9 +157,6 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
     assert summary.get("truncated_by") is None, summary
     assert sibling.seen, "the resumed run never reached its model"
     assert rec.calls == [], f"a resumed run issued a backend call: {rec.verbs}"
-    # The sibling's `l-00c` sidecar is the SOURCE's, carried across with the rest of the run
-    # dir (a resume inherits its artifacts) — not a claim this run made over the mismatched
-    # tree: byte-identical to the source's, and the source's names the shipped id.
     sidecar = sibling_dir / "gather_raw" / f"{L3}.lead.json"
     assert sidecar.read_bytes() == (source.run_dir / "gather_raw" / f"{L3}.lead.json").read_bytes()
 
@@ -225,8 +206,3 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     # #1235 round 2: the run's budget lives on a `RunState` a raising run hands back to no
     # one, so "nothing was spent before the config was read" is read off the run dir instead.
     assert not (run_dir / "wire_logs").exists(), "the run opened its logger before the config was read"
-
-
-# =========================================================================================
-# O4 — the authored contract is vendor-neutral; the vendor facts live in the template.
-# =========================================================================================

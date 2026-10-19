@@ -9,9 +9,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
-# and a bare module-scope import there is a COLLECTION error, which pytest answers by
-# interrupting the whole session. Guarded like `pydantic_ai` above it.
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender.tests.e2e._toon872 import (  # noqa: E402
@@ -34,9 +31,6 @@ MAX_DEPTH_ENV = "DEFENDER_TOON_GATE_MAX_DEPTH"
 MAX_NODES_ENV = "DEFENDER_TOON_GATE_MAX_NODES"
 MAX_PERCENT_ENV = "DEFENDER_TOON_GATE_MAX_PERCENT"
 
-#: A spy that CANNOT reach the real encoder. Every refusal case uses it, because the whole
-#: point of those cases is that the encoder must not be called — and if the implementation
-#: calls it anyway, the failure must be a red assertion rather than SIGSEGV.
 def _sealed() -> SpyEncoder:
     return SpyEncoder(EncoderFault(dumps_returns="<the encoder must not have been called>"))
 
@@ -190,9 +184,6 @@ def test_the_validators_container_set_equals_the_encoders() -> None:
         assert out.encoder.dumps_calls == 1, (
             f"a hazard inside a {label} was refused, but the encoder never enters one"
         )
-        # The admitted half read at the model as well: the container the encoder emits as
-        # `null` cannot carry the payload back, so M3 rejects and the JSON arm is what the
-        # model reads — where the baseline serializes it at all.
         if out.error is None:
             assert framed_content(out.dispatched.text()) == wire_text(value), (
                 f"a hazard inside a {label} was ADMITTED and then substituted over a view "
@@ -228,9 +219,6 @@ def test_a_payload_one_level_over_the_configured_depth_cap_is_refused_and_one_un
 def test_a_shallow_acyclic_payload_whose_node_count_exceeds_the_budget_is_refused() -> None:
     """A shallow, acyclic payload whose node count exceeds the configured budget is refused
     before the encoder, and the WALK'S OWN COST is bounded by the same budget."""
-    # The k=16 refusal probe rides in the gated k=28 child (printed and flushed BEFORE the
-    # 2**28 run that may abort it), so the harness is imported once per arm, not three times.
-    # The un-gated k=28 child is the parity baseline and stays separate.
     gated_child = f'''
 import json
 from defender.tests.e2e import _toon872 as T
@@ -266,9 +254,6 @@ T.agent_run(toolset=T.foreign_toolset(value), capabilities=True)
     assert result["raised"] is False
     assert result["content_is_wire"] is True
 
-    # The k=28 arm: the walk must TERMINATE rather than visit 2**28 nodes. The process then
-    # dies serializing a payload no serializer can hold — so what is asserted is termination
-    # (not a hang) and PARITY of that death, never survival.
     plain_child = (
         "from defender.tests.e2e import _toon872 as T\n"
         'value = {"leaf": 1}\n'
@@ -310,9 +295,6 @@ def test_a_payload_under_the_budget_in_containers_and_over_it_in_values_is_refus
             "wire bytes"
         )
 
-        # The anti-vacuity control, and it is the half that makes the assertion above mean
-        # what it says: the SAME 63 containers with the values under the budget is ADMITTED,
-        # so the refusal is charged to the value count and not to the shape.
         under = _shared_leaf_dag(width=under_width, share=5)
         admitted = agent_run(toolset=foreign_toolset(under), env=env)
         assert admitted.encoder.dumps_calls == 1, (
@@ -369,10 +351,6 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
             '    value = {"n": value}'
         ),
     }
-    # ONE child per arm runs the whole battery (the harness import and first-run warm-up cost
-    # ~2.5 s per interpreter, which 14 children paid 14 times). Each class prints its result
-    # line as it finishes, so a class that kills the child is the first one missing. The parity claim is unchanged:
-    # per class, both arms complete or die at the same class, and a completed class agrees.
     def child_for(gated: bool) -> str:
         return (
             "import json, sys\n"
@@ -384,12 +362,6 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
             "    exec(build, ns)\n"
             "    value = ns['value']\n"
             f"    out = T.agent_run(toolset=T.foreign_toolset(value), capabilities={gated})\n"
-            # HARVESTED DEFENSIVELY, and this is load-bearing: `texts()` SERIALIZES the
-            # tool return, so on an unserializable payload the probe itself raises — in
-            # the un-gated arm only, because the gated arm's text is already a plain
-            # framed `str` with nothing left to serialize. Harvesting it bare made this
-            # test report a divergence it had created: the RUN reached the same outcome in
-            # both arms (neither delivers), and only the measurement died.
             "    try:\n"
             "        text, text_raised = (out.dispatched.texts() or [None])[0], False\n"
             "    except BaseException:\n"
@@ -428,22 +400,6 @@ def test_every_input_class_kills_or_survives_the_run_identically_with_and_withou
     assert brace in g_res, "a `}`-in-key payload stopped delivering with the gate"
     assert brace in p_res, "a `}`-in-key payload stopped delivering without the gate"
 
-    # THE PROBED STDERR DIVERGENCE DOES NOT EXIST, and asserting it made this test depend on a
-    # panic being ABSENT from an arm that also emits it. Executed over a 2x2 — {benign,
-    # `}`-in-key} x {gated, un-gated} — the `serialization.rs` panic line appears in ALL FOUR,
-    # including a benign dict-row payload with no capability installed at all. It is ambient to
-    # driving an agent in this harness, not something the gate does and not something the
-    # `}` key provokes: a bare `toons.dumps({"rows": [{"a": 1}]})` in a child prints nothing.
-    #
-    # So the honest statement is the ABSENCE of a gate-attributable stderr difference, and the
-    # demand that actually carries O9 is the model-visible one: the text is identical.
-    #
-    # Read off the battery's own `}`-in-key class: it already ran this payload both ways and
-    # harvested the text, so two more children would re-measure it.
-    # Whole-process stderr, as the one-class-per-child form compared it: the ambient panic fires
-    # once per process before any class runs, so a per-class chunk would drop it and compare
-    # something the original never did. (A later `deserialization.rs` panic IS gated-only on this
-    # payload today; that was invisible to the original comparison too, and is left as it was.)
     assert ("panicked at" in gated_out.stderr) == ("panicked at" in plain_out.stderr), (
         "a Rust panic line became gate-attributable — it is ambient to this harness today, so "
         "an asymmetry here is a real change in what the gate does to the process"

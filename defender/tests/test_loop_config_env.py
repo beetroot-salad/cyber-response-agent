@@ -19,9 +19,6 @@ from defender.learning.core import config  # type: ignore[import-not-found]
     ],
 )
 def test_accessor_sees_an_env_set_after_import(monkeypatch, accessor, var, raw, expected):
-    """The behavioral guard, spanning both coercions (str + int) and all four knob
-    families (stage models/efforts, timeouts, retry caps, lock waits). `config` was
-    imported at collection time; the setenv lands after that and must still be seen."""
     monkeypatch.setenv(var, raw)
     assert getattr(config, accessor)() == expected
 

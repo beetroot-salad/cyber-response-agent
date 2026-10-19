@@ -48,9 +48,6 @@ pytestmark = pytest.mark.e2e
 
 # demand #0 and its leave-in-place doctrine
 def test_refused_write_raises_oserror_and_leaves_the_outside_target_intact(tmp_path):
-    """refused_write_outcome — driving the guarded primitive at a name a symlink occupies RAISES
-    `OSError` at the primitive and writes NOTHING through the alias: the outside target's
-    bytes, inode and link count are unchanged, and no new entry appears beside it."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -88,9 +85,6 @@ def test_a_refused_write_leaves_the_planted_alias_in_place(tmp_path):
 # O1's census-keyed negative and its positive control
 @pytest.mark.parametrize("writer", CENSUS, ids=lambda w: w.id)
 def test_no_writer_follows_a_link_planted_at_its_artifact_name(writer: Writer, tmp_path):
-    """no_write_through_planted_leaf — for EVERY host-side writer into a shared tree, a symlink
-    planted at the artifact name it is about to write leaves the outside target byte-
-    identical: the write fails closed instead of redirecting."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -135,10 +129,6 @@ def test_each_writer_lands_its_artifact_when_nothing_is_planted(tmp_path):
 
 
 def test_the_fault_exit_trace_write_never_blanks_a_completed_one(tmp_path):
-    """tool_trace_write_is_torn_write_safe — when the trace write raises inside the run, the
-    fault-exit path leaves `tool_trace.jsonl` present and parseable as (empty) JSONL rather
-    than a torn write; and on the happy path the fault handler never touches the file the
-    normal exit wrote."""
     run = run_tree(tmp_path)
     (run / "report.md").write_text("---\ndisposition: benign\n---\n", encoding="utf-8")
     drive_fault_exit_trace(run)
@@ -163,19 +153,12 @@ def test_the_fault_exit_trace_write_never_blanks_a_completed_one(tmp_path):
 
 # the directory-component half (B8/B10, five sites not two)
 def test_no_writer_mkdirs_through_a_planted_directory_component(tmp_path):
-    """no_write_through_planted_dir_component — a symlink-to-directory planted at a path
-    COMPONENT a writer will create or traverse makes the write fail closed; nothing lands in
-    the directory the component points at, at ANY depth."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     outside_dir = elsewhere / "loot"
     outside_dir.mkdir(parents=True)
     before = snapshot_outside(elsewhere)
 
-    # The three PRODUCTION component-creating writers first, each driven over a planted
-    # component of its own — the census rows this demand's binds already named. Measured while
-    # writing this: all three land their payload inside the outside directory today,
-    # byte-for-byte, and two of them report success while doing it.
     for writer in [w for w in CENSUS if w.mkdirs_component]:
         d = tmp_path / f"component-{writer.id}"
         d.mkdir()
@@ -232,9 +215,6 @@ def test_directory_component_writers_land_when_nothing_is_planted(tmp_path):
 
 
 def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
-    """component_guard_is_anchored_at_the_tree_root — a symlinked component ABOVE the shared tree
-    does not refuse the write, and a run whose runs base sits under one still opens its
-    session store; a component planted INSIDE the tree is still refused in that same layout."""
     from defender.runtime import session_store
 
     # The whole shared tree sits under a symlinked ancestor — the macOS `/tmp` shape.
@@ -288,9 +268,6 @@ def test_a_replacing_write_stages_under_an_unpredictable_name(tmp_path):
 
 
 def test_atomic_write_refuses_a_planted_temp_name(tmp_path):
-    """write_atomic_temp_not_followed — when the staged name is already occupied, the replacing
-    write fails closed with `EEXIST` and the payload never reaches whatever that entry
-    aliases; there is no retry under another name."""
     run = run_tree(tmp_path)
     target = outside(tmp_path)
     original = target.read_bytes()
@@ -306,9 +283,6 @@ def test_atomic_write_refuses_a_planted_temp_name(tmp_path):
 
 
 def test_orphaned_staged_files_are_swept_through_the_same_primitive(tmp_path):
-    """orphaned_staged_files_are_swept — a staged file an interrupted write left behind is
-    removed by the sweep, the sweep is itself a guarded write into the tree, and it refuses to
-    follow an alias planted at an orphan's name."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -333,10 +307,6 @@ def test_orphaned_staged_files_are_swept_through_the_same_primitive(tmp_path):
 # the four postures F1 preserved, and §7 D3's exemption
 @pytest.mark.parametrize("writer", CENSUS, ids=lambda w: w.id)
 def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(writer, tmp_path):
-    """call_site_postures_preserved — for EVERY census writer, an alias refusal produces the same
-    observable that site produces today when its write fails for an ordinary reason, and the
-    outside target stays byte-identical; across the census the four posture classes X5
-    measured are all still ..."""
     ordinary_dir = tmp_path / f"{writer.id}-ordinary"
     ordinary_dir.mkdir()
     ordinary_run = run_tree(ordinary_dir)
@@ -371,9 +341,6 @@ def test_each_writer_keeps_its_exception_posture_when_the_write_is_refused(write
 
 # the locked idiom, the seam, the lint, and the callers outside every box
 def test_locked_json_open_fails_before_the_lock_is_acquired(tmp_path):
-    """locked_json_open_refuses_before_the_lock — the locked read-modify-write idiom refuses at
-    the OPEN, with `ELOOP`, so `flock` is never taken on the outside target and its bytes are
-    unchanged."""
     run = run_tree(tmp_path)
     target = outside(tmp_path)
     original = target.read_bytes()
@@ -392,9 +359,6 @@ def test_locked_json_open_fails_before_the_lock_is_acquired(tmp_path):
 
 
 def test_every_shared_tree_writer_routes_through_the_guarded_primitive(tmp_path):
-    """write_guarded_is_the_single_write_seam — the guarded primitive exists with the declared
-    signature, its three modes are distinguishable in effect, and it is reachable for both
-    shared roots."""
     import inspect
 
     sig = inspect.signature(_io.write_guarded)  # type: ignore[attr-defined]
@@ -413,10 +377,6 @@ def test_every_shared_tree_writer_routes_through_the_guarded_primitive(tmp_path)
     assert (run / "notes.jsonl").read_text(encoding="utf-8") == "replaced\n"
     assert not list(run.glob("notes.jsonl.*")), "the replacing write left its staged name behind"
 
-    # THE THIRD MODE. `update` is the locked read-modify-write lane, and it was named in the
-    # outcome sentence and never driven here — its only appearance in the suite was a REFUSAL
-    # (the ELOOP-before-the-lock demand), which shows the mode exists without showing it does
-    # anything. Three modes "distinguishable in effect" needs all three to have an effect.
     write_guarded(run / "state.json", '{"n": 1}')
     write_guarded(run / "state.json", '{"n": 2}', mode="update")
     assert json.loads((run / "state.json").read_text(encoding="utf-8"))["n"] == 2, (
@@ -433,16 +393,9 @@ def test_every_shared_tree_writer_routes_through_the_guarded_primitive(tmp_path)
 
 # the lead tables, and the second shared root
 def test_a_duplicate_lead_id_still_fails_exclusive_create(tmp_path):
-    """duplicate_lead_claim_still_refuses — claiming a `lead_id` twice still fails on the
-    exclusive create: the second claim reports the reuse and does NOT overwrite the first
-    sidecar's contents."""
     run = run_tree(tmp_path)
     dispatch = {"run_dir": str(run), "lead_id": "l-001", "goal": "first", "what_to_summarize": []}
 
-    # `== CLAIMED`, not `!= 2` (#855 F-12): "not the reuse code" is satisfied by the silent
-    # refusal too, which is exactly the read that let an unclaimed dispatch run. The first
-    # claim of this pair is the premise the rest of the demand rests on, so it asserts that
-    # the row was WRITTEN.
     assert record_lead.claim_lead(dispatch, run=fixture_run(run)) == record_lead.CLAIMED
     sidecar = run / "gather_raw" / "l-001.lead.json"
     first = sidecar.read_text(encoding="utf-8")
@@ -454,9 +407,6 @@ def test_a_duplicate_lead_id_still_fails_exclusive_create(tmp_path):
 
 
 def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_path):
-    """lead_id_gates_agree_at_both_check_sites — the claim-time gate and the gather-seam gate
-    accept and reject exactly the same `lead_id` values, driven at both enforcement sites over
-    a boundary set."""
     import asyncio
 
     from defender.runtime.tools_gather import _run_gather
@@ -465,10 +415,6 @@ def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_pa
              "../etc", "l-1/../..")
 
     def claim_rejects(lead_id: str) -> bool:
-        # The observable is whether a SIDECAR appeared, not the return code — and it stays the
-        # observable now that #855 F-12 has split the codes (a refusal answers `NOT_CLAIMED`,
-        # success `CLAIMED`), because the two gates being compared are the shape checks, and
-        # only one of them has a code to report at all.
         d = tmp_path / f"claim-{abs(hash(lead_id))}"
         d.mkdir()
         run = run_tree(d)
@@ -500,9 +446,6 @@ def test_the_claim_time_and_gather_seam_lead_id_gates_accept_the_same_set(tmp_pa
 
 
 def test_the_drain_worktree_writers_meet_a_planted_alias_the_same_way(tmp_path):
-    """alias_backstop_covers_the_second_shared_root — the writers into the SECOND shared root
-    (the curator drain worktree) meet a planted alias exactly as the run-dir writers do: the
-    outside target is byte-identical and the write fails closed."""
     worktree = tmp_path / "wt"
     corpus = worktree / "defender" / "lessons"
     corpus.mkdir(parents=True)
@@ -536,10 +479,6 @@ def test_the_drain_worktree_writers_meet_a_planted_alias_the_same_way(tmp_path):
     )
 
 
-# the gated model writers, back in the negatives on the hard-link axis
-#: The four arms X17's executed matrix covered: both gated model write tools crossed with both
-#: names the write allowlist admits. Each arm carries content its own artifact schema accepts,
-#: so a refusal in the test can only come from the alias check and never from the schema.
 REPORT_BODY = "---\ndisposition: benign\n---\n\nnothing to see.\n"
 INVESTIGATION_BODY = "+ spec investigation\n"
 
@@ -552,20 +491,10 @@ GATED_WRITE_ARMS = (
      lambda deps, p: runtime_tools._tool_edit_file(deps, p, "nothing to see.", "PWNED")),
     ("edit_file", "investigation.md", INVESTIGATION_BODY,
      lambda deps, p: runtime_tools._tool_edit_file(deps, p, "spec", "PWNED")),
-    # #810: `append_block` is main's ONLY writer, so it is the arm that now matters most here
-    # — the other two are held by the curator and lead-author roles. One arm, not two: the verb
-    # is bound to investigation.md and takes no path, so report.md is unreachable through it by
-    # construction rather than by refusal. It ignores the `p` the harness passes for the same
-    # reason, and lands on `deps.run_dir / "investigation.md"` — the planted name.
     ("append_block", "investigation.md", INVESTIGATION_BODY,
      lambda deps, p: runtime_tools._tool_append_block(deps, INVESTIGATION_BODY)),
 )
 
-#: (#774/R1: report.md left the model's write_file/edit_file allow entirely — both tools now
-#: refuse it unconditionally, planted alias or not — so it is no longer a positive-control arm.
-#: The hard-link negative above still drives all four GATED_WRITE_ARMS: refusal is refusal
-#: regardless of cause, and report.md refusing a hard-linked plant is still true. Only the
-#: "lands when nothing is planted" control below narrows, to the one name that still lands.)
 LANDING_ARMS = tuple(arm for arm in GATED_WRITE_ARMS if arm[1] != "report.md")
 
 
@@ -574,26 +503,14 @@ LANDING_ARMS = tuple(arm for arm in GATED_WRITE_ARMS if arm[1] != "report.md")
     ids=[f"{t}-{n}" for t, n, _s, _d in GATED_WRITE_ARMS],
 )
 def test_the_gated_model_writers_refuse_a_planted_hard_link(tool, name, seed, drive, tmp_path):
-    """gated_model_writers_refuse_a_planted_hard_link — a HARD LINK planted at either of the two
-    names the model's write allowlist admits leaves the outside file byte-identical, through
-    EITHER gated write tool: all four arms refuse rather than truncating the shared inode."""
     run = run_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     target = elsewhere / "secret.txt"
-    # Seeded with the arm's OWN schema-valid content, so the artifact's content gate cannot be
-    # what refuses: a deny for a schema reason would make this negative pass for the wrong
-    # cause, which is exactly how a plant-shaped oracle certifies a gate that never looked.
     target.write_text(seed, encoding="utf-8")
 
     deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).resolve().parents[2])
     plant_hardlink(run / name, target)
-    # WRITE-CODE-FROM-SPEC FIX: `before` moves to AFTER the plant, not before it. Planting a
-    # hard link unconditionally raises the target's own st_nlink 1->2 (plant_hardlink's own
-    # postcondition, asserted a few lines up its stack) — a `before` snapshot taken earlier
-    # captures nlink=1 and NO write can ever match it again, so the assertion below failed on
-    # every arm regardless of whether the write was refused. The oracle's intent is "the write
-    # did not change anything past the plant", so the baseline has to include the plant.
     before = snapshot_outside(elsewhere)
 
     refused = False
@@ -636,10 +553,6 @@ def test_the_gated_model_write_lands_when_nothing_is_planted(tool, name, seed, d
 def test_report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted(
     tool, name, seed, drive, tmp_path,
 ):
-    """report_md_refuses_the_gated_model_writers_even_when_nothing_is_planted (#774/R1) — the
-    positive control LANDING_ARMS lost when report.md left the model's write_file/edit_file
-    allow entirely: unlike the other allowlisted name, there is no "lands" case for report.md
-    to be missing a control for."""
     run = run_tree(tmp_path)
     deps = bind(MAIN_DEF, run, defender_dir=Path(__file__).resolve().parents[2])
     artifact = run / name

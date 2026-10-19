@@ -1,7 +1,3 @@
-"""One list of drain mounts per label (`DrainLabel.writable_trees`): the drain box's read-write mounts equal the trees
-`open_drain_trees` holds, are lexical (never resolved, never joined to the cwd), a non-member label is refused before
-anything is held, and each lane's real work step mounts and holds its leaf's trees.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -26,9 +22,6 @@ from defender.tests.test_1111_rooted_io import HOST_BYTES, census
 from defender.tests._tree_listing_1134 import descriptors_under, put_plain
 from defender.learning.core.state import FINDINGS
 
-# ---------------------------------------------------------------------------------------
-# The labels and their trees
-# ---------------------------------------------------------------------------------------
 
 #: The two labels are the members of `DrainLabel` (#1179): values no string equals.
 AUTHOR = DrainLabel.AUTHOR
@@ -52,19 +45,8 @@ MOUNTS_BY_ATTRIBUTE: dict[DrainLabel, Callable[[LoopPaths], tuple[Path, ...]]] =
 #: Every tree a drain checkout carries that some label mounts.
 ALL_TREES = ("defender/lessons", "defender/lessons-questioner", "defender/skills")
 
-#: Trees a checkout carries that no label lists (H5): the two retired corpora the real repo
-#: still tracks, and a folder named like the skills tree. A list that globs or lists the leaf's
-#: folders picks them up.
 DECOY_TREES = ("defender/lessons-actor", "defender/lessons-environment", "defender/skills-old")
 
-#: Labels no lane names: first the members' own values as bare strings (#1179: a string is never
-#: a label, however it is spelled), their names, and look-alike objects carrying their values
-#: (only the members themselves are labels), then near misses (v1's E5, and H7's spawn-label forms): a prefix,
-#: a case change, a leading or trailing space or newline, hyphens for underscores, a leading or
-#: trailing extra character, the empty string, a suffixed version, the pitfalls lane (drained
-#: inside the lead-author tick, never its own box), and a lane with a `:`, `/` or `.` suffix
-#: (`<lane>:<batch_id>` is this codebase's spawn-label shape). A label matched by prefix, by
-#: case, after `.strip()`, or up to a separator gets a tree.
 class _LookAlike(enum.Enum):
     """A second enum whose members carry the drain labels' values: equal by `.value` and by
     name, never the members themselves."""
@@ -225,42 +207,10 @@ def assert_raises_non_member(fn: Callable[[], Any], what: str) -> None:
     pytest.fail(f"{what}: answered {got!r} for a non-member, not AttributeError")
 
 
-# ---------------------------------------------------------------------------------------
-# The labels: spelled once, in config, and passed by name
-# ---------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------------------
-# DrainLabel.writable_trees: the one list
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("on_disk", ["absent", "built_with_decoys"])
 @pytest.mark.parametrize("label", KNOWN)
 def test_each_members_writable_trees_are_its_mount_points_in_order(
         tmp_path: Path, label: DrainLabel, on_disk: str):
-    """`label.writable_trees(paths)` (the owner of `drain_writable_trees`, #1179 M1') is the member's
-    mount points, a tuple in the contract's order, under the `LoopPaths` it is handed, whatever
-    else the checkout holds."""
     lf = _leaf(tmp_path)
     if on_disk == "built_with_decoys":
         lf.build()
@@ -294,16 +244,8 @@ def test_the_mount_lists_are_pairwise_disjoint(tmp_path: Path):
     assert w.catalog_dir.is_relative_to(w.skills_dir)
 
 
-# ---------------------------------------------------------------------------------------
-# _drain_box_request mounts that list and nothing else
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("label", KNOWN)
 def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: DrainLabel):
-    """The real `_drain_box_request` mounts exactly the leaf's `label.writable_trees(wt_paths)`
-    read-write, each at its own path, plus `wt` read-only, and nothing else. (A non-member
-    raises: `test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held`.)"""
     lf = _leaf(tmp_path)
 
     request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
@@ -322,9 +264,6 @@ def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: Dra
 @pytest.mark.parametrize("label", KNOWN)
 def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
         tmp_path: Path, label: DrainLabel, dot_git: str):
-    """A real drain leaf is a git worktree (`.git` is a file naming the main repository's
-    worktree dir), or a clone (`.git` a folder). Either way the box mounts the leaf read-only,
-    its own trees read-write, and nothing else (round 2's H6)."""
     lf = _leaf(tmp_path)
     lf.build()
     git = lf.wt / ".git"
@@ -340,11 +279,6 @@ def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
     assert rw_mounts(request) == [(m, m) for m in expected]
     assert len(request.mounts) == 1 + len(expected)
     assert git.is_file() if dot_git == "file" else git.is_dir()
-
-
-# ---------------------------------------------------------------------------------------
-# O4: the box's rw mounts are the roots open_drain_trees holds
-# ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("swap", ["fresh_folder", "link_to_outside"])
@@ -407,10 +341,6 @@ def test_the_box_rw_mounts_are_the_roots_open_drain_trees_holds_and_a_swap_moves
 @pytest.mark.parametrize("label", UNKNOWN_LABELS)
 def test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held(
         tmp_path: Path, label: object):
-    """O1': only a member names a lane. A non-member (the members' values and names as strings,
-    a look-alike enum's member, an object carrying a member's value, a near miss) raises at
-    `_drain_box_request` and at `open_drain_trees`, over a leaf that is not even on disk, and
-    nothing is held or made."""
     lf = _leaf(tmp_path)
 
     assert_raises_non_member(
@@ -455,9 +385,6 @@ def test_a_tree_missing_from_the_leaf_is_refused_never_skipped(tmp_path: Path):
 @pytest.mark.parametrize("label", KNOWN)
 def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
         tmp_path: Path, label: DrainLabel):
-    """`_drain_box_request` and `open_drain_trees` both take their list from
-    `label.writable_trees` over the `LoopPaths` they are handed, asked of the leaf, never from a
-    table of their own (v1's E1)."""
     asked: list[tuple[Path, str]] = []
     paths = relocated_paths(asked)(repo_root=tmp_path / MAIN,
                                    state_dir=tmp_path / "learning-state")
@@ -486,13 +413,6 @@ def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
     assert_asked_of(asked, wt, label, "the holder")
 
 
-
-
-# ---------------------------------------------------------------------------------------
-# Absolute mounts: a relative root is refused before anything is held
-# ---------------------------------------------------------------------------------------
-
-
 def relative_paths(how: str, root: Path, tmp_path: Path) -> LoopPaths:
     """A `LoopPaths` whose `repo_root` is the relative `root`: `constructed` directly, or
     `rebased` from the main checkout's paths through `with_repo_root`, the drain's own route."""
@@ -507,9 +427,6 @@ def relative_paths(how: str, root: Path, tmp_path: Path) -> LoopPaths:
 @pytest.mark.parametrize("label", KNOWN)
 def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to_the_cwd(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, label: str, at_cwd: str, how: str):
-    """`DefenderPaths` and `with_repo_root` keep a relative `repo_root` as given, so its list
-    and the box's rw mounts are relative, and `open_drain_trees` refuses it with `ValueError`
-    before it opens anything. It never falls back to the cwd."""
     rel_root = Path("relative-wt")
     abs_root = tmp_path / rel_root
     for rel in EXPECTED_MOUNTS[label]:
@@ -542,12 +459,6 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
             open_drain_trees(absolute, label)
     assert held_roots(tmp_path) == []
 
-
-
-
-# ---------------------------------------------------------------------------------------
-# The real drives: what each lane hands its box, and what its work step can hold
-# ---------------------------------------------------------------------------------------
 
 #: Each lane's own branch prefix (`AuthorBranch`'s default, and the lead lane's).
 LANE_PREFIX = {AUTHOR: "lessons/", LEAD: "lead-author/"}
@@ -670,9 +581,6 @@ def assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d: Drive)
 @pytest.mark.parametrize("kind", ["shipped", "relocated"])
 def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_them(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, prefix: str):
-    """Driven through the real `drains.author_drain`: the box request the lane composes mounts
-    the leaf's two lesson corpora rw and the leaf ro, nothing else, all absolute, and the trees
-    its work step can hold over the `LoopPaths` the lane hands it are exactly those mounts."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     d = start_drive(tmp_path, AUTHOR, kind, prefix)
     put_plain(d.paths.state_root / FINDINGS.queue, b'{"finding_id": "f-1"}\n')
@@ -690,10 +598,6 @@ def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_th
 @pytest.mark.parametrize("kind", ["shipped", "relocated"])
 def test_the_lead_lane_mounts_its_leafs_skills_and_its_work_step_holds_it(
         tmp_path: Path, kind: str, prefix: str):
-    """Driven through the real `drains.lead_author_drain` with one queued case: the box request
-    the lane composes mounts the leaf's `skills/` rw and the leaf ro, nothing else, all
-    absolute, and the trees its work step can hold over the `LoopPaths` the lane hands it are
-    exactly that mount."""
     d = start_drive(tmp_path, LEAD, kind, prefix)
     run_dir = curation_run_dir("run-1")
     with state_for_paths(d.paths) as state:

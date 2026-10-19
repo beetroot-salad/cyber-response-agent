@@ -11,13 +11,6 @@ from defender.tests.learning_state_1135 import _spec1135 as S
 def test_the_kept_root_routes_still_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The routes the design keeps still work: config.loop_paths() resolves the root from
-    DEFENDER_LEARNING_STATE_DIR at call time; LoopPaths(state_dir=...) still names a root;
-    _tenant._refuse_widened_learning_state_overlap still reads DEFENDER_LEARNING_STATE_DIR
-    directly and still refuses an overlapping data root (D4 "Kept").
-
-    And the handle opened on loop_paths() holds that root: describe of a channel queue is under
-    it (JF8 reading A: an absolute path string)."""
     from defender import _tenant
     from defender.learning.core import config
 
@@ -46,15 +39,3 @@ def test_the_kept_root_routes_still_resolve(
     assert isinstance(described, str), f"describe must give a display string: {described!r}"
     assert Path(described).is_relative_to(root.resolve()), (
         f"the handle on loop_paths() does not hold the env's root: describe gave {described!r}")
-
-
-# ---------------------------------------------------------------------------------------------
-# O4: the root-route scan
-# ---------------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------------
-# D28: a removed name still imported by a lazily loaded module
-# ---------------------------------------------------------------------------------------------
-
-

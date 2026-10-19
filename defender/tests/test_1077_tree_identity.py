@@ -44,9 +44,6 @@ def _baseline_exists() -> None:
 # d13 / d14 — the structural check, and the narrow content check beside it
 
 def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Path):
-    """Replaying a fixture run through the handle produces a run directory whose SET OF NAMES
-    is the pre-migration one exactly — no entry added, removed, renamed or moved — with no
-    exemption and no entry excused."""
     _baseline_exists()
     run_dir = _replay(tmp_path)
     doc = S.load_baseline()
@@ -61,10 +58,6 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
     assert "exclude" not in S.snapshot.__code__.co_varnames, (
         "`snapshot` grew an `exclude` argument — the structural check admits no exemption, "
         "which is the only thing that makes 'the same set of names' worth asserting")
-    # And the per-run-unstable files ARE in the compared name set: their names are pinned even
-    # though their bytes are not. (The case pointer was one until #1235 moved it out of the run
-    # dir into a sidecar beside it; the baseline no longer names it, so a pointer written back
-    # inside the folder is an added name the structural check above reports.)
     names = set(S.snapshot(run_dir))
     for unstable in ("tool_trace.jsonl",):
         assert unstable in names, (
@@ -76,11 +69,6 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
 # g04 — the writers that share one run directory
 
 def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_path: Path):
-    """Driven from the composition frame (`materialize_run`/`run_main`), every writer under one run
-    dir (`Run`, `_alias`, `challenge_gate`, `model_bash`, `record_query`) writes into its own
-    reserved key space — lead claims by lead_id+seq (d29), review records by turn, the box's own
-    `bash`/`docker-exec` writes by their fixed names — with no two writers' keys able to
-    collide."""
     from defender.scripts.gather_tools import record_query
     run_dir = S.seed_run_tree(S.make_run_dir(S.make_runs_base(tmp_path)))
     owner = S.RunPaths(run_dir)

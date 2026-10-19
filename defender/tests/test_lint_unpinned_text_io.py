@@ -82,10 +82,6 @@ def test_pinned_and_binary_are_clean(tmp_path):
 
 
 def test_duck_typed_path_open_is_flagged(tmp_path):
-    """The crux of the refactor: `p.open("r")` has an UNRESOLVABLE callee — the
-    receiver is a value, not a module. It must stay flagged. A resolver that
-    treats "unresolvable" as "skip" would silently gut this gate, and the empty
-    baseline would not notice."""
     assert _flags(tmp_path, 'def f(p):\n    return p.open("r")\n')
     assert _flags(tmp_path, "def f(p):\n    return p.open()\n")
 
@@ -114,10 +110,6 @@ def test_fingerprint_dedups_within_a_function(tmp_path):
 
 
 def test_multiple_scopes_are_prefixed_and_cannot_collide(tmp_path):
-    """The real run scans several roots; a finding is prefixed with its tree-relative path so a
-    same-file:function:kind site in two trees yields two DISTINCT fingerprints — otherwise one
-    baseline entry would silence a real site in the other tree. Exercises the prefix seam directly
-    (no monkeypatch), with the empty prefix returning `_scan` untouched (the single-scope path)."""
     gate = _GATE
     a, b = tmp_path / "treeA", tmp_path / "treeB"
     _pyfile(a, "_config.py", "def f(p):\n    return p.read_text()\n")
@@ -164,16 +156,10 @@ def test_gzip_open_text_mode_is_flagged(tmp_path):
 
 
 def test_gzip_open_binary_default_is_clean(tmp_path):
-    """gzip.open defaults to "rb" — the mode DEFAULT is a property of the callee,
-    which is exactly what only a resolver can know. Green today (for the wrong
-    reason: `gzip` is in the skip-list) and must stay green after."""
     assert not _flags(tmp_path, "import gzip\ndef f(p):\n    return gzip.open(p)\n")
 
 
 def test_codecs_open_binary_literal_is_not_flagged_for_the_right_reason(tmp_path):
-    """`codecs.open("f.bin", "rb")` is clean today because _open_mode returns the
-    FILENAME "f.bin", which contains a "b". Rename the file and it flags. This
-    test pins the intent: binary is clean because the MODE says so."""
     assert not _flags(tmp_path, (
         "import codecs\n"
         'def f():\n    return codecs.open("data.txt", "rb")\n'
@@ -192,11 +178,6 @@ def test_hoisted_mode_constant_is_resolved(tmp_path):
 
 
 def test_spooled_tempfile_text_mode_is_flagged(tmp_path):
-    """`SpooledTemporaryFile(max_size, mode)` — max_size comes FIRST, so the mode sits at
-    slot 1, not slot 0 like its `NamedTemporaryFile`/`TemporaryFile` siblings. Pinning it
-    at 0 read the max_size INT as the mode string, so a genuine text-mode spooled file went
-    unflagged — the very slot-guessing bug the resolver exists to end, in the one table
-    entry never checked against inspect.signature."""
     assert _flags(tmp_path, (
         "import tempfile\n"
         'def f():\n    return tempfile.SpooledTemporaryFile(1024, "w")\n'
@@ -215,10 +196,6 @@ def test_spooled_tempfile_binary_is_clean(tmp_path):
 
 
 def test_open_on_an_imported_object_is_flagged(tmp_path):
-    """A receiver rooted at an IMPORTED name is not necessarily a MODULE. `PATHS` is a
-    module-level Path-holder object, so `PATHS.lessons_dir.open()` resolves to a non-None
-    origin — and a gate that reads "it resolved" as "not a duck-typed opener" drops a real
-    unpinned text open on the floor while its empty baseline stays green."""
     assert _flags(tmp_path, (
         "from defender._paths import PATHS\n"
         "def f():\n    return PATHS.lessons_dir.open()\n"
@@ -226,10 +203,6 @@ def test_open_on_an_imported_object_is_flagged(tmp_path):
 
 
 def test_aliased_subprocess_is_flagged(tmp_path):
-    """Green today, but ONLY by accident: the subprocess check has no receiver test
-    at all, so `sp.run` matches on the bare attribute `run`. It is the same defect
-    that produces the `runner.run` false positive above. After the resolver it is
-    green for the right reason — `sp` resolves to `subprocess`."""
     assert _flags(tmp_path, (
         "import subprocess as sp\n"
         "def f(cmd):\n    return sp.run(cmd, text=True)\n"

@@ -42,11 +42,6 @@ LOCK_NAMES = {
 }
 
 
-# ---------------------------------------------------------------------------------------------
-# The world: a repo with both corpora, a created state root, both thresholds at 1
-# ---------------------------------------------------------------------------------------------
-
-
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
                           check=True).stdout
@@ -156,29 +151,7 @@ def _handle_rows(paths: LoopPaths) -> list[dict]:
     return S.rows_of(state.rows(S.coined("FINDINGS")))
 
 
-# ---------------------------------------------------------------------------------------------
-# #30 — the halt
-# ---------------------------------------------------------------------------------------------
-
-
 def test_a_refusal_in_the_first_curator_halts_the_tick_with_exit_2(tmp_path, monkeypatch, caplog):
-    """A curator-drain tick runs through _run_stage with a symlink planted at the findings
-    channel's consumed ledger (`_pending/consumed.jsonl`, pointing at a file outside the root).
-    That plant is reached by rotate inside _tick's stuck-guarded body (the gate consumes the
-    tick's one row, so the closing rotation appends it to the ledger), so the refusal crosses
-    every changed catch site. Then: the stage returns 2 with a CRITICAL line naming the refused
-    entry, and no second "...it displaced" CRITICAL line (JF15: a lone refusal is one CRITICAL
-    line; the core error the handle converted is not a displaced fault); the entry and its
-    target are untouched; no queue, ledger or request is rewritten, and
-    nothing is dead-lettered, retired or bumped; no stuck record is written on either channel
-    (_tick's arm skips it for StateRefused, 3.1 A, and _drain_one_curator records nothing); the
-    questioner curator does not run in that tick (R12 narrowed by R16 and 3.1 B). The only
-    entries the tick may add are lock files, created below the existing root as today.
-
-    JF1 (owner, §7) is a clause: the halt line naming the batch's branch is not asserted here."""
-    # rejected: N11 — no recovery scan; N14 — no skip or report-and-continue; N15 — earlier
-    # writes in the tick are not rolled back; the by-hand CLIs get an uncaught traceback, not
-    # exit 2 — declared, not fixed
     caplog.set_level(logging.INFO)
     repo, root, paths = _world(tmp_path, monkeypatch)
     row = _defender_row("ep-1/b/0/1", "caught")
@@ -213,25 +186,7 @@ def test_a_refusal_in_the_first_curator_halts_the_tick_with_exit_2(tmp_path, mon
         "the queue read back through the handle is not the queue the tick left"
 
 
-# ---------------------------------------------------------------------------------------------
-# #31 — a non-refusal systemic fault keeps today's containment
-# ---------------------------------------------------------------------------------------------
-
-
 def test_a_non_refusal_fault_in_the_first_curator_stays_contained(tmp_path, monkeypatch, caplog):
-    """An existing SYSTEMIC_FAULTS member that is not a StateRefused is raised at the same site
-    as #30, inside _tick's stuck-guarded body. It keeps today's containment: exactly one stuck
-    record is written on that channel (by _tick's arm; _drain_one_curator sees it already
-    recorded); the fault does not reach _run_stage; the questioner curator still runs in the
-    same tick. Revisions 3 and 3.1 B narrow only the curator, recorder and _tick catches, and
-    only to StateRefused.
-
-    The fault is a real input through real code, in place of the seed's StageAbort-from-the-gate
-    (no real input makes the gate raise StageAbort): the tick's one row is admitted for authoring
-    (a fresh new-shape row), and `LEARNING_AUTHOR_MODEL` names a model no provider serves, so
-    the curator spawn's key sourcing raises `FatalConfigError` — a SYSTEMIC_FAULTS member —
-    inside _tick's body, before any model is called (config.source_first_party_key). (It was
-    the verifier-key preflight's until #1166 deleted that check.)"""
     caplog.set_level(logging.INFO)
     monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-provider-model-1135")
     repo, root, paths = _world(tmp_path, monkeypatch)
@@ -254,27 +209,8 @@ def test_a_non_refusal_fault_in_the_first_curator_stays_contained(tmp_path, monk
         "the queue read back through the handle is not the row the fault left queued"
 
 
-# ---------------------------------------------------------------------------------------------
-# #32 — RF4's recorder catch re-raises a refusal
-# ---------------------------------------------------------------------------------------------
-
-
 def test_a_refused_stuck_report_raises_instead_of_logging_not_written(
         tmp_path, monkeypatch, caplog):
-    """When a non-retiring fault in run_batch/_tick/_handle_retire is recorded and the channel's
-    stuck report is a planted symlink, the recorder catch re-raises the StateRefused (RF4,
-    narrowed by R16): it does not log "stuck record NOT written", and nothing is appended to the
-    link's target.
-
-    Driven at the recorder itself: the folded drain body `author/drain.run_batch` over the
-    regression tier's findings config (`_drain719.cfg_for`), with a world-subject row on the
-    defender queue, so the lessons gate's real `ValueError` (a non-retiring fault) is raised
-    inside _tick and handed to the recorder. (It was the verifier-key preflight's
-    `FatalConfigError` until #1166 deleted the forward check.)
-    Not through `author_drain`: `_drain_one_curator` reads the stuck report's count before the
-    curator runs, so a refusal there would be met before any recorder catch is reached. The
-    stuck report `_pending/findings.stuck.jsonl` is a link to a file outside the root (X5:
-    today's recorder follows it and appends the record into the target)."""
     from defender.learning.author import drain as author_drain_body
 
     caplog.set_level(logging.INFO)
@@ -302,11 +238,6 @@ def test_a_refused_stuck_report_raises_instead_of_logging_not_written(
     assert S.entry_kind(report) == "link", "the planted stuck report was not left in place"
     assert os.readlink(report) == str(target), "the planted stuck report was re-pointed"
     assert _handle_rows(paths) == [row], "the faulted row did not stay queued"
-
-
-# ---------------------------------------------------------------------------------------------
-# s_d7 — the second curator's non-refusal systemic fault, after the first committed
-# ---------------------------------------------------------------------------------------------
 
 
 class _FirstCommitsSecondFaults:
@@ -343,14 +274,6 @@ class _FirstCommitsSecondFaults:
 
 def test_1135_second_curator_meets_a_non_refusal_systemic_fault_after_the_first_committed(
         tmp_path, monkeypatch, caplog):
-    """A systemic fault that is not a refusal keeps today's containment (3.1 B, R16: the curator
-    catch re-raises StateRefused only): the second curator's failure is recorded on its channel's
-    stuck report and the tick returns without exit 2. The first curator's committed work is as it
-    is today: its batch is pushed and its PR opened in the same tick, and its committed rows stay
-    queued (hold_committed) until the lesson is on origin/main — nothing is consumed by the tick,
-    and nothing is left on an unpushed branch.
-
-    PJ1C is the probed today; PJ1R refutes "the first curator's rows are consumed"."""
     caplog.set_level(logging.INFO)
     repo, root, paths = _world(tmp_path, monkeypatch)
     row = _defender_row("ep-1/b/0/4", "survived")
@@ -382,19 +305,7 @@ def test_1135_second_curator_meets_a_non_refusal_systemic_fault_after_the_first_
         "the queue read back through the handle is not the queue the tick left"
 
 
-# ---------------------------------------------------------------------------------------------
-# s_d15 — a halt releases every lock it held
-# ---------------------------------------------------------------------------------------------
-
-
 def test_1135_locks_of_a_halted_tick_are_free_for_the_next_tick(tmp_path, monkeypatch, caplog):
-    """After a tick halts on a refused entry, every lock it held (the repo lock, the drain lock,
-    a channel's append lock) is released: the same process's next tick takes each of them (O3:
-    lock semantics are unchanged and a halt unwinds through the lock holders like any exception).
-
-    The halt is #30's (a link at the findings channel's consumed ledger). After it: each lock
-    file is free to another holder; the handle takes the repo lock and the drain locks; and once
-    the planted entry is removed, the next tick in this process runs through and consumes."""
     caplog.set_level(logging.INFO)
     repo, root, paths = _world(tmp_path, monkeypatch)
     row = _defender_row("ep-1/b/0/5", "caught")
@@ -427,10 +338,6 @@ def test_1135_locks_of_a_halted_tick_are_free_for_the_next_tick(tmp_path, monkey
     assert [r["finding_id"] for r in S.jsonl_rows(root / "_pending" / "consumed.jsonl")] \
         == [row["finding_id"]], "the next tick did not take the locks and consume"
 
-
-# ---------------------------------------------------------------------------------------------
-# s_d19 — an ordinary write failure in each phase under the stuck guard (a child process)
-# ---------------------------------------------------------------------------------------------
 
 #: The file-size ceiling the child runs under (RLIMIT_FSIZE). A file already past it cannot
 #: grow by a byte (EFBIG, "File too large"): a real full-file failure, root or not.
@@ -487,18 +394,6 @@ def _tick_in_child(tmp_path: Path, repo: Path, root: Path) -> dict:
 @pytest.mark.parametrize("phase", ["retire_unkeyable", "rotation_ledger_append", "held_report"])
 def test_1135_ordinary_write_failure_at_each_phase_under_the_stuck_guard(
         tmp_path, monkeypatch, phase):
-    """Each phase fails as it does today (R16, O3): an ordinary write failure (a full volume) in
-    the retirement of unkeyable rows, the rotation's ledger append or the held-report write is
-    caught by the tick's stuck guard, recorded and routed as before, with the rows in flight in
-    each phase unchanged. The handle's verbs do not convert an ordinary write failure into
-    StateRefused, and no phase loses a row that today survives.
-
-    The failure is real: the tick runs in a child process under RLIMIT_FSIZE, and the phase's
-    one file — the graveyard `findings.deadletter.jsonl`, the ledger `consumed.jsonl`, or the
-    held report `findings.held_report.log` — is already past the ceiling, so its append fails
-    with EFBIG while every other write of the tick fits. Write-side failures carry an errno
-    (G8); _tick's arm records any fault outside RETIRE_SET, an OSError included (X21), and the
-    curator frame contains an OSError as today. The questioner curator still runs."""
     repo, root, paths = _world(tmp_path, monkeypatch)
     pending = root / "_pending"
     caught = _defender_row("ep-1/b/0/6", "caught")
@@ -548,22 +443,8 @@ def test_1135_ordinary_write_failure_at_each_phase_under_the_stuck_guard(
         "the queue read back through the handle disagrees with the queue on disk"
 
 
-# ---------------------------------------------------------------------------------------------
-# s_i7 — a planted entry at the repo lock's name
-# ---------------------------------------------------------------------------------------------
-
-
 def test_1135_a_deadline_lock_name_is_a_planted_entry_when_run_batch_takes_the_repo_lock(
         tmp_path, monkeypatch, caplog):
-    """A planted entry at the repo lock's name is a refusal and not a busy or timed-out lock:
-    StateRefused is not an OSError and is not received by run_batch's TimeoutError arm ("repo
-    lock unavailable ... queue intact", which returns 0). The tick halts with exit 2 and a
-    CRITICAL line naming the lock entry (a lock-open refusal raises for every role, O2), with no
-    second "...it displaced" CRITICAL line (JF15: no new line); no lock target is created and
-    the queue is untouched.
-
-    The plant is a symlink at `_author.lock` to an absent file outside the root (C10: today's
-    lock open follows it and creates the target)."""
     caplog.set_level(logging.INFO)
     repo, root, paths = _world(tmp_path, monkeypatch)
     row = _defender_row("ep-1/b/0/8", "caught")
@@ -594,24 +475,11 @@ def test_1135_a_deadline_lock_name_is_a_planted_entry_when_run_batch_takes_the_r
     assert _handle_rows(paths) == [row], "the queue read back through the handle is not the seeded queue"
 
 
-# ---------------------------------------------------------------------------------------------
-# s_i18 — a planted entry at a stage folder
-# ---------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("shape", ["symlink", "file"])
 @pytest.mark.parametrize(("lane", "folder"), [(AUTHOR_DRAIN_LABEL, "_pending"),
                                             (LEAD_AUTHOR_DRAIN_LABEL, "_pending_leads")])
 def test_1135_the_stage_dir_lane_folder_is_a_planted_entry(
         tmp_path, caplog, lane, folder, shape):
-    """A planted link or file at a stage folder is refused when the handle makes the folder for
-    the stage (stage_dir makes it through the held root, D1): StateRefused, exit 2 with a
-    CRITICAL line naming the lane folder, before the stage harness runs; nothing is created
-    through the link and no stage record is written.
-
-    Driven as a stage under the real stage runner: the stage asks the handle for its lane's
-    folder (`stage_dir(lane)`, the lane a drain label config spells once) and only then would
-    run its harness."""
     caplog.set_level(logging.INFO)
     paths = S.built_paths(tmp_path)
     root = tmp_path / "learning-state"
@@ -639,10 +507,6 @@ def test_1135_the_stage_dir_lane_folder_is_a_planted_entry(
     assert S.tree_snapshot(outside_dir) == {}, "something was created through the link"
     assert S.tree_snapshot(root) == before, "a stage record was written below the root"
 
-
-# ---------------------------------------------------------------------------------------------
-# s_a12 — everyday failures keep today's routing (a child process)
-# ---------------------------------------------------------------------------------------------
 
 _VERB_CHILD = r'''
 import json, logging, os, sys
@@ -769,27 +633,6 @@ def _assert_an_unreadable_queue_never_reads_as_empty(
 
 
 def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_path, monkeypatch):
-    """Ordinary I/O errors keep today's routing (R16, O3): a read, write, append, move or lock
-    open that fails for an ordinary reason gives each caller what it saw before. The run-end
-    enqueue logs "could not enqueue" and returns, the investigation unchanged (E1's OSError
-    arm); a rotation, a claim's move and a drain lock fail as today, and the error is not
-    converted to StateRefused or folded into "not taken" for a try-once lock. A queue that
-    cannot be read is an ordinary failure, never an empty read (JF2 A): rows() raises an OSError
-    that is not a StateRefused and answers no rows, and a rotate over that queue raises before it
-    writes, so the queue keeps its bytes (no row is lost) and the consumed ledger is not made.
-
-    The everyday failure driven here is a permission refusal, made real, and the operations run
-    in a child process that, when this process is root (root ignores permission bits), drops to
-    an unprivileged user first. Cells: the run-end enqueue (a write: `run_common.enqueue_curation`
-    logs at ERROR and returns False), the handle's `append`, its `rotate`, a claim's move out of
-    an unwritable `author-queue/`, and a try-once drain lock whose file cannot be created — each
-    with its one folder at mode 0555 — and a read and a rotate of a findings queue whose file is
-    mode 000 while its folder and append lock stay writable (so a rotate that read the queue as
-    empty could replace it). Each write-side handle cell raises the ordinary `PermissionError`
-    (EACCES); each read-side cell raises an OSError (the core's read answer keeps only a reason
-    string, so no errno is pinned there). Never a StateRefused, never an empty answer, never
-    "not taken". Not driven here: a full volume is s_d19's (EFBIG); read-only volume, quota and
-    lock-service refusals are not driven (R17: one ordinary failure per operation kind)."""
     base = Path(tempfile.mkdtemp(prefix="ls1135-everyday-", dir="/tmp"))
     os.chmod(base, 0o755)
     try:

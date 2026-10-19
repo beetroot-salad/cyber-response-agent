@@ -1,52 +1,3 @@
-"""#1256 slice C — a granted system down at run start, seen by lead zero (O-6) and by run start
-(O-8).
-
-The design (#1256 r3): each granted system's adapter judges, at run start, whether the run's
-frozen settings make it usable; one that fails is *down for this run* with its cause
-(not configured, or its adapter broken), and every gate refuses it without running the adapter or
-charging the breaker.
-
-O-6 — the correlation lead (`l-00c`) on a system down at start ends BEFORE it claims its lead or
-spends a gather count, as the withheld ending does, with an ending of its own that names the
-cause: never "tripped breaker", never "every call failed", never a run refusal (the run goes on,
-MAIN runs, report.md is written, provided gather has another usable system). The ending constant
-this contract pins is `lead_zero._spec.ENDING_DOWN_AT_START` (one ending for every start-time
-cause; its sentence names the cause, as `tripped_breaker`'s names the system).
-
-O-8 — a run where no granted system is usable at start is refused at start, naming each down
-system and its reason: the existing "gather can query nothing" refusal (`require_gather_query`),
-applied to the systems granted AND up. Read here, as that rule already reads a health-check-only
-grant, as: gather can query only through a non-health-check verb on a system that is up — so a
-system granted nothing but its health check, though up, does not save the run. O-8 is a RUN-start
-refusal only (D4): `tenant.py setup` adopts a tenant whose every system is down (setup judges
-structure and grants; settings content may be filled in later), and its runs are refused. Two
-arms discriminate HOW run start judges "down": one whose systems are down only for keys no
-`load_config` reads (the adapters' declared checks, not a load_config/stored-fault pre-check),
-one mixing a broken adapter with a not-configured one (a broken adapter is down too).
-
-D5 (r4) — a `ConfigFault` escaping during l-00c (O-5b) still downs its system on the spot,
-uncharged; a lead that has written a usable summary keeps it, and MAIN gets it with a host note
-naming the system and the cause (never the fault text, #1222 A2); a lead that ends with no
-summary takes the `down_mid_lead` ending, told apart by its correlation section. Only the lead's
-FINAL text counts as its summary (D5a, human ruling): text written beside the call that escaped
-is not kept, so a lead whose last turn is empty ends `down_mid_lead` whatever it wrote before.
-
-HOW EACH IS SEEN. Every scenario goes through the production front door (`S.run_alert`: the real
-`run.main`, the real driver behind `_ReplayLifecycle`), with the REAL adapters under the checkout
-judging the planted tenant's settings (K2) — except where an adapter must be broken: those
-arms point run start at a planted tree holding only the test's own adapters (`_planted_tree`),
-the adapter-broken O-6 arm and one mixed O-8 arm through the driver's `defender_dir`, and the
-other mixed O-8 arm through `run.main` handed the planted tree's roster (`run.main(roster=…)`,
-the adapters roster the run reads) — so run.py's pre-check and the driver are each held to
-judging a broken adapter down (see the mixed arms' docstrings). A system is made unusable the way an operator would:
-its `config.env` missing a key its adapter requires (`_spec1107.drop_key`), or absent. The
-correlation sentence is read from MAIN's opening message's ONE correlation section
-(`S.correlation_section`), not from the whole-prose diff `_ending` takes against the summary
-control: once O-3 lands the workspace map also names the down system, and that line is not the
-lead's ending. The ending names the CAUSE; the check's reason (the missing key) need only reach
-MAIN somewhere in its opening message (O-3) — #1222 A2's no-fault-text sentences stand. "No gather count spent" is the run's `subagent_spawns` (the summary control's is 1,
-the withheld reference's 0); "never claimed" is l-00c's leads-table row.
-"""
 from __future__ import annotations
 
 import importlib
@@ -161,10 +112,6 @@ def _assert_names_not_configured(d: S.Drive, control: S.Drive, what: str,
             f"{what}: MAIN's opening message never names the reason ({token}) the system is down")
 
 
-# =================================================================================================
-# O-6 — the ending constant
-# =================================================================================================
-
 def test_o6_down_at_start_has_its_own_ending_constant() -> None:
     """The lead-zero vocabulary carries ONE new ending for a system down at run start, distinct from every ending A2 already lists (it is neither 'tripped breaker' nor 'every call failed')."""
     spec = importlib.import_module("defender.runtime.lead_zero._spec")
@@ -181,10 +128,6 @@ def test_o6_down_at_start_has_its_own_ending_constant() -> None:
         f"{ENDING_NAME} = {value!r} is another ending's value: "
         f"{[n for n, v in others.items() if v == value]}")
 
-
-# =================================================================================================
-# O-6 — l-00c on a system down at start, through the front door
-# =================================================================================================
 
 def test_o6_lead_on_an_unconfigured_system_ends_before_its_claim_naming_the_cause(
         tmp_path: Path) -> None:
@@ -256,9 +199,6 @@ raise ImportError("{BROKEN_MARK}")
 VERBS = {{"health-check": None, "query": None, "alerts": None, "esql": None}}
 '''
 
-#: A minimal, well-formed cmdb adapter: the scene's one usable gather system (TABLE_A grants
-#: gather its three verbs), declaring a check that needs nothing. Written here, never copied from
-#: the checkout, and importing nothing from it — so loading it touches no `sys.path`.
 _PLANTED_CMDB = '''\
 """#1256 planted: a minimal cmdb adapter whose settings check needs nothing. Every verb
 records its call in `planted-calls.log` at the planted tree's root."""
@@ -353,10 +293,6 @@ def _import_state_restored(tmp_path: Path) -> Iterator[None]:
 @pytest.mark.usefixtures("_import_state_restored")
 def test_o6_lead_on_a_system_whose_adapter_is_broken_ends_down_at_start(tmp_path: Path) -> None:
     """A correlation system whose adapter cannot be imported is down at start (adapter broken): l-00c ends before its claim and count with an ending that names the system and is not the 'not configured' one, nor 'tripped breaker', 'every call failed' or 'withheld'; nothing runs or is charged; the run goes on."""
-    # Every reference runs on the checkout's own tree (its elastic adapter intact), so none of
-    # them is itself down at start. They are compared by MAIN's correlation section alone: the
-    # planted tree's workspace map names another DEFENDER_DIR, so a whole-prose diff against a
-    # checkout control would carry that path.
     scene = _Scene(tmp_path)
     control = scene.control()
     withheld = _Scene(tmp_path, tenant_id="acme-withheld", table=S.TABLE_WITHHELD).run("withheld")
@@ -399,9 +335,6 @@ def test_o6_lead_on_a_system_whose_adapter_is_broken_ends_down_at_start(tmp_path
 
 def test_o5b_l00c_call_time_config_fault_marks_its_system_not_configured_uncharged(
         tmp_path: Path) -> None:
-    """Elastic passes the start check, so l-00c is dispatched; its first call raises ConfigFault (an escape the check missed). Elastic goes down as not configured on the spot, uncharged: the lead's later calls never run the verb, MAIN's correlation section names elastic and 'not configured' — never the breaker's words (DP4), never the fault's text (#1222 A2, kept by D5) — and the breaker holds nothing for elastic or the run (DP3).
-
-    r4 (D5): a lead that wrote a usable summary keeps it, with a note naming the cause; one that ends with no summary takes the `down_mid_lead` ending. Here every call the lead made failed or was refused and it then wrote text: whether that text is a "usable summary" (A2's classifier says a lead whose every call failed has none) the amendment does not say, so which of the two this is stays unpinned — both name elastic and 'not configured' in the section. The two unambiguous arms are the D5 tests below."""
     scene = _Scene(tmp_path)
     d = scene.run("escaped-config-fault", backend=_fail_alerts(_config_fault),
                   leads={S.L3: [_q(1), _q(2), _q(3), S.text("FD1256-ESCAPE-NARRATION")]})
@@ -430,9 +363,6 @@ def test_o5b_l00c_call_time_config_fault_marks_its_system_not_configured_uncharg
 
 # --- D5 (r4): a summary written before the system went down is kept, with a note --------------
 
-#: The key the escaped fault names: elastic's `config.env` is complete, so its start check passes
-#: and only this call's adapter finds the key unset (O-5b). It is the FAULT TEXT that #1222 A2
-#: keeps out of the correlation section (D5: "naming the cause, not the fault text").
 ESCAPE_TOKEN = "ELASTIC_FD1256_ESCAPED_KEY"
 #: What the lead writes as its summary after one served call and one escaped one.
 D5_SUMMARY = ("FD1256-D5-SUMMARY window 2026-05-25T13:00Z..17:00Z anchored on alert_timestamp; "
@@ -448,9 +378,6 @@ def _escape() -> BaseException:
 
 def test_d5_l00c_keeps_a_usable_summary_and_main_is_told_its_system_went_down(
         tmp_path: Path) -> None:
-    """D5: l-00c's first call is served; it writes its summary and, in the same response, makes a second call, which escapes the start check (ConfigFault): elastic goes Down(NotConfigured) on the spot, uncharged, and a later call never reaches the verb. The lead's summary is usable (one call succeeded, the text is not empty: A2's classifier) and was written before the system went down — and, should the lead run on, it ends on the same text. MAIN's correlation section carries that summary, framed as the lead's own text, AND a host note — outside the frame — naming elastic and the cause 'not configured'; never the fault's text (A2 stands) and never the breaker's words (DP4). Rejected by D5: ending `down_mid_lead` and discarding the summary. Red at base, which delivers the summary with no note.
-
-    Only the lead's final text counts as its summary (D5a, human ruling): the lead runs on after the escape (its third call is refused without reaching the verb) and ends on its summary, which is what is kept. The same text written beside the escaping call is not what keeps it — a lead that wrote it there and then ended on an empty turn ends `down_mid_lead` (the next arm)."""
     scene = _Scene(tmp_path)
     written_then_escaped = S.Turn(text=D5_SUMMARY, tool_calls=_q(2).tool_calls)
     d = scene.run("d5-summary", backend=_backend(fault=T.Fault(raise_after=1), exc=_escape),
@@ -526,9 +453,6 @@ def test_d5_l00c_whose_last_turn_is_empty_ends_down_mid_lead_and_its_text_beside
 
 def test_d5_l00c_with_no_summary_after_its_system_went_down_ends_down_mid_lead(
         tmp_path: Path) -> None:
-    """D5's other arm: l-00c's first call escapes the start check (ConfigFault), elastic goes down on the spot, uncharged, and the lead then writes nothing — it ends with no summary, which is the `down_mid_lead` ending: MAIN's correlation section names elastic and 'not configured', carries no framed lead output, never the fault's text or the breaker's words, and is none of the other endings' sections — 'empty output' (a lead that wrote nothing on a working system), 'every call failed', 'tripped breaker', or 'down at start' (O-6). The constant's name is not pinned (K4's one type-level pin is O-6's); the section is the observable. Red at base, whose sentence for this lead names no system.
-
-    Read as D5 is written: an escape during the lead ends it `down_mid_lead` unless the lead has written a usable summary (the rejected alternative was `down_mid_lead` always), so the lead's empty answer after the escape — whether it stops the lead or is retried and fails — is no summary, and the ending is `down_mid_lead`, not another no-summary ending."""
     scene = _Scene(tmp_path)
     empty = scene.run("empty-reference", leads={S.L3: [S.EMPTY_OUTPUT]})
     ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
@@ -567,10 +491,6 @@ def test_d5_l00c_with_no_summary_after_its_system_went_down_ends_down_mid_lead(
     assert d.breaker.get("total_failures", 0) == 0, (
         f"the escaped ConfigFault was charged to the run-wide count: {d.breaker!r}")
 
-
-# =================================================================================================
-# O-8 — every granted system down at start: refused at start, naming each
-# =================================================================================================
 
 #: Gather reaches three systems by query verbs; the correlation lead holds elastic.alerts.
 TABLE_THREE = """\

@@ -34,10 +34,6 @@ def _fps(tree: Path, **kw: bool) -> set[str]:
     return {f.fingerprint for f in _GATE._scan(tree, **kw)}
 
 
-# --------------------------------------------------------------------------------------------
-# what is a whole read
-# --------------------------------------------------------------------------------------------
-
 def test_attribute_reads_fire_whatever_the_receiver(tmp_path):
     """Pinned encoding or not: this gate is about SIZE, not text-io's locale."""
     tree = _tree(tmp_path, {"prod.py": (
@@ -185,10 +181,6 @@ def test_same_fingerprint_twice_is_one_finding(tmp_path):
     assert [f.fingerprint for f in _GATE._scan(tree)] == ["prod.py:twice:read_text"]
 
 
-# --------------------------------------------------------------------------------------------
-# the marker
-# --------------------------------------------------------------------------------------------
-
 def test_a_reasoned_marker_on_the_call_line_suppresses(tmp_path):
     tree = _tree(tmp_path, {"prod.py": (
         "def marked(p):\n"
@@ -284,10 +276,6 @@ def test_one_marked_read_does_not_cover_another_in_a_same_named_method(tmp_path)
     assert _GATE.main([], scope=tree, baseline_path=empty) == 0
 
 
-# --------------------------------------------------------------------------------------------
-# main
-# --------------------------------------------------------------------------------------------
-
 def test_main_fails_on_an_unmarked_read_and_passes_once_marked(tmp_path):
     tree = _tree(tmp_path, {"prod.py": "def f(p):\n    return p.read_text()\n"})
     empty = tmp_path / "absent.json"
@@ -308,16 +296,4 @@ def test_cli_exits_with_the_gate_status():
     assert [ast.unparse(s) for g in guards for s in g.body] == ["sys.exit(main())"]
 
 
-# --------------------------------------------------------------------------------------------
-# the real tree (`gate`: CI's lint job runs these; the test job deselects them)
-# --------------------------------------------------------------------------------------------
-
-
-#: The production whole reads outside `_io`, each in a stdlib-only module run without `defender`
-#: on `sys.path`, so `_io` is out of its reach: `_image.py` (`box_image.py` loads it by path on
-#: a bare `python3`) and two eval scripts run by path.
-
-
 #: Guarded APIs that share a name with Path.read_bytes; each remains capped by _io.
-
-

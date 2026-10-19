@@ -19,11 +19,6 @@ def _corpus_status(sc) -> list[str]:
     return [line for line in out.splitlines() if line.strip()]
 
 
-# ---------------------------------------------------------------------------
-# an approval never outlives the bytes it read
-# ---------------------------------------------------------------------------
-
-
 class _Rewriting(JournalHeld):
     """The real corpus handle, except that reading `l1.md` through its view hands back what
     the file held and then lets `edit(n)` rewrite it on disk, `n` counting those reads from 1:
@@ -83,15 +78,7 @@ def test_a_file_that_never_holds_still_under_the_citation_read_refuses_the_tick(
                for r in S.stuck_records(sc.paths, sc.channel))
 
 
-# ---------------------------------------------------------------------------
-# the settle puts back what no lesson needs
-# ---------------------------------------------------------------------------
-
-
 def test_a_mode_only_change_is_put_back_and_the_tree_is_clean_after_the_tick(tmp_path):
-    """A tracked lesson whose bytes are unchanged but whose mode bit flipped is not content
-    the check must judge — and it is not left dirty either. The next tick on the same
-    checkout starts clean."""
     old = S.lesson("older", body="the old lesson")
 
     def flip_the_mode(rows, batch_id, cfg):
@@ -109,11 +96,6 @@ def test_a_mode_only_change_is_put_back_and_the_tree_is_clean_after_the_tick(tmp
     assert sc.head_files() == [LESSON]
     assert _corpus_status(sc) == []
     assert not os.stat(sc.corpus / "old.md").st_mode & stat.S_IXUSR
-
-
-# ---------------------------------------------------------------------------
-# a row's fate is read off the tree, not off the curator's word
-# ---------------------------------------------------------------------------
 
 
 def test_a_finding_the_curator_did_not_report_but_an_approved_file_cites_is_committed(tmp_path):

@@ -28,9 +28,6 @@ ADAPTERS = DEFENDER / "scripts" / "adapters"
 SYSTEM = scene.REGISTRY_SYSTEM
 LOOKUP = "lookup"
 
-#: The alerted actor/host/pattern the #983 case turns on — container UID 0 rewriting the CA
-#: bundle on a build-runner host. Read off the shared scene rather than respelled, so a suite
-#: cannot assert a hit against an actor the document names differently.
 ACTOR = scene.ACTOR
 HOST = scene.HOST
 PATTERN = scene.PATTERN
@@ -64,9 +61,6 @@ def _ids(entries) -> list[str]:
 
 
 def test_registry_entry_fields(tmp_path):
-    """One entry carries exactly `id`, `pattern`, `actor_scope`, `host_scope`, `added_by`,
-    `added_at`, `review_by` and `justification`; an entry missing any of them, or carrying an
-    unknown key, is refused at load and does not discharge anything"""
     assert set(registry().ENTRY_FIELDS) == {
         "id", "pattern", "actor_scope", "host_scope",
         "added_by", "added_at", "review_by", "justification",
@@ -90,9 +84,6 @@ def test_registry_entry_fields(tmp_path):
 
 
 def test_review_by_beyond_the_bound_is_refused(tmp_path):
-    """An entry whose `review_by` is further than the policy bound past its `added_at` is
-    refused AT LOAD: the freshness bound is enforced, not self-set (demand
-    `review_by_bounded_span`, fork F2)."""
     span = registry().TACIT_KNOWLEDGE_MAX_REVIEW_SPAN_DAYS
     assert isinstance(span, int)
     assert span > 0
@@ -117,9 +108,6 @@ def test_review_by_beyond_the_bound_is_refused(tmp_path):
 
 
 def test_blanket_scope_entry_is_refused(tmp_path):
-    """An entry whose `actor_scope` or `host_scope` is blank, blanket, or MOSTLY WILDCARD is
-    refused at load, so one overly broad entry cannot silently authorize an entire estate
-    (demand `no_wildcard_scope`, fork F6)."""
     good = _entry()
     assert _ids(_load(tmp_path / "control", good)) == [good["id"]], "positive control"
 
@@ -175,9 +163,6 @@ def test_scope_mismatch_does_not_discharge(tmp_path):
 
 
 def test_expired_entry_is_not_a_hit_at_lookup(tmp_path):
-    """An entry whose `review_by` is in the past does not discharge — the lookup is simply no
-    hit (the loader/lookup half of demand `expired_entry_does_not_discharge`; the
-    falls-through-to-`indeterminate` half is the e2e)."""
     entries = _load(tmp_path / "expiry", _entry(added_at="2026-03-01", review_by="2026-04-15"))
 
     assert registry().find_entry(
@@ -201,9 +186,6 @@ def _ctx(root: Path, tmp_path: Path, *, as_of: dt.datetime) -> VerbContext:
 
 
 def test_lookup_verb_answers_off_the_registry_it_is_handed(tmp_path):
-    """`lookup` — the VERB, not the pure helper under it — loads the registry out of the tree
-    its `VerbContext` names and answers a genuine hit, a genuine miss and an expired entry
-    (demand `registry_lookup_gather_verb`)."""
     root = tmp_path / "tree"
     _write_registry(root, _entry(id="tk-fixture-only", added_at="2026-03-01",
                                  review_by="2026-06-01"))
@@ -271,9 +253,6 @@ def test_no_authz_grounding_from_a_past_ai_verdict(tmp_path):
 
 
 def test_registry_lookup_is_a_rostered_gather_verb():
-    """The registry lookup is declared by its adapter, explicitly granted to gather, and
-    read-only through the existing dispatch seam. #1108 P2 retires the generated roster
-    file while retaining these authorization checks."""
     assert is_system_name(SYSTEM)
     assert registry().SYSTEM == SYSTEM
     assert LOOKUP in registry().VERBS
@@ -309,9 +288,6 @@ def test_the_shipped_registry_file_is_human_authored_and_loads(tmp_path):
 
 
 def test_no_run_path_writes_the_registry(tmp_path):
-    """No path an agent run can reach writes the registry file: the gather verb is read-only and
-    the file tools refuse the path, so every entry traces to a human commit
-    (demand `registry_never_agent_written`)."""
     target = registry().registry_path(DEFENDER)
     assert target.is_file(), "a negative reachability claim about a file that does not exist"
 
@@ -345,9 +321,6 @@ def test_no_run_path_writes_the_registry(tmp_path):
     ).allow, "positive control: main's own artifact is still writable"
 
 
-#: Verb-name and function-name stems that MUTATE. A name is the cheapest signal a reviewer
-#: reads, and the adapter that grows a `save_entry` beside `lookup` is the one where "the
-#: registry is only ever human-authored" quietly stops being true.
 _MUTATING_STEMS = (
     "write", "save", "add", "append", "put", "post", "create", "insert", "upsert",
     "update", "set", "delete", "remove", "drop", "edit", "patch", "sync", "commit",
@@ -395,9 +368,6 @@ def test_the_adapter_module_exports_nothing_that_writes():
 
 @pytest.mark.parametrize("verb", ["health-check", LOOKUP])
 def test_every_registry_verb_takes_a_verb_context_first(verb):
-    """The lookup is an ordinary adapter verb: a leading `VerbContext` and keyword-only
-    annotated parameters, so `skills/connect/validate_scaffold.check_signatures` admits it and
-    the real query tool can validate a lead's bound params against its real signature."""
     import inspect
 
     params = list(inspect.signature(registry().VERBS[verb]).parameters.values())

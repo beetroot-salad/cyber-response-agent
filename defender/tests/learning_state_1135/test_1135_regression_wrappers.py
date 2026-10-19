@@ -1,15 +1,3 @@
-"""#1135 — O3's two re-homed regression pointers (deviation D-1). Each wrapper re-drives the
-scenario of an existing test outside this directory over a BUILT state root (R15: the root must
-exist, so the fixture creates it) and reads the outcome through the handle as well as by today's
-record names (R14). The wrapped originals are not imported or called, and stay unchanged:
-
-  * `e2e/test_922_spine.py::test_922_graded_episode_reaches_the_corpus_through_the_family_partition`
-  * `test_drain719_locks.py::test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline`
-
-The spine's seams (`TriggerRecorder`, `drive_author_drain` over its `RepoBranch`) are imported from
-its module, as `test_1007_corpus.py` does, so a fixture edit there reaches this wrapper too. Shared
-machinery and the names this suite coins are in `_spec1135.py`.
-"""
 from __future__ import annotations
 
 import logging
@@ -32,10 +20,6 @@ def _finding_ids(rows: list[dict]) -> list[str]:
 
 @pytest.mark.e2e
 def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, monkeypatch):
-    """The one end-to-end replay of the queue path stays green with only import and fixture edits:
-    judge enqueue -> _pending/findings.jsonl -> author_drain -> corpus commit -> idempotent rotate
-    (the wrapped test's docstring states each hop). Driven here over a built state root, the grade
-    handed the handle (RF5) in place of queue_dir=."""
     paths = S.built_paths(tmp_path, repo_root=D.make_repo(tmp_path))
     runs_base = tmp_path / "defender-runs"
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(runs_base))
@@ -103,10 +87,6 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
 
 
 def test_1135_the_drains_append_lock_wait_ends_at_the_configured_deadline(tmp_path: Path, caplog):
-    """RF7's third expiry behaviour, kept: _tick's read window waits up to the configured deadline,
-    then skips the tick (0, "skipping"), never raising TimeoutError. The composite verb that
-    replaces acquire_flock_within keeps it (X4, executed at the base). The same contention is
-    driven at two configured deadlines over a built state root, and each give-up tracks its own."""
     paths = S.built_paths(tmp_path, repo_root=D.make_repo(tmp_path))
     channel = D.channel_of("findings")
     rows = [D.row_for("findings", "a/0")]

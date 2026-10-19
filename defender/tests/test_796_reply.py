@@ -63,9 +63,6 @@ def test_a_lens_reading_survives_intact():
 
 @pytest.mark.parametrize("empty", [None, "", "   ", "\n\t "])
 def test_an_empty_lens_reading_is_refused(empty):
-    """The fail-open read the retired gate shipped: everything that was not the expected word
-    was taken as the permissive value, so an empty reply let a confident close through on a
-    reading nothing had made. A composer handed silence weighs it as agreement."""
     with pytest.raises(Unreadable):
         read_lens_reading(empty)
 
@@ -96,9 +93,6 @@ def test_an_ask_naming_a_real_reference_is_readable(refs):
 
 
 def test_an_ask_naming_an_invented_reference_is_refused(refs):
-    """The invented-identifier guard. Unbounded, a hallucinated id is handed back to the
-    investigator as work to go do — the forced turn's economy inverted, with the gate
-    charging the investigation for a hallucination."""
     with pytest.raises(Unreadable, match="never recorded"):
         read_composer_reply(
             _reply(ask={"target": "v-hallucinated", "prose": "provenance"}), refs=refs,
@@ -150,18 +144,12 @@ def test_a_whole_reply_wrapped_in_a_code_fence_is_still_read(refs):
 
 
 def test_a_fence_around_prose_is_still_unreadable(refs):
-    """The unpacking is anchored at BOTH ends of the whole reply. A fence that merely appears
-    inside a reply of prose means the composer answered outside its contract, and that is the
-    fail-closed arm rather than something to dig an object out of."""
     with pytest.raises(Unreadable):
         read_composer_reply(f"Here is my answer:\n```json\n{_reply()}\n```\nHope that helps.",
                             refs=refs)
 
 
 def test_a_finding_of_holds_carrying_an_ask_is_refused(refs):
-    """A composer that says the close holds AND asks for a measurement has contradicted
-    itself, and either half could be the one it meant. Dropping the ask and committing would
-    be the gate choosing for it."""
     target = sorted(refs)[0]
     with pytest.raises(Unreadable, match="holds"):
         read_composer_reply(

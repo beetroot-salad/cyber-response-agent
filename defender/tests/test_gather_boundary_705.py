@@ -46,9 +46,6 @@ def test_gather_boundary_extracts_lead_id_across_all_three_args_shapes(tmp_path)
 
 
 def test_a_malformed_args_row_nulls_itself_without_aborting_the_query(tmp_path):
-    """A malformed args string of arbitrary GARBAGE TEXT nulls its own row only; the well-formed
-    rows in the same query still return their `lead_id`, and SQLite raises no `malformed JSON`
-    error."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
@@ -67,11 +64,6 @@ def test_a_malformed_args_row_nulls_itself_without_aborting_the_query(tmp_path):
 
 
 def test_args_shapes_outside_the_enumerated_three_null_without_aborting(tmp_path):
-    """Every `args` shape outside O12's enumerated three resolves without aborting the query: an
-    array, a bare scalar, JSON null and an absent key all yield a clean NULL; a duplicate
-    `lead_id` key resolves to the FIRST occurrence; an object- or array-valued `lead_id` returns
-    that substructure's compact JSON serialization AS TEXT; and a double-encoded args string
-    fails safe to NULL."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
@@ -133,9 +125,6 @@ def test_over_depth_args_does_not_abort_the_whole_gather_boundary_query(tmp_path
 
 
 def test_gather_boundary_stays_narrowed_to_kind_response(tmp_path):
-    """The view scans only `kind='response'` rows, so request payloads carrying the resolved
-    `instructions` blob are never walked — the predicate C16 measured at 21.6 ms → 0.4 ms over
-    2200 messages, asserted as a contract rather than as a timing."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
 
@@ -156,9 +145,6 @@ def test_gather_boundary_stays_narrowed_to_kind_response(tmp_path):
 
 
 def test_gather_boundary_is_scoped_to_one_session(tmp_path):
-    """The boundary carries the scoping predicate ITSELF: a per-case file holding a second execution
-    and a fork never serves one session another's leads, and the caller's `WHERE session_id = ?`
-    chooses a session rather than repairing the view."""
     store = make_store(tmp_path)
     first = store.new_session(agent_id="main")
     first_row = _append_gather_call(store, first, {"lead_id": "l-first"}, tool_call_id="a")
@@ -229,9 +215,6 @@ def test_gather_boundary_drops_the_leads_a_fold_displaced(tmp_path):
 
 
 def test_a_cyclic_parent_chain_ends_the_boundarys_walk_instead_of_hanging(tmp_path):
-    """A `parent_id` chain that loops — reachable only by direct file damage, since the foreign key
-    keeps a phantom id out of every write the store's own API can make — terminates the view's
-    recursive walk and returns each row in the ring once."""
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -253,9 +236,6 @@ def test_a_cyclic_parent_chain_ends_the_boundarys_walk_instead_of_hanging(tmp_pa
 
 
 def test_a_thinking_part_shaped_like_a_sql_fragment_round_trips_inert(tmp_path):
-    """Model-authored content shaped like a SQL fragment is stored and returned as inert text: the
-    reader never concatenates payload content into a query, so a `'; DROP TABLE message; --`
-    ThinkingPart survives the round trip AND leaves the schema intact."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     hostile = "'; DROP TABLE message; --"

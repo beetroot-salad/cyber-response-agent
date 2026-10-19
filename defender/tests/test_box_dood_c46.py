@@ -345,13 +345,6 @@ def _request_runtime_of(monkeypatch, value: str | None) -> str:
     return rec.create_argv[rec.create_argv.index("--runtime") + 1]
 
 
-# C46 — the wiring: the discovered table must actually REACH the argv builders
-# Every translation test above calls the argv builders directly with a table handed in. That
-# leaves the connection between discovery and use unpinned: drop the mounts argument at
-# either call site and all of them stay green while the shipped code emits untranslated
-# sources again — the exact pre-fix defect. These drive the start paths instead.
-
-
 def test_the_discovered_table_reaches_the_run_dir_create_argv(tmp_path):
     workspace = tmp_path / "workspace"
     run_dir = workspace / ".defender-runs" / "r1"

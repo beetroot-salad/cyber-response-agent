@@ -37,9 +37,6 @@ ABSENT_KNOWLEDGE = [
 @pytest.mark.parametrize("plant", ABSENT_KNOWLEDGE)
 def test_1120_setup_over_an_absent_knowledge_folder_exits_one_naming_it_and_the_remedy_and_writes_nothing(
         tmp_path: Path, plant) -> None:
-    """`tenant.py setup acme` exits 1 naming <root>/acme/knowledge and the remedy (clone the tenant
-    repo into it, then run tenant.py setup acme again) in three cases: an absent or empty data root,
-    an empty rowless acme/ folder, and a row-only tenant."""
     root = tmp_path / "data"
     plant(root)
     before = H.tree_census(root)
@@ -50,10 +47,6 @@ def test_1120_setup_over_an_absent_knowledge_folder_exits_one_naming_it_and_the_
     assert H.census_diff(before, H.tree_census(root)) == [], (
         "the refused setup wrote into the data root")
 
-
-# ======================================================================================
-# Shared observations for this file.
-# ======================================================================================
 
 #: A verb the change-mgmt adapter declares (`change_mgmt_adapter.VERBS`) and the fixture's
 GAP_LINE = "    get-change:"
@@ -80,10 +73,6 @@ def _gap_table(settings: Path) -> None:
 def _knowledge_census(root: Path) -> dict:
     return H.tree_census(H.knowledge_dir(root))
 
-
-# ======================================================================================
-# DC2 + MF1 (a): setup ADOPTS the placed folder — the row is its only write.
-# ======================================================================================
 
 def _plain_folder(tmp: Path, root: Path) -> Path:
     return H.place_knowledge(root)
@@ -125,10 +114,6 @@ def test_1120_setup_adopts_an_operator_placed_knowledge_folder_writing_only_the_
     tenant = H.accept(_tenant, root)
     assert tenant.id == H.TID
 
-
-# ======================================================================================
-# MF1 (a), NF6: the guard's rowless inner scan admits exactly the NAME `knowledge`.
-# ======================================================================================
 
 def _knowledge_dir_entry(root: Path, tmp: Path) -> None:
     H.knowledge_dir(root).mkdir(parents=True)
@@ -176,9 +161,6 @@ GUARD_CELLS = [
 @pytest.mark.parametrize(("plant", "foreign"), GUARD_CELLS)
 def test_1120_the_one_tenant_guard_admits_only_knowledge_beside_a_missing_row(
         tmp_path: Path, plant, foreign: str | None) -> None:
-    """refuse_foreign_data_root(root, acme) returns over a rowless acme/ holding exactly knowledge,
-    whether that entry is a directory, a symlink or a file: the guard admits the NAME, and
-    acceptance judges the type (NF6)."""
     root = tmp_path / "data"
     plant(root, tmp_path)
     before = H.tree_census(root)
@@ -200,10 +182,6 @@ def test_1120_the_one_tenant_guard_admits_only_knowledge_beside_a_missing_row(
             f"the guard named the placed knowledge as foreign: {text}")
 
 
-# ======================================================================================
-# M8 under DC2: agent/.tenant-id is the only cross-tenant defence at setup.
-# ======================================================================================
-
 TENANT_ID_CELLS = [
     pytest.param(None, (), id="absent"),
     pytest.param(f"{H.OTHER}\n", (H.TID, H.OTHER), id="other-id"),
@@ -213,9 +191,6 @@ TENANT_ID_CELLS = [
 @pytest.mark.parametrize(("content", "also_named"), TENANT_ID_CELLS)
 def test_1120_setup_refuses_a_placed_knowledge_folder_whose_tenant_id_is_absent_or_names_another_tenant(
         tmp_path: Path, content: str | None, also_named: tuple[str, ...]) -> None:
-    """`setup acme` over an operator's clone exits 1 when agent/.tenant-id is absent, naming
-    <root>/acme/knowledge/agent/.tenant-id, or names beta (the wrong tenant's repo was cloned — now
-    the only cross-tenant defence at setup), naming the file, acme and beta."""
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "bad", root, tenant_id_file=content)
     before = H.tree_census(root)
@@ -231,14 +206,7 @@ def test_1120_setup_refuses_a_placed_knowledge_folder_whose_tenant_id_is_absent_
     _row_is_acme(control)
 
 
-# ======================================================================================
-# Re-runs (DC1, M2 dissolved): the folder rules always run; a clean re-run is silent.
-# ======================================================================================
-
 def test_1120_setup_over_a_finished_tenant_succeeds_and_writes_nothing(tmp_path: Path) -> None:
-    """After a successful adopt (a finished tenant: its row plus the placed knowledge/), a second
-    `setup acme` runs the folder rules, exits 0 with no output, and the whole data-root census is
-    byte- and mtime-identical — it also carries pass-A's o10_rerun_no_second_row."""
     # rejected: re-cloning, re-copying or overwriting an existing knowledge/ (and, per N6,
     # pulling).
     root = tmp_path / "data"
@@ -294,9 +262,6 @@ REVERIFY_CELLS = [
 @pytest.mark.parametrize("damage", REVERIFY_CELLS)
 def test_1120_setup_rerun_runs_the_folder_rules_and_names_a_knowledge_folder_that_no_longer_passes(
         tmp_path: Path, damage) -> None:
-    """After a successful adopt, a re-run of `setup acme` runs the folder rules again — presence alone
-    is not success — and exits 1 naming the offending path, writing nothing, when knowledge/ has
-    since become empty, a dangling symlink, a regular file, or lost its settings/ half."""
     root = tmp_path / "data"
     H.adopted(root)
     H.assert_clean(H.setup(tenant_py, root))
@@ -306,27 +271,8 @@ def test_1120_setup_rerun_runs_the_folder_rules_and_names_a_knowledge_folder_tha
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused re-run wrote something"
 
 
-# ======================================================================================
-# The one-tenant guard's outer scan, unchanged (N1): refused before any write.
-# ======================================================================================
-
-
-
-# ======================================================================================
-# DC1 as REFINED by V1, V10 and V14 and STATED by V18 (human, §7-verify; overturning NF1): setup =
-# run start's own readiness function (the grant table loads, gather holds a query verb, the
-# lead-zero agreement — whatever would make a run refuse) + the folder rules (links and special
-# files, .tenant-id presence + match, the top-level allow-list, the settings files parse —
-# mapping.yaml included); the census is check's. (Was, before V1: "setup = acceptance + the
-# settings tables load".)
-# ======================================================================================
-
 def test_1120_setup_refuses_a_placed_folder_that_fails_acceptance_and_leaves_grant_gaps_to_check(
         tmp_path: Path) -> None:
-    """Setup runs the folder rules (V18: accept_tenant's checks plus the settings files' parse,
-    mapping.yaml included) plus run start's own readiness function (V14: the grant table loads,
-    gather holds a query verb, the lead-zero agreement — its cells pinned in test_1120_check.py),
-    never the grant census (DC1: a gap does not stop runs, A1)."""
     missing = tmp_path / "missing"
     H.place_knowledge(missing)
     lead_zero = H.settings_dir(missing) / "lead-zero.yaml"
@@ -350,11 +296,6 @@ def test_1120_setup_refuses_a_placed_folder_that_fails_acceptance_and_leaves_gra
     _row_is_acme(gapped)
     H.assert_refused(H.check(tenant_py, gapped, H.TID), GAP_PAIR)
 
-
-# ======================================================================================
-# V5 (92 #3; MF1 Q2 rules-first, NF6): a FIRST, row-less setup applies every folder rule
-# acceptance applies — the guard admits the NAME knowledge, acceptance judges what it is.
-# ======================================================================================
 
 def _outside_file(tmp: Path) -> Path:
     target = tmp / "elsewhere" / "not-this-tenants.yaml"
@@ -432,12 +373,6 @@ FIRST_RUN_FAULTS = [
 @pytest.mark.parametrize("plant", FIRST_RUN_FAULTS)
 def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
         tmp_path: Path, plant) -> None:
-    """Over a data root holding only an operator-placed acme/knowledge and no row, `tenant.py setup
-    acme` exits 1 naming the offending path, writes no row and leaves the data-root census
-    unchanged, when knowledge/ is a symlink (to an otherwise valid folder) or a regular file, when
-    settings/ holds a symlink, when agent/ holds a hard link, when settings/ holds a FIFO (refused
-    without being opened — setup does not block on it), and when lead-zero.yaml or systems/case-
-    history/mapping.yaml does not parse."""
     root = tmp_path / "data"
     named = plant(root, tmp_path)
     assert not H.row_path(root).exists(), "precondition: this is a first, row-less setup"
@@ -461,16 +396,6 @@ def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
     H.assert_clean(H.setup(tenant_py, control))
     _row_is_acme(control)
 
-
-# ======================================================================================
-# The guarded lane: the row is setup's ONLY write, and setup makes no tree operation.
-# ======================================================================================
-
-
-
-# ======================================================================================
-# N1's residual: two first setups racing one placed knowledge/.
-# ======================================================================================
 
 def test_1120_two_concurrent_first_setups_leave_one_row_and_one_refusal_naming_it(
         tmp_path: Path) -> None:
@@ -500,22 +425,8 @@ def test_1120_two_concurrent_first_setups_leave_one_row_and_one_refusal_naming_i
     assert H.census_diff(knowledge_before, _knowledge_census(root)) == []
 
 
-# ======================================================================================
-# N12 (pulled up, dissolved by DC2): a pass-A tenant meeting piece 1.
-# ======================================================================================
-
-
-
-# ======================================================================================
-# O11a survives TenantPaths' absorption (M4: the private layout class keeps it).
-# ======================================================================================
-
 def test_1120_a_data_root_inside_the_checkouts_defender_tree_is_still_refused(
         tmp_path: Path) -> None:
-    """`tenant.py setup acme` (no --from) with DEFENDER_DATA_ROOT inside the RUNNING checkout's
-    defender/ tree and an adopted acme/knowledge placed there exits 1 through `[tenant.py]`, naming
-    the defender/ tree; no row is written and knowledge/ is byte-identical — the guard refuses AFTER
-    the operator's placement and never removes it."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     script = checkout / H.script_of(tenant_py).relative_to(H.REPO_ROOT)
     root = checkout / "defender" / "tenant-data"
@@ -532,12 +443,6 @@ def test_1120_a_data_root_inside_the_checkouts_defender_tree_is_still_refused(
     H.place_knowledge(allowed)
     H.assert_clean(H.run_script(script, "setup", H.TID, root=allowed))
     _row_is_acme(allowed)
-
-
-# ======================================================================================
-# Settled premises (45), rewritten under DC2 where 47 says so.
-# ======================================================================================
-
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="uid 0 bypasses mode bits; CI runs non-root")
@@ -581,10 +486,6 @@ DEBRIS = [
 
 @pytest.mark.parametrize("plant", DEBRIS)
 def test_1120_s12_refuse_foreign_data_root_meets_filesystem_debris(tmp_path: Path, plant) -> None:
-    """The one-tenant guard's outer scan is unchanged (N1): any top-level entry other than the id's own
-    folder — an ext-style lost+found/, an NFS silly-rename .nfs* file, a .knowledge.partial orphaned
-    by a deleted tenant — beside an operator-placed acme/knowledge makes `setup acme` refuse, naming
-    the entry, before any write."""
     root = tmp_path / "data"
     H.place_knowledge(root)
     entry = plant(root)
@@ -599,9 +500,3 @@ def test_1120_s12_refuse_foreign_data_root_meets_filesystem_debris(tmp_path: Pat
         target.unlink()
     H.assert_clean(H.setup(tenant_py, root))
     _row_is_acme(root)
-
-
-# ======================================================================================
-# D9 / H2: THE helper a test uses to get a tenant — the fixture adopted into a tmp root.
-# ======================================================================================
-

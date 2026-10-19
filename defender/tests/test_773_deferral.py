@@ -26,9 +26,6 @@ def _defer_again(sc, filler_id: str) -> int:
     """Reseed the queue with whatever is pending plus a fresh, disposable finding, and drive
     one more tick over `orphan` riding uncited alongside it."""
     filler = S.finding_row(filler_id, run_id=filler_id)
-    # `finding_row`'s default `direction="adversarial"` wants `benign` on the source run —
-    # `build_scene`'s own auto-seeding rule (`_spec773.py`), mirrored here since this finding
-    # is seeded straight onto the channel rather than through `build_scene`.
     S.seed(sc.paths, sc.channel, [*sc.pending(), filler])
     sc.curator.writes = {f"{filler_id}.md": S.lesson(filler_id)}
     sc.curator.committed = ["orphan", filler_id]
@@ -45,11 +42,6 @@ def _hold_append_lock(store: dict):
         store["holder"] = holder
 
     return grab
-
-
-# ---------------------------------------------------------------------------
-# O9 — bounded, reported, never silent
-# ---------------------------------------------------------------------------
 
 
 def test_a_deferred_row_bumps_the_deferrals_counter_and_graveyards_at_the_ceiling_773(
@@ -123,9 +115,6 @@ def test_a_deferred_rows_count_after_ten_consecutive_deferring_ticks_773(tmp_pat
 
 
 def test_a_deferral_that_reaches_the_ceiling_773(tmp_path):
-    """The bump that REACHES the ceiling graveyards on that same call — `retire`'s boundary
-    is `>=`, evaluated and acted on in the call that does the bump, with no grace tick — and
-    the graveyard record carries its own `deferred_ceiling` reason."""
     sc = _orphan_tick(tmp_path, max_attempts=1)
     assert sc.run() == 0
     assert "orphan" not in sc.pending_by_id()
@@ -167,11 +156,6 @@ def test_max_attempts_one_retires_on_the_first_failure_773(tmp_path):
     assert sc.run() == 2
     assert sc.pending() == []
     assert [r["finding_id"] for r in sc.graveyard()] == ["f1"]
-
-
-# ---------------------------------------------------------------------------
-# Conservation — every finding ends somewhere, exactly once
-# ---------------------------------------------------------------------------
 
 
 def test_a_finding_cited_by_two_approved_files_is_consumed_committed_exactly_once_773(tmp_path):
@@ -304,11 +288,6 @@ def test_a_tick_whose_batch_faults_before_reaching_the_deferred_list_computation
     assert control.head_files() == ["defender/lessons/l1.md"]
 
 
-# ---------------------------------------------------------------------------
-# §7 FK-19 — what a lock wait actually costs
-# ---------------------------------------------------------------------------
-
-
 def test_repo_lock_wait_exceeded_at_the_closing_rotation_773(tmp_path):
     """A commit that already LANDED is never undone by a later rotation failure."""
     held: dict = {}
@@ -340,10 +319,6 @@ def test_repo_lock_wait_exceeded_specifically_on_the_deferral_bump_773(tmp_path)
         held["holder"].__exit__()
     assert "deferrals" not in sc.pending_by_id()["orphan"]
 
-    # "a" already landed (its lesson reached HEAD before the timeout unwound the queue
-    # rotation), so the retried batch never hands it to the curator — `_defer_again` reads
-    # whatever is genuinely still pending (both rows; "a" resolves pre-consumed off the tree)
-    # and adds the filler that keeps the corpus honestly dirty for `orphan`'s own deferral.
     sc.curator.also = None
     assert _defer_again(sc, "filler1") == 0
     assert sc.pending_by_id()["orphan"]["deferrals"] == 1

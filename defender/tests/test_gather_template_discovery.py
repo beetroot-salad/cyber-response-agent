@@ -79,9 +79,6 @@ def _prompt_for(tmp_path: Path, defender_dir: Path, system: str = "elastic") -> 
 
 
 def test_d0a_walk_yields_a_record_per_template_sorted_by_path(tmp_path):
-    """iter_query_templates yields id/system/status/goal/query/path for every template —
-    established AND draft — sorted by full path (the order is LLM-visible, and glob() order is
-    not guaranteed)."""
     dfn = _catalog(tmp_path)
     rows = list(_corpus.iter_query_templates(dfn / "skills" / "gather" / "queries"))
 
@@ -103,11 +100,6 @@ def test_d0a_walk_yields_a_record_per_template_sorted_by_path(tmp_path):
 
 
 def test_d18b_walk_reads_the_catalog_dir_it_is_given_not_a_module_default(tmp_path):
-    """The walk must not fall back to a module-level PATHS root behind the caller's back.
-    evals/harness_lead.py materializes a tmp tree, copies the real catalog in and overlays
-    scenario templates on top, then re-execs the lead-author against THAT tree — a walk that
-    resolves off PATHS silently scores the eval against the real repo's corpus and ignores the
-    scenario's catalog_overlay/."""
     dfn = _catalog(tmp_path)
     rows = list(_corpus.iter_query_templates(dfn / "skills" / "gather" / "queries"))
     ids = {r.id for r in rows}
@@ -143,11 +135,6 @@ def test_d13_malformed_template_is_skipped_with_a_warning_not_raised(tmp_path, c
 
 
 def test_d12_corpus_module_imports_with_no_yaml_available(tmp_path):
-    """_corpus.py is deliberately yaml-free at import: the actor runs the pinned lesson scripts as
-    `python3 <script>` under the SYSTEM interpreter, which has no PyYAML, and each imports
-    _corpus at module scope before re-execing into the venv. iter_query_templates needs
-    parse_frontmatter (defender/_frontmatter.py imports yaml at module scope) — hoisting that
-    import to the top of _corpus breaks the actor's lesson retrieval live in the learning loop."""
     probe = tmp_path / "probe.py"
     probe.write_text(textwrap.dedent(f"""
         import sys
@@ -172,9 +159,6 @@ def test_d12_corpus_module_imports_with_no_yaml_available(tmp_path):
 
 
 def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
-    """The index line is the template's id, its repo-relative path, and its `## Goal` body —
-    not the frontmatter, not the `## Query`, not `## Pitfalls`. The PATH is load-bearing: see
-    d16 (without it, gather binds an id for a template it never opened)."""
     prompt = _prompt_for(tmp_path, _catalog(tmp_path))
 
     assert "elastic.sshd-auth-history" in prompt
@@ -185,9 +169,6 @@ def test_d2_index_entry_carries_id_path_and_goal(tmp_path):
 
 
 def test_835_only_the_dispatched_systems_entries_carry_goal_prose(tmp_path):
-    """#835's demand, both directions off two renders of one corpus — so neither "keep every Goal"
-    (the shape being replaced) nor "drop every Goal" (which would strand the lead's own system)
-    can pass."""
     dfn = _catalog(tmp_path)
     as_cmdb = _prompt_for(tmp_path, dfn, system="cmdb")
     as_elastic = _prompt_for(tmp_path, dfn, system="elastic")
@@ -288,12 +269,6 @@ def test_an_all_denied_grant_is_not_reported_as_an_unreadable_corpus(tmp_path):
 
 
 def test_d18_index_is_built_from_the_threaded_tree_and_is_not_memoized(tmp_path):
-    """Root a tree-dependent path off __file__ behind a memo and a worktree run injects the MAIN
-    CHECKOUT's templates — the #551 bug bind() already fixed for the policy anchor, and the one
-    gather's system-descriptor listing carried until #591 (it is now built from the skills folder
-    and adapters roster it is handed, never from paths rooted off __file__, and the run threads
-    deps.defender_dir into it). The template index must not re-grow that mould. Two trees, ONE
-    process: each dispatch gets its own index."""
     tree_a = _catalog(tmp_path / "a")
     tree_b = tmp_path / "b" / "defender"
     qb = tree_b / "skills" / "gather" / "queries" / "identity"
@@ -329,9 +304,6 @@ class _ToolRecorder:
 
 
 def test_d5_gather_registers_template_search_and_main_does_not():
-    """Registration derives from the DEF's ToolSet, not a hand-built one: the existing
-    `ToolSet(read=True, bash=BashGrammar())` assertions feed a SYNTHETIC set and stay green while
-    GATHER_DEF drifts."""
     g = _ToolRecorder()
     tools.register_tools(g, GATHER_DEF.tools, FakeVerbs({}))
     assert "template_search" in g.names
@@ -357,9 +329,6 @@ def test_d6_template_search_exposes_no_path_parameter():
 
 @pytest.mark.parametrize("bad", ["..", "../..", "elastic/..", "/etc", "elastic\x00", "_draft"])
 def test_d7_no_system_value_escapes_the_corpus_root(tmp_path, bad):
-    """`system` is model-supplied and (naively) becomes a path segment joined onto the harness
-    root. No value of it may read outside {defender_dir}/skills/gather/queries/ — a traversal is
-    rejected rather than joined. Positive control lives in the sibling test below."""
     deps = _deps(tmp_path, _catalog(tmp_path))
     from pydantic_ai.exceptions import ModelRetry
 
@@ -383,9 +352,6 @@ def test_d8_system_none_searches_every_system_and_a_name_restricts(tmp_path):
 
 
 def test_d8_an_unknown_system_reports_the_ones_that_exist(tmp_path):
-    """An unknown system is a model mistake, not a crash and not a silent empty (which reads as
-    "the catalog is bare" and makes gather coin). It names the systems that DO exist, so the
-    next call can succeed."""
     deps = _deps(tmp_path, _catalog(tmp_path))
     from pydantic_ai.exceptions import ModelRetry
 
@@ -405,9 +371,6 @@ def test_d8_empty_system_is_not_a_second_spelling_of_all(tmp_path):
 
 
 def test_d0b_a_hit_carries_the_template_id_and_its_path(tmp_path):
-    """read_file(path, pattern=) ALREADY grep-folds one file, and gather already has it. If
-    template_search returns bare matching lines it is a rename, not a capability: gather needs a
-    LOCATOR — the id to bind and the path to read the body from (d16)."""
     deps = _deps(tmp_path, _catalog(tmp_path))
     out = tools_gather._tool_template_search(deps, "Failed password")
 
@@ -417,9 +380,6 @@ def test_d0b_a_hit_carries_the_template_id_and_its_path(tmp_path):
 
 
 def test_d9_search_admits_drafts_while_the_index_excludes_them(tmp_path):
-    """The asymmetry is deliberate — a draft's Goal is boilerplate but its Query body is a real
-    query that ran. Both halves are pinned in ONE test so a future author cannot quietly
-    collapse them onto a single predicate."""
     dfn = _catalog(tmp_path)
     deps = _deps(tmp_path, dfn)
 
@@ -429,9 +389,6 @@ def test_d9_search_admits_drafts_while_the_index_excludes_them(tmp_path):
 
 
 def test_d20_search_is_case_insensitive(tmp_path):
-    """_grep_lines is a CASE-SENSITIVE plain substring, and SCHEMA.md tells authors to write
-    Goals for keyword recall (sshd, sudo, /etc/passwd). A model typing SSHD would get a silent
-    empty and conclude the catalog is bare — which makes it coin, the exact failure #585 fixes."""
     deps = _deps(tmp_path, _catalog(tmp_path))
 
     lower = tools_gather._tool_template_search(deps, "failed password")
@@ -450,9 +407,6 @@ def test_d20_the_pattern_is_a_substring_not_a_regex(tmp_path):
 
 
 def test_d21_zero_matches_says_so_instead_of_returning_the_empty_string(tmp_path):
-    """_grep_lines returns '' on no match — a VALID empty. Fed to a model, '' reads as "the
-    catalog is empty", and gather coins. Positive control: a matching pattern returns hits and
-    NOT the sentinel."""
     deps = _deps(tmp_path, _catalog(tmp_path))
 
     miss = tools_gather._tool_template_search(deps, "xyzzy-no-template-says-this")
@@ -478,11 +432,6 @@ def test_d22_the_empty_pattern_is_not_a_wildcard(tmp_path):
 
 
 def test_d10_a_draft_hit_comes_back_untrusted_wrapped(tmp_path):
-    """draft_synthesis writes {system}/_draft/{verb}.md from an executed gather query — the skeleton
-    embeds the lead's goal text and the query body the gather LLM coined in RESPONSE TO ALERT
-    DATA, which is attacker-influenced by definition. is_untrusted_read is False for every corpus
-    path today (files.py:178-182 — only alert.json / gather_raw), so that text would reach the
-    model bare."""
     dfn = _catalog(tmp_path)
     q = dfn / "skills" / "gather" / "queries"
     (q / "elastic" / "_draft" / "poisoned.md").write_text(
@@ -561,9 +510,6 @@ def test_a_broad_pattern_is_bounded_and_says_that_it_truncated(tmp_path):
 
 
 def test_the_truncated_list_keeps_the_densest_matches(tmp_path):
-    """Which templates survive the cap is not incidental. Ranked by match density, the strongest
-    candidate survives; in corpus-walk order it would be whichever system sorts first, so the
-    best template could be dropped for an alphabetical accident while 20 weaker ones are shown."""
     corpus = 40
     assert corpus > tools_gather._SEARCH_MAX_TEMPLATES, "fixture too small to exercise the cap"
 
@@ -615,5 +561,3 @@ def test_598_the_walk_and_lead_render_agree_on_a_fenced_hash_query(tmp_path):
 
     assert "LIMIT 5" in rendered, "lead_render truncated the query at the fenced `## ` line"
     assert "Pitfalls" not in rendered, "lead_render leaked the next section into the query"
-
-

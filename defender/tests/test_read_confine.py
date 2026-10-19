@@ -19,24 +19,6 @@ from defender.tests import _tenants1106 as T1106  # noqa: E402
 
 _DEFENDER = config.REPO_ROOT / "defender"
 
-#: A FAMILY OF DEMANDS LEFT THIS FILE WITH #922, recorded rather than deleted in silence.
-#:
-#: `test_judge_cat_*` (18 cases) drove the learning-side bash lane: `cat` over a run dir and
-#: `cat <payload> | defender-sql '<SQL>'`, compiled off the pipeline judge's real seam. That
-#: role is deleted and NO surviving role has that lane — the curator, the one learning role
-#: that still holds `cat`, is granted it over its own corpus only and has no `defender-sql` at
-#: all, which is its design rather than an oversight. Re-pointing the cases onto it would have
-#: asserted grants nothing holds.
-#:
-#: What still witnesses the gate here: the MAIN and GATHER families below, which are runtime
-#: roles and unaffected. What is no longer witnessed anywhere: the denylist and traversal
-#: refusals AS THEY APPLY TO A LEARNING ROLE'S bash. Restore them when a learning role is next
-#: granted a shell lane — that grant is the change that needs them, not this one.
-#: TWO REAL DIRECTORIES UNDER `defender/`, used as confine members. They were the actor legs'
-#: two lesson corpora until #922 deleted those legs; what the gate tests below need of them is
-#: only that they exist, differ, and sit inside the defender dir — the property under test is
-#: the CONFINE's, not any role's. Named for what they are here rather than for a role that no
-#: longer binds them, so a reader is not sent looking for a leg that is gone.
 _CONFINE_A = _DEFENDER / "lessons"
 _CONFINE_B = _DEFENDER / "skills"
 #: A real file OUTSIDE both, for the refusal side. It was the deleted judge's rubric; any file
@@ -54,7 +36,6 @@ def _policy(*, read_confine=(), bash_allow=(), read_roots=()):
     return AgentPolicy(
         read_roots=read_roots, read_confine=read_confine, bash_allow=bash_allow,
     )
-
 
 
 @pytest.mark.parametrize("path", [_CONFINE_A / "T1078.md", _CONFINE_B / "svc-monitoring.md"])
@@ -131,7 +112,6 @@ def test_confined_actor_cannot_reach_gather_raw(tmp_path):
         defender_dir=_DEFENDER, policy=pol).allow
 
 
-
 def _tmp_tree(tmp_path):
     """A tmp defender-like tree: a confine dir + an out-of-confine 'rubric'. Returns (defender_dir, confine, rubric)."""
     dfn = tmp_path / "defender"
@@ -165,7 +145,6 @@ def test_resolve_error_fails_closed(tmp_path):
     assert not permission.decide_read(a, run_dir=tmp_path / "run", defender_dir=dfn, policy=pol).allow
 
 
-
 @pytest.mark.parametrize("cmd", [
     "cat defender/lessons-actor/x.md",
     "grep foo defender/lessons-environment/y.md",
@@ -174,9 +153,6 @@ def test_resolve_error_fails_closed(tmp_path):
     "ls defender/lessons-actor",
 ])
 def test_actor_all_generic_readers_denied(cmd):
-    """a confined actor (empty `bash_allow`) is denied EVERY generic bash reader — reads go through the tool.
-    Even an IN-confine path is denied here: bash is simply not a read path for the actor. (Deny-by-default
-    is the mechanism: with no grant, no stage is ever claimed.)"""
     assert not permission.decide_bash(cmd, policy=_policy(bash_allow=())).allow, cmd
 
 
@@ -196,36 +172,12 @@ def test_reduction_is_per_policy_not_global(tmp_path):
         f"cat {inv} | grep foo", policy=main, run_dir=run, defender_dir=dfn).allow
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @pytest.mark.parametrize("cmd", [
     'cat {r} | defender-sql \\\n  "SELECT 1"',
     'cat {r} | defender-sql "SELECT 1\nFROM data"',
 ])
 def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
     """`bash_exec.parse` lexes each PHYSICAL LINE on its own (an unquoted newline is a"""
-    # ANY compiled policy answers this: the refusal happens in the LEXER, before a program or
-    # a path is looked at, so the demand is policy-independent. It used to ride on the deleted
-    # judge's gate purely because that helper was to hand; MAIN's is the one that ships.
     raw = tmp_path / "gather_raw" / "l-002" / "0.json"
     run = tmp_path / "run"
     dfn = tmp_path / "tree" / "defender"
@@ -236,25 +188,6 @@ def test_multiline_command_is_denied_with_a_reason_that_says_why(tmp_path, cmd):
     assert not decision.allow
     assert decision.reason == permission.bash.UNTOKENIZABLE_REASON
     assert "SINGLE line" in decision.reason
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_main_cat_scope_is_the_read_surface(tmp_path):
@@ -287,4 +220,3 @@ def test_gather_stream_plumbing_anchored(tmp_path):
     assert bash(f"cat {raw} | wc -c").allow
     assert not bash("cat /tmp/p.json | wc -c").allow
     assert not bash(f"cat {run}/gather_raw/evil.json").allow
-

@@ -89,12 +89,6 @@ def _script(checkout: Path) -> Path:
 @pytest.mark.parametrize("shape", ["merged", "squashed", "linear"])
 def test_migrate_gives_an_old_shape_tenant_a_folder_setup_accepts(
         tmp_path: Path, shape: str) -> None:
-    """Over an old-shape root inside a tmp checkout (beside its `defender/`) whose HEAD no
-    longer has the lab, acceptance refuses naming migrate; `migrate playground
-    <root>/playground/knowledge` exits 0, telling the operator to run setup; the new repo
-    commits exactly the lab's last committed files plus `.tenant-id` — not a stale copy left on
-    disk with an edited table; nothing else under the root changed. `setup playground` then
-    exits 0 and writes nothing, and the tenant is accepted."""
     checkout, lab = _checkout_with_a_retired_lab(tmp_path / "checkout", shape)
     stale = checkout / _LAB / "settings"
     stale.mkdir(parents=True)
@@ -140,5 +134,3 @@ def test_a_migrate_that_fails_after_creating_the_folder_removes_it(tmp_path: Pat
     H.assert_refused(_migrate(_TID, target, home=home, script=_script(checkout)), "undone")
     assert not target.exists()
     assert H.census_diff(before, H.tree_census(root)) == []
-
-

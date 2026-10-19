@@ -64,10 +64,6 @@ def env(tmp_path):
                 "docs/x.md", "skills/elastic/SKILL.md",
                 "fixtures/held-out/m01/ground_truth.yaml"):
         (dfn / rel).write_text("x\n")
-    # `elastic` is declared, not merely present: since #772 the lead author's write lanes and
-    # `rm` grant are compiled one per system the tree declares an adapter for, so a tree with a
-    # `skills/elastic/` and no `elastic_adapter.py` binds to no lanes at all — and the audit
-    # demands below sweep that policy.
     seed_adapter_stubs(dfn, ("elastic",))
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     return _Env(run=run, dfn=dfn, main=main, tmp=tmp_path)
@@ -110,11 +106,6 @@ def _curator(env):
 def _all_policies(env) -> dict[str, permission.AgentPolicy]:
     """Every agent's compiled policy, through each role's REAL seam. The audit demands (a2/a4/
     b3/b8/g1) sweep this."""
-    # From `defender.agents`, the same source every other row above is imported from — so this
-    # row also witnesses that the registry module imports the definition (#1008 M4). Imported
-    # HERE rather than at module scope because it was written before the definition existed,
-    # and a missing name in the module-level import block fails COLLECTION, hiding every other
-    # test in this file behind one error.
     from defender.agents import JUDGE_DEF, ORACLE_CHECK_DEF, ORACLE_DEF
 
     return {
@@ -124,21 +115,9 @@ def _all_policies(env) -> dict[str, permission.AgentPolicy]:
         # that if the keys are the roster's own names.
         "lead_author": _lead_author(env),
         "corpus_author": _curator(env),
-        # #796's review roles. They are here for the same reason every other role is: b3
-        # sweeps THIS dict, so a role registered in AGENTS but absent here is a compiled
-        # policy the audit never looks at. Their expected shape is the empty one — no bash
-        # grant, no read grant, no write grant — which is precisely what makes an untabled
-        # program in one of them worth catching.
         "support": compile_policy_for(SUPPORT_DEF, run_dir=env.run, defender_dir=env.dfn),
         "composer": compile_policy_for(COMPOSER_DEF, run_dir=env.run, defender_dir=env.dfn),
-        # #947's questioner, here for that same reason: it is registered in AGENTS, so a
-        # compiled policy of its exists whether or not this dict looks at it. Its expected
-        # shape is the empty one — the whole posture of the role is that it grants nothing.
         "questioner": compile_policy_for(QUESTIONER_DEF, run_dir=env.run, defender_dir=env.dfn),
-        # #1008's family judge, the second deny-all role and here for the same reason again.
-        # It has its OWN key rather than the questioner's (one deny-all key per package), so
-        # its policy — and above all its deny_reason, which g1 sweeps as prompt surface — is a
-        # second compiled object the audit would otherwise never look at.
         "judge": compile_policy_for(JUDGE_DEF, run_dir=env.run, defender_dir=env.dfn),
         # #1224's live oracle and its verifier: two more deny-all roles, each its own key, so
         # each is a compiled policy (and a deny_reason) the audit must look at.
@@ -168,9 +147,6 @@ def test_a1_shape_and_scope_both_required(env):
 
 
 def test_a3_under_fullmatches_the_resolved_path(env):
-    """a3: `under(root, tail)` fullmatches the RESOLVED path — it is an allowlist entry over what
-    `resolve()` returns, not over what the model typed. A same-file spelling that only resolve()
-    can normalize (a symlinked root, a `.` segment) matches only AFTER resolution."""
     real = env.tmp / "real"
     real.mkdir()
     (real / "a.md").write_text("x\n")
@@ -192,9 +168,6 @@ def test_a5_symlink_escaping_the_root_denied(env):
 
 
 def test_a6_symlink_to_an_in_root_target_allowed(env):
-    """a6: a symlink `{run}/gather_raw/l-001/1.json` → another IN-ROOT, in-shape file ALLOWs —
-    a5 denies for the ESCAPE, not because symlinks are banned. Containment is where the path
-    RESOLVES, nothing else."""
     link = env.run / "gather_raw" / "l-001" / "1.json"
     os.symlink(env.run / "gather_raw" / "l-001" / "0.json", link)
     assert _bash(env, f"cat {link}", "gather").allow
@@ -224,9 +197,6 @@ def test_a8_missing_and_broken_symlinks_are_judged_by_shape(env):
 
 
 def test_a9_embedded_nul_operand_denies_without_raising(env):
-    """a9: an embedded-NUL operand makes `Path.resolve()` raise `ValueError`, which is in
-    `_RESOLVE_ERRORS` → DENY. The tool must not propagate it (a raise out of decide_bash is a
-    500 in the driver, not a deny the model can retry)."""
     d = _bash(env, f"cat {env.run}/inv\x00.md", "main")
     assert not d.allow
 
@@ -253,9 +223,6 @@ def test_a11_relative_operand_is_rebased_on_the_executor_cwd(env):
 
 
 def test_a12_every_pipe_stage_is_gated(env):
-    """a12: EVERY stage of a pipeline is gated, not just the first: `cat {run}/x.md | cat /etc/passwd`
-    DENIES — the second stage's operand is scope-checked too. Positive control: the same pipe with
-    both operands in scope ALLOWs."""
     inv = f"{env.run}/investigation.md"
     assert not _bash(env, f"cat {inv} | cat /etc/passwd", "main").allow
     assert _bash(env, f"cat {inv} | cat {env.run}/report.md", "main").allow
@@ -287,9 +254,6 @@ def test_b4_cat_extractor_fails_closed_on_unknown_dash_tokens(env, tok):
 
 
 def test_b4_cat_known_boolean_bundles_extract_the_operands(env):
-    """b4 positive control: the known boolean bundles (`-n`, `-A`, `-vET`) are admitted and the file
-    operands are extracted + scope-checked correctly — cat's whole short-flag set (`-A -b -e -E -n
-    -s -t -T -u -v`) consumes NO argument, which is why it can have an extractor at all."""
     inv = f"{env.run}/investigation.md"
     for flags in ("-n", "-A", "-vET", "-n -s"):
         assert _bash(env, f"cat {flags} {inv}", "main").allow, flags
@@ -486,9 +450,6 @@ def _projection(pol) -> tuple:
 
 
 def test_h1_compile_policy_for_is_idempotent(env):
-    """h1: compiling the same (def, roots) twice yields an EQUAL policy — the compile is a pure
-    projection of declared data, with no accumulated or cached state leaking between calls
-    (`tools_gather.py:325` binds GATHER_DEF once per DISPATCH, many times per run)."""
     for defn in (MAIN_DEF, T1106.fixture_gather_def()):
         a = compile_policy_for(defn, run_dir=env.run, defender_dir=env.dfn)
         b = compile_policy_for(defn, run_dir=env.run, defender_dir=env.dfn)
@@ -534,10 +495,6 @@ def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env,
     from defender.scripts import policy_cli
 
     c = cmd.format(run=env.run, dfn=env.dfn)
-    # #1106 M2: gather's grant is built from a named tenant under an injected root — the CLI
-    # holds no process-level grant to fall back to. The root is `$DEFENDER_DATA_ROOT` (#1120);
-    # the tenant is the committed fixture placed there, whose grants `env.gather` was compiled
-    # from.
     tenant = (("--tenant", T1106.fixture_tenant().id) if which == "gather" else ())
     # The CLI's `main` in-process: the differential is about what `explain` decides, and a
     # fresh interpreter per (agent, command) pair only re-paid the import. i1 drives the shim.

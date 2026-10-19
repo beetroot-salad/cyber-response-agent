@@ -51,10 +51,6 @@ def test_the_generic_bash_census_enumerates_the_curator(tmp_path):
 
 
 def test_the_registry_validates_the_curator_at_import_time(tmp_path):
-    """``build_registry`` drops ``if d.bindable``, so importing ``defender.agents`` validates
-    CORPUS_AUTHOR_DEF's write co-constraint before any spawn exists (f16/M9) — which means the
-    curator must DECLARE its write scope (a bindable writer with empty ``write_shapes`` would
-    raise the co-constraint at import)."""
     assert CORPUS_AUTHOR_DEF.write_shapes != ()  # RED today (empty)
     with pytest.raises(ValueError):  # noqa: PT011
         build_registry((_misconfigured_writer_def(),))  # the un-skipped validation bites
@@ -62,9 +58,6 @@ def test_the_registry_validates_the_curator_at_import_time(tmp_path):
 
 
 def test_every_role_in_the_registry_binds_through_the_one_seam(tmp_path):
-    """Every role in AGENTS binds through the ONE ``bind`` seam (drives(role_census->bind),
-    RunScope): after #0 the curator has no private ``_corpus_author_policy`` back-door — its
-    policy is compiled by the SAME ``bind``/``compile_policy_for`` every other role goes through."""
     from defender.runtime.agent_definition import RunScope, compile_policy_for
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     # a non-curator role reaches a compiled policy through the seam — the positive control.
@@ -91,5 +84,3 @@ def test_binding_a_corpus_requiring_role_without_a_name_raises_legibly(tmp_path)
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     with pytest.raises(ValueError, match=r"(?i)corpus[_ ]?name|corpus name"):
         bind(CORPUS_AUTHOR_DEF, rd, scope=RunScope(), defender_dir=wt / "defender")
-
-

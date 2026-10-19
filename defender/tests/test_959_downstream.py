@@ -76,9 +76,6 @@ def _gather_scene(tmp_path: Path, result: BoxResult, *, lead_id: str = "l-1"):
     dfn.mkdir(parents=True)
     payload = run / "gather_raw" / lead_id / "0.json"
     payload.write_text("{}", encoding="utf-8")
-    # The run's state, as the driver starts it and hands it to gather deps (#1235): the
-    # shim-failure row's seq and its `system=` attribution are read from it, and this folder
-    # went through no driver.
     from defender.runtime.run_state import RunState
 
     box = Box(result)
@@ -113,9 +110,6 @@ def test_the_operand_set_the_four_post_decision_consumers_read_is_the_one_the_ga
     assert "untrusted" not in opened_nothing
     assert len(opened_nothing) > 12000, "the capture ceiling was applied to a command with no operand"
 
-    # The half this change moves: an operand the TEXT does not name must never reach any of
-    # them. Today the gate trims the trailing blank and all four consumers are handed a file
-    # the model did not write.
     deps3 = dataclasses.replace(deps, box=Box(BoxResult(0, b"z", b"")))
     with pytest.raises(ModelRetry) as refusal:
         _tool_bash(deps3, f"cat {model_path(payload, run_dir=deps.run_dir)}" + NBSP)
@@ -123,9 +117,6 @@ def test_the_operand_set_the_four_post_decision_consumers_read_is_the_one_the_ga
 
 
 def test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_set(tmp_path):
-    """The queries-table row the shim-failure path writes derives its `system=` attribution from
-    the same authorised operand set, re-derived from the same decision with no cache, so the row
-    and the execution cannot disagree about which files the command opened."""
     deps, _box, payload = _gather_scene(tmp_path, BoxResult(1, b"", b"boom"))
     run = deps.run_dir
     record_query.append_query_row(
@@ -151,9 +142,6 @@ def test_the_audit_rows_system_attribution_derives_from_the_authorised_operand_s
     assert rows2[-1]["system"] == ""
 
 
-# The sibling surfaces: the read-tool lane.
-#: Paths and the answer both lanes must give for them, under MAIN. Every row is a constraint
-#: the read lane enforces - confine (the grant's scope fullmatch), the denylist, and resolve.
 _PARITY = (
     ("/run/report.md", True),
     ("/dfn/lessons/a.md", True),
@@ -237,9 +225,6 @@ def test_a_command_refused_only_for_an_invisible_character_is_told_so():
                 f"the refusal of {cmd!r} never names U+{ord(blank):04X}. It cannot be shown, so "
                 "the codepoint is the only thing that can be said about it"
             )
-    # The carriage return, in each of the three places this change newly refuses it for: inside
-    # an operand, at a word edge, and - member 8 - as a word of its own after a connector, where
-    # it also costs the model the one message that used to name the problem.
     for cmd in (f"cat {REPORT}" + CR + "x", f"cat {REPORT}" + CR + "\nwc -l",
                 f"cat {REPORT} |" + CR, f"cat {REPORT} &&" + CR):
         d = _bash(cmd)
@@ -249,9 +234,6 @@ def test_a_command_refused_only_for_an_invisible_character_is_told_so():
             "carriage return a model sends, and after this change every one of them carrying a "
             "path operand under a `cat`-shaped grant is refused"
         )
-    # The second predicate, at BOTH ends: the shapes whose refusal an invisible character moves
-    # off the lexing path. Swept from the corpus's own derived tables, so this follows the code
-    # and the recorded positions rather than a list of shapes.
     for arm, shape, moves_trailing, moves_leading in base.LEXING_ARMS:
         for label, build, moves in (
             ("trailing", lambda b, sh=shape: sh + b, moves_trailing),
@@ -274,12 +256,6 @@ def test_a_command_refused_only_for_an_invisible_character_is_told_so():
                     "nothing after it. The character is what moved the refusal off that arm, so "
                     "the reason has to say which character"
                 )
-    # ...and the wrapper shapes, which are the case #971 INVERTS. They used to be refused for
-    # the lexing reason and to lose it when a leading blank took the wrapper word with it, so
-    # the character had to be named. There is no wrapper word to take any more: each one is an
-    # ungranted program with the blank and without it, so the character is not what refuses
-    # them, and naming it would send the model hunting for a stray codepoint in a command whose
-    # real problem is the program it names.
     for name, shape in base.WRAPPER_LATER_TOKEN_SHAPES:
         for blank in base.DIVERGENT_BLANKS:
             d = _bash(blank + shape)

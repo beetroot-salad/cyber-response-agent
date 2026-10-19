@@ -25,9 +25,6 @@ def _family_mod():
 
 
 def test_947_questioner_definition_grants_no_tool_and_no_verb():
-    """The questioner definition grants nothing on any surface it could reach: no tool set, no
-    verb entry, no bash program, no read root and no write root — deny-all by omission, the way
-    the oracle's definition is, rather than by a grant line that can be edited open."""
     QUESTIONER_DEF = _questioner().QUESTIONER_DEF
     assert tuple(QUESTIONER_DEF.tools) == ()
     assert QUESTIONER_DEF.verb_grant.entries == ()
@@ -47,11 +44,6 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     spawn = T.FakeSpawn()
-    # The launch runs the question-writer and then pre-flight, which refuses the family (no
-    # world declares a fact, so nothing calibrates) before any oracle turn or sibling: every
-    # in-process step that could call the preflight a second time short of the siblings, with
-    # no model reached but the injected doubles. The siblings are separate processes (the
-    # source check below).
     worlds = [T.base_world(), T.world_doc("b", facts=[]), T.world_doc("c", facts=[])]
     questioner = T.FakeAgent(T.family_doc(worlds=worlds), *worlds[1:])
     rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
@@ -77,9 +69,6 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
 
 
 def test_947_three_questioner_calls_share_a_role_and_differ_by_agent_id(tmp_path):
-    """The three questioner calls run under one role key and are separated by their agent ids
-    alone: the ids are pairwise distinct, and every trace row the run writes carries the id of
-    the call that produced it."""
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     _questioner().author_family(
         source_run_dir=tmp_path, episode_dir=T.episode(tmp_path), invoke=agent,
@@ -91,9 +80,6 @@ def test_947_three_questioner_calls_share_a_role_and_differ_by_agent_id(tmp_path
 
 
 def test_947_agent_trace_ids_are_pairwise_distinct_across_all_four_role_key_writers(tmp_path):
-    """All four calls that write under the questioner role key take pairwise distinct trace
-    ids: the three authoring calls AND the comparator's, which shares the role and would
-    otherwise overwrite one of them in the run's per-id trace."""
     author = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     judge = T.FakeAgent("mutation")
     _questioner().author_family(source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
@@ -108,9 +94,6 @@ def test_947_agent_trace_ids_are_pairwise_distinct_across_all_four_role_key_writ
 
 
 def test_947_questioner_reads_joined_leads_alert_and_frontier_at_n(tmp_path):
-    """The questioner's first call is handed exactly three captured inputs — the joined leads at
-    the branch point, the source alert, and the investigation document's frontier at the fence
-    count — and the prompt it receives carries all three."""
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     _questioner().author_family(
         source_run_dir=tmp_path, episode_dir=T.episode(tmp_path), invoke=agent,
@@ -122,9 +105,6 @@ def test_947_questioner_reads_joined_leads_alert_and_frontier_at_n(tmp_path):
 
 
 def test_947_questioner_inputs_are_wrapped_untrusted(tmp_path):
-    """Every captured artifact reaching the questioner's prompt is wrapped untrusted by the
-    existing seam: the lead's text sits inside a `<run-{salt}-untrusted>` frame the call itself
-    minted, and appears nowhere outside one, so no payload text is presented as instruction."""
     agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
     _questioner().author_family(
         source_run_dir=tmp_path, episode_dir=T.episode(tmp_path), invoke=agent,
@@ -138,9 +118,6 @@ def test_947_questioner_inputs_are_wrapped_untrusted(tmp_path):
 
 
 def test_947_call_one_output_is_rewrapped_before_it_seeds_calls_two_and_three(tmp_path):
-    """Taint propagates across the chained calls: Call 1's own output is re-wrapped untrusted
-    before it seeds Calls 2 and 3, so a captured payload that steered the base story cannot
-    reach the world-authoring calls as trusted framing."""
     steered = T.family_doc(base_story="STEERED-BY-A-PAYLOAD")
     agent = T.FakeAgent(steered, T.world_doc("b"), T.world_doc("c"))
     _questioner().author_family(source_run_dir=tmp_path, episode_dir=T.episode(tmp_path),
@@ -154,9 +131,6 @@ def test_947_call_one_output_is_rewrapped_before_it_seeds_calls_two_and_three(tm
 
 
 def test_947_the_questioner_screens_the_source_document_before_reading_it(tmp_path):
-    """The questioner screens the source run's investigation document before reading it: the
-    file is model-writable, and a link planted at its name is refused rather than followed into
-    a prompt."""
     base, src = T.runs_base(tmp_path)
     secret = tmp_path / "secret.txt"
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
@@ -221,11 +195,6 @@ def test_947_the_questioner_is_told_which_systems_the_tenant_serves(tmp_path):
     family_prompt = agent.prompts[0]
     for system in ("alpha-sys", "beta-sys"):
         assert system in family_prompt, f"the prompt never names the served {system!r}"
-    # HOST TEXT, ahead of the untrusted region: the systems come from the tenant's own grant,
-    # and a domain the model is told to OBEY must not arrive inside a frame that tells it to
-    # read the contents as evidence.
-    # The frame's OPENING tag, not the bare word — the shipped prompt names "untrusted" in its
-    # own reader contract long before any frame opens, so matching the word finds host text.
     opened = re.search(rf"<[\w-]+-{_questioner().UNTRUSTED_TAG}>", family_prompt)
     assert opened, "the capture was never framed at all"
     assert family_prompt.index("alpha-sys") < opened.start(), (
@@ -272,9 +241,6 @@ def test_947_a_real_answer_per_served_system_reaches_every_prompt(tmp_path):
     assert len(agent.prompts) == 3, "the seat-authoring calls never ran"
     for which, prompt in zip(("call 1", "seat B", "seat C"), agent.prompts, strict=True):
         assert "system alpha:" in prompt, f"{which} was not told which systems answered"
-        # The VALUE, not just the field name: the shape of a value is the half a story gets
-        # wrong (a loopback source is `::1`, and a world asserting `127.0.0.1` describes
-        # answers no system returns).
         assert "::1" in prompt, f"{which} was shown no value shape"
 
 

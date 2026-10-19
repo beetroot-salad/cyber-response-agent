@@ -127,9 +127,6 @@ def test_the_tenant_record_is_created_once_under_the_runs_base(tenant_root, tmp_
 
 
 def test_the_tenant_record_is_removed_between_two_runs_of_one_tenant(tenant_root, tmp_path):
-    """'Created once when absent' is the only stated rule, so a materialisation after the record
-    was deleted recreates it with a freshly-minted `base_world_id`, silently re-minting the
-    tenant's base world."""
     base = tenant_root / T_ID / "runs"
     alert = H.plant_alert(tmp_path / "in")
     first = Path(_materialize(alert, "run-before-delete"))
@@ -212,9 +209,6 @@ def test_a_tenant_record_missing_a_field_or_carrying_a_wrong_type_refuses_the_ru
 
 
 def test_the_tenant_records_path_is_occupied_by_something_that_is_not_a_regular_file(tenant_root):
-    """With something that is not a regular file at `<runs_base>/_tenant.json`, the
-    complete-or-absent create lane fails, and because the tenant record is an identity-bearing
-    write the run fails loudly rather than degrading or retrying."""
     base = tenant_root / T_ID / "runs"
     base.mkdir(parents=True, exist_ok=True)
     target = base / H.RECORD_NAME
@@ -281,9 +275,6 @@ def test_the_loser_of_a_tenant_record_create_race_discards_its_value_and_rereads
 
 
 def test_run_creation_refuses_a_run_directory_named_like_the_tenant_record(tenant_root, tmp_path):
-    """Run creation refuses a run directory whose name would collide with the tenant record's
-    filename, by an explicit check rather than by the three coincidences that keep them apart
-    today."""
     from defender._run_id import is_valid_run_id
 
     alert = H.plant_alert(tmp_path / "in")
@@ -409,17 +400,6 @@ def _recorded_world(ep: Path, label: str):
 
 def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_world(
         tenant_root, tmp_path):
-    """An unforked run stamps the tenant's `base_world_id` and no lineage. A forked sibling's
-    world token — the escaped `<episode token>.<label>` the ledger and the staged aliases key
-    on — and its lineage (the source run, the branch turn) are the episode's, host-side.
-
-    #1255 P3 FLIPPED the sibling half: "`provenance.json` (world id, parent run, fork turn)
-    moves out of the run folder into the episode's host-side record". Before #1255 the sibling
-    stamped its token and lineage into its own `provenance.json`; its run folder is the box's
-    mount, so that told the model it was an arm. Now the sibling's run-folder stamp, if any,
-    has the unforked shape (no token, no parent run, no fork turn; world id absent or the
-    tenant's natural base world), and the token, source run and branch turn are read off the
-    episode's own record."""
     alert = H.plant_alert(tmp_path / "in")
     unforked = Path(_materialize(alert, "run-unforked"))
     base = tenant_root / T_ID / "runs"
@@ -567,5 +547,3 @@ def test_the_cross_tenant_comparison_runs_over_the_stamped_siblings_and_records_
     assert "1" in reason, counted
     assert any(w in reason.lower() for w in ("skip", "unstamped")), counted
     assert "wait" not in reason.lower(), "the comparison does not wait for the rest"
-
-

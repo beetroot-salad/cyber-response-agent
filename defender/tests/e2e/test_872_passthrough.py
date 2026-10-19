@@ -8,9 +8,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
-# and a bare module-scope import there is a COLLECTION error, which pytest answers by
-# interrupting the whole session. Guarded like `pydantic_ai` above it.
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from pydantic_ai.messages import BinaryContent  # noqa: E402
@@ -40,9 +37,6 @@ def _substituting() -> dict:
 
 
 def test_str_scalar_none_and_content_block_returns_never_reach_the_encoder() -> None:
-    """A `str`, a scalar, `None`, `bytes` and a content-block return never reach the encoder: the
-    type admission examines the top-level shape and precedes both the byte gate and the round
-    trip."""
     for value in ("a plain string", 7, None, b"ab"):
         out = agent_run(toolset=foreign_toolset(value))
         assert out.encoder.dumps_calls == 0, f"{type(value).__name__} reached the encoder"
@@ -114,9 +108,6 @@ def test_a_nested_payload_and_one_toon_enlarges_pass_through() -> None:
 
 
 def test_a_silently_coerced_value_fails_the_round_trip_and_emits_json() -> None:
-    """A payload whose TOON view does not carry the JSON's content back reaches the model as JSON
-    — with the oracle §7 r4 (f8 = B) decided: `to_json(loads(toon)) == to_json(value)`,
-    compared SERIALIZED, not with Python `==`."""
     big = {"rows": [{"a": 2 ** 63, "b": f"pad-{i}"} for i in range(40)]}
     assert toons.loads(toons.dumps(big)) == big, (
         "the `==` oracle no longer blesses the big-integer view, so this case has stopped "
@@ -142,9 +133,6 @@ def test_a_silently_coerced_value_fails_the_round_trip_and_emits_json() -> None:
 
 
 def test_every_passthrough_arm_is_byte_identical_with_and_without_the_gate() -> None:
-    """On EVERY passthrough arm — type admission, encoder fault, baseline serialization, the byte
-    gate, the round trip, and the guard's refusal — the JSON content inside the frame is byte-
-    identical to the no-gate run's model-visible text."""
     arms = {
         "type-admission": ("a plain string", None),
         "byte-gate": (corpus()["fx-33"], None),
@@ -168,9 +156,6 @@ def test_every_passthrough_arm_is_byte_identical_with_and_without_the_gate() -> 
 
 
 def test_a_payload_failing_the_byte_gate_is_never_decoded() -> None:
-    """The round trip runs only AFTER the byte gate, and the pre-validator runs before the
-    encoder: a payload that fails the bar is encoded once and decoded zero times, and a
-    payload the guard refuses is encoded zero times."""
     over_value = corpus()["fx-33"]
     over = agent_run(toolset=foreign_toolset(over_value))
     assert (over.encoder.dumps_calls, over.encoder.loads_calls) == (1, 0)
@@ -249,9 +234,6 @@ def test_a_view_the_encoder_produced_that_the_decoder_cannot_read_passes_through
 
 
 def test_a_nan_or_infinite_float_reaches_the_model_identically_with_and_without_the_gate() -> None:
-    """A payload carrying NaN or ±infinity reaches the model with the same information gated and
-    un-gated — and where the gate substitutes, it substitutes because M3's oracle BLESSES the
-    round trip under the wire serializer."""
     substituted_at_least_once = False
     for f in (float("nan"), float("inf"), float("-inf")):
         for value in ({"x": f}, {"rows": [{"a": f, "b": i} for i in range(40)]}):

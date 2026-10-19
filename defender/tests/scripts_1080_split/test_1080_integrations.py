@@ -1,13 +1,3 @@
-"""#1080 group `integrations`: the generic HTTP check and the fault types, the Elastic grammar,
-and the adapter-private endpoint table the adapters hand to the moved check.
-
-SCOPE CUT (2026-10-04, human): `scripts/adapters/` — the fault types, the generic HTTP check,
-the Elastic grammar and the endpoint table — stays where it is; its move is owned by #1172 (with
-#1121 for the Elastic grammar), and this group's tests are parked with it
-(`spec-flow/specs/parked/1080/parked_integrations.py`, with the coined `TABLE_KW` and the
-`goldens/integrations.json` capture). Kept here: s025's `ParamsTooDeep` cell, which rides with
-`record_query`'s query-rule slice into the flat tier.
-"""
 from __future__ import annotations
 
 import ast
@@ -20,21 +10,11 @@ from typing import Any
 from defender.tests.scripts_1080_split import _spec1080 as S
 
 
-# ======================================================================================
-# The one normaliser and row comparison (shared with the golden capture)
-# ======================================================================================
-
-
 def _run(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> tuple[Any, Exception | None]:
     try:
         return fn(*args, **kwargs), None
     except Exception as e:  # noqa: BLE001 — the exception IS the observed outcome
         return None, e
-
-
-# ======================================================================================
-# Locating the moved code (at call time, never at import)
-# ======================================================================================
 
 
 def _import(relpath: str, line: int, dotted: str) -> ModuleType:
@@ -115,24 +95,7 @@ def _assert_bound_to(relpath: str, name: str, obj: Any) -> None:
                 f"{relpath} still takes `{name}` from {source}, the old path")
 
 
-# ======================================================================================
-# The tests
-# ======================================================================================
-
-
 def test_moved_exception_type_raised_on_one_side_and_caught_on_the_other():
-    """Each moved exception type has one definition. Under the 2026-10-04 scope cut that is
-    `ParamsTooDeep`, which rides with the query-rule slice into the flat tier; the code that
-    raises it and the code that catches it bind the same class object, with every catch site
-    repointed (capture, estate registry, query_tool; _family's catch went with the manifest
-    envelope, #1224). A second definition or a catch
-    site left on the old path is a failure. (The VisualizeFailed, CaseTicketError, ViewNameError
-    and fault-type cells read modules the cut leaves in place; they are parked with #1105, the
-    case_ticket follow-up #1190 and #1172.)
-
-    Observed: the type has exactly one definition in the tree; every listed site's import of it
-    (module-level or inside a function) resolves to that object; and a raise from the moved
-    params normaliser is caught by each site's binding."""
     assert len(S.definitions("ParamsTooDeep")) == 1, (
         f"`ParamsTooDeep` has {len(S.definitions('ParamsTooDeep'))} definitions: "
         f"{list(S.definitions('ParamsTooDeep'))}")

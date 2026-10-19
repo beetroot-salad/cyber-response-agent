@@ -65,9 +65,6 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
             assert "settings" not in Path(side).parts, m
     assert str(mine.settings) not in joined
     assert str(theirs.settings) not in joined
-    # A mount SOURCE is a tree: a bind of `<root>/<tenant>` (or of the root) holds `settings/`
-    # without spelling it. For EVERY bind, no settings folder — this tenant's or the other's —
-    # and nothing of the other tenant may sit at, below or above its source.
     for m in mounts:
         source = Path(m["source"])
         for forbidden in (mine.settings, theirs.settings, root / other):

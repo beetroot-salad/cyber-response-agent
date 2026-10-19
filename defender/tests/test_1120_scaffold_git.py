@@ -26,9 +26,6 @@ def _template_in_head(checkout: Path) -> set[str]:
 
 
 def test_scaffold_copies_what_head_commits_not_what_sits_on_disk(tmp_path: Path) -> None:
-    """A tmp checkout whose template holds an untracked `.DS_Store` at its top and an untracked
-    `settings/systems/cmdb/.env`, and a locally edited `settings/lead-zero.yaml`: the new
-    repo commits exactly HEAD's template files plus `.tenant-id`, with HEAD's bytes."""
     checkout = H.tmp_checkout(tmp_path / "checkout")
     template = checkout / _TEMPLATE_REL
     (template / ".DS_Store").write_bytes(b"\0\0finder")
@@ -75,9 +72,6 @@ def test_scaffold_identity_from_an_includeif_gitdir_rule_counts(tmp_path: Path) 
 
 
 def test_scaffold_does_not_borrow_an_enclosing_repos_identity(tmp_path: Path) -> None:
-    """The target sits inside a repository whose own config sets the identity, and the
-    operator has none: scaffold refuses at its preflight, naming the identity, before any
-    write — not by writing, failing the commit and undoing — and leaves the target as found."""
     enclosing = tmp_path / "enclosing"
     enclosing.mkdir()
     H.git(enclosing, "init", "-q", "-b", "main")
@@ -95,9 +89,6 @@ def test_scaffold_does_not_borrow_an_enclosing_repos_identity(tmp_path: Path) ->
 
 def test_scaffold_into_a_relative_target_asks_the_identity_of_that_target(
         tmp_path: Path) -> None:
-    """`scaffold acme newrepo` (relative, from the target's parent) under an `includeIf
-    "gitdir:<parent>/"` identity: exits 0 and commits under it. (A relative `GIT_DIR` read
-    from `cwd=target` named `newrepo/newrepo/.git`, which git refused outright.)"""
     parent = tmp_path / "work"
     included = tmp_path / "work-identity"
     included.write_text("[user]\n\tname = Work\n\temail = work@example.invalid\n",
@@ -113,9 +104,6 @@ def test_scaffold_into_a_relative_target_asks_the_identity_of_that_target(
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root removes a read-only folder's entries")
 def test_a_failed_undo_is_reported_not_raised(tmp_path: Path) -> None:
-    """The commit fails (a pre-commit hook exits 1), and the hook has left a read-only folder
-    holding a file, so the undo cannot empty the target: scaffold exits non-zero with no
-    traceback, saying the undo failed and naming the target."""
     target = S._empty_dir(tmp_path / "acme")
     hooks = S._empty_dir(tmp_path / "hooks")
     (hooks / "pre-commit").write_text(

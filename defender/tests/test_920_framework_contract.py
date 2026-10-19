@@ -14,16 +14,6 @@ from defender.tests._session_store_705 import (  # noqa: E402
 
 
 def test_the_framework_still_merges_adjacent_same_role_messages():
-    """    Two adjacent same-role messages come back as one.
-
-    The store produces exactly this shape: #808's correlation lead is a synthesized
-    `ModelRequest` written straight into MAIN's session, landing next to the tool-return
-    `ModelRequest` before it — and RESPONSES merge the same way, measured here as a second
-    arm, which is broader than the shape that first motivated the seam. If the framework stopped
-    merging, `framework_view` would return
-    the prefix unchanged and the re-seed it guards would become a no-op — harmless. If it
-    started merging something ELSE, the count would drift the other way and a resume would
-    underflow. Either way the seam's assumption is what this measures."""
     requests = [user_request("orient"), *complete_pair(), user_request("correlation summary")]
     responses = [user_request("orient"), text_response("thinking"), *complete_pair()]
 
@@ -39,10 +29,6 @@ def test_the_framework_still_merges_adjacent_same_role_messages():
 
 
 def test_a_prefix_the_framework_does_not_touch_survives_intact():
-    """    An alternating prefix has nothing to merge, so `framework_view` is the identity.
-
-    This is the arm that keeps the merge measurement honest: if the function started dropping
-    or rewriting messages generally, the case above would still pass on the count alone."""
     prefix = [user_request("orient"), *complete_pair()]
 
     view = branch.framework_view(prefix)
@@ -52,12 +38,6 @@ def test_a_prefix_the_framework_does_not_touch_survives_intact():
 
 
 def test_the_private_symbol_is_still_where_the_seam_reaches_for_it():
-    """    The import itself, at COLLECTION time.
-
-    `framework_view` imports inside the function body — deliberately, because hoisting it
-    would put `pydantic_ai._agent_graph` in the import graph of every process that imports the
-    driver. The cost of that deferral is that a rename surfaces during a run; this test is what
-    pays it back."""
     from pydantic_ai._agent_graph import _clean_message_history
 
     assert callable(_clean_message_history)

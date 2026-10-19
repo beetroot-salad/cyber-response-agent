@@ -19,9 +19,6 @@ from defender.tests import _branch_947 as B947
 
 
 def test_model_forwards_kw_only_rather_than_dropping_it_into_config():
-    """`@model(frozen=True, kw_only=True)` must build a keyword-only constructor — four
-    `@dataclass(frozen=True, kw_only=True)` classes are queued for the later PRs of this
-    sequence, and a knob splatted into `ConfigDict` is ignored by pydantic without a word."""
     @model(frozen=True, kw_only=True)
     class K:
         a: int
@@ -47,10 +44,6 @@ def test_model_refuses_a_keyword_that_is_neither_a_knob_nor_a_config_key():
 
 
 def test_model_refuses_a_keyword_the_class_has_no_field_for():
-    """Stdlib `@dataclass` raised `TypeError` on an unknown keyword; pydantic's own default
-    (`extra="ignore"`) drops it in silence, so a typo in a constructor call — or in a
-    `dataclasses.replace`, which forwards its leftover keys to `__init__` — would have handed
-    back a record that quietly kept its old value."""
     @model(frozen=True)
     class R:
         worktree_root: Path
@@ -67,11 +60,6 @@ def test_model_refuses_a_keyword_the_class_has_no_field_for():
 # the branch spec: every mistyped field is a `BranchError`, at construction
 
 
-#: #1255 (D1, P4) COMPAT: the continuation prompt is offered only while `BranchSpec` still
-#: declares it (`_branch_947.declares_retired_prompt`), so every mistyped-field case below
-#: reaches its own refusal on both sides of the change. That the field is GONE is
-#: `test_920_branch_seam`'s demand and `test_branch_spec_field_types_are_read_off_the_class`'s.
-#: The mistyped-prompt case that stood in the table below retired with the field (D1).
 _RETIRED_PROMPT = {B947.RETIRED_PROMPT_FIELD: "go"} if B947.declares_retired_prompt() else {}
 _GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3, **_RETIRED_PROMPT,
              as_of=datetime(2026, 1, 1, tzinfo=UTC))
@@ -84,9 +72,6 @@ _GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3, **_RETIRED_PROMPT,
     ("as_of", "2026-01-01T00:00:00Z"),
 ])
 def test_branch_spec_refuses_a_mistyped_field_as_branch_error(field_name, bad):
-    """`learning/branch/cli.py` builds the spec inside `except BranchError → LauncherRefused`
-    and the driver's store-setup handler names `BranchError` alone; pydantic's own
-    `ValidationError` would escape both as a traceback."""
     from defender.runtime.branch import BranchError, BranchSpec
 
     with pytest.raises(BranchError, match=rf"{field_name} must be an? \w+, got "):
@@ -97,9 +82,6 @@ def test_branch_spec_refuses_a_mistyped_field_as_branch_error(field_name, bad):
 
 
 def test_family_fact_refuses_a_non_string_entity_as_family_error():
-    """YAML 1.1 reads a bare `on`/`yes`/`1` as a bool or an int; `Fact.entities` is strictly
-    `tuple[str, ...]`, so without the loader's own check this surfaced as pydantic's
-    `ValidationError` — a class `run.py --resume` and the branch CLI's handlers do not name."""
     from defender.runtime.branch._family import FamilyError, parse_world
 
     with pytest.raises(FamilyError, match=r"worlds\['b'\]\.facts\[0\]\.entities names True"):
@@ -127,9 +109,6 @@ def test_verb_context_keeps_the_mapping_it_was_handed():
 
 
 def test_grant_pattern_refuses_a_bare_string():
-    """Pydantic's `re.Pattern` schema compiles a `str` even under `strict=True`; a path or
-    shape string handed where a `program_shape(...)` was meant would become a live regex
-    with its metacharacters unescaped."""
     from defender.runtime.permission.grant import Grant, program_shape
     from defender.runtime.permission.policy import AgentPolicy
 
@@ -153,27 +132,18 @@ def test_grant_pattern_refuses_a_bare_string():
 
 
 def test_validate_params_names_every_problem_once_in_one_refusal():
-    """Four categories at once — reserved, unknown, missing, mistyped — and the one refusal
-    names each ONCE. The exclusions are what a one-problem call cannot see: a reserved param
-    is never ALSO "unknown", and a param already refused as unknown is never ALSO mistyped."""
     from defender.runtime.verbs import validate_params, verb
 
     @verb(wrapper_only=("require_closed",))
     def read(ctx, *, host: str, size: int = 10, require_closed: bool = False):  # noqa: ARG001
         return None
 
-    # `require_closed="yes"` — a str where a bool is declared — so that ONLY the exclusion
-    # keeps it out of the mistyped category; a well-typed `True` would pass that scan on its
-    # own and the assertion below could never fail.
     refusal = validate_params(read, {"require_closed": "yes", "bogus": "x", "size": "10"})
     assert refusal is not None
     assert "param(s) ['require_closed'] are set by the first-party tool" in refusal
     assert "unknown param(s) ['bogus']" in refusal  # not ['bogus', 'require_closed']
     assert "missing required param(s) ['host']" in refusal
     assert "'size' takes int, got str" in refusal
-    # The exclusions: the reserved name is not ALSO unknown (asserted above), and a name already
-    # refused as reserved is not ALSO scanned for its type — a second verdict on a param the
-    # model was just told to drop.
     assert "'require_closed' takes" not in refusal
 
 

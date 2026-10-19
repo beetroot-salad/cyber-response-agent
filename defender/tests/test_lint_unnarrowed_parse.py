@@ -146,9 +146,6 @@ def test_two_same_named_siblings_get_distinct_fingerprints(tmp_path):
 
 
 def test_the_validator_construction_is_not_flagged(tmp_path):
-    """The cure, not the disease: the parse is consumed by the check in ONE expression, so the
-    raw value is never bound, never deref'd, never returned. This is the shape the retired
-    run cycle's judge-YAML check used with an injected `Callable`."""
     assert _scan_src(tmp_path, _NARROWED_BY_VALIDATOR) == []
 
 
@@ -276,5 +273,3 @@ def test_a_marker_buried_in_the_body_does_not_suppress(tmp_path):
 
 
 # (d) ScanBlind, and the ratchet
-
-

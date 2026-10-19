@@ -68,7 +68,6 @@ def test_fork_retains_current_alert_bytes_for_the_same_id_and_inherits_verified_
     assert fallback.facts.alert_record.path.read_bytes() == source.facts.alert_record.path.read_bytes()
 
 
-
 def test_missing_alert_fallback_replaces_a_stale_record_through_target_run(tmp_path):
     """O2/O7: legacy missing-alert fallback replaces an existing stale input record."""
     store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path)
@@ -84,12 +83,6 @@ def test_missing_alert_fallback_replaces_a_stale_record_through_target_run(tmp_p
 
 
 def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
-    """O7: canonical payload/claim/summary bytes survive even when they are not UTF-8.
-
-    #1255 P2: every file — the canonical ones and the unknown shapes alike — is planted before
-    the source is built (`source_and_sibling(plant=…)`), so the source's fork snapshot is taken
-    over a folder that already holds them: the canonical bytes are evidence the source held at
-    its branch point, and the unknown shapes were already there beside them."""
     canonical = {
         "gather_raw/l-001/0.json": b'\xff\x00payload\xfe',
         "gather_raw/l-001/12.json": b'opaque 12',
@@ -132,12 +125,6 @@ def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
 
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_recognized_source_payload_refusal_still_fails_fork(tmp_path, kind):
-    """O4/O7: selecting a recognized artifact never turns a refused read into absence.
-
-    #1255 P2: the alias is planted before the source is built (`source_and_sibling(plant=…)`),
-    so it already sits at the payload's name when the source's fork snapshot is taken — the
-    refusal is about a recognized artifact the source held at its branch point, not about a
-    file that appeared after the snapshot and that the snapshot never recorded."""
 
     def plant(source):
         path = source.tables.payloads("l-001", 0).path
@@ -182,16 +169,6 @@ def test_source_store_factory_uses_the_opened_source_record_and_cannot_bypass_it
 
 @pytest.mark.parametrize("fault", [False, True])
 def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup(tmp_path, fault):
-    """O1: real resumed driver uses separate source Run for every selected durable read.
-
-    #1255: re-fixtured onto a DRIVEN source branched at a D1 branch point (a MAIN response that
-    called tools). The hand-planted `legal_source` this used to branch has no fork snapshot (N4)
-    and its branch point was a tool RETURN, which D1 no longer admits. The read set no longer
-    names `investigation.md`: the document is restored from the snapshot's recorded CONTENT
-    (P2), so whether the restore reads the source's file at all is the implementation's.
-
-    Regression over the new branch point (D1): it passes once D1 lands, fork snapshot or not,
-    so it is not evidence for the snapshot (P2)."""
     from defender.run_repository import RunPaths
     from defender.tests import _1255_snapshot as S
 
@@ -221,33 +198,3 @@ def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup
     assert list(state.lead_rows("l-00c"))
     assert "investigation.md" in target_io.names("rooted_write")
     assert "executed_queries.jsonl" in target_io.names("rooted_write")
-
-
-# RETIRED AT #1255 (P2 replaces the per-file cut rules; D1 moves the branch point):
-#
-# - `test_query_seed_replaces_the_snapshot_before_state_inheritance`,
-#   `test_query_seed_failure_preserves_the_original_view_and_empty_live_state`,
-#   `test_open_main_session_accepts_a_zero_byte_query_scaffold` and
-#   `test_selected_empty_evidence_directories_retain_their_presence` pinned LEAD SELECTION —
-#   which leads' rows and folders an arm inherits. The fork snapshot replaces it: the queries
-#   table is cut to its recorded length and write-once evidence is checked by hash
-#   (tests/e2e/test_1255_snapshot_restore.py::test_p2_append_only_and_write_once_files_are_
-#   restored_up_to_the_cut, which also asks that the run state holds the restored rows).
-# - `test_seed_validates_against_itself_and_remains_writable`,
-#   `test_source_investigation_refusal_seeds_empty_only_at_an_empty_prefix` and
-#   `test_fork_seed_keeps_document_global_schema_validation` pinned the FENCE-BOUNDARY seed
-#   (a prefix cut by fence count, then validated). The document is now restored by content
-#   (test_1255_snapshot_restore.py::test_p2_the_investigation_document_is_restored_by_content).
-#   Their fresh-sibling refusal is kept, on a driven source:
-#   tests/e2e/test_1255_snapshot_legality.py::test_an_arm_folder_already_holding_work_is_
-#   refused_before_anything_forks.
-# - `test_open_main_session_refuses_occupied_queries_before_fork` -> the same e2e test
-#   (an occupied and a linked queries table).
-#
-# STILL HAND-PLANTED (kept, reported): the alert, opaque-bytes, payload-refusal and store-
-# factory tests above branch `_branch_947.planted_source` (not the N4 fixture) at a tool RETURN.
-# After #1255 they need the implementer's fixture-only snapshot planting on that source, and a
-# D1 branch point (`LEGACY_BRANCH_CALL`) once the restore's entry point replaces
-# `ForkSnapshot.restore_files`. The opaque-bytes and payload-refusal tests plant their files through
-# `source_and_sibling(plant=…)`, BEFORE `planted_source` builds the source, so whatever
-# snapshots it (at or after `planted_source` returns, on what it returns) sees them.

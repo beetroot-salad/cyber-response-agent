@@ -215,22 +215,6 @@ def test_the_gather_factory_is_handed_the_ceiling_this_dispatch_will_enforce(tmp
 
 
 def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path):
-    """#1031 — the descriptor index the dispatch prompt opens with is READ AT RUN START by
-    `run_investigation` and handed down (`catalog=`), not built inside this frame per dispatch.
-    Building it reads the adapters tree, which since #1031 fails loudly for a tree that cannot
-    be read; a fault of that shape belongs before any model call, not mid-run inside a tool
-    the model is waiting on — and `functools.cache` on the builder does not memoise a raise,
-    so every later dispatch would re-raise it.
-
-    #1256 r4: what run start hands down is the system index it built (`SystemIndex`), and the
-    dispatch RENDERS it at use against the run's current down map (`.render(down)`) — so the
-    stand-in handed here is an index whose rendering is the sentinel, and it records that the
-    dispatch rendered it.
-
-    Pinned from the prompt the gather agent receives: the handed index's rendering lands in it
-    verbatim, and `None` yields NO "Systems of record" block at all — over `_DEFENDER`, the real
-    tree, whose real catalog is non-empty, so a frame that built its own would render one here
-    and fail the second arm."""
     from defender.runtime import tools_gather
 
     run_dir, deps = _seam_deps(tmp_path)
@@ -275,9 +259,6 @@ def test_the_dispatch_renders_the_catalog_it_is_handed_and_builds_none(tmp_path)
 
 
 def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
-    """The other unclaimed outcome (#855 F-12), and the one no argument can reach from the model
-    side: the claim's write FAILED — a full disk, a squatted `gather_raw` component, an id the
-    filesystem will not take."""
 
     from defender.hooks.record_lead import NOT_CLAIMED
     from defender.runtime import tools_gather
@@ -301,9 +282,6 @@ def test_a_claim_that_could_not_be_written_is_a_retry_not_a_dispatch(tmp_path):
 
 
 def test_an_overlong_lead_id_never_reaches_the_claim(tmp_path):
-    """A `lead_id` is spent as a FILENAME COMPONENT — `gather_raw/{id}.lead.json` — and the
-    validator that admits it said nothing about length, so a well-shaped 300-character id reached
-    `os.open` and failed ENAMETOOLONG."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime import tools_gather

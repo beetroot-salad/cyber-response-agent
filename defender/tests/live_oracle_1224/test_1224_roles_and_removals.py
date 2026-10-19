@@ -1,8 +1,3 @@
-"""#1224 — the oracle roles' model knobs, their scoped preflight, and survivors of the staging removal
-(run-record label check, redaction filter, elastic index confinement).
-
-Preflight failures are logged, so they are read off `caplog`.
-"""
 from __future__ import annotations
 
 import importlib
@@ -101,11 +96,6 @@ def _assert_spent_nothing(launch: Any, est: Any, oracle: Any, verifier: Any) -> 
         assert outcome.get("outcome") != "unusable", outcome
     for label in S.WORLDS:
         assert S.read_world_record(launch.ep, label) is None, label
-
-
-# ======================================================================================
-# The two roles (M11) and their preflight (M25=A).
-# ======================================================================================
 
 
 def test_1224_oracle_and_its_verifier_are_their_own_roles_with_their_own_model_knobs(

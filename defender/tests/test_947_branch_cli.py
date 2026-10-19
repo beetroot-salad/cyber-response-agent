@@ -118,30 +118,6 @@ def test_the_launcher_bootstraps_the_package_when_invoked_by_path(tmp_path):
     assert "usage: branch" in proc.stdout
 
 
-# RETIRED AT #947: `test_an_unknown_world_system_is_refused_before_the_episode_is_primed`.
-#
-# It drove `--episode-id ... --world w:elastc`, and #947 deletes both arguments: the episode id
-# is derived from (source run, branch point), and the worlds are authored by the questioner
-# rather than declared on the command line, with `World.touches` retired as an authored field
-# (D2). Its INTENT — a misspelt system cannot become a successful all-passthrough sibling — was
-# carried by #947's overlay-key refusals, which #1224 retired with the overlay itself: a world is
-# now natural-language `facts` that name no system, and the manifest's `served_systems` is the
-# launcher's own derivation from the tenant's gather grant (`cli.served_systems`), overwriting
-# whatever the questioner returned — so no authored system name reaches a sibling at all.
-
-
-# ---------------------------------------------------------------------------------------
-# #1255 (P4, D1): the operator's continuation prompt is gone from the command line.
-#
-# An arm resumes with no user message (the branch point is a response whose tool calls the arm
-# runs), so there is nothing for an operator to say on arrival and nothing in the instrument
-# whose wording could bias the siblings. Before #1255 `--continuation-prompt` was REQUIRED
-# ("part of the measured instrument"); the BranchSpec and manifest halves are
-# `test_920_branch_seam::test_branch_spec_carries_no_continuation_prompt` and
-# `test_1255_snapshot_instrument.py`.
-# ---------------------------------------------------------------------------------------
-
-
 def test_p4_a_branch_request_without_a_continuation_prompt_is_complete():
     """P4: a tenant, a source run and a branch point are the whole request — it parses, and the
     parsed request carries no prompt field. Today the parser refuses it for the missing flag."""
@@ -153,10 +129,6 @@ def test_p4_a_branch_request_without_a_continuation_prompt_is_complete():
 
 
 def test_p4_the_branch_command_line_refuses_a_continuation_prompt(capsys):
-    """P4: `--continuation-prompt` is not an argument any more, so passing one is refused as
-    unrecognised (exit 2) rather than silently carried. Positive control: the same request
-    without it parses (`test_p4_a_branch_request_without_a_continuation_prompt_is_complete`),
-    so the refusal is the flag's."""
     with pytest.raises(SystemExit) as exc:
         cli_mod().parse_branch_args(
             ["--tenant", "acme", "run-x", "59", "--continuation-prompt", "go"])

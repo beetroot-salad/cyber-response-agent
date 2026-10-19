@@ -32,9 +32,6 @@ def _pitfalls_rows(n: int) -> list[dict]:
 
 
 def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Path):
-    """P16: every path this change ADDS — the append-role lock, the drain-role lock and the
-    graveyard — resolves under `state_root`, never under the disposable worktree repo root,
-    because two drains in two worktrees must share one lock and one queue."""
     state = tmp_path / "elsewhere"
     paths = h.make_paths(tmp_path, state_dir=state)
     assert paths.state_root == state
@@ -66,9 +63,6 @@ def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Pat
 
 
 def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path):
-    """P03/F5: `assert_clean_corpus_dir` and `verify_agent_state` treat any untracked path that is
-    not `<corpus>/*.md` as stray, so a new lock or graveyard file placed outside the ignored
-    prefix aborts EVERY subsequent batch on that channel."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
 
@@ -216,14 +210,6 @@ def test_pitfalls_batch_retires_at_the_ceiling(tmp_path: Path, monkeypatch):
     grave = h.graveyard(paths, PITFALLS)
     assert h.pending(paths, PITFALLS) == []
     assert [r.get("attempts") for r in grave] == [3, 3]
-    # #870 FK-11: the ceiling path files `batch-error:<class>` — two writers append to one
-    # `pitfalls.deadletter.jsonl`, and a bare `str(e)` beside `_graveyard_dropped_rows`' named
-    # classes leaves a human triaging that file with three classes and a traceback string.
-    # The PREFIX is what closes the vocabulary, so it is pinned as a prefix; the MESSAGE rides
-    # after the same `:` separator the undeclared class already carries its name after, because
-    # the class alone made a timed-out spawn, a refused scope and an attempted section deletion
-    # — all `LeadAuthorError` — the same four indistinguishable words in the one durable record
-    # this lane leaves.
     reason = grave[0]["deadletter_reason"]
     assert reason.startswith("batch-error:AuthorError"), reason
     assert "pitfalls curation failed" in reason, (

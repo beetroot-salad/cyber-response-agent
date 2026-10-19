@@ -13,9 +13,6 @@ from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
 
 def test_check_folder_ignores_an_exported_git_dir_for_every_git_read(tmp_path: Path) -> None:
-    """`check --folder` over a clean clone exits 0 both with and without `GIT_DIR` exported
-    to an unrelated repository: neither the committed-`.tenant-id` read nor the census's read
-    of the running checkout follows it."""
     knowledge = H.cloned_tenant(tmp_path, tmp_path / "root")
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -27,11 +24,6 @@ def test_check_folder_ignores_an_exported_git_dir_for_every_git_read(tmp_path: P
 
 def test_check_folder_fails_closed_when_its_git_is_not_its_own_repository(
         tmp_path: Path) -> None:
-    """A repo that commits `sub/` (the fixture with its `.tenant-id`), and an empty `sub/.git`
-    directory: git walks past the bogus `.git` to the enclosing repo, whose HEAD does commit
-    the bytes. `check --folder sub` exits 1 naming "cannot verify .tenant-id is committed" —
-    the enclosing repo's answer is not the folder's. The positive control: the same tree
-    without the bogus `.git` is a plain folder, which is exempt and checks clean."""
     outer = tmp_path / "outer"
     sub = outer / "sub"
     shutil.copytree(H.FIXTURE, sub, symlinks=True)
@@ -46,10 +38,6 @@ def test_check_folder_fails_closed_when_its_git_is_not_its_own_repository(
 
 
 def test_check_folder_accepts_a_crlf_checkout_of_an_lf_commit(tmp_path: Path) -> None:
-    """The tenant repo commits `.tenant-id` with an LF; a clone made with
-    `core.autocrlf=true` checks it out with a CRLF (asserted first, so the test cannot pass
-    vacuously). `check --folder` exits 0. The negative control: the same clone with the id
-    edited by hand is still a finding."""
     src = tmp_path / "src"
     shutil.copytree(H.FIXTURE, src, symlinks=True)
     H.write_tenant_id_file(src, H.TID, "id")
@@ -68,9 +56,6 @@ def test_check_folder_accepts_a_crlf_checkout_of_an_lf_commit(tmp_path: Path) ->
 
 
 def test_a_configured_clean_filter_neither_runs_nor_masks_an_edited_id(tmp_path: Path) -> None:
-    """A clone whose own config routes `agent/.tenant-id` through a clean filter that prints
-    the committed id (and touches a marker), with the working id edited by hand to another
-    tenant's: check reports the file as differing, and the filter never ran."""
     knowledge = H.cloned_tenant(tmp_path, tmp_path / "root")
     marker = tmp_path / "filter-ran"
     H.git(knowledge, "config", "filter.mask.clean", f"sh -c 'touch {marker}; printf \"{H.TID}\\n\"'")
@@ -84,9 +69,6 @@ def test_a_configured_clean_filter_neither_runs_nor_masks_an_edited_id(tmp_path:
 
 
 def test_a_replace_object_does_not_make_an_edited_id_look_committed(tmp_path: Path) -> None:
-    """The clone's committed `.tenant-id` blob is replaced (`git replace`) by a blob holding
-    another tenant's id, and the working file is edited to match the replacement: check
-    reports the file as differing from what HEAD commits."""
     knowledge = H.cloned_tenant(tmp_path, tmp_path / "root")
     rel = H.TENANT_ID_FILE.as_posix()
     committed = H.git(knowledge, "rev-parse", f"HEAD:{rel}").stdout.strip()
@@ -97,16 +79,10 @@ def test_a_replace_object_does_not_make_an_edited_id_look_committed(tmp_path: Pa
     H.assert_refused(H.check(tenant_py, None, "--folder", str(knowledge)), str(tenant_id_file))
 
 
-#: The bound the FIFO test hands the committed read: long enough for a git process to start on
-#: a loaded runner, far short of the FIFO's wait (forever). Not a whole number, so the message
-#: naming it is checked however a float is spelled.
 _FIFO_BOUND = 1.5
 
 
 def test_a_fifo_in_git_fails_closed_instead_of_hanging(tmp_path: Path) -> None:
-    """`.git/HEAD` swapped for a FIFO nobody writes: the committed read fails closed naming
-    "cannot verify .tenant-id is committed" BECAUSE git did not answer within the bound it was
-    handed (not a git error), well before ten times that bound."""
     knowledge = H.cloned_tenant(tmp_path, tmp_path / "root")
     head = knowledge / ".git" / "HEAD"
     head.unlink()

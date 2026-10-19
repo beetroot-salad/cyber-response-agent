@@ -1,29 +1,3 @@
-"""#1195 design amendment 3 (2026-10-06) against a real box: the batch's one box, stopped between
-agent runs, keeps nothing a run left running or left in its scratch space, and keeps its link
-ban. Replaces #1178's frozen-box row (`test_1178_frozen_box.py`).
-
-The box is created the way the lead-author drain creates one, by the real `start_box` over the
-real `_drain_box_request` (the worktree read-only, `defender/skills` read-write) on a temp git
-worktree, wrapped in the lanes' handle (`runtime.box.BoxRuns`) and stopped at once
-(`runs.stop()`, as `_run_worktree_batch` does), every call through the real docker the executor
-carries. Each run is the spawn sites' `box_for_run(handle)`, which yields the executor:
-
-- run 1 leaves a writer loop running inside the box, appending to a file under `skills/`, and
-  leaves a marker in `/tmp` and in `/dev/shm`. During run 1 the file grows, the writer is in the
-  box's process table and both markers are there (the positive controls);
-- after run 1's stop the file does not grow;
-- during run 2 (the same container, started again) the file still does not grow, no process
-  carries the writer's command, and neither marker is there; `ln -s` and `ln` in the writable
-  mount are still refused, while an ordinary create there succeeds;
-- `box_for_run` refuses a box someone started outside a run, naming its status: its body never
-  runs, and the box is stopped again;
-- the batch-end `stop_box` leaves no container holding the name, and the file run 1's writer
-  left is what the production committer commits.
-
-Self-skips like the other real-box suites (`requires_real_box`: no daemon, a docker-outside-of-
-Docker tree no bind source resolves under, or the levered runtime not registered). CI's `test`
-job runs it under runsc.
-"""
 from __future__ import annotations
 
 import os

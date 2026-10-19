@@ -1,7 +1,3 @@
-"""Every `_io` writer lands 0644 masked by the process umask, whichever lane wrote it: the unnamed (`O_TMPFILE`) create
-lane, its linked-through-/proc and no-/proc fallbacks, and every other lane. The unnamed lane sets its mode itself from
-the umask read out of `/proc/self/status`, and the reader leaves the umask as it found it.
-"""
 from __future__ import annotations
 
 import errno
@@ -196,13 +192,6 @@ def _create_lands_masked(tmp_path: Path, seen: _Lane, seam: str, lane: str, wher
 @pytest.mark.parametrize("seam", list(SEAMS))
 def test_every_create_lane_lands_0644_masked_by_the_umask_as_replace_does(
         tmp_path, seen, no_unnamed_files_here, seam, lane, where, mask, want):
-    """Under umask M, a `create` through `seam`'s `lane`, at the top of the root or nested in
-    `served/`, lands `0644 & ~M`: a plain, single-named regular file holding the whole body,
-    owned by the writer, and the same mode a `replace` through the same seam lands beside it
-    from the same process under the same umask. That holds on a kernel that leaves the unnamed
-    file unmasked too (`old_kernel`). The lane that ran is the one named: an unnamed or
-    old-kernel case's record IS the unnamed file the real open made, a fallback case's unnamed
-    lane was refused once, and a default case injects nothing at all."""
     _needs_the_unnamed_lane(no_unnamed_files_here, lane)
     _create_lands_masked(tmp_path, seen, seam, lane, where, BODY, mask, want)
 
@@ -212,9 +201,6 @@ def test_every_create_lane_lands_0644_masked_by_the_umask_as_replace_does(
 @pytest.mark.parametrize("seam", list(SEAMS))
 def test_a_small_or_empty_create_lands_masked_too(tmp_path, seen, no_unnamed_files_here, seam,
                                                    lane, body):
-    """The create matrix's claim for a body far below `BODY`'s size: a few bytes, and none.
-    Under umask 077 each lands 0600 on every seam and lane, nested in `served/`, as the replace
-    beside it does."""
     mask, want = TIGHT
     _needs_the_unnamed_lane(no_unnamed_files_here, lane)
     _create_lands_masked(tmp_path, seen, seam, lane, "nested", body, mask, want)
@@ -272,9 +258,6 @@ NO_PROC_SEAMS: dict[str, Callable[..., None]] = {
 @pytest.mark.parametrize("seam", list(NO_PROC_SEAMS))
 def test_a_create_with_no_proc_to_link_through_falls_back_and_lands_masked(
         tmp_path, seen, no_unnamed_files_here, seam, mask, want):
-    """The unnamed lane's other documented way down: a host with no `/proc` to link the
-    unnamed file through. The create gives the unnamed file up (its one link refused), falls
-    back to the named open, and lands `0644 & ~M` beside the replace, like every other case."""
     _needs_the_unnamed_lane(no_unnamed_files_here)
     root = tmp_path / "records"
     root.mkdir()
@@ -294,11 +277,6 @@ STATUS_WITHOUT_UMASK = "Name:\tpython3\nState:\tR (running)\nTgid:\t4242\nPid:\t
 @pytest.mark.parametrize("status", ["absent", "no_umask_line"])
 def test_the_unnamed_lane_stands_down_where_it_cannot_read_the_umask(
         tmp_path, no_unnamed_files_here, status):
-    """Where the process umask cannot be read without changing it (`/proc/self/status` absent,
-    or a kernel before 4.7 whose status has no `Umask:` line), the unnamed lane names nothing
-    and answers False, which sends its caller to the named fallback (the no-`/proc` cases above
-    drive that fallback end to end). It neither guesses a mode nor sets the umask to learn
-    it."""
     _needs_the_unnamed_lane(no_unnamed_files_here)
     folder = tmp_path / "records"
     folder.mkdir()
@@ -320,9 +298,6 @@ def test_the_unnamed_lane_stands_down_where_it_cannot_read_the_umask(
 @pytest.mark.parametrize("mask", [0o077, 0o027, 0o022, 0o002, 0o000],
                          ids=lambda m: f"umask{m:03o}")
 def test_the_umask_reader_reports_what_os_umask_does_and_leaves_it_alone(mask):
-    """The unnamed lane's umask reader answers the umask in force, the value `os.umask`
-    reports, and leaves it in force: read, then reported by `os.umask` setting the same mask
-    back, both are the mask pinned."""
     with umask(mask):
         read = _io._process_umask()
         reported = os.umask(mask)
@@ -376,10 +351,6 @@ OTHER_LANES: dict[str, Callable[[Path, str], None]] = {
 @pytest.mark.parametrize("lane", list(OTHER_LANES))
 def test_every_other_lane_that_makes_a_file_lands_0644_masked_by_the_umask(
         tmp_path, lane, mask, want):
-    """O1's other lanes: replace, append (plain and durable), update, the locked rewrite, the
-    streaming open and the JSONL appender, on every seam that has each, make a new file of
-    `0644 & ~M` under umask M: plain, single-named, owned by the writer, holding the whole
-    body. Under umask 002 this is what tells a lane asking for 0644 from one asking for 0666."""
     root = tmp_path / "records"
     root.mkdir()
     name = "rec.jsonl"
@@ -390,12 +361,3 @@ def test_every_other_lane_that_makes_a_file_lands_0644_masked_by_the_umask(
 
 
 # -- the one mode `_io` sets itself, and the umask it never sets -------------------------------
-
-
-
-
-
-
-
-
-

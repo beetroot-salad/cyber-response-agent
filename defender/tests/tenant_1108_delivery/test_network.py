@@ -1,17 +1,3 @@
-"""Amendment 3, C4 (R8): network git on our own terms. It runs in its own session with a wall
-timeout, and on any exit from the call (a timeout, an exception, an interrupt) the whole
-process group is killed before the error surfaces: a stalled forge fails the fetch or the
-push within the timeout, and no process (git, or its `git-remote-http` helper, which a plain
-`subprocess.run(timeout=)` leaves orphaned in the clone) outlives the call. That holds on
-every route that runs network git: publish's fetch, `start_batch`'s, finish's PR lookup when
-it goes through git, finish's push, deliver's push, and the revert's fetch and push.
-
-The forge is a real smart-HTTP remote (`http_repo`) whose server stalls the first request of
-a service until the test lets it go: silent, or trickling bytes faster than any low-speed
-limit (`Trickle`), so curl's `http.lowSpeedLimit`/`lowSpeedTime` cannot end the wait and only
-the wall timeout and the group kill can. The timeout is `TenantDelivery.open`'s
-`network_timeout` (seconds); without it, the module's `NETWORK_TIMEOUT` applies, finite
-(orchestrator ruling)."""
 from __future__ import annotations
 
 import math
@@ -58,10 +44,6 @@ def _left(tenant, server):
     return quiet(tenant.dir, naming=(server.url,), seconds=1.0)
 
 
-#: Each route that runs network git, the service whose first request is stalled, and
-#: whether the route must reach it. Finish's lookup reaches git only when it goes through
-#: `refs/pull/*` (it may ask the forge's API instead); deliver's push is needed only when the
-#: retained branch is not already on the remote at its tip, which here it is.
 _ROUTES = {
     "publish-fetch": ("git-upload-pack", True),
     "start_batch-fetch": ("git-upload-pack", True),
@@ -123,12 +105,6 @@ def _stalled_route(http_repo, tmp_path, route, then=None, trickle=False):
 @pytest.mark.parametrize("trickle", [False, True], ids=["silent", "trickle"])
 @pytest.mark.parametrize("route", sorted(_ROUTES))
 def test_a_stalled_forge_fails_within_the_timeout_and_leaves_no_process(http_repo, tmp_path, route, trickle):
-    """R8: on each route, the forge accepts the connection and never finishes its answer: it
-    sends nothing, or it trickles bytes for ever above any low-speed limit (so `lowSpeedTime`
-    alone never ends it, and a `git-remote-http` left behind by a kill of git alone keeps
-    receiving). The call is refused within the timeout, and nothing is left running: no
-    git, no `git-remote-http` in the clone or naming the forge's URL. A route that need not
-    reach git (`finish-lookup`, `deliver-push`) and does not completes normally instead."""
     tenant, server = http_repo[0], http_repo[3]
     call, stall, required = _stalled_route(http_repo, tmp_path, route, trickle=trickle)
     started = time.monotonic()
@@ -164,13 +140,6 @@ class _Interrupt(BaseException):
 @pytest.mark.parametrize("raised", [_Fault, _Interrupt], ids=["exception", "interrupt"])
 @pytest.mark.parametrize("route", sorted(_ROUTES))
 def test_an_exception_or_interrupt_during_network_git_leaves_no_process(http_repo, tmp_path, route, raised):
-    """R8: while the route's network git waits on the forge, a signal handler raises an
-    exception, or an interrupt, into the call in the main thread. It leaves the call (an
-    exception may come out as `DeliveryRefused`), and nothing is left running: the process
-    group was killed on the way out. A route that need not reach git and does not completes
-    normally instead. The connection trickles above curl's low-speed limit, and return is
-    bounded too: merely waiting for curl to give up cannot substitute for killing the group.
-    """
     tenant, server = http_repo[0], http_repo[3]
 
     def handler(signum, frame):
@@ -206,10 +175,6 @@ def test_an_exception_or_interrupt_during_network_git_leaves_no_process(http_rep
 
 
 def test_network_git_has_a_finite_wall_timeout_by_default(repo):
-    """R8 / C4 (orchestrator ruling): a production drain, which passes no `network_timeout`,
-    still has a wall timeout: the module exports `NETWORK_TIMEOUT`, a finite number of
-    seconds above zero, and a delivery opened without the argument uses it
-    (`.network_timeout`); one opened with it uses what it was given."""
     mod = target()
     default = mod.NETWORK_TIMEOUT
     assert isinstance(default, (int, float)), default

@@ -45,9 +45,6 @@ pytestmark = pytest.mark.e2e
 
 SALT = "0011223344556677"
 
-#: A token the MAIN agent emits into its own history and that nothing else in the driven
-#: conversation contains. Probed, not assumed: the leak test below reads it back out of
-#: main's own next request as its positive control, and the string it replaced
 MAIN_ONLY_MARKER = "MAIN-ONLY-MARKER-705-a1b2c3"
 
 
@@ -77,9 +74,6 @@ def _read_alert_turns(run_dir: Path, n: int) -> list[Turn]:
 # the fifth seam, and the identity the run mints
 
 def test_run_investigation_takes_a_store_factory_seam(tmp_path):
-    """`run_investigation` takes a store-factory argument as a VALUE, alongside
-    `make_model`, `verbs`, `limits` and `box`: the factory it is handed is the one the run
-    opens, it is called once with `(case_id, run_dir)`, and every message the run rendered"""
     run_dir = materialize(tmp_path, GOLDEN, run_id='seam')
     opened: list = []
     factory = store_factory(tmp_path, sink=opened)
@@ -105,9 +99,6 @@ def test_run_investigation_takes_a_store_factory_seam(tmp_path):
 def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
     tmp_path,
 ):
-    """`run_investigation` mints `case_id` at entry and writes `{case_id, store_path}` into
-    the run's host-only pointer sidecar BESIDE the run dir (`<run_id>.session-pointer.json` in
-    its container, #1235 F2), so a child process holding only a run dir resolves the same"""
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN, run_id='pointer')
     result = drive(run_dir, run_id="pointer",
@@ -130,9 +121,6 @@ def test_run_investigation_mints_a_case_id_and_writes_a_run_dir_pointer(
 # the capability, its seam, and the flag that no longer gates it
 
 def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
-    """Both the main agent and the gather agent receive the store capability through
-    `build_agent_core`'s existing `extra_capabilities` argument, and no new seam is
-    introduced: driving one run leaves main's rows AND the gather leg's rows in the store,"""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='seam-attach')
     opened: list = []
     main = ReplayFn([
@@ -157,9 +145,6 @@ def test_capability_attaches_at_the_existing_extra_capabilities_seam(tmp_path):
 # whose history is store-rendered
 
 def test_main_history_is_store_rendered(tmp_path):
-    """The main agent's history on every request past the first is the store's render,
-    not the list the framework accumulated: the messages the model is handed on turn N are
-    exactly what the reader returns for `(session, role="send")` at that point."""
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN, run_id='store-render')
     opened: list = []
@@ -181,9 +166,6 @@ def test_main_history_is_store_rendered(tmp_path):
 
 
 def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tmp_path):
-    """The gather agent's history is never replaced by a store render and learning-stage
-    agents get neither the fold nor the store, while gather's own messages ARE still
-    recorded as rows: a marker the main agent put into ITS OWN history reaches none of the"""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='gather-render')
     opened: list = []
     main = ReplayFn([
@@ -205,11 +187,6 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
                      sql(store, "SELECT DISTINCT agent_id FROM message WHERE agent_id != 'main'")}
     assert gather_agents, "gather still WRITES rows — this is a render exclusion, not a record one"
 
-    # POSITIVE CONTROL on the observation channel: the marker main emitted is in main's own
-    # next request, read through the SAME flattening every assertion below uses. Without
-    # this the negatives pass whenever the marker simply never existed — which is exactly
-    # how the previous formulation ("investigate" not in seen) passed: that word appears
-    # nowhere in the conversation this test drives, in either arm.
     assert any(MAIN_ONLY_MARKER in seen for seen in main.seen), (
         "the marker never reached main's own history — the channel these negatives watch "
         "cannot see the content they are about, so they would pass vacuously")
@@ -243,9 +220,6 @@ def test_gather_history_is_not_store_rendered_and_learning_stages_get_neither(tm
 
 @pytest.mark.parametrize("mode", ["absent", "corrupt", "locked", "disk-full"])
 def test_store_append_is_fail_closed(tmp_path, mode):
-    """A store that is absent, corrupt, locked, or out of room stops the run instead of
-    letting it continue against a history the store does not know was sent: the model is
-    never asked for another turn after the failed append."""
     run_dir = materialize(tmp_path, GOLDEN, run_id=f"fail-{mode}")
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
@@ -265,9 +239,6 @@ def test_store_append_is_fail_closed(tmp_path, mode):
 
 
 def test_store_append_failure_stops_the_run_through_a_handled_exit(tmp_path):
-    """A store append that fails stops the run through a HANDLED exit — `run_investigation`
-    returns its summary dict carrying `exit_reason == "StoreAppendError"` and the run dir's
-    artifacts are still written — rather than crashing out of `agent.iter()` uncaught."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='handled')
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 6) + [Turn(text="done")])
@@ -287,9 +258,6 @@ def test_store_append_failure_stops_the_run_through_a_handled_exit(tmp_path):
 
 
 def test_a_swallowed_store_error_never_sends_an_unrecorded_list(tmp_path):
-    """No path returns the processor's input unchanged after a store error: there is no
-    catch-all letting a request go out against a list the store never recorded, and the
-    wire log holds no request logged after the failed append."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='no-swallow')
     opened: list = []
     replay = ReplayFn(_read_alert_turns(run_dir, 8) + [Turn(text="done")])
@@ -309,9 +277,6 @@ def test_a_swallowed_store_error_never_sends_an_unrecorded_list(tmp_path):
 
 
 def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
-    """A wire-log write that raises is still swallowed and the run continues, while a store
-    append that raises still stops the run — the guard at `driver.py:143-144` stays exactly
-    where it is, around the log path alone."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='log-guard')
     opened: list = []
 
@@ -368,9 +333,6 @@ def request_limit_run(tmp_path_factory):
 
 def test_run_end_flush_captures_the_terminal_response_on_every_exit(
         tmp_path, monkeypatch, request_limit_run):
-    """A run that ends by `UsageLimitExceeded`, `BudgetKill`, `RunAborted` or an uncaught
-    exception type has its terminal response in the store, captured by a SINGLE run-end
-    flush in a true `finally` rather than by per-arm flushes — observable through a"""
     ss = store_mod()
     exits: dict[str, tuple] = {}
 
@@ -410,13 +372,6 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
     def _exploding_gather(messages, info) -> ModelResponse:
         raise RuntimeError("an exit type nobody enumerated")
 
-    # Same shape as (3)'s RunAborted case: the exception arises DEEP INSIDE a nested
-    # gather dispatch, so MAIN's own response (the `gather` tool call) stays orphaned —
-    # unanswered, no continuation ever built — rather than needing a second call to
-    # MAIN's own model (which `Turn`'s own documented rule rules out for a text-only
-    # first response, and which — even with a tool call — would leave the FIRST round
-    # complete in the store, not orphaned, once round two's own model raises instead of
-    # the store ever seeing an unanswered call).
     with pytest.raises(RuntimeError):
         drive(rd, run_id="flush-uncaught",
               main=ReplayFn([Turn(tool_calls=[("gather", {
@@ -441,9 +396,6 @@ def test_run_end_flush_captures_the_terminal_response_on_every_exit(
 
 
 def test_the_moved_projection_is_built_after_the_run_end_flush(request_limit_run):
-    """For a run terminated mid-pair, the projection `run_stats.py` reads contains the
-    terminal response the run-end flush wrote, because `visualize()` (the page render) is
-    ordered AFTER the flush and the projection reads at role=`analysis`."""
     ss = store_mod()
     rd, store = request_limit_run
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -467,9 +419,6 @@ def test_the_moved_projection_is_built_after_the_run_end_flush(request_limit_run
 
 
 def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
-    """A renderer-minted synthesized row round-trips byte-identically when the round trip
-    is taken AFTER `fill_run_metadata` has run: the row is minted with `run_id`,
-    `conversation_id` and `timestamp` already filled from `RunContext`."""
     monkeypatch.setenv("DEFENDER_COMPACTION", "1")
     rd = materialize(tmp_path, GOLDEN, run_id='minted')
     (rd / "investigation.md").write_text(CLOSED_LOOP_INVLANG, encoding="utf-8")
@@ -490,4 +439,3 @@ def test_minted_row_round_trips_after_fill_run_metadata(tmp_path, monkeypatch):
         revalidated = ModelMessagesTypeAdapter.validate_json(f"[{payload}]")
         assert json.loads(ModelMessagesTypeAdapter.dump_json(revalidated))[0] == body, (
             "the minted row must re-dump byte-identically")
-

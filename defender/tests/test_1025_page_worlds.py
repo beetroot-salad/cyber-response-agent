@@ -95,11 +95,6 @@ def _ungradable_episode(tmp_path: Path) -> E.Episode:
     return ep
 
 
-# ---------------------------------------------------------------------------------------
-# d06 / d07 / d08 / d09 / d10 / d11 — sections, states, verdict line, bucket, chips, links
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_every_step_in_steps_order_and_every_directory_under_runs_has_its_section_the_control_included(
         tmp_path):
     """On the sample the page has `stage-timing` rows for `questioner, preflight, runs, verify,
@@ -214,11 +209,6 @@ def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and
     assert ep.page.read_bytes() == first
 
 
-# ---------------------------------------------------------------------------------------
-# d25 / d30 / d33 / d37 / d38 — guide, nav, leads, anchors, header
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_headings_carry_substituted_counts_the_worlds_guide_uses_each_axis_verbatim_and_the_nav_iterates_the_same_sets_as_the_sections(
         tmp_path):
     """Section headings carry the sample's counts (3 worlds, 13 findings, 5 stages)."""
@@ -271,9 +261,6 @@ def test_1025_per_world_leads_are_referenced_leads_union_gather_summary_stems_wi
 
 
 def test_1025_a_lead_id_that_names_no_single_file_reads_nothing_and_renders_the_guards_sentence(tmp_path):
-    """A world whose `:T resolutions` row names `../../a/report` renders the "does not name a file
-    inside this world" sentence for that id and the sibling's `report.md` text appears nowhere in
-    that world's leads block."""
     ep = E.sample_episode(tmp_path)
     (ep.world(E.CONTROL) / "report.md").write_text(
         T.report_text("malicious", body="SIBLING-REPORT-BODY-NEVER-IN-ANOTHER-WORLD"), encoding="utf-8")
@@ -328,11 +315,6 @@ def test_1025_the_header_names_the_episode_alert_rule_source_run_and_branch_poin
     live = E.sample_episode(tmp_path / "live", family_draw=False, samples=False, judge=False)
     E.write_judge(live.dir, E.sample_grade(family=False))
     assert E.ALERT_RULE in render(live).one("header").text()
-
-
-# ---------------------------------------------------------------------------------------
-# J5 — the frame channel
-# ---------------------------------------------------------------------------------------
 
 
 def _attribute_values(page: E.Page) -> list[str]:
@@ -402,11 +384,6 @@ def test_1025_a_bucket_or_reason_word_used_as_an_attribute_value(tmp_path):
     assert word in world.text()
 
 
-# ---------------------------------------------------------------------------------------
-# J7 — the roster
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_runs(tmp_path):
     """A `judge.yaml` row for a label in neither the manifest nor `runs/` renders on the row-driven
     surfaces ."""
@@ -423,20 +400,12 @@ def test_1025_judge_yaml_worlds_row_names_a_label_absent_from_family_yaml_and_ru
 
 
 def test_1025_a_run_directory_whose_name_is_not_episode_dash_label(tmp_path):
-    """A dir under `runs/` whose name does not decompose into `<episode_id>-<label>` is no roster
-    label, so it gets no section and is not named anywhere on the page (#1105 PR 2, declared
-    change 4/J3."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / "stray_run_dir" / "gather_raw").mkdir(parents=True)
     page = render(ep)
     assert sorted(page.ids_with("world-")) == sorted(f"world-{w}" for w in E.WORLDS), page.ids
     assert "stray_run_dir" not in page.raw
     assert "not declared in the manifest" not in page.text
-
-
-# ---------------------------------------------------------------------------------------
-# J8 — section keying when runs/ and the record drift apart
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_render_when_a_graded_world_has_no_matching_runs_dir(tmp_path):
@@ -450,16 +419,6 @@ def test_1025_render_when_a_graded_world_has_no_matching_runs_dir(tmp_path):
     assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" not in page.hrefs
     assert any(E.GRADED_WORLD in c.text() for c in page.elements(cls="vd-cause"))
     assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
-
-
-# ---------------------------------------------------------------------------------------
-# J16 — small per-world choices
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# settled — world states, leaves, the header frame
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_component(tmp_path):
@@ -560,12 +519,6 @@ def test_1025_markup_in_lead_params_raw_command_and_resolutions(tmp_path):
     assert "onerror=x" not in page.raw.replace("on​error", "")
 
 
-# ---------------------------------------------------------------------------------------
-# The review of PR #1042 — headings count the list they head; the ledger and the document
-# are two slots
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_the_worlds_and_leads_headings_count_exactly_the_sections_under_them(tmp_path):
     """"Worlds (N)" is the number of `world-*` sections rendered and "Leads (M)" the number of
     `leads-*` blocks ."""
@@ -610,5 +563,3 @@ def test_1025_a_missing_or_unreadable_served_ledger_costs_the_leads_block_only_t
     block = render(ep).text_of(f"leads-{E.CONTROL}")
     assert "investigation record unavailable" in block, block
     assert "served ledger" not in block, block
-
-

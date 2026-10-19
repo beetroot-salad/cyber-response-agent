@@ -19,10 +19,6 @@ from defender.tests._state1135 import env_state
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    # The learning STATE root too, so the shared findings queue this pass appends to is
-    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
-    # here rather than in the appender: a production path that picks a different queue when
-    # an env var is unset is a pass whose rows can land where no drain reads.
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -63,20 +59,7 @@ def _graded(tmp_path, **kw):
     return ep, J.judge_record(ep)
 
 
-# ---------------------------------------------------------------------------------------
-# O2 / D6 — the family partition inside the channel's one gate
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
-    """A `direction: family` row with NO `source_refs.yaml` behind it is ADMITTED by
-    `_gate_family` on the ground truth the row itself carries (#1234: its contrast evidence and
-    its two booleans), where `_gate_findings` would hold it `no_ground_truth` forever.
-
-    The HELD-FOREVER state is the observable driven here, not a mocked gate: the row is seeded
-    into the real findings channel and the real drain tick is run, so the assertion is about
-    where the row ends up rather than about which function was called.
-    """
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
     D.seed(paths, channel, [_family_row()])
@@ -90,14 +73,6 @@ def test_921_family_row_is_not_held_as_no_ground_truth(tmp_path):
 
 
 def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings(tmp_path):
-    """One tick's batch carrying family rows AND adversarial/benign rows routes each population
-    by its OWN rule and neither disturbs the other: the family rows take the family partition,
-    the rest are held as a retired direction (#1166 deleted the per-case route they took).
-
-    A mixed batch is the designed shape, not an edge case — the channel gate is called once per
-    tick over every keyed row of the file — and it is the shape the whole tick fails on if the
-    partition is written as a second gate downstream of the first.
-    """
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
     D.seed(paths, channel, [
@@ -119,9 +94,6 @@ def test_921_mixed_batch_routes_family_rows_and_leaves_the_rest_to_gate_findings
 
 
 def test_921_gate_family_authors_a_survived_row(tmp_path):
-    """A family row in the #1234 shape (the judge queues one only for an investigator finding of
-    a measured, unanimous world, A7/A13) is admitted for authoring. (Pre-#1234 this was the
-    row whose `judge_outcome` said `survived`; the family word is retired, A4.)"""
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
     D.seed(paths, channel, [_family_row()])
@@ -134,13 +106,6 @@ def test_921_gate_family_authors_a_survived_row(tmp_path):
 
 
 def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
-    """#1234 rewrite (A4, I10): the family words `caught` / `undecidable` / `survived` are
-    retired, so the partition no longer skips on a word. A pre-#1234 row carrying
-    `judge_outcome` (whatever its word), or a row missing one of the three new fields, is HELD
-    naming why — never authored and never consumed as though it meant what the retired design
-    meant. Positive control in the same tick: a new-shape row beside them IS authored, so the
-    hold cannot pass on a gate that admits nothing.
-    """
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
     missing = _family_row("ep-1/c/0/1")
@@ -164,13 +129,6 @@ def test_921_gate_family_skips_caught_and_undecidable(tmp_path):
 
 
 def test_921_gate_family_is_idempotent_over_a_replayed_batch(tmp_path):
-    """A row whose `finding_id` already appears in an authored lesson's provenance is consumed
-    idempotently and authors NO second lesson.
-
-    The guard keys on `finding_id` EXACTLY — not `run_id`, not row content (P5, executed against
-    both idempotency guards). Positive control: a row with a NEW id in the same replayed batch
-    still authors, so idempotency cannot pass on a gate that has stopped authoring at all.
-    """
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
     drain = J.mod("learning.author.drain")
@@ -189,14 +147,6 @@ def test_921_gate_family_is_idempotent_over_a_replayed_batch(tmp_path):
 
 def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_and_index(
         tmp_path):
-    """Because the idempotency guard keys on `finding_id` ALONE (P5), the id must be BOTH
-    deterministic across a retried enqueue of the same finding AND distinct across every
-    (world, draw, finding index).
-
-    A fresh id per retry defeats the guard and floods the corpus; a reused id across distinct
-    findings suppresses real ones. Both halves are driven: re-enqueue the same replies and
-    observe the same ids, and enqueue two different findings and observe two.
-    """
     ep, record = _graded(tmp_path)
 
     first = J.enqueued_rows(record)
@@ -204,10 +154,6 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     assert ids, "the graded episode enqueued nothing, so there is no id to compare"
     assert len(ids) == len(set(ids)), f"colliding finding ids inside one pass: {ids}"
 
-    # #1234 A8: the bare re-enqueue path (`enqueue.enqueue` over the record) is gone — rows
-    # are built only from the replies a pass just drew. The retry is therefore a second pass
-    # over the same episode and the same replies (a scratch copy, its own queue), and it must
-    # mint the same ids.
     import shutil
 
     retry = tmp_path / "retry"
@@ -232,9 +178,6 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
     ep2 = J.accepted_episode(tmp_path / "two", ledgers={"b": [J.staged_row("b")], "c": []},
                              dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep2 / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
-    # Its OWN queue: the appender writes to the one configured findings queue, and this second
-    # fixture episode reuses the first one's episode id by construction, so sharing a sink here
-    # would count the first episode's rows as this one's rather than test the id minting.
     own_root = tmp_path / "two" / "queue"
     own_root.mkdir(parents=True)
     own = LearningState.open(LoopPaths(repo_root=tmp_path / "two", state_dir=own_root))
@@ -246,14 +189,6 @@ def test_921_finding_id_is_stable_across_a_retry_and_distinct_across_world_draw_
 
 
 def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
-    """#1234 rewrite (A7, A16, A17): the episode words `discard` / `corpus-contradiction` are
-    retired; a world that cannot measure the investigator is said by the world's OWN draws
-    filing an `unreachable` or `incoherent` world finding. Such a world is not measured, and its
-    investigator findings take the `not_measured` lane: NOTHING reaches the defender queue,
-    while the world row keeps its bucket — the record is the artifact. Both words are driven,
-    because they are two members of the vocabulary and a refusal written against one is silent
-    about the other.
-    """
     for word in ("unreachable", "incoherent"):
         ep = J.accepted_episode(tmp_path / word, ledgers={"b": [J.staged_row("b")], "c": []})
         reply = J.reply_doc(findings=[J.finding_doc(),
@@ -274,18 +209,6 @@ def test_921_enqueue_refuses_discard_and_corpus_contradiction(tmp_path):
 
 
 def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path):
-    """A row missing `run_id` or `direction` raises a bare `KeyError` inside `_gate_findings`;
-    `_tick` stuck-records THE ENTIRE KEYED BATCH — every well-formed adversarial and benign row
-    in that tick — and then RE-RAISES (P6, executed).
-
-    So M5 refuses such a row AT THE APPENDER, and the blast radius is one refusal rather than
-    one tick of the corpus drain. A `_gate_family` running after `_gate_findings` has already
-    indexed the row is too late.
-
-    Both halves are driven: the appender refuses and writes nothing, AND the blast radius it
-    prevents is demonstrated on the real channel — the same row seeded past the appender takes
-    the whole batch to `stuck.jsonl` and the tick fails.
-    """
     enqueue = _enqueue()
     ep, record = _graded(tmp_path)
     before = len(J.enqueued_rows(record))
@@ -315,15 +238,6 @@ def test_921_enqueue_refuses_a_row_that_would_key_error_the_shared_gate(tmp_path
 
 
 def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
-    """`lint_unguarded_tree_write` resolves `append_jsonl` BY CALLEE and `learning/judge/**`
-    carries no baseline entry, so M5's stated mechanism is a NEW blocking finding unless it goes
-    through `write_guarded(..., mode="append")` or carries the inline suppression.
-
-    The demand is the guarded path and the LINT RUN is its witness: the real gate is driven over
-    a synthetic tree holding both spellings of the same append, so the assertion is that the
-    gate distinguishes them rather than that a string appears in a file. Then the same gate is
-    run over the real `learning/judge/` and required to find nothing new.
-    """
     from defender.tests._by_path import load_lint_gate
 
     enqueue = _enqueue()          # RED until M5 exists: a lint that scans nothing is clean
@@ -358,24 +272,7 @@ def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
     assert not real, f"the judge's own appender trips the write lint: {sorted(real)}"
 
 
-# ---------------------------------------------------------------------------------------
-# O6 / M5 — the twelve-key row
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path):
-    """One world's rows are built as ONE list and written by ONE `append_jsonl` call — one
-    `open`, one loop, one `queue_lock` hold — not N independent lock/append cycles (P3,
-    executed: `append_findings` does exactly this and the shape is what M5 inherits).
-
-    The appender's acquisition is a blocking `flock` with no deadline, and it contends only with
-    other APPENDERS: the drain passes its own deadline and raises `TimeoutError` (P2, executed
-    against a real second process holding the lock for 3s), so M5 introduces no unbounded wait
-    behind the drain. Interleave two appenders and observe no torn line and no lost row.
-
-    The call-shape guarantee is NOT a durability guarantee: the individual `fh.write()` calls
-    are not `fsync`'d, so this pins what the writer does, not what survives a power cut.
-    """
     enqueue = _enqueue()
     ep, record = _graded(tmp_path)
     before = len(J.enqueued_rows(record))
@@ -405,32 +302,6 @@ def test_921_rows_are_appended_under_the_queue_lock_one_row_per_finding(tmp_path
 
 
 def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tmp_path):
-    """F-11, settled at the phase-F seam: the findings-queue reader TOLERATES A TORN TAIL — an
-    unparseable final line is SKIPPED AND COUNTED on the family record, never raised on.
-
-    THE TORN TAIL IS OBSERVED, NOT IMAGINED. P3's re-execution (`48-p3-p5-executed.md`, P3(d))
-    SIGKILLed a real child process mid-batch-write against the real `append_findings`: most
-    trials landed on a clean line boundary, but one at a 0.05s delay left 182532 bytes of a
-    partially-written row on disk with no closing newline and nothing else corrupted. The
-    "individual `fh.write()` calls are not `fsync`'d" caveat was on record as theoretical; it is
-    now an observed, non-deterministic outcome of an ordinary hard kill. The fragment below is
-    the same shape written as bytes — a real row's JSON truncated mid-record, no newline.
-
-    WHY IT MATTERS HERE AND NOT ONLY IN GENERAL. P6 (executed) established that a bad row in
-    this queue takes the WHOLE keyed batch to `stuck.jsonl` and re-raises out of `_tick`, so one
-    torn row can stall the corpus drain for the two directions that already work — and #921 adds
-    a SECOND writer to that same sink. The posture is not new: it is the one J3 already chose
-    for the ledger reader, skip-and-count with the count on the family record, and it is
-    recorded as consistent with J3 rather than as a fresh policy.
-
-    THE ACCEPTED COST IS STATED: a torn line becomes survivable rather than loud, so a writer
-    bug that produces one is QUIETER than today. The count is what buys that back — a silent
-    skip and a counted skip are the same drain and different evidence — which is why the count
-    is asserted here and not just the absence of a raise.
-
-    The loss is bounded to the torn line: every row this pass says it enqueued is readable on
-    the queue afterwards, and so is the family row that was already there.
-    """
     from defender._io import read_jsonl_rows_report
 
     paths = D.make_paths(tmp_path)
@@ -482,19 +353,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
         "the row already queued stopped draining because of a torn line written after it")
 
 
-# ---------------------------------------------------------------------------------------
-# O7 — what keeps an episode's findings off the defender queue (#1234: the world's own draws)
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifact(tmp_path):
-    """#1234 rewrite (A17, I2/P-c): the family word `discard` is retired, and the family call
-    can never close any world's defender lane. What survives of the pre-#1224 arm: pre-flight's
-    recorded drift reaches the model as host text. What the family call files instead is a
-    family-scope world finding (`incoherent` here), which goes to the questioner — and the
-    worlds' own measured, unanimous draws still queue their defender rows, with the per-world
-    grading on the record.
-    """
     from defender._episode_handle import Episode
     from defender.learning.branch.outcome import write_outcome
 
@@ -522,13 +381,6 @@ def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifac
 
 
 def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
-    """#1234 rewrite (A16, F-14): the episode word `corpus-contradiction` is retired. A defect in
-    the experiment rather than in the analyst is now said by the world's own draws — here a
-    deployment gap flagged `kept_facts_from_investigator` in every draw: the world is not
-    measured, the reason names the gap, the gap goes to the user record, and no defender row is
-    authored from the world. Positive control: the same episode with an unflagged reply is
-    graded normally and enqueues.
-    """
     gap = {"what": "elastic esql", "how": "the served system does not hold the field",
            "evidence": ["worlds/b/report.md"], "kept_facts_from_investigator": True}
     kept = J.as_reply_text(J.reply_doc(gaps=[gap]))
@@ -555,12 +407,6 @@ def test_921_world_contradicted_by_the_corpus_is_corpus_contradiction(tmp_path):
 
 
 def test_921_discard_needs_a_majority_of_draws(tmp_path):
-    """#1234 rewrite (A7): the majority rule is replaced by UNANIMITY over a world's completed
-    draws. One draw of three filing an `incoherent` world finding makes the draws disagree: the
-    world is withheld (`draws_disagree`), neither measured nor not-measured, and none of its
-    investigator findings reaches the defender queue (lane `draws_disagree`). Positive control:
-    all three draws filing it make the world not measured (lane `not_measured`).
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []},
                             labels=("a", "b"))
     incoherent = J.as_reply_text(J.reply_doc(findings=[
@@ -588,10 +434,3 @@ def test_921_discard_needs_a_majority_of_draws(tmp_path):
     assert row["measured"] is False, (
         "positive control: three draws agreeing on `incoherent` did not take the world out of "
         "measurement")
-
-
-# ---------------------------------------------------------------------------------------
-# N6 and J12 — what this appender does NOT touch
-# ---------------------------------------------------------------------------------------
-
-

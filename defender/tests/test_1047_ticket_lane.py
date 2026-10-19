@@ -11,9 +11,6 @@ from defender.tests import _spec1047 as S
 
 
 def test_an_aborted_run_leaves_its_ticket_open_with_the_escalation(tmp_path):
-    """A run whose exit class is `aborted` leaves its ticket open and records the breaker's
-    escalation — the environment appears unreachable or unconfigured, escalate with the
-    visibility gap named — rather than transitioning the ticket to any resolution."""
     run_dir = S.closed_run_dir(tmp_path, report=False)
     opened = S.open_ticket(run_dir)
     fake = S.record_ticket(run_dir, truncated_by="aborted", closed_before_cut=False)
@@ -70,9 +67,6 @@ def test_a_run_that_was_not_cut_short_still_records_off_its_report(tmp_path):
 
 
 def test_an_exit_class_the_table_does_not_name_takes_the_report_driven_fallback(tmp_path):
-    """An exit value the per-class table does not name — `dead-end`, or any string a future writer
-    adds — takes the report-driven fallback rather than silently leaving the ticket in whichever
-    state the last arm happened to reach."""
     assert "dead-end" in S.vocabulary(), (
         "the control failed: `dead-end` left the vocabulary, so this no longer tests a real "
         "member with no arm in the table")
@@ -87,9 +81,6 @@ def test_an_exit_class_the_table_does_not_name_takes_the_report_driven_fallback(
 
 def test_a_run_with_no_exit_class_and_no_usable_report_records_that_and_proposes_nothing(
         tmp_path):
-    """A run with no exit class and no usable report.md still records — the fixed "no disposition
-    could be recorded" sentence (#767 §7 R10), with no proposal in it — and the ticket stays
-    open for a person."""
     for name, write in (
         ("absent", None),
         ("no-frontmatter", "just some prose, no headline anywhere\n"),
@@ -113,9 +104,6 @@ def test_a_run_with_no_exit_class_and_no_usable_report_records_that_and_proposes
 
 
 def test_a_ticket_for_a_run_that_closed_and_was_then_cut_short(tmp_path):
-    """A run whose model had ALREADY CLOSED when the exit class was stamped records its own
-    verdict, and raises no escalation note — the no-verdict arms defer to a genuine model close
-    (fork F-A, reading B, human, §7 round 2)."""
     run_dir = S.closed_run_dir(tmp_path, disposition="malicious")
     decided = S.record_ticket(run_dir, truncated_by="aborted", closed_before_cut=True)
     assert len(decided.records) == 1, (
@@ -136,9 +124,6 @@ def test_a_ticket_for_a_run_that_closed_and_was_then_cut_short(tmp_path):
 
 def test_a_forced_close_set_exit_whose_own_forced_close_failed_leaves_the_ticket_open_with_the_escalation(
         tmp_path):
-    """A `request-limit` or `retry-exhausted` run whose own forced close FAILED — so no `report.md`
-    exists — takes the same escalation shape as the aborted arm, rather than recording
-    `unresolved` off a payload that does not exist."""
     for exit_class in S.FORCED_CLOSE_SET:
         run_dir = S.closed_run_dir(tmp_path / exit_class, report=False)
         fake = S.record_ticket(run_dir, truncated_by=exit_class)
@@ -183,10 +168,6 @@ def test_a_failed_note_call_never_breaks_the_run_and_is_recorded_in_the_receipt(
 
 def test_no_planted_file_under_the_run_dir_changes_which_comment_record_case_ticket_makes_for_any_exit_class(
         tmp_path):
-    """No file planted anywhere under the run dir changes which comment the ticket lane makes, for
-    any exit class — under F3's reading the lane takes no run-dir input to DECIDE at all (the
-    report's own text is the record's content, which is why both run dirs here carry the same
-    one)."""
     for exit_class in (*S.vocabulary(), None):
         clean = S.closed_run_dir(tmp_path / f"clean-{exit_class}", disposition="unresolved")
         salted = S.closed_run_dir(tmp_path / f"salted-{exit_class}", disposition="unresolved")
@@ -201,9 +182,6 @@ def test_no_planted_file_under_the_run_dir_changes_which_comment_record_case_tic
 
 def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_lane_for_any_exit_class(
         tmp_path):
-    """A forged case pointer is never consulted for any exit class: F3 reading A was chosen
-    precisely to avoid recovering the case from the pointer, and reading B was rejected as the
-    box-writable input the design's own negative universal forbids."""
     in_folder_name = "session_store_pointer.json"
 
     def addresses(run_dir: Path) -> dict[str, Path]:
@@ -241,9 +219,6 @@ def test_a_forged_session_store_pointer_file_is_never_consulted_by_the_ticket_la
 
 def test_a_forged_ticket_write_receipt_claiming_prior_closure_does_not_suppress_the_real_record_or_note_call(
         tmp_path):
-    """A ticket receipt forged to claim a prior closure suppresses nothing: the genuine record/note
-    call is issued regardless, because nothing in this design reads the receipt back as an
-    input."""
     for exit_class, expect in (("request-limit", "records"), ("aborted", "notes")):
         run_dir = S.closed_run_dir(tmp_path / exit_class, disposition="unresolved",
                                    report=expect == "records")

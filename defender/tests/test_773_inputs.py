@@ -16,11 +16,6 @@ def _committing(**kw):
     return S.FakeCurator(writes={"l1.md": S.lesson("f1")}, **kw)
 
 
-# ---------------------------------------------------------------------------
-# O5 / S2 — no model-emitted string is used as a path
-# ---------------------------------------------------------------------------
-
-
 def test_path_like_strings_planted_in_author_result_never_reach_the_check_or_the_commit_773(
     tmp_path,
 ):
@@ -60,9 +55,6 @@ def test_author_result_fields_filled_with_path_like_strings_773(tmp_path):
             extra_result={"committed_paths": [PATHY]},
         ),
     )
-    # The partition validator refuses the foreign id, so this tick faults — and the point
-    # stands on the surface that matters: no path-shaped field reached the filesystem, and
-    # the only path the check would ever have opened is the one `git status` reported.
     assert sc.run() == 2
     assert sc.head_files() == []
     assert not (sc.corpus / "attacker-chosen.md").exists()
@@ -145,11 +137,6 @@ def test_author_result_retired_observability_gaps_with_row_shaped_content_is_ref
     assert control.category_of("f1") == "consumed_committed"
 
 
-# ---------------------------------------------------------------------------
-# The queue row — trusted by provenance, not by shape
-# ---------------------------------------------------------------------------
-
-
 def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
     """A row whose batch id is not this tick's is not among this batch's ids, so it mints no
     pair and is irrelevant to this tick's verdict work — consistent with N1's scoping."""
@@ -160,11 +147,6 @@ def test_queue_row_batch_id_does_not_match_this_ticks_batch_773(tmp_path):
     )
     assert sc.run() == 0
     assert sc.head_files() == [LESSON]
-
-
-# ---------------------------------------------------------------------------
-# The bytes — frontmatter, citations, and what a malformed lesson vouches for
-# ---------------------------------------------------------------------------
 
 
 def test_changed_lesson_file_is_zero_bytes_773(tmp_path):
@@ -249,9 +231,6 @@ def test_a_changed_file_citing_only_findings_from_an_earlier_batch_773(tmp_path)
 
 
 def test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773(tmp_path):
-    """An id belonging to the SIBLING channel's batch is not in this channel's batch ids, so
-    it mints no pair — and if it is the file's only citation the file is unvouched and the
-    tick raises, by the same intersection rule as the cross-batch case."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("mine", run_id="mine")],
@@ -260,11 +239,6 @@ def test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773(tm
     )
     assert sc.run() == 2
     assert sc.head_files() == []
-
-
-# ---------------------------------------------------------------------------
-# §7 FK-4 / FK-5 — what the tree looks like when the tick starts and ends
-# ---------------------------------------------------------------------------
 
 
 def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):

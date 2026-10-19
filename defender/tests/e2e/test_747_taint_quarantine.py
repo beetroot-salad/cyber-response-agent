@@ -95,9 +95,6 @@ def test_the_taint_still_propagates_and_nothing_is_pushed(tmp_path):
 
     assert isinstance(taint, RunTainted)
     assert branch.finished == [], "a tainted batch reached the commit+push+PR step"
-    # `startswith`, not `in`: the recorder logs `finish_batch:<batch_id>`, so a bare
-    # `"finish_batch" not in branch.events` is a list-membership test against a string that is
-    # never an element — it holds whether or not the supply-chain step ran.
     assert not any(e.startswith("finish_batch") for e in branch.events), \
         "the supply-chain step ran on a tainted tree"
     assert "cleanup" in branch.events, "the tree must still be destroyed (M5)"

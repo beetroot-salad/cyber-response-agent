@@ -25,11 +25,6 @@ MALFORMED = "bucket: [unterminated"
 LQ = "lead-quality"
 
 
-# --------------------------------------------------------------------------------------
-# Scenario data: replies and worlds, a few lines each.
-# --------------------------------------------------------------------------------------
-
-
 def _inv(label: str, bucket: str = LQ) -> dict:
     """An investigator finding whose contrast pair resolves for world `label`: a conduct pointer
     in the focus run (its report) and one in a reference run (the control's)."""
@@ -93,11 +88,6 @@ def _plain(role: str) -> dict:
     return {"role": role, "calls": [S.CallRow()]}
 
 
-# --------------------------------------------------------------------------------------
-# Reading what the pass left.
-# --------------------------------------------------------------------------------------
-
-
 def _ids(rows: list[dict]) -> set[Any]:
     return {r.get("finding_id") for r in rows}
 
@@ -122,25 +112,7 @@ def _draw_buckets(row: dict) -> Counter:
     return Counter(d.get(BUCKET) for d in row.get(ROW_DRAWS) or [] if isinstance(d, dict))
 
 
-
-
-
-
-# --------------------------------------------------------------------------------------
-# The tests — one per demand, named by its `discharged_by`.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_world_bucket_counts_only_when_every_completed_draw_agrees(tmp_path):
-    """With three completed draws answering analyze-discipline, analyze-discipline and
-    analyze-discipline, the world row's bucket is analyze-discipline; with analyze-discipline,
-    analyze-discipline and none, the row's bucket is None, every draw's bucket is still recorded,
-    the row says the draws disagree and the world is withheld (A7).
-
-    Both worlds are shown their facts (a discipline bucket is refused for a world that never
-    was, A5), and each draw lists one resolving investigator finding, so withholding is seen
-    on the defender queue: the unanimous world's findings queue from every draw, the split
-    world's from none."""
     ad = "analyze-discipline"
     built = S.family(tmp_path, S.triad(d=_shown("d", "D")))
     agree = S.world_reply(ad, ["idp"], investigator=[_inv("b", ad)])
@@ -164,12 +136,6 @@ def test_1234_world_bucket_counts_only_when_every_completed_draw_agrees(tmp_path
 
 
 def test_1234_world_whose_draws_disagree_queues_no_defender_row(tmp_path):
-    """With two completed draws answering lead-quality and none, the world is withheld: it
-    queues no defender row and its row says the draws disagree (A7); its design world findings
-    from either draw still reach the questioner queue under their own finding ids (A13).
-
-    The design finding is `mislabelled` (it does not change a draw's outcome); world c, judged
-    in the same pass with two agreeing draws, queues its investigator findings from both."""
     built = S.family(tmp_path)
     judge = S.judge({
         **_draws("b", _lq("b", _design("b")),
@@ -187,14 +153,6 @@ def test_1234_world_whose_draws_disagree_queues_no_defender_row(tmp_path):
 
 
 def test_1234_not_measured_needs_unanimity_and_the_doubt_mark_needs_any_draw(tmp_path):
-    """A world in which one of three completed draws files unreachable and the other two do not
-    has draws disagreeing on the outcome and is withheld (A7), never recorded not measured; one
-    in which all three file unreachable is recorded not measured; a world in which any one draw
-    files mislabelled queues its rows with world_label_doubted true (A7, A13).
-
-    World b is the one-in-three unreachable world, c the three-in-three, d the one-in-three
-    mislabelled; e (no mislabelled draw) queues its rows unmarked, so the mark is seen to
-    discriminate."""
     built = S.family(tmp_path, S.triad(d=_plain("D"), e=_plain("E")))
     judge = S.judge({
         **_draws("b", _lq("b"), _lq("b"), _lq("b", _design("b", "unreachable"))),
@@ -222,16 +180,7 @@ def test_1234_not_measured_needs_unanimity_and_the_doubt_mark_needs_any_draw(tmp
     assert all(r.get(S.DOUBT) is False for r in plain), plain
 
 
-
-
 def test_1234_unreachable_world_is_not_measured_and_queues_no_defender_row(tmp_path):
-    """A world whose every completed draw files an unreachable finding is recorded not measured
-    with that reason (A7), and none of its investigator findings is queued; its design world
-    findings still reach the questioner queue (I4).
-
-    Each of b's three draws lists a resolving investigator finding (index 0) beside the design
-    unreachable finding (index 1); world c, measured in the same pass, queues its investigator
-    findings."""
     built = S.family(tmp_path)
     judge = S.judge({**_draws("b", *[_lq("b", _design("b", "unreachable"))] * 3),
                      **_draws("c", *[_lq("c")] * 3)})
@@ -247,16 +196,7 @@ def test_1234_unreachable_world_is_not_measured_and_queues_no_defender_row(tmp_p
     assert _defender_ids("c") == _every_draw(built, "c", 0)
 
 
-
-
 def test_1234_world_whose_facts_a_gap_kept_back_is_not_measured(tmp_path):
-    """A world whose every completed draw names a deployment gap as the reason its facts did not
-    reach the investigator is recorded not measured with that reason (A7), and none of its
-    investigator findings is queued.
-
-    F-14 (78-gate-resolutions): the gap carries kept_facts_from_investigator true in every one
-    of b's draws, citing b's refused call. World c's draws name its own refused call with the
-    flag false in every draw: c stays measured and queues its investigator findings."""
     built = S.family(tmp_path, S.triad(
         b={"calls": _b_calls(S.refused_call(params={"entity": "b-blocked"}))},
         c={"calls": _c_calls(S.refused_call(params={"entity": "c-blocked"}))}))
@@ -276,11 +216,6 @@ def test_1234_world_whose_facts_a_gap_kept_back_is_not_measured(tmp_path):
 
 
 def test_1234_world_bucketed_none_queues_none_of_its_investigator_findings(tmp_path):
-    """A world whose every completed draw buckets none queues none of the investigator findings
-    its replies list (today they are queued, E-02/C14).
-
-    Each of b's three `none` draws lists a resolving investigator finding; world c, bucketed
-    lead-quality in the same pass, queues the same kind of finding from every draw."""
     built = S.family(tmp_path)
     judge = S.judge({**_draws("b", *[_none("b")] * 3), **_draws("c", *[_lq("c")] * 3)})
 
@@ -293,25 +228,8 @@ def test_1234_world_bucketed_none_queues_none_of_its_investigator_findings(tmp_p
     assert _defender_ids("c") == _every_draw(built, "c", 0)
 
 
-
-
-
-
-
-
-
-
-
-
 @pytest.mark.parametrize("knob", ["0", "-1"])
 def test_1234_judge_draws_zero_or_negative(tmp_path, monkeypatch, knob):
-    """A non-positive JUDGE_DRAWS is refused loudly before any world is graded (principle 2);
-    no world is silently recorded as graded with zero draws.
-
-    The knob is set in the environment and the pass passes no draw count. The refusal is one of
-    the design's refusal classes and names the knob; no model call is made, no draw file is
-    written, no world row records completed draws and nothing is queued. Control: the same
-    episode, with the knob at one, grades."""
     built = S.family(tmp_path)
     monkeypatch.setenv(S.DRAWS_KNOB, knob)
     judge = S.judge()
@@ -336,18 +254,7 @@ def test_1234_judge_draws_zero_or_negative(tmp_path, monkeypatch, knob):
     assert S.row(built, "b").get(COMPLETED) == 1
 
 
-
-
 def test_1234_am_world_with_completed_draws_that_queues_nothing(tmp_path, monkeypatch):
-    """A world whose draws complete and route nothing (not measured, bucket none, every finding
-    dropped, or withheld for disagreeing draws) flips to `queued` with nothing appended and is
-    final: a bare re-run skips it (I8), and a later JUDGE_DRAWS change never revisits it (I-8);
-    the family row commits the same way (NA01).
-
-    b is not measured (its unreachable finding is serving: the user record, no queue), c
-    buckets none, d's only finding cites nothing that resolves, e's draws disagree; the family
-    call files nothing. A bare re-run, then a pass under a changed knob, make no model call
-    and leave both queues byte-identical."""
     built = S.family(tmp_path, S.triad(d=_plain("D"), e=_plain("E")))
     serving = S.wf("unreachable", evidence=[S.conduct("b")])
     lost = S.inv(LQ, contrast=[S.conduct("d", "missing.md"), S.conduct("a", "missing.md")])
@@ -383,18 +290,7 @@ def test_1234_am_world_with_completed_draws_that_queues_nothing(tmp_path, monkey
     assert S.queue_bytes() == queues
 
 
-
-
-
-
 def test_1234_world_with_some_malformed_draws_and_some_completed(tmp_path):
-    """A world with some completed draws and some malformed is judged on the completed draws:
-    outcome and systems count only when every completed draw agrees (A7). A bare re-run does not
-    top up.
-
-    b's draw 0 completes (lead-quality on idp); every ask of draws 1 and 2 is malformed. c's
-    draws 0 and 1 complete (lead-quality, then none) and draw 2 is malformed. The re-run asks
-    neither world again."""
     built = S.family(tmp_path)
     judge = S.judge({("b", 0): _lq("b"), ("b", 1): MALFORMED, ("b", 2): MALFORMED,
                      ("c", 0): _lq("c"), ("c", 1): _none("c"), ("c", 2): MALFORMED})
@@ -417,5 +313,3 @@ def test_1234_world_with_some_malformed_draws_and_some_completed(tmp_path):
     assert not rerun.called("c"), rerun.agent_ids
     assert S.row(built, "b").get(COMPLETED) == 1
     assert S.row(built, "c").get(COMPLETED) == 2
-
-

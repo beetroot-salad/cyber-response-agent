@@ -126,10 +126,6 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
     return text, start
 
 
-# =============================================================================================
-# O4 / C9 / D4 — each refusal lands before the box, naming the path.
-# =============================================================================================
-
 def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(world, capsys):
     T.place_tenant(world["root"], "acme")
     world["runs_base"]("ghost")
@@ -195,9 +191,6 @@ def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, ca
     assert "elastic.no-such-template" in text, text
 
 
-#: A table whose correlation lead holds `elastic.query` — a legal narrowing (one system, one
-#: query verb, a pair gather holds) that DISAGREES with the shipped template, which binds
-#: `elastic.alerts`.
 TABLE_LEAD_ON_QUERY = """\
 dispositions:
   cmdb:
@@ -222,10 +215,6 @@ def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_befo
     assert T.SHIPPED_CORRELATION_TEMPLATE in text, text
     assert "elastic.query" in text, text
 
-
-# =============================================================================================
-# O1 / O2 / O3 — one process, tenant A then tenant B: each run carries only its own tenant.
-# =============================================================================================
 
 class _RegistryRecorder:
     """`_drive_investigation`'s `registry_cls` seam:"""
@@ -292,4 +281,3 @@ def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tena
             assert T.reaches(payload, own_settings), f"{seam} was not handed {own_settings}"
             assert not T.reaches(payload, root / other), f"{seam} was handed {other}'s folder"
             assert not T.reaches(payload, T.FIXTURE_SETTINGS), f"{seam} got the checkout's"
-

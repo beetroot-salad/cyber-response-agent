@@ -96,9 +96,6 @@ def test_a_curator_read_carries_its_own_role_not_a_two_way_guess(tmp_path):
 
 
 def test_a_push_row_names_the_push_and_the_main_role(tmp_path):
-    """O5: the write-return push (`_tool_append_block` → `_frontier_recall`) records
-    `kind == "push"`, `role == "main"` — distinguishable from the read row on the same file
-    by `kind`, which is the difference the issue asked for."""
     from defender.runtime.tools import _tool_append_block
 
     deps, run, dfn = _main_deps(tmp_path)
@@ -240,9 +237,6 @@ def test_trace_names_the_evidence_class_behind_each_case(tmp_path, capsys):
 
 
 def test_evidence_precedence_is_read_over_push_over_indirect_over_unknown(tmp_path, capsys):
-    """O7: a case with mixed rows reports the strongest evidence it has, and only QUALIFYING
-    rows count — a MAIN read from before the lesson's `created_at` is outside the window and
-    cannot lift a push-only case to `read`."""
     _mk_lesson(tmp_path / "lessons", "L", created_at="2026-06-04")
     runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)
     legacy, gather = _row("L"), _row("L", kind="read", role="gather")
@@ -262,9 +256,6 @@ def test_evidence_precedence_is_read_over_push_over_indirect_over_unknown(tmp_pa
 
 
 def test_the_index_counts_cases_with_a_main_read_in_a_fourth_column(tmp_path, capsys):
-    """O7: `--all` no longer folds every class into one count — the fourth column is the
-    number of cases with a MAIN read, so a lesson that only ever reached models through
-    pushes reads `N\\t0`. Legacy rows are `unknown`, not assumed reads."""
     _mk_lesson(tmp_path / "lessons", "L", created_at="2026-06-04")
     _mk_lesson(tmp_path / "lessons", "M", created_at="2026-06-04")
     runs = _tenant_runs()  # #1105 PR 2 (J8, declared change 10)

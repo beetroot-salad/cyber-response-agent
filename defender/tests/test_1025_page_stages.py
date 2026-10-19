@@ -65,16 +65,8 @@ def _tx_order(page: E.Page, stage: str) -> list[str]:
     return [n.id for n in page.section(stage).descendants() if n.id and n.id.startswith("tx-")]
 
 
-# ---------------------------------------------------------------------------------------
-# d26 / d27 / d28 / d29
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_the_stage_table_has_one_row_per_step_runs_expanded_per_run_dir_wall_only_rows_and_a_total_that_says_what_it_excludes(
         tmp_path):
-    """Rows in `STEPS` order; `runs` expanded into `a`, `no_remote_session`,
-    `prior_fake_key_precedent` sub-rows each with its result-event cost ($0.4000 / $0.2500 /
-    $0.3500)."""
     page = render(E.sample_episode(tmp_path))
     timing = page.text_of("stage-timing")
     assert _ordered(timing, *ST.EXPECTED_STEPS), timing
@@ -111,12 +103,6 @@ def test_1025_without_timing_json_the_axis_is_model_time_with_a_labelled_lower_b
     E.write_timing(ep.dir, E.every_step()[:3])
     stages = render(ep).text_of("sec-stages")
     assert stages.count("1m00s") >= 3, stages
-    # ">=", matching the tolerant pattern the "1m00s" check just above already uses: each
-    # step's own wall/cost text is rendered twice by design — once in the compact `stage-timing`
-    # overview, once more inside that step's own id-anchored block (`stage-questioner` etc.),
-    # which is what lets `page.text_of("stage-questioner")` carry its own cost line independently
-    # (asserted elsewhere in this file). A strict "== 3" only holds if that duplication did not
-    # exist.
     assert stages.count("not on the record") >= len(ST.EXPECTED_STEPS) - 3, stages
 
 
@@ -181,17 +167,8 @@ def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_fi
         stem = name[: -len("_framed_trace.jsonl")] + "_trace"
         block = launched.text_of(f"tx-{stem}")
         row = json.loads((launch.episode_dir / "wire_logs" / name).read_text(encoding="utf-8"))
-        # `block` is `.text()`'s whitespace-COLLAPSED view (every run of whitespace, a real
-        # judge prompt's own paragraph breaks included, becomes one space); the raw prompt is
-        # collapsed the same way before the containment check, or a genuine `\n\n` between
-        # sentences — present in the page's raw HTML verbatim — reads as a false mismatch.
         assert " ".join(row["prompt"][:60].split()) in block, (stem, block[:200])
         assert " ".join((row["reply"] or "")[:40].split()) in block, (stem, block[:200])
-
-
-# ---------------------------------------------------------------------------------------
-# settled — clocks
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_what_the_header_wall_covers(tmp_path):
@@ -219,11 +196,6 @@ def test_1025_the_runs_row_has_two_clocks(tmp_path):
     assert "result event" in runs.lower(), runs
     assert "18m00s" not in runs, runs
     assert "19m00s" not in runs, runs
-
-
-# ---------------------------------------------------------------------------------------
-# settled — trace shapes
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_a_trace_with_a_request_row_and_no_response_row(tmp_path):
@@ -257,9 +229,6 @@ def test_1025_trace_present_but_framed_absent(tmp_path):
 
 
 def test_1025_a_framed_trace_row_carries_a_failure_field_instead_of_a_reply(tmp_path):
-    """The block shows the framed prompt and the `failure` text (escaped) in place of a reply;
-    no cost line for the call.
-    """
     ep = E.sample_episode(tmp_path)
     E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:0", response=False)
     E.write_framed(ep.dir, f"judge:{E.GRADED_WORLD}:0", prompt="FRAMED-P", reply=None,
@@ -286,11 +255,6 @@ def test_1025_trace_prompt_or_reply_contains_a_literal_pre_or_script_close_tag(t
     assert page.raw.count("<script") == page.raw.count("</script>")
     assert page.raw.count("<pre") == page.raw.count("</pre>")
     assert "alert(1)</script>" not in page.raw
-
-
-# ---------------------------------------------------------------------------------------
-# J13 — questioner request rows, partial cost, controls per stream
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_a_trace_whose_last_line_is_torn(tmp_path):
@@ -358,11 +322,6 @@ def test_1025_a_symlinked_tool_trace_in_a_run_dir(tmp_path):
     assert f"${S.run_cost[E.CONTROL]:.4f}" in runs
 
 
-# ---------------------------------------------------------------------------------------
-# The review of PR #1042 — a priced row is finite and non-negative; one digit alphabet
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp_path):
     """A wire-log `usage` block is box-writable."""
     ep = E.sample_episode(tmp_path)
@@ -381,5 +340,3 @@ def test_1025_a_usage_block_with_a_negative_or_overflowing_count_is_unpriced(tmp
     assert "$nan" not in stages, stages
     assert "$-" not in page.text_of("sec-verdict")
     assert E.SAMPLE.total_cost in page.text_of("sec-verdict"), "positive control: the sample total"
-
-

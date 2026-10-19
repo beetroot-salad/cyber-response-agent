@@ -18,11 +18,6 @@ DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 PASSTHROUGH_ENV = "DEFENDER_GATHER_PASSTHROUGH_MAX_BYTES"
 
 
-# ======================================================================================
-# Goldens and the one normalization
-# ======================================================================================
-
-
 def _golden(demand: str) -> Mapping[str, Any]:
     data = S.golden(GOLDEN)
     assert demand in data, f"goldens/{GOLDEN}.json holds no entry for {demand}"
@@ -75,11 +70,6 @@ def _outcome_of(fn: Callable[..., Any], *args: Any, view: Callable[[Any], Any] =
     return {"returns": view(value)}
 
 
-# ======================================================================================
-# The payload view
-# ======================================================================================
-
-
 def _view() -> Any:
     return S.moved_module("passthrough_max_bytes")
 
@@ -117,14 +107,6 @@ def _observe_at_ceiling(case: str, tmp: Path, mp: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("case", list(_ceiling_cases()))
 def test_payload_at_the_ceiling(case, tmp_path, monkeypatch):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). A payload one byte under, at and one over the ceiling,
-    with a multi-byte character across the cut and a ceiling smaller than one character, is
-    clipped at the same boundary as today.
-
-    The moved `render` over plain text, a JSON document and a server envelope at each side of
-    the ceiling, multi-byte text cut mid-character, ceilings of one, zero and below zero, and
-    once through the variable; the view against the base golden."""
     assert _observe_at_ceiling(case, tmp_path, monkeypatch) == _golden("s173")[case]
 
 
@@ -172,26 +154,4 @@ def _observe_shape(case: str, tmp: Path, mp: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("case", list(_shape_cases()))
 def test_payload_shapes_the_view_must_not_choke_on(case, tmp_path, monkeypatch):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). Empty, plain-text, deeply nested JSON, boundary-length
-    string leaves, invalid UTF-8, scalar-top-level and ten-thousand-item payloads are viewed as
-    today without a new failure.
-
-    `render` takes text (`query_tool` hands it `json.dumps(payload)`), so invalid UTF-8 reaches
-    it as the surrogate-escaped characters a lossless decode leaves; each shape through the
-    moved `render` against the base golden (a long view by its length, hash and ends).
-
-    Case `nested_past_the_parser` (the view raises `RecursionError`): quirk pin: base behavior,
-    not a requirement."""
     assert _observe_shape(case, tmp_path, monkeypatch) == _golden("s174")[case]
-
-
-# ======================================================================================
-# s204 / s205 — fresh-process imports and module-level state
-# ======================================================================================
-
-
-# ======================================================================================
-# Shared by the capture script (the `_observe_*` functions above ARE the capture)
-# ======================================================================================
-

@@ -12,9 +12,6 @@ import pytest
 from defender import _yaml
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
-# --------------------------------------------------------------------------------------
-# Vocabulary local to this slice.
-# --------------------------------------------------------------------------------------
 
 #: The hand-built control's label: three letters no refusal text spells by accident ("a" is
 #: an English word, so `"a" in reason` holds for every reason).
@@ -125,8 +122,6 @@ def _assert_out_of_references(judge: S.RoutedJudge, gone: str, *,
             f"control: {ref} is not among {f}'s references, so a missing {gone} proves nothing")
 
 
-
-
 def _assert_malformed(where: Any, label: str, *names: str) -> str:
     """World `label`'s row is ungradable AND malformed, and its reason names each of `names`."""
     row = S.row(where, label)
@@ -212,15 +207,6 @@ def _missing_id_calls(first: S.CallRow) -> list[S.CallRow]:
     a failed read of the TABLE under R3 (a), and this case pins the ledger's own check."""
     return [first, S.CallRow(params=S.query_params("user:carol"), call_id=None, table=False)]
 
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# Damage tables: one entry per way a run's context read fails (A3, A12).
-# Each entry: (world overrides, damage planted after the build, names its refusal must carry).
-# --------------------------------------------------------------------------------------
 
 Damage = Callable[[S.Built, str, Path], Any]
 Names = Callable[[S.Built, str], tuple[str, ...]]
@@ -383,20 +369,7 @@ _CTL_FIRST = S.CallRow()
 _C_FIRST = S.CallRow(system="edr", params=S.query_params("host:db-1"))
 
 
-# ======================================================================================
-# The control check (M1, A3): every control state stamps the family, after the unchanged gates.
-# ======================================================================================
-
 def test_1234_control_not_archived_stamps_the_family_not_graded(tmp_path):
-    """An accepted, comparable family whose control has a world record (`not archived`) is
-    stamped not-graded, the stamp naming the control and that reason. The family is past the
-    door gate and the unchanged manifest, outcome, O5 and family-stamp gates (A3). No model call
-    is made, nothing is queued, and the user section carries the found gaps (A2).
-
-    The control's own served ledger stays in `served/`, because the registry writes it during
-    the run, so a not-archived world still has one. A2's census reads it ("not-archived worlds
-    included") beside b's. The positive control is the same family with its control archived,
-    which grades b and queues b's defender row: the call channel and the queue channel are live."""
     outcome = S.mod(S.OUTCOME)
     b_blocked = S.refused_call()
     b_over = {"calls": [S.CallRow(), S.oracle_call(fact_id="f-b", forged_id="fg-b-1"), b_blocked]}
@@ -425,19 +398,6 @@ def test_1234_control_not_archived_stamps_the_family_not_graded(tmp_path):
 
 @pytest.mark.parametrize("cut", ["before-the-model-closed", "failed-served-ledger-write"])
 def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
-    """An accepted, comparable family whose control's run was cut short is stamped not-graded,
-    naming the control and the cut. The cut is either before the model closed, or a failed write
-    of either call record, which is named (AN01). The check runs after the unchanged gates; no
-    model call is made and nothing is queued.
-
-    The first case is the hand-built run-end record: `truncated_by` set, `closed_before_cut`
-    false. Its control is a run cut AFTER the model closed, which is no cut, so the family grades. The
-    AN01 cases run the REAL launcher and REAL siblings: the control's investigator makes one call
-    on a key no recording holds, and the estate's adapter plants a directory at the control's
-    query table (on main `NotPlainEntry` out of `run.main`, so the sibling exits 1, AP-01) or at
-    its served ledger (on main the write is refused and swallowed, JP-02). On the real path the
-    control is always `a`. The stamp must name it in a quoted or path form, and must name the
-    record whose write failed."""
     if cut == "before-the-model-closed":
         built = _build(tmp_path, "cut", _triad_ctl(a={"run_end": dict(CUT_SHORT)}))
         judge = S.judge()
@@ -471,19 +431,11 @@ def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
         f"the stamp does not name the failed write ({record}): {reason!r}")
 
 
-
-
 @pytest.mark.parametrize("case", [
     "report-with-no-usable-disposition", "report-with-a-look-alike-disposition",
     "report-with-a-second-disposition-key", "report-is-a-symlink", "alert-is-a-fifo",
     "ledger-row-without-a-call-id", "two-table-rows-sharing-one-call-id"])
 def test_1234_control_malformed_stamps_the_family_not_graded(tmp_path, case):
-    """An accepted, comparable family whose control's context read fails is stamped not-graded
-    naming the control, the file and the refusal (A3, A12). The read fails on: report.md with no
-    usable disposition or a second disposition key, a served-ledger row without a call id, two
-    table rows of the run sharing one id, or a link, special or torn file. No model call is made
-    and nothing is queued. A filter that skips foreign or null-owner ledger rows is not the
-    answer (X13). A linked report is never followed: the host file's text reaches nothing."""
     built, names = _damaged(tmp_path, case, CTL, _triad_ctl, _CTL_FIRST)
     judge = S.judge({"b": _finding_reply("b", CTL)})
 
@@ -502,11 +454,6 @@ def test_1234_control_malformed_stamps_the_family_not_graded(tmp_path, case):
     "served-ledger-is-torn", "ledger-row-without-a-call-id",
     "two-table-rows-sharing-one-call-id"])
 def test_1234_control_with_a_damaged_query_table_or_ledger(tmp_path, case):
-    """A control with any failed read of a file its context needs stamps the family not graded,
-    naming the control and the cause (A3, A12). The failed reads are: query table or served
-    ledger a link or torn, a ledger row without a call id, two table rows sharing one id. No
-    world is graded against a thinned control. On main the query table degrades silently to empty
-    and a torn ledger line is skipped and counted (OB5, AP-13), so the family grades."""
     built, names = _damaged(tmp_path, case, CTL, _triad_ctl, _CTL_FIRST)
     judge = S.judge({"b": _finding_reply("b", CTL), "c": _finding_reply("c", CTL)})
 
@@ -518,12 +465,6 @@ def test_1234_control_with_a_damaged_query_table_or_ledger(tmp_path, case):
 
 @pytest.mark.parametrize("state", ["no-investigation", "short-gather-summaries"])
 def test_1234_control_missing_investigation_or_short_gather_summaries(tmp_path, state):
-    """A control with a readable report but no investigation.md, or short gather summaries, is
-    unusable the same way a planted world with those states is ungradable (malformed/cut short).
-    The family is stamped not graded naming which.
-
-    "Short" means the control's `gather_summaries/` exists but lacks the summary of a lead its
-    own investigation.md resolves (`l-001`)."""
     if state == "no-investigation":
         built = _build(tmp_path, state, _triad_ctl(a={"investigation": None}))
         named = "investigation.md"
@@ -539,16 +480,6 @@ def test_1234_control_missing_investigation_or_short_gather_summaries(tmp_path, 
 
 
 def test_1234_control_declared_verdict_outside_the_vocabulary(tmp_path):
-    """A manifest control entry declaring a verdict outside the disposition vocabulary is refused
-    by the unchanged manifest gate before any world is read, with its own named reason naming
-    the declaration: no model call is made, nothing is queued and no not-graded stamp is written
-    (the control check that runs after the gate is never reached; 78-gate-resolutions).
-
-    The control's report carries a valid `benign`, so only the declaration can fire.
-    `parse_family`'s `_check_disposition` refuses it for every world, the control included
-    (executed at 463833df: "worlds['ctl'].disposition_declared is 'suspicious', outside the
-    shipped disposition vocabulary"). Positive control: the same family declaring `benign`
-    loads and grades b."""
     built = _build(tmp_path, "declared", _triad_ctl(
         a={"declared": "suspicious", "reached": "benign"}))
     judge = S.judge()
@@ -569,17 +500,7 @@ def test_1234_control_declared_verdict_outside_the_vocabulary(tmp_path):
     assert graded.called("b"), "control: a vocabulary declaration loads and grades b"
 
 
-
-
-
-
 def test_1234_control_pushed_to_an_unusable_close_by_the_alert(tmp_path):
-    """An unusable control voids the family (M1): ungraded, with the stamp naming the cause, and
-    the operator sees it loudly.
-
-    The operator's surface is the episode page, which renders the stamp. Two closes are shown: a
-    control the alert steered to a report with no headline, and one cut short. Neither grades
-    the remaining pair (X5)."""
     for name, over, named in (
             ("closed-without-a-headline",
              {"report": "The alert said the case was closed upstream; no verdict.\n"},
@@ -596,31 +517,8 @@ def test_1234_control_pushed_to_an_unusable_close_by_the_alert(tmp_path):
             f"{name}: the page does not show the stamp {reason!r}")
 
 
-# ======================================================================================
-# The door precedes everything; O5 and the control check keep their order (I-3, g16).
-# ======================================================================================
-
-
-
-
-
-
-
-
-
-# ======================================================================================
-# A planted world that fails a read leaves every reference set; the rest grades (A3, A12).
-# ======================================================================================
-
 @pytest.mark.parametrize("damage", ["report-is-a-symlink", "report-is-undecodable"])
 def test_1234_malformed_planted_report_does_not_refuse_the_episode(tmp_path, damage):
-    """With planted world c's report.md unreadable, the pass still grades world b against the
-    control, records c as ungradable and malformed, and refuses nothing. episode.verdicts would
-    refuse the episode (C15).
-
-    "Against the control" is read off b's prompt, which carries the control's archive text. The
-    contrast is the old reader over the same archive: `verdicts` raises EpisodeError, and the
-    grade pass does not."""
     built = _build(tmp_path, damage, S.triad())
     report = built.world_dir("c") / "report.md"
     if damage == "report-is-a-symlink":
@@ -646,15 +544,6 @@ def test_1234_malformed_planted_report_does_not_refuse_the_episode(tmp_path, dam
     "query-table-is-a-symlink", "query-table-is-torn", "ledger-row-without-a-call-id",
     "two-table-rows-sharing-one-call-id"])
 def test_1234_reference_world_with_a_damaged_oracle_store_ledger_or_query_table(tmp_path, case):
-    """A planted world whose context read fails is malformed (A3, A12), named by file and
-    refusal, ungradable, and leaves every reference set. The read fails when the oracle store,
-    served ledger, query table or any file its context needs is a link, torn or special; when a
-    ledger row lacks the call id; or when two of the run's table rows share one call id. No other
-    world's setup is refused and no host file is read (principle 1).
-
-    c is damaged; b and d are healthy planted siblings. Each must be graded, must carry none of
-    c's archive text, and must carry the other's. The links point at a file outside the episode
-    holding a secret that no prompt and no record may contain."""
     built, names = _damaged(tmp_path, case, "c", _quad, _C_FIRST)
     judge = S.judge()
 
@@ -667,18 +556,8 @@ def test_1234_reference_world_with_a_damaged_oracle_store_ledger_or_query_table(
     _assert_no_host_text(built, judge)
 
 
-
-
 @pytest.mark.parametrize("stray", ["another-worlds-fact", "a-fact-no-world-declares"])
 def test_1234_forged_rows_naming_another_worlds_fact_or_an_unserved_system(tmp_path, stray):
-    """An oracle-store row that names a fact outside that world's own facts makes the world
-    malformed (A3): named by file and cause, ungradable, out of every reference set. The row never
-    enters another world's fact surface.
-
-    c's store holds its own row and one stray row. The stray names b's fact `f-b` or a fact id
-    no manifest entry declares (K5: checkable per directory against the world's own manifest
-    facts). The stray row's marker reaches no prompt at all. The paired positive control is d's
-    own forged row, which IS in d's prompt, so the built layer renders."""
     fact_id = "f-b" if stray == "another-worlds-fact" else "f-nowhere"
     mark = S.marker("c", "forged-stray")
     rows = [{"forged_id": "fg-c-1", "fact_id": "f-c", "system": "edr",
@@ -700,17 +579,7 @@ def test_1234_forged_rows_naming_another_worlds_fact_or_an_unserved_system(tmp_p
         "control: d's own forged row is not in d's prompt, so the built layer never renders")
 
 
-
-
 def test_1234_world_setup_faults_while_its_siblings_are_judged(tmp_path):
-    """B's unreadable file makes B malformed (A3): its row carries the named reason (the page
-    shows it) and B leaves every reference set. C and D grade and enqueue normally. The user
-    section carries B's blocked calls like every run's (A2), and carries B's setup fault only if
-    it is a gap.
-
-    B's investigation.md is undecodable bytes; its ledger is intact and holds a refused call, so
-    the census can read it. C's and D's replies each file a finding on a two-run pair with the
-    control, so "enqueue normally" is one defender row each."""
     b_blocked = S.refused_call()
     built = _build(tmp_path, "setup-fault", _quad(
         b={"calls": [S.CallRow(), S.oracle_call(fact_id="f-b", forged_id="fg-b-1"), b_blocked]}))
@@ -733,39 +602,11 @@ def test_1234_world_setup_faults_while_its_siblings_are_judged(tmp_path):
     assert "investigation.md" not in user_text, "b's setup fault (not a gap) is in the user section"
 
 
-
-
-
-
-
-
-
-
-
-
-# ======================================================================================
-# A row in b's served file that is not b's (A3, A12, NA03 (b), X13) — on the REAL path.
-# ======================================================================================
-
 def _ledger_file(ep: Path, label: str, token: str) -> Path:
     return ep / "served" / f"{S.world_token(label, episode_token=token)}.jsonl"
 
 
 def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
-    """A row in b's served file that is not b's makes b's ledger read not well-formed (A3, A12;
-    NA03 (b), X13: no reader skips such a row). Such a row has no world id, another world's id,
-    no call id, or another run's call id. b is then malformed: a planted world is ungradable, named
-    by file and refusal, and out of every reference set, and a control stamps the family not
-    graded. b's found-gap census entry is named unread with its cause (NA04). Such a row never
-    pairs with b's table and never enters b's found gaps. Unmapped is only a ledger row carrying
-    b's own call id that is in no table row of b (A12). A ledger file in `served/` for a label the
-    manifest does not declare is not a run and is read by nothing, the census included (AP-12).
-
-    One real launch. Its archive is copied per variant and the row is appended to the copy's
-    archived served file. Ids are read off the real rows, and only the unmapped row mints b's
-    spelling. Each foreign row carries a refused call no run made (`FOREIGN`), so a reader that
-    kept it would list it as a gap. The paired positive control is the unedited archive plus the
-    undeclared label's file: b grades, and its own refused call IS a found gap."""
     real = S.real_family(tmp_path)
     token = real.token
     refused_b = next(r for r in real.ledger_rows("b") if r.get("source") == "refused")
@@ -825,10 +666,6 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
                    for e in S.found_gaps(clean)), "the undeclared label's file was read"
 
 
-# ======================================================================================
-# A box that edits its own query table after the run (R3 (a), OB10; I-4, I-5): fail closed.
-# ======================================================================================
-
 #: The seeded prefix every hand-built table opens with: an ordinary pre-branch row and J3's
 #: inherited denial, identical in every run's table and carrying no id of any run (A12).
 _PREFIX = [S.CallRow(params=S.query_params("user:prebranch"), inherited=True),
@@ -872,19 +709,6 @@ def _j3_listed_once(where: Any) -> bool:
 
 @pytest.mark.parametrize("edit", ["missing", "extra", "altered"])
 def test_1234_box_edits_the_inherited_rows_of_its_own_query_table(tmp_path, edit):
-    """The inherited prefix must be identical across every readable query table: a table whose
-    inherited rows differ from the others' (one missing, one extra, one altered) is a failed
-    read under A3 (R3 (a), human 2026-10-12; OB10: a box can rewrite its own table after the
-    run). A planted world is malformed, named by the file, and leaves every reference set; a
-    control's stamps the family not graded; in a pair family the two tables disagree with each
-    other, so both are refused and the family is stamped. A box's edit therefore never
-    un-identifies J3's row: it is still listed once as the family's found gap, from the readable
-    tables, and a finding resting on it stays gap-only (I-4).
-
-    Hand-built, every table opening with the same two inherited rows (an ordinary pre-branch
-    row and J3's denial); the stamped arms run first, since a stamp is read against empty
-    queues. The paired positive control is the unedited family: c grades and J3 is listed
-    once."""
     control = _build(tmp_path, f"control-{edit}", _triad_ctl(), inherited=_PREFIX)
     S.rewrite_jsonl(control.table_path(CTL), _edit_prefix(edit, control, CTL))
     judge = S.judge({"b": _finding_reply("b", CTL)})
@@ -942,14 +766,6 @@ def _disagree(built: S.Built, label: str, column: str) -> Callable[[list[dict]],
 
 @pytest.mark.parametrize("column", sorted(_DISAGREE))
 def test_1234_call_id_joins_a_ledger_row_and_a_table_row_that_disagree(tmp_path, column):
-    """Where one host-written call id joins a served-ledger row and a query-table row whose
-    (system, verb, params) disagree, the read is not well-formed: a failed read under A3 (R3
-    (a), human 2026-10-12; I-5; OB10: the table is the box's to rewrite, the ledger the
-    host's). A planted world is malformed, named by the joined call id, and leaves every
-    reference set; a control stamps the family not graded, naming the id.
-
-    One table row of c (then of the control) has the named column rewritten after the run. The
-    paired positive control is the unedited family: c grades."""
     clean = _build(tmp_path, "clean", _quad())
     judge = S.judge()
     S.grade(clean, judge)
@@ -969,15 +785,3 @@ def test_1234_call_id_joins_a_ledger_row_and_a_table_row_that_disagree(tmp_path,
     judge = S.judge({"b": _finding_reply("b", CTL)})
     S.grade(control, judge)
     _assert_stamped(control, judge, CTL, S.call_id(CTL, 0))
-
-
-# ======================================================================================
-# Labels the pointer grammar or the family call would collide with: refused at the manifest.
-# ======================================================================================
-
-
-
-
-
-
-

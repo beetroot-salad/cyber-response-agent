@@ -163,17 +163,10 @@ def test_require_output_false_still_accepts_a_content_less_final(tmp_path, tag, 
 
 @pytest.mark.parametrize(("tag", "text"), CONTENT_LESS, ids=[t for t, _ in CONTENT_LESS])
 def test_a_logged_response_of_only_content_less_text_reads_as_empty(tmp_path, tag, text):
-    """The fault-path classifier over a REAL logged response: a lone text part carrying
-    nothing visible reads as "empty output", so a run that faulted after emitting only
-    invisible characters reports what happened rather than the transport's repr."""
     assert _last_response_is_empty_text(_logged(tmp_path, [TextPart(content=text)], tag))
 
 
 def test_a_truly_empty_final_reports_empty_output_through_the_fault_path(tmp_path):
-    """End-to-end proof that the classifier is what SELECTS the fault message: pydantic-ai rejects a
-    truly-empty final itself, so run_stage lands in its ``except`` arm — with require_output on,
-    the classifier turns that into "returned empty output"; with it off, the same fault reports
-    the raw transport failure."""
     with pytest.raises(RunUnprocessable, match="returned empty output"):
         _lead_author(tmp_path, "", "empty-on", require_output=True)
     with pytest.raises(RunUnprocessable, match="failed:"):

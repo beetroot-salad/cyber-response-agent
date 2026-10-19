@@ -60,9 +60,6 @@ def typed(rec: VerbRecorder) -> FakeVerbs:
 
 
 def test_a_mistyped_param_is_a_usage_error_not_an_infra_failure(tmp_path):
-    """A string where the verb declares `int` is the AGENT's mistake: exit 64, error_class
-    agent-fixable, and the verb is never reached. Unvalidated it raised TypeError inside the
-    verb and was recorded as exit 2 — "the system is down"."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=clamping(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs", "limit": "20"}), DONE,
@@ -119,9 +116,6 @@ def test_a_bool_is_not_an_int(tmp_path):
 
 
 def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_path):
-    """The check must not reject what the verb actually declares: `None` for `X | None`, a dict
-    for `dict[str, str]`, an int for `int`. A validator that denies the happy path is worse than
-    the bug it fixes."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=typed(rec), turns=[
         q("elastic", "probe", {
@@ -138,11 +132,6 @@ def test_well_typed_params_including_optionals_and_containers_are_admitted(tmp_p
 @pytest.mark.parametrize(("system", "verb", "params", "why"), [
     ("elastic", "query", {"native_query": "FROM logs", "limit": "20"}, "limit"),
     ("identity", "list-users", {"enabled": "false"}, "enabled"),
-    # `ticket.list-tickets`' `require_closed` was the third row until #900 reserved it
-    # `@verb(wrapper_only=…)`. It is DROPPED rather than left in place: a reserved param is
-    # refused ahead of the type check, so the row still passed (the refusal names it) while
-    # measuring nothing about types — a green arm that had stopped being an arm. The reserved
-    # refusal has its own oracle in `test_list_verbs_900.py`'s O1.
 ])
 def test_the_real_registry_rejects_a_mistyped_param(system, verb, params, why):
     """The shipped adapters, not a fake: each of these signatures has a non-`str` param a model
@@ -169,9 +158,6 @@ def test_the_real_registry_admits_its_own_declared_types():
 
 
 def test_an_unresolvable_annotation_is_unconstrained_not_denied():
-    """A verb whose annotation cannot be evaluated must not deny a well-formed call — the
-    checker fails OPEN on its own confusion rather than inventing a rejection the model cannot
-    act on. (Fail-closed belongs at the registry, which is where an unknown system/verb dies.)"""
 
     def broken(ctx, *, thing: NotAType) -> None:  # noqa: F821 — deliberately unresolvable
         ...

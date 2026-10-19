@@ -53,10 +53,6 @@ def _head_files(tmp_repo) -> list[str]:
 
 
 def test_survival_partial_write_rollback(tmp_repo, helpers):
-    """A mid-batch fault (the in-process ``run_stage`` RunUnprocessable, surfaced through the seam
-    as ``AuthorError``) after the agent wrote some lesson bytes: no partial commit lands, the
-    queue is NOT rotated (findings retryable), and — once the drain's rollback restores the
-    corpus — a re-drain authors the finding EXACTLY once (no silent double-author)."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-P/0", run_id="run-P")
     commits_before = _commit_count(tmp_repo)
@@ -131,9 +127,6 @@ def test_survival_committed_dirty_crosscheck(tmp_repo, helpers):
 
 
 def test_survival_scope_gate_strays(tmp_repo, helpers):
-    """The scope gate catches a NEW file the agent wrote OUTSIDE the corpus (→ AuthorError, rc 2),
-    but a sibling's PRE-EXISTING baseline stray (staged before the agent ran) is NOT blamed on
-    the curator."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-S/0", run_id="run-S")
     pre = _rows_without_attempts((tmp_repo.paths.state_root / FINDINGS.queue).read_text())
@@ -166,9 +159,6 @@ def test_survival_scope_gate_strays(tmp_repo, helpers):
 
 
 def test_survival_idempotent_redrain(tmp_repo, helpers):
-    """A re-drain of an already-committed batch does not double-commit or double-append: once the
-    finding is cited in an existing lesson's ``source_finding_ids``, the next tick filters it
-    (consumed_idempotent) and the agent is NEVER re-invoked."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-I/0", run_id="run-I")
     commits_before = _commit_count(tmp_repo)
@@ -195,9 +185,6 @@ def test_survival_idempotent_redrain(tmp_repo, helpers):
 
 
 def test_survival_agent_no_git(tmp_repo, helpers):
-    """The in-process agent runs NO git — the loop remains the SOLE committer. The agent leaves the
-    lesson uncommitted in the working tree and the loop makes exactly ONE new, pathspec-scoped
-    commit."""
     a = tmp_repo.author
     helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-G/0", run_id="run-G")
     commits_before = _commit_count(tmp_repo)
@@ -243,9 +230,6 @@ def _spawn_curator(**over):
 
 
 def test_trace_per_spawn_distinct(tmp_path: Path):
-    """UNIQUENESS at the composition frame: two curator spawns (C then D) in ONE drain, into ONE
-    learning_run_dir, must get DISTINCT trace paths keyed on (batch_id, pid) — a single-spawn
-    test cannot see the collision."""
     rd = tmp_path / "state" / "_pending"
     rd.mkdir(parents=True)
 
@@ -272,5 +256,3 @@ def test_trace_per_spawn_distinct(tmp_path: Path):
     observe.RequestLogger(d).close()
     assert d.read_text() == ""
     assert c.read_text() == "C-TRACE\n"
-
-

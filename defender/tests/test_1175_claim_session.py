@@ -1,60 +1,3 @@
-"""#1175 design amendment 1 ("a claim-scoped git session"): the claim's commit and the cleanup
-after it.
-
-The amendment keeps O1-O5 / N1-N5 (pinned in `test_1175_leads_git_liveness.py` and
-`test_1175_adversary_holes.py`) and adds three obligations, pinned here:
-
-- O6 the commit reads nothing from the worktree: it carries exactly the admitted change
-  records. (a) The lead-author agent deletes the pending draft `LIFT` (admitted) and leaves a
-  FOLDER at the same path holding files HEAD's committed ignore rules ignore (`*.log`,
-  `__pycache__/`): the commit is exactly `D LIFT`, nothing from inside the folder. Lead-author
-  only: the pitfalls rule refuses every deletion, so no admitted pitfalls path can be replaced
-  by a folder. (b) An unrelated path already STAGED in the worktree's index before the commit
-  (a new file under `skills/`, an edit of a tracked file outside it, a removal under it, each a
-  baseline stray the scope check tolerates without admitting) is not in the commit. Both lanes.
-- O7 the commit is a local operation only: no repo hook (`pre-commit`, `prepare-commit-msg`,
-  `commit-msg`, `post-commit`) runs in it, whether it would fail the commit or stall past the
-  lane's bound, and no automatic maintenance (`gc --auto`) runs in it. Both lanes. Each scene's
-  positive control runs a plain `git commit` in the same repo afterwards and sees the hook run
-  (or the pack appear), so the plant was armed.
-- O8 no cleanup error of any kind displaces a propagating fault: while a systemic fault
-  propagates out of a claim, git cannot START for the cleanup (`PATH` holds no runnable `git`:
-  `FileNotFoundError` / `PermissionError` from `subprocess`, an `OSError`, not a `GitError`).
-  The tick raises the claim's fault, the very object. Both lanes. Positive control: the same
-  unstartable git after a CLEAN claim ends the tick (an `OSError` raised, the next claim not
-  served, nothing consumed).
-
-Every scene is a real drain tick (`drains.lead_author_drain`) over a real committed repo, under
-`test_1134_curator_git_bounds._within`'s deadline (through the liveness suite's `_tick`), with
-the real scrub; the lanes are the real ones (`_LeadLane` / `_PitfallsLane`: only the agent
-spawn, `extract` and the queue lock replaced) except in O8, whose work steps are fakes that
-leave an edit behind and raise. Only the public seams `LeadAuthorDeps.git_timeout` and
-`run_pitfalls(git_timeout=)` are used; nothing is `setattr`-patched (`PATH` is set with
-`monkeypatch.setenv`).
-
-O8's plant is `PATH` changed inside the work step, so it reaches the cleanup only if git is
-looked up on `PATH` when each git call starts (as `subprocess` does with the environment
-`_git.committed_view_env()` builds per call today). Each O8 scene checks the cleanup really
-could not run (its leftover edit still stands): an implementation that pinned the git binary or
-its `PATH` earlier fails that check, which then reports the plant, not O8.
-
-Red on the branch as written for the original design (fa849d3b), observed:
-
-- O6a `folder`: the tick raises a `GitError`. The commit judges the admitted `LIFT` present
-  (`kind_at` finds the folder), `add -f` stages the folder's ignored files, and
-  `commit -- <LIFT>` then fails ("does not have a commit checked out"). Nothing is committed.
-- O7: each failing hook refuses the commit (`GitError`, rc 1); each stalling hook overruns
-  `BOUND` (`GitOverran`). The hook ran either way. For maintenance, the claim's commit runs
-  `gc --auto` and a pack appears.
-- O8 in-flight scenes (`missing`, `not-executable`): the cleanup's `FileNotFoundError` /
-  `PermissionError` replaces the claim's fault, because the cleanup drops only `GitError`.
-
-Green on it, pinning behaviour the session must keep: O6a `control`; every O6b scene (today's
-`commit -- <paths>` already leaves other staged entries out; they pin the amendment's
-no-pathspec commit against a missing reset of the index to HEAD); O8's `control` variants and
-both clean-claim positive controls. O7's positive controls run after the scene's own assertions,
-so they only run once those pass; each was checked separately on this branch.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -126,10 +69,6 @@ def _git_path(wt: Path, name: str) -> Path:
     return (wt / out) if not os.path.isabs(out) else Path(out)
 
 
-# ---------------------------------------------------------------------------------------
-# O6a: a folder standing at a deleted draft's path rides nothing into the commit
-# ---------------------------------------------------------------------------------------
-
 #: What the agent leaves inside the folder at `LIFT`: files HEAD's `LOG_IGNORE` ignores.
 FOLDER_FILES = (f"{LIFT}/notes.log", f"{LIFT}/__pycache__/x.cpython-312.pyc")
 
@@ -138,18 +77,6 @@ FOLDER_FILES = (f"{LIFT}/notes.log", f"{LIFT}/__pycache__/x.cpython-312.pyc")
 def test_o6a_a_folder_at_a_deleted_drafts_path_commits_as_the_deletion_alone(
     tmp_path, monkeypatch, folder,
 ):
-    """O6 (a), lead-author. HEAD's root `.gitignore` ignores `*.log` and `__pycache__/`. The agent
-    removes the pending draft `LIFT` (a removal the scope check admits) and, in `folder`, makes
-    a folder at that same path holding `notes.log` and `__pycache__/x.cpython-312.pyc`. Both are
-    ignored by HEAD's rules (checked: that is why the scope check lists neither), so the claim's
-    one admitted record is `D LIFT`. The tick lands and the commit is exactly `D LIFT`: nothing
-    from inside the folder rides in, and the folder does not turn the deletion into an error.
-
-    `control`: the same removal, no folder: the commit is `D LIFT`.
-
-    Catches: a commit that re-asks the filesystem what stands at an admitted path (a folder
-    there is "present", and `add -f` of it stages its ignored files) or commits with that path as
-    a pathspec (git refuses a folder where the index holds a file)."""
     sc = _lead_scene(tmp_path, monkeypatch, committed={".gitignore": LOG_IGNORE})
     ignored: list[int] = []
 
@@ -174,11 +101,6 @@ def test_o6a_a_folder_at_a_deleted_drafts_path_commits_as_the_deletion_alone(
         "something at the deleted draft's path was committed"
 
 
-# ---------------------------------------------------------------------------------------
-# O6b: an unrelated path already staged is not in the commit
-# ---------------------------------------------------------------------------------------
-
-
 def _stage_new_under_skills(wt: Path) -> str:
     write(wt / NOTES, "left here before the claim\n")
     git(wt, "add", "--", NOTES)
@@ -196,10 +118,6 @@ def _stage_removal_under_skills(wt: Path) -> str:
     return f"D\t{INVLANG_INIT}"
 
 
-#: How the index already carries an unrelated change when the claim starts: each a baseline
-#: stray (the before-agent listing carries the same record), so the scope check tolerates it
-#: without admitting it. Each returns the staged record as `git diff --cached --name-status`
-#: spells it.
 STAGINGS: dict[str, Callable[[Path], str] | None] = {
     "control": None,
     "new-under-skills": _stage_new_under_skills,
@@ -223,13 +141,6 @@ def _staged(sc: _Scene, staging: str) -> None:
 def test_o6b_a_path_already_staged_is_not_in_the_lead_author_commit(
     tmp_path, monkeypatch, staging,
 ):
-    """O6 (b), lead-author. Before the claim, the worktree's index already carries an unrelated
-    staged change (`staging`; checked to be what `git diff --cached` shows). The agent edits
-    `LIFT`. The claim lands and its commit is exactly `M LIFT`: the staged change does not ride
-    in. `control`: nothing staged, the same commit.
-
-    Catches: a commit of the index as it stands (no reset to HEAD before staging the admitted
-    records)."""
     sc = _lead_scene(tmp_path, monkeypatch)
     _staged(sc, staging)
 
@@ -252,11 +163,6 @@ def test_o6b_a_path_already_staged_is_not_in_the_curation_commit(
 
     assert got == ("value", 0), got
     _assert_rows_consumed(sc, {f"M\t{EXEC}"})
-
-
-# ---------------------------------------------------------------------------------------
-# O7: no repo hook and no automatic maintenance runs in the commit
-# ---------------------------------------------------------------------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -320,15 +226,6 @@ def _armed_hook(tmp: Path, wt: Path, case: str) -> _Hook:
 
 @pytest.mark.parametrize("case", list(HOOKS))
 def test_o7_no_repo_hook_runs_in_the_lead_author_commit(tmp_path, monkeypatch, case):
-    """O7, lead-author. A commit hook is armed in the scene repo's hooks dir (`case`: one that
-    exits 1, or one that sleeps far past the lane's bound `LeadAuthorDeps.git_timeout=BOUND`).
-    The agent edits `LIFT`. The claim lands (no overrun, no git error) with exactly `M LIFT`, and
-    the hook never ran. Positive control, afterwards: a plain `git commit` in the same repo runs
-    the hook and is failed or stalled by it.
-
-    Catches: a commit that runs repo hooks (the failing hook refuses it as a `GitError`; the
-    stalling one overruns `BOUND`); `--no-verify` alone (`prepare-commit-msg` and `post-commit`
-    still run)."""
     sc = _lead_scene(tmp_path, monkeypatch)
     hook = _armed_hook(tmp_path, sc.wt, case)
     lane = _LeadLane(EDIT_LIFT, git_timeout=BOUND)
@@ -347,9 +244,6 @@ def test_o7_no_repo_hook_runs_in_the_lead_author_commit(tmp_path, monkeypatch, c
 
 @pytest.mark.parametrize("case", list(HOOKS))
 def test_o7_no_repo_hook_runs_in_the_curation_commit(tmp_path, monkeypatch, case):
-    """O7, pitfalls: the same hooks, `run_pitfalls(git_timeout=BOUND)`; the curator adds a pitfall
-    to `EXEC`. The row is consumed against a commit of exactly `M EXEC` and the hook never ran;
-    afterwards a plain `git commit` runs it."""
     sc = _pitfalls_scene(tmp_path, monkeypatch)
     hook = _armed_hook(tmp_path, sc.wt, case)
     lane = _PitfallsLane(CURATE, git_timeout=BOUND)
@@ -394,11 +288,6 @@ def _assert_gc_armed(wt: Path) -> None:
 
 
 def test_o7_no_automatic_maintenance_runs_in_the_lead_author_commit(tmp_path, monkeypatch):
-    """O7, lead-author: the scene repo is set so that any `git commit` runs `gc --auto` in the
-    foreground (which writes a pack). The claim lands with exactly `M LIFT` and no pack exists:
-    no maintenance ran in its commit. Positive control, afterwards: a plain `git commit` packs.
-
-    Catches: a commit that leaves `gc.auto` / `maintenance.auto` to the repo's config."""
     sc = _lead_scene(tmp_path, monkeypatch)
     _arm_auto_gc(sc.wt)
     assert _packs(sc.wt) == []
@@ -423,11 +312,6 @@ def test_o7_no_automatic_maintenance_runs_in_the_curation_commit(tmp_path, monke
     assert _packs(sc.wt) == [], "automatic maintenance ran in the curation's commit"
     _assert_rows_consumed(sc, {f"M\t{EXEC}"})
     _assert_gc_armed(sc.wt)
-
-
-# ---------------------------------------------------------------------------------------
-# O8: git that cannot start at cleanup displaces no propagating fault
-# ---------------------------------------------------------------------------------------
 
 
 def _no_runnable_git(tmp: Path, how: str) -> Path:
@@ -493,17 +377,6 @@ def _oserror_in(exc: BaseException | None) -> bool:
 def test_o8_unstartable_git_at_cleanup_keeps_the_lead_author_claims_fault(
     tmp_path, monkeypatch, how, fault_kind,
 ):
-    """O8, lead-author. The claim's work step leaves an edit of `LIFT` behind, makes git unable
-    to start (`how`: `PATH` holds no runnable `git`) and raises a systemic fault (`fault_kind`).
-    The cleanup that follows cannot start git: an `OSError`, raised while the claim's fault
-    propagates. The tick raises the claim's fault, the very object, not the `OSError`; the claim
-    waits in `inflight/` with `attempts: 1`, neither dead-lettered nor re-queued; the leftover
-    edit still stands (checked: the cleanup really could not run).
-
-    `control`: git can start; the same fault comes out and the cleanup resets the leftover.
-
-    Catches: a cleanup that drops only git errors under a propagating fault (the `OSError`
-    replaces the fault, which survives only as its `__context__`)."""
     sc = _lead_scene(tmp_path, monkeypatch)
     fault = FAULTS[fault_kind]()
     path_dir = _no_runnable_git(tmp_path, how) if how else None
@@ -523,10 +396,6 @@ def test_o8_unstartable_git_at_cleanup_keeps_the_lead_author_claims_fault(
 def test_o8_unstartable_git_at_cleanup_keeps_the_curations_fault(
     tmp_path, monkeypatch, how, fault_kind,
 ):
-    """O8, pitfalls: the curation's work step leaves an edit of `EXEC` behind, makes git unable to
-    start and raises a systemic fault. The tick raises that fault, the very object; the row is
-    untouched (not consumed, retired or bumped) and the batch never finishes; the leftover still
-    stands. `control`: the same fault, the leftover reset."""
     sc = _pitfalls_scene(tmp_path, monkeypatch)
     committed = (sc.wt / EXEC).read_text(encoding="utf-8")
     leftover = committed + "\n- a pitfall the faulted curation left behind\n"
@@ -548,13 +417,6 @@ def test_o8_unstartable_git_at_cleanup_keeps_the_curations_fault(
 def test_o8_control_unstartable_git_after_a_clean_lead_author_claim_ends_the_tick(
     tmp_path, monkeypatch, how,
 ):
-    """O8's positive control, lead-author. Two claims (`case-a`, `case-b`). The first is served
-    cleanly, but its step leaves an edit of `LIFT` behind and makes git unable to start (`how`).
-    No fault propagates, so the cleanup's `OSError` is the tick's: raised, `case-b` never served
-    (it would run, and commit, over `case-a`'s leftover) and still queued as enqueued, `case-a`
-    waiting in `inflight/` with `attempts: 1`, not dead-lettered; the leftover still stands.
-
-    `control`: git can start: both claims are served and consumed, the leftover reset."""
     sc = _lead_scene(tmp_path, monkeypatch, cases=("case-a", "case-b"))
     served: list[Path] = []
     path_dir = _no_runnable_git(tmp_path, how) if how else None
@@ -594,11 +456,6 @@ def test_o8_control_unstartable_git_after_a_clean_lead_author_claim_ends_the_tic
 def test_o8_control_unstartable_git_after_a_clean_curation_ends_the_tick(
     tmp_path, monkeypatch, how,
 ):
-    """O8's positive control, pitfalls. The curation ends cleanly, but its step leaves an edit of
-    `EXEC` behind and makes git unable to start. The cleanup's `OSError` is the tick's: raised,
-    the curation's disposition never applied (the row queued byte for byte), the batch never
-    finished, the leftover still standing. `control`: the row is consumed against the
-    curation's commit and the leftover reset."""
     sc = _pitfalls_scene(tmp_path, monkeypatch)
     committed = (sc.wt / EXEC).read_text(encoding="utf-8")
     leftover = committed + "\n- a pitfall the curation left behind\n"

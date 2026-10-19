@@ -35,17 +35,6 @@ from defender.scripts.adapters.host_state_adapter import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 CONFIGURED_PATTERNS = ("logs-*", "security-audit-*")
-# The four estate-write endpoints that exist at HEAD, as (system, path, METHOD) triples — the
-# shape the rule now keys on. #767 D2 moves the host's ticket write from a transition to a
-# comment; the transition route STAYS in this census because the stub still serves it and a
-# person's close is now the release act — the triple is a property of the store, not of who
-# currently calls it (`d_checked_in_censuses_move_together`).
-#
-# THE SYSTEM LITERAL IS THE ONE THE WRITER REALLY CARRIES, and correcting it is half of why
-# the method axis had to exist. The ticket-store mutations are reached by a post-run script
-# whose system identity is `case-history`, not `ticket`, and both configs resolve to the SAME
-# host — so neither the system label nor the host separates a read from a write, and the
-# previous literal `"ticket"` papered that over. What separates them is the method.
 TICKET_WRITER_SYSTEM = "case-history"
 WRITE_ENDPOINTS = (
     (TICKET_WRITER_SYSTEM, "/tickets", "POST"),
@@ -53,17 +42,7 @@ WRITE_ENDPOINTS = (
     (TICKET_WRITER_SYSTEM, "/tickets/SOC-1/comments", "POST"),
     ("elastic", "/logs-2026.01.01/_update/1", "POST"),
 )
-# The collision the endpoint-only rule could not survive, kept as its own case because it is
-# the test's whole stated purpose: a FUTURE read-classed verb wrapping the write client would
-# carry the `ticket` system name and request the same `/tickets` path the real `list-tickets`
-# read requests. Path alone admits and refuses one call; path+method does not.
 TICKET_READ_PATH = "/tickets"
-# The paths the five stub adapters really request, read off their own `http_get`/`http_get_obj`
-# call sites and written HERE rather than taken from the allowlist — the whole point is that
-# the two lists are independent, so a divergence is a failure rather than a tautology.
-# Placeholders are bound because the check runs on resolved targets. Every one is a GET: the
-# measurement over all 27 real (system, path, method) triples found no stub read on any other
-# method. Elastic's are not here: they arrive through the capture seam on a real drive.
 REAL_STUB_ENDPOINTS = tuple(
     (system, path, "GET") for system, path in (
         ("change-mgmt", "/health"), ("change-mgmt", "/changes"),
@@ -116,12 +95,7 @@ def _kibana_status_path() -> str:
     return found[0]
 
 
-
-
 def test_host_state_refuses_a_host_outside_its_inventory(tmp_path: Path):
-    """A host-state verb aimed at a container outside the declared inventory REFUSES before
-    the docker exec, instead of warning on stderr and proceeding. The host_state_target the
-    model supplies becomes the docker exec target verbatim today, so `passwd` and"""
     assert "elasticsearch" not in host_state_adapter.KNOWN_HOSTS
 
     with pytest.raises(ConfinementFault) as caught:
@@ -138,9 +112,6 @@ def test_host_state_refuses_a_host_outside_its_inventory(tmp_path: Path):
     "ELASTICSEARCH", "Web-1", " web-1", "web-1 ", "web", "web-1-shadow",
 ])
 def test_a_case_variant_of_an_inventory_host_is_refused_not_normalized(near_miss: str):
-    """A case, whitespace, substring or prefix variant of a declared inventory host is
-    REFUSED, not warned-and-proceeded, and no normalization equates it to the real host —
-    the confinement compares against the inventory as declared, so a near-miss buys nothing."""
     with pytest.raises(ConfinementFault):
         confine_host(near_miss)
     assert near_miss not in host_state_adapter.KNOWN_HOSTS
@@ -161,12 +132,7 @@ def test_a_host_state_verb_confines_the_program_and_the_container_target_togethe
         confine_host_state_call("curl", "web-1")          # in-inventory target, ungated program
 
 
-
-
 def test_an_elastic_read_refuses_an_index_outside_the_configured_patterns(tmp_path: Path):
-    """An elastic read whose `elastic_index` param falls outside the system's configured
-    patterns REFUSES, instead of overriding the configured index and reading it as the
-    cluster superuser."""
     with pytest.raises(ConfinementFault):
         confine_index(".security-7", CONFIGURED_PATTERNS)
 
@@ -179,9 +145,6 @@ def test_an_elastic_read_refuses_an_index_outside_the_configured_patterns(tmp_pa
 def test_an_index_expression_whose_reach_widens_refuses_the_whole_call(
     tmp_path: Path, widening: str,
 ):
-    """Confinement evaluates REACH, not the literal, and refuses the WHOLE call (§7 R5). A
-    comma is a multi-index list, `*` is a wildcard, and a leading `-` is an exclusion; all
-    three are Elasticsearch's own grammar and all three pass today's URL quoting unescaped,"""
     with pytest.raises(ConfinementFault):
         confine_index(widening, CONFIGURED_PATTERNS)
 
@@ -197,9 +160,6 @@ def test_an_index_expression_whose_reach_widens_refuses_the_whole_call(
     "security-audit-2026.01", # the same, on the second configured pattern
 ])
 def test_an_inventory_host_and_a_configured_index_still_run(tmp_path: Path, inside: str):
-    """An inventory host and an index whose REACH falls inside the configured patterns still
-    reach their stores unchanged — the confinement refuses the OUTSIDE, not the inside. The
-    positive control both refusals need: without it, a rule that refused everything would"""
     confine_host("web-1")
     assert confine_index(inside, CONFIGURED_PATTERNS) == inside, \
         "an index whose reach is inside the configured patterns was rewritten or refused"
@@ -212,9 +172,6 @@ def test_an_inventory_host_and_a_configured_index_still_run(tmp_path: Path, insi
 
 
 def test_target_confinement_refuses_before_any_transport_is_attempted(tmp_path: Path):
-    """Target confinement refuses BEFORE any transport is attempted, so a live backend
-    outage cannot arrive first and obscure the refusal. Ordering, not outcome — distinct
-    from the refusals above, which pin the refusal itself."""
     ctx = _ctx(tmp_path)
 
     with pytest.raises(ConfinementFault):
@@ -224,9 +181,6 @@ def test_target_confinement_refuses_before_any_transport_is_attempted(tmp_path: 
 
 
 def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Path):
-    """The adapters expose a TRANSPORT CAPTURE SEAM: a sink threaded in through the same
-    `VerbContext` every verb already receives, into which each outbound request records its
-    RESOLVED target before the transport is attempted."""
     capture = TransportCapture()
     ctx = VerbContext(defender_dir=tmp_path / "tree", tenant=_tree(tmp_path / "tree"),
                       run_dir=tmp_path / "run", env={}, capture=capture)
@@ -251,14 +205,6 @@ def test_the_transport_capture_seam_records_every_resolved_request(tmp_path: Pat
 
 
 def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Path):
-    """A verb classed `r` may only reach a declared read endpoint for its system, including
-    a future verb wrapping the write client that already exists. The allowlist's entries are
-    `(URL pattern, HTTP METHOD)` PAIRS, and the capture seam records the method beside the"""
-    # THE REQUIREMENT IS EVERY SYSTEM THIS TEST DRIVES A READ ON, computed from the two
-    # sources the drive below uses rather than hand-listed. Stated as four names while six
-    # systems get driven, an implementer who builds to the assertion fails the loop on a
-    # message about a URL instead of about a missing system — and the list drifts again the
-    # next time a stub read is added.
     required = {"elastic", *(system for system, _, _ in REAL_STUB_ENDPOINTS)}
     assert required <= set(READ_ENDPOINT_ALLOWLIST), (
         f"the read allowlist declares no endpoints for "
@@ -296,12 +242,6 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
     for system, endpoint, method in REAL_STUB_ENDPOINTS:
         confine_read_endpoint(system, f"http://host{endpoint}", method=method, verb_class="r")
 
-    # THE THREE TICKET-STORE WRITE REFUSALS BELOW REST ON THIS, and until now nothing said so.
-    # `case-history` is the ticket WRITER's own system identity and a really configured system
-    # in this tree — it has a config of its own — so an implementer who declares read endpoints
-    # under it in good faith turns three of the four negatives green without touching a line of
-    # this test. It reaches the estate as a writer only: no adapter declares a verb for it, so
-    # a correct read allowlist has nothing to list.
     assert TICKET_WRITER_SYSTEM not in READ_ENDPOINT_ALLOWLIST, (
         f"the read allowlist declares read endpoints for {TICKET_WRITER_SYSTEM}, the ticket "
         f"WRITER's system identity — three of the four write refusals below then pass for a "
@@ -313,10 +253,6 @@ def test_an_r_classed_verb_may_only_reach_a_declared_read_endpoint(tmp_path: Pat
             confine_read_endpoint(system, f"http://host{endpoint}", method=method,
                                   verb_class="r")
 
-    # The collision itself, both ways round, under the ONE system name a read-classed verb
-    # wrapping the write client would carry. This pair is the reason the axis exists: drop
-    # either assertion and the rule is either unsatisfiable or blind to the case it was
-    # written for.
     confine_read_endpoint("ticket", f"http://host{TICKET_READ_PATH}", method="GET",
                           verb_class="r")
     with pytest.raises(ConfinementFault):
@@ -340,9 +276,6 @@ def _stub_tree(root: Path, system: str, prefix: str, *, bastion: str) -> Any:
 def test_a_non_elastic_stub_adapter_is_confined_through_the_real_shared_transport(
     tmp_path: Path,
 ):
-    """The read-endpoint rule is enforced for a STUB system (identity, not elastic) by
-    driving its REAL adapter through the REAL, unmocked `_stub_transport.py` — the shared
-    function all five stub systems route through — rather than by calling"""
     ctx = VerbContext(
         defender_dir=tmp_path / "tree",
         tenant=_stub_tree(tmp_path / "tree", "identity", "IDENTITY",
@@ -370,9 +303,6 @@ def test_a_non_elastic_stub_adapter_is_confined_through_the_real_shared_transpor
 
 
 def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
-    """The read-endpoint allowlist CANNOT BE BUILT with an entry that names no HTTP method: it
-    is assembled through a validating constructor that refuses one, and the shipped table is
-    what that constructor returned."""
     assert isinstance(READ_ENDPOINT_ALLOWLIST, ReadEndpointAllowlist), (
         "the shipped read-endpoint allowlist is not a constructed allowlist, so nothing in "
         "production refuses a method-less entry — the constructor is not on the path the "
@@ -400,9 +330,6 @@ def test_the_read_endpoint_allowlist_cannot_be_built_with_a_methodless_entry():
 
 
 def test_the_two_post_with_body_reads_still_pass_the_endpoint_check():
-    """Elastic's `_search` and `_query` — both POST-with-body reads — still pass the endpoint
-    check as LISTED PAIRS, so what the rule rejects is an unlisted (path, method) and never
-    "POST" as such. The standing guard for the refutation that killed the blanket rule."""
     confine_read_endpoint("elastic", "http://es:9200/logs-*/_search", method="POST",
                           verb_class="r")
     confine_read_endpoint("elastic", "http://es:9200/_query?format=json", method="POST",

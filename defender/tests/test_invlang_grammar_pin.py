@@ -1,26 +1,3 @@
-"""Pin: the ```invlang column grammar documented in `skills/invlang/SKILL.md`
-must match the parser's column constants.
-
-`SKILL.md` is injected verbatim as the authoring surface — it tells the agent
-which columns to write, in which order (`:V [id|type|class|ident|attrs?]`). The
-parser reads those same rows positionally against its column constants
-(`_VERTEX_COLS` etc.). The two are a hand-maintained pair: if a column is
-added / reordered / renamed in one and not the other, the agent writes a
-surface the parser rejects — and for the 9-col `:H` header that's a *whole-block*
-rejection (`_is_current_hyp_header`), i.e. a `ModelRetry` storm at runtime.
-
-This test pins the doc to the constants so that drift fails in CI (cheap, early)
-instead of at runtime (expensive, late). It compares the live constants, not a
-saved snapshot, so neither side can move alone.
-
-Coverage: the surfaces that have a fixed parser column constant —
-`:V`/`:E` rows, both hypothesis-declaration headers
-(`:H hypothesize.hypotheses` and the mid-run fork's
-`:H l-NNN.new_hypotheses`), and the `:H h-NNN.<sub>` sub-blocks. `:L findings`
-and `:R …` blocks read their columns from the block's own header (no fixed
-constant), so they are out of scope here.
-"""
-
 from __future__ import annotations
 
 import re
@@ -101,11 +78,6 @@ def test_skill_md_grammar_matches_parser_constants():
         f"expected to pin :V/:E/:H grammar headers from SKILL.md, "
         f"found tags {sorted(pinned_tags)} — extraction may have broken"
     )
-    # By NAME, not just by tag: `hypothesize.hypotheses` already contributes the
-    # `H` tag, so a rename or a singular typo in the documented fork header
-    # (`:H l-002.new_hypothesis`) leaves `_expected` returning None, this loop
-    # skipping the header, and the pin silently covering one declaration site
-    # instead of two — while the parser drops that block at runtime.
     assert "hypothesize.hypotheses" in pinned_names, (
         "SKILL.md no longer documents a `:H hypothesize.hypotheses` header"
     )

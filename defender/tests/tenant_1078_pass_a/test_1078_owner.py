@@ -13,10 +13,6 @@ from defender.tests.tenant_1078_pass_a import _spec1078 as H
 GRAMMAR = re.compile(H.GRAMMAR)
 
 
-# ======================================================================================
-# The grammar (O3)
-# ======================================================================================
-
 @pytest.mark.parametrize("candidate", [
     "a", "playground", "defender", "default", "a-b-c", "a0", "z" * 63, "a" * 64, "", "A",
     "../x", "a/b", "1abc", "acme\n", "-a", "a_b", "a.b", " a", "a ", "\nacme", "acme\r",
@@ -37,12 +33,6 @@ def test_o3_grammar_seam(candidate):
 
 
 def test_o3_trailing_newline_refused(tmp_path, monkeypatch):
-    """'acme\\n', which re.match with a '$' anchor accepts, is refused at every entry because
-    the check is re.fullmatch.
-
-    The owner's three spellings are asked here (the predicate, the refusal, the
-    TenantPaths constructor, create_tenant and require_tenant); the CLI entries are
-    `test_o3_grammar_refusal_parity`'s."""
     assert re.match(H.GRAMMAR, "acme\n"), "the premise moved: re.match no longer accepts it"
     tenant = H.tenant()
     root = tmp_path / "root"
@@ -72,10 +62,6 @@ def test_o3_length_boundary(tmp_path):
 
 @pytest.mark.parametrize("tenant_id", ["playground", "defender"])
 def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
-    """A valid id ('playground', and 'defender' under a data root outside the checkout)
-    round-trips: create_tenant writes it, require_tenant and TenantPaths accept it, and a run
-    dir under its runs base opens, by id through its accepted tenant's runs repository, as its
-    run (#1105 PR 2: `tenant_of_run_dir` is gone, F-13)."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     written = H.create_tenant(root, tenant_id)
@@ -99,14 +85,6 @@ def _opened_tenant(root: Path, tenant_id: str, run_id: str) -> str:
 
     H.place_knowledge_for_rows()
     return H.accept(root, tenant_id).runs_repository().open(RunId.parse(run_id)).tenant_id
-
-
-
-
-# ======================================================================================
-# TenantPaths (D1) and O11a
-# ======================================================================================
-
 
 
 def test_s7_j03_tenantpaths_relative_root_refused(tmp_path, monkeypatch):
@@ -141,8 +119,6 @@ def test_o11a_checkout_root_tenant_defender_refused():
     H.owner_refusal(H.TenantPaths, checkout, "defender")
 
 
-
-
 def test_checkout_path_itself_reached_through_a_symlink(tmp_path):
     """O11a's refusal holds when the checkout path is reached through a symlink: the
     comparison is between resolved paths."""
@@ -156,9 +132,6 @@ def test_checkout_path_itself_reached_through_a_symlink(tmp_path):
 
 
 def test_data_root_inside_another_checkouts_mounted_tree(tmp_path):
-    """O11a does not refuse a data root inside ANOTHER checkout's defender/ (N13's stated
-    non-obligation). Whether this non-check is pinned as a test rides demand fork F6 — kept
-    as a test (§7 F6, auto)."""
     other = tmp_path / "other-checkout"
     (other / ".git").mkdir(parents=True)
     (other / "defender").mkdir()
@@ -168,22 +141,12 @@ def test_data_root_inside_another_checkouts_mounted_tree(tmp_path):
     H.owner_refusal(H.TenantPaths, H.mod("_paths").PATHS.defender_dir / "data", "playground")
 
 
-# ======================================================================================
-# The row: create_tenant / require_tenant (D1, O2, O10)
-# ======================================================================================
-
-
-
 @pytest.mark.parametrize("fault", [
     "absent", "invalid-json", "list-top-level", "non-utf8", "missing-tenant_id",
     "missing-created_at", "non-string-tenant_id", "non-string-created_at",
     "off-grammar-tenant_id", "disagreeing-tenant_id", "directory-at-row", "dangling-link",
 ])
 def test_d1_require_tenant_refusals(tmp_path, fault):
-    """require_tenant refuses an absent row, a corrupt row (invalid JSON, a non-object top
-    level, a decode error, or a missing or non-string tenant_id or created_at), a row whose
-    tenant_id is off-grammar, and a row whose tenant_id disagrees with its folder (refused as
-    corrupt); every refusal names the path."""
     root = tmp_path / "data"
     row = H.row_path(root, "playground")
     row.parent.mkdir(parents=True)
@@ -210,8 +173,6 @@ def test_d1_require_tenant_refusals(tmp_path, fault):
     good = tmp_path / "good"
     H.plant_row(good, "playground")
     assert H.require_tenant(good, "playground").tenant_id == "playground"
-
-
 
 
 def test_d1_create_exclusive(tmp_path):
@@ -251,10 +212,6 @@ def test_d1_create_exclusive(tmp_path):
         assert on_disk["created_at"] == won[0].created_at, "the row is not the winner's"
 
 
-# ======================================================================================
-# The data root (D2) and runs_base_for
-# ======================================================================================
-
 def test_d2_resolve_data_root(tmp_path, monkeypatch):
     """resolve_data_root refuses a relative DEFENDER_DATA_ROOT and returns an absolute value
     .resolve()d, so a symlinked root resolves to its target."""
@@ -279,9 +236,6 @@ def test_d2_resolve_data_root(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("value", [None, ""], ids=["unset", "empty"])
 def test_d2_data_root_default(tmp_path, monkeypatch, value):
-    """With DEFENDER_DATA_ROOT unset, resolve_data_root refuses, naming the variable; an empty
-    value is refused the same way (parametrized); a set absolute value resolves (the
-    control). There is no code default."""
     if value is None:
         H.set_data_root(monkeypatch, None)
     else:
@@ -290,8 +244,6 @@ def test_d2_data_root_default(tmp_path, monkeypatch, value):
     assert H.DATA_ROOT_ENV in str(refusal), f"the refusal does not name the variable: {refusal}"
     H.set_data_root(monkeypatch, tmp_path / "set")
     assert H.resolve_data_root() == (tmp_path / "set").resolve()
-
-
 
 
 def test_data_root_itself_is_a_symlink(tmp_path, monkeypatch):
@@ -314,9 +266,6 @@ def test_data_root_itself_is_a_symlink(tmp_path, monkeypatch):
 @pytest.mark.parametrize("shape", ["equal", "learning-inside-data-root",
                                    "learning-contains-data-root", "equal-through-a-symlink"])
 def test_o13_widened_refusal(tmp_path, monkeypatch, shape):
-    """The learning-state refusal, which lives in resolve_data_root, refuses a learning state
-    root equal to, nested inside, or containing the data root, comparing resolved paths, and
-    a disjoint pair passes."""
     data = tmp_path / "data"
     data.mkdir()
     learning = {
@@ -333,19 +282,3 @@ def test_o13_widened_refusal(tmp_path, monkeypatch, shape):
     # the control: a disjoint pair passes
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "elsewhere" / "learning"))
     assert H.resolve_data_root() == data.resolve()
-
-
-
-
-# ======================================================================================
-# Demand #0 — the return contract and the ONE refusal shape
-# ======================================================================================
-
-
-
-
-
-
-
-
-

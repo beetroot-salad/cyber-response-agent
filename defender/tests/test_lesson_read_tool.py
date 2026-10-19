@@ -133,9 +133,6 @@ def test_l5_non_fenced_file_degrades_to_whole_text(tmp_path):
 
 
 def test_l6_pattern_grep_folds_the_selected_text(tmp_path):
-    """demand: L6 — ``pattern=`` grep-folds the SELECTED text (part-then-grep): under body only the
-    body lines matching the pattern return, and the frontmatter is out of scope; pattern=None is
-    unfolded."""
     scene = _scene(tmp_path)
     (scene.corpus / "l6.md").write_text(
         "---\nname: l6\ndescription: SHARED-TOKEN in fm\n---\n"
@@ -175,13 +172,6 @@ def test_l7_denied_path_raises_no_existence_oracle(tmp_path):
 
 
 def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
-    """demand: L10 — an oversized lesson is truncated to the shared ``_read_char_cap`` with the same
-    overflow notice as ``_tool_read_file`` (one core; ``part`` is its only added seam).
-
-    The notice and its filter hint name ``lesson_read``, not ``read_file``: the curator has no bash
-    reducer (no ``jq``, no ``defender-sql``), so it is precisely the agent that lands on the hint's
-    read-tool branch — and ``read=True`` was dropped, so a hardcoded ``read_file`` would tell the
-    one agent that reads this hint to call a tool it does not have."""
     scene = _scene(tmp_path)
     cap = _rt_tools._read_char_cap()
     (scene.corpus / "big.md").write_text("---\nname: big\n---\n" + "X" * (cap + 5000) + "\n")
@@ -199,9 +189,6 @@ def test_l10_oversized_lesson_bounded_by_shared_cap(tmp_path):
 
 
 def test_l11_trusted_lesson_returned_raw_no_wrap(tmp_path):
-    """demand L11 as superseded by #680 — the legacy path classifier still does not mark
-    lessons untrusted, but a learning-role lesson_read frames cross-agent authored bytes at
-    the stronger model boundary."""
     scene = _scene(tmp_path)
     lp = _lesson(scene.corpus, "l11", body="L11-RAW-BODY")
     assert permission.is_untrusted_read(scene.corpus / "l11.md") is False
@@ -226,9 +213,6 @@ def test_t2_corpus_author_def_drops_read_adds_lesson_read(tmp_path):
 
 
 def test_t3_registers_lesson_read_not_read_file(tmp_path):
-    """demand: T3 — a CORPUS_AUTHOR agent registers ``lesson_read`` and NOT ``read_file``; controls:
-    lesson_read is absent from every other role, and a read=True role still registers ``read_file``
-    with its ``pattern`` grep-fold."""
     agent, logger = _build_curator_agent(tmp_path)
     try:
         tools = agent._function_toolset.tools

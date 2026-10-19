@@ -56,9 +56,6 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
     resolved = Path(ss.resolve_store_path(_run_handle_1165(run_dir)))
     assert base.resolve() not in resolved.resolve().parents
-    # #1235: the case pointer is a host-only sidecar BESIDE the run dir (`<run_id>.session-
-    # pointer.json`, like `.run-end.json`), so the runs base holds the run dir and that run's
-    # own sidecar — exactly those two, and still no store file.
     pointer = RunPaths(run_dir).session_pointer()
     assert pointer.name == f"{run_dir.name}.session-pointer.json", pointer
     assert sorted(base.iterdir()) == sorted([run_dir, pointer]), (
@@ -67,9 +64,6 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
 
 
 def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
-    """A `case_id` that is not a conforming slug is REJECTED at the resolver — not
-    sanitised, not escaped — before it is interpolated into a filesystem path; a conforming
-    one resolves normally."""
     ss = store_mod()
     base = runs_base(tmp_path)
 
@@ -167,9 +161,6 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
 
 
 def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
-    """The real host collector — `lead_repository.stage_tables` — does not follow a symlink out
-    of the run dir: the store's bytes do not enter the staged tree, and a merely DANGLING
-    symlink does not abort the collection. (Since #648 the collector goes further and refuses"""
     from defender.learning import lead_repository
 
     ss = store_mod()
@@ -219,9 +210,6 @@ def _actor_fixture(tmp_path):
 
 
 def test_the_actor_projection_excludes_payloads(tmp_path):
-    """An actor-role read returns tool-call coordinates only: no `message_payload` body, no
-    `config` row, no `session` row, and nothing carrying the defender's goals — on EVERY
-    out-edge the projected content could reach, not merely on the message table."""
     ss = store_mod()
     store, session_id = _actor_fixture(tmp_path)
 
@@ -254,9 +242,6 @@ def test_the_analysis_role_reaches_the_payloads_through_the_same_reader(tmp_path
 
 
 def test_every_via_reaching_store_rows_goes_through_the_role_scoped_projection(tmp_path):
-    """Every path that reaches store rows applies the same role-scoped projection: the
-    actor via is payload-free, the analysis via is not, the `defender-sql` lane cannot
-    resolve a reference to the store file at all, and the reader's direct handle refuses to"""
     ss = store_mod()
     store, session_id = _actor_fixture(tmp_path)
 
@@ -301,4 +286,3 @@ def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_p
     assert {row[0] for row in sql(final, "SELECT session_id FROM session")} == set(sessions)
     files = sorted(p.name for p in Path(final.path).parent.glob("*.db"))
     assert files == ["case-alpha.db"], f"two executions produced {files}"
-

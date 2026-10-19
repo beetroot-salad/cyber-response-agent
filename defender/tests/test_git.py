@@ -55,9 +55,6 @@ def test_git_status_z_handles_spaced_paths(tmp_path):
 
 
 def test_git_status_survives_non_utf8_path(tmp_path):
-    """A non-UTF-8 untracked filename must not crash ``git_status`` (the ``-z`` form emits
-    raw, unquoted path bytes, so a strict decode would ``UnicodeDecodeError``). It is
-    surrogate-escaped and surfaces as an out-of-corpus record the scope gate quarantines."""
     repo = _repo(tmp_path)
     with open(os.path.join(os.fsencode(repo), b"stray-\xff.md"), "wb") as f:
         f.write(b"x\n")
@@ -67,9 +64,6 @@ def test_git_status_survives_non_utf8_path(tmp_path):
 
 
 def test_git_status_z_consumes_the_rename_origpath(tmp_path):
-    """A staged rename emits TWO NUL fields — `R  <newPath>` then a bare `<origPath>`.
-    Reading the second as a record of its own fabricated a phantom whose status was the
-    first two characters of the old path and whose path was that path minus two (#854 F-17)."""
     repo = _repo(tmp_path)
     _git.git(["mv", "seed.md", "renamed.md"], cwd=repo)
     records = _git.git_status(repo)

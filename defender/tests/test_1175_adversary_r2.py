@@ -1,9 +1,3 @@
-"""#1175 round-2 adversary: strengthening scenes for test_1175_claim_session.py (O6-O8).
-
-The round-2 adversary pass on PR #1193: each scene was red against a named cheat (A: hooks off
-on the commit call only; B: gc off but maintenance on; C: the claim's cleanup scope ending
-before the re-queue arm; E: `core.fsmonitor` left on) and green on an honest implementation.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -48,10 +42,6 @@ from defender.tests.test_1175_leads_git_liveness import (
     _tick,
 )
 
-# ---------------------------------------------------------------------------------------
-# R2-A (O7 "Repo hooks ... never run in it"): the hooks git runs on the commit's OWN index and
-# ref writes, which `HOOKS` does not arm.
-# ---------------------------------------------------------------------------------------
 
 #: The subcommands that make up the claim's commit (S3: reset the index, stage, commit), in
 #: whatever spelling an implementation picks.
@@ -110,9 +100,6 @@ exit 0
 
 @pytest.mark.parametrize("name", ["post-index-change"])
 def test_r2a_no_index_hook_runs_in_the_lead_author_commit(tmp_path, monkeypatch, name):
-    """O7, lead-author: a `post-index-change` hook that stalls whenever one of the commit's own
-    steps (`read-tree`, `add`, `rm`, `commit`, ...) runs it. The claim lands with exactly
-    `M LIFT`, and no commit step ran the hook. Positive control: a plain `git add` runs it."""
     sc = _lead_scene(tmp_path, monkeypatch)
     hook = _IndexHook(name, ran=tmp_path / "hook-ran", pids=tmp_path / "hook-pids")
     hook.install(sc.wt)
@@ -146,11 +133,6 @@ def test_r2a_no_index_hook_runs_in_the_curation_commit(tmp_path, monkeypatch, na
         hook.assert_armed(sc.wt, EXEC)
     finally:
         hook.shim.kill_stalls()
-
-
-# ---------------------------------------------------------------------------------------
-# R2-B (O7 "automatic maintenance never run[s] in it"): a maintenance task other than gc.
-# ---------------------------------------------------------------------------------------
 
 
 def _arm_loose_objects_maintenance(wt: Path) -> None:
@@ -191,21 +173,9 @@ def test_r2b_no_maintenance_task_runs_in_the_curation_commit(tmp_path, monkeypat
     assert _packs(sc.wt), "a plain commit ran no maintenance: the scene was unarmed"
 
 
-# ---------------------------------------------------------------------------------------
-# R2-C (S4 "otherwise (served, dead-lettered or re-queued): it is raised"): the RE-QUEUED arm.
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("how", ["missing", "not-executable", None],
                          ids=["missing", "not-executable", "control"])
 def test_r2c_unstartable_git_after_a_requeued_claim_ends_the_tick(tmp_path, monkeypatch, how):
-    """Two claims. The first's step leaves an edit of `LIFT` behind, makes git unable to start,
-    and raises the transient the drain re-queues (`_LeadAuthorRetry`, attempt 1 of 3). No fault
-    propagates out of the claim (the drain handles the retry itself), so the cleanup's `OSError`
-    is the tick's: raised, `case-b` never served over `case-a`'s leftover, `case-b` still queued
-    as enqueued, nothing dead-lettered, the leftover still standing.
-
-    `control`: git can start: `case-a` re-queued, `case-b` served, the leftover reset."""
     sc = _lead_scene(tmp_path, monkeypatch, cases=("case-a", "case-b"))
     run_a, run_b = sc.run_dirs
     served: list[Path] = []
@@ -238,12 +208,6 @@ def test_r2c_unstartable_git_after_a_requeued_claim_ends_the_tick(tmp_path, monk
     assert _failed(sc.paths) == []
     assert "finish" not in sc.branch.events
     _assert_leftover(sc.wt, LIFT, EDITED_LIFT, cleaned=False, committed=LIFT_TEXT)
-
-
-# ---------------------------------------------------------------------------------------
-# R2-E (O7 "Repo hooks ... never run in it"): `fsmonitor-watchman` (githooks(5)), which git runs
-# from `core.fsmonitor`, not from the hooks dir, so `core.hooksPath` does not disable it.
-# ---------------------------------------------------------------------------------------
 
 
 def _install_fsmonitor_hook(wt: Path, ran: Path, pids: Path) -> None:

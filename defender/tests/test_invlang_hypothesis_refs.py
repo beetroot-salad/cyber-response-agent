@@ -1,32 +1,3 @@
-"""Every site that names an `h-*` resolves to a `:H` row, and the weight table is keyed by
-exactly what those rows declare.
-
-#819 closed the `:T resolutions` case — a resolution could no longer move a hypothesis
-nothing declared. It was the shallowest of three reference sites and the second of two
-depths, and #821 is the rest of both:
-
-  * `:L findings`' `tests` column references a hypothesis the
-    same way and neither resolved it. A lead could claim to TEST a hypothesis nobody
-    declared — upstream of
-    the resolution the rule did catch, so a typo surfaced (if at all) one step late and
-    pointing at the wrong row.
-
-  * `_walkers.final_weights` seeded an entry from the resolution row itself, so the
-    validator was a gate in front of a walker that still minted the phantom. The gate only
-    runs on the write; `queries.py` and the judge's `compare.py` read the walker on
-    documents that never passed through it — one carrying a parse warning, or one read back
-    after the fact — and counted an id that existed only as a typo as a live hypothesis.
-
-The declaration check is `validate_companion`'s; the key set is the walker's. They are
-tested together here because either alone leaves the phantom reachable.
-
-The resolution site's own tests stay in `test_invlang_prediction_refs.py` with the
-prediction-citation rule they were written against; `_check_hypothesis_refs` now owns all
-four sites, and the error it emits for a resolution keeps its `moves undeclared hypothesis`
-body — only the closing clause generalised, from "before anything resolves it" to "before
-anything references it", now that three more sites can be the thing referencing it.
-"""
-
 from __future__ import annotations
 
 
@@ -49,10 +20,6 @@ _EDGE = (
     "e-002|executed|v-001|v-001|2026-05-05T03:42:11Z|siem-event:siem|\n"
 )
 
-#: Scoped to this rule. `examples/` carries unrelated errors that predate it, so the corpus
-#: check below stays a check on the rule rather than a freeze of the whole validator's
-#: verdict. One substring covers all three sites — `moves`/`tests`/`names` undeclared
-#: hypothesis — because they share the message body by construction.
 _MARKERS = ("undeclared hypothesis",)
 _COMMITMENT_MARKER = "tests commitment"
 
@@ -84,9 +51,6 @@ def _parsed(body: str):
 
 
 def test_a_lead_that_tests_an_undeclared_hypothesis_is_rejected():
-    """The first of the two sites. h-999 is not declared anywhere, and PLAN is where the
-    typo is cheapest to fix — before a lead is dispatched against a commitment that does
-    not exist."""
     errors = _errors(_doc(_declaring("h-001") + "\n" + _lead("h-001,h-999")))
     assert len(errors) == 1
     assert "'h-999'" in errors[0]
@@ -140,9 +104,6 @@ def test_a_dropped_declaration_block_stands_the_site_down():
 
 
 def test_final_weights_does_not_mint_a_hypothesis_no_H_row_declares():
-    """The walker half of #821, on a document the validator never saw. Seeding the entry
-    from the resolution row is what made an id that exists only as a typo a key in the
-    table every consumer reads."""
     companion = _parsed(
         _declaring("h-001") + "\n"
         + _lead("h-001") + "\n"
@@ -204,9 +165,6 @@ def test_the_surviving_key_is_not_advertised_as_a_flat_conclude_row():
     companion = _parsed(
         _declaring("h-001") + "\n"
         ":T conclude\n"
-        # A recognized key beside the unrecognized one: a `:T conclude` that records NOTHING
-        # is warned in its own right, and this test is about the flat-key hint rather than
-        # about an empty close.
         "disposition            inconclusive\n"
         "surviving_hypotheses   none\n"
         "\n"
@@ -265,9 +223,6 @@ def test_the_misspelled_declaration_block_defers_for_the_ids_it_dropped():
 
 
 def test_a_dropped_declaration_does_not_make_the_commitment_rule_double_report():
-    """The commitment half needs the same deference. With the `:H` block rejected there is
-    nothing to scope a `p*` against, and falling back to "every declared hypothesis" —
-    which is none — reported it on top of the parse warning: two errors, one defect."""
     doc = _doc(
         _EDGE + "\n"
         ":H hypothesize.hypotheses [id|name|attached_to|rel]\n"
@@ -312,9 +267,6 @@ def _with_preds(tests: str) -> str:
 
 
 def test_a_commitment_in_tests_that_no_tested_hypothesis_declares_is_rejected():
-    """The other half of the mixed column. Only its `h-*` was being resolved, so
-    `tests=h-001,p9` named a commitment that does not exist and validated clean — the same
-    hole the hypothesis half had, one namespace over."""
     errors = _commitment_errors(_with_preds("h-001,p9"))
     assert len(errors) == 1
     assert "'p9'" in errors[0]
@@ -333,5 +285,3 @@ def test_a_siblings_commitment_is_rejected_even_though_it_exists():
     errors = _commitment_errors(_with_preds("h-001,p2"))
     assert len(errors) == 1
     assert "'p2'" in errors[0]
-
-

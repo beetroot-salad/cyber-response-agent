@@ -53,11 +53,6 @@ def test_a_missing_table_refuses_rather_than_projecting_nothing(tmp_path):
 # ---- O3: two tenants, one process ---------------------------------------------------------------
 
 def test_one_process_holds_two_tenants_grants_and_each_admits_exactly_its_own_pairs(tmp_path):
-    """THE O3 test. Both registries are built in this one process, A first then B then A again,
-    over the real adapters. `cmdb.get-host` is granted under A and refused under B;
-    `identity.get-user` the other way round — positive and negative on the SAME pair. A grant
-    fixed per process (the pre-#1106 cache, or a first-tenant-wins memo) answers both tenants
-    with one table and fails one side."""
     root = tmp_path / "tenants"
     a = T.place_tenant(root, "acme", table=T.TABLE_A)
     b = T.place_tenant(root, "bravo", table=T.TABLE_B)
@@ -107,11 +102,6 @@ def test_a_table_edited_between_two_runs_is_read_again(tmp_path):
 
 def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_tenant(
         tmp_path, capsys, monkeypatch):
-    """M2: `defender-policy` reached the table at import through `agents.py` → `GATHER_DEF`.
-    With no process-level grant it must build gather's grant from a root and a tenant it is
-    HANDED — the root as `$DEFENDER_DATA_ROOT` (#1120: the one place tenants are found), the
-    tenant as `--tenant` — a complete tenant shows gather's policy; an absent one is refused
-    naming the path."""
     policy_cli = T.mod("scripts.policy_cli")
     root = tmp_path / "tenants"
     T.place_tenant(root, "acme")
@@ -138,10 +128,6 @@ def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_te
 
 def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
         tmp_path, capsys, monkeypatch):
-    """A tenant freshly copied from the template grants gather nothing. `defender-policy show
-    gather` for it is refused the way a run is — a `defender-policy:` line naming the table —
-    never a `GrantError` traceback out of `compile_policy`. The control is the test above (a
-    tenant granting gather verbs shows its policy)."""
     import pytest
 
     policy_cli = T.mod("scripts.policy_cli")
@@ -160,10 +146,6 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
 
 @pytest.mark.parametrize("inside", ["code tree", "runs base"])
 def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside):
-    """The settings half is host-only: a data root placed in the code tree (bound read-only
-    into every box) or under the runs base (whose run dirs are the box's writable bind) would
-    hand the model every tenant's endpoints. `resolve_tenant` refuses it; the same tenant under
-    a root outside both resolves (the control)."""
     rt = T.mod("runtime.run_tenant")
     defender_dir = tmp_path / "repo" / "defender"
     runs_base = tmp_path / "runs"

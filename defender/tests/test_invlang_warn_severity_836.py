@@ -18,10 +18,6 @@ from defender.tests._invlang_warn_836 import (
 
 # error-severity documents, one per family that must NOT become a warning (N1)
 
-#: EXECUTED at c0dca747 — one `parse error: ... row has 5 cells but 4 expected` diagnostic.
-#: PR-3's finding is that only the too-MANY direction produces one; one cell too FEW is
-#: padded by `_row_cells` and emits nothing at any severity, so the fixture takes the side
-#: that actually reaches the validator.
 _PARSE_ERROR = PROLOGUE + attr_block("l-001|v-001|owner|a|b")
 
 #: EXECUTED — one `undeclared lead` diagnostic, from a document-global check with no locus.
@@ -142,9 +138,6 @@ def test_validate_companion_drops_warnings():
 
 
 def test_the_write_gate_applies_the_validators_warn_severity(tmp_path):
-    """`decide_write` (the gate the write verbs face) applies the validator's warn severity: a
-    warn-only document is allowed, a parse error is not. Its unused `_decide_investigation_write`
-    twin (brief F6), whose parity this test once pinned, was deleted in #1136."""
     from defender.agents import MAIN_DEF
     from defender.runtime.agent_definition import bind
     from defender.runtime.permission.files import decide_write
@@ -196,5 +189,3 @@ def test_warning_renders_the_flagged_row_byte_exactly(tmp_path, label, row):
 
     assert f"row: {row}" in rendered, label
     assert flagged_rows(doc) == (row,), label
-
-

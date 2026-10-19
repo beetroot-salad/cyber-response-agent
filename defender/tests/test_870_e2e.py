@@ -39,29 +39,6 @@ pytestmark = pytest.mark.e2e
 
 
 def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, monkeypatch):
-    """O3's own oracle, end to end: a replay run whose gather lane fails a terminal
-    `cat <payload> | defender-sql …` leaves `∅.bash-shim` rows in the pitfalls queue, and the
-    next curation tick hands the curator a handoff whose `path` is the reducer surface — which
-    the curator then writes and the loop commits.
-
-    Asserted on the QUEUE ROW and the HANDOFF TARGET and the COMMIT, because "the drop counter
-    is 0" would pass a build that never wrote the row at all.
-
-    The whole chain is production code between two fakes: the model is scripted and the box
-    returns a scripted failure (the real `defender-sql` is not exercised — a test that
-    depended on it would be asserting about the machine's duckdb install, and at this base the
-    shim exits `EXIT_NO_RUNTIME` here, which the translation table calls infra and the lane
-    correctly refuses to teach). Everything between — the permission gate, `_record_shim_
-    failure`'s four conjunctive preconditions, `terminal_reducer`'s structural test, the
-    queries table, the join, the extraction, the collector, the merge, the threshold, the
-    handoff builder, the path rule, the content rule and the commit — is the real thing.
-
-    THE THRESHOLD IS PART OF THE ORACLE, not a fixture detail. Three failing reduces of one
-    unchanging diagnosis are ONE merged record with `occurrences=3`, and under FK-3's gate
-    that record clears a threshold of 3 on its own. Under the record-counting reading it never
-    could, and the motivating incident would have been unreachable end to end — which is what
-    made FK-3 a decision about whether this lane fires at all rather than a tuning question.
-    """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     run_dir = materialize(tmp_path, GOLDEN_AB3)
     res = _run(
@@ -109,9 +86,6 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
     assert reducer[0]["failures"][0]["stderr_digest"] == BINDER
     assert "defender-sql" in reducer[0]["failures"][0]["executed_query"]
 
-    # THIS TICK's commit, not HEAD's file list: the fixture seeds the reducer surface in its
-    # own commit, so the literal is in `head_files` from the seed whenever the tick commits
-    # nothing — which is exactly the build this demand exists to catch.
     assert git(repo, "rev-parse", "HEAD").stdout.strip() != head_before, (
         "the taught lesson never reached a commit of its own"
     )
@@ -124,12 +98,6 @@ def test_e2e_a_failed_reducer_pipe_becomes_a_reducer_handoff(tmp_path: Path, mon
         r["consumed_category"] == "consumed_committed" for r in consumed_by_id(paths).values()
     )
 
-    # and the loop closes: the NEXT reduce can read what this one was taught
-    # O3's own reachability claim (G23), executed as a break attempt rather than believed
-    # from two definitions: the gather role's REAL read gate, compiled against the tree the
-    # tick just committed into, admits the reducer surface and refuses the paths outside the
-    # corpus that prove it is still a gate. Without this arm the whole round ends at a
-    # committed file nobody has shown anyone reads.
     policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=run_dir, defender_dir=repo / "defender")
 
     def _readable(path: Path) -> bool:

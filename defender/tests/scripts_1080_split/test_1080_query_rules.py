@@ -28,11 +28,6 @@ def _g() -> Any:
     return S.golden(GOLDEN)
 
 
-# ======================================================================================
-# Locating the moved rules
-# ======================================================================================
-
-
 def _flat_rule(base_name: str) -> tuple[str, str]:
     """`(module relpath, name in that module)` of a flat-tier query rule.
 
@@ -54,10 +49,6 @@ def _flat(base_name: str) -> Any:
     home, name = _flat_rule(base_name)
     return getattr(importlib.import_module(S.dotted(home)), name)
 
-
-# ======================================================================================
-# Shared encoders (capture and test both go through these)
-# ======================================================================================
 
 #: A golden value whose canonical JSON is longer than this is stored as its digest.
 _BIG = 4000
@@ -88,11 +79,6 @@ def _trip(t: Any) -> Any:
     if t is None:
         return None
     return {"type": type(t).__name__, "first_seq": t.first_seq, "occurrence": t.occurrence}
-
-
-# ======================================================================================
-# Input tables
-# ======================================================================================
 
 
 def awkward_cases() -> dict[str, tuple[Any, Any, Any]]:
@@ -272,11 +258,6 @@ def nesting_cases(limit: int) -> dict[str, tuple[Any, dict[str, str]]]:
     return out
 
 
-# ======================================================================================
-# Fixture builders (capture and test both drive these)
-# ======================================================================================
-
-
 def write_calls(append: Any, run: Any, calls: list[dict[str, Any]]) -> list[dict]:
     """Record each call through `append` (the queries-table writer), as a granted query. `run`
     is what the writer takes first: the run's state (`RunState`, #1235)."""
@@ -328,16 +309,6 @@ def drive_roundtrip(state: Any, *, request_key: Any, append: Any,
     }
 
 
-# ======================================================================================
-# The census helper (t_query_rules_in_flat_tier, s085, s087)
-# ======================================================================================
-
-
-# ======================================================================================
-# The tests
-# ======================================================================================
-
-
 def _query_id_verdicts() -> dict[str, dict[str, Any]]:
     pytest.importorskip("pydantic_ai")
     from defender.runtime import query_tool
@@ -367,39 +338,14 @@ def _assert_query_ids(group: str) -> None:
 
 
 def test_model_query_id_empty_or_reserved():
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). An empty, whitespace-only, reserved-sentinel or
-    reserved-prefix- plus-text query id, or one with a leading space, is accepted or rejected
-    exactly as today by the same rule.
-
-    The query tool's rule is the pair it applies: its forbidden-character screen (the refusal
-    text, or none) and the moved `resolve_query_id` (the id the row is recorded under — the
-    model's own when accepted, the `{system}.{verb}` fallback when not), plus the reserved-prefix
-    test; each is compared with the base golden per id, and the query tool must hold the moved
-    rule itself, not a copy."""
     _assert_query_ids("s162")
 
 
 def test_model_query_id_with_forbidden_characters_and_lookalikes():
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). Query ids with a slash, backslash, `..`, NUL, newline, CR,
-    `#` and the Unicode look-alikes are rejected or accepted exactly as today by the same rule.
-
-    Observed as in s162: the screen's refusal text and the recorded id, per id, against the
-    base golden."""
     _assert_query_ids("s163")
 
 
 def test_params_nested_exactly_at_the_depth_limit():
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). Params nested one level under, exactly at and one past the
-    nesting limit pass or raise the nesting fault as today, as dicts, lists and mixes; a wide
-    shallow map passes. The limit's value is unchanged.
-
-    The limit, the fault class and the normaliser are the flat-tier ones ([26]: the fault and
-    its limit travel with the normaliser). Each case's outcome — the normalised value, or the
-    fault's class and sentence naming the field — is the base golden; the fault raised is an
-    instance of the flat-tier class and carries the field."""
     g = _g()
     limit = _flat("PARAMS_NESTING_LIMIT")
     assert limit == g["constants"]["PARAMS_NESTING_LIMIT"]
@@ -412,14 +358,6 @@ def test_params_nested_exactly_at_the_depth_limit():
 
 
 def test_params_values_of_every_awkward_kind():
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). NaN, infinity, negative zero, huge integers,
-    `1`/`1.0`/`True`, bytes, sets, tuples, dates, paths, int-versus-str dict keys, insertion
-    order and None/int/non- ASCII system and verb values render to the same safe params and the
-    same request key as before.
-
-    Both outcomes per row of `awkward_cases()` against the base golden, through `S.canon`, so a
-    tuple turning into a list, `1` into `1.0` or a key's type changing is a difference."""
     g = _g()["awkward"]
     normalise, request_key = _flat(_JSP), _flat(_RK)
     for case, (system, verb, params) in awkward_cases().items():
@@ -428,15 +366,6 @@ def test_params_values_of_every_awkward_kind():
 
 
 def test_same_call_live_and_after_the_row_is_read_back(tmp_path):
-    """A call's params with a tuple and an int-keyed dict give the same request key live as the
-    learning side computes from the stored row after a JSON round trip, as today. The key rule
-    is identical before and after the move (F30).
-
-    The call is recorded by the writer into a real queries table in `tmp_path`, read back by
-    learning's repository, and keyed by the ledger from the typed row and from the raw record;
-    the live key, every read-back key and the guard over the read-back rows agree, and the whole
-    record equals the base golden. The writer and the guard stay in `record_query` under the
-    2026-10-04 scope cut, so they are reached at its staying path (E5)."""
     g = _g()["roundtrip"]
     request_key = _flat(_RK)
     rq = S.module_at("defender/scripts/gather_tools/record_query.py")

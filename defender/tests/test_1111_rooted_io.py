@@ -45,9 +45,6 @@ LEAF_PLANTS = ("hardlink", "symlink", "fifo", "socket", "directory")
 #: What a plant can put at a holding folder between the root and the record.
 FOLDER_PLANTS = ("folder_link_inside", "folder_link_outside", "folder_file", "folder_fifo")
 
-#: O6's write-side table, row for row: plant -> (exception type, errno, alias-marked). Unmarked
-#: means `write_guarded_alias` is absent or False: `hooks/budget_enforcer.py` reads it with
-#: `getattr(e, "write_guarded_alias", False)`, so both spellings count toward the kill circuit.
 O6_ROWS: dict[str, tuple[type[OSError], int, bool]] = {
     "symlink": (OSError, errno.ELOOP, True),
     "hardlink": (OSError, errno.EMLINK, True),
@@ -69,10 +66,6 @@ HOST_BYTES = b'{"planted": "HOST"}\n'
 #: What a plain file at the record's own address holds: the positive control's answer.
 PLAIN = "plain record at its own address\n"
 
-
-# ---------------------------------------------------------------------------------------
-# The members, enumerated from the shipped tables and addressed from their own paths (O4)
-# ---------------------------------------------------------------------------------------
 
 @dataclasses.dataclass(frozen=True)
 class Member:
@@ -192,10 +185,6 @@ def tree(tmp_path: Path) -> Tree:
     host.mkdir()
     return Tree(tmp_path, runs_base, world, host)
 
-
-# ---------------------------------------------------------------------------------------
-# Plants, the tree census, the deadline
-# ---------------------------------------------------------------------------------------
 
 @dataclasses.dataclass(frozen=True)
 class Planted:
@@ -354,10 +343,6 @@ def assert_same_refusal(got: BaseException | None, owner: BaseException, *, wher
         f"{where}: the owner's refusal ({owner!r}) no longer fires first — the op raised {got!r}")
 
 
-# ---------------------------------------------------------------------------------------
-# A member's own verb, a payload it accepts, and what landing looks like
-# ---------------------------------------------------------------------------------------
-
 def document(m: Member, tag: str) -> str:
     """A whole document `m.write` accepts. The report must meet its schema; every other
     written record, the investigation included, takes plain text."""
@@ -404,15 +389,6 @@ def seam_calls(rec: S.RecordingIo, mark: int) -> list[tuple[str, dict[str, Any]]
     return [(op, S.bound_arguments(op, a, kw)) for op, a, kw in rec.invocations[mark:]]
 
 
-# =======================================================================================
-# O4 — the matrix is the shipped tables, and it reaches every kind of address
-# =======================================================================================
-
-
-# =======================================================================================
-# O1 / O3 — no read escapes the root, and no plant hangs a read
-# =======================================================================================
-
 def _read_cases():
     for m in READABLE:
         for kind in LEAF_PLANTS:
@@ -425,19 +401,6 @@ def _read_cases():
 @pytest.mark.parametrize(("m", "kind", "folder"), list(_read_cases()))
 def test_o1_o3_a_plant_at_a_records_address_reads_none_and_a_plain_file_there_reads_back(
         tree, m, kind, folder):
-    """O1: no handle read returns the bytes of a file reached through a symlink at any
-    component below the trust root, or of anything but a plain single-linked regular file. A
-    refused read is `None`, as today. O3: a FIFO (at the name, or as a holding folder) is
-    refused without blocking.
-
-    Holding folders are the new ground (C1: today's `read_guarded` judges only the leaf, so a
-    `wire_logs -> /host` link reads the host's bytes). A link to a folder INSIDE the root
-    reaches the walk even for the `_confine`d composed kinds. A link outside the root is
-    refused by `_confine` itself for those kinds, before any read, as today (O6's "owner
-    refusals fire first").
-
-    The read changes nothing on disk. Positive control on the same address: with the plant
-    removed and a plain file written there, the same handle reads it back."""
     planted = plant(tree, m, kind, folder)
     h = tree.handle(m)
     owner = owner_refusal(h)
@@ -494,14 +457,6 @@ def _record_sources(tree: Tree) -> list[Path]:
 
 @pytest.mark.parametrize("kind", LEAF_PLANTS)
 def test_o1_o3_a_plant_at_any_file_run_record_reads_counts_as_absent(tree, kind):
-    """O1 over `Run.record`: a plant at any file the record reads (enumerated by recording its
-    reads, O4) makes the record exactly what it is with that file ABSENT. It is never what the
-    plant's bytes would give, and never a hang (O3).
-
-    Controls: every source feeds the record (removing it changes the record, so the negative
-    can see a leak), and restoring the plain file restores the full record. Floor: the five
-    reads the design names (provenance, alert bytes, alert record, report, run-end sidecar) are among those
-    recorded, so the enumeration cannot shrink to nothing."""
     _fill_record_sources(tree)
     sources = _record_sources(tree)
     owner = RunPaths(tree.runs_base / RUN_ID)
@@ -515,9 +470,6 @@ def test_o1_o3_a_plant_at_any_file_run_record_reads_counts_as_absent(tree, kind)
         src.unlink()
         absent = tree.run().record
         if src != owner.alert:
-            # The stored alert only vouches for the record's digest (#1222 A1): without it the
-            # record is what it was, so there is no control to run for it — the plant arms
-            # below are its test.
             assert absent != full, f"control: {src.name} does not feed run.record"
         planted = plant_leaf(src, kind, host=tree.host, body=body)
         before = census(tree.tmp)
@@ -531,14 +483,6 @@ def test_o1_o3_a_plant_at_any_file_run_record_reads_counts_as_absent(tree, kind)
 
 @pytest.mark.parametrize("kind", LEAF_PLANTS)
 def test_o1_the_schema_gated_writes_pre_read_does_not_read_through_a_plant(tree, kind):
-    """O1 over the schema-gated write's pre-read. The investigation is validated against what
-    is on disk. An over-bound document's refusal names the committed share when there is one
-    ("N of those bytes are already committed") and says "Trim it" when there is none. So the
-    refusal's words show what the pre-read returned.
-
-    Control: a plain `investigation.md` holding N bytes is named in the refusal. The same N
-    bytes behind a plant are not: the pre-read saw nothing, the refusal is the schema's
-    `ValueError` with "Trim it", and the tree is unchanged."""
     m = _member("investigation")
     record = tree.path(m)
     committed = "x" * 1000
@@ -560,10 +504,6 @@ def test_o1_the_schema_gated_writes_pre_read_does_not_read_through_a_plant(tree,
     assert census(tree.tmp) == before
 
 
-# =======================================================================================
-# O2 / O3 / O6 / O7 — no write escapes the root; today's error shapes; the partial-failure line
-# =======================================================================================
-
 def _write_cases():
     for m in WRITABLE:
         for kind in LEAF_PLANTS:
@@ -576,22 +516,6 @@ def _write_cases():
 @pytest.mark.parametrize(("m", "kind", "folder"), list(_write_cases()))
 def test_o2_o3_o6_o7_a_write_into_a_plant_is_refused_in_todays_shape_and_changes_nothing(
         tree, m, kind, folder):
-    """O2: no handle write (`write` in create or replace, `append`, `update`), and no
-    holding-folder creation it does, creates, truncates or modifies any entry reached through
-    a symlink below the root, or writes into a non-plain entry. The whole temp tree is
-    unchanged: the plant, the file a link or hard link reaches, the folder a link points at,
-    and no folder is made anywhere. O3: a FIFO is refused without blocking.
-
-    O6: the refusal is today's, row for row (`O6_ROWS`). A marked alias at the leaf
-    (symlink ELOOP, hard link EMLINK). An unmarked ELOOP for any other non-plain leaf. An
-    unmarked ELOOP for a symlinked folder, an unmarked ENOTDIR for a non-directory folder. The
-    owner's `_confine` refusal still fires first for an outside link on a composed kind.
-
-    O7: an `observability` append swallows a refused LEAF write into `run.partial_failures`
-    ("<member>: append failed") and does not raise. A refused holding FOLDER propagates, as
-    `_mkdir` runs outside the append's `try`.
-
-    Positive control on the same address: the plant removed, the same call lands."""
     planted = plant(tree, m, kind, folder)
     run = tree.run()
     h = tree.handle(m, run=run)
@@ -618,10 +542,6 @@ def test_o2_o3_o6_o7_a_write_into_a_plant_is_refused_in_todays_shape_and_changes
 
 
 def test_o7_a_fifo_at_the_tool_trace_is_a_partial_failure_not_a_raise_and_not_a_hang(tree):
-    """O7, first case, as the design names it: a FIFO planted at `tool_trace.jsonl` with no
-    reader. The append returns promptly (C22: an unguarded append open blocks forever),
-    records `tool_trace: append failed`, and leaves the FIFO in place. Control: a plain file
-    there takes the rows."""
     m = _member("tool_trace")
     run = tree.run()
     fifo = plant_leaf(tree.path(m), "fifo", host=tree.host)
@@ -636,9 +556,6 @@ def test_o7_a_fifo_at_the_tool_trace_is_a_partial_failure_not_a_raise_and_not_a_
 
 
 def test_o7_a_symlinked_wire_logs_folder_raises_and_records_no_partial_failure(tree):
-    """O7, second case: `wire_logs -> <host dir>` is a holding-folder refusal, so the wire-log
-    append RAISES (unmarked ELOOP) and is not swallowed into `run.partial_failures`. The host
-    dir is untouched (C2). Control: a real `wire_logs/` takes the append."""
     m = _member("wire_log")
     run = tree.run()
     planted = plant_folder(tree.root(m), m.rel, m.folders[0], "folder_link_outside",
@@ -657,9 +574,6 @@ def test_o7_a_symlinked_wire_logs_folder_raises_and_records_no_partial_failure(t
 @pytest.mark.parametrize("m", [m for m in WRITABLE if m.verb == "write"], ids=str)
 def test_o6_a_second_write_is_refused_as_write_once_only_where_the_record_is_write_once(
         tree, m):
-    """O6's write-once row: a second `write` of a write-once record raises `FileExistsError`
-    with the "is write-once" message, unmarked, and the first write stands. Control: every
-    other written record takes the second write whole (replace)."""
     h = tree.handle(m)
     h.write(document(m, "first"))
     if m.name in WRITE_ONCE:
@@ -689,10 +603,6 @@ class _OccupiedStageIo(S.RecordingIo):
 
 @pytest.mark.parametrize("m", REPLACED, ids=str)
 def test_o6_an_occupied_staged_name_refuses_the_replace_as_a_marked_eexist(tree, m):
-    """O6's staged-name row, through the handle: when the name the replace stages under is
-    already taken, the write raises `EEXIST`, marked as an alias, and changes nothing (neither
-    the record nor the occupying entry). Control: the same call with the real staged name
-    lands."""
     record = tree.path(m)
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text(document(m, "before"), encoding="utf-8")
@@ -709,15 +619,8 @@ def test_o6_an_occupied_staged_name_refuses_the_replace_as_a_marked_eexist(tree,
     assert_landed(record, m, "after")
 
 
-# =======================================================================================
-# O5 — the root's spelling is followed; a missing root is created on write, absent on read
-# =======================================================================================
-
 @pytest.mark.parametrize("m", [m for m in RUN_MEMBERS if m.root == "run_dir"], ids=str)
 def test_o5_run_at_over_a_symlinked_run_dir_reads_and_writes_every_in_run_record(tree, m):
-    """O5: `Run.at` over a symlinked spelling of the run dir keeps that spelling (C16) and
-    every in-run record reads and writes through it. The root is host-trusted and followed;
-    only what is below it is judged."""
     alias = tree.tmp / "alias-of-the-run"
     alias.symlink_to(tree.runs_base / RUN_ID, target_is_directory=True)
     h = S.member(H.Run.at(alias), m.group, m.name, *S.member_args(m.name))
@@ -737,10 +640,6 @@ def test_o5_run_at_over_a_symlinked_run_dir_reads_and_writes_every_in_run_record
 @pytest.mark.parametrize("m", RUN_MEMBERS, ids=str)
 def test_o5_a_symlinked_runs_base_or_data_root_keeps_every_record_readable_and_writable(
         tmp_path, m, aliased):
-    """O5, one symlinked spelling per trust root: a symlinked runs base (C12), and a symlinked
-    data root above it. The data root is the session db's own trust root; the runs base is the
-    sidecars'; either link is an ancestor of the run dir. Every record reads, and every
-    writable one writes, through the followed spelling."""
     real = tmp_path / "real-data"
     (real / "runs" / RUN_ID).mkdir(parents=True)
     S.plant_tenant_record(real / "runs")  # #1105 NH-3: the record run setup writes first
@@ -775,13 +674,6 @@ def test_o5_an_archived_world_at_a_symlinked_world_dir_reads_every_member(tree, 
 
 @pytest.mark.parametrize("m", WRITABLE, ids=str)
 def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m):
-    """O5 (C23): a write under a root that does not exist yet creates it, following the links in
-    its spelling as `guarded_mkdir` does. The data root is a symlink, and the record lands in the
-    folder it points at. Since #1105 (NH-3) `Run.for_tenant` needs the runs base's record, so the
-    runs base and its record are planted after the precondition: for a member rooted at the run
-    dir the missing root is the run dir alone, and a member rooted at the runs base is written
-    under the existing runs base (reached through the data root's link), so its missing-root
-    case is no longer reachable through `Run.for_tenant`."""
     real = tmp_path / "real-data"
     real.mkdir()
     (tmp_path / "data").symlink_to(real, target_is_directory=True)
@@ -799,11 +691,6 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
 
 @pytest.mark.parametrize("m", READABLE, ids=str)
 def test_o5_a_read_under_a_missing_root_is_none_and_creates_nothing(tmp_path, m):
-    """O5: a read under a root that does not exist is absent: `None`, and nothing is made. Since
-    #1105 (NH-3) the runs base and its record are planted first for every member not rooted at
-    the world dir: a member rooted at the run dir still reads under a missing run dir, and a
-    member rooted at the runs base reads under the existing runs base with no member file
-    (still `None`, nothing made), no longer under a missing root."""
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "worlds" / "gone", tmp_path)
     if m.root != "world_dir":  # #1105 NH-3: the handle needs its runs base's record
         tree.runs_base.mkdir(parents=True)
@@ -812,15 +699,6 @@ def test_o5_a_read_under_a_missing_root_is_none_and_creates_nothing(tmp_path, m)
     assert tree.handle(m).read() is None
     assert census(tmp_path) == before, f"{m}: a read under a missing root made something"
 
-
-# =======================================================================================
-# O8 — every handle file op crosses the `io=` seam as a rooted call carrying (root, name)
-# =======================================================================================
-
-
-# =======================================================================================
-# The seam itself — `_io.rooted_read` / `rooted_mkdir` / `rooted_write`, driven directly
-# =======================================================================================
 
 #: A name two folders deep, so each folder is planted in turn.
 DEEP = PurePosixPath("a/b/rec.json")
@@ -868,9 +746,6 @@ def _plant_deep(s: Scratch, kind: str, folder: PurePosixPath | None) -> Planted:
 # -- rooted_read ------------------------------------------------------------------------
 
 def test_rooted_read_returns_the_text_or_the_bytes_of_a_plain_file(scratch):
-    """The positive half, and the return shape of `read_guarded` / `read_bytes_guarded`:
-    `(text, None)`, or `(bytes, None)` with `binary=True` (exact bytes, CRLF kept). `name`
-    may be a `str` or a `PurePosixPath`."""
     target = scratch.real_folders()
     target.write_bytes(b"line\r\nnext\n")
     assert _io.rooted_read(scratch.root, "a/b/rec.json", binary=True) \
@@ -906,11 +781,6 @@ def test_rooted_read_refuses_undecodable_text_but_returns_its_bytes(scratch):
 @pytest.mark.parametrize(("kind", "folder"), list(_seam_plants()))
 @pytest.mark.parametrize("binary", [False, True], ids=["text", "bytes"])
 def test_rooted_read_refuses_every_plant_without_blocking(scratch, kind, folder, binary):
-    """M1's read rule: every component below the root opened no-follow, the leaf opened
-    `O_NONBLOCK` and judged on its descriptor. Any plant (a link or hard link to a real file, a
-    special file, a symlinked or non-directory folder) is `(None, reason)`, promptly, and
-    changes nothing. Control: the plant removed and a plain file written, the same call reads
-    it."""
     planted = _plant_deep(scratch, kind, folder)
     before = census(scratch.tmp)
     got, reason = in_time(lambda: _io.rooted_read(scratch.root, DEEP, binary=binary),
@@ -939,9 +809,6 @@ def test_rooted_read_follows_the_roots_own_spelling(scratch):
 
 @pytest.mark.parametrize("name", BAD_NAMES)
 def test_rooted_read_never_reads_a_name_outside_the_grammar(scratch, name):
-    """A name outside `_parse_name`'s grammar is never read. The design leaves open whether
-    it raises `ValueError` (`Bound.read` does) or answers `(None, reason)`. It must not
-    return the file a climbing name would reach."""
     (scratch.tmp / "rec.json").write_bytes(HOST_BYTES)
     (scratch.root / "rec.json").write_bytes(HOST_BYTES)
     try:
@@ -972,10 +839,6 @@ def test_rooted_mkdir_creates_a_missing_root_following_links_then_each_folder(sc
 @pytest.mark.parametrize("folder", [PurePosixPath("a"), PurePosixPath("a/b")], ids=str)
 def test_rooted_mkdir_refuses_a_linked_or_non_directory_folder_in_todays_shape(
         scratch, kind, folder):
-    """O6's folder rows for the holding-folder creation: a symlinked folder is an unmarked
-    `ELOOP`; a non-directory (a file, a FIFO, promptly) is an unmarked `NotADirectoryError`.
-    Nothing is created through the link or anywhere else. Control: the plant removed, the
-    same call creates the folders."""
     planted = plant_folder(scratch.root, DEEP, folder, kind, host=scratch.host)
     before = census(scratch.tmp)
     assert_row(raised_by(lambda: _io.rooted_mkdir(scratch.root, "a/b"), fifo=planted.fifo),
@@ -1001,9 +864,6 @@ def test_rooted_mkdir_refuses_a_name_outside_the_grammar_and_creates_nothing(scr
 # -- rooted_write -----------------------------------------------------------------------
 
 def test_rooted_write_create_lands_once_single_linked_and_a_second_create_is_unmarked(scratch):
-    """`create`: the record lands whole, single-linked, mode 0644 under umask 022 (#1078's
-    lane). A second create of the same name is the ordinary race: `FileExistsError`, unmarked,
-    the first content standing."""
     target = scratch.real_folders()
     with umask(0o022):
         _io.rooted_write(scratch.root, DEEP, "first\n", mode="create")
@@ -1017,10 +877,6 @@ def test_rooted_write_create_lands_once_single_linked_and_a_second_create_is_unm
 
 def test_rooted_write_create_links_the_unnamed_file_it_opened_off_the_parent_descriptor(
         scratch):
-    """The addendum's lane 1: `open_unnamed(dir_fd)` gets a descriptor of the record's own
-    parent folder, reached by the walk, not a path. The name is then linked to exactly that
-    unnamed file (same inode), which has one name and mode 0644 under umask 022. A reader sees
-    the name absent or complete, never partial."""
     target = scratch.real_folders()
     seen: dict[str, Any] = {}
 
@@ -1052,9 +908,6 @@ def test_rooted_write_create_links_the_unnamed_file_it_opened_off_the_parent_des
 @pytest.mark.parametrize("unsupported", [errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL],
                          ids=errno.errorcode.get)
 def test_rooted_write_create_falls_back_where_no_unnamed_file_can_be_made(scratch, unsupported):
-    """The addendum's lane 2: where the unnamed open answers EOPNOTSUPP / EISDIR / EINVAL, the
-    create falls back to one named `O_EXCL|O_NOFOLLOW` open. The record lands once, and a
-    second create is `FileExistsError`, unmarked."""
     target = scratch.real_folders()
     _io.rooted_write(scratch.root, DEEP, "{}\n", mode="create",
                      open_unnamed=no_unnamed_files(unsupported))
@@ -1093,10 +946,6 @@ def test_rooted_write_replace_swaps_the_whole_record_in_and_leaves_no_staged_fil
 
 
 def test_rooted_write_replace_stages_under_the_name_stage_name_gives_for_the_leaf(scratch):
-    """The `stage_name(leaf: str) -> str` seam: it is asked for the record's leaf name, and
-    an already-taken answer refuses the replace with `EEXIST`, marked as an alias (O6). The
-    record and the occupying entry are unchanged. Control: a free staged name lands, and is
-    gone afterwards."""
     target = scratch.real_folders()
     target.write_text("old\n", encoding="utf-8")
     (target.parent / "rec.json.staged-taken").write_bytes(HOST_BYTES)
@@ -1142,9 +991,6 @@ def test_rooted_write_append_creates_then_appends(scratch):
 
 @pytest.mark.parametrize("mode", MODES)
 def test_rooted_write_walks_the_folders_without_creating_them(scratch, mode):
-    """M1: `rooted_write` walks the holding folders no-follow and does NOT create them. A
-    missing folder, or a missing root, is `FileNotFoundError` and nothing is made. Folders
-    are `rooted_mkdir`'s job."""
     before = census(scratch.tmp)
     with pytest.raises(FileNotFoundError):
         _io.rooted_write(scratch.root, DEEP, "x\n", mode=mode)
@@ -1157,11 +1003,6 @@ def test_rooted_write_walks_the_folders_without_creating_them(scratch, mode):
 @pytest.mark.parametrize("mode", MODES)
 def test_rooted_write_refuses_every_plant_in_todays_shape_and_changes_nothing(
         scratch, mode, kind, folder):
-    """O2/O3/O6 at the seam, for each mode. The leaf is judged before any open: a symlink is a
-    marked ELOOP, a hard link a marked EMLINK, and any other non-plain leaf an unmarked ELOOP,
-    promptly. A symlinked folder is an unmarked ELOOP; a non-directory folder an unmarked
-    ENOTDIR. The planted entry, and whatever it reaches, are unchanged. Control: the plant
-    removed (and real folders made), the same call lands."""
     planted = _plant_deep(scratch, kind, folder)
     before = census(scratch.tmp)
     assert_row(raised_by(lambda: _io.rooted_write(scratch.root, DEEP, "x\n", mode=mode),
@@ -1195,16 +1036,6 @@ def test_rooted_write_refuses_a_name_outside_the_grammar_and_writes_nothing(
     assert census(scratch.tmp) == before
 
 
-# =======================================================================================
-# Three holes an adversary greened the first commit through: a device at the leaf, the race
-# window between the leaf's check and its open, and `create`'s DEFAULT lane. The seam takes
-# an `os_=` module (the `_io.bind(root, *, os_=os)` idiom), and every os call it makes goes
-# through it: the leaf's pre-open check is `os_.stat(<leaf>, dir_fd=<parent>,
-# follow_symlinks=False)`, the opened leaf is judged by `os_.fstat`, and `create`'s unnamed lane
-# names its file with `os_.link("/proc/self/fd/<N>", <leaf>, dst_dir_fd=<parent>,
-# follow_symlinks=True)`. The fakes below are pass-throughs over the real `os`.
-# =======================================================================================
-
 class PassThroughOs:
     """The real `os` module, handed in as the seam's `os_`: every attribute is the real one
     unless a subclass overrides it."""
@@ -1213,9 +1044,6 @@ class PassThroughOs:
         return getattr(os, name)
 
 
-#: Real device nodes. /dev/null's numbers open and swallow writes, so a leaf judge that lets a
-#: character device through reads '' and takes an append. Whether the block device opens
-#: depends on the host's device policy; the judge must refuse it either way, by its type.
 DEVICES = {"char_device": (stat.S_IFCHR, os.makedev(1, 3)),
            "block_device": (stat.S_IFBLK, os.makedev(7, 200))}
 
@@ -1279,14 +1107,6 @@ def assert_seam_lands(s: Scratch, op: str, **kw: Any) -> None:
 @pytest.mark.parametrize("op", SEAM_OPS)
 @pytest.mark.parametrize("kind", sorted(DEVICES))
 def test_o1_o2_o6_a_device_node_at_the_leaf_is_refused_as_non_plain(scratch, kind, op):
-    """O1/O2/O6: a character or block device at the record's name is "any other non-plain
-    leaf". A read is `(None, reason)` (a /dev/null that read back '' would be a leak of
-    whatever the device yields); every write mode raises the unmarked ELOOP row
-    and write nothing into it. Control: the node removed, the same op lands.
-
-    Real device nodes, so it runs where `mknod` of a device is allowed and skips elsewhere;
-    `test_o1_o2_o6_the_leaf_judge_is_an_allow_list_whatever_type_the_leaf_reports` pins the
-    row on every host."""
     planted = plant_device(scratch.root / DEEP, kind)
     before = census(scratch.tmp)
     assert_seam_refused(op, kind, seam_op(scratch, op))
@@ -1297,9 +1117,6 @@ def test_o1_o2_o6_a_device_node_at_the_leaf_is_refused_as_non_plain(scratch, kin
 
 
 def test_o1_o2_a_device_node_at_any_members_address_is_refused_through_the_handle(tree):
-    """The same, through the handle, for every member (O4): a character device at a record's
-    address reads `None`, and the member's verb raises the non-plain row (an `observability`
-    append records it as a partial failure, O7). Control: the node removed, the verb lands."""
     for m in READABLE:
         planted = plant_device(tree.path(m), "char_device")
         assert tree.handle(m).read() is None, f"{m}: a device at its address read back"
@@ -1379,11 +1196,6 @@ O6_ROWS.update({
 @pytest.mark.parametrize("op", ["read", "read_bytes", "append"])
 @pytest.mark.parametrize("pose", sorted(p for p in POSES if p != "as_symlink"))
 def test_o2_o3_the_opened_leaf_is_rejudged_on_its_descriptor(scratch, pose, op):
-    """M1's change from today: the leaf is judged again on the descriptor it was opened as,
-    so what the pre-open check saw is not the last word. Here the pre-open `stat` answers
-    truthfully (a plain file) and only `fstat` of the opened leaf reports another kind: the
-    read is `(None, reason)`, and `append` (the mode that opens the leaf itself) raises that
-    kind's row and writes nothing. Control: unposed, the op lands."""
     target = scratch.real_folders()
     target.write_bytes(b"plain\n")
     fmt, nlink = POSES[pose]
@@ -1420,13 +1232,6 @@ class _SwapsAfterCheck(PassThroughOs):
 @pytest.mark.parametrize("swap", ["hardlink", "fifo", "symlink", "directory"])
 def test_o2_o3_a_plant_swapped_in_after_the_leaf_check_is_refused_on_the_descriptor(
         scratch, swap, op):
-    """M1: "a plant that slipped into the race window is refused on the descriptor, and ENXIO
-    from a reader-less FIFO folds into the non-plain row". The leaf passes its pre-open check
-    as a plain file and is then replaced, before the open, by a hard link to a host file (the
-    marked EMLINK: the host file's bytes and mtime unchanged), a FIFO (the unmarked ELOOP,
-    promptly: the open does not block), a symlink to a host file (the marked ELOOP), or a
-    directory (the unmarked ELOOP, not the open's bare EISDIR). The plant is left in place.
-    Control: the same pass-through with no swap lands."""
     target = scratch.real_folders()
     target.write_bytes(b"plain\n")
     host_file = scratch.host / "host-file"
@@ -1470,11 +1275,6 @@ def test_o2_o3_a_plant_swapped_in_after_the_leaf_check_is_refused_on_the_descrip
 
 @pytest.mark.parametrize("op", ["read", "read_bytes", "bound_read", "append"])
 def test_a_file_a_replace_unnamed_after_it_was_opened_still_counts_as_plain(scratch, op):
-    """A replace landing between an op's open and its descriptor check leaves the opened file
-    with no name (`st_nlink == 0`). That file is still the plain record the op opened: the
-    read answers its text, as `read_guarded` always has, and the write lands. Reads and writes
-    share one plainness rule (a regular file with at most one name). A read that refused it
-    would look absent, and the schema pre-read would then lose its append-only baseline."""
     target = scratch.real_folders()
     target.write_bytes(b"plain\n")
     unnamed = _PosesAs(target, fmt=stat.S_IFREG, nlink=0, on=("fstat",))
@@ -1490,9 +1290,6 @@ def test_a_file_a_replace_unnamed_after_it_was_opened_still_counts_as_plain(scra
 
 
 def test_a_write_once_collision_writes_no_body(scratch):
-    """A `create` onto a plain record already at the name is refused as the ordinary
-    write-once collision (`FileExistsError`, unmarked) before any body is written: no unnamed
-    file is opened for it. The first record stands."""
     target = scratch.real_folders()
     target.write_text("first\n", encoding="utf-8")
     opened: list[int] = []
@@ -1535,12 +1332,6 @@ class _RecordsCreate(PassThroughOs):
 
 def test_create_with_the_default_open_unnamed_links_an_unnamed_file_and_never_opens_the_name(
         scratch):
-    """The addendum: "a reader sees the name either absent or complete, and the file never
-    has two names", for the DEFAULT `open_unnamed` (every production write-once record takes
-    it). The record's name comes into being in one `link` from a `/proc/self/fd/` source,
-    relative to the parent's descriptor, at a moment it did not exist; the name itself is never
-    opened with `O_CREAT` (a named create would expose it empty while the body is written).
-    The record lands whole, single-linked, 0644 under umask 022."""
     target = scratch.real_folders()
     recorder = _RecordsCreate(target)
     with umask(0o022):
@@ -1576,11 +1367,6 @@ while True:
     i += 1
 """
 
-#: The odds, measured before authoring with this loop's shape: against an exploit-shaped
-#: lane (a named `O_CREAT|O_EXCL` open of `alert.json`, then the write), 7 of 16 kills left a
-#: torn alert at 1 MiB, so 16 kills all missing one has odds near (9/16)**16, about 1e-4. The
-#: real lane left none. It is a probabilistic backstop through the handle; the deterministic
-#: pin is the `os_` test above.
 ALERT_BODY_BYTES = 1 << 20
 ALERT_KILLS = 16
 
@@ -1614,10 +1400,6 @@ def _alert_leftovers(root: Path, body: bytes) -> tuple[list[str], int]:
 
 
 def test_the_handles_alert_write_leaves_no_alert_or_a_whole_one_when_killed(tmp_path):
-    """The addendum's complete-or-absent guarantee through the handle's production write-once
-    write, `run.facts.alert.write(...)`, where no `os_` can be injected: a real SIGKILL of a
-    child looping over it in fresh run dirs leaves every run dir with no alert or the whole
-    alert, one name, nothing else beside it. Non-vacuity: the child did write whole alerts."""
     env = dict(os.environ)
     env["PYTHONPATH"] = f"{S.REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}".rstrip(os.pathsep)
     body = b"A" * (ALERT_BODY_BYTES - 1) + b"\n"

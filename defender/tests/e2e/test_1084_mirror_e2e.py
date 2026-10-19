@@ -53,9 +53,6 @@ def _assert_warned(caplog, needle: str) -> None:
 
 
 def _warning_records(caplog) -> list[logging.LogRecord]:
-    # #1255 C6: a driven replay uses production's unboxed fallback, which warns
-    # about its missing boundary. The copy's one-warning contract belongs to
-    # the visualization logger; the fallback's own operator warning remains.
     return [r for r in caplog.records if r.levelno == logging.WARNING
             and r.name == "defender.scripts.visualize.visualize_run"]
 
@@ -85,16 +82,6 @@ def _assert_record_written(run_dir: Path) -> None:
     assert record.is_file(), f"the page record {record} was not written"
     assert MARKER in record.read_text(encoding="utf-8"), (
         "the page record does not carry this run's own final turn")
-
-
-# ---------------------------------------------------------------------------------------
-# O2 — nothing under defender/; the page at the override
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# M2 — replace, never truncate in place; a failed mirror write is a warning, the record kept
-# ---------------------------------------------------------------------------------------
 
 
 def test_1084_an_existing_mirror_page_is_replaced_not_rewritten_in_place(
@@ -186,20 +173,6 @@ def test_1084_a_link_at_the_page_name_is_refused_in_process_and_warned_naming_it
     assert dest.read_bytes() == page.encode("utf-8")
     assert _warning_records(caplog) == [], "a copy that landed was warned about"
 
-
-# ---------------------------------------------------------------------------------------
-# M3 — the absolute path; an outside override does not fail the copy
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# O3 — the detector bites a render, not only the bare resolver
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# D5 / O1 / O4 — written as the owner (root only)
-# ---------------------------------------------------------------------------------------
 
 root_only = pytest.mark.skipif(
     os.geteuid() != 0, reason="D5's drop-privilege lane runs only when the render runs as root")
@@ -366,11 +339,7 @@ def test_1084_a_mirror_folder_the_owner_cannot_write_is_left_untouched_and_warne
     run_common.visualize(run)  # a failed copy is not a failed render: no VisualizeFailed
 
     _assert_record_written(run_dir)
-    # The owner's child fails creating `<run>/`; its error names that folder, never the page
-    # path — so the page path must appear in the warning exactly ONCE (#1110 review found the
-    # drop lane's own error prefixed with it a second time).
     warned = _assert_one_warning_naming_the_destination_once(
         caplog, owned_tree.mirror / run_dir.name / PAGE)
     assert "Permission denied" in warned, f"the warning does not carry the error: {warned!r}"
     assert _fingerprint(owned_tree.mirror) == before, f"the {shape} mirror folder was written"
-

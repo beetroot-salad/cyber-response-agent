@@ -59,11 +59,6 @@ def _card_link(card: E.Node) -> tuple[str, str]:
     return links[0].attrs["href"], links[0].text()
 
 
-# ---------------------------------------------------------------------------------------
-# One boundary: a scalar where the writer produces a list or a mapping degrades one slot
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_scalar_worlds_field_in_the_manifest_is_refused_by_the_loader_gate(tmp_path):
     """`family.yaml` with `worlds: 5` is a manifest the runtime loader refuses (the page reads the
     manifest through the loader's own gate, `family.read_manifest`), so it is the."""
@@ -90,9 +85,6 @@ def test_1025_a_scalar_findings_field_in_a_draw_document_is_that_draws_own_absen
 
 
 def test_1025_non_numeric_usage_and_odd_message_shapes_in_a_wire_log_leave_that_call_unpriced(tmp_path):
-    """A judge trace whose response `usage` counts are text, whose request `message` is a
-    list, and whose response `message.parts` is a number renders its block with the call
-    unpriced — the judge row prices the other calls and the page is written."""
     ep = E.sample_episode(tmp_path)
     agent_id = f"judge:{E.GRADED_WORLD}:1"
     rows = E.trace_rows(agent_id)
@@ -113,9 +105,6 @@ def test_1025_non_numeric_usage_and_odd_message_shapes_in_a_wire_log_leave_that_
 
 
 def test_1025_a_scalar_list_field_in_the_outcome_or_the_provenance_record_degrades_its_own_slot(tmp_path):
-    """`outcome.yaml` with `unservable_worlds: 5`, `not_replayable: 5` and `drift: 5`, and
-    `provenance.json` with `agreed.dirty_paths: 5`, render the records section with those lists
-    empty and every other record intact — the outcome's word and reason still show."""
     ep = E.sample_episode(tmp_path)
     outcome_path = ep.dir / "outcome.yaml"
     outcome = yaml.safe_load(outcome_path.read_text(encoding="utf-8"))
@@ -134,11 +123,6 @@ def test_1025_a_scalar_list_field_in_the_outcome_or_the_provenance_record_degrad
     assert not page.elements(cls="rc-outcome-call")
     assert not page.elements(cls="rc-world-record")
     assert not page.elements(cls="rc-dirty")
-
-
-# ---------------------------------------------------------------------------------------
-# One walk: the tiles, the cards and the findings section agree by construction
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_a_finding_with_no_subject_key_is_the_defenders_as_the_enqueue_read_it(tmp_path):
@@ -194,9 +178,6 @@ def test_1025_a_world_not_measured_card_does_not_say_enqueued(tmp_path):
 
 
 def test_1025_the_dropped_count_on_the_tile_and_in_the_accounting_is_the_ledgers_own(tmp_path):
-    """Two findings the ledger files in drop lanes (#1234 A13: a drop is the finding's own
-    ledger entry; the draw's `dropped_findings` count is retired) are counted on tile 3's split
-    ("2 dropped") and in the queue accounting ("dropped 2") — never a literal zero."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     E.set_lane(doc, E.GRADED_WORLD, 0, 0, "dropped_unresolved")
@@ -207,15 +188,7 @@ def test_1025_the_dropped_count_on_the_tile_and_in_the_accounting_is_the_ledgers
     assert "dropped 2" in page.one(cls="vd-acct").text()
 
 
-# ---------------------------------------------------------------------------------------
-# The stage clock, the report slot, the CLI's diagnostics
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_the_cli_diagnostic_is_the_records_refusal_not_a_phrase_on_the_page(tmp_path, capsys):
-    """An episode WITH a readable `judge.yaml` whose draw finding claim contains the words "no
-    grade record" exits 0 with nothing on stderr: the diagnostics come off the record slots
-    the page was built from, never a substring scan of the rendered bytes."""
     ep = E.sample_episode(tmp_path)
     graded = E._world_findings_rows()
     graded[0]["claim"] = "the run left no grade record behind"
@@ -229,11 +202,6 @@ def test_1025_the_cli_diagnostic_is_the_records_refusal_not_a_phrase_on_the_page
     rc, _out, err = E.cli_on(ep.dir, capsys, module=visualize_episode())
     assert rc == 0
     assert "grade record unreadable" in err, err
-
-
-# -----------------------------------------------------------------------------------------
-# Second pass of the #1042 review: what the load boundary must refuse or degrade on its own
-# -----------------------------------------------------------------------------------------
 
 
 def _outside_world(tmp_path, ep) -> tuple[Path, str]:
@@ -272,9 +240,6 @@ def test_1025_a_manifest_label_off_the_directory_grammar_reads_nothing_from_disk
     f"worlds/{E.GRADED_WORLD}/judge",
 ])
 def test_1025_an_unlistable_directory_is_its_own_slots_absence(tmp_path, rel):
-    """A directory the page cannot LIST (mode 000, non-root) — at any of the names the loader
-    walks — costs what that directory would have shown, never the page: the page is written and
-    the header still reads."""
     ep = E.sample_episode(tmp_path)
     target = ep.dir / rel
     target.mkdir(parents=True, exist_ok=True)

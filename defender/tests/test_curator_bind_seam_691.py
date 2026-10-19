@@ -37,9 +37,6 @@ def test_bind_returns_a_corpus_scoped_curator_deps(tmp_path):
 
 
 def test_a_bound_deps_is_copied_with_one_field_replaced(tmp_path):
-    """The per-spawn attach idiom copies a bound deps with one field changed; the copy's retained
-    ResolvedRoots (M6) and compiled policy are downstream of the BIND, not of the replace — so they
-    are copied through byte-identical (c11's bind-then-replace idiom)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = bind_curator(wt, rd, "lessons")
     copy = replace(deps, run_id="other-run")
@@ -54,21 +51,12 @@ def test_a_bound_deps_is_copied_with_one_field_replaced(tmp_path):
 
 
 def test_importing_runtime_does_not_import_the_learning_stages():
-    """M4: the tool-config slot is a RUNTIME-side Protocol with an inert default, so importing the
-    runtime deps module must not drag in the learning stages (runtime/ never imports learning/ to
-    look a deps subtype up)."""
     code = (
         "import defender.runtime.tools, sys; "
         "leaked = [m for m in sys.modules if m.startswith('defender.learning.author')]; "
         "assert not leaked, leaked"
     )
-    # repo root is 2 parents up from this test file (<repo_root>/defender/tests/...) — set
-    # PYTHONPATH explicitly for the fresh interpreter rather than relying on the invoker's
-    # ambient env (pytest's own `pythonpath = [".."]` ini setting resolves `import defender`
-    # for THIS process; a bare subprocess.run([sys.executable, "-c", ...]) does not inherit it).
     repo_root = Path(__file__).resolve().parents[2]
     env = {**os.environ, "PYTHONPATH": str(repo_root)}
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
-
-

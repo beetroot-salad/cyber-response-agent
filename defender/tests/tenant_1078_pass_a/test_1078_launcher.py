@@ -23,10 +23,6 @@ from defender.tests import _state1135
 TID = H.VALID_ID
 
 
-# ======================================================================================
-# Cluster helpers
-# ======================================================================================
-
 def _episodes_root(tmp_path: Path, monkeypatch) -> Path:
     """A configured episodes root OUTSIDE the data root (the only place pass A accepts one)."""
     root = tmp_path / "episodes-root"
@@ -116,17 +112,6 @@ def _old_layout_source(tmp_path: Path, tenant_id: str = TID) -> tuple[Path, Path
     return base, H.source_run(base)
 
 
-
-
-
-
-
-# ======================================================================================
-# O5 — the derivation's own refusals (owner, then the fork-source entry)
-# ======================================================================================
-
-
-
 def test_o5_no_record_refused_never_minted(tmp_path, monkeypatch, data_root):
     """A run dir at <root>/T/runs/r1 whose base has no _tenant.json is refused, and no
     _tenant.json is created."""
@@ -144,9 +129,6 @@ def test_o5_no_record_refused_never_minted(tmp_path, monkeypatch, data_root):
 
 
 def test_o5_requires_row(tmp_path, data_root):
-    """A run dir at a tenant location whose record names T is refused when T has no row: the
-    tenant is not accepted, so its runs are not opened (#1105 PR 2: the source is opened through
-    the accepted tenant's repository)."""
     base, src = H.tenant_source(data_root, TID, row=False)
     assert not H.row_path(data_root, TID).exists()
     H.place_knowledge(data_root, TID)
@@ -157,18 +139,7 @@ def test_o5_requires_row(tmp_path, data_root):
     assert _opens_as(data_root, src.name) == TID
 
 
-
-
-
-
-# ======================================================================================
-# D4 — the launch-path location check, and refuse_distant_source's deletion (J52)
-# ======================================================================================
-
 def test_d4_launch_location_check(tmp_path, monkeypatch, data_root):
-    """cli.py launched on a source outside <root>/T/runs is refused (#1105 PR 2: by T's runs
-    repository, which the source is opened through by id) before any episode dir is written;
-    refuse_distant_source is not on the launch path."""
     episodes = _episodes_root(tmp_path, monkeypatch)
     H.make_tenant(data_root, TID)
     _base, src = _old_layout_source(tmp_path)
@@ -210,9 +181,6 @@ def _graded_launch(tmp_path: Path, monkeypatch, root: Path, *, collide: bool):
 
 
 def test_d4_launcher_derives_once(tmp_path, monkeypatch, data_root, capfd):
-    """The launcher takes T once, from the request, before it places the episode dir, and hands
-    T's repository to every consumer it drives; no consumer re-derives T or reads the manifest
-    for it."""
     result, episode_dir = _graded_launch(tmp_path / "collide", monkeypatch, data_root,
                                          collide=True)
     err = capfd.readouterr().err
@@ -232,8 +200,6 @@ def test_d4_launcher_derives_once(tmp_path, monkeypatch, data_root, capfd):
     assert not isinstance(result, BaseException), f"the control launch was refused: {result!r}"
     assert "the judge pass failed" not in err, f"the control's grade failed:\n{err[-2000:]}"
     assert (clean_episode / "judge.yaml").is_file(), "the control episode was never graded"
-
-
 
 
 def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_root):
@@ -266,9 +232,6 @@ def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_roo
     real_runs.mkdir(parents=True)
     (root2 / TID / "runs").symlink_to(real_runs, target_is_directory=True)
     H.plant_record(root2 / TID / "runs", TID)
-    # Built AT THE RESOLVED base, so the source's case pointer names the store beside
-    # `real-runs` — the one C67's own derive-and-compare (unchanged by #1078, it resolves the
-    # run dir first) re-derives. That keeps the location check the only question asked here.
     H.source_run(real_runs)
     src2 = root2 / TID / "runs" / T.SOURCE_RUN_ID
     owner2 = _repository_refusal(root2, src2.name)
@@ -283,20 +246,7 @@ def test_s7_j26_symlinked_tenant_folder_accepted(tmp_path, monkeypatch, data_roo
     assert not spawn.launches, f"<root>/T/runs as a symlink started a sibling: {result!r}"
 
 
-
-
-
-
-
-# ======================================================================================
-# Past the tenant check, into the launcher's existing source checks
-# ======================================================================================
-
 def test_launch_from_a_nonexistent_run_dir_at_a_tenant_location(tmp_path, monkeypatch, data_root):
-    """(a) A nonexistent run id at T's runs base (with a valid record) is refused by the
-    launcher's source open; (b) an arbitrary nonexistent path where the id belongs is refused
-    (#1105 PR 2: the source is named by its run id, never a path). Nothing is written in either
-    case."""
     episodes = _episodes_root(tmp_path, monkeypatch)
     base, _src = H.tenant_source(data_root, TID)
     ghost = base / "no-such-run"
@@ -342,26 +292,6 @@ def test_tenant_of_run_dir_given_a_run_dir_that_is_a_file_not_a_directory(
                                     agent=agent)
 
 
-# ======================================================================================
-# Episodes made before (A), and pass-A episodes setup never adopts
-# ======================================================================================
-
-
-
-
-
-# ======================================================================================
-# D2 — the launcher stops exporting DEFENDER_RUNS_BASE (C9, J46), and the #947 pins (s104)
-# ======================================================================================
-
-
-
-
-
-# ======================================================================================
-# D4 — the episodes root re-keyed onto the tenant (A), J44's pass-A refusal
-# ======================================================================================
-
 def _episodes_root_for(tenant):
     """`episodes_root` handed the data root the launcher's accepted `Tenant` (#1120 D1) was
     accepted under (x1078_d4_episodes_root_rekeyed). #1105 PR 2: the episode owner's
@@ -379,9 +309,6 @@ def _accepted(root: Path):
 
 
 def test_an_episodes_base_containing_the_checkout_is_accepted(tmp_path, monkeypatch):
-    """Only a base INSIDE the checkout dirties it; one that merely contains the checkout
-    (`$HOME` for a checkout at `$HOME/cyber-response-agent`) puts every episode beside it, and
-    is accepted — unlike a base containing the data root, which d4 refuses. Nothing is created."""
     root = tmp_path / "defender-data"
     H.set_data_root(monkeypatch, root)
     containing = H.branch_cli().REPO_ROOT.resolve().parent
@@ -396,12 +323,6 @@ def test_an_episodes_base_containing_the_checkout_is_accepted(tmp_path, monkeypa
     "tenant-folder", "tenant-episodes", "outside-data-root",
 ])
 def test_d4_episodes_root_rekeyed(tmp_path, monkeypatch, member):
-    """episodes_root, handed T's accepted Tenant under root (#1120: the data root comes from the
-    Tenant, x1078_d4_episodes_root_rekeyed), refuses a base inside
-    <T>/runs, a base equal to or containing the data root, and ANY base inside the data root,
-    <T>/episodes and its subdirectories included (so /tmp/defender-data,
-    /tmp/defender-data/playground, <root>/T/episodes and /tmp are refused for root
-    /tmp/defender-data), and accepts a base outside the data root."""
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     root = tmp_path / "defender-data"
     H.set_data_root(monkeypatch, root)
@@ -428,9 +349,6 @@ def test_d4_episodes_root_rekeyed(tmp_path, monkeypatch, member):
 
 
 def test_s7_j44_episodes_base_inside_data_root_refused(tmp_path, monkeypatch, data_root):
-    """In pass (A), DEFENDER_EPISODES_BASE=<root>/T/episodes and <root>/T/episodes/sub are
-    refused by episodes_root, naming the variable, and nothing is written; a base outside the
-    data root is accepted (the control)."""
     monkeypatch.delenv(T.RUNS_BASE_ENV, raising=False)
     H.make_tenant(data_root, TID)
     before = H.census(data_root)
@@ -444,8 +362,6 @@ def test_s7_j44_episodes_base_inside_data_root_refused(tmp_path, monkeypatch, da
     outside = tmp_path / "episodes-outside"
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(outside))
     assert _episodes_root_for(tenant_paths) == outside.resolve()
-
-
 
 
 def test_episodes_base_reached_through_a_symlink_into_the_data_root(
@@ -468,12 +384,6 @@ def test_episodes_base_reached_through_a_symlink_into_the_data_root(
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ok_link))
     assert _episodes_root_for(tenant_paths) == outside.resolve()
 
-
-
-
-# ======================================================================================
-# O4 — a fork's session rows land in its source's store under <root>/T/sessions/ (C67)
-# ======================================================================================
 
 def _sibling_state(sib: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at top)
     """A fresh run state for the sibling at `sib`, which seeding takes as its third argument

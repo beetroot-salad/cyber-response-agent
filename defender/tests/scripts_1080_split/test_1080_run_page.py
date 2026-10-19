@@ -1,14 +1,3 @@
-"""#1080 — the run page's renderer, its mirror and its consumers after the move (group `runpage`).
-
-SCOPE CUT (2026-10-04, human): the run-page renderer, its mirror writer, its failure type and
-its assets stay in `scripts/visualize/` (#1105), so this group's renderer and mirror tests are
-parked with #1105 (`spec-flow/specs/parked/1080/parked_run_page.py`, with the shadow-checkout
-machinery the parked e2e tests import). Kept here: the moved modules' environment knobs (s038:
-the payload view's passthrough cap, the sql engine's and the venv helper's box marker) and the
-module-level consumers of the moved modules (s053). "As today" values are the BASE's, frozen in
-`goldens/runpage.json` and compared through `_scrub`, the one normalisation both the capture
-and the tests use.
-"""
 from __future__ import annotations
 
 import json
@@ -21,20 +10,10 @@ from defender.tests.scripts_1080_split import _spec1080 as S
 GOLDEN = "runpage"
 
 
-# ======================================================================================
-# The moved names, reached at call time
-# ======================================================================================
-
-
 def _golden(key: str) -> Any:
     data = S.golden(GOLDEN)
     assert key in data, f"goldens/{GOLDEN}.json has no entry {key!r}"
     return data[key]
-
-
-# ======================================================================================
-# The one normalisation (capture and tests both go through it)
-# ======================================================================================
 
 
 def _scrub(value: Any, subs: dict[str, str]) -> Any:
@@ -47,14 +26,6 @@ def _scrub(value: Any, subs: dict[str, str]) -> Any:
     return json.loads(text)
 
 
-# ======================================================================================
-# s175 / s038 — the override and the other knobs, read at call time
-# ======================================================================================
-
-
-#: argv: the copied `_venv` module's path, `import` (DEFENDER_BOX as the env has it at load) then
-#: `call` (set/unset before the call). Prints RETURNED when the call returns; an exec into the
-#: planted venv prints the planted interpreter's own line instead.
 _VENV_CHILD = r'''
 import importlib.util, os, sys
 path, at_call = sys.argv[1], sys.argv[2]
@@ -135,19 +106,6 @@ S038_KEPT = ("payload_passthrough_cap", "sql_box_marker", "venv_box_marker")
 
 def test_moved_module_reads_its_environment_knob_at_a_different_point(
         tmp_path, monkeypatch, capsys):
-    """A moved module reads each environment knob (payload passthrough cap, box marker) at the
-    same point in the run as before, and the value it acts on is the same
-    under every start-up order: no module that read the knob at call time reads it at import,
-    and no import that used to be lazy now runs before the run's settings reach the
-    environment. (M2; probe P8.)
-
-    Observed with every knob set or changed AFTER the moved module is imported (an import-time
-    read would act on the stale value): the moved payload view's passthrough cap for unset /
-    `100` / `0` / a non-number; the moved SQL engine's missing-runtime answer with the box
-    marker unset and set; the moved venv helper's re-exec with the marker set only at the call
-    and unset only at the call (a copy beside a planted venv interpreter, so the exec is seen).
-    Each equals the base's golden. The renderer's mirror override, the fourth knob, stays in
-    `scripts/visualize/` under the 2026-10-04 scope cut; its cell is parked with #1105."""
     observed = _observe_knobs(tmp_path, monkeypatch, capsys)
     expected = {k: _golden("s038")[k] for k in S038_KEPT}
     assert observed == expected, (
@@ -155,10 +113,6 @@ def test_moved_module_reads_its_environment_knob_at_a_different_point(
         f"observed: {json.dumps(observed, ensure_ascii=False, indent=1)[:4000]}\n"
         f"golden:   {json.dumps(expected, ensure_ascii=False, indent=1)[:4000]}")
 
-
-# ======================================================================================
-# s053 — module-level consumers meet a stale name at import
-# ======================================================================================
 
 #: (edge, consumer module, a symbol the moved module defines). The consumer's import of that
 #: module is at module level, so a stale name is loud at process start.
@@ -206,21 +160,6 @@ def _imports_module(consumer_rel: str, target: str) -> list[S.ImportStmt]:
 
 
 def test_module_level_consumers_of_a_moved_module_meet_a_stale_name_at_import():
-    """A module-level consumer (under the 2026-10-04 scope cut: the API server, the tool
-    package, the query tool — the consumers of the modules the cut moves) whose import still
-    names the old place fails at process start with an ImportError, for every one of them,
-    never later at first use. A missed repoint on those is loud (unlike the fail-open lazy
-    sites). The run.py, run_common and learning-frontend edges reach modules the cut leaves in
-    place; they are parked with #1165 and #1105.
-
-    Observed per consumer edge: (1) the consumer imports the moved module — found by a symbol
-    it defines — through a MODULE-LEVEL import statement naming the module's new dotted path;
-    (2) driven: in a fresh child where that dotted path cannot be imported (`None` in
-    `sys.modules`, what a name that no longer exists gives), importing the consumer raises
-    `ImportError` naming exactly that module, at the import, before any call. Positive control:
-    in a fresh child with nothing blocked every consumer imports (the API server may stop only
-    at its own uninstalled web framework, never at a `defender` module), so the failure in (2)
-    is the stale name's."""
     consumers = [c for _edge, c, _sym in S053_EDGES]
     clean = S.python("-c", _CLEAN_IMPORTS, *consumers, cwd="/")
     assert clean.returncode == 0, clean.stderr.decode(errors="replace")

@@ -1,29 +1,3 @@
-"""Tests for runtime.tools._bounded_read — the read_file char cap (#303).
-
-read_file must not pull a multi-MB gather payload whole into the model's
-context (a hard 200K-token overflow). _bounded_read caps the returned view at
-the cap `_cap_for` picks BY PATH (#832): a captured payload (`gather_raw/`,
-`ticket_reads/`) is re-read at the capture ceiling, so a later read of the
-persisted payload can't defeat the bound the capture chose, while an authored
-file gets its own — the two were one constant until the capture ceiling
-dropped to 8 KB, which equality would have paid for by truncating
-`defender/SKILL.md`. Under the ceiling a file comes
-back verbatim (every authored SKILL/lesson/doc fits with room to spare); over
-it, the head plus a notice carrying the true size and a filter-first
-resolution, since the overflowing files are single-document JSON dumps a line
-window can't page.
-
-The resolution is spelled in the CALLER'S OWN bash lane (`_overflow_filter_hint`,
-derived from `policy.bash_allow` + `policy.write_allow`, never from a single capability
-bit). It is always a PIPE: every reader's `jq`/`defender-sql` is stdin-compute-only, so
-`jq '<filter>' <path>` is denied for main and gather and must never be advertised. main
-gets `cat … | jq` plus the write-the-result step; gather gets the same pipe WITHOUT that
-step (it has `jq` but no write tool); the judge gets `cat … | defender-sql` (no `jq` at
-all); a reader-less agent (actor / oracle / verify / curators) is pointed at
-`read_file(pattern=)`. A hint naming a program the agent cannot run, or a step it cannot
-take, is worse than no hint — so every branch is pinned against a REAL compiled policy,
-and the commands are asserted to pass that policy's own `decide_bash`.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -57,8 +31,6 @@ def _main_policy(tmp: Path) -> AgentPolicy:
 def _gather_policy(tmp: Path) -> AgentPolicy:
     return compile_policy_for(
         _tenants1106.fixture_gather_def(), run_dir=tmp / "run", defender_dir=_DEFENDER)
-
-
 
 
 def _admits(policy: AgentPolicy, command: str, run_dir: Path) -> bool:
@@ -98,8 +70,6 @@ def test_overflow_hint_offers_a_reduction_correct_for_any_payload_shape(tmp_path
     assert "DESCRIBE data" in hint, hint
     assert "count(*)" not in hint, f"the hint offers a whole-payload count: {hint!r}"
     assert _admits(pol, _hinted_command(hint), run)
-
-
 
 
 def test_a_captured_payload_is_read_at_the_CAPTURE_ceiling() -> None:

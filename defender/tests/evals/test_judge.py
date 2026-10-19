@@ -1,11 +1,3 @@
-"""Pins for the two-pass judge (#711).
-
-Everything here runs against a stubbed call seam. The judge's *judgement* can only be
-measured by running it (`audit_judge.py`); what these tests pin is the plumbing around
-it — above all the input split, which is the design's load-bearing claim: the label pass
-must never see the story or the projection, because its output is the measurement a
-projection is later graded against.
-"""
 from __future__ import annotations
 
 import json
@@ -52,9 +44,6 @@ rationale: |
 # the input split
 
 def test_the_label_pass_is_shown_neither_the_story_nor_a_projection():
-    """The whole point of two passes. A label pass that has read a confident projection
-    tags to match it, and the calibration in audit_judge.py — hand labels derived
-    without one — stops being like-for-like."""
     inputs = judge.load_lead_inputs(CASE, "l-001")
     user = judge.label_user_prompt(inputs)
     assert "<story>" not in user
@@ -111,9 +100,6 @@ def test_a_long_payload_is_truncated_and_says_so():
 
 
 def test_an_unrecorded_payload_is_flagged_rather_than_rendered_as_empty(tmp_path):
-    """The case assembler copied raw payloads verbatim, so a zero-byte file is a capture
-    that never happened — 12 are in the tree. Rendering it as an empty result set would
-    ask the judge to infer absence from a missing measurement."""
     empty = tmp_path / "0.json"
     empty.write_text("", encoding="utf-8")
     got = judge._payload_entry(empty)
@@ -142,9 +128,6 @@ def test_a_lead_with_an_unrecorded_payload_still_assembles():
     [],                                                                   # a bare list
 ])
 def test_a_lookup_payload_passes_through_untouched(payload):
-    """50 of the tree's 135 payloads are a lookup system's own response shape, with no
-    row array to bound. Rewriting a shape we do not model is how a judge ends up grading
-    our edit — and one of them carries a `truncated` field of its own."""
     assert judge._bounded(payload) == (payload, False)
 
 
@@ -213,14 +196,6 @@ def test_a_grammar_failure_is_retried():
 
 
 def test_the_retry_complains_about_the_envelope_and_nothing_else():
-    """A retry is for a malformed envelope around a real judgement, not for a verdict we
-    dislike. The re-ask names the parse failure and the YAML rule that avoids it; the
-    payload the judgement is made from is byte-identical, and nothing in the note says
-    what a good answer would look like.
-
-    It is not decoration: a real case-005 verdict wrote its `rationale` as a plain
-    scalar containing `pam_unix(sshd:auth): authentication failure`, which YAML cannot
-    carry, and two byte-identical attempts both produced it."""
     call = _call("rationale: pam_unix(sshd:auth): authentication failure", LABEL_OK)
     judge.label_lead(judge.load_lead_inputs(CASE, "l-001"), model="m", effort="high",
                      call=call)
@@ -387,9 +362,6 @@ def test_the_audit_set_is_the_hand_labelled_measurable_leads():
     ("0", "identity.access-check", ("state-only",)),
 ])
 def test_a_hand_label_maps_onto_the_delta_kinds_that_agree_with_it(hand, query_id, expected):
-    """The retired `0` collapsed "this stream was quiet" and "this is a lookup" into one
-    class. Expanding it by the lead's own systems is a property of the lead, not a
-    judgement about the answer."""
     lead = {"queries": [{"query_id": query_id}]}
     assert audit_judge.expected_delta_kinds(hand, lead) == expected
 
@@ -473,9 +445,6 @@ def _committed_calibrations() -> list[dict]:
 
 
 def test_the_committed_calibration_was_produced_by_the_prompts_in_the_tree():
-    """A calibration describes the judge that produced it. Edit either prompt and it
-    stops describing the judge that would run now — so the sweep is re-run, exactly as a
-    held-out result is re-scored under a new tag rather than quietly inherited."""
     calibrations = _committed_audits()
     assert calibrations, "no calibration is committed — the judge is unmeasured"
     assert any(c["prompts_sha8"] == judge.prompts_sha8() for c in calibrations), (
@@ -525,9 +494,6 @@ VERDICT_CONTRA = ("faithful: null\nundecidable_reason: contradicts-measurement\n
 
 
 def test_the_verdict_audit_grades_the_leads_a_real_score_graded():
-    """It reuses the committed labels rather than re-measuring: the question is how
-    stable the VERDICT pass is given a FIXED measurement, and letting the label pass
-    vary underneath would fold two variances into a number that names neither."""
     entries = audit_judge.verdict_set(audit_judge.AUDIT_CASES,
                                       audit_judge.DEFAULT_ORACLE_TAG)
     assert entries, "no committed labels/projections — the sweep would pass vacuously"
@@ -541,14 +507,6 @@ def test_the_verdict_audit_grades_the_leads_a_real_score_graded():
 
 
 def test_the_audit_shows_the_verdict_pass_the_same_reading_a_real_score_does():
-    """The audit's whole claim is "this is how stable the verdict pass is ON A REAL SCORE".
-    That only holds if it hands the pass the same measurement block `score_case` would.
-
-    It had spelled the projection out again — its own `{k: label[k] for k in (...)}` over
-    its own key list — so the audit could have been measuring a differently-briefed judge
-    and reporting the number as the scorer's. Both go through `score.measurement` now, and
-    this compares the audit's block against that function on the same committed label
-    rather than against a third copy of the key list."""
     entries = audit_judge.verdict_set(audit_judge.AUDIT_CASES,
                                       audit_judge.DEFAULT_ORACLE_TAG)
     assert entries, "no committed labels/projections — the check would pass vacuously"
@@ -623,10 +581,6 @@ def test_instability_is_reported_not_failed(monkeypatch, capsys):
 
 
 def test_the_verdict_pass_has_a_measured_noise_floor_for_the_current_prompts():
-    """The judge runs at score time, so its variance sits inside every interval
-    `report.py` prints. Without this number a prompt change smaller than the judge's own
-    wobble reads as an improvement — and the dev active band is 7 leads, so that is a
-    very small change indeed."""
     current = [a for a in _committed_audits("verdict")
                if a["prompts_sha8"] == judge.prompts_sha8()]
     assert current, (
@@ -645,17 +599,6 @@ def test_the_verdict_pass_has_a_measured_noise_floor_for_the_current_prompts():
 # the lead projection
 
 def test_a_plumbing_field_in_a_lead_row_never_reaches_a_judge_prompt():
-    """`seq` is the queries-table key that pairs a control with its observed payload
-    (#882). The judge has no use for it, and `label_user_prompt` yaml-dumps the whole
-    `leads.jsonl` row into its `<lead>` block — so without a projection, a case rebuilt
-    with that field shows the label pass a `seq:` line its siblings do not.
-
-    That failure is silent by construction: the prompt text is not in `prompts_sha8`
-    (which hashes the prompt FILES), and `labels/<judge-suffix>.json` is keyed by case
-    and judge suffix, so nothing invalidates a cached measurement taken from the other
-    shape. An allowlist is the point — the next plumbing field must not have to be
-    remembered here.
-    """
     row = {"lead_id": "l-001", "goal": "g", "what_to_summarize": ["x"],
            "queries": [{"query_id": "elastic.a", "params": {"query": "FROM a"}, "seq": 3}],
            "provenance": "harness"}
@@ -668,5 +611,3 @@ def test_a_plumbing_field_in_a_lead_row_never_reaches_a_judge_prompt():
         baseline=[], environment_notes={}, story=""))
     assert "seq" not in rendered
     assert "provenance" not in rendered
-
-

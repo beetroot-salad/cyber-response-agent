@@ -93,14 +93,7 @@ def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
     return src, ep, world
 
 
-# ======================================================================================
-# Layout (O4) and the stamp
-# ======================================================================================
-
 def test_o4_materialize_layout(tmp_path, tenant_root):
-    """materialize_run(alert, 'r1') with its tenant_id keyword set to T creates <root>/T/runs/r1/, the runs-base
-    record <root>/T/runs/_tenant.json names T, and the run's provenance stamp carries
-    tenant_id T."""
     run_dir = _materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID)
     expected = tenant_root / T_ID / "runs" / "r1"
     assert Path(run_dir) == expected
@@ -136,18 +129,7 @@ def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
     assert H.row_path(tenant_root, T_ID).read_bytes() == row_bytes, "the row was rewritten"
 
 
-
-
-
-
-# ======================================================================================
-# Refusals: the row (O2), the order (D2), the record (O6)
-# ======================================================================================
-
 def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
-    """materialize_run with its tenant_id keyword set to T, with no row for T is refused before creating anything
-    and never writes <root>/T/tenant.json; after a successful materialize for an existing T
-    the row is byte-identical."""
     root = tmp_path / "data"
     root.mkdir()
     H.set_data_root(monkeypatch, root)
@@ -163,12 +145,7 @@ def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
     assert H.row_path(root, T_ID).read_bytes() == row_bytes
 
 
-
-
 def test_o6_record_mismatch_refused(tmp_path, tenant_root):
-    """materialize_run with its tenant_id keyword set to T, over a runs base whose record names U is refused by
-    ensure_runs_base_record's disagreement refusal at materialize step 4, and the record still
-    names U, byte-for-byte unmodified."""
     base = tenant_root / T_ID / "runs"
     record = H.plant_record(base, "someone-else")
     before = record.read_bytes()
@@ -181,9 +158,6 @@ def test_o6_record_mismatch_refused(tmp_path, tenant_root):
 
 @pytest.mark.parametrize("body", ["", '{"tenant_id": "playgr'], ids=["empty", "truncated"])
 def test_torn_runs_base_record_under_the_tenant(tmp_path, tenant_root, body):
-    """A torn or empty <T>/runs/_tenant.json refuses every later fresh run of T at materialize
-    (ensure_runs_base_record reads it as corrupt); the record is never re-minted or overwritten
-    (universal 4). No repair is designed; deleting it by hand re-mints base_world_id (C10)."""
     base = tenant_root / T_ID / "runs"
     record = H.plant_record(base, T_ID, body=body)
     alert = H.plant_alert(tmp_path / "in")
@@ -195,8 +169,6 @@ def test_torn_runs_base_record_under_the_tenant(tmp_path, tenant_root, body):
     record.unlink()
     _materialize(alert, "r3", T_ID)
     assert json.loads(record.read_text(encoding="utf-8"))["tenant_id"] == T_ID
-
-
 
 
 def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
@@ -225,21 +197,7 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
     assert _stamp(run_dir)["tenant_id"] == T_ID
 
 
-# ======================================================================================
-# The sibling's runs base (D2 step 2) and the widened refusal on that path (§7 J24)
-# ======================================================================================
-
 def test_d2_sibling_runs_base(tmp_path, tenant_root):
-    """A sibling's materialize puts its run dir under EpisodePaths(world.episode_dir).runs and
-    reads that base's record for T.
-
-    #1105 PR 2 (declared change 6, G5): the container is the launcher's to make — run setup
-    never creates it — so over an ABSENT container a sibling's materialize is refused and
-    nothing is made. Once the launcher has made it with T's record
-    (`EpisodeRuns.create_container`), two worlds of one pass-(A) episode both land in it and
-    preserve its one container record, and neither lands under `<root>/T/runs/` (O4's
-    gap until (B)). #1255 keeps run-local provenance neutral using the source tenant's
-    natural base world rather than the episode world."""
     src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b", container=None)
     world_c = H.run_py().resume_world(
         Episode.open(ep), "c", tenant=lambda: H.T1106.run_tenant(H.accept(tenant_root, T_ID)))
@@ -266,10 +224,6 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
 
 
 def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_root):
-    """A sibling's materialize, whose runs base is EpisodePaths(ep).runs rather than
-    runs_base_for(T), still meets the widened learning-state refusal: resolve_data_root,
-    reached through the sibling's entry, refuses a learning state root equal to, inside, or
-    containing the data root."""
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b", monkeypatch=monkeypatch)
     alert = RunPaths(src).alert
     argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
@@ -294,16 +248,6 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
         assert rc == 0, rc
         assert Path(_materialize(alert, world.run_id, T_ID, world=world,
                                  episode_runs=view)).is_dir()
-
-
-# ======================================================================================
-# Resume (O6, N4, N5)
-# ======================================================================================
-
-
-
-
-
 
 
 def test_o6_old_run_id_fresh_under_tenant(tmp_path, monkeypatch, tenant_root):

@@ -38,10 +38,6 @@ def _curator_for_run(tmp_path, *, box):
 
 
 def test_box_delivery_absence_does_not_silently_re_dead_the_lane(tmp_path):
-    """test_box_delivery_absence_does_not_silently_re_dead_the_lane (F1 → R1) — box= is a
-    REQUIRED parameter on the production construction wrapper: omitting it is a LOUD TypeError
-    at construction, never a silent inert `BoxExecutor()` fallback (which would re-create the
-    exact dead-lane defect this issue ..."""
     with pytest.raises(TypeError):
         _curator_for_run_no_box(tmp_path)
 
@@ -66,5 +62,3 @@ def _curator_for_run_no_box(tmp_path):
         repo,
         dtree / "lessons",
     )
-
-

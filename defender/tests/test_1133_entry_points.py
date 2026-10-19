@@ -1,7 +1,3 @@
-"""#1133: each migrated write, through its real entry point, refuses a planted link and writes nothing
-where it points. Links are planted both outside the episode and inside it; every negative has a
-positive control. Covers start/verify/archive, the judge's draws/wire-log/judge.yaml, the priming
-claim/base, and the family.yaml reader."""
 from __future__ import annotations
 
 import contextlib
@@ -162,10 +158,6 @@ def start_family(episode: Any, spawn: Any) -> dict[str, int]:
     return branch_cli().start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
 
 
-# =======================================================================================
-# H1 — the launcher's folders: the siblings' runs base, `worlds/`
-# =======================================================================================
-
 class Spawned:
     """`start_family`'s process seam: records each child it was asked to start."""
 
@@ -182,17 +174,6 @@ class Spawned:
 @pytest.mark.parametrize("reach", REACH)
 def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
         tmp_path, host, reach):
-    """The launcher's RUNS step makes the siblings' runs base through the episode's view
-    (`EpisodeRuns.create_container`, #1105 PR 2: `episode._runs.ensure()`), which refuses a link
-    at `runs/`: the core's unmarked ELOOP, raised before the runs-base tenant record is minted and
-    before any sibling starts (`start_family`). The folder the link reaches gains nothing (no
-    `_tenant.json`) and the link is left.
-
-    A reverted `os.makedirs(runs, exist_ok=True)` accepts the link, mints the tenant record in
-    the folder it reaches and hands that folder to every sibling as its runs base.
-
-    Control on the same address: with nothing planted, `runs/` is a real folder holding the
-    episode tenant's record and both siblings are started."""
     ep = tmp_path / "episodes" / EPISODE_ID
     ep.mkdir(parents=True)
     planted = link_folder(ep / "runs", reach=reach, ep=ep, host=host)
@@ -221,15 +202,6 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
 @pytest.mark.parametrize("scrub_ran", [False, True], ids=["nothing-to-archive", "verified"])
 def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_archived(
         tmp_path, host, scrub_ran, reach):
-    """`verify_family` makes `worlds/` with `episode.worlds.ensure()` whatever the outcome,
-    before the archive: a link at `worlds/` is refused there, so the folder it reaches gains no
-    world (with no scrub-verified sibling the refusal is this site's alone: nothing else walks
-    `worlds/`) and the link is left.
-
-    A reverted `os.makedirs(worlds, exist_ok=True)` accepts the link and returns the report
-    (and, with verified siblings, archives them into the folder the link reaches).
-
-    Control on the same address: with nothing planted, `worlds/` is a real folder."""
     cli = branch_cli()
     ep = T.episode(tmp_path)
     for w in T.WORLDS:
@@ -261,14 +233,6 @@ def test_h1_verify_family_refuses_a_linked_worlds_folder_before_anything_is_arch
 @pytest.mark.parametrize("kind", LEAF_LINKS)
 def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_through_it(
         tmp_path, host, kind, reach):
-    """An accepted family's stamp is `episode.family_stamp.write(...)`: a link at
-    `provenance.json` is the core's marked ELOOP out of `verify_family`, the file it reaches
-    keeps its bytes (a dangling link's target is not created) and the link is left.
-
-    A reverted `open(path, "w")` writes the stamp through the link.
-
-    Control on the same address: with nothing planted, the stamp is a plain, single-linked file
-    carrying the agreed commit."""
     cli = branch_cli()
     ep = T.episode(tmp_path)
     for w in T.WORLDS:
@@ -295,23 +259,10 @@ def test_h1_the_family_stamp_refuses_a_link_at_its_name_and_writes_nothing_throu
     assert json.loads(stamp.read_text(encoding="utf-8"))["agreed"]["commit"] == "cafe1"
 
 
-# =======================================================================================
-# H1 — the archive
-# =======================================================================================
-
 @pytest.mark.parametrize("reach", REACH)
 @pytest.mark.parametrize("at", ["worlds", "worlds/b"])
 def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through_it(
         tmp_path, host, at, reach):
-    """`archive_episode` makes each world's folder with `episode.world(label).dir.ensure()`,
-    which refuses a link at `worlds/` or at `worlds/<label>/` before the copy lane runs: the
-    folder the link reaches gains no world artifact, and the link is left.
-
-    A reverted `os.makedirs(world_dir, exist_ok=True)` makes (or accepts) the world folder
-    through an inside link, and the copy lane writes the world's artifacts there.
-
-    Control on the same address: with nothing planted the world is archived into a real
-    folder."""
     archive = T.mod("learning.branch.archive")
     ep = T.episode(tmp_path)
     run_dir = T.sibling_run_dir(ep / "runs", "b")
@@ -340,14 +291,6 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
 @pytest.mark.parametrize("reach", REACH)
 @pytest.mark.parametrize("kind", LEAF_LINKS)
 def test_h1_the_archive_refuses_a_link_at_the_run_dir_pointer(tmp_path, host, kind, reach):
-    """The pointer is written last, with `episode.world(label).run_dir_pointer.write(...)`: a
-    link at `worlds/<label>/run_dir` (which the copy lane's destination screen does not judge)
-    is the core's marked ELOOP, the file it reaches keeps its bytes (a dangling link's target is
-    not created) and the link is left.
-
-    A reverted `open(pointer, "w")` writes the run dir's path through the link.
-
-    Control on the same address: the pointer is a plain file naming the run dir."""
     archive = T.mod("learning.branch.archive")
     ep = T.episode(tmp_path)
     run_dir = T.sibling_run_dir(ep / "runs", "b")
@@ -369,10 +312,6 @@ def test_h1_the_archive_refuses_a_link_at_the_run_dir_pointer(tmp_path, host, ki
     assert_plain_file(pointer)
     assert pointer.read_text(encoding="utf-8") == f"{run_dir}\n"
 
-
-# =======================================================================================
-# H1 — the judge
-# =======================================================================================
 
 class ScriptedJudge:
     """The judge seam (`judge=`): a good reply for every call — or, for a label in `failing`, a
@@ -425,15 +364,6 @@ def regrade(tmp_path: Path, ep: Path, judge: ScriptedJudge) -> Any:
 @pytest.mark.parametrize("reach", REACH)
 def test_h1_a_linked_world_draws_folder_is_refused_before_any_draw_is_paid_for(
         tmp_path, roots, host, reach):
-    """The world's prompt is prepared with `episode.world(label).draws.ensure()`: a link at
-    `worlds/b/judge/` is refused there, contained to world `b` — recorded as its
-    `draws_failed_reason`, zero draws — so the judge is never called for `b`, the folder the
-    link reaches gains no draw and the link is left.
-
-    A reverted `os.makedirs(draws, exist_ok=True)` accepts an inside link, pays for `b`'s draws
-    and writes them where the link points (or refuses only at the draw write, after paying).
-
-    Control on the same address: with nothing planted, `b`'s draws land in a real folder."""
     ep = judged_episode(tmp_path)
     planted = link_folder(ep / "worlds" / "b" / "judge", reach=reach, ep=ep, host=host)
     before, host_before = planted.state(), S.census(host)
@@ -466,16 +396,6 @@ def test_h1_a_linked_world_draws_folder_is_refused_before_any_draw_is_paid_for(
 @pytest.mark.parametrize("at", ["worlds/family", "worlds/family/judge"])
 def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_call(
         tmp_path, roots, host, at, reach):
-    """The family-level call makes its folder with `episode.world("family").draws.ensure()`:
-    a link at `worlds/family/` or `worlds/family/judge/` is refused and contained to the family
-    call — recorded on the family row's `draws_failed_reason` (#1234) — so the judge is never called for it, the folder
-    the link reaches gains nothing and the link is left.
-
-    A reverted `os.makedirs(draws, exist_ok=True)` makes the draws folder through an inside
-    link and writes the family's draws there.
-
-    Control on the same address: with nothing planted, the family's draws land in a real
-    `worlds/family/judge/` (each call here fails, which the pass records as a draw)."""
     ep = judged_episode(tmp_path)
     if at == "worlds/family/judge":
         (ep / "worlds" / "family").mkdir(parents=True, exist_ok=True)
@@ -509,14 +429,6 @@ def test_h1_a_linked_family_draws_folder_is_refused_and_contained_to_the_family_
 @pytest.mark.parametrize("kind", LEAF_LINKS)
 def test_h1_a_link_at_a_draws_name_refuses_the_pass_and_is_written_through_by_nothing(
         tmp_path, roots, host, kind, reach):
-    """A good draw is written with `episode.world(label).draw(n).write(...)`, and a link at its
-    sink is not contained: the pass is refused (`JudgeRefused` over the core's marked ELOOP),
-    the file the link reaches keeps its bytes (a dangling link's target is not created) and the
-    link is left.
-
-    A reverted `open(draw, "w")` writes the draw through an inside link and the pass completes.
-
-    Control on the same address: the draw lands as a plain file."""
     ep = judged_episode(tmp_path)
     planted = link_file(ep / "worlds" / "b" / "judge" / "0.yaml", kind, reach=reach, ep=ep,
                         host=host)
@@ -545,16 +457,6 @@ FRAMED = WIRE_LOG_NAMES.agent_framed_trace("judge:b:0")
 @pytest.mark.parametrize("at", ["leaf-symlink", "leaf-dangling", "wire_logs"])
 def test_h1_the_framed_wire_log_refuses_a_link_contains_it_and_writes_nothing_through_it(
         tmp_path, roots, host, caplog, at, reach):
-    """The judge's framed wire log is `episode.wire_log(name).write(...)`, best-effort: a link
-    at `wire_logs/<name>` (to a file, or dangling) or at `wire_logs/` (to a folder) is refused
-    and the refusal CONTAINED — logged, the pass completes and the draw is still written —
-    while what the link reaches is unchanged (no framed trace written through it, a dangling
-    link's target not created) and the link is left.
-
-    A reverted `os.makedirs` + `open(path, "w")` writes the trace through the link.
-
-    Control on the same address: the framed trace lands as a plain file under a real
-    `wire_logs/`."""
     ep = judged_episode(tmp_path)
     if at == "wire_logs":
         planted = link_folder(ep / "wire_logs", reach=reach, ep=ep, host=host)
@@ -587,14 +489,6 @@ def test_h1_the_framed_wire_log_refuses_a_link_contains_it_and_writes_nothing_th
 @pytest.mark.parametrize("kind", LEAF_LINKS)
 def test_h1_judge_yaml_refuses_a_link_planted_mid_pass_and_writes_nothing_through_it(
         tmp_path, roots, host, kind, reach):
-    """The family record is `episode.judge.write(...)`. A link planted at `judge.yaml` while the
-    pass runs (by the judge seam's first call: a link there BEFORE the pass is the idempotency
-    read's refusal, which never reaches the write) is refused at the write — `JudgeRefused`
-    over the core's marked ELOOP — the file it reaches keeps its bytes and the link is left.
-
-    A reverted `open(judge_yaml, "w")` writes the record through the link.
-
-    Control on the same address: the record lands as a plain file."""
     ep = judged_episode(tmp_path)
     holder: dict[str, Any] = {}
 
@@ -620,11 +514,6 @@ def test_h1_judge_yaml_refuses_a_link_planted_mid_pass_and_writes_nothing_throug
 
 
 def test_o3_the_judge_pass_reads_and_writes_through_one_held_descriptor(tmp_path, roots):
-    """O3: the pass's reads go through the view of the pass's own `Episode`, which shares its
-    handle — so while the judge is being paid, exactly ONE descriptor is open on the episode
-    dir. A pass that opens the `Episode` for its writes but keeps a `bind` of the episode dir by
-    path for its reads holds two roots, which a rename or a swap can split. Afterwards none is
-    left open."""
     ep = judged_episode(tmp_path)
     seen: list[list[int]] = []
     judge = ScriptedJudge(on_first=lambda: seen.append(S.open_fds_on(ep)))
@@ -640,11 +529,6 @@ def test_o3_the_judge_pass_reads_and_writes_through_one_held_descriptor(tmp_path
 
 def test_o6_a_judge_pass_whose_episode_dir_is_renamed_mid_pass_records_in_the_moved_folder(
         tmp_path, roots):
-    """O6 through the judge's door: the episode is held, not remembered. The episode dir is
-    renamed while the pass runs (by the judge seam's first call); every later write — the draws
-    and `judge.yaml` — lands in the MOVED folder, and nothing reappears at the old name. A
-    writer that reopens the episode by name (an alias of `Episode.open` called on
-    `episode.dir`) finds nothing there, and the pass is refused."""
     ep = judged_episode(tmp_path)
     moved = ep.parent / f"{ep.name}-moved"
 
@@ -659,20 +543,8 @@ def test_o6_a_judge_pass_whose_episode_dir_is_renamed_mid_pass_records_in_the_mo
         "0.yaml", "1.yaml"]
 
 
-# =======================================================================================
-# H4 — the priming claim alone; the primed base alone
-# =======================================================================================
-
 def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_primes(
         tmp_path, roots):
-    """Two primers on one episode, each through its own `Episode` on the same directory. The
-    first holds the claim and its primer waits until the second has finished (the primer writes
-    no base, so nothing but the claim stands between them): the second is the "another launcher
-    is priming" `LedgerError` and its primer never runs. The first then completes and releases
-    the claim. (`prepare_episode` itself never reaches a taken directory since #1224: a launch
-    mints a fresh `-r<n>` episode, so the claim is driven through `_prime_once` directly.)
-
-    Control on the same address: once released, the next primer runs, handed its episode."""
     cli = branch_cli()
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
@@ -727,15 +599,6 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
 
 def test_h4_the_primed_base_alone_refuses_a_rival_base_that_lands_just_before_its_create(
         tmp_path):
-    """`prime_base(source_run_dir, episode)` lists `served/` (no base there), reads the whole
-    capture, then writes the base with ONE exclusive create, which still refuses a caller
-    without the claim (R3 step 4). A recording `Held` behind the episode's `io=` seam plants a
-    rival base (a plain file, by path) just before it delegates that create: the create's
-    collision is the "already primed" `LedgerError`, and the rival keeps its bytes. A
-    check-then-write, a replace or an append would clobber it.
-
-    Control on the same address: with no rival, the same capture primes the base, by one
-    `create` and nothing else."""
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     run_dir = source_run(tmp_path)
@@ -775,22 +638,11 @@ def test_h4_the_primed_base_alone_refuses_a_rival_base_that_lands_just_before_it
     assert [r["source"] for r in rows] == [ledger.CAPTURED]
 
 
-# =======================================================================================
-# H5 — the manifest readers never follow a link at family.yaml
-# =======================================================================================
-
 MARKER = "host-manifest-1133-never-read"
 
 
 @pytest.mark.parametrize("kind", ["symlink", "hardlink"])
 def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it(tmp_path, kind):
-    """`load_family(view)` reads `family.yaml` through the episode's view (rev 3, R1), which
-    follows nothing below the episode dir and refuses a hard link: over a symlink to a host file
-    holding a valid manifest, or a hard link whose other name is that host file, it raises
-    `FamilyError` naming `family.yaml`, returns nothing, and never reads what the link reaches —
-    the host manifest's text appears in no message.
-
-    Control on the same address: the same bytes as a plain `family.yaml` load."""
     fam = T.mod("runtime.branch._family")
     doc = T.family_doc()
     doc["worlds"][1]["story"] = MARKER
@@ -825,8 +677,3 @@ def test_h5_the_manifest_reader_refuses_a_link_at_family_yaml_without_reading_it
     with S.open_episode(ep) as episode:
         got = call(episode.view())
     assert [w.story for w in got.worlds][1] == MARKER
-
-
-# =======================================================================================
-# H7 — the judge's read view grows no writer
-# =======================================================================================

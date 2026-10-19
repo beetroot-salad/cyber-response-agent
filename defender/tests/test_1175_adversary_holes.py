@@ -1,8 +1,3 @@
-"""#1175 adversary pass: scenes that a cheating implementation of the #1175 design passed
-`test_1175_leads_git_liveness.py` without (F1-F8 of the adversary report on the PR). Each pins
-one clause the base suite left open; each was confirmed red against the cheat and green against
-an honest seam.
-"""
 from __future__ import annotations
 
 from pathlib import Path

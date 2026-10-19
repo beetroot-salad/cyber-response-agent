@@ -40,11 +40,6 @@ class TwoLaneRecorder:
         self._agent = agent
         self._run = run
         self._fail_on = fail_on
-        #: THE FAULT CLASS IS DATA, and the two this suite drives are P-A's own executed
-        #: measurement of this tick's envelope (pa-2), never an author's imagined taxonomy:
-        #: `_run_curator_module` catches `(SubprocessError, OSError)`, so a `RuntimeError`
-        #: ESCAPES it and a `TimeoutError` — an `OSError` subclass — is SWALLOWED, leaving
-        #: `rc=None`, one `(continuing)` log line and no other trace anywhere.
         self._fault_class = fault_class
 
     def __call__(self, paths, state, channel, threshold_env, module_name, pending_label,
@@ -100,11 +95,6 @@ def drive(paths, trigger, *, rec=None):
         paths, trigger_author=trigger, branch=RepoBranch(paths.repo_root, events=rec.events),
         start_box=rec.start_box, stop_box=rec.stop_box, scrub=rec.scrub)
     return rc, rec
-
-
-# ---------------------------------------------------------------------------------------
-# The corpus and its curator
-# ---------------------------------------------------------------------------------------
 
 
 def test_the_questioner_curator_gate_is_idempotency_only(tmp_path):
@@ -217,11 +207,6 @@ def test_an_unrecognized_drain_label_gets_no_box_at_all(tmp_path):
     assert {wt.lessons_dir, wt.lessons_questioner_dir} <= writable_sources(request)
 
 
-# ---------------------------------------------------------------------------------------
-# A2 — the two-curator tick is ONE unit
-# ---------------------------------------------------------------------------------------
-
-
 def test_one_author_drain_tick_opens_one_branch_and_one_pr_for_both_corpora(tmp_path):
     """One tick, one worktree, one box, one branch and one PR lease — covering both corpora."""
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
@@ -278,11 +263,6 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
         drive(paths, trigger)
         return trigger
 
-    # TWO TICKS, because `hold_committed=True` is what this drain runs: the rows a tick commits
-    # STAY queued for the next tick to retire (`test_922_a_full_findings_queue_alone_wakes_the
-    # _drain` pins that), so consumption is only observable on the second — and a one-tick test
-    # asserting "consumed" would fail against a correct implementation while a one-tick test
-    # asserting "still queued" would pass against one that never consumes at all.
     first = faulting_tick("family-lesson")
     faulting_tick("must-not-author-twice")
 
@@ -324,11 +304,6 @@ def test_a_faulting_curator_leaves_the_others_commit_and_consumed_markers_intact
     assert not D.stuck_records(paths, FINDINGS), (
         "the SURVIVING lane carries a stuck record — the fault was recorded against the curator "
         "that landed its work")
-
-
-# ---------------------------------------------------------------------------------------
-# The census: who must see the new root, and who must not
-# ---------------------------------------------------------------------------------------
 
 
 def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):

@@ -1,19 +1,3 @@
-"""`:H` blocks accumulate; a hypothesis is declared once and never un-declared.
-
-Append-only forbids rewriting the loop-1 `:H hypothesize.hypotheses` block, so a
-loop that forks a hypothesis has only one way to record it: a SECOND block. That
-block used to REPLACE the projected list — every earlier loop's hypothesis
-vanished from the companion, silently, with no parse warning. Everything keyed
-off `_walkers.all_hypotheses` inherited the hole: the predictions a later
-resolution resolves against, the weights `final_weights` reports, and the authz
-contracts `disposition: benign` is gated on.
-
-The lead-scoped spelling (`:H l-NNN.new_hypotheses`) had the mirror defect. Its
-records never entered the projector's sub-block index, so the `:H h-NNN.preds`
-declaring their predictions was rejected as "unknown hypothesis" — a mid-run
-hypothesis could not carry a prediction at all (#816).
-"""
-
 from __future__ import annotations
 
 from defender.skills.invlang._walkers import all_hypotheses
@@ -54,9 +38,6 @@ def test_a_second_hypothesize_block_adds_rather_than_replaces():
 
 
 def test_a_later_block_cannot_un_declare_an_earlier_hypothesis_prediction():
-    """`:H h-001.preds` is projected before loop 2's block is even read. Replacing
-    the list took the predictions with it, so a loop-2 resolution citing p1 found
-    a hypothesis that declared nothing."""
     body, warnings = parse_dense_companion(_doc(
         _loop_one()
         + ":H h-001.preds [id|subject|claim]\n"
@@ -107,9 +88,6 @@ def test_a_lead_born_hypothesis_can_declare_a_prediction():
 
 
 def test_a_second_authz_block_cannot_drop_an_earlier_contract():
-    """The safety edge of the same defect. `ac1` is fulfilled by nothing; `ac2`
-    is authorized. While the second block REPLACED the contract list, ac1
-    vanished and the benign gate saw only the satisfied contract."""
     doc = _doc(
         _loop_one()
         + ":H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
@@ -157,9 +135,6 @@ def test_declaring_one_id_at_both_sites_is_rejected_and_the_table_still_outranks
 
 
 def test_a_lead_declaring_hypotheses_off_a_stale_header_is_rejected_whole():
-    """The prologue site rejects an off-schema `:H` header outright. The lead site
-    skipped the check — and a lead-born record now reaches every consumer of
-    `_walkers.all_hypotheses`, so an off-schema row would have ridden in."""
     body, warnings = parse_dense_companion(_doc(
         _EDGE + "\n"
         + _LEAD_HEADER + "\n"
@@ -175,9 +150,6 @@ def test_a_lead_declaring_hypotheses_off_a_stale_header_is_rejected_whole():
 
 
 def test_a_second_observations_block_adds_to_a_lead_rather_than_replacing():
-    """Not `:H`, same defect: the two observation sub-blocks assigned, so a lead
-    whose results arrive in two blocks kept only the last — and append-only
-    leaves no way to write them as one."""
     body, warnings = parse_dense_companion(_doc(
         _LEAD_HEADER + "\n"
         "l-001|1|process-ancestry|v-001|h-001|elastic|±10m\n"
@@ -192,5 +164,3 @@ def test_a_second_observations_block_adds_to_a_lead_rather_than_replacing():
     lead = next(f for f in body["findings"] if f["id"] == "l-001")
     observed = lead["outcome"]["observations"]["vertices"]
     assert [v["id"] for v in observed] == ["v-100", "v-101"]
-
-

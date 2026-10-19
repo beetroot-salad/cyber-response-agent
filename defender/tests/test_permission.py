@@ -9,21 +9,12 @@ import pytest
 
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
-# The workspace root is on sys.path via pytest's `pythonpath = [".."]`, so
-# `defender.*` namespace imports resolve. The agent registry moved OUT of `runtime/`
-# to `defender.agents` (#575), which imports `pydantic_ai` transitively — hence the guard.
 from defender.agents import MAIN_DEF  # noqa: E402
 from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
 from defender.runtime.permission.grant import PathShapes, under  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 
-# The gate is policy-driven (it keys on an AgentPolicy, not a role). The runtime-agent reader
-# policy is compiled PER-RUN — `compile_policy_for(<DEF>, run_dir, defender_dir=…)` bakes the
-# RESOLVED roots into every grant's SCOPE and RAISES without them (safe-by-construction). These
-# synthetic absolute roots anchor the lane; `decide_bash` resolves an operand but never stats it,
-# so they need not exist. The per-run anchored-read behavior is specced in test_read_confine_bash.py;
-# here the bash tests exercise shim/adapter/wrapper-fold/redirect shapes against the same policies.
 _RUN = Path("/run")
 _DFN = Path("/dfn")
 MAIN = compile_policy_for(MAIN_DEF, run_dir=_RUN, defender_dir=_DFN)
@@ -48,20 +39,16 @@ def _bash(cmd, policy):
 @pytest.mark.parametrize("cmd", [
     "defender-invlang enum types",
     "defender-lessons --tags",
-    # #575: the viewers lost their file operands, so a run-dir artifact is opened by `cat` and
-    # reduced through the stdin-only stages (`tail -1 {run}/…` denies — see the c1 ledger).
     "cat /run/executed_queries.jsonl | tail -1 | wc -c",
+    '''cat /run/investigation.md | defender-sql 'SELECT * FROM data WHERE ts >= "2026-01-01" AND x <= "2026-12-31"' ''',
+    '''cat /run/investigation.md | grep 'trust_edges_out > 0' ''',
 ])
-def test_main_loop_allows_safe(cmd):
+def test_main_allows_safe_commands_and_quoted_comparisons(cmd):
     assert _bash(cmd, MAIN).allow
 
 
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
     ("defender-elastic query foo", "not runnable from bash"),
-    # The raw payload is denied to MAIN by POSITIVE ENUMERATION (the gather_raw shape is not in
-    # main's grants), not by the deleted `RAW_MARKER in cmd` clamp — so the bash lane answers with
-    # main's fall-through reason. The gather_raw-specific reason is the READ tool's, and it is
-    # still asserted there (test_read_main_loop_gather_raw_not_enumerated_gather_allowed).
     ("cat /run/gather_raw/l-001/0.json", "only the defender-* shims"),
     ("python3 scripts/adapters/elastic_adapter.py query foo", "not runnable from bash"),
     ("curl http://evil", "arbitrary shell"),
@@ -76,10 +63,6 @@ def test_main_loop_denies(cmd, reason_substr):
 # bash, gather subagent (#611: the adapter lane is gone)
 
 def test_gather_denies_standalone_adapter():
-    # #611 FLIP: gather used to run a standalone adapter from bash and have its payload captured
-    # transparently. That capability is DELETED — the data source is reached through the `query`
-    # tool — so the standalone form now denies for gather exactly as it always did for main, with
-    # the reason that names the surface which DOES work.
     d = _bash("defender-elastic query foo", _gather())
     assert not d.allow
     assert d.reason == permission.ADAPTER_RETIRED_REASON
@@ -92,9 +75,6 @@ def test_gather_denies_standalone_adapter():
     "cat /run/report.md; defender-elastic query foo",         # sequenced
 ])
 def test_gather_denies_compound_with_adapter(cmd):
-    # The other stage is deliberately one gather MAY run: the deny must come from the ADAPTER
-    # stage, not from the neighbouring stage being unclaimed. It denied as a "compound" before
-    # #611 and denies as an adapter now — either way, no adapter reaches a shell.
     d = _bash(cmd, _gather())
     assert not d.allow
     assert d.reason == permission.ADAPTER_RETIRED_REASON
@@ -102,11 +82,13 @@ def test_gather_denies_compound_with_adapter(cmd):
 
 # The reader lane's shapes: `cat` opens (and is scope-checked), the rest read stdin.
 @pytest.mark.parametrize("cmd", [
-    "cat /run/gather_raw/l-001/0.json | grep hits",   # stdin viewer, not a file operand
+    "cat /run/gather_raw/l-001/0.json | grep hits",
     "defender-invlang enum types",
-    "cat /run/gather_raw/l-001/0.json",            # gather reads its own raw, absolute
+    "cat /run/gather_raw/l-001/0.json",
+    '''cat /run/gather_raw/l-001/0.json | defender-sql 'SELECT * FROM data WHERE ts >= "2026-01-01" AND x <= "2026-12-31"' ''',
+    '''cat /run/gather_raw/l-001/0.json | grep 'trust_edges_out > 0' ''',
 ])
-def test_gather_allows_readonly_viewers(cmd):
+def test_gather_allows_readonly_commands_and_quoted_comparisons(cmd):
     assert _bash(cmd, _gather()).allow
 
 
@@ -115,111 +97,39 @@ def test_gather_denies_arbitrary_shell(cmd):
     assert not _bash(cmd, _gather()).allow
 
 
-# quoted comparison operators are not redirects (quote-aware unsafe scan)
-# Regression: `>`/`<` inside a quoted filter (a comparison) were read as shell
-# redirects and hard-denied in-process. They must be allowed; real redirects and
-# command substitution outside quotes must still be denied.
-#
-# Carried by `defender-sql` and `grep` since #540 dropped jq from the reader lanes. The
-# property under test is the LEXER's, not any one program's: what matters is that a
-# comparison operator inside a quoted token survives, so the substitute only has to keep
-# `>=`/`<=`/`>` inside quotes.
-
 @pytest.mark.parametrize("cmd", [
-    # stdin-compute-only, so the payload is fed via an in-scope `cat …`; the point of this
-    # regression stays — `>`/`<` inside the single-quoted argument are comparisons, not redirects.
-    '''cat /run/gather_raw/l-001/0.json | defender-sql 'SELECT * FROM data WHERE ts >= "2026-01-01" AND x <= "2026-12-31"' ''',
-    '''cat /run/gather_raw/l-001/0.json | grep 'trust_edges_out > 0' ''',
-])
-def test_gather_allows_quoted_comparisons(cmd):
-    assert _bash(cmd, _gather()).allow
-
-
-@pytest.mark.parametrize("cmd", [
-    # Same regression for MAIN — the gather variants above open a gather_raw path that is not in
-    # MAIN's enumeration, so cover MAIN over an in-scope NON-raw artifact instead. Without this, no
-    # MAIN test carries a comparison-bearing quoted filter, so a main-only over-tightening of
-    # redirect detection (`>=`/`<=` misread as a redirect) would slip through green.
-    '''cat /run/investigation.md | defender-sql 'SELECT * FROM data WHERE ts >= "2026-01-01" AND x <= "2026-12-31"' ''',
-    '''cat /run/investigation.md | grep 'trust_edges_out > 0' ''',
-])
-def test_main_allows_quoted_comparisons(cmd):
-    assert _bash(cmd, MAIN).allow
-
-
-@pytest.mark.parametrize("cmd", [
-    # Each head is a command the lane OTHERWISE ALLOWS (an in-scope `cat`), so the deny can only
-    # come from the redirect / substitution guard — a viewer with a file operand would now deny at
-    # the shape gate and the guard would never be exercised.
-    "cat /run/report.md > /tmp/out",         # real stdout redirect outside quotes
-    "cat /run/report.md 1> /tmp/out",        # explicit fd redirect
-    "cat /run/report.md >> /tmp/out",        # append redirect
-    "cat $(cat injected)",                   # command substitution outside quotes
-    'cat "$(rm -rf /)"',                     # substitution live inside double quotes
-    # Fused shell-operator tokens shlex emits as a single token that is neither a
-    # recognized separator (|/||/&&/;) nor a `<>&`-only redirect — a redirect-only
-    # check missed these, so a file write / a second ungated command slipped through.
-    "cat /run/report.md >| /tmp/out",        # >| force-clobber stdout redirect
-    "cat secret >| /tmp/exfil",              # ... same, exfil shape
-    "cat /run/report.md &>| /tmp/out",       # &>| both-stream clobber
-    "cat /run/report.md |& rm -rf /",        # |& pipe-both: the rm must be gated
-    "cat /run/report.md & rm -rf /",         # bare-& background: the rm must be gated
-    # `2>1` is a write to a file named `1` (operator token `>`), not the `2>&1`
-    # merge (operator token `>&`) — it must not be waved through as benign stderr.
+    "cat /run/report.md > /tmp/out",
+    "cat /run/report.md 1> /tmp/out",
+    "cat /run/report.md >> /tmp/out",
+    "cat $(cat injected)",
+    'cat "$(rm -rf /)"',
+    "cat /run/report.md >| /tmp/out",
+    "cat secret >| /tmp/exfil",
+    "cat /run/report.md &>| /tmp/out",
+    "cat /run/report.md |& rm -rf /",
+    "cat /run/report.md & rm -rf /",
     "cat /run/report.md 2>1",
-    "cat /run/report.md 2 > 1",              # ... same, with `2` as a positional token
-])
-def test_gather_still_denies_real_redirect_and_substitution(cmd):
-    assert not _bash(cmd, _gather()).allow
-    assert not _bash(cmd, MAIN).allow
-
-
-# a second command must never hide behind a safe head
-# shlex eats an unquoted newline as whitespace, and the wrapper fold's `bash -c`/`timeout`
-# handling used to drop or re-quote what followed — both let a safe head (an in-scope
-# `cat`) front an ungated second command the shell still runs. Each must fail closed
-# in BOTH sessions. The heads are all commands the lane really allows, so a regression
-# in the wrapper fold shows up as an ALLOW here rather than being masked by the head's own deny.
-
-@pytest.mark.parametrize("cmd", [
-    "cat /run/report.md\nrm -rf /tmp/x",                    # unquoted newline = a 2nd command
+    "cat /run/report.md 2 > 1",
+    "cat /run/report.md\nrm -rf /tmp/x",
     "cat /run/report.md\ncurl http://evil",
-    "bash -c 'cat /run/report.md' ; rm -rf /tmp/x",         # cmd AFTER the -c payload (outer shell)
-    "bash -c 'cat /run/report.md'\nrm -rf /tmp/x",          # ... via newline
+    "bash -c 'cat /run/report.md' ; rm -rf /tmp/x",
+    "bash -c 'cat /run/report.md'\nrm -rf /tmp/x",
     "bash -c 'cat /run/report.md' && curl http://evil",
     "bash -c 'cat /run/report.md' | sh",
-    'bash -c "cat /run/report.md\nrm -rf /tmp/x"',          # newline INSIDE the -c payload
-    "timeout 5 cat /run/report.md\nrm -rf /tmp/x",          # timeout prefix + newline (wrapper-fold join)
+    'bash -c "cat /run/report.md\nrm -rf /tmp/x"',
+    "timeout 5 cat /run/report.md\nrm -rf /tmp/x",
     "timeout 5 cat /run/report.md ; rm -rf /tmp/x",
-    "cat /run/report.md ;; rm -rf /tmp/x",                  # ;-fused token must fail closed
+    "cat /run/report.md ;; rm -rf /tmp/x",
     "echo a ;& curl http://evil",
-])
-def test_no_second_command_hides_behind_safe_head(cmd):
-    assert not _bash(cmd, _gather()).allow
-    assert not _bash(cmd, MAIN).allow
-
-
-# A SCRIPT FILE before `-c` is not the inline `bash -c <payload>` wrapper: the shell
-# runs the script and `-c`/the "payload" become its positional args. the wrapper fold used to
-# grab the first `-c` anywhere, extract the safe-looking payload, and approve while
-# `shell=True` ran the script (issue #379 bypass). The exact-adjacency fold must
-# fail closed here in BOTH sessions. The payload is an ALLOWED command on purpose:
-# a fold that grabbed it would approve, so the deny pins the adjacency rule itself.
-@pytest.mark.parametrize("cmd", [
-    "bash evil.sh -c 'cat /run/report.md'",            # script file before -c → -c is the script's arg
+    "bash evil.sh -c 'cat /run/report.md'",
     "sh evil.sh -c 'cat /run/report.md'",
-    "timeout 5 bash evil.sh -c 'cat /run/report.md'",  # ... behind a timeout prefix
+    "timeout 5 bash evil.sh -c 'cat /run/report.md'",
 ])
-def test_bash_script_file_before_c_fails_closed(cmd):
+def test_both_roles_deny_redirects_substitution_and_hidden_commands(cmd):
     assert not _bash(cmd, _gather()).allow
     assert not _bash(cmd, MAIN).allow
 
 
-# The happy-path anchor this used to be — the inline `bash -c <viewer>` form must STILL be
-# approved — is retired with the fold (#971). What replaces it is the pairing: the wrapper
-# denies, the payload on its own is allowed. That keeps the guard the anchor existed for (a
-# deny-only corpus would stay green if the viewers themselves broke) while pinning the new
-# answer, in both sessions.
 @pytest.mark.parametrize(("wrapped", "payload"), [
     ("bash -c 'cat /run/investigation.md'", "cat /run/investigation.md"),
     ("sh -c 'cat /run/investigation.md'", "cat /run/investigation.md"),
@@ -250,22 +160,18 @@ def test_a_timeout_prefix_denies_and_the_same_command_without_it_does_not(cmd):
 
 
 @pytest.mark.parametrize("cmd", [
-    # A quote spanning a newline is unparseable → the shared executor decomposition
-    # (bash_exec.parse) raises, so the gate fails CLOSED. It must fail closed at the LEX,
-    # before any classification of its head (which "starts with defender-") — an unparseable
-    # command is never handed on as a shape anyone acts on.
     "defender-elastic query 'unterminated\nrest'",
     "cat /run/report.md | jq '.a\n.b'",
-    # #854 F-22 — a connector at a line boundary. Each physical line is lexed on its own, so
-    # the token used to be DROPPED and `A | B` ran as `A ; B`: the second stage read /dev/null
-    # and the miss was indistinguishable downstream from a genuine no-match. It now joins its
-    # `\`-continuation sibling in the same fail-closed lexing refusal.
     "cat /run/report.md |\nwc -l",
     "cat /run/report.md\n| wc -l",
     "cat /run/report.md &&\nwc -l /run/report.md",
     "cat /run/report.md\n&& wc -l /run/report.md",
+    "cat /run/report.md | ; wc -l",
+    "cat /run/report.md | && wc -l",
+    "cat /run/report.md | || wc -l",
+    "cat /run/report.md | | wc -l",
 ])
-def test_unparseable_quote_spanning_newline_fails_closed(cmd):
+def test_unparseable_command_fails_closed_at_the_gate(cmd):
     d = _bash(cmd, _gather())
     assert not d.allow
     assert not _bash(cmd, MAIN).allow
@@ -274,33 +180,6 @@ def test_unparseable_quote_spanning_newline_fails_closed(cmd):
     assert d.pipelines is None  # nothing was parsed, so nothing is handed downstream
 
 
-@pytest.mark.parametrize("cmd", [
-    # #884 F-28 — the WITHIN-a-line half of the same defect. #854 closed the line-boundary
-    # spellings above and believed it had closed these too; it had only closed `| grep a`,
-    # because after a `|` the executor's guard saw a stage already banked and stood down.
-    # `;` never reached that guard at all (it is not a dangling connector), so the spelling
-    # the gather deny-reason itself teaches — `cat <payload> | grep '<substring>'` — silently
-    # dropped its pipe and ran the grep on /dev/null at rc 0.
-    "cat /run/report.md | ; wc -l",
-    "cat /run/report.md | && wc -l",
-    "cat /run/report.md | || wc -l",
-    "cat /run/report.md | | wc -l",
-])
-def test_dangling_pipe_within_a_line_fails_closed_at_the_gate(cmd):
-    """The gate and the executor stay pinned together."""
-    d = _bash(cmd, _gather())
-    assert not d.allow
-    assert not _bash(cmd, MAIN).allow
-    assert d.reason == permission.UNTOKENIZABLE_REASON
-    assert d.pipelines is None
-
-
-#: Every distinct way a command can fail to become a `Pipeline` list, paired with the phrase
-#: the agent must find in its refusal. The runtime spec no longer teaches ANY of this — the
-#: "One physical line" paragraph was removed as always-on context for a rare failure, and it
-#: lived in MAIN's prompt and the advisory skill while every observed instance came from
-#: GATHER, which never carried it. The reason string is now the only teacher, so it has to be
-#: complete, and this table is what says it still is.
 _LEXING_FAILURES = [
     ("unbalanced quote",            "cat /run/report.md | grep 'unterminated", "unbalanced quote"),
     ("newline in a quoted arg",     "cat /run/report.md | grep 'a\nb'",        "quoted argument"),
@@ -312,12 +191,6 @@ _LEXING_FAILURES = [
     ("pipe then `|`",               "cat /run/report.md | | wc -l",            "BOTH sides"),
     ("connector then bare `;`",     "cat /run/report.md && ;",                 "BOTH sides"),
     ("pipe into a bare redirect",   "cat /run/report.md | 2> /dev/null",       "BOTH sides"),
-    # NO WRAPPER SHAPE IS ON THIS LIST (#971). `bash -c '<cmd>' extra`, `bash /run/report.md`
-    # and a quoted `timeout` prefix were each here at one time or another, because a fold had an
-    # opinion about them and the lexing reason had to explain it. Nothing folds now: they are
-    # ungranted PROGRAMS and answer the capability reason, which is the one that says what the
-    # lane can actually run. `test_959_wrapper_fold.py::test_no_word_is_parsed_as_a_wrapper`
-    # holds that end.
 ]
 
 
@@ -327,9 +200,6 @@ _LEXING_FAILURES = [
     "cat $(cat injected)",               # substitution
 ])
 def test_a_shape_this_surface_does_not_offer_stays_a_capability_refusal(cmd):
-    """The other side of the split. These LEX fine and ask for something the lane does not
-    have, so they must keep the policy deny reason — the one that teaches the lane's actual
-    capability — rather than being swept into the lexing message and reading as a typo."""
     d = _bash(cmd, _gather())
     assert not d.allow
     assert d.reason != permission.UNTOKENIZABLE_REASON, \
@@ -338,9 +208,6 @@ def test_a_shape_this_surface_does_not_offer_stays_a_capability_refusal(cmd):
 
 
 def test_the_real_pipe_the_gather_deny_reason_teaches_is_still_allowed():
-    """The positive control the refusals above are worthless without: the gather lane's
-    payload-grep idiom must still pass. A guard that over-fired here would deny gather the one
-    command shape its own deny-reason instructs it to use."""
     d = _bash("cat /run/gather_raw/l-1/0.json | grep hits", _gather())
     assert d.allow
     assert [[list(st.argv) for st in pl.stages] for pl in d.pipelines] == [
@@ -362,12 +229,6 @@ def _read_roots(tmp_path):
 
 
 def test_read_allows_in_root_corpus_and_run(tmp_path):
-    # The reads past runs actually make: alert/investigation/run artifacts under the run dir;
-    # tight-corpus `.md` under the defender corpus. Built with a MAIN policy compiled on these
-    # roots (`compile_policy_for` bakes them into the `cat` grant's scope, which IS the policy's
-    # `read_allow` — so the policy must anchor on the SAME roots the gate is called with; a
-    # mismatched anchor denies every read). A run-dir file is admitted regardless of name; a
-    # corpus read must be a tight `.md` under lessons/skills/examples.
     run, dfn = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     for p in (run / "alert.json", run / "investigation.md", run / "executed_queries.jsonl",
@@ -407,11 +268,6 @@ def test_read_traversal_escape_denied(tmp_path):
 
 @pytest.mark.parametrize("name", [".env", "credentials.txt", "ground_truth.yaml", "cases.json"])
 def test_read_denylist_is_belt_and_suspenders_inside_a_root(tmp_path, name):
-    # A secret that lands INSIDE an allowed root AND inside the agent's own shapes (a captured
-    # .env at the top of the run dir, the eval cases.json) is still denied by the declarative
-    # denylist on top. The path is IN-SHAPE on purpose — a run-dir file at depth 1 matches
-    # `under(run, SEG)` — so the denylist is the only thing that can deny it (an out-of-shape
-    # probe would deny at the enumeration and prove nothing about the denylist).
     run, dfn = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert not permission.decide_read(
@@ -421,9 +277,6 @@ def test_read_denylist_is_belt_and_suspenders_inside_a_root(tmp_path, name):
 
 
 def test_read_ssh_dir_component_denied_inside_a_shape(tmp_path):
-    # The denylist's OTHER axis: a denied path COMPONENT (`.ssh`). The probe sits inside the tight
-    # corpus `.md` shape (`lessons/<dir>/<name>.md` — `.ssh` is a legal segment), so the shape gate
-    # admits it and only the component denylist can deny it.
     run, dfn = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     assert not permission.decide_read(
@@ -433,11 +286,6 @@ def test_read_ssh_dir_component_denied_inside_a_shape(tmp_path):
 
 
 def test_read_main_loop_gather_raw_not_enumerated_gather_allowed(tmp_path):
-    # gather_raw is inside the run dir, but the gather_raw SHAPE is simply not in main's
-    # `read_allow` (which IS its `cat` grant's scope) — positive enumeration, not the deleted
-    # `raw_reads` clamp bit. The gather subagent's grants DO carry that shape, so it reads its own
-    # payload. The gather_raw-specific deny REASON is prompt surface the e2e deny-tail asserts as a
-    # substring, so it is pinned here too.
     run, dfn = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     gather = compile_policy_for(T1106.fixture_gather_def(), run_dir=run, defender_dir=dfn)
@@ -452,18 +300,6 @@ def test_alert_is_untrusted():
     assert permission.is_untrusted_read(Path("/tmp/defender-runs/x/alert.json"))
     assert not permission.is_untrusted_read(Path("/tmp/defender-runs/x/report.md"))
 
-
-# write
-# decide_write is a flat, deny-by-default allowlist (the write twin of bash_allow):
-# the RESOLVED path must fullmatch a `policy.write_allow` pattern. There is NO implicit
-# run_dir base — every writer declares its paths (main: its run-dir subtree; the lead
-# author: defender/skills/**.md). Empty write_allow → the agent may write nothing.
-# `build_write_allow(root, suffix=…)` is the shared subtree-pattern builder.
-# Both run roots are REQUIRED arguments (#681) — the former `run_dir=None` default silently
-# skipped the #629 output-structure gate for a caller that forgot the kwarg — so every probe
-# below threads them. They do not loosen or tighten the allowlist assertions: the write⊆read
-# containment guard they enable is a no-op for a target already inside the policy's own roots.
-# `_VALID_REPORT` is the content for run-dir-root report.md probes, which are gated artifacts.
 
 _VALID_REPORT = "---\ndisposition: benign\n---\nConcise analysis.\n"
 
@@ -522,9 +358,6 @@ def test_decide_write_requires_policy_and_roots(tmp_path):
 
 
 def test_write_allow_admits_declared_denies_sibling(tmp_path):
-    """write_allow is a flat list of the paths an agent may author: a skills .md under the declared
-    subtree is allowed (positive control — real, would-be-committed content); a sibling under
-    defender/ but OUTSIDE the allowlist (lessons) is denied on the same policy (guarded negative)."""
     skills = tmp_path / "defender" / "skills"
     (skills / "elastic").mkdir(parents=True)
     (tmp_path / "defender" / "lessons").mkdir(parents=True)
@@ -537,9 +370,6 @@ def test_write_allow_admits_declared_denies_sibling(tmp_path):
 
 
 def test_write_allow_md_only_denies_non_md(tmp_path):
-    """the lead-author allowlist is .md-only (the corpus), so a .py under the SAME skills subtree
-    (the invlang/connect code that also lives there) is DENIED — the tightening #3 asked for: the
-    write gate refuses corpus-code writes up front, not just at the loop's late .md-only scope gate."""
     skills = tmp_path / "defender" / "skills"
     (skills / "invlang").mkdir(parents=True)
     pol = _skills_pol(skills)
@@ -579,9 +409,6 @@ def test_write_allow_traversal_escape_denied(tmp_path):
 
 
 def test_write_empty_allow_denies_all(tmp_path):
-    """empty write_allow (every read-only / predictor stage: gather/judge/actor/oracle/verify) → the
-    agent may write NOTHING, deny-by-default. Even a run_dir path is denied — a non-writer that
-    somehow reached the write gate is refused, not silently granted its run dir."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     pol = permission.AgentPolicy()  # write_allow=()
@@ -614,11 +441,6 @@ def test_write_allow_corpus_file_named_investigation_not_gated(tmp_path):
 # gather subagent: compute + adapter surface
 
 def test_gather_drops_find():
-    # `find` was dropped from the allowlist (#379): template discovery is Read/Grep
-    # now (gather SKILL §2), and find was the one tool needing arg-level deny rules
-    # (-exec/-delete, sensitive-path locator). It now fails closed in both lanes — and
-    # since #575 it is not even in `PROGRAMS`, so no policy could grant it without
-    # failing loud at compile.
     for cmd in ("find /workspace -type d -name gather",
                 "find skills/gather/queries -name '*.md'"):
         assert not _bash(cmd, _gather()).allow, cmd
@@ -626,10 +448,6 @@ def test_gather_drops_find():
 
 
 def test_gather_keeps_local_computation():
-    # #611: gather's bash lane keeps the LOCAL-COMPUTATION half only — defender-sql over an
-    # IN-SCOPE payload already on disk, streamed via `cat {RUN}/…`. The adapter half (the one
-    # network-capable program the lane ever had) went to the `query` tool, so deleting the route
-    # IS "take the network off bash". (#540 dropped jq, so defender-sql is the whole reducer.)
     for cmd in ("cat /run/gather_raw/l-001/1.json | defender-sql 'SELECT count(*) FROM data'",
                 "cat /run/gather_raw/l-001/1.json | wc -c"):
         assert _bash(cmd, _gather()).allow, cmd
@@ -656,11 +474,6 @@ def test_gather_admits_the_declared_rows_flags_on_defender_sql(flags):
         assert decision.allow, (cmd, decision.reason)
 
 
-# command_shape: pure classifiers over parsed pipelines (#456)
-# The classification half, shared between the gate and dispatch. It operates on
-# the parsed bash_exec.Pipeline structure (no parsing of its own); the gate parses
-# once and routes off these, so a command is decomposed exactly once per tool call.
-
 from defender.runtime import bash_exec  # noqa: E402 — grouped with its test section
 
 
@@ -670,19 +483,10 @@ def _shape(cmd):
     return bash_exec.parse(cmd)
 
 
-# AgentPolicy primitive: read_roots + hand-built grants
-# The generic mechanism the judge is the first consumer of: an agent brings its
-# capability as DATA (an AgentPolicy carrying Grants). These test the primitive itself
-# with a synthetic policy; the judge's own policy is tested with the judge module (its
-# closed-ticket read is a typed tool now, not a bash grant — #672).
-
 from defender.runtime.permission import AgentPolicy, Grant  # noqa: E402
 
 
 def test_policy_read_roots_extend_the_allowlist(tmp_path):
-    # A read under a declared extra root is allowed; the SAME path is denied under a
-    # policy without it. This is how the judge reaches its comparison dir (which
-    # lives under learning_run_dir, outside {run_dir, defender_dir}).
     run, dfn = _read_roots(tmp_path)
     main = compile_policy_for(MAIN_DEF, run_dir=run, defender_dir=dfn)
     extra = tmp_path / "learning_run" / "comparison"
@@ -694,11 +498,6 @@ def test_policy_read_roots_extend_the_allowlist(tmp_path):
 
 
 def test_policy_read_roots_still_subject_to_denylist(tmp_path):
-    # HIGH-SEVERITY: widening read_roots must NOT defeat the ground-truth/secret
-    # denylist — a held-out ground_truth.yaml sitting in a declared extra root is
-    # still denied, so a judge granted its comparison/gather dirs can never read the
-    # label it is being measured against. (An empty `read_allow` applies no shape filter,
-    # so the denylist is the ONLY thing standing between this policy and the file.)
     run, dfn = _read_roots(tmp_path)
     extra = tmp_path / "learning_run"
     extra.mkdir(parents=True)
@@ -711,10 +510,6 @@ def test_policy_read_roots_still_subject_to_denylist(tmp_path):
         extra / "l-001.md", run_dir=run, defender_dir=dfn, policy=pol).allow
 
 
-# A pinned-command grant: exactly `python3 <…>/elastic_adapter.py …` (adapter-SHAPED, the mirror of
-# the judge's ticket read / the actor's lesson scripts). `pins_path=True` — the operand IS the
-# program, so the path lives in the PATTERN and the grant opens nothing the gate must resolve
-# (`PROGRAMS["python3"] is OPENS_NOTHING`).
 _PY_CLI = Grant(
     program="python3",
     pattern=re.compile(r"^python3 scripts/adapters/elastic_adapter\.py .*$"),
@@ -723,9 +518,6 @@ _PY_CLI = Grant(
 
 
 def test_policy_bash_allow_claims_before_adapter_classification():
-    # `python3 <…>/elastic_adapter.py …` is adapter-shaped, so adapter classification would
-    # deny it for a no-adapter policy. The `bash_allow` reader lane runs FIRST and can
-    # claim it — exactly how the judge's ticket read (python3 <ticket_cli>) is allowed.
     cmd = "python3 scripts/adapters/elastic_adapter.py query foo"
     no_allow = AgentPolicy(deny_reason="nope")
     assert not _bash(cmd, no_allow).allow  # adapter-denied
@@ -741,20 +533,11 @@ def test_policy_bash_allow_non_match_falls_through_to_deny():
 
 
 def test_policy_untabled_program_fails_loud():
-    # The replacement for the old `_OPERAND_GATED_PROGRAMS.get(argv[0]) is None → True`
-    # pass-through, which left an untabled program silently UNGATED: a grant naming a program
-    # absent from `PROGRAMS` now raises at policy construction, not at the first decide.
     with pytest.raises(ValueError, match="untabled"):
         AgentPolicy(bash_allow=(Grant(program="strings", pattern=re.compile(r"^strings .*$")),))
 
 
 def test_policy_scope_not_shape_breadth_is_containment():
-    # SECURITY: the old lane had a raw-read CLAMP that ran BEFORE the allowlist, so an
-    # over-permissive pattern could not rescue a gather_raw command. The clamp is deleted (#575);
-    # what replaces it is that a grant's SHAPE never decides containment — its SCOPE does. Here the
-    # shape claims EVERY `cat` command, and the scope admits only the run dir's own top-level files:
-    # the gather_raw payload (and /etc/passwd) still deny, because the operand is RESOLVED and
-    # matched against the scope after the shape claims the stage.
     claim_all = AgentPolicy(bash_allow=(Grant(
         program="cat",
         pattern=re.compile(r"^cat .*$"),

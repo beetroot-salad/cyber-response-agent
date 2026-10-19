@@ -52,9 +52,6 @@ def _q(system: str) -> Turn:
 
 
 def test_request_limit_writes_partial_trace(tmp_path):
-    """Driver terminal path #1 — the request limit. The agent loop never stops on
-    its own, so `agent.iter` raises UsageLimitExceeded at DEFAULT_REQUEST_LIMIT.
-    The driver must treat it as an expected terminator (not a crash): catch it."""
     run_id = "limit"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -72,9 +69,6 @@ def test_request_limit_writes_partial_trace(tmp_path):
 
 
 def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
-    """Driver terminal path #2 — the run-wide circuit breaker. A nested gather
-    keeps hitting connectivity failures (adapter exit 2) across distinct systems;
-    the RUN_FAIL_KILL_LIMIT-th raises RunAborted from circuit_breaker, deep inside"""
     run_id = "kill-switch"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -104,9 +98,6 @@ def test_circuit_breaker_kill_switch_aborts_run(tmp_path):
 
 
 def test_invlang_deny_bounces_then_recovers(tmp_path):
-    """Gate-as-feedback recovery: an investigation.md append that fails invlang
-    validation is denied (ModelRetry), the validator's errors come back to the
-    model, and a corrected append then commits. The in-process twin of the old"""
     run_id = "invlang-recover"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     good = (GOLDEN_AB3 / "investigation.md").read_text()
@@ -132,15 +123,6 @@ def test_invlang_deny_bounces_then_recovers(tmp_path):
 
 
 def test_tripped_system_dispatch_returns_down_message(tmp_path):
-    """Circuit-breaker dispatch + in-gather adapter gates, end-to-end. One gather
-    run fails `elastic` twice (tripping its per-system breaker) and is then denied
-    a third `elastic` call IN-GATHER (the _tripped_message gate — a down-message
-    return, not a captured query). A SECOND dispatch of the now-tripped system
-    short-circuits at the DISPATCH gate: the nested gather is never spawned and the
-    main loop gets the transparent 'system down' summary instead.
-
-    #1256 r4: the down gate comes before the lead claim for every down cause, a trip included,
-    so the short-circuited `l-002` writes no lead record (it did before r4)."""
     run_id = "tripped"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -173,9 +155,6 @@ def test_tripped_system_dispatch_returns_down_message(tmp_path):
 
 
 def test_gather_lead_guards_bounce_then_recover(tmp_path):
-    """Gather dispatch guards as retry feedback: an invalid lead_id and a reused
-    lead_id each bounce the main loop (ModelRetry) WITHOUT spawning the nested
-    agent; a fresh, well-formed lead then dispatches normally. No data source is"""
     run_id = "lead-guards"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -229,15 +208,9 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
 
 
 def test_read_file_not_found_bounces_then_recovers(tmp_path):
-    """read_file's not-found guard as retry feedback: a missing run-dir file
-    bounces (ModelRetry), then a real read (the untrusted alert) succeeds and comes
-    back salt-wrapped — the recovery proves the bounce didn't wedge the loop."""
     run_id = "read-missing"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
-    # #1255 (design rev 4, P1 inbound): the model names run files by the model view's
-    # `/runs/current/...` — the host run folder's own path is outside the three trees. The alert
-    # sits in the run's input directory.
     main = ReplayFn([
         Turn(tool_calls=[("read_file", {"path": "/runs/current/nope.txt"})]),
         Turn(tool_calls=[("read_file", {"path": "/runs/current/alert_input/alert.json"})]),

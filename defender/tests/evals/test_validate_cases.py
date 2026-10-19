@@ -1,10 +1,3 @@
-"""Pins for the slimmed case-tree linter (#711 §9.4).
-
-The label-shaped checks went with `label.py`. What is pinned here is what survives any
-change to how a lead is graded: the structural facts, the story-leak guard, the
-split/unit inheritance, and the append-only held-out ledger — plus the coverage report,
-whose job is to make the instrument's limits visible rather than to assert they are zero.
-"""
 from __future__ import annotations
 
 import json
@@ -191,9 +184,6 @@ def test_coverage_counts_what_a_case_actually_holds(tmp_path):
 
 
 def test_coverage_counts_errored_payloads_separately_from_empty_ones(tmp_path):
-    """A zero-byte payload is a query that ERRORED at capture — `query_tool.py` writes ""
-    on a non-zero exit. Counting it as an empty result set would turn a missing
-    measurement into evidence of absence."""
     d = _case(tmp_path, "case-x")
     (d / "hidden" / "observed" / "l-001" / "1.json").write_text("", encoding="utf-8")
     row = validate_cases.coverage(
@@ -219,9 +209,6 @@ def test_coverage_counts_dead_control_windows(tmp_path):
 
 
 def test_a_defective_case_is_excluded_from_the_totals_and_named(tmp_path):
-    """A capture whose leads cannot contain the activity is not coverage. Leaving it in
-    the split totals inflates the unit count with a unit nothing was measured for —
-    which is exactly how case-006 and case-007 briefly made dev look like six units."""
     _case(tmp_path, "case-good")
     _case(tmp_path, "case-bad", manifest_extra={"defective": "leads point at the wrong host"})
     rows = [validate_cases.coverage(
@@ -234,10 +221,6 @@ def test_a_defective_case_is_excluded_from_the_totals_and_named(tmp_path):
 
 
 def test_a_story_that_leaks_the_evaluation_frame_is_caught_case_insensitively(tmp_path):
-    """The leak check is what the shared list is FOR, and it must survive the story being
-    read in its own case: the owner lowercases internally, so the caller hands it the raw
-    text. Passing an already-lowered string worked too — which is why this could have been
-    broken by the move without a test noticing."""
     _case(tmp_path, "case-leaky", story="This is the NEGATIVE CONTROL for the burst.")
     problems = validate_cases.check_case(tmp_path / "case-leaky", {})
     assert any("leaks the evaluation frame" in p for p in problems), problems
@@ -249,9 +232,6 @@ def test_a_story_that_leaks_the_evaluation_frame_is_caught_case_insensitively(tm
 
 # controls
 
-#: A lead query with no `@timestamp` bound of its own, written on ONE line — ES|QL
-#: separates commands with `|`, not with newlines, and the defender model writes both
-#: shapes. This is the shape `add_esql_window` used to splice wrongly (#882 F-20).
 _UNBOUNDED = "FROM logs-zeek.ssh-* | LIMIT 1"
 _WINDOW = ["2026-07-12T19:36:22.000Z", "2026-07-12T20:36:22.000Z"]
 
@@ -277,15 +257,6 @@ def _controlled_case(root, name, *, lead_query, control_query, window=None,
 
 
 def test_an_added_window_behind_another_command_is_a_problem(tmp_path):
-    """#882 F-20, against the artifact. The clause belongs immediately after the source
-    command, where it narrows the row set and CANNOT widen it — that property is the
-    only thing that makes an added window a control. Behind a `LIMIT`, one arbitrary row
-    is taken first and then filtered by time, so the control reads zero rows.
-
-    Zero rows is exactly what nothing downstream can interpret: `judge._control` drops
-    the query string, so the label pass sees a live window that observed nothing and
-    grades every observed row `present` against it.
-    """
     d = _controlled_case(
         tmp_path, "case-x", lead_query=_UNBOUNDED,
         control_query=f'FROM logs-zeek.ssh-* | LIMIT 1 | WHERE @timestamp >= "{_WINDOW[0]}" '
@@ -296,11 +267,6 @@ def test_an_added_window_behind_another_command_is_a_problem(tmp_path):
 
 
 def test_a_bound_on_the_wrong_end_of_the_window_is_a_problem(tmp_path):
-    """#882 F-32, against the artifact. A shifted pair bound by POSITION rather than by
-    each match's operator crosses an upper-bound-first query into `< start AND >= end` —
-    unsatisfiable. ES|QL runs it happily and returns nothing, and `window_is_live` probes
-    the window separately, so the record stores `live: true` with zero rows: the same
-    empty baseline the misplaced splice produces."""
     d = _controlled_case(
         tmp_path, "case-x",
         lead_query=('FROM logs-system.auth-* | WHERE @timestamp < "2026-07-26T20:30:00.000Z" '
@@ -313,10 +279,6 @@ def test_a_bound_on_the_wrong_end_of_the_window_is_a_problem(tmp_path):
 
 
 def test_a_control_that_pairs_with_no_query_is_a_problem(tmp_path):
-    """#882 F-21's failure mode, against the artifact. Control records and observed
-    payloads are joined on `seq`; a control keyed to a seq the lead set does not have is
-    a baseline for nothing, and `judge._control` drops the query string, so no reader
-    downstream can notice the mispairing."""
     d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED, seq=0, record_seq=3,
                          control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
                                        f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
@@ -325,11 +287,6 @@ def test_a_control_that_pairs_with_no_query_is_a_problem(tmp_path):
 
 
 def test_a_window_that_landed_last_is_caught_behind_a_non_bound_timestamp_predicate(tmp_path):
-    """The placement check must key on which command CARRIES THE BOUNDS, not on which one
-    reads `WHERE @timestamp`. A lead is free to open with `WHERE @timestamp IS NOT NULL`,
-    which bounds nothing; a prefix test sees that at command 1, calls the placement good,
-    and passes a record whose window really did land after the `LIMIT` — the exact
-    artifact this check exists to refuse."""
     d = _controlled_case(
         tmp_path, "case-x",
         lead_query="FROM logs-* | WHERE @timestamp IS NOT NULL | LIMIT 1",
@@ -339,9 +296,6 @@ def test_a_window_that_landed_last_is_caught_behind_a_non_bound_timestamp_predic
 
 
 def test_a_control_record_under_another_leads_directory_is_a_problem(tmp_path):
-    """`judge.load_lead_inputs` reads `hidden/controls/<lead_id>/` — it joins by the
-    DIRECTORY and never looks at the record's own `lead_id`. A record whose field says
-    otherwise baselines the lead it is filed under, whatever it claims."""
     d = _controlled_case(tmp_path, "case-x", lead_query=_UNBOUNDED,
                          control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= '
                                        f'"{_WINDOW[0]}" AND @timestamp < "{_WINDOW[1]}"\n'
@@ -373,12 +327,6 @@ def test_a_window_literal_the_record_cannot_state_is_reported_not_raised(tmp_pat
 # seq keying
 
 def test_an_observed_payload_no_query_is_keyed_by_is_a_problem(tmp_path):
-    """The half of the join `check_controls` cannot see. `controls.lead_queries` falls
-    back to the LIST POSITION for a `leads.jsonl` with no `seq`, and the control record
-    was written from that same fallback — so the two agree with each other and disagree
-    with the payloads on disk. Only the payload filenames carry the table's own seq, and
-    since #841 split the `∅.` sentinels out of `JoinedLead.queries` one refusal ahead of
-    a real query is enough to make position trail seq for the rest of the lead."""
     d = _case(tmp_path, "case-x")
     (d / "oracle_visible" / "leads.jsonl").write_text(
         json.dumps({"lead_id": "l-001", "queries": [
@@ -432,9 +380,6 @@ def _two_bad_records(root, name="case-x"):
 
 
 def test_a_waiver_covers_one_record_and_not_its_neighbour(tmp_path):
-    """The registry is keyed by `(case, lead, seq)` because a case is the wrong
-    granularity: waiving at case level would let one accepted defect hide every later one
-    in the same case, which is the failure the file exists to prevent."""
     d = _two_bad_records(tmp_path)
     known = {("case-x", "l-001", 0): {"defect": "added-window-behind-another-command"}}
 
@@ -445,9 +390,6 @@ def test_a_waiver_covers_one_record_and_not_its_neighbour(tmp_path):
 
 
 def test_an_entry_whose_record_no_longer_has_the_defect_fails(tmp_path):
-    """The dangerous rot. A record repaired with its entry left behind waives the next
-    real defect at that key — so the registry is re-checked against the tree rather than
-    trusted to have been right when it was written."""
     _controlled_case(  # a CORRECTLY spliced control: no defect to waive
         tmp_path, "case-x", lead_query=_UNBOUNDED,
         control_query=f'FROM logs-zeek.ssh-*\n| WHERE @timestamp >= "{_WINDOW[0]}" '
@@ -467,9 +409,6 @@ def test_an_entry_naming_a_record_that_does_not_exist_fails(tmp_path):
 
 
 def test_the_committed_registry_still_describes_the_committed_tree():
-    """The integration pin. Both entries must still reproduce against the real cases —
-    if a capture session repairs one, this fails until its entry is deleted, which is
-    exactly the coupling that stops the waiver outliving the defect."""
     known = validate_cases.load_known_defects()
     assert set(known) == {("case-010-crosstier-web2", "l-006", 1),
                           ("case-012-bruteforce-db1", "l-006", 6)}
@@ -478,9 +417,6 @@ def test_the_committed_registry_still_describes_the_committed_tree():
 
 
 def test_the_real_tree_has_no_untracked_control_defect():
-    """What the registry buys: the suite can now assert the ABSENCE of a new defect. With
-    the two accepted records waived, any other control that does not measure the window it
-    declares fails here — which it could not do while the command always exited 1."""
     cases = validate_cases.GOLDEN_DIR / "cases"
     known = validate_cases.load_known_defects()
     untracked = [p for d in sorted(x for x in cases.iterdir() if x.is_dir())
@@ -498,11 +434,6 @@ def test_the_real_tree_has_no_untracked_control_defect():
 ])
 def test_a_malformed_registry_entry_raises_rather_than_waiving_nothing_quietly(
         entry, expected, tmp_path):
-    """The registry is operator-authored CONFIG, not an artifact under validation — the
-    other readers report a bad artifact and carry on, but a waiver this reader misparses
-    is worse than stopping. A `seq: "1"` compares unequal to every real record key, so it
-    would waive nothing while reading, to a human, as though it did. `seq: true` is the
-    same trap one layer down, `bool` being an `int` in Python."""
     p = tmp_path / "known_defects.yaml"
     p.write_text(yaml.safe_dump({"entries": [entry]}), encoding="utf-8")
     with pytest.raises(ValueError, match=expected):

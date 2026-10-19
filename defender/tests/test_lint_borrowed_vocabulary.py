@@ -52,17 +52,11 @@ def test_a_borrowed_vocabulary_with_an_owners_answer_is_flagged(gate, tmp_path):
 
 
 def test_a_vocabulary_with_no_owners_answer_is_not_watched(gate, tmp_path):
-    """The permissive half of the rule, and the reason the gate does not need a large baseline:
-    until someone writes the normalizer there is nothing for a consumer to call, so a plain
-    membership test is the only thing it COULD do."""
     root = _tree(tmp_path, {"owner.py": _OWNER_BARE, "borrower.py": _BORROWER})
     assert gate._scan(root) == []
 
 
 def test_writing_the_normalizer_arms_the_vocabulary(gate, tmp_path):
-    """Self-arming, stated as a transition: the same borrower goes from clean to flagged with no
-    edit to the gate. This is what makes it a rule about the tree rather than a list of names —
-    the next fold protects its own vocabulary the moment it lands."""
     bare = _tree(tmp_path / "before", {"owner.py": _OWNER_BARE, "borrower.py": _BORROWER})
     armed = _tree(tmp_path / "after", {"owner.py": _OWNER_ARMED, "borrower.py": _BORROWER})
     assert gate._scan(bare) == []
@@ -93,11 +87,6 @@ def test_the_owner_testing_its_own_vocabulary_is_the_answer_not_the_smell(gate, 
     ],
 )
 def test_no_spelling_of_the_borrow_hides_it(gate, tmp_path, spelling, borrower):
-    """How the borrow is SPELLED must not decide whether the gate sees it — the #602 rule the
-    other AST gates already follow. The rebinding pair matters most: a module-level
-    `LOCAL = COLOURS` is the ordinary way to shorten a long import, and a gate that reads it as
-    "this module owns COLOURS" is disarmed by the cheapest possible refactor rather than
-    evaded by a deliberate one."""
     root = _tree(tmp_path / spelling, {"owner.py": _OWNER_ARMED, "borrower.py": borrower})
     assert _names(gate._scan(root)) == ["defender/borrower.py:check:COLOURS"]
 
@@ -172,5 +161,3 @@ def test_tests_are_out_of_scope(gate, tmp_path):
 
 
 # the gate cannot report clean on source it never read
-
-

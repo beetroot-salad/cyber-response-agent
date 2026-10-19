@@ -7,11 +7,6 @@ from pathlib import Path
 from defender.tests import _world_1007 as W
 
 
-#: The captured-leads text, as a marker a containment assertion can look for. It has to be a
-#: string that appears NOWHERE ELSE in the composed prompt: `family.md`'s own host preamble
-#: reads "1. the joined leads as they stood at the branch point," — so a fixture that used the
-#: phrase "the joined leads" as its marker matched that boilerplate outside every frame and
-#: reported a containment failure that had not happened.
 CAPTURED_LEADS = "CAPTURED-LEADS-BODY-1007"
 
 
@@ -144,11 +139,6 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
     paths = W.loop_paths(tmp_path)
     W.questioner_lesson(paths, "q", body="QUESTIONER-ONLY-BODY", systems=[W.SYSTEM])
 
-    # BOTH READERS' ROOTS ARE CONSTANTS, and that is the whole mechanism: neither resolves a
-    # corpus from configuration, so neither can be pointed at the questioner's. Asserted on the
-    # constants because a planted lesson in a tmp corpus is unreachable BY EITHER READER — a
-    # test that only greps their output for its own body would pass on a reader that scanned
-    # every corpus root in the repo.
     for root in (lessons_fm.LESSONS_DIR, frontier.DEFAULT_CORPUS):
         assert root.name != W.QUESTIONER_CORPUS_DIRNAME, (
             f"a defender-side lessons reader is rooted at {root} — the questioner corpus")
@@ -161,9 +151,6 @@ def test_no_questioner_lesson_reaches_the_defender_agents_own_prompt(tmp_path):
     # shim really runs: it names neither the corpus nor anything in it.
     run_dir = tmp_path / "run"
     run_dir.mkdir(exist_ok=True)
-    # The SHIPPED `defender/` tree, not the tmp one: `run_env` puts `<defender_dir>/bin` on
-    # PATH, and the shim lives there. Both readers' roots are repo constants anyway, so this is
-    # the only tree either of them could ever read.
     env = run_common.run_env(Path(orient.__file__).resolve().parents[1], run_dir)
     section = orient._build_lessons_section(env, "rule-v2-cross-tier-ssh-pivot", orient._shim)
 

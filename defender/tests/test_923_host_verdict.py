@@ -286,9 +286,6 @@ def test_the_no_review_bypass_matches_both_verdicts_and_no_others(tmp_path):
         f"a member that must still spend a review and `False` one the branch skips"
     )
 
-    # THE `forced` DISCRIMINATOR, and the reason it is a separate close: above, `forced=True`
-    # is paired only with the verdict that also skips by name, so nothing there can tell the
-    # settled branch from `... or forced:`. A confident verdict on the host's own lane can.
     forced_stages = recording_stages("holds")
     deps, run_dir = main_deps(tmp_path / "forced-confident", pays_every_price("malicious"))
     close(deps, "malicious", stages=forced_stages.bundle(), forced=True)

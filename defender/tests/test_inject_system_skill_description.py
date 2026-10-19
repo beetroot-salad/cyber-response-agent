@@ -38,9 +38,6 @@ def test_reads_block_scalar_description(tmp_path):
 
 
 def test_block_scalar_with_blank_line_between_paragraphs(tmp_path):
-    """Multi-paragraph block scalars survive — regression for the original
-    regex that stopped at the first unindented blank line and silently
-    dropped everything after it."""
     _write_skill(
         tmp_path, "elastic",
         "First paragraph names the system and when it applies.\n"

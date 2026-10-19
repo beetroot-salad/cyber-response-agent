@@ -12,7 +12,6 @@ PREFIX = "MYSYS"
 DOCKER_EXEC = "docker-exec"
 
 
-
 # ---- fixture planting (returns, never asserts) ----------------------------------------------------
 
 def _scaffold(root: Path, *, extra: str = "", transport: str | None = DOCKER_EXEC,
@@ -38,8 +37,6 @@ def _check(settings: Path) -> list[tuple[str, str]]:
     return list(report.rows)
 
 
-
-
 def _passes(rows: list[tuple[str, str]]) -> list[str]:
     return [m for s, m in rows if s == validate_scaffold.PASS]
 
@@ -48,20 +45,12 @@ def _naming(messages: list[str], needle: str) -> list[str]:
     return [m for m in messages if needle in m]
 
 
-
-
-
-
 # ---- O8: the retired _ENV convention -----------------------------------------------------------------
-
 
 
 # ---- the access method is not the product's to check -----------------------------------------------
 
 def test_validator_does_not_judge_an_access_method(tmp_path):
-    """The docker access method is the lab transport's own requirement, not a product rule: a
-    connected system's config.env draws no access-method row, whether it declares neither key,
-    half a pair, or a method other than docker-exec. The rest of the file is still judged."""
     cases = {"neither": dict(transport=None, context=None),
              "half": dict(transport=DOCKER_EXEC, context=None),
              "other-method": dict(transport="http")}
@@ -75,6 +64,3 @@ def test_validator_does_not_judge_an_access_method(tmp_path):
 
 
 # ---- the connect guide --------------------------------------------------------------------------
-
-
-

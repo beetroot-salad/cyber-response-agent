@@ -46,9 +46,6 @@ def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
 
 
 def test_retire_blocks_while_append_lock_held(tmp_path: Path):
-    """O7 on the path D2 does not reach. Today's dead-letter rewrite takes no lock at all and
-    loses a concurrently appended row (G13/C16); D9 removes it as a separate write path, so
-    the retire seam must be excluded by the same append lock rotation is."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
@@ -68,9 +65,6 @@ def test_retire_blocks_while_append_lock_held(tmp_path: Path):
 
 
 def test_every_channels_read_batch_happens_under_the_append_lock(tmp_path: Path):
-    """C1/P15, fork 3: the folded read takes the append lock on EVERY channel, so "every touch of a
-    pending file happens under `append_lock`" becomes one stateable property rather than two
-    divergent lock disciplines."""
     paths = h.make_paths(tmp_path)
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(name)
@@ -193,5 +187,3 @@ def test_second_author_drain_invocation_returns_without_blocking(tmp_path: Path)
     assert rc == 0
     assert seconds < 10, "the second drainer blocked instead of exiting"
     assert triggered == [], "the second drainer reached a channel"
-
-

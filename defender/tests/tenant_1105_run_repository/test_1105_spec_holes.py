@@ -54,9 +54,6 @@ def _one_line_exit(err: BaseException | None) -> bool:
 @pytest.mark.parametrize("kind", ["file", "fifo", "dangling-link"])
 def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anything(
         tmp_path, data_root, kind):
-    """A regular file, a FIFO and a dangling link at tenant.runs: run setup raises
-    TenantRefused (run.py prints it as '[run.py] ...'), never a raw OSError, and leaves the
-    entry as it found it (O5.4: today a file or dangling link raises a raw FileExistsError)."""
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)
     runs = Path(t.runs)
@@ -82,10 +79,6 @@ def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anyt
 
 @pytest.mark.parametrize("kind", ["link", "file"])
 def test_1105_every_reader_refuses_a_linked_or_file_episodes(tmp_path, data_root, kind):
-    """`_episodes` as a link (to a real folder holding a good record) and as a regular file:
-    runs.list (PR 1's list_run_ids), sibling_run_ids and the path-only episode_sibling_ids each raise
-    RunRefused naming `_episodes` — never "no claims" — and run setup refuses a pinned id with
-    one stderr line, creating no run folder."""
     from defender.run_repository import RunRefused, episode_sibling_ids, sibling_run_ids
 
     t = _good(tmp_path, "r0", "ep-a")
@@ -118,10 +111,6 @@ def test_1105_every_reader_refuses_a_linked_or_file_episodes(tmp_path, data_root
 
 @pytest.mark.parametrize("kind", ["file", "fifo"])
 def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind):
-    """A regular file and a FIFO at tenant.runs are not "absent": every lookup and record
-    function raises TenantRefused (H2: every refusal of the hold other than absent) — an open,
-    `RunUnreachable` raised from it (#1105 PR 2 review: one refusal family) — never an empty
-    answer."""
     from defender.run_repository import RunUnreachable
 
     root = tmp_path / "data"
@@ -145,9 +134,6 @@ def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind)
 
 @pytest.mark.parametrize("kind", ["file", "fifo"])
 def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
-    """A regular file and a FIFO named r2 in the runs folder: runs.open (PR 1's open_run) raises
-    RunRefused naming the path; no Run is handed out (H6 step 4: a real directory, anything else
-    refuses)."""
     from defender.run_repository import RunId, RunRefused
 
     t = _good(tmp_path, "r1")
@@ -170,9 +156,6 @@ def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
     f"Bad Name.run-end.json{H.STAGED_TAIL}",
 ])
 def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tmp_path, name):
-    """A regular file with a known sidecar suffix whose `<id>` RunId.parse refuses, beside a
-    good run: runs.list raises RunRefused naming it (rev 4.1: known sidecar
-    files are named `<id><suffix>` with `<id>` a run id; H4: any other entry refuses)."""
     from defender.run_repository import RunRefused
 
     t = _good(tmp_path, "r1")
@@ -205,9 +188,6 @@ def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_pat
 
 
 def test_1105_a_json_escaped_lone_surrogate_makes_a_record_corrupt(tmp_path):
-    """A record whose label is the JSON escape `\\ud800`, and a record whose tenant_id is, are
-    corrupt (NM-04: a lone surrogate is corrupt): the tenant-keyed readers and the path-only
-    reader raise RunRefused naming the file, never return the surrogate."""
     from defender.run_repository import (
         RunRefused, episode_runs, episode_sibling_ids, sibling_run_ids,
     )
@@ -234,9 +214,6 @@ def test_1105_a_json_escaped_lone_surrogate_makes_a_record_corrupt(tmp_path):
 
 def test_1105_a_surrogate_escaped_run_id_is_refused_not_a_raw_encoding_error(tmp_path,
                                                                              data_root):
-    """`r\\udcff1` (a surrogate-escaped name, as os.fsdecode gives an undecodable byte) is
-    refused by RunId.parse with RunRefused, never a raw UnicodeEncodeError, and run setup exits
-    one line `invalid run id: ...` (D12.2: every refusal is RunRefused; deck replay #677)."""
     from defender.run_repository import RunId, RunRefused
 
     err = H.raised(RunId.parse, "r\udcff1")
@@ -252,9 +229,6 @@ def test_1105_a_surrogate_escaped_run_id_is_refused_not_a_raw_encoding_error(tmp
 
 
 def test_1105_a_foreign_record_beside_an_odd_entry_refuses_on_the_record(tmp_path):
-    """A `_tenant.json` naming another tenant beside an entry no rule admits: each listing
-    raises TenantRefused naming the record, and the message carries none of the folder's
-    entries (NF-8) — the tenant check comes before the listing is judged."""
     t = _good(tmp_path, "r1")
     runs = Path(t.runs)
     H.plant_tenant_record(runs, H.U_ID)

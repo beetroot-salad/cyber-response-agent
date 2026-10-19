@@ -94,10 +94,6 @@ def _empty_dir(path: Path) -> Path:
     return path
 
 
-# ======================================================================================
-# The happy path.
-# ======================================================================================
-
 def test_1120_scaffold_copies_the_template_writes_the_tenant_id_and_commits(
         tmp_path: Path, data_root: Path) -> None:
     """`tenant.py scaffold acme <empty dir>` exits 0."""
@@ -127,10 +123,6 @@ def test_1120_scaffold_copies_the_template_writes_the_tenant_id_and_commits(
     H.assert_clean(H.check(tenant_py, data_root, "--folder", str(target)))
 
 
-# ======================================================================================
-# Refusals: a bad id, a non-empty, non-directory or in-checkout target (N5).
-# ======================================================================================
-
 def _dir_holding_a_file(tmp: Path) -> Path:
     target = _empty_dir(tmp / "occupied")
     (target / "notes.txt").write_text("the operator's own file\n", encoding="utf-8")
@@ -151,10 +143,6 @@ def _regular_file(tmp: Path) -> Path:
 ])
 def test_1120_scaffold_refuses_a_bad_id_or_a_non_empty_target_and_writes_nothing(
         tmp_path: Path, tenant_id: str, cell: str) -> None:
-    """`scaffold ../x <empty dir>`, `scaffold acme <dir holding a file>`, `scaffold acme <a regular
-    file>` and `scaffold acme <an empty dir inside the running checkout>` each exit non-zero, naming
-    the id or the target, and leave the target exactly as found: no file copied, no .tenant-id, no
-    repository."""
     home = _home(tmp_path / "cfg")
     work = tmp_path / "work"
     script = None
@@ -180,16 +168,8 @@ def test_1120_scaffold_refuses_a_bad_id_or_a_non_empty_target_and_writes_nothing
         assert (outside / H.TENANT_ID_FILE).is_file(), "the control scaffold wrote no tenant"
 
 
-# ======================================================================================
-# git: the product repo, a refused commit, the preflight (N3, N5).
-# ======================================================================================
-
 def test_1120_scaffold_leaves_the_product_repo_unchanged_under_an_exported_git_dir(
         tmp_path: Path) -> None:
-    """With GIT_DIR and GIT_WORK_TREE exported naming the product repo — here a SCRATCH repo in tmp
-    standing for it, never the real worktree — `tenant.py scaffold acme <empty dir>` exits 0, leaves
-    that repo's HEAD, index and refs byte-identical, and the TARGET gets the repository: its own
-    .git holding one commit with agent/.tenant-id."""
     # rejected: automatic retry and a clone timeout (N3).
     product = _product_repo(tmp_path)
     before = _repo_state(product)
@@ -206,12 +186,6 @@ def test_1120_scaffold_leaves_the_product_repo_unchanged_under_an_exported_git_d
 
 def test_1120_a_failed_scaffold_leaves_its_target_as_found_and_a_retry_succeeds(
         tmp_path: Path) -> None:
-    """A commit git refuses after the preflight passed — commit.gpgSign set with gpg.program pointing
-    at `false` (git cannot sign, so it refuses to write the commit object) and core.hooksPath naming
-    a pre-commit hook that exits 1, two real git mechanisms configured in the scaffold process's own
-    $HOME/.gitconfig — makes `tenant.py scaffold acme <empty dir>` exit non-zero naming git, and
-    leaves the target as it found it: still an empty directory, no copied file, no .tenant-id, no
-    .git."""
     false = shutil.which("false")
     assert false, "no `false` executable on this host to stand in for a failing gpg"
     target = _empty_dir(tmp_path / "acme-tenant")
@@ -240,11 +214,6 @@ _IDENTITY_WORDS = ("identity", "user.email", "user.name", "who you are")
 ])
 def test_1120_scaffold_without_git_or_a_commit_identity_refuses_before_any_write(
         tmp_path: Path, fault: str) -> None:
-    """`tenant.py scaffold acme <empty dir>` with no git on PATH, or with no committer identity (a
-    private $HOME whose config sets user.useConfigOnly and names no user, and no identity variable
-    in the environment), exits non-zero naming git — and, for the missing identity, naming the
-    identity — BEFORE any write: the target is left as found and the product repo the command runs
-    from (a SCRATCH repo standing for it) is unchanged."""
     product = _product_repo(tmp_path)
     repo_before = _repo_state(product)
     target = _empty_dir(tmp_path / "acme-tenant")

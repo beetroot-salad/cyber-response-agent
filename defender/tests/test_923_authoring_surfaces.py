@@ -28,25 +28,11 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
 )
 
 
-#: Every module in the shipping tree that reaches the disposition vocabulary's OWNER, with what
-#: each one is. The census is how the subjects below are PICKED; what is asserted about them is
-#: driven, one surface at a time. The set's closure is the guard: a thirteenth consumer means
-#: someone taught a new place to read or write a verdict, and it has to be classified here
-#: before it can be inherited as safe.
 _AUTHORING_SURFACES = {
     # A model supplies the value.
     "runtime/close_tool.py",                    # the close tool's `disposition` argument
     "skills/invlang/validate/_structure.py",    # `conclude.disposition` in investigation.md
-    # A model supplies the value, one branch removed: the QUESTIONER authors a world's
-    # `disposition_declared` into the family manifest (`SEAT_AUTHORED_FIELDS`), and #921's judge
-    # grades the world by comparing that declaration against what its run concluded. Authoring,
-    # not reading — the value originates here rather than being read back from a committed
-    # report. Arrived with #920, unclassified until the census below caught it.
     "runtime/branch/_family.py",                # a world's declared disposition in family.yaml
-    # #767 N10: the analyst-editable ticket resolution line was a fourth surface here — the
-    # only one whose writer was neither the host nor the investigating model — until D5 deleted
-    # the decoder that made it one. A person may still type anything into a ticket's
-    # `resolution` field; nothing reads it back as a verdict any more (c12).
 }
 _VOCABULARY_READERS = {
     "_vocab.py",                                # the owner
@@ -56,60 +42,17 @@ _VOCABULARY_READERS = {
     "skills/invlang/cli.py",                    # read-only query filters
     "skills/invlang/queries.py",                # corpus rendering
     "skills/invlang/validate/_gating.py",       # the entry-price dispatch
-    # READER, not an authoring surface: #921's family judge reads a world's archived
-    # headline (through `_report.read_report`) and the manifest's `disposition_declared`, and
-    # asks the owner whether each is in the vocabulary. It writes no disposition anywhere, so
-    # it owes an in-or-out verdict and nothing else — and it gives one: a value outside the
-    # vocabulary makes that world `ungradable`, named on the record, never coerced.
     "learning/judge/family.py",                 # the family judge's per-world row
-    # READER: #1224's judge pass writes the row of a world O5 counts as failed (since #1234
-    # `runs.failed_row`), carrying the manifest's `disposition_declared` through the owner's
-    # normalizer exactly as `family.read_world` does for a judged world. It authors no
-    # disposition: a value outside the vocabulary lands on the row as `None`, never coerced
-    # into a member.
     "learning/judge/runs.py",                   # a failed world's row
-    # READER, and the counterpart of the manifest surface above: #920's archive reader takes
-    # each world's headline from that world's OWN committed `report.md` — written by the host's
-    # report gate, never by this module — and asks the owner whether it is in the vocabulary. A
-    # value outside it refuses and the refusal names the world; a host-terminated world reads
-    # back as the member it is, which is what keeps one gate overrule from making a whole
-    # episode unreadable.
     "learning/branch/episode.py",               # the archived worlds' headlines
-    # READER: the run page's review-gate panel answers "did a review run?" for a record
-    # written before the close said so (no `reviewed` field) by asking the owner whether the
-    # record's disposition is in the vocabulary and then whether it was in the bypass set of
-    # its day. It writes nothing; a value outside the vocabulary renders as NOT reviewed — the
-    # one direction that page must never err in — and is never coerced.
     "scripts/visualize/visualize_runtime.py",   # the review-gate panel's pre-record fallback
-    # READER: the episode page's verdict tile counts how many measuring worlds' declared
-    # dispositions contrast with the control's, and how many verdicts agree with their
-    # declaration, through the owner's normalizer — so a case or whitespace variant of one
-    # member cannot agree on one figure and differ on the other. It writes nothing; a value
-    # outside the vocabulary is compared as the raw string it is, never coerced into the
-    # member it resembles (`test_923_readers.py`'s `visualize_episode` edge).
     "scripts/visualize/visualize_episode.py",   # the verdict tile's contrast/agree counts
-    # READER: the platform API's `Investigation` wire model (#1131) serves the disposition the
-    # store read off a completed run's committed report. No request body carries a disposition
-    # (the create bodies forbid unknown fields), so nothing authors one here; the model asks the
-    # owner whether the value is a member and refuses to serve one that is not, never coercing
-    # a variant into the member it resembles (`test_923_readers.py`'s `api_models` edge).
     "api/models.py",                            # the served investigation's disposition
 }
 _VOCABULARY_OWNER_NAMES = frozenset({
     "DISPOSITION_ENUM", "DISPOSITION_VALUES", "DISPOSITION", "normalized_disposition",
 })
 
-#: The ONE function inside each authoring module that reaches the vocabulary owner — the
-#: surface itself, not the file it lives in.
-#:
-#: A module-grained census answers "did someone add a new consumer FILE", and a fourth
-#: authoring surface does not have to arrive in one: a second close entry point in
-#: `close_tool.py`, another write path in `case_ticket.py` or a second conclude-vocabulary
-#: check in `_structure.py` grows no module and passes a module census untouched. Named at
-#: function grain, each is a row someone has to add and classify. The cost is stated rather
-#: than hidden: an implementer who factors one of these checks into a helper that also reaches
-#: the owner makes this red, and the repair is to add the helper here beside its entry point —
-#: which is the classification this guard exists to force.
 _AUTHORING_ENTRY_POINTS = {
     "runtime/close_tool.py::_close_investigation_async",
     "skills/invlang/validate/_structure.py::_check_conclude_vocab",
@@ -155,24 +98,8 @@ def _vocabulary_consumers() -> set[str]:
     return found
 
 
-# ---------------------------------------------------------------------------------------
-# O4 — the rule cannot be disabled by a spelling, at every boundary that validates one.
-# ---------------------------------------------------------------------------------------
-
 @pytest.mark.parametrize("value", ["not-a-disposition", "Unresolved", "INCONCLUSIVE", ["benign"], 3])
 def test_an_unknown_disposition_is_refused_at_the_tool_boundary(tmp_path, value):
-    """A verdict the vocabulary does not know — a garbage string, or a case/spelling variant of
-    a real member — is REFUSED at the tool boundary, not silently skipped past the check it
-    should have triggered, and the refusal names the ORDERED tuple.
-
-    `Unresolved` is the load-bearing member of this set: once the fifth member exists, a
-    case-variant of it must draw the ordinary unknown-verdict refusal rather than being
-    normalized into the host's own verdict, and it must not draw the host-only refusal either —
-    the model never authored a member at all.
-
-    The non-string case matters for its own reason: `isinstance(str)` is tested FIRST, because
-    an unhashable value fed to a set membership test raises out of the gate instead of denying,
-    and the sync host entry has nothing in front of it to coerce the argument."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run_dir = main_deps(tmp_path, paid(PAYING_ROW))
@@ -187,14 +114,6 @@ def test_an_unknown_disposition_is_refused_at_the_tool_boundary(tmp_path, value)
 
 
 def test_the_report_frontmatter_write_gate_also_refuses_an_unknown_disposition():
-    """The `report.md` frontmatter write gate refuses a value outside the disposition enum with
-    its own refusal text, exactly as the close tool does.
-
-    This is O4's assertion widened to the THIRD validating boundary, not a new rule: the design
-    named two boundaries and there are three, and a verdict outside the vocabulary has to be
-    refused at each place a verdict is validated or the rule is only true at the doors someone
-    happened to look at. It admits the fifth member and refuses everything else, including the
-    case variant."""
     from defender._artifact_schema import validate_artifact
 
     def report(disposition: str) -> str:
@@ -210,28 +129,6 @@ def test_the_report_frontmatter_write_gate_also_refuses_an_unknown_disposition()
 
 
 def test_a_malformed_verdict_is_refused_at_both_write_gates(tmp_path):
-    """A verdict that only READS as a member — zero-width characters inside it, or a homoglyph
-    standing in for a letter — is REFUSED at both write gates, with retry text an author can
-    act on, and nothing is committed. It is never coerced into the member it resembles.
-
-    THE WRITE HALF OF THE §7-ROUND-4 DESIGN CHANGE, and the half that is already true: both
-    gates test exact membership and each carries a comment saying it deliberately does NOT use
-    the forgiving reader, because on write there is still an author to ask. This pins that,
-    because the change's read half is implemented by moving the shared reader onto the write
-    gates' answer, and the obvious way to write that patch is to move the write gates onto the
-    reader's instead — which launders the injected character past the gate that exists to deny
-    it. The two gates are the ones a value passes THROUGH on the way to a committed report:
-    the close tool's argument and the `report.md` frontmatter schema.
-
-    THE PAIRED POSITIVE CONTROL IS THE LAST BLOCK: the clean spelling of the same member is
-    accepted at both gates and commits. Without it a build that refused every close would pass
-    this perfectly.
-
-    The consequence on the write side is asserted where it lives, in
-    `test_the_entry_price_is_owed_by_the_keyword_the_close_commits`: a malformed keyword fails
-    CLOSED at the price dispatch — it still OWES — rather than taking the unpriced branch. A
-    build that implements "never coerced" by gutting the shared normalizer and letting every
-    dispatch fail open passes this test and fails that one."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender._artifact_schema import validate_artifact
@@ -270,34 +167,7 @@ def test_a_malformed_verdict_is_refused_at_both_write_gates(tmp_path):
     assert (run_dir / "report.md").is_file()
 
 
-# ---------------------------------------------------------------------------------------
-# The host-only verdict, at all three authoring surfaces.
-# ---------------------------------------------------------------------------------------
-
 def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
-    """Every surface from which a disposition can be authored refuses `unresolved`. "Only the
-    host produces this verdict" is a universal, not a property of one door.
-
-    * **the close tool's argument** — refused, nothing committed;
-    * **the invlang document's `conclude.disposition`** — refused at the write gate. Without
-      this the member is admitted for free (the document vocabulary is the same tuple), and a
-      model writing it into its conclude block gets a legal document at the very boundary the
-      two-boundary price exists to close — and the host's verdict carries no price row;
-    * **a branched world's `disposition_declared`** — refused at the family manifest's
-      validator. The questioner authors that field, and the manifest's check is the owner's own
-      normalizer, which admits the member for free — the invlang document's exact shape one
-      design later. A world declaring it would have #921's judge grade the questioner's guess
-      about a gate overrule against what the world's run actually concluded. Model-facing, like
-      the close tool's.
-
-    #767 N10 retired the fourth surface this test used to drive: the analyst-editable ticket
-    resolution line decoded by bare enum membership, so a hand-typed `unresolved` decoded
-    cleanly and indistinguishably from a host-forced close. D5 deleted that decoder
-    structurally — nothing reads a ticket's `resolution` as a verdict any more — so there is
-    no third authoring surface left to refuse it there.
-
-    Each surface is driven and each verdict is asserted AT THAT SURFACE — a check that the
-    vocabulary "refuses it somewhere" is green when one of three moved."""
     from pydantic_ai.exceptions import ModelRetry
 
     deps, run_dir = main_deps(tmp_path, paid(PAYING_ROW))
@@ -337,28 +207,7 @@ def test_every_authoring_surface_refuses_the_host_only_verdict(tmp_path):
     assert parse_world(_world(GAP_MEMBER)).disposition_declared == GAP_MEMBER
 
 
-# ---------------------------------------------------------------------------------------
-# The committed report's host-owned fields, and what leaves the process.
-# ---------------------------------------------------------------------------------------
-
 def test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_chosen(tmp_path):
-    """No model-authored text reaches a host-owned field of the committed report. `cause` stays
-    composed from the closed six-member cause set, `disposition` stays a member of the closed
-    enum, and `outcome`/`failure_kind` stay their own typed vocabularies.
-
-    The companion driven here carries an injected instruction in BOTH slots a model controls —
-    the conclude summary and a `ceiling_test` receipt's `note` — because alert data is
-    attacker-influenced by definition and the receipt is authored after reading it. The
-    negative binds every surface the content could reach out of the close: the committed
-    frontmatter's host-owned fields, the numbered review record, and the ticket bridge's
-    outbound close payload. The frontmatter's `ceiling_test` field ITSELF is now also a
-    negative surface for this marker (§7 round 4: it carries `ref`/`state`/`cap` alone, a
-    closed vocabulary plus an id, never the note) — asserted below alongside the others.
-
-    The PAIRED POSITIVE CONTROL is the last assertion, and without it this passes on a report
-    that carries nothing at all: the receipt's `note` DOES land, legitimately, in the report
-    BODY — that is the one place model-authored text belongs now, and the entry price is what
-    makes writing a receipt mandatory."""
     from defender.runtime.close_tool import COMMITTED_OUTCOMES, FAILURE_KINDS, REPORT_CAUSES
     from defender.runtime import case_ticket
     from defender.tests._spec923 import committed
@@ -403,18 +252,3 @@ def test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_
         "the receipt's own note did not land in the report BODY — the negative above is then "
         "true of a report that carries no model text at all"
     )
-
-
-# #767 D1-D3 retired the mechanism `test_ticket_egress_body_renders_with_every_slot_bound` and
-# `test_a_gap_row_reaching_the_ticket_resolution_is_sanitized` pinned: `case_record_to_close`,
-# the `reason = cause or body` fallback, and the 512-character `_TICKET_REASON_MAX` bound are
-# all gone. `CaseRecord` now always carries BOTH `cause` and `narrative` (the report's body,
-# never a fallback), rendered by `case_record_to_comment` into a `{author, body}` comment
-# bounded at 4096 UTF-8 bytes with the same fence-stripping property these two tests drove.
-# That coverage — every slot bound, no unsubstituted token, the fence strip, the size bound
-# with truncation visible as truncation, the positive control that a legitimate claim survives
-# whole — is now `test_767_writer.py`'s: `test_767_case_record_to_comment_shape`,
-# `test_767_narrative_is_the_fence_stripped_report_body`,
-# `test_767_comment_body_is_bounded_on_the_wire`, `test_767_wire_bound_wins_and_the_cut_is_
-# visible`, `test_767_planted_frontmatter_fence_never_reaches_the_wire` and
-# `test_767_the_first_fence_wins_over_every_later_one`.

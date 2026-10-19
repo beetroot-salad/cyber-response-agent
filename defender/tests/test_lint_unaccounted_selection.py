@@ -53,9 +53,6 @@ def _kinds(findings) -> set[str]:
 
 
 def test_each_bypass_arm_is_flagged(tmp_path):
-    """Both ways to reach the shared regex, and the way around it. Re-deriving the pattern
-    is the arm that matters most: importing the constant at least reuses one grammar, while
-    a second `re.compile` is a second grammar free to drift from the first."""
     tree = tmp_path / "scope"
     _pyfile(tree, "a_import.py", _IMPORT_ALIASED)
     _pyfile(tree, "b_attribute.py", _ATTRIBUTE)
@@ -75,9 +72,6 @@ def test_the_alias_does_not_hide_the_import(tmp_path):
 
 
 def test_the_canonical_module_and_tests_are_exempt(tmp_path):
-    """The owner of the split must use the regex, and test modules quote both spellings.
-    The exemption is by full relative PATH — a second `parser.py` elsewhere under the scope
-    is exactly the copy this gate exists to stop, so a basename match would wave it in."""
     tree = tmp_path / "scope"
     _pyfile(tree, "skills/invlang/parser/__init__.py", _IMPORT_ALIASED)
     _pyfile(tree, "test_reader.py", _IMPORT_ALIASED)
@@ -129,19 +123,12 @@ def test_arm2_flags_a_grammar_filter_that_drops_the_rest(tmp_path):
 
 
 def test_arm2_leaves_the_reporting_shape_alone(tmp_path):
-    """THE DISTINCTION THE ARM RESTS ON. `if not RE.fullmatch(t)` turns every non-match into
-    the finding — the shape validate.py's four id-structure rules use. Without the negation
-    test this gate would flag all of them and read as noise, so this is the control that
-    keeps the arm honest rather than merely quiet."""
     tree = tmp_path / "scope"
     _pyfile(tree, "report.py", _NEGATED_REPORT)
     assert _GATE._scan(tree) == []
 
 
 def test_arm2_applies_inside_the_parser_too(tmp_path):
-    """Arm 1 exempts the module that OWNS the fence split — it must use the regex. Arm 2 has
-    no such owner: a silent grammar filter is the same defect wherever it sits, and three of
-    the four sites this gate documents live in the parser."""
     tree = tmp_path / "scope"
     _pyfile(tree, "skills/invlang/parser/__init__.py", _GRAMMAR_FILTER + _IMPORT_ALIASED)
     # arm 1 exempt (the import), arm 2 not
@@ -154,5 +141,3 @@ def test_arm2_marker_must_sit_inside_the_flagged_span(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(tree, "marked.py", _MARKED_FILTER)
     assert _GATE._scan(tree) == []
-
-

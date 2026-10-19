@@ -1,22 +1,3 @@
-"""The payload view (#832) — what a query result looks like by the time a lead reads it.
-
-The view used to be decided by `_RECORD_KEYS`, a tuple of six vendor envelope key names
-(`hits`/`results`/`events`/`records`/`data`/`rows`). Measured over 894 recorded payloads only
-`hits` ever matched: defender's own adapters name each list after its contents (`values`,
-`entries`, `packages`, `users`, `hosts`, `changes`, `tickets`, `indicators`, `keys`), a naming
-rule with open range that no whitelist can track. So a 105-byte complete Lucene result was cut to
-three docs and stamped "Do NOT count these", while a 19 KB package list went into context whole —
-and neither was chosen.
-
-These tests pin the properties that replaced it, and they are written so that the old design
-CANNOT pass them:
-
-  - key names decide nothing (`test_the_key_name_decides_nothing_*`)
-  - a payload shown in full is never told it is a sample (`test_a_complete_*`)
-  - a shortened list always says so, in its own scope (`test_every_shortened_list_*`)
-  - a kept element is a WHOLE element; only long string leaves clip (`test_kept_elements_*`)
-  - which list is "the bulk" is a fact about bytes, not about a key (`test_the_bulk_is_*`)
-"""
 from __future__ import annotations
 
 import json
@@ -100,9 +81,6 @@ def test_the_marker_names_how_many_were_dropped(tmp_path):
 # O5 — a kept element is a WHOLE element. Only long string leaves clip.
 
 def test_kept_elements_keep_every_field(tmp_path):
-    """`_SAMPLE_MAX_CHARS` used to clip `json.dumps(record)`, so 80 of 80 real elastic sample
-    records arrived as mid-token prefixes with their trailing fields gone — a "FIELD-SHAPE
-    sample" that dropped part of the field shape."""
     docs = _docs(60, fields=12)
     view = _view(_lucene(docs), ceiling=2000, run_dir=tmp_path)
     body = json.loads(_json_block(view))
@@ -124,9 +102,6 @@ def test_a_long_string_clips_at_the_leaf_not_the_record(tmp_path):
 
 
 def test_a_payload_with_no_list_at_all_is_walked(tmp_path):
-    """`host-state proc-tree` returns its whole `ps` forest as one string under `ps_output`. With
-    no list anywhere the old code fell to a blunt 1,800-char cut of the raw JSON — no record
-    count, no field shape, the worst view in the module, reached by accident."""
     text = json.dumps({"host": "web-1", "captured_at": "2026-08-07T00:00:00Z", "ps_output": "P" * 40000})
     view = _view(text, ceiling=2000, run_dir=tmp_path)
     body = json.loads(_json_block(view))
@@ -138,9 +113,6 @@ def test_a_payload_with_no_list_at_all_is_walked(tmp_path):
 # N6 — no key is privileged. "The bulk" is a fact about bytes.
 
 def test_a_small_sibling_list_survives_while_the_bulk_is_elided(tmp_path):
-    """ES|QL returns `columns` (the schema) beside `values` (the rows). Cutting `columns` to
-    three would leave the kept rows uninterpretable — but no rule says "never cut columns",
-    because the next test needs the opposite. The byte budget settles both."""
     payload = json.dumps({
         "query": "FROM logs-* | STATS c = COUNT(*) BY host",
         "columns": [{"name": "host", "type": "keyword"}, {"name": "c", "type": "long"}],
@@ -152,9 +124,6 @@ def test_a_small_sibling_list_survives_while_the_bulk_is_elided(tmp_path):
 
 
 def test_the_bulk_is_whichever_list_is_big(tmp_path):
-    """The inverse occurs in the corpus: 6 over-ceiling ES|QL payloads are `row_count: 1` with
-    75-1,657 columns — a lead probing schema by pulling one wide row. There `columns` IS the
-    bulk and `values` is trivial. A per-key rule cannot be right for both; a budget is."""
     payload = json.dumps({
         "query": "FROM logs-* | LIMIT 1",
         "columns": [{"name": f"field_number_{i}", "type": "keyword"} for i in range(1657)],
@@ -206,9 +175,6 @@ def test_an_oversized_payload_with_no_bulk_node_is_still_bounded(tmp_path):
 
 
 def test_wide_fields_are_cut_even_when_the_payload_also_carries_a_bulk_node(tmp_path):
-    """`_fit_fields` was reachable only when there was NO bulk node at all, so a wide flat object
-    that happened to carry one long string kept all 4,000 of its fields and blew the budget by
-    70 KB. The scalars are what overflows here; the walk has to say so."""
     payload = {f"field_number_{i}": f"v{i}" for i in range(4000)} | {"note": "N" * 3000}
     body = _json_block(_view(json.dumps(payload), ceiling=2000, run_dir=tmp_path))
     assert len(body) <= 2000
@@ -305,9 +271,6 @@ def test_an_unknown_envelope_is_not_offered_as_a_full_payload_to_count(tmp_path)
 
 
 def test_a_row_count_above_the_rows_present_is_still_a_cap(tmp_path):
-    """The reading that survives, and the reason the branch was narrowed rather than deleted: a
-    `row_count` ABOVE the rows carried is a real declaration — whoever wrote it knew of rows
-    this payload does not hold — while a `row_count` EQUAL to them declares nothing."""
     text = json.dumps({
         "query": "FROM logs-* | LIMIT 400", "columns": [{"name": "host", "type": "keyword"}],
         "row_count": 400, "values": _esql_rows(20),
@@ -337,9 +300,6 @@ def test_a_list_never_collapses_to_a_bare_marker(tmp_path):
 
 
 def test_the_squeeze_keeps_field_shape_before_value_shape(tmp_path):
-    """Values clip progressively (`_SQUEEZE_CAPS`) before any FIELD is dropped: a 12-character
-    value still tells the lead the field is an ISO stamp and not a count, which is the whole
-    reason elements are shown instead of a key list."""
     one = [{f"f{j}": "2026-05-25T15:27:22.928Z" for j in range(80)}]
     view = _view(_lucene(one), ceiling=2000, run_dir=tmp_path)
     body = json.loads(_json_block(view))
@@ -394,9 +354,6 @@ def test_a_named_cell_is_bound_to_the_RIGHT_name(tmp_path):
 
 
 def test_a_cut_row_never_reorders_the_cells_it_keeps(tmp_path):
-    """Positional binding is only sound if the kept cells are a PREFIX. Keeping cells 0,1,4
-    would still be honest about the count and silently misattribute every value after the
-    gap — `columns[i]` would name a cell that is no longer at `i`."""
     names = [f"col_{j}" for j in range(400)]
     row = [f"cell-{j:03d}" for j in range(400)]
     body = json.loads(_json_block(_view(_esql([row], names), ceiling=4096, run_dir=tmp_path)))
@@ -406,9 +363,6 @@ def test_a_cut_row_never_reorders_the_cells_it_keeps(tmp_path):
 
 
 def test_the_elision_marker_for_a_row_counts_cells_not_elements(tmp_path):
-    """A row's marker is about CELLS. Reusing the list wording ("elements") would read as
-    "rows were dropped" on a payload where the row count is intact and only the row's own
-    width was cut — the exact metadata/bulk confusion this module keeps apart."""
     names = [f"col_{j}" for j in range(400)]
     view = _view(_esql([[f"c{j}" for j in range(400)]], names), ceiling=4096, run_dir=tmp_path)
     marker = json.loads(_json_block(view))["values"][0][-1]

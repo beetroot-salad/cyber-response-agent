@@ -22,12 +22,6 @@ from defender.tests._invlang_warn_836 import (
     warn_window,
 )
 
-#: `UNCHANGED_LEAD` (H2) is imported per-function from `defender._artifact_schema`, alongside
-#: `UNCHANGED_NOTICE` — it is that constant's leading fragment. It is minted on the production
-#: side (see `spec_graph_836-invlang-warn.yaml`'s NAMES THIS SPEC MINTS block) so an
-#: implementation that spells the lead differently across the four refusal paths cannot pass
-#: silently. The close has no proposed text of its own, so it carries only the lead, not the
-#: full notice.
 
 #: EXECUTED at c0dca747 — two warn-family diagnostics, no others.
 TWO_WARN_DOC = PROLOGUE + attr_block(WARN_ROW, SECOND_WARN_ROW)
@@ -152,9 +146,6 @@ def test_window_is_recomputed_after_each_fix_row(tmp_path):
 
 
 def test_partial_repair_leaves_other_row_flagged(tmp_path):
-    """One of two flagged rows repaired: the gate keeps refusing, and now names only the
-    remaining row. The window is re-derived from disk on every check, so a stale set cannot
-    survive a partial repair."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime.tools import _tool_append_block, _tool_fix_row

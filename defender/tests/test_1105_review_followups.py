@@ -107,10 +107,6 @@ def test_a_record_over_the_cap_cut_mid_character_is_refused_as_over(tmp_path):
 
 
 def test_another_tenants_record_is_a_record_mismatch_everywhere(tmp_path):
-    """`_tenant.json` naming another tenant is `TenantRecordMismatch` — what `Run.for_tenant`
-    raises — from the lookups and the listings alike, not a bare `TenantRefused`. An open
-    answers it as `RunUnreachable` raised from that `TenantRecordMismatch` (#1105 PR 2 review:
-    an open answers one refusal family)."""
     from defender._tenant import TenantRecordMismatch
     t = H.tenant(tmp_path / "data")
     runs = H.runs_folder(t)
@@ -126,10 +122,6 @@ def test_another_tenants_record_is_a_record_mismatch_everywhere(tmp_path):
 
 
 def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
-    """The absent folder's refusal is raised outside the hold's `except`, so it carries no
-    `FileNotFoundError` as its context (a traceback that blamed the wrong error) — the
-    container's `TenantRefused` (here from `base_world_id`), and an open's `RunAbsent` (#1105
-    PR 2 review: an open answers an absent container as the run gone) alike."""
     from defender._tenant import TenantRefused
     t = H.tenant(tmp_path / "data")
     with pytest.raises(TenantRefused) as refused:
@@ -195,9 +187,6 @@ def _family_doc(episode_id: str, label: str) -> dict:
 
 
 def test_a_sibling_id_over_the_bound_is_refused_before_anything_is_staged():
-    """The family gate judges `<episode_id>-<label>` by the whole run-id rule, its 206-byte
-    bound included, so an over-long sibling is refused with the manifest, not by each child
-    after authoring. The episode id itself must leave room for a sibling."""
     from defender.runtime.branch import _family
     episode = "e" * 190
     with pytest.raises(_family.FamilyError, match="206-byte bound"):
@@ -238,9 +227,6 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
 
 
 def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
-    """The xhigh review's case: a label that passes the view and run-id rules but makes the
-    sibling id sidecar-shaped is refused with the manifest, not by every child. (#1224: the
-    world-token alphabet admits no '.', so such a label is refused by that rule first.)"""
     from defender.runtime.branch import _family
     with pytest.raises(_family.FamilyError, match="world-token alphabet"):
         _family.check_identities(_family.parse_family(
@@ -248,9 +234,6 @@ def test_a_sidecar_shaped_label_is_refused_at_the_family_gate():
 
 
 def test_the_writer_refuses_an_arm_id_its_sidecar_files_hold(tmp_path):
-    """An id that owns sidecar files but has no run folder is taken: the writer refuses it as
-    an arm. (`runs.exists`, PR 1's `run_exists`, which agreed, is deleted — no production
-    caller, #1105 PR 2 review.)"""
     t = H.tenant(tmp_path / "data")
     runs = H.runs_folder(t)
     H.make_run(runs, "r0")
@@ -285,5 +268,3 @@ def test_creating_a_runs_folder_under_a_dangling_ancestor_is_a_refusal(tmp_path)
     os.symlink(tmp_path / "nowhere", tmp_path / "dangling")
     with pytest.raises(TenantRefused):
         R.hold_runs_folder(tmp_path / "dangling" / "runs", create=True)
-
-

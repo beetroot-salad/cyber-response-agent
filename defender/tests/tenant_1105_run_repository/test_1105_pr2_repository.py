@@ -71,14 +71,7 @@ def _episode(episodes: Path, *, container: str | None = None, arms: tuple[str, .
     return ep
 
 
-# ==========================================================================================
-# The natural container.
-# ==========================================================================================
-
 def test_the_accepted_tenant_hands_out_a_repository_that_opens_its_own_runs_by_id(tmp_path):
-    """`tenant.runs_repository().open(run_id)` is PR 1's `open_run(tenant, run_id)`: the `Run`
-    at `<T>/runs/<id>`, carrying T's id, reading the run's own records. No method takes a
-    `Tenant` beside an id (O1(e)): handing one in is a `TypeError`, before any read."""
     _root, t = _good(tmp_path, "r1", "r2")
     runs = t.runs_repository()
 
@@ -91,12 +84,7 @@ def test_the_accepted_tenant_hands_out_a_repository_that_opens_its_own_runs_by_i
         "the repository's open took a Tenant beside the id")
 
 
-
 def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):
-    """S4: `open` raises `RunAbsent` — a `RunRefused` — for an absent entry, and a plain
-    `RunRefused` that is NOT `RunAbsent` for an entry that is there but no run: a regular file,
-    a link to a real run folder. An existing `except RunRefused` handler still catches
-    `RunAbsent`. The positive control opens the real run beside them."""
     from defender.run_repository import RunAbsent, RunRefused
 
     _root, t = _good(tmp_path, "r1")
@@ -122,12 +110,6 @@ def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):
 
 
 def test_a_container_fault_is_the_tenants_refusal_not_an_absent_run(tmp_path):  # name kept; the owner changed the class (#1105 PR 2 review)
-    """Container faults are the container's refusal, never a `RunAbsent` (P2; S4) — reaching an
-    open as `RunUnreachable`, a `RunRefused` raised from the container's `TenantRefused` (#1105
-    PR 2 review: an open answers one refusal family): a link at `<T>/runs` (never followed), a
-    record naming another tenant (`TenantRecordMismatch`), and a folder with no record. An
-    ABSENT runs folder is the one container state an open answers `RunAbsent` (the run is gone
-    with it). The positive control: the folder made right, the run opens."""
     from defender.run_repository import RunAbsent, RunUnreachable
 
     root = tmp_path / "data"
@@ -163,10 +145,6 @@ def test_a_container_fault_is_the_tenants_refusal_not_an_absent_run(tmp_path):  
 
 
 def test_list_tells_an_absent_container_from_an_empty_one_and_judges_every_entry(tmp_path):
-    """`runs.list()`: the run ids in `list_run_ids`' order (sorted by text), sidecar files
-    beside a run taken and not listed; `absent` true only when the folder does not exist —
-    an empty folder is not absent (R51-05, R51-18). A stray file refuses the listing
-    (`RunRefused` naming it: rev 4.1 H4, the rule the tracer applies after J3)."""
     from defender.run_repository import RunRefused
 
     root = tmp_path / "data"
@@ -197,10 +175,6 @@ def test_list_tells_an_absent_container_from_an_empty_one_and_judges_every_entry
 
 
 def test_create_holds_the_container_writes_its_record_and_hands_out_the_run(tmp_path):
-    """D-create (a), natural: `runs.create(run_id)` makes `<T>/runs` when absent (as run setup
-    does today), ensures its `_tenant.json` naming T, and hands out the `Run` at `<T>/runs/<id>`
-    for T. A linked `<T>/runs` and a record naming another tenant are refused, and nothing is
-    written through the link or over the record."""
     root = tmp_path / "data"
     root.mkdir()
     t = H.tenant(root, H.T_ID)
@@ -234,16 +208,7 @@ def test_create_holds_the_container_writes_its_record_and_hands_out_the_run(tmp_
     assert not (Path(w.runs) / "r9").exists()
 
 
-# ==========================================================================================
-# RunAddress and rehydration (G22).
-# ==========================================================================================
-
 def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_path):
-    """`RunAddress(tenant_id, run_id, None)` is the stored form: its fields written as text
-    (`{tenant_id, run_id}`, the curation row) and read back give an equal address; to
-    rehydrate, accept its tenant, then `runs.resolve(address)` — the same run `open` gives.
-    G22: a repository refuses an address naming ANOTHER tenant, even when that tenant has a
-    run of the same id (R51-01's shape), and never hands out the other tenant's folder."""
     from defender.run_repository import RunAddress, RunId
 
     root, t = _good(tmp_path, "r1")
@@ -271,9 +236,6 @@ def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_pat
 
 
 def test_a_run_address_checks_its_fields_at_construction_and_is_frozen():
-    """`RunAddress`'s fields are checked when it is built — the tenant id grammar, `RunId`'s
-    rules, the episode-id grammar — so a bad stored field never reaches a lookup; and it is
-    frozen. The positive control builds a well-formed address with and without an episode."""
     from defender.run_repository import RunAddress, RunId
 
     good = RunAddress(tenant_id=_tenant.TenantId(H.T_ID), run_id=RunId.parse("r1"),
@@ -297,12 +259,6 @@ def test_a_run_address_checks_its_fields_at_construction_and_is_frozen():
 ], ids=["dotdot", "dot", "slash", "upper", "empty", "over-long", "dash-first", "nul", "bytes",
         "int"])
 def test_a_run_address_holds_its_episode_id_to_the_owners_episode_grammar(episode_id):
-    """F6(b) / D-repo: `RunAddress` checks `episode_id` at construction against the owner's
-    episode-id grammar — exactly a `str`, a valid run id (`..`, `.`, a separator, a leading
-    `-`, NUL and the empty string are not), case-stable (`Upper-Case` is not), and short enough
-    to name its record (300 bytes is not) — and refuses every member of that domain, not only
-    `/`. POSITIVE CONTROL: the same fields with the episode id `EP` build an address. RED at
-    base: the door has no `RunAddress` (ImportError)."""
     from defender.run_repository import RunAddress, RunId
 
     fields = {"tenant_id": _tenant.TenantId(H.T_ID), "run_id": RunId.parse(f"{EP}-a")}
@@ -311,17 +267,8 @@ def test_a_run_address_holds_its_episode_id_to_the_owners_episode_grammar(episod
         f"RunAddress accepted the episode id {episode_id!r}")
 
 
-# ==========================================================================================
-# The episode view.
-# ==========================================================================================
-
 def test_an_arm_created_for_t_opens_for_t_through_its_episode_and_never_as_a_natural_run(
         tmp_path, episodes):
-    """O3 / O4: `runs.episode(ep)` over a container naming T opens the arm `view.arm_id(label)`
-    (`<ep>-<label>`, a `RunId`) at `<episode>/runs/<ep>-<label>` for T;
-    `view.episode` is the owner's handle on the episode folder; `view.base_world_id()` is the
-    container record's own. The same id through the natural container is `RunAbsent` (an arm
-    is reachable only through its episode)."""
     from defender.run_repository import RunAbsent, RunId
 
     _root, t = _good(tmp_path, "r1")
@@ -341,10 +288,6 @@ def test_an_arm_created_for_t_opens_for_t_through_its_episode_and_never_as_a_nat
 
 
 def test_the_view_refuses_a_container_naming_another_tenant_or_none_at_once(tmp_path, episodes):
-    """O3 / G20 / N-c″: a PRESENT container's `_tenant.json` is judged when the view opens. One
-    naming another tenant is `TenantRecordMismatch`; a present `runs/` with no record (an
-    episode launched before #1078) is a `TenantRefused` too — old episodes are not supported.
-    The positive control is the same episode once the record names T."""
     _root, t = _good(tmp_path)
     ep = _episode(episodes, container=H.U_ID, arms=(LABEL,))
     runs = t.runs_repository()
@@ -363,11 +306,6 @@ def test_the_view_refuses_a_container_naming_another_tenant_or_none_at_once(tmp_
 
 def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_creates_it(
         tmp_path, episodes):
-    """An episode before RUNS has no container and so no record to judge (N-ep): the view opens,
-    its `state` is absent, and `view.open` / `view.create` refuse — the create making nothing
-    (G5: an arm is never made in a container nobody bound). `view.create_container()` makes
-    `runs/` with T's record (D-create b); then `view.create(arm_id)` hands out the arm's `Run`
-    inside it. A second `create_container()` adopts what is there (C-19)."""
     _root, t = _good(tmp_path)
     ep = _episode(episodes)
     view = t.runs_repository().episode(EP)
@@ -394,10 +332,6 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
 
 def test_an_unreadable_container_is_recorded_not_raised_and_never_written_through(
         tmp_path, episodes):
-    """R51-20 / G25: a link at `<episode>/runs` — to a real folder holding an arm and no
-    record — is an UNREADABLE container. The view opens (the page reads it as absent), its
-    `state` unreadable with the reason recorded; `view.open` refuses; `view.create_container()`
-    refuses before minting a record; nothing is written through the link."""
     _root, t = _good(tmp_path)
     ep = _episode(episodes)
     target = tmp_path / "elsewhere"
@@ -416,12 +350,6 @@ def test_an_unreadable_container_is_recorded_not_raised_and_never_written_throug
 
 
 def test_episode_files_is_the_owners_handle_alone_and_creates_nothing(tmp_path, episodes):
-    """`runs.episode_files(ep)` is the judge's door: the owner's handle on the episode folder.
-    Since PR #1236's second review round it judges the container's `_tenant.json` as
-    `runs.episode` does (C-26 amended, owner decision): a record naming another tenant is
-    refused (`TenantRecordMismatch`) and nothing is created; the tenant's own container opens.
-    A missing episode and a file at the episode's name are refused, and nothing is created
-    (#1133 O4.8.2, G23)."""
     from defender._tenant import TenantRecordMismatch
 
     _root, t = _good(tmp_path)
@@ -449,9 +377,6 @@ def test_episode_files_is_the_owners_handle_alone_and_creates_nothing(tmp_path, 
 
 def test_a_bad_episode_id_or_an_unset_episodes_base_is_refused_before_anything_is_read(
         tmp_path, episodes, monkeypatch):
-    """The episode owner refuses a bad id before anything is read (D-ep), at both doors: a
-    separator, `..`, upper case. Without `DEFENDER_EPISODES_BASE` the owner refuses (only an
-    episode open reads it). Nothing is created under the episodes root."""
     _root, t = _good(tmp_path)
     _episode(episodes, container=H.T_ID)
     runs = t.runs_repository()

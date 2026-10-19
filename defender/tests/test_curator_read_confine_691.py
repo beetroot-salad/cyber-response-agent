@@ -31,9 +31,6 @@ def _reads(deps, path: str) -> bool:
 
 
 def test_a_read_inside_the_spawns_tree_but_outside_every_lesson_corpus(tmp_path):
-    """NEGATIVE + control: a read of ``defender/docs/*.md`` and ``defender/SKILL.md`` — inside the
-    worktree but outside every lesson corpus — DENYs under the confine; the spawn's OWN run-dir
-    file stays ALLOW (the run dir is a read root independent of the confine)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     (rd / "note.md").write_text("x\n", encoding="utf-8")
     deps = curator_deps(wt, rd, "lessons")
@@ -79,5 +76,3 @@ def test_defender_dir_is_the_main_checkout_paths_value(tmp_path):
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     with pytest.raises(ValueError, match=_EXPLICIT_TREE):
         _bind_no_tree(wt, rd, PATHS.defender_dir)
-
-

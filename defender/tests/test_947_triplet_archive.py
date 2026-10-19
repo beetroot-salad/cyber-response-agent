@@ -53,9 +53,6 @@ def _archived(tmp_path, worlds=T.WORLDS, **kw):
 
 
 def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
-    """Each archived world carries every artifact the archived-world row declares: the report,
-    the investigation document, the two tables, the stamp, the scrub verdict and the run-dir
-    pointer — six roles, none sourced from another."""
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
@@ -116,9 +113,6 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
 
 
 def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path):
-    """Both derived readers compute from the episode dir alone: with every sibling's run dir
-    removed from disk, the per-key classification and the per-world disposition are still
-    produced, unchanged."""
     import shutil
 
     base, src = T.runs_base(tmp_path)
@@ -154,9 +148,6 @@ def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
 
 
 def test_947_delta_o_returns_class_per_shared_correlation_key(tmp_path):
-    """The per-key reader returns one class for every correlation key the base and a world both
-    hold: equal canonical text answers `same`, and a difference is classified by the comparator
-    against the world's own declared axis."""
     ep = _archived(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1"), T.captured_row(key="k2")])
     (ep / "served" / f"{T.world_token('b')}.jsonl").write_text(
@@ -169,9 +160,6 @@ def test_947_delta_o_returns_class_per_shared_correlation_key(tmp_path):
 
 
 def test_947_delta_o_subtracts_the_controls_drift_keys(tmp_path):
-    """The per-key reader subtracts the control's drift keys: a key the control world also
-    differs on is not reported as a world's own difference, or the one measurement the
-    downstream judge consumes becomes noise."""
     ep = _archived(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1"), T.captured_row(key="k2")])
     drifted = json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "drift"}]}))
@@ -202,9 +190,6 @@ def test_947_verdicts_refuses_disposition_outside_enum(tmp_path):
 
 
 def test_947_readers_over_an_episode_with_no_archived_worlds_return_empty(tmp_path):
-    """Both readers answer EMPTY on an accepted episode holding no archived worlds rather than
-    raising: a family whose every sibling failed is a legitimate archived state, and the
-    episode's own recorded outcome is what tells "no worlds" apart from "no differences"."""
     ep = _accepted(tmp_path)
     (ep / "worlds").mkdir(exist_ok=True)
     assert _episode().verdicts(ep) == {}
@@ -267,9 +252,6 @@ def test_947_no_sibling_artifact_is_reachable_by_a_runs_base_walk(tmp_path, monk
 
 
 def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch):
-    """The positive control for the containment negative: an ORDINARY run materialised into the
-    same base by the same production writer IS found by the same walk, so the emptiness above is
-    a relocated episode rather than a walk that sees nothing."""
     base, src, root, ep = _relocated(tmp_path, monkeypatch)
     # The source's tenant, by its tenant location `<root>/<T>/runs/<id>` (#1105 PR 2: the
     # run-folder-to-tenant derivation `tenant_of_run_dir` is gone, F-13).

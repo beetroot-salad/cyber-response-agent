@@ -3,16 +3,10 @@ channel keeps vouching without a verdict step."""
 from __future__ import annotations
 
 
-
 from defender.tests import _spec773 as S
 
 LESSON = "defender/lessons/l1.md"
 QLESSON = "defender/lessons-questioner/w1.md"
-
-
-# ---------------------------------------------------------------------------
-# M1 — the curator writes, never checks
-# ---------------------------------------------------------------------------
 
 
 def test_the_curator_partitions_the_batch_into_committed_and_consumed_skip_only_773(tmp_path):
@@ -37,9 +31,6 @@ def test_the_curator_partitions_the_batch_into_committed_and_consumed_skip_only_
 
 
 def test_author_result_carries_an_unrecognized_bucket_key_773(tmp_path):
-    """An AUTHOR_RESULT carrying ANY key outside `{committed, consumed_skip}` fails partition
-    validation explicitly — including the removed `held_forward_bad`, and including a key
-    that was never recognised at all."""
     for stray in ("held_forward_bad", "some_key_nobody_declared"):
         sc = S.build_scene(
             tmp_path / stray,
@@ -77,11 +68,6 @@ def test_a_citation_of_an_earlier_batch_finding_is_not_verified_773(tmp_path):
         curator=S.FakeCurator(writes={"l1.md": S.lesson("now", "earlier-batch-id")}),
     )
     assert sc.run() == 0
-
-
-# ---------------------------------------------------------------------------
-# O7 — the questioner channel keeps today's behaviour
-# ---------------------------------------------------------------------------
 
 
 def test_a_questioner_tick_runs_vouching_and_no_verdict_step_773(tmp_path):
@@ -128,9 +114,6 @@ def test_a_questioner_tick_with_a_changed_file_citing_no_batch_finding_773(tmp_p
 
 
 def test_a_questioner_tick_whose_curator_committed_nothing_773(tmp_path):
-    """Vouching is now REACHED on a questioner tick that committed nothing — today it is
-    skipped, because the #852 gate sits inside `if committed:` (G13) — and it has no work,
-    so the observable outcome is unchanged: nothing committed, nothing refused."""
     sc = S.build_questioner_scene(
         tmp_path,
         rows=[S.world_row("w1")],
@@ -155,5 +138,3 @@ def test_the_questioner_tick_skips_only_the_verdict_stage_not_the_surrounding_or
     assert sc.head_files() == [QLESSON]
     assert sc.category_of("w1") == "consumed_committed"
     assert sc.category_of("w2") is None
-
-

@@ -1,23 +1,3 @@
-"""A resolution's `h-*` and `p*`/`ap*`/`r*` references resolve, and a strong move
-carries one.
-
-`:H h-NNN.preds` / `.attr_preds` / `.refuts` are the sole sites that declare a
-prediction or a refutation shape. The parser never joined a resolution's
-citations back to them — `matched_prediction_ids` is the head tokens that start
-with `p` — so `h-001 … [l-001 p9 severe ⟂ e-002]` parsed clean and validated
-clean, and the semantic reviewer downstream would have been the first thing in
-the pipeline to notice p9 does not exist.
-
-The row's own `h-*` was the same hole one level up, deferred until `:H` blocks
-accumulated (#817/#818): an id no `:H` row declares moved a phantom hypothesis
-to `++` with nothing in the pipeline objecting.
-
-The strong-move rule is the other half of the provenance tuple
-(`_check_strong_move_provenance`): one half makes a `++`/`--` cite the
-observation, this one makes it name the pre-committed claim that observation
-settled (#798).
-"""
-
 from __future__ import annotations
 
 
@@ -84,11 +64,6 @@ def _resolution_doc(row: str, extra: str = "") -> str:
     return _doc(_two_hypotheses() + "\n" + extra + ":T resolutions\n" + row)
 
 
-# rows the rule must REJECT
-# Each case is one defective resolution row, and each asserts the same two things: the row
-# produces EXACTLY ONE error (a second error means the check double-reports a single defect),
-# and that error names the offending token — an error the author cannot act on is the failure
-# mode this rule was added to avoid.
 @pytest.mark.parametrize(("case", "row", "extra", "fragments"), [
     # A prediction id no hypothesis declares. The error must name the declaring BLOCK, or the
     # author has to guess where `p9` was supposed to have come from.
@@ -96,9 +71,6 @@ def _resolution_doc(row: str, extra: str = "") -> str:
      "h-001  null → +    [l-001 p9 weak ⟂ e-002 :: parent looks interactive]", "",
      ["'p9'", "h-001.preds"]),
 
-    # h-002 declares a p1 and h-001 does not. Citing h-001's for h-002 is the cross-citation
-    # the id namespace makes so easy: both spell it `p1`, and before this check the head token
-    # resolved against nothing at all. The error must show what IS declared.
     ("siblings-prediction-id-even-though-it-exists",
      "h-002  null → +    [l-001 p2 weak ⟂ e-002 :: no packaging metadata]", "",
      ["'p2'", "declare: p1"]),
@@ -108,11 +80,6 @@ def _resolution_doc(row: str, extra: str = "") -> str:
      "h-001  null → -    [l-001 r7 weak ⟂ e-002 :: parent is packaged]", "",
      ["'r7'", "h-001.refuts"]),
 
-    # h-404 has no `:H` row anywhere. Nothing else catches it — the projector opens no bucket
-    # for an unknown `h-*`, so before this the row moved a phantom to `++` in silence and
-    # `_walkers.final_weights` reported it live. Enforcing it had to wait for `:H` blocks to
-    # accumulate (#817): while a second `:H hypothesize.hypotheses` REPLACED the list, every
-    # loop-1 hypothesis vanished from a legitimately-forked document and this fired on it.
     ("resolution-against-an-undeclared-hypothesis",
      "h-404  null → +    [l-001 p1,p2 weak ⟂ e-002 :: unrelated]", "",
      ["'h-404'", "h-001, h-002"]),
@@ -123,10 +90,6 @@ def _resolution_doc(row: str, extra: str = "") -> str:
      "h-404  null → ++   [l-001 p1,p2 severe ⟂ e-002 :: phantom]", "",
      ["'h-404'"]),
 
-    # The deference to a parse warning is keyed to the DECLARING block, not to "the document
-    # parsed without a single warning". An unknown block drops no `:H` row, so h-404 is still
-    # phantom for exactly the reason the error gives — gating on `not warnings` hid it behind
-    # any unrelated parse defect, and would have hid it behind every warning added since.
     ("a-warning-that-drops-no-hypothesis-does-not-stand-the-rule-down",
      "h-404  null → ++   [l-001 p1 severe ⟂ e-002 :: phantom]",
      ":Z bogus.block [a|b]\nx|y\n\n",
@@ -147,10 +110,6 @@ def _resolution_doc(row: str, extra: str = "") -> str:
      "h-001  null → ++   [l-001 ap9 severe ⟂ e-002 :: the binary is unsigned]", "",
      ["'ap9'"]),
 
-    # The shape this check found in the shipped corpus. Severity is positional-last in the
-    # head, so a row that leaves it out has its prediction ids read AS the severity: three
-    # predictions written down, none of them bound to the `++` (`golden-v2sshd`, fixed in
-    # #798). The error must point at the slot that ate them.
     ("omitting-severity-reads-as-a-strong-move-citing-nothing",
      "h-001  null → ++   [l-001 p1,p2 ⟂ e-002 :: interactive parent, no packaging]", "",
      ["<severity>"]),
@@ -158,18 +117,12 @@ def _resolution_doc(row: str, extra: str = "") -> str:
 def test_a_defective_resolution_row_is_rejected_once_and_names_the_token(
     case, row, extra, fragments
 ):
-    """A resolution row may only move on predictions its own hypothesis declared. Each defect
-    here yields exactly ONE error naming the token at fault — the id, the move, or the slot
-    that swallowed it."""
     errors = _errors(_resolution_doc(row, extra))
     assert len(errors) == 1
     for fragment in fragments:
         assert fragment in errors[0], f"the error must name {fragment}"
 
 
-# rows the rule must ACCEPT
-# The controls. Each of these is a legitimate shape the rule cost nothing, and several are
-# shapes an earlier draft of it wrongly denied.
 @pytest.mark.parametrize(("case", "row", "extra"), [
     # Both hypotheses resolving on ids they declared — the plain accepted shape.
     ("declared-predictions-and-refutations",
@@ -181,10 +134,6 @@ def test_a_defective_resolution_row_is_rejected_once_and_names_the_token(
     ("attribute-prediction-via-the-annotation",
      "h-001  null → +    [l-001 severe ⟂ e-002 :: unsigned binary ⟺ ap1]", ""),
 
-    # The spelling the error message itself asks for. `matched_prediction_ids` fell out of a
-    # bare `startswith("p")`, so `ap1` in the head parsed as citing NOTHING — and this rule
-    # then blocked the write of a row that had named its attribute prediction, telling the
-    # author to name the `ap*` they had just named.
     ("attribute-prediction-cited-in-the-head",
      "h-001  null → ++   [l-001 ap1 severe ⟂ e-002 :: the binary is unsigned]", ""),
 
@@ -197,9 +146,6 @@ def test_a_defective_resolution_row_is_rejected_once_and_names_the_token(
     ("strong-move-needs-only-one-of-the-two-lists",
      "h-001  null → --   [l-001 r1 severe ⟂ e-002 :: parent is a packaged unit]", ""),
 
-    # The legitimate fork this rule must not cost: `:H l-NNN.new_hypotheses` declares h-010
-    # inside the lead that found it, and a resolution against it is as well-grounded as one
-    # against a loop-1 hypothesis.
     ("hypothesis-the-lead-declares-mid-run",
      "h-010  null → ++   [l-001 p1 severe ⟂ e-002 :: the fork holds]",
      ":H l-001.new_hypotheses "
@@ -210,19 +156,12 @@ def test_a_defective_resolution_row_is_rejected_once_and_names_the_token(
      'p1|proposed_parent|"the fork predicts this"\n'
      "\n"),
 
-    # The other documented spelling. Both must be live before this rule can be, since between
-    # them they are the only way to declare a hypothesis after loop 1 — append-only forbids
-    # rewriting the first block.
     ("second-hypothesize-block-declares-a-fork",
      "h-003  null → +    [l-001 weak ⟂ e-002 :: suggestive]",
      _HYP_HEADER + "\n"
      "h-003|?late-fork|v-001|executed|process|unclassified-process||null|active\n"
      "\n"),
 
-    # The head is not id-only — `[l-001 p1 + l-003 p1,p2 moderate ⟂ …]` is a shipped shape. A
-    # `startswith` test read any word beginning `p`, `ap` or `r` as a cited id, which cost
-    # nothing while the ids resolved against nothing; once this rule joined them to the
-    # declaring block, these words became denied writes. Only an id-SHAPED token is a citation.
     ("head-prose-partial-is-not-a-citation",
      "h-001  null → ++   [l-001 p1 partial severe ⟂ e-002 :: interactive parent]", ""),
     ("head-prose-approved-is-not-a-citation",
@@ -231,9 +170,6 @@ def test_a_defective_resolution_row_is_rejected_once_and_names_the_token(
      "h-001  null → ++   [l-001 p1 refuted severe ⟂ e-002 :: interactive parent]", ""),
 ], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "⟂" not in v else "")
 def test_a_well_grounded_resolution_row_is_accepted(case, row, extra):
-    """The rule costs the corpus no legitimate document: ids that resolve against the block
-    that declared them — including one declared mid-run — pass, and so does prose that merely
-    looks like an id."""
     assert _errors(_resolution_doc(row, extra)) == []
 
 
@@ -268,5 +204,3 @@ def test_a_misspelled_new_hypotheses_block_names_itself():
     assert [e for e in validate_companion(doc) if "new_hypothesis`" in e], (
         "the parse warning must name the misspelled block"
     )
-
-

@@ -16,9 +16,6 @@ FM_BOUND = 512
 BODY_BOUND = 8192
 INV_BOUND = 65536
 
-# A real, invlang-valid investigation.md — the base for the size fixtures. Padding it with
-# plain text (ASCII or a multibyte codepoint) keeps it invlang-valid, so an over-bound fixture
-# is RED at HEAD via the NEW size check, not green for the wrong reason via invlang.
 GOLDEN_INV = (Path(__file__).resolve().parents[1]
               / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md").read_text(encoding="utf-8")
 
@@ -162,10 +159,6 @@ def test_report_md_in_subdir_not_gated(env):
     assert env.decide("report.md", bad).allow is False  # positive control
 
 
-# ak3 / ak7 (Fork 6c -> resolve symlinks). The size branch keys on the RESOLVED path, not on
-# the name the operand was reported under. Both artifacts must be closed the same way: ak7 is
-# the leg that FAILS if the implementer leaves the investigation branch keyed name-only
-# (files.py:269), re-opening for investigation.md the disguise bypass §7 closes for both.
 @pytest.mark.parametrize(("case", "artifact", "decoy_name", "bad"), [
     ("report", "report.md", "decoy.md", whole_file_of(BODY_BOUND + 1)),
     ("investigation", "investigation.md", "decoy2.md",
@@ -207,14 +200,6 @@ def test_forward_check_lesson_named_report_md_not_gated(tmp_path):
     d2 = permission.decide_write(run / "report.md", "", run_dir=run, defender_dir=dfn, policy=main_pol)
     assert d2.allow is False
 
-
-# investigation.md keying (the SHARED §7 F-A2/Fork 6 rule, investigation half)
-# The keying rule §7 resolved is stated over BOTH artifacts verbatim ("<run_dir>/report.md OR
-# <run_dir>/investigation.md — exact basename, run-dir ROOT, symlinks resolved"). ak1-ak3 pin the
-# report.md half; ak5-ak7 mirror them for investigation.md so the branch cannot be left keyed
-# name-only (files.py:269) for investigation — which would re-open the symlink-disguise size bypass
-# ak3 closes for report.md. The over-bound investigation carrier is `GOLDEN_INV + "x" * (INV_BOUND
-# + 100)` (invlang-valid padding, mirroring the existing investigation over-bound tests).
 
 def test_investigation_case_variant_not_gated(env):
     """ak5 (Fork 6a -> exact-match name, investigation half; mirrors ak1) — a case/whitespace-variant"""
@@ -288,44 +273,25 @@ def test_report_md_valid_frontmatter_empty_body(env):
 
 
 def test_report_md_body_contains_a_second_fence(env):
-    """fb11 — split_frontmatter splits on the FIRST closing fence only; a second `---`-looking
-    line in the body is inert body text -> Decision(True) if otherwise in-bound (the behavior of
-    the cited existing parser, _frontmatter.py:43)."""
     text = "---\ndisposition: benign\n---\nbody line\n---\nnot a second frontmatter\n"
     assert env.decide("report.md", text).allow is True
-
-
-def test_report_md_disposition_benign_commits(env):
-    """fb12 (gate-minted) — an otherwise-valid, in-bound report.md with `disposition: benign`
-    commits (Decision(True)). The valid-member accept path fb5/fb6 (absent/outside-enum) leave
-    untested."""
-    assert env.decide("report.md", report(disposition="benign")).allow is True
 
 
 # disposition normalization (Fork 7 -> exact-lowercase, non-string/dup -> not-in-enum)
 
 def test_report_disposition_case_variant_denied(env):
-    """dn1 (Fork 7a -> exact-lowercase) — a case-variant disposition ("Benign", "MALICIOUS")
-    is not an exact-lowercase enum member and denies; no case-folding step. Positive control:
-    the exact-lowercase value commits."""
     for variant in ("Benign", "MALICIOUS", "Inconclusive"):
         assert env.decide("report.md", report(disposition=variant)).allow is False, variant
     assert env.decide("report.md", report(disposition="benign")).allow is True
 
 
 def test_report_disposition_surrounding_whitespace_denied(env):
-    """dn2 (Fork 7b -> exact-lowercase, no trim) — a disposition value carrying surrounding
-    whitespace (`" benign "`, YAML-quoted so the spaces survive the parse) is not an exact
-    member and denies. Positive control: the untrimmed exact value commits."""
     assert env.decide("report.md", report(disposition='" benign "')).allow is False
     assert env.decide("report.md", report(disposition='"benign\t"')).allow is False
     assert env.decide("report.md", report(disposition="benign")).allow is True
 
 
 def test_report_disposition_non_string_denied(env):
-    """dn3 (Fork 7c) — a non-string `disposition` value (null, an int, a list) is treated as
-    not-in-enum and denies CLEANLY (a returned Decision(False), never a `value in ENUM`
-    TypeError escaping from the unhashable list). Positive control: a string member commits."""
     for value in ("disposition:", "disposition: 5", "disposition: [benign]", "disposition: {a: b}"):
         text = f"---\n{value}\n---\nbody\n"
         d = env.decide("report.md", text)  # must not raise
@@ -334,9 +300,6 @@ def test_report_disposition_non_string_denied(env):
 
 
 def test_report_disposition_duplicate_key_denied(env):
-    """dn4 (Fork 7d) — a duplicated `disposition:` key is treated as not-in-enum and denies,
-    even when a last-value-wins parse would resolve to a VALID member (both `benign`) — so the
-    gate cannot lean on PyYAML's silent last-key-wins. Positive control: a single key commits."""
     dup = "---\ndisposition: benign\ndisposition: benign\n---\nbody\n"
     assert yaml.safe_load("disposition: benign\ndisposition: benign\n") == {"disposition": "benign"}, \
         "re-probe: PyYAML resolves duplicate keys last-wins, so the gate must detect them itself"
@@ -345,9 +308,6 @@ def test_report_disposition_duplicate_key_denied(env):
 
 
 def test_report_disposition_nested_not_found_denied(env):
-    """fk11 (Fork 11 -> top-level-key only) — `disposition` nested inside a sibling collection
-    (not a top-level scalar key) is "missing" under a top-level lookup and denies. Positive
-    control: the same value as a top-level key commits."""
     nested = "---\nmeta:\n  disposition: benign\n---\nbody\n"
     assert env.decide("report.md", nested).allow is False
     assert env.decide("report.md", report(disposition="benign")).allow is True
@@ -360,9 +320,6 @@ def test_report_frontmatter_valid_but_over_size_bound(env):
     assert env.decide("report.md", fm_raw_of(FM_BOUND + 1)).allow is False
     at_bound = fm_raw_of(FM_BOUND)
     assert env.decide("report.md", at_bound).allow is True
-    # full-fenced-block-span alternative: the raw span alone is AT the bound, but wrapping it
-    # with its two `---` fence lines pushes the span to 521 B -- a full-block basis would deny
-    # here where the real (raw-only) basis accepts.
     _, at_bound_raw, _ = split_frontmatter(at_bound)
     full_block = "---\n" + at_bound_raw + "\n---\n"
     assert len(full_block.encode("utf-8")) > FM_BOUND, "re-probe: the fence overhead crosses the bound"
@@ -378,9 +335,6 @@ def test_report_frontmatter_valid_but_over_size_bound(env):
 
 
 def test_report_frontmatter_and_body_both_over_bound_simultaneously(env):
-    """sz2 — at least one bound violated -> Decision(False, reason), regardless of ordering; a
-    report over BOTH the 512 B frontmatter and the 8,192 B whole-file bound denies. (Which
-    violation wins the one-reason slot is unaddressed but does not change accept/deny.)"""
     head = f"---\ndisposition: benign\npad: {'y' * 600}\n---\n"
     text = head + "x" * (BODY_BOUND + 1)
     assert len(split_frontmatter(text)[1].encode("utf-8")) > FM_BOUND
@@ -467,9 +421,6 @@ def test_report_gate_cannot_be_skipped_by_omitting_the_run_root(env):
         env.run / "report.md", repro, run_dir=None, defender_dir=None, policy=env.pol
     )
     assert explicit_none.allow is False
-    # …and it fails closed at the READ-CONTAINMENT check specifically: a bare `allow is False`
-    # would stay green if the deny drifted to write_allow, a resolve error, or anything else,
-    # while the docstring's claim about WHICH check catches the untyped caller went false.
     assert "read roots" in explicit_none.reason
     gated = env.decide("report.md", repro)  # positive control — the gate itself, not containment
     assert gated.allow is False

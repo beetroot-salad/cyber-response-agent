@@ -89,20 +89,6 @@ def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
 
 
 def test_the_breakers_causes_are_reachability_not_configuration(tmp_path):
-    """#1256 (DP2) supersedes #1246's wording: whether a system is configured is decided at run
-    start, so a not-configured system is refused before any call and never charged (the run-flow
-    proof is `startup_usability_1256/test_1256_run_flow.py`). The breaker then counts only what
-    can change during a run — outages, errors, timeouts — and "not configured" leaves its
-    vocabulary: `INFRA_CAUSES`, the tripped system's down message and the run kill narrow back
-    to reachability. Unchanged: the down message still restates its count and the causes, the
-    causes stay examples (exit 2 is also a 5xx, a garbled reply, an adapter crash) under the
-    breaker's own codes, MAIN's opening correlation sentence for a tripped system claims no
-    cause, and the operator's escalation note still names configuration (#1256 does not change
-    it).
-
-    The system is tripped here with literal exit 2s — what a transport fault exits with. The
-    breaker sees codes only; which faults never reach it is the run's gates' business, so this
-    test does not ask whether `record_outcome` would charge a `ConfigFault`'s code."""
     from defender.runtime.case_ticket import ESCALATION_COMMENT_BODY
     from defender.runtime.lead_zero import (
         ENDING_TRIPPED_BREAKER,

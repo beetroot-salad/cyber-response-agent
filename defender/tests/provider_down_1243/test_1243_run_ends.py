@@ -1,18 +1,3 @@
-"""#1243 part 1 — a provider that stays down ends the run by name (O3, O4, O6, D4, D5).
-
-Inside an investigation run, `ProviderDown` from any model call ends the run with end class
-`provider-down`: MAIN, a MAIN-dispatched lead (whose session is stamped), the correlation lead
-(stop before MAIN, never `dispatch_raised`), a review stage (after the sibling lens settles; the
-round's traces still marked incomplete), concurrent leads (one run end). No report (O4); `run.py`
-exits 4 (D4); a caller's own deadline keeps its own ending if it expires mid-backoff.
-
-Every scenario drives the PRODUCTION front door (`run.main` through `_spec1222.run_alert`) and
-asserts FIRST that the path it is about ran. Two kinds of fault:
-* the typed failure raised directly by the scripted model (`ProviderDown`, as the retrier raises
-  it) — the subject is what each caller DOES with one;
-* the REAL retrier over the scripted model (`run_alert(wrap_model=...)`, instant waits) with a
-  provider that stays down — the subject is that the run path actually carries it.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -42,14 +27,7 @@ def _store(stores: list) -> Path:
     return stores[-1].path
 
 
-# =================================================================================================
-# MAIN
-# =================================================================================================
-
 def test_o3_main_down_ends_the_run_provider_down_with_no_report_and_exit_4(tmp_path: Path) -> None:
-    """O3/O4/D4 + scenario 2: `ProviderDown` on MAIN's own request ends the run `provider-down` —
-    the run-end record and exit reason say so, MAIN's session is stamped, no report.md is
-    written, and run.py exits 4."""
     stores: list = []
     main = S.MainScript([S.call("read_file", path="alert.json"), S.text(S.DONE)],
                         fault=_down_at(2))
@@ -62,9 +40,6 @@ def test_o3_main_down_ends_the_run_provider_down_with_no_report_and_exit_4(tmp_p
 
 
 def test_o3_scenario2_main_behind_the_real_retrier_ends_provider_down(tmp_path: Path) -> None:
-    """Scenario 2 through the real retrier: MAIN's provider answers 503 to every attempt —
-    the run path's model carries the retrier (4 attempts of MAIN's first request, each the same
-    request) and the run ends `provider-down`, exit 4, no report."""
     main = P.MainFailing([S.text(S.DONE)], P.ALWAYS_503)
     d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]},
                     wrap_model=P.wrap_with(P.instant_policy(), kinds=("main",)))
@@ -75,9 +50,6 @@ def test_o3_scenario2_main_behind_the_real_retrier_ends_provider_down(tmp_path: 
 
 
 def test_o3_a_main_lead_down_stamps_its_session_and_ends_the_run(tmp_path: Path) -> None:
-    """O3: `ProviderDown` in a MAIN-dispatched gather lead ends the run `provider-down` (never a
-    crash with no run-end record, as today), and that lead's session is stamped
-    `provider-down`; MAIN's session too."""
     stores: list = []
     d = S.run_alert(
         tmp_path, main=[S.gather(LEAD, "cmdb"), S.text(S.DONE)],
@@ -93,10 +65,6 @@ def test_o3_a_main_lead_down_stamps_its_session_and_ends_the_run(tmp_path: Path)
 
 
 def test_o3_concurrent_leads_down_end_the_run_once(tmp_path: Path) -> None:
-    """O3: two leads dispatched in one MAIN response both meet a down provider — the run ends
-    once, `provider-down` (no crash, no exception group escaping run.py), at least the first
-    lead's session stamped. A cancelled sibling's own stamp is not constrained (as for a budget
-    kill today)."""
     stores: list = []
     two = S.Turn(tool_calls=(S.gather(LEAD, "cmdb").tool_calls[0],
                              S.gather("l-002", "cmdb").tool_calls[0]))
@@ -116,15 +84,7 @@ def test_o3_concurrent_leads_down_end_the_run_once(tmp_path: Path) -> None:
             "something else")
 
 
-# =================================================================================================
-# The correlation lead
-# =================================================================================================
-
 def test_o3_scenario5_correlation_lead_down_stops_before_main(tmp_path: Path) -> None:
-    """O3 + scenario 5: the correlation lead (`l-00c`) meeting a provider that stays down (no
-    response, through the REAL retrier) stops the run before MAIN through the existing
-    stop-before-MAIN path — MAIN is never asked, the run ends `provider-down`, exit 4 — never
-    the `dispatch_raised` ending after which MAIN meets the same provider."""
     stores: list = []
     router = P.LeadsFailing({L3: [S.text(CORR)]},
                             {L3: P.Plan(exc=P.no_response, fail_from=1)})
@@ -150,10 +110,6 @@ def test_o3_correlation_lead_provider_down_is_not_a_lead_ending(tmp_path: Path) 
 
 
 def test_o3_a_deadline_cutting_a_backoff_keeps_its_own_ending(tmp_path: Path) -> None:
-    """Design (deadlines): the backoff counts against the caller's deadline and is awaited on the
-    event loop, so the correlation deadline expiring mid-backoff gives the lead its own ending
-    (timed out) — MAIN starts in time and the run does not end `provider-down`. The policy's
-    sleep here stalls far past the deadline; only a cancellable sleep lets MAIN start."""
     stall_s = 12.0
 
     async def stall(_seconds: float) -> None:
@@ -176,10 +132,6 @@ def test_o3_a_deadline_cutting_a_backoff_keeps_its_own_ending(tmp_path: Path) ->
     assert P.sessions(_store(stores)).get(P.gather_agent(L3)) == timed_out, (
         "the correlation lead cut mid-backoff is not stamped timed out")
 
-
-# =================================================================================================
-# A review stage (D5)
-# =================================================================================================
 
 #: How long a lens waits for the event it is gated on before giving up (a gate that never ran
 #: the other lens) — a bound on a broken scenario, never reached on a conforming one.
@@ -242,22 +194,10 @@ def _assert_round_marked_incomplete(d: S.Drive) -> None:
             f"the {role} trace is not marked incomplete for the round the provider ended: {rows}")
 
 
-#: How long the sibling lens keeps working AFTER the failing lens has raised. A real lens takes
-#: minutes; this is the shortest hold that still outlasts any short "grace period" a gate might
-#: wait out before raising (the contract cannot outlast an unbounded one — see the test).
 SIBLING_HOLD_S = 5.0
 
 
 def test_o3_d5_a_review_stage_down_ends_the_run_after_its_sibling_settles(tmp_path: Path) -> None:
-    """O3/D5: a review lens whose model is down ends the run `provider-down` (a close that cannot
-    be reviewed cannot commit) — not a failed review the model is told about. The gate raises
-    only after `gather` settles, so the sibling lens is not orphaned: it is never cancelled and
-    records finishing before the run ends. The sibling's work is ANCHORED on the failure — it
-    waits for the support lens to have raised, then keeps working `SIBLING_HOLD_S` — so a gate
-    that raises early (or after a fixed grace shorter than that hold) cancels it mid-work. Still
-    a margin, not a proof: a grace longer than the hold would pass; "run-ended" is recorded
-    only after the run's loop closes. The round's traces are still marked incomplete; no
-    report.md; exit 4."""
     events: list[str] = []
     failed = asyncio.Event()
     support = _Lens(exc=P.provider_down_fault("review"), events=events, name="support",
@@ -298,9 +238,6 @@ def test_o3_d5_the_composer_down_ends_the_run(tmp_path: Path) -> None:
 
 
 def test_o3_d5_a_review_stage_failing_otherwise_still_fails_the_review_closed(tmp_path: Path) -> None:
-    """D5 positive control: a lens failing with an ordinary error keeps today's ending — the
-    review fails closed and the run goes on (MAIN is told and stops); the run does NOT end
-    provider-down. Only `ProviderDown` ends the run."""
     stores: list = []
     support = _Lens(exc=lambda: RuntimeError("lens broke"))
     stages = P.sym("runtime.review_roles", "ReviewStages")(
@@ -323,14 +260,7 @@ def test_o3_d5_a_review_stage_failing_otherwise_still_fails_the_review_closed(tm
     assert any(r.get("incomplete") is True for r in P.trace_rows(d.folder, "support"))
 
 
-# =================================================================================================
-# O4/O5 at the front door, O6 a branched sibling
-# =================================================================================================
-
 def test_o5_a_provider_down_run_hands_its_class_to_the_post_steps_and_renders(tmp_path: Path) -> None:
-    """O5: run.py's normal post-steps run on a provider-down run — curation is handed
-    `truncated_by='provider-down'` (and refuses it, O5), and the REAL run page renders over a run
-    with no report."""
     from defender import run_common
 
     rendered: list[Path] = []
@@ -351,9 +281,6 @@ def test_o5_a_provider_down_run_hands_its_class_to_the_post_steps_and_renders(tm
 
 def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
-    """O6/D4: exit 4 is none of run.py's existing exits, and a sibling world exiting with it is
-    recorded `did not finish` by the branch launcher and counted toward the family's failures
-    (never graded)."""
     from defender._episode_handle import Episode
 
     assert P.PROVIDER_DOWN_EXIT not in P.TAKEN_EXITS
@@ -372,19 +299,11 @@ def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
     assert "a" not in records, "a sibling that exited 0 was recorded as failed"
 
 
-# =================================================================================================
-# D4 — exit 4 is provider-down's own; the sibling door exits with it too
-# =================================================================================================
-
 @pytest.mark.parametrize(("kill", "member"), [
     (lambda: P.sym("hooks.budget_enforcer", "BudgetKill")("run budget spent"), "TRUNCATED_BY_BUDGET"),
     (lambda: P.sym("runtime.circuit_breaker", "RunAborted")(5, ["cmdb"]), "TRUNCATED_BY_ABORTED"),
 ], ids=["budget", "aborted"])
 def test_d4_exit_4_is_provider_downs_alone(tmp_path: Path, kill: Any, member: str) -> None:
-    """D4: 4 is provider-down's OWN exit ("its own non-zero run.py exit code"). A run cut short
-    on MAIN's request by another infrastructure end — a budget kill, a run-level abort — ends
-    as today: that class, and exit 0 (so a branched sibling cut by its budget is graded, not
-    recorded "did not finish"). The provider-down tests above read exit 4 off the same channel."""
     main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=kill))
     d = S.run_alert(tmp_path, main=main, leads={L3: [S.text(CORR)]})
     assert main.requests == 1, f"MAIN made {main.requests} requests; the kill is on its first"
@@ -447,11 +366,6 @@ def _run_sibling(tmp_path: Path, ep: Path, main: S.MainScript) -> S.Drive:
 def test_o6_d4_a_sibling_world_ending_provider_down_exits_4(tmp_path: Path,
                                                            monkeypatch: pytest.MonkeyPatch,
                                                            fault: Any, ends: str, rc: int) -> None:
-    """O6/D4 + scenario 8 at the sibling's own door: a branched sibling (`run.py --episode
-    --world`) whose MAIN meets a provider that stays down ends `provider-down` and EXITS 4 —
-    the non-zero exit the launcher records as "did not finish" (the O6 launcher test above),
-    never 0, which the launcher treats as a finished, gradable world. Control on the same
-    door: a sibling cut by a budget kill exits 0, as today."""
     ep = _sibling_episode(tmp_path, monkeypatch)
     main = S.MainScript([S.text(S.DONE)], fault=S.LeadFault(raise_on=1, exc=fault))
     d = _run_sibling(tmp_path / "sibling", ep, main)

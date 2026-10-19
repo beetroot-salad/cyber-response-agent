@@ -57,9 +57,6 @@ def test_852_f02_a_forward_bad_lesson_is_not_swept_into_a_mixed_batch_commit(tmp
 
     def curate(rows, batch_id, cfg):
         _write_corpus_file(cfg.corpus_dir, "vouched", "source_finding_ids", ["run-G/0"])
-        # The BAD lesson the curator was told to `rm` and did not (prompt.md, "Per-lesson
-        # forward-check gate"). Nothing cites it, because the finding that would have is the
-        # one the forward check just rejected.
         _write_corpus_file(cfg.corpus_dir, "forward-bad", "source_finding_ids", [])
         return {
             "committed": ["run-G/0"],
@@ -106,10 +103,6 @@ def test_852_f02_an_attributable_mixed_batch_still_commits_and_reports_the_hold(
     assert "held_reason" not in h.pending_by_id(paths, ch)["run-B/0"], (
         "a row this tick never mentioned was stamped with a hold reason it was never given"
     )
-
-
-
-
 
 
 def test_852_f02_a_modified_file_that_claims_a_new_source_still_needs_a_voucher(
@@ -185,9 +178,6 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     _queued_run("case-1", "run-1", paths)
     _queued_run("case-2", "run-2", paths)
 
-    # The lock file is resolved off `paths` (#952 M5: `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"`),
-    # so the drain and a by-hand `run(run_dir, paths=p)` contend on the SAME file for the
-    # same `paths` — `lead_author.QUEUE_LOCK_FILE` is that path's DEFAULT_PATHS spelling.
     queue_lock = (paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"
     queue_lock.parent.mkdir(parents=True, exist_ok=True)
     holder = queue_lock.open("a+")
@@ -217,9 +207,6 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     run_dir = _state1135.curation_run_dir("run-1")
     paths = loop_paths(tmp_path)
 
-    # Held at the file `run(run_dir, paths=paths)` locks — `(paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"`
-    # (#952 M5) — not at the DEFAULT_PATHS constant, which is a different file for a
-    # `LoopPaths` rooted under `tmp_path`.
     queue_lock = (paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"
     queue_lock.parent.mkdir(parents=True, exist_ok=True)
     holder = queue_lock.open("a+")
@@ -290,7 +277,6 @@ def test_852_f04_requeue_is_create_if_absent_and_leaves_no_staging_file(tmp_path
         "the refused re-queue wrote itself in anyway"
     assert {p.name for p in queue_dir.iterdir()} == {"case-A.json", "inflight"}, \
         "the re-queue left its staging file in the queue directory"
-
 
 
 @pytest.mark.parametrize("spec", [{"case_id": "c"}, {"run_id": "r", "attempts": 2}])

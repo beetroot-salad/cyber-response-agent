@@ -1,7 +1,3 @@
-"""V3 holes in the lead author's listings: serving a claim after its trees closed, refused listings alone not refusing
-a draft, `kind_at` mapping a refusal to absent, discovery re-listing a refused folder or rewording its reason.
-Faults go through `DrainTrees.open`'s `os_` seam.
-"""
 from __future__ import annotations
 
 import errno
@@ -52,18 +48,8 @@ def _bad_fd(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records if "Bad file descriptor" in r.getMessage()]
 
 
-# ---------------------------------------------------------------------------------------
-# V3-H1: the CLI route serves its claim inside the trees it opened
-# ---------------------------------------------------------------------------------------
-
-
 def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
         tmp_path: Path, monkeypatch, caplog):
-    """`lead_author.run(run, label=, paths=)` with no deps (what `main()` calls): the run
-    opens its own trees under the queue lock and serves the whole claim inside them. Both coined
-    rows' drafts land with their ids, the agent spawn is reached (`FatalConfigError` from the
-    unroutable model), nothing is recorded done, no log line says `Bad file descriptor`, and
-    once the run has unwound nothing under the worktree is held."""
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     caplog.set_level(logging.DEBUG)
     repo = _worktree(tmp_path)
@@ -85,20 +71,10 @@ def test_run_without_deps_mints_and_reaches_its_agent_inside_its_own_trees(
     assert descriptors_under(repo) == []
 
 
-# ---------------------------------------------------------------------------------------
-# V3-H2: a refused listing falls through to the write; only the write's refusal is the draft's
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("route", ["scandir", "reopen"])
 @pytest.mark.parametrize("err", [errno.EACCES, errno.EIO], ids=["EACCES", "EIO"])
 def test_a_refused_listing_alone_does_not_refuse_the_draft(
         tmp_path: Path, route: str, err: int, caplog):
-    """The trees held over an `os_` that refuses only the LISTING of the wazuh draft's `_draft`
-    folder (its `scandir`, or the reopen of `.` for reading), not the step into it: the
-    existence probe's `entry_kind` answers that listing's `reason` (asked and refused once), the
-    probe falls through to the write, and the write lands. Both drafts are created with their
-    bytes, in order, and nothing is logged."""
     repo = bare_skills(tmp_path)
     skills_dir = repo / "defender" / "skills"
     refuser = RefusesFolder(skills_dir / "gather/queries/wazuh/_draft", route, err)
@@ -112,11 +88,6 @@ def test_a_refused_listing_alone_does_not_refuse_the_draft(
     assert (skills_dir / w_name).read_text(encoding="utf-8") == w_text
     assert (skills_dir / e_name).read_text(encoding="utf-8") == e_text
     assert wrote_errors(caplog) == []
-
-
-# ---------------------------------------------------------------------------------------
-# V3-H3 / V3-H6: every refusal is "other" to `kind_at`, the mount point included
-# ---------------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -133,9 +104,6 @@ DRAFT_FOLDER = "gather/queries/wazuh/_draft"
 @pytest.mark.parametrize("route", REFUSAL_ROUTES)
 @pytest.mark.parametrize("err", REFUSED_ERRNOS, ids=errno.errorcode.get)
 def test_kind_at_answers_other_for_every_refused_listing(scene, err: int, route: str):
-    """A holding folder whose listing is refused with any errno, on any route: `kind_at`
-    answers `"other"` for a name below it, never `"absent"` and never a raise. Control: the same
-    trees over the real `os` answer `"absent"` for the absent name."""
     (scene.skills_dir / DRAFT_FOLDER).mkdir(parents=True, exist_ok=True)
     rel = scene.rel(MINTED_NAME)
     assert kind_at(scene.repo, scene.tree_for, rel) == "absent"
@@ -149,11 +117,6 @@ def test_kind_at_answers_other_for_every_refused_listing(scene, err: int, route:
 @pytest.mark.parametrize("err", REFUSED_ERRNOS, ids=errno.errorcode.get)
 def test_a_refused_draft_folder_neither_clears_the_twin_nor_departs_a_draft(
         scene, err: int, route: str):
-    """Through the gates: with the wazuh `_draft` folder's listing refused (any errno, any
-    route), the half-promote twin probe refuses an established template (something it cannot
-    see past stands where the twin goes), and a minted draft below it is not counted departed.
-    Control: the same folder listed for real, with no twin and no draft, passes the twin probe
-    and departs the draft."""
     (scene.skills_dir / DRAFT_FOLDER).mkdir(parents=True, exist_ok=True)
     place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain")
     assert not os.path.lexists(scene.at(TWIN_NAME))
@@ -178,9 +141,6 @@ def test_a_refused_draft_folder_neither_clears_the_twin_nor_departs_a_draft(
 
 @pytest.mark.parametrize("route", ["reopen", "scandir"])
 def test_kind_at_on_the_mount_point_answers_from_its_own_listing(scene, route: str):
-    """`kind_at` on the mount point itself (`tree_for` answers `"."`): `"dir"` over open trees;
-    `"other"` when the mount's own listing is refused (EIO) and after the trees closed (`Bad
-    file descriptor`). Never hardcoded, never a raise."""
     rel = "defender/skills"
     assert kind_at(scene.repo, scene.tree_for, rel) == "dir"
     refuser = RefusesFolder(scene.skills_dir, route, errno.EIO)
@@ -191,10 +151,6 @@ def test_kind_at_on_the_mount_point_answers_from_its_own_listing(scene, route: s
         assert kind_at(scene.repo, closed.tree_for, rel) == "dir"
     assert kind_at(scene.repo, closed.tree_for, rel) == "other"
 
-
-# ---------------------------------------------------------------------------------------
-# V3-H4 / V3-H5: discover's refused folders — one listing decides, its reason verbatim
-# ---------------------------------------------------------------------------------------
 
 SKILL_SYSTEMS = frozenset({"elastic", "wazuh"})
 GHOST = "discover_system_drafts: skipped undeclared directory 'ghost'"
@@ -226,10 +182,6 @@ def _warnings(caplog) -> list[str]:
 @pytest.mark.parametrize("deny", ["wazuh", "wazuh/_draft"])
 def test_discover_takes_a_refused_folders_one_listing_as_final(
         skills: Path, deny: str, route: str, caplog):
-    """A transient refusal (`once=True`: only the first listing of the folder is refused, a
-    second would answer): the folder is asked for exactly once, its draft is not discovered,
-    and its one warning is given. Catches: a discover that lists a refused folder again and
-    splices in the second answer, in silence."""
     refuser = RefusesFolder(skills / deny, route, errno.EACCES, once=True)
     assert _discover(skills, refuser) == [skills / "elastic/_draft/a.md"]
     assert refuser.asked == 1, f"the folder was asked for {refuser.asked} times"
@@ -241,23 +193,7 @@ def test_discover_takes_a_refused_folders_one_listing_as_final(
 @pytest.mark.parametrize("deny", ["wazuh", "wazuh/_draft"])
 def test_discover_warns_an_uncommon_refusal_in_its_own_words(
         skills: Path, deny: str, err: int, route: str, caplog):
-    """A declared folder refused with an errno no other row names: ONE
-    `warn: skipping <where>/<name> (<strerror>)`, the listing's reason verbatim; every other
-    system is still discovered."""
     refuser = RefusesFolder(skills / deny, route, err)
     assert _discover(skills, refuser) == [skills / "elastic/_draft/a.md"]
     assert refuser.refused > 0
     assert _warnings(caplog) == [GHOST, f"warn: skipping {skills / deny} ({os.strerror(err)})"]
-
-
-# ---------------------------------------------------------------------------------------
-# V3-H7 / V3-L1: B2's helpers are the one lister, and their stand-in suppression is gone
-# ---------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-

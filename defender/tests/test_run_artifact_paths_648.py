@@ -94,21 +94,9 @@ def test_payload_outside_the_two_known_families_is_refused(tmp_path: Path) -> No
 
 
 def test_a_seq_is_ascii_digits_only(tmp_path: Path) -> None:
-    """Both seqs are `f"{int}"`, so the shape is ASCII. A str pattern's `\\d` also matches every
-    Unicode decimal, which would admit names no writer produces and contradict the ASCII-only
-    lead-id alphabet in the same pattern."""
     run = tmp_path / "runs" / "case-1"
     assert contained_payload(run, f"gather_raw/{LEAD}/٣.json") is None
     assert contained_payload(run, "ticket_reads/١.json") is None
-
-
-# Staging — the copy, not the read.
-#
-# The read gate above judges a path the moment a consumer follows it. Staging runs EARLIER and
-# judges nothing: it copies the tables into learning state, and `copy2`/`copytree` handed a link
-# write the TARGET's bytes in under an artifact's name. After that copy the planted content is
-# an ordinary in-run file and the gate has nothing left to catch. Nothing this system writes is
-# ever a link (a boxed run's exit scrub taints a tree holding one), so the boundary bans them.
 
 
 def _outside_secret(tmp_path: Path) -> Path:

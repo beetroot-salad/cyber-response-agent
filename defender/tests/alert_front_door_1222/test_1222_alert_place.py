@@ -491,9 +491,6 @@ def _runtime_spec(runtime: str) -> Any:
 # A3 — the lead reads the alert itself; O12 — no alert byte in a goal or harness prose
 
 def test_a3_correlation_lead_reads_this_runs_alert_through_its_file_tool(tmp_path):
-    """Following the pointer, the correlation lead opens this run's alert in its box with
-    read_file and with cat and gets the whole text inside an untrusted frame, or a read that
-    names its truncation."""
     rel = S.alert_rel()
     d = _run(tmp_path, leads={S.L3: [S.call("read_file", path=rel),
                                      S.call("bash", command=f"cat {rel}"),
@@ -524,9 +521,6 @@ _HOSTILE = (MARK, S.FENCE_RUN, S.RUN_TAG_CLOSE, S.RUN_TAG_OPEN, S.FORGED_HEADING
 
 
 def test_o12_no_alert_byte_reaches_a_goal_or_harness_prose(tmp_path):
-    """For an alert carrying a ``` run, a </run-…> tag and raw U+2028/U+2029/U+0085, no alert
-    byte appears in l-00c's stored goal, its Dispatch block or any harness-built prose; MAIN's
-    own raw-alert block is unchanged and sealed as today."""
     rel = S.alert_rel()
     d = _run(tmp_path, alert=_hostile_kibana_alert(),
              leads={S.L3: [S.call("read_file", path=rel), S.text(S.DEFAULT_CORRELATION_SUMMARY)]})
@@ -558,9 +552,6 @@ def test_o12_no_alert_byte_reaches_a_goal_or_harness_prose(tmp_path):
 # A1 — the box cannot change the input directory (runc, runsc, the production runtime)
 
 def test_a1_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatch):
-    """From inside the box, every write-shaped attempt against the input directory and both files
-    in it — open for write or append, truncate, chmod, utime, chown, unlink, rename away, rename
-    over, sed -i — is refused, and the host sha256 of both files is unchanged after the run."""
     with _live_tree(tmp_path, monkeypatch, hard=False):
         if "runc" not in docker_runtimes():
             pytest.skip("the 'runc' runtime is not registered with this daemon")
@@ -571,14 +562,6 @@ def test_a1_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatch):
 
 
 def test_a1_runsc_box_cannot_change_the_alert_or_its_record(tmp_path, monkeypatch):
-    """Under the production runtime (runsc), from inside the box, every write-shaped attempt
-    against the input directory and both files in it -- open for write or append, truncate,
-    chmod, utime, chown, unlink, rename away, rename over, mount over, sed -i -- is refused, and
-    the host sha256 of both files is unchanged after the run: the list
-    a1_input_dir_read_only_in_the_box drives under runc, with the same positive controls (a new
-    file in the run folder is written and seen on the host; cat and read_file return both files'
-    real bytes). Collected in a job that has runsc; where runsc is absent the test fails, it
-    never skips."""
     with _live_tree(tmp_path, monkeypatch, hard=True):
         assert "runsc" in docker_runtimes(), (
             "the 'runsc' runtime is not registered with this daemon — this cell FAILS rather "
@@ -617,12 +600,6 @@ def _finished_run(tmp_path: Path) -> S.Drive:
 
 
 def test_a1_a_replaced_alert_is_refused_at_the_next_host_read_whatever_the_runtime(tmp_path):
-    """With the read-only bind taken out of play -- alert.json replaced on the host after setup,
-    standing in for a bind that failed silently under the production runtime -- the run's next
-    host-side read (orientation on a restart, a sibling's resume, a visualizer page, the
-    launcher) refuses with a fixed reason naming the run, and nothing derived from the replaced
-    bytes reaches a model, a ticket or a lesson. It needs no runsc: it pins the second line of
-    defence wherever it runs. Positive control: the untouched alert reads as before."""
     rel = S.alert_rel()
 
     def drive(where: Path, **kw: Any) -> S.Drive:
@@ -661,11 +638,6 @@ def test_a1_a_replaced_alert_is_refused_at_the_next_host_read_whatever_the_runti
 
 
 def test_p149_agents_read_permission_and_the_one_directory_dow(tmp_path):
-    """MAIN and the correlation lead can read the alert and the record at their new place. A
-    refused read names the file it refused.
-
-    The absolute spelling is the one a model holds (#1255 design rev 4, P1): the run folder's
-    model path `/runs/current/<rel>`, never the run folder's host path."""
     rel, rec = S.alert_rel(), S.record_rel()
     planted = _tenant()
     run_id = "s08-p149"
@@ -853,9 +825,6 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     with Episode.open(ep) as episode:
         T.episode_view(episode, tenant=planted.accept()).close()
     copy = S.plant_episode_copy(ep, alert=fresh["alert"], record=S.read_record(src))
-    # Then the source run's folder holds another alert with a record that agrees with it, so
-    # "the episode's copy" is told apart from "whatever the source run holds now" (base copies
-    # the source's: PA-09) without tripping a digest re-check of the source.
     _replace_alert_and_record(src)
     sib_daemon, sib = _scripted_daemon(), dict[str, Any]()
     lifecycle = functools.partial(_lifecycle(), start_box=_start_with(sib_daemon),
@@ -960,12 +929,6 @@ def _held_files(run_dir: Path) -> dict[str, Path]:
     return {k: p for k, p in held.items() if p.is_file()}
 
 
-#: The source run a sibling is branched from: a fenced document, one gathered query, then one
-#: more MAIN tool call (`echo held`) — the branch point. #1255 (D1, C7): a branch point is a MAIN
-#: response that called tools, and its fork snapshot must already hold a query that reached a
-#: system. The capture lands INSIDE the gather call, so neither the append's response nor the
-#: gather dispatch has it in its snapshot; the response after the gather returns does (the
-#: shape `test_1222_correlation_dispatch`'s sibling source uses).
 def _branchable_source(tmp_path: Path, planted: S.Planted) -> S.Drive:
     golden = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")
     src = _run(tmp_path / "source", tenant=planted,
@@ -1008,10 +971,6 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
 
 
 def test_p152_host_replaces_a_file_inside_the_directory_mid_ru(tmp_path, monkeypatch):
-    """The box sees a host replacement inside the read-only directory and still cannot write it.
-      - No host step writes the alert or the record after setup.
-      - A sibling's alert and record are placed at its setup from the episode's copy, so the
-        resume seeder's post-box rewrite goes."""
     # A sibling: placed at setup, then resumed through the real seeder while its box would be
     # up. Base's seeder copies the source's alert over the sibling's (PA-09).
     at_setup, after = _seeded_sibling(tmp_path / "sibling")

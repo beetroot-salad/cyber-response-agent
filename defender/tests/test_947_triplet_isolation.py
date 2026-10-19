@@ -23,9 +23,6 @@ def _model_text(detail: str) -> str:
     "Elasticsearch query failed (HTTP 404): no such index [logs-{a}]",
 ])
 def test_947_no_model_visible_fault_text_names_a_run_or_world_token(detail):
-    """No model-visible fault text names a run or world token: the episode's token and any
-    world's own token are removed from a fault's detail before it reaches the model — a
-    refusal and the system's own relayed reason alike, because both arrive on one channel."""
     rendered = _model_text(detail.format(a=TOKEN_A, c=TOKEN_C))
     for leak in (TOKEN_A, TOKEN_C, T.EPISODE_TOKEN):
         assert leak not in rendered, f"{leak!r} survived into model-visible text"
@@ -33,9 +30,6 @@ def test_947_no_model_visible_fault_text_names_a_run_or_world_token(detail):
 
 
 def test_947_an_ordinary_refusal_still_tells_the_model_something_actionable():
-    """The positive control for the redaction: an ordinary refusal that names no token is
-    passed through intact, so the filter removes tokens rather than emptying the channel
-    the model reasons from."""
     plain = "index expression 'logs-*,alerts-*' names a multi-index list — refused whole"
     assert _model_text(plain) == plain
     redacted = _model_text(f"index 'logs-{TOKEN_A}' falls outside the configured patterns")
@@ -62,5 +56,3 @@ def test_947_what_the_redaction_leaves_behind_names_nothing_about_the_scheme(det
             "scheme the removal exists to hide")
     assert rendered != detail.format(a=TOKEN_A).casefold(), (
         "nothing was redacted at all, so the assertion above passed on an unfiltered string")
-
-

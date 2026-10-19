@@ -328,15 +328,6 @@ def _lesson_alert(sig: str, **rule: Any) -> dict[str, Any]:
 # o8 / r6 / r7 / r8 — the gate's lesson demands
 
 def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
-    """A lesson authored from a run of an alert_id-mapped tenant is listed in orientation's
-    lesson hits on a later run of the same recorded signature.
-
-    Observed: the first run of a committed Kibana fixture alert on a tenant whose mapping takes
-    the signature from `alert_id` records that value; the lesson the author writes from the run
-    (that recorded signature, unquoted) and a decoy keyed on the alert's `rule.id` sit in the
-    isolated checkout corpus; a later run of the same alert lists the first in orientation's hits and not
-    the decoy. The author's own leg — queue row to lesson file — is p074's and p077's.
-    """
     alert = S.fixture_alert("v2-sshd-success-after-failures")
     alert_id, rule_id = alert["alert_id"], alert["rule"]["id"]
     planted = S.plant_tenant(alert_mapping=S.ALERT_ID_MAPPING)
@@ -359,11 +350,6 @@ def test_o8_lesson_authored_from_a_run_is_found_on_a_later_run(tmp_path):
 
 
 def test_curated_checkout_lesson_is_discovered_and_read_by_main(tmp_path):
-    """A real curator drain and MAIN use the same corpus, including readable lesson bodies.
-
-    The committed lesson is read in place: no copy into a tenant corpus or lookup fixture.
-    Both read_file and cat must reach the body that discovery advertises.
-    """
     sig, name, finding = "R-FEEDBACK", "fd-feedback", "feedback/b/0"
     marker = "CURATOR-FEEDBACK-BODY-1222"
     lesson = _author_lesson(name, [sig], [finding]) + "\n" + marker + "\n"
@@ -407,18 +393,6 @@ _DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
 
 
 def test_r6_a_hostile_source_signature_entry_is_inert_in_every_lesson_listing(tmp_path):
-    """A lesson file whose source_signature entry is outside the allow-list (written by the
-    lesson author model or by hand: a newline, an ANSI escape, '## ' heading text, a key-looking
-    'attack_phase: [x]', YAML-significant punctuation, 129 characters) is listed by
-    defender-lessons --tags, by the grep hit listing and by the curator's corpus manifest as one
-    inert line: no listing gains a second tag line, a forged sibling section or key, or a raw
-    control character, and the entry shows as written, neutralised the way every other lesson
-    frontmatter line is. Positive control: a well-formed entry beside it is listed once with its
-    count.
-
-    Observed: the tags listing and the hit listing as orientation hands them to MAIN (the real
-    `defender-lessons` subprocesses), and `build_corpus_manifest` over the isolated checkout corpus.
-    """
     lessons = {name: S.lesson_text(name, raw_signature_line=f"source_signature: [{entry}, {_GOOD_ENTRY}]")
                for name, entry in _HOSTILE_ENTRIES.items()}
     lessons["fd-r6-good"] = S.lesson_text("fd-r6-good", source_signature=[_GOOD_ENTRY])
@@ -486,16 +460,6 @@ def _loaded_row(lesson: str) -> str:
 
 
 def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_path, capsys):
-    """A lesson whose source_signature is written unquoted with entries YAML retypes (000123, yes,
-    2026-05-01, 0x1F, null) is yielded by iter_lessons (not skipped as malformed), scored by
-    match_lessons exactly as the same lesson written with quoted entries is, with the entry in the
-    hit's frontmatter as the text written, and indexed by the lesson tracer with its case count;
-    every one of them agrees with what defender-lessons --tags lists for it. Positive control: the
-    quoted twin gives identical scores and counts.
-
-    Observed: each reader's own entry point over two corpora holding the unquoted lesson and its
-    quoted twin; the tags listing as orientation hands it to MAIN.
-    """
     name = "fd-r7-retyped"
     twins = {
         "unquoted": S.lesson_text(name, source_signature=_RETYPED, extra_lines=_SELECTOR_LINES),
@@ -587,24 +551,6 @@ def _probes(text: str) -> set[str]:
 
 
 def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys, monkeypatch):
-    """The in-box corpus filters on the signature it is handed, exactly, never on rule.id. An
-    in-box lookup that cannot see past runs says so and never reads as an empty corpus.
-
-    Observed: (1) the corpus CLI over a runs base holding only the current run, run as it runs in
-    the sandbox (`DEFENDER_BOX` set — PR-24's observed in-box view, where past runs are not
-    mounted) against the same CLI on the host, where that runs base truly holds no past run;
-    (2) the corpus CLI on the host over the tenant's runs folder holding past runs whose records
-    and `rule.id`s disagree — handed the mapped signature it counts exactly the run recorded
-    under it — and MAIN's own `defender-invlang hypothesis-vocabulary --signature` call, handed
-    the mapped signature in its sandbox, which sees none of those past runs.
-
-    #1255 (design rev 4, P1; `e2e/test_1255_view_replay.py::test_b5_unboxed_invlang_scans_only_
-    this_run_as_the_box_would`): MAIN's `/runs` holds only `current` in every mode, so its in-box
-    lookup can no longer count a past run. Before #1255 half (2) asserted that MAIN's in-box call
-    counted exactly `p1` — another run's folder, which the model view forbids it to see (and
-    which PR-24, the premise this test's spec-graph entry cites, already says a box does not
-    mount). The exact-filter half moves to the same CLI over the same runs folder on the host.
-    """
     sig = "M-777"
     only_current = tmp_path / "only-current"
     current = S.generic_alert(rule_id="R-1", rule={"id": "R-1", "uuid": sig})
@@ -630,9 +576,6 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
         "p4": dict(signature=sig + "0", rule_id="R-4"),
     }
     recorded = [_past_run(planted.runs, f"past-{tag}", tag=tag, **spec) for tag, spec in past.items()]
-    # The filter is exact over these past runs: the CLI, on the host, over the tenant's runs
-    # folder, counts the run recorded under the signature and none matched by rule.id, by case
-    # or by prefix.
     _rc, over_runs = _vocab_cli(capsys, planted.runs, sig)
     assert _probes(over_runs) == {"p1"}, (
         f"the corpus lookup of {sig!r} over the runs folder counted "
@@ -659,14 +602,6 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
 
 
 def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
-    """Orientation tells "vocabulary unavailable" apart from "no past runs". The corpus reads
-    recorded facts, not the mapping.
-
-    Observed: orientation's vocabulary section when the corpus lookup failed (the shim runner's
-    own "failed" answer, PR-05) against the same section over a runs base with no past run; then
-    a past run whose record holds the signature while its `rule.id` and the field the tenant now
-    maps say otherwise.
-    """
     sig = "R-P065"
     planted = S.plant_tenant("acme-a")
     failed = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id="p065-failed",
@@ -705,14 +640,6 @@ def _raw_record(run_dir: Path, data: bytes) -> bool:
 
 
 def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
-    """A run whose record cannot be read is skipped by name and counted. It is listed with its
-    own reason ("record unreadable"), apart from runs with no record.
-
-    Observed: past runs of one alert, each finished with a report: one with no record; records
-    that are not JSON, cut short, missing the digest, or a JSON list; and one whole record. Read
-    by `load_corpus`; the judge excludes every prior run under J3 when grading an
-    episode carrying that alert's copy and record.
-    """
     sig = "R-P143"
     raw = S.alert_bytes(S.generic_alert(rule_id=sig))
     runs = tmp_path / "runs-base"
@@ -763,15 +690,6 @@ def test_p143_record_unreadable_partial_or_of_another_shape(tmp_path):
 
 
 def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
-    """Orientation lists exactly the lessons with an entry equal to the signature.
-      - A one-character signature matches only an entry of that character.
-      - A blank or whitespace value is no signature.
-      - The corpus filter agrees.
-
-    Observed: the shipped corpus plus lessons keyed on `R`, on a longer value, on `r`, and on
-    `R` as a second entry; past runs recorded under each; orientation's lessons and vocabulary
-    sections for a run whose signature is `R` and for one whose mapped value is a single space.
-    """
     planted = S.plant_tenant()
     _plant_shipped(planted)
     for name, entries in {"fd-p080-r": ["R"], "fd-p080-second": ["Q", "R"],
@@ -798,14 +716,6 @@ _WRITTEN_P182 = ["000123", "yes", "2026-05-01", "5710"]
 
 
 def test_p182_lesson_signature_entry_that_frontmatter_reads_as(tmp_path):
-    """The lessons reader takes each source_signature entry as the text written, with no YAML
-    retyping: an unquoted 000123, yes or 2026-05-01 entry matches a recorded signature of that
-    exact text, and every listing shows the written text.
-
-    Observed: a lesson whose entries are written unquoted (000123, yes, 2026-05-01, 5710); the
-    curator's corpus manifest; the tags listing and orientation's hits for a run recorded under
-    each entry; and runs recorded under the values YAML retypes them to (83, True).
-    """
     name = "fd-p182-retyped"
     planted = S.plant_tenant()
     S.plant_lesson(name, source_signature=_WRITTEN_P182)
@@ -859,15 +769,6 @@ _LESSON_KEYS = {"name", "description", "telemetry_source", "attack_phase", "sour
 
 
 def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
-    """Each lesson's source_signature is its own finding's, carried on the queue row. The curator
-    never re-reads a world copy.
-
-    Observed: one drain batch holding the REAL judge's findings for an episode recorded under
-    one signature, whose world copies' alerts carry another rule id, and a queued finding
-    recorded under a second signature; the rows and user turn the curator is handed; the lessons
-    it writes from them (each with its own finding's signature, unquoted) as the drain commits
-    them; and a later run of each signature with those lessons in the isolated checkout corpus.
-    """
     sig_a, sig_b, world = "SIG-P072-A", "SIG-P072-B", "R-P072-WORLD"
     rows_a, copied = _judged(tmp_path, signature=sig_a, world_rule=world)
     assert rows_a, "the judge enqueued no finding"
@@ -897,14 +798,6 @@ def test_p072_curator_batch_mixes_findings_of_two_signatures(tmp_path):
 
 @pytest.mark.parametrize("sig", ["Rule:Brute/Force@v2", "unkeyed"])
 def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
-    """The curator writes the recorded signature verbatim as source_signature, and a later run's
-    orientation lists that lesson.
-
-    Observed: the REAL judge's findings for an episode recorded under a signature a slug would
-    rewrite (case, `:`, `/`, `@`); the keys and user turn the curator is handed; the lesson it
-    writes with that value (unquoted) as the drain commits it; a later run of an alert whose
-    `rule.id` is that signature, with the committed lesson in the isolated checkout corpus.
-    """
     rows, copied = _judged(tmp_path, signature=sig, world_rule="R-P074-WORLD")
     assert rows, "the judge enqueued no finding"
     curator = _Curator({"fd-p074": _author_lesson("fd-p074", [sig], _ids(rows))})
@@ -920,17 +813,6 @@ def test_p074_lesson_round_trip_for_a_signature_whose_slug_dif(tmp_path, sig):
 
 
 def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
-    """The lesson writer writes each source_signature entry as the token, unquoted; under the
-    allow-list no character changes the list's structure, the saved lesson carries exactly the
-    recorded signature with no extra frontmatter keys, and a later run of that signature finds
-    it.
-
-    Observed: the REAL judge's findings for an episode recorded under `R-P077:` (a trailing
-    `:`, which an unquoted inline list reads as a mapping key) and a queued finding recorded
-    under a value using every other punctuation the allow-list admits; the keys the curator is
-    handed; the lessons it writes with each value unquoted, as the drain commits them; later
-    runs of each signature with those lessons in the isolated checkout corpus.
-    """
     colon, mixed = "R-P077:", "k8s_x:pod/exec@ns=prod+v1.2-x"
     rows, copied = _judged(tmp_path, signature=colon, world_rule="R-P077-WORLD")
     assert rows, "the judge enqueued no finding"
@@ -950,5 +832,3 @@ def test_p077_signature_carries_frontmatter_significant_charac(tmp_path):
     assert _later_hits(tmp_path, planted, colon, "p077-later-colon") == ["fd-p077-colon"]
     assert _later_hits(tmp_path, planted, mixed, "p077-later-mixed") == ["fd-p077-mixed"]
     assert copied, "the episode's record copy could not be planted (S.COINED accessors)"
-
-

@@ -183,10 +183,6 @@ def raising(rec: VerbRecorder, exc: BaseException, systems: tuple[str, ...] = ("
 
 
 def test_query_returns_wrapped_truncated_view_and_payload_note(tmp_path):
-    """query_returns_wrapped_truncated_view_and_payload_note — the tool returns an exit-code
-    line, the SALT-WRAPPED truncated view, and the ABSOLUTE `[record_query] raw payload:`
-    note. Not a bare payload_ref. Since #1255 (design rev 4, P1 outbound) the absolute path is
-    the MODEL view's (`/runs/current/gather_raw/...`), never the host run folder's."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs | LIMIT 2"}), DONE,
@@ -220,9 +216,6 @@ def test_query_return_wrap_mints_its_own_salt(tmp_path):
 
 
 def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
-    """query_payload_is_not_double_wrapped_on_read_back — reading the persisted payload back
-    with the REAL read tool (which salt-wraps gather_raw/ via is_untrusted_read) yields exactly
-    ONE wrap, not a wrap nested inside the one the query tool already applied."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
@@ -257,9 +250,6 @@ def test_unknown_system_verb_param_rejected(tmp_path, label, args):
 
 
 def test_registry_validation_failure_writes_its_row_before_raising(tmp_path):
-    """registry_validation_failure_writes_its_row_before_raising — a registry validation
-    failure writes its queries row (64 / agent-fixable / error) BEFORE raising ModelRetry:
-    ModelRetry bypasses on_tool_execute_error AND after_tool_execute, so a write that follows"""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "nosuch-verb", {"native_query": "x"}), DONE,
@@ -275,9 +265,6 @@ def test_registry_validation_failure_writes_its_row_before_raising(tmp_path):
 
 
 def test_arg_shape_validation_error_still_writes_a_64_row(tmp_path):
-    """arg_shape_validation_error_still_writes_a_64_row — a malformed tool CALL (verb as an
-    int) fails in pydantic-ai's VALIDATE hook family, which runs BEFORE the EXECUTE family, so
-    capture must also install wrap_tool_validate or the row is silently lost."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         Turn(tool_calls=[("query", {"system": "elastic", "verb": {"not": "a string"},
@@ -293,9 +280,6 @@ def test_arg_shape_validation_error_still_writes_a_64_row(tmp_path):
 
 
 def test_a_recursive_args_body_does_not_take_the_rejection_row_with_it():
-    """a_recursive_args_body_does_not_take_the_rejection_row_with_it — `_raw_args` absorbs the
-    `RecursionError` a deeply nested arguments body raises, because its one production caller
-    is `wrap_tool_validate`'s rejection handler and that frame has no `try` of its own."""
     body = '{"system": "elastic", "verb": "probe", "params": ' + "[" * 2000 + "]" * 2000 + "}"
     with pytest.raises(RecursionError):
         json.loads(body)
@@ -356,9 +340,6 @@ def _make_tree(root: Path, adapters: dict[str, str], described: tuple[str, ...] 
 
 
 def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
-    """descriptor_catalog_advertises_only_declared_systems — fail-closed holds at the PROMPT as
-    well as at the tool: a `*_adapter.py` on disk that declares NO verbs is ABSENT from the injected
-    catalog (which today derives its roster by globbing filenames and never imports the module)."""
     tree = _make_tree(
         tmp_path / "tree",
         {"hollow": _ADAPTER_NO_VERBS, "solid": _ADAPTER_WITH_VERBS},
@@ -373,9 +354,6 @@ def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
 
 
 def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
-    """descriptor_catalog_does_not_freeze_the_tree — two catalogs built for two trees in ONE
-    process (the learning loop's worktree-drain shape) each resolve their OWN tree: building
-    the catalog for tree A must not make a later verb call under tree B run A's module."""
     a = _make_tree(tmp_path / "a", {"probe": _TREE_PROBE}, described=("probe",))
     b = _make_tree(tmp_path / "b", {"probe": _TREE_PROBE}, described=("probe",))
 
@@ -428,9 +406,6 @@ def test_query_id_fallback_chain(tmp_path):
     "elastic.nul\x00byte",
 ])
 def test_query_id_traversal_guard_survives(tmp_path, bad_qid):
-    """query_id_traversal_guard_survives — a query_id carrying '/', '\\', '..' or NUL is
-    rejected: it becomes a {system}/_draft/{verb}.md path segment in the offline lead-author,
-    and it is now model-authored input arriving at a NEW boundary."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "x"}, query_id=bad_qid), DONE,
@@ -459,9 +434,6 @@ def test_failing_verb_still_writes_its_row(tmp_path):
 
 
 def test_unmapped_fault_still_writes_a_row(tmp_path):
-    """unmapped_fault_still_writes_a_row — a fault with NO mapping (a bare RuntimeError) still
-    writes a row under a default exit code: the catch-all is what stops an unmapped fault from
-    DELETING the record the taxonomy exists for."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, RuntimeError("kaboom in the adapter")), turns=[
         q("elastic", "probe", {}), DONE,
@@ -474,9 +446,6 @@ def test_unmapped_fault_still_writes_a_row(tmp_path):
 
 
 def test_systemexit_does_not_unwind_the_run(tmp_path):
-    """systemexit_does_not_unwind_the_run — SystemExit is a BaseException, so pydantic-ai's
-    `except Exception` does not catch it and asyncio.to_thread re-raises it to the awaiter. The
-    capture seam catches it, writes a row, and the run CONTINUES."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, SystemExit(2)), turns=[
         q("elastic", "probe", {}), DONE,
@@ -489,9 +458,6 @@ def test_systemexit_does_not_unwind_the_run(tmp_path):
 
 
 def test_capture_catch_all_re_raises_the_control_flow_exceptions(tmp_path):
-    """capture_catch_all_re_raises_the_control_flow_exceptions — the catch-all must NOT swallow
-    RunAborted (the run-wide kill switch), ModelRetry, or pydantic-ai's control-flow exceptions.
-    Every one of them is a plain Exception subclass, so a broad `except Exception` silently"""
     declared = set(query_tool.CONTROL_FLOW_EXCEPTIONS)
     for exc in (RunAborted, ModelRetry, SkipToolExecution, CallDeferred, ApprovalRequired,
                 ToolRetryError):
@@ -504,9 +470,6 @@ def test_capture_catch_all_re_raises_the_control_flow_exceptions(tmp_path):
 
 
 def test_breaker_pre_call_trip_returns_without_executing(tmp_path):
-    """breaker_pre_call_trip_returns_without_executing — once a system is tripped, query()
-    returns the down-message as the TOOL RESULT without invoking the verb and without raising
-    ModelRetry (a tripped system never recovers, so a retry would burn the budget into an"""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, TransportFault("down")), turns=[
         q("elastic", "probe", {}),
@@ -522,9 +485,6 @@ def test_breaker_pre_call_trip_returns_without_executing(tmp_path):
 
 
 def test_capture_fires_only_for_the_query_tool(tmp_path):
-    """capture_fires_only_for_the_query_tool — a gather run that calls bash / read_file /
-    template_search writes NO queries row and has no result swapped: an AbstractCapability hook
-    method otherwise fires for EVERY tool (the tools=[…] filter exists only on the Hooks"""
     rec = VerbRecorder()
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='q611-other')
     main = ReplayFn([
@@ -570,9 +530,6 @@ def _two_in_one_turn() -> Turn:
 
 
 def test_concurrent_queries_do_not_collide_on_seq(tmp_path):
-    """concurrent_queries_do_not_collide_on_seq — two query() calls in ONE model turn write
-    distinct gather_raw/{lead}/{seq}.json paths and distinct (lead_id, seq) rows; no payload is
-    overwritten. pydantic-ai's default parallelism is 'parallel' and sync tool fns are"""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_echo_registry(rec), turns=[_two_in_one_turn(), DONE])
 
@@ -587,9 +544,6 @@ def test_concurrent_queries_do_not_collide_on_seq(tmp_path):
 
 
 def test_seq_collision_would_misdirect_the_judge(tmp_path):
-    """seq_collision_would_misdirect_the_judge — (lead_id, seq) is UNIQUE across a concurrent
-    run, and every row carries its own payload_path. A duplicate makes judge/compare._payload_paths
-    (which falls back to gather_raw/{lead}/0.json when a row carries no payload path) hand the"""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_echo_registry(rec), turns=[_two_in_one_turn(), DONE])
 
@@ -611,9 +565,6 @@ def test_seq_collision_would_misdirect_the_judge(tmp_path):
 
 
 def test_hung_verb_records_infra_not_a_synthesized_timeout(tmp_path):
-    """hung_verb_records_infra_not_a_synthesized_timeout — a hung verb surfaces through the
-    TRANSPORT's own inner timeout as exit 2 / infra, and the breaker advances. 124 is never
-    synthesized again: asyncio.wait_for cancels the await, not the thread, so a row claiming a"""
     rec = VerbRecorder()
     r = run_gather(
         tmp_path,
@@ -629,9 +580,6 @@ def test_hung_verb_records_infra_not_a_synthesized_timeout(tmp_path):
 
 
 def test_failure_digest_carries_the_vendor_diagnosis(tmp_path):
-    """failure_digest_carries_the_vendor_diagnosis — on failure payload_digest is
-    `exit=N; <the upstream error body>`: an HTTP 4xx still carries Elasticsearch's own `detail`
-    text, not a generic str(e). The pitfalls curator SKIPS any failure whose digest names no"""
     detail = "[verification_exception] Unknown column [user.nmae], did you mean [user.name]?"
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, UpstreamFault(detail)), turns=[
@@ -644,18 +592,6 @@ def test_failure_digest_carries_the_vendor_diagnosis(tmp_path):
 
 
 def test_missing_config_is_infra_not_agent_fixable(tmp_path, caplog):
-    """missing_config_is_infra_not_agent_fixable — a missing config is never an agent-fixable
-    query error (#611: the transport's bare exit 1 used to file a definitionally-down system as
-    the agent's mistake).
-
-    #1256 replaces the rest. The fixture tenant configures elastic, so elastic passes its start
-    check and this `ConfigFault` reaches the run at CALL time — an adapter whose settings check
-    missed a key (O-5b, DP3), not the startup refusal the design text names for this test: the
-    call runs. It no longer ADVANCES the breaker: elastic is marked down as not configured on
-    the spot, nothing is charged (per-system or run-wide), the lead's same call retried is
-    refused naming "not configured" and the fault's reason without running the verb, and the
-    escape is logged as an adapter defect at ERROR or above naming elastic. The escaped call's
-    own row is not pinned (the design is silent), beyond never being agent-fixable."""
     import logging
 
     caplog.set_level(logging.INFO)
@@ -686,9 +622,6 @@ def test_missing_config_is_infra_not_agent_fixable(tmp_path, caplog):
 
 @pytest.mark.parametrize("empty", [{}, []])
 def test_empty_verb_return_is_payload_status_empty(tmp_path, empty):
-    """empty_verb_return_is_payload_status_empty — a verb returning {} or [] yields
-    payload_status='empty': the seam tests the RETURNED OBJECT for emptiness BEFORE serializing,
-    because json.dumps({}) == '{}' is non-blank and would read as 'ok' — silently killing the"""
     rec = VerbRecorder()
 
     def probe(ctx: VerbContext, *, native_query: str = "x"):
@@ -710,9 +643,6 @@ def _provider_key_vars() -> set[str]:
 
 
 def test_provider_key_absent_from_transport_children(tmp_path, monkeypatch):
-    """provider_key_absent_from_transport_children — no subprocess a transport forks carries a
-    provider API key in its environment. The scrub rides on _bash_env today; in-process the
-    transports pass no env= and would inherit the driver's os.environ."""
     keys = _provider_key_vars()
     assert keys, "no provider key vars declared — the scrub would be vacuous"
     for var in keys:
@@ -729,9 +659,6 @@ def test_provider_key_absent_from_transport_children(tmp_path, monkeypatch):
 
 
 def test_verb_resolves_config_from_deps_tree(tmp_path):
-    """verb_resolves_config_from_deps_tree — a verb resolves its config from the RUN's
-    record (the ctx), not an import-time module constant: a run handed tenant A's record reads
-    `<A settings>/systems/{system}/config.env` as it was when the run began (#1107: the record"""
     def _ctx_over(root: Path, tenant_id: str, url: str | None) -> VerbContext:
         configs = {} if url is None else {"elastic": (
             f"ELASTIC_URL_BASE={url}\nELASTIC_BASTION_HOST=bastion\nELASTIC_TIMEOUT_SEC=30\n"
@@ -757,28 +684,12 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
 ROW_KEYS = {
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command",
     "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
-    # #877 F-9: the payload's CONTENT identity, beside the display digest rather than inside
-    # it — `repeat_note` asserts byte identity from this, the digest stays prose a curator
-    # reads. Derived by the writer from the text it persists, so no caller can disagree with
-    # the sidecar it just wrote.
     "payload_sha256",
-    # #871: the identity of a call whose `system` column deliberately does NOT carry the name
-    # the model used. A HASH, never the string — this table is in the gather agent's read
-    # scope and `_build_pitfalls_handoffs` spends `system` verbatim as a corpus path — and
-    # `""` on every row that kept its dispatched system, which is all of them but the
-    # above-guard rejections #855 coarsened.
     "system_key",
-    # #1255 G4 reverses #1234 A12's `call_id` column: the table is in the gather agent's read
-    # scope, and on an arm the id spelled the world token. The call's host-written id now lives
-    # only in the host's records (the served ledger and a host-only join keyed by
-    # `(lead_id, seq)`), never on this row.
 }
 
 
 def test_row_contract_frozen(tmp_path):
-    """row_contract_frozen — the fourteen-key queries row: params keyed by the REGISTRY's real param
-    names (not arg0/arg1), verb holding the tool's REAL verb (the column has zero production
-    readers today and finally becomes honest), raw_command a derived audit string."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs | LIMIT 2", "limit": 2},
@@ -799,11 +710,6 @@ def test_row_contract_frozen(tmp_path):
     assert row["error_class"] is None
     assert row["payload_status"] == "ok"
     assert row["payload_digest"]
-    # #871: pinned by VALUE here like every other column, not left to `set(row) == ROW_KEYS`.
-    # An executed row's `system` is the dispatched name, so it identifies its own call and the
-    # fingerprint column is empty — and today nothing else asserts that directly: a non-`""`
-    # here is caught only indirectly, by `repeat_trip`'s live call passing `""` and the row
-    # then matching nothing.
     assert row["system_key"] == "", \
         "an executed row was fingerprinted, which splits its own system's repeat count"
 
@@ -827,9 +733,6 @@ def test_payload_lands_by_ref(tmp_path):
 
 
 def test_stage_tables_still_round_trips(tmp_path):
-    """stage_tables_still_round_trips — lead_repository.stage_tables (copy2 + copytree), the
-    SECOND writer of both sinks (driven by core/persist), still round-trips a
-    run dir under the new row shape: the replay contract is over the FILES, not the writer."""
     rec = VerbRecorder()
     r = run_gather(tmp_path / "src", verbs=_echo_registry(rec), turns=[
         q("elastic", "probe", {"tag": "alpha"}),
@@ -869,9 +772,6 @@ def _decide(cmd: str, policy, run_dir):
     "python3 defender/scripts/adapters/elastic_adapter.py query foo",
 ])
 def test_adapters_unreachable_from_gather_bash(tmp_path, cmd):
-    """adapters_unreachable_from_gather_bash — no adapter shim or *_adapter.py path is runnable from
-    gather's bash lane: the CAPTURE_ADAPTER / CAPTURE_ADAPTER_SQL grants are gone and the adapter
-    classifier denies unconditionally."""
     run_dir, gather, _ = _policies(tmp_path)
     decision = _decide(cmd, gather, run_dir)
     assert not decision.allow, f"gather can still run an adapter from bash: {cmd}"
@@ -900,9 +800,6 @@ _ESQL_RAW = {
 
 
 def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captured(tmp_path):
-    """#1138 O7 end to end — the lead queries ES|QL with the `query` tool, then declares the
-    captured payload's positional rows from its bash lane:
-    `cat <payload> | defender-sql --rows values --names columns '<SQL>'`. The REAL gate must"""
     from defender.scripts.adapters.elastic_adapter import esql_payload
 
     rec = VerbRecorder()
@@ -943,9 +840,6 @@ def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captu
 
 
 def test_main_cannot_reach_a_payload_by_any_surface(tmp_path):
-    """main_cannot_reach_a_payload_by_any_surface — the main loop cannot read a gather_raw payload
-    by ANY surface, including a bash command carrying a `# record_query` comment. Main's clamp is
-    positive enumeration (it has no gather_raw shape at all)."""
     run_dir, _, main = _policies(tmp_path)
     payload = run_dir / "gather_raw" / LEAD / "0.json"
     assert not _decide(f"cat {payload}", main, run_dir).allow

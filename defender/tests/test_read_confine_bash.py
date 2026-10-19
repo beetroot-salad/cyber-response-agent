@@ -75,19 +75,11 @@ def test_compile_policy_for_rejects_degenerate_roots(tmp_path):
     ("run-investigation-main", "cat {run}/investigation.md", "main"),
     ("run-investigation-gather", "cat {run}/investigation.md", "gather"),
 
-    # the per-lead summary, built inline at tools_gather.py and NOT a RunPaths prop — the
-    # scope must still cover it. Read on the MAIN lane on purpose: the summary is main's
-    # sanctioned view of a lead's data (the raw payload is gather's).
     ("run-gather-summary-on-main", "cat {run}/gather_summaries/l-001.md", "main"),
 
     # a plain run-dir artifact (RunPaths.executed_queries)
     ("run-executed-queries", "cat {run}/executed_queries.jsonl", "main"),
 
-    # The real read/format shapes from run traces, in their #575 form: the viewers have NO
-    # file slot, so `cat` opens the file and the reduction happens on STDIN. The FILE forms of
-    # these same three commands are the deny half of the c1 ledger
-    # (test_viewer_file_operand_denied below); these are the surviving capability — identical,
-    # one extra `cat |`.
     ("investigation-piped-to-tail", "cat {run}/investigation.md | tail -5", "main"),
     ("investigation-piped-to-wc", "cat {run}/investigation.md | wc -l", "main"),
     ("investigation-piped-to-grep",
@@ -116,9 +108,6 @@ def test_an_in_scope_read_is_allowed(env, case, cmd, lane):
 
 # C. Out-of-scope reads DENY (guarded negatives, each with a positive control)  #
 
-# Each row is one out-of-scope read plus, where one exists, the in-scope read that proves the
-# deny came from the SCOPE check and not from the program being unsupported. Without that
-# control, a gate that denied `cat` outright would pass every row here.
 @pytest.mark.parametrize(("case", "denied", "control", "lane"), [
     # The demonstrated bypass #535 closed, on both lanes.
     ("etc-passwd-gather", "cat /etc/passwd", "cat {run}/investigation.md", "gather"),
@@ -129,39 +118,23 @@ def test_an_in_scope_read_is_allowed(env, case, cmd, lane):
     ("through-a-pipe", "cat /etc/passwd | grep root",
      "cat {run}/investigation.md | grep root", "gather"),
 
-    # `..` collapses at resolve() and the result lands outside every scope shape. (#535
-    # rejected `..` TEXTUALLY because the lane did not resolve; #575 resolves, so the
-    # traversal is closed by the same check that closes symlinks — one mechanism, not two.)
     ("traversal-out-of-prefix", "cat {run}/../outside.txt", "cat {run}/report.md", "gather"),
 
     # Starts WITH the run-dir prefix — it would pass a naive startswith — but the `..`
     # segments tunnel out, and resolve() collapses them to /etc/passwd.
     ("in-prefix-traversal-escape", "cat {run}/gather_raw/../../../etc/passwd", None, "gather"),
 
-    # The FIRST operand is in-scope and the SECOND escapes: every operand the extractor
-    # reports is scope-checked, not just the first. The control is the same command with both
-    # operands in scope.
     ("second-operand-escape", "cat {run}/investigation.md /etc/passwd",
      "cat {run}/investigation.md {run}/report.md", "gather"),
 
-    # A sibling dir sharing the corpus PREFIX but not under it must not match — `under()`
-    # closes the root with a `/` boundary, so the anchor is a path boundary, not a string
-    # prefix.
     ("corpus-lookalike-sibling", "cat {dfn}-evil/x.md", None, "gather"),
 ], ids=lambda v: v if isinstance(v, str) and len(v) < 40 and "/" not in v else "")
 def test_an_out_of_scope_read_is_denied(env, case, denied, control, lane):
-    """A read that resolves outside every scope shape is denied — spelled directly, hidden
-    behind a pipe stage, tunnelled through `..`, banked behind an in-scope first operand, or
-    aimed at a sibling that merely shares the corpus prefix."""
     fmt = {"run": env.run, "dfn": env.dfn}
     assert not _bash(env, denied.format(**fmt), lane).allow
     if control is not None:
         assert _bash(env, control.format(**fmt), lane).allow, "positive control"
 
-
-# D. File-opening FLAGS — the escape a clean trailing operand hides             #
-#    (`OPENS_NOTHING` is a CLAIM the SHAPE must earn: the gate skips the scope   #
-#     check for those programs, so any flag that opens a file is a fail-open)    #
 
 def test_grep_dash_f_patternfile_escapes(env):
     """grep -f /etc/passwd → DENY: `-f` opens the out-of-root PATTERN file."""
@@ -172,9 +145,6 @@ def test_grep_dash_f_patternfile_escapes(env):
 
 
 def test_grep_dash_e_promotes_positional_to_file(env):
-    """grep -e root /etc/shadow → DENY: `-e` fills the pattern slot so /etc/shadow becomes a FILE
-    operand. Doubly denied now (grep has no file slot at all, and `-e` is an arg-taker excluded from
-    the flag allowlist) — the belt and the suspenders are both pinned."""
     # rejected: model grep as always pattern+files positionally (ignores -e)
     assert not _bash(env, "grep -e root /etc/shadow", "gather").allow
 
@@ -215,13 +185,6 @@ def test_tail_head_have_no_file_slot_and_no_arg_taking_flag(env):
         assert _bash(env, f"{inv} | head -c 100", which).allow, which    # control
 
 
-# The c1 ledger — viewers lose their file-operand slot, the `cat … |` form still allows —
-# is pinned once, on a fully in-scope path, at
-# test_grant_gate_575.py::test_c1_file_operand_viewers_lose_their_file_slot. The copy that
-# lived here was byte-identical to it (same four parameter pairs, same operand, same
-# main/gather loop) against an equivalent `env`, so it could not fail alone.
-
-
 def test_grep_free_text_pattern_is_not_a_path(env):
     """cat {RUN}/investigation.md | grep "/home/x/.ssh/authorized_keys" → ALLOW: the path-LOOKING token is the search PATTERN, not a file."""
     # rejected: deny because a token looks like an out-of-root path (over-anchors the pattern)
@@ -229,9 +192,6 @@ def test_grep_free_text_pattern_is_not_a_path(env):
 
 
 def test_wc_files0_from_escapes(env):
-    """wc --files0-from=/etc/passwd → DENY: it opens the named file AND every path inside it, a
-    two-hop out-of-root read. `wc` is `OPENS_NOTHING`, so the shape's flag allowlist (short boolean
-    bundles only — no `--long` option anywhere) is the sole thing that denies it."""
     # rejected: leave --files0-from ungated
     assert not _bash(env, "wc --files0-from=/etc/passwd", "gather").allow
     assert not _bash(env, f"cat {env.run}/report.md | wc --files0-from=/etc/passwd", "gather").allow
@@ -421,9 +381,6 @@ def test_empty_command_allowed(env):
 
 
 def test_arbitrary_shell_still_denied(env):
-    """curl / rm / python3 → DENY for both agents (regression floor — the grant list is
-    deny-by-default, and `curl` is not even in `PROGRAMS`, so no policy could grant it without
-    failing loud at compile)."""
     for cmd in ("curl http://evil", "rm -rf /tmp/x", "python3 -c 'x'"):
         assert not _bash(env, cmd, "gather").allow, cmd
         assert not _bash(env, cmd, "main").allow, cmd

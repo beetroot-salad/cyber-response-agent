@@ -1,26 +1,3 @@
-"""#1256 slice B — a system's usability is decided at run start, not by failing calls.
-
-Every scenario drives the REAL driver through the replay harness (`_replay_harness.drive`) over a
-tenant planted with `_spec1107.plant` (complete settings, K6), one or more of whose systems is then
-made unusable by editing its real `config.env` on disk. The injected `FakeVerbs` only records each
-call and then does what the scenario says: run the REAL adapter verb (`REAL`), answer canned
-success (`OK`), or raise one of the adapters' own fault classes. Which systems are usable is NOT
-the fakes' to say (K2): the run judges each granted system with its own adapter's settings check
-over the planted record, so an unconfigured system's fake still runs the real adapter — before
-#1256 that call raised its `ConfigFault`, was charged to the breaker, and three such systems
-aborted a healthy run (the issue's headline); after it, the fake is never reached.
-
-Observation channels (K4): what each model double was handed (`_spec1222.MainScript` /
-`LeadRouter` — the opening message, the gather prompt, each tool result), the verb recorder, the
-run's breaker (`run_state.breaker_snapshot()`), the queries table, `report.md`, the run summary,
-and the log (`caplog`). No `SystemStatus` type, RunState field or module is pinned.
-
-The correlation lead is withheld in every table here (no `lead-zero-correlation` row): O-6 is not
-this file's, and with it withheld MAIN's first request is the run's start.
-
-Red at base, by construction: no adapter declares a settings check, nothing judges a system at
-start, and a not-configured system is reached, charged and finally tripped like an outage.
-"""
 from __future__ import annotations
 
 import logging
@@ -57,9 +34,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 )
 from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
-# =================================================================================================
-# The tenant: four granted stub systems, the correlation lead withheld
-# =================================================================================================
 
 #: Gather holds verbs on four stub systems; no row names `lead-zero-correlation`, so the lead is
 #: withheld (a legal table, `_tenants1106.TABLE_B`'s shape) and MAIN's first request is the start.
@@ -147,10 +121,6 @@ def _token(system: str) -> str:
     return UNCONFIGURE[system][1]
 
 
-# =================================================================================================
-# The verbs: a recorder in front of each, then the scenario's behaviour
-# =================================================================================================
-
 def _verbs(rec: VerbRecorder, behaviour: Mapping[str, Any]) -> FakeVerbs:
     """A `FakeVerbs` over `TABLE`'s verbs. Each call is recorded as `"<system>.<verb>"`, then
     `behaviour["<system>.<verb>"]` (else `behaviour["<system>"]`) decides it: `REAL` runs the
@@ -192,10 +162,6 @@ def _transport_fault() -> BaseException:
     """The transport's own fault for an unreachable system (the class a docker failure raises)."""
     return TransportFault("docker exec curl timed out after 10s")
 
-
-# =================================================================================================
-# Driving one run, and reading what it did
-# =================================================================================================
 
 def dispatch(lead_id: str, system: str) -> R.Turn:
     """MAIN's `gather` tool call for one lead."""
@@ -287,10 +253,6 @@ def _drive(tmp_path: Path, root: Path, *, main: Any, leads: Mapping[str, list],
     return _Run(run_dir=run_dir, main=script, router=router, rec=rec, summary=summary)
 
 
-# =================================================================================================
-# Reading the text the agent was handed
-# =================================================================================================
-
 def _names(text: str, system: str) -> bool:
     """`text` names `system` as a word (case-sensitive: `cmdb`, never the `CMDB_` of a key, nor
     the `cmdb-<marker>` of a host name)."""
@@ -298,9 +260,6 @@ def _names(text: str, system: str) -> bool:
 
 
 _NOT_CONFIGURED = re.compile(r"(?i)not configured")
-#: "Do not dispatch", "Do NOT re-dispatch", "never dispatch", "not to dispatch", "must not be
-#: dispatched": the prohibition governs `dispatch` ITSELF. A negation somewhere before the word
-#: is not one — "Do not hesitate to dispatch" is the opposite instruction (adversary A5).
 _DONT_DISPATCH = re.compile(
     r"(?i)\b(?:do not|don't|never|must not|should not|not to)\s+(?:be\s+)?(?:re-?)?dispatch")
 _VISIBILITY_GAP = re.compile(r"(?i)visibility gap")
@@ -377,10 +336,6 @@ _INVERTED: tuple[str, ...] = (
 
 
 def test_the_dispatch_instruction_matcher_reads_polarity():
-    """The O-3 assertion's own discrimination (its positive and negative controls): the matcher
-    accepts the instruction in the shapes an implementation may write it, and refuses the
-    opposite instruction worded in the same vocabulary — "Do not hesitate to dispatch", "not a
-    visibility gap", "nothing to name" — which a vocabulary-only matcher accepted."""
     for text in _TELLS:
         assert _told_not_to_dispatch(text), f"control: the instruction is not recognised: {text!r}"
     for text in _INVERTED:
@@ -402,17 +357,7 @@ def _assert_not_configured_refusal(text: str, token: str, what: str) -> None:
         f"{what}: a not-configured refusal counts failures: {text!r}"
 
 
-# =================================================================================================
-# O-1 / O-4 — down for the whole run, refused at every gate, the adapter never runs
-# =================================================================================================
-
 def test_a_system_down_at_start_is_refused_at_every_gate_without_running_its_adapter(tmp_path):
-    """O-1, O-4. cmdb's settings name no docker context, so its own check fails at start: cmdb
-    is down for the whole run with that reason. A gather lead on a configured system queries
-    cmdb before and after a successful threat-intel call, and MAIN then dispatches a lead to
-    cmdb: every one is refused naming "not configured" and the reason, no cmdb verb runs, no
-    query row is written for cmdb, and nothing is charged. The threat-intel call in between is
-    the in-run control: the same recorder, rows and breaker DO see a call that runs."""
     root = _plant(tmp_path, "o1", down=("cmdb",))
     token = _token("cmdb")
     run = _drive(tmp_path, root, main=[
@@ -450,17 +395,7 @@ def test_a_system_down_at_start_is_refused_at_every_gate_without_running_its_ada
     assert run.total_failures == 0, f"the run was charged (O-2): {run.breaker}"
 
 
-# =================================================================================================
-# O-3 — the agent learns at the start which systems are down and why
-# =================================================================================================
-
 def test_the_agent_is_told_at_start_which_systems_are_not_configured_and_why(tmp_path):
-    """O-3. cmdb (no docker context) and change-mgmt (no settings folder) are down at start;
-    threat-intel is configured. MAIN's opening message names each down system as not configured
-    with its reason and tells MAIN not to dispatch them and to name the visibility gap; a gather
-    lead's system index names each the same way; and `list_verbs` for a down system says not
-    configured, with the reason. Control: threat-intel is shown as down on none of the three
-    surfaces, and its `list_verbs` still lists its verbs."""
     down = ("cmdb", "change-mgmt")
     root = _plant(tmp_path, "o3", down=down)
     run = _drive(tmp_path, root, main=[dispatch("l-001", CONFIGURED), R.text(R.DONE)], leads={
@@ -505,12 +440,6 @@ def test_the_agent_is_told_at_start_which_systems_are_not_configured_and_why(tmp
 
 def test_a_not_configured_reason_names_the_settings_pointer_never_the_host_path(
         tmp_path, data_root):
-    """#1106's rule carried into #1256: the settings half is host-only. The not-configured
-    reason is stored at start and re-shown on surfaces the model reads — MAIN's opening
-    message, gather's system index, `list_verbs`, a query's refusal and a dispatch's refusal.
-    For a system whose `config.env` is missing (the tenant planted under this test's own data
-    root), each of them names the file by the settings pointer
-    (`settings/systems/change-mgmt/config.env`) and none carries the host data root path."""
     folder = S.plant(data_root, marker="red", table=TABLE)
     S.config_path(folder, "change-mgmt").unlink()
     pointer = "settings/systems/change-mgmt/config.env"
@@ -543,17 +472,7 @@ def test_a_not_configured_reason_names_the_settings_pointer_never_the_host_path(
                 f"{what} carries the host data root path (#1106): {host_path}"
 
 
-# =================================================================================================
-# O-2 — no failure of a not-configured system is charged; an abort follows configured ones only
-# =================================================================================================
-
 def test_three_unconfigured_systems_never_charge_and_the_run_reaches_its_close(tmp_path):
-    """O-2, the issue's headline. Three granted systems the tenant does not configure (three
-    different reasons) and one it does. MAIN dispatches a lead to each unconfigured system —
-    each lead scripted to call its system 2, 2 and 1 times, which before #1256 charged 5 infra
-    failures and aborted the run — then a lead to the configured one, which also queries the
-    three, and closes. Nothing is charged per-system or run-wide, no unconfigured adapter runs,
-    no RunAborted, and the run reaches its close with the configured system's answer."""
     root = _plant(tmp_path, "o2", down=THREE_DOWN)
     run = _drive(tmp_path, root, main=[
         dispatch("l-001", "cmdb"),
@@ -595,12 +514,6 @@ def test_three_unconfigured_systems_never_charge_and_the_run_reaches_its_close(t
 
 
 def test_only_failures_of_configured_systems_are_charged(tmp_path):
-    """O-2. Two unconfigured systems and two configured ones whose calls fail with the
-    transport's own fault, all reached from one lead. The unconfigured systems' calls come first
-    (2 + 2, which before #1256 were charged and, with the next failure, aborted the run): none is
-    charged. The configured systems' four transport failures ARE charged — each system tripped at
-    2, the run total exactly 4 — so the same breaker that shows nothing for the unconfigured
-    systems demonstrably counts, and the run is not aborted."""
     root = _plant(tmp_path, "o2m", down=("cmdb", "identity"))
     run = _drive(tmp_path, root, main=[dispatch("l-001", CONFIGURED), R.text(R.DONE)], leads={
         "l-001": [R.query("cmdb", "get-host", {"host": "web-1"}), R.query("cmdb", "health-check"),
@@ -652,12 +565,6 @@ def _drive_configured_outage(tmp_path: Path) -> _Run:
 
 
 def test_configured_systems_that_fail_still_trip_and_abort_the_run(tmp_path):
-    """O-2's positive control, and the non-obligation "no change for configured outages": the
-    same script as the headline, every system configured, three failing with the transport's
-    fault. Each failure is charged, cmdb trips at `PER_SYSTEM_FAIL_LIMIT` and a second dispatch
-    to it is refused by the breaker with its count, and the fifth failure across configured
-    systems aborts the run (`RUN_FAIL_KILL_LIMIT`). Passes before #1256 too: it is what makes
-    "nothing charged" in the tests above an observation, not an empty breaker."""
     limit = circuit_breaker.RUN_FAIL_KILL_LIMIT
     per_system = circuit_breaker.PER_SYSTEM_FAIL_LIMIT
     assert (per_system, limit) == (2, 5), \
@@ -684,11 +591,6 @@ def test_configured_systems_that_fail_still_trip_and_abort_the_run(tmp_path):
 
 
 def test_a_tripped_systems_refusal_names_its_count_not_configuration(tmp_path, caplog):
-    """DP2, observed in a run. With configuration decided at start, the breaker counts only
-    what can change during a run: the refusal MAIN gets for a system tripped by transport
-    failures keeps its count and its "tripped", and no longer offers "not configured" among
-    its causes; the run-kill the operator is told about (the driver's log of `RunAborted`) no
-    longer says "unconfigured"."""
     caplog.set_level(logging.INFO)
     run = _drive_configured_outage(tmp_path)
 
@@ -709,10 +611,6 @@ def test_a_tripped_systems_refusal_names_its_count_not_configuration(tmp_path, c
             f"the run-kill message still names 'not configured' (DP2): {message!r}"
 
 
-# =================================================================================================
-# O-5b — a ConfigFault that escapes the start check marks its system down at once, uncharged
-# =================================================================================================
-
 #: The reason an escaped call-time `ConfigFault` carries, and its distinctive token.
 ESCAPED_TOKEN = "THREAT_INTEL_FEED_INDEX"
 
@@ -722,13 +620,6 @@ def _escaped_config_fault() -> BaseException:
 
 
 def test_a_config_fault_at_call_time_marks_its_system_not_configured_uncharged(tmp_path, caplog):
-    """O-5b (DP3). threat-intel passes its start check, but its health-check raises
-    `ConfigFault` when called — a check that missed a key. From that call on, threat-intel is
-    down as not configured: nothing is charged (per-system or run-wide), the lead's next call to
-    it is refused with the not-configured text and its verb does not run (and writes no row),
-    MAIN's later dispatch to it is refused the same way, and the escape is logged as an adapter
-    defect at ERROR or above, naming the system. The escaped call's own row is not pinned (the
-    design is silent). cmdb's successful call is the in-run control."""
     caplog.set_level(logging.INFO)
     root = _plant(tmp_path, "o5b")
     run = _drive(tmp_path, root, main=[
@@ -771,10 +662,6 @@ def test_a_config_fault_at_call_time_marks_its_system_not_configured_uncharged(t
         f"{CONFIGURED} (K3): {[(r.levelname, r.getMessage()) for r in caplog.records]}")
 
 
-# =================================================================================================
-# O-7 — the operator sees, at start, each down system and why
-# =================================================================================================
-
 class _AtFirstRequest:
     """MAIN's double, noting how many log records existed when MAIN was first asked for a turn
     — everything logged before that is the run's start (the correlation lead is withheld)."""
@@ -793,12 +680,6 @@ class _AtFirstRequest:
 
 
 def test_the_operator_log_names_each_down_system_and_why_at_start(tmp_path, caplog):
-    """O-7 (K3). Three systems down at start for three reasons, one configured: before MAIN's
-    first request, the log carries exactly one line at WARNING or above per down system, naming
-    the system and its reason; none names the configured system. "A line per system" is a
-    record per system: the three are three distinct records, and no record names two down
-    systems (one combined line naming all three satisfies "one line naming cmdb" three times —
-    adversary A4)."""
     caplog.set_level(logging.INFO)
     root = _plant(tmp_path, "o7", down=THREE_DOWN)
     main = _AtFirstRequest(R.MainScript([R.text(R.DONE)]), caplog)

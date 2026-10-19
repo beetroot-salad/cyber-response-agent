@@ -36,12 +36,6 @@ def _verbatim_owner(out: str, root: Path, tenant_id: str = TID) -> BaseException
     return owner
 
 
-# ======================================================================================
-# O10 — tenant 1 only in a fresh data root
-# ======================================================================================
-
-
-
 @pytest.mark.parametrize("shape", ["empty", "populated"])
 def test_o10_rowless_folder_refused(tmp_path, shape):
     """Setup into a data root holding a rowless old/ folder is refused naming 'old', and writes
@@ -58,9 +52,6 @@ def test_o10_rowless_folder_refused(tmp_path, shape):
 
 @pytest.mark.parametrize("shape", ["absent", "empty", "missing-parent"])
 def test_o10_fresh_root_writes_exactly_row(tmp_path, shape):
-    """Setup into a data root whose only entry is the operator-placed <root>/<id>/knowledge
-    creates exactly <root>/<id>/tenant.json and nothing else (no runs/), leaving the knowledge
-    folder byte-identical."""
     top = tmp_path / "top"
     root = {"absent": top, "empty": top, "missing-parent": top / "a" / "b" / "c"}[shape]
     if shape == "empty":
@@ -82,9 +73,6 @@ def test_o10_fresh_root_writes_exactly_row(tmp_path, shape):
 
 
 def test_setup_refuses_a_path_shaped_id_before_looking_under_the_data_root(tmp_path):
-    """`setup ../<dir>` is refused on the id's grammar, before anything under the data root is
-    named with it — so the refusal never lists the contents of a directory outside the data
-    root, and nothing is written. The control: a well-formed id into the same root succeeds."""
     root = tmp_path / "data"
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -130,12 +118,7 @@ def test_o10_rerun_no_second_row(tmp_path):
     assert H.census(root) == before, "the re-run wrote something"
 
 
-
-
 def test_setup_re_run_after_the_tenant_already_has_runs(tmp_path):
-    """A setup re-run with the same id after T has runs/ and sessions/ is accepted as a re-run
-    (the root's only entry is <id>/ with a valid row): no second row, nothing under <T>/
-    changes, success exit (F0)."""
     root = tmp_path / "data"
     H.place_knowledge(root, TID)  # #1120 DC2: the operator's clone precedes setup
     first = H.run_setup(root, TID)
@@ -153,8 +136,6 @@ def test_setup_re_run_after_the_tenant_already_has_runs(tmp_path):
     assert H.census(root) == before, "the re-run changed something under <T>/"
 
 
-
-
 def test_data_root_holds_a_dangling_symlink_entry(tmp_path):
     """A data root whose only entry is a dangling symlink: setup is refused by O10, naming the
     entry, and writes nothing."""
@@ -166,18 +147,7 @@ def test_data_root_holds_a_dangling_symlink_entry(tmp_path):
     assert (root / "ghost").is_symlink() and not (tmp_path / "nowhere").exists()  # noqa: PT018 — one fact: the link is left, dangling
 
 
-
-
-# ======================================================================================
-# §7 J08/J09 — RECORD MEANS THE TENANT
-# ======================================================================================
-
 def test_s7_j08_setup_rerun_completes_rowless_own_folder(tmp_path):
-    """A setup re-run for id T, over a data root whose only entry is a rowless <root>/T/ holding
-    nothing but what create_tenant itself makes (an interrupted setup, or a disk-full row
-    write), creates the row and succeeds: a tenant exists iff its row exists, and every setup
-    step is idempotent. The control: a <root>/T/ holding anything setup did not make is still
-    refused by O10, and any other id's entry is still refused."""
     root = tmp_path / "data"
     H.place_knowledge(root, TID)
     before = H.census(root)
@@ -199,16 +169,8 @@ def test_s7_j08_setup_rerun_completes_rowless_own_folder(tmp_path):
     assert O10_TEXT in out, out
 
 
-# ======================================================================================
-# §7 J60 — the row's own name does not short-circuit the guarded write
-# ======================================================================================
-
 @pytest.mark.parametrize("alias", ["symlink", "hardlink"])
 def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
-    """The #771 census's create_tenant row plants an alias at <root>/<id>/tenant.json and
-    create_tenant's real O_NOFOLLOW-guarded write refuses it, the outside target untouched:
-    setup's own-folder check ignores the row's own name when judging whether an entry is the
-    tenant's, so O10 does not short-circuit the plant."""
     for driver in ("owner", "setup"):
         root = tmp_path / driver / "data"
         H.tenant_dir(root, TID).mkdir(parents=True)
@@ -239,25 +201,3 @@ def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
     H.tenant_dir(control, TID).mkdir(parents=True)
     assert H.create_tenant(control, TID).tenant_id == TID
     assert not H.row_path(control, TID).is_symlink()
-
-
-# ======================================================================================
-# D10 — setup is the only production caller; its writes go through create_tenant
-# ======================================================================================
-
-
-
-
-
-
-
-
-
-# ======================================================================================
-# D1's #1077 gate changes: the kinds row, the accessor, resolve(), the #771 census
-# ======================================================================================
-
-
-
-
-

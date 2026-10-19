@@ -99,9 +99,6 @@ def test_the_two_shipped_defects_are_both_flagged(tmp_path):
 
 
 def test_an_alias_and_a_duck_typed_write_are_both_seen(tmp_path):
-    """Neither spelling is a way out. `write_guarded as w` is resolved by ORIGIN, and
-    `<path>.write_text(...)` has no origin at all — the receiver is a value — so it is matched
-    as a method shape, the same way the sibling tree-write gate matches it."""
     tree = tmp_path / "scope"
     _pyfile(tree, "aliased.py", _ALIASED_WRITE)
     _pyfile(tree, "ducked.py", _DUCK_TYPED_WRITE)
@@ -110,15 +107,6 @@ def test_an_alias_and_a_duck_typed_write_are_both_seen(tmp_path):
 
 
 def test_the_schema_call_is_the_clean_spelling(tmp_path):
-    """LIVENESS CONTROL for the whole gate: all three sanctioned ways to meet the schema scan
-    clean, so a green run means "every writer is gated" rather than "the scanner matched
-    nothing".
-
-    The injected-validator arm is the one that would break first. The close takes its schema as
-    a parameter so the seam can be driven in tests, and a parameter has no import — a gate that
-    resolved validators by origin alone would flag the close forever, and the flag would be
-    suppressed rather than fixed.
-    """
     tree = tmp_path / "scope"
     _pyfile(tree, "gated.py", _GATED_SEED)
     _pyfile(tree, "injected.py", _INJECTED_VALIDATOR)
@@ -129,9 +117,6 @@ def test_the_schema_call_is_the_clean_spelling(tmp_path):
 
 
 def test_a_write_of_some_other_file_is_not_the_gates_business(tmp_path):
-    """The gate is keyed on the TWO artifacts, not on writing in general — that question is
-    `lint_unguarded_tree_write`'s, and a gate that answered both would be suppressed by
-    everyone who only failed one."""
     tree = tmp_path / "scope"
     _pyfile(
         tree, "other.py",
@@ -144,9 +129,6 @@ def test_a_write_of_some_other_file_is_not_the_gates_business(tmp_path):
 
 
 def test_a_nested_function_gets_its_own_verdict(tmp_path):
-    """An inner def is its own frame. Folding its nodes into the enclosing function's would
-    let a validation in one excuse a write in the other, in whichever direction happened to
-    nest."""
     tree = tmp_path / "scope"
     _pyfile(
         tree, "nested.py",
@@ -165,9 +147,6 @@ def test_a_nested_function_gets_its_own_verdict(tmp_path):
 
 
 def test_the_schema_owner_and_tests_are_exempt(tmp_path):
-    """The module that OWNS the schema cannot be required to call it, and test modules build
-    ungated writes deliberately. The owner is exempt by full relative PATH — a second
-    `_artifact_schema.py` elsewhere under the scope is not the canonical one."""
     tree = tmp_path / "scope"
     _pyfile(tree, "_artifact_schema.py", _UNGATED_SEED)
     _pyfile(tree, "test_writer.py", _UNGATED_SEED)
@@ -185,16 +164,6 @@ def test_a_deliberate_site_can_be_marked(tmp_path):
 
 
 def test_the_blind_spots_are_real_and_pinned(tmp_path):
-    """The gate's own docstring admits two limits; both are asserted, because a limit stated
-    only in prose is one people stop believing.
-
-    CO-OCCURRENCE, NOT DATAFLOW: validating one string and writing another passes. And a write
-    SPLIT ACROSS FUNCTIONS is invisible from either side — the composer names no artifact, the
-    writer runs no schema, and neither frame holds both halves.
-
-    Pinned so that if someone strengthens the gate to catch them, this test fails and says so
-    rather than the improvement landing unnoticed.
-    """
     tree = tmp_path / "scope"
     _pyfile(
         tree, "wrong_text.py",
@@ -216,5 +185,3 @@ def test_the_blind_spots_are_real_and_pinned(tmp_path):
         '    _land(run_dir / "investigation.md", block)\n',
     )
     assert _GATE._scan(tree) == [], "both limits still hold; update the docstring if not"
-
-

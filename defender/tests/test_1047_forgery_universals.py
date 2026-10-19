@@ -18,10 +18,6 @@ def _rows_and_word(episode_dir):
 
 
 def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path):
-    """The security dive's first negative universal, as one test over every surface the content
-    could reach: with every box-writable file in the run dir replaced by a forgery — report.md
-    frontmatter, a planted run_end.json, the case pointer — the grade and the ticket decision
-    are byte-identical to the control's."""
     archive = S.mod("learning.branch.archive")
 
     control_base, _src = S.runs_base(tmp_path / "control-base")
@@ -176,11 +172,6 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
            (forged_ep / "worlds" / "b" / S.run_end_name()).read_text(encoding="utf-8"), (
         "the archive's record changed when box-written content changed")
 
-    # site 2 — the judge. The salt goes in the RUN DIR and the real archive runs over it, for
-    # the same reason it does everywhere in this module: `worlds/<label>/run_end.json` is the
-    # host's own output, and a value planted THERE is supposed to move the grade
-    # (`cut_short_row_shape`), so salting it would assert that demand's negation instead of
-    # this one.
     judge_base, _src = S.runs_base(tmp_path / "judge-base")
     clean_grade = S.cut_short_episode(tmp_path / "judge-clean")
     forged_grade = S.cut_short_episode(tmp_path / "judge-forged")
@@ -207,10 +198,6 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
 
 
 def test_no_world_can_move_another_worlds_cut_short_row(tmp_path):
-    """Content planted in world b's run dir or sidecar that claims to describe world c — a
-    run_end.json under b's identity carrying c's label, or a sidecar forged to answer for c's
-    run_id — never reaches c's row: worlds/b/run_end.json and worlds/c/run_end.json land at two
-    distinct, non-interfering paths and each world's grade reflects only its own record."""
     base, _src = S.runs_base(tmp_path)
     ep = S.cut_short_episode(tmp_path)
     b_dir, c_dir = S.sibling_run_dir(base, "b"), S.sibling_run_dir(base, "c")

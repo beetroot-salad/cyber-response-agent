@@ -17,11 +17,6 @@ from defender.tests import test_1133_rev3 as R
 from defender.tests.test_947_capture_prime import append_call, call_row, source_run
 
 
-# ---------------------------------------------------------------------------------------
-# E2 (R3): the already-primed check lists through the held view; a linked `served/` holding a base elsewhere is the folder refusal.
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_linked_served_holding_a_base_elsewhere_is_the_folder_refusal_not_already_primed(tmp_path):
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
@@ -41,11 +36,6 @@ def test_a_linked_served_holding_a_base_elsewhere_is_the_folder_refusal_not_alre
     S.assert_refusal(raised, "folder_link_outside", where="prime_base through a linked served/")
 
 
-# ---------------------------------------------------------------------------------------
-# E10 (R3): the already-primed check follows the held root, not the path, and reads nothing from the base.
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_already_primed_check_follows_the_held_root_not_the_path(tmp_path):
     capture = S.T.mod("learning.branch.capture") if hasattr(S, "T") else R.mod("learning.branch.capture")
     ledger = R.mod("learning.branch.ledger")
@@ -61,12 +51,6 @@ def test_the_already_primed_check_follows_the_held_root_not_the_path(tmp_path):
     assert isinstance(raised, ledger.LedgerError), raised
     assert "already holds a primed base" in str(raised), raised
     assert not watch.read.is_set(), "the capture was read: the check looked at the old path"
-
-
-# ---------------------------------------------------------------------------------------
-# E3 (R1): the outcome gate refuses a refused outcome record for both readers that share it
-# (#1224 moved the gate from `review.yaml` to pre-flight's `outcome.yaml`).
-# ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("reader", ["verdicts", "delta_o"])
@@ -90,11 +74,6 @@ def test_a_linked_outcome_record_holding_accepted_is_refused_by_both_readers(tmp
         getattr(episode, reader)(ep)
 
 
-# ---------------------------------------------------------------------------------------
-# E4 (R1): `delta_o` reads through its one bind; a linked `served/` is no primed base, never followed.
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_linked_served_folder_is_no_primed_base_never_followed(tmp_path):
     episode = T.mod("learning.branch.episode")
     ledger = T.mod("learning.branch.ledger")
@@ -115,11 +94,6 @@ def test_a_linked_served_folder_is_no_primed_base_never_followed(tmp_path):
         episode.delta_o(ep)
 
 
-# ---------------------------------------------------------------------------------------
-# E5 (R1): an `under` derivation owns nothing; taken before a close, it is refused after it.
-# ---------------------------------------------------------------------------------------
-
-
 def test_an_under_derivation_taken_before_close_is_refused_after_it(tmp_path):
     root = tmp_path / "root"
     (root / "fa").mkdir(parents=True)
@@ -133,11 +107,6 @@ def test_an_under_derivation_taken_before_close_is_refused_after_it(tmp_path):
     assert rec.text is None, rec
     assert rec.reason == os.strerror(errno.EBADF), rec
     assert sub.entries().entries is None
-
-
-# ---------------------------------------------------------------------------------------
-# E6 (R4): one leaf writer, which closes the descriptor when `fdopen` fails.
-# ---------------------------------------------------------------------------------------
 
 
 class FdopenFails(types.SimpleNamespace):
@@ -162,11 +131,6 @@ def test_a_failed_fdopen_leaves_no_descriptor_open_on_the_leaf(tmp_path, durable
     finally:
         for fd in S.open_fds_on(leaf):
             os.close(fd)
-
-
-# ---------------------------------------------------------------------------------------
-# E7 (patch): case-stable is casefold, not `.lower()`.
-# ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("token", ["e1133.straße", "straße", "e1133ß.b"])

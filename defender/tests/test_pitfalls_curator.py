@@ -18,8 +18,6 @@ from defender.tests._lead_author_1134 import lane_tree_for, lead_trees
 from defender.learning.core.state import PITFALLS
 
 
-
-
 def _run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=cwd,
                           capture_output=True, text=True, check=True)
@@ -34,11 +32,6 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     return seed_skills_repo(tmp_path / "repo")
 
 
-
-
-#: The fixture's adapter-declared systems (`tests/_repo.seed_skills_repo`), threaded
-#: explicitly per #869 — every consumer answers from the value it is handed, never from a
-#: re-derivation of the tree.
 DECLARED = frozenset({"elastic", "wazuh"})
 
 
@@ -94,9 +87,6 @@ def test_verify_pitfalls_state_rejects_deletion(tmp_git_repo: Path):
 
 
 def test_verify_pitfalls_stray_wins_over_in_corpus_violation(tmp_git_repo: Path):
-    """A stray edit AND an in-corpus non-execution.md edit → the stray-gate error
-    ('outside') is raised, not the 'non-execution.md' loop error — proving the shared
-    preamble runs before the per-path loop."""
     _commit_outside(tmp_git_repo).write_text("stray")
     skill = tmp_git_repo / "defender" / "skills" / "elastic" / "SKILL.md"
     skill.write_text(skill.read_text() + "\nedit\n")
@@ -126,8 +116,6 @@ def test_verify_pitfalls_state_returns_sorted_changed(tmp_git_repo: Path):
         "defender/skills/cmdb/execution.md",
         "defender/skills/elastic/execution.md",
     ]
-
-
 
 
 def _seed_pitfalls(state, n: int) -> None:
@@ -187,9 +175,6 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
 
 
 def test_run_pitfalls_no_edit_tick_still_rotates(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
-    """A curator that legitimately makes no edits (every failure already documented
-    / too thin to fix — a valid tick per the prompt) must still drain the batch.
-    Otherwise the queue stays >= threshold and re-spawns the curator forever."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     state = open_state(paths)
@@ -236,9 +221,6 @@ def test_the_commit_gate_refuses_an_execution_md_that_mints_its_own_system_dir(t
 
 
 def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Path, tmp_path: Path, monkeypatch):
-    """A batch whose rows all carry no system can't be folded into any execution.md;
-    run_pitfalls drops it without spawning the curator instead of leaving it stuck at
-    threshold and re-waking the drain every tick."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     state = open_state(paths)
@@ -251,8 +233,6 @@ def test_run_pitfalls_all_systemless_drops_batch_without_spawn(tmp_git_repo: Pat
     assert rc == 0
     assert called == []
     assert persist.read_pitfalls(state) == []
-
-
 
 
 def _state(tmp_path: Path):
@@ -295,4 +275,3 @@ def test_invoke_pitfalls_agent_config_fault_propagates(tmp_path: Path, monkeypat
     _capture_engine(monkeypatch, raise_exc=FatalConfigError("needs FIREWORKS_API_KEY"))
     with pytest.raises(FatalConfigError):
         pitfalls_curator._invoke_pitfalls_agent([], state=_state(tmp_path), repo_root=tmp_path)
-

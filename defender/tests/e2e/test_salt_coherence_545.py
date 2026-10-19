@@ -34,9 +34,6 @@ def _driven_transcript(tmp_path, run_id: str) -> str:
 
 
 def test_the_alert_wrap_and_the_tool_wrap_carry_DIFFERENT_salts(tmp_path):
-    """A driven run wraps its alert (orient) and its tool output (a read of alert.json) with
-    DIFFERENT salts. THE INVERSE of this file's original assertion, and the property that makes
-    a framed party unable to close the frame its own content arrives in."""
     transcript = _driven_transcript(tmp_path, "salt-split-545")
 
     salts = set(_UNTRUSTED_TAG.findall(transcript))
@@ -48,9 +45,6 @@ def test_the_alert_wrap_and_the_tool_wrap_carry_DIFFERENT_salts(tmp_path):
 
 
 def test_no_untrusted_frame_contains_its_own_delimiter(tmp_path):
-    """The re-mint guarantee, observed on a real run: for every complete frame the model is
-    shown, the frame's salt does not occur in the body it delimits. This is what `wrap_fresh`'s
-    collision loop buys and what a run-scoped token could not — the salt is drawn after the"""
     transcript = _driven_transcript(tmp_path, "salt-noecho-545")
 
     checked = 0

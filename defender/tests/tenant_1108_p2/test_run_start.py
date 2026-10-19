@@ -1,9 +1,3 @@
-"""O3: real run lifecycle refuses a wrong agent mount before the model's first request.
-
-The host's accepted Tenant and the bytes visible through Docker are independent inputs.
-No production setup is stubbed; only the existing start_box docker= and replay model seams
-are injected. Request/drain and oracle lanes remain usable without any tenant agent half.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -158,9 +152,6 @@ def test_explicit_unsandboxed_lane_reads_the_accepted_path_before_message_zero(
         observed_env = []
         _lifecycle(scene, docker, main, observed_env=observed_env)
         assert main.calls == 1
-        # #1255 (design rev 4, P1 "Every mode"): the unboxed fallback runs its programs in the
-        # model view over a per-run staging tree, so DEFENDER_AGENT_DIR is that tree's `agent`
-        # folder — not the inherited value, and not the tenant clone's host path.
         ((seen, ident),) = observed_env
         assert seen != '/wrong/inherited/agent', 'fallback subprocess inherited the wrong agent path'
         assert Path(seen).name == 'agent', seen
@@ -193,9 +184,6 @@ def test_box_request_and_oracle_lanes_do_not_require_a_run_tenant(tmp_path):
 
     root = tmp_path / 'learning-worktree'
     root.mkdir()
-    # D7 as amended (#1108 P3): the legacy drain checkout is a declared `code` mount, read
-    # back at `<workdir>/defender/<box.CODE_CHECK_FILE>`; it carries the product's committed
-    # check file, as the real learning worktree does.
     (root / 'defender').mkdir()
     check = box_mod.CODE_CHECK_FILE
     shutil.copyfile(T.DEFENDER / check, root / 'defender' / check)

@@ -10,9 +10,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
-# and a bare module-scope import there is a COLLECTION error, which pytest answers by
-# interrupting the whole session. Guarded like `pydantic_ai` above it.
 toons = pytest.importorskip("toons")  # noqa: E402
 
 
@@ -60,9 +57,6 @@ def _gather_turn(lead: str = "l-001") -> Turn:
 def test_a_foreign_toolset_injected_at_the_entry_point_reaches_the_model_through_the_gate(
     tmp_path: Path,
 ) -> None:
-    """A foreign dict-returning toolset installed through the declared seam at
-    `run_investigation` is offered to the model, called, and its result reaches the model as
-    the framed TOON view."""
     value = _payload()
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     main = PartRecorder([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
@@ -77,9 +71,6 @@ def test_a_foreign_toolset_injected_at_the_entry_point_reaches_the_model_through
 def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     tmp_path: Path,
 ) -> None:
-    """With the gate installed the model still sees `QueryCapture`'s rendered salt-wrapped
-    string for `query`, the executed-queries row is still appended — and a foreign dict in the
-    SAME run is substituted."""
     from defender._io import read_jsonl_rows
     from defender.run_repository import RunPaths
 
@@ -102,11 +93,6 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     assert read_jsonl_rows(RunPaths(live_dir).executed_queries), (
         "no executed-queries row was written, so the query path did not run"
     )
-    # COMPARED WITH THE SALT NORMALIZED, because #875 mints a fresh one per frame: `query`
-    # renders its own payload through `wrap_fresh`, so the two runs' delimiters differ by
-    # construction and a raw text comparison asserts only that two CSPRNG draws collided. Every
-    # other byte — the payload, the frame's shape, its position in the surrounding tool text —
-    # is still compared, and the frame's presence is asserted separately below.
     def _comparable(text: str, run_dir: Path) -> str:
         # ...and the run dir normalized with it, for the same reason: the two arms are two
         # RUNS, so `query` echoes each one's own `gather_raw` path back in its tool text.

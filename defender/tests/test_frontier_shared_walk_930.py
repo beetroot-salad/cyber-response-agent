@@ -34,16 +34,7 @@ from defender.tests._invlang_warn_836 import (  # noqa: E402
     attr_block,
 )
 
-# fixtures
-#
-# Every document below was EXECUTED against the real `diagnose` while this file was written and
-# carries ZERO diagnostics; `test_the_fixture_documents_carry_no_invlang_fault` re-asserts it on
-# every run. An empty frontier is the honest answer for an unparseable document, so a fixture
-# that quietly failed to parse would let a do-nothing implementation pass half this file.
 
-#: One observed edge, so a `:R attr_updates` row has a legal EDGE target to name. `diagnose`
-#: accepts a refinement targeting `e-001` (`_check_attr_update_targets`), which is the whole
-#: reason the divergence below exists rather than being a parse error nobody has to decide.
 EDGE_BLOCK = """
 ```invlang
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
@@ -51,9 +42,6 @@ e-001|attempted_auth|v-002|v-001|2026-05-05T03:47:12Z|siem-event:siem|outcome=fa
 ```
 """
 
-#: A `process` vertex whose IDENT CELL IS BLANK — not `??`, absent. The three-state fixture:
-#: `''` is neither a question the run has open nor a fact it holds, and an implementation that
-#: classified cells with one bool would have to call it one or the other.
 BLANK_IDENT_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -61,9 +49,6 @@ v-008|process|nc||image=/usr/bin/nc
 ```
 """
 
-#: A `process` vertex with an open CLASS cell, and the refinement that closes it. Together they
-#: are the open/terminal contrast the document frontier reports: open at one block index, settled
-#: at the next.
 OPEN_CLASS_BLOCK = """
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -185,14 +170,6 @@ def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path)
         "the fast path skipped an append whose trailing backtick closed a fence"
     )
 
-
-# the re-observation fold — what a LATER `:V` row is allowed to supersede
-#
-# `_seed_vertex_state` is the half of `effective_vertex_state` that reads `:V` declarations,
-# and #919 gave two of its cells a reader for the first time (`iter_vertex_cells` reports the
-# ident cell, and stamps the class tuple onto EVERY cell). Both of its supersede rules were
-# written for the `??`-to-concrete case only, so the shapes below folded to a value the
-# document had already superseded — silently, on documents `diagnose` accepts.
 
 def _reobservation_doc(*rows: str) -> str:
     """`v-001` declared in the prologue and re-declared once per lead — one `:V` row each."""

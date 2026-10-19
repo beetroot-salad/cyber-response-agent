@@ -24,13 +24,6 @@ p1|proposed_edge|"failures repeat on a fixed interval"
 ```
 """
 
-#: The same fork run to a `benign` close: the cadence lead grades h-002 up and h-001 out, the
-#: source's own class cell is resolved by the CMDB lead, and the two proposed parents stay
-#: `??`. A proposed parent is not an observed vertex, so its open slot must not reach the
-#: benign gate — the SKILL says so under §Open questions, and a run that had to name one to
-#: close would be back to minting tuples. Graded and closed on purpose rather than left with
-#: two live null-weight siblings: the fixture is what a reader copies as the shape, so it has
-#: to be a document a real run could emit, not the smallest one this gate happens to pass.
 _BENIGN_CLOSE_OVER_OPEN_PARENTS = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -82,9 +75,6 @@ h-002|++
 def test_siblings_sharing_an_open_parent_class_parse_and_validate_clean() -> None:
     body, warnings = parse_dense_companion(_OPEN_PARENT_FORK)
     assert warnings == []
-    # Assert on what parsed. A document whose fence stopped being recognized parses to `{}`
-    # with no warnings and validates clean, so `warnings == []` alone is a pass this file
-    # would earn by testing nothing.
     hyps = body["hypothesize"]["hypotheses"]
     assert [h["id"] for h in hyps] == ["h-001", "h-002"]
     assert {h["proposed_edge"]["parent_vertex"]["classification"] for h in hyps} == {"??"}
@@ -166,15 +156,6 @@ def test_refuting_one_of_the_two_is_the_repair() -> None:
     assert _fork_errors(doc) == []
 
 
-#: A fork carried entirely by `.attr_preds`: identical `.preds`, opposite predicted values for
-#: one attribute of the anchored vertex.
-#:
-#: `target` is `attached_vertex`, NOT `v-001`. The cell names WHICH of the hypothesis's three
-#: objects carries the attribute (`_ATTR_PRED_TARGETS`) — the proposed parent and proposed edge
-#: have no id yet, and the attached vertex is already named by `attached_to` — so a vertex id
-#: there is a rule #33 violation. It shipped as `v-001` because #33 had no implementation when
-#: this fixture was written; `attached_vertex` is the same prediction about the same object,
-#: said in the grammar.
 _ATTR_FORK = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]

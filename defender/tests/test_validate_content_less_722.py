@@ -78,34 +78,11 @@ def _report(tmp_path: Path, disposition: str) -> Path:
 # the "non-empty string" gates — a field that renders as nothing is empty
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # the keyword gates — the same split, running the other way
-
-
-
 
 
 @pytest.mark.parametrize(("tag", "written"), [("clean", "benign")])
 def test_a_report_disposition_is_matched_on_what_it_renders_as(tmp_path, tag, written):
-    """report.md's disposition is the headline the loop reads to pick a direction. The
-    normalized keyword comes back, so no caller downstream ever sees the invisible
-    characters the model wrote around it."""
     assert loop.normalize_disposition(_report(tmp_path, written)) == "benign"
 
 
@@ -128,9 +105,6 @@ def test_a_report_disposition_that_is_not_a_keyword_is_still_rejected(tmp_path, 
 # the shared helper's own contract
 
 def test_strip_zero_width_keeps_the_whitespace_callers_split_on():
-    """`strip_zero_width` drops what occupies no space and KEEPS whitespace — the
-    property the outcome split depends on. Dropping `\\n` (category Cc, like NUL) would
-    silently glue a keyword to the rationale beneath it."""
     assert strip_zero_width("caught​﻿\x00") == "caught"
     assert strip_zero_width("caught. why\nbecause") == "caught. why\nbecause"
     assert strip_zero_width(" caught ") == " caught "

@@ -30,11 +30,6 @@ def _deployment_logs(caplog, level: int) -> list[str]:
             if r.levelno == level and _env.DEPLOYMENT_ENV in r.getMessage()]
 
 
-# ---------------------------------------------------------------------------------------
-# O6 — the setting: two values, production by default, a typo is loud and never fatal
-# ---------------------------------------------------------------------------------------
-
-
 def test_1110_o6_unset_is_production_and_logs_nothing(caplog):
     """O6/M4: unset → `production`, silently. Unset is the documented default (a worker that
     missed the variable must not write copies into itself), not a typo."""
@@ -64,17 +59,10 @@ def test_1110_o6_a_recognised_value_is_read_stripped_and_lowercased_and_logs_not
 
 @pytest.mark.parametrize("typo", [
     "staging", "prdo", "QA-Box", "true",
-    # Near-misses of the two values: EXACT values only. A prefix alias (`startswith("dev")`)
-    # would turn the copy on for `development`/`dev2`/`devbox`; a `startswith("prod")` one
-    # would answer `prod`/`prodution` correctly but SILENTLY — and the typo must be loud.
     "development", "dev2", "devbox", "prod", "prodution",
 ])
 def test_1110_o6_an_unrecognised_value_is_production_with_one_error_naming_it(
         monkeypatch, caplog, typo):
-    """O6: anything else is treated as `production` — never `dev` (a typo must not turn the
-    copy on), never a raise (a typo must not abort the run) — and is logged as exactly ONE
-    error per read, naming the variable, the value it saw, and the choices it accepts. The two
-    recognised values are exact: a value that merely starts like one is still a typo."""
     monkeypatch.setenv(_env.DEPLOYMENT_ENV, typo)
     caplog.set_level(logging.DEBUG)
 
@@ -86,12 +74,6 @@ def test_1110_o6_an_unrecognised_value_is_production_with_one_error_naming_it(
     assert typo.lower() in message.lower(), f"the error does not name the value {typo!r}: {message!r}"
     assert "dev" in message, f"the error does not name the choice 'dev': {message!r}"
     assert "production" in message, f"the error does not name the choice 'production': {message!r}"
-
-
-# ---------------------------------------------------------------------------------------
-# O1 / O7 — `run.py main` hands the render step the tenant-bound handle; its failure is not
-# the run's
-# ---------------------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -116,12 +98,6 @@ class _FailingRender(SpecTail):
 
 def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materialized(
         tmp_path, state):
-    """O1 (the hand-off half): the real entrypoint, with the real builder, hands its render
-    step the run's TENANT-BOUND handle — the run dir the lifecycle ran in, under the configured
-    runs base, carrying the tenant the runs base's tenant record names. Not a bare path, and
-    not a `Run.at` over the directory (which has no tenant and no runs base): the page is a
-    record of THIS tenant's run, saved through the handle the platform's store backend sits
-    behind."""
     from defender import _tenant
     from defender.tests._data_root_1078 import current_data_root
     from defender.tests._tenants1106 import accept
@@ -141,13 +117,6 @@ def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materiali
 
 
 def test_1110_o7_a_failed_render_step_leaves_the_exit_code_at_0(tmp_path, state, capfd):
-    """O7 (the seam half): a render step that raises `VisualizeFailed` does not change the
-    run's exit code — the investigation succeeded; its page did not. The failure is reported
-    on stderr rather than swallowed.
-
-    Positive control: the render step was reached and handed the run (the raise happened), so
-    the 0 is not a run that never got that far. The genuine-crash half — a real renderer
-    exception surfacing as `VisualizeFailed` through the real step — is in the e2e module."""
     tail = _FailingRender(state)
     rc = drive_tail(run_py.main, plant_alert(tmp_path / "o7"), tail, "--no-learn")
 
@@ -156,10 +125,3 @@ def test_1110_o7_a_failed_render_step_leaves_the_exit_code_at_0(tmp_path, state,
         f"the render step was never reached (ran {tail.names}) — the 0 proves nothing")
     err = capfd.readouterr().err
     assert "not rendered (#1110 O7)" in err, "the failed render was not reported on stderr"
-
-
-# ---------------------------------------------------------------------------------------
-# The failure type — one class, in a leaf both sides import (#1110 second review)
-# ---------------------------------------------------------------------------------------
-
-

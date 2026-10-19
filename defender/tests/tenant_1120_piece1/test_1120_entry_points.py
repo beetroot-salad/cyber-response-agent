@@ -28,9 +28,6 @@ from defender.tests.tenant_1120_piece1 import _spec1120 as H
 #: The launcher's episodes knob (J44; the refusal stays until D12).
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
 
-# ======================================================================================
-# Same-file helpers.
-# ======================================================================================
 
 def _owner(root: Path, tenant_id: str = H.TID, **kw: Any) -> str:
     """`accept_tenant`'s own refusal on this tree — the text every entry must pass through."""
@@ -113,19 +110,8 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
         return refused
 
 
-# ======================================================================================
-# D1 — RunTenant is the accepted Tenant plus its grants and dispatch.
-# ======================================================================================
-
 def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
         data_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The RunTenant that run.py hands the lifecycle has three parts: its tenant member, a Tenant equal
-    to what accept_tenant returns for the request; its grants, the RunGrants loaded from that
-    tenant's settings/verb-grants.yaml under the data root (for the fixture, a gather grant equal to
-    GATHER_CENSUS); and its correlation member, a CorrelationDispatch naming the fixture's
-    elastic.correlate-alerts-by-entity for a fresh run and None for a sibling (which dispatches no
-    turn-0 lead; #1105 PR 2, declared change 6: started as `--tenant T --episode <id> --world L`
-    over the container its launcher made for T)."""
     H.adopted(data_root)
     rec = H.RunRecorder(tmp_path / "run")
     rc, exc = H.drive_run(run_py, [str(H.plant_alert(tmp_path / "in")), "--tenant", H.TID], rec)
@@ -161,10 +147,6 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
     assert sibling_tenant.tenant == expected
     assert sibling_tenant.correlation is None, "a --resume sibling dispatches no turn-0 lead"
 
-
-# ======================================================================================
-# O3 — one acceptance frame: every tenant-taking entry refuses what accept_tenant refuses.
-# ======================================================================================
 
 #: The cells each entry point takes (F8 closed by correction 3; M7). `tenant.py setup` has no
 ALL_CELLS = ("bad-id", "no-row", "knowledge-link", "mounted-tree", "learning-state-overlap")
@@ -329,15 +311,6 @@ def _cell_problems(where: str, entry: str, cell_name: str, cell: _Cell, base: Pa
 @pytest.mark.parametrize("entry", list(CELLS_OF))
 def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses(
         entry: str, tmp_path: Path, monkeypatch, capsys) -> None:
-    """Each entry point that takes a tenant after piece 1 — run.py, the branch launcher, tenant.py
-    setup and check, policy_cli, validate_scaffold (held_out takes none: an evaluation tool, outside
-    the application; generate_case is removed — human, PR #1157; ticket_adapter's command line was
-    removed by #1107) — and tenant.py scaffold for its bad-id cell, is driven over each cell: a bad
-    id ('A'); a data root with no row for the id; a knowledge folder that is a symlink; settings
-    inside a mounted tree (through policy_cli's own defender-dir option, and for the others a data
-    root inside the running checkout's defender/ tree, which is O11a); and a
-    DEFENDER_LEARNING_STATE_DIR overlapping the data root, a cell on every row that resolves the
-    data root (M7)."""
     problems: list[str] = []
     for cell_name in CELLS_OF[entry]:
         base = tmp_path / cell_name
@@ -350,23 +323,9 @@ def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses
     assert not problems, "\n".join(problems)
 
 
-# ======================================================================================
-# D1 — the removed surface.
-# ======================================================================================
-
-
-
-# ======================================================================================
-# D1 — process boundaries: a child gets the id, inherits the root, and re-accepts.
-# ======================================================================================
-
 # rejected: a tenants-root or data-root argument across the process boundary.
 def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
         data_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The branch launcher's sibling_argv for tenant acme contains --tenant acme and no root argument,
-    and the launcher starts its siblings (start_family, which takes no tenants root) with an
-    environment carrying the parent's DEFENDER_DATA_ROOT unchanged (generate_case, the other parent,
-    is removed — human, PR #1157)."""
     H.adopted(data_root)
     episode = tmp_path / "episodes" / "ep-1"
     episode.mkdir(parents=True)
@@ -403,18 +362,8 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
     assert not rec.spent
 
 
-# ======================================================================================
-# M4 — the pre-acceptance guards (J03 + O11a) on every path.
-# ======================================================================================
-
 def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data_root_before_reading(
         tmp_path: Path, monkeypatch, capsys) -> None:
-    """A relative DEFENDER_DATA_ROOT, and one inside the running checkout's defender/ tree, are refused
-    with TenantRefused naming it before anything under the root is read or written, on every pre-
-    acceptance path: create_tenant, require_tenant, accept_tenant (#1105 PR 2 deleted
-    tenant_of_run_dir, F-13), the branch launcher (before it reads the source's runs-base record)
-    and tenant.py setup (over an operator-placed knowledge folder inside a checkout's defender/,
-    which it leaves byte-identical, writing no row)."""
     monkeypatch.chdir(tmp_path)  # a relative root, if anything followed it, lands in tmp
     tid = _tenant.TenantId(H.TID)
     relative = Path("relative-spec1120") / "data"
@@ -446,9 +395,6 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
             f"the launcher did not refuse {root} before reading the source's record: {text!r}")
     _assert_never_created(inside)
 
-    # tenant.py setup, as a process: relative, and inside a checkout copy's defender/ with a
-    # placed knowledge folder (the guard refuses AFTER the operator's placement, and never
-    # removes it — 71's accepted known limit).
     proc = H.run_script(H.script_of(tenant_py), "setup", H.TID, root=relative, cwd=tmp_path)
     H.assert_refused(proc, str(relative))
     assert not (tmp_path / relative).exists()
@@ -469,16 +415,9 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
     assert H.accept(_tenant, other_root, H.TID).dir == other_root / H.TID
 
 
-# ======================================================================================
-# J44 — the launcher's episodes-base refusal survives until D12.
-# ======================================================================================
-
 # rejected: deleting J44's refusal in piece 1 — D12 removes it (scope constraint).
 def test_1120_the_launcher_still_refuses_an_episodes_base_inside_the_data_root(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
-    """Given a Tenant (from accept_tenant), the branch launcher's episodes_root still refuses
-    DEFENDER_EPISODES_BASE in each of these cases: equal to the tenant's episodes folder, inside the
-    data root, inside the checkout, or containing the data root."""
     H.adopted(data_root)
     tenant = H.accept(_tenant, data_root, H.TID)
     bases = {
@@ -495,15 +434,3 @@ def test_1120_the_launcher_still_refuses_an_episodes_base_inside_the_data_root(
     outside = tmp_path / "episodes-outside"
     monkeypatch.setenv(EPISODES_BASE_ENV, str(outside))
     assert EH.episodes_root(tenant.data_root) == outside.resolve()
-
-
-# ======================================================================================
-# D1 — runs_base_for takes the accepted Tenant.
-# ======================================================================================
-
-
-
-# ======================================================================================
-# R7 — every unmoved reader of RunTenant takes the accepted Tenant through it.
-# ======================================================================================
-

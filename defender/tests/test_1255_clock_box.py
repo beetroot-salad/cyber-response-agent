@@ -86,7 +86,7 @@ def natural(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Captured:
 
 
 @pytest.fixture
-def arm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, natural: Captured) -> Captured:
+def arm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Captured:
     """An arm's box start through `run.main --episode`."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
     tenant_id, source = C.record_source(tmp_path)
@@ -103,7 +103,7 @@ def _trees_are_bound(cap: Captured) -> None:
     assert C.DEFENDER in sources, f"the run's own trees are not bound, so the filter proves nothing: {cap.docker.mounts()}"
 
 
-def test_k1_a_natural_runs_box_carries_one_read_only_clock_mount(natural):
+def test_natural_box_clock_mount_and_preload(natural):
     _trees_are_bound(natural)
     found = natural.clock_mounts()
     assert len(found) == 1, (
@@ -112,8 +112,15 @@ def test_k1_a_natural_runs_box_carries_one_read_only_clock_mount(natural):
     assert not any(_within(tree, source) for tree in natural.trees()), (
         f"the clock mount's source {source} exposes one of the run's trees")
 
+    env = natural.docker.env()
+    assert env, "the create command carries no environment to inspect"
+    in_image = _box_recipe_preload()
+    assert in_image or env.get("LD_PRELOAD", "").strip(), (
+        "no time-faking preload is configured for the box: neither the create command nor any "
+        "instruction of the image recipe sets one (a comment configures nothing)")
 
-def test_k1_an_arms_box_carries_its_clock_mount_at_the_natural_runs_target(natural, arm):
+
+def test_arm_box_clock_mount_and_preload_match_natural_run(natural, arm):
     _trees_are_bound(arm)
     found = {"natural": natural.clock_mounts(), "arm": arm.clock_mounts()}
     assert all(len(m) == 1 for m in found.values()), (
@@ -123,6 +130,17 @@ def test_k1_an_arms_box_carries_its_clock_mount_at_the_natural_runs_target(natur
     source = Path(found["arm"][0]["source"])
     assert not any(_within(tree, source) for tree in arm.trees()), (
         f"the arm's clock mount source {source} exposes one of its trees")
+
+    env_n, env_a = natural.docker.env(), arm.docker.env()
+    assert env_n, "a create command carries no environment to compare"
+    assert env_a, "a create command carries no environment to compare"
+    config = {"natural": _time_configuration(natural), "arm": _time_configuration(arm)}
+    for side, conf in config.items():
+        assert conf["preload"], (
+            f"the {side} run's box has no time-faking preload configured — there is no time "
+            f"configuration to compare: {conf}")
+    assert config["natural"] == config["arm"], (
+        f"an arm's box is configured differently from a natural run's: {config}")
 
 
 _ISO_IN_FILE = re.compile(
@@ -418,34 +436,12 @@ def test_k3_the_recipe_reader_sees_instructions_not_comments(tmp_path):
     assert _recipe_preload(_instructions(recipe)) == ["ENV LD_PRELOAD=/x.so"]
 
 
-def test_k3_the_box_is_preloaded_for_every_run(natural):
-    env = natural.docker.env()
-    assert env, "the create command carries no environment to inspect"
-    in_image = _box_recipe_preload()
-    assert in_image or env.get("LD_PRELOAD", "").strip(), (
-        "no time-faking preload is configured for the box: neither the create command nor any "
-        "instruction of the image recipe sets one (a comment configures nothing)")
-
-
 def _time_configuration(cap: Captured) -> dict[str, Any]:
     """Collect preload and clock settings from the create environment and image recipe."""
     env = cap.docker.env()
     return {"preload": env.get("LD_PRELOAD", "").strip() or tuple(_box_recipe_preload()),
             "variables": {k: v for k, v in env.items() if _PRELOAD_KEY.search(k)},
             "clock mounts": sorted((m["target"], m["readonly"]) for m in cap.clock_mounts())}
-
-
-def test_k3_an_arms_preload_and_clock_variables_are_the_natural_runs(natural, arm):
-    env_n, env_a = natural.docker.env(), arm.docker.env()
-    assert env_n, "a create command carries no environment to compare"
-    assert env_a, "a create command carries no environment to compare"
-    config = {"natural": _time_configuration(natural), "arm": _time_configuration(arm)}
-    for side, conf in config.items():
-        assert conf["preload"], (
-            f"the {side} run's box has no time-faking preload configured — there is no time "
-            f"configuration to compare: {conf}")
-    assert config["natural"] == config["arm"], (
-        f"an arm's box is configured differently from a natural run's: {config}")
 
 
 _SQL = ("SELECT now() AS a, today() AS b, current_timestamp AS c, current_date AS d, "

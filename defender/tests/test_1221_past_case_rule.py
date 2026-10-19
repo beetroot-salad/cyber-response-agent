@@ -83,11 +83,6 @@ def _row_errors(doc: str) -> list[str]:
             if "cites_past_case" in m and ("l-003" in m or "ac1" in m)]
 
 
-# =======================================================================================
-# #27 — what makes a past case is the citation
-# =======================================================================================
-
-
 @pytest.mark.parametrize("grounding", PAST_CASE_SPELLINGS + OTHER_GROUNDINGS)
 def test_1221_a_benign_close_resting_on_past_cases_alone_is_refused(grounding):
     """NEGATIVE, with its controls on the same address."""
@@ -113,9 +108,6 @@ def test_1221_a_benign_close_resting_on_past_cases_alone_is_refused(grounding):
 
 
 def test_1221_the_rule_keys_on_the_citation_not_on_the_grounding():
-    """The amendment's whole point, side by side on one contract: an `org-authority` row that
-    cites a run is a past case and is refused; the same row without the citation is an
-    authority and is clean. The grounding cell did not move between the two."""
     assert _refusals_of_ac1(_grounded("org-authority", cites=PRIOR_RUN)), (
         "an org-authority row citing a prior run discharged ac1 — the citation, not the "
         "grounding word, decides whether a row is a past case"
@@ -141,11 +133,6 @@ def test_1221_the_past_case_rule_is_benign_only(disposition):
             assert cited == [], f"a malicious close citing a past case was refused: {cited}"
 
 
-# =======================================================================================
-# The row-structure rules: a past case names the run it cites, and the cite is a run id
-# =======================================================================================
-
-
 def _row_error_everywhere(doc: str, why: str) -> list[str]:
     """The citation errors `doc` draws under `malicious` — where #27 has nothing to say — after
     checking that each of them is drawn under EVERY disposition: a row-structure rule is about
@@ -166,9 +153,6 @@ def _row_error_everywhere(doc: str, why: str) -> list[str]:
 
 @pytest.mark.parametrize("spelling", PAST_CASE_SPELLINGS)
 def test_1221_an_uncited_past_case_is_an_error(spelling):
-    """A row whose grounding folds to `past-case` — in any case, with any run of whitespace,
-    underscores or hyphens between the words — but whose `cites_past_case` is empty is an error
-    on that row."""
     _row_error_everywhere(_grounded(spelling, cites=""),
                           f"a row grounded {spelling!r} with no cites_past_case")
 
@@ -202,9 +186,6 @@ def test_1221_a_citation_that_is_not_a_run_id_is_an_error(cite):
 
 
 def test_1221_a_valid_citation_under_org_authority_is_still_a_past_case():
-    """A valid run id under an `org-authority` grounding is a well-formed row — clean under
-    `malicious` — and #27 still applies to it on a benign close: a well-formed citation is
-    exactly what makes the row lean on a past run."""
     doc = _grounded("org-authority", cites=PRIOR_RUN)
     assert _errors(_with_disposition(doc, "malicious")) == [], (
         f"a valid citation under org-authority draws "
@@ -215,10 +196,6 @@ def test_1221_a_valid_citation_under_org_authority_is_still_a_past_case():
         f"{_errors(doc)}"
     )
 
-
-# =======================================================================================
-# How far #27 reaches: several rows, several contracts, the frontier
-# =======================================================================================
 
 AC1_DECL = 'ac1|e-001|iam-policy|"metrics-shipper is provisioned and authorized for this source→target SSH path"|escalate|escalate'
 AC2_DECL = 'ac2|e-001|iam-policy|"the SSH path is inside the monitoring role\'s approved scope"|escalate|escalate'
@@ -258,9 +235,6 @@ def test_1221_an_uncited_authorized_row_beside_a_past_case_discharges(rescue_gro
 
 @pytest.mark.parametrize("grounding", ["past-case", "org-authority"])
 def test_1221_the_rule_is_per_contract(grounding):
-    """Two contracts on the same live hypothesis: ac1 rests on a citing row only, ac2 on an
-    uncited authority. Benign is refused, naming ac1 and not ac2. The control: ac1 on an
-    uncited authority too validates clean."""
     def two(cites: str) -> str:
         doc = _grounded(grounding if cites else "org-authority", cites=cites,
                         extra_row=_row("ac2", "org-authority"))

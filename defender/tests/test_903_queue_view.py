@@ -144,10 +144,6 @@ EXPECTED_FINDINGS_DEADLETTER = [
 ]
 
 EXPECTED_MARKERS = [
-    # sorted by (queue, identity): "delivery" before "lead_author", whatever the
-    # directories' own walk order is.
-    # #1105 PR 2 (review): a row shows the run address it stores, `tenant_id` and `run_id`,
-    # each null when the record carries none; an old row's `run_dir` is no longer shown.
     {"queue": "delivery", "identity": "z-delivery-1",
      "failed": "unreadable pending-delivery record", "tenant_id": None, "run_id": None},
     {"queue": "lead_author", "identity": "run-a",
@@ -304,13 +300,6 @@ def _seed_set_aside(paths: LoopPaths) -> None:
 
 
 def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page(tmp_path):
-    """The absent member of the ill-formed class: a file that PARSES but carries the wrong
-    type where the reader expects a list, a mapping, a string or an int. A tainted manifest
-    with `findings: 3` and `verdict: "clean"`, a graveyard record whose `row` is a list, a
-    stuck record whose tick count is prose, a pitfalls row whose decline counter is prose —
-    each is one degraded row, and the page still lists everything else. The contract is the
-    typed boundary: nothing off disk reaches the renderer un-coerced, so the whole page is
-    built here rather than asserted not to raise."""
     paths = _make_paths(tmp_path)
     _write_lines(paths.state_root / FINDINGS.queue, [])
     _write_lines(_graveyard_file(paths, FINDINGS), [
@@ -366,10 +355,6 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
 
 
 def test_an_empty_state_root_reads_as_three_idle_channels_and_nothing_set_aside(tmp_path):
-    """The negative control for the whole contract: a root with nothing in it. Every channel
-    is present and idle, every set-aside list is empty, and the cap is still reported — so a
-    serializer that answered from anything but the files it was handed would be caught by the
-    difference between this and the seeded root."""
     paths = _make_paths(tmp_path)
 
     view = _build(paths)
@@ -441,9 +426,6 @@ def _channel(view: dict, name: str) -> dict:
 
 
 def test_each_channel_carries_its_accent_and_whether_a_stuck_record_exists_for_it(view):
-    """The two per-channel constants that ride beside the name. `has_stuck_record` is
-    structural, not a fact about today's files: it is false for pitfalls, whose lane records
-    no stuck tick at all, and true for the two that do."""
     accents = {ch["name"]: ch["accent"] for ch in view["channels"]}
     assert accents == {
         "findings": "defender",
@@ -457,19 +439,12 @@ def test_each_channel_carries_its_accent_and_whether_a_stuck_record_exists_for_i
 
 
 def test_queue_depth_is_the_readable_rows_of_the_pending_file(view):
-    """O9: the queued count beside the dead letters is what the pending file holds — four
-    readable rows on findings, the torn fifth line excluded, so an empty dead-letter list
-    next to a full queue reads differently from an idle channel."""
     assert _channel(view, "findings")["depth"] == {"queued": 4}
     assert _channel(view, "questioner_findings")["depth"] == {"queued": 2}
     assert _channel(view, "pitfalls")["depth"] == {"queued": 3}
 
 
 def test_unreadable_sums_a_channels_three_sidecars_counting_each_once(view):
-    """O7: a line the tolerant reader cannot parse is COUNTED, not dropped. Findings carries
-    one torn line in its pending file, TWO in its graveyard and none in its stuck report —
-    three, which only a sum of lines produces (a count of files-with-a-torn-line says two) —
-    and pitfalls, whose sidecars are all clean, carries none."""
     assert _channel(view, "findings")["unreadable"] == 3
     assert _channel(view, "questioner_findings")["unreadable"] == 0
     assert _channel(view, "pitfalls")["unreadable"] == 0
@@ -480,10 +455,6 @@ def test_unreadable_sums_a_channels_three_sidecars_counting_each_once(view):
 
 
 def test_findings_holds_are_every_row_carrying_held_reason_however_empty(view):
-    """O3, the findings/questioner lane: PRESENCE of `held_reason`, not truthiness. `f-3`
-    carries `held_reason: ""` — a holder that had no wording to give — and a truthiness test
-    reads it as authorable, which is the defect by the one route no gate spells. `f-1` (no
-    marker) and `f-4` (the forward check's own field) are the negative arm."""
     held = _channel(view, "findings")["held"]
     assert held["ids"] == ["f-2", "f-3"]
     assert held["count"] == len(held["ids"])
@@ -494,19 +465,10 @@ def test_findings_holds_are_every_row_carrying_held_reason_however_empty(view):
 
 
 def test_dead_letters_are_newest_first_and_normalised_field_by_field(view):
-    """O1 and mechanism 2, whole. Both writers' shapes collapse to one record: the nested
-    one keeps its `row` and answers with the id under the channel's key, the flat one has no
-    id and its row is the record minus the three bookkeeping fields. `when` is `retired_at`
-    where a record has one and `null` where it predates mechanism 3, and the whole list is
-    file order reversed."""
     assert _channel(view, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
 
 
 def test_a_curator_drop_reads_as_a_dead_letter_with_no_attempts_in_the_contract(view):
-    """`_graveyard_dropped_rows` writes `{pitfall_id, deadletter_reason, row}` and no
-    `attempts` at all, so the contract has no slot for one — a record is exactly four fields
-    on every channel, and a reader that reached for `attempts` would find it on two of the
-    three writers' records and not the third."""
     [entry] = _channel(view, "pitfalls")["deadletter"]
     assert entry == {
         "id": "p-9",
@@ -528,11 +490,6 @@ def test_a_channel_with_no_graveyard_file_lists_no_dead_letters(view):
 
 
 def test_stuck_is_the_last_record_of_the_report_with_its_own_time(view):
-    """O2: the band is the channel's most recent non-retiring fault — the LAST record, not
-    the first, not the one with the most ticks, and not a fold — carried whole, `recorded_at`
-    included. `consecutive_ticks` resets to 1 whenever the class or row set changes, so the
-    record with the most ticks is routinely a STALE fault. The file is
-    append-only and nothing truncates it, so the band means "last faulted at"."""
     assert _channel(view, "findings")["stuck"] == STUCK_LAST
     # ...and NOT the record with the most ticks, which is the middle one.
     assert _channel(view, "findings")["stuck"]["consecutive_ticks"] == 1
@@ -557,11 +514,6 @@ def test_the_findings_lane_records_stuck_ticks_even_before_it_has_written_one(tm
 
 
 def test_failed_markers_from_both_queue_dirs_are_listed_and_told_apart(view):
-    """O4: `quarantine_marker` writes under its CALLER's dir and it has two callers, so a
-    page reading only the lead-author queue omits every quarantined delivery record. Each row
-    names which queue it came from, its identity, the reason and the run dir it pointed at —
-    `null` for a marker that carried none, which is one of the two ways a marker gets
-    quarantined in the first place. Sorted by `(queue, identity)`."""
     assert view["quarantine"]["markers"]["rows"] == EXPECTED_MARKERS
 
 
@@ -572,17 +524,10 @@ def test_pending_deliveries_are_listed_newest_first(view):
 
 
 def test_tainted_manifests_are_listed_newest_first_with_the_verdict_kept(view):
-    """The tainted archive, newest first by `quarantined_at`. `verdict: {}` is preserved as
-    the empty dict the writer stored — "no scan recorded", which must not read as a clean
-    scan to the human triaging the directory — and `findings` is the COUNT of what the scrub
-    found, not the list."""
     assert view["quarantine"]["tainted"]["rows"] == EXPECTED_TAINTED
 
 
 def test_each_set_aside_list_counts_its_own_unreadable_files(view):
-    """O7 again, on the three JSON lists: two torn files in the markers dir, one each in the
-    pending-delivery dir and the quarantine dir, counted per list and never folded into a
-    channel's own count."""
     q = view["quarantine"]
     assert q["markers"]["unreadable"] == 2
     assert q["deliveries"]["unreadable"] == 1
@@ -591,10 +536,6 @@ def test_each_set_aside_list_counts_its_own_unreadable_files(view):
 
 
 def test_held_is_the_writers_count_of_archives_not_of_readable_manifests(paths):
-    """`preserve_tainted_tree` refuses at `held >= cap` counting TARBALLS, and the page must
-    show that number: an archive that survived without its manifest (the writer's own logged
-    failure) and one whose manifest is torn both spend a slot. Counting manifests reads
-    headroom that does not exist in exactly the failure the page exists to show."""
     qdir = paths.quarantine_dir
     (qdir / "orphan.tar.gz").write_bytes(b"")          # archive, no manifest
     (qdir / "c-torn.tar.gz").write_bytes(b"")          # archive, torn manifest (seeded)
@@ -608,10 +549,6 @@ def test_held_is_the_writers_count_of_archives_not_of_readable_manifests(paths):
 
 
 def test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_state_root(view, paths):
-    """The tainted list is the one thing on the page that does not move with
-    `DEFENDER_LEARNING_STATE_DIR` — it lives beside the live worktrees, off the repo root — so
-    an operator pointing the page at a copied state dir sees THIS checkout's tainted trees and
-    must be told where they came from."""
     assert view["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
     assert paths.quarantine_dir == AuthorBranch(repo_root=paths.repo_root).quarantine_dir
     assert not str(paths.quarantine_dir).startswith(str(paths.state_root))
@@ -619,9 +556,6 @@ def test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_sta
 
 
 def test_the_near_cap_warning_shows_at_two_slots_left_and_never_on_an_empty_directory(paths, monkeypatch):
-    """The `near` class turns the count warm, so it must be a rule the page's own markup can
-    match, and it must mean "two or fewer slots left" — not "cap minus two is at most the
-    count", which at a cap of two is true of nothing at all."""
     def page_for(cap: int) -> str:
         monkeypatch.setenv("LEARNING_TAINT_QUARANTINE_MAX", str(cap))
         return _rendered(build.render_queues(_build(paths)))
@@ -636,9 +570,6 @@ def test_the_near_cap_warning_shows_at_two_slots_left_and_never_on_an_empty_dire
 
 
 def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
-    """The tolerant reader's tolerance extends to the file it cannot OPEN: a sidecar with no
-    read permission is one unreadable on its channel, an unlistable set-aside directory is
-    one unreadable on its list and a `held` of null, and the page is still built."""
     if not hasattr(os, "geteuid") or os.geteuid() == 0:
         pytest.skip("permission bits do not bind root")
     _graveyard_file(paths, FINDINGS).chmod(0)
@@ -666,14 +597,6 @@ def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
 
 
 def test_stamped_view_resolves_the_state_root_at_call_time_and_stamps_it(tmp_path, monkeypatch):
-    """O5: the page says which host's state it shows and when it was built. Resolved at CALL
-    time — a module-level constant freezes the state root at import, and the CLI is exactly
-    the caller that must honour one set after it.
-
-    The env var moves the STATE root only: the tainted list stays with this checkout's
-    worktrees, which is why the contract names that directory — and why this is the one test
-    that reads it (nothing here asserts on what it holds; `main` and every other test hand
-    their own `LoopPaths`)."""
     root = tmp_path / "late-state"
     (root / "_pending").mkdir(parents=True)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(root))
@@ -719,11 +642,6 @@ def _rewrite_strings(obj, old: str, new: str):
 
 
 def test_a_row_that_looks_like_a_script_tag_opens_no_script_tag(view):
-    """The security dive's one claim, executed. A dead-letter row carries `<script>` verbatim
-    (alert data is attacker-influenced by definition, and a queue row is alert data's
-    descendant). The page must contain no more script tags than the identical page built from
-    a view with a harmless string in that slot — and must still carry the row's content, or
-    the count would be trivially equal because nothing was rendered."""
     quiet = _rewrite_strings(copy.deepcopy(view), SCRIPT_PAYLOAD, BENIGN_PAYLOAD)
     assert SCRIPT_PAYLOAD in json.dumps(view), "the fixture lost its payload"
     assert SCRIPT_PAYLOAD not in json.dumps(quiet)
@@ -745,10 +663,6 @@ def _rendered(page: str) -> str:
 
 
 def test_the_page_renders_every_dead_letter_and_hold_it_carries(view):
-    """O1, on the surface a person reads. For each channel: its name, its queued count, each
-    dead letter's id and reason and its row's own content, and the held ids — present in the
-    rendered HTML, not only inside the `const DATA` line. The empty-list arm renders its own
-    words, and the flat record renders "no id" rather than nothing."""
     body = _rendered(build.render_queues(view))
     for ch in view["channels"]:
         assert ch["name"] in body
@@ -768,9 +682,6 @@ def test_the_page_renders_every_dead_letter_and_hold_it_carries(view):
 
 
 def test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart(view):
-    """O4 on the surface: every marker's identity and reason, every undelivered branch,
-    every tainted batch and its taint, with the two groups under their own headings and the
-    cap beside the tainted list."""
     body = _rendered(build.render_queues(view))
     q = view["quarantine"]
     for m in q["markers"]["rows"]:
@@ -794,17 +705,10 @@ def test_the_page_renders_what_was_set_aside_and_tells_the_two_groups_apart(view
 
 
 def test_every_attacker_influenced_string_reaches_the_page_escaped(view):
-    """The security dive's claim on EVERY surface the page renders, not one: a dead-letter
-    row value, a stuck fault class and reason, a marker's failure text. Each hostile literal
-    is absent raw and present escaped in the rendered HTML, and a harmless twin proves the
-    slot renders at all."""
     body = _rendered(build.render_queues(view))
     for hostile in (SCRIPT_PAYLOAD, "GitProbeError<b>", "<index.lock>"):
         assert hostile not in body, hostile
         assert html.escape(hostile, quote=True) in body, hostile
-    # The marker's text is attacker-influenced, so it takes the run visualizer's escaper for
-    # that class: escaped, AND its `onerror=` split by a zero-width space so nothing that
-    # re-reads the page as plain text sees a live handler.
     assert "<img src=x onerror=alert(2)>" not in body
     assert "onerror=" not in body
     assert "&lt;img src=x on\u200berror=alert(2)&gt;" in body
@@ -816,10 +720,6 @@ def test_every_attacker_influenced_string_reaches_the_page_escaped(view):
 
 
 def test_content_that_spells_a_placeholder_is_content(view):
-    """The template is filled in ONE pass. Filled by successive replacements, a stuck reason
-    of `${cards}` re-expanded into every card a second time and a row value of
-    `${queues_json}` dumped the whole contract — the host's state-root path included — inside
-    that row's own card. Both reproduced against the first cut."""
     loud = copy.deepcopy(view)
     _channel(loud, "findings")["stuck"]["reason"] = "${cards} __CARDS__"
     _channel(loud, "findings")["deadletter"][0]["row"]["k"] = "${queues_json} __QUEUES_JSON__"
@@ -835,10 +735,6 @@ def test_content_that_spells_a_placeholder_is_content(view):
 
 
 def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths):
-    """One command builds all four files, on demand — nothing here runs on a drain tick.
-
-    The build writes into the real frontend dir (that is the point), so this restores every
-    one of the four to whatever it found, including "absent"."""
     frontend = Path(build.__file__).resolve().parent
     names = ("lessons.json", "lessons.html", "queues.json", "queues.html")
     before = {
@@ -947,9 +843,6 @@ def test_the_curators_dropped_row_carries_the_time_it_was_dropped(bare):
 
 
 def test_recording_a_stuck_tick_stamps_when_it_was_recorded(bare):
-    """O8, writer 4 of 4. The stuck file is append-only and nothing clears it, so the band is
-    "last faulted at" and NOT "stuck right now" — without `recorded_at` the page cannot say
-    which of those it is showing."""
     ch = FINDINGS
 
     with _Clock() as clock, LearningState.open(bare) as state:
@@ -966,5 +859,3 @@ def test_recording_a_stuck_tick_stamps_when_it_was_recorded(bare):
 
 # --------------------------------------------------------------------------------------
 # structural pins — O6, the cap's owner, the deferral closure, the ignore file
-
-

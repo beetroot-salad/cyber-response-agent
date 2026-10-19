@@ -9,11 +9,6 @@ from defender.learning.frontend import serialize  # noqa: E402
 
 
 def test_three_groups_present():
-    """#1007 M7 adds a FOURTH group, `questioner` — findings about a WORLD rather than
-    about the defender agent, folded from the family judge's own world findings. Name kept
-    (referenced by `spec_graph_584-corpus-fold.yaml` and this file's own `test_corpus_fold_
-    584.py` docstring); the assertion widens in the same diff, per #922's own precedent for
-    an exact-set test gaining a member."""
     groups = serialize.build_view()["groups"]
     assert set(groups) == {"defender", "actor", "environment", "questioner"}
     for g in groups.values():
@@ -36,14 +31,6 @@ def test_lesson_record_shape():
 
 
 def test_environment_seed_field_mapping():
-    """Env-fact seeds surface through build_view with the field mapping the
-    template depends on: subject→title, relevance_criteria→description, and the
-    body carried for the expander. Validated against the live env corpus
-    generically — no single seed is load-bearing, so the test survives the
-    corpus churning as the loop authors and prunes env facts (issue #298 moved
-    these seeds from the actor corpus to the shared environment corpus). The
-    subject→title / relevance_criteria→description direction is pinned by
-    test_environment_field_mapping_unit."""
     env = serialize.build_view()["groups"]["environment"]["lessons"]
     assert env, "environment corpus is empty — env-seed retrieval would surface nothing"
     for seed in env:
@@ -54,9 +41,6 @@ def test_environment_seed_field_mapping():
 
 
 def test_environment_field_mapping_unit():
-    """Env mapping (subject→title, relevance_criteria→description) is pinned
-    via _normalize directly, since the live env corpus may be empty and the
-    build_view-based actor test wouldn't exercise it."""
     spec = serialize.GROUPS["environment"]
     path = DEFENDER / spec["dir"] / "corp-vpn-egress.md"
     fm = {
@@ -75,10 +59,6 @@ def test_environment_field_mapping_unit():
 
 
 def test_skipped_lesson_gets_a_degraded_record(tmp_path):
-    """A DISCOVERED lesson the walk warn-skips must still appear in the view (#590's rule, the
-    posture-view half): omitting it hides from ``lessons.html`` exactly the broken lesson a
-    human should be looking at. The record is degraded (marker description, ``status:
-    malformed``, no metadata) but shape-compatible, so the template renders it unchanged."""
     import json
 
     fixture = tmp_path / "defender"
@@ -122,5 +102,3 @@ def test_json_safe_coerces_exotic_types():
     assert out["d"] == "2026-06-02"
     assert isinstance(out["t"], str)
     json.dumps(out)
-
-

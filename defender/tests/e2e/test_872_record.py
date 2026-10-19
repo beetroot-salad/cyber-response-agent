@@ -9,9 +9,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
-# and a bare module-scope import there is a COLLECTION error, which pytest answers by
-# interrupting the whole session. Guarded like `pydantic_ai` above it.
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
@@ -126,9 +123,6 @@ def _tool_return_parts(rec: dict) -> list[dict]:
 
 
 def test_a_run_records_what_the_gate_examined_substituted_and_saved(tmp_path: Path) -> None:
-    """A run records, at the operator's altitude, FOUR categories: how many foreign results the
-    gate examined, how many the guard refused, how many it substituted, and how many bytes it
-    saved."""
     run_dir, _ = _substituting_run(tmp_path)
     records = read_jsonl_rows(run_dir / "wire_logs" / "llm_requests.jsonl")
     counters = [rec["toon_gate"] for rec in records if isinstance(rec.get("toon_gate"), dict)]

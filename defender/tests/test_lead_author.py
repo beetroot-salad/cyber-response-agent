@@ -272,12 +272,6 @@ def _claude_should_not_be_called(*args, **kwargs):
 
 
 def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path, tmp_path: Path):
-    """A held queue lock spawns nothing AND says so distinguishably (#852 F-03).
-
-    It used to return 0 — the value a completed curation returns — and the lead-author drain
-    reads that rc as "served, unlink the marker". The whole claimed batch was deleted with no
-    work done and no dead letter. The agent still must not be spawned; what changed is that
-    the caller can now tell the two apart."""
     deps = _deps(tmp_path, invoke_agent=_claude_should_not_be_called)
     with deps.state.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held:
         assert held, "the test could not take the queue lock it means to hold"
@@ -395,9 +389,6 @@ def _append(path: Path, text: str) -> None:
     path.write_text(path.read_text() + text)
 
 
-# Every row mutates the seeded worktree ONE way the write lane admits, then asserts the
-# post-flight refuses it and says why. The `match` is load-bearing: these refusals land in a
-# batch's stderr, and "which rule" is the only thing that tells the loop what to revert.
 @pytest.mark.parametrize(("case", "mutate", "match"), [
     # a non-*.md file under defender/skills/ is a stray — the corpus is *.md
     ("non-md-under-skills",
@@ -417,18 +408,10 @@ def _append(path: Path, text: str) -> None:
                        "\nstomped\n"),
      "protected surface"),
 
-    # A promote that writes the established template but never ``rm``s its ``_draft/`` twin
-    # leaves both on disk. The surviving draft is UNCHANGED ⇒ not in ``git status`` ⇒ the
-    # records-only checks cannot see it; the filesystem twin probe must catch the half-promote
-    # rather than letting the loop commit established + draft together.
     ("half-promote",
      lambda r: (r / _CATALOG / "wazuh" / "newthing.md").write_text(
          query_template("wazuh.newthing", "established")), "half-promote"),
 
-    # The lift writes `skills/{system}/SKILL.md`, so the frontmatter identity `connect` checks
-    # at scaffold time is an invariant this lane can break — `read_description` and the roster
-    # audit both key on the DIRECTORY, so a SKILL.md that calls itself another system is a
-    # per-system prompt injected under the wrong system's name.
     ("skill-md-naming-another-system",
      lambda r: (r / "defender" / "skills" / "elastic" / "SKILL.md").write_text(
          "---\nname: defender-cmdb\n---\n# elastic\n"), "defender-elastic"),
@@ -436,10 +419,6 @@ def _append(path: Path, text: str) -> None:
 def test_verify_skills_state_rejects_a_tree_the_write_lane_could_produce(
     tmp_git_repo: Path, case, mutate, match
 ):
-    """The write lane admits any `{system}/{name}.md`, so the post-flight is the only thing
-    standing between a well-formed but illegitimate edit and a commit. Each row is one such
-    edit — a stray, a deletion, a protected surface, a half-finished promote, a misnamed
-    identity — and each is refused by the rule that owns it."""
     mutate(tmp_git_repo)
     with pytest.raises(lead_author.LeadAuthorError, match=match):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
@@ -447,10 +426,6 @@ def test_verify_skills_state_rejects_a_tree_the_write_lane_could_produce(
 
 
 def test_verify_skills_state_rejects_out_of_scope_skills_md(tmp_git_repo: Path):
-    """A skills *.md that is neither catalog, SKILL.md, nor _draft is out of scope.
-
-    Not `execution.md` (#869): that basename is refused at every depth for its own,
-    more specific reason (`marker_is_not_agent_committable`), asserted separately."""
     (tmp_git_repo / "defender" / "skills" / "elastic" / "notes.md").write_text("x")
     with pytest.raises(lead_author.LeadAuthorError, match="out-of-scope"):
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,
@@ -482,9 +457,6 @@ def _stage_covered_draft(repo: Path, query_id: str) -> Path:
 
 
 def test_a_discard_into_widen_that_carries_covers_is_accepted(tmp_git_repo: Path):
-    """The PREFERRED disposition (`lead_author.md`: discard-into-widen > skip > promote), and
-    the one the old basename link could never have expressed — the identity lands on a template
-    that already existed under an unrelated name."""
     repo = tmp_git_repo
     draft = _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
     (repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
@@ -499,11 +471,6 @@ def test_a_discard_into_widen_that_carries_covers_is_accepted(tmp_git_repo: Path
 
 
 def test_a_bare_discard_of_a_covered_draft_is_refused(tmp_git_repo: Path):
-    """Deleting a draft without attributing it is the silent, self-repeating failure.
-
-    Nothing observable happens: the batch commits, and the identity is minted again the next
-    time a run coins it, discarded again, forever. The refusal names the alternative the prompt
-    already gives — a draft that fits no template is one to SKIP."""
     repo = tmp_git_repo
     draft = _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
     draft.unlink()
@@ -560,14 +527,6 @@ def test_a_draft_minted_this_tick_and_left_alone_is_not_a_departure(tmp_git_repo
 
 
 def test_a_promote_that_leaves_the_draft_behind_is_refused(tmp_git_repo: Path):
-    """The half-promote, now that no basename links the two files.
-
-    `_skills_content_rule`'s twin probe derives `_draft/{name}.md` from the established file's
-    own name, which was the link while a promote was `_draft/{id}.md` -> `{id}.md`. A digest
-    basename and an author-chosen name share nothing, so that probe cannot fire on any real
-    promote — and the surviving draft is UNCHANGED, so no `git status` record carries it
-    either. `covers:` is the link that is left: the identity landed on an established template
-    while the draft that records it is still on disk."""
     repo = tmp_git_repo
     _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
     (repo / _CATALOG / "wazuh" / "auth-failure-rate.md").write_text(
@@ -583,11 +542,6 @@ def test_a_promote_that_leaves_the_draft_behind_is_refused(tmp_git_repo: Path):
 def test_a_discard_is_accepted_when_an_untouched_template_already_covers_it(
     tmp_git_repo: Path,
 ):
-    """Transfer is a question about the TREE, not about this batch's diff.
-
-    An identity a template took over in an earlier tick is one `synthesize_drafts` will not
-    re-mint, so deleting its leftover draft costs nothing — and scoring the rule against the
-    batch alone would refuse that delete and discard every other edit in the tick with it."""
     repo = tmp_git_repo
     draft = _stage_covered_draft(repo, "wazuh.hunt-failed-logins")
     established = repo / _CATALOG / "wazuh" / "auth-events.md"
@@ -607,14 +561,6 @@ def test_a_discard_is_accepted_when_an_untouched_template_already_covers_it(
 def test_repairing_an_id_that_disagrees_with_its_directory_is_not_a_clobber(
     tmp_git_repo: Path
 ):
-    """The two rules deadlocked, and the deadlock had no exit.
-
-    A template filed under `wazuh/` while calling itself `elastic.…` is refused by
-    `check_template`'s `id-system-mismatch` on every edit, with a message telling the author to
-    make the id start with `wazuh`. Doing that was then refused by the monotonicity rule as
-    "rewriting the identity of an established template", and moving the file instead is refused
-    by the delete-prohibition — so every tick that touched the file discarded its whole batch
-    while following two contradictory instructions."""
     repo = tmp_git_repo
     broken = repo / _CATALOG / "wazuh" / "auth-events.md"
     broken.write_text(query_template("elastic.auth-events", "established"))
@@ -628,13 +574,6 @@ def test_repairing_an_id_that_disagrees_with_its_directory_is_not_a_clobber(
 
 
 def test_a_draft_folded_into_another_draft_is_attributed(tmp_git_repo: Path):
-    """A draft is a legal home for a transferred identity, because the MINT thinks so.
-
-    `top_k_neighbors` iterates the whole catalog and `lead_author.md` calls a coined draft a
-    possible wide neighbor, so folding a narrow draft into a wider one is real curation. The
-    transfer rule scored attribution against established templates' `covers:` alone, which is a
-    narrower set than the `answered_identities` the mint actually reads — so a delete that could
-    never cause a re-mint was refused, and the tick's every other edit went with it."""
     repo = tmp_git_repo
     narrow = _mint_uncommitted_draft(repo, "wazuh.narrow-probe")
     wide = _mint_uncommitted_draft(repo, "wazuh.wide-probe")
@@ -659,13 +598,6 @@ def test_a_draft_folded_into_another_draft_is_attributed(tmp_git_repo: Path):
 
 
 def test_an_established_template_may_not_lose_the_identities_it_covers(tmp_git_repo: Path):
-    """Monotonicity — the collision detector.
-
-    The L1 write lane admits ANY `{system}/{name}.md` and overwriting an established template
-    is a legal fold, so an author who picks a name that already exists gets no error: the write
-    silently replaces a different measurement. Dropping that template's `covers:` is what
-    separates a clobber from a widen, and it is what the clobbered measurement's future
-    re-mints depended on."""
     repo = tmp_git_repo
     established = repo / _CATALOG / "wazuh" / "auth-events.md"
     established.write_text(
@@ -681,14 +613,6 @@ def test_an_established_template_may_not_lose_the_identities_it_covers(tmp_git_r
 
 
 def test_an_established_template_may_not_have_its_id_rewritten(tmp_git_repo: Path):
-    """The other half of the clobber: a promote writes a NEW file, so an edit that replaces an
-    existing template's `id:` is a name collision that has already overwritten a different
-    measurement. Refused by identity rather than by content, because the content of a clobber
-    is perfectly well-formed — it is a valid template, just not the one that was there.
-
-    This is also the bound on the repair exemption above: that exemption only forgives an id
-    that was WRONG before and right after, so a swap between two WELL-FORMED ids gets no
-    relief from it — it is exactly the name collision the monotonicity rule exists to catch."""
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "auth-events.md").write_text(
         query_template("wazuh.something-else", "established")
@@ -709,14 +633,6 @@ def test_verify_skills_state_rejects_schema_mutation(tmp_git_repo: Path):
 def test_verify_skills_state_rejects_a_promotion_whose_placeholder_is_not_a_param(
     tmp_git_repo: Path,
 ):
-    """#901's negative control, at this lane's own seam.
-
-    Until the fold, every gate here was path-shaped — out-of-scope path, protected surface,
-    delete-prohibition, half-promote — so a promoted template could name a `${placeholder}` the
-    verb does not declare and nothing in the lane would look. `connect`'s check would not catch
-    it either: it ran at scaffold time and excluded `_draft/`, the directory this lane mints
-    into. The gather lead that then bound the template is refused at `validate_params` with its
-    turn already spent."""
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "newthing.md").write_text(
         query_template(
@@ -731,13 +647,6 @@ def test_verify_skills_state_rejects_a_promotion_whose_placeholder_is_not_a_para
 
 
 def test_verify_skills_state_accepts_a_malformed_draft(tmp_git_repo: Path):
-    """The decided SCOPE, pinned so a later widening is deliberate rather than incidental.
-
-    The content gate fires at PROMOTION, not on the lane's `_draft/` writes: a draft is minted
-    from a query that really ran, and refusing the batch over one would discard the signal the
-    loop wanted. A draft is model-reachable through `template_search` before promotion, which is
-    the cost this accepts; the corpus-wide CI sweep (`test_scaffold_rules_901.py`) is where a
-    malformed draft is caught, one PR later rather than one commit earlier."""
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "_draft" / "rough.md").write_text(
         query_template(
@@ -751,31 +660,13 @@ def test_verify_skills_state_accepts_a_malformed_draft(tmp_git_repo: Path):
 
 
 def test_is_catalog_template_excludes_what_is_not_a_template(tmp_git_repo: Path):
-    """A template lives at `{catalog}/{system}/{name}.md`, and the catalog holds files that are
-    not one. The content rule reads a file AS a template (`id:`, `verb:`, a system derived from
-    its parent dir), so pointing it at one of those refuses the file for a reason that is not
-    its defect — "no `id:`", or the verbs of a system called `queries`.
-
-    A classifier test rather than a `_verify_skills_state` one: since #869 a catalog-root note
-    and a `_draft` twin are refused by the MEMBERSHIP rule before any content rule reads them
-    (`_membership_segment` yields `NOTES.md`, which no tree declares), so driving this through
-    the gate would assert about the wrong refusal. The predicate is what #901 changed.
-    """
     assert lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/auth.md")
-    # `README.md` is excluded by NAME, not by depth: it sits at `{system}/README.md`, exactly
-    # where a template sits, so the depth test alone let the content rule refuse a system's
-    # catalog notes for "no `id:`" — the very failure this predicate was split out to stop.
     assert not lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/README.md")
     assert not lead_author._is_catalog_template("defender/skills/gather/queries/NOTES.md")
     assert not lead_author._is_catalog_template("defender/skills/gather/queries/SCHEMA.md")
     assert not lead_author._is_catalog_template(
         "defender/skills/gather/queries/wazuh/_draft/rough.md"
     )
-    # EXTRA depth stays IN, `_draft` at extra depth included. `{system}/sub/_draft/x.md` is not
-    # the documented draft shape (`_under_draft` is depth-1), so the content rule must still
-    # read it and refuse it — its parent dir names no system, so the resolver raises. A
-    # `"_draft" not in parts` membership test over every segment handed exactly that shape a
-    # silent pass, which is the guard-dropped direction this predicate was split out to avoid.
     assert lead_author._is_catalog_template("defender/skills/gather/queries/wazuh/sub/x.md")
     assert lead_author._is_catalog_template(
         "defender/skills/gather/queries/wazuh/sub/_draft/x.md"
@@ -785,15 +676,9 @@ def test_is_catalog_template_excludes_what_is_not_a_template(tmp_git_repo: Path)
 def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(
     tmp_git_repo: Path,
 ):
-    """"Could not check" must not read as "nothing wrong". A catalog dir for a system no adapter
-    declares is the phantom-system class (#855 F-06) wearing a catalog path, and it is exactly
-    the case a resolver that swallowed its own failure would wave through."""
     ghost = tmp_git_repo / _CATALOG / "ghost"
     ghost.mkdir(parents=True)
     (ghost / "x.md").write_text(query_template("ghost.x", "established"))
-    # `ghost` is DECLARED here on purpose: #869's membership gate fires before the resolver,
-    # so leaving it undeclared would refuse the path for the wrong reason and stop testing that
-    # an unresolvable adapter is never swallowed. Declared-but-unresolvable is the real case.
     with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved"):
         lead_author._verify_skills_state(
             tmp_git_repo, baseline_stray=[], systems=DECLARED | {"ghost"},
@@ -802,15 +687,6 @@ def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(
 
 
 def test_verify_skills_state_refuses_a_tree_whose_adapters_cannot_be_read(tmp_git_repo: Path):
-    """The construction-time arm of the case above (#1031): since the registry reads its
-    roster when it is built, a worktree whose `defender/scripts/adapters` cannot be read fails
-    when the batch's ONE resolver is built — before any path is checked — and that failure is
-    this lane's own refusal, `LeadAuthorError` naming the directory, not a bare
-    `ScaffoldRuleError` from a frame the lane never wrapped. The dead-letter reader greps for
-    one class; a second one is a refusal it misses.
-
-    The tree is otherwise clean (no working-tree edit at all), so the only thing that can
-    refuse is the resolver's construction."""
     adapters = tmp_git_repo / "defender" / "scripts" / "adapters"
     shutil.rmtree(adapters)
     with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved") as exc:
@@ -907,9 +783,6 @@ def test_run_raises_and_skips_commit_on_scope_violation(tmp_git_repo: Path, tmp_
 
 
 def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Path):
-    """A non-zero agent exit (crash/timeout) makes ``run`` return 2 — the drain
-    quarantines the marker. The loop commits nothing, writes no done sentinel, and
-    (post-#426) writes no ``failure.txt`` brake (quarantine is the sole surfacing)."""
     repo = tmp_git_repo
     run_dir = curation_run_dir("lead-run")
     deps = _deps(
@@ -927,13 +800,6 @@ def test_run_returns_rc2_on_nonzero_agent_exit(tmp_git_repo: Path, tmp_path: Pat
 
 
 def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_path: Path):
-    """The fake-LLM stand-in for the live ``--lead-author-drain`` check: the agent does a
-    discard (``rm`` a draft) AND a promote (write established + ``rm`` its draft) in the
-    worktree; after ``run`` the loop has committed and *both* draft files are actually gone
-    — neither left on disk nor tracked — with the promoted established template present and
-    no established+draft duplicate. This is what the live ``rm``-under-allowlist run was to
-    confirm; only the real Claude Code Bash matcher is out of frame here (the grant uses the
-    documented ``:*`` form), the loop's commit/clear logic is end-to-end."""
     repo = tmp_git_repo
     (repo / _CATALOG / "wazuh" / "_draft" / "olddraft.md").write_text(
         query_template("wazuh.olddraft", "draft")
@@ -971,10 +837,6 @@ def test_run_loop_clears_drafts_on_discard_and_promote(tmp_git_repo: Path, tmp_p
 
 
 def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
-    """End-to-end: the agent writes a promote's established template but forgets the draft
-    ``rm`` (the silent-loss case A1's matcher fix can't prevent if the model omits it). The
-    loop's half-promote gate raises through ``run`` → no commit, no ``done`` → the drain
-    quarantines the marker instead of committing established + draft together."""
     repo = tmp_git_repo
     run_dir = curation_run_dir("lead-run")
 
@@ -1001,15 +863,6 @@ def test_run_quarantines_half_promote(tmp_git_repo: Path, tmp_path: Path):
 def test_run_refuses_a_bare_discard_of_a_draft_it_minted_this_tick(
     tmp_git_repo: Path, tmp_path: Path
 ):
-    """End-to-end, through `run` — the WIRING, not the rule.
-
-    The rule's own tests hand `_verify_skills_state` a `minted` mapping they built themselves,
-    so every one of them passes against a `_run_locked` that stopped threading it. That is the
-    shape of the defect this test exists for: the transfer rule was unit-tested from the moment
-    it was written and was still inert in production, because the drafts it was written to guard
-    are minted untracked in the same tick and no test drove that path. Here the mint is the real
-    one (`synthesize_drafts` off a real queries row), the discard is the agent's, and the only
-    thing under test is that the two are connected."""
     repo = tmp_git_repo
     run_dir = curation_run_dir("lead-run")
     (run_dir / "gather_raw").mkdir(parents=True)
@@ -1127,9 +980,6 @@ def _capture_engine(monkeypatch, *, rc: int = 0, raise_exc=None):
 
 
 def test_invoke_agent_pending_drafts_reach_engine_user_prompt(run_dir: Path, monkeypatch):
-    """(GLM-port rewrite) invoke_agent no longer spawns ``claude -p`` — it routes to the in-process
-    engine. Assert the handoff envelope reaches the engine as the ``user_prompt`` PAYLOAD (not
-    merely that a rc came back): the whole prompt survives the transport swap."""
     cap = _capture_engine(monkeypatch)
     handoffs = [{"query_id": "wazuh.auth-events", "status": "established",
                  "executed_template_path": "defender/skills/gather/queries/wazuh/auth-events.md",
@@ -1202,11 +1052,6 @@ def test_collect_and_synthesize_partition_disjointly(tmp_path: Path, catalog: Pa
 
 
 def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tmp_path: Path):
-    """The collection runs before _prepare_handoffs' done-sentinel early-return (the
-    all-unresolved case is the very source of general failures), lands in the central
-    queue, and the pitfalls_collected sentinel makes a re-run idempotent. repo_root is
-    a real git repo (the tick runs `git status` for its stray baseline); the queue
-    resolves to an out-of-repo state dir."""
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     deps = replace(
         lead_deps(paths),
@@ -1233,13 +1078,6 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
 def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     tmp_git_repo: Path, tmp_path: Path
 ):
-    """The reload-on-mint hinge: when synthesize_drafts mints a draft for an
-    uncatalogued verb this tick, `_run_locked` refreshes the once-loaded catalog so
-    build_handoff (the post-synthesis consumer) sees the new `_draft/` and the
-    just-minted query_id resolves into a handoff (the WARN-and-draft path) instead of
-    being dropped (WARN-and-drop). Uses production synthesize + build_handoff, so it
-    guards against a regression that reused the stale pre-synthesis snapshot — which
-    would silently drop every just-minted draft's handoff."""
     paths = LoopPaths(repo_root=tmp_git_repo, state_dir=tmp_path / "state")
     seen: dict = {}
     deps = replace(
@@ -1254,17 +1092,9 @@ def test_run_reloads_catalog_after_mint_so_minted_draft_resolves(
     assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
     minted = lead_author._draft_basename("wazuh.brandnew")
     assert (tmp_git_repo / _CATALOG / "wazuh" / "_draft" / f"{minted}.md").is_file()
-    # The row still resolves, through `covers:` rather than through a matching `id:`. The
-    # draft's name is now derived, so the coined `wazuh.brandnew` the row carries is no
-    # template's id — and a `by_id` that indexed only ids would drop this row as an unresolved
-    # contract violation, handing the author nothing about the draft this tick just minted.
     assert f"wazuh.{minted}" in {h["query_id"] for h in seen["handoffs"]}
 
 
-# `_loop_commit_message` derives the commit SCOPE from the changed paths alone. Each row is
-# one path shape and the scope it must produce — and, where it matters, the scope it must NOT
-# produce: a message that named both scopes for a catalog-only batch would read as a wider
-# edit than the one that happened.
 @pytest.mark.parametrize(("case", "changed", "present", "absent"), [
     ("catalog-only", ["defender/skills/gather/queries/wazuh/auth-events.md"],
      ["gather catalog for run-123"], ["system skills"]),
@@ -1294,5 +1124,3 @@ def test_loop_commit_message_scope_follows_the_changed_paths(case, changed, pres
         assert fragment in msg
     for fragment in absent:
         assert fragment not in msg
-
-

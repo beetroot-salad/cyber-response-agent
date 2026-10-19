@@ -20,9 +20,6 @@ from defender._query_rules import params_too_deep
 
 LEAD = "l-001"
 
-#: The deepest params map a row may carry, the map itself counted as 1. SPELLED, not derived
-#: from the reader's bound: the amended design makes it a product constant, pinned once below,
-#: and every arm here is about that number.
 LIMIT = 32
 
 #: Far past the limit and past where a recursive walk of the value exhausts the interpreter's
@@ -256,9 +253,6 @@ CYCLES = [_dict_that_holds_itself, _params_holding_a_list_that_holds_itself, _ya
 
 @pytest.mark.parametrize("build", CYCLES, ids=lambda b: b.__name__)
 def test_a_cyclic_value_is_too_deep_and_the_walk_terminates(build):
-    """The walk stops once past the limit, so a cycle terminates and is refused. A cycle has no
-    finite depth; answering "shallow" would let it through to a writer. Run in process: a walk
-    that did not stop would hang this test, which is the failure."""
     value = build()
     assert _is_cyclic(value), "the fixture is not a cycle, so this arm tests nothing"
     assert params_too_deep(value) is True
@@ -266,9 +260,6 @@ def test_a_cyclic_value_is_too_deep_and_the_walk_terminates(build):
 
 @pytest.mark.parametrize("build", CYCLES, ids=lambda b: b.__name__)
 def test_the_writer_refuses_a_cyclic_value_as_too_deep_and_writes_nothing(tmp_path, build):
-    """B on a cycle: the bounded cleaner refuses it as `ParamsTooDeep` — the cycle is past any
-    limit — rather than recursing into `RecursionError`, and nothing reaches the table or the
-    payload directory."""
     run = _started(tmp_path)
     value = build()
     assert _is_cyclic(value), "the fixture is not a cycle, so this arm tests nothing"
@@ -294,9 +285,6 @@ def _yaml_anchor_reused() -> Any:
     _yaml_anchor_reused,
 ], ids=["shared-flat", "shared-at-the-limit", "shared-in-sequences", "yaml-anchor-reused"])
 def test_a_value_reached_twice_is_not_a_cycle(build):
-    """A shared reference is not a cycle: the cleaner writes it once per place it appears, at
-    the depth it appears, so it is no deeper than one copy. Paired with the cyclic arm above:
-    the predicate must tell "seen before" from "contains itself"."""
     value = build()
     assert not _is_cyclic(value), "the fixture is a cycle, so this arm tests nothing"
     assert params_too_deep(value) is False
@@ -338,9 +326,6 @@ def test_a_row_at_or_under_the_limit_is_written_verbatim_and_read_back(tmp_path,
 
 @pytest.mark.parametrize("depth", [LIMIT + 1, LIMIT + 2, FAR])
 def test_a_row_past_the_limit_is_refused_as_too_deep_before_anything_is_written(tmp_path, depth):
-    """B: `ParamsTooDeep` — exactly, at one past the limit and at a depth where an unbounded
-    walk overflows the stack — with no line, and, because the cleaner runs before
-    `persist_payload`, no sidecar for the seq the row would have taken."""
     run = _started(tmp_path)
     params = params_of_depth(depth)
 
@@ -392,14 +377,6 @@ def _deque_chain(depth: int) -> Any:
 
 @pytest.mark.parametrize("shape", list(_SHAPES))
 def test_the_predicate_the_cleaner_and_the_written_line_agree_at_every_depth(tmp_path, shape):
-    """THE DIFFERENTIAL. For every depth 1..60: `params_too_deep(p)` is False exactly when the
-    shared cleaner accepts `p` and `append_query_row` writes a line its reader reads back; it
-    is True exactly when the cleaner and the writer refuse `p` with `ParamsTooDeep` and nothing
-    is written. And the flip is at exactly `LIMIT + 1`.
-
-    Asserted on the written LINE, read back off disk — not on whether the writer allowed the
-    call — because the predicate and the cleaner are two copies of one rule, and the only way to
-    know they are the same rule is to compare what each says about the same value."""
     build = _SHAPES[shape]
     disagreements = []
     refused_at = set()
@@ -430,10 +407,6 @@ def test_the_predicate_the_cleaner_and_the_written_line_agree_at_every_depth(tmp
 
 
 def test_the_row_after_a_refused_one_takes_the_next_seq_and_overwrites_nothing(tmp_path):
-    """C13 on the writer. Were the deep row written unreadable (seq 1, sidecar `1.json`),
-    `_next_seq` would hand seq 1 out again and the next row would OVERWRITE that sidecar.
-    Refused before `persist_payload`, the deep call leaves no seq and no file behind, and every
-    sidecar that exists keeps its bytes."""
     run = _started(tmp_path)
     first = _append(run, {"native_query": "FROM a"}, payload_text='["first"]')
     first_bytes = _sidecar(run, 0).read_bytes()
@@ -452,5 +425,3 @@ def test_the_row_after_a_refused_one_takes_the_next_seq_and_overwrites_nothing(t
     assert _sidecar(run, 1).read_text(encoding="utf-8") == '["second"]'
     assert all(parse_jsonl_row(line) is not None for line in _lines(run)), \
         "the table holds a line its own reader skips"
-
-

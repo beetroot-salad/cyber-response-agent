@@ -1,9 +1,3 @@
-"""#1235: a refused query view write records one successful call once.
-
-#1222 retired the ancestor fetch's capped call path. The correlation lead now uses the
-ordinary QueryCapture recorder; a view-write fault still must not turn success into a
-second failure row.
-"""
 from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165

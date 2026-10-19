@@ -94,10 +94,6 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
 
 
 def test_1105_run_end_keeps_todays_order_cross_check_ticket_curation_page(tmp_path, monkeypatch):
-    """A replayed run with --update-ticket ends in today's order through run.main's existing
-    keyword seams: the cross-check, then the ticket write, then the curation enqueue, then the
-    run page; and a step that raises leaves the later steps, the exit status and the records as
-    today's (RG-08-a..d)."""
     order, outcome, queued = _drive(tmp_path / "ok", monkeypatch)
     tail_steps = [s for s in order if s in (CROSS_CHECK, TICKET, ENQUEUE, PAGE)]
     assert tail_steps == [CROSS_CHECK, TICKET, ENQUEUE, PAGE], (

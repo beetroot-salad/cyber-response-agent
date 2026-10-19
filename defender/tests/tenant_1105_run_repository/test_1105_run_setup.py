@@ -28,7 +28,6 @@ def _one_line_exit(err: BaseException | None) -> bool:
             and len(err.code.splitlines()) == 1)
 
 
-
 def _link_runs_to(t, outside: Path) -> None:
     """`t.runs` as a link to a real folder elsewhere (another tenant's, say)."""
     outside.mkdir(parents=True, exist_ok=True)
@@ -38,10 +37,6 @@ def _link_runs_to(t, outside: Path) -> None:
 
 def test_1105_run_setup_refuses_a_pinned_id_a_record_claims_and_creates_no_run_folder(
         tmp_path, data_root):
-    """Run setup for a pinned run id that a record in tenant.runs/_episodes claims (written by
-    record_episode_runs in the test) exits with a str refusal, leaves the runs folder and
-    _tenant.json in place, and creates no run folder. Positive control: an unclaimed pinned id
-    runs."""
     from defender.run_repository import RunId, record_episode_runs
 
     t = H.tenant(data_root, H.T_ID)
@@ -62,10 +57,6 @@ def test_1105_run_setup_refuses_a_pinned_id_a_record_claims_and_creates_no_run_f
 
 def test_1105_a_corrupt_episode_record_refuses_every_pinned_id_and_never_a_minted_one(
         tmp_path, data_root):
-    """With a truncated record in tenant.runs/_episodes, run setup refuses every pinned id, an
-    unclaimed one included, with one stderr line naming that record (sys.exit(str), no
-    traceback); a minted id (no pinned id given) still runs, because minted ids are not
-    checked."""
     t = H.tenant(data_root, H.T_ID)
     runs = H.runs_folder(t)
     good = H.record_text("ep1", t.id, "src1", {"a": "ep1-a"})
@@ -85,9 +76,6 @@ def test_1105_a_corrupt_episode_record_refuses_every_pinned_id_and_never_a_minte
 
 def test_1105_run_setup_refuses_a_pinned_id_a_record_naming_another_tenant_claims(
         tmp_path, data_root):
-    """A record planted in T's _episodes/ that names another tenant still claims its ids at run
-    setup: a pinned id it claims is refused (the fail-safe direction). Positive control: a
-    pinned id it does not claim runs."""
     t = H.tenant(data_root, H.T_ID)
     runs = H.runs_folder(t)
     H.plant_record(runs, "ep1", H.U_ID, "src1", {"a": "ep1-a"})
@@ -99,13 +87,8 @@ def test_1105_run_setup_refuses_a_pinned_id_a_record_naming_another_tenant_claim
     assert _pinned(alert, "ep1-b", t).run_dir == runs / "ep1-b", "an unclaimed pinned id runs"
 
 
-
 def test_1105_run_setup_refuses_a_pinned_or_minted_id_over_206_bytes_with_the_invalid_run_id_exit(
         tmp_path, data_root):
-    """Run setup runs a pinned 206-byte id, and exits 'invalid run id: ...' before creating
-    anything for a pinned id of 207, 231 and 256 bytes and for an id minted from an alert
-    label of 190 ASCII characters or of 95 x 'ß'; an alert labelled 94 x 'ß' mints a 205-byte
-    id and runs."""
     t = H.tenant(data_root, H.T_ID)
     runs = Path(t.runs)
     alert = H.alert_file(tmp_path / "in")
@@ -130,14 +113,6 @@ def test_1105_run_setup_refuses_a_pinned_or_minted_id_over_206_bytes_with_the_in
 
 
 def test_1105_run_setup_refuses_a_sidecar_suffixed_pinned_or_minted_id(tmp_path, data_root):
-    """Run setup exits 'invalid run id: ...' for a pinned id ending in each sidecar suffix and
-    for a pinned id of the staged shape ('r1.run-end.json.staged-0123456789abcdef'), and for a
-    minted id that ends in a sidecar suffix: run setup mints from the alert's file stem, or from
-    its folder's name when the stem is 'alert' (run_common._alert_label, unchanged), so an alert
-    'x.run-end.json.txt' mints '<stamp>-x.run-end.json' (RG-18-a) and an 'alert.json' in a
-    folder 'y.scrub-verdict.json' mints '<stamp>-y.scrub-verdict.json'. No folder named like a
-    sidecar or a staged sidecar is created, and a refused minted id creates nothing (today both
-    are created, RG-13-b, RG-18-a). Positive control: the plain id r1 runs."""
     t = H.tenant(data_root, H.T_ID)
     runs = Path(t.runs)
     alert = H.alert_file(tmp_path / "in")
@@ -160,14 +135,6 @@ def test_1105_run_setup_refuses_a_sidecar_suffixed_pinned_or_minted_id(tmp_path,
 
 def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
         tmp_path, data_root):
-    """When tenant.runs is a link to an outside folder, and when a sibling's episode runs/
-    (materialize_run(world=...)) is a link, run setup raises TenantRefused, which run.py prints
-    as '[run.py] ...', before creating or reading anything inside it: the outside folder stays
-    empty and no raw OSError escapes. Positive control: an absent tenant.runs is created with
-    its _tenant.json and the run. The link is P2's one representative state of the runs folder;
-    a dangling link and a non-directory there are not driven here: _io.hold(follow=False) tells
-    those states apart (test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart).
-    The tenant.runs arm is driven through run.main itself."""
     from defender._episode_handle import Episode
 
     alert = H.alert_file(tmp_path / "in")
@@ -207,13 +174,6 @@ def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
 
 
 def test_1105_run_setups_refusals_are_one_stderr_line_naming_the_path(tmp_path, data_root):
-    """Every claimed-id refusal at run setup exits through sys.exit(str): one stderr line naming
-    the path, no traceback, for a truncated record and for a stray name in _episodes; the hold's
-    own refusal of a linked runs folder is TenantRefused shown as '[run.py] ...'; 'invalid run
-    id: ...' carries RunId's repr-quoted refusal. Odd occupants at a pinned id's name keep
-    today's outcome (RG-21-a): a regular file exits '<runs>/r1 is not a directory — refusing to
-    materialise a run over it', an empty directory proceeds, and a directory holding
-    investigation.md exits 'run dir already exists and a run has been in it: ...'."""
     from defender.run_repository import RunId
 
     alert = H.alert_file(tmp_path / "in")
@@ -264,10 +224,6 @@ def test_1105_run_setups_refusals_are_one_stderr_line_naming_the_path(tmp_path, 
 
 def test_1105_run_setup_over_a_deeply_nested_tenant_record_refuses_as_tenant_refused(
         tmp_path, data_root):
-    """Run setup over a tenant runs folder whose _tenant.json nests 200,000 levels deep exits
-    '[run.py] ...' with TenantRefused, not a raw RecursionError (today's value, RG-20-a), and
-    creates no run folder: ensure_runs_base_record's read-back uses the nesting-checked decoder
-    (_tenant.py:218). A declared O5 change."""
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)
     record = H.plant_tenant_record(t.runs, t.id, raw=H.deep_json())

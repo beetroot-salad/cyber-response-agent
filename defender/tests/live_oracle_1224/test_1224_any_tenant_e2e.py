@@ -16,9 +16,6 @@ from defender.tests import _tenants1106 as T6  # noqa: E402
 from defender.tests._state1135 import state_over  # noqa: E402
 from defender.tests.live_oracle_1224 import _spec1224 as S  # noqa: E402
 
-#: The answer every captured call of these launches returns. One shape for every call, so a
-#: single pre-flight oracle script (submit the base unchanged) is right for any world and any
-#: replay order; the launch stages are the subject here, not the answers.
 SHARED = {"rows": [{"entity": "alice", "event_id": "e-1", "kind": "seen"}]}
 
 
@@ -157,13 +154,6 @@ def _default_calls() -> list:
 
 
 def test_1224_a_tenant_with_no_lab_systems_branches_and_serves_a_world_change(tmp_path):
-    """d02a_any_tenant_branches_end_to_end — a branch over a tenant serving only edr, idp and
-    siem-x is refused by no layer and serves a verified world change on edr.
-
-    The manifest loads, the question-writer runs, pre-flight accepts, a sibling call on edr
-    receives an `oracle` answer that differs from the base answer, the judge grades, and a
-    lesson with systems [edr] is selected for a later episode of that tenant. O1.
-    """
     est = S.estate(tmp_path)
     doc = _family(S.SYSTEMS, S.fact("f1"), S.fact("f2", "bob reset carol's password from "
                                                         "10.0.0.9", ("bob", "carol", "10.0.0.9")))
@@ -177,12 +167,6 @@ def test_1224_a_tenant_with_no_lab_systems_branches_and_serves_a_world_change(tm
 
 @pytest.mark.parametrize("elastic", ["none-configured", "fails-to-resolve"])
 def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
-    """s_p036 — a branch over a tenant that configures no elastic system, or whose elastic part
-    fails to resolve while elastic is not in its gather grant, is not refused for lack of
-    elastic: every stage from tenant acceptance to lesson selection proceeds.
-
-    O1: a branch over such a tenant refused or serving no world change is the observed failure.
-    """
     est = S.estate(tmp_path)
     if elastic == "fails-to-resolve":
         T6.place_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), S.FIXTURE_TENANT,
@@ -209,13 +193,6 @@ def test_1224_launch_over_a_tenant_with_no_elastic_system(tmp_path, elastic):
 
 
 def test_input_tenant_system_replaces_a_lab_system_with_another_shape(tmp_path):
-    """s_p037 — a tenant system named like a lab system (identity, ticket) whose verbs, params
-    and answer shapes are nothing like the lab's is branched end to end with no lab assumption.
-
-    The question-writer authors facts against the tenant's own systems, the oracle serves world
-    changes from the tenant's own verbs and shapes, and the judge buckets from the model's
-    reading (O1).
-    """
     systems = ("identity", "ticket")
     est = S.estate(tmp_path, systems=systems)
     doc = _family(systems,
@@ -235,10 +212,6 @@ def test_input_tenant_system_replaces_a_lab_system_with_another_shape(tmp_path):
 
 
 def test_input_all_worlds_fact_the_same_single_system(tmp_path):
-    """s_p038 — a tenant serving exactly one system, with every world's facts on it, launches,
-    pre-flights, serves and is graded like any other, and the samples record, the oracle's
-    family block and lesson selection work from that one system.
-    """
     systems = ("edr",)
     est = S.estate(tmp_path, systems=systems)
     doc = _family(systems,

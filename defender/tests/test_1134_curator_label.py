@@ -1,6 +1,3 @@
-"""#1134 curator step: the drain label is consumed where the author lane's trees open; the open
-`DrainTrees` flows below that and lives exactly as long as one curator's batch (released on fault,
-nothing held below the threshold or for an injected seam)."""
 from __future__ import annotations
 
 import json
@@ -47,17 +44,8 @@ BUILDERS = {
 RUNNERS = {"lessons": lessons_run.run_batch, "questioner": questioner_run.run_batch}
 
 
-# ---------------------------------------------------------------------------------------
-# The trees are required below the open; exactly one of trees / cfg reaches run_batch
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("channel", sorted(BUILDERS))
 def test_the_builders_require_the_trees_and_take_their_mounts(tmp_path, channel):
-    """`build_author_config` / `build_questioner_config` refuse a call without `trees`
-    (`TypeError`, no default). With them, `cfg.corpus` IS `trees.mount(cfg.corpus_dir)` (the held
-    mount itself, no second hold), `cfg.corpus_dir` is the corpus's spelling, and `cfg.tree_for`
-    is the trees' own bound lookup."""
     w = world(tmp_path)
     build, attr = BUILDERS[channel]
 
@@ -72,10 +60,6 @@ def test_the_builders_require_the_trees_and_take_their_mounts(tmp_path, channel)
 
 @pytest.mark.parametrize("channel", sorted(BUILDERS))
 def test_run_batch_takes_exactly_one_of_trees_and_cfg(tmp_path, channel):
-    """The channel `run_batch` takes exactly one of `trees` (it builds its config from them) and
-    `cfg` (used as is: it carries the `Held` and `tree_for`): neither, or both, is a `TypeError`
-    (always over the test's own paths, never `DEFAULT_PATHS`). The positive controls: each one
-    alone serves an empty queue (rc 0)."""
     w = world(tmp_path)
     build, _attr = BUILDERS[channel]
     run = RUNNERS[channel]
@@ -88,11 +72,6 @@ def test_run_batch_takes_exactly_one_of_trees_and_cfg(tmp_path, channel):
 
     assert run(paths=w.paths, state=w.state, trees=w.trees) == 0
     assert run(cfg=cfg) == 0
-
-
-# ---------------------------------------------------------------------------------------
-# lane_corpus: the corpus mount comes from the trees, or the lane refuses
-# ---------------------------------------------------------------------------------------
 
 
 def _refusing_trees(w) -> dict[str, Any]:
@@ -124,13 +103,6 @@ REFUSALS = ("lead_label", "omits_the_corpora", "moves_the_corpora", "mount_above
 @pytest.mark.parametrize("how", REFUSALS)
 @pytest.mark.parametrize("channel", sorted(BUILDERS))
 def test_trees_that_do_not_hold_the_corpus_exactly_are_fatal_config(tmp_path, channel, how):
-    """`shared.lane_corpus(trees, corpus_dir)` is `trees.mount(corpus_dir)`, its `ValueError`
-    turned into `FatalConfigError` naming the corpus and the mounts the trees hold: never a handle
-    rooted elsewhere (above or below), never a fallback to the plain path. The builder, and
-    `run_batch` building its own config, refuse the same way.
-
-    Catches: `hold(corpus_dir)` beside the trees, and a lookup that takes the mount ABOVE the
-    corpus (`tree_for(corpus_dir)` answering a non-`"."` name)."""
     w = world(tmp_path)
     build, attr = BUILDERS[channel]
     paths, trees = _refusing_trees(w)[how]()
@@ -151,10 +123,6 @@ def test_trees_that_do_not_hold_the_corpus_exactly_are_fatal_config(tmp_path, ch
 
 @pytest.mark.parametrize("channel", sorted(BUILDERS))
 def test_lane_corpus_is_the_trees_own_mount_whatever_opened_them(tmp_path, channel):
-    """The control for the refusals: trees holding exactly the two corpora, opened directly
-    (`DrainTrees.open`, not through the author member) give the very `Held` the trees hold, and
-    the builder takes it; its `tree_for` maps the sibling corpus to the sibling's mount of the
-    same trees."""
     w = world(tmp_path)
     build, attr = BUILDERS[channel]
     paths = LoopPaths(repo_root=w.repo, state_dir=tmp_path / "state")
@@ -170,16 +138,8 @@ def test_lane_corpus_is_the_trees_own_mount_whatever_opened_them(tmp_path, chann
         assert hit[1] == "y.md"
 
 
-# ---------------------------------------------------------------------------------------
-# cfg.corpus and cfg.tree_for, behaviourally
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("channel", sorted(BUILDERS))
 def test_cfg_corpus_is_the_held_mount_and_never_follows_a_link(tmp_path, channel):
-    """`cfg.corpus` is the held corpus mount: a symlink at a name below it is refused by the
-    view's read, by `write` and by `unlink` (`NotPlainEntry`), the link left and its target
-    untouched. The positive control: a plain file at the same name is read and rewritten."""
     w = world(tmp_path)
     build, attr = BUILDERS[channel]
     cfg = build(w.paths, state=w.state, trees=w.trees)
@@ -205,11 +165,6 @@ def test_cfg_corpus_is_the_held_mount_and_never_follows_a_link(tmp_path, channel
 
 
 def test_cfg_tree_for_maps_both_corpora_to_their_own_mounts_and_nothing_else(tmp_path):
-    """`cfg.tree_for` is the trees' lookup: a path in the curator's own corpus maps to `cfg.corpus`
-    itself, a path in the SIBLING corpus to the sibling's mount (the `Held` `_put_back` uses for a
-    git-status name there), anything else (skills, the rest of the repo) to `None`, and a relative
-    path is refused (callers join it to the working copy first). The sibling's view refuses a
-    link at the name."""
     w = world(tmp_path)
     cfg = w.cfg()
 
@@ -232,11 +187,6 @@ def test_cfg_tree_for_maps_both_corpora_to_their_own_mounts_and_nothing_else(tmp
     assert entry_kind(held.view(), name).kind == "other"
 
 
-# ---------------------------------------------------------------------------------------
-# The seam consumes the label: _maybe_trigger_author, and author_drain's real default seam
-# ---------------------------------------------------------------------------------------
-
-
 def _held_queue(paths: LoopPaths) -> None:
     """One per-case finding from before #1234: the pre-author gate holds it
     (`retired_direction`), so a tick serves it without spawning any agent."""
@@ -248,9 +198,6 @@ def _trigger_args(paths: LoopPaths) -> tuple:
 
 
 def test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees(tmp_path, monkeypatch):
-    """`drains._maybe_trigger_author` refuses a call without `label` (`TypeError`); with it, the
-    channel's `run_batch` runs over the trees the label opens: the gate holds the row (written back
-    with its `held_reason`) and nothing is recorded stuck."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     w = world(tmp_path)
     _held_queue(w.paths)
@@ -267,15 +214,6 @@ def test_the_trigger_requires_the_label_and_runs_the_batch_under_its_trees(tmp_p
 
 
 def test_the_trigger_opens_the_trees_of_the_label_it_is_handed_and_no_other(tmp_path, monkeypatch):
-    """H8: `_maybe_trigger_author` opens the trees of the label IT was handed. The lead member
-    opens `skills/` alone, and the builder refuses it (`FatalConfigError` out of the trigger;
-    the row is not served). A non-member (every `UNKNOWN_LABELS` entry: the values and names
-    as strings, a look-alike enum's members, `.value` carriers, near misses) raises at its first use (#1179 O1', `AttributeError`), with nothing held
-    and the row not served. The author member serves the queue: the gate holds the row, nothing
-    is stuck.
-
-    Catches: a trigger that shadows its `label` with the author label (the lead member would
-    serve the queue), and one that coerces a string into a member."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     w = world(tmp_path)
     _held_queue(w.paths)
@@ -308,12 +246,6 @@ def _drive_author_drain(paths: LoopPaths, repo: Path) -> int:
 
 
 def test_author_drains_real_default_seam_carries_the_label_to_the_open(tmp_path, monkeypatch):
-    """`drains.author_drain` with its production `trigger_author`: the label it binds into that
-    default reaches the trees' open, and the batch runs over them. A queue the gate holds entirely
-    means no agent is spawned; the held row is written back, nothing is recorded stuck on either
-    channel, and nothing is held once the drain returns. A default seam that bound no label (a
-    `TypeError`) or a label that mounts no corpus would take the curator out of the tick
-    (`_drain_one_curator` records a stuck row) instead."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     w = world(tmp_path)
     _held_queue(w.paths)
@@ -330,15 +262,6 @@ def test_author_drains_real_default_seam_carries_the_label_to_the_open(tmp_path,
 
 
 def test_a_missing_corpus_mount_is_a_hold_fault_each_curator_records_stuck(tmp_path, monkeypatch):
-    """The drain working copy lacks `lessons-questioner/` (one of the author label's mounts).
-    Through `author_drain` with its REAL default seam: each curator's `open_drain_trees` fails to
-    hold it (`FileNotFoundError` from `hold`), and that fault propagates out of the seam (it is
-    not folded into `_run_curator_module`'s rc=None), so `_drain_one_curator` writes that
-    channel's stuck record naming it. The sibling curator still runs — it opens its own trees, and
-    records its own. Nothing is created, no row is bumped or held, and nothing is held after.
-
-    Catches: the open placed inside `_run_curator_module` (an `OSError` there is swallowed into a
-    `(continuing)` log line, recorded nowhere), and a "make the mount point" fallback."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     monkeypatch.setenv("LEARNING_QUESTIONER_THRESHOLD", "1")
     repo = make_repo(tmp_path)
@@ -363,9 +286,6 @@ def test_a_missing_corpus_mount_is_a_hold_fault_each_curator_records_stuck(tmp_p
 
 
 def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypatch):
-    """The unit half: over a working copy with no `lessons-questioner/`, `_maybe_trigger_author`
-    raises the `FileNotFoundError` its open met (not swallowed into rc=None), serves nothing,
-    creates nothing, and holds nothing after (the mount it did hold is released)."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     repo = make_repo(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
@@ -377,11 +297,6 @@ def test_a_hold_fault_at_the_open_propagates_out_of_the_seam(tmp_path, monkeypat
     assert "held_reason" not in pending(paths, FINDINGS)[0]
     assert not os.path.lexists(paths.lessons_questioner_dir)
     assert descriptors_under(repo) == []
-
-
-# ---------------------------------------------------------------------------------------
-# Lifetime (A3): one DrainTrees per curator batch, open while it runs, closed after
-# ---------------------------------------------------------------------------------------
 
 
 def _spy_paths(repo: Path, state: Path, seen: list[list[str]], *,
@@ -417,15 +332,6 @@ def _held_roots(paths: LoopPaths) -> list[str]:
 def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
     tmp_path, monkeypatch, caplog, extra,
 ):
-    """`_maybe_trigger_author(..., label=AUTHOR)` over a queue the gate holds: while the curator's
-    batch runs (seen from inside its config build) this process holds exactly the roots of
-    `AUTHOR_DRAIN_LABEL.writable_trees(paths)` of the paths it was HANDED (a third mount the
-    label's list adds is held too); once the seam returns it holds nothing under the repo; and no handle
-    was used after a close (no `Bad file descriptor` in the log of a batch whose gate read the
-    corpus through it).
-
-    Catches: trees opened from a fresh `LoopPaths` (or the default list), trees opened outside
-    the seam or left open after it, and a lazy reader iterated past the close."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     caplog.set_level(logging.DEBUG)
     w = world(tmp_path)
@@ -456,10 +362,6 @@ def test_the_trigger_holds_the_labels_mounts_only_while_the_batch_runs(
 
 @pytest.mark.parametrize("fault", ["RuntimeError", "OSError"])
 def test_the_trigger_releases_the_trees_when_the_batch_raises(tmp_path, monkeypatch, fault):
-    """The curator's batch raises inside the seam (from its config build): a `RuntimeError`
-    propagates out of the seam as itself; an `OSError` is `_run_curator_module`'s swallowed
-    crash (rc=None, the seam returns). Either way the trees were held while it ran and are closed
-    after."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     w = world(tmp_path)
     seen: list[list[str]] = []
@@ -479,9 +381,6 @@ def test_the_trigger_releases_the_trees_when_the_batch_raises(tmp_path, monkeypa
 
 
 def test_below_the_threshold_nothing_is_held(tmp_path, monkeypatch):
-    """Under the threshold the seam returns before the open: neither corpus attribute is read
-    after the queue is seeded (the label's trees are never asked for), no batch runs, and
-    nothing is held."""
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "5")
     w = world(tmp_path)
     asked: list[str] = []
@@ -532,16 +431,6 @@ print(json.dumps({"rc": run.returncode, "stdout": run.stdout, "stderr": run.stde
 
 
 def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_path):
-    """E05/E05b, driven: the harness's own `materialize` over a scenario whose queue is empty
-    (no model is ever called), `init_git`, then `run_author` — in a subprocess, the way the
-    harness runs (its `_harness_util` import needs `evals/` on the path), under a deadline. It
-    reports rc 0 and raises nothing; the batch ran in the scratch repo (its author lock is
-    there); and nothing landed in the decoy state folder `DEFAULT_PATHS` is pointed at
-    (`DEFENDER_LEARNING_STATE_DIR`), so the run never reached the live checkout's paths.
-
-    Catches (E05): a harness that opens trees its scratch repo cannot hold (a mount point it
-    never made: `FileNotFoundError` out of `open_drain_trees`, before the reporting `try`); and
-    (E05b) one whose config is built over `DEFAULT_PATHS`, which takes its locks in the decoy."""
     evals = _harness().parent
     scenario = tmp_path / "scenario"
     scenario.mkdir()

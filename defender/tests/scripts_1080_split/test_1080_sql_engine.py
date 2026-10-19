@@ -29,10 +29,6 @@ GOLDEN = "sql"
 SQL = "defender-sql"
 LESSONS = "defender-lessons"
 
-# ======================================================================================
-# Locating the engines (dF0: by symbol; red until the move)
-# ======================================================================================
-
 
 def _sql_engine() -> str:
     """The moved sql engine, repo-relative: the one module under `defender/runtime/` defining the
@@ -65,10 +61,6 @@ def _packages(relpath: str) -> list[str]:
     return ["/".join(parts[: i + 1]) for i in range(len(parts))]
 
 
-# ======================================================================================
-# Fixed inputs
-# ======================================================================================
-
 _PAYLOAD = (b'[{"user": "alice", "n": 3, "host": {"name": "h1"}}, '
             b'{"user": "bob", "n": 5, "host": {"name": "h2"}}, '
             b'{"user": "alice", "n": 1, "host": {"name": "h1"}}]\n')
@@ -93,15 +85,9 @@ _CORPUS = {
 #: Each engine's one real invocation for the closure and tree-derivation runs.
 _REAL_RUN = {SQL: ((_QUERY,), _PAYLOAD), LESSONS: (("--tags",), b"")}
 
-# ======================================================================================
-# The one normaliser (capture and test both go through it)
-# ======================================================================================
 
 _SCRATCH = re.compile(r"[^\s\"']*defender-sql-[A-Za-z0-9_]{8}")
 _TRACEBACK = "Traceback (most recent call last):"
-#: CPython's own start-up warnings when it cannot locate its prefix. A `uv`-managed interpreter
-#: (CI's) prints them in the shims' minimal environment; the box image's `/usr/local` install,
-#: which the box lane stands in for, does not. They come from the interpreter, never the engine.
 _PREFIX_WARNING = re.compile(
     r"^(?:Could not find platform (?:in)?dependent libraries <(?:exec_)?prefix>"
     r"|Consider setting \$PYTHONHOME to <prefix>\[:<exec_prefix>\])\n", re.M)
@@ -154,10 +140,6 @@ def _check_all(records: dict[str, Any]) -> None:
         _check(key, value)
 
 
-# ======================================================================================
-# Trees: copies, foreign checkouts
-# ======================================================================================
-
 _SKIP = S.JUNK_DIRS | {"tests"}
 
 
@@ -204,10 +186,6 @@ def _at_module_scope(line: str) -> Callable[[Path], None]:
         path.write_text("".join(lines), encoding="utf-8")
     return edit
 
-
-# ======================================================================================
-# Children: the shim's interpreter, environments, runners
-# ======================================================================================
 
 #: `python3 <file> <args>` as a shim runs it, recording every code file executed.
 _TRACER = '''\
@@ -358,12 +336,6 @@ def _box_allowlist() -> tuple[str, ...]:
     return tuple(sorted(set(S.box_import_allowlist()) | extensions | stdlib_data))
 
 
-# ======================================================================================
-# The box closure check ([121]: the engine run as the shim runs it, by path, with the box mark,
-# under the import blocker, a real query; [72]; s120: preloads evicted, never trusted). Its names
-# avoid the blocker prelude's own (`_refused`, `_Blocker`), which share the `-c` namespace.
-# ======================================================================================
-
 _CLOSURE_BODY = '''
 import importlib, importlib.machinery, json, os, runpy, sys, traceback
 def _outside(name):
@@ -495,15 +467,6 @@ def _assert_caught(rep: dict[str, Any], name: str | None, what: str) -> None:
         assert any(name in f for f in found), (
             f"{what}: the check failed but never named `{name}`: {found}")
 
-
-# ======================================================================================
-# Static readers
-# ======================================================================================
-
-
-# ======================================================================================
-# Golden producers (the capture script runs each one at the base, under SPEC1080_AT_BASE)
-# ======================================================================================
 
 PRODUCERS: dict[str, Callable[[Path, Path], dict[str, Any]]] = {}
 
@@ -653,47 +616,18 @@ def _p_rows_names(tmp: Path, co: Path) -> dict[str, Any]:
             for case, flags in cases.items()}
 
 
-# ======================================================================================
-# Fixtures
-# ======================================================================================
-
-
 @pytest.fixture(scope="module")
 def co(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """One copy of the tree with the fixed lesson corpus, shared by the tests that only read it."""
     return _copy_tree(tmp_path_factory.mktemp("co"))
 
 
-# ======================================================================================
-# Tests
-# ======================================================================================
-
-
 def test_1080_defender_sql_answers_through_the_moved_engine_as_today(tmp_path, co):
-    """`bin/defender-sql`, run with `DEFENDER_DIR` set to the worktree's `defender/`, execs a file
-    that exists and answers a fixed SQL query over a fixed JSON input with the same stdout and
-    exit code as the base engine. Its `--help` text is unchanged.
-
-    Observed through the real shim on the box and host lanes: the query, a declared
-    positional-rows query and `--help`, each against the base golden, and on the box lane the
-    trace shows the moved engine (found by symbol) is what ran."""
     assert S.shim_exec_target(SQL).is_file(), f"bin/{SQL} execs a file that does not exist"
     _check_all(_p_survival(tmp_path, co))
 
 
 def test_1080_the_defender_sql_engine_imports_nothing_outside_the_box_image_closure(tmp_path, co):
-    """The engine `bin/defender-sql` execs runs under an interpreter that refuses every import
-    outside the standard library, `defender`, and the core and `box` dependencies, with
-    `DEFENDER_BOX=1`. It answers a fixed query, and no blocked module (`pydantic_ai`,
-    `anthropic`, `openai`, `mcp` and their kin) appears in `sys.modules`, including through any
-    package `__init__` on its path. The allowlist is derived from `pyproject.toml`'s core
-    dependencies and `box` extra.
-
-    The check (`_closure`) starts the wrapper the shim names, by path, as `__main__`, then
-    imports the engine by name so every package initialiser on its path runs inside the blocked
-    child; it reports every refused import, every blocked module present, and the initialisers
-    executed. Positive control in the same test: the same check over a copy whose engine
-    imports `pydantic_ai` fails and names it (box_closure_catches_heavy_import)."""
     allow = _box_allowlist()
     assert "pydantic_ai" not in allow, allow
     assert "duckdb" in allow, allow
@@ -707,13 +641,6 @@ def test_1080_the_defender_sql_engine_imports_nothing_outside_the_box_image_clos
 
 
 def test_sql_argument_shapes_the_shim_must_forward(tmp_path, co):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). An empty, whitespace-only, dash-leading, bare `--`,
-    non-ASCII SQL argument, or one followed by extra positionals reaches the engine unaltered and
-    produces the same status and output as before.
-
-    Through the real shim on the box lane; the base answers an empty or whitespace-only query with
-    a traceback (pinned by its last line). Each shape also runs once with the trace checked."""
     _check_all(_p_arg_shapes(tmp_path, co))
     rec, ran = _run_shim(tmp_path, SQL, ["SELECT 'é' AS e, '日本' AS j, \"user\" FROM data "
                                          "ORDER BY 3 LIMIT 1"], stdin=_PAYLOAD)
@@ -722,26 +649,12 @@ def test_sql_argument_shapes_the_shim_must_forward(tmp_path, co):
 
 
 def test_sql_stdin_closed_empty_or_huge(tmp_path, co):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). A closed, empty, huge single-line or non-text stdin yields
-    the same status and output as today.
-
-    Through the real shim on the box lane: stdin closed (descriptor 0 closed in the child: the
-    base answers a traceback, pinned by its last line), empty, whitespace, a 300 000-record
-    single line, and undecodable bytes with and without a declaration."""
     _check_all(_p_stdin(tmp_path, co))
     _rec_, ran = _run_shim(tmp_path, SQL, ["SELECT count(*) AS n FROM data"], stdin=_huge())
     _assert_answered_by(ran, S.REPO_ROOT / _sql_engine(), "a huge stdin")
 
 
 def test_rows_and_names_flags_unpaired_or_unreadable(tmp_path, co):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). One of `--rows`/`--names` alone, or both naming a missing
-    file, directory, unreadable file or a file outside the run, gives the same input-error status
-    and message as today.
-
-    At the base `--rows` and `--names` are paths INTO the payload, never files: a file path is a
-    key that does not resolve. Pinned as the base answers it, through the real shim."""
     _check_all(_p_rows_names(tmp_path, co))
     _rec_, ran = _run_shim(tmp_path, SQL, ["--rows", "values", "SELECT 1"], stdin=_POSITIONAL)
     _assert_answered_by(ran, S.REPO_ROOT / _sql_engine(), "an unpaired flag")
@@ -749,18 +662,4 @@ def test_rows_and_names_flags_unpaired_or_unreadable(tmp_path, co):
 
 def test_1080_the_sql_engine_gives_one_verdict_per_argv_on_the_box_lane_and_the_host_lane(
         tmp_path, co):
-    """For each lane that reaches `defender-sql` with model-authored argv (the box lane with
-    `DEFENDER_BOX` set, and the host lane under `run_common.run_env`) the same fixed table of argv
-    gets the same verdict from the moved engine: the `--rows` and `--names` flag allowlist admits
-    and refuses identically; a query that reaches duckdb's external access
-    (`read_csv('/etc/passwd')`, `COPY ... TO`) is refused on both lanes; and the engine starts
-    under that lane's own environment, with the checkout root importable, and answers. The shim
-    token gate is observed at the permission gate (s203) and is not re-asserted here.
-
-    Each lane's environment comes from its own builder (the box's `_render_env`, the host's
-    `run_env`) and the shim is reached by its token on that PATH. Every row's verdict is equal
-    across the lanes and to the base; no refused write lands; the box lane ran the moved
-    engine."""
     _check_all(_p_lanes(tmp_path, co))
-
-

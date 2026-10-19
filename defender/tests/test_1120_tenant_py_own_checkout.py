@@ -9,10 +9,6 @@ from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
 
 def test_a_decoy_tree_earlier_on_pythonpath_is_not_imported(tmp_path: Path) -> None:
-    """A decoy checkout — a `defender/` namespace tree whose `_tenant` refuses to import —
-    placed BEFORE this checkout on `PYTHONPATH`: `check --folder` over the fixture still runs
-    this checkout's code and exits 0. The precondition: with that path, a plain
-    `import defender._tenant` does reach the decoy."""
     decoy = tmp_path / "decoy"
     (decoy / "defender").mkdir(parents=True)
     (decoy / "defender" / "_tenant.py").write_text(

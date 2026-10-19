@@ -89,9 +89,6 @@ _FORGE = ("forge", {"forged_id": "fg-1", "fact_id": "f1", "system": "idp",
 
 
 def test_a_tool_called_after_a_refused_submit_is_still_answered(tmp_path):
-    """Finding 1: a reply of [submit, forge] whose submit is refused left forge unanswered, and
-    the provider refused every later request of the conversation — the call went unservable.
-    The agent loop answers every call of the reply, so the retry goes out and is served."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     model = ProviderLikeModel(
@@ -125,9 +122,6 @@ def test_a_tool_called_after_submit_is_answered_but_not_run(tmp_path):
 
 
 def test_a_tool_called_after_one_that_ended_the_attempt_is_still_answered(tmp_path):
-    """Finding 1, the tool path: `python` with no sandboxed box ends the attempt; a forge in
-    the same reply after it was never answered. It now is (as not run), and the next attempt
-    is served."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
 
@@ -146,9 +140,6 @@ def test_a_tool_called_after_one_that_ended_the_attempt_is_still_answered(tmp_pa
 
 
 def test_a_hung_verifier_is_cut_off_by_the_turn_deadline(tmp_path):
-    """Finding 2: the verifier's requests ran with no deadline, while the investigator's clock
-    was paused, so a hung provider stream hung the sibling. They now run under the same guard
-    as the oracle's: the pass ends at the deadline and the attempt fails, naming why."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
@@ -183,9 +174,6 @@ def test_a_call_after_the_world_went_unservable_reports_the_failing_call(tmp_pat
 
 
 def test_the_advisory_check_resolves_the_base_handle_as_submit_does(tmp_path):
-    """Finding 6: `check(served="$BASE")` diffed the base against the literal string and
-    reported a shape change, while the same submission passed at `submit`. Both run one host
-    checker, which resolves the handle."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.check(oracle_mod.BASE_HANDLE, S.EMPTY_CLAIM),
@@ -199,9 +187,6 @@ def test_the_advisory_check_resolves_the_base_handle_as_submit_does(tmp_path):
 
 
 def test_an_oracle_side_query_runs_in_the_context_of_the_call_whose_turn_it_is(tmp_path):
-    """Finding 7: a call entering the registry overwrote the shared context before it queued
-    for the turn lock, so the turn already running issued its remaining oracle-side queries in
-    the newcomer's context. The context now belongs to the turn, set under the lock."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     est.answer("idp", "query", BOB, BOB_ROWS)
@@ -230,9 +215,6 @@ def test_an_oracle_side_query_runs_in_the_context_of_the_call_whose_turn_it_is(t
 
 
 def test_stopping_an_oracle_box_removes_its_scratch_folder(tmp_path):
-    """Finding 10: each box's host scratch folder was kept in a module-wide map that nothing
-    cleared, and teardown removed only the container. The box now owns its folder, and
-    stopping it removes both — the folder even when the container's removal fails."""
     removed: list[list[str]] = []
 
     def docker(argv: list[str], **_kw: Any) -> subprocess.CompletedProcess:
@@ -288,17 +270,11 @@ def _shape_failures(*, frozen: dict, staged: dict) -> list[str]:
 
 
 def test_a_frozen_row_is_not_re_judged_against_real_data_seen_since_it_froze():
-    """Second-round finding 1: real data seen after a row froze (a column it lacks) failed
-    check 2 on every later call serving it, and a frozen row cannot be changed — the world went
-    unservable. Check 2 judges fresh rows only; the same row fresh still fails (control)."""
     assert _shape_failures(frozen={"fg-1": _FROZEN}, staged={}) == []
     assert _shape_failures(frozen={}, staged={"fg-1": _FROZEN}) != []
 
 
 def test_re_forging_a_frozen_row_reuses_it_instead_of_staging_a_copy(tmp_path):
-    """Second-round finding 9: re-forging a frozen row with its exact content staged a copy,
-    and a row both frozen and staged escaped check 3 (frozen) and the collision recorder
-    (staged). A row is now fresh or frozen, never both."""
     est = S.estate(tmp_path)
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(),
                            verifier=S.passing_verifier())
@@ -313,9 +289,6 @@ def test_re_forging_a_frozen_row_reuses_it_instead_of_staging_a_copy(tmp_path):
 
 
 def test_the_verifier_is_shown_a_large_unchanged_answer_once_and_capped(tmp_path):
-    """Second-round finding 2: the oracle saw a large base answer capped, but the verifier was
-    handed it in full twice (base and served), past what a request carries. Every prompt frames
-    answers through one capped renderer, and an unchanged answer is not sent a second time."""
     est = S.estate(tmp_path)
     big = {"rows": [{**_REAL_ROW, "event_id": f"e-{n:06d}", "note": "x" * 60}
                     for n in range(4000)]}
@@ -331,9 +304,6 @@ def test_the_verifier_is_shown_a_large_unchanged_answer_once_and_capped(tmp_path
 
 
 def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
-    """Second-round finding 6: the deadline bounded model requests only, so a tool running
-    long (a hung tenant read, a box run) held the turn — and the investigator's paused clock —
-    past it. One deadline now covers the whole attempt, tools included."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
 
@@ -355,9 +325,6 @@ def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
 
 
 def test_an_unpriced_model_is_refused_before_any_request(tmp_path):
-    """Second-round finding 5: a model with no pricing row was charged $0 per response, so the
-    oracle's budget never bounded it. Its price is settled when the oracle is configured, and
-    a model with none is refused before any request goes out."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     model = ProviderLikeModel([("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})],
@@ -377,10 +344,6 @@ def _configure_and_ask(tmp_path: Path, est: Any, oracle: Any, verifier: Any) -> 
 
 
 def test_an_undelivered_control_world_call_leaves_no_row(tmp_path):
-    """Second-round finding 7: the no-facts (control) world wrote its passthrough row itself,
-    without the rule that an undelivered call leaves no row (N12). Every delivered row now goes
-    through one recorder. (#1255 D3: the live read takes the control world's oracle turn, which
-    serves it unchanged.)"""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     ep = S.episode_v2(tmp_path)
@@ -442,9 +405,6 @@ def _checks(base: Any, served: Any, claim: dict, *, staged: dict | None = None,
 
 
 def test_an_esql_side_query_selects_its_rows_not_its_columns():
-    """Fourth-round finding 3: check 5 counted the first list in a side query's answer, which
-    for ES|QL is `columns`: a removal selecting 2 rows over 4 columns read as 4. It counts the
-    answer's rows, and finds the removed row among them."""
     base = _esql(_ESQL_ROWS)
     served = _esql(_ESQL_ROWS[:1])
     side = {"system": "s", "verb": "esql", "params": {"query": "FROM logs-* | WHERE host == 1"}}
@@ -480,9 +440,6 @@ _REAL_EVENT = {"@timestamp": "2026-03-01T09:00:00Z", "event": {"action": "exec"}
 
 
 def test_a_nested_real_identifier_reused_by_a_forged_row_fails_check_3():
-    """Fourth-round finding 4: check 3 judged only a forged row's top-level scalars, so a
-    nested id (`process.entity_id`) copied from a real event passed. Rows are judged by their
-    flat columns; the same row with a fresh id passes (control)."""
     base = {"hits": [_REAL_EVENT]}
 
     def forged(entity_id: str) -> list[str]:
@@ -499,9 +456,6 @@ def test_a_nested_real_identifier_reused_by_a_forged_row_fails_check_3():
 
 
 def test_a_frozen_row_s_nested_id_collision_is_recorded():
-    """Fourth-round finding 4, the collision record: a frozen row serving a nested id that
-    real data carries was never recorded for the judge. It is, with the column spelled flat,
-    off the submission's own structural diff."""
     from defender.learning.branch.estate.checks import frozen_id_collisions, run_checks
 
     row = {"@timestamp": "2026-03-01T09:30:00Z", "event": {"action": "exec"},
@@ -588,9 +542,6 @@ def test_the_python_box_is_stopped_when_the_attempt_that_used_it_ends(tmp_path):
 
 
 def test_a_deadline_abandoned_python_frame_does_not_share_the_next_attempts_box(tmp_path):
-    """Finding 9: by the time `_attempt` asked whether python was busy, the cancelled tool had
-    cleared the flag, so the abandoned frame's box was kept and the next attempt ran in it. The
-    attempt that the deadline ends stops its box (ending the frame); the next starts its own."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     box, log = _python_box_factory(tmp_path, slow_first=1.5)
@@ -692,9 +643,6 @@ def test_an_oracle_turn_holds_the_clock_only_while_it_is_open(tmp_path):
 
 def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort(tmp_path,
                                                                                monkeypatch):
-    """Finding 7, second half: `oracle_turn_closed` raising in the turn's `finally` replaced an
-    in-flight `OracleUnservable`, which was then filed as a fault row instead of ending the
-    sibling. The abort leaves the turn as itself."""
     from defender.learning.branch.estate import registry as registry_mod
 
     closed: list[Any] = []
@@ -719,9 +667,6 @@ def test_a_failure_closing_the_oracle_mark_does_not_replace_the_unservable_abort
 
 
 def test_an_unpriced_verifier_is_refused_before_the_oracles_first_request(tmp_path):
-    """Finding 6: the verifier's price row was settled only when its agent was first built,
-    after the oracle's paid attempt, so pre-flight paid and then aborted. Both roles' rows are
-    settled when the oracle is configured, before any request."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     model = ProviderLikeModel([("submit", {"served": ALICE_ROWS, "claim": S.EMPTY_CLAIM})])
@@ -855,9 +800,6 @@ def test_a_star_count_does_not_cover_an_edit_to_a_real_rows_field():
 
 
 def test_one_count_entry_accounts_for_one_count_cell():
-    """Fifth-round finding 2, consumption: one count entry covered every changed count cell
-    with its base and served. Two totals moving 1 -> 2 need two entries; with two, the answer
-    passes (control)."""
     base = {"hits": {"total": 1}, "aggregations": {"all": {"value": 1}}}
     served = {"hits": {"total": 2}, "aggregations": {"all": {"value": 2}}}
     star = {"group": "*", "base": 1, "added": 1, "removed": 0, "served": 2}
@@ -873,9 +815,6 @@ class _NoScan(list):
 
 
 def test_a_declared_reference_is_found_by_value_not_by_scanning_every_real_row():
-    """Fifth-round finding 15: an entity reference was confirmed by scanning every flat real
-    row, though `RealData.by_value` indexes rows by value. It is looked up by value; the
-    reference still exempts the reused id."""
     real_row = {"user": "alice", "user_id": "u-4410", "event_id": "e-100"}
     real = RealData(answers=[("s", {"rows": [real_row]})])
     real.maps = _NoScan(real.maps)
@@ -894,9 +833,6 @@ def test_a_declared_reference_is_found_by_value_not_by_scanning_every_real_row()
 
 
 def test_a_result_that_returned_as_the_deadline_fired_is_completed():
-    """Fifth-round finding 9: `_within_deadline` reported `(False, result)` whenever its scope
-    caught the deadline's cancel, so a work() that had returned (a verified submission) as the
-    cancel landed was thrown away as 'the turn deadline passed'. A returned result wins."""
     import anyio
 
     run = oracle_mod._Run(door=None, deadline=0.0)  # type: ignore[arg-type]
@@ -1004,9 +940,6 @@ def test_a_limiter_failing_closed_under_an_oracle_query_is_a_failed_attempt(tmp_
 
 
 def test_a_broken_serving_machine_makes_the_world_unservable_not_a_fault_row(tmp_path):
-    """Fifth-round finding 10, the other tier: any other error escaping an attempt (here the
-    door's verb lookup breaking) reached the investigator as itself. It is logged and the call
-    ends unservable (`fault`), a `ServingAbort` that never becomes a fault row."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
     o = S.oracle(S.run_query("idp", "lookup", {"entity": "alice"}),
@@ -1026,9 +959,6 @@ def test_a_broken_serving_machine_makes_the_world_unservable_not_a_fault_row(tmp
 
 
 def test_a_trace_append_that_failed_part_way_is_counted_once_on_resume(tmp_path):
-    """Fifth-round finding 12: after an append that landed its first row whole and tore the
-    second, the next charge rewrote both, and a resumed store counted the first row twice.
-    Each trace row carries an id and is counted once: the resumed `spent` is exact."""
     from defender._io import write_guarded
 
     store = oracle_mod.OracleStore(tmp_path / "oracle")
@@ -1110,12 +1040,6 @@ def test_a_bad_oracle_setting_is_refused_before_the_question_writer(tmp_path, mo
     assert run.rc != 0
     assert named in run.message, run.message
     assert questioner.calls == 0, "the question-writer was paid for before the refusal"
-
-
-# --------------------------------------------------------------------------------------
-# Sixth round: the oracle box binds nothing of the repository; the oracle's clock state is
-# host state the box cannot write.
-# --------------------------------------------------------------------------------------
 
 
 def test_the_oracle_box_binds_nothing_of_the_repository_and_no_env_file(tmp_path, monkeypatch):
@@ -1314,10 +1238,6 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
     assert not (ep / "outcome.yaml").exists()
 
 
-# --------------------------------------------------------------------------------------
-# Seventh round (finding 5): a sibling's re-ask of a pre-branch call is held to M01=A.
-# --------------------------------------------------------------------------------------
-
 #: A base answer whose columns a forged row can share (check 2), and that row (check 3: an id no
 #: real answer holds) — the shape the serving suite forges onto.
 _PB_BASE = {"rows": [{"action": "logon", "event_id": "e-100", "user": "alice"}]}
@@ -1373,9 +1293,6 @@ def test_a_sibling_s_changed_answer_to_a_pre_branch_call_is_refused_and_retried(
 
 
 def test_an_oracle_that_only_changes_a_pre_branch_call_makes_it_unservable(tmp_path):
-    """Seventh-round finding 5, the other end: an oracle that changes the pre-branch call on
-    every attempt spends `retry_cap` and the call is unservable — as the world would have
-    failed pre-flight — with no verifier pass paid and no answer served."""
     o = S.oracle(*_pb_change(), then=S.submit(_PB_CHANGED, _PB_CLAIM))
     v = S.passing_verifier()
     reg, ctx = _pb_registry(tmp_path, o, v, prebranch=True, retry_cap=2)
@@ -1400,9 +1317,6 @@ def test_a_post_branch_call_can_still_be_changed(tmp_path):
 
 
 def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
-    """Seventh-round finding 5, one rule for two callers: the sibling's `WorldRegistry` is
-    handed the source run's pre-branch calls by the same derivation pre-flight's `fixed` reads
-    (`prebranch_calls`): the inherited lead's calls, not the post-branch lead's."""
     from defender import run
     from defender.learning.branch.estate.registry import prebranch_calls
     from defender.learning.branch.ledger import request_key
@@ -1480,9 +1394,6 @@ def _ids_check(real_rows: list[dict], forged: dict) -> list[str]:
 
 
 def test_a_forged_id_collides_only_with_a_real_identifier():
-    """Seventh round (re-ruled M14/M12): a forged id-like value collided with ANY real scalar,
-    so a forged `pid: 1` failed because a real row carried an unrelated `total: 1`. It collides
-    only with a real value that sat in an id-like column (or is UUID / long-hex shaped)."""
     real = [{"pid": 4242, "total": 1}]
     assert _ids_check(real, {"pid": 1, "total": 5}) == []
     reused = _ids_check(real, {"pid": 4242, "total": 5})
@@ -1497,9 +1408,6 @@ def test_a_forged_id_collides_only_with_a_real_identifier():
 
 
 def test_a_frozen_row_records_only_collisions_with_real_identifiers():
-    """Seventh round (re-ruled M14/M12): the frozen-row collision record used the same
-    any-scalar rule, recording `pid: 1` against an unrelated `total: 1`; it now records only a
-    real identifier, with the rows holding it as one."""
     from defender.learning.branch.estate.checks import frozen_id_collisions, run_checks
 
     row = {"pid": 1, "user_id": "u-9", "total": 2}

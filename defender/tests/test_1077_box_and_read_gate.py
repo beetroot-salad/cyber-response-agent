@@ -23,9 +23,6 @@ def worktree(tmp_path: Path) -> Path:
     """A defender tree that is NOT this process's own checkout."""
     tree = tmp_path / "worktree" / "defender"
     (tree / "skills").mkdir(parents=True)
-    # The verb registry reads the adapters directory of the tree it compiles for (a role's
-    # declared systems); a tree with none is `RegistryError` before any policy exists. The
-    # real adapters, under the fake tree.
     from defender._paths import PATHS
     shutil.copytree(PATHS.defender_dir / "scripts" / "adapters", tree / "scripts" / "adapters")
     # The corpus-author role binds to a per-spawn corpus under the tree; give it one to name.
@@ -53,9 +50,6 @@ def _policies(run_dir: Path, defender_dir: Path) -> dict[str, object]:
 
 
 def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
-    """Each of the six per-name denies — `gather_raw` by shape, `wire_logs/` outright,
-    `provenance.json` outright, the case answer key for confined roles, the denylist and the
-    payload read cap — refuses for every role."""
     from defender.run_repository import CASE_ANSWER_KEY_NAMES, RUN_LAYOUT
     from defender.runtime import permission
 
@@ -89,9 +83,6 @@ def test_the_six_per_name_denies_hold_for_every_role(run_dir, worktree):
                 allowed.append(f"{role} may read {why} ({path})")
     assert allowed == [], "\n".join(allowed)
 
-    # POSITIVE CONTROL: the denies are not a blanket refusal — an ordinary run-dir read that
-    # names none of the six is allowed for the role that owns it. Without it every arm above
-    # is green on a policy that refuses everything.
     main = policies["MAIN"]
     assert permission.decide_read(
         run_dir / "alert.json", run_dir=run_dir, defender_dir=worktree, policy=main).allow, (
@@ -128,9 +119,6 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
     assert "target=/runs/current" in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
         "wire protocol with the model, and the run dir stays its one rw bind (at /runs/current)")
     readonly = [m for m in mounts if "readonly" in m]
-    # the defender tree and, since #1222, the run's input directory are the two named read-only
-    # binds; #1255 (design rev 4, "Time / Into the box") allows ONE more — the run clock's own
-    # mount (slice D asserts its shape) — whose target lies outside the model view's three trees.
     assert any(f"source={DEFENDER}," in m and "target=/defender," in m for m in readonly)
     assert any(f"source={run_dir / 'alert_input'}," in m
                and "target=/runs/current/alert_input," in m for m in readonly)
@@ -155,9 +143,6 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
 
 
 def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
-    """The layout owner, served by the runs repository's door `defender.run_repository` since
-    #1105, imports with no third-party package installed and names the sentinel, and `RunPaths`
-    is a stdlib dataclass (D1)."""
     from defender._paths import PATHS
     from defender.tests._import_blocker import run_blocked
 

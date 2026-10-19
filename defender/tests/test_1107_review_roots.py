@@ -29,10 +29,6 @@ def _ctx(record, where: Path, shim: S.DockerShim):
     return S.verb_context(record, run_dir, shim.env())
 
 
-# ======================================================================================
-# 1 — reach is never guessed; Kibana is optional to the health check.
-# ======================================================================================
-
 def test_health_check_reports_missing_kibana_container_as_data(tmp_path):
     """An elastic config with no ELASTIC_KIBANA_CONTAINER: the health check still returns the
     green Elasticsearch answer, says Kibana is not configured, and spawns no Kibana call."""
@@ -65,14 +61,7 @@ def test_transport_lanes_require_a_named_system(tmp_path, call):
     assert shim.calls() == []
 
 
-# ======================================================================================
-# 2 — faults: worded without the host path.
-# ======================================================================================
-
 def test_settings_faults_name_no_host_path(tmp_path):
-    """Every settings fault the resolver or an adapter words names the file by the settings
-    pointer, never by its absolute path: a non-UTF-8 config, a missing system folder, a missing
-    required key (stub and elastic), and an unreadable case-history mapping."""
     from defender.scripts.adapters import cmdb_adapter
 
     root, folder = _tenant(tmp_path, "pth")
@@ -105,10 +94,6 @@ def test_settings_faults_name_no_host_path(tmp_path):
         assert _POINTER in text, f"{arm}: the fault does not name the file by the pointer: {text!r}"
 
 
-# ======================================================================================
-# 3 — one way to read a settings file.
-# ======================================================================================
-
 def test_lone_cr_line_endings_parse_as_lines(tmp_path):
     """A config.env written with lone-CR line endings parses line by line, the way the connect
     validator (universal newlines) reads it."""
@@ -138,9 +123,6 @@ def test_oversized_config_is_that_system_down_not_a_crash(tmp_path):
 
 @pytest.mark.parametrize("alias", ["hard link", "symlink"])
 def test_the_config_reader_refuses_an_aliased_file(tmp_path, alias):
-    """Tenant acceptance walks the folder for links before resolve, but a link swapped in after
-    that walk reaches the reader: it refuses a hard-linked or symlinked config.env itself, as the
-    run-dir readers do, rather than reading another file's bytes."""
     from defender.runtime import tenant_settings
 
     other = tmp_path / "other.env"
@@ -155,9 +137,6 @@ def test_the_config_reader_refuses_an_aliased_file(tmp_path, alias):
 
 
 def test_an_opened_file_renamed_over_still_reads(tmp_path):
-    """A settings file replaced by write-then-rename while a read has it open: the reader sees
-    its link count drop to 0, and that is still a plain file to read — the repo's one rule
-    (`_io.is_plain_entry`) refuses more than one name, never zero."""
     from defender.runtime import tenant_settings
 
     path = tmp_path / "config.env"
@@ -171,14 +150,7 @@ def test_an_opened_file_renamed_over_still_reads(tmp_path):
         os.close(fd)
 
 
-# ======================================================================================
-# 5 — the receipt is out of the box's reach (third review: it moved beside the run dir).
-# ======================================================================================
-
 def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_path):
-    """The receipt is a sidecar in the runs base, never inside the run dir the box is root on.
-    Whatever the box leaves in the run dir — a directory or a forged success at the old in-tree
-    name — neither blocks the host's write nor reaches the page."""
     from defender.scripts.case_history import ticket_writer
     from defender.scripts.visualize import visualize_run
 
@@ -214,14 +186,7 @@ def test_deeply_nested_receipt_is_unreadable_at_any_depth(tmp_path):
     assert visualize_run.RECEIPT_UNREADABLE in line, line
 
 
-# ======================================================================================
-# Second review: routing, stored faults, the validator, the ignore rule.
-# ======================================================================================
-
 def test_elasticsearch_calls_never_route_to_kibana_by_url(tmp_path):
-    """An Elasticsearch-only tenant whose KIBANA_URL equals its ELASTICSEARCH_URL (a placeholder
-    for a required key) still has its searches run in the Elasticsearch container: which
-    service a call addresses is the caller's statement, never a URL-prefix guess."""
     root, folder = _tenant(tmp_path, "kpx")
     S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
     es_url = S.config_path(folder, "elastic").read_text(encoding="utf-8").split(
@@ -273,9 +238,6 @@ def _validate(tmp_path: Path, extra: str) -> list[tuple[str, str]]:
     'MYSYS_TOKEN_SECRET_REF="ghp-AbC!d3f@xyz"\nMYSYS_TOKEN_SECRET_REF=""\n',
 ], ids=["export line", "overridden duplicate", "overridden reference"])
 def test_validator_finds_secrets_on_lines_the_run_ignores(tmp_path, extra):
-    """A secret on an `export` line, or on a line a later duplicate overrides, is ignored by the
-    run but still sits in the tracked file: the validator FAILs it and does not also claim the
-    file carries no inline secrets."""
     rows = _validate(tmp_path, extra)
     assert any(s == "FAIL" for s, _ in rows), rows
     assert ("PASS", "config.env carries no inline secrets") not in rows, rows
@@ -289,11 +251,6 @@ def _raised(fn, *args, **kw):
     return None
 
 
-# ======================================================================================
-# Third review: a verb over no record, env parameters, unreadable settings, one prefix.
-# ======================================================================================
-
-
 def _two_systems(tmp_path: Path) -> Path:
     settings = tmp_path / "settings"
     for name in ("alpha", "beta"):
@@ -304,9 +261,6 @@ def _two_systems(tmp_path: Path) -> Path:
 
 
 def test_an_unlistable_systems_folder_configures_no_system(tmp_path, monkeypatch, caplog):
-    """`settings/systems/` that has lost its read permission after acceptance: the resolver
-    warns and configures no system, never a raw PermissionError out of run.py. (Tests run as root,
-    where permission bits are ignored, so the refusal is induced at the listing call.)"""
     from defender.runtime import tenant_settings as ts
 
     settings = _two_systems(tmp_path)
@@ -343,5 +297,3 @@ def test_an_unexaminable_system_folder_is_that_system_down(tmp_path, monkeypatch
     assert systems["alpha"]["ALPHA_URL_BASE"] == "http://alpha:1"
     assert isinstance(systems["beta"], ConfigFault), systems["beta"]
     assert str(tmp_path) not in str(systems["beta"]), "the fault names the host path"
-
-

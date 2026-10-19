@@ -1,24 +1,3 @@
-"""#754 — the demands that bind OUTSIDE `session_store.py`, driven end to end. (The third,
-"the pointer path is trusted verbatim across a relocated run dir", retired with the relocation
-contract in #1235: the case link is host state beside the run folder, not in a copy of it.)
-
-Flat under `defender/tests/` for the same mechanical reason `test_store_driver_705.py` is:
-`check_binds` globs the suite dir non-recursively, so a `discharged_by` pointing into
-`tests/e2e/` resolves to nothing and the demands' prose becomes unscannable.
-`pytestmark = pytest.mark.e2e` keeps these in the same marker lane as the other replay
-scripts.
-
-Every scenario is a few lines of `Turn(...)` against `_replay_harness`: the real agent loop,
-the real tools, the real permission gate, the real store — with the store handed in through
-the `store_factory` seam, and nothing patched.
-
-**RED AGAINST `1cecad37` IS THE EXPECTED STATE.** `run_investigation` calls its store factory
-during SETUP, outside the run loop's `except (sqlite3.Error, StoreError)` handler
-(driver.py:520-526, c19/C11), so once the version check moves into `open_store` a stale file
-takes the whole `run.py` process down instead of ending the run through the handled
-`truncated_by = "store"` exit. That is the one place in this change where a store-level
-decision can kill a production process.
-"""
 from __future__ import annotations
 
 import pytest
@@ -56,11 +35,6 @@ SALT = "0011223344556677"
 
 def test_a_gather_leg_session_carries_its_own_head_like_any_other_session(tmp_path):
     """A dispatched gather leg gets a `session` row of its own, so it carries a head like any"""
-    # provenance: correction C3 (binding): the design's scope sentence 'gather legs are not
-    # sessions and get no head of their own' is false as written — driver.py:428 runs
-    # new_session per dispatched leg (c11, refuted). P93, P91 (two sessions moving their own
-    # heads on one shared connection cannot cross-contaminate; the seq-collision rider is
-    # settled by PR-23, executed, with zero cross-session interference) and P92.
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='leg-head')
     opened: list = []
     main = ReplayFn([

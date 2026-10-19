@@ -46,11 +46,6 @@ _OTHER = {"native_query": "FROM other"}
 _CORRECTED = q("elastic", "query", {"native_query": "FROM corrected"})
 
 
-# ======================================================================================
-# The registry. Its payload names the run that asked and how many calls it has answered, so
-# a payload file overwritten by a later call is visible byte for byte.
-# ======================================================================================
-
 class Asked:
     """What the injected `elastic.query` verb was asked, and what it saw of the run's state."""
 
@@ -95,13 +90,6 @@ def _rows(run_dir: Path, lead: str = LEAD) -> list[dict]:
             if r.get("lead_id") == lead]
 
 
-# ======================================================================================
-# R1 — the branched sibling. The source's `l-001` rows are rows a REAL run wrote (so the guards'
-# request identity is the writer's, not a hand-built approximation), moved into a legal branch
-# source (`_branch_947.planted_source`: a store, a case link, an alert, the golden document;
-# not the N4 fixture — the implementer's fixture-only snapshot planting may snapshot it).
-# ======================================================================================
-
 def _real_rows(root: Path, gather_turns: list[Turn]) -> tuple[list[dict], dict[str, bytes]]:
     """`l-001`'s rows and payload files as a fresh real run writes them for `gather_turns`."""
     run_dir = materialize(root, GOLDEN_AB3, run_id='r1235-v2-source-rows')
@@ -124,10 +112,6 @@ class Branched:
     def __init__(self, tmp_path: Path, rows: list[dict], payloads: dict[str, bytes]) -> None:
         assert rows, "the source run wrote no l-001 rows — nothing below is inherited"
         self.rows, self.payloads = rows, payloads
-        # #1255 P2: the payload files land BEFORE `planted_source` builds the source (its
-        # folder is made with `exist_ok`), so a fork snapshot of the source records them as
-        # what it held at its branch point; written after, the snapshot holds no such file and
-        # the sibling's restore has nothing to copy.
         source = runs_base(tmp_path) / SOURCE_RUN
         for rel, data in payloads.items():
             (source / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -138,9 +122,6 @@ class Branched:
         assert planted == source, (planted, source)
         assert not (source / "gather_raw" / f"{LEAD}.lead.json").exists(), (
             "the legal source carries a claim for l-001, so the sibling could not re-dispatch it")
-        # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN
-        # the pre-#1255 shape branched at (`_branch_947.LEGACY_BRANCH_CALL`). The source is
-        # hand-planted (`planted_source`, not the N4 fixture) — see `_branch_947`'s fixture rule.
         self.spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
         store.close()
         self.sibling = tmp_path / "defender-runs" / "run-sibling-1235"
@@ -164,9 +145,6 @@ def _two_same(tmp_path: Path) -> Branched:
 
 
 def test_the_siblings_state_holds_its_inherited_rows_from_its_first_call(tmp_path):
-    """R1: the sibling's first query already sees, on the state its verb context carries, the two
-    `l-001` rows the sibling inherited — exactly the rows seeding wrote into its table — and
-    that state is the one the driver hands back."""
     branched = _two_same(tmp_path)
     asked = Asked("sibling")
     summary = branched.resume(main=_main(LEAD),
@@ -223,9 +201,6 @@ def test_a_siblings_next_row_takes_the_seq_after_its_inherited_rows(tmp_path):
 
 
 def test_the_rejection_budget_counts_inherited_rejections(tmp_path):
-    """R1: with one capture and `REJECTION_BUDGET - 1` above-guard rejections inherited on
-    `l-001`, the sibling's first rejection spends the budget: the lead is ended and the
-    corrected call scripted after it never reaches the backend."""
     rows, payloads = _real_rows(tmp_path / "rows",
                                 [q("elastic", "query", _SAME), *[_rejected(i) for i in range(B - 1)]])
     assert len(rows) == B, "the source run did not write a capture and B-1 rejections"
@@ -243,9 +218,6 @@ def test_the_rejection_budget_counts_inherited_rejections(tmp_path):
 
 
 def test_a_failed_reducer_over_an_inherited_payload_is_recorded_with_its_system(tmp_path):
-    """R1, the arm a production sibling reaches as is: a NEW lead reduces an inherited payload
-    (`cat gather_raw/l-001/0.json | defender-sql …`) and the reducer fails; its shim row
-    carries the inherited payload's system, `elastic`, read off the run's state."""
     branched = _two_same(tmp_path)
     sib = branched.sibling
     own_payload = sib / "gather_raw" / NEW_LEAD / "0.json"
@@ -269,10 +241,6 @@ def test_a_failed_reducer_over_an_inherited_payload_is_recorded_with_its_system(
     assert by_sql.get(False) == "elastic", (
         "a reducer over an inherited payload was recorded without that payload's system")
 
-
-# ======================================================================================
-# R2 — the state is carried, never looked up.
-# ======================================================================================
 
 class Probe:
     """A `cmdb.probe` verb that keeps the `RunState` each call's context carried."""
@@ -305,10 +273,6 @@ def _pool_script(run_dir: Path, *, run_id: str, probe: Probe) -> dict:
 
 
 def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
-    """R2: a run whose folder is reached through a symlinked data root keeps one state: the
-    gather lead's verb context carries the very object the driver returns, and that object
-    counts MAIN's calls and the lead's together (four calls, one spawn) and holds the lead's
-    two rows — the rows the table holds, ..."""
     real = tmp_path / "real"
     real.mkdir()
     link = tmp_path / "link"
@@ -351,10 +315,6 @@ def test_two_runs_with_one_run_id_in_one_process_share_no_state(tmp_path):
     assert list(second.lead_rows(LEAD)) == []
 
 
-# ======================================================================================
-# R4 — the state is released with the run.
-# ======================================================================================
-
 def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path):
     """R4: after the run returns and the caller drops what `drive()` returned, no process-wide
     reference keeps the run's state — a weak reference to it dies at the next collection."""
@@ -383,10 +343,3 @@ def test_nothing_holds_the_runs_state_once_the_caller_drops_the_result(tmp_path)
     gc.collect()
     assert answered == ["FROM hosts"]
     assert ref() is None, "something in the process still holds the run's state after the run"
-
-
-# ======================================================================================
-# R5 — a run recorded before #1235 is refused at every reader of its case link.
-# ======================================================================================
-
-

@@ -13,10 +13,6 @@ from defender.runtime import close_tool
 from defender.tests import _tacit983 as scene
 from defender.tests._tenants1106 import fixture_run_tenant
 
-#: The second baseline in the two-row fixture: a different anchor id, a different window and a
-#: different count. Everything the render is asserted to carry differs between the two rows, so
-#: a renderer emitting one row's values twice — or a projection handing back one canned
-#: receipt per row — is visible.
 WINDOW_90D = "2026-02-04T00:00:00Z/2026-05-04T00:00:00Z"
 ANCHOR_90D = "tk-baseline-90d"
 RESULT_90D = "4100 occurrences over 90d; actor uid-0 and host build-runner-07.prod throughout"
@@ -34,10 +30,6 @@ def _receipts(text: str):
 
     return conclude_runtime_evidence_rows(parse_dense_companion(text)[0])
 
-#: A document carrying one qualifying baseline consultation and the receipted authz pair —
-#: the shape a benign close over a container-root case actually has. It carries TWO
-#: `:R consultations` rows (the lead's recorded registry hit and the baseline) and exactly ONE
-#: of them qualifies, which is what makes "the projection selects" a claim with a witness.
 BENIGN_DOC = scene.benign_document(rows=scene.authorized_rows(baseline=True))
 
 
@@ -121,10 +113,6 @@ def test_runtime_evidence_consultation_lands_in_report_body():
     assert body.count("runtime-evidence") == len(receipts), (
         "not one body line per receipt — a close with two baselines would render one of them"
     )
-    #: Asserted against the RECEIPT's own fields, not against the fixture's literals: the
-    #: property is that what the projection parsed is what the report shows. A body compared
-    #: to hand-copied constants passes for a renderer that ignores its argument and prints
-    #: them.
     for field in (receipt.window, receipt.anchor_id, receipt.resolved_by_lead):
         assert field in body, f"{field!r} was parsed into the receipt and never rendered"
     assert "1500 occurrences over 30d" in body, (

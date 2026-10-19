@@ -33,9 +33,6 @@ def _deps(tmp_path):
 
 
 def test_investigation_crosses_bound_mid_run(tmp_path):
-    """lc1 — at turn K only that call's full resulting text is evaluated: an under-bound
-    investigation commits, then an over-bound (but invlang-valid) write on the next turn is
-    denied for THAT call only, leaving the K-1 committed content untouched on disk."""
     deps, run = _deps(tmp_path)
     p = model_path(run / "investigation.md", run_dir=run)   # #1255 P1: the model's spelling
     runtime_tools._tool_write_file(deps, p, GOLDEN_INV)
@@ -46,9 +43,6 @@ def test_investigation_crosses_bound_mid_run(tmp_path):
 
 
 def test_edit_file_splice_pushes_investigation_over_bound(tmp_path):
-    """lc2 — an edit_file splice that pushes investigation.md past 65,536 B is denied: the gate
-    sees the post-splice WHOLE resulting text, not the delta. The splice is an append (invlang
-    append-only-valid) so the deny is the NEW size check, not invlang. Prior content preserved."""
     deps, run = _deps(tmp_path)
     p = model_path(run / "investigation.md", run_dir=run)   # #1255 P1: the model's spelling
     runtime_tools._tool_write_file(deps, p, GOLDEN_INV)
@@ -61,9 +55,6 @@ def test_edit_file_splice_pushes_investigation_over_bound(tmp_path):
 
 
 def test_edit_file_splice_pulls_investigation_under_bound(tmp_path):
-    """lc3 — a shrinking splice landing <= 65,536 B is accepted regardless of the stale
-    over-bound baseline it started from (Decision(True), invlang also passing). A grandfathered
-    over-bound investigation on disk is edited down under the bound and the edit commits."""
     deps, run = _deps(tmp_path)
     p = model_path(run / "investigation.md", run_dir=run)   # #1255 P1: the model's spelling
     pad = "x" * (INV_BOUND + 5000)

@@ -30,7 +30,6 @@ from defender.tests._session_store_705 import (  # noqa: E402
 )
 
 
-
 def branch_mod():
     """`defender.runtime.branch` — PR 1's new module, imported per test."""
     return importlib.import_module("defender.runtime.branch")
@@ -47,15 +46,6 @@ def _sibling_state(sibling_dir: Path):  # noqa: ANN202 — a `RunState` (#1235: 
 # the caller contract: fork's seeding and send-role hydration are one number
 
 def test_a_fresh_framework_message_list_underflows_against_a_fork(tmp_path):
-    """    A fork already carries a `last_render_len` for the prefix it inherited, so an
-    `agent.iter` that starts its message list empty — the shape a resume takes if nothing is
-    handed back — hands `ingest` a live list SHORTER than the last render, and `ingest`
-    refuses it as `IngestTailUnderflow` rather than silently re-appending.
-
-    This is the failure #920's "done when" names by name, and it is the reason the caller
-    contract is a contract at all: the store is already right, and only the caller can be
-    wrong. Pinned as a NEGATIVE so the positive below is not merely a run that happened to
-    work — without this arm, an implementation that never forked at all would satisfy it."""
     # provenance: issue O1 ("observed failing by: IngestTailUnderflow out of selection.ingest");
     # claim C4 (executed) measured this exact message on a 3-message prefix.
     ss = store_mod()
@@ -75,15 +65,6 @@ def test_a_fresh_framework_message_list_underflows_against_a_fork(tmp_path):
 
 
 def test_the_hydrated_prefix_plus_one_turn_appends_exactly_one_row(tmp_path):
-    """    Handing the fork's own `hydrate(role="send")` back as the resumed run's message history
-    makes the tail slice exact: re-ingesting the prefix alone appends nothing, and the prefix
-    plus one new message appends exactly one row, parented onto the branch point. The prefix
-    rows are not re-written under new ids.
-
-    The two numbers are one number. `fork` seeds `last_render_len` from
-    `_complete_prefix_len(prefix)` and `hydrate(..., role="send")` truncates by the same
-    function, so the symmetry is exact rather than approximate — which is what lets this
-    assert a row COUNT rather than a tolerance."""
     # provenance: issue O1 / claim C4 — "with the prefix: accepted, path rows [1,2,3,4],
     # exactly one new row". M1 ("hydrates the prefix and passes it as message_history").
     ss = store_mod()
@@ -116,20 +97,6 @@ def test_the_hydrated_prefix_plus_one_turn_appends_exactly_one_row(tmp_path):
 
 
 def test_a_fork_at_a_call_bearing_response_hands_that_response_to_the_framework(tmp_path):
-    """    D1 (#1255 — reverses #920's mid-pair rule at two of its three sites): a fork taken AT a
-    response whose tool calls are still unanswered — since #1255 the ONLY kind of branch point
-    — keeps that response in the conversation the resumed run is handed, and the fork is
-    charged for it. So the framework is given the history ENDING in the call-bearing response
-    (it runs those calls; P-U2), and the first row the resumed run lands is their answer,
-    appended exactly once, with the response itself not appended a second time.
-
-    The two sites, by the design's own list: "conversation loading (which drops a trailing
-    call-bearing response)" — `hydrate(role="send")` here — and "the store fork's bookkeeping
-    (which would append the response twice)" — `last_render_len`. The third, validation, is
-    driven end to end in `tests/e2e/test_1255_snapshot_branch_point.py`.
-
-    Before #1255 this test asserted the opposite: send-role hydration DROPPED the dangling
-    response and the fork's charge excluded it, so the resumed model was never shown the call."""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -175,9 +142,6 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
     run_dir = runs_base(tmp_path) / "run-source-001"
     run_dir.mkdir(parents=True, exist_ok=True)
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
-    # Every real run dir holds its alert before anything else happens
-    # (`run_common.materialize_run`), and the sibling investigates the same one — so a
-    # source run without one is not a shape a branch is ever taken from (#947).
     plant_alert(run_dir, ALERT_DOC.encode("utf-8"))
     session_id = store.new_session(agent_id="main")
     sel.ingest(store, session_id, [user_request("investigate the alert"), *complete_pair()],
@@ -186,15 +150,6 @@ def _source_run(tmp_path, *, case_id: str = "case-source"):
 
 
 def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
-    """    The factory a resumed run is handed opens the database the SOURCE run wrote — the file
-    `session_store.resolve_store_path` names from the source run dir — and the source session
-    is readable through the handle it returns.
-
-    Asserted as a path and then as a READ, because neither alone discriminates. `open_store`
-    creates the file if it is missing, so a factory that mis-derives its runs base still
-    returns a live handle over an empty database; and a handle whose path is right but whose
-    lineage query finds nothing would fail at `fork` with an error naming neither the factory
-    nor the run dir."""
     # provenance: design M1 ("the store the factory hands back is the SOURCE run's, and the
     # prefix rows live in it"); the seam itself is R12's `run_investigation(store_factory=…)`.
     ss = store_mod()
@@ -218,9 +173,6 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
 
 
 def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
-    """    The callable is `StoreFactory`-shaped — two positional parameters, `(case_id, run_dir)`
-    — so a resume rides the injection seam `run_investigation` already has rather than growing
-    a second one. Neither argument steers it: a resume joins a case, it does not mint one."""
     # provenance: driver.py's `StoreFactory = Callable[[str, Path], Any]`; design M1 reuses it.
     branch = branch_mod()
     store, run_dir, _session_id, path_ids = _source_run(tmp_path)
@@ -231,9 +183,6 @@ def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
     assert all(p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for p in params), (
         f"the driver calls `factory(case_id, run_dir)` positionally: {params}")
 
-    # WHICH database it opens is the test above; this one asserts only that the two arguments
-    # do not steer it, so the two demands fail separately rather than as one indistinguishable
-    # red.
     first = factory("case-one", tmp_path / "one")
     second = factory("case-two", tmp_path / "two")
     assert Path(first.path) == Path(second.path), (
@@ -241,34 +190,4 @@ def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
         "must not choose which database its prefix lives in")
 
 
-# branch-point legality — moved onto driven sources by #1255
-#
-# Every legality test that stood here built its source by writing store rows directly. After
-# #1255 such a store is a run recorded before the change: it has no fork snapshot, and forking
-# it is refused for THAT (N4), so a rule checked over it would be checked over nothing. Where
-# each went:
-#
-# - message 0 / an id past the tip / not on MAIN's path -> tests/e2e/test_1255_snapshot_legality.py
-#   ::test_d1_a_branch_point_must_be_a_response_on_mains_own_path (now also a gather session's call)
-# - a run that captured no queries -> ...::test_a_source_that_captured_no_query_is_refused_at_launch
-# - an empty frontier / the frontier read at the branch point, not the end of the run
-#   -> ...::test_the_frontier_is_the_one_the_branch_points_snapshot_holds (the frontier is the
-#   snapshot's document, P2)
-# - a run dir holding evidence / a reused run dir is refused before anything forks
-#   -> ...::test_an_arm_folder_already_holding_work_is_refused_before_anything_forks
-# - a branch point mid tool pair is refused -> REVERSED (D1): it is now the only branch point;
-#   tests/e2e/test_1255_snapshot_branch_point.py::test_d1_only_a_tool_calling_main_response_is_a_branch_point
-# - a batched turn counts two fences -> RETIRED with fence counting (P2 replaces it);
-#   ...legality.py::test_d1_a_branch_response_that_batches_two_appends_is_rerun_whole
-# - a snapped frontier is refused by its own name -> RETIRED: no fence mapping remains to snap
-#   (the document is restored by content from the snapshot, P2)
-# - the document its history claims / a prefix that would (not) validate -> RETIRED with the
-#   fence-boundary seed (P2: content restore); tests/e2e/test_1255_snapshot_restore.py
-#   ::test_p2_the_investigation_document_is_restored_by_content and
-#   tests/e2e/test_920_branch_resume.py::test_a_resumed_run_appends_onto_the_document_it_inherited
-# - the evidence its prefix names (copied, recorded) -> RETIRED with lead selection (G7/P2);
-#   tests/e2e/test_1255_snapshot_restore.py::test_p2_append_only_and_write_once_files_are_restored_up_to_the_cut
-
-
 # the two named seams
-

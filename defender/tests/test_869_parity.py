@@ -23,10 +23,6 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.tests._lead_author_1134 import drafts_under, lane_tree_for, lead_deps, skills_view
 from defender.tests._state1135 import curation_run_dir, run_of
 
-#: The name driven at every composition site. It must be undeclared under BOTH membership
-#: readings (NF2): a MARKER-ONLY name is declared at the three union sites and undeclared at
-#: the pitfalls gate, so using one here would make this "parity" assert a divergence the
-#: design requires.
 PHANTOM = "fakesys"
 
 DECLARED = frozenset({"elastic"})
@@ -43,22 +39,6 @@ def _lead(query_id: str, *, system: str) -> ExecutedLead:
 
 
 def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkeypatch):
-    """The SAME undeclared name, driven at each of the FOUR sites that spend a name as a path
-    component, produces a write at NONE of them.
-
-    U1's discharge standard as one test over the census, bound per access cell so the parity
-    is per-surface and cannot be discharged facet-wide. FK-4 grew the census from three sites
-    to four: `discover_system_drafts` joins it, and gets no access cell of its own because it
-    composes a path and hands it ONWARD without writing — its surface is the handoff.
-
-    THE FIXTURE TRAP NF2 ADDS, and this is where the two membership values bite first: the
-    name driven here is undeclared under BOTH readings. A marker-only name is declared at the
-    three union sites and undeclared at the pitfalls gate, so using one would make this
-    "parity" assert a divergence the design requires.
-
-    The declared name is driven through the same four sites in the same test, so a set of
-    predicates that refused everything could not pass.
-    """
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=("elastic",), non_systems=("gather",))
@@ -115,19 +95,6 @@ def test_every_path_composition_site_refuses_an_undeclared_name(tmp_path, monkey
 
 
 def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatch):
-    """With `systems == frozenset()` the lead-author lane refuses LOUDLY and commits nothing —
-    never a quiet per-path "no" that looks like ordinary membership enforcement.
-
-    RF6 states the empty-set refusal as a per-boundary universal — "AT EACH BOUNDARY an empty
-    declared set is a refusal to run the lane" — and `empty_declared_set_refuses_the_lane`
-    pins it only at the pitfalls curator. This is the same unsafe state one boundary over: an
-    empty set spent as an ordinary membership answer would have the commit gate refuse every
-    catalog and system-skill path ONE FILE AT A TIME, which is the failure O4 names.
-
-    The discriminator is that it refuses BEFORE the agent runs and regardless of what the
-    agent does: the drive hands the lane an agent that edits nothing at all, where a per-path
-    refusal would have nothing to refuse and the tick would report a clean no-op.
-    """
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     repo = seed_tree(tmp_path, adapters=(), markers=(), skills=(), catalog=(),
                      non_systems=("gather",))
@@ -153,5 +120,3 @@ def test_an_empty_declared_set_refuses_the_lead_author_lane(tmp_path, monkeypatc
     assert spawn.calls == [], "the agent must not be spawned against an empty declared set"
     assert head_files(repo) == before
     assert git(repo, "status", "--porcelain").stdout == ""
-
-

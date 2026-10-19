@@ -1,7 +1,3 @@
-"""#787 — the review gate's model calls land in the run's accounted cost.
-
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -15,10 +11,6 @@ from defender.runtime import observe
 from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX, live_review_stages
 from defender._pricing import usage_cost
 
-# Through `visualize_data`, which is how every other visualizer test reaches these: the two
-# modules are mutually importing (`visualize_data` re-exports from `visualize_messages` at its
-# foot, `visualize_messages` takes `phase_verb` from its head), so naming the messages module
-# first is an ImportError on a partially-initialised module.
 from defender.scripts.visualize.visualize_data import (
     deduped_main_records,
     gather_cost_by_model,
@@ -30,9 +22,6 @@ DEFENDER_DIR = Path(__file__).resolve().parents[1]
 
 _LENSES = ("support", "ablation", "composer")
 
-#: One priced round. Chosen so `usage_cost` returns a number no other row in a fixture can
-#: coincidentally equal, and so input/output/cache are all non-zero — a reader that dropped
-#: a term would still return something plausible against a usage dict of one field.
 _USAGE = {"input_tokens": 4000, "output_tokens": 1000, "cache_read_input_tokens": 2000,
           "cache_creation_input_tokens": 500}
 
@@ -143,11 +132,6 @@ def test_the_two_support_calls_stay_apart_in_the_log(run_dir):
         logger.close()
 
     rows = read_jsonl_rows(observe.wire_log_path(run_dir))
-    # Asked of the AGENT ID, not of the record id. `_emit` keys `seq` on `agent_id`, so a
-    # bundle that gave all three lenses ONE id would still write three distinct record ids
-    # (`review:support#0/#1/#2`) — a uniqueness assertion cannot fail for the reason this
-    # test names. What collapses under a shared id is the attribution, so that is what is
-    # asked: three calls, three namespaces, and the reader splits them three ways.
     assert [r["agent_id"] for r in rows] == [
         f"{REVIEW_AGENT_ID_PREFIX}{lens}" for lens in _LENSES
     ], "two review calls share an agent id — their readings collapse into one"
@@ -198,9 +182,6 @@ def test_the_review_s_spend_is_priced_per_model(tmp_path):
 
 
 def test_the_review_is_priced_at_its_own_model_s_rate(tmp_path):
-    """Not at the investigator's. `usage_cost` keys on the record's OWN model, and a review
-    priced at the main model's rate would be wrong by the ratio between two price rows while
-    still looking like a number."""
     same_usage_as_main = usage_cost("claude-sonnet-4-6", _USAGE)
     assert pytest.approx(same_usage_as_main) != _ONE_CALL, (
         "fixture no longer discriminates — pick a review model whose price row differs"
@@ -227,5 +208,3 @@ def test_a_request_record_is_not_priced(tmp_path):
     cost by however many turns of history the wire log restates."""
     with_request = [*_MIXED, _wire(f"{REVIEW_AGENT_ID_PREFIX}support", "kimi-k3", kind="request")]
     assert review_cost_by_lens(tmp_path, with_request) == review_cost_by_lens(tmp_path, _MIXED)
-
-

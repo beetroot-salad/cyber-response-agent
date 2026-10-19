@@ -6,10 +6,6 @@ from defender.tests import _spec773 as S
 
 LESSON = "defender/lessons/l1.md"
 
-# ---------------------------------------------------------------------------
-# M3.2 — vouching, on every channel, over every changed corpus file
-# ---------------------------------------------------------------------------
-
 
 def test_a_changed_file_citing_no_batch_finding_raises_author_error_773(tmp_path):
     """A changed corpus file whose citations do not intersect this batch's ids is unvouched,

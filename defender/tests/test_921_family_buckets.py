@@ -13,10 +13,6 @@ from defender.tests._state1135 import env_state
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    # The learning STATE root too, so the shared findings queue this pass appends to is
-    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
-    # here rather than in the appender: a production path that picks a different queue when
-    # an env var is unset is a pass whose rows can land where no drain reads.
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -26,17 +22,7 @@ def _grade(ep, **kw):
     return J.grade(ep, **kw)
 
 
-# ---------------------------------------------------------------------------------------
-# what the row may not be moved by
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_control_world_is_graded_per_world_only_and_gets_no_bucket(tmp_path):
-    """The control world carries no row in the family record.
-
-    Positive control: a non-control world in the same family DOES carry one, with a bucket, so
-    the negative cannot pass on a record with no rows at all.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     rows = J.rows(_grade(ep))
     assert "a" not in rows, "the control world was given a bucket row"
@@ -46,16 +32,6 @@ def test_921_control_world_is_graded_per_world_only_and_gets_no_bucket(tmp_path)
 
 
 def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path):
-    """Every per-world fact reads X's own record plus the manifest, so grading the worlds in
-    any order — including a world before a sibling's own archive write lands —
-    yields the same rows.
-
-    Driven by grading with sibling c's archived directory absent and then present: if any fact
-    reached across worlds, world b's row would differ between the two. (#1234 A3: the drive
-    used to stash the CONTROL's archive, but a control that is not usable now stamps the whole
-    family not graded, so the absent archive is a planted sibling's — excluded from b's
-    reference set, which changes b's prompt and none of b's own facts.)
-    """
     import shutil
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
@@ -79,18 +55,6 @@ def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path)
 
 
 def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(tmp_path):
-    """The pass reads no `served/base.jsonl`, makes no base comparison and issues no comparator
-    call.
-
-    Driven as real input rather than as an inspection: the family capture is first DELETED and
-    then written as bytes no reader can parse. Every base-comparing path in the tree goes
-    through `Ledger`, which refuses a missing base outright, so a pass that touched it would
-    fail on the first arm and raise on the second.
-
-    Positive control: with the base gone the pass still produces a COMPLETE grade from X's own
-    record — every per-world fact, the model's bucket and a completed family call (#1234: the
-    family word is retired, A17) — so the negative cannot pass on a pass that does nothing.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
@@ -113,14 +77,6 @@ def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(
 
 
 def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
-    """A world's bucket is the judge model's own answer for the world — the reply's top-level
-    `bucket` (`run.draw_document` @owns it) — never one its findings claim. Each finding row
-    carries its OWN bucket as `type`, because that is what the lesson author acts on.
-
-    #1224 inverted the owner (O11): no code path computes a bucket, so where the draws DISAGREE
-    the row carries none (`draws_disagree`, every draw's answer on `draws`) rather than a bucket
-    of the pass's own choosing.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
@@ -153,19 +109,6 @@ def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
 
 
 def test_921_the_majority_denominator_is_completed_draws(tmp_path):
-    """J6, settled with the human: a world's draws are combined over COMPLETED draws, both the
-    completed and the configured counts are recorded on the family record, and a draw that fails
-    at any stage writes a DRAW RECORD carrying its failure reason.
-
-    The denominator is not a detail: with `draws=4`, two failures and two completed draws that
-    both file an `incoherent` world finding, the completed draws are unanimous and the world is
-    not measured (#1234 A7; the episode word `discard` and its majority are retired, A17) —
-    counting the two failures as draws would make them disagree instead.
-
-    P9 (executed) is why the record cannot branch on exception type: a wall-clock timeout and a
-    raw transport failure arrive as the same `RunUnprocessable`. And a world with ZERO completed
-    draws carries no bucket at all (#1224, O11): nothing but a draw supplies one.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     discard = J.as_reply_text(J.reply_doc(findings=[
         J.finding_doc(), J.finding_doc(subject="world", bucket="incoherent")]))
@@ -200,26 +143,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
         "a world whose every draw failed carries a bucket no draw gave")
 
 
-# ---------------------------------------------------------------------------------------
-# a world that served nothing leaves a ledger saying so
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_a_running_world_leaves_a_ledger_even_when_it_serves_nothing(tmp_path):
-    """`Ledger.declare` creates the file at world setup, so serving nothing is EXPRESSIBLE.
-
-    The rows are written by `record`, which creates the file on its first append — so a sibling
-    that answered every question from the replayed capture, and made no live call at all, left
-    no ledger. One missing file then stood for two facts: a world that never ran and one that
-    ran perfectly and served nothing.
-
-    Observed live: of two siblings, one issued the same 76 queries as the control, served
-    nothing, closed `benign`, and was filed unjudgeable — when "closed without ever consulting
-    the world it was given" is the strongest finding this design can make.
-
-    Declared up front, that sibling leaves an EMPTY ledger, which the row reports as
-    `served_nothing`.
-    """
     ledger_mod = J.mod("learning.branch.ledger")
     ep_dir = J.accepted_episode(tmp_path)
     with Episode.open(ep_dir) as episode:
@@ -234,13 +158,6 @@ def test_921_a_running_world_leaves_a_ledger_even_when_it_serves_nothing(tmp_pat
 
 
 def test_921_declaring_a_ledger_twice_keeps_the_rows_already_written(tmp_path):
-    """`declare` opens in APPEND and never truncates.
-
-    It runs once at world setup, but this world's gather leads dispatch in parallel and `record`
-    may already be appending. A create that truncated would silently drop the rows the table
-    exists to hold — and the loss would look exactly like the world having served nothing, which
-    is the very fact `declare` exists to make trustworthy.
-    """
     ledger_mod = J.mod("learning.branch.ledger")
     ep_dir = J.accepted_episode(tmp_path)
     with Episode.open(ep_dir) as episode:
@@ -253,13 +170,6 @@ def test_921_declaring_a_ledger_twice_keeps_the_rows_already_written(tmp_path):
 
 
 def test_921_an_empty_ledger_reports_served_nothing_on_the_record(tmp_path):
-    """The row says whether the world served anything at all, from its own rows.
-
-    A world that served NOTHING never made a call that reached its oracle, so its facts were
-    never consulted and its verdict is not a measurement. World `c` serves one row on a system
-    other than the fixture's usual one, so a `served_nothing` keyed on a particular system
-    instead of on the rows fails it.
-    """
     elsewhere = J.ledger_row(source="passthrough", system="cmdb", verb="lookup",
                              world_label="c")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [], "c": [elsewhere]})

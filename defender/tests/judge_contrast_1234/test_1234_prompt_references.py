@@ -42,13 +42,6 @@ def _title(section: str) -> str:
     return S.COINED[f"title.{section}"]
 
 
-
-
-# --------------------------------------------------------------------------------------
-# Building the family: distinct labels, distinct lead ids, a marker in every text.
-# --------------------------------------------------------------------------------------
-
-
 def _q(text: str) -> dict:
     return S.query_params(text)
 
@@ -109,12 +102,6 @@ def _world_prompts(judge: S.RoutedJudge) -> list[str]:
             if S.parse_agent_id(a)[0] not in (None, S.FAMILY)]
 
 
-# --------------------------------------------------------------------------------------
-# Reading a prompt: host text, sections, labelled blocks.
-# --------------------------------------------------------------------------------------
-
-
-
 def _host_spans(text: str) -> list[tuple[int, int]]:
     """The spans of `text` outside every closed untrusted frame (`S.untrusted_frames`), the
     complement `S.outside_untrusted_frames` joins, kept as positions."""
@@ -128,8 +115,6 @@ def _host_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-
-
 def _host_hits(text: str, pattern: re.Pattern[str], lo: int = 0, hi: int | None = None) -> list[int]:
     end = len(text) if hi is None else hi
     hits: list[int] = []
@@ -138,8 +123,6 @@ def _host_hits(text: str, pattern: re.Pattern[str], lo: int = 0, hi: int | None 
         if a < b:
             hits.extend(m.start() for m in pattern.finditer(text, a, b))
     return sorted(hits)
-
-
 
 
 def _sections(prompt: str) -> dict[str, tuple[int, int]]:
@@ -185,14 +168,6 @@ def _blocks(prompt: str, span: tuple[int, int], labels: Iterable[str]) -> dict[s
 def _reference_blocks(prompt: str, focus: str, labels: Iterable[str] = LABELS) -> dict[str, str]:
     return _blocks(prompt, _sections(prompt)["references"], [x for x in labels if x != focus])
 
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# Reading a `JudgeContext` without guessing its field names (F2).
-# --------------------------------------------------------------------------------------
 
 _SCALARS = (str, bytes, int, float, bool, type(None), Path)
 
@@ -313,16 +288,7 @@ def _row_check(rows: list[Any], expected: Mapping[str, set[str]], universe: set[
     return problems
 
 
-# --------------------------------------------------------------------------------------
-# d00f — the seam.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_render_builds_judge_context_per_focus_world(tmp_path: Path) -> None:
-    """render, given the archived episode and one focus world, returns a JudgeContext holding
-    header rows and contrast rows for every run, fact surfaces, heuristic-labelled aligned lead
-    rows, one reference section per reference run, the focus section, the noise context and the
-    questioner inputs, built without any model call."""
     built = _family(tmp_path, drift=[_drift()])
     ctx = _context(built, WB)
     assert isinstance(ctx, S.sym(S.JUDGE_RENDER, S.COINED["cls.context"]))
@@ -357,17 +323,8 @@ def test_1234_render_builds_judge_context_per_focus_world(tmp_path: Path) -> Non
         assert needle in prompt, f"{needle} is in the context but not in the prompt sent"
 
 
-# --------------------------------------------------------------------------------------
-# d02a, d02b, d02g — the reference set.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_world_prompt_carries_control_and_every_gradable_sibling_as_references(
         tmp_path: Path) -> None:
-    """In a triad (control a, planted b and c), world b's prompt carries a labelled reference
-    section for the control and one for c, each with its leads, report and call list, and a
-    marker planted in the control's report.md reaches b's prompt (today it reaches no prompt,
-    C1/E-01)."""
     built = _family(tmp_path)
     judge = _graded(built)
     assert judge.called(WB)
@@ -384,8 +341,6 @@ def test_1234_world_prompt_carries_control_and_every_gradable_sibling_as_referen
     assert S.marker(WC, "report") not in blocks[CTL]
 
 
-
-
 _UNGRADABLE = {
     "o5-failed": ({"world_record": "did not finish"}, "did not finish"),
     "cut-short": ({"run_end": {"truncated_by": "budget", "closed_before_cut": False}}, "budget"),
@@ -396,9 +351,6 @@ _UNGRADABLE = {
 
 @pytest.mark.parametrize("kind", sorted(_UNGRADABLE))
 def test_1234_ungradable_planted_world_is_in_no_reference_set(tmp_path: Path, kind: str) -> None:
-    """A planted world that failed O5, was cut short, or is malformed appears in no other
-    world's prompt or the family prompt as a reference: a marker in its report reaches no
-    prompt, and its own row keeps the named reason it carries today."""
     # rejected: grading on a thinned, flagged or partial run set (X5)
     fields, reason_word = _UNGRADABLE[kind]
     wx = {"role": "D", "calls": [_call("l-777", params=_q(f"user:alice {S.marker('wx', 'call')}"))],
@@ -423,33 +375,10 @@ def test_1234_ungradable_planted_world_is_in_no_reference_set(tmp_path: Path, ki
     assert reason_word in reason, f"wx's row does not keep its named reason ({reason_word!r}): {reason!r}"
 
 
-# --------------------------------------------------------------------------------------
-# d03a, s_A71 — the computed header.
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# d03f, d03g, d03h, s_A34, s_D21 — fact surfaces and the aligned lead view.
-# --------------------------------------------------------------------------------------
-
 _SURFACE_LEADS = {"l-001", "l-201", "l-305", "l-406", "l-556", "l-560", "l-917"}
 
 
 def test_1234_fact_surface_names_forged_systems_entities_and_touching_leads(tmp_path: Path) -> None:
-    """Each fact's surface names the systems its forged rows were served on (oracle store
-    forged.jsonl, fact_id to system) and its entities, and for each run the leads that queried one
-    of those systems or mention one of those entities in their params."""
-    # rejected: a matcher tolerance for degenerate entities (X4)
-    # f-wb1's forged row is on siem-x (and served there); f-wb2's is on edr and was never served
-    # an oracle answer, so only forged.jsonl can name edr for it.
     wb = S.planted(WB, facts=[S.fact("f-wb1", entities=("ent917",), label=WB),
                               S.fact("f-wb2", entities=("ent918",), label=WB)],
                    forged=[_forged("fg-wb-1", "f-wb1", "siem-x"), _forged("fg-wb-2", "f-wb2", "edr")],
@@ -502,9 +431,6 @@ _ALIGNED_ROWS = {"l-917": {"l-305"}, "l-918": {"l-408"}, "l-556": set(),
 
 
 def test_1234_aligned_lead_view_matches_by_surface_then_system_and_verb(tmp_path: Path) -> None:
-    """Leads are matched across runs through fact surfaces first and by system and verb second,
-    an unmatched lead gets a row of its own, and the region before the judged world's first
-    altered answer is marked shared baseline."""
     built = _family(tmp_path, _aligned_worlds())
     ctx = _context(built, WB)
     candidates = [c for c in _collections(ctx)
@@ -523,23 +449,7 @@ def test_1234_aligned_lead_view_matches_by_surface_then_system_and_verb(tmp_path
         "the prompt's aligned lead view does not mark the shared baseline")
 
 
-
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# d03i, d03j, d04b — what the judged world and the references show.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_planted_world_shown_as_designed_built_and_served(tmp_path: Path) -> None:
-    """The judged planted world is shown in three layers: designed (its manifest entry), built
-    (its forged rows per fact, claims, verifier verdicts, collisions and pre-flight's calibration
-    result) and served (its altered calls)."""
     claim = {"added": [{"forged_id": "fg-wb-1", "fact_id": "f-wb"}], "removed": [], "changed": [],
              "counts": [], "entity_refs": [S.marker(WB, "claim")]}
     verdict = {"passed": True, "reason": f"the fact's telemetry is present {S.marker(WB, 'verdict')}"}
@@ -552,9 +462,6 @@ def test_1234_planted_world_shown_as_designed_built_and_served(tmp_path: Path) -
     built.oracle_path(WB, collisions).write_text(json.dumps(
         {"forged_id": "fg-wb-1", "column": "event_id", "value": S.marker(WB, "collision"),
          "real_rows": []}) + "\n", encoding="utf-8")
-    # Pre-flight's calibration (`registry.calibrate_one`) froze the forged rows and the facts it
-    # recorded (`facts.jsonl`) and logged its replay as a `preflight` row of the world's
-    # oracle-side ledger (N14). Either record shows its result.
     built.oracle_path(WB, "facts.jsonl").write_text(json.dumps(
         {"entity": "alice", "field": "logon_host", "value": S.marker(WB, "calibration")}) + "\n",
         encoding="utf-8")
@@ -577,53 +484,7 @@ def test_1234_planted_world_shown_as_designed_built_and_served(tmp_path: Path) -
             or S.marker(WB, "calibrated-call") in prompt), "pre-flight's calibration result is not shown"
 
 
-
-
-
-
-# --------------------------------------------------------------------------------------
-# d03k, d03l, d04a, d04h — where the prompt lives, its order, its wording.
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# s_A9, s_L24 — references are computed from the archive alone.
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# s_A42, s_D17 — an excluded world's facts reach no other world's prompt.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_failed_world_detail_quoting_its_forged_rows(tmp_path: Path) -> None:
-    """A failed world's detail quoting its forged rows reaches no per-world prompt, framed or
-    not: the failed world is in no reference set (M1, A3), so its facts have no labelled section
-    in another world's prompt (M3). It may reach the family prompt inside an untrusted frame, and
-    the page escaped."""
     live = f"<script>alert('{S.marker('wx', 'detail')}')</script>"
     detail = (f"refused: frozen row fg-wx-1 {{'note': '{S.marker('wx', 'detail')}'}} did not verify"
               f" {live}")
@@ -683,27 +544,6 @@ def test_1234_reference_file_links_to_an_ungradable_worlds_oracle_store(
     assert S.marker(CTL, "report") in _reference_blocks(judge.prompt_for(WB), WB)[CTL]
 
 
-# --------------------------------------------------------------------------------------
-# d11b — drift is information.
-# --------------------------------------------------------------------------------------
-
-
-
-
-# --------------------------------------------------------------------------------------
-# g03 — the judge call's payload.
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# g18 — the samples section render shows and the resolver accepts are one set.
-# --------------------------------------------------------------------------------------
-
 #: Each system's samples, by the marker its section's LAST answer carries: idp has a small
 #: section, siem-x a large one (what a cap cuts), edr none at all.
 _SAMPLES_END = {"idp": S.marker("idp", "samples"), "siem-x": "MARK-siem-x-samples-end",
@@ -760,11 +600,6 @@ def _samples_coherence(built: S.Built, prompt: str) -> tuple[set[str], list[str]
 
 def test_1234_a_samples_pointer_resolves_exactly_when_the_prompt_shows_that_section(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A `samples.yaml#` pointer is a context pointer (and a design cite is dropped under O16)
-    exactly when the prompt shows that served system's section of real answers: the section
-    render shows and the fragment the resolver accepts are the same set, for a system with
-    samples, a system without, and a section the cap cut. The control is a pointer at a shown
-    section."""
     built, prompt = _samples_pass(tmp_path / "uncapped", S.EPISODE_ID)
     shown, problems = _samples_coherence(built, prompt)
     assert shown == {"idp", "siem-x"}, f"uncapped, the prompt shows {sorted(shown)}"

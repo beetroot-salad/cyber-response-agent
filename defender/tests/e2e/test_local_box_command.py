@@ -47,11 +47,6 @@ print(json.dumps(result))
 def test_marker_read_uses_the_test_runtime_without_inherited_pythonpath(
     tmp_path: Path, fake: str, marker: bytes,
 ) -> None:
-    """From CI's defender cwd, both real commands import the owner and judge actual bytes.
-
-    A valid marker must start; a bare CR must name its format refusal. A child import
-    failure cannot satisfy either observation, and neither fake may answer from a canned id.
-    """
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     proc = subprocess.run(

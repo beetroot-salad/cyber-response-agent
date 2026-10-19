@@ -221,9 +221,6 @@ def test_the_path_walk_refuses_a_cyclic_parent_chain(tmp_path):
 # identity: sessions, forks, case_id, config
 
 def test_a_fork_is_a_branch_with_no_prefix_copy_and_no_id_remap(tmp_path):
-    """Constructing a fork writes one `session` row and sets its first message's
-    `parent_id` to the fork point; the source's rows are not copied, no id is remapped,
-    and no `forked_at_message` column exists."""
     store = make_store(tmp_path)
     main = store.new_session(agent_id="main")
     r1 = store.append(main, [user_request("root")], agent_id="main")[0]
@@ -326,9 +323,6 @@ def test_raw_gather_payloads_are_not_stored_in_the_message_payload_table(tmp_pat
 
 
 def test_synthesized_rows_occupy_their_own_seq_address_space(tmp_path):
-    """After a fold, the synthesized frontier and the next real message can both hold
-    their own `seq` without collision, and `main#5` still names the fifth non-synthesized
-    thing main produced."""
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     for i in range(5):
@@ -491,9 +485,6 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
 
 @pytest.mark.parametrize("bad", [
     True, "12.5", float("nan"), float("inf"), float("-inf"),
-    # Not `int`/`float` — pydantic's strict `float` ADMITS these (#1067 PR5 tried it), and
-    # sqlite3 then refuses to bind them inside the open transaction as a `ProgrammingError`
-    # no caller names. The boundary refuses them with the store's own class instead.
     pytest.param(__import__("decimal").Decimal("1.5"), id="Decimal"),
     pytest.param(__import__("fractions").Fraction(1, 2), id="Fraction"),
 ])

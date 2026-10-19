@@ -26,11 +26,6 @@ from defender.tests.learning_state_1135 import _spec1135 as S
 ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 
-# ---------------------------------------------------------------------------------------------
-# helpers (this file only)
-# ---------------------------------------------------------------------------------------------
-
-
 def _finding(fid: str, **extra) -> dict:
     return {"finding_id": fid, "run_id": fid.split("/")[0], "direction": "adversarial", **extra}
 
@@ -63,22 +58,7 @@ def _claim_all(state) -> list:
     return list(state.claim("case_id"))
 
 
-# ---------------------------------------------------------------------------------------------
-# #0 — the refusal contract
-# ---------------------------------------------------------------------------------------------
-
-
 def test_state_refused_is_a_systemic_fault_no_oserror_arm_holds(tmp_path: Path, caplog):
-    """StateRefused(record, reason) carries the refused record and its reason. It is not an
-    OSError subclass, it is a member of faults.SYSTEMIC_FAULTS, and it is not in
-    author/drain.RETIRE_SET. So run_or_dead_letter re-raises it and never dead-letters or
-    quarantines it (the on_dead_letter callback is never called); _run_curator_module lets it
-    propagate instead of logging "crashed (continuing)"; _run_stage returns 2 with a CRITICAL line
-    whose text names the refused record. It is not an `Exception` either (#1199), so no broad arm
-    absorbs it and none needs a re-raise of its own; only _tick's arm still names it, to record
-    nothing for it (#30-#32). Everywhere else it is just another systemic fault.
-
-    The refusal is a real one: the handle's read of a findings queue that is a planted symlink."""
     # rejected: a StateRefused subclassing OSError (every `except OSError` arm would catch it;
     # X2 shows today's arms swallow the core's refusal exactly that way)
     paths = S.built_paths(tmp_path)
@@ -113,21 +93,8 @@ def test_state_refused_is_a_systemic_fault_no_oserror_arm_holds(tmp_path: Path, 
         "the stage's CRITICAL line does not name the refused record"
 
 
-# ---------------------------------------------------------------------------------------------
-# The root (R11, R15, 3.1 C) and its distinguished spellings
-# ---------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("spelled", ["env", "loop_paths"])
 def test_open_holds_the_resolved_existing_root(tmp_path: Path, monkeypatch, spelled):
-    """LearningState.open(paths) is the handle's only constructor. It resolves paths.state_root
-    once to its real path and holds it. A root spelled through a symlink is followed at open, so
-    the handle's writes land in the link's target (R11, C27); a link below the root is refused
-    (the guards). No other public constructor or path-taking factory exists.
-
-    Two spellings of one root through a link: DEFENDER_LEARNING_STATE_DIR read by
-    config._env_state_dir (`env`), and a LoopPaths whose state_dir is the link itself
-    (`loop_paths`). After open the link is re-pointed; the held root does not move."""
     # rejected: N1 — the root does not move or become per-tenant here (D11, #1186)
     real = tmp_path / "real"
     elsewhere = tmp_path / "elsewhere"
@@ -160,23 +127,6 @@ def test_open_holds_the_resolved_existing_root(tmp_path: Path, monkeypatch, spel
 @pytest.mark.parametrize("shape", ["missing", "not-a-folder"])
 def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, monkeypatch, caplog,
                                                          shape):
-    """With state_root absent: LearningState.open(paths) raises FatalConfigError, whose message
-    names both the resolved root and DEFENDER_LEARNING_STATE_DIR, and creates nothing, neither
-    the root nor any parent; a drain stage run through _run_stage returns 2 with a CRITICAL line
-    naming them, where today it would report "nothing to do" with exit 0; the run-end enqueue
-    (E1, run_common.enqueue_curation) logs the error and returns False with nothing created, and
-    the investigation continues. A second row: a root that exists but is not a folder (a regular
-    file at the spelled path) takes the same route — FatalConfigError naming
-    DEFENDER_LEARNING_STATE_DIR and the resolved root, exit 2 through _run_stage, nothing
-    created — not the core's bare NotADirectoryError. E3's route for the same error is in #35.
-    Lock files and holding folders below an existing root are still created as today (#17, #23).
-
-    The root is spelled through the env var, so config._env_state_dir resolves it (as every
-    entry point's route does)."""
-    # rejected: a lazy bootstrap that creates a missing root on first write (R15 supersedes
-    # R4/RF5's writer/opener split); the core's bare FileNotFoundError (3.1 C chose
-    # FatalConfigError); for a non-folder root, the core's bare NotADirectoryError, which does
-    # not name the variable (JF18 reading B, declined by the owner)
     from defender import run_common
     from defender.runtime import scrub as scrub_mod
     from defender.tests._spec791 import make_run_dir
@@ -223,13 +173,6 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, monkeyp
 
 
 def test_1135_root_is_a_dangling_link(tmp_path: Path, monkeypatch, caplog):
-    """A root that is a link to nothing is a missing root: the entry point resolves the spelling
-    once and follows a link at or above the root once (R11), so the resolved root does not exist
-    and the error is FatalConfigError naming the resolved root and DEFENDER_LEARNING_STATE_DIR
-    (3.1 C). The drain stage (_run_stage) exits 2; the page build (build_view, through
-    `serialize_queues.stamped_view(paths)`, what `frontend/build.main` calls) does not produce an
-    empty page; nothing is created at the link's target (R15). It is not a link refusal, which
-    R11 limits to links below the root."""
     from defender.learning.frontend import serialize_queues
 
     target = tmp_path / "gone" / "learning-state"
@@ -258,12 +201,6 @@ def test_1135_root_is_a_dangling_link(tmp_path: Path, monkeypatch, caplog):
 
 @pytest.mark.parametrize("value", [None, ""], ids=["unset", "empty"])
 def test_1135_unset_and_empty_state_dir_open_the_package_folder(monkeypatch, value):
-    """With DEFENDER_LEARNING_STATE_DIR unset, and again set to the empty string,
-    config.loop_paths() names the package folder defender/learning/ as state_root (GT1: both read
-    as None), and LearningState.open(paths) holds it and creates nothing. The empty string is not
-    read as the launching directory, which Path("").resolve() would be. One parametrized test,
-    two rows; the variable is set through the env fixture the suite already uses (no
-    monkeypatch.setattr)."""
     if value is None:
         monkeypatch.delenv(ENV, raising=False)
     else:
@@ -283,20 +220,8 @@ def test_1135_unset_and_empty_state_dir_open_the_package_folder(monkeypatch, val
     assert sorted(os.listdir(package)) == listing, "opening the default root created something"
 
 
-# ---------------------------------------------------------------------------------------------
-# read (R17 pair 1)
-# ---------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("at", ["queue-file", "holding-folder"])
 def test_a_linked_queue_read_raises_and_never_reads_as_empty(tmp_path: Path, at):
-    """With a symlink planted at a channel's queue file, or at its holding folder _pending/,
-    pointing outside the root: rows(channel) raises StateRefused naming the queue, and never
-    returns [] or (rows, malformed); the link's target is untouched and unread, and the link is
-    left in place.
-
-    The target is a FIFO already holding one row (`_spec1135.fifo_holding`), so "unread" is
-    observable: a read through the link consumes the row, and a read to end of file blocks."""
     # rejected: N14 — a refused read is never folded to empty outside E1-E3
     paths = S.built_paths(tmp_path)
     outside_dir = tmp_path / "outside"
@@ -324,9 +249,6 @@ def test_a_linked_queue_read_raises_and_never_reads_as_empty(tmp_path: Path, at)
 
 
 def test_a_plain_queue_reads_its_rows_and_an_absent_one_reads_empty(tmp_path: Path):
-    """On a plain queue file rows(channel) returns its rows. On an absent queue file (and an
-    absent _pending/) it returns no rows and raises nothing. Absent and refused are
-    distinguishable."""
     paths = S.built_paths(tmp_path)
     state = S.LearningState.open(paths)
     findings = S.coined("FINDINGS")
@@ -343,19 +265,10 @@ def test_a_plain_queue_reads_its_rows_and_an_absent_one_reads_empty(tmp_path: Pa
     assert S.rows_of(state.rows(findings)) == rows, "a plain queue did not read its rows"
 
 
-# ---------------------------------------------------------------------------------------------
-# write (R17 pair 2)
-# ---------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(("mode", "at"), [("replace", "record"), ("replace", "holding-folder"),
                                      ("create", "record")])
 def test_a_linked_write_target_raises_in_either_mode_and_is_never_slot_taken(tmp_path: Path,
                                                                             mode, at):
-    """With a symlink planted at a request record (or its holding folder): a replace write
-    (stamp) raises StateRefused; a create-if-absent write (requeue into the top-level slot)
-    raises StateRefused and never answers False ("slot taken"); the link's target is untouched
-    and nothing is written through it."""
     paths = S.built_paths(tmp_path)
     S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
     state = S.LearningState.open(paths)
@@ -388,9 +301,6 @@ def test_a_linked_write_target_raises_in_either_mode_and_is_never_slot_taken(tmp
 
 
 def test_a_plain_write_lands_in_either_mode(tmp_path: Path):
-    """On plain entries: stamp(claimed, spec) replaces the claim's record in inflight/ with the
-    new spec; requeue(claimed) into a free top-level slot creates a complete single-linked
-    record and returns True."""
     paths = S.built_paths(tmp_path)
     S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
     state = S.LearningState.open(paths)
@@ -415,16 +325,8 @@ def test_a_plain_write_lands_in_either_mode(tmp_path: Path):
         "a staging leftover sits beside the requeued record"
 
 
-# ---------------------------------------------------------------------------------------------
-# append (R17 pair 3)
-# ---------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("at", ["channel-file", "holding-folder"])
 def test_a_linked_append_target_raises_and_its_target_is_untouched(tmp_path: Path, at):
-    """With a symlink planted at a channel file whose append reads nothing first (the pitfalls
-    channel's read-free append, or the gap ledger), or at its holding folder, append raises
-    StateRefused naming it. No row is written into the link's target."""
     paths = S.built_paths(tmp_path)
     target = S.outside(tmp_path, "pitfalls.jsonl", "")
     if at == "channel-file":
@@ -441,11 +343,6 @@ def test_a_linked_append_target_raises_and_its_target_is_untouched(tmp_path: Pat
 
 
 def test_a_plain_append_returns_todays_counts_and_encoding(tmp_path: Path):
-    """On plain channel files (the same pitfalls channel #18 plants at, plus a judge findings
-    channel), append(channel, rows, dedup_key=...) keeps today's channel semantics (D3): it
-    returns (appended, malformed); each row is written as one json.dumps line; the judge
-    channels' torn-tail and dedup read are unchanged; append_pitfalls' read-free append is
-    unchanged (and makes the channel's missing holding folder below the root)."""
     paths = S.built_paths(tmp_path)
     state = S.LearningState.open(paths)
 
@@ -466,15 +363,7 @@ def test_a_plain_append_returns_todays_counts_and_encoding(tmp_path: Path):
         "the torn tail was concatenated onto, or the duplicate was written"
 
 
-# ---------------------------------------------------------------------------------------------
-# move (R17 pair 4)
-# ---------------------------------------------------------------------------------------------
-
-
 def test_a_linked_inflight_folder_stops_the_claim_before_any_move(tmp_path: Path):
-    """With author-queue/inflight planted as a symlink to a folder outside the root and one plain
-    queued request, the claim raises StateRefused: the queued request is still at its top-level
-    name, and nothing appears in the link's target folder."""
     paths = S.built_paths(tmp_path)
     queued = S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
     body = queued.read_bytes()
@@ -492,13 +381,6 @@ def test_a_linked_inflight_folder_stops_the_claim_before_any_move(tmp_path: Path
 
 
 def test_a_plain_claim_moves_the_request_into_inflight(tmp_path: Path):
-    """On plain entries, the claim moves each queued request into inflight/ through move_at
-    (orphans first), reads it and yields a Claimed that carries its spec and request key. The
-    top-level slot is free afterwards, so a later enqueue lands there.
-
-    The orphan's name (case-b) sorts AFTER the queued request's (case-a), so orphans-first and
-    a plain alphabetical order give different answers (R14: today's claim_markers serves
-    [*orphans, *queued])."""
     paths = S.built_paths(tmp_path)
     run_a, run_b = S.curation_run_dir("run-a"), S.curation_run_dir("run-b")
     S.seed_request(paths, "case-a", run_a)
@@ -517,15 +399,7 @@ def test_a_plain_claim_moves_the_request_into_inflight(tmp_path: Path):
     assert S.entry_kind(queue / "inflight" / "case-a.json") == "file", "the claim is not in inflight/"
 
 
-# ---------------------------------------------------------------------------------------------
-# lock open (R17 pair 5)
-# ---------------------------------------------------------------------------------------------
-
-
 def test_a_linked_lock_name_raises_for_a_try_once_role_and_creates_no_target(tmp_path: Path):
-    """With a symlink planted at a try-once role's lock name (.author-drain.lock) pointing at an
-    absent file outside the root, lock(role, wait=try-once) raises StateRefused: it never answers
-    "not taken", so the drain cannot exit 0 silently; the link's target is not created."""
     paths = S.built_paths(tmp_path)
     absent_target = tmp_path / "outside" / "never-made.lock"
     S.plant(paths.state_root / ".author-drain.lock", "symlink", target=absent_target)
@@ -544,17 +418,6 @@ def test_a_linked_lock_name_raises_for_a_try_once_role_and_creates_no_target(tmp
 
 
 def test_a_plain_lock_role_is_taken_refused_while_held_and_released(tmp_path: Path):
-    """On an existing root, lock(role, wait=...) on a plain or absent lock name keeps today's
-    semantics: it creates the lock file and its holding folder below the root; it takes the
-    lock; while held, a second try-once take answers not taken and a deadline take raises
-    TimeoutError; on exit it releases the lock. A block take (wait=BLOCK) of a lock another
-    descriptor holds waits until that holder releases, then takes the lock, and releases it on
-    exit.
-
-    The try-once half on the curator drain lock (`_pending/.lock`, holding folder absent), the
-    deadline half on the repo lock (`_author.lock`), the block half on the lead queue lock
-    (`_pending_leads/.lock`, held by today's name from another descriptor for 0.6 s; the whole
-    half is capped, so a block that never ends fails instead of hanging)."""
     # rejected: N8 — no lease or claim-epoch model; locks stay flock
     paths = S.built_paths(tmp_path)
     state = S.LearningState.open(paths)
@@ -627,11 +490,6 @@ def test_a_plain_lock_role_is_taken_refused_while_held_and_released(tmp_path: Pa
 
 
 def test_1135_a_zero_repo_lock_wait_is_try_once(tmp_path: Path, monkeypatch):
-    """With LEARNING_REPO_LOCK_WAIT_SECONDS at 0 and the repo lock held by another descriptor,
-    the handle's repo-lock verb raises TimeoutError at once rather than waiting out the
-    1800-second default; with the lock free it is taken (the control). The zero is not swallowed
-    by a `wait or DEFAULT` coercion in lock(role, wait). The test is bounded (a short
-    wall-clock cap)."""
     monkeypatch.setenv("LEARNING_REPO_LOCK_WAIT_SECONDS", "0")
     paths = S.built_paths(tmp_path)
     state = S.LearningState.open(paths)
@@ -656,23 +514,8 @@ def test_1135_a_zero_repo_lock_wait_is_try_once(tmp_path: Path, monkeypatch):
     assert answer == "taken", "a free repo lock was not taken"
 
 
-# ---------------------------------------------------------------------------------------------
-# list (R17 pair 6; firm, 3.1 D)
-# ---------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("shape", S.SHAPES)
 def test_a_non_plain_entry_at_a_record_name_halts_when_the_claim_opens_it(tmp_path: Path, shape):
-    """A non-plain entry is planted at a record name in author-queue/, parametrized over the four
-    shapes revision 3.1 D names: a symlink case-x.json to an entry outside, a FIFO, a folder, and
-    a hard link to a file outside. The listing keeps the entry because its name is a record name;
-    has_requests() does not drop it. When the claim reaches it, it is judged at open and claim()
-    raises StateRefused naming that entry. The entry is left in place, its target is unread, and
-    nothing reaches inflight/.
-
-    The symlink's target is a FIFO already holding a request body (`_spec1135.fifo_holding`),
-    so a read through the link is observable: it consumes the body. The hard link's target is a
-    plain file (a hard link to a FIFO would be a FIFO)."""
     paths = S.built_paths(tmp_path)
     queue = paths.state_root / "author-queue"
     queue.mkdir()
@@ -707,11 +550,6 @@ def test_a_non_plain_entry_at_a_record_name_halts_when_the_claim_opens_it(tmp_pa
 
 
 def test_a_listing_keeps_record_names_and_never_opens_a_foreign_name(tmp_path: Path, caplog):
-    """On plain entries, has_requests() and the claim see every *.json record in author-queue/
-    and author-queue/inflight/. Entries at foreign names are never opened, followed, counted or
-    reported: a plain one (a README, or today's .<name>.requeue.<pid> staging file) and a
-    non-plain one (a symlink notes.txt to a file outside, or a FIFO x.fifo). The pass completes,
-    no log line names them, and nothing blocks on the FIFO."""
     # rejected: halting on a non-plain entry at a foreign name (3.1 D: O2 holds because nothing
     # follows it)
     paths = S.built_paths(tmp_path)
@@ -752,10 +590,6 @@ def test_a_listing_keeps_record_names_and_never_opens_a_foreign_name(tmp_path: P
     assert named == [], f"a foreign name was reported: {named}"
 
 
-# ---------------------------------------------------------------------------------------------
-# conversion and ordinary errors (JF2 A)
-# ---------------------------------------------------------------------------------------------
-
 #: The core's refusal shapes (X1, G8, G9), each planted at the read verb's queue (rows) and the
 #: write verb's claimed record (stamp): (verb, where, shape).
 _CONVERSION = [
@@ -774,14 +608,6 @@ _CONVERSION = [
 
 @pytest.mark.parametrize(("verb", "where", "shape"), _CONVERSION)
 def test_every_core_refusal_shape_surfaces_as_state_refused(tmp_path: Path, verb, where, shape):
-    """Each refusal shape the core produces reaches a handle verb's caller as StateRefused, never
-    as an OSError and never folded to absent or empty: NotPlainEntry at the leaf (link ELOOP,
-    hard link EMLINK); the plain OSError(ELOOP) of a linked holding folder; the
-    NotADirectoryError(ENOTDIR) of a file where a holding folder belongs (R16); a refused Bound
-    read's reason; an `other` entry at a record name. Every other non-ok read answer is an
-    ordinary failure on today's route (JF2 A).
-
-    One read verb (rows) and one write verb (stamp), as the hint says suffices."""
     paths = S.built_paths(tmp_path)
     target = S.outside(tmp_path, "entry.json", '{"outside": true}\n')
     state = S.LearningState.open(paths)
@@ -819,10 +645,6 @@ def test_every_core_refusal_shape_surfaces_as_state_refused(tmp_path: Path, verb
 
 
 def test_ordinary_io_errors_are_not_converted_to_refusals(tmp_path: Path):
-    """Ordinary I/O outcomes keep today's routing and are never StateRefused: a requeue into a
-    plain occupied top-level slot returns False (C3); a queued request that vanished between the
-    listing and its move is skipped by the claim, as today's FileNotFoundError arm does; move_at
-    on a missing source raises FileNotFoundError."""
     paths = S.built_paths(tmp_path)
     S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
     state = S.LearningState.open(paths)
@@ -833,9 +655,6 @@ def test_ordinary_io_errors_are_not_converted_to_refusals(tmp_path: Path):
     answer = state.requeue(claims[0])
     assert answer is False, f"a requeue into an occupied slot answered {answer!r}"
     assert fresher.read_bytes() == body, "the requeue overwrote the fresher request"
-    # Settle case-x before the next pass: its unreleased claim is an orphan the next pass must
-    # serve first (R14), and the fresher re-ask would be served after it — neither is what the
-    # vanished-request check below is about.
     state.done(claims[0])
     fresher.unlink()
 
@@ -864,18 +683,7 @@ def _vanishing_pass(state, paths: LoopPaths):
         yield claim
 
 
-# ---------------------------------------------------------------------------------------------
-# R14's one fix, D8's rotate
-# ---------------------------------------------------------------------------------------------
-
-
 def test_a_request_whose_identity_is_already_claimed_this_pass_waits_a_pass(tmp_path: Path):
-    """A claim pass runs over author-queue/inflight/case-x.json (an orphan for run A) and a
-    top-level author-queue/case-x.json (a fresher request for run B), holding every claim as a
-    pass does. The pass yields exactly one claim, run A's orphan. Run B's request stays at its
-    top-level name with its bytes unchanged, and the orphan's inflight/ record is never
-    overwritten by it. After done on the orphan, the next pass claims run B's request. Identity
-    is the record name's stem (JF7)."""
     # rejected: revision 2's newest-wins removal of the orphan (R5, superseded by R14); N2 —
     # request record bodies are unchanged
     paths = S.built_paths(tmp_path)
@@ -899,10 +707,6 @@ def test_a_request_whose_identity_is_already_claimed_this_pass_waits_a_pass(tmp_
 
 
 def test_a_refused_ledger_stops_rotate_before_the_queue_is_replaced(tmp_path: Path):
-    """With a symlink planted at a channel's consumed ledger: rotate(channel, held, consumed,
-    sha, timeout=...) raises StateRefused before any write; the queue file's bytes are unchanged
-    (not replaced), and nothing is appended through the link (D8: both files are judged before
-    either is written)."""
     # rejected: closing the crash window between the queue replace and the ledger append
     # (unchanged, O3; X11)
     paths = S.built_paths(tmp_path)
@@ -922,15 +726,7 @@ def test_a_refused_ledger_stops_rotate_before_the_queue_is_replaced(tmp_path: Pa
     assert ledger_target.read_text(encoding="utf-8") == "", "a row went through the ledger link"
 
 
-# ---------------------------------------------------------------------------------------------
-# D2: the two core functions beside Held
-# ---------------------------------------------------------------------------------------------
-
-
 def test_move_at_renames_under_the_held_root(tmp_path: Path):
-    """move_at(held, src, dst) renames a plain src to dst across two folders below the held root:
-    it makes dst's holding folders; onto a plain destination it replaces it, as os.replace does;
-    a missing src raises FileNotFoundError."""
     # rejected: a hard-linked, FIFO, link or folder destination enumeration (R17: no host-actor
     # edge enumeration; #20 is the move guard)
     move_at = S.core_fn("move_at")
@@ -963,10 +759,6 @@ def test_move_at_renames_under_the_held_root(tmp_path: Path):
 
 
 def test_open_lock_at_opens_a_plain_lock_without_truncating(tmp_path: Path):
-    """open_lock_at(held, name) returns an open file at name for flock: it makes the holding
-    folders; under umask 022 it creates an absent lock file with mode 0o644 (R8/D9); it never
-    truncates an existing lock file's content; two opens of one name exclude each other under
-    flock LOCK_EX|LOCK_NB (C7); timing stays in _flock.take/release."""
     # rejected: N13 — a lock mode looser than 0644 is not kept; the hard-link/FIFO lock cases
     # (R17)
     open_lock_at = S.core_fn("open_lock_at")
@@ -1004,10 +796,3 @@ def test_open_lock_at_opens_a_plain_lock_without_truncating(tmp_path: Path):
         for fh in opened:
             if hasattr(fh, "close"):
                 fh.close()
-
-
-# ---------------------------------------------------------------------------------------------
-# A18: the regression tier's absence oracles read what the handle writes
-# ---------------------------------------------------------------------------------------------
-
-

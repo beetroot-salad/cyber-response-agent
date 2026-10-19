@@ -60,10 +60,6 @@ def _lead(*queries: str) -> ReplayFn:
     return ReplayFn([*(q("cmdb", "probe", {"native_query": n}) for n in queries), DONE])
 
 
-# ======================================================================================
-# O1 — a refused view write ends the run, and the run's state holds what happened.
-# ======================================================================================
-
 def test_a_failing_query_whose_view_write_is_refused_ends_the_run_holding_its_row_and_charge(
         tmp_path):
     """O1, driven:"""
@@ -92,10 +88,6 @@ def test_a_failing_query_whose_view_write_is_refused_ends_the_run_holding_its_ro
     assert [r["seq"] for r in summary["run_state"].lead_rows(LEAD)] == [0, 1, 2]
     assert summary["run_state"].breaker_snapshot()["systems"].get("cmdb") is None
 
-
-# ======================================================================================
-# O6 — the summary carries no state; the state is injected, or resolved at the boundary.
-# ======================================================================================
 
 def test_a_run_handed_no_state_resolves_its_own_at_the_boundary(tmp_path):
     """O6, production's path (`run.py` hands no state):"""

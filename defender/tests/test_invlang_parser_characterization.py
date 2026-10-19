@@ -1,42 +1,3 @@
-"""Characterization suite for the invlang dense-companion parser (issue #453).
-
-This is a **behavior-preserving refactor guard**, not a fresh spec. The #453
-refactor moves the schema-free cell tokenizer into a new `_cells.py`, lifts the
-shared `Block`/`RowError` types into a new `_types.py`, and gives
-`companion_from_blocks` a `_Projector` state object. None of that may change a
-single observable output. So every test here is GREEN against HEAD and must
-STAY green through the refactor — a red is a regression, never an "unimplemented"
-signal.
-
-It deliberately pins the four surfaces the refactor puts at risk, none of which
-the existing `test_invlang_parser.py` covers end-to-end:
-
-  A. Full-output identity on the two real `investigation.md` corpus files
-     (existing tests assert individual fields; a whole-dict freeze catches drift
-     in any field nobody thought to assert on).
-  B. The import surface — every name today's production importers and the two
-     invlang test modules pull from `parser`. The module split is exactly what
-     threatens these; per the locked design the moved names stay importable
-     from `parser` (re-exported).
-  C. The schema-free lexer functions, called directly. Today only `_split_cells`
-     has a direct unit test; the whole point of `_cells.py` is that these become
-     independently testable, so their current behavior is pinned here.
-  D. The ParseWarning block-label + reason strings at every reachable
-     construction site. The refactor consolidates ~12 hand-built warnings behind
-     one `_warn` helper; if the label spelling drifts at any site, a downstream
-     consumer that greps `warning.block` breaks silently. (Site 1094,
-     ":T resolutions" / "resolution has no lead attribution", is unreachable —
-     `_resolution_record` always returns a non-empty lead id or raises first —
-     so it is documented here but not pinned.)
-
-Plus (E) the projection paths that neither corpus nor the existing suite hits.
-
-The names imported below (the lexer helpers, `Block`) live in `parser` at HEAD.
-Post-refactor they live in `_cells.py`/`_types.py` but remain importable from
-`parser` per the locked re-export decision, so these imports stay valid without
-edits. Expected values were all captured by executing the parser at HEAD.
-"""
-
 from __future__ import annotations
 
 import json
@@ -80,10 +41,6 @@ _PRODUCTION_SURFACE = [
     "parse_dense_companion",
     "ParseWarning",
     "INVLANG_FENCE_RE",
-    # The fence split itself, and the type that carries what the fences ORPHAN
-    # alongside what they hold. Production surface since #932 — `validate`,
-    # `frontier` and `runtime.branch` all import it, and a lint gate directs every
-    # new reader here, so renaming it is a breaking change and not an internal one.
     "scan_fences",
     "FenceScan",
 ]
@@ -359,9 +316,6 @@ def test_naming_the_lead_projects_the_row_onto_that_lead_only():
 
 
 def test_a_lead_subblock_does_not_make_later_rows_inherit_its_lead():
-    """`:V l-002.…` scopes its own rows and nothing else. It used to leave l-002
-    as the ambient lead, so an unattributed `:R` row anywhere below it landed
-    there."""
     body, warnings = parse_dense_companion(
         _fence(
             _LEAD_HEADER + "\n"

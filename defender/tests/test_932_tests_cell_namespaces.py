@@ -57,18 +57,12 @@ def test_every_legal_shape_is_resolved() -> None:
 
 
 def test_the_qualified_spelling_is_accepted_and_actually_checked() -> None:
-    """LIVENESS CONTROL and regression in one. `h-001.ac1` is legal — `h-001` declares `ac1` —
-    so it must pass; and the same cell with a contract nobody declares must NOT, which is what
-    proves the token is being read rather than skipped as it was before."""
     assert _errors("h-001.ac1") == []
     assert len(_errors("h-001.ac9")) == 1
     assert "h-001.ac9" in _errors("h-001.ac9")[0]
 
 
 def test_a_qualified_token_resolves_against_its_own_hypothesis_only() -> None:
-    """`h-002.ac1` is refused even though a SIBLING on the same row declares `ac1`. The bare
-    form scopes against the union of the row's hypotheses; the qualified form names its
-    declarer, and honouring that is the cross-citation the sibling rules refuse elsewhere."""
     assert _errors("h-001,h-002,ac1") == []
     refused = _errors("h-001,h-002,h-002.ac1")
     assert len(refused) == 1
@@ -85,9 +79,6 @@ def test_a_malformed_hypothesis_id_stops_passing_as_some_other_kind() -> None:
 
 
 def test_a_lead_scoped_id_is_exempt_not_residue() -> None:
-    """`lp1` is a real namespace `_check_lead_prediction_structure` owns, and no hypothesis's
-    declarations could resolve it. Recognized-but-unresolvable and unrecognized have to be
-    different answers, or the residue rule denies a legal document."""
     assert _errors("lp1") == []
     assert _errors("h-001,lp1") == []
 

@@ -32,11 +32,6 @@ _COPY_SKIP_TOP = frozenset({"tests", "evals", "docs", "fixtures-e2e", "lessons"}
 SHIM_REL = "defender/bin/defender-lessons"
 
 
-# ======================================================================================
-# Fixture corpora (inputs; the goldens hold the outputs)
-# ======================================================================================
-
-
 def _lesson(name: str, *, desc: str, sig: str, tel: str, phase: str, extra: str = "",
             body: str = "body text") -> str:
     return (f"---\nname: {name}\ndescription: {desc}\nsource_signature: {sig}\n"
@@ -77,10 +72,6 @@ SHAPE_CORPUS = {
     )
 }
 
-#: Tag values holding a line-break character (s147's tab and newline, H8 (b)'s hostile values).
-#: Each lesson's `description` holds the SAME string, so `_emit_match`'s flattening of it — the
-#: `<path>\t<description>` listing — is the observed oracle for how the tag value must list.
-#: The double-quoted escapes and the block scalar are the GR10 shapes the write gate admits.
 BREAK_CORPUS = {
     "break-tab.md": (
         '---\nname: break-tab\ndescription: "tab\\there"\n'
@@ -131,11 +122,6 @@ v-001|compute|ip-only/??/??|??|knowledge=partial
 v-002|identity|user/known-corp|jsmith|uid=1000;loginuid=-1
 ```
 """
-
-
-# ======================================================================================
-# Trees, environments, children
-# ======================================================================================
 
 
 def venv_home() -> Path:
@@ -321,10 +307,6 @@ class WarningLog(logging.Handler):
 # --- reading `--tags` output (layout-agnostic: never rebuilds the column layout) -------------
 
 
-# ======================================================================================
-# Observations (the capture script runs these at the base; the tests compare them)
-# ======================================================================================
-
 SURVIVAL_ARGV: tuple[tuple[str, ...], ...] = (
     (),
     (r"telemetry_source:.*\bsshd\b",),
@@ -371,9 +353,6 @@ def closure_run(root: Path, tmp: Path, run_dir: Path) -> subprocess.CompletedPro
     from defender.tests._import_blocker import run_blocked
 
     body = f"BLOCKED = {S.BOX_BLOCKED!r}\n" + _CLOSURE_BODY
-    # `_sysconfigdata_*` is the interpreter's own build-variable module (zoneinfo reads it via
-    # sysconfig); it is not in `sys.stdlib_module_names`, yet every interpreter, a box's included,
-    # carries it.
     allow = (*S.box_import_allowlist(), sysconfig._get_sysconfigdata_name())
     return run_blocked(body, allow_only=allow,
                        argv=[shim_module(), *CLOSURE_ARGV],
@@ -711,23 +690,11 @@ def observe_lanes(tmp: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
-# ======================================================================================
-# Tests
-# ======================================================================================
-
-
 def _shim_answers(root: Path, tmp: Path) -> subprocess.CompletedProcess[bytes]:
     return shim(root, ("--tags",), tmp=tmp, cwd=tmp)
 
 
 def test_1080_defender_lessons_answers_through_the_moved_engine_as_today(tmp_path):
-    """`bin/defender-lessons`, run over a fixed lesson folder, returns the same frontmatter-match
-    output and exit code as the base engine. Its `--help` text is unchanged.
-
-    Observed by running a copy of this checkout's shim over a fixture corpus from an unrelated
-    directory, every argv against the base's verdict. The engine that answers is the moved one:
-    `cmd_show` is defined outside `defender/scripts/` and outside the lesson content folder, and a
-    copy with that module removed no longer answers (positive control: the intact copy does)."""
     home = engine_home()
     assert observe_survival(tmp_path / "a") == golden("survival")
 
@@ -742,14 +709,6 @@ def test_1080_defender_lessons_answers_through_the_moved_engine_as_today(tmp_pat
 
 
 def test_1080_the_defender_lessons_engine_imports_nothing_outside_the_box_image_closure(tmp_path):
-    """The same closure holds for the engine `bin/defender-lessons` runs: it answers a fixed
-    frontmatter query with no blocked module loaded, through every package `__init__` on its path.
-
-    The wrapper the shim execs is started as the main module under the box lane's environment and
-    an interpreter that refuses everything outside the standard library and the box image's
-    closure; it reaches the moved engine through its package path. Positive control: the same
-    harness, over a copy whose engine module has a heavy import planted after its header, refuses
-    it — the harness sees an import the engine makes."""
     home = engine_home()
     seen = observe_box_closure(tmp_path / "a")
     assert seen == golden("box_closure"), seen
@@ -787,18 +746,6 @@ def _first_real_lesson() -> Path:
 
 
 def test_lessons_show_names_a_file_outside_the_corpus_after_the_engine_moved(tmp_path):
-    """`defender-lessons --show` refuses any path that resolves outside defender/lessons: an
-    absolute path to a real file elsewhere (a tenant config.env, another file under defender/), a
-    `..` climb, and a link inside the corpus pointing out. It still shows an in-corpus lesson.
-    `--tags` runs over the real corpus, so the root assertion pins it by content or location, not
-    only by the folder name 'lessons' (which survives a wrong depth). (M2 re-anchor; access
-    surface: attacker- influenced argv.)
-
-    The refusals run through the REAL tree's shim (files that exist) and, for links planted in
-    the corpus, a copy's; each verdict is the base's. The root is pinned by location (an in-corpus
-    lesson's `--show` header and every listed path name this checkout's `defender/lessons`) and
-    by content (`--tags` over the real tree equals `--tags` over a copy holding a byte copy of the
-    real corpus)."""
     engine_home()
     assert observe_s021(tmp_path) == golden("s021")
 
@@ -825,45 +772,12 @@ def test_lessons_show_names_a_file_outside_the_corpus_after_the_engine_moved(tmp
 
 
 def test_lessons_shim_is_started_through_a_link_from_outside_the_tree(tmp_path):
-    """`defender-lessons` started through a link or a copy outside the tree, with the tree variable
-    unset, resolves its tree exactly as today (defaulting from its own path), and the engine
-    serves the same corpus whether started from the box entrypoint, from the host through the
-    search path, or from a linked worktree. Preserved behavior; the engine's idea of the tree is
-    the same in all three.
-
-    Each start, against the base's verdict for `--tags` and the listing: a link and a copy of the
-    shim outside the tree (the tree taken from the link's own folder, as today), the link with the
-    tree variable set, the host lane and the box lane resolving the shim on their PATH from a run
-    folder, and the checkout reached through a linked path."""
     engine_home()
     assert observe_s060(tmp_path) == golden("s060")
 
 
 def test_lessons_corpus_folder_is_missing_empty_or_a_link_when_tags_are_listed(tmp_path,
                                                                                monkeypatch):
-    """`defender-lessons --tags` over a missing, empty, linked, or malformed-front-matter corpus
-    does what it does today, and through the shim the host's lessons section is built as today:
-    an alert with no signature gets a Lessons section holding only `### Viable tags` when the
-    `--tags` call answers (`goldens/lessons.json`, `s062.orient`, "fixed, no signature"), and none
-    only when that call also fails (KNOWN LIMIT, corrected by F5); an alert with a signature and a failed or
-    empty shim gets the Lessons section carrying the line `_(no lessons matched `source_signature
-    ~ <sig>`)_`, which reads as a true zero match, with a `### Viable tags` list only when the
-    `--tags` call returned text. Only the corpus-vocabulary section is dropped by a failed shim.
-    The corpus root is the real `defender/lessons` in every case, so a missing folder is reported
-    for the right path.
-
-    `--tags` runs through a copy's shim over each corpus shape. orient's Lessons section is built
-    by `orientation` through its shim seam (the `shim` keyword): a recording fake that hands each
-    call to orient's own runner (the copy's real shim and engine) or answers a failure G22
-    observed, plus one copy whose shim is deleted (the real runner then fails). Every row is the
-    base's: the recorded argv, the section text, and whether the vocabulary section shows (since #1222
-    it names its failure rather than vanishing, and only an unsigned run has none). Pinned as the base answers it: an alert with no
-    signature gets no Lessons section when the `--tags` call fails too, and a section holding only
-    `### Viable tags` when that call answered.
-
-    #1255 (design rev 4, P1): the Lessons section is model-bound text, so its Hits name each
-    lesson by its model path (`/defender/lessons/<name>.md`), the checkout at `/defender` —
-    `goldens/lessons.json` `s062.orient`, respelled from the base's host paths."""
     engine_home()
     seen = observe_s062(tmp_path, monkeypatch.setenv)
     assert seen == golden("s062")
@@ -874,41 +788,17 @@ def test_lessons_corpus_folder_is_missing_empty_or_a_link_when_tags_are_listed(t
 
 
 def test_lessons_show_path_that_is_a_link_a_directory_or_missing(tmp_path):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and
-    rename; O5 where it applies). A symlink inside the corpus pointing outside is refused; a
-    symlink loop, a directory and a nonexistent name produce today's error; a list mixing one valid
-    lesson and one bad entry behaves as today (valid shown, bad reported as today).
-
-    A traceback (today's answer to a symlink loop) is compared by exit status and its last line."""
     engine_home()
     assert observe_s145(tmp_path) == golden("s145")
 
 
 def test_lesson_tag_values_of_unexpected_shape(tmp_path):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and
-    rename; O5 where it applies). Lesson tag fields holding a scalar, null, empty list, number,
-    nested list or a value with a tab or newline are listed or skipped exactly as today.
-
-    Observed through a copy's shim against the base's capture (golden `s147`): the shape corpus
-    under `--tags`, `--tags source_signature` and the listing, and the tab and newline lessons
-    under the listing, `--show` and a pattern match, each byte for byte. H8 (b)'s change to how
-    `--tags` prints a tab or newline value is parked with the lessons --tags fix follow-up by the
-    2026-10-04 scope cut, so `--tags` output over those two values is not pinned here either
-    way."""
     engine_home()
     seen = observe_s147(tmp_path)
     assert seen == golden("s147")
 
 
 def test_lesson_frontmatter_and_tags_with_pattern_metacharacters(tmp_path):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster and
-    rename; O5 where it applies). Lesson tags or descriptions with regex metacharacters, quotes, a
-    colon-space, a leading dash, emoji or the frontier block's own lead-in strings are matched and
-    rendered as today.
-
-    The engine through a copy's shim (`--tags`, the listing, `--show`, an unescaped pattern and
-    each tag escaped as orient escapes it), and the frontier block rendered by the moved library
-    over the same lessons, both as the write return and as the fold."""
     engine_home()
     frontier_home()
     assert observe_s185(tmp_path) == golden("s185")
@@ -916,26 +806,6 @@ def test_lesson_frontmatter_and_tags_with_pattern_metacharacters(tmp_path):
 
 def test_1080_the_lessons_engine_gives_one_verdict_per_argv_on_the_box_lane_and_the_host_lane(
         tmp_path):
-    """For each lane that reaches `defender-lessons` with model-authored argv (the box lane and the
-    host lane) the same fixed table of argv gets the same verdict from the moved engine, and the
-    engine starts from that lane's own environment and answers. The `--tags` and `--show` flag
-    allowlist admits and refuses identically. `--show` of anything that does not resolve inside
-    `defender/lessons` is refused on both lanes with one text, `error: no such lesson: <the path as
-    typed>` on stderr and exit status 2, whether or not the target exists (exit 2 if any of several
-    paths is refused): an absolute path to a sibling file such as `defender/pyproject.toml`,
-    `/etc/passwd`, `defender/lessons/../pyproject.toml`, `defender/lessons/../../README.md`, a link
-    inside the corpus pointing at a file outside it (a relative target, and a target outside the
-    repository), a symlinked parent directory pointing out, and a sibling folder whose name merely
-    starts with the corpus name (`defender/lessons-actor/...`). A link inside the corpus to an
-    in-corpus lesson is shown (status 0); a relative path is joined to the repository root, not
-    the working directory (status 0 from another cwd); when the corpus folder is itself a link to
-    a real folder elsewhere, a lesson in it is shown and a link inside it pointing outside that
-    folder is refused. Each case is pinned from the base engine run from the box run folder and
-    from the repository root alike (RG6, JD1).
-
-    The box lane is the real `_render_env` (the in-box mark set, the shims on PATH); the host lane
-    the real `run_common.run_env`. Each argv's verdict is the base's on every lane and from both
-    working directories; the refusals are additionally checked to carry exactly RG6's one text."""
     engine_home()
     seen = observe_lanes(tmp_path)
     want = golden("lanes")
@@ -949,10 +819,6 @@ def test_1080_the_lessons_engine_gives_one_verdict_per_argv_on_the_box_lane_and_
             assert refused, (a, v)
             assert v["err"].count("\n") == len(refused), (a, v)
 
-
-# ======================================================================================
-# #1206 (H8 (b) of #1080): a line break in a lesson tag value forges no dimension block
-# ======================================================================================
 
 #: The engine's retrieval dimensions, in the order `--tags` lists them.
 TAG_DIMENSIONS = ("source_signature", "telemetry_source", "attack_phase")
@@ -1084,20 +950,6 @@ def observe_hostile(tmp: Path, setenv: Callable[[str, str], None]) -> dict[str, 
 
 def test_1080_a_line_break_in_a_lesson_tag_value_forges_no_dimension_block_in_tags_output(
         tmp_path, monkeypatch):
-    """A lesson whose `source_signature`, `telemetry_source` or `attack_phase` frontmatter value
-    contains a line break (a double-quoted YAML string with an escaped newline, and a block
-    scalar) is listed by `defender-lessons --tags` on one line under its own dimension, the break
-    flattened the way `_emit_match` flattens a description. The output holds no column-0 dimension
-    header that the corpus did not declare (no forged `attack_phase:` or `source_signature:`
-    block), and the `### Viable tags` text that orient splices from it into message zero holds the
-    same single line. An ordinary value lists byte for byte as at the base. The deterministic write
-    gate admits such a value (GR10), so the render site is the barrier this change owns.
-
-    Over a copy holding the fixed corpus plus one hostile value per dimension (each lesson's
-    description holds the same string, so the listing is the flattening oracle): `--tags` for all
-    dimensions and each one alone, then orient's Viable tags through the real shim. Positive
-    control: every value line the base printed for the fixed corpus is in the output unchanged.
-    Red at the base, which forges the blocks (GT7, GR10). Adopted by #1206."""
     engine_home()
     seen = observe_hostile(tmp_path, monkeypatch.setenv)
     tags = seen[key(("--tags",))]["out"]

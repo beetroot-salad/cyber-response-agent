@@ -6,7 +6,6 @@ import ast
 from defender.tests._by_path import import_lint_lib
 
 
-
 def _gate():
     return import_lint_lib("lint_hand_rolled_name_resolution")
 
@@ -25,12 +24,6 @@ REAL_SOURCE_HEADER = (
 
 
 def test_it_fires_on_a_callee_matched_by_spelling_over_real_source():
-    """The shape that shipped twice: a call census over a real file, matched by `.func.id`.
-
-    Both an alias (`from m import run_stage as _rs`) and the attribute form
-    (`mod.run_stage(...)`) are the same function under a name this comparison does not match,
-    which is how a widening call hid from a census written to count exactly those calls.
-    """
     found = _findings(REAL_SOURCE_HEADER + (
         "    return [n for n in ast.walk(tree)\n"
         "            if isinstance(n, ast.Call) and n.func.id == 'run_stage']\n"))
@@ -48,11 +41,6 @@ def test_it_fires_on_the_getattr_spelling_of_the_same_comparison():
 
 
 def test_it_fires_on_an_import_alias_read():
-    """Reading `.asname` has one purpose: deciding what a name is bound to.
-
-    That is the resolver's question, and the hand-written version of it missed a function-local
-    import shadowing an honest module-level one at the line that used the name.
-    """
     found = _findings(REAL_SOURCE_HEADER + (
         "    for node in ast.walk(tree):\n"
         "        if isinstance(node, ast.ImportFrom):\n"
@@ -63,9 +51,6 @@ def test_it_fires_on_an_import_alias_read():
 
 
 def test_it_is_quiet_on_a_module_that_reaches_the_resolver():
-    """The ownership half. A module that goes through `_astlib` has ASKED THE OWNER; whether it
-    also compares a name somewhere is not this gate's business, because the resolver returns
-    None for a duck-typed method and a lexical fallback there is correct, not a hand-roll."""
     source = REAL_SOURCE_HEADER.replace(
         "import ast\n", "import ast\nfrom _astlib import module_env\n") + (
         "    env = module_env(tree)\n"
@@ -75,9 +60,6 @@ def test_it_is_quiet_on_a_module_that_reaches_the_resolver():
 
 
 def test_it_is_quiet_on_synthetic_source_the_module_wrote_itself():
-    """A claim about a fixture written three lines up is a claim about a spelling, and the
-    spelling IS the fact there. Only a claim about a SHIPPED file has to survive how that file
-    actually spells things."""
     source = (
         "import ast\n"
         "def check():\n"
@@ -88,9 +70,6 @@ def test_it_is_quiet_on_synthetic_source_the_module_wrote_itself():
 
 
 def test_it_is_quiet_on_a_definition_matched_by_name():
-    """`FunctionDef.name` is a definition, not a reference. Finding the function called `foo`
-    in a file is a lexical question with a lexical answer — there is no binding to get wrong,
-    which is exactly why this gate does not flag it."""
     found = _findings(REAL_SOURCE_HEADER + (
         "    return [n for n in ast.walk(tree)\n"
         "            if isinstance(n, ast.FunctionDef) and n.name == 'seam']\n"))
@@ -114,5 +93,3 @@ def test_the_resolver_itself_is_out_of_scope():
     gate = _gate()
     assert gate.OWNER.name == "_astlib.py"
     assert gate.OWNER.is_file(), "the gate points at a resolver that is not there"
-
-

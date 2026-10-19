@@ -1,6 +1,3 @@
-"""#1224 — every query branching issues on its own behalf (oracle/verifier run_query, check 5 re-run,
-pre-flight replay/drift): the gather-grant door, the branch-point as_of clock, oracle-side ledger
-isolation, cross-world isolation, and the rate limiter."""
 from __future__ import annotations
 
 import dataclasses
@@ -27,15 +24,9 @@ from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S
 from defender.tests.tenant_1107_settings import _spec1107 as T1107
 
-# --------------------------------------------------------------------------------------
-# The scenario's data.
-# --------------------------------------------------------------------------------------
 
 #: A rate no scenario outside the rate demands comes near, so their timing is not the limiter's.
 FAST = 500.0
-#: Real-clock windows are judged this much shorter than one interval: the stub stamps a call a
-#: few milliseconds after its permit, so two permits exactly one slot apart can land a hair
-#: closer than that in the log. An unthrottled run packs every query into a few milliseconds.
 SLACK = 0.05
 
 #: The source run's idp call and its captured answer — also the live answer, so the base read,
@@ -62,13 +53,6 @@ UNGRANTED_CALL = S.Call(UNGRANTED, "query", S.query_params("src:10.0.0.9"), {"fl
 WRITE_CALL = S.Call("idp", S.WRITE_VERB, {"host": "web-1"}, {"isolated": "web-1"})
 
 
-# --------------------------------------------------------------------------------------
-# The estate: the shared fixture tenant, plus this file's extra adapters and grant rows.
-# --------------------------------------------------------------------------------------
-
-#: A fixture adapter whose read goes through the REAL index confinement (`confine_index`), so
-#: "the adapters' own confinement refuses as on a real run" has a real refusal to observe
-#: (tier 1: the real `ConfinementFault`, raised by a real adapter module on disk).
 _CONFINED_ADAPTER = '''\
 """#1224 fixture adapter: a search confined by the real `confine_index`."""
 from __future__ import annotations
@@ -193,11 +177,6 @@ def _plain_registry(est: S.Estate, tenant: Any = None) -> ModuleVerbRegistry:
     return ModuleVerbRegistry(est.roster(), rt.grants.gather, grant_home=rt.table_pointer)
 
 
-# --------------------------------------------------------------------------------------
-# Serving and launching.
-# --------------------------------------------------------------------------------------
-
-
 def _scene(tmp_path: Path, oracle: S.ScriptedModel, verifier: S.ScriptedModel | None = None,
            *, est: S.Estate | None = None, ep: Path | None = None, label: str = "b",
            **knobs: Any) -> tuple[S.Estate, Path, Any]:
@@ -264,11 +243,6 @@ def _gather_run(tmp_path: Path, reg: Any, est: S.Estate, *turns: Any) -> tuple[P
                               gather_turns=[*turns, S.done_turn()])
 
 
-# --------------------------------------------------------------------------------------
-# Observing.
-# --------------------------------------------------------------------------------------
-
-
 def _hits(rows_or_est: Any, system: str, verb: str, params: Mapping[str, Any]) -> list[dict]:
     """The adapter calls (as the tenant logged them) for this exact call."""
     rows = rows_or_est.calls() if isinstance(rows_or_est, S.Estate) else rows_or_est
@@ -318,16 +292,6 @@ def _breaker(state: Any) -> dict:
     return state.breaker_snapshot()
 
 
-# An Elasticsearch that answers from a three-document index: one document dated before the
-# branch point, one a second after it, one weeks after it (and before today). The REAL elastic
-# adapter reaches it through the real transport (`docker exec ... curl`), the seam
-# `test_947_clock` drives; the shim applies whatever window the request carries (a search
-# body's `@timestamp` range filters, an ES|QL query's `@timestamp` comparisons, `now` date math,
-# epoch milliseconds) and nothing else, so the rows it returns are the rows a cluster holding
-# those documents would return. A bound it cannot read is no bound (the later rows come back).
-# It also appends every request it is handed (its argv) to `@LOG@`, so a scenario can read the
-# window that reached the cluster (R-10=A: a branching read keeps the caller's own end on the
-# wire and drops later rows after the read).
 EARLY = "2026-07-28T10:00:00Z"
 JUST_AFTER = "2026-07-28T16:18:46Z"
 LATE = "2026-08-15T09:00:00Z"
@@ -516,11 +480,6 @@ def _acquire_times(limiter: Any, clock: _Clock, n: int) -> list[float]:
     return out
 
 
-# ======================================================================================
-# The grant door (M7, O6, M21=A, M22=A).
-# ======================================================================================
-
-
 def test_1224_run_query_is_decided_by_the_gather_grant(tmp_path):
     """the oracle's run_query is executed only on the gather grant's decision: a granted read reaches the tenant adapter and its answer comes back to the …"""
     est = _estate(tmp_path, withheld=(("edr", "lookup"),))
@@ -682,11 +641,6 @@ def test_1224_sibling_query_tool_via_decides_each_call_and_carries_as_of(tmp_pat
     assert not oracle.overrun
 
 
-# ======================================================================================
-# The branch-point clock (O6; D3 narrows the bound to adapters that honour as_of).
-# ======================================================================================
-
-
 def test_p083_call_window_extends_past_the_branch_point(tmp_path):
     """however a window's end is spelled past the branch point, the elastic adapter sends the cluster the caller's own end and returns no row dated after …"""
     assert datetime.now(UTC) > _moment(LATE), "premise: the later row is already indexed"
@@ -825,11 +779,6 @@ def test_1224_tacit_knowledge_run_query_reads_the_state_at_the_branch_date(tmp_p
         "the oracle was not answered with the registry's state on the branch date")
 
 
-# ======================================================================================
-# Oracle-side traffic is invisible to the sibling (O9, M16=A) and lands in its own ledger.
-# ======================================================================================
-
-
 def test_1224_oracle_side_queries_land_in_no_sibling_record(tmp_path):
     """after a sibling call whose oracle explores, forges and is verified with its own queries, the sibling's evidence rows and world-ledger rows are …"""
     est = _estate(tmp_path)
@@ -958,16 +907,6 @@ def test_system_marked_down_by_real_failures_is_also_needed_by_the_oracle(tmp_pa
     assert len(S.lead_rows(run_dir)) == 3
 
 
-# ======================================================================================
-# The base answer and the retry count (N06).
-# ======================================================================================
-
-
-# ======================================================================================
-# Investigator reasoning never rides along (O10).
-# ======================================================================================
-
-
 def test_p011_call_params_smuggle_the_investigators_conclusion(tmp_path):
     """a long free-text param carrying the investigator's conclusion reaches the oracle and the verifier only inside an untrusted frame, and nothing else …"""
     harness = S.replay_harness()
@@ -992,11 +931,6 @@ def test_p011_call_params_smuggle_the_investigators_conclusion(tmp_path):
             f"the investigator's reasoning reached the {model.name}")
         assert "measure the idp lead" not in model.all_seen(), (
             f"the lead's goal reached the {model.name}")
-
-
-# ======================================================================================
-# No exploration result crosses worlds (S20, S21, S22).
-# ======================================================================================
 
 
 def test_1224_exploration_result_never_reaches_another_worlds_oracle(tmp_path):
@@ -1055,11 +989,6 @@ def test_1224_shared_exploration_result_carries_another_worlds_fact_entities(tmp
     assert leaked == [], f"world b's content reached world c's oracle: {leaked}"
 
 
-# ======================================================================================
-# The live grant governs every query at query time (M21=A).
-# ======================================================================================
-
-
 def test_1224_grant_narrowed_between_preflight_and_the_sibling_start(tmp_path, monkeypatch):
     """when the tenant withholds a verb after pre-flight calibrated a world on it, the sibling's call for that verb is refused by the grant decision at call …"""
     est = _estate(tmp_path)
@@ -1080,11 +1009,6 @@ def test_1224_grant_narrowed_between_preflight_and_the_sibling_start(tmp_path, m
     assert [r["source"] for r in world_ledger if r["system"] == "idp"] == [S.REFUSED]
     assert oracle.submissions() == 1, "the refused call reached the sibling's oracle"
     assert not oracle.overrun
-
-
-# ======================================================================================
-# The rate limit (M13; S16, S17, S18; M11=A; N19).
-# ======================================================================================
 
 
 def test_1224_oracle_side_queries_never_exceed_the_configured_rate(tmp_path):

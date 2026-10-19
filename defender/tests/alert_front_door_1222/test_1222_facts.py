@@ -193,13 +193,6 @@ def _fail(problems: Sequence[str]) -> str:
 # The tests (one per demand; the name is the demand's `discharged_by`)
 
 def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
-    """Given the admitted alert and the tenant's alert mapping, the one derivation, run once at
-    run start, yields exactly three facts — signature, event_time, summary — each the value at its
-    mapped dotted path (a walk over JSON objects only), or absent when the key is unmapped or the
-    path is absent from the alert; it never substitutes another field.
-
-    Driven through run start (`run.main`); the facts are read where the readers meet them — the
-    orientation lookups and the case ticket — and then off the run's record."""
     mapping = {"signature": "detection.key", "event_time": "detection.seen",
                "summary": "detection.title"}
     planted = S.plant_tenant("acme", alert_mapping=mapping)
@@ -235,14 +228,6 @@ def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
 
 
 def test_alert_facts_value_domain(tmp_path: Path) -> None:
-    """A mapped value is a signature only when it is a JSON string, or an integer as its decimal
-    text (5710 → '5710', 0 → '0', -0 → '0'), matching [A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,127} —
-    ASCII only, no leading dash, at most 128 characters. Anything else — a negative integer, a
-    float, a boolean, an empty string, a list, an object, a value with a leading dash, whitespace,
-    a quote, a control or shell character, a non-ASCII character, or a value of 129 characters —
-    is no signature, recorded and named exactly like an unmapped one. Mapping the signature to
-    rule.name over the committed fixture alerts gives no signature (every committed rule.name holds
-    a space, RD-05)."""
     planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
 
@@ -304,12 +289,6 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
 
 
 def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
-    """A list, string, null, number, boolean or list-index look-alike on the path gives no fact.
-    There is no rule.id fallback.
-
-    The mapping keys the signature on `vendor.rule.key`; the alert puts something that is not a
-    JSON object at `vendor` (or a list at the end of the path, or an object), with a rule.id
-    beside it that no reader may fall back to."""
     mapping = {"signature": "vendor.rule.key", "event_time": "detected_at",
                "summary": "rule.description"}
     planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
@@ -341,12 +320,6 @@ def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
 
 
 def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
-    """A value with a leading dash, a negative rule number included, is no signature under the
-    allow-list [A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,127}: orientation names it like an unmapped one
-    and no lookup receives it as an argument.
-
-    PR-06: given as an argument, `--x`-shaped values were parsed as options by the vocabulary
-    lookup; `-5` was taken as a value."""
     planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     valid = _drive(tmp_path, planted, _alert(VALID), "s01-dash-control", mapping=SHIPPED)
@@ -374,12 +347,6 @@ def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
 
 
 def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
-    """A NUL or other control character in the mapped signature value gives no signature, named
-    in orientation, and the run continues; a NUL in summary or event_time is ordinary data; an
-    unpaired surrogate escape is refused at admission.
-
-    PR-05 / PR-09: at base a NUL or lone surrogate handed to a lookup failed inside it and the
-    section silently dropped."""
     planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     controls = [("NUL", "Zq7731\u0000nul"), ("escape", "Zq7731\u001b[31mred"),
@@ -418,12 +385,6 @@ def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
 
 
 def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> None:
-    """An integer gives its decimal text (-0 gives '0'); a float, an exponent form and an integer
-    whose text exceeds 128 characters are no signature; '05710' and 5710 are distinct; every sink
-    uses that one text.
-
-    PR-04: at base the signature text was Python's own spelling (5710.0 -> '5710.0', 1E3 ->
-    '1000.0')."""
     planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     digits_128 = "9" * 128
@@ -459,10 +420,6 @@ def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> N
 
 
 def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
-    """When the mapped member is repeated, the last one wins, and every reader agrees.
-
-    Readers observed: the orientation lookups, the case ticket's sig: label, the invlang corpus
-    loader over the tenant's runs, and the run's record. Real duplicate bytes, written as is."""
     planted = S.plant_tenant("acme", alert_mapping=VENDOR)
     inner = S.alert_bytes(_alert(vendor="@@")).replace(
         b'"code": "@@"', b'"code": "FIRST-7731",\n  "code": "LAST-7731"')
@@ -492,13 +449,6 @@ def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
 
 
 def test_p083_event_time_mapped_to_a_number_zero_or_object(tmp_path: Path) -> None:
-    """The evt: label is non-empty for the committed fixture alerts.
-    - An object, list or float event_time is no fact.
-    - An integer gives its decimal text; "now" stays "now".
-    - No other field changes, and no reader raises.
-
-    The evt: label is the case ticket's open payload; "no other field" is the signature and the
-    summary, on the ticket and in the record."""
     planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
     fixtures = [(slug, S.fixture_alert(slug)["alert_timestamp"],
                  _drive(tmp_path, planted, S.fixture_alert_bytes(slug), f"s01-evt-fx-{i}"))
@@ -556,12 +506,6 @@ def test_p179_signature_at_and_one_past_the_length_bound(tmp_path: Path) -> None
 
 
 def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> None:
-    """Every non-ASCII character — Unicode whitespace, format controls, curly or guillemet quotes,
-    line separators — is outside the allow-list, so such a value is no signature, named like an
-    unmapped one.
-
-    PA-22: no Unicode category isolates "quote", and one_line() drops format controls, so two such
-    values could print alike."""
     planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     values = [("no-break space", "Zq7731\u00a0nb"), ("ideographic space", "Zq7731\u3000id"),

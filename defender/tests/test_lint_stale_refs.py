@@ -137,9 +137,6 @@ def test_unresolvable_base_ref_exits_2(tmp_path, capsys):
 
 
 def test_shallow_graft_without_merge_base_exits_2(tmp_path, capsys):
-    """THE regression test. Reproduces the CI checkout: a depth-1 graft whose base ref
-    resolves but shares no ancestor with HEAD. The old gate exited 0 having checked
-    nothing, even though the diff deletes a symbol that is still referenced."""
     work = _clone(tmp_path, _upstream(tmp_path), depth=1)
 
     assert _run_gate(work, tmp_path) == 2
@@ -176,9 +173,6 @@ def test_stale_reference_is_flagged(tmp_path):
 
 
 def test_deleted_cli_shim_named_in_a_prompt_is_flagged(tmp_path):
-    """The #617 shape that exposed all this: a deleted `bin/defender-record-query` shim
-    whose name survives in a model-facing prompt. The ident is synthesized from the
-    deleted PATH, not from a Python `def`."""
     up = _upstream(tmp_path)
     _git(up, "checkout", "-q", "main")
     _write(up, "bin/defender-record-query", "#!/bin/sh\necho hi\n")
@@ -213,12 +207,6 @@ def test_deleted_markdown_matches_filename_not_ordinary_prose(tmp_path):
 
 
 def test_surviving_module_named_in_a_from_package_import_is_not_flagged(tmp_path):
-    """`from pkg import mod` puts a MODULE in the target position, where idents are
-    collected. Deleting one importer must not make every OTHER importer of that live
-    module read as a stale reference — a module's binding site is a file, which the AST
-    binding scan cannot see. `_removed_idents` already refuses to collect the module PATH
-    of `from pkg.mod import name` for this reason; the target position is the same shape.
-    """
     up = _upstream(
         tmp_path,
         main_files={
@@ -240,17 +228,6 @@ def test_surviving_module_named_in_a_from_package_import_is_not_flagged(tmp_path
 
 
 def test_a_genuinely_deleted_module_is_still_flagged(tmp_path):
-    """Positive control for the rule above: the module-exists check is scoped to
-    git-TRACKED paths, so it clears a module that SURVIVES without blunting the deletion
-    the gate exists to catch. (A filesystem walk would find a stale copy under
-    `.worktrees/` — where a module deleted from this tree still sits on disk — and mask
-    exactly this.)
-
-    The surviving reference is prose, not an import: a surviving `from pkg import mod`
-    line is itself an AST binding of that name, so `_still_defined` clears it on the
-    pre-existing rule and the deleted-module case never reaches the new one. Prose is
-    also where the #617-class stale reference actually lives.
-    """
     up = _upstream(
         tmp_path,
         main_files={
@@ -280,14 +257,6 @@ def test_moved_symbol_is_not_flagged(tmp_path):
 
 
 def test_a_function_local_def_is_not_a_removed_identifier(tmp_path):
-    """A `def` nested inside a function body is invisible outside that scope, so deleting it
-    can strand no reference — and its name is usually an ordinary word the rest of the tree
-    uses as prose. The PR deletes `outbound_note`, a helper nested inside a test function,
-    while `docs.md` (untouched, on main) uses the word; that must not be a finding. Positive
-    control in the same repo: the same PR also deletes the module-level `some_removed_helper`
-    that `caller.py` still calls, and THAT is flagged — so the scan ran and the local def was
-    excluded by scope, not by accident. Scope is read off the base tree's AST, because a
-    local def inside a top-level function and a method are both indented four."""
     up = _upstream(
         tmp_path,
         main_files={
@@ -330,10 +299,6 @@ def test_a_method_with_the_same_indent_as_a_local_def_IS_a_removed_identifier(tm
 
 
 def test_an_override_of_an_outside_base_is_not_a_removed_identifier(tmp_path):
-    """A method of a class whose every base comes from outside the repo overrides that base's
-    API: deleting a test double's `with_suffix` (a `Path` subclass) must not condemn every
-    `Path.with_suffix` call in the tree. Controls: a method of a class whose base the file
-    defines, or imports from a repo module, is the repo's own name, and its removal is flagged."""
     up = _upstream(
         tmp_path,
         main_files={
@@ -371,11 +336,6 @@ def test_an_override_of_an_outside_base_is_not_a_removed_identifier(tmp_path):
 
 
 def test_a_dropped_import_line_does_not_condemn_the_MODULE_it_imported(tmp_path):
-    """Removing `from pkg_helper_mod import Thing` is evidence about `Thing`, never about
-    `pkg_helper_mod`. The module's binding site is a FILE, so `_still_defined` — which only
-    recognises AST bindings — structurally cannot clear it, and every surviving importer of
-    a module that still exists reads as a stale reference. On the #647 branch that shape
-    produced 25 false findings across 20 files, none of them stale."""
     up = _upstream(
         tmp_path,
         main_files={
@@ -395,14 +355,6 @@ def test_a_dropped_import_line_does_not_condemn_the_MODULE_it_imported(tmp_path)
 
 
 def test_a_DELETED_module_is_condemned_by_its_own_deletion(tmp_path):
-    """The other half of the rule above: the gate must still catch a reference to a module
-    the PR really deleted. That evidence comes from `--name-status`, not from an importer
-    having dropped a line — so it holds even when NO import of the module was removed
-    anywhere (here there is none: the reference that survives is prose).
-
-    Regression pin for the gap the narrowing opened: the removed-paths walk skipped every
-    component containing a dot, and since every filename carries a suffix, it dropped the
-    BASENAME of every deleted file — leaving the deleted-module class covered by nothing."""
     up = _upstream(
         tmp_path,
         main_files={
@@ -431,13 +383,6 @@ def test_a_DELETED_module_is_condemned_by_its_own_deletion(tmp_path):
     ],
 )
 def test_reference_in_an_excluded_path_is_not_flagged(tmp_path, rel):
-    """`defender/fixtures-e2e` and `defender/lessons-environment` are the near-misses: the
-    match is `rel == d or rel.startswith(d + "/")`, so excluding `defender/fixtures` never
-    covered `defender/fixtures-e2e`.
-
-    The control below is what makes this test mean anything: the SAME text at a
-    non-excluded path must be flagged, so a pass here is the exclusion doing the work and
-    not some other filter."""
     up = _upstream(tmp_path, main_files={rel: "mentions some_removed_helper()\n"})
     work = _clone(tmp_path, up)
 
@@ -455,24 +400,11 @@ def test_the_same_reference_at_a_non_excluded_path_IS_flagged(tmp_path):
     assert "src/notes.md:some_removed_helper" in hits
 
 
-# The reference these three plant names ONLY `held-back`. `_batch_grep` attributes a hit
-# line to a single ident, so a line that also spelled `defender/fixtures/` would be claimed
-# by `defender` — itself a harvested component of the deleted path in a repo this small —
-# and `held-back` would come back empty whatever the rule under test did.
 _HELD_BACK_REF = "src/notes.md"
 _HELD_BACK_REF_BODY = "the harness walks the held-back set for members\n"
 
 
 def test_a_directory_keeping_one_tracked_file_is_not_read_as_removed(tmp_path):
-    """`_scan` harvests idents from the path COMPONENTS of removed files, so emptying a
-    directory but keeping one file in it used to mark the directory's own name removed —
-    and every surviving reference to a directory that STILL EXISTS went red at once (44 of
-    them, when `fixtures/held-out/` was emptied down to its README).
-
-    The survivor is planted under `defender/fixtures/`, which is in EXCLUDED_GREP_DIRS:
-    that list answers "is this a reference SOURCE", never "does this path exist", so a
-    survivor sitting there must still vouch for the name.
-    """
     up = _upstream(
         tmp_path,
         main_files={
@@ -507,9 +439,6 @@ def test_a_directory_losing_every_tracked_file_IS_read_as_removed(tmp_path):
 
 
 def test_an_archival_copy_does_not_vouch_for_a_deleted_directory(tmp_path):
-    """`_path_named` reads survival from the LIVE tree only. `experiments/` holds frozen
-    records, so a like-named directory there must not keep a genuinely deleted production
-    directory's references green."""
     up = _upstream(
         tmp_path,
         main_files={
@@ -526,10 +455,6 @@ def test_an_archival_copy_does_not_vouch_for_a_deleted_directory(tmp_path):
 
 
 def test_frontmatter_name_is_a_declaration_but_the_body_is_a_reference(tmp_path):
-    """A skill keeps its own `name:` after the like-named shim is deleted. That line is a
-    declaration. The rule is LINE-scoped, so an instruction in the same file that still
-    tells the model to RUN the dead command must still go red — otherwise the rule would
-    whitelist exactly the bug the gate exists to catch."""
     up = _upstream(tmp_path)
     _git(up, "checkout", "-q", "main")
     _write(up, "bin/defender-elastic", "#!/bin/sh\n")
@@ -609,27 +534,11 @@ def _pr_branch_with_nothing_removed(tmp_path: Path) -> Path:
 
 
 def test_a_deletion_living_only_in_the_working_tree_is_scanned(tmp_path):
-    """A symbol deleted on DISK but not yet committed is scanned, and its surviving reference
-    is reported.
-
-    THE GATE'S TWO HALVES READ ONE TREE OR IT ANSWERS ABOUT NO TREE. The reference half is
-    `git grep`, which reads the working tree. The removal half read `origin/main...HEAD`, which
-    is the last COMMIT. So the ordinary way to use this gate — run it, then commit — verified a
-    tree in which your own deletions had not happened: they donated no identifiers, while every
-    reference the same edit added was fully visible. It reported clean and the deletions went to
-    CI unchecked, which is exactly how #922 shipped two rounds of stale references.
-
-    Driven as the delta between two runs over ONE repo: the committed state is clean, the only
-    change is an unlinked file, and that alone turns the gate red. A test that asserted only the
-    red half would pass on a gate that reports on everything."""
     work = _pr_branch_with_nothing_removed(tmp_path)
 
     assert _run_gate(work, tmp_path) == 0, "the committed PR removes nothing — nothing to report"
 
     (work / "mod.py").unlink()
-    # The tracked-path cache is per-process and keyed on the repo root, and this test moves the
-    # tree under it. A real run resolves it once against one tree; only a second run in the same
-    # process over a CHANGED tree can see the stale value.
     GATE._tracked_paths.cache_clear()
 
     assert _run_gate(work, tmp_path) == 1
@@ -639,14 +548,6 @@ def test_a_deletion_living_only_in_the_working_tree_is_scanned(tmp_path):
 
 
 def test_a_module_deleted_on_disk_no_longer_vouches_for_its_own_name(tmp_path):
-    """The same agreement one level down: a file removed with a plain `rm` is gone from the tree
-    and still in the INDEX, and the index is what `git ls-files` reports.
-
-    That set is what may VOUCH that a name survives — `_module_named` clears an identifier when
-    a tracked path still carries it — so reading it off the index let a module vouch for its own
-    name in the instant after being deleted. The grep, meanwhile, reads a tree where the module
-    is gone and its importers are dangling. Same failure as the diff basis, and it hides a
-    deletion rather than a reference."""
     work = _pr_branch_with_nothing_removed(tmp_path)
 
     (work / "helper_module.py").unlink()

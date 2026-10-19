@@ -59,14 +59,6 @@ def test_an_intervening_success_does_not_reset_the_attempt_count(tmp_path: Path)
 # The ceiling's own domain — 1, 0 and -1
 
 
-#: ONE DEMAND LEFT THIS FILE WITH #922. `test_a_faulted_tick_defers_its_held_and_pre_consumed_
-#: classifications` needed one batch whose rows land in THREE different gate buckets at once —
-#: authored, held, pre-consumed — which the observation channels gave for free because their
-#: rows carried no source bundle for the gate to judge. Every findings row in one batch with
-#: one ground truth lands in the same bucket, so the batch shape the demand was about cannot be
-#: built on the surviving channel. Restore it when a second channel returns.
-
-
 def _retires_on_the_first_failure(tmp_path: Path, ceiling: int) -> None:
     """Shared body for the three ceiling members; each demand's own test drives it."""
     paths = h.make_paths(tmp_path)
@@ -134,9 +126,6 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
 
 
 def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path: Path):
-    """C15: a tick that finds nothing on any channel is inert — it appends no consumed row
-    and no graveyard row, so a steady state of empty ticks cannot grow either file. The
-    positive control is the same drain on a non-empty channel, which does write both."""
     paths = h.make_paths(tmp_path)
     for name in h.AUTHOR_CHANNELS:
         ch = h.channel_of(name)

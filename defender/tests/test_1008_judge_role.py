@@ -11,22 +11,9 @@ from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests import _state1135
 
-#: The grant surfaces `AgentDefinition` defaults to deny-all on
-#: (`runtime/agent_definition.py:63-86`). The whole of O3 is that NONE of them is spelled at
-#: the judge's constructor call — an omission over the defaults, not an empty grant line a
-#: one-word edit reopens.
-#:
-#: SIX, not the four that are obviously grants. `read_allow_override` and `corpus_dirs` widen
-#: the READ lane and default to deny-all exactly as the other four do, so an empty
-#: `read_allow_override=PathShapes()` sitting in the constructor is the same one-word-from-open
-#: line the rule forbids — and it compiles to an empty `read_allow`, so the runtime companion
-#: assertion below cannot see it either.
 GRANT_KEYWORDS = ("tools", "bash_shapes", "write_shapes", "verb_grant",
                   "read_allow_override", "corpus_dirs")
 
-#: The functions and classes the source checks below resolve calls against, by their real
-#: dotted names. Spelled once: a check comparing against a bare identifier is a check that an
-#: alias defeats, which is the hole this file reopened twice.
 RUN_STAGE = "defender.learning._pydantic_stage.run_stage"
 AGENT_DEFINITION = "defender.runtime.agent_definition.AgentDefinition"
 JUDGE_DEPS = "defender.learning.judge.run.JudgeDeps"
@@ -66,12 +53,6 @@ def _questioner_def():
 def _grant_gate():
     """The #575 grant gate's module — for its `_named_programs` extractor, IMPORTED not copied."""
     return T.mod("tests.test_grant_gate_575")
-
-
-# ---------------------------------------------------------------------------------------
-# AST machinery — used where the claim IS about the source (an omitted keyword cannot be
-# observed at runtime: a definition that spells `tools=ToolSet()` compiles identically).
-# ---------------------------------------------------------------------------------------
 
 
 def _astlib():
@@ -166,10 +147,6 @@ def _self_test_the_extractor() -> None:
     assert set(_keywords(splatted)) == {"role"}, "the splat leaked into the named keywords"
     assert _splats(splatted) == 1, "the reader cannot see a `**mapping` argument at all"
 
-    # 3. THE NAME IS NOT THE BINDING. Every one of these spells `deps=SomeDeps()`; only the
-    #    first three construct `a.b.SomeDeps`. A function-local shadow and a `for` target are
-    #    two ways to write the same betrayal, and each has to answer differently here or the
-    #    seam checks below are reading decoration.
     resolved = {name: _called_origin(tree, _calls(_function(tree, name), "e.f.run_stage",
                                                   tree)[0], "deps")
                 for name in ("bare", "attribute", "aliased", "shadowed", "looped")}
@@ -220,11 +197,6 @@ def _assert_sole_unwidened_seam(path, fn_name: str, deps_origin: str) -> None:
     assert _splats(call) == 0, (
         f"{path.name}'s seam splats a mapping into `run_stage`, so `tools=`/`verbs=` ride in "
         "unread by the check above")
-
-
-# ---------------------------------------------------------------------------------------
-# O1 — every family-judge draw runs under the judge's own role
-# ---------------------------------------------------------------------------------------
 
 
 def test_1008_the_family_judge_is_registered_under_its_own_role_key():
@@ -283,10 +255,6 @@ def test_1008_the_real_selection_step_builds_the_judges_agent_with_no_tool_at_al
         assert seen == [(wiring.model, wiring.effort)], (
             f"the build never reached the model builder ({seen}) — an agent that was not "
             "really constructed registers no tools for reasons of its own")
-        # `_function_toolset` is the registration itself, which is what makes it the observable:
-        # `register_tools` is the only thing that puts a lane on a built agent (#921's premise 2
-        # probed exactly this on `QUESTIONER_DEF`), so an empty one is "the model cannot attempt
-        # a tool call at all" rather than a claim about a field.
         registered = sorted(agent._function_toolset.tools)  # noqa: SLF001 — the registration IS the observable
         assert registered == [], (
             f"the judge's agent registered {registered}; this role holds no tool lane at all")
@@ -327,11 +295,6 @@ def test_1008_every_judge_draw_is_declared_under_the_judges_role(tmp_path):
             "borrows the questioner's key")
 
 
-# ---------------------------------------------------------------------------------------
-# O2 — the refusal text is the judge's own, and it teaches no dead command
-# ---------------------------------------------------------------------------------------
-
-
 def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
     """The compiled policy carries a refusal in the JUDGE's words."""
     compile_policy_for = T.sym("runtime.permission", "compile_policy_for")
@@ -345,10 +308,6 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
     assert policy.deny_reason == JUDGE_DEF.deny_reason, (
         "the compiled policy did not carry the definition's own refusal text — either the "
         "compile did not run on this definition or the definition declares none")
-    # CONTAINMENT, not inequality. `!=` against the two borrowed texts passes for
-    # `_DEFAULT_DENY_REASON + " (judge)"` — the runtime default verbatim with the role name
-    # bolted on, which is the whole of the text O2 says the judge must not refuse in, and which
-    # also satisfies a bare "names the judge" check.
     for borrowed, whose in ((default_reason, "the runtime default"),
                             (questioner_reason, "the questioner")):
         assert borrowed not in policy.deny_reason, (
@@ -364,22 +323,6 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
         "this role grades an archived episode that the host inlined in its prompt, and that is "
         "the fact a refusal has to carry for the model to stop reaching")
 
-    # NOR A FIND-AND-REPLACE OF THE QUESTIONER'S. Containment catches a borrowed text carried
-    # WHOLE; it does not catch the questioner's sentence with three noun phrases swapped and
-    # the closing clauses left byte-identical, which is what the first draft of this constant
-    # actually was. Two texts that are each other's template share a long contiguous run; two
-    # texts written about different roles do not. The judge's and the questioner's share 11
-    # characters today, and the substituted draft shared 48.
-    # autojunk=False, and it is load-bearing rather than tidy. With the default, any character
-    # appearing more than len(b)//100+1 times in a b of 200+ is dropped from the index — and
-    # the judge's reason is 373 — so a shared run made of ordinary letters has no seed to
-    # anchor on and `find_longest_match` UNDER-REPORTS it. Measured: the questioner's verbatim
-    # 47-character clause inside a judge-length reason reads as 12 with autojunk on and 48 with
-    # it off, so the guard below passed on the exact case it names.
-    # ONE clause is shared by contract and excluded before measuring: the reply-shape sentence
-    # (#1018 — every site that tells a model its reply shape says the document is bare, in the
-    # same words, and `test_1018_reply_document.py`'s census pins each deny reason to that
-    # phrase). It is the parser's rule stated once, not one role's voice borrowed by the other.
     shape_clause = "bare, not inside a code fence, with nothing before or after it"
     for reason in (questioner_reason, policy.deny_reason):
         assert shape_clause in reason, (
@@ -398,11 +341,6 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
         "jq", "ls", "cat"}, (
         "the g1 extractor found no program names in text that has three — it is blind here, so "
         "the assertion below would prove nothing")
-    # ...and the control that matters: the extractor fires on THIS text's own shape. g1 sweeps
-    # every policy at once and guards itself with a whole-sweep `seen >= 3`, so a row that
-    # contributes nothing is invisible there; a reason with no backticks and no slash-group —
-    # which the judge's is — makes both that check and the one below `set() - set()`. Splicing
-    # a program into the judge's own reason proves the check would fail if there were one.
     spliced = policy.deny_reason + " Filter the archive with `jq` before grading."
     assert named_programs(spliced) == {"jq"}, (
         "the extractor finds no program in the judge's own reason even with one spliced in — "
@@ -414,11 +352,6 @@ def test_1008_the_judges_deny_reason_is_its_own_and_names_no_program(tmp_path):
         f"the judge's deny reason names {sorted(offenders)}, which its own lane denies — a "
         "deny reason is PROMPT SURFACE (g1), so a dead program named there is one the model "
         "will spend turns on")
-
-
-# ---------------------------------------------------------------------------------------
-# O3 — it grants nothing, and it grants it BY OMISSION
-# ---------------------------------------------------------------------------------------
 
 
 def test_1008_the_judges_compiled_policy_is_empty_on_every_surface(tmp_path):
@@ -442,9 +375,6 @@ def test_1008_the_judges_compiled_policy_is_empty_on_every_surface(tmp_path):
     assert not policy.write_roots
     assert policy.verb_allow.entries == ()
 
-    # The resolved read lane, asserted as it IS rather than as the field reads. If this ever
-    # becomes bounded (a `read_confine`, or `requires_confine=True`), this assertion is what
-    # says so out loud instead of a docstring quietly going stale in the other direction.
     files = T.mod("runtime.permission.files")
     resolved = files._resolved_read_roots(policy, tmp_path, T.DEFENDER)
     assert T.DEFENDER.resolve() in resolved, (
@@ -453,21 +383,6 @@ def test_1008_the_judges_compiled_policy_is_empty_on_every_surface(tmp_path):
     assert not tuple(policy.read_allow), (
         "and there is no shape filter over those roots, which is the other half of why 'no "
         "read root' is a claim about the definition's field and not about the gate")
-
-
-# ---------------------------------------------------------------------------------------
-# O4 — the registry invariant
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# O5 — the questioner and the comparator are untouched
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# O6 — the deps carry nothing but the role
-# ---------------------------------------------------------------------------------------
 
 
 def test_1008_bind_refuses_the_judges_definition_by_its_deps_type_name(tmp_path):

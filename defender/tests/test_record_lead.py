@@ -102,9 +102,6 @@ def test_missing_required_keys_silently_skips_write(tmp_path):
 
 
 def test_non_list_what_to_summarize_silently_skips(tmp_path):
-    """The `isinstance(wtc, list)` guard the live caller relies on: `tools_gather`
-    unfreezes the request's tuple back to a list at that boundary precisely
-    because a non-list is skipped here rather than coerced."""
     run_dir = tmp_path / "run-tuple"
     (run_dir / "gather_raw").mkdir(parents=True)
     assert claim_lead(_dispatch(run_dir, "l-001", "g", ("d",)), run=fixture_run(run_dir)) == NOT_CLAIMED
@@ -159,9 +156,6 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
 
     sentinel_path = tmp_path / "sentinel"
     sentinel_path.write_text("intact", encoding="utf-8")
-    # Force the real named-create fallback. The normal unnamed lane deliberately uses
-    # closefd=False and retains descriptor ownership, so file-object closure there cannot
-    # exercise this historical double-close regression.
     class NamedCreateIo:
         def __getattr__(self, name):
             return getattr(_io, name)

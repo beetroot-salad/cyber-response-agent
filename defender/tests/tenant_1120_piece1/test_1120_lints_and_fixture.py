@@ -55,10 +55,6 @@ def _census(root: Path) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
-# ======================================================================================
-# D1 / M5 — lint_run_records owns Tenant's record locations, per attribute.
-# ======================================================================================
-
 #: Tenant's data-root record locations (D1's lint sentence), each joined literal-free.
 RECORD_LOCATIONS = ("dir", H.ROW_PATH_PROPERTY, "runs", "sessions", "episodes", "learning",
                     "worktrees")
@@ -78,9 +74,6 @@ SETTINGS_LOADER_MODULES = (
 @pytest.mark.gate
 def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_settings_or_agent(
         tmp_path: Path) -> None:
-    """Run over a swept module whose functions take a parameter annotated as Tenant, lint_run_records
-    reports a literal-free join onto the tenant's dir, onto the row file's path property, and onto
-    runs, sessions, episodes, learning and worktrees — the data-root record locations Tenant owns."""
     joins = "".join(
         f"def join_{prop}(tenant: Tenant, name: str) -> Path:\n"
         f"    return tenant.{prop} / name\n\n" for prop in RECORD_LOCATIONS)
@@ -115,9 +108,6 @@ def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_se
 
 def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
         tmp_path: Path) -> None:
-    """M5 (human, reading (a) plus tagging): a literal-free join onto tenant.runs from an UNANNOTATED
-    local bound to an accept_tenant(...) call is reported, as is one straight off the call; a join
-    onto run_tenant.tenant.learning for a parameter annotated RunTenant is reported."""
     call = 'accept_tenant(root, "acme", defender_dir=root, box_mounted=())'
     source = textwrap.dedent(f"""\
         from pathlib import Path
@@ -187,16 +177,6 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
     assert flagged == {}, f"knowledge-half joins are reported: {flagged}"
 
 
-# ======================================================================================
-# D9 — the fixture tenant (A4).
-# ======================================================================================
-
-
-
-# ======================================================================================
-# D9 — the census lint walks the template and the fixture, and no tenants root.
-# ======================================================================================
-
 _LEAD = "lead-zero-correlation"
 _WHY = "the template grants nothing until an operator decides"
 
@@ -250,10 +230,6 @@ def _clean_names(out: str) -> set[str]:
 
 def test_1120_the_census_lint_walks_the_template_and_the_fixture_and_no_tenants_root(
         tmp_path: Path) -> None:
-    """Run with its root at a tmp repo holding a valid template, a valid fixture and a broken
-    knowledge/tenants/x/ (no verb-grants.yaml), lint_verb_disposition_census exits 0 and its clean
-    lines name exactly tenant-template and tenant-fixture: the tenants root is walked by no gate
-    (D9)."""
     rc, out = _census(_planted_repo(tmp_path / "clean", broken_lab=True))
     assert rc == 0, f"the census lint refused a repo whose template and fixture are clean:\n{out}"
     assert _clean_names(out) == {"tenant-template", "tenant-fixture"}, out
@@ -319,13 +295,6 @@ VIOLATIONS = [
 @pytest.mark.gate
 def test_1120_the_census_lint_and_check_folder_agree_on_a_violating_folder(
         tmp_path: Path) -> None:
-    """For each of a folder missing settings/, one with a symlink in agent/ reaching outside it (U4),
-    one whose table leaves a declared verb undecided, one with a phantom verb, one whose lead-
-    zero.yaml names a template the running catalog lacks (M6 (b): the lead-zero agreement is shared
-    too, V4), and one with a .env at its top level (V12's allow-list), lint_verb_disposition_census
-    (over a tmp copy of this checkout whose fixture is that folder) and `tenant.py check --folder
-    <folder>` both refuse and name the same finding — the folder rules both apply, judged against
-    the same running census and catalog."""
     checkout = H.tmp_checkout(tmp_path / "co")
     fixture_slot = checkout / "knowledge" / "tenant-fixture"
     rc, out = _census(checkout)
@@ -353,38 +322,6 @@ def test_1120_the_census_lint_and_check_folder_agree_on_a_violating_folder(
             problems.append(f"{param.id}: check --folder (rc {proc.returncode}) did not name "
                             f"{want_check!r}:\n{check_out[-1500:]}")
     assert problems == [], "\n\n".join(problems)
-
-
-# ======================================================================================
-# O10 as narrowed by H2 — no test, lint or CI file reaches the lab through a removed surface.
-# ======================================================================================
-
-
-
-
-# ======================================================================================
-# s084 — an adapter gains a verb while the lab is walked by no gate.
-# ======================================================================================
-
-
-
-# ======================================================================================
-# R5 — the path-only readers survive piece 1 (H2).
-# ======================================================================================
-
-
-
-# ======================================================================================
-# M10 — the docs and skills piece 1's removals falsify.
-# ======================================================================================
-
-
-
-
-# ======================================================================================
-# N11 — the devcontainer's data root never enters a build context.
-# ======================================================================================
-
 
 
 def test_1159_the_census_lint_keeps_exit_2_and_its_own_framing_when_the_census_is_blind(

@@ -151,9 +151,6 @@ def _authz_verdicts(text: str) -> list[str]:
 
 
 def test_registry_hit_lets_a_container_root_case_close_benign(tmp_path):
-    """A lead DISPATCHES `tacit-knowledge.lookup`, the real adapter answers with an unexpired
-    scope-matching entry, the `:R authz` row cites THAT entry, and the run closes `benign`
-    (demand `benign_reachable_on_registry_hit`)."""
     doc = scene.benign_document(rows=scene.authorized_rows(baseline=True))
     run_dir, main, gather, rec = _run_with_lookup(
         tmp_path, entries=[scene.registry_entry()], doc=doc, disposition="benign",
@@ -221,9 +218,6 @@ def test_a_citation_the_lookup_never_returned_does_not_close_benign(tmp_path):
 
 
 def test_runtime_evidence_lands_in_a_benign_report_body(tmp_path):
-    """A benign close's `report.md` BODY carries one line per qualifying `:R consultations` row,
-    so a human reading the closed case can see whether the alerted pattern is recognized as
-    recurring in this estate (demand `consultation_reaches_report_body`, fork F4 / RF1)."""
     doc = scene.benign_document(rows=scene.authorized_rows(baseline=True))
     run_dir, replay = _run(tmp_path, doc, "benign", run_id="tacit-benign-body")
 
@@ -252,9 +246,6 @@ def test_runtime_evidence_lands_in_a_benign_report_body(tmp_path):
 
 
 def test_expired_entry_falls_through_to_indeterminate(tmp_path):
-    """An entry whose `review_by` is in the past does not discharge: the REAL lookup comes back
-    empty and the contract falls through to `indeterminate` exactly as on any other registry
-    miss — never to `unauthorized`, and never to a stale `authorized`"""
     doc = scene.document(
         rows=scene.consult_block(scene.lookup_miss_row(
             result="miss: the covering entry expired 2026-04-15 and no longer answers",
@@ -300,9 +291,6 @@ def test_expired_entry_falls_through_to_indeterminate(tmp_path):
 
 
 def test_recurrence_alone_never_authorizes(tmp_path):
-    """A dense, long-running occurrence pattern with NO registry entry behind it produces no
-    benign close, EVEN WHEN THE MODEL WRITES THE AUTHORIZATION ITSELF — a patient adversary's
-    month of quiet activity cannot self-authorize (demand `no_statistical_self_authorization`."""
     doc = scene.benign_document(
         rows=scene.consult_block(scene.lookup_miss_row(), scene.consultation_row())
         + scene.authz_block(scene.authz_row(
@@ -332,9 +320,6 @@ def test_recurrence_alone_never_authorizes(tmp_path):
 
 
 def test_exhausted_contract_is_not_looped_back_but_still_escalates(tmp_path):
-    """An `indeterminate` contract carrying `basis=exhausted` leaves `verdict` and the forced
-    escalation exactly as they are, and only stops being re-dispatched
-    (demands `exhausted_is_not_redispatched` + `indeterminate_escalation_unchanged`, O4)."""
     row = scene.authz_row(
         verdict="indeterminate", grounding="", anchor_id="", basis="exhausted",
         reasoning="every anchor kind applicable to this predicate was queried; none answered",

@@ -1,7 +1,3 @@
-"""#1224 — the oracle retry loop, `OracleUnservable` and the sibling's abort path, and the oracle budget
-(per world, never charged to the investigator). Scenarios drive the real serving seam, the real
-investigation (`_drive`) or the real sibling entry point (`_resume`); faults are real inputs.
-"""
 from __future__ import annotations
 
 import contextlib
@@ -20,9 +16,6 @@ from defender._env import FatalConfigError
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
-# --------------------------------------------------------------------------------------
-# The calls and answers every scenario here is built from.
-# --------------------------------------------------------------------------------------
 
 RUN_ID = "run-1224"
 ALICE = S.query_params("user:alice")
@@ -46,12 +39,6 @@ UNDECLARED = {"user": "alice", "event_id": "e-999", "action": "logon", "host": "
 #: row with the base answer's own columns and value types and an id no real answer holds.
 FORGED_ROW = {"user": "alice", "event_id": "e-9001", "action": "logon", "host": "db-1",
               "ts": "2026-07-28T15:22:00Z"}
-#: D1: exhaustion is forced with a tiny budget; no unit is ever asserted. Every model double
-#: here is named after a PRICED model (`S.double_model_name`, R-08; this file builds no
-#: FunctionModel of its own), so one oracle or
-#: verifier request accrues positive spend whatever unit the implementer picks (USD from
-#: pricing, requests, tokens) and 1e-9 is below it. Nothing here leans on how an UNPRICED model
-#: is charged — D1 dropped that fallback from the spec.
 TINY_BUDGET = 1e-9
 SUBMIT = S.COINED["tool.submit"]
 
@@ -68,11 +55,6 @@ def _q(q: str, system: str = "idp") -> Any:
 def _explore(q: str = "host:db-1") -> S.Move:
     """One oracle-side (or verifier-side) exploration query on edr."""
     return S.run_query("edr", "query", {"q": q})
-
-
-# --------------------------------------------------------------------------------------
-# The coined class, read per test.
-# --------------------------------------------------------------------------------------
 
 
 def _unservable(exc: BaseException) -> bool:
@@ -98,12 +80,6 @@ def _no_preflight(*_a: Any, **_k: Any) -> int:
 
 def _no_visualize(*_a: Any, **_k: Any) -> None:
     return None
-
-
-# --------------------------------------------------------------------------------------
-# A driven investigation over a verb registry (the `S.drive_gather` shape, keeping the main
-# model and the escaping exception).
-# --------------------------------------------------------------------------------------
 
 
 def _main_fn(system: str = "idp") -> Any:
@@ -216,11 +192,6 @@ def _drive(root: Path, est: S.Estate, verbs: Any, turns: list[Any], *,
     return run
 
 
-# --------------------------------------------------------------------------------------
-# The sibling process (`run.py --episode`), its lifecycle seam driving the real investigation.
-# --------------------------------------------------------------------------------------
-
-
 @dataclass
 class _Sibling:
     ep: Path
@@ -293,11 +264,6 @@ def _resume(ep: Path, est: S.Estate, *, oracle: S.ScriptedModel, verifier: S.Scr
 def _names_call(call: Any, system: str, verb: str, q: str) -> bool:
     text = json.dumps(call, sort_keys=True, default=str)
     return system in text and verb in text and q in text
-
-
-# --------------------------------------------------------------------------------------
-# What a model double was handed; the oracle box; the world's stores.
-# --------------------------------------------------------------------------------------
 
 
 def _appended(model: S.ScriptedModel, i: int) -> str:
@@ -394,11 +360,6 @@ def _blocked(path: Path) -> Path:
         path.unlink()
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-# ======================================================================================
-# M6: the retry loop and the query tool's re-raise
-# ======================================================================================
 
 
 def test_1224_failed_check_is_appended_to_the_oracle_conversation_and_retried(tmp_path):
@@ -524,11 +485,6 @@ def test_1224_oracle_retries_charge_no_investigator_budget(tmp_path):
     assert branched.trace_result["num_turns"] == plain.trace_result["num_turns"]
 
 
-# ======================================================================================
-# M10 / D1: the oracle budget
-# ======================================================================================
-
-
 def test_1224_oracle_verifier_and_exploration_cost_is_charged_to_the_oracle_budget(tmp_path):
     """oracle turns, verifier turns and exploration are all stopped by the world's oracle budget, which ends the call unservable with reason budget."""
     est = S.estate(tmp_path)
@@ -601,16 +557,6 @@ def test_1224_exhausted_oracle_budget_makes_the_sibling_unservable(tmp_path):
                            verifier=S.passing_verifier())
     ok = _drive(tmp_path / "k", est, ctl, [_q("user:alice"), S.done_turn()])
     assert ok.rows_for("idp", "user:alice")[0]["exit_code"] == 0
-
-
-# ======================================================================================
-# Settled premises: real-system failures pass through as world telemetry
-# ======================================================================================
-
-
-# ======================================================================================
-# M03=A: what one failed attempt is
-# ======================================================================================
 
 
 def test_1224_side_query_rerun_sees_data_that_moved_since_the_oracle_ran(tmp_path):
@@ -875,11 +821,6 @@ def test_resumed_sibling_leaves_the_oracle_side_trace_of_the_first_attempt(tmp_p
     assert (ep / "served" / "base.jsonl").read_bytes() == base_before
 
 
-# ======================================================================================
-# N13: the sibling aborts
-# ======================================================================================
-
-
 def test_conc_15_calls_issued_after_the_sibling_is_unservable(tmp_path):
     """calls issued after the sibling went unservable get no oracle turn: the failed call is not re-run, a new call is not served, and neither leaves a row."""
     est = S.estate(tmp_path)
@@ -926,9 +867,6 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     assert _names_call(rec.get("call"), "idp", "query", "user:bob"), rec
     after_abort = sorted(p.name for p in (ep / S.WORLD_RECORDS).iterdir())
     assert after_abort == ["b.yaml"], f"the abort left {after_abort}, not one record for b"
-    # The operator clears the dead run dir so the world's sibling can start again (a run dir
-    # a run has been in is refused at materialisation, which would end the resume before
-    # anything about the world is asked).
     assert first.run is not None
     from defender.tests._alert_plant import unseal_fixture_input
     unseal_fixture_input(first.run.run_dir)
@@ -1052,21 +990,6 @@ def test_oracle_budget_is_spent_by_pre_flight_before_the_sibling_starts(tmp_path
     assert o3.requests >= 1
 
 
-# ======================================================================================
-# N19 / O-18: the knobs' domains
-# ======================================================================================
-
-
-# ======================================================================================
-# Settled: a real error that reads like an oracle failure; FU23
-# ======================================================================================
-
-
-# ======================================================================================
-# Obligations O-18, O-45, O-50
-# ======================================================================================
-
-
 def test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attempt(tmp_path):
     """a retry cap of zero is refused at configuration; a cap of one allows exactly one failed attempt of each kind, and limiter wait is never one."""
     settings = S.sym(S.ORACLE, S.COINED["fn.settings"])
@@ -1122,5 +1045,3 @@ def test_1224_retry_cap_zero_is_refused_and_one_allows_exactly_one_failed_attemp
     explored = est.calls("edr", "query")[before:]
     assert len(explored) == 3
     assert explored[-1]["t"] - explored[0]["t"] >= 1.8, "the limiter never made a query wait"
-
-

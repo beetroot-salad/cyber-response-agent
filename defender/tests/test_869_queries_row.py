@@ -15,22 +15,6 @@ PARAMS = {"native_query": "FROM logs"}
 
 
 def test_granted_call_records_its_own_system(tmp_path):
-    """A granted, successful query dispatched to `elastic` and tagged
-    `query_id='fakesys.hunt-creds'` writes a row whose `query_id` names the system the call
-    was DISPATCHED to, never the one the model coined.
-
-    O2 at the sink: `defender/CLAUDE.md` already states the schema — `query_id` is
-    `{system}.{kebab-name}` — and nothing enforces it, so a granted call to `elastic` tagged
-    with a phantom records the phantom verbatim, and the table is append-only and read by
-    later ticks, which is M4's whole reason to exist. The row is checked against the DISPATCH
-    ARGUMENTS rather than against the table it is drawn from, so the assertion cannot recover
-    its own expectation from the thing it is judging.
-
-    The positive control is in the same drive and on the same address: a second call tagged
-    with its OWN system keeps its coined id, so the rule refuses a disagreeing prefix rather
-    than model-supplied ids as a class, and it establishes that this run's rows can differ
-    from `{system}.{verb}` at all.
-    """
     rec = VerbRecorder()
     res = _run(
         tmp_path,

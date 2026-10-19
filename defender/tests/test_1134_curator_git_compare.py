@@ -1,8 +1,3 @@
-"""#1134 curator: the three "is this file still identical to the before-state?" checks (the settle's
-`_byte_identical_to_head`, `_restore_unapproved_files`, `_restore_corpus`) ask git
-(`_git.git_unchanged_since`), not the handle and not a plain-path read. Covers what git calls unchanged
-(content, regular-file type, no attribute conversion), git-failure routing per site, and that a hard
-link holding the before-state's bytes is never committed or restored from its target."""
 from __future__ import annotations
 
 import logging
@@ -61,23 +56,7 @@ def _break_index(w) -> None:
     (w.repo / ".git" / "index").write_bytes(b"not an index\n")
 
 
-# ---------------------------------------------------------------------------------------
-# _git.git_unchanged_since: git's answer, from planted facts
-# ---------------------------------------------------------------------------------------
-
-
 def test_git_names_each_unchanged_regular_file_and_none_that_changed(tmp_path):
-    """One tree, every case at once, each a REAL entry the agent could leave. Unchanged: a file
-    left alone, one chmod-ed only, a nested one, one whose name git would quote, and a hard link
-    to an outside file holding the exact committed bytes (declared, N-a). Changed: a one-byte
-    edit, a CRLF-only rewrite, a nested edit, a symlink to an outside file holding the exact
-    committed bytes (a type change), a deleted file, a FIFO and a folder where a file was. The
-    FIFO is never opened (under the deadline), the symlink's target never opened, and the call
-    leaves the worktree as it found it.
-
-    Catches: a comparison by the handle (refuses the hard link), by a plain-path read (follows
-    the symlink, blocks on the FIFO), by decoded text (CRLF equal), or by `git diff` without
-    the executable bit ignored (the chmod-only file changed)."""
     w = world(tmp_path)
     names = ["same.md", "mode.md", "edit.md", "crlf.md", "sym.md", "gone.md", "fifo.md",
              "dir.md", "hard.md", "n/deep/same.md", "n/deep/edit.md", 'q "é\\x.md']
@@ -110,10 +89,6 @@ def test_git_names_each_unchanged_regular_file_and_none_that_changed(tmp_path):
 
 
 def test_a_path_the_commit_does_not_carry_as_a_regular_file_is_never_unchanged(tmp_path):
-    """A name the agent created (untracked: git's diff alone reports nothing for it), a tracked
-    symlink left exactly as committed, and a name below the pathspec of another corpus are none
-    of them in the answer: only a regular file `rev` carries can be "unchanged". Control: the
-    committed plain file beside them is."""
     w = world(tmp_path)
     put(w.corpus_dir / "kept.md", lesson_text("f0"))
     plant_link(w.corpus_dir / "tracked-link.md", w.target("t.md"))
@@ -147,14 +122,6 @@ def test_the_answer_is_against_the_commit_named_not_head(tmp_path):
     "* text eol=crlf\n", "*.md text\n", "* -text\n",
 ], ids=["eol-crlf", "text", "minus-text"])
 def test_an_attributes_file_the_agent_writes_does_not_change_the_answer(tmp_path, attributes):
-    """The agent writes a `.gitattributes` into the corpus (untracked) before a CRLF-only
-    rewrite. Git compares raw bytes all the same: the rewrite is changed, the untouched file
-    beside it unchanged. (Under `* text eol=crlf` git's own status would call the CRLF rewrite
-    clean.) Needs git 2.42+ (`GIT_ATTR_SOURCE`).
-
-    Catches: a comparison that lets the worktree's attributes normalise line ends, so a real
-    content change is judged identical and `git checkout` (settle) or no rewrite (restore)
-    follows."""
     w = world(tmp_path)
     put(w.corpus_dir / "a.md", lesson_text("f0"))
     put(w.corpus_dir / "b.md", lesson_text("f0"))
@@ -170,9 +137,6 @@ def test_an_attributes_file_the_agent_writes_does_not_change_the_answer(tmp_path
 
 @pytest.mark.parametrize("fault", ["unknown commit", "broken index", "no repository"])
 def test_git_unchanged_since_raises_when_git_cannot_answer(tmp_path, fault):
-    """A commit git does not hold, an index it cannot read, a working copy that is no
-    repository: `GitError`, never an empty or partial answer (which a caller would read as
-    "everything changed" or "nothing did")."""
     w = world(tmp_path)
     put(w.corpus_dir / "a.md", lesson_text("f0"))
     w.commit()
@@ -188,15 +152,7 @@ def test_git_unchanged_since_raises_when_git_cannot_answer(tmp_path, fault):
         _git.git_unchanged_since(w.repo, rev, LESSONS_REL.rstrip("/"))
 
 
-# ---------------------------------------------------------------------------------------
-# The settle: _byte_identical_to_head
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_settle_comparison_raises_rather_than_answer_when_git_cannot(tmp_path):
-    """`_byte_identical_to_head` over a broken index: the `GitError` comes out (never `False`,
-    which would send an unchanged lesson to judging, nor `True`, which would check out a
-    changed one). Control: the same call with the index whole answers."""
     w = world(tmp_path)
     put(w.corpus_dir / "t.md", lesson_text("f0"))
     w.commit()
@@ -247,15 +203,6 @@ def _failing_git_diff(tmp_path: Path, patch) -> None:
 def test_a_git_failure_in_the_settle_comparison_is_the_ticks_stuck_git_probe(
     tmp_path, monkeypatch,
 ):
-    """Through the drain: the curator chmods seeded `SEEDED` (git reports it, so the settle
-    compares it) and writes an attributable lesson; every `git diff` the comparison runs fails.
-    The settle's git read turns the `GitError` into `GitProbeError` (not a retire member): it
-    comes out of `run_batch`, recorded stuck under that class, the row not bumped, nothing
-    committed, and the fault undo (whose own comparison fails too, so it writes every
-    before-state file back) leaves `SEEDED` holding its committed bytes and removes the lesson.
-
-    Catches: a settle that reads a failed comparison as "changed" (the tick judges and commits
-    on) or as "identical"."""
     from defender.tests.test_1134_curator_drain import PLANTED, SEEDED, _run, _scene
 
     def chmod_seeded(rows, batch_id, cfg):
@@ -276,23 +223,10 @@ def test_a_git_failure_in_the_settle_comparison_is_the_ticks_stuck_git_probe(
     assert not os.path.lexists(sc.corpus / PLANTED)
 
 
-# ---------------------------------------------------------------------------------------
-# The settle restore: _restore_unapproved_files
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("fault", ["unknown commit", "broken index"])
 def test_a_git_failure_in_the_settle_restores_comparison_is_a_git_probe_before_any_change(
     tmp_path, fault,
 ):
-    """The settle restore cannot ask git (its before-state commit unknown, or the index
-    broken): `GitProbeError`, raised before anything is written or removed — the agent's new
-    file and its rewrite both still stand (the fault undo that follows owns the corpus). The
-    positive control, the same call able to ask: the new file removed, the rewrite put back.
-
-    Catches: a failed comparison read as "unchanged" (the rewrite kept) or as "changed" with
-    the rest of the restore carried on regardless, or a raw `GitError`, which no probe wrapper
-    has turned into the tick's stuck class."""
     w = world(tmp_path)
     put(w.corpus_dir / "old.md", lesson_text("f0"))
     w.commit()
@@ -322,11 +256,6 @@ def test_a_git_failure_in_the_settle_restores_comparison_is_a_git_probe_before_a
 def test_the_settle_restore_rewrites_what_git_says_changed_and_leaves_what_it_does_not(
     tmp_path,
 ):
-    """Which before-state files the settle restore writes is git's answer: of three unapproved
-    tracked names, the rewritten one and the deleted one are written back through `cfg.corpus`;
-    the untouched one is not written at all (its inode is the one it had). Over a journalling
-    `cfg.corpus`: a `write` for each changed name, none for the unchanged one, and no read of
-    any of them through the view."""
     w = world(tmp_path)
     for name in ("same.md", "edit.md", "gone.md"):
         put(w.corpus_dir / name, lesson_text("f0", mark=name))
@@ -353,18 +282,6 @@ def test_the_settle_restore_rewrites_what_git_says_changed_and_leaves_what_it_do
 def test_the_settle_restore_judges_a_link_holding_the_before_state_bytes_as_git_does(
     tmp_path, kind,
 ):
-    """An unapproved tracked name the agent replaced by a link to an outside file holding the
-    before-state's exact bytes:
-
-    - a symlink is a type change: the rewrite is attempted and the core refuses it
-      (`NotPlainEntry` propagates, off the fault path), the link left, its target never opened;
-    - a hard link holds the same bytes as a regular file: unchanged (declared, N-a), so nothing
-      is written and nothing raised; the hard link stays, its target's bytes and link count as
-      they were.
-
-    Catches: a comparison that reads the worktree by its plain path (the symlink's target equal,
-    so the plant is passed over silently) or through the held mount (the hard link refused, so
-    the restore raises over an unchanged file)."""
     w = world(tmp_path)
     body = lesson_text("f0", mark=OUT_MARK)
     put(w.corpus_dir / "t.md", body)
@@ -390,11 +307,6 @@ def test_the_settle_restore_judges_a_link_holding_the_before_state_bytes_as_git_
     assert os.stat(w.corpus_dir / "t.md").st_ino == os.stat(target).st_ino
 
 
-# ---------------------------------------------------------------------------------------
-# The fault restore: _restore_corpus
-# ---------------------------------------------------------------------------------------
-
-
 def _restore(w, snapshot, *, head_before: str, corpus=None) -> None:
     drain._restore_corpus(w.repo, w.corpus_dir, snapshot,
                           corpus=corpus if corpus is not None else w.corpus,
@@ -402,10 +314,6 @@ def _restore(w, snapshot, *, head_before: str, corpus=None) -> None:
 
 
 def test_the_fault_restore_rewrites_only_what_git_says_changed(tmp_path):
-    """Git answers: of the before-state's files, the rewritten, the deleted and the nested
-    rewritten one are written back; the untouched ones (one nested) are not written at all
-    (same inode). Over a journalling held corpus: the writes are exactly the changed names and
-    no read goes through the view."""
     w = world(tmp_path)
     names = ("same.md", "edit.md", "gone.md", "n/deep/same.md", "n/deep/edit.md")
     for name in names:
@@ -431,16 +339,6 @@ def test_the_fault_restore_rewrites_only_what_git_says_changed(tmp_path):
 def test_a_failed_comparison_on_the_fault_path_writes_every_before_state_file_back(
     tmp_path, caplog,
 ):
-    """The fault restore's comparison fails (its before-state commit unknown; `git status` still
-    answers, so the agent's stray is swept): one WARNING naming the failed comparison (not the
-    host path), nothing raised, and every before-state file is written back through the held
-    corpus — the rewritten one restored, the untouched one rewritten too (a new inode, the same
-    bytes), and a hard link standing at a third name (which git would have judged unchanged)
-    refused, logged by name and left, its target never written.
-
-    Catches: a restore that lets the comparison's `GitError` replace the fault being unwound,
-    one that reads the failure as "nothing changed" and restores nothing, or one that falls
-    back to reading the worktree itself."""
     caplog.set_level(logging.WARNING)
     w = world(tmp_path)
     for name in ("same.md", "edit.md", "hard.md"):
@@ -473,19 +371,6 @@ def test_a_failed_comparison_on_the_fault_path_writes_every_before_state_file_ba
 def test_the_fault_restore_judges_a_link_holding_the_before_state_bytes_as_git_does(
     tmp_path, kind, caplog,
 ):
-    """A before-state name the agent replaced by a link to an outside file holding its exact
-    bytes, on the fault path:
-
-    - a symlink is a type change: the rewrite is refused, logged by name and passed over (O5.3),
-      the link left, its target never opened;
-    - a hard link is unchanged (declared, N-a): no write is attempted, nothing is logged for it
-      and it is left, its target's bytes and link count as they were — the survivor addendum 3
-      declares.
-
-    Either way the other rewritten file is restored (the positive control, same call).
-
-    Catches: a plain-path comparison, under which the symlink reads identical and is passed
-    over unlogged; a handle comparison, under which the hard link is refused and logged."""
     caplog.set_level(logging.WARNING)
     w = world(tmp_path)
     body = lesson_text("f0", mark=OUT_MARK)
@@ -513,24 +398,8 @@ def test_the_fault_restore_judges_a_link_holding_the_before_state_bytes_as_git_d
     assert not warnings_naming(caplog, "t.md"), caplog.text
 
 
-# ---------------------------------------------------------------------------------------
-# Declared, through the drain: a hard link with the before-state's bytes is never committed
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("mode", ["same mode", "made executable"])
 def test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed(tmp_path, mode):
-    """The curator writes an attributable lesson and replaces seeded `SEEDED` by a hard link to
-    an outside file holding `SEEDED`'s exact committed bytes (left with its mode, or made
-    executable so git reports it). The tick commits the lesson alone: `SEEDED` is never judged
-    (no verifier call names it), never in the commit, and HEAD still carries its committed
-    bytes; the outside file keeps its bytes. Made executable, the settle's git comparison
-    judges it unchanged and puts it back from HEAD's blob (`git checkout`): `SEEDED` is then a
-    plain file of its own. Left alone, git never reports it at all: the hard link stays
-    (declared, N-a — the box's alias ban refuses hard-link creation in the first place).
-
-    Catches: a settle that judges the hard link changed (the handle refuses it), sending it to
-    attribution, which cites nothing and faults the tick; and any path that commits it."""
     from defender.tests.test_1134_curator_drain import PLANTED, SEEDED, _run, _scene
 
     holder: dict = {}
@@ -555,4 +424,3 @@ def test_a_hard_link_holding_a_lessons_exact_bytes_is_never_committed(tmp_path, 
     assert (sc.corpus / SEEDED).read_text() == lesson_text("f0")
     same_inode = os.stat(sc.corpus / SEEDED).st_ino == os.stat(target).st_ino
     assert same_inode is (mode == "same mode")
-

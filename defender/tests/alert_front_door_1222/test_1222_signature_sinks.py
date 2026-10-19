@@ -297,12 +297,6 @@ def _lesson_author_received(tmp_path: Path, rows: list[dict]) -> tuple[list[dict
 
 
 def test_o8_main_system_prompt_takes_the_signature_from_orientation(tmp_path: Path) -> None:
-    """MAIN's system prompt, as received, tells the agent to use the signature orientation shows
-    for the exact lessons lookup and --signature, says there is nothing to pass when there is
-    none, and does not tell it to read alert.rule.id (SKILL.md:242, :297-299, :336; advisory
-    SKILL.md:21,40; handbook invlang.md:46,50).
-
-    The advisory skill and the handbook page are what MAIN's own `read_file` returned."""
     d = S.run_alert(tmp_path, alert=_alert(), tenant=S.plant_tenant(alert_mapping=MAPPING),
                     main=[*_main_reads(ADVISORY_SKILL, HANDBOOK_INVLANG), S.text(S.DONE)])
     skill = d.main_instructions
@@ -327,15 +321,6 @@ def test_o8_main_system_prompt_takes_the_signature_from_orientation(tmp_path: Pa
 
 
 def test_o10_orientation_names_the_missing_signature(tmp_path: Path) -> None:
-    """With a mapping that names no signature, orientation's lessons section says the alert has
-    no signature and why — even when the lessons shim lists no tags (RC22: today the section is
-    then absent).
-
-    The tags lookup answers nothing (`RecordingShim(fail=...)`, the shim contract's own "failed").
-    "Names it" is read against a reference run of the same alert in the same tenant whose mapping
-    DOES name a signature: some line of the Lessons section only the unsigned run carries says
-    "signature" (at base both sections are the same line, `no lessons matched source_signature ~
-    R1001`)."""
     planted = S.plant_tenant(alert_mapping=MAPPING)
     signed = S.run_alert(tmp_path / "signed", alert=_alert(), tenant=planted,
                          orient_shim=S.RecordingShim(fail=("--tags",)), run_id="o10-signed")
@@ -354,14 +339,6 @@ def test_o10_orientation_names_the_missing_signature(tmp_path: Path) -> None:
 
 
 def test_o10_no_reader_falls_back_to_a_vendor_field(tmp_path: Path) -> None:
-    """With a mapping that names no signature, over an alert carrying rule.id, a top-level
-    signature and a top-level id, no reader yields any of those values.
-
-    One run feeds every surface: orientation (MAIN's opening message outside its frames, and
-    every lookup argv), the open ticket and the record comment, the corpus (the run itself, as
-    a past run), the judge's enqueued key and what the lesson author is handed for it. Each
-    surface is first shown to be live, so an absent value is not an empty channel; the six O8
-    tests above are the positive controls on the same addresses."""
     alert = _alert(alert_id=None, signature=TOP_SIG, id=TOP_ID)
     shim = S.RecordingShim()
     d, store = _ticketed(tmp_path, alert=alert, mapping=NO_SIG_MAPPING, shim=shim)
@@ -414,13 +391,6 @@ def _siblings_listed(prompt: str, names: Iterable[str]) -> set[str]:
 
 
 def test_o11_a_rewritten_alert_changes_neither_union_nor_key(tmp_path: Path) -> None:
-    """A world, or a past run, whose alert.json was rewritten (a decoy alert_id, another alert's
-    bytes) changes neither the union nor the enqueued rule key.
-
-    Rewritten here: every world's `alert.json` (a decoy `alert_id` and rule), a past run of
-    alert B whose box rewrote its `alert.json` into a byte copy of A (PR-17: the box CAN rewrite
-    it at base), and a past run carrying the decoy `alert_id`. The union and the key must be
-    exactly the clean controls' (`trial-same`; the recorded `MAPPED`)."""
     decoy = {"alert_id": "decoy-alert-7", "rule": {"id": "DECOY-1"}}
     base, _src = J.runs_base(tmp_path)
     _union_world(base)
@@ -447,14 +417,6 @@ def test_o11_a_rewritten_alert_changes_neither_union_nor_key(tmp_path: Path) -> 
 
 
 def test_a6_every_sink_carries_and_matches_one_signature_text(tmp_path: Path) -> None:
-    """For one recorded signature, orientation's and MAIN's lessons lookup, the corpus filter,
-    the ticket's sig: label and record comment, the findings key and the lesson file's
-    source_signature all carry the same text and match by exact, case-sensitive whole-value
-    equality: 'R-1' never matches 'R-10', 'r-1' or 'XR-1'.
-
-    MAIN's lookup is the one orientation ran, typed through MAIN's own `bash` tool. The lesson
-    file is read through the lookups (a lesson filed under each of the four texts); the lesson
-    author's half is what it is handed for the episode (see the frontier's red flag)."""
     sig = "R-1"
     near = ("R-10", "r-1", "XR-1")
     lessons = {"fd1222-a6-exact": [sig], **{f"fd1222-a6-{i}": [v] for i, v in enumerate(near)}}
@@ -499,12 +461,6 @@ HOSTILE_PROBES = (S.RUN_TAG_CLOSE, HOSTILE_HEADING, "key-3c1f", "with a newline"
 
 
 def test_p056_alert_key_names_are_hostile_and_the_harness_name(tmp_path: Path) -> None:
-    """No harness message (orientation, the record's note, the judge's note) echoes alert keys
-    or values.
-
-    The alert's member names are hostile (a frame closer, a heading, a line break, a 20 KB
-    key); its mapping's signature path is absent from it, so the harness names the unmapped
-    condition."""
     alert = {**_alert(), **dict.fromkeys(HOSTILE_KEYS, HOSTILE_VALUE)}
     mapping = {**MAPPING, "signature": "detection.rule_uuid"}
     shim = S.RecordingShim()
@@ -529,19 +485,6 @@ def test_p056_alert_key_names_are_hostile_and_the_harness_name(tmp_path: Path) -
 
 
 def test_p082_signature_with_spaces_or_commas_as_a_ticket_labe(tmp_path: Path) -> None:
-    """The ticket gets exactly one sig: label and one evt: label.
-
-    - When the run has a signature, the sig: label is "sig:" plus the recorded signature, and a
-      later search on that label finds the case. The premise's own value, a rule name with
-      spaces, is no signature under A6, so its ticket carries case-history's existing fallback
-      label (O10).
-    - event_time is carried into its label as-is, never parsed or rewritten. The summary goes
-      to the description, also as-is.
-
-    A store that refuses the ticket is b1's demand: the refusal is named in the ticket receipt
-    and on the run page. Signed arm: the alert's `rule.id` mapped, over the stateful store
-    (`S.HoldingTicketStore`, the playground stub's exact, case-sensitive label search). Unsigned
-    arm: mapped to `rule.name` (spaces, a comma, a colon)."""
     holding = S.HoldingTicketStore()
     signed, _ = _ticketed(tmp_path / "signed", alert=S.generic_alert(rule_id=RULE_ID),
                           mapping=S.DEFAULT_MAPPING_GENERIC, store=holding, run_id="p082-signed")
@@ -571,18 +514,6 @@ SPACED_EVENT_TIME = "2026-09-30 08:15:00 UTC"
 
 def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
         tmp_path: Path) -> None:
-    """A ticket store that refuses the case ticket -- here for its evt: label, the event time
-    carried as-is with spaces (C16) -- is recorded in the ticket receipt and on the run page,
-    quoting the store's reason, and the receipt does not read as a success. The investigation
-    still ends normally: no refusal, nothing raised, exit 0, report.md written.
-
-    Positive control: the same run over an event time with no whitespace opens the ticket, a
-    later search by its sig: label finds the case, and its receipt reads as a success.
-
-    The store is `S.HoldingTicketStore(refuse_label=...)`, the emulated vendor rule P-p082 drove
-    the real writer against (400 with a Jira-shaped errors.labels body; a comment on a ticket it
-    never stored answers 404). At base the refusal reaches only a log line and the receipt
-    names the later comment's 404 (P-p082)."""
     receipt_path = S.sym("scripts.case_history.ticket_writer", "receipt_path")
     render_page = S.sym("scripts.visualize.visualize_run", "render_page")
 
@@ -622,10 +553,6 @@ LOOKALIKE = "R-1А"  # a Cyrillic capital A where a Latin one would print the sa
 
 
 def test_p089_signatures_that_look_identical_but_differ_in_cod(tmp_path: Path) -> None:
-    """Every non-ASCII character is outside the allow-list, so look-alike letters and NFC/NFD
-    pairs are no signature; values differing in case are distinct signatures, a trailing space
-    is no signature, and the lessons lookup, corpus filter, ticket label and findings key use
-    one text and one equality."""
     upper, lower = "SIG-A", "sig-a"
     lessons = {"fd1222-p089-upper": [upper], "fd1222-p089-lower": [lower]}
     for value, other in ((upper, lower), (lower, upper)):
@@ -683,10 +610,6 @@ class _RewritesAlertAtClose(S.MainScript):
 
 
 def test_p112_case_ticket_opened_then_recorded_after_the_alert(tmp_path: Path) -> None:
-    """The ticket's open label and its record comment carry the same recorded signature.
-
-    The signature is mapped to `rule.id`; the stored alert is rewritten during the run (another
-    `rule.id`) after the open leg and orientation read it, before the record leg runs."""
     rewritten = S.alert_bytes(S.generic_alert(rule_id="R9999"))
     main = _RewritesAlertAtClose(rewritten)
 

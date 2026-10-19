@@ -1,7 +1,3 @@
-"""The two parse caches the catalog walk and the run start lean on: `parse_query_template`
-(memoized on its `(text, path)` inputs) and `load_dispositions` (memoized on the path and the
-exact text it read). Each must answer a repeat from the cache, never answer changed input from a
-stale entry, and never store a refusal."""
 from __future__ import annotations
 
 import os

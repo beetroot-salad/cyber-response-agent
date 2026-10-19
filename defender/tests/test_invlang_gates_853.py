@@ -1,28 +1,3 @@
-"""#853 — four parser/validator gaps that let a block close over an unresolved classification.
-
-One suite because the four defects sit in one skill and two of them defeat the same gate from
-opposite directions:
-
-  F-14  `_split_quoted` let the `"` of a `\\"` reach the quote toggle, so a row carrying an odd
-        number of them before its last cell silently MERGED the remaining cells and `_row_cells`
-        padded the record with empty strings — no RowError, no warning. The committed document
-        still displays `signing=??` to a human while the benign gate reads nothing.
-  F-15  `has_open_slot` implemented only the whole-cell `{a, b}` form of the documented rule,
-        so the per-slot and type-prefixed spellings SKILL.md itself blesses closed benign over
-        an unresolved class.
-  F-16  `_check_benign_authz` resolves verdicts by bare contract id across the whole document
-        while `ac*` ids were hypothesis-local everywhere else, so one `:R authz` row discharged
-        every hypothesis's same-numbered contract.
-  F-27  `_HYP_PREFIX_RE` restated a narrower hypothesis id than `HYPOTHESIS_ID_RE`, so a
-        hierarchical child could never declare the predictions the validator then demands.
-
-Every fixture below is a WHOLE document run through the real `parse_dense_companion` /
-`validate_companion`, because three of the four defects are only observable in what the gate
-concludes, not in what the unit returns. Each negative case is paired with the control that
-keeps the fix from being "deny everything": a laced-but-legal `\\|`, a concrete class, an
-attribute whose value merely CONTAINS braces, and distinct `ac*` ids that still discharge.
-"""
-
 from __future__ import annotations
 
 from defender.skills.invlang.parser import (
@@ -66,9 +41,6 @@ def _blocked(errors: list[str]) -> list[str]:
 # F-14 — the escaped quote never reaches the quote toggle
 
 def test_backslash_quote_in_a_middle_cell_does_not_merge_the_rest_of_the_row():
-    """The defect in one call: an ODD `\\"` before the last cell used to swallow every
-    remaining delimiter. The pair is consumed verbatim now, exactly as `_has_unbalanced_quote`
-    has always read it."""
     assert _split_cells(r"a|b\"c|d") == ["a", r"b\"c", "d"]
     # ...and the row keeps its cell count however many escaped quotes it carries.
     assert _split_cells(r'a|b\"c|d\"e|f') == ["a", r"b\"c", r"d\"e", "f"]
@@ -111,9 +83,6 @@ def test_a_quote_opening_mid_token_is_refused_rather_than_merging_cells():
 
 
 def test_a_row_short_of_a_required_column_is_refused_not_padded():
-    """The pad was the silent half of F-14: a record short of what its own header requires
-    became a record with empty strings in it, and no diagnostic. The `?` flags say which
-    columns may be omitted; anything before the last required one is a refusal."""
     truncated = _benign_doc("v-001|compute|bastion/internal/known-corp")
     _companion, warnings = parse_dense_companion(truncated)
     assert [w.reason for w in warnings] == [
@@ -162,9 +131,6 @@ def test_attribute_candidate_set_blocks_benign_and_names_the_value():
 
 
 def test_an_unterminated_candidate_set_blocks_benign():
-    """A dropped `}` must not read as concrete. The brace-aware split folds every slot after
-    the unclosed `{` into one cell that is neither `??` nor a closed `{...}`, so without this
-    a one-character typo closed benign over the class it was still enumerating."""
     truncated = _benign_doc(
         "v-001|compute|{monitoring-agent/internal/known-corp, ip-only/internet/novel|10.42.7.183|"
     )
@@ -256,9 +222,6 @@ def test_a_collision_with_one_side_refuted_is_not_denied():
 
 
 def test_one_authz_row_no_longer_discharges_a_siblings_contract():
-    """The control on the fix's other half: with the ids made distinct — the repair the new
-    error asks for — h-002's contract is unresolved and benign is blocked. This is the outcome
-    the collision was silently buying, so it has to hold under the same document shape."""
     doc = _authz_doc(
         "ac1", "ac2", "l-001|e-001|ac1|authorized|change-mgmt|\"CHG-4471 covers the window\""
     )
@@ -269,9 +232,6 @@ def test_one_authz_row_no_longer_discharges_a_siblings_contract():
 
 
 def test_one_hypothesis_repeating_a_contract_id_in_one_block_is_denied():
-    """The collision's other half, one level down: `_extend_by_id` keeps the FIRST row per id,
-    so a second `ac1` carrying a different predicate was discarded in silence and the benign
-    gate never had to satisfy it. The projector names the dropped row now."""
     doc = _doc(
         ":V prologue.vertices [id|type|class|ident|attrs?]\n"
         "v-001|compute|bastion/internal/known-corp|bastion-01.corp|",
@@ -324,5 +284,3 @@ def test_a_hierarchical_child_can_declare_the_predictions_the_validator_demands(
     hyp = companion["hypothesize"]["hypotheses"][0]
     assert [p["id"] for p in hyp["predictions"]] == ["p1"]
     assert validate_companion(_CHILD_DOC) == []
-
-

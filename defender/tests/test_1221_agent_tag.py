@@ -63,11 +63,6 @@ def _comment_post(store: FakeStore) -> tuple[str, str]:
     return posts[0].path, store.wire_body()
 
 
-# =======================================================================================
-# The tag itself
-# =======================================================================================
-
-
 def test_1221_the_tag_is_one_plain_line_naming_the_run():
     """The tag is one plain-text line."""
     prefix = _prefix()
@@ -97,11 +92,6 @@ def test_1221_the_tag_is_one_plain_line_naming_the_run():
     assert _tag(RUN_ID) != _tag(BRANCH_RUN_ID), "two runs' tags are the same line"
 
 
-# =======================================================================================
-# Every comment the host posts
-# =======================================================================================
-
-
 @pytest.mark.parametrize(
     ("arm", "report_kw", "record_kw", "expected_rest"),
     [
@@ -118,13 +108,6 @@ def test_1221_the_tag_is_one_plain_line_naming_the_run():
 )
 def test_1221_every_posted_comment_opens_with_the_tag(
         tmp_path, arm, report_kw, record_kw, expected_rest):
-    """Every comment kind the host posts — the record, the unreadable-report sentence, and
-    the escalation note on both of its paths — reaches the store with the agent tag naming
-    the run as its FIRST line, and the comment the tenant's mapping renders on the next line,
-    unchanged. The tenant is the committed fixture, whose `comment.body` is
-    `{disposition} — {cause}\\n\\n{narrative}`; the expected remainder is spelled here, never
-    read back from the renderer under test. The positive control is that remainder: the tag
-    is ADDED, nothing it displaces."""
     assert shipped_mapping_doc()["comment"]["body"] == "{disposition} — {cause}\n\n{narrative}", (
         "the fixture tenant's comment template moved; re-spell the expected record body"
     )
@@ -140,10 +123,6 @@ def test_1221_every_posted_comment_opens_with_the_tag(
 
 
 def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
-    """The tag names the run (`run_dir.name`) even when the case is written under another key —
-    on the platform the case key is the vendor's ticket id — and it reaches the wire even when
-    the tenant's `comment.body` template has no placeholder for either id: the tag never goes
-    through the template, so a mapping cannot drop it."""
     key = "SOC-VENDOR-4242"
     run_dir = make_run(tmp_path, name=RUN_ID, body=NARRATIVE)
     assert _tag(RUN_ID) != _tag(key), "the control is vacuous: the two ids tag alike"
@@ -182,9 +161,6 @@ def test_1221_the_tag_names_the_run_not_the_case_key(tmp_path, monkeypatch):
 )
 def test_1221_every_comment_kind_tags_the_run_under_a_vendor_key(
         tmp_path, arm, report_kw, record_kw):
-    """Every comment kind, written under a case key that is NOT the run id (the platform's
-    vendor ticket id), opens with the tag naming the RUN. The control: the comment goes to the
-    vendor key's path, so the key was in play and the tag still ignored it."""
     key = "SOC-VENDOR-4242"
     run_dir = make_run(tmp_path, name=RUN_ID, **report_kw)
     store = FakeStore()
@@ -196,18 +172,9 @@ def test_1221_every_comment_kind_tags_the_run_under_a_vendor_key(
     assert key not in first, f"{arm}: the tag names the case key"
 
 
-# =======================================================================================
-# The bound, and the model-facing clip
-# =======================================================================================
-
-
 @pytest.mark.parametrize("run_id", [RUN_ID, BRANCH_RUN_ID])
 @pytest.mark.parametrize("filler", ["x", "é", "🜁"])
 def test_1221_the_tag_survives_the_wire_bound(tmp_path, run_id, filler):
-    """With a narrative far past the bound, the whole posted body — tag line included — is at
-    most `WIRE_BOUND_BYTES` UTF-8 bytes, the tag line is intact at its start, and the cut is
-    the narrative's (the body still ends in the one visible `…`). The tag's bytes come out of
-    the bound, never on top of it, for the longest run id too."""
     run_dir = make_run(tmp_path, name=run_id, body=filler * 20000)
     store = FakeStore()
     record(run_dir, store)

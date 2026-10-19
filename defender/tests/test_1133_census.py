@@ -59,9 +59,6 @@ RAW_OS = frozenset({
 })
 _RAW_OS_ORIGINS = frozenset(f"os.{op}" for op in RAW_OS)
 OPENERS = frozenset({"builtins.open", "io.open", "codecs.open"})
-#: D6's `Path` methods: the writes and the link-following reads, judged by attribute name on
-#: any receiver but a module or a defining `defender` class (`_path_verb`). A subset of the
-#: #1134 census's `Path` verbs.
 ATTR_CALLS = frozenset({"open", "mkdir", "write_text", "write_bytes", "unlink", "rmdir", "touch",
                         "symlink_to", "hardlink_to", "link_to", "rename", "replace",
                         "read_text", "read_bytes"})
@@ -74,19 +71,9 @@ _DYNAMIC_IMPORTS = frozenset({"importlib.import_module", "builtins.__import__"})
 
 #: The residue D6' leaves, exactly, re-derived on the final tree.
 RESIDUE = frozenset({
-    # (The queue writer's three rows are gone: #1135 moved it onto the learning-state handle, so
-    # it makes no guarded write of its own any more.)
-    # The archive's copy lane (N-a).
     ("learning.branch.archive", "_screen_destinations", ".unlink"),
     ("learning.branch.archive", "archive_episode", "shutil.copy2"),
     ("learning.branch.archive", "archive_episode", "shutil.copytree"),
-    # Link-following reads of things that are not episode records: a sibling's scrub verdict,
-    # the sidecar beside its run dir (screened by `artifact_file` first); the source run's
-    # investigation and alert (run records, #1105); the episode page's own stylesheet asset.
-    # #1105 PR 2 (decision C): the tenant-scoped runs repository's `open(run_id)` — a run
-    # opened by id through its owner, not a `Path.open` — which this census's by-name rule
-    # cannot tell apart from one. (VERIFY's and the page's per-arm opens left with PR 2's
-    # review: both take every arm from one hold, `EpisodeRuns.arms`.)
     ("learning.branch.cli", "_open_launch_source", ".open"),
     ("run", "_open_world_source", ".open"),
 })
@@ -101,9 +88,6 @@ _IO_PURE = frozenset({"json_nesting_depth", "load_json_artifact", "parse_jsonl_r
 _PATH_IO = C.ATTRS
 #: `os` functions that touch no file.
 _OS_PURE = frozenset({"os.fspath", "os.fsdecode", "os.fsencode"})
-#: The `Held` verbs that share a name with a `Path` I/O method: a call carrying the name
-#: positionally (`held.mkdir(rel)`, `held.unlink(rel)`) is the verb, since `Path.mkdir()` and
-#: `Path.unlink()` take no positional name.
 _HELD_NAMED_VERBS = frozenset({"mkdir", "unlink"})
 _BUILTINS = frozenset(dir(builtins))
 
@@ -334,9 +318,6 @@ def collect(rels: Iterable[str] = MODULES) -> set[tuple[str, str, str]]:
 
 
 def test_d6_the_migrated_modules_make_no_episode_io_but_the_declared_residue():
-    """O1 / D6: across D6's modules, the calls to and references to write-capable callees are
-    exactly the residue. Every other episode write or path-seam read now goes through the
-    `Episode` handle (or a `Bound`), which this vocabulary does not name."""
     found = collect()
     extra = sorted(found - RESIDUE)
     missing = sorted(RESIDUE - found)
@@ -345,11 +326,6 @@ def test_d6_the_migrated_modules_make_no_episode_io_but_the_declared_residue():
               + "".join(f"  residue entry gone (remove it from RESIDUE): {m}\n" for m in missing))
     assert not extra, report
     assert not missing, report
-
-
-# ---------------------------------------------------------------------------------------------
-# The handle scan (D1' / D2'): the core only by `hold` / `hold_new`, I/O only through `Held`
-# ---------------------------------------------------------------------------------------------
 
 
 def _io_functions() -> frozenset[str]:
@@ -421,11 +397,6 @@ def handle_scan(tree: ast.Module) -> tuple[list[tuple[str, str]], set[str]]:
 
 
 def test_d6_the_episode_handle_does_io_only_through_hold_and_its_held():
-    """D1' / D2' / D6': `_episode_handle.py` reaches the core only through `hold` and
-    `hold_new` (its `io=` seam) and does I/O only through the `Held` they return: no `rooted_*`,
-    no path seam, no `bind`, no `os.*` / `shutil.*` operation, no builtin `open`, no filesystem
-    method of a `Path`, no other I/O-doing `_io` function. It does call `hold` and `hold_new`,
-    so the check is not vacuous."""
     violations, core = handle_scan(_parse(PACKAGE / "_episode_handle.py"))
     assert not violations, (
         f"the handle does I/O around its held root: {sorted(set(violations))}")
@@ -434,20 +405,12 @@ def test_d6_the_episode_handle_does_io_only_through_hold_and_its_held():
         "`Episode.create` one `io.hold_new`")
 
 
-# ---------------------------------------------------------------------------------------------
-# The O5 scan (D6'): no function takes a path below the episode dir
-# ---------------------------------------------------------------------------------------------
-
 #: O5's exemptions by name, as D6' words them: the episode dir itself, the episodes root, a
 #: source run, a run dir.
 _O5_EXEMPT_EXACT = frozenset({"episode_dir", "episodes_root"})
 _O5_EXEMPT_PREFIX = ("source", "run_dir")
 #: O5's named parameters.
 _O5_NAMED = frozenset({"path", "manifest", "draw_dir", "world_dir"})
-#: Path-typed parameters named for a root outside every episode tree: the sibling runs base,
-#: the tenant's settings, the data root (#1120; the episodes root is refused inside it), the
-#: lessons folder, the judge queue, the defender checkout, a git work tree. None is below an
-#: episode dir.
 OUTSIDE_EPISODE = frozenset({"runs_base", "settings_dir", "data_root", "lessons_dir",
                              "queue_dir", "defender_dir", "cwd"})
 #: Concrete, I/O-capable path types (a `PurePath` is a relative name, not a path to open).
@@ -466,25 +429,16 @@ PARAM_ALLOWLIST = frozenset({
      "scrub callback takes the lifecycle tree; verdict reads/writes use its bound Run"),
     ("learning.branch.ledger", "Ledger._absorb", "path", _CARVE_READ),
     ("learning.judge.family", "leads_by_id", "world_dir", _CARVE_READ),
-    # (#1234 removed `run._resolves(world_dir, …)` and `run._draw_document(world_dir, …)`: the
-    # one pointer resolver is `pointers._resolves` over the episode's bound view, and the draw
-    # document is built from the validated reply alone — neither takes a path.)
     ("learning.judge", "_memoized_show.invoke", "path", _GIT),
     ("learning.judge.render", "_git_show_default", "path", _GIT),
     ("run", "_Investigate.__call__", "alert_path", _ALERT),
     ("run", "_drive_investigation", "alert_path", _ALERT),
     ("run", "_materialize_run", "alert", _ALERT),
 })
-#: Rows that may be present or not: D3' leaves the sibling's `resume_world` shape open (its door
-#: `run.main` opens the episode from the manifest's parent; `resume_world` may keep taking the
-#: manifest path it refuses by name, or take the `Episode`).
 PARAM_TOLERATED = frozenset({
     ("run", "resume_world", "manifest"),
 })
 
-#: Where `EpisodePaths(`, `base_file(` and `staged_path(` may be called, `(module, function)`
-#: (a nested scope counts as its enclosing function): the readers that bind at the episode root
-#: (O3 / N-b), the functions D3' keeps path-typed, and the O5 carve-outs.
 NB_READERS = frozenset({
     # D3' "stay path-typed": pre-door, or the episode dir itself.
     ("learning.branch.cli", "preflight_episode"),
@@ -509,11 +463,6 @@ NB_READERS = frozenset({
     ("scripts.visualize.visualize_episode", "load_episode"),
     ("scripts.visualize.visualize_episode", "_read_grade"),
     ("scripts.visualize.visualize_episode", "_Episode"),
-    # The O5 carve-outs: the stale-`served/*.jsonl` glob (the launcher's door), the
-    # path-taking readers and their one caller each, and the containment arithmetic. Rev 3 (R1) removes
-    # `episode._answers` and `episode.delta_o`: `delta_o` reads the base and each world's served
-    # file through its one `bind` (`read_jsonl(LAYOUT.served_base)`, `read_jsonl(LAYOUT.
-    # served_world(token))`), naming no path.
     ("learning.branch.cli", "prepare_episode"),
     ("learning.branch.ledger", "Ledger._absorb"),
     ("learning.judge.family", "leads_by_id"),
@@ -521,9 +470,6 @@ NB_READERS = frozenset({
 })
 _O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
 
-#: The doors D3' names, and #1224's pre-flight: where `Episode.open` / `Episode.create` may be
-#: called. `grade_episode`'s one orchestration body `_grade_episode` (where its `bind` is today)
-#: counts as the door.
 DOORS = frozenset({
     ("learning.branch.cli", "prepare_episode"),
     ("run", "main"),
@@ -532,9 +478,6 @@ DOORS = frozenset({
     ("scripts.visualize.visualize_episode", "render_episode"),
     ("learning.branch.cli", "preflight_replay"),
 })
-#: Callers D3' does not place but whose callees take the `Episode`: the page script's `main`
-#: hands one to `_write_page`, and may open its own. Rev 3 (R1) removes `delta_o`: it opens no
-#: `Episode`, reading the manifest as `load_family(bound)` through its one `bind`.
 DOORS_TOLERATED = frozenset({
     ("scripts.visualize.visualize_episode", "main"),
 })
@@ -544,10 +487,6 @@ DOORS_REQUIRED = (
     ("learning.branch.cli", ("prepare_episode",), "create"),
     ("run", ("main",), "open"),
     ("learning.branch.cli", ("preflight_replay",), "open"),
-    # #1105 PR 2 (decision C, declared changes 3 and 4): the judge's and the page's doors take an
-    # episode id and hold their `Episode` through the tenant's runs repository
-    # (`runs.episode_files(ep)`, `runs.episode(ep)`), which opens it by id — so neither calls
-    # `Episode.open` itself any more.
 )
 
 
@@ -752,9 +691,6 @@ def _o5_collect(scan: Any) -> set[tuple[str, str, str]]:
 
 
 def test_o5_no_function_takes_a_path_below_the_episode_dir_but_the_allowlist():
-    """O5 / D6' (parameters): across the O5 modules, every flagged parameter is on
-    `PARAM_ALLOWLIST` (or tolerated), and every allowlist row is still flagged on the tree. A
-    writer takes the `Episode`, a path-seam reader the `Episode` or a view."""
     found = _o5_collect(o5_params)
     allowed = {row[:3] for row in PARAM_ALLOWLIST}
     extra = sorted(found - allowed - PARAM_TOLERATED)
@@ -769,9 +705,6 @@ def test_o5_no_function_takes_a_path_below_the_episode_dir_but_the_allowlist():
 
 
 def test_o5_episode_paths_base_file_and_staged_path_are_called_only_by_root_readers():
-    """O5 / D6' (calls): `EpisodePaths(`, `base_file(` and `staged_path(` are called only in
-    `NB_READERS`. A writer reaches a path through the `Episode`'s own records (`.path`), and a
-    judge or page reader through the view it was handed."""
     found = _o5_collect(o5_calls)
     extra = sorted(hit for hit in found if not _allowed(hit, NB_READERS))
     assert not extra, (
@@ -780,10 +713,6 @@ def test_o5_episode_paths_base_file_and_staged_path_are_called_only_by_root_read
 
 
 def test_o5_only_the_doors_open_or_create_an_episode():
-    """O5 / D3' / D6' (doors): `Episode.open` / `Episode.create` are called only in the doors
-    (plus the tolerated callers D3' does not place); and `cli.prepare_episode` creates, and
-    `run.main`, `grade_episode`, `render_episode` and `cli.preflight_replay` open, so the scan
-    is not vacuous."""
     found = _o5_collect(o5_doors)
     extra = sorted(hit for hit in found if not _allowed(hit, DOORS | DOORS_TOLERATED))
     missing = [
@@ -797,10 +726,6 @@ def test_o5_only_the_doors_open_or_create_an_episode():
 
 
 def test_o5_the_episodes_only_constructors_are_its_two_doors():
-    """The door scan keys on `Episode.open` / `Episode.create`, so those must be the only ways to
-    have an `Episode`: its public class- and static methods are exactly `open` and `create`
-    (a third, `Episode.at(d)`, would be a door no scan looks for), and `_episode_handle`
-    defines no public module-level function (an `open_episode(d)` wrapper would be one too)."""
     handle_mod = importlib.import_module("defender._episode_handle")
     episode = handle_mod.Episode
     constructors = {

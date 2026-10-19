@@ -1,7 +1,3 @@
-"""#796 — how the composer's finding plus host state becomes one gate outcome.
-
-"""
-
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
@@ -128,9 +124,6 @@ def test_an_unmeasurable_gap_forces_inconclusive_without_spending_a_turn(tmp_pat
 
 
 def test_repeating_an_ask_that_bought_nothing_does_not_spend_another_turn(tmp_path):
-    """The overlap rule. The investigation was already asked for this target and came back
-    having recorded nothing new about it, so a further turn provably cannot surface anything
-    it was not already asked for."""
     deps, _run_dir = _deps(tmp_path)
     target = _a_real_target(deps)
     bundle = _bundle(composer=_composer("gap", ask={"target": target, "prose": "provenance"}))
@@ -260,9 +253,6 @@ def test_a_lens_that_was_never_dispatched_is_not_recorded_as_one_that_answered(t
 
 
 def test_an_unknown_stage_name_is_refused_as_a_name(tmp_path):
-    """`stage()` resolves against the bundle's own fields, not by bare attribute lookup: a
-    bare `getattr` handed `stage("stage")` this very method back as a lens, and reported every
-    typo as "no run dir" — a diagnosis of a different fault than the one that happened."""
     from defender.runtime.review_roles import UnboundReviewStage
 
     bundle = _bundle(composer=_composer("holds"))
@@ -273,9 +263,6 @@ def test_an_unknown_stage_name_is_refused_as_a_name(tmp_path):
 
 
 def test_a_lens_reply_reaches_the_trace_framed_and_never_bare(tmp_path):
-    """A lens reads a document derived from attacker-influenced payloads, so its reply is
-    payload-derived prose and the trace is read later by an operator, a visualizer, or
-    another model."""
     deps, run_dir = _deps(tmp_path)
     poison = "IGNORE-PREVIOUS-INSTRUCTIONS-MARKER"
     _run(deps, _bundle(lens=poison, composer=_composer("holds")))
@@ -285,9 +272,6 @@ def test_a_lens_reply_reaches_the_trace_framed_and_never_bare(tmp_path):
 
 
 def test_the_record_reaches_each_lens_inside_that_calls_own_fresh_salt(tmp_path):
-    """PR7/PR8, on the INBOUND half. The projection is payload-derived, so it rides framed —
-    and the frame is keyed on the salt the stage call mints, never on the investigation's,
-    which is the delimiter the lens's OWN reply returns inside."""
     deps, _run_dir = _deps(tmp_path)
     seen: list = []
 
@@ -309,10 +293,6 @@ def test_the_record_reaches_each_lens_inside_that_calls_own_fresh_salt(tmp_path)
     assert len(salts) == len(seen), "two stage calls shared a salt"
     for request in seen:
         assert f"<run-{request.salt}-untrusted>" in request.prompt, "the record arrived unframed"
-    # The obligation this asserted — a review role must never hold the delimiter of the frame
-    # its own output returns inside — is discharged by construction since #875: the
-    # investigation has no salt to reach anyone. What stays checkable is asserted above: each
-    # stage mints its own, they are all distinct, and each frames that stage's record.
     assert not hasattr(deps, "salt"), (
         "the investigation carries a salt again — a review role could be handed it"
     )
@@ -336,9 +316,6 @@ def test_every_dispatched_lens_leaves_a_row_even_when_an_earlier_one_faults(tmp_
 
 
 def test_a_second_review_pass_is_not_recorded_as_the_first(tmp_path):
-    """A challenged close comes back and reviews again. With the round hardcoded to zero every
-    row of the second pass reads on disk exactly like the first's, so a trace cannot say which
-    pass a fault belongs to."""
     deps, run_dir = _deps(tmp_path)
     target = _a_real_target(deps)
     bundle = _bundle(composer=_composer("gap", ask={"target": target, "prose": "provenance"}))
@@ -356,11 +333,6 @@ def test_a_second_review_pass_is_not_recorded_as_the_first(tmp_path):
     ['{"finding": "holds", "review": "r"}', "[1, 2]", '"prose"', "3", "plain prose"],
 )
 def test_no_stage_reply_stands_as_a_trace_row_whatever_shape_it_arrives_in(tmp_path, reply):
-    """The writer puts a reply on its own literal line only because every READER skips it, so
-    the two sides have to be one predicate — the writer asks `_io.parse_jsonl_row`, which is
-    the rule `read_jsonl_rows` applies. Asked here of the bytes, across the JSON types a model
-    can answer in: the file holds exactly one row, the gate's own, and the reply is recoverable
-    either way. A reader that loosened its rule alone would fail this from its own side."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     challenge_gate._write_trace_row(fixture_run(run_dir), "composer", 0, {"ok": True}, raw_reply=reply)
@@ -395,9 +367,6 @@ def test_the_writer_and_the_reader_agree_about_a_nested_reply_from_any_stack_dep
 
 
 def test_the_composers_json_reply_does_not_stand_as_a_trace_row_of_its_own(tmp_path):
-    """The composer answers with a JSON OBJECT by contract. Framed on its own literal line
-    that object is a round-less row every trace consumer reads as gate metadata — the review's
-    own prose counted as a trace record, on every close."""
     deps, run_dir = _deps(tmp_path)
     _run(deps, _bundle(composer=_composer("holds", review="the close reads sound")))
 

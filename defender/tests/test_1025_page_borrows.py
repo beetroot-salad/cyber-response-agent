@@ -51,11 +51,6 @@ def _restoring(paths: list[Path], mode: int):
     return _Ctx()
 
 
-# ---------------------------------------------------------------------------------------
-# One guarded reader — the leaks the per-site pattern left
-# ---------------------------------------------------------------------------------------
-
-
 @NOT_ROOT
 def test_1025_a_permission_denied_trace_or_tool_trace_is_that_slots_refusal_never_the_pages_crash(
         tmp_path):
@@ -147,11 +142,6 @@ def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
     assert "absent" in block, block
 
 
-# ---------------------------------------------------------------------------------------
-# One lane rule — the pass's (`route.fate`, #1234 A13); its answers are the ledger below
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
     """`family` is the reserved label the family-level draws live under, never a world."""
     ep = E.sample_episode(tmp_path)
@@ -176,11 +166,6 @@ def test_1025_a_world_spelled_family_never_doubles_the_family_lane(tmp_path):
         E.render_episode(ep.dir, module=visualize_episode())
 
 
-# ---------------------------------------------------------------------------------------
-# Small things the review named
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_response_row_with_an_empty_model_string_is_unpriced(tmp_path):
     """`model: ""` — a call whose model was never recorded — reads "unpriced", not a figure at
     the pricing table's absorbed-row rate: the stage sum excludes it and says so."""
@@ -192,11 +177,6 @@ def test_1025_a_response_row_with_an_empty_model_string_is_unpriced(tmp_path):
     questioner = page.text_of("stage-questioner")
     assert "$0.7500" in questioner, questioner
     assert "partial — 2 of 3 calls priced" in questioner, questioner
-
-
-# ---------------------------------------------------------------------------------------
-# The ledger — the pass writes what it decided; the page reads it and decides nothing
-# ---------------------------------------------------------------------------------------
 
 
 def _ledger_of(doc: dict) -> dict[str, tuple[str, str | None]]:
@@ -286,9 +266,6 @@ def test_1025_a_record_naming_one_world_twice_renders_exactly_what_the_pass_file
 
 
 def test_1025_a_record_with_no_ledger_says_so_instead_of_guessing(tmp_path):
-    """A `judge.yaml` written before the ledger existed (the two real archives the design doc
-    quotes) renders every on-disk finding under one group, "record carries no disposition ledger
-    ."""
     ep = E.sample_episode(tmp_path)
     doc = E.sample_grade()
     del doc["dispositions"]

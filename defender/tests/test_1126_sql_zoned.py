@@ -18,9 +18,6 @@ _ZONED = ("SELECT '2026-01-01T03:00:00Z'::TIMESTAMPTZ AS lit, "
 
 @pytest.mark.parametrize("host_zone", ["UTC", "America/New_York", "Asia/Kolkata", ""])
 def test_a_zoned_result_is_the_same_utc_instant_whatever_the_hosts_zone(host_zone):
-    """A plain timestamp cast to a zoned one is read in the session's zone, and a day bucket
-    starts at the session's midnight — both follow the host's zone unless the tool pins it. An
-    empty `TZ` made duckdb name the zone `Etc/Unknown`, which pytz cannot resolve."""
     proc = run_sql_py(_ZONED, stdin='{"x": 1}', env={**os.environ, "TZ": host_zone})
     assert proc.returncode == EXIT_OK, proc.stderr
     [row] = json.loads(proc.stdout)

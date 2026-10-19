@@ -38,13 +38,6 @@ from defender.run_repository import SessionPaths  # noqa: E402
 
 def test_session_head_log_has_the_declared_shape(tmp_path):
     """`session_head_log` is one STRICT table with SIX columns — an integer primary key, the"""
-    # provenance: B9 (executed) verified the DDL is satisfiable verbatim on this connection —
-    # STRICT accepts a NULL origin and refuses a bogus destination.
-    # rejected: D1's alternative of three narrow columns — head_message_id plus
-    # branch_point_message_id on `session`, and displaces_message_id on `message`. The one
-    # table is chosen instead because it makes fork and fold ONE operation with two reasons
-    # rather than two mechanisms sharing a substrate, which is what this test observes: the
-    # two entries below differ in their reason and in nothing else structural.
     sel = selection_mod()
     store = make_store(tmp_path)
 
@@ -82,9 +75,6 @@ def test_session_head_log_has_the_declared_shape(tmp_path):
 
 def test_no_head_log_row_is_ever_updated_or_deleted(tmp_path):
     """No head move the store's own API can make ever rewrites or removes an entry already in the"""
-    # provenance: P87, scoped by PR-22 (executed census): the only two production UPDATEs
-    # anywhere target session.truncated_by and session.last_render_len; no trigger, no
-    # constraint and no STRICT mechanism forbids a direct write.
     sel = selection_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -187,10 +177,6 @@ def test_every_role_scoped_reader_returns_empty_for_a_null_head_session(tmp_path
 
 def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
     """When the walked path contains an id no `message` row resolves, every role-scoped read"""
-    # provenance: PR-3 (executed) measured the uncaught KeyError on the send and actor roles.
-    # P29's consensus ('unreachable through the store's own API') is true of the WRITE path
-    # only. This change makes it more reachable, not less: the walk's anchor stops being a
-    # derived tip and becomes a plain column carrying no application guard.
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -198,11 +184,6 @@ def test_hydrate_fails_closed_on_an_unresolvable_path_element(tmp_path):
     assert len(ss.hydrate(store, session_id, role="analysis")) == 2, (
         "control: the same reads return the conversation while the chain resolves")
 
-    # Direct file damage is the only route left: the foreign key on `parent_id` refuses this
-    # on any connection the store hands out, so the corruption goes through a raw connection
-    # that never issued the pragma — which is the shape #705's
-    # `test_every_store_connection_sets_the_foreign_keys_pragma_itself` describes and the one
-    # PR-3 drove.
     raw = sqlite3.connect(str(store.path))
     raw.execute("UPDATE message SET parent_id = 999999 WHERE id = ?", (r1,))
     raw.commit()
@@ -288,9 +269,6 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
 
 def test_the_session_pick_resolves_the_root_of_lineage_main_session(tmp_path):
     """The session the pick resolves is the ROOT-OF-LINEAGE main session — the one whose"""
-    # provenance: P113, grounded in B14 (executed): today's picker returns the true main only
-    # because rowid ordering happens to favour it, and a fork of main is a second agent_id
-    # 'main' row.
     run_dir, store = _rendered_run(tmp_path)
     leg = store.new_session(agent_id="gather-l1")
     linear_turns(store, leg, 1, agent_id="gather-l1", label="leg")

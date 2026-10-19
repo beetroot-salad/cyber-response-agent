@@ -27,9 +27,6 @@ def test_a_crlf_only_rewrite_is_not_byte_identical_to_head(tmp_path):
 
 
 def test_a_genuine_byte_identical_file_is_still_recognised(tmp_path):
-    """Positive control beside the fix: an ACTUAL byte-identical rewrite (chmod only, same
-    bytes) must still be recognised as unchanged — the fix must not overcorrect into
-    flagging every touched file as changed."""
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q")

@@ -1,14 +1,3 @@
-"""Defender invlang parser tests (current schema).
-
-Covers:
-  - The slim `:H hypothesize.hypotheses` 9-col header (identity only).
-  - `:H h-NNN.{preds,refuts,authz,attr_preds,parent_attrs}` sub-blocks.
-  - Quoted attrs values so cell values can contain a literal `|`.
-  - Strict rejection (with logged ParseWarning) of legacy 14-col or
-    11-col `:H` headers, missing `⟂` on resolutions, etc.
-  - Per-row recovery: one bad row never takes down the rest of a file.
-"""
-
 from __future__ import annotations
 
 import subprocess
@@ -119,9 +108,6 @@ detection_notes        "Rule joins on host.name only; failures and success are d
 
 
 def test_conclude_without_detection_notes_is_clean_and_invents_no_key():
-    """The field is for a detection defect that was FOUND. Most runs find none, so its absence
-    is the ordinary case and must stay silent — and the key must not be conjured empty, since a
-    reader cannot tell an empty note from a defect nobody looked for."""
     text = """\
 ```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
@@ -136,9 +122,6 @@ summary                "Login matched established bastion usage"
     body, warnings = parse_dense_companion(text)
     assert warnings == []
     assert "detection_notes" not in body["conclude"]
-    # The prologue is here to carry `benign`'s grounding clause, not for the projection under
-    # test: a `:T conclude` block alone is a document that recorded no alerted entity, which
-    # `_check_benign_grounding` refuses independently of anything about `detection_notes`.
     assert validate_companion(text) == []
 
 
@@ -182,9 +165,6 @@ detection_notes        "Rule joins on host.name only.
         f"both halves of the spilled value must warn — got rows {sorted(rows_warned)} from "
         f"{[(w.row_index, w.reason[:60]) for w in warnings]!r}"
     )
-    # The fragment is still projected; the DENIAL is what stops it reaching disk, and it comes
-    # from validate_companion turning these warnings into write-gate errors. Assert the denial
-    # itself — warnings nobody converts would let the truncation ship with the suite green.
     assert body["conclude"]["detection_notes"].startswith('"')
     assert validate_companion(text), (
         "the truncated write was not denied — parse warnings must reach the write gate"
@@ -207,9 +187,6 @@ malicious
 
 
 def test_conclude_key_set_twice_names_the_clobbered_field():
-    """The continuation of a two-line value lands on whatever key its first word names, so the
-    damage is not always a dropped row — here the tail of `termination.rationale` overwrites the
-    run's `summary`. The warning has to name the field that was lost, not just the opener."""
     text = """\
 ```invlang
 :T conclude
@@ -227,9 +204,6 @@ summary of h-002 cannot reach --"
 
 
 def test_quoted_word_inside_a_one_line_value_is_not_a_truncation():
-    """The test is quote PARITY, not a leading `"`. A value that opens with a quoted word and
-    continues in prose is a valid one line; denying it would block a conclusion whose author has
-    no rewrite that satisfies the check."""
     text = """\
 ```invlang
 :T conclude
@@ -383,9 +357,6 @@ def test_resolution_missing_perp_raises():
 
 
 def test_resolution_extracts_matched_ids_from_iff_annotation():
-    """The iff RHS literal set names which predictions / refutations the
-    lead actually tested. Downstream Class 8 / Class 13 queries depend on
-    these fields; they cannot be silently dropped."""
     lead_id, rec = _resolution_record(
         "h-001  null → ++   "
         "[l-001 p1,p2 severe ⟂ e-002 :: p1 ⟺ src=monitor; p2 ⟺ cadence=5m]"
@@ -635,9 +606,6 @@ h-001|++
 
 
 def test_hypothesis_canonical_key_is_anchor():
-    """`:H attached_to=v-*` canonicalizes to `anchor` (not the legacy
-    `attached_to_vertex`); downstream queries (hypothesis_shape_match)
-    index off the new key."""
     body, warnings = parse_dense_companion(_H_VERTEX_ANCHOR)
     assert warnings == []
     h = body["hypothesize"]["hypotheses"][0]
@@ -672,9 +640,6 @@ summary                "x"
 
 
 def test_hypothesis_rejects_edge_anchor():
-    """`:H` is discovery-only — anchors must be `v-*` ids. Edge anchors
-    surface as a ParseWarning (row dropped) with the offending hyp id
-    plus a pointer to `??` notation as the alternative."""
     body, warnings = parse_dense_companion(_H_EDGE_ANCHOR)
     assert body.get("hypothesize", {}).get("hypotheses", []) == []
     h_warnings = [w for w in warnings if w.block.startswith(":H ")]

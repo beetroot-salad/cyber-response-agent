@@ -23,10 +23,6 @@ from defender.tests.tenant_1078_pass_a import _spec1078 as H
 T_ID = H.VALID_ID
 
 
-# ======================================================================================
-# The race and the bystander — the real primitives, in the test itself.
-# ======================================================================================
-
 def _race(n: int, fn) -> tuple[list, list]:
     """Release `n` callers of `fn` together behind one Barrier (C-P2's shape). Returns
     (results, exceptions)."""
@@ -114,12 +110,6 @@ class _Bystander:
 _WHY_0644 = "C-R6 found the naive staged shape regressing to 0600"
 
 
-#: The crash children: each loops over ONE real create lane in fresh directories until it is
-#: killed. Split per lane because the lanes' odds differ: measured on the old one-open lane,
-#: a kill landed inside the record's create window in 8/40 (record-only loop) but 0/40 for the
-#: row (create_tenant's own listing and mkdir dominate its loop) — so the record lane carries
-#: the discriminating kills and the row lane is a stray-entry check with weak odds of a torn
-#: hit (red-flagged in the author digest).
 _CRASH_CHILD = {
     "record": r"""
 import os, sys
@@ -178,10 +168,6 @@ def _crash_leftovers(root: Path) -> list[str]:
     return bad
 
 
-# ======================================================================================
-# ensure_runs_base_record (D1) and the record's grammar (O3)
-# ======================================================================================
-
 def test_o3_record_read_grammar(tmp_path, monkeypatch):
     """A runs-base record whose tenant_id is '../../x' is refused when read, where at ed5386bc
     it reads back unchallenged."""
@@ -206,9 +192,6 @@ def test_o3_record_read_grammar(tmp_path, monkeypatch):
 
 
 def test_o6_ensure_record_semantics(tmp_path):
-    """ensure_runs_base_record(runs_base, T) mints a record naming T when absent, returns it
-    when present and naming T, and refuses when present and naming another tenant;
-    ensure_tenant no longer exists."""
     base = tmp_path / "runs"
     base.mkdir()
     minted = H.ensure_runs_base_record(base, T_ID)
@@ -249,13 +232,6 @@ def test_o6_record_create_exclusive(tmp_path):
 
 
 def test_s7_j16_create_lane_complete_or_absent(tmp_path):
-    """A reader that catches a create-lane writer (ensure_runs_base_record's runs-base record,
-    create_tenant's tenant row) mid-write sees the name absent or the file complete, never
-    empty or partial; the file has exactly one name throughout (no two-named alias window),
-    mode 0644 under umask 022 (and the writing process's owner), and a crash before the write
-    completes leaves no stray entry in the directory. N racing ensure_runs_base_record calls on
-    one base all succeed, leave one record, and every caller carries the winner's
-    base_world_id."""
     with umask(0o022):
         # (1) + (3) the runs-base record
         record_fields = ("tenant_id", "base_world_id", "created_at")
@@ -323,11 +299,6 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
 
 @pytest.mark.parametrize("unsupported", [errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL])
 def test_create_falls_back_where_no_unnamed_file_can_be_made(tmp_path, unsupported):
-    """`write_guarded(mode="create")` on a filesystem that cannot make an unnamed file still
-    creates the file, once: the fallback is the one-open exclusive create, and a second create
-    of the same name is the ordinary race (`FileExistsError`, unmarked). The control is the
-    real lane on this host, which writes the same bytes with one name and mode 0644 under
-    umask 022."""
     io_mod = H.mod("_io")
     target = tmp_path / "x.json"
     io_mod.write_guarded(target, "{}\n", mode="create", open_unnamed=no_unnamed_files(unsupported))
@@ -344,9 +315,6 @@ def test_create_falls_back_where_no_unnamed_file_can_be_made(tmp_path, unsupport
 
 
 def test_create_does_not_swallow_an_unrelated_failure(tmp_path):
-    """A failure of the unnamed open that is not "this filesystem cannot" (here ENOSPC) is this
-    call's own, and propagates — never read as "someone else won" or quietly retried through
-    the fallback. Nothing is left at the name."""
     io_mod = H.mod("_io")
     target = tmp_path / "x.json"
     with pytest.raises(OSError, match="No space") as failed:
@@ -357,10 +325,6 @@ def test_create_does_not_swallow_an_unrelated_failure(tmp_path):
 
 
 def test_runs_base_record_torn_read(tmp_path, monkeypatch):
-    """Under the complete-or-absent create lane (J16/J63), no reader of a runs-base record — a
-    racing ensure_runs_base_record loser or a bystander such as the tenant's runs repository
-    opening a run — ever observes an empty or partial record: it sees the record absent or
-    complete, so the read is old-or-new-only by construction."""
     from defender.run_repository import RunId, RunRefused
 
     root = tmp_path / "data"
@@ -403,10 +367,6 @@ def test_runs_base_record_torn_read(tmp_path, monkeypatch):
 
 def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and_first_write(
         tmp_path):
-    """create_tenant makes and holds its folder with `_io.hold_new` off the data root's handle
-    (F12, brief R4(d): _tenant.py is hard-gated for a raw mkdir; #1137 moved it off
-    guarded_mkdir), which judges `<T>` with no link followed at mkdir time, closing the swap
-    window after O11a's construction-time check."""
     victim = tmp_path / "victim"
     victim.mkdir()
     root = tmp_path / "data"
@@ -420,14 +380,7 @@ def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and
     assert (fresh / T_ID / H.ROW_NAME).is_file()
 
 
-# ======================================================================================
-# Run.for_tenant — the race backstop and its coherence with a pass-(A) record
-# ======================================================================================
-
 def test_s7_j34_run_for_tenant_mismatch_backstop(tmp_path):
-    """Run.for_tenant(runs_base, T) over a present record naming U raises its mismatch
-    refusal and writes nothing: the race backstop behind ensure_runs_base_record's step-4
-    refusal."""
     Run = H.mod("run_repository._handle").Run
     base = tmp_path / "runs"
     H.plant_record(base, "someone-else")
@@ -438,5 +391,3 @@ def test_s7_j34_run_for_tenant_mismatch_backstop(tmp_path):
     same = tmp_path / "same"
     H.plant_record(same, T_ID)
     assert Run.for_tenant(T_ID, "r1", runs_base=same).run_dir == same / "r1"
-
-

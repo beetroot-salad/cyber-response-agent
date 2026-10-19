@@ -1,13 +1,3 @@
-"""#1080 — the fail-open lazy import sites that reach a moved module, over REAL outputs (group
-`runpage`).
-
-SCOPE CUT (2026-10-04, human): the run page, its mirror writer and its assets stay in
-`scripts/visualize/` (#1105), so this file's run-page tests are parked with #1105
-(`spec-flow/specs/parked/1080/parked_run_page_e2e.py`). What is left is s037's two lazy sites
-that reach the moved lessons engine (`lessons_frontier`): the compaction fold's push and the
-document tool's write return. Neither imports the old run-handle or run-path module
-(E4: #1105 PR1 deletes those modules, so no kept test may import them at module level).
-"""
 from __future__ import annotations
 
 import importlib
@@ -23,11 +13,6 @@ from defender.tests.scripts_1080_split import _spec1080 as S
 pytestmark = pytest.mark.e2e
 
 
-# ======================================================================================
-# Shared drivers
-# ======================================================================================
-
-
 def _make_unimportable(monkeypatch, dotted: str) -> None:
     """`dotted` cannot be imported for the rest of the test: `None` in `sys.modules`, and the
     attribute its package may already carry removed (`test_1110`'s pattern; monkeypatch
@@ -38,11 +23,6 @@ def _make_unimportable(monkeypatch, dotted: str) -> None:
     monkeypatch.delattr(with_pkg, leaf, raising=False)
     with pytest.raises(ImportError):
         importlib.import_module(dotted)
-
-
-# ======================================================================================
-# s037 — every fail-open lazy site pinned by its real output
-# ======================================================================================
 
 
 def _lesson_fixture(tmp_path: Path):
@@ -87,21 +67,6 @@ def _site_document_tool(tmp_path: Path) -> Callable[[], dict[str, Any]]:
 
 
 def test_lazy_import_repointed_to_a_path_that_does_not_exist(tmp_path, monkeypatch):
-    """Each fail-open site that lazily imports a moved module (under the 2026-10-04 scope cut,
-    the frontier block in the lessons pushes: the compaction fold and the document tool's write
-    return, both reaching the moved `lessons_frontier`) is pinned by a test that observes the
-    real output, not the absence of an error: the frontier block in the push. A lazy import
-    repointed to a missing module or a missing name therefore turns a test red even though the
-    census is clean, every module-level import resolves and the run exits 0. (The run page,
-    workspace map and episode page sites lazily import modules the cut leaves in place; their
-    cells are parked with #1105.)
-
-    Observed at each site through its own entry point (`compose_fold`, the document tool's
-    `_frontier_recall`): with the moved module importable, the REAL output is there — the push
-    and the recall carrying the planted lesson. Then the moved module each site lazily imports
-    is made unimportable (what a stale repoint gives): every site still fails open — no
-    exception reaches the caller — and the real-output check is FALSE at every one, so these
-    assertions are the ones a stale lazy import turns red."""
     sites = {
         "lessons_push": (_site_lessons_push(tmp_path), ("FOLD_LEAD", None)),
         "document_tool": (_site_document_tool(tmp_path), ("WRITE_RETURN_LEAD", None)),

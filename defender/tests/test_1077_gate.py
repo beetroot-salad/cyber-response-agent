@@ -68,9 +68,6 @@ def test_gate_admits_a_quoted_name_only_under_an_inline_suppression(tmp_path: Pa
 
 
 def test_gate_suppression_comment_missing_reason(tmp_path: Path):
-    """A reasonless suppression does not suppress: D6(a) defines the escape by its literal form
-    `# lint-…: ok — reason`, so a comment carrying the marker with no reason text after it does
-    not match that form, is not honoured, and the underlying finding is still reported."""
     for comment in ("# lint-run-records: ok", "# lint-run-records: ok —", "# lint-run-records:"):
         found = S.gate_findings(
             tmp_path / comment.replace(" ", "_").replace(":", ""), "runtime/msg.py",
@@ -88,11 +85,6 @@ def test_gate_suppression_comment_missing_reason(tmp_path: Path):
 
 
 def test_a_record_name_that_reaches_a_path_without_ever_being_a_literal(tmp_path: Path):
-    """A record name that reaches a path without ever being a literal — from a data file, an env
-    var, a message or a table row — is an accepted, out-of-scope gap and not a finding: D6(a) is
-    a literal-shaped check and is structurally blind to it, D6(b)'s data-flow pass closes only
-    the narrower literal-free-join-onto-a-tagged-owner-value case, and O1's 'no code spells a
-    name outside the owner' is therefore a claim about literal spellings only."""
     found = S.gate_findings(tmp_path / "nonliteral", "runtime/indirect.py", '''
 import os
 from pathlib import Path
@@ -196,5 +188,3 @@ def test_the_gate_reports_a_finding_for_a_source_file_it_cannot_parse(tmp_path: 
 
 
 # The two sibling lints coupled to the owners
-
-

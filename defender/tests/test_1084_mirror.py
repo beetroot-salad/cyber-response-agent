@@ -88,9 +88,6 @@ def test_1084_the_override_wins_even_over_an_explicit_start(tmp_path, monkeypatc
 
 
 def test_1084_the_override_is_read_at_call_time_not_at_import(tmp_path, monkeypatch):
-    """The module is imported first; only then is the override removed, set, changed and
-    removed again, and every call follows the environment of that moment. A module constant
-    (or a cached first answer) fails the second or third call."""
     vr = _renderer()
     main = _checkout(tmp_path / "main")
     monkeypatch.delenv(ENV, raising=False)
@@ -123,9 +120,6 @@ def test_1084_a_main_checkout_resolves_to_its_own_top_level_folder(tmp_path, war
 @pytest.mark.parametrize("relative", [False, True], ids=["absolute-gitdir", "relative-gitdir"])
 def test_1084_a_worktree_resolves_to_the_main_checkouts_folder_not_its_own(
         tmp_path, warned, no_override, relative):
-    """D3: a worktree's `.git` is the file `gitdir: <main>/.git/worktrees/<name>` (absolute, or
-    relative to the worktree); that dir's `commondir` (`../..`) names the main `.git`, whose
-    parent is the main checkout."""
     main = _checkout(tmp_path / "main")
     wt = tmp_path / "trees" / "wt"
     _worktree(main, wt, relative=relative)
@@ -228,9 +222,6 @@ def test_1084_commondir_is_followed_to_whichever_checkout_it_names(tmp_path, war
 
 def test_1084_under_pytest_without_the_override_the_default_resolution_is_refused(
         tmp_path, monkeypatch):
-    """With `PYTEST_CURRENT_TEST` set (pytest sets it for every phase) and the override removed,
-    `mirror_root()` with no `start` raises `MirrorRootRefused` instead of naming the real
-    checkout's folder."""
     vr = _renderer()
     assert issubclass(vr.MirrorRootRefused, Exception)
     monkeypatch.delenv(ENV, raising=False)
@@ -253,6 +244,3 @@ def test_1084_an_empty_override_is_not_an_override(monkeypatch):
     monkeypatch.setenv(ENV, "")
     with pytest.raises(vr.MirrorRootRefused):
         vr.mirror_root()
-
-
-

@@ -24,10 +24,6 @@ def _tmp_roots(tmp_path, monkeypatch):
     """
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    # The learning STATE root too, so the shared findings queue this pass appends to is
-    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
-    # here rather than in the appender: a production path that picks a different queue when
-    # an env var is unset is a pass whose rows can land where no drain reads.
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -40,9 +36,6 @@ def _tenant_paths():
     return T.current_tenant()
 
 
-#: The one captured call every launch here replays, and the empty answer it was recorded with:
-#: pre-flight's oracle serves it unchanged, so every world calibrates and the episode is
-#: `accepted` (#1224).
 _EMPTY: dict = {"rows": []}
 
 
@@ -87,25 +80,7 @@ def _launch(tmp_path, *, judge=None, spawn=None, **seams):
     return launched.rc, judge, launched.ep
 
 
-# ---------------------------------------------------------------------------------------
-# demand #0 — the return-value contract
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
-    """Driving the launcher over an accepted episode leaves exactly three artifact sets and
-    returns nothing that carries the grade: `worlds/<X>/judge/<n>.yaml` one per world per draw,
-    `episodes/<id>/judge.yaml` once, and one appended row per finding in `findings.jsonl`.
-
-    The chain has no single return value; its observable contract is WRITTEN ARTIFACTS, and the
-    launcher's own status stays what it always was — about the LAUNCH, not about the grade. The
-    judge is called at the tail of `_run_episode`, after the archive step and before the return
-    (J10), so the worlds it grades are the ones `verify_family` has just archived.
-
-    `render` is the one pure function whose RETURN is the contract (a `JudgeInput`); the family
-    pass returns the `FamilyGrade` it writes, and the enqueue returns the appended-row count,
-    the shape `_io.append_jsonl(path, rows) -> int` already has.
-    """
     rc, judge, ep = _launch(tmp_path)
 
     assert rc in (0, 1), "the launcher's status is still about the LAUNCH, not about the grade"
@@ -129,21 +104,7 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
         "seam saw a different count")
 
 
-# ---------------------------------------------------------------------------------------
-# the trigger
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_unaccepted_episodes_are_not_graded(tmp_path):
-    """Only an `accepted` episode is graded; `unusable` and `refused` are recorded as "not
-    graded, reason" rather than passing silently.
-
-    #1224: the gate reads pre-flight's `outcome.yaml`, whose words are `accepted` / `unusable`
-    / `refused`. A word outside them (the retired `incomplete`) is no outcome at all: it reads
-    as the distinct "no record" state, never as `accepted` (M05=A). The refusal has to be
-    RECORDED rather than expressed as an absent file. Positive control in the same drive: the
-    accepted episode does get graded, so the negative cannot pass on a judge that never runs.
-    """
     no_record = J.sym("learning.branch.outcome", "NO_RECORD")
     seen = {}
     for outcome in ("accepted", "unusable", "refused", "incomplete"):
@@ -166,11 +127,6 @@ def test_921_unaccepted_episodes_are_not_graded(tmp_path):
 
 
 def test_921_the_trigger_reads_the_outcome_record_preflight_wrote(tmp_path):
-    """The trigger is pre-flight's `outcome.yaml` (#1224), which carries ONE `outcome` word —
-    the retired `review.yaml` and its two-writer `episode.outcome` key are gone. Drive a full
-    episode and read the record back off disk: the word is one of the three, no `review.yaml`
-    was left, and the grade follows that word.
-    """
     import yaml
 
     rc, judge, ep = _launch(tmp_path)
@@ -186,21 +142,8 @@ def test_921_the_trigger_reads_the_outcome_record_preflight_wrote(tmp_path):
 
 
 def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
-    """A present `judge.yaml` stops a second grade, and a present-but-unreadable one is a
-    refusal rather than a pass.
-
-    Note what the presence gate does NOT say: nothing in it records whether the ENQUEUE ran, so
-    a crash between the family write and the enqueue would orphan that episode's findings
-    forever, with `judge.yaml` present and the episode unrerunnable (re-running the same
-    source-run + branch-point pair is refused outright). That is why J11 moves the write to
-    last; this demand pins the gate itself. Positive control: the same episode with no
-    `judge.yaml` IS graded, so the negative cannot pass on a judge that never runs.
-    """
     ep = J.accepted_episode(tmp_path)
 
-    # #1234 A6: a re-run keeps every `queued` row verbatim and calls again only for a row
-    # that is not — so the first pass answers the family call with a FAMILY reply (a world
-    # reply there is refused, leaving the family row uncommitted and owed a re-run).
     first = J.scripted_judge()
     J.grade_at(ep, judge=first, state=env_state())
     assert first.calls > 0, "the control failed: the first pass never reached the model"
@@ -219,21 +162,7 @@ def test_921_existing_judge_yaml_stops_a_second_grade(tmp_path):
         J.grade_at(ep, judge=third, state=env_state())
 
 
-# ---------------------------------------------------------------------------------------
-# write discipline and completion
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
-    """Both episode sinks are written through `write_guarded` into a tree #947 screens as
-    box-reachable: `worlds/<X>/judge/<n>.yaml` and `episodes/<id>/judge.yaml`.
-
-    `mode="replace"` stages to an unpredictable name and `os.replace`s, so the target holds the
-    old bytes or the complete new bytes and never a partial write; it refuses an ALIASED target
-    and clobbers an ordinary one (P4, executed). The refusal is the observable this drives: a
-    symlink planted at either sink's path is refused rather than written THROUGH, which is what
-    a bare `write_text` would do.
-    """
     ep = J.accepted_episode(tmp_path)
     outside = tmp_path / "outside.yaml"
     outside.write_text("untouched\n", encoding="utf-8")
@@ -257,19 +186,6 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
 
 
 def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts(tmp_path):
-    """`judge.yaml` carries the enqueued row count and the per-world completed-draw counts, and
-    its presence never certifies an enqueue that did not happen.
-
-    #1234 A6 replaces J11's "written last" with a per-row commit: a world's row is written
-    `state: queueing` BEFORE its rows are appended and flipped to `queued` after, so a record
-    whose append failed says so on the row itself — the row stays `queueing`, never `queued` —
-    and a re-run refuses that record naming the row rather than guessing whether the rows
-    landed. With the counts on the record, "graded with nothing to report" is distinguishable
-    from "never graded" and a resumed invocation's decision is derivable.
-
-    Driven by failing the enqueue through the real primitive: the queue's holding folder is a
-    regular file, so the append raises where it really would.
-    """
     ep = J.accepted_episode(tmp_path)
 
     grade = J.grade_at(
@@ -307,27 +223,6 @@ def test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_c
 
 def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncated_with_a_marker(
         tmp_path, monkeypatch):
-    """The three operator knobs — draws-per-world, the judge's model/effort, and the render's
-    payload cap — are resolved ONCE at the top of the episode-grading pass, their resolved
-    values are recorded on the family record beside the draw count, and a view whose content
-    exceeds the cap is TRUNCATED with an explicit marker rather than dropped silently (J15).
-
-    THE CAP BOUNDS THE ASSEMBLED SET OF VIEWS, not one file inside one of them. It first bounded
-    a single lead's `gather_summaries/<lead>.md` while the document rows, the lesson bodies, the
-    investigation and the report went unmeasured, so the knob reported success over a prompt it
-    had barely looked at. The cap VALUE here moved with that meaning — the assertions are the
-    same four, over a quantity that is now the bytes the model actually receives.
-
-    Reading once per pass is not tidiness. Because a retry clobbers each existing draw file in
-    place rather than erroring and no cleanup step exists (P4), a draws knob that SHRINKS
-    between two attempts is the only way stale draw files survive — so re-reading it per world
-    is what makes the retry story non-deterministic. And a dropped lead is invisible to the
-    judge AND to the reader of its reply, while Scale records 10-32K input tokens per call, so a
-    cap that fires is an event worth seeing.
-
-    The knob names carry no `DEFENDER_` prefix, matching `QUESTIONER_EFFORT`: run1/G23 executed
-    that convention, and a judge knob spelled with the prefix would be unsettable.
-    """
     monkeypatch.setenv(J.DRAWS_KNOB, "2")
     monkeypatch.setenv(J.MODEL_KNOB, "kimi-k3")
     monkeypatch.setenv(J.EFFORT_KNOB, "xhigh")
@@ -356,12 +251,6 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
         "judge and to the reader of its reply")
     assert "l-001" in prompt, "the truncated lead vanished from the view entirely"
 
-    # And the bound is over the SET. Eight sections each allowed to reach the cap is eight
-    # times the number the operator set, which is the same defect one bounded file was.
-    # #1224 (N22): the call list is the one view the cap never cuts — under any cap the judge
-    # still gets each call with its decision word — so the bound is over every OTHER view.
-    # #1234 (A9): the views are the M3 layout's blocks (`layout.world_layout`), measured the way
-    # the cap measures them (host titles and labels outside every frame are not charged).
     from defender._io import bind
 
     layout = J.mod("learning.judge.layout")

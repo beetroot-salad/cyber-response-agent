@@ -38,11 +38,6 @@ def world_reply(**kw) -> str:
     return S.as_text(S.world_reply(**kw))
 
 
-# ---------------------------------------------------------------------------------------
-# O1/M6 — the partition, at the validator and at both appenders
-# ---------------------------------------------------------------------------------------
-
-
 def test_world_row_refused_at_the_defender_appender(tmp_path):
     """A `subject: world` row may not reach the DEFENDER findings channel."""
     enqueue = W.mod("learning.judge.enqueue")
@@ -86,16 +81,6 @@ def test_lessons_gate_refuses_direction_world_loudly(tmp_path):
     with pytest.raises(W.refusals()):
         author._gate_findings([queue_row(direction=W.SUBJECT_WORLD, subject=W.SUBJECT_WORLD)],
                               cfg)
-
-
-# ---------------------------------------------------------------------------------------
-# O8/M10 + R2 — the defender side stays pinned, the selector is per subject
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# M6 — the second channel's own shape
-# ---------------------------------------------------------------------------------------
 
 
 def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drain_lock(
@@ -147,11 +132,6 @@ def test_two_appends_of_one_finding_id_land_once(tmp_path):
         f"one finding id landed twice: {rows}")
 
 
-# ---------------------------------------------------------------------------------------
-# The closed world vocabulary (#1234 M4), made mechanical
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_non_string_world_bucket_is_refused(tmp_path):
     """A world bucket must be a STRING of the vocabulary — never a list, number or mapping."""
     run = W.mod("learning.judge.run")
@@ -196,11 +176,6 @@ def test_a_world_finding_cannot_borrow_a_defender_bucket_and_the_list_decides_th
     assert len(W.queue_rows(paths, FINDINGS)) == 1
 
 
-# ---------------------------------------------------------------------------------------
-# The rows themselves: what the pass owns and what the model owns (A3)
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_defender_queue_row_carries_its_subject_key(tmp_path):
     """A defender row carries `subject: defender` EXPLICITLY, rather than by absence."""
     enqueue = W.mod("learning.judge.enqueue")
@@ -209,10 +184,6 @@ def test_a_defender_queue_row_carries_its_subject_key(tmp_path):
     enqueue.append_rows(tmp_path, [queue_row()], state=W.learning_state(paths))
 
     assert W.queue_rows(paths, FINDINGS)[0]["subject"] == W.SUBJECT_DEFENDER
-    # REQUIRED, not merely carried: a row that reached the appender without one would
-    # otherwise land and read as a defender row by default, which is the inference this key
-    # exists to remove. Without this half the assertion above passes on an appender that
-    # copies whatever it is handed.
     bare = queue_row()
     bare.pop("subject")
     with pytest.raises(W.refusals()):
@@ -357,9 +328,6 @@ def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_ow
     enqueue.append_world_rows(tmp_path, [world_row(finding_id=shared_id)],
                               state=W.learning_state(paths))
 
-    # #881 (merged from main) renamed the drain's counter to `_pending_queue_counts`,
-    # returning `(authorable, held)` rather than one int — this row carries no `held_reason`,
-    # so it counts on the authorable side.
     pending, held = drains._pending_queue_counts(W.learning_state(paths), QUESTIONER_FINDINGS)
 
     assert held == 0, f"the row was held, not suppressed: {held}"

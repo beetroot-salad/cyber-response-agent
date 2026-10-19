@@ -29,15 +29,8 @@ from defender.tests.e2e._replay_harness import ToolRoster, Turn  # noqa: E402
 
 GOLDEN = Path(__file__).resolve().parents[1] / "fixtures-e2e" / "golden-v2sshd"
 
-#: The #722 case: a zero-width space inside an otherwise valid member. It renders as `benign`
-#: to every human reader and to every terminal, and it is not one.
-#: Spelled with the escape rather than the character itself, so an editor, a diff or a copy
-#: through a terminal cannot silently strip the thing under test.
 LACED = "beni\u200bgn"
 
-#: What a value outside the vocabulary looks like when it is nearly inside it. Case, trailing
-#: whitespace, the invisible character, a superstring, and nothing at all — each one is a
-#: distinct way a model reading attacker-influenced alert data lands off the enum.
 NEAR_MISSES = ("Benign", "benign ", LACED, "totally-benign", "")
 
 
@@ -204,10 +197,6 @@ def test_the_refusal_escapes_an_invisible_character_rather_than_echoing_it(tmp_p
     assert "'beni\\u200bgn'" in seen, (
         f"the model was handed a refusal that hides the character it must fix: {seen!r}"
     )
-    # BOTH halves on this lane too, not just the escaped one: an escaped copy alongside a raw
-    # echo still hands the model a rejected answer that reads identical to a valid one, and
-    # this is the lane the model actually reads. `ToolCallPart` carries no `content`, so the
-    # model's own laced argument is not what this would be seeing.
     assert LACED not in seen, (
         "the model was handed the laced value raw, so its rejected answer reads as identical "
         f"to a valid one: {seen!r}"

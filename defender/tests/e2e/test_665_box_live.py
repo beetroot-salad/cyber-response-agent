@@ -50,9 +50,6 @@ def _run_cycle_box(tmp_path):
 
 # ro-mount / traversal containment (po63 / c13)
 def test_single_non_overlapping_readonly_mount_refuses_a_direct_in_box_write(tmp_path):
-    """A write to a read-only bind's own target is refused (rc=2, Read-only file system) —
-    distinct from the `--read-only` rootfs (po63 confirmed live). S1's containment rests on
-    the ro flag, not the gate."""
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
@@ -88,9 +85,6 @@ def test_two_mounts_with_nested_or_overlapping_sources_and_targets(tmp_path):
         name="defender-nested-live", workdir=outer, env={},
         mounts=(Mount(source=outer, target=outer, writable=False, kind="code"),
                 Mount(source=inner, target=inner, writable=True)),
-        # `outer` is a tmp tree with none of the three hash inputs; a real-daemon request
-        # pins the name of THIS checkout's image, never the stock one (#1092, #94) — on the
-        # env-derived spec, so the DEFENDER_BOX_RUNTIME lever still holds (test_540:973).
         spec=dataclasses.replace(box_mod.BoxSpec.from_env(os.environ), rootfs=box_mod.image_tag(DEFENDER)),
     )
     box = start_box_request(req, docker=box_mod._docker)
@@ -115,11 +109,6 @@ def test_tmpfs_contents_persist_across_execs_within_one_box_lifetime(tmp_path):
         box_mod.stop_box(box)
 
 
-# interpreter coupling + the behavioral startup probe (c12 / decision 7)
-# box_start_probes_interpreter (decision 7 / c12) — the startup probe is BEHAVIORAL: it RUNS
-# the granted programs when the box comes up and refuses the start if they do not exit clean,
-# rather than comparing interpreter identities. Each row is one granted program the probe has
-# to be able to run, and the way that program fails when the box is wrong.
 @pytest.mark.parametrize(("case", "cmd", "rc_why", "contains", "contains_why"), [
     # the granted repertoire itself imports — a broken repertoire fails the box (c12)
     ("granted-repertoire-runs-clean",
@@ -141,9 +130,6 @@ def test_tmpfs_contents_persist_across_execs_within_one_box_lifetime(tmp_path):
 def test_box_start_probes_the_granted_repertoire_by_running_it(
     tmp_path, case, cmd, rc_why, contains, contains_why
 ):
-    """A box that comes up but cannot run what it granted is a box that fails later, inside an
-    investigation. The startup probe runs each granted program and refuses the start on a
-    non-clean exit."""
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
@@ -156,16 +142,9 @@ def test_box_start_probes_the_granted_repertoire_by_running_it(
 
 
 def test_pinned_lesson_scripts_reject_arbitrary_argv_read(tmp_path):
-    """lesson_scripts_no_arbitrary_read (negative; OWED live probe) — the pinned lesson scripts
-    cannot be driven to read an arbitrary path via their argv (S6): the gate passes argv
-    unexamined via pins_path, so the scripts themselves are the last line."""
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:
-        # positive control: the pinned lesson script runs on its INTENDED in-corpus operand (a
-        # frontmatter pattern), exits 0, and returns its corpus content — so the hostile-argv
-        # negative below only passes once the script has DEMONSTRABLY executed (a bare no-leak
-        # check passes vacuously if the script errored on a bad path and printed nothing).
         allowed = _run(box, "/defender/bin/defender-lessons .", cwd=Path("/runs/current"))
         assert allowed.rc == 0, "the pinned lesson script did not run on its intended operand (positive control)"
         assert allowed.out, "the pinned lesson script returned no corpus content on its intended operand"
@@ -174,5 +153,3 @@ def test_pinned_lesson_scripts_reject_arbitrary_argv_read(tmp_path):
         assert b"root:" not in hostile.out, "a pinned lesson script leaked an arbitrary file via argv"
     finally:
         box_mod.stop_box(box)
-
-

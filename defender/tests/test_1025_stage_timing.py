@@ -136,9 +136,6 @@ def _launch(tmp_path, *, judge=None, spawn=None, calls=None, oracle=None, verifi
     if spawn is None:
         spawn = J.FakeSibling(episode_dir)
     if judge is None:
-        # A valid reply in each scope (#1234: a world reply carries `bucket`/`systems` and the
-        # three filed lists, a family reply world findings only), so no draw is refused and
-        # asked again.
         judge = J.FakeJudge(
             default=J.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[])),
             family_default=J.as_reply_text(J.family_reply()))
@@ -226,17 +223,9 @@ class _PlantingSibling(J.FakeSibling):
     def __call__(self, argv: list[str], *, env: dict[str, str] | None = None,
                  **kw: Any) -> int:
         rc = super().__call__(argv, env=env, **kw)
-        # N arms, released from one barrier, race to plant ONE link; the loser's
-        # `FileExistsError` would otherwise leave `start_family` as a second, unintended fault
-        # ("world b was never started") in a scenario whose only fault is the planted alias.
         with contextlib.suppress(FileExistsError):
             (self.episode_dir / "worlds").symlink_to(self.outside, target_is_directory=True)
         return rc
-
-
-# ---------------------------------------------------------------------------------------
-# the record itself — `learning/branch/timing.py`
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_a_step_row_round_trips_through_the_record(tmp_path):
@@ -442,11 +431,6 @@ def test_1025_a_step_the_disk_refused_once_is_still_on_the_next_document(tmp_pat
         "the step whose own write was refused is missing from the document written after it")
 
 
-# ---------------------------------------------------------------------------------------
-# the launcher writes it — one row per completed step, through `cli.main`
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_an_accepted_episode_leaves_every_step_in_launch_order(tmp_path):
     """A clean accepted episode leaves five rows in `STEPS` order ."""
     episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
@@ -489,9 +473,6 @@ def test_1025_the_runs_row_spans_the_time_the_siblings_were_actually_running(tmp
     assert sibling.stamps, "the control failed: no sibling was spawned"
 
     rows = _raw_rows(launch.episode_dir)
-    # `_clocked`'s chain is what makes THIS launch tell a step's own start from the launch's:
-    # `verify` must start no earlier than `runs` ended, which is one second later than a
-    # `started_at` frozen at the launch's first moment.
     _clocked(rows, before=launch.before, after=launch.after)
     runs = next(row for row in rows if row["step"] == "runs")
     started, ended = parse_iso_utc(runs["started_at"]), parse_iso_utc(runs["ended_at"])

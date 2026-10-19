@@ -12,11 +12,6 @@ LESSON = "defender/lessons/l1.md"
 OLD = "defender/lessons/old.md"
 
 
-# ---------------------------------------------------------------------------
-# D0 — the commit seam, as §7 corrected it
-# ---------------------------------------------------------------------------
-
-
 def test_an_empty_approved_list_commits_nothing_and_invokes_no_git_773(tmp_path):
     """An empty approved list returns `None` WITHOUT calling git."""
     sc = S.build_scene(
@@ -63,11 +58,6 @@ def test_an_empty_approved_list_still_lets_the_rest_of_the_tick_complete_773(tmp
     assert sc.run() == 0
     assert sc.category_of("f1") == "consumed_skip"
     assert sc.report_lines()
-
-
-# ---------------------------------------------------------------------------
-# O2 — the commit names exactly the approved files plus curator deletions
-# ---------------------------------------------------------------------------
 
 
 def test_the_commit_names_the_approved_files_and_the_curator_deletions_and_nothing_else_773(
@@ -119,9 +109,6 @@ def test_a_curator_deletion_under_the_corpus_is_named_in_the_commit_list_773(tmp
 
 
 def test_git_status_reports_a_deleted_corpus_file_773(tmp_path):
-    """M5 puts curator deletions under the corpus into the commit's explicit path list even
-    though `_changed_corpus_records` drops `D` rows (C17), and the deletion is not vouched
-    for by anything — there is no file left to attribute (N6)."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -146,17 +133,10 @@ def test_deletions_list_names_a_path_git_status_never_reported_deleted_773(tmp_p
         ),
     )
     assert sc.run() == 0
-    # The expected set is the FAKE's own write/delete list, spelled out here rather than
-    # recovered by re-running production's own `git status` — an oracle that re-runs the
-    # primitive under test cannot disagree with it.
     assert set(sc.head_files()) == {LESSON, OLD}
 
 
 def test_the_commit_list_is_built_in_repo_relative_paths_773(tmp_path):
-    """The explicit commit list is built in REPO-relative paths — the representation
-    `_changed_corpus_records`, `_vouched_for`, `_cited_ids_at_head` and `_revert_strays`
-    already use consistently — so a lesson in a corpus SUBDIRECTORY commits at the path git
-    knows it by."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -164,11 +144,6 @@ def test_the_commit_list_is_built_in_repo_relative_paths_773(tmp_path):
     )
     assert sc.run() == 0
     assert sc.head_files() == ["defender/lessons/nested/deep/l1.md"]
-
-
-# ---------------------------------------------------------------------------
-# O4 / O5 — the tree is the truth; AUTHOR_RESULT is a hint
-# ---------------------------------------------------------------------------
 
 
 def test_a_reported_committed_finding_no_approved_file_cites_is_deferred_not_consumed_773(
@@ -285,9 +260,6 @@ def test_git_status_reports_no_changed_corpus_files_773(tmp_path):
 
 
 def test_git_status_reports_an_untracked_file_under_the_corpus_773(tmp_path):
-    """`git status --porcelain --untracked-files=all -z` includes `??`, and only `D` is
-    filtered (G1/C17), so an untracked corpus file is a changed non-deleted record and goes
-    through vouch, verdict and commit like any other."""
     sc = S.build_scene(
         tmp_path,
         rows=[S.finding_row("f1", run_id="f1")],
@@ -350,17 +322,8 @@ def test_git_status_reports_an_unexpected_two_letter_status_code_773(tmp_path):
     )
     assert sc.run() == 2
     assert LESSON not in sc.head_files()
-    # NAMED, not merely loud. Today this tick already fails — the conflicted file's markers
-    # break its frontmatter, so it reads as unvouched — and a test asserting only "the tick
-    # refused" would be green on that unrelated reason forever. The refusal has to say what
-    # it refused, which is what makes it greppable for an operator.
     [record] = sc.graveyard()
     assert "unmerged" in record["deadletter_reason"].lower()
-
-
-# ---------------------------------------------------------------------------
-# §7 FK-22 — the new step's git reads do not spend the batch's fault budget
-# ---------------------------------------------------------------------------
 
 
 def test_git_status_call_the_check_steps_paths_are_derived_from_fails_773(tmp_path):

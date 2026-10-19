@@ -136,10 +136,3 @@ def test_a_stray_the_agent_wrote_outside_the_corpus_does_not_whitelist_itself(tm
 
 
 # A fault AFTER the commit landed must not delete what the commit captured
-
-
-# The "commit landed, then a later git read fails, and the restore must not delete what already
-# landed" property moved with #773 M5 (the findings channel commits through
-# `shared.commit_corpus_paths`, which `cfg_for` does not override). It is pinned for that flow at
-# `test_773_commit_list.py::test_git_status_call_the_check_steps_paths_are_derived_from_fails_773`
-# and `test_773_verdict_pass.py::test_verify_agent_state_after_repair_spawn_depends_on_a_failing_git_read_773`.

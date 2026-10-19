@@ -1,6 +1,3 @@
-"""#1224 — the question-writer's inputs: served systems, questioner lessons selected by system (exact
-roster-canonical match, malformed lessons skipped), and the per-system samples record.
-"""
 from __future__ import annotations
 
 import json
@@ -21,9 +18,6 @@ from defender.tests import _triplet_947 as T
 from defender.tests import _world_1007 as W
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
-# --------------------------------------------------------------------------------------
-# Private helpers (helper requests for `_spec1224.py` are listed in the hand-back).
-# --------------------------------------------------------------------------------------
 
 #: Lab names that are also plain English words: counted only where they read as a system name
 #: (quoted or backticked, or as a YAML key), so prose like "the account's identity" is not a hit.
@@ -227,11 +221,6 @@ def _world_queue(paths: Any) -> list[dict]:
     return W.queue_rows(paths, QUESTIONER_FINDINGS)
 
 
-# --------------------------------------------------------------------------------------
-# The launcher records what the tenant serves; the question-writer authors facts.
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_launcher_records_the_gather_grant_systems_as_served_systems(tmp_path, monkeypatch):
     """the launcher writes the episode tenant's gather grant systems into family.yaml as served_systems, whatever the question-writer replied."""
     est = S.estate(tmp_path, systems=(*S.SYSTEMS, "ndr"),
@@ -372,11 +361,6 @@ def test_1224_question_writer_authors_world_facts_not_telemetry(tmp_path, monkey
             f"a manifest carrying the world's {key!r} was written")
         assert oracle.requests == 0, f"pre-flight spent an oracle turn on a refused {key!r} reply"
         assert spawn.launches == [], f"a sibling started for a refused {key!r} reply"
-
-
-# --------------------------------------------------------------------------------------
-# Lessons by system (O12).
-# --------------------------------------------------------------------------------------
 
 
 def test_1224_lesson_is_shown_iff_the_tenant_serves_one_of_its_systems(tmp_path):
@@ -596,11 +580,6 @@ def test_input_lesson_systems_spelling_differs_from_the_served_system(tmp_path):
             f"a lesson naming {name!r} was shown to a tenant serving {served}")
 
 
-# --------------------------------------------------------------------------------------
-# Samples per system (O16).
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_samples_record_is_keyed_by_served_system(tmp_path, monkeypatch):
     """the launcher's samples record holds real example answers from the capture keyed by served system, with no pattern keys."""
     launch = _launch(tmp_path, monkeypatch, S.estate(tmp_path))
@@ -725,11 +704,6 @@ def test_1224_samples_for_a_system_whose_verbs_answer_in_different_shapes(tmp_pa
         S.assert_wrapped_untrusted(agent.prompts[0], token, f"siem-x's {token} example")
 
 
-# --------------------------------------------------------------------------------------
-# The question-writer's prompt and the served-systems rule (N25, M2, O-03).
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
         tmp_path, monkeypatch):
     """the question-writer's system names are exactly the manifest's served systems (the gather grant's), not the systems the tenant's settings configure."""
@@ -757,5 +731,3 @@ def test_1224_question_writer_prompt_when_configured_and_granted_systems_differ(
     assert samples is not None, "no samples.yaml was written"
     assert set(samples) == set(served), (
         f"samples.yaml keys {sorted(samples)} do not follow served_systems {served}")
-
-

@@ -93,10 +93,6 @@ def test_947_an_injected_document_read_back_is_wrapped_untrusted(tmp_path):
     assert rec.calls, "the query never reached the verb, so nothing was served back"
     seen = "\n".join(gather.seen)
     assert PLANTED in seen, "the injected document never reached the model at all"
-    # The frame SHAPE, not a literal from a second `wrap_fresh` call: since #875 the seam mints a
-    # fresh salt per frame, so a marker built here names a frame this run never emitted and the
-    # assertion could not hold for any implementation. `_FRAME_TAG_RE` is the harness's own
-    # spelling of the same shape.
     opened = [m for m in _UNTRUSTED_FRAME.finditer(seen) if not m.group(1)]
     assert opened, "the served payload reached the model outside the untrusted wrap"
     body = seen[opened[0].end():]
@@ -108,9 +104,6 @@ def test_947_an_injected_document_read_back_is_wrapped_untrusted(tmp_path):
 
 
 def test_947_a_driven_faults_detail_reaches_the_model_with_no_world_token(tmp_path):
-    """No world token reaches the model on a driven run: an adapter fault carrying the world's
-    own id is handed to the model with it removed — the channel the decision was raised about,
-    observed end to end rather than through the filter the handler may never call."""
     rec = VerbRecorder()
     gather, _run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, TOKEN_FAULT))
     assert rec.calls, "the query never reached the verb, so no fault was raised"
@@ -121,9 +114,6 @@ def test_947_a_driven_faults_detail_reaches_the_model_with_no_world_token(tmp_pa
 
 
 def test_947_a_driven_ordinary_fault_still_reaches_the_model_intact(tmp_path):
-    """The positive control for the driven redaction: an ordinary fault naming no token
-    comes back to the model on the same channel word for word, so the assertion above is a filter
-    that removed a token rather than a channel that carries nothing."""
     rec = VerbRecorder()
     plain = "Elasticsearch query failed (HTTP 400): [logs-*] is not a valid index expression"
     gather, _run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, plain))

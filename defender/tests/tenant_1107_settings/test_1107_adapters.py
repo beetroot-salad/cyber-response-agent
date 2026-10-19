@@ -26,11 +26,6 @@ from defender.tests import _tenants1106 as T1106
 from defender.tests._by_path import load_module
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
-# ---------------------------------------------------------------------------------------------
-# Canned docker answers. Each is the transport's own contract: curl's body, then `-w
-# '\n%{http_code}'`'s status on a trailing line (`split_status`), or a bare stdout for a non-curl
-# docker call. None is a fault, so none needs a claim beyond that contract.
-# ---------------------------------------------------------------------------------------------
 
 _OK = S.answer('{"status": "ok"}')
 _HOST = S.answer('{"hostname": "web-1"}')
@@ -38,9 +33,6 @@ _SEARCH = S.answer(json.dumps({"hits": {"total": {"value": 0}, "hits": []}}))
 _ES_HEALTH = S.answer(json.dumps({"status": "green", "number_of_nodes": 1}))
 _KB_STATUS = S.answer(json.dumps({"status": {"overall": {"level": "available"}}}))
 _PS = S.answer("PID PPID USER\n1 0 root", None)
-#: `docker inspect --format '{{json .Name}}\t{{json .Config.Image}}'`'s observed success shape, and
-#: its observed answer for a container that does not exist (AP4, executed on docker 29.x): the
-#: daemon's text is lower-case "error: no such object: <id>" on stderr, rc=1.
 _INSPECT = S.answer('"/web-1"\t"nginx:1.27"\n', None)
 _INSPECT_MISSING = S.answer("", None, rc=1, stderr="error: no such object: c0ffee1107\n")
 _NAMES = S.answer("web-1\nweb-2", None)
@@ -109,16 +101,7 @@ def _breaker_run(run_dir: Path, outcomes: list[tuple[str, int]]) -> tuple[list[i
     return totals, None
 
 
-# ---------------------------------------------------------------------------------------------
-# load_config and the record
-# ---------------------------------------------------------------------------------------------
-
 def test_d_load_config_shape_survives(tmp_path):
-    """An adapter's load_config still returns its prefix-stripped keys (URL_BASE, BASTION_HOST,
-    TIMEOUT_SEC for a stub system, and the elastic key set for elastic). It still raises
-    ConfigFault naming each missing required key. It now reads them from the record's systems
-    entry: with the config.env file deleted after the record is built, load_config still answers
-    from the entry."""
     m = "lcs"
     root, folder = _tenant(tmp_path, m)
     record = S.resolve(root)
@@ -159,20 +142,7 @@ def test_d_load_config_shape_survives(tmp_path):
     assert "KIBANA_URL" in str(fault), f"a missing KIBANA_URL must be a ConfigFault naming it, got {fault!r}"
 
 
-
-
-# ---------------------------------------------------------------------------------------------
-# D2: the access method, per system
-# ---------------------------------------------------------------------------------------------
-
 def test_d2_transport_domain(tmp_path):
-    """A system's <PREFIX>_TRANSPORT decides how the system is reached. With docker-exec it is
-    reached through docker exec on its own Docker context. With the key absent, the system's
-    calls raise ConfigFault naming the missing key: the system is down and the run goes on. With
-    the key blank, a near-miss spelling (Docker-Exec, docker_exec) or any other value (http,
-    documented as future by N1), the system's calls raise ConfigFault naming the unimplemented
-    method (F4, human; NF-29: an exact match after the one parser's trimming): the system is
-    down and the run goes on."""
     # rejected: N1: no plain-HTTP transport in this issue
     root, _ = _tenant(tmp_path, "tdok", name="ok")
     shim = S.DockerShim(tmp_path / "ok" / "shim", [_OK])
@@ -209,11 +179,6 @@ def test_d2_transport_domain(tmp_path):
 
 
 def test_d2_docker_context_per_system(tmp_path):
-    """Each system's docker exec runs against that system's own <PREFIX>_DOCKER_CONTEXT, and so
-    does host-state's docker inspect (container_inspect, docker_inspect_raw's call site, CX13).
-    Two systems whose config.env files name different contexts produce child argv that each carry
-    `--context <its own>`. A system whose config lacks the key raises ConfigFault when called,
-    and no call, and no fault text, falls back to soc-playground."""
     m = "dcp"
     root, _ = _tenant(tmp_path, m)
     shim = S.DockerShim(tmp_path / "shim", [_OK])
@@ -253,10 +218,6 @@ def test_d2_docker_context_per_system(tmp_path):
 
 
 def test_d2_elastic_containers_no_default(tmp_path):
-    """Elastic's docker exec targets the tenant file's ELASTIC_ES_CONTAINER for Elasticsearch
-    URLs and its ELASTIC_KIBANA_CONTAINER for Kibana URLs. The write door takes its container
-    from the same key. With either key absent elastic
-    calls fault; nothing falls back to 'elasticsearch' or 'kibana' (CX17)."""
     # This slice drives the adapter half only; the write door's half is fork E1's (the door's
     # new signature is not named by the design, so it is not guessed here).
     m = "ecn"
@@ -292,18 +253,7 @@ def test_d2_elastic_containers_no_default(tmp_path):
             f"{key} absent: a call fell back to a built-in container (CX17): {targets}"
 
 
-
-
-# ---------------------------------------------------------------------------------------------
-# O1 / O2: the file as of resolve, never the environment
-# ---------------------------------------------------------------------------------------------
-
-
-
 def test_o2_adapter_config_snapshot(tmp_path):
-    """After the record is built, editing a system's config.env (cmdb's URL, elastic's index)
-    does not change the next adapter call, which still addresses the value as of the run's
-    start."""
     # rejected: N7: no run snapshot file is written
     # rejected: N6: siblings of one episode each build their own record at their own start
     m = "ocs"
@@ -329,14 +279,7 @@ def test_o2_adapter_config_snapshot(tmp_path):
         "precondition: a record resolved after the edit must see it"
 
 
-# ---------------------------------------------------------------------------------------------
-# §6/§7 value domains: empty, absent, dash-leading
-# ---------------------------------------------------------------------------------------------
-
 def test_s60_url_base_empty_is_missing(tmp_path):
-    """A stub system's <PREFIX>_URL_BASE set to the empty string counts as missing to
-    load_config's required-key check (design doc, Data model): load_config raises ConfigFault
-    naming URL_BASE, the same as if the key were absent."""
     root, folder = _tenant(tmp_path, "sue")
     shim = S.DockerShim(tmp_path / "shim", [_HOST])
     present = transport.load_config(_ctx(S.resolve(root), tmp_path / "p", shim), "cmdb", "CMDB")
@@ -361,16 +304,6 @@ def test_s60_url_base_empty_is_missing(tmp_path):
 
 
 def test_s60_timeout_sec_empty_and_request_reads_current_value(tmp_path):
-    """An empty <PREFIX>_TIMEOUT_SEC counts as missing (the design: empty counts as missing), and a
-    non-digit one is bad config, that system down (O5): either way the call raises a ConfigFault
-    naming the key at call time, not at resolve, and spawns no docker child. After the migration
-    to load_config reading the record's systems entry, _request still sees the tenant's current
-    TIMEOUT_SEC value (not a stale copy)."""
-    # AF-3a (auto, text-grounded): the seed's ValueError carried F29's non-digit observation over
-    # to '' unprobed; the design's "empty counts as missing" decides it — a ConfigFault, the same
-    # required-key shape as s60_url_base_empty_is_missing. R3 (human-confirmed): a non-digit value
-    # is a ConfigFault too. F29 stays a true observation of BASE (int()'s ValueError at
-    # `_stub_transport._request`); this change replaces that behaviour, it is not the contract.
     records = {}
     for name, timeout in (("a", "7"), ("b", "3"), ("e", ""), ("n", "ten")):
         root, folder = _tenant(tmp_path, f"st{name}", name=name)
@@ -394,17 +327,7 @@ def test_s60_timeout_sec_empty_and_request_reads_current_value(tmp_path):
         assert _argvs(shim, before) == [], f"{what} TIMEOUT_SEC spawned a child: {_argvs(shim, before)}"
 
 
-
-
 def test_s7_mf3_empty_destination_is_config_fault(tmp_path):
-    """An empty or missing destination value is that system down, never a deferral. With
-    <PREFIX>_DOCKER_CONTEXT absent, empty or whitespace-only in a system's config.env, that
-    system's calls raise ConfigFault naming the key and spawn no docker child, so docker's own
-    deferral of --context '' to DOCKER_CONTEXT or the current context never happens
-    (F1/G23/RG1). The same holds for elastic's ELASTIC_ES_CONTAINER and
-    ELASTIC_KIBANA_CONTAINER: an empty value makes elastic
-    calls fault. The rule is stated over the value the access method addresses, not over docker
-    (transport-agnostic)."""
     # G23: `--context ''` answers rc=0 on the default daemon, or on DOCKER_CONTEXT's name when
     # that is set — so the only safe empty context is one that never reaches docker.
     root, _ = _tenant(tmp_path, "mdp", name="p")
@@ -447,11 +370,6 @@ def test_s7_mf3_empty_destination_is_config_fault(tmp_path):
 
 
 def test_s7_mf3_destination_never_from_process_env(tmp_path, monkeypatch):
-    """With DOCKER_CONTEXT, SOC_PLAYGROUND_DOCKER_CONTEXT, SOC_PLAYGROUND_ES_CONTAINER and
-    SOC_PLAYGROUND_KIBANA_CONTAINER exported in the launching process and present in ctx.env,
-    every docker child a configured system's call spawns names the tenant file's context
-    explicitly as its --context value (never omitted, never empty) and targets the tenant file's
-    container: no destination is taken from the process environment."""
     # rejected: stripping docker's own steering variables from the child environment: waived (w_mf3_docker_steering_vars) to the per-tenant hands box follow-up
     exported = {"DOCKER_CONTEXT": "env-docker-ctx", "SOC_PLAYGROUND_DOCKER_CONTEXT": "env-spg-ctx",
                 "SOC_PLAYGROUND_ES_CONTAINER": "env-es-c", "SOC_PLAYGROUND_KIBANA_CONTAINER": "env-kb-c"}
@@ -501,11 +419,6 @@ def test_s7_mf3_destination_never_from_process_env(tmp_path, monkeypatch):
 
 
 def test_s7_nf6_dash_leading_context_is_a_name(tmp_path):
-    """A <PREFIX>_DOCKER_CONTEXT value that starts with a dash (-tlsverify,
-    --host=tcp://elsewhere) reaches docker only as the context name: the child argv carries it
-    as the --context value, never as a flag of its own, and a name docker does not know faults
-    as that system being down (an exit-2 fault the breaker counts, as today) with no call
-    reaching any daemon."""
     for i, value in enumerate(("-tlsverify", "--host=tcp://elsewhere")):
         root, folder = _tenant(tmp_path, f"nf{i}", name=f"t{i}")
         S.set_key(folder, "cmdb", "CMDB_DOCKER_CONTEXT", value)
@@ -524,10 +437,6 @@ def test_s7_nf6_dash_leading_context_is_a_name(tmp_path):
         assert state.get("systems", {}).get("cmdb", {}).get("failures") == 1, \
             f"the breaker must count the fault: {state}"
 
-
-# ---------------------------------------------------------------------------------------------
-# The breaker
-# ---------------------------------------------------------------------------------------------
 
 _REPLAY_TABLE = """\
 dispositions:
@@ -585,9 +494,6 @@ def test_sibling_system_calls_share_one_docker_context_partial_failure(tmp_path,
     pytest.importorskip("pydantic_ai")
     from defender.tests.e2e._replay_harness import FakeVerbs
 
-    # Each transient failure is a shape the real tooling was observed to produce (AP3,
-    # 82-author-probes.md): the daemon's "No such container" and "is not running" (rc=1) and
-    # curl's --max-time timeout (rc=28), each with its own diagnostic stderr — never a bare exit.
     transient = {"no-such-container": S.no_such_container("bastion-sib"),
                  "not-running": S.container_not_running(),
                  "timed-out": S.curl_timed_out()}
@@ -620,12 +526,6 @@ def test_sibling_system_calls_share_one_docker_context_partial_failure(tmp_path,
             f"{label}: both systems must reach docker on their one shared context: {calls}"
 
 
-
-
-#: The five stub systems with an adapter, plus host-state — granted gather's health-check each,
-#: and host-state a query verb too. host-state stays configured in every arm, so the run always
-#: has a usable system that gather can query (a run whose granted-and-up systems grant gather no
-#: query verb is refused at start, #1256 O-8 over `require_gather_query`).
 _MF8_TABLE = """\
 dispositions:
   cmdb:
@@ -645,17 +545,6 @@ dispositions:
 
 
 def test_s7_mf8_config_fault_breaker_accounting_unchanged(tmp_path):
-    """#1256 supersedes this test's #1107 expectation ("a ConfigFault counts toward the
-    per-system and the run-wide breaker exactly as a TransportFault does; no config-fault
-    exemption is added"). Now: whether a system is configured is decided at run start, and a
-    system down for config is never charged (O-2, DP2). N = RUN_FAIL_KILL_LIMIT distinct systems
-    each down for config, each called once from a run's gather lead, charge nothing and the run
-    completes; N distinct systems down for connectivity still reach the run-wide limit exactly
-    as before (the breaker's accounting of outages is unchanged, a #1256 non-obligation).
-
-    The config arm drives a REAL run (a lead on configured host-state calls each system's real
-    `health_check`, behind a recorder) — the arm that changed. The connectivity arm keeps its
-    direct feed of real `TransportFault`s to the real breaker: what it pins did not change."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.e2e._replay_harness import FakeVerbs
 
@@ -715,10 +604,6 @@ def test_s7_mf8_config_fault_breaker_accounting_unchanged(tmp_path):
     assert aborted.systems == sorted(systems), f"the run must abort over those systems: {aborted.systems}"
 
 
-# ---------------------------------------------------------------------------------------------
-# The connect example, the ticket adapter's verbs, the two readers of elastic's file
-# ---------------------------------------------------------------------------------------------
-
 class _Recorder(http.server.BaseHTTPRequestHandler):
     """A local HTTP endpoint that records each path it is asked for and answers a JSON record."""
 
@@ -736,9 +621,6 @@ class _Recorder(http.server.BaseHTTPRequestHandler):
 
 
 def test_o8_example_reads_record(tmp_path, monkeypatch):
-    """examples/example_adapter.py reads its system's settings from the record on its
-    VerbContext. Driven with a record whose systems carry an example entry, and with no
-    config.env on disk, it addresses that entry's URL."""
     for var in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("no_proxy", "*")
@@ -771,20 +653,7 @@ def test_o8_example_reads_record(tmp_path, monkeypatch):
         f"the example must address its record entry's URL: {addressed}"
 
 
-
-
-
-
-
-
-
-
-
-
 def test_s7_mf7c_the_adapter_judges_its_own_required_keys(tmp_path):
-    """The read adapter keeps its own required-key check (no record view stands beside it since
-    #1222 M1). With ELASTIC_KIBANA_CONTAINER absent the Elasticsearch verbs, whose own required
-    keys are present, still answer; with KIBANA_URL absent the adapter faults naming it."""
     m = "mf7"
     root, folder = _tenant(tmp_path, m, name="kc")
     S.drop_key(folder, "elastic", "ELASTIC_KIBANA_CONTAINER")
@@ -807,22 +676,10 @@ def test_s7_mf7c_the_adapter_judges_its_own_required_keys(tmp_path):
     assert _argvs(shim2) == [], f"the faulted adapter spawned a child: {_argvs(shim2)}"
 
 
-#: `_REPLAY_TABLE` plus threat-intel's `lookup`: with cmdb down at start, the systems left up must
-#: still grant gather a query verb, or #1256 O-8 refuses the run at start (`require_gather_query`
-#: over the granted-and-up systems) — this test is about a run that goes on.
 _O5_TABLE = _REPLAY_TABLE + "    lookup: {roles: [gather]}\n"
 
 
 def test_o5_missing_system_config_run_completes(tmp_path, monkeypatch):
-    """A tenant with cmdb's config.env removed resolves, and its run completes, the other
-    systems still answering (#1107 O5 — unchanged).
-
-    #1256 replaces what a cmdb call does: cmdb fails its own settings check at run start, so it
-    is down for the whole run — a call to it is refused naming "not configured" and the reason,
-    its adapter never runs, the refusal writes no query row, and nothing is charged (O-1, O-2,
-    O-4). Before #1256 the call raised ConfigFault, wrote an exit-2 infra row and was charged to
-    cmdb's breaker. The lead is dispatched to threat-intel (not cmdb, as before): a dispatch to
-    cmdb is itself refused now, and would leave no call to observe."""
     pytest.importorskip("pydantic_ai")
     from defender.tests.e2e._replay_harness import FakeVerbs
 
@@ -868,11 +725,6 @@ def test_o5_missing_system_config_run_completes(tmp_path, monkeypatch):
 
 
 def test_tenant_copied_from_the_template_keeps_its_placeholders(tmp_path):
-    """A tenant copied from knowledge/tenant-template keeps its CHANGE-ME placeholders: the
-    access-method keys and the non-pattern Elastic keys are present but name no real method or
-    context, so each system is down at call time (its calls fault, TRANSPORT=CHANGE-ME as an
-    unimplemented method) and the run goes on. Only CHANGE-ME index patterns are refused ahead
-    of that, at branch launch (F23/G49)."""
     root = tmp_path / "tenants"
     # #1120: the copy is the tenant's knowledge folder under a data root — `agent/.tenant-id`
     # naming it, and its row beside it (written by hand, as `_tenants1106.place_tenant` does).

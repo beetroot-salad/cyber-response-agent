@@ -148,12 +148,6 @@ def _spawn(**over):
 # bind(LEAD_AUTHOR_DEF, defender_dir=) — worktree binding + safe-by-construction
 
 def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
-    """bind stamps the WORKTREE's defender_dir + write_allow, NOT PATHS.defender_dir (the main
-    checkout). Asserted through the real gates: with these deps, a read AND write of the worktree
-    skills tree is allowed. Guarded negatives prove the worktree binding is load-bearing — the SAME
-    op bound to a DIFFERENT tree is denied, and calling the gate with a mismatched defender_dir (the
-    deps/policy split #551 forbids) denies the read (a stale-anchor bug would lock the agent out of
-    the very tree it curates)."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     deps = _lead_deps(rd, wt)
     assert deps.defender_dir == wt / "defender"
@@ -173,14 +167,6 @@ def test_for_run_binds_worktree_defender_dir_and_write_allow(tmp_path):
 
 
 def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
-    """Safe-by-construction (#536 required-policy): a LeadAuthorDeps built WITHOUT a policy is a
-    ValidationError — a writer subtype can't silently inherit the MAIN policy by omission. Positive
-    control: for_run supplies the lead-author policy (write_allow non-empty; no data-source reach).
-
-    #575: the `adapters` / `raw_reads` capability bits are deleted. Their content — "this agent has
-    no data-source reach and no payload address" — is now a fact about the GRANT LIST (the adapter
-    capability IS a routed Grant; a raw read IS a shape in `read_allow`), so it is asserted through
-    the gate, where it is actually decided, rather than as a declared bit that could disagree."""
     with pytest.raises(ValidationError):  # 1067: a required/kw-only miss is pydantic's ValidationError, never stdlib's TypeError
         LeadAuthorDeps(run_dir=tmp_path, defender_dir=tmp_path / "defender", run_id="x")
     deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
@@ -194,10 +180,6 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
 
 
 def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path):
-    """The agent runs with cwd=worktree and issues REPO-RELATIVE rm paths, so the matcher must
-    accept ``rm defender/skills/...`` for ANY worktree location — the repo-relative spelling is
-    the fixed SKILLS_REL, not skills_dir.relative_to(REPO_ROOT) (a tmp worktree is not under
-    REPO_ROOT). The absolute <worktree>/defender/skills/... spelling is accepted too."""
     wt = _worktree(tmp_path)
     pol = _lead_deps(_run_dir(tmp_path), wt).policy
     assert permission.decide_bash("rm defender/skills/elastic/_draft/x.md", policy=pol).allow
@@ -233,11 +215,6 @@ def test_rm_command_substitution_denied(tmp_path):
 
 
 def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
-    """Parity: the corpus is mutable via TWO surfaces — the file writers (decide_write +
-    write_allow) and rm (bash lane + bash_allow). An out-of-scope mutation is denied on BOTH:
-    a write_file to defender/lessons AND ``rm defender/lessons/x`` are each denied. Positive
-    controls: the SAME op to defender/skills is ALLOWED on both lanes (the mechanism fires, the
-    boundary is real). A constraint on one surface but absent on its sibling is the fail-open."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     pol = _lead_deps(rd, wt).policy
     (wt / "defender" / "lessons").mkdir(parents=True)
@@ -255,13 +232,6 @@ def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
 
 
 def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
-    """Both mutation surfaces confine ``..`` traversal (the review-hardened rm matcher, finding #1).
-    An operand that lexically starts defender/skills/ but ``..``-escapes it is denied on BOTH lanes:
-    decide_write resolve()s the ``..`` and lands outside write_allow → DENY; the rm matcher rejects a
-    ``..`` segment TEXTUALLY (the bash lane does no resolve()) → DENY. This closes the prior
-    accepted asymmetry, where ``rm defender/skills/../lessons/x.md`` was allowed and could delete a
-    file OUTSIDE the worktree that the loop's git scope gate (worktree ``git status`` only) never
-    sees. Positive controls: the in-scope ``_draft`` baseline both surfaces still accept."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     pol = _lead_deps(rd, wt).policy
     escape = wt / "defender" / "skills" / ".." / "lessons" / "x.md"
@@ -279,14 +249,6 @@ def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
 # run_stage — require_output (the new flag) + the writers toolset
 
 def test_run_stage_require_output_matrix(tmp_path):
-    """The blast-radius guard for the four shipped read-only stages. With a CONTENT-LESS final text
-    (whitespace — the observable proxy for a reasoning model that burned its whole budget in the
-    thinking channel and emitted no real prose; a TRULY-empty "" is rejected by pydantic-ai itself
-    before this guard, so whitespace is what actually reaches it): require_output OMITTED →
-    RunUnprocessable; =True → RunUnprocessable; =False → returns the content-less text as-is. The
-    DEFAULT is unchanged, so judge/actor/oracle/verify (which never pass the flag) still quarantine
-    a content-less verdict — the new path is opt-in. Positive control: require_output=False with
-    NON-empty output returns that text verbatim (the flag suppresses only the content-less guard)."""
     deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
 
     def _go(require, text, tag):
@@ -323,13 +285,6 @@ def test_run_stage_require_output_matrix(tmp_path):
 # F2 — a repo-relative file op resolves against the WORKTREE, not the process cwd
 
 def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch):
-    """F2 (the sharpest correctness fault), pinned as the OBSERVABLE (impl-agnostic — chdir or
-    resolve-against-deps both pass). Process cwd is chdir'd to a DECOY dir that ITSELF holds a
-    defender/skills tree; the model issues write_file('defender/skills/.../new.md', body)
-    through the REAL _run_lead_author_pydantic(repo_root=<worktree>). The file must land under the
-    WORKTREE (allowed by write_allow) with content==body, and NOTHING is written under the
-    decoy — the write resolves against repo_root, never the ambient cwd. (The bash lane already
-    runs at the worktree via _tool_bash cwd=deps.defender_dir.parent; the FILE tools must too.)"""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     decoy = tmp_path / "decoy"
     (decoy / "defender" / "skills" / "gather" / "queries" / "elastic").mkdir(parents=True)
@@ -360,17 +315,6 @@ def test_relative_write_lands_in_worktree_not_process_cwd(tmp_path, monkeypatch)
 
 
 def test_write_into_new_subtree_creates_parents(tmp_path):
-    """A promote/lift into a not-yet-existing skills subtree must succeed (the file writers mkdir
-    their approved path's parents, mirroring the claude -p Write they replace) — NOT raise an
-    uncaught FileNotFoundError that run_stage maps to RunUnprocessable, quarantining the whole tick
-    and discarding every valid edit. `cmdb/` does not exist in the worktree; the write must create
-    it and land the file, and the run must complete (out == 'done').
-
-    `cmdb` rather than the `newsys` this used to use: since #772 the approved path must name a
-    system the tree DECLARES, and the interesting case is precisely the one the fixture now
-    seeds — an adapter with no skills directory beside it yet. A path under an undeclared
-    `newsys` is refused by the gate before the writer's mkdir is ever reached, which would make
-    this a test about the allowlist rather than about creating parents."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     rel = "defender/skills/cmdb/_draft/auth.md"              # cmdb/ absent in the worktree
     assert not (wt / "defender" / "skills" / "cmdb").exists()
@@ -397,10 +341,6 @@ def test_write_into_new_subtree_creates_parents(tmp_path):
 
 
 def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
-    """If the port fixes F2 via os.chdir(repo_root), that mutation is PROCESS-GLOBAL and would
-    corrupt sibling lead+pitfalls spawns / concurrent stages. Pin the observable: after a full
-    _run_lead_author_pydantic run, os.getcwd() is UNCHANGED (absolute-ize AND chdir-with-restore both
-    pass; a leaked chdir fails)."""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     decoy = tmp_path / "decoy2"
     decoy.mkdir()
@@ -426,14 +366,6 @@ def test_engine_run_does_not_leak_process_cwd(tmp_path, monkeypatch):
 
 
 def test_writer_contentless_final_after_write_is_success(tmp_path):
-    """The lead author is a writer: it works via write_file/rm and may end with a CONTENT-LESS
-    final (whitespace — a truly-empty "" is rejected by pydantic-ai before the guard, so the
-    observable content-less case is whitespace). Through the real transport (LEAD_AUTHOR_DEF's
-    write-enabled toolset + require_output=False), a write_file tool call THEN a content-less final
-    returns that text (not RunUnprocessable) and the write landed — proving the def registered the
-    file writers and a content-less final != a failed run. (Production leans on the prompt to emit a
-    one-line summary,
-    so the normal final is non-empty; this pins the require_output=False safety valve.)"""
     wt, rd = _worktree(tmp_path), _run_dir(tmp_path)
     rel = "defender/skills/gather/queries/elastic/e.md"
     fn = _tool_then_text([("write_file", {"path": rel, "content": "X"})], "  ")
@@ -473,10 +405,6 @@ def test_run_author_stage_run_unprocessable_maps_to_124():
 
 
 def test_run_author_stage_config_fault_propagates_not_124():
-    """F1 = PROPAGATE. A FatalConfigError — from key sourcing (bad/absent metered key, unroutable
-    model, cross-provider effort) OR from run_author (run_stage's build ValueError→FatalConfigError)
-    — must RE-RAISE, NOT be mapped to 124. A deployment-wide misconfig then fails ONCE, loudly
-    (systemic exit-2), instead of quarantining every queued marker one-by-one."""
     def _boom_key(model, label):
         raise FatalConfigError("needs FIREWORKS_API_KEY")
     with pytest.raises(FatalConfigError, match="FIREWORKS_API_KEY"):
@@ -499,9 +427,6 @@ def test_run_author_stage_stage_abort_propagates():
 
 
 def test_run_author_stage_sources_key_before_run():
-    """Ordering: the metered key is sourced BEFORE the transport runs (a run that bills before
-    its key is present would 401). Observable via ordered spy recording; the key is sourced for
-    the configured model."""
     events = []
     _spawn(
         source_key=lambda model, label: events.append(("key", model)),
@@ -513,10 +438,6 @@ def test_run_author_stage_sources_key_before_run():
 
 
 def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
-    """Positive control for the truncate-mode RequestLogger: two spawns with DISTINCT trace names
-    into ONE learning_run_dir both leave a non-empty trace — the second open() does not clobber
-    the first. Driven in turn (deterministic — a collision would be a same-name truncate, which
-    distinct names avoid; no race harness needed)."""
     rd, wt = _run_dir(tmp_path), _worktree(tmp_path)
     with override_allow_model_requests(False):
         for name in ("run-A.7.trace.jsonl", "run-B.7.trace.jsonl"):
@@ -547,9 +468,6 @@ def test_two_distinct_traces_into_one_dir_both_survive(tmp_path):
 
 
 def test_claude_none_effort_becomes_fatal_config(tmp_path, monkeypatch):
-    """FACT-BUILDERR wiring end-to-end: an unsupported cross-provider effort (claude-* + none)
-    raises ValueError at build, which run_stage maps to FatalConfigError (systemic, not a per-run
-    RunUnprocessable). Fake key; the ValueError fires before any request (real make_model)."""
     pytest.importorskip("pydantic_ai.models.openai")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with override_allow_model_requests(False), pytest.raises(FatalConfigError):
@@ -570,9 +488,6 @@ def test_claude_none_effort_becomes_fatal_config(tmp_path, monkeypatch):
 
 
 def test_unroutable_model_source_key_fatal_config(tmp_path):
-    """source_first_party_key (the REAL default source_key) raises FatalConfigError on a model
-    that routes to no provider — and per F1 that propagates (not 124). run_author is a fake so
-    nothing runs; the fault is at key-sourcing time."""
     with pytest.raises(FatalConfigError):
         _spawn(
             system_prompt_file=_prompt(tmp_path),
@@ -580,5 +495,3 @@ def test_unroutable_model_source_key_fatal_config(tmp_path):
             model="gpt-4-turbo",
             source_key=config.source_first_party_key,
             run_author=lambda *a, **kw: "x")
-
-

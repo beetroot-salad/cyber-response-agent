@@ -26,11 +26,6 @@ def _roots(tmp_path, monkeypatch):
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
-# --------------------------------------------------------------------------------------
-# Private helpers.
-# --------------------------------------------------------------------------------------
-
-
 def _render(ep: Path) -> E.Page:
     """`render_episode(<dir>)` — the real entry point — then the page it wrote, parsed."""
     return E.render(ep, module=S.mod(S.VISUALIZE))
@@ -96,11 +91,6 @@ def _empty_decision_slot(raw: str) -> bool:
     return re.search(r'class="[^"]*decision[^"]*"[^>]*>\s*(?:None|-|—)?\s*<', raw) is not None
 
 
-# --------------------------------------------------------------------------------------
-# O15 on the page.
-# --------------------------------------------------------------------------------------
-
-
 def test_manifest_ledger_and_judge_strings_reach_the_page_as_inert_text(tmp_path):
     fact_markup = "<script>alert('fact')</script> alice obtained a TGT"
     entity_markup = "<b>alice</b>"
@@ -122,18 +112,7 @@ def test_manifest_ledger_and_judge_strings_reach_the_page_as_inert_text(tmp_path
     assert finding_markup in page.text, "the judge's finding is not shown as text"
 
 
-# --------------------------------------------------------------------------------------
-# The page over a v2 episode.
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_episode_page_renders_a_v2_episode_from_the_models_output(tmp_path):
-    """d12k_episode_page_reads_the_models_output — the page renders an oracle-era episode from
-    the outcome record and the judge model's family record.
-
-    With no staging, review-reachability or envelope sections (M19=A: the bucket is the judge
-    model's; M16=A: the decision words). The staging module is gone, so a page that still
-    imported it would fail to render."""
     ep = S.judged_episode(tmp_path, ledgers={
         "b": [_oracle_row("b"), S.ledger_row(S.REAL_ERROR, label="b",
                                              params=S.query_params("host:db-9"),
@@ -161,12 +140,6 @@ def test_1224_episode_page_renders_a_v2_episode_from_the_models_output(tmp_path)
 
 def test_1224_outcome_and_world_record_reasons_render_inert_on_the_page_and_in_the_judge_record(
         tmp_path):
-    """o35_outcome_reasons_inert — reasons quoting investigator-influenced params render as
-    inert text on the page and are kept as data in the judge's not-graded record.
-
-    The reasons (markup, a newline) sit in the outcome record, its drift calls, and each
-    world's own record; the reason text is shown (positive control). M05=A: `unusable` is
-    stamped not-graded with no model call (PCO-02)."""
     reason = "world b could not serve <script>alert('reason')</script>\nsecond line"
     call_markup = "<img src=x onerror=alert('call')>"
     drift_markup = "<svg onload=alert('drift')>"
@@ -201,11 +174,6 @@ def test_1224_outcome_and_world_record_reasons_render_inert_on_the_page_and_in_t
 
 
 def test_1224_episode_page_renders_a_section_per_system_from_the_samples_record(tmp_path):
-    """o40_page_samples_by_system — the page renders one section per system of the per-system
-    samples record and never rejects it for lacking pattern keys.
-
-    (O-40, O16.) The record shape is the coined one: a served system's verbs with their real
-    example answers, and an unavailable system with its reason."""
     ep = S.judged_episode(tmp_path)
     S.samples_record(ep, {
         "idp": {"verbs": {"query": ['{"rows": [{"user": "sample-alice-7"}]}']}},
@@ -221,10 +189,6 @@ def test_1224_episode_page_renders_a_section_per_system_from_the_samples_record(
 
 
 def test_1224_episode_page_shows_unusable_and_refused_with_their_reason(tmp_path):
-    """pco03_page_records_block — the page shows an `unusable` and a `refused` outcome record
-    with the word and its reason, and no empty decision slot.
-
-    (PCO-03, M05=A.)"""
     for word, reason in (("unusable", "worlds b and c were unservable in pre-flight"),
                          ("refused", "pre-flight had no call to calibrate")):
         ep = S.judged_episode(tmp_path / word, outcome=None)
@@ -236,17 +200,6 @@ def test_1224_episode_page_shows_unusable_and_refused_with_their_reason(tmp_path
 
 
 def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_path):
-    """pco09_page_counts_oracle_rows — the page's ledger read counts served `oracle` and `real-error` rows as rows: the malformed-row count it shows covers only a torn line, never them.
-
-    (PCO-09, M16=A.) "Counts" is the page's ledger screening (`read_world_ledger`,
-    65-regrounds PCO-09): every line is either a counted row or a malformed one, and the page
-    shows the malformed count (`<n> malformed row`). Pinned as numbers: the torn line alone, not
-    4 (today's reader counts every out-of-vocabulary `source` as malformed, GR-06). That twin is
-    also the positive control: the note's channel is live. A per-decision tally on the page
-    (e.g. "2 oracle · 1 real-error") is NOT pinned: no design element names one; the decision
-    words being shown at all is d12k's.
-    s_p236 — a page rendered while siblings append shows a consistent snapshot: no torn partial row, and no oracle-side store row shown as the sibling's own ledger (O9). The torn twin's world ledger ends in a partial line (an append in flight) and its oracle-side ledger carries its own rows.
-    """
     rows = [_oracle_row("b"), _oracle_row("b", q="user:bob"),
             S.ledger_row(S.REAL_ERROR, label="b", params=S.query_params("host:db-9"),
                          payload="UpstreamFault: upstream said no")]
@@ -278,12 +231,7 @@ def test_1224_episode_page_counts_oracle_rows_without_a_malformed_row_note(tmp_p
     assert S.REAL_ERROR in torn.text, "the world ledger's complete row is not shown"
 
 
-
 def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
-    """pco01_episode_readers_refuse_new_words — verdicts and delta_o refuse `unusable`,
-    `refused`, an absent record and a torn record, each naming the word; `accepted` reads.
-
-    (PCO-01, GR-01, M05=A.)"""
     verdicts = S.sym(S.EPISODE, "verdicts")
     delta_o = S.sym(S.EPISODE, "delta_o")
     refusal = S.sym(S.EPISODE, "EpisodeError")
@@ -309,4 +257,3 @@ def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
     accepted = S.judged_episode(tmp_path / "accepted")
     assert set(verdicts(accepted)) == {"a", "b", "c"}
     delta_o(accepted)
-

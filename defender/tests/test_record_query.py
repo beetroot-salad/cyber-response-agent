@@ -26,7 +26,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, LEAD, q  # noqa: E402
 
 
-
 def test_derive_system_from_defender_shim():
     assert ge.derive_system(["defender-elastic", "query", "x"]) == "elastic"
     assert ge.derive_system(["defender-change-mgmt", "list-changes"]) == "change-mgmt"
@@ -40,15 +39,6 @@ def test_derive_system_from_cli_path():
 def test_derive_system_skips_non_adapter_and_unknown():
     assert ge.derive_system(["defender-invlang", "--tags"]) is None
     assert ge.derive_system(["echo", "hi"]) is None
-
-
-
-# The field-shape sampler that used to live here moved to `payload_view.py` with #832, and
-# its tests to `test_payload_view.py`. One of them —
-# `test_build_truncated_view_complete_envelope_is_not_flagged_sampled` — pinned the DEFECT:
-# it asserted that a complete 3-of-3 envelope still reads "FIELD-SHAPE sample". Measured over
-# the recorded corpus that wording reached 41 of 62 elastic payloads whose every record was
-# already in context, telling the lead not to count what it could see in full.
 
 
 def _row(seq, *, params, payload, lead="l-001"):
@@ -182,9 +172,6 @@ def test_seq_stays_monotonic_when_a_payload_write_fails(tmp_path):
     ])
     state = drive(run_dir, run_id="rq-seq", main=main, gather=gather, verbs=verbs)["run_state"]
 
-    # lead-0 (#808) resolves against GOLDEN_AB3 ahead of MAIN's own turn and writes its
-    # own (l-000) row(s) into this same table — scope to `LEAD`'s own rows, which is
-    # what seq-monotonicity-within-a-lead actually means here.
     rows = [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl") if r["lead_id"] == LEAD]
     assert [r["seq"] for r in rows] == [0, 1]
     assert rows[0]["payload_path"] is None
@@ -200,15 +187,6 @@ def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
     assert ge.payload_sha256(a) != ge.payload_sha256(b), \
         "two different payloads share one content hash"
     assert ge.payload_sha256("héllo") == ge.payload_sha256("héllo")
-
-
-# ── #1235: the queries table's live reads come from the run's state ─────────────────────────
-#
-# `executed_queries.jsonl` stays the model's view and the learning loop's input, written
-# exactly as before; the DECISIONS read from it live (the repeat guard, the rejection budget,
-# the repeat note, the next seq, a reducer failure's system) take the run's `RunState` (#1235
-# round 2) and read the rows it recorded. No file is ever read into it, and since round 3 a
-# row is recorded there before its line is written: the state is the record.
 
 
 def _live():

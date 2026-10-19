@@ -1,33 +1,3 @@
-"""#1080 — group `pages`: the episode page, the run page's footer, the learning frontend's page
-primitives and pricing, after `defender/scripts/` is split into its homes.
-
-SCOPE CUT (2026-10-04, human): the page renderers stay in `scripts/visualize/` (#1105), so the
-episode-page, footer and frontend tests are parked with #1105
-(`spec-flow/specs/parked/1080/parked_episode_frontend_and_pricing.py`). Kept here: pricing, the
-lessons-frontier consumers (s052), the location-derived values of the moved modules (m2) and
-the O5 suites' assertions (s043). No kept test imports the old run-path module (E4).
-
-The renderers land under `defender/reports/` (M-F (a)) and pricing in the flat tier
-(`S.PRICING`; first pinned under `runtime/providers/`, moved after review); every other home is found by symbol (dF0). Every
-moved name is reached at CALL time through `_spec1080` (`S.moved` / `S.moved_module` /
-`S.home_of`), so a missing home is one failure per test, never a collection error. Modules that
-do not move (`learning/branch/cli.py`, `learning/frontend/build.py`, `runtime/observe.py`,
-`runtime/lessons_push.py`, `runtime/tools/_document.py`) are imported inside the test bodies
-too: each imports a moved module at its own module level or lazily, and a stale import there is
-exactly the failure these tests exist to show.
-
-"As today" is `goldens/pages.json` (the whole-page captures `goldens/pages/*.html` moved to
-`spec-flow/specs/parked/1080/goldens/` with the parked page tests), captured once at
-the base 80888efb by running the BASE code over the same fixtures these tests build. The
-fixtures, the run-dir/git setup and the one path normalizer (`_norm`) live here and the capture
-script imported them from this file, so capture and test cannot drift on shape.
-
-Faults are real inputs through the real primitive: an unimportable renderer through
-`sys.modules` (the test_1110 precedent), an empty PATH, a copy of this checkout's `defender/`
-package under `tmp_path` that is not a repository / tracks no lesson / is owned by another uid,
-exported repository-locating variables pointing at a real second repository. No
-`monkeypatch.setattr`.
-"""
 from __future__ import annotations
 
 import ast
@@ -45,10 +15,6 @@ from defender.tests import _state1135
 
 GOLDEN = "pages"
 
-# ======================================================================================
-# Shared by the capture script and the tests (ONE shape, ONE normalizer)
-# ======================================================================================
-
 
 def _g(key: str):
     return copy.deepcopy(S.golden(GOLDEN)[key])
@@ -62,10 +28,6 @@ def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
-
-# --------------------------------------------------------------------------------------
-# Pricing
-# --------------------------------------------------------------------------------------
 
 _USAGE = {"input_tokens": 1000, "output_tokens": 2000, "cache_creation_input_tokens": 300,
           "cache_read_input_tokens": 4000}
@@ -113,16 +75,6 @@ def _pricing_rows(usage_cost) -> list:
             for model, usage in PRICING_ROWS]
 
 
-# --------------------------------------------------------------------------------------
-# s043: the O5 suites
-# --------------------------------------------------------------------------------------
-
-#: Each O5 suite, and the moved symbols it reaches (with the home they must be found under):
-#: the file must import the module that now defines each. A suite whose base version imports no
-#: moving module reaches the moved code through the runtime only and carries no entry. E2 of
-#: the 2026-10-04 scope cut: the three symbol rows (`payload_digest`, `TransportFault`,
-#: `mirror_root`) name modules the cut leaves in place, so every row is empty and the check is
-#: "assertions unchanged".
 O5_SUITES: dict[str, tuple[tuple[str, str | None], ...]] = {
     "defender/tests/e2e/test_replay_skeleton.py": (),
     "defender/tests/test_1096_entrypoint_closure.py": (),
@@ -146,23 +98,7 @@ def _imports_module(relpath: str, dotted: str) -> bool:
     return False
 
 
-# ======================================================================================
-# The learning frontend
-# ======================================================================================
-
-
 def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_not(tmp_path):
-    """Each consumer of a moved module is pinned by its own test that observes real output: the
-    fold push and the document tool each produce the frontier block from the moved
-    `lessons_frontier`. A suite that exercises only one consumer is not enough: leaving the
-    other on the old path turns its own test red. (The learning frontend build's consumers, the
-    page primitives and the run renderer, stay in `scripts/visualize/` under the 2026-10-04
-    scope cut; that half is parked with #1105.)
-
-    Both frontier consumers fail open on an import error (RG4 S3, S4), so each is driven over a
-    real corpus holding a lesson the fixture document matches, and each must return a block
-    naming that lesson under its own header: the fold row (`compose_fold`) and the write-return
-    recall (`_frontier_recall`)."""
     pytest.importorskip("pydantic_ai")
     from defender.tests import _fold_936 as F
     from defender.tests._lessons_corpus import _main_deps, _write_lesson
@@ -178,9 +114,6 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
     assert on_minted is not None, "the fold push produced no block (it failed open)"
     block = text[len("the record"):]
     assert block.startswith("\n\n"), text
-    # #1255 (design rev 4, P1 outbound): lessons are named by the checkout's model path.
-    # (The hit line's `- ` lead is matched too: the planted tree ends in `/defender`, so a bare
-    # `/defender/lessons/…` would also be a substring of the host realpath.)
     model_lesson = f"- /defender/lessons/{lesson.name} — matched"
     assert model_lesson in block, block
     assert F.FOLD_HEADER in block.strip().splitlines()[0], block
@@ -192,21 +125,7 @@ def test_one_of_two_consumers_of_a_moved_module_is_repointed_and_the_other_is_no
     assert engine in sys.modules, f"neither consumer loaded the moved engine {engine}"
 
 
-# ======================================================================================
-# Location-derived values
-# ======================================================================================
-
-
 def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
-    """After the move, each of these resolves to the same directory or file as at the base:
-    `lessons_fm.REPO_ROOT`, `lessons_frontier.DEFAULT_CORPUS`'s checkout and `_venv`'s
-    `_DEFENDER_DIR`. (The
-    2026-10-04 scope cut keeps these three cells; `mirror_root()`'s default, `_MIRROR_WRITER`,
-    `visualize_primitives.REPO_ROOT` / `ASSETS` and `workspace_map`'s `DEFENDER_DIR` belong to
-    modules that stay in `scripts/`, parked with #1105.)
-
-    Each module is located by a symbol only it defines. The golden holds each value as the base
-    resolved it, repo-relative: the checkout root and `defender/`."""
     g = _g("location_values")
     assert Path(S.moved_module("cmd_tags").REPO_ROOT).resolve() \
         == (S.REPO_ROOT / g["lessons_fm_REPO_ROOT"]).resolve()
@@ -218,22 +137,8 @@ def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
         == (S.REPO_ROOT / g["venv_DEFENDER_DIR"]).resolve()
 
 
-# ======================================================================================
-# s043: the O5 suites keep their assertions
-# ======================================================================================
-
-
 @pytest.mark.parametrize("suite", sorted(O5_SUITES))
 def test_suite_assertions_kept_while_a_fixture_points_the_test_at_another_target(suite):
-    """Each O5 suite keeps its assert statements and still exercises the real moved code: a
-    fixture that loads by path, stubs a renderer or spawns the wrapper instead of the engine
-    must still reach the real implementation, and the assertion fails if the engine, wrapper or
-    renderer is broken. An unchanged assertion that now holds against a stub is a failure.
-
-    The suite's `assert` statements, read through the AST, are the base's multiset exactly
-    (fixtures and imports may change, assertions may not). A suite that imported a moving
-    module at the base must import the module that now defines the symbols it reaches — the
-    moved implementation, not a stand-in."""
     assert _asserts(suite) == _g("suite_asserts")[suite], (
         f"{suite}: its assert statements changed with the move")
     for symbol, home in O5_SUITES[suite]:
@@ -242,20 +147,7 @@ def test_suite_assertions_kept_while_a_fixture_points_the_test_at_another_target
             f"{suite} does not import {target}, where `{symbol}` lives now")
 
 
-# ======================================================================================
-# Pricing
-# ======================================================================================
-
-
 def test_1080_observe_costs_usage_through_pricing_in_providers_as_today():
-    """`runtime/observe.py`'s `usage_cost` comes from the moved pricing module (the flat tier
-    since the post-review change; the name keeps its first home for the record). A fixed usage
-    record costs the same amount as at the base. Importing it loads no `pydantic_ai`.
-
-    Observed through the observer's own binding: `observe.usage_cost` is the moved function,
-    and over the fixed table every cost equals the base's (type-preserving). A cold child
-    importing the moved pricing module has loaded no agent framework; the same child then
-    importing the observer shows the agent framework loaded — the channel sees it."""
     moved = S.moved("usage_cost", home=S.PRICING)
     observe = importlib.import_module("defender.runtime.observe")
     assert observe.usage_cost is moved
@@ -269,15 +161,6 @@ def test_1080_observe_costs_usage_through_pricing_in_providers_as_today():
 
 
 def test_pricing_module_lands_in_a_package_whose_initialiser_must_not_load_the_agent_framework():
-    """The price table is importable with the standard library alone: its module imports only
-    the standard library, and a cold import of it loads no third-party package at all — not the
-    agent framework, not pydantic. (Post-review change, human: under `runtime/providers/` every
-    import paid for the providers package, which builds the provider objects and loads
-    pydantic.) A fixed usage record costs exactly what it costs today.
-
-    Observed: the module's import statements read through the AST, and a child with every
-    import outside the standard library and this tree refused importing it. Positive control:
-    the same child refuses `defender.runtime.providers`."""
     from defender.tests._import_blocker import run_blocked
 
     home = S.home_of("usage_cost", home=S.PRICING)

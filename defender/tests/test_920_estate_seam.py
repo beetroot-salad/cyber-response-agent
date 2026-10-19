@@ -56,9 +56,6 @@ from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.tests.live_oracle_1224 import _spec1224 as S24  # noqa: E402
 from defender.tests.live_oracle_1224._spec1224 import build_registry  # noqa: E402
 
-#: The estate a real branched run queries: the shipped adapters and the shipped gather grant.
-#: Read through `PATHS`, the same seam `build_agent_core` defaults to, so a tree that moves its
-#: adapters moves this with it.
 REAL_ADAPTERS = PATHS.adapters_dir
 
 #: #1255 D5's ledger decision for a control world whose oracle turn served something other than
@@ -73,23 +70,12 @@ def _gather_grant():
     return T1106.fixture_grants().gather
 
 
-#: What the shipped grant covers today. Asserted rather than derived, so a grant that SHRINKS
-#: — a system quietly dropped out of the estate — fails here instead of making the structural
-#: sweep below cover less and still pass.
 GRANTED_ENTRIES = 30
 GRANTED_SYSTEMS = 8
 
 
 # the fake estate: a real adapters directory, with verb bodies that count
 
-#: A recording adapter. Written to disk rather than patched in, because `ModuleVerbRegistry`
-#: COLD-READS this text (`read_roster` parses the `VERBS = {...}` literal without
-#: importing) and checks the grant against it at construction — a module-object stand-in would
-#: never reach that check, so the fixture would not be the shape the seam actually admits.
-#:
-#: `defender/tests/_repo.py`'s `seed_adapter_stubs` is the neighbouring tool and is NOT it: its
-#: `ADAPTER_BODY` is `VERBS = {}`, which declares a system that serves nothing. Serving is the
-#: whole subject here.
 _RECORDING_ADAPTER = '''\
 """A verb body that records the params it was CALLED with, under a run dir the test reads."""
 from __future__ import annotations
@@ -148,15 +134,9 @@ FAKE_GRANT = VerbGrant(role="gather", entries=(
 
 CALLS_LOG = "adapter-calls.jsonl"
 
-#: The branch point's own moment (#947). Every world here is served under ONE clock, so nothing
-#: below turns on its value — but a registry cannot be built without one, because a defaulted
-#: clock is a wall-clock stamp in a branched run and the whole point is that there are none.
 AS_OF = datetime(2026, 5, 25, 15, 30, 45, tzinfo=UTC)
 
 
-#: A world ledger's place in an episode, `<episode>/served/<world id>.jsonl`, relative to a
-#: test's tmp dir: a `Ledger` is built only by `Ledger.for_world(episode, world_id)` (#1133 rev
-#: 2), so the file every test here reads back is where that puts it.
 SERVED_FILE = Path("ep", "served", "w.jsonl")
 
 
@@ -221,10 +201,6 @@ def logger(tmp_path):
         lg.close()
 
 
-#: The default world for tests whose subject is not the world: it asserts no facts, so every
-#: answer it serves is its base unchanged, `passthrough`. (#1255 D3: a live read still takes an
-#: oracle turn, which serves that base unchanged — a test that serves one hands
-#: `control_oracle(...)`.)
 UNTOUCHED_WORLD = World("w1")
 
 
@@ -266,13 +242,6 @@ def estate_esql(query: str, call: int = 1) -> dict:
 
 
 def test_every_granted_verb_decides_granted_through_the_world_registry(tmp_path):
-    """    `decide()` answers GRANTED for all 28 shipped grant entries.
-
-    This is the coverage claim, and it runs through the REAL adapters: `decide` resolves the
-    callable through `verbs()`, so a wrapper that broke `verb_class_of` would fail the grant's
-    class agreement (a `GrantError`, not a soft denial) and a wrapper that lost a verb name
-    would answer UNDECLARED. Whole-grant rather than per-system spot checks, because the
-    property is "no system is left out of the estate"."""
     reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
 
     refused = [
@@ -285,13 +254,6 @@ def test_every_granted_verb_decides_granted_through_the_world_registry(tmp_path)
 
 
 def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
-    """    Both routes to a callable — `decide().fn` and the query tool's own second lookup,
-    `registry.verbs(system)[verb]` — hand back a WRAPPER over the real body, never the body.
-
-    A bare body is a query that reaches the defender without passing the seam, which is the
-    silent-scenario-deletion hazard the ledger exists to make visible: it would be a response
-    with no row. Pinned as `__wrapped__ is real`, so the wrapper is proven to be over THIS
-    body rather than merely to be some other callable."""
     reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
     plain = ModuleVerbRegistry(read_roster(REAL_ADAPTERS), _gather_grant())
 
@@ -306,13 +268,6 @@ def test_no_route_to_a_verb_hands_back_a_bare_adapter_body(tmp_path):
 
 
 def test_a_wrapper_only_param_is_still_reserved_through_the_wrapper(tmp_path):
-    """    `ticket.list-tickets` reserves `require_closed` to the benign judge's first-party tool,
-    and the wrapper must not hand that reservation back to gather.
-
-    The live case for the signature claim above: the param is DECLARED (so it is in
-    `declared_params`) and model-facing NOTHING, so a wrapper that flattened the two reads into
-    one would open a param whose only effect is to silently narrow a lead's read to closed
-    tickets."""
     reg = world_registry(REAL_ADAPTERS, _gather_grant(), tmp_path / SERVED_FILE)
     served = reg.verbs("ticket")["list-tickets"]
 
@@ -337,12 +292,6 @@ def _built(logger, verbs):
 
 
 def test_build_agent_core_refuses_a_registry_shaped_stand_in(logger):
-    """    A duck-typed registry that answers `verbs()`/`decide()` is refused by the build site.
-
-    This is the reason `WorldRegistry` SUBCLASSES `ModuleVerbRegistry` rather than
-    reimplementing its surface: a structural check cannot tell a real grant from a stand-in
-    that answers GRANTED to everything, so the check is nominal and the estate has to satisfy
-    it for real."""
     class RegistryShaped:
         def systems(self):
             return ("elastic",)
@@ -360,12 +309,6 @@ def test_build_agent_core_refuses_a_registry_shaped_stand_in(logger):
 # 3. every served response is recorded with a decision
 
 def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path):
-    """    One served call, one world row: the system, the verb, the params as asked, the
-    payload bytes, the decision and the world id.
-
-    `passthrough` is a DECISION here, not an absence — this world asserts no facts, so the seam
-    honestly reports that it served the base answer. A response with no row is the failure
-    the table exists to make visible, so the row's presence is the assertion."""
     ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(
@@ -384,11 +327,6 @@ def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path
 
 
 def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
-    """    `Ledger.record` is where the vocabulary is OWNED, so it refuses directly too.
-
-    The registry deliberately does not re-check the decision it just received — the same rule
-    in two places is a rule with a copy that can drift, and the copy that drifts is the one
-    that stops refusing. This arm is what makes that delegation safe to rely on."""
     ledger = fresh_ledger(tmp_path / SERVED_FILE)
     call = ServedCall(
         system="cmdb", verb="get-host", params={"host": "canary-1"},
@@ -402,15 +340,6 @@ def test_the_ledger_refuses_an_invented_decision_at_its_own_door(tmp_path):
 
 
 def test_an_estate_fault_still_leaves_a_row(tmp_path):
-    """    The adapter body raising is a RESPONSE the defender sees, so it lands in the table.
-
-    `QueryCapture` catches whatever the body raises and hands the model a fault row, so a seam
-    that wrote nothing here would leave exactly the state this table exists to make visible —
-    "a served response with no row" — and a reader counting evidence would see the sibling
-    simply never asking. The real system's error is its own class (`real-error`, #1224 O4): it
-    passes through as itself, never cached, and is told apart from a refusal.
-
-    The exception still reaches the caller untouched: the row is a record, not a rescue."""
     adapters = fake_estate(tmp_path)
     down = (adapters / "cmdb_adapter.py").read_text(encoding="utf-8").replace(
         'def get_host(ctx: VerbContext, *, host: str) -> dict:',
@@ -432,19 +361,6 @@ def test_an_estate_fault_still_leaves_a_row(tmp_path):
 
 
 def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tmp_path):
-    """    #860 — a verb the grant WITHHOLDS is turned away at the grant decision, one frame
-    before the seam; of every call the defender makes it was the one that left no row here, so
-    every reader of this ledger (the judge's "no row on H" above all) saw a sibling that never
-    asked. `authorize_call` — the dispatch path's decision — files it as `refused`, against the
-    params as ASKED, under the world's own id; and the adapter body is never reached.
-
-    The NEGATIVE arms are what make the split earn its name. `decide` — the same question,
-    asked by the discovery tool about every verb a system declares — records nothing: a
-    withheld verb the model merely READ ABOUT was refused nothing. And a granted call's
-    decision records nothing either: its row is the served one, written when the call runs.
-
-    Observed failing by: no row, a row with the wrong source/params/world, a row for the
-    listing, or a row for the granted decision."""
     ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
@@ -472,13 +388,6 @@ def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tm
 
 
 def test_an_adapter_that_cannot_load_at_the_decision_is_a_fault_row_and_still_raises(tmp_path):
-    """    After cold authorization, an adapter whose module cannot be imported raises out of
-    `resolve_call`. Filed `fault`: it is the environment's outage,
-    not a refusal of the call, and a `refused` row would charge it to the world. Re-raised
-    untouched: what the query tool makes of
-    that exception (§7 R2, the load-error row it writes) is the query tool's own.
-
-    Observed failing by: no row, a `refused` row, or the exception swallowed."""
     adapters = fake_estate(tmp_path)
     (adapters / "elastic_adapter.py").write_text(
         _RECORDING_ADAPTER + "\nraise ImportError('the elastic client is not installed')\n",
@@ -501,13 +410,6 @@ def test_an_adapter_that_cannot_load_at_the_decision_is_a_fault_row_and_still_ra
 
 
 def test_the_verb_table_handed_back_is_the_callers_to_edit(tmp_path):
-    """    `verbs()` returns a COPY, so one caller's edit cannot reach the next lookup.
-
-    The wrappers are memoized per system (they are built once and both routes to a callable go
-    through them), and `ModuleVerbRegistry.verbs` ends `return dict(verbs)` — callers may treat
-    that freedom as theirs. Handing out the live memo means an edit anywhere reaches every later
-    lookup INCLUDING `decide`'s, which is the route the grant is checked through: a verb swapped
-    in a returned table would then be admitted under the real one's class."""
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, tmp_path / SERVED_FILE)
     served = reg.verbs("cmdb")["get-host"]
 
@@ -518,13 +420,6 @@ def test_the_verb_table_handed_back_is_the_callers_to_edit(tmp_path):
 
 
 def test_the_reserved_base_world_id_cannot_name_the_family_capture(tmp_path):
-    """The natural id ``base`` is refused when it would make both ledger tiers one file.
-
-    It is a safe corpus name and a safe filename component, so generic validation admits it.
-    Under the episode factory, though, it resolves to ``served/base.jsonl`` — exactly the file
-    siblings replay as their immutable capture. Construction must fail before any world row can
-    be appended there.
-    """
     episode_root = tmp_path / "episode"
     capture = EpisodePaths(episode_root).served_base
     capture.parent.mkdir(parents=True, exist_ok=True)
@@ -540,14 +435,6 @@ def test_the_reserved_base_world_id_cannot_name_the_family_capture(tmp_path):
 # 4. the family tier and the world's kept base: no second adapter call
 
 def test_the_same_key_twice_is_one_adapter_call_and_one_payload(tmp_path):
-    """    Serving one key twice returns identical payloads and issues EXACTLY ONE adapter call.
-
-    The estate is live: two calls minutes apart see different data, so a sibling that re-asked
-    would measure the estate's drift and call it the world's difference. The world's kept base
-    read is what buys determinism back, and the adapter's own call log is what proves it — the
-    payload's call ordinal would differ on a second live call. The live read is kept in the
-    world's oracle store and is never a ledger row (M16): the ledger holds the two served
-    calls and nothing else."""
     ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     reg = world_registry(
@@ -565,12 +452,6 @@ def test_the_same_key_twice_is_one_adapter_call_and_one_payload(tmp_path):
 
 
 def test_two_siblings_read_one_base_recording(tmp_path):
-    """    Two worlds asking a question the family recorded get the same bytes off NO adapter call.
-
-    This is the A/B invariance the branch is for: everything the capture holds is literally
-    identical across siblings, so a difference between them is readable as the world rather
-    than as the estate having moved between two queries. Each world still records its own
-    served row, because what was served is per world."""
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     base = EpisodePaths(tmp_path / "ep").served_base
@@ -593,16 +474,6 @@ def test_two_siblings_read_one_base_recording(tmp_path):
 
 
 def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_path):
-    """    Two base rows for one key resolve to the FIRST, whether the answer comes from this
-    process's memo or from a rebuild off the file.
-
-    The check-then-act spans the adapter call and `base_payload` reads the memo unlocked, so
-    two of ONE world's gather threads can both miss and both record — the tier split closed the
-    cross-process half of this, not the cross-thread half. The file then holds two rows for one
-    key, and the tie-break is the only thing left to make them agree. Resolved one way in
-    `record` and the other in `_absorb`, this process served the second payload while any
-    process rebuilding from the file served the first: two answers to one question with both
-    rows reading honestly, which is exactly the invariance the family tier exists to buy."""
     ledger_path = tmp_path / SERVED_FILE
     ledger = fresh_ledger(ledger_path)
     call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"},
@@ -617,12 +488,6 @@ def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_pa
 
 
 def test_a_world_reopened_from_disk_replays_its_own_kept_base_read(tmp_path):
-    """    A world rebuilt from disk — the shape a resumed sibling process opens — replays its own
-    kept base read rather than re-asking the estate, and another world does not.
-
-    The kept read lives in the world's oracle store on disk, so a sibling restarted after a
-    crash inherits its own answer. It is the world's own and never the family's (M16): a
-    different world asking the same uncaptured key reads live for itself."""
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     first = build_registry(read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
@@ -647,11 +512,6 @@ def test_a_world_reopened_from_disk_replays_its_own_kept_base_read(tmp_path):
 
 
 def test_two_spellings_of_one_question_are_one_key(tmp_path):
-    """    Params built in a different order are the SAME key, so they cost one adapter call.
-
-    `request_key` sorts, the way `_query_rules._request_key` does and for the same reason: two
-    spellings of one question would otherwise split one memo into two, and the pair would see
-    the estate twice at two different moments."""
     ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     body = "FROM logs-* | LIMIT 5"
@@ -673,16 +533,6 @@ def test_two_spellings_of_one_question_are_one_key(tmp_path):
 # 5. a failure keeps its row, and a world with no facts is served its base
 
 def test_a_ledger_write_failure_ends_the_run_and_keeps_the_failure_it_records(tmp_path):
-    """    When recording WHY a call failed itself fails, the run ends naming the served ledger,
-    and the call's own failure stays on the chain (A12, #1234).
-
-    Before #1234 the system's error propagated and the failed ledger write was dropped; A12
-    reverses "the run carries on after a failed call-record write": a call whose served-ledger
-    row is missing would read as never served, so the registry raises `CallRecordWriteFailed`
-    naming `served_ledger` (the exit class the driver stamps when it ends the run). What the
-    old pin guarded stays guarded: the real system's error is not displaced by an
-    unrecognised `OSError` filed as an infra code — it is the context of the failed write,
-    and the refusal names the call whose row it could not write."""
     adapters = fake_estate(tmp_path)
     down = (adapters / "cmdb_adapter.py").read_text(encoding="utf-8").replace(
         'def get_host(ctx: VerbContext, *, host: str) -> dict:',
@@ -710,17 +560,6 @@ def test_a_ledger_write_failure_ends_the_run_and_keeps_the_failure_it_records(tm
 
 
 def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):
-    """    A world whose `world_id` is `None` is refused at construction.
-
-    `None` is how the family tier spells "this is what the estate answered", and every sibling
-    replays that slot instead of re-asking a live system. A world answering to it would write
-    its own served payload there, and the next sibling would serve another world's difference
-    AS the estate — while recording an honest-looking `passthrough` row of its own. Silent
-    scenario INJECTION, the inverse of the deletion the ledger was built to catch, and invisible
-    in exactly the record meant to show it.
-
-    Refused at CONSTRUCTION rather than at the write: by the time a payload is being recorded
-    the world has already served, and a check there would have to be repeated at every writer."""
     ledger_path = tmp_path / SERVED_FILE
 
     class BaseWorld:
@@ -737,22 +576,11 @@ def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):
 
 
 def test_the_control_worlds_rows_are_its_own_never_the_familys(tmp_path):
-    """    The control world queries the estate exactly as it is, and its rows carry its own id.
-
-    Its payloads ARE the estate's, which is what makes a control-versus-sibling difference read
-    as exactly the sibling's world. THE ROWS ARE KEYED TO IT, and that is the point: a control
-    that answered to `None` would share the family's slot — harmless only while it changes
-    nothing, and silent scenario INJECTION the moment it does, because every sibling replays that
-    slot as the estate while its own row honestly reports `passthrough`. And its live read never
-    enters the family's recording (M16): the primed base stays exactly as primed."""
     ledger_path = tmp_path / SERVED_FILE
     ctx = run_ctx(tmp_path)
     body = "FROM logs-system.auth-*\n| LIMIT 5"
 
     class ControlWorld:
-        # Control-ness is `facts`, not the id: a control asserts nothing, so there is nothing
-        # for an oracle to serve. Expressing it as a reserved id instead would conflate "the
-        # control world" with "the family's recording", which is the slot every sibling replays.
         world_id = "base"
         facts = ()
 
@@ -769,12 +597,6 @@ def test_the_control_worlds_rows_are_its_own_never_the_familys(tmp_path):
 
 
 def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
-    """    Nothing was rewritten, so there is no second identity to record (#1224: under the
-    oracle a call always runs as asked; only archived staging-era rows carry `asked_params`).
-
-    The column is written only when it says something. Echoing `params` onto every row would
-    make the two identities look like one thing, which is the confusion the pair exists to
-    prevent."""
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     reg = build_registry(
