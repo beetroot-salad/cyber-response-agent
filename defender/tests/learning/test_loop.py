@@ -14,7 +14,8 @@ LoopPaths = loop.LoopPaths
 
 from defender.learning.core import drains as drains  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, FINDINGS  # noqa: E402
-from defender.tests._state1135 import curation_run_dir, enqueue_run, state_for_paths  # noqa: E402
+from defender.tests._fixture_uuid import fixture_uuid
+from defender.tests._state1135 import curation_run_dir, enqueue_case, enqueue_run, state_for_paths  # noqa: E402
 from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
 from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning import lead_repository as lr  # type: ignore[import-not-found]  # noqa: E402
@@ -477,7 +478,7 @@ def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
     )
     assert [rd for _, rd in seen] == [run_dir.resolve()]
     assert str(seen[0][0]).startswith("/tmp/wt-")
-    assert not (paths.state_root / "author-queue" / "case-b.json").exists()
+    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
     assert branch.events == ["lease-check", "start", "finish", "cleanup"]
 
 
@@ -515,7 +516,7 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
     enqueue_run(state_for_paths(paths), run_dir)
     # A row naming a run its tenant's repository cannot open (#1105 PR 2): the address is
     # well-formed, the run folder was never made.
-    gone = run_dir.parent / "case-gone"
+    gone = run_dir.parent / fixture_uuid("case-gone")
     enqueue_run(state_for_paths(paths), gone)
     seen: list[Path] = []
     drains.lead_author_drain(
@@ -525,8 +526,8 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert seen == [run_dir.resolve()]
-    assert not (paths.state_root / "author-queue" / "case-gone.json").exists()
-    failed = paths.state_root / "author-queue" / "failed" / "case-gone.json"
+    assert not (paths.state_root / "author-queue" / f"{gone.name}.json").exists()
+    failed = paths.state_root / "author-queue" / "failed" / f"{gone.name}.json"
     assert json.loads(failed.read_text())["failed"] == "artifact-missing"
 
 
@@ -635,7 +636,7 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
     seen: list[Path] = []
 
     def maybe_boom(wt_paths, state, run, *, box=None, **_kw) -> None:
-        if run.run_dir.name == "case-poison":
+        if run.run_dir.name == poison.name:
             raise RuntimeError("lead-author blew up")
         seen.append(run.run_dir)
 
@@ -644,8 +645,8 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert seen == [good.resolve()]
-    assert not (paths.state_root / "author-queue" / "case-poison.json").exists()
-    failed = paths.state_root / "author-queue" / "failed" / "case-poison.json"
+    assert not (paths.state_root / "author-queue" / f"{poison.name}.json").exists()
+    failed = paths.state_root / "author-queue" / "failed" / f"{poison.name}.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
@@ -659,8 +660,8 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     monkeypatch.setattr(la, "run_under_held_queue_lock", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok
     branch = _FakeBranch(prefix="lead-author/", worktree=_declarable_worktree(tmp_path))
     drains.lead_author_drain(paths, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
-    assert not (paths.state_root / "author-queue" / "case-rc.json").exists()
-    failed = paths.state_root / "author-queue" / "failed" / "case-rc.json"
+    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
+    failed = paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
@@ -677,8 +678,8 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
 
     # lint-monkeypatch: ok — same intentional seam as the rc=2 test above: drives the
     monkeypatch.setattr(la, "run_under_held_queue_lock", boom)  # lint-monkeypatch: ok
-    marker = paths.state_root / "author-queue" / "case-transient.json"
-    failed = paths.state_root / "author-queue" / "failed" / "case-transient.json"
+    marker = paths.state_root / "author-queue" / f"{run_dir.name}.json"
+    failed = paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json"
     wt = _declarable_worktree(tmp_path)
 
     for expected in (1, 2):
@@ -752,7 +753,7 @@ def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path:
     head = forge.open_calls[0]["head"]
     records = sorted((paths.state_root / "_pending_delivery").glob("*.json"))
     assert [json.loads(r.read_text())["branch"] for r in records] == [head]
-    assert not (paths.state_root / "author-queue" / "case-pr.json").exists(), "the served run was re-queued"
+    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists(), "the served run was re-queued"
     assert _real(work, "rev-parse", "--verify", f"refs/heads/{head}").returncode == 0
     capsys.readouterr()
 
@@ -786,8 +787,10 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
     paths = LoopPaths(repo_root=wt, state_dir=tmp_path / "state")
     poison = curation_run_dir("case-a-poison")
     good = curation_run_dir("case-b-good")
-    enqueue_run(state_for_paths(paths), poison)
-    enqueue_run(state_for_paths(paths), good)
+    # Case keys order the drain independently of the opaque run ids: the poison must run
+    # first, so the next marker observes whether its dirty worktree was reset.
+    enqueue_case(state_for_paths(paths), "case-a-poison", poison)
+    enqueue_case(state_for_paths(paths), "case-b-good", good)
 
     clean_at_entry: dict[str, bool] = {}
 
@@ -797,7 +800,7 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
             capture_output=True, text=True,
         )
         clean_at_entry[run.run_dir.name] = st.stdout.strip() == ""
-        if run.run_dir.name == "case-a-poison":
+        if run.run_dir.name == poison.name:
             (p.repo_root / "defender" / "skills" / "gather" / "queries"
              / "wazuh" / "auth-events.md").unlink()
             raise RuntimeError("scope-gate boom")
@@ -805,8 +808,8 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
     drains._drain_lead_author_markers(paths, state_for_paths(paths), run_lead_author,
                                       data_root=drains._data_root())
 
-    assert clean_at_entry["case-a-poison"] is True
-    assert clean_at_entry["case-b-good"] is True
+    assert clean_at_entry[poison.name] is True
+    assert clean_at_entry[good.name] is True
     end = _subprocess.run(["git", "-C", str(wt), "status", "--porcelain"],
                           capture_output=True, text=True)
     assert end.stdout.strip() == ""
