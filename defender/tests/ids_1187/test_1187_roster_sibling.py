@@ -208,8 +208,10 @@ def test_a_second_start_runs_refuses_and_leaves_the_roster_byte_identical(data_r
 #: nothing but `start_runs`' own writes meets the limit. A real SIGKILL-class death mid-write,
 #: through the real primitive (adversary F8).
 _START_RUNS_CHILD = """
-import resource, signal, sys
+import errno, os, resource, signal, sys
 from pathlib import Path
+from defender._tenant import TenantRefused
+from defender.run_repository import RunRefused
 from defender.tests.ids_1187 import _spec1187 as S
 root, tenant_id, episode_id, limit = Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
 runs = S.tenant(root, tenant_id).runs_repository()
@@ -217,13 +219,25 @@ with runs.episode(episode_id) as view:
     if limit:
         signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
         resource.setrlimit(resource.RLIMIT_FSIZE, (limit, resource.RLIM_INFINITY))
-    view.start_runs(["a", "b", "c"])
+    if sys.argv[5] == "unavailable":
+        def unavailable(event, args):
+            if event == "open" and len(args) >= 3 and args[2] & os.O_TMPFILE == os.O_TMPFILE:
+                print("ATOMIC_UNAVAILABLE", flush=True)
+                raise OSError(errno.EOPNOTSUPP, "injected unsupported anonymous create")
+        sys.addaudithook(unavailable)
+    try:
+        view.start_runs(["a", "b", "c"])
+    except (TenantRefused, RunRefused):
+        print("REFUSED", flush=True)
+    else:
+        print("STARTED", flush=True)
 """
 #: Far below any roster of three UUIDs (about 130 bytes), so the write is cut mid-way.
 _WRITE_LIMIT = 16
 
 
-def _start_runs_in_a_child(data_root: Path, episode_id: str, *, limit: int):
+def _start_runs_in_a_child(data_root: Path, episode_id: str, *, limit: int,
+                           unavailable: bool = False):
     """`_START_RUNS_CHILD` as a real process of this interpreter over this checkout."""
     import subprocess
     import sys
@@ -234,7 +248,8 @@ def _start_runs_in_a_child(data_root: Path, episode_id: str, *, limit: int):
         filter(None, [str(H5.WORKTREE), os.environ.get("PYTHONPATH")])),
         "PYTHONDONTWRITEBYTECODE": "1", S.DATA_ROOT_ENV: str(data_root)}
     return subprocess.run(  # noqa: S603 — this interpreter, a fixed script
-        [sys.executable, "-c", _START_RUNS_CHILD, str(data_root), A_ID, episode_id, str(limit)],
+        [sys.executable, "-c", _START_RUNS_CHILD, str(data_root), A_ID, episode_id, str(limit),
+         "unavailable" if unavailable else "supported"],
         capture_output=True, text=True, encoding="utf-8", check=False, env=env,
         cwd=str(H5.WORKTREE), timeout=300)
 
@@ -252,7 +267,7 @@ def test_a_roster_write_killed_mid_write_leaves_no_roster(data_root):
     refuses for ever. A named `O_EXCL` write leaves the torn prefix under the roster's own name.
     Positive control, same child with no limit: it exits 0 and writes the roster naming a, b, c.
     Skipped only where the episode's filesystem has no `O_TMPFILE` (the lane cannot exist
-    there; whether the roster must then refuse is an open design question). RED at base: no
+    there; the strict unsupported-lane refusal is pinned separately below). RED at base: no
     `start_runs`."""
     import errno
     import signal
@@ -288,6 +303,28 @@ def test_a_roster_write_killed_mid_write_leaves_no_roster(data_root):
     done = _start_runs_in_a_child(data_root, control_id, limit=0)
     assert done.returncode == 0, f"control: the child failed: {done.stderr[-1500:]}"
     assert sorted(S.read_roster(control)) == sorted(LABELS), "control: no roster was written"
+
+
+def test_an_unavailable_atomic_roster_lane_refuses_without_a_named_fallback(data_root):
+    """S-roster's chosen write lane is anonymous create, write, fsync, then linkat; a named
+    exclusive-create fallback is forbidden even if the filesystem lacks O_TMPFILE. An external
+    child audit hook makes the actual anonymous-open attempt raise EOPNOTSUPP. start_runs
+    must refuse with no named roster or temporary file. With the fault absent, the same
+    child writes the complete roster. No production seam or assertion about private helpers.
+    """
+    S.tenant(data_root, A_ID)
+    episode_id, ep = _episode(data_root, A_ID)
+    failed = _start_runs_in_a_child(data_root, episode_id, limit=0, unavailable=True)
+    assert failed.returncode == 0, failed.stderr[-1500:]
+    assert "ATOMIC_UNAVAILABLE" in failed.stdout.splitlines(), failed.stdout
+    assert "REFUSED" in failed.stdout.splitlines(), failed.stdout
+    assert not os.path.lexists(ep / S.ROSTER_NAME), "unsupported lane left a named roster"
+    assert sorted(set(os.listdir(ep)) - {S.MANIFEST_NAME, "runs"}) == []
+
+    done = _start_runs_in_a_child(data_root, episode_id, limit=0)
+    assert done.returncode == 0, done.stderr[-1500:]
+    assert "STARTED" in done.stdout.splitlines(), done.stdout
+    assert sorted(S.read_roster(ep)) == sorted(LABELS)
 
 
 @pytest.mark.parametrize("occupant", ["link-to-another-tenants-arms", "regular-file"])
