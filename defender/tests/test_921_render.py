@@ -516,6 +516,6 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     # A dirty sibling tree is a caveat in the judge's own input, not a silent equivalence.
     dirty = J.accepted_episode(tmp_path / "dirty", ledgers={"b": [J.oracle_row("b")], "c": []},
                                dirty=True)
-    lessons = _lessons_view(_render().render(dirty, "b", git_show=J.FakeGitShow(bodies={})))
+    lessons = _lessons_view(J.render_at(dirty, "b", git_show=J.FakeGitShow(bodies={})))
     assert "dirty" in lessons.lower(), (
         "an allow_dirty family's lesson view claims a reproducibility it does not have")
