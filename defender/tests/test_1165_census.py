@@ -130,6 +130,29 @@ RESIDUE = {
     ("hooks.inject_system_skill_description", "read_description", "read_text_soft"): (1, "nonrecord", ('skill_path',)),
     ("runtime.bash_policy", "_load_policy", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("runtime.box._docker", "_own_container_ids", "read_text_soft"): (2, "nonrecord", ('hostname_path', 'mountinfo_path')),
+    # #1255 "Time / Into the box": a preload's clock-offset projection lives in
+    # <runs base>/../clocks/<run>, outside the run's records. This is job state,
+    # not a durable record or a second authority for the in-memory run clock.
+    ("runtime.box._clock", "write_clock", "write_guarded"): (1, "job_state", ('clock_file',)),
+    ("runtime.box._clock", "prepare_clock", "guarded_mkdir"): (1, "job_state", ('where',)),
+    ("runtime.box._clock", "prepare_clock", "write_guarded"): (1, "job_state", ('clock_file',)),
+    ("runtime.box._clock", "remove_clock", "shutil.rmtree"): (1, "job_state", ('clock_file.parent',)),
+    # #1255 P1 "Every mode", C6/C8: the unboxed transport mirrors model-readable
+    # file views into its own temporary runs/current, with checkout/agent links.
+    # Source files are read, never written; copy/mkdir/remove target the staging
+    # tree. It is neither a durable record sink nor authority for host decisions.
+    # Name this transport residue separately from #1136's rooted model tools:
+    # the source side may read run evidence, so it is not "nonrecord" I/O.
+    ("runtime.box._stage", "_remove", "shutil.rmtree"): (1, "model_view", ('entry',)),
+    ("runtime.box._stage", "_remove", ".unlink"): (1, "model_view", ('entry',)),
+    ("runtime.box._stage", "_same_bytes", "builtins.open"): (2, "model_view", ('a', 'b')),
+    ("runtime.box._stage", "_carry_file", "shutil.copy2"): (1, "model_view", ('entry.path',)),
+    ("runtime.box._stage", "_mirror_tree", "guarded_mkdir"): (1, "model_view", ('target',)),
+    ("runtime.box._stage", "make_staging_tree", "guarded_mkdir"): (1, "model_view", ('tree.run_view',)),
+    ("runtime.box._stage", "make_staging_tree", ".symlink_to"): (
+        2, "model_view", ("root / MODEL_DEFENDER.relative_to('/')", "root / MODEL_AGENT.relative_to('/')")),
+    # The finalizer holds this cleanup callable; the census records that reference.
+    ("runtime.box._stage", "staged_executor", "shutil.rmtree"): (1, "model_view", ('<reference>',)),
     ("runtime.box._image", "_read", ".read_bytes"): (1, "nonrecord", ('tree / name',)),
     # #1108 P3 (D7): a read-only mount is verified by reading an existing host file back
     # (a code mount's `MOUNT_CHECK` or a data mount's first regular file) — never a run record.
@@ -145,7 +168,10 @@ RESIDUE = {
     ("runtime.box._oracle", "start_oracle_box.discard", "shutil.rmtree"): (2, "nonrecord", ('runner', 'scratch')),
     ("runtime.box._oracle", "stop_oracle_box", "shutil.rmtree"): (1, "nonrecord", ('folder',)),
     ("runtime.driver", "_stop_before_main", "write_guarded"): (1, "retiring"),
-    ("runtime.driver", "run_investigation", "write_guarded"): (1, "retiring"),
+    # #1255 extracted the existing empty tool-trace fallback; #1165 N-c still
+    # retires this projection separately. Its record target and count are unchanged.
+    ("runtime.driver", "_write_trace_or_empty", "write_guarded"): (
+        1, "retiring", ('RunPaths(run_dir).tool_trace',)),
     ("runtime.driver._build", "_gather_instructions", "read_text_utf8"): (1, "nonrecord", ("defender_dir / 'skills' / 'gather' / 'SKILL.md'",)),
     ("runtime.driver._prompts", "_main_instructions", "read_text_utf8"): (1, "nonrecord", ("defender_dir / 'SKILL.md'",)),
     ("runtime.lead_zero", "run_correlation", "read_text_utf8"): (1, "m_read"),

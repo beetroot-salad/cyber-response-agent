@@ -504,7 +504,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
 
     Composition: base world A, then the authored worlds in seat order with roles assigned by
     seat. The launcher adds the measurement facts (`episode_id`, `source_run_dir`,
-    `source_run_id`, `branch_message_id`, `fences_at`, `as_of`, `continuation_prompt`).
+    `source_run_id`, `branch_message_id`, `fences_at`, `as_of`).
 
     `served_systems` is the manifest's recorded list (M21), named in every call's host text;
     `samples` is the per-system samples document (`samples.yaml`). `lessons` is the unread

@@ -150,11 +150,16 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
     base, _src = J.runs_base(tmp_path)
     world = ep / "worlds" / "b"
     _lead_file(world, goal)
-    # #1234 A12/A21: a row of world b's own run carries a call id of b's run (an id of no run
-    # is an inherited, pre-branch row, which must match every other table's). Numbered from 1
-    # so none joins the ledger's one oracle row (`<token>/0`, another call).
+    # #1234 A12/A21: a row of world b's own run has a call id of b's run (a row with no id of
+    # any run is an inherited, pre-branch row, which must match every other table's). Numbered
+    # from 1 so none joins the ledger's one oracle row (`<token>/0`, another call). #1255
+    # G4/G6: the id is not on the row; b's host-only call-join record names it by the row's
+    # `(lead_id, seq)` — the host's own integer seq, also where a stressed row spells it as a
+    # string (`..._stresses_every_coercion`).
     token = J.world_token("b", episode_token=J.EPISODE_TOKEN)
-    _table(world, [{**r, J.CALL_ID: f"{token}/{i + 1}"} for i, r in enumerate(rows)])
+    _table(world, rows)
+    J.write_call_join(world, [J.call_join_entry(r["lead_id"], int(r["seq"]), f"{token}/{i + 1}")
+                              for i, r in enumerate(rows)])
     return ep, base, world
 
 

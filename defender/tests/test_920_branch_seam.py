@@ -5,9 +5,8 @@ from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 from defender.tests._spec1077 import fixture_run
 
-import dataclasses
 import importlib
-import json
+import inspect
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,6 @@ from defender.tests._branch_947 import ALERT_DOC, spec_at  # noqa: E402
 from defender.tests._session_head_754 import message_ids  # noqa: E402
 from defender.tests._alert_plant import plant_alert  # noqa: E402
 from defender.tests._session_store_705 import (  # noqa: E402
-    DEFENDER,
     complete_pair,
     make_store,
     mid_pair_session,
@@ -27,16 +25,10 @@ from defender.tests._session_store_705 import (  # noqa: E402
     sql,
     store_mod,
     text_response,
-    tool_call_response,
     tool_return_request,
     user_request,
 )
 
-#: The document every legality fixture branches over. Read off the tree rather than authored
-#: inline: an invlang document whose frontier is non-empty is not a string one can improvise —
-#: it needs vertices carrying live `??` cells — and the golden is the same corpus
-#: `_invlang_corpus` parametrizes every other invlang rule over.
-GOLDEN_INVESTIGATION = DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md"
 
 
 def branch_mod():
@@ -123,17 +115,21 @@ def test_the_hydrated_prefix_plus_one_turn_appends_exactly_one_row(tmp_path):
     assert len(shas) == len(set(shas)), f"byte-identical duplicate rows survive: {shas}"
 
 
-def test_a_mid_pair_branch_point_hydrates_to_what_the_fork_was_charged_for(tmp_path):
-    """    Branching at a response whose tool call is still unanswered — the shape a raw row count
-    over-counts by one — leaves the fork's `last_render_len` and its send-role hydration
-    still equal, and the first resumed turn still appends exactly one row.
+def test_a_fork_at_a_call_bearing_response_hands_that_response_to_the_framework(tmp_path):
+    """    D1 (#1255 — reverses #920's mid-pair rule at two of its three sites): a fork taken AT a
+    response whose tool calls are still unanswered — since #1255 the ONLY kind of branch point
+    — keeps that response in the conversation the resumed run is handed, and the fork is
+    charged for it. So the framework is given the history ENDING in the call-bearing response
+    (it runs those calls; P-U2), and the first row the resumed run lands is their answer,
+    appended exactly once, with the response itself not appended a second time.
 
-    The mid-pair case is where a caller that rebuilds the prefix any other way (a row count, a
-    `role="live"` read) diverges from the store: `fork` deliberately does not count the
-    dangling response, so a history that DOES count it makes the live list one longer than the
-    render and the dangling call is silently re-sent."""
-    # provenance: claim C5 — session_store.py:327's docstring states the SEND-role seeding and
-    # why the raw row count over-counts; this is the caller half of that same statement.
+    The two sites, by the design's own list: "conversation loading (which drops a trailing
+    call-bearing response)" — `hydrate(role="send")` here — and "the store fork's bookkeeping
+    (which would append the response twice)" — `last_render_len`. The third, validation, is
+    driven end to end in `tests/e2e/test_1255_snapshot_branch_point.py`.
+
+    Before #1255 this test asserted the opposite: send-role hydration DROPPED the dangling
+    response and the fork's charge excluded it, so the resumed model was never shown the call."""
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -145,18 +141,25 @@ def test_a_mid_pair_branch_point_hydrates_to_what_the_fork_was_charged_for(tmp_p
     child = store.fork(main, at_message_id=inherited[-1])
     history = ss.hydrate(store, child, role="send")
 
-    assert len(history) == complete_len, (
-        "send-role hydration did not drop the unanswered call, so the resumed model is "
-        "handed a tool call it can neither answer nor withdraw")
+    assert len(history) == complete_len + 1, (
+        f"conversation loading handed the resumed run {len(history)} message(s), not the "
+        f"{complete_len + 1} through the branch response — the call-bearing response was "
+        "dropped, so the framework has no calls to run")
+    tail_calls = [p.tool_call_id for p in getattr(history[-1], "parts", ())
+                  if getattr(p, "part_kind", "") == "tool-call"]
+    assert tail_calls == ["c2"], f"the history does not end on the branch response: {history[-1]!r}"
     assert store.last_render_len(child) == len(history), (
-        "the fork's charge and the hydrated history disagree on the mid-pair boundary")
+        "the fork's charge and the hydrated history disagree at the branch response — the "
+        "first ingest would append the response a second time, or underflow")
 
     added = sel.ingest(store, child, [*history, tool_return_request("query", tool_call_id="c2")],
                        agent_id="main")
 
     assert len(added) == 1, f"exactly the answering return lands; got {added}"
+    assert ss.path_row_ids(store, child) == [*inherited, added[0]], (
+        "the resumed path is not the inherited prefix (through the branch response) plus its answer")
     assert message_ids(store, child) == added, (
-        "the child owns more than the one row it added")
+        "the child owns more than the one row it added — the branch response was re-appended")
 
 
 # the store factory: a sibling forks INTO the source run's database
@@ -214,468 +217,58 @@ def test_the_branch_factory_opens_the_source_runs_own_database(tmp_path):
         "the prefix rows are not visible through the sibling's handle")
 
 
-# branch-point legality
-
-def _legal_source(tmp_path, *, investigation: str | None, queries: str | None = "row"):
-    """A source run whose session carries an `append_block` turn — a branch point past which
-    at least one invlang fence has landed.
-
-    `investigation` is the document body (`None` writes no file); `queries` is the captured
-    evidence (`None` writes no table). Returns `(store, run_dir, path_ids)` where `path_ids`
-    is the session path — `path_ids[2]` is the last row BEFORE the `append_block` turn and
-    `path_ids[-1]` the last row after it.
-    """
-    ss = store_mod()
-    store, run_dir, session_id, _ = _source_run(tmp_path)
-    # The call carries the DOCUMENT as its `text`, which is what a real `append_block` that
-    # authored this file would have sent. `fence_count_at` reads the appended text, so a
-    # placeholder here would land a document the store says holds no fences — a fixture
-    # asserting a convention (one fence per append) that nothing in the runtime enforces.
-    store.append(session_id, [tool_call_response("append_block",
-                                                 {"text": investigation or ""},
-                                                 tool_call_id="ab1")], agent_id="main")
-    store.append(session_id, [tool_return_request("append_block", "ok", tool_call_id="ab1")],
-                 agent_id="main")
-    if investigation is not None:
-        (run_dir / "investigation.md").write_text(investigation, encoding="utf-8")
-    if queries is not None:
-        (run_dir / "executed_queries.jsonl").write_text(
-            '{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "esql", '
-            '"query_id": "elastic.sshd-failed-by-srcip", "params": {}, '
-            '"payload_status": "ok"}\n', encoding="utf-8")
-    return store, run_dir, ss.path_row_ids(store, session_id)
-
-
-def _append_document(store, session_id, text, chunks):
-    """Author `text` through `chunks` `append_block` turns, cut on fence boundaries.
-
-    The document a run ends with is the concatenation of what its appends sent, and a fixture
-    that writes one text to disk while sending another asserts a mapping neither half has.
-    Cut on fence starts so every running concatenation is a valid prefix document — and NOT
-    one fence per chunk, because that is the convention nothing enforces and the reason
-    `fence_count_at` counts blocks rather than calls.
-
-    Returns `(chunks, return_row_ids)`.
-    """
-    import re
-    ss = store_mod()
-    starts = [m.start() for m in re.finditer(r"(?m)^```invlang", text)]
-    picks = ([0] + [starts[round(i * len(starts) / chunks)] for i in range(1, chunks)]
-             + [len(text)])
-    pieces = [text[a:b] for a, b in zip(picks, picks[1:], strict=False)]
-    returns = []
-    for i, piece in enumerate(pieces):
-        store.append(session_id, [tool_call_response("append_block", {"text": piece},
-                                                     tool_call_id=f"doc-{i}")], agent_id="main")
-        store.append(session_id, [tool_return_request("append_block", "ok",
-                                                      tool_call_id=f"doc-{i}")], agent_id="main")
-        returns.append(ss.path_row_ids(store, session_id)[-1])
-    return pieces, returns
-
-
-def _one_fence(marker: str) -> str:
-    """One ````invlang` block, distinct per marker — the text one `append_block` sends."""
-    return f"```invlang\n:L findings [id]\n{marker}\n```"
-
-
-def _fence_turns(store, session_id, batches):
-    """Append one `append_block` turn per entry in `batches`, each landing that many fences.
-
-    A batch of 2 is ONE `ModelResponse` carrying two `ToolCallPart`s and ONE `ModelRequest`
-    carrying both returns — the shape the framework produces when a turn calls the fence verb
-    twice, which `tools.py`'s `sequential=True` orders and does not prevent. Returns the row id
-    of each turn's RETURN message, in order."""
-    from pydantic_ai.messages import (
-        ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart,
-    )
-    ss = store_mod()
-    returns = []
-    for turn, width in enumerate(batches):
-        ids = [f"ab-{turn}-{i}" for i in range(width)]
-        store.append(session_id, [ModelResponse(parts=[
-            ToolCallPart(tool_name="append_block", args={"text": _one_fence(i)},
-                         tool_call_id=i)
-            for i in ids])], agent_id="main")
-        store.append(session_id, [ModelRequest(parts=[
-            ToolReturnPart(tool_name="append_block", content="ok", tool_call_id=i)
-            for i in ids])], agent_id="main")
-        returns.append(ss.path_row_ids(store, session_id)[-1])
-    return returns
-
-
-def test_a_turn_that_batches_two_appends_counts_two_fences(tmp_path):
-    """    A turn carrying two `append_block` calls lands two fences and is counted as two.
-
-    The `actor` projection cannot say "twice": `session_store._tool_name` publishes every
-    DISTINCT tool a message names, comma-joined, so a count taken from it reads one batched
-    turn as one fence. That under-count is the SILENT direction — `FrontierAt.snapped` fires
-    only when a caller asks PAST the document's end — so the branch was admitted at a frontier
-    the run had already moved past, with `validate` reporting nothing wrong. Nothing forbids
-    the turn: `tools.py` sets `sequential=True`, which orders two calls inside one response
-    rather than preventing them, and nothing sets `parallel_tool_calls=False`.
-
-    Asserted against the DOCUMENT's own fence count, not against a literal, so the two halves
-    of the mapping are pinned to each other rather than to a number this test chose."""
-    # provenance: `fence_count_at`'s contract — "a caller holding a message index maps it to a
-    # fence itself" (`frontier_at`); `session_store._tool_name`'s distinct-name join.
+def test_the_branch_factory_wears_the_store_factory_shape(tmp_path):
+    """    The callable is `StoreFactory`-shaped — two positional parameters, `(case_id, run_dir)`
+    — so a resume rides the injection seam `run_investigation` already has rather than growing
+    a second one. Neither argument steers it: a resume joins a case, it does not mint one."""
+    # provenance: driver.py's `StoreFactory = Callable[[str, Path], Any]`; design M1 reuses it.
     branch = branch_mod()
-    store, run_dir, session_id, _ = _source_run(tmp_path)
-    returns = _fence_turns(store, session_id, [1, 2])
-    document = "\n\n".join(_one_fence(f"ab-{t}-{i}") for t, i in ((0, 0), (1, 0), (1, 1)))
-    (run_dir / "investigation.md").write_text(document, encoding="utf-8")
-
-    counted = branch.fence_count_at(store, session_id, returns[-1], document)
-
-    assert counted == 3, (
-        f"the batched turn's second fence was dropped: {counted} counted against 3 landed")
-    from defender.skills.invlang.frontier import frontier_at
-    assert not frontier_at(document, counted).snapped, (
-        "the count ran past the document, which is the loud direction and not this bug")
-
-
-def test_a_resumed_run_inherits_the_document_its_history_claims(tmp_path):
-    """    A sibling's run dir gets `investigation.md` seeded from the source's, cut at the branch.
-
-    The session is inherited and the run dir is FRESH, so without this the model reads an
-    inherited history saying it authored N fences while `_tool_append_block` starts an empty
-    file in the new run dir — and it cannot even read the source's copy, because
-    `permission.decide_read` is rooted at the sibling's run dir.
-
-    CUT AT THE BRANCH, not copied whole: the source ran on past the fork, and its later fences
-    carry the conclusions the pair exists to not share. Asserted as a byte PREFIX of the source
-    and as a fence count, because either alone passes something wrong — a prefix check alone
-    admits the empty file, and a count alone admits a rebuilt document that dropped the
-    author's prose between blocks."""
-    # provenance: `_opening_prompt`'s own docstring (a model re-reading `<source>/…` is denied);
-    # `_tool_append_block` writes `_investigation_path(deps)`, rooted at the sibling's run_dir.
-    branch = branch_mod()
-    document = GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
-    store, run_dir, session_id, _ = _source_run(tmp_path)
-    pieces, returns = _append_document(store, session_id, document, 3)
-    landed = sum(piece.count("```invlang") for piece in pieces[:2])
-    (run_dir / "investigation.md").write_text(document, encoding="utf-8")
-    (run_dir / "executed_queries.jsonl").write_text(
-        '{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "esql", '
-        '"query_id": "elastic.sshd-failed-by-srcip", "params": {}, "payload_status": "ok"}\n',
-        encoding="utf-8")
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-doc"
-    sibling_dir.mkdir(parents=True, exist_ok=True)
-
-    branch.open_main_session(store, spec_at(store, run_dir, returns[1]),
-                             _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(run_dir))
-
-    seeded = (sibling_dir / "investigation.md").read_text(encoding="utf-8")
-    from defender.skills.invlang.parser import INVLANG_FENCE_RE
-    assert len(INVLANG_FENCE_RE.findall(seeded)) == landed, (
-        f"the seed holds {len(INVLANG_FENCE_RE.findall(seeded))} fences, not the {landed} "
-        "that had landed at the branch point")
-    assert document.startswith(seeded), (
-        "the seed is not a byte prefix of the source document — a rebuilt document drops the "
-        "prose the author wrote between blocks")
-    assert len(INVLANG_FENCE_RE.findall(document)) > landed, (
-        "the fixture no longer runs on past the branch, so this pins nothing")
-    assert "\n" in seeded.strip("\n").replace("```", ""), (
-        "the seed carries no prose at all, so the byte-prefix arm above pins nothing")
-
-
-def test_a_resumed_run_inherits_the_evidence_its_prefix_names(tmp_path):
-    """    The sibling gets the source's captured evidence in its OWN run dir, copied not shared.
-
-    The inherited message prefix is full of absolute paths into the run dir that produced it —
-    a gather return names `gather_raw/{lead_id}/{seq}.json`, a lead claim names its sidecar —
-    and `permission.decide_read` roots the sibling at its own run dir, so every one of them is
-    denied to a model reading back its own history. The queries table comes for the mirror
-    reason: `validate` refuses a branch whose source captured nothing, so those rows ARE the
-    sibling's evidence.
-
-    COPIED, because the sibling appends to both. A link would put the sibling's new rows into
-    the source run's own table — corrupting the base of the comparison the branch exists to
-    produce.
-
-    And RECORDED: the sibling's run state holds each inherited row as seeding writes it
-    (#1235 round 2), so the lead's rows the live run reads are the table's."""
-    branch = branch_mod()
-    document = GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
-    store, run_dir, session_id, _ = _source_run(tmp_path)
-    _pieces, returns = _append_document(store, session_id, document, 3)
-    (run_dir / "investigation.md").write_text(document, encoding="utf-8")
-    (run_dir / "executed_queries.jsonl").write_text(
-        '{"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "esql", '
-        '"query_id": "elastic.sshd-failed-by-srcip", "params": {}, "payload_status": "ok"}\n',
-        encoding="utf-8")
-    (run_dir / "gather_raw" / "l-001").mkdir(parents=True)
-    (run_dir / "gather_raw" / "l-001" / "0.json").write_text('{"hits": []}', encoding="utf-8")
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-evidence"
-    sibling_dir.mkdir(parents=True, exist_ok=True)
-    state = _sibling_state(sibling_dir)
-
-    branch.open_main_session(store, spec_at(store, run_dir, returns[1]), state, run=fixture_run(state.run_dir), source_run=fixture_run(run_dir))
-
-    assert (sibling_dir / "executed_queries.jsonl").read_text(encoding="utf-8") == (
-        run_dir / "executed_queries.jsonl").read_text(encoding="utf-8")
-    tabled = [json.loads(line) for line in (sibling_dir / "executed_queries.jsonl").read_text(
-        encoding="utf-8").splitlines()]
-    assert [row["lead_id"] for row in tabled] == ["l-001"], "the fixture's one inherited row"
-    assert list(state.lead_rows("l-001")) == tabled, (
-        "the sibling's run state does not hold the rows seeding wrote to its table")
-    assert (sibling_dir / "gather_raw" / "l-001" / "0.json").is_file(), (
-        "the payload sidecar the inherited prefix names is not in the sibling's run dir")
-    # Copied, not shared: writing to the sibling's table leaves the source's alone.
-    (sibling_dir / "executed_queries.jsonl").write_text("{}\n", encoding="utf-8")
-    assert "sshd-failed-by-srcip" in (
-        run_dir / "executed_queries.jsonl").read_text(encoding="utf-8")
-
-
-def test_a_run_dir_holding_evidence_is_refused_before_anything_forks(tmp_path):
-    """    A sibling dir that already carries evidence is refused BEFORE the fork, not after.
-
-    `store.fork` commits its own transaction and this module cannot undo one, so a refusal
-    raised after it leaves a child session in the SOURCE database with no run behind it — and
-    this refusal is the repeatable kind (a retried resume), so every retry would add another.
-
-    An EMPTY `gather_raw/` is not evidence: the run scaffolding creates it for every run before
-    a resume reaches this check, so refusing on existence would refuse every branch."""
-    ss = store_mod()
-    branch = branch_mod()
-    store, run_dir, path_ids = _legal_source(
-        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
-    session_id = ss.main_session_id(store)
-    before = len(sql(store, "SELECT session_id FROM session WHERE parent_session_id = ?",
-                     (session_id,)))
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-dirty"
-    (sibling_dir / "gather_raw" / "l-009").mkdir(parents=True)
-    (sibling_dir / "gather_raw" / "l-009" / "0.json").write_text("{}", encoding="utf-8")
-    spec = spec_at(store, run_dir, path_ids[-1])
-
-    with pytest.raises(branch.BranchError, match="already holds"):
-        branch.open_main_session(store, spec, _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(spec.source_run_dir))
-
-    assert len(sql(store, "SELECT session_id FROM session WHERE parent_session_id = ?",
-                   (session_id,))) == before, (
-        "the refusal came after the fork — the source store now carries a child session no "
-        "run will ever drive, and every retry adds another")
-
-
-def test_a_reused_run_dir_is_refused_rather_than_seeded_over(tmp_path):
-    """    A run dir that already holds a document is refused, not appended to.
-
-    `investigation.md` is append-only and one run's. Seeding a source's prefix onto another
-    run's work log would interleave two investigations in the one artifact whose whole contract
-    forbids it — and it would pass every later append-only check, because the result only
-    grows."""
-    branch = branch_mod()
-    store, run_dir, session_id, _ = _source_run(tmp_path)
-    returns = _fence_turns(store, session_id, [1])
-    (run_dir / "investigation.md").write_text(
-        GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), encoding="utf-8")
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-used"
-    sibling_dir.mkdir(parents=True, exist_ok=True)
-    (sibling_dir / "investigation.md").write_text("someone else's work\n", encoding="utf-8")
-
-    with pytest.raises(branch.BranchError, match="already holds"):
-        branch.seed_investigation(store, spec_at(store, run_dir, returns[0]),
-                                  _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(run_dir))
-
-
-def test_a_prefix_that_would_not_validate_is_refused_rather_than_seeded(tmp_path):
-    """    A fence-boundary prefix that does not pass invlang validation is refused, even though the
-    SOURCE document passes whole.
-
-    The premise this seam rested on — a valid source gives a valid prefix — is false, and not
-    by a technicality. `_check_lead_refs` asks whether a cited lead is declared ANYWHERE in the
-    document, not whether it was declared first, so a source whose `:R` block cites a lead its
-    `:L findings` block declares one fence LATER is well-formed as a whole and `undeclared
-    lead` when cut between the two. That is exactly the cut this function makes.
-
-    REFUSED rather than seeded, and refused rather than repaired: the sibling would receive a
-    document it did not write, cannot fix — append-only puts the committed bytes out of reach —
-    and every subsequent append of which is refused for a fault that is not its own. It is the
-    same answer, for the same reason, that the fence-count mismatch above already gives: a seed
-    cut wrong is not a seed.
-
-    The third site of #961/#964's class, found by `lint_ungated_artifact_write` on its first
-    run rather than by either issue.
-    """
-    branch = branch_mod()
-    store, run_dir, session_id, _ = _source_run(tmp_path)
-    returns = _fence_turns(store, session_id, [1, 1, 1])
-
-    from defender.skills.invlang.validate import diagnose
-    from defender.tests._invlang_amendment_954 import (
-        VERTICES, attr_block, findings_block,
-    )
-    source_doc = (
-        VERTICES
-        + attr_block("l-001|v-001|class|file-server/internal/known-corp")
-        + findings_block("l-001|1|probe|v-001||cmdb|n/a")
-    )
-    assert [d for d in diagnose(source_doc, None) if d.severity != "warning"] == [], (
-        "the fixture's premise: the SOURCE document is well-formed"
-    )
-    (run_dir / "investigation.md").write_text(source_doc, encoding="utf-8")
-
-    sibling_dir = tmp_path / "defender-runs" / "run-sibling-prefix"
-    sibling_dir.mkdir(parents=True, exist_ok=True)
-
-    with pytest.raises(branch.BranchError, match="does not pass validation"):
-        branch.seed_investigation(
-            store, spec_at(store, run_dir, returns[1]), _sibling_state(sibling_dir), run=fixture_run(sibling_dir), source_run=fixture_run(run_dir))
-
-    assert not (sibling_dir / "investigation.md").exists(), (
-        "the refusal came after the write — the sibling holds a document it can never repair"
-    )
-
-
-def test_message_zero_is_refused_as_a_branch_point(tmp_path):
-    """    Message 0 is refused. It precedes every payload the run captured, so both siblings are
-    consistent with the prefix by construction and the captured base constrains nothing —
-    which is the generated-world design the redesign rejected, reached by branching too early
-    rather than by choosing it."""
-    # provenance: design §The captured base world ("the base is captured, not authored");
-    # the branch point is defined as "when the defender holds a concrete set of payloads".
-    branch = branch_mod()
-    store, run_dir, path_ids = _legal_source(
-        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
-
-    with pytest.raises(branch.BranchError):
-        branch.validate(store, dataclasses.replace(
-            spec_at(store, run_dir, path_ids[-1]), branch_message_id=0), source_run=_run_handle_1165((dataclasses.replace(
-            spec_at(store, run_dir, path_ids[-1]), branch_message_id=0)).source_run_dir))
-
-
-def test_a_run_that_captured_no_queries_is_refused(tmp_path):
-    """    A source run whose queries table is empty is refused, however far into the conversation
-    the branch point sits. "A world consistent with the evidence" is vacuous when there is no
-    evidence: every proposed sibling agrees with an empty capture."""
-    # provenance: design §The captured base world — "base = executed_queries.jsonl +
-    # gather_raw/ from the source run"; claim C14 records the same emptiness one level up.
-    branch = branch_mod()
-    store, run_dir, path_ids = _legal_source(
-        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None)
-
-    with pytest.raises(branch.BranchError):
-        branch.validate(store, spec_at(store, run_dir, path_ids[-1]), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[-1])).source_run_dir))
-
-
-def test_a_branch_point_with_an_empty_frontier_is_refused(tmp_path):
-    """    A branch point over a document with no invlang blocks is refused even though the run
-    captured evidence: an empty frontier is nothing open, so the pair of worlds has no
-    question to divide and the episode grades nothing.
-
-    Paired with the capture check above rather than folded into it: an implementation that
-    tests only the capture passes that one and fails this, which is the point."""
-    # provenance: design M8 ("the invlang frontier at the branch turn, frontier_at, shipped by
-    # #919"); frontier.frontier_at answers the empty frontier for a fence-less document.
-    branch = branch_mod()
-    store, run_dir, path_ids = _legal_source(tmp_path, investigation=None)
-
-    with pytest.raises(branch.BranchError):
-        branch.validate(store, spec_at(store, run_dir, path_ids[-1]), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[-1])).source_run_dir))
-
-
-def test_the_frontier_is_read_at_the_branch_point_not_at_the_end_of_the_run(tmp_path):
-    """    The same finished run admits a branch point and refuses an earlier one: after its
-    `append_block` turn the frontier is open, before it the document had not started and the
-    frontier is empty.
-
-    This is the demand that separates reading the frontier AT the branch from reading the
-    terminal document. Both arms run against ONE source run whose investigation.md is the
-    full golden — so an implementation that derives the frontier from the finished file
-    accepts both and fails here, while one that maps the message id onto the fences that had
-    landed by then splits them."""
-    # provenance: design M8 + `frontier_at`'s own docstring — "a caller holding a message
-    # index maps it to a fence itself, because only the run's trace can do that".
-    branch = branch_mod()
-    document = GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
-    assert "```invlang" in document, (
-        f"{GOLDEN_INVESTIGATION} carries no invlang fence — the fixture moved and both arms "
-        "below would be asserting over an empty document")
-    store, run_dir, path_ids = _legal_source(tmp_path, investigation=document)
-
-    def at(message_id: int):
-        return spec_at(store, run_dir, message_id)
-
-    assert branch.validate(store, at(path_ids[-1]), source_run=_run_handle_1165((at(path_ids[-1])).source_run_dir)) is None, (
-        "a branch point past the run's own append_block was refused; nothing here is left "
-        "to accept and the refusals above are vacuous")
-
-    with pytest.raises(branch.BranchError):
-        branch.validate(store, at(path_ids[2]), source_run=_run_handle_1165((at(path_ids[2])).source_run_dir))
-
-
-def test_a_message_that_is_not_on_mains_path_is_refused(tmp_path):
-    """    An id past the source run's tip is refused rather than read as "every fence".
-
-    `fence_count_at` scores rows with `row_id <= branch_message_id`, so a number no row of
-    MAIN's path carries silently reads as the WHOLE document — and `fork` walks parents from
-    whatever id it is handed, so the fault surfaces far away (or not at all) instead of here."""
-    branch = branch_mod()
-    store, run_dir, path_ids = _legal_source(
-        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
-
-    with pytest.raises(branch.BranchError, match="MAIN path"):
-        branch.validate(store, dataclasses.replace(
-            spec_at(store, run_dir, path_ids[-1]), branch_message_id=path_ids[-1] + 1000), source_run=_run_handle_1165((dataclasses.replace(
-            spec_at(store, run_dir, path_ids[-1]), branch_message_id=path_ids[-1] + 1000)).source_run_dir))
-
-
-def test_a_branch_point_mid_tool_pair_is_refused(tmp_path):
-    """    A branch point that is a response whose tool call is still unanswered is refused.
-
-    `fork` hides that row from `hydrate(role="send")` — so the FIRST `message_history` looks
-    clean — while still making it the child's HEAD. `ingest` then parents the continuation
-    prompt onto it, the next `hydrate(role="send")` ends on a `ModelRequest` and therefore
-    stops truncating, and the dangling `tool_use` goes on the wire with no matching result.
-    Every provider rejects that, so the resumed run dies on its first request with a 400 that
-    names nothing about branching.
-
-    `path_ids[3]` is the `append_block` CALL and `path_ids[4]` its return, so the two arms
-    below are one message apart: the accepted one is the same branch point, taken at the
-    boundary the store's own `_complete_prefix_len` puts it at."""
-    branch = branch_mod()
-    store, run_dir, path_ids = _legal_source(
-        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
-
-    with pytest.raises(branch.BranchError, match="unanswered"):
-        branch.validate(store, spec_at(store, run_dir, path_ids[3]), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[3])).source_run_dir))
-
-    assert branch.validate(store, spec_at(store, run_dir, path_ids[4]), source_run=_run_handle_1165((spec_at(store, run_dir, path_ids[4])).source_run_dir)) is None, (
-        "the tool RETURN one row later was refused too, so the arm above is satisfied by a "
-        "guard that refuses every branch point rather than by the pair rule")
-
-
-def test_a_snapped_frontier_is_refused_by_its_own_name(tmp_path):
-    """    A branch point whose fence count runs past the document is refused AS SNAPPED.
-
-    `frontier_at` clamps an out-of-range index and answers the TERMINAL frontier — the state
-    with everything settled and nothing open — so a `validate` that asks "is anything open?"
-    first reports "branched too late" for a run whose real fault is that the message-to-fence
-    mapping cannot be trusted at all. The refusal has to name the clamp, or the operator is
-    sent to fix the wrong thing.
-
-    The document here holds ONE fence against a session whose appends carry the whole golden,
-    which is the shape a truncated or rewritten document leaves behind."""
-    ss = store_mod()
-    branch = branch_mod()
-    store, run_dir, path_ids = _legal_source(
-        tmp_path, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))
-    session_id = ss.main_session_id(store)
-    # A second landed append, carrying no block of its own — the count that over-runs the
-    # document comes from `_legal_source`'s first append, which sent the whole golden.
-    store.append(session_id, [tool_call_response("append_block", {"text": "..."},
-                                                 tool_call_id="ab2")], agent_id="main")
-    store.append(session_id, [tool_return_request("append_block", "ok", tool_call_id="ab2")],
-                 agent_id="main")
-    document = GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
-    one_fence = document[: document.index("```", document.index("```invlang") + 10) + 3]
-    (run_dir / "investigation.md").write_text(one_fence, encoding="utf-8")
-    tip = ss.path_row_ids(store, session_id)[-1]
-    assert tip != path_ids[-1], "the two extra rows did not land"
-
-    with pytest.raises(branch.BranchError, match="snapped"):
-        branch.validate(store, spec_at(store, run_dir, tip), source_run=_run_handle_1165((spec_at(store, run_dir, tip)).source_run_dir))
+    store, run_dir, _session_id, path_ids = _source_run(tmp_path)
+    factory = branch.store_factory_for(spec_at(store, run_dir, path_ids[-1]), source_run=fixture_run(run_dir))
+
+    params = list(inspect.signature(factory).parameters.values())
+    assert len(params) == 2, f"not (case_id, run_dir)-shaped: {params}"
+    assert all(p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for p in params), (
+        f"the driver calls `factory(case_id, run_dir)` positionally: {params}")
+
+    # WHICH database it opens is the test above; this one asserts only that the two arguments
+    # do not steer it, so the two demands fail separately rather than as one indistinguishable
+    # red.
+    first = factory("case-one", tmp_path / "one")
+    second = factory("case-two", tmp_path / "two")
+    assert Path(first.path) == Path(second.path), (
+        "the factory's answer moved with its arguments; a sibling's own case id and run dir "
+        "must not choose which database its prefix lives in")
+
+
+# branch-point legality — moved onto driven sources by #1255
+#
+# Every legality test that stood here built its source by writing store rows directly. After
+# #1255 such a store is a run recorded before the change: it has no fork snapshot, and forking
+# it is refused for THAT (N4), so a rule checked over it would be checked over nothing. Where
+# each went:
+#
+# - message 0 / an id past the tip / not on MAIN's path -> tests/e2e/test_1255_snapshot_legality.py
+#   ::test_d1_a_branch_point_must_be_a_response_on_mains_own_path (now also a gather session's call)
+# - a run that captured no queries -> ...::test_a_source_that_captured_no_query_is_refused_at_launch
+# - an empty frontier / the frontier read at the branch point, not the end of the run
+#   -> ...::test_the_frontier_is_the_one_the_branch_points_snapshot_holds (the frontier is the
+#   snapshot's document, P2)
+# - a run dir holding evidence / a reused run dir is refused before anything forks
+#   -> ...::test_an_arm_folder_already_holding_work_is_refused_before_anything_forks
+# - a branch point mid tool pair is refused -> REVERSED (D1): it is now the only branch point;
+#   tests/e2e/test_1255_snapshot_branch_point.py::test_d1_only_a_tool_calling_main_response_is_a_branch_point
+# - a batched turn counts two fences -> RETIRED with fence counting (P2 replaces it);
+#   ...legality.py::test_d1_a_branch_response_that_batches_two_appends_is_rerun_whole
+# - a snapped frontier is refused by its own name -> RETIRED: no fence mapping remains to snap
+#   (the document is restored by content from the snapshot, P2)
+# - the document its history claims / a prefix that would (not) validate -> RETIRED with the
+#   fence-boundary seed (P2: content restore); tests/e2e/test_1255_snapshot_restore.py
+#   ::test_p2_the_investigation_document_is_restored_by_content and
+#   tests/e2e/test_920_branch_resume.py::test_a_resumed_run_appends_onto_the_document_it_inherited
+# - the evidence its prefix names (copied, recorded) -> RETIRED with lead selection (G7/P2);
+#   tests/e2e/test_1255_snapshot_restore.py::test_p2_append_only_and_write_once_files_are_restored_up_to_the_cut
 
 
 # the two named seams
-
 

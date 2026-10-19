@@ -417,9 +417,9 @@ def _box_probe(box, run_dir: Path, name: str, source: str) -> dict:
     """Run a probe script inside the box and decode its one JSON line."""
     script = run_dir / f"_probe_{name}.py"
     script.write_text(source, encoding="utf-8")
-    command = f"python3 {script}"
+    command = f"python3 /runs/current/{script.name}"
     result = box.run_parsed(
-        bash_exec.parse(command), command=command, cwd=run_dir, timeout=60)
+        bash_exec.parse(command), command=command, cwd=Path("/runs/current"), timeout=60)
     assert result.rc == 0, (
         f"the {name} probe did not run to completion inside the box (rc={result.rc}): "
         f"{result.err.decode('utf-8', 'replace')!r} — this is a broken probe, not a denial"
@@ -508,7 +508,7 @@ print(json.dumps(out))
     finally:
         box_mod.stop_box(box)
 
-    assert seen["symlink"] != "ok", (
+    assert seen["symlink"] == "PermissionError:1", (
         "an alias created AFTER the startup probe returned succeeded — a window opened between "
         "the probe's observation and the first real write, which is the one thing the "
         "creation-time attachment is supposed to make impossible"
@@ -529,7 +529,7 @@ def test_an_alias_between_two_artifacts_inside_the_tree_is_refused_too(live_run_
 import json, os
 out = {{}}
 try:
-    os.link({str(first)!r}, {str(second)!r})
+    os.link({str(Path("/runs/current") / first.relative_to(run))!r}, {str(Path("/runs/current") / second.relative_to(run))!r})
     out["link"] = "ok"
 except OSError as e:
     out["link"] = "%s:%s" % (type(e).__name__, e.errno)
@@ -538,7 +538,8 @@ print(json.dumps(out))
     finally:
         box_mod.stop_box(box)
 
-    assert seen["link"] != "ok", "an intra-tree hard link succeeded under the ban"
+    assert seen["link"] == "PermissionError:1", (
+        f"the intra-tree link must reach the syscall ban, not fail on a missing operand: {seen}")
     assert not second.exists(), (
         f"the link call reported {seen['link']} but the second name exists anyway, so the "
         f"refusal is being read off an exit status while the entry was created"

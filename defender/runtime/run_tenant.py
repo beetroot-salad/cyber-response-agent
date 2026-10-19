@@ -33,11 +33,14 @@ if TYPE_CHECKING:
 
 def table_pointer(tenant_id: str) -> str:
     """The model-facing name of a tenant's verb-disposition table. Never the resolved host
-    path: the settings half is host-only and the prompt must not vary by machine. Operator
-    messages print `RunGrants.path` instead."""
+    path: the settings half is host-only and the prompt must not vary by machine. Nor the
+    tenant's name (#1255 O3: the tenant is host layout, and the model sees one view on every
+    host), so every tenant's pointer reads the same; `tenant_id` is the table whose pointer
+    this is, not text for the model. Operator messages print `RunGrants.path` instead."""
     from defender.runtime.verbs import TABLE_POINTER
 
-    return f"{TABLE_POINTER}, tenant {tenant_id!r}"
+    del tenant_id  # not rendered: see above
+    return TABLE_POINTER
 
 
 @dataclasses.dataclass(frozen=True)

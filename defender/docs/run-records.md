@@ -94,6 +94,8 @@ unreachable by root containment rather than by a named deny.
 | scrub_verdict | 2 | `<run>.scrub-verdict.json` | — | scrub_verdict.json (renamed, `archive.py:79`) | run.facts.scrub_verdict |  |
 | ticket_write | 2 | `<run>.ticket-write.json` | — | — | run.observability.ticket_write | the case-ticket write's receipt, written by the host's record step (`ticket_writer._write_receipt`); moved out of the run dir by #1107 so the box can neither plant nor block it |
 | session_pointer | 2 | `<run>.session-pointer.json` | — | — | run.observability.session_pointer | the run -> case link (which case's session store holds this run), written by the driver before the first turn; moved out of the run dir by #1235 so the box can neither forge nor delete it |
+| call_join | 2 | `<run>.call-join.jsonl` | — | call_join.jsonl | run.tables.call_join | one line per query-table row the run wrote, `(lead_id, seq)` -> the call's host-written id, appended by `record_query.append_query_row`; beside the run folder so the model's table carries no id (#1255 G4/G6); archived as `worlds/<label>/call_join.jsonl` |
+| ticket_comments | 2 | `<run>.ticket-comments.jsonl` | — | — | run.observability.ticket_comments | every comment the record step got the store to accept, `{key, body}`, appended by `ticket_writer._record_posted_comment`; the run's own writes to the world, handed to a branched world's oracle (#1255 P5) |
 | session_db | 3 | `<sessions>/<lineage id>.db` | — | — | run.session.session_db | SQLite; the connection at `_bare_connect` carries every read and append |
 | family | 4 | `family.yaml` | — | — | episode.family | the fork point, declared once per episode |
 | family_stamp | 4 | `provenance.json` | — | — | episode.family_stamp | a different shape from the run stamp; written by `verify_family` |
@@ -103,7 +105,7 @@ unreachable by root containment rather than by a named deny.
 | judge_draw | 4 | `worlds/<label>/judge/<n>.yaml, worlds/family/judge/<n>.yaml` | — | — | episode.judge_draw |  |
 | timing | 4 | `timing.json` | — | — | episode.timing | per launcher step |
 | staged | 4 | `staged.yaml` | — | — | episode.staged | the sole record that a cluster write happened |
-| served | 4 | `served/base.jsonl, served/<token>.jsonl` | — | — | episode.served | base: primed once by the host before any sibling; <token>: appended live per sibling |
+| served | 4 | `served/base.jsonl, served/unrecorded.jsonl, served/<token>.jsonl` | — | — | episode.served | base: primed once by the host before any sibling; <token>: appended live per sibling; unrecorded: the primer's skip record (#1255 D6), created once beside base — calls the source asked whose answer base lacks (failed or unreadable) |
 | priming_lock | 4 | `served/.priming` | — | — | episode.priming_lock | `O_CREAT\|O_EXCL`; never unlinked, so a crashed priming leaves the episode permanently claimed |
 | stage_trace | 4 | `wire_logs/<stage>.trace.jsonl, wire_logs/<agent>_framed_trace.jsonl` | — | — | episode.stage_trace | episode-root wire traces of the learning stages |
 | learning_html | 4 | `learning.html` | — | — | episode.learning_html |  |

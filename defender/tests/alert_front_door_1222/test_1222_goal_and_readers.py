@@ -487,11 +487,15 @@ class _Views:
         summary = self.run_dir / "gather_summaries" / f"{S.L3}.md"
         if summary.is_file():
             shutil.copy2(summary, summaries / f"{S.L3}.md")
-        rows = [json.dumps({**r, "call_id": f"{J.world_token('b')}/{n}"})
-                for n, r in enumerate(self.d.rows_for(S.L3), start=100)]
+        # #1255 G4: the table row carries no call id; the world's host-only call-join record
+        # names it for the row's (lead_id, seq), so the merged rows join as world b's own.
+        own = [{k: v for k, v in r.items() if k != J.CALL_ID} for r in self.d.rows_for(S.L3)]
         table = world / "executed_queries.jsonl"
-        table.write_text(table.read_text(encoding="utf-8") + "".join(f"{r}\n" for r in rows),
-                         encoding="utf-8")
+        table.write_text(table.read_text(encoding="utf-8")
+                         + "".join(f"{json.dumps(r)}\n" for r in own), encoding="utf-8")
+        J.write_call_join(world, [J.call_join_entry(r["lead_id"], r["seq"],
+                                                    f"{J.world_token('b')}/{n}")
+                                  for n, r in enumerate(own, start=100)], append=True)
         alert = self._alert_bytes if self._alert_bytes is not None else self.d.stored_alert
         S.plant_episode_copy(ep, alert=alert, record=S.read_record(self.run_dir))
         return ep

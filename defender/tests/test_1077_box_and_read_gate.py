@@ -121,13 +121,26 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
     mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
     writable = [m for m in mounts if "readonly" not in m]
     assert len(writable) == 1, f"the box has more than one read-write bind: {writable}"
-    assert f"target={run_dir}" in writable[0], (
-        "N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
-        "wire protocol with the model, and the run dir stays its one rw bind")
+    # #1255 (design rev 4, P1) flipped the TARGETS to the model view: the run folder is bound at
+    # `/runs/current`, the checkout at `/defender`; the SOURCES still name this host's trees.
+    assert f"source={run_dir}," in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
+        "wire protocol with the model, and the run dir stays its one rw bind (at /runs/current)")
+    assert "target=/runs/current" in writable[0], ("N1: the handle does not hide the filesystem from the box — the run-dir layout is a "
+        "wire protocol with the model, and the run dir stays its one rw bind (at /runs/current)")
     readonly = [m for m in mounts if "readonly" in m]
-    assert len(readonly) == 2, readonly  # the defender tree and, since #1222, the run's input directory
-    assert any(f"target={DEFENDER}" in m for m in readonly)
-    assert any(f"target={run_dir / 'alert_input'}" in m for m in readonly)
+    # the defender tree and, since #1222, the run's input directory are the two named read-only
+    # binds; #1255 (design rev 4, "Time / Into the box") allows ONE more — the run clock's own
+    # mount (slice D asserts its shape) — whose target lies outside the model view's three trees.
+    assert any(f"source={DEFENDER}," in m and "target=/defender," in m for m in readonly)
+    assert any(f"source={run_dir / 'alert_input'}," in m
+               and "target=/runs/current/alert_input," in m for m in readonly)
+    from defender.tests._1255_view import MODEL_ROOTS
+
+    extra = [m for m in readonly
+             if not any(f"target={t}," in m or f"target={t}/" in m for t in MODEL_ROOTS)]
+    named = [m for m in readonly if m not in extra]
+    assert len(named) == 2, named
+    assert len(extra) <= 1, f"more than the clock's one extra read-only bind: {extra}"
     for m in mounts:
         source = Path(m.split("source=")[1].split(",")[0])
         target = Path(m.split("target=")[1].split(",")[0])
@@ -136,6 +149,7 @@ def test_the_box_keeps_network_none_and_one_rw_bind(run_dir):
             "the tenant record beside it unreachable from inside a box (demand d49)")
         assert source != run_dir.parent, bound_the_base
         assert target != run_dir.parent, bound_the_base
+        assert target != Path("/runs"), bound_the_base  # the model view's runs base (#1255)
     assert "--cap-add" not in joined
     assert "--privileged" not in joined
 
@@ -182,7 +196,8 @@ def test_the_tenant_record_sits_outside_every_box_mount(run_dir):
             "`<run_dir>` only (`runtime/box/_spec.py`), and the record sits one level up "
             "under `<runs_base>`, which no box mounts")
     # POSITIVE CONTROL, in the demand's own sentence: the run dir still IS mounted.
-    assert any(f"target={run_dir}" in m for m in mounts), (
+    # (#1255: the run dir is bound from its host path to the model view's `/runs/current`.)
+    assert any(f"source={run_dir}," in m and "target=/runs/current" in m for m in mounts), (
         "the run dir stopped being mounted, which would make the negative above pass "
         "vacuously — and would break N1")
     # N9 is the recorded scope: a hostile local user on a shared /tmp is outside the threat

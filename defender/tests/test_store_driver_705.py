@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.messages import (  # noqa: E402
@@ -68,7 +70,7 @@ def _down(*systems: str) -> FakeVerbs:
 
 
 def _read_alert_turns(run_dir: Path, n: int) -> list[Turn]:
-    return [Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})])
+    return [Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})])
             for _ in range(n)]
 
 
@@ -325,7 +327,7 @@ def test_the_request_logging_guard_stays_around_the_log_path_only(tmp_path):
                 return ModelResponse(parts=[
                     TextPart(content=json.loads('"\\ud800"')),
                     ToolCallPart(tool_name="read_file",
-                                args={"path": str(RunPaths(run_dir).alert)}),
+                                args={"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)}),
                 ])
             return ModelResponse(parts=[TextPart(content="Investigation complete.")])
 

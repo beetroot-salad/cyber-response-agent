@@ -652,7 +652,7 @@ def _check_vertex_participation(
     inherits the exemption, matching `_walkers.vertex_types`' first-declaration-wins.
 
     Scoped to what this write introduces, like `_check_surface`: the document is append-only,
-    and `committed_investigation_reason` and `seed_investigation` re-validate a committed
+    and `committed_investigation_reason` and `restore_run_folder` re-validate a committed
     document as its own baseline, so a document-global reading would dead-letter finished runs
     over bytes no repair can reach.
 

@@ -1,7 +1,10 @@
 """D1/D2: the operator commands and the settings loaders read the DATA ROOT's copy."""
 from __future__ import annotations
 
+from defender.tests._1255_view import MODEL_AGENT
+
 import functools
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -239,7 +242,7 @@ def _launch(source: Path) -> BaseException | int:
     try:
         return branch_cli.main(
             ["--tenant", source.parent.parent.name, source.name,
-             str(T947.BRANCH_MESSAGE_ID), "--continuation-prompt", "Continue from here."],
+             str(T947.BRANCH_MESSAGE_ID), *T947.retired_continuation_argv()],
             spawn=spawn, preflight=T947.no_preflight)
     except SystemExit as refused:
         return refused
@@ -345,7 +348,7 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
         "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
         box_mod.DEFAULT_SPEC, (), tenant_agent=agent).argv
     mounts = _mount_specs(argv)
-    agent_mounts = [m for m in mounts if m.get("target") == str(agent)]
+    agent_mounts = [m for m in mounts if m.get("target") == MODEL_AGENT]
     assert len(agent_mounts) == 1, mounts
     assert Path(agent_mounts[0]["source"]).resolve() == H.agent_dir(data_root).resolve()
     assert "readonly" in agent_mounts[0], agent_mounts
@@ -367,10 +370,12 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
     (F13's refusal-wording consequence, V7)."""
     shared = tmp_path / "shared"
     mounts = ((shared, tmp_path / "daemon-side"), (H.DEFENDER, H.DEFENDER))
+    on_mount = shared / "data"
+    run_dir = H.tenant_folder(on_mount) / "runs" / "run"
     off_mount = tmp_path / "data"
     agent = H.agent_dir(off_mount)
     with pytest.raises(box_mod.BoxFault) as refused:
-        box_mod._create_argv("defender-run-spec1120", shared / "run", H.DEFENDER,
+        box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER,
                              box_mod.DEFAULT_SPEC, mounts, tenant_agent=agent)
     text = str(refused.value)
     assert str(agent) in text, f"the refusal does not name the agent half {agent}:\n{text}"
@@ -380,10 +385,14 @@ def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_ro
         f"the remedy does not tell the operator to move {H.DATA_ROOT_ENV}, under which the "
         f"agent half now lives:\n{text}")
 
-    on_mount = shared / "data"
-    plant_alert_with_record(shared / "run", {})
-    box_mod._create_argv("defender-run-spec1120", shared / "run", H.DEFENDER,
+    plant_alert_with_record(run_dir, {})
+    box_mod._create_argv("defender-run-spec1120", run_dir, H.DEFENDER,
                          box_mod.DEFAULT_SPEC, mounts, tenant_agent=H.agent_dir(on_mount))
+
+
+#: #1255 K3's preload/clock env keys — `test_1255_clock_box._PRELOAD_KEY`'s pattern, kept in step
+#: as `test_1092_box_mark_env._CLOCK_KEY` keeps it.
+_CLOCK_KEY = re.compile(r"PRELOAD|FAKETIME|CLOCK", re.IGNORECASE)
 
 
 def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> None:
@@ -407,7 +416,10 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
         "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
         box_mod.DEFAULT_SPEC, ()).argv
     env_keys = {v.partition("=")[0] for f, v in zip(argv, argv[1:], strict=False) if f == "--env"}
-    assert env_keys == set(allow) - {"DEFENDER_AGENT_DIR"}, env_keys
+    assert H.DATA_ROOT_ENV not in env_keys, env_keys
+    assert not [k for k in env_keys if "TENANT" in k.upper()], env_keys
+    clock = {k for k in env_keys | set(allow) if _CLOCK_KEY.search(k)}
+    assert env_keys - clock == set(allow) - {"DEFENDER_AGENT_DIR"} - clock, env_keys
     assert "DEFENDER_AGENT_DIR" not in env_keys
 
 

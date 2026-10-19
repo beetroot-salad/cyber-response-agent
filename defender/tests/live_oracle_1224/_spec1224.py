@@ -1007,6 +1007,13 @@ def family_v2(*, worlds: list[dict] | None = None,
                                                 ("bob", "carol", "10.0.0.9"))]),
         ],
     }
+    # #1255 (D1, P4) COMPAT: the fields `T.RETIRED_FAMILY_FIELDS` names are written only while
+    # `Family` still declares them (`_triplet_947.family_doc`'s rule), so the strict loader's
+    # unknown-key refusal does not turn every test here into one failure about a retired key.
+    declared = T._declared_family_fields()  # noqa: SLF001 — the sibling builder's own filter
+    for retired in T.RETIRED_FAMILY_FIELDS:
+        if retired not in declared:
+            doc.pop(retired, None)
     doc.update(over)
     return doc
 
@@ -1146,12 +1153,17 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     `J.write_ledger` stamps (`<token>/<i>`, or the ledger row's own `call_id`); a ledger row
     whose `call_id` is `None` gets no table row. Calls are filed under lead `l-001`, in ledger
     order; a decision other than `passthrough`/`oracle` is a non-zero exit. The payload sidecar
-    each row names is written beside it."""
+    each row names is written beside it.
+
+    #1255 G4/G6: the table row carries no id. The world's host-only call-join record
+    (`worlds/<X>/call_join.jsonl`, `J.write_call_join`) names each row's id by its
+    `(lead_id, seq)` — written even when the ledger is empty."""
     rq = mod("scripts.gather_tools.record_query")
     breaker = mod("runtime.circuit_breaker")
     world = Path(ep) / "worlds" / label
     token = world_token(label)
     lines: list[str] = []
+    joined: list[dict] = []
     for i, row in enumerate(ledger):
         cid = row.get(J.CALL_ID, f"{token}/{i}")
         if cid is None:
@@ -1170,10 +1182,11 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
             "payload_path": f"gather_raw/l-001/{seq}.json", "exit_code": exit_code,
             "error_class": breaker.error_class_for_exit(exit_code),
             "payload_status": rq.payload_status(exit_code, body), "payload_digest": "",
-            "payload_sha256": rq.payload_sha256(text), "system_key": "",
-            J.CALL_ID: cid}) + "\n")
+            "payload_sha256": rq.payload_sha256(text), "system_key": ""}) + "\n")
+        joined.append(J.call_join_entry("l-001", seq, cid))
     path = world / "executed_queries.jsonl"
     path.write_text("".join(lines), encoding="utf-8")
+    J.write_call_join(world, joined)
     return path
 
 
@@ -1560,24 +1573,48 @@ def default_calls() -> list[Call]:
 
 
 def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
-               tenant_id: str = FIXTURE_TENANT) -> tuple[Path, Path]:
+               tenant_id: str = FIXTURE_TENANT,
+               after_source: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
     """A runs base on the fixture tenant holding ONE finished source run whose captured calls
     are `calls` (default `default_calls()`), each also answered by the live estate with the
-    same payload — so a clean replay finds no drift. Returns `(runs base, source run dir)`."""
+    same payload — so a clean replay finds no drift. Returns `(runs base, source run dir)`.
+
+    `after_source(src)` is a scenario's own PRE-branch edit of the source (a sentinel row
+    appended to its table) or of the live estate (a drifted answer).
+
+    #1255 (P2/P3): a fork snapshot holds what the source's model-readable files held when its
+    branch response arrived — the table's length, each payload's hash — and an arm restores
+    the table cut to that length and is refused at launch if the source no longer opens on it.
+    So the source is written in the order a real run writes it:
+      * BEFORE its session is seeded (`T.runs_base(land_calls=...)`, where a fixture snapshot is
+        planted): the pre-branch calls, then `after_source` — everything the source held at the
+        branch point;
+      * AFTER it, APPENDED (the table only grows past the branch point, never rewritten): the
+        post-branch calls (`POST_BRANCH_LEAD`), with the main-session pair that dispatched
+        their lead after the branch message.
+    Every live answer (`est.answer`) is set before `after_source` runs, so a drift it plants
+    over one of them stands."""
     calls = list(default_calls() if calls is None else calls)
     est.place(tenant_id=tenant_id)
-    base, src = T.runs_base(tmp_path, tenant_id=tenant_id)
-    # `runs_base` lands one elastic capture; this tenant has no elastic, so the scenario's own
-    # calls replace it.
-    (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
-    seqs = {LEAD: 0, POST_BRANCH_LEAD: 0}
-    for c in calls:
-        lead = POST_BRANCH_LEAD if c.post_branch else LEAD
+    pre = [c for c in calls if not c.post_branch]
+    post = [c for c in calls if c.post_branch]
+
+    def land(src: Path) -> None:
+        # `runs_base` would land one elastic capture; this tenant has no elastic, so the
+        # scenario's own calls stand in its place, on the empty table it starts.
+        for seq, c in enumerate(pre):
+            T.capture_call(src, system=c.system, verb=c.verb, params=dict(c.params),
+                           payload=c.payload, lead=LEAD, seq=seq)
+        for c in calls:
+            est.answer(c.system, c.verb, c.params, c.payload)
+        if after_source is not None:
+            after_source(src)
+
+    base, src = T.runs_base(tmp_path, tenant_id=tenant_id, land_calls=land)
+    for seq, c in enumerate(post):
         T.capture_call(src, system=c.system, verb=c.verb, params=dict(c.params),
-                       payload=c.payload, lead=lead, seq=seqs[lead])
-        seqs[lead] += 1
-        est.answer(c.system, c.verb, c.params, c.payload)
-    if seqs[POST_BRANCH_LEAD]:
+                       payload=c.payload, lead=POST_BRANCH_LEAD, seq=seq)
+    if post:
         _dispatch_after_branch_point(base, src, POST_BRANCH_LEAD)
     return base, src
 
@@ -1646,7 +1683,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         # #1105 PR 2 (declared change 1): the tenant and the source run by id — the source sits
         # at `<data root>/<tenant>/runs/<run id>`.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(BRANCH_MESSAGE_ID),
-                       "--continuation-prompt", "go", *argv_extra], spawn=spawn, **seams)
+                       *T.retired_continuation_argv(), *argv_extra], spawn=spawn, **seams)
     except SystemExit as stop:
         if isinstance(stop.code, int):
             rc = stop.code

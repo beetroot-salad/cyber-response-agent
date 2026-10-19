@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from defender._run_id import is_case_stable_id, is_valid_run_id
+from defender.tests import _triplet_947 as T
 from defender.tests._by_path import load_lint_gate
 
 READ_GATE = load_lint_gate("lint_tree_read_follows_link")
@@ -95,13 +96,13 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
                    "entities": ["web-1"]}],
     }
     def family(world: dict) -> dict:
-        return {
-            "episode_id": "ep1", "source_run_dir": "/runs/src", "source_run_id": "src",
-            "branch_message_id": 1, "fences_at": 1, "as_of": "2026-07-28T16:18:45Z",
-            "continuation_prompt": "go", "base_story": "b", "served_systems": ["elastic"],
-            "discriminator": {"predicate": "p"},
-            "worlds": [{**world, "world_id": "a", "role": "A", "axis": None, "facts": []}, world],
-        }
+        # #1255 (D1, P4): `T.family_doc` writes the continuation prompt and the fence count only
+        # while `Family` still declares them, so this stays about the identity gate on both sides.
+        return T.family_doc(
+            episode_id="ep1", source_run_dir="/runs/src", source_run_id="src",
+            branch_message_id=1, as_of="2026-07-28T16:18:45Z",
+            base_story="b", served_systems=["elastic"], discriminator={"predicate": "p"},
+            worlds=[{**world, "world_id": "a", "role": "A", "axis": None, "facts": []}, world])
 
     with pytest.raises(_family.FamilyError) as caught:
         _family.check_identities(_family.parse_family(family(doc)))

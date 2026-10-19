@@ -67,7 +67,7 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
     S._require_data_root(root)
     # #1105 PR 2 (declared change 1): the tenant and the source run by id.
     argv = ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-            "--continuation-prompt", H.CONTINUATION]
+            *T.retired_continuation_argv()]
     try:
         return cli.main(argv, **seams), None
     except SystemExit as refused:

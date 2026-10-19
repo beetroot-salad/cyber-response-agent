@@ -31,8 +31,8 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
-from pydantic_ai.messages import ModelResponse
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.usage import RunUsage, UsageLimits
 
 from defender.runtime.tools._deps import run_of
 from defender._io import write_guarded
@@ -41,6 +41,7 @@ from defender._knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
 
+from .. import box as box_mod
 from .. import branch
 from .. import compaction
 from .. import observe
@@ -61,7 +62,8 @@ from ..close_tool import register_close_tool
 from ..circuit_breaker import RunAborted
 from ..permission.policies import _common
 from ..providers import BuiltModel
-from ..run_state import RunState
+from ..run_clock import ClockSource
+from ..run_state import RunState, run_state_of
 from ..tools import (
     AgentDeps,
     GatherDeps,
@@ -86,7 +88,6 @@ from ._prompts import (
     DEFAULT_REQUEST_LIMIT,
     DEFAULT_TOOL_RETRIES,
     GATHER_REQUEST_LIMIT,
-    _branch_clock,
     _coordinates,
     _main_instructions,
     _opening_prompt,
@@ -191,19 +192,33 @@ def _run_summary(  # noqa: PLR0913 — one dict literal's full field set, named 
     }
 
 
-def _run_state_at_boundary(run_state: RunState | None, run_dir: Path, run_id: str) -> RunState:
+def _run_state_at_boundary(run_state: RunState | None, run_dir: Path, run_id: str,
+                           clock: ClockSource | None) -> RunState:
     """The run's one live state (#1235), resolved once: the one the caller handed in, which
     must be this run's — started for this folder, as spelled, under this run id — or, when
     handed none, a new one for the run (production's path: `run.py` hands none). Another
     run's state is a `ValueError`: counting this run on it would charge that run's budget
-    and breaker, and leave this one's decisions reading a state they never wrote."""
+    and breaker, and leave this one's decisions reading a state they never wrote.
+
+    `clock` is the run clock's source (#1255), attached here, before anything reads the clock;
+    `None` keeps the state's own (the host's: wall time)."""
     if run_state is None:
-        return RunState(run_dir, run_id)
+        return RunState(run_dir, run_id, clock=clock)
     if (run_state.run_dir, run_state.run_id) != (Path(run_dir), run_id):
         raise ValueError(
             f"run_investigation was handed the state of run {run_state.run_id!r} on "
             f"{run_state.run_dir}, not this run's ({run_id!r} on {run_dir})")
+    if clock is not None:
+        run_state.attach_clock(clock)
     return run_state
+
+
+def _box_follows_run_clock(box: Any, state: RunState) -> None:
+    """The box's own programs read the run's clock (#1255 "Into the box"): a box this run
+    started (`BoxExecutor`) rewrites its clock file from `state.now` before every command. Any
+    other executor (a test's recording double) has no clock mount to feed."""
+    if isinstance(box, box_mod.BoxExecutor):
+        box.follow_clock(state.now)
 
 
 def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | None) -> None:
@@ -237,12 +252,18 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
 
 
 async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent, prompt, deps, store, bounds
-    agent: Agent[AgentDeps, str], prompt: str, deps: AgentDeps, store: Any, session_id: str,
-    bounds: challenge_gate.Bounds, message_history: list | None = None,
+    agent: Agent[AgentDeps, str], prompt: str | None, deps: AgentDeps, store: Any,
+    session_id: str, bounds: challenge_gate.Bounds, message_history: list | None = None,
+    *, usage: RunUsage | None = None, snapshots: branch.SnapshotWriter | None = None,
 ) -> tuple[Any, run_end.RunEnd, str | None]:
     """@owns truncated_by, @owns closed_before_cut — runs the agent loop, classifies its caught
     exits into the run-end record and an exit reason, and returns them with the (possibly
-    unfinished) `run`. The sole producer of a MAIN session's exit class."""
+    unfinished) `run`. The sole producer of a MAIN session's exit class.
+
+    A resumed run passes no `prompt` (#1255 D1, P4): its history ends on the branch response,
+    whose calls the framework runs first, and `usage` carries the request count the source had
+    reached there. `snapshots` records the fork snapshot of every MAIN response that called
+    tools, as it arrives and before any of its calls run (#1255 P2)."""
     truncated_by: str | None = None
     exit_reason: str | None = None
     run: Any = None
@@ -256,9 +277,14 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
             # The ceiling includes the review gate's forced-turn headroom, read from the bound,
             # whether or not the gate fires.
             usage_limits=UsageLimits(request_limit=challenge_gate.raised_request_limit(bounds)),
+            usage=usage,
         ) as run:
             async for node in run:
                 _log_node(node)
+                if snapshots is not None and Agent.is_call_tools_node(node) and any(
+                        isinstance(p, ToolCallPart) for p in node.model_response.parts):
+                    # The response is in hand and none of its calls has run: the cut.
+                    snapshots.record(run.usage.requests, challenge_gate.ReviewState.of(deps))
     except UsageLimitExceeded as e:
         _logger.warning(f"request limit reached ({e}); writing partial trace")
         truncated_by = session_store.TRUNCATED_BY_REQUEST_LIMIT
@@ -538,14 +564,78 @@ async def _correlation_phase(  # noqa: PLR0913 — the dispatch seams plus the r
         outcome, grant_home=tenant.table_pointer), None
 
 
-async def _drive_releasing_log(logger: Any, *args: Any) -> Any:
+async def _drive_releasing_log(logger: Any, *args: Any, **kwargs: Any) -> Any:
     """`_drive_agent`, releasing the wire log when the run ends by an escaping exception (a
     world that went unservable, #1224), so a resume into the same run dir can open it again."""
     try:
-        return await _drive_agent(*args)
+        return await _drive_agent(*args, **kwargs)
     except BaseException:
         logger.close()
         raise
+
+
+def _branch_snapshot(store: Any, resume: Any, source_run: Run | None) -> branch.ForkSnapshot | None:
+    """The fork snapshot a resumed run continues from (`None` for a fresh run): the one
+    `open_main_session` validated and restored the run folder from."""
+    if resume is None:
+        return None
+    if source_run is None:
+        raise TypeError("a resumed run requires its source Run (`open_main_session` refuses one "
+                        "without it before this is asked)")
+    snapshot = branch.snapshot_at(store, resume, source_run=source_run)
+    if snapshot is None:
+        raise branch.BranchError(
+            f"the fork snapshot of message {resume.branch_message_id} vanished after the arm "
+            "was restored from it")
+    return snapshot
+
+
+def _resume_from(
+    snapshot: branch.ForkSnapshot | None, state: RunState, limits: dict,
+    bounds: challenge_gate.Bounds,
+) -> tuple[branch.ForkSnapshot | None, dict, challenge_gate.Bounds, RunUsage | None]:
+    """The caps a run runs under and the usage it starts from: its own and none for a fresh
+    run. An arm continues its source (#1255 P2, D2): its counters resume from the branch
+    point's snapshot (recorded into `state` here), its request count enters the framework as
+    its starting usage, and it runs under the source's caps rather than its own
+    configuration's (rev 5 C3). The review stage timeout is a real-time safety bound, not a cap
+    the model can feel, so it stays the arm's own."""
+    if snapshot is None:
+        return None, limits, bounds, None
+    state.restore_fork_counters(snapshot.counters)
+    resumed = replace(bounds, base_request_limit=snapshot.base_request_limit,
+                      extra_turns=snapshot.extra_turns)
+    return snapshot, snapshot.limits, resumed, RunUsage(requests=snapshot.request)
+
+
+def _snapshot_writer(  # noqa: PLR0913 — the run's identity plus the caps its snapshots record
+    snapshot: branch.ForkSnapshot | None, deps: AgentDeps, store: Any, session_id: str,
+    limits: dict, bounds: challenge_gate.Bounds,
+) -> branch.SnapshotWriter:
+    """The writer of MAIN's fork snapshots for this run, recording the caps it runs under —
+    after an arm's review gate is resumed where its source's stood (`snapshot`), so the first
+    response it records already carries that state."""
+    if snapshot is not None:
+        challenge_gate.ReviewState.of(deps).restore(**snapshot.review)
+    return branch.SnapshotWriter(
+        store, session_id, run=run_of(deps), state=run_state_of(deps), limits=limits,
+        base_request_limit=bounds.base_request_limit, extra_turns=bounds.extra_turns)
+
+
+def _write_trace_or_empty(run_dir: Path, store: Any, session_id: str, wall_ms: float) -> None:
+    """Write the run's tool trace, or an empty one when the store cannot produce it; never
+    fails the run (the trace is observability)."""
+    try:
+        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
+    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
+        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
+        try:
+            write_guarded(RunPaths(run_dir).tool_trace, "")
+        except OSError as fallback_err:
+            # The target can be a planted alias; the trace is observability and must not
+            # discard the run's result.
+            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
+                          f"{run_dir} has no tool_trace.jsonl")  # lint-run-records: ok — an operator diagnostic naming the missing record
 
 
 async def run_investigation(  # noqa: PLR0913 — a composition root: every parameter is a
@@ -573,6 +663,7 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     tenant: RunTenant,
     orient_shim: orient.ShimRunner | None = None,
     run_state: RunState | None = None,
+    clock: ClockSource | None = None,
 ) -> dict:
     # `tenant` is resolved once at the entry point (settings folder, permissions, item 3's
     # dispatch identity). Required: there is no process-level fallback.
@@ -582,8 +673,13 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     # driven — and carried by reference to every role of the run; a branch sibling's seeding
     # records its inherited rows into it. The summary does not hand it out: a caller that wants
     # it passes its own.
+    #
+    # `clock` is the run clock's source (#1255 "Time"): a zero-argument callable returning an
+    # aware UTC datetime, the single source every model-visible time of the run is read from
+    # (`RunState.now`). Omitted, the host's own (wall time).
     run_dir, run_id = run.run_dir, str(run.id)
-    state = _run_state_at_boundary(run_state, run_dir, run_id)
+    state = _run_state_at_boundary(run_state, run_dir, run_id, clock)
+    _box_follows_run_clock(box, state)
     model_name = resolve_main_model(model_name)
     # Captured before the default is resolved below: with no injected `verbs=`, lead-0 must not
     # inherit MAIN-gather's default registry.
@@ -641,7 +737,8 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         # A resume joins the source run's case, so the case pointer comes from the store, not
         # the uuid minted above (they match on a fresh run). `run_dir` is passed because a
         # resumed MAIN inherits the investigation document as well as the message history.
-        session_id, resume_history = branch.open_main_session(store, resume, state, run=run, source_run=source_run)
+        session_id, resume_history = branch.open_main_session(
+            store, resume, state, run=run, source_run=source_run)
         # Written after the session opens, so a refused branch leaves no pointer naming the
         # source run's store. Rebound so `_run_summary` names the case this run joined.
         case_id = branch.attach_case_pointer(
@@ -698,6 +795,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
         orient_shim=orient_shim, tenant_agent=tenant.agent,
     )
 
+    snapshot, limits, gate_bounds, usage = _resume_from(
+        _branch_snapshot(store, resume, source_run), state, limits, gate_bounds)
+
     agent = build_agent(
         defender_dir, logger, make_model, main_model=model_name, verbs=verbs, limits=limits,
         store=store, session_id=session_id, review_stages=stages, bounds=gate_bounds,
@@ -717,21 +817,13 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
 
     agent_run, end, exit_reason = await _drive_releasing_log(
         logger, agent, prompt, deps, store, session_id, gate_bounds, resume_history,
+        usage=usage, snapshots=_snapshot_writer(snapshot, deps, store, session_id, limits,
+                                                gate_bounds),
     )
     wall_ms = (time.monotonic() - run_started) * 1000.0
 
     result = agent_run.result if agent_run is not None else None
-    try:
-        observe.write_trace(run_dir, store=store, session_id=session_id, wall_ms=wall_ms)
-    except Exception as e:  # noqa: BLE001 — a broken store must not swallow the artifact entirely
-        _logger.error(f"write_trace failed ({e!r}); writing an empty trace")
-        try:
-            write_guarded(RunPaths(run_dir).tool_trace, "")
-        except OSError as fallback_err:
-            # The target can be a planted alias; the trace is observability and must not
-            # discard the run's result.
-            _logger.error(f"the empty-trace fallback also failed ({fallback_err!r}); "  # lint-run-records: ok — a message naming the record for the model or operator, not a path
-                          f"{run_dir} has no tool_trace.jsonl")  # lint-run-records: ok — an operator diagnostic naming the missing record
+    _write_trace_or_empty(run_dir, store, session_id, wall_ms)
     logger.close()
     output = result.output if result is not None else None
     return _run_summary(
@@ -782,7 +874,6 @@ __all__ = [
     "_CORPUS_DIRS",
     "_account_executed_call",
     "_affinity_key",
-    "_branch_clock",
     "_budget_short_circuit",
     "_clock",
     "_common",

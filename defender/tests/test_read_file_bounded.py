@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender.tests._frames680 import assert_one_frame, frame_salt_of
 
 _DEFENDER = Path(__file__).resolve().parents[1]
@@ -166,7 +168,7 @@ def _read_file_tool_output(run_dir: Path, path: Path) -> str:
     def _model_fn(messages, info):  # noqa: ANN001 — pydantic_ai FunctionDef shape
         calls.append(1)
         if len(calls) == 1:
-            return ModelResponse(parts=[ToolCallPart("read_file", {"path": str(path)})])
+            return ModelResponse(parts=[ToolCallPart("read_file", {"path": model_path(path, run_dir=run_dir, defender_dir=_DEFENDER)})])
         return ModelResponse(parts=[TextPart("done")])
 
     agent = Agent(deps_type=tools.AgentDeps)

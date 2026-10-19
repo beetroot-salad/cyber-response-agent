@@ -14,7 +14,7 @@ from defender.tests.startup_usability_1256.test_1256_adapter_checks import (
     planted_tree,
 )
 from defender.tests.tenant_1107_settings import _spec1107 as S
-from defender.tests.test_920_estate_seam import SERVED_FILE, served_rows, world_registry
+from defender.tests.test_920_estate_seam import SERVED_FILE, control_oracle, served_rows, world_registry
 
 _TABLE = """\
 dispositions:
@@ -46,7 +46,8 @@ def test_queries_to_a_startup_broken_adapter_never_import_it_again(tmp_path: Pat
     tenant = S.resolve(root)
     roster = read_roster(tree / "scripts" / "adapters")
     ledger = tmp_path / SERVED_FILE
-    registry = (world_registry(roster.root, tenant.grants.gather, ledger) if replay else
+    registry = (world_registry(roster.root, tenant.grants.gather, ledger,
+                               **control_oracle({"system": "cmdb", "planted": True})) if replay else
                 ModuleVerbRegistry(roster, tenant.grants.gather))
     main = _replies([
         Turn(tool_calls=[("gather", {"lead_id": "l-001", "system": "cmdb",

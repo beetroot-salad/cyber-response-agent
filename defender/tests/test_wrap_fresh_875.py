@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from defender import _untrusted  # noqa: E402
@@ -192,7 +194,7 @@ def test_875_the_persisted_gather_summary_cannot_replay_the_escape_on_mains_re_r
         "second frame on the way back and the test below no longer states the risk"
     )
 
-    text = tools._tool_read_file(deps, str(summary))
+    text = tools._tool_read_file(deps, model_path(summary, run_dir=run_dir))
     _sole_closing_tag(text)
     assert HOST_NOTE in text, "the persisted summary lost the injected sentence"
     assert text.startswith(out[:60]), "the persisted bytes are not what MAIN was returned"

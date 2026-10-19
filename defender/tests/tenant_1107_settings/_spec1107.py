@@ -311,14 +311,12 @@ def launch_branch(src: Path, data_root: Path, **seams: Any) -> tuple[Any, BaseEx
     refused with)`."""
     _require_data_root(data_root)
     from defender.tests import _triplet_947 as t947
-    from defender.tests.tenant_1078_pass_a import _spec1078 as h1078
 
     fakes: dict[str, Any] = {
         "spawn": t947.FakeSpawn(), "questioner": t947.FakeAgent(),
         "live_tree": t947.source_capture(), "preflight": t947.no_preflight}
     fakes.update(seams)
-    argv = [str(src), str(t947.BRANCH_MESSAGE_ID), "--continuation-prompt",
-            h1078.CONTINUATION]
+    argv = [str(src), str(t947.BRANCH_MESSAGE_ID), *t947.retired_continuation_argv()]
     try:
         return mod("learning.branch.cli").main(argv, **fakes), None
     except SystemExit as refused:

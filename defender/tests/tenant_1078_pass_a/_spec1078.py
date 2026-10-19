@@ -505,7 +505,7 @@ def launch_argv(source: Path, message_id: int = T.BRANCH_MESSAGE_ID, *,
     source = Path(source)
     requested = source.parent.parent.name if tenant_id is None else tenant_id
     return ["--tenant", requested, source.name, str(message_id),
-            "--continuation-prompt", CONTINUATION]
+            *T.retired_continuation_argv()]
 
 
 def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:

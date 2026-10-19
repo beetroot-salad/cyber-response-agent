@@ -350,7 +350,6 @@ def _drive_investigation(  # noqa: PLR0913 — one investigation's whole identit
         resume = branch_mod.BranchSpec(
             source_run_dir=source.run_dir,
             branch_message_id=family.branch_message_id,
-            continuation_prompt=family.continuation_prompt,
             as_of=family.as_of,
         )
         try:

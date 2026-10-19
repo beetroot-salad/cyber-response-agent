@@ -376,11 +376,50 @@ def test_reusing_a_run_id_clears_all_three_sidecars_not_only_the_named_one(tenan
 
 # D3 / decision 15 — the world token, and a resume without a family record
 
+def _arm_stamp_has_the_unforked_shape(run_dir: Path, *, token: str, natural_world: str) -> None:
+    """#1255 P3: "`provenance.json` (world id, parent run, fork turn) moves out of the run folder
+    into the episode's host-side record." An arm's in-folder stamp, IF it keeps one, has the
+    shape an unforked run's has: no parent run, no fork turn, and a world id that is absent or
+    the tenant's natural base world — never the arm's world token, under any key (the run folder
+    is the box's mount, and the token names the episode and the world)."""
+    path = run_dir / "provenance.json"
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    stamp = json.loads(text)
+    assert stamp.get("parent_run_id") is None, (
+        f"the arm's run folder names its parent run {stamp.get('parent_run_id')!r} (#1255 P3)")
+    assert stamp.get("fork_turn") is None, (
+        f"the arm's run folder names its fork turn {stamp.get('fork_turn')!r} (#1255 P3)")
+    assert stamp.get("world_id") in (None, natural_world), (
+        f"the arm's stamp carries the world id {stamp.get('world_id')!r}, neither absent nor the "
+        f"tenant's natural base world {natural_world!r} — the world id moves out of the run "
+        "folder (#1255 P3)")
+    assert token not in text, f"the arm's run-folder stamp carries its world token {token!r}"
+
+
+def _recorded_world(ep: Path, label: str):
+    """The world `label` as the episode's own host-side record names it, read back through the
+    reader a sibling resolves from (`run.resume_world` over the held episode) — the record's
+    file name and format are the episode's, not pinned here."""
+    with Episode.open(ep) as episode:
+        return H.run_py().resume_world(
+            episode, label, tenant=lambda: T1106.run_tenant(T1106.accept(current_data_root(), T_ID)))
+
+
 def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_world(
         tenant_root, tmp_path):
-    """A forked sibling stamps its `ResumeWorld.world_id` — the escaped `<episode token>.
-    <label>` the ledger and the staged aliases key on — and its lineage (the source run, the
-    branch turn); an unforked run stamps the tenant's `base_world_id` and no lineage."""
+    """An unforked run stamps the tenant's `base_world_id` and no lineage. A forked sibling's
+    world token — the escaped `<episode token>.<label>` the ledger and the staged aliases key
+    on — and its lineage (the source run, the branch turn) are the episode's, host-side.
+
+    #1255 P3 FLIPPED the sibling half: "`provenance.json` (world id, parent run, fork turn)
+    moves out of the run folder into the episode's host-side record". Before #1255 the sibling
+    stamped its token and lineage into its own `provenance.json`; its run folder is the box's
+    mount, so that told the model it was an arm. Now the sibling's run-folder stamp, if any,
+    has the unforked shape (no token, no parent run, no fork turn; world id absent or the
+    tenant's natural base world), and the token, source run and branch turn are read off the
+    episode's own record."""
     alert = H.plant_alert(tmp_path / "in")
     unforked = Path(_materialize(alert, "run-unforked"))
     base = tenant_root / T_ID / "runs"
@@ -391,14 +430,20 @@ def test_a_forked_sibling_stamps_the_episode_token_and_an_unforked_run_the_base_
 
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
     sibling = Path(_arm(RunPaths(src).alert, world, ep))
-    assert _stamp(sibling)["world_id"] == world.world_id, (
-        "a forked sibling stamps its ResumeWorld token, which is what `served/<token>.jsonl` "
-        "keys on and what D3 writes into provenance")
-    assert "-" not in _stamp(sibling)["world_id"], (
+    _arm_stamp_has_the_unforked_shape(sibling, token=world.world_id,
+                                      natural_world=_record(base)["base_world_id"])
+
+    recorded = _recorded_world(ep, "b")
+    assert recorded.world_id == world.world_id == T.world_token("b"), (
+        "the episode's record no longer names the token the sibling ran as — the one "
+        "`served/<token>.jsonl` keys on")
+    assert "-" not in recorded.world_id, (
         "the token is the ESCAPED spelling (`episode_token_for`), never `<episode_id>.<label>` "
         "re-composed from the run id — that spelling joins to nothing")
-    assert _stamp(sibling)["parent_run_id"] == world.family.source_run_id
-    assert _stamp(sibling)["fork_turn"] == world.family.branch_message_id
+    assert recorded.family.source_run_id == src.name, (
+        "the episode's host-side record no longer names the run the sibling forked")
+    assert recorded.family.branch_message_id == T.BRANCH_MESSAGE_ID, (
+        "the episode's host-side record no longer names the branch turn")
 
 
 def test_a_resume_without_a_family_record_stamps_the_tenants_base_world(tenant_root, tmp_path):

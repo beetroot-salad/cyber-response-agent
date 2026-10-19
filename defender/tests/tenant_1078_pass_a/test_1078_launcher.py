@@ -1,6 +1,8 @@
 """Branch launcher keeps a fork's tenant: source opened through the tenant's runs repository, refusals write nothing, episodes-root placement refusals."""
 from __future__ import annotations
 
+from defender.tests import _branch_947 as B947
+
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
 
 from defender.tests._spec1077 import fixture_run
@@ -60,7 +62,7 @@ def _launch_id(source_run_id: str, *, tenant_id: str = TID, **over):
     seams.setdefault("preflight", H.no_preflight)
     H.place_knowledge_for_rows()
     argv = ["--tenant", tenant_id, source_run_id, str(T.BRANCH_MESSAGE_ID),
-            "--continuation-prompt", H.CONTINUATION]
+            *T.retired_continuation_argv()]
     try:
         result = H.branch_cli().main(argv, spawn=spawn, **seams)
     except SystemExit as refused:
@@ -494,8 +496,11 @@ def test_o4_fork_store_location(tmp_path, data_root):
         as_of = br.branch_point_time(store, src, T.BRANCH_MESSAGE_ID, source_run=_run_handle_1165(src))
     finally:
         store.close()
+    # #1255 (D1, P4) COMPAT: the prompt reaches the spec only while the spec declares it.
+    retired = ({B947.RETIRED_PROMPT_FIELD: H.CONTINUATION}
+               if B947.declares_retired_prompt() else {})
     spec = br.BranchSpec(source_run_dir=src, branch_message_id=T.BRANCH_MESSAGE_ID,
-                         continuation_prompt=H.CONTINUATION, as_of=as_of)
+                         as_of=as_of, **retired)
     sib = tmp_path / "episodes-root" / T.EPISODE_ID / "runs" / f"{T.EPISODE_ID}-b"
     sib.mkdir(parents=True)
     store = br.store_factory_for(spec, source_run=fixture_run(spec.source_run_dir))("minted-case", sib)

@@ -859,7 +859,11 @@ def test_lessons_corpus_folder_is_missing_empty_or_a_link_when_tags_are_listed(t
     base's: the recorded argv, the section text, and whether the vocabulary section shows (since #1222
     it names its failure rather than vanishing, and only an unsigned run has none). Pinned as the base answers it: an alert with no
     signature gets no Lessons section when the `--tags` call fails too, and a section holding only
-    `### Viable tags` when that call answered."""
+    `### Viable tags` when that call answered.
+
+    #1255 (design rev 4, P1): the Lessons section is model-bound text, so its Hits name each
+    lesson by its model path (`/defender/lessons/<name>.md`), the checkout at `/defender` —
+    `goldens/lessons.json` `s062.orient`, respelled from the base's host paths."""
     engine_home()
     seen = observe_s062(tmp_path, monkeypatch.setenv)
     assert seen == golden("s062")

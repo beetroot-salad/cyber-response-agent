@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
     ReplayFn,
@@ -59,7 +61,7 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
         Turn(tool_calls=[("gather", {
             "lead_id": "l-001", "system": "elastic",
             "goal": "check sshd auth history", "what_to_summarize": ["auth events"]})]),
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"), "content": report_md})]),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir), "content": report_md})]),
         Turn(text="Investigation complete."),
     ])
     def esql(ctx, *, query: str) -> list[dict]:
@@ -126,7 +128,7 @@ def test_835_the_composition_root_keys_each_gather_lane_on_its_dispatched_system
     main_replay = ReplayFn([
         Turn(tool_calls=[_dispatch("l-001", "elastic"), _dispatch("l-002", "cmdb")]),
         Turn(tool_calls=[_dispatch("l-003", "elastic")]),
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir),
                                          "content": report_md})]),
         Turn(text="Investigation complete."),
     ])

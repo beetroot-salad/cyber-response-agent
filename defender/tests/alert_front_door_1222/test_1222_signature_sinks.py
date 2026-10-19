@@ -16,6 +16,7 @@ from typing import Any
 
 
 from defender.tests import _judge_921 as J
+from defender.tests import _1255_view as V
 from defender.tests import _spec773 as S773
 from defender.tests._state1135 import env_state
 from defender.tests.alert_front_door_1222 import _spec1222 as S
@@ -144,7 +145,9 @@ class _MainRunsOrientationLookup(S.MainScript):
 
 
 def _main_reads(*paths: Path) -> list[S.Turn]:
-    return [S.call("read_file", path=str(S.checkout_defender() / p.relative_to(S.DEFENDER)))
+    """MAIN's `read_file` of each checkout file, by the path a model holds for it: the checkout's
+    model path `/defender/<rel>` (#1255 design rev 4, P1), never the checkout's host path."""
+    return [S.call("read_file", path=f"{V.MODEL_DEFENDER}/{p.relative_to(S.DEFENDER).as_posix()}")
             for p in paths]
 
 

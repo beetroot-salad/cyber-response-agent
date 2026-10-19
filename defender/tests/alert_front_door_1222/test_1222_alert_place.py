@@ -20,8 +20,9 @@ from typing import Any
 
 import pytest
 
-from defender.tests import _session_store_705 as SS
+from defender.tests import _1255_view as V
 from defender.tests import _triplet_947 as T
+from defender.tests._1255_snapshot import calls_of, message_at, tool_calling_responses
 from defender.tests._branch_947 import spec_at
 from defender.tests._data_root_1078 import DATA_ROOT_ENV
 from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
@@ -182,6 +183,30 @@ def _assert_names_the_run_and_carries_no_byte(text: str, run_dir: Path, what: st
         assert digest not in text, f"{what}: the refusal carries the record's bytes (its digest)"
 
 
+def _assert_model_refusal_names_no_run_and_carries_no_byte(text: str, run_dir: Path,
+                                                            what: str) -> None:
+    """RG1's refusal as a MODEL receives it (a tool result): a fixed reason carrying no byte of
+    the alert or the record, and — #1255 design rev 5, C5 ("the alert-digest refusal names no
+    run folder name") — no run folder name either: the run's id is an identity an arm would
+    differ by (O2), and its host folder is host layout (O3). The operator-facing refusals keep
+    naming the run (`_assert_names_the_run_and_carries_no_byte`)."""
+    assert text, f"{what}: nothing refused"
+    assert Path(run_dir).name not in text, (
+        f"{what}: the refusal the model reads names the run folder: {text[:400]!r}")
+    assert DECOY not in text, f"{what}: the refusal carries the replaced alert's bytes"
+    with contextlib.suppress(AssertionError, OSError, ValueError):
+        digest = S.recorded_digest(run_dir)
+        assert digest not in text, f"{what}: the refusal carries the record's bytes (its digest)"
+
+
+def _in_box(host: Path, run_dir: Path) -> str:
+    """A file under the run folder as the box names it: #1255 (design rev 4, P1 Box bullet; rev
+    5, C8) mounts the run folder at the model view's `/runs/current`, so the host path is not a
+    path inside the box. Lexical, through the design's table (`_1255_view.model_path`)."""
+    return V.model_path(host, run_dir=run_dir)
+
+
+# =================================================================================================
 # The box scenarios
 
 def _lifecycle() -> Callable[..., dict]:
@@ -224,10 +249,21 @@ def _scripted_daemon(**kw: Any) -> Any:
     return RecordingDocker(**kw)
 
 
-def _readonly_binds_inside(mounts: list[dict], run_dir: Path) -> list[dict]:
-    """The read-only binds whose target lies inside `run_dir` (the input directory's shape)."""
-    root = str(Path(run_dir))
-    return [m for m in mounts if m["readonly"] and m["target"].startswith(root + "/")]
+def _readonly_binds_inside(mounts: list[dict]) -> list[dict]:
+    """The read-only binds whose target lies inside the box's run folder (the input
+    directory's shape). Since #1255 (design rev 4, P1) the box mounts the run folder at the
+    model view's `/runs/current` whatever run it is, so a bind's TARGET no longer tells one run
+    from another — the callers pin which run's directory it is by the bind's SOURCE."""
+    return [m for m in mounts if m["readonly"] and m["target"].startswith(V.MODEL_RUN + "/")]
+
+
+def _assert_mounts_its_own_input_dir(binds: list[dict], run_dir: Path, what: str) -> None:
+    """`binds` is exactly one bind: this run's input directory (host source) at its model path
+    (box target)."""
+    assert [b["target"] for b in binds] == [_in_box(S.input_dir(run_dir), run_dir)], (
+        f"{what}: the read-only bind is not the input directory at its model path: {binds}")
+    assert [Path(b["source"]).resolve() for b in binds] == [S.input_dir(run_dir).resolve()], (
+        f"{what}: the read-only bind's source is not this run's own input directory: {binds}")
 
 
 @contextlib.contextmanager
@@ -323,14 +359,16 @@ print(json.dumps({"create_in": outcome(create_in), "rename_dir": outcome(rename_
 _SHA_PROBE = "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())"
 
 
-def _exec(box: Any, run_dir: Path, *argv: str) -> subprocess.CompletedProcess:
-    """`docker exec -w <run> <box> …` through the docker the box was created with — the
-    in-box view, independent of the permission layer (RJ-08)."""
-    return box.docker(["docker", "exec", "-w", str(run_dir), box.name, *argv])
+def _exec(box: Any, *argv: str) -> subprocess.CompletedProcess:
+    """`docker exec -w /runs/current <box> …` through the docker the box was created with — the
+    in-box view, independent of the permission layer (RJ-08). The box's working directory is
+    its run folder's MODEL path (#1255 design rev 5, C8 extended), and every path argument a
+    caller hands in is an in-box path (`_in_box`)."""
+    return box.docker(["docker", "exec", "-w", V.MODEL_RUN, box.name, *argv])
 
 
-def _probe(box: Any, run_dir: Path, script: str, *args: str) -> dict[str, str]:
-    done = _exec(box, run_dir, "python3", "-c", script, *args)
+def _probe(box: Any, script: str, *args: str) -> dict[str, str]:
+    done = _exec(box, "python3", "-c", script, *args)
     assert done.returncode == 0, (
         f"the in-box probe did not run (rc={done.returncode}): {done.stderr!r} — a broken probe, "
         "not a refusal")
@@ -366,26 +404,27 @@ def _write_probes(box: Any, run_dir: Path, seen: _BoxSeen) -> None:
     # Positive controls first, while both files are intact: a new file in the run folder lands
     # on the host; the box reads the alert's real bytes, raw and through the agent's transport.
     control = f"box-control-{uuid.uuid4().hex[:8]}.txt"
-    done = _exec(box, run_dir, "sh", "-c", f"echo CONTROL > {control}")
+    done = _exec(box, "sh", "-c", f"echo CONTROL > {control}")
     seen.control_written = control if done.returncode == 0 else None
-    seen.box_sha = {"alert": _exec(box, run_dir, "python3", "-c", _SHA_PROBE,
-                                   str(alert)).stdout.strip()}
+    seen.box_sha = {"alert": _exec(box, "python3", "-c", _SHA_PROBE,
+                                   _in_box(alert, run_dir)).stdout.strip()}
     bash_exec = S.mod("runtime.bash_exec")
     command = f"cat {S.alert_rel()}"
-    seen.transport_cat = box.run_parsed(bash_exec.parse(command), command=command, cwd=run_dir,
-                                        timeout=60)
+    # #1255 C8 (extended): the box receives the working directory as a model path.
+    seen.transport_cat = box.run_parsed(bash_exec.parse(command), command=command,
+                                        cwd=Path(V.MODEL_RUN), timeout=60)
     try:
         record = S.record_file(run_dir)
         seen.record_sha_before = S.sha256_hex(record.read_bytes())
-        seen.box_sha["record"] = _exec(box, run_dir, "python3", "-c", _SHA_PROBE,
-                                       str(record)).stdout.strip()
+        seen.box_sha["record"] = _exec(box, "python3", "-c", _SHA_PROBE,
+                                       _in_box(record, run_dir)).stdout.strip()
     except (AssertionError, OSError) as e:
         seen.coined_error = e
         record = None
-    seen.alert_shapes = _probe(box, run_dir, _FILE_PROBE, str(alert), str(run_dir))
+    seen.alert_shapes = _probe(box, _FILE_PROBE, _in_box(alert, run_dir), V.MODEL_RUN)
     if record is not None:
-        seen.record_shapes = _probe(box, run_dir, _FILE_PROBE, str(record), str(run_dir))
-        seen.dir_shapes = _probe(box, run_dir, _DIR_PROBE, str(S.input_dir(run_dir)))
+        seen.record_shapes = _probe(box, _FILE_PROBE, _in_box(record, run_dir), V.MODEL_RUN)
+        seen.dir_shapes = _probe(box, _DIR_PROBE, _in_box(S.input_dir(run_dir), run_dir))
 
 
 def _box_write_run(tmp_path: Path, *, start_box: Callable[..., Any]) -> tuple[_BoxSeen, bytes]:
@@ -412,7 +451,7 @@ def _assert_box_held(seen: _BoxSeen, alert: bytes) -> None:
     assert seen.run_dir is not None, f"the box never came up: {seen.raised!r}"
     assert seen.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
     refused = {k: v for k, v in (seen.alert_shapes or {}).items() if v == "ok"}
-    assert seen.alert_shapes, "no write shape was tried on the alert"
+    assert seen.alert_shapes, f"no write shape was tried on the alert: {seen.raised!r}"
     assert not refused, (
         f"from inside the box these write shapes were NOT refused on the alert: {sorted(refused)} "
         f"(all: {seen.alert_shapes})")
@@ -623,13 +662,15 @@ def test_a1_a_replaced_alert_is_refused_at_the_next_host_read_whatever_the_runti
 
 def test_p149_agents_read_permission_and_the_one_directory_dow(tmp_path):
     """MAIN and the correlation lead can read the alert and the record at their new place. A
-    refused read names the file it refused."""
+    refused read names the file it refused.
+
+    The absolute spelling is the one a model holds (#1255 design rev 4, P1): the run folder's
+    model path `/runs/current/<rel>`, never the run folder's host path."""
     rel, rec = S.alert_rel(), S.record_rel()
     planted = _tenant()
     run_id = "s08-p149"
-    run_dir = planted.runs / run_id
     reads = [S.call("read_file", path=rel), S.call("bash", command=f"cat {rel}"),
-             S.call("read_file", path=str(run_dir / rel)),
+             S.call("read_file", path=f"{V.MODEL_RUN}/{rel}"),
              S.call("read_file", path=rec), S.call("bash", command=f"cat {rec}"),
              S.call("read_file", path=OTHER_DIR_FILE)]
 
@@ -759,10 +800,9 @@ def test_p153_box_created_while_the_directory_is_missing_or_no(tmp_path, monkeyp
     daemon, raised, run_dir = _start_over(tmp_path / "populated", _populated)
     assert raised is None, f"a populated input dir refused: {raised!r}"
     assert run_dir is not None, "the populated control never reached start_box"
-    binds = _readonly_binds_inside(daemon.mounts(), run_dir)
+    binds = _readonly_binds_inside(daemon.mounts())
     assert binds, "the box mounts nothing read-only inside the run folder"
-    assert [b["target"] for b in binds] == [str(S.input_dir(run_dir))], (
-        f"the read-only bind is not the input directory: {binds}")
+    _assert_mounts_its_own_input_dir(binds, run_dir, "populated")
     box_fault = S.sym("runtime.box", "BoxFault")
     for name, shape in _BAD_SOURCES.items():
         daemon, raised, run_dir = _start_over(tmp_path / name, shape)
@@ -771,8 +811,12 @@ def test_p153_box_created_while_the_directory_is_missing_or_no(tmp_path, monkeyp
         assert S.input_dir(run_dir).name in str(raised), (
             f"{name}: the refusal does not name the input directory: {raised}")
         created = daemon.create_argv is not None
+        # Writable at the input directory's place in the box (its model path, #1255 P1) or
+        # writable over its host folder under any target.
+        inside, host = _in_box(S.input_dir(run_dir), run_dir), str(S.input_dir(run_dir))
         writable = [m for m in (daemon.mounts() if created else [])
-                    if not m["readonly"] and m["target"].startswith(str(S.input_dir(run_dir)))]
+                    if not m["readonly"] and (m["target"].startswith(inside)
+                                              or m["source"].startswith(host))]
         assert not writable, f"{name}: box start fell back to a writable bind: {writable}"
         leaked = [m for m in (daemon.mounts() if created else []) if "s08-elsewhere" in m["source"]]
         assert not leaked, f"{name}: the box was handed the link's target: {leaked}"
@@ -799,9 +843,9 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
                 start_box=_start_with(fresh_daemon), investigate=_capture_inputs(fresh))
     assert "run_dir" in fresh, f"the fresh run never reached its investigation: {fresh}"
     src = fresh["run_dir"]
-    fresh_binds = _readonly_binds_inside(fresh_daemon.mounts(), src)
+    fresh_binds = _readonly_binds_inside(fresh_daemon.mounts())
     assert fresh_binds, "a fresh run's box mounts nothing read-only inside its run folder"
-    assert [b["target"] for b in fresh_binds] == [str(S.input_dir(src))]
+    _assert_mounts_its_own_input_dir(fresh_binds, src, "the fresh run")
     # The launcher's copy in the episode (A1; launch itself is S11's), then a sibling resumed.
     ep = T.episode(tmp_path, root=Path(os.environ[T.EPISODES_BASE_ENV]),
                    doc=T.family_doc(source_run_dir=str(src), source_run_id=src.name))
@@ -822,9 +866,8 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
         ticket_writer=S.NoTicket())
     assert rc == 0, f"the sibling run failed (rc={rc})"
     assert "run_dir" in sib, "the sibling never started its box"
-    sib_binds = _readonly_binds_inside(sib_daemon.mounts(), sib["run_dir"])
-    assert [b["target"] for b in sib_binds] == [str(S.input_dir(sib["run_dir"]))], (
-        f"the sibling's box does not mount its input directory read-only: {sib_binds}")
+    sib_binds = _readonly_binds_inside(sib_daemon.mounts())
+    _assert_mounts_its_own_input_dir(sib_binds, sib["run_dir"], "the sibling")
     assert sib["alert"] == copy, (
         "the sibling's box holds an alert other than the episode's copy"
         + (" — the source run's current bytes" if sib["alert"] == DECOY_BYTES else ""))
@@ -917,13 +960,18 @@ def _held_files(run_dir: Path) -> dict[str, Path]:
     return {k: p for k, p in held.items() if p.is_file()}
 
 
-#: The source run a sibling is branched from: a fenced document and one gathered query, so the
-#: branch point at MAIN's first tool return passes `validate` (S04's resume trio does the same).
+#: The source run a sibling is branched from: a fenced document, one gathered query, then one
+#: more MAIN tool call (`echo held`) — the branch point. #1255 (D1, C7): a branch point is a MAIN
+#: response that called tools, and its fork snapshot must already hold a query that reached a
+#: system. The capture lands INSIDE the gather call, so neither the append's response nor the
+#: gather dispatch has it in its snapshot; the response after the gather returns does (the
+#: shape `test_1222_correlation_dispatch`'s sibling source uses).
 def _branchable_source(tmp_path: Path, planted: S.Planted) -> S.Drive:
     golden = (H.GOLDEN / "investigation.md").read_text(encoding="utf-8")
     src = _run(tmp_path / "source", tenant=planted,
                main=[S.call("append_block", text=golden),
-                     S.gather("l-009", "elastic", "capture one fact"), S.text(S.DONE)],
+                     S.gather("l-009", "elastic", "capture one fact"),
+                     S.call("bash", command="echo held"), S.text(S.DONE)],
                leads={"l-009": [S.query("elastic", "query", {"native_query": "s08:capture"}),
                                 S.text("L9 captured.")]})
     assert src.raised is None, f"the source run did not end cleanly: {src.raised!r}"
@@ -939,9 +987,12 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     src = _branchable_source(tmp_path, planted)
     assert src.run_dir is not None
     store = S.sym("runtime.branch._spec", "open_source_store")(src.run_dir, source_run=_run_handle_1165(src.run_dir))
-    ss = SS.store_mod()
-    spec = spec_at(store, src.run_dir, ss.path_row_ids(store, ss.main_session_id(store))[2],
-                   prompt="Continue this investigation from where it stands.")
+    # #1255 (D1, C7): a branch point is a MAIN response that called tools, and the arm resumes
+    # with no continuation prompt — the source's third one (its `echo`), after the capture.
+    point = tool_calling_responses(store)[2]
+    assert calls_of(message_at(store, point))[0].tool_name == "bash", (
+        "the branch point is not the source's `echo` call")
+    spec = spec_at(store, src.run_dir, point)
     sibling_dir = planted.runs / f"{src.run_dir.name}-sibling"
     sibling_dir.mkdir(parents=True)
     for name, source in _held_files(src.run_dir).items():
@@ -989,8 +1040,9 @@ def test_p152_host_replaces_a_file_inside_the_directory_mid_ru(tmp_path, monkeyp
             run_dir = run.run_dir
             alert = S.alert_file(run_dir)
             _replace_alert(Path(run_dir), replaced)
-            seen["box_sees"] = _exec(box, Path(run_dir), "cat", str(alert)).stdout
-            seen["write"] = _probe(box, Path(run_dir), _FILE_PROBE, str(alert), str(run_dir))
+            in_box = _in_box(alert, Path(run_dir))
+            seen["box_sees"] = _exec(box, "cat", in_box).stdout
+            seen["write"] = _probe(box, _FILE_PROBE, in_box, V.MODEL_RUN)
             seen["host_after"] = alert.read_bytes() if alert.is_file() else None
             return {}
 

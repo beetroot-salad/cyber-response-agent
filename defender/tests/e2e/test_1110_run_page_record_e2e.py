@@ -331,6 +331,10 @@ def test_1110_o4_o5_a_failed_copy_is_a_warning_not_a_failed_render(
         tmp_path, monkeypatch, caplog, run_visualizations_dir, fault):
     """O4/O5 under `dev`."""
     run_dir = driven_run(tmp_path)
+    # The drive that made the run takes production's unboxed mode (#1255 C6), whose opt-out
+    # logs a WARNING; it is the drive's, not the page step's. Counted from here, every
+    # logger's warnings are the page step's.
+    caplog.clear()
     run = tenant_run(run_dir)
     monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
     if fault == "unwritable-destination":

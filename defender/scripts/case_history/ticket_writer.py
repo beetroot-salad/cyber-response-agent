@@ -265,7 +265,20 @@ def _post_comment(  # noqa: PLR0913 — one call site's worth of context, thread
     else:
         reason = None
         _logger.info(f"record {case_id}: comment posted ({status}, {word})")
+        _record_posted_comment(run, case_id, payload)
     _write_receipt(run, config, case_id, word if ok else RECEIPT_ERROR, reason)
+
+
+def _record_posted_comment(run: Run, case_id: str, payload: Mapping[str, object]) -> None:
+    """@owns ticket_comments — append the comment the store just accepted, `{key, body}`, to the
+    run's host-only record of its writes to the world (`RunPaths.ticket_comments`, beside the
+    run folder). A world branched from this run serves the case as it stood at the fork, so its
+    oracle is handed these writes (#1255 P5, O6; `case_ticket.read_posted_comments`).
+    Best-effort like every post-step: a failed append is a warning and never changes the receipt."""
+    try:
+        run.observability.ticket_comments.append([{"key": case_id, "body": payload.get("body")}])
+    except OSError as e:
+        _logger.warning(f"record {case_id}: the posted comment could not be recorded: {e}")
 
 
 def _prior_open_refusal(run: Run) -> str | None:

@@ -79,15 +79,17 @@ def test_create_argv_translates_the_source_and_keeps_the_target_canonical():
     joined = " ".join(argv)
     assert (
         "type=bind,source=/home/dev/projects/repo/.defender-runs/r1,"
-        "target=/workspace/.defender-runs/r1" in joined
+        "target=/runs/current" in joined
     )
     assert (
         "type=bind,source=/home/dev/projects/repo/defender,"
-        "target=/workspace/defender,readonly" in joined
+        "target=/defender,readonly" in joined
     )
-    # The in-isolate geography is untouched — this is what artifacts record.
-    assert argv[argv.index("--workdir") + 1] == "/workspace/.defender-runs/r1"
-    assert "/home/dev/projects/repo" not in joined.split("--workdir")[1]
+    assert argv[argv.index("--workdir") + 1] == "/runs/current"
+    # Neither namespace's host path follows the sources: not the daemon's, not this process's.
+    after_mounts = joined.split("--workdir")[1]
+    assert "/home/dev/projects/repo" not in after_mounts
+    assert "/workspace" not in after_mounts
 
 
 def test_create_argv_is_untouched_when_there_is_no_mount_table():
@@ -95,8 +97,9 @@ def test_create_argv_is_untouched_when_there_is_no_mount_table():
         "defender-run-r1", Path("/tmp/defender-runs/r1"), Path("/srv/defender"), PINNED, (),
     ).argv
     joined = " ".join(argv)
-    assert "type=bind,source=/tmp/defender-runs/r1,target=/tmp/defender-runs/r1" in joined
-    assert "type=bind,source=/srv/defender,target=/srv/defender,readonly" in joined
+    # #1255 P1: no table, no translation of the SOURCE; the target is the model view's path.
+    assert "type=bind,source=/tmp/defender-runs/r1,target=/runs/current" in joined
+    assert "type=bind,source=/srv/defender,target=/defender,readonly" in joined
 
 
 def test_create_argv_refuses_a_run_dir_off_every_shared_mount():
@@ -342,21 +345,34 @@ def _request_runtime_of(monkeypatch, value: str | None) -> str:
     return rec.create_argv[rec.create_argv.index("--runtime") + 1]
 
 
-def test_the_discovered_table_reaches_the_run_dir_create_argv():
+# C46 — the wiring: the discovered table must actually REACH the argv builders
+# Every translation test above calls the argv builders directly with a table handed in. That
+# leaves the connection between discovery and use unpinned: drop the mounts argument at
+# either call site and all of them stay green while the shipped code emits untranslated
+# sources again — the exact pre-fix defect. These drive the start paths instead.
+
+
+def test_the_discovered_table_reaches_the_run_dir_create_argv(tmp_path):
+    workspace = tmp_path / "workspace"
+    run_dir = workspace / ".defender-runs" / "r1"
+    run_dir.mkdir(parents=True)
+    defender_dir = workspace / "defender"
+    defender_dir.mkdir()
+    mounts = ((workspace, Path("/home/dev/projects/repo")),)
     rec = _CapturingDocker()
     with pytest.raises(BoxFault):  # the fake refuses create; the argv is already captured
         box_mod._start_boxed(
-            Path("/workspace/.defender-runs/r1"), Path("/workspace/defender"),
-            PINNED, rec, lambda _docker: MOUNTS,
+            run_dir, defender_dir, PINNED, rec, lambda _docker: mounts,
         )
     joined = " ".join(rec.create_argv or [])
+    # Targets are the model view's fixed paths (#1255 P1); the SOURCES carry the translation.
     assert (
         "type=bind,source=/home/dev/projects/repo/.defender-runs/r1,"
-        "target=/workspace/.defender-runs/r1" in joined
+        "target=/runs/current" in joined
     )
     assert (
         "type=bind,source=/home/dev/projects/repo/defender,"
-        "target=/workspace/defender,readonly" in joined
+        "target=/defender,readonly" in joined
     )
 
 

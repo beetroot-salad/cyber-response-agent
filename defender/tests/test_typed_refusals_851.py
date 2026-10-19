@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")  # CI installs the runtime extra; skip otherwise
 
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
@@ -92,7 +94,10 @@ def test_f10_the_cat_lane_still_denies_a_nul_operand(tmp_path):
     from defender.runtime.permission import bash as bash_gate
 
     deps, run, _box = _box_scene(tmp_path, MAIN_DEF)
-    command = f"cat {run}/inv\x00.md"
+    # Relative (#1255): the one spelling both altitudes read the same way — `decide_bash` over
+    # the model view and `_decide_readers` over the host anchor it is handed below — so the
+    # RESOLVE_ERRORS arm stays the thing answering there, not an "outside the trees" deny.
+    command = "cat inv\x00.md"
     d = permission.decide_bash(
         command, policy=deps.policy,
         run_dir=deps.run_dir, defender_dir=deps.defender_dir, cwd_anchor=deps.cwd_anchor,
@@ -125,7 +130,7 @@ def test_f07_a_nul_in_a_LATER_pipeline_stage_is_refused_too(tmp_path):
     deps, run, box = _box_scene(tmp_path, T1106.fixture_gather_def())
     payload = run / "gather_raw" / "l-001" / "1.json"
     with pytest.raises(ModelRetry):
-        _tool_bash(deps, f"cat {payload} | grep -n a\x00b")
+        _tool_bash(deps, f"cat {model_path(payload, run_dir=run)} | grep -n a\x00b")
     assert box.calls == []
 
 
@@ -138,7 +143,7 @@ def test_f07_an_encoder_valueerror_becomes_a_retry_not_a_dead_run(tmp_path):
         tmp_path, T1106.fixture_gather_def(), result=ValueError("embedded null byte"),
     )
     with pytest.raises(ModelRetry) as excinfo:
-        _tool_bash(deps, f"cat {run}/alert.json")
+        _tool_bash(deps, f"cat {model_path(run / 'alert.json', run_dir=run)}")
     assert "embedded null byte" in str(excinfo.value)
 
 
@@ -146,7 +151,7 @@ def test_f07_a_clean_command_still_runs(tmp_path):
     """Positive control: the NUL check is a check on ONE byte, not a new refusal of the bash
     lane. The same shapes without it reach the box and return its output."""
     deps, run, box = _box_scene(tmp_path, T1106.fixture_gather_def())
-    assert "ok" in _tool_bash(deps, f"cat {run}/alert.json")
+    assert "ok" in _tool_bash(deps, f"cat {model_path(run / 'alert.json', run_dir=run)}")
     assert len(box.calls) == 1
 
 

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender._io import read_jsonl_rows
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import (
@@ -59,8 +61,12 @@ def report_text() -> str:
 
 
 def tail_turns(run_dir: Path, n: int) -> list[Turn]:
-    """`n` TAIL-tier read_file turns — read_file is tail on MAIN, so each EXECUTES and advances tool_calls even..."""
-    return [Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})])
+    """`n` TAIL-tier read_file turns — read_file is tail on MAIN, so each EXECUTES and
+    advances tool_calls even after the trip, driving the count limb to
+    N + TAIL_ALLOWANCE deterministically. This is how the kill tests reach exhaustion
+    WITHOUT depending on wall-clock timing (blind reader R25: six e2e tests shared an
+    undeclared machine-speed assumption through `wall_clock_timeout=1`)."""
+    return [Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})])
             for _ in range(n)]
 
 
@@ -133,7 +139,7 @@ def test_only_the_budget_kill_marks_truncated_by_budget(tmp_path, enforced):
 def test_budget_kill_writes_partial_trace(tmp_path, enforced):
     """Tail exhaustion raises the budget kill's own exception type — not RunAborted, whose constructor is..."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='kill')
-    burst = [Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})] * 15)]
+    burst = [Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})] * 15)]
     summary = drive(run_dir, run_id="kill", main=ReplayFn(burst),
                     limits=caps(max_tool_calls=1, wall_clock_timeout=3600,
                                 grace_seconds=600))

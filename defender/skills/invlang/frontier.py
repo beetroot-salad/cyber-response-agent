@@ -34,7 +34,6 @@ import sys
 from defender._model import model
 
 from . import _walkers, vocab
-from .parser import scan_fences
 from .schema import CompanionBody
 from .validate import (
     _cell,
@@ -48,12 +47,10 @@ from .validate import (
 #: `:R attr_updates` key grammar is enforced; they are deliberately not re-exported here.
 __all__ = [
     "Frontier",
-    "FrontierAt",
     "HeldFact",
     "OpenContract",
     "OpenSlot",
     "derive_frontier",
-    "frontier_at",
     "frontier_from_text",
 ]
 
@@ -218,44 +215,3 @@ def frontier_from_text(text: str) -> Frontier:
             file=sys.stderr,
         )
         return Frontier(slots=(), contracts=(), held=())
-
-
-@model(frozen=True)
-class FrontierAt:
-    """The frontier as of block `n`, and an honest account of which `n` that actually was."""
-
-    frontier: Frontier
-    #: The block count actually used, after snapping into range.
-    n: int
-    #: How many ````invlang` blocks the document has in total.
-    total: int
-    #: What the caller asked for, unclamped — `snapped` is the two disagreeing.
-    requested: int
-
-    @property
-    def snapped(self) -> bool:
-        return self.n != self.requested
-
-
-def frontier_at(text: str, n: int) -> FrontierAt:
-    """The frontier as the document stood after its first `n` ````invlang` blocks.
-
-    A lesson should key on the frontier while the pitfall was live; by the close, the slots it
-    fires on are closed. `n` counts fences, not messages, so many branch points share one
-    frontier. A caller holding a message index maps it to a fence itself, because only the
-    run's trace can do that.
-
-    An out-of-range `n` is clamped into `[0, total]`, and the result reports both the requested
-    and the used `n` so the snap is visible. The prefix is rebuilt from fence bodies, so prose
-    between blocks cannot affect it. Never raises.
-    """
-    bodies = scan_fences(text).bodies
-    total = len(bodies)
-    resolved = max(0, min(n, total))
-    prefix = "\n\n".join(f"```invlang\n{body}\n```" for body in bodies[:resolved])
-    return FrontierAt(
-        frontier=frontier_from_text(prefix),
-        n=resolved,
-        total=total,
-        requested=n,
-    )

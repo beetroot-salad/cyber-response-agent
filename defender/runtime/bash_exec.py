@@ -410,9 +410,6 @@ def _run_one_pipeline(
                         stderr=stderr,
                         cwd=str(cwd),
                         env=env,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
                     )
                 except FileNotFoundError:
                     _kill_all(procs)
@@ -441,7 +438,9 @@ def _run_one_pipeline(
                         p.stdout.close()
         errfile.seek(0)
         err = errfile.read().decode("utf-8", "replace")
-    return rc, out or "", err
+    # Decoded here rather than by a text-mode pipe, whose universal newlines would turn a
+    # program's `\r\n` into `\n`: the output reaches the caller as the program wrote it.
+    return rc, (out or b"").decode("utf-8", "replace"), err
 
 
 def _short_circuit(pl, rc: int) -> bool:

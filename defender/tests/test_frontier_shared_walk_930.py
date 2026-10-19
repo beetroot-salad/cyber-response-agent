@@ -1,4 +1,4 @@
-"""One node-axis walk (validate.iter_vertex_cells) under both the benign gate and the frontier, and the frontier at block N."""
+"""One node-axis walk (validate.iter_vertex_cells) under both the benign gate and the frontier, and the document frontier."""
 from __future__ import annotations
 
 import sys
@@ -15,7 +15,7 @@ pytest.importorskip("pydantic_ai")
 from defender._artifact_schema import validate_investigation  # noqa: E402
 from defender.skills.invlang.frontier import (  # noqa: E402
     derive_frontier,
-    frontier_at,
+    frontier_from_text,
 )
 from defender.skills.invlang.parser import parse_dense_companion  # noqa: E402
 from defender.skills.invlang.validate import (  # noqa: E402
@@ -62,7 +62,7 @@ v-008|process|nc||image=/usr/bin/nc
 """
 
 #: A `process` vertex with an open CLASS cell, and the refinement that closes it. Together they
-#: are the prefix/terminal contrast `frontier_at` exists for: open at one block index, settled
+#: are the open/terminal contrast the document frontier reports: open at one block index, settled
 #: at the next.
 OPEN_CLASS_BLOCK = """
 ```invlang
@@ -145,36 +145,18 @@ def test_the_open_cells_are_exactly_what_the_gate_refuses_on():
                for c in iter_vertex_cells(body, include_ident=True))
 
 
-# frontier_at
-
-def test_the_prefix_frontier_is_where_the_key_lives():
-    """CLAIM: the motivating contrast — a slot open at one block index and gone at the next."""
-    at_open = frontier_at(REFINED_DOC, 2)
-    at_closed = frontier_at(REFINED_DOC, 3)
-
-    assert [(s.vertex_id, s.slot) for s in at_open.frontier.slots] == [("v-006", "class")]
-    assert at_closed.frontier.slots == ()
-    assert ("v-006", "class") in [(h.vertex_id, h.slot) for h in at_closed.frontier.held]
+def test_the_document_frontier_tracks_open_and_resolved_slots():
+    opened = frontier_from_text(PROLOGUE + OPEN_CLASS_BLOCK)
+    closed = frontier_from_text(REFINED_DOC)
+    assert [(s.vertex_id, s.slot) for s in opened.slots] == [("v-006", "class")]
+    assert closed.slots == ()
+    assert ("v-006", "class") in [(h.vertex_id, h.slot) for h in closed.held]
 
 
-@pytest.mark.parametrize(("requested", "expected"), [(99, 3), (4, 3), (-5, 0)])
-def test_an_out_of_range_index_snaps_and_says_so(requested, expected):
-    """CLAIM: out-of-range clamps, and the result reports that it did."""
-    result = frontier_at(REFINED_DOC, requested)
-    assert result.n == expected
-    assert result.requested == requested
-    assert result.snapped is True
-    assert frontier_at(REFINED_DOC, 3).snapped is False
-
-
-def test_prose_between_blocks_cannot_change_the_answer():
-    """CLAIM: the prefix is rebuilt from fence bodies, so analyst prose between two blocks is
-    inert. `parse_dense_companion` already ignores it; this pins that `frontier_at` does not
-    reintroduce a dependency on it by slicing the raw text instead."""
+def test_prose_between_blocks_cannot_change_the_document_frontier():
     prosed = (PROLOGUE + "\n\nWorking hypothesis: the source IP is a scanner.\n\n"
               + OPEN_CLASS_BLOCK + "\n\nStill unresolved.\n\n" + attr_block(CLOSE_CLASS_ROW))
-    for n in range(0, 4):
-        assert frontier_at(prosed, n).frontier == frontier_at(REFINED_DOC, n).frontier
+    assert frontier_from_text(prosed) == frontier_from_text(REFINED_DOC)
 
 
 def test_the_recall_fast_path_sees_a_delimiter_that_straddles_the_seam(tmp_path):

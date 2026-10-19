@@ -259,11 +259,13 @@ def test_an_alias_bomb_manifest_is_refused_fast_without_being_expanded(tmp_path,
 
 
 def _scalar_across_top_level_fields() -> str:
-    """`continuation_prompt` anchored, `base_story` its alias."""
+    """`source_run_id` anchored, `base_story` its alias. (#1255 P4, D1: this was
+    `continuation_prompt` anchored; that field is retired, and the refusal is the YAML loader's,
+    which does not care which two top-level scalars the anchor links.)"""
     doc = T.family_doc()
-    prompt = doc["continuation_prompt"]
-    doc["continuation_prompt"], doc["base_story"] = "__PROMPT__", "__STORY__"
-    return spliced(doc, {"__PROMPT__": "&s " + json.dumps(prompt), "__STORY__": "*s"})
+    anchored = doc["source_run_id"]
+    doc["source_run_id"], doc["base_story"] = "__ANCHORED__", "__STORY__"
+    return spliced(doc, {"__ANCHORED__": "&s " + json.dumps(anchored), "__STORY__": "*s"})
 
 
 def _sequence_across_worlds() -> str:

@@ -1,12 +1,15 @@
 """#1007 — F-R5: an episode has ONE namespace, and the operator door that defeated it."""
 from __future__ import annotations
 
+import inspect
+
 from pathlib import Path
 
 import pytest
 
 from defender.tests import _triplet_947 as T
 from defender.tests import _world_1007 as W
+from defender.tests._spec1077 import fixture_run
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
 #: The string an operator would name. Distinctive on purpose: the negative below sweeps every
@@ -73,11 +76,17 @@ def test_an_episode_is_read_under_one_namespace(tmp_path):
 
     with pytest.raises(TypeError):
         fam.episode_token_for(family.episode_id, override=OPERATOR_NAMED)
-    with pytest.raises(TypeError):
+    # #1255 (D1, P4): `preflight_episode` takes a continuation prompt only while the CLI still
+    # does, so it is offered only then — otherwise the TypeError below would be the missing
+    # parameter, not the refused `episode_token`. The call names every OTHER parameter by the
+    # signature's own spelling, so the TypeError can only be about `episode_token`.
+    params = inspect.signature(cli.preflight_episode).parameters
+    assert "episode_token" not in params, "the operator-named token is still a parameter"
+    retired = {"continuation_prompt": "go"} if "continuation_prompt" in params else {}
+    with pytest.raises(TypeError, match="episode_token"):
         cli.preflight_episode(
-            source_run_dir=ep, branch_message_id=W.BRANCH_MESSAGE_ID,
-            preflight=W.no_preflight, model=None, continuation_prompt="go",
-            allow_dirty=False, live_tree=T.source_capture(),
-            episode_token=OPERATOR_NAMED)
+            source=fixture_run(ep), branch_message_id=W.BRANCH_MESSAGE_ID,
+            preflight=W.no_preflight, model=None, allow_dirty=False,
+            live_tree=T.source_capture(), episode_token=OPERATOR_NAMED, **retired)
 
 

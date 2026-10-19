@@ -19,6 +19,7 @@ from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.runtime import bash_exec, box as box_mod
 from defender.runtime.box._image import HASH_INPUTS
+from defender.tests._1255_view import MODEL_RUN
 from defender.tests._alert_plant import plant_alert
 from defender.tests._declared869 import commit_all, init_git
 from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
@@ -219,9 +220,14 @@ class _AgentExec:
 
     box: box_mod.BoxExecutor
     tree: Path
+    inside: Path = Path(MODEL_RUN)
+
+    def at(self, host: Path) -> str:
+        """`host`, a path under `tree`, as a command in the box names it."""
+        return str(self.inside / host.relative_to(self.tree))
 
     def sh(self, command: str) -> _Ran:
-        res = self.box.run_parsed(bash_exec.parse(command), command=command, cwd=self.tree,
+        res = self.box.run_parsed(bash_exec.parse(command), command=command, cwd=self.inside,
                                   timeout=EXEC_TIMEOUT)
         return _Ran(res.rc, res.out.decode("utf-8", "replace"),
                     res.err.decode("utf-8", "replace"))
@@ -231,7 +237,7 @@ class _AgentExec:
         script = self.tree / "_probe_1188.py"
         if not script.exists():
             script.write_text(_PROBE, encoding="utf-8")
-        return self.sh(" ".join(["python3", str(script), *args]))
+        return self.sh(" ".join(["python3", self.at(script), *args]))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -241,8 +247,18 @@ class _DockerExec:
     name: str
     tree: Path
 
+    @property
+    def inside(self) -> Path:
+        """The writable tree as the box names it: a lane box mounts it at its own host path (a
+        learning-loop box, which #1255's model view does not cover — design rev 5, C12)."""
+        return self.tree
+
+    def at(self, host: Path) -> str:
+        """`host`, a path under `tree`, as a command in the box names it."""
+        return str(self.inside / host.relative_to(self.tree))
+
     def _run(self, *argv: str) -> _Ran:
-        done = box_mod._docker(["docker", "exec", "-w", str(self.tree), self.name, *argv])
+        done = box_mod._docker(["docker", "exec", "-w", str(self.inside), self.name, *argv])
         rc = done.returncode
         return _Ran(-(rc - 128) if rc > 128 else rc, done.stdout, done.stderr)
 
@@ -373,7 +389,9 @@ print(json.dumps(out))
 
 
 def _probe(x: _Exec, mode: str, target: Path, n: int) -> dict:
-    res = x.probe(mode, str(target), str(n))
+    """Run the probe in the box on `target`, a host path under `x.tree`, named as the box
+    names it."""
+    res = x.probe(mode, x.at(target), str(n))
     assert res.rc == 0, (
         f"the {mode} probe did not run to completion in the box (rc={res.rc}): "
         f"{res.err!r} — a broken probe, not a refusal"
@@ -414,12 +432,12 @@ def _assert_sparse_extension_is_bounded(x: _Exec) -> None:
     _assert_host_takes_a_sparse_tib(tree)
 
     big, small = tree / "sparse-big", tree / "sparse-small"
-    refused = x.sh(f"truncate -s 1T {big}")
+    refused = x.sh(f"truncate -s 1T {x.at(big)}")
     assert refused.rc != 0, "`truncate -s 1T` succeeded inside the box"
     assert _host_size(big) <= L, (
         f"the host sees a {_host_size(big)}-byte file the box truncated to 1 TiB (cap {L})"
     )
-    allowed = x.sh(f"truncate -s {L // 2} {small}")
+    allowed = x.sh(f"truncate -s {L // 2} {x.at(small)}")
     assert allowed.rc == 0, (
         f"control: `truncate` under the cap failed (rc={allowed.rc}): {allowed.err!r}"
     )
@@ -454,14 +472,14 @@ def _assert_allocation_is_bounded(x: _Exec) -> None:
     _assert_host_takes_an_allocation_past_the_cap(tree)
 
     for size, name in ((PAST, "fallocate-past"), (ONE_TIB, "fallocate-tib")):
-        refused = x.sh(f"fallocate -l {size} {tree / name}")
+        refused = x.sh(f"fallocate -l {size} {x.at(tree / name)}")
         assert refused.rc != 127, f"there is no `fallocate` in the box image: {refused.err!r}"
         assert refused.rc != 0, f"`fallocate -l {size}` succeeded inside the box"
         assert _host_size(tree / name) <= L, (
             f"the host sees a {_host_size(tree / name)}-byte file the box allocated (cap {L})"
         )
     small = tree / "fallocate-small"
-    allowed = x.sh(f"fallocate -l {L // 2} {small}")
+    allowed = x.sh(f"fallocate -l {L // 2} {x.at(small)}")
     assert allowed.rc == 0, (
         f"control: `fallocate` under the cap failed (rc={allowed.rc}): {allowed.err!r}"
     )

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from pydantic_ai.exceptions import ModelRetry
 
 from defender.agents import LEAD_AUTHOR_DEF, MAIN_DEF
@@ -31,7 +33,7 @@ def test_main_bash_result_contains_a_learning_frame_forgery(tmp_path):
     deps = _deps(tmp_path, MAIN_DEF, box=fake)
     artifact = deps.run_dir / "report.md"
     artifact.write_text("admitted main read")
-    out = _tool_bash(deps, f"cat {artifact}")
+    out = _tool_bash(deps, f"cat {model_path(artifact, run_dir=deps.run_dir)}")
     assert out == _format_bash_result(0, fake.result.out.decode(), "")
 
 

@@ -242,7 +242,7 @@ def _launch(tmp_path: Path, est: S.Estate, monkeypatch: Any, *, oracle: S.Script
     try:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id.
         rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(S.BRANCH_MESSAGE_ID),
-                       "--continuation-prompt", "go"],
+                       *T.retired_continuation_argv()],
                       spawn=spawn, questioner=S.questioner_for(), preflight=S.no_preflight,
                       live_tree=T.source_capture(), roster=est.roster(),
                       oracle=oracle.model, verifier=verifier.model)

@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
 # --------------------------------------------------------------------------------------
@@ -83,10 +85,14 @@ def reducer_make(label: str = "b") -> Callable[[], Any]:
     sibling by this writer's smoke: exit 69 `EXIT_NO_RUNTIME`, recorded infra; where duckdb is
     installed, the missing table fails the reduce the same way)."""
     def make() -> Any:
-        raw = _run_dir(label) / "gather_raw" / "l-001"
+        run_dir = _run_dir(label)
+        raw = run_dir / "gather_raw" / "l-001"
         payload = max(raw.glob("*.json"), key=lambda p: int(p.stem))
+        # #1255 P1 (slice B): the gather model names the payload by its model path,
+        # `/runs/current/gather_raw/l-001/<n>.json`, never the arm's host run folder.
         return S.S24.replay_harness().Turn(tool_calls=[("bash", {
-            "command": f"cat {payload} | defender-sql 'SELECT * FROM no_such_table_1234'"})])
+            "command": f"cat {model_path(payload, run_dir=run_dir)} | defender-sql "
+                       "'SELECT * FROM no_such_table_1234'"})])
     return make
 
 
@@ -286,7 +292,7 @@ def test_1234_contrast_row_counts_calls_leads_and_external_refusals(tmp_path: Pa
     ∅.bash-shim included, I-1), and as unmapped each ledger row whose id is in no table row; a
     sibling's seeded lead-zero row is inherited, not unserved (I-2).
 
-    render reads executed_queries (its inherited rows seeded by _inherit_evidence) and the
+    render reads executed_queries (its inherited rows seeded by ForkSnapshot.restore_files) and the
     served_ledger into the JudgeContext. World b runs: a reject; a repeat of the inherited
     call; QP (altered); the withheld edr lookup (refused); an outage (BOB); a failing reduce
     (∅.bash-shim); three identical failing calls (the repeat guard trips: ∅.repeat-trip, and
@@ -764,7 +770,7 @@ def test_1234_failed_served_ledger_write_ends_the_run(tmp_path: Path, writer: st
 
 
 def test_1234_one_call_carries_one_host_written_id_on_both_records(tmp_path: Path) -> None:
-    """Before a call reaches the registry the query tool allocates a host-written call id naming
+    """(Name kept: `spec_graph_1234.yaml` binds it; #1255 reverses the table half.) Before a call reaches the registry the query tool allocates a host-written call id naming
     the run and the call; the registry writes it on every served-ledger row of that call
     (refused from authorize_call / fault from resolve_call, delivered/real-error from _deliver/_record_beside) and the
     query tool writes the same id on the call's table row; no two calls of one run share an id,
@@ -782,30 +788,31 @@ def test_1234_one_call_carries_one_host_written_id_on_both_records(tmp_path: Pat
         S.done_turn()], oracle=S.altering_oracle()))
     inherited = PRE_BRANCH + 1
     ledger_b = built.ledger_rows("b")
-    table_b = own(built.table_rows("b"), inherited)
+    rows_b = built.table_rows("b")
+    table_b = own(rows_b, inherited)
     assert sorted({r["source"] for r in ledger_b}) == \
         ["oracle", "passthrough", "real-error", "refused"], "fixture: every ledger source"
     assert len(ledger_b) == len(table_b) == 6, "fixture: six calls, a row each on both records"
 
     ledger_ids = [r.get(S.CALL_ID) for r in ledger_b]
-    table_ids = [r.get(S.CALL_ID) for r in table_b]
-    assert all(ledger_ids), "every row of both records carries the id"
-    assert all(table_ids), "every row of both records carries the id"
+    assert all(ledger_ids), "every ledger row carries the id"
     assert len(set(ledger_ids)) == 6, "no two calls share an id"
-    assert set(ledger_ids) == set(table_ids), "the same ids on both records"
-    by_id = {r[S.CALL_ID]: r for r in table_b}
-    for row in ledger_b:
-        partner = by_id[row[S.CALL_ID]]
-        assert (partner["system"], partner["verb"], S.canonical(partner["params"])) == \
-            (row["system"], row["verb"], S.canonical(row["params"])), "one id, one call"
     carol_ids = [r.get(S.CALL_ID) for r in ledger_b
                  if S.canonical(r["params"]) == S.canonical(CAROL)]
     assert len(set(carol_ids)) == 2, "the repeated identical call has its own id"
-    seeded = {r.get(S.CALL_ID) for r in built.table_rows("b")[:inherited]}
-    assert not seeded & set(ledger_ids), "an inherited row carries no id of this run"
-    others = {r.get(S.CALL_ID) for w in "ac" for r in
-              [*built.ledger_rows(w), *built.table_rows(w)]}
+    others = {r.get(S.CALL_ID) for w in "ac" for r in built.ledger_rows(w)}
     assert not others & set(ledger_ids), "the id names the run: no other run carries b's ids"
+
+    b = _contrast(S.render_context(built, "b"), "b")
+    assert list(_field(b, "contrast.unserved")) == [], "an own row lost its ledger partner"
+    assert list(_field(b, "contrast.unmapped")) == [], "a ledger row found no table row"
+    assert _field(b, "contrast.first_altered") == lines(rows_b, S.QP)[-1]
+    assert sorted(_field(b, "contrast.errored")) == lines(rows_b, BOB)
+    own_denied = lines(rows_b, S.DENIED_LOOKUP, query_id=S.DENIED_QUERY_ID)[-1]
+    assert own_denied in _numbers(_field(b, "contrast.blocked")), (
+        "the refused call's table row is not joined to its `refused` ledger row")
+    carrying = [r for w in "abc" for r in built.table_rows(w) if S.CALL_ID in r]
+    assert not carrying, f"#1255 G4: a query-table row carries the call id: {carrying[:2]}"
 
 
 
@@ -828,22 +835,28 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "driven_by": "test_1234_failed_served_ledger_write_ends_the_run"},
     "runtime/query_tool.py::QueryCapture._record": {
         "writes_by": "append_query_row", "via": ("QueryCapture._record_denied",),
-        "failed_write": "ordinary OSError propagates; denied view is best-effort", "call_id": "this run's",
+        "failed_write": "ordinary OSError propagates; denied view is best-effort",
+        "call_id": "none on the row (#1255 G4: the host-only join record holds it)",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
     "runtime/tools/_bash.py::_record_shim_failure": {
         "writes_by": "append_query_row", "via": (), "failed_write": "best-effort view",
-        "call_id": "this run's", "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
+        "call_id": "none on the row (#1255 G4)",
+        "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
     "scripts/gather_tools/record_query.py::append_query_row": {
         "writes_by": "append", "via": (), "failed_write": "records state, then raises OSError",
-        "call_id": "this run's", "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "runtime/branch/_seed.py::_inherit_evidence": {
-        "writes_by": "seed", "via": (), "failed_write": "refuses the seed",
-        "call_id": "none of this run's (seeded)",
+        "call_id": "none on the row (#1255 G4)",
+        "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
+    # #1255 P2: an arm's queries table is restored from the source's fork snapshot (the table
+    # cut to the length it held when the branch response arrived) — the production seeder of a
+    # sibling's table. Its rows are the source's, so none carries this run's call id.
+    "runtime/branch/_snapshot.py::ForkSnapshot.restore_files": {
+        "writes_by": "seed", "via": (), "failed_write": "refuses the restore",
+        "call_id": "none of this run's (restored from the source's snapshot)",
         "driven_by": "test_1234_every_query_table_writer_writes_this_runs_call_id"},
     # The archive's verbatim copy of the run's finished table into `worlds/<X>/`.
     "learning/lead_repository.py::stage_tables": {
         "writes_by": "copy2", "via": (), "failed_write": "raises out of the archive",
-        "call_id": "the run's own, copied verbatim",
+        "call_id": "none (#1255 G4), copied verbatim",
         "driven_by": "test_1234_one_call_carries_one_host_written_id_on_both_records"},
 }
 
@@ -907,12 +920,15 @@ def test_1234_two_leads_calls_at_once_leave_intact_distinct_ledger_and_table_row
     assert sorted(r["source"] for r in parsed) == \
         ["passthrough", "passthrough", "passthrough", "real-error", "refused"]
     ledger_ids = [r.get(S.CALL_ID) for r in parsed]
-    table_ids = [r.get(S.CALL_ID) for r in table]
     assert all(ledger_ids), "five calls, five ids"
     assert len(set(ledger_ids)) == 5, "five calls, five ids"
-    assert len(table) == 5, "each id on both records"
-    assert set(table_ids) == set(ledger_ids), "each id on both records"
-    by_id = {r[S.CALL_ID]: r for r in table}
-    for row in parsed:
-        assert S.canonical(by_id[row[S.CALL_ID]]["params"]) == S.canonical(row["params"]), (
-            "the exact join pairs the call with its own partner")
+    assert len(table) == 5, "a table row per call"
+    # #1255 G4/G6: the table carries no id; the exact join is the host's, read by the judge.
+    rows = built.table_rows("b")
+    b = _contrast(S.render_context(built, "b"), "b")
+    assert list(_field(b, "contrast.unserved")) == [], (
+        "the exact join pairs every call with its own partner")
+    assert list(_field(b, "contrast.unmapped")) == [], (
+        "the exact join pairs every call with its own partner")
+    assert sorted(_field(b, "contrast.errored")) == lines(rows, CAROL)
+    assert not [r for r in table if S.CALL_ID in r], "a query-table row carries the call id"

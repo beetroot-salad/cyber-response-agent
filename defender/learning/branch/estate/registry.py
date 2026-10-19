@@ -1,9 +1,11 @@
 """The verb registry a branched run queries through (#1224: served by the world's live oracle).
 
-Every investigator call reads its real base answer (the family's recording, else live) and,
-in a world with facts, is served by one oracle turn whose submission passed the host checks and
-a verifier (`estate.oracle`). Nothing reaches the investigator unverified, and every response
-lands in the world ledger with the decision that produced it.
+Every investigator call reads its real base answer (the family's recording, else live at the
+fork time) and is served by one oracle turn whose submission passed the host checks and a
+verifier (`estate.oracle`) — every call in a world with facts, and a call whose base is a live
+read in every world, the control included (#1255 D3). Only an answer the source received is
+served to the control with no turn, as the source received it. Nothing reaches the investigator
+unverified, and every response lands in the world ledger with the decision that produced it.
 
 Subclassing `ModuleVerbRegistry` is required: `driver.build_agent_core` refuses anything failing
 `isinstance(verbs, VerbRegistry)`, and `VerbRegistry.decide` compares `verb_class_of(fn)` against
@@ -34,6 +36,8 @@ from defender._io import read_jsonl_rows, read_text_utf8
 from defender._query_rules import ParamsTooDeep, _json_safe_params
 from defender.learning.core.config import OracleSettings
 from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
+from defender.runtime.payload_view import payload_text_of
+from defender.runtime.case_ticket import read_posted_comments
 from defender.runtime.verbs import (
     CALL_DELIVERY,
     CALL_ID,
@@ -51,11 +55,11 @@ from ..ledger import (
     ORACLE,
     PASSTHROUGH,
     REAL_ERROR,
+    RECONSTRUCTED,
     REFUSED,
     Ledger,
     LedgerError,
     ServedCall,
-    payload_text,
 )
 from .checks import RealData, canonical_json
 from .limiter import RateLimiter
@@ -80,20 +84,29 @@ class EstateError(Exception):
 def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any,
               params: Mapping[str, Any]) -> Any:
     """Serve one investigator call for `registry`'s world: the single definition of the serve
-    order (#1224).
+    order (#1224, #1255 D3/D5/D6).
 
-    The world's stored answer first (a repeated call is served byte for byte, no turn). Then
+    The world's stored answer first (a repeated call is served from the store, no turn). Then
     the call's base answer: the family's recording, else this world's own live base store,
-    else one live read (kept in that store, never in the world ledger, M16). A real error on
-    that read passes through as itself (`real-error`, not cached, O4). A world with no facts is
-    served its base (`passthrough`). Otherwise one oracle turn at a time (S11): the stored
-    answer is looked up again under the turn, then the oracle serves, the host checks and the
-    verifier pass it, and its rows, facts and answer are committed before the ledger row.
+    else one live read at the fork time (kept in that store, never in the world ledger, M16).
+    A real error on that read passes through as itself (`real-error`, not cached, O4).
+
+    An answer the source run received — the recording holds it — is served to a world with no
+    facts (the control) unchanged, as the source received it, with no turn (`passthrough`).
+    Every other call takes one oracle turn, one at a time (S11): every call of a world with
+    facts, and in EVERY world, the control included, a call whose base is a live read (D3, D6:
+    a question the source never asked, or one it asked but whose answer the recording lacks —
+    its call failed or its payload was unreadable). Live is "now"; the oracle serves the world
+    as it stood at the fork, told the fork time and the source's own writes after it. The
+    stored answer is looked up again under the turn, then the oracle serves, the host checks
+    and the verifier pass it, and its rows, facts and answer are committed before the ledger row.
 
     A call the source run made before the branch point (`registry.prebranch`, M01=A) still
     takes its turn (S1), but a submission that changes its base answer is refused as a failed
     attempt before the host checks and the verifier (`changes_base`): the world serves it
-    unchanged or goes unservable, as pre-flight would have failed it (`calibrate_one`).
+    unchanged or goes unservable, as pre-flight would have failed it (`calibrate_one`) — unless
+    the primer's skip record names it (D6: the source asked it, but its call failed or its
+    payload was unreadable; `registry.fixes`), whose oracle's fork-time answer is served.
 
     The answer is recorded and delivered only once the turn has closed (its clock mark
     included): a failure closing the turn raises before any row is written, so the ledger
@@ -104,8 +117,8 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
     hit = registry.store.answers.get(key)
     if hit is not None:
         return registry._from_store(system, verb, asked, hit)
-    base_text = registry._base(system, verb, fn, ctx, asked)
-    if not registry.world_facts:
+    base_text, recorded = registry._base(system, verb, fn, ctx, asked)
+    if recorded and not registry.world_facts:
         return registry._deliver(ServedCall(
             system=system, verb=verb, params=asked, payload_text=base_text, source=PASSTHROUGH,
             world_id=registry.world.world_id, call_id=CALL_ID.get()))
@@ -113,23 +126,32 @@ def serve_one(registry: WorldRegistry, system: str, verb: str, fn: Any, ctx: Any
         hit = registry.store.answers.get(key)
         if hit is None:
             hit = _served_in_turn(registry, system, verb, asked, base_text,
-                                  fixed=key in registry.prebranch)
+                                  fixed=registry.fixes(key), live=not recorded)
     return registry._record_answer(system, verb, asked, hit)
 
 
-def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict,
-                    base_text: str, *, fixed: bool) -> dict:
+def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict,  # noqa: PLR0913 — the call, its base and the turn's two framings
+                    base_text: str, *, fixed: bool, live: bool) -> dict:
     """One oracle turn's committed answer for the call (under the turn the caller holds).
-    `fixed`: a pre-branch call, whose changed submission is refused before it is checked."""
+    `fixed`: a recorded pre-branch call, whose changed submission is refused before it is
+    checked. `live`: the base is a live read, framed for the oracle as the system now.
+
+    What is committed is what the world serves (#1255 G8, D5): a submission that leaves the
+    base unchanged serves the BASE — the bytes the system or the source produced, however the
+    oracle spelled its equal submission — and is `passthrough`; a changed one serves the
+    submission, decided `oracle` in a world with facts and `reconstructed` in the control world
+    (no facts: the change is the world as it stood at the fork, never a fact shown)."""
     base = json.loads(base_text)
     digest = base_digest(base_text)
     committed: dict[str, Any] = {}
 
     def commit(served: Any, claim: dict, verdict: dict, attempts: int, staged: Any) -> None:
-        served_text = payload_text(served)
-        decision = ORACLE if changes_base(served, base) else PASSTHROUGH
+        changed = changes_base(served, base)
+        decision = (PASSTHROUGH if not changed
+                    else ORACLE if registry.world_facts else RECONSTRUCTED)
         answer = {"system": system, "verb": verb, "params": asked,
-                  "served": json.loads(served_text), "decision": decision,
+                  "served": json.loads(payload_text_of(served if changed else base)),
+                  "decision": decision,
                   "base_digest": digest, "claim": claim, "verifier_verdict": verdict,
                   "attempts": attempts}
         registry.store.commit(forged=list(staged.forged.values()),
@@ -143,7 +165,7 @@ def _served_in_turn(registry: WorldRegistry, system: str, verb: str, asked: dict
 
     registry.oracle.serve((system, verb, asked), base,
                           lambda: registry._real(system, base), commit,
-                          fixed=fixed, gate=unchanged if fixed else None)
+                          fixed=fixed, live=live, gate=unchanged if fixed else None)
     return committed["answer"]
 
 
@@ -199,8 +221,9 @@ class PrebranchChanged(Exception):
     branch point (M01=A: that prefix is fixed, so the world cannot be served)."""
 
 
-def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
-                  params: Mapping[str, Any], base: Any, *, fixed: bool) -> None:
+def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,  # noqa: PLR0913 — the call, its base and its two framings
+                  params: Mapping[str, Any], base: Any, *, fixed: bool,
+                  live: bool = False) -> None:
     """Pre-flight's replay of one original call through `registry`'s world (#1224, Amendment 2
     change 1): one oracle turn and verifier pass against the call's base answer, under the same
     turn lock, checks and budget as a sibling's call. It only CALIBRATES: a verified attempt
@@ -211,7 +234,8 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
     `fixed` marks a call the source run made before the branch point: a verified answer that
     differs from its base raises `PrebranchChanged` before anything is frozen (the oracle is
     told the call is pre-branch; unlike a sibling's turn, pre-flight does not refuse the
-    change and retry — one verified change fails the world, M01=A). An unservable
+    change and retry — one verified change fails the world, M01=A). `live` frames a base read
+    live rather than recorded (#1255 D6), as a sibling's turn frames it. An unservable
     call raises `OracleUnservable` as it would in a sibling. `ctx` is pre-flight's own verb
     context; every oracle-side query of the turn runs in it, at the branch-point clock."""
     asked = dict(params)
@@ -229,7 +253,8 @@ def calibrate_one(registry: WorldRegistry, ctx: Any, system: str, verb: str,
 
     with registry._turn(_carrying(ctx, as_of=registry.as_of), pauses_clock=False):
         registry.oracle.serve((system, verb, asked), base,
-                              lambda: registry._real(system, base), commit, fixed=fixed)
+                              lambda: registry._real(system, base), commit, fixed=fixed,
+                              live=live)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -308,6 +333,9 @@ class WorldRegistry(ModuleVerbRegistry):
         self.tenant = tenant
         self.world_facts = tuple(getattr(world, "facts", ()) or ())
         self.prebranch = frozenset(prebranch)
+        #: The calls the source asked whose answer the recording lacks (#1255 D6, the primer's
+        #: skip record): never fixed, served through the oracle at the fork time.
+        self.unrecorded = ledger.unrecorded_keys()
         self._source_run = source_run
         self.store = OracleStore(Path(oracle_dir))
         self._turn_lock = threading.Lock()
@@ -339,13 +367,19 @@ class WorldRegistry(ModuleVerbRegistry):
             box_factory=serving.box,
             retry_cap=settings.retry_cap, turn_deadline=settings.turn_deadline,
             budget=settings.budget, restart_after=serving.restart_after,
-            family_examples=self._examples(), real_extra=self._alert())
+            family_examples=self._examples(), real_extra=self._alert(),
+            source_writes=self._source_writes())
         # A world whose sibling already went unservable stays so on resume: its failing call
         # is never retried (N13). Its record is the sibling's own (`run.py`), read here.
         recorded = _world_record(world)
         if recorded is not None:
             self.oracle.unservable = recorded
         self._wrapped: dict[str, dict[str, Any]] = {}
+
+    def fixes(self, key: str) -> bool:
+        """Whether the call keyed `key` is a fixed pre-branch answer (M01=A): one the source
+        made before the branch point, unless the primer recorded it unanswered (#1255 D6)."""
+        return key in self.prebranch and key not in self.unrecorded
 
     @property
     def call_run(self) -> str:
@@ -407,16 +441,19 @@ class WorldRegistry(ModuleVerbRegistry):
 
     # -- the serve order's parts ------------------------------------------------------------
 
-    def _base(self, system: str, verb: str, fn: Any, ctx: Any, params: dict) -> str:
-        """The call's base answer text: the family's recording, else this world's own base
-        store, else one live read kept in that store (never a world-ledger row, M16). A real
-        error on the read is recorded `real-error` and passes through untouched."""
+    def _base(self, system: str, verb: str, fn: Any, ctx: Any,
+              params: dict) -> tuple[str, bool]:
+        """The call's base answer text and whether it is the family's recording (an answer the
+        source received): the recording, else this world's own base store, else one live read
+        at the fork time kept in that store (never a world-ledger row, M16). A live base keeps
+        the adapter's own spelling (`payload_text_of`, #1255 G8). A real error on the read is
+        recorded `real-error` and passes through untouched."""
         recorded = self.ledger.base_payload(system, verb, params)
         if recorded is not None:
-            return recorded
+            return recorded, True
         kept = self.store.base.get(request_key(system, verb, params))
         if kept is not None:
-            return kept
+            return kept, False
         try:
             answer = fn(ctx, **params)
         except Exception as failure:
@@ -425,9 +462,9 @@ class WorldRegistry(ModuleVerbRegistry):
                 payload_text=str(failure) or type(failure).__name__, source=REAL_ERROR,
                 world_id=self.world.world_id, call_id=CALL_ID.get()))
             raise
-        text = payload_text(answer)
+        text = payload_text_of(answer)
         self.store.keep_base(system, verb, params, text)
-        return text
+        return text, False
 
     def _from_store(self, system: str, verb: str, params: dict, answer: dict) -> Any:
         return self._record_answer(system, verb, params, answer)
@@ -436,7 +473,7 @@ class WorldRegistry(ModuleVerbRegistry):
         """The stored answer, delivered to this call (`_deliver`)."""
         return self._deliver(ServedCall(
             system=system, verb=verb, params=params,
-            payload_text=payload_text(answer.get("served")),
+            payload_text=payload_text_of(answer.get("served")),
             source=answer.get("decision") or ORACLE, world_id=self.world.world_id,
             base_digest=answer.get("base_digest"), claim=answer.get("claim"),
             verifier_verdict=answer.get("verifier_verdict"), attempts=answer.get("attempts"),
@@ -533,6 +570,16 @@ class WorldRegistry(ModuleVerbRegistry):
             return []
         alert = source_alert(self._source_run)
         return [alert] if alert is not None else []
+
+    def _source_writes(self) -> list[tuple[str, str]]:
+        """The source run's own writes to the world after the branch point (#1255 P5, O6): the
+        comments it posted on its case ticket when it closed, read off its host-only record
+        (`case_ticket.read_posted_comments`). The host never transitions a case, so its
+        comments are the writes there are. `[]` with no source run, or none posted."""
+        if self._source_run is None:
+            return []
+        return [(f"its comment on case ticket {key}", body)
+                for key, body in read_posted_comments(self._source_run)]
 
     def close(self) -> None:
         """Tear down the oracle's boxes (the sibling is ending)."""

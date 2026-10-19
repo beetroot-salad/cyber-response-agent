@@ -2,6 +2,8 @@
 opening message outside any frame, and the run still closes."""
 from __future__ import annotations
 
+from defender.tests._1255_view import MODEL_RUN
+
 from defender.tests._spec1077 import fixture_run as _fixture_run_1165
 
 import collections
@@ -146,6 +148,8 @@ def _named(d: S.Drive, control: S.Drive, what: str) -> str:
         "run's, line for line (A2: one fixed sentence outside the lead's frame; RC1: silent "
         "or late at base)")
     assert "<RUN_DIR>" not in sentence, f"{what}: the sentence names the run folder: {sentence!r}"
+    # #1255 (design rev 4, P1): the run folder's model spelling is no more welcome than its host one.
+    assert MODEL_RUN not in sentence, f"{what}: the sentence names the run folder: {sentence!r}"
     assert not S.host_paths_in(sentence, *_roots(d)), (
         f"{what}: the sentence carries a host path: {sentence!r}")
     assert ALERT_MARK not in sentence, f"{what}: the sentence carries alert text: {sentence!r}"

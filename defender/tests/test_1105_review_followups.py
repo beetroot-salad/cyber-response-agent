@@ -10,6 +10,7 @@ import pytest
 
 from defender import _io
 from defender import run_repository as R
+from defender.tests import _triplet_947 as T
 from defender.tests.tenant_1105_run_repository import _spec1105 as H
 
 
@@ -185,10 +186,12 @@ def test_a_shown_name_is_bounded_by_what_is_shown(name):
 def _family_doc(episode_id: str, label: str) -> dict:
     world = {"world_id": label, "role": "A", "story": "s", "axis": None,
              "disposition_declared": "malicious", "label_basis": "policy-rule", "facts": []}
-    return {"episode_id": episode_id, "source_run_dir": "/runs/src", "source_run_id": "src",
-            "branch_message_id": 1, "fences_at": 1, "as_of": "2026-07-28T16:18:45Z",
-            "continuation_prompt": "go", "base_story": "b", "served_systems": ["elastic"],
-            "discriminator": {"predicate": "p"}, "worlds": [world]}
+    # #1255 (D1, P4): `T.family_doc` writes the continuation prompt and the fence count only while
+    # `Family` still declares them, so this stays about the bound on both sides.
+    return T.family_doc(episode_id=episode_id, source_run_dir="/runs/src", source_run_id="src",
+                        branch_message_id=1, as_of="2026-07-28T16:18:45Z", base_story="b",
+                        served_systems=["elastic"], discriminator={"predicate": "p"},
+                        worlds=[world])
 
 
 def test_a_sibling_id_over_the_bound_is_refused_before_anything_is_staged():

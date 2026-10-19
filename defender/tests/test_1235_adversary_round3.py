@@ -24,6 +24,7 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests._1255_view import model_path  # noqa: E402
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 from defender.tests.test_959_downstream import Box  # noqa: E402
 from defender.tests.test_1235_round3 import (  # noqa: E402
@@ -44,7 +45,9 @@ LEAD = "l-001"
 # ======================================================================================
 
 @pytest.mark.parametrize(("wall_back", "mono_back", "credited", "open_for", "killed"), [
-    pytest.param(1000, 0, 0, None, True, id="wall-clock-ahead-of-the-monotonic"),
+    # #1255 ("Time") RETIRES `wall-clock-ahead-of-the-monotonic` (1000, 0, 0, None, True): it
+    # pinned `max(wall delta, monotonic delta)` — 1000 s on the wall clock and ~0 on the
+    # monotonic one counted as spent. The run clock is the only source now.
     pytest.param(1000, 1000, 0, 990, False, id="an-oracle-turn-open-now"),
 ])
 def test_lead_zeros_gate_agrees_with_the_hooks_on_the_rest_of_the_clock(
@@ -73,7 +76,7 @@ _LIMITS = {**DEFAULT_LIMITS, "max_tool_calls": 50, "wall_clock_timeout": 3600,
 def test_an_enforced_gather_whose_deps_carry_no_state_raises(tmp_path):
     """O2."""
     run_dir = _run_dir(tmp_path, "adv3-o2-gather")
-    script = [[("read_file", {"path": str(run_dir / "alert.json")})]]
+    script = [[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]]
     with pytest.raises(TypeError, match="RunState"):
         drive_agent(T1106.fixture_gather_def(), run_dir, script, limits=_LIMITS, enforce=True,
                     agent_id="gather:l-001", state=None)

@@ -9,7 +9,7 @@ from typing import Any
 from pydantic_ai.models import override_allow_model_requests
 from pydantic_ai.models.function import FunctionModel
 
-from defender import _io, run_common
+from defender import _io
 from defender.run_repository import Run
 from defender.runtime import box, driver
 from defender.runtime.providers import BuiltModel
@@ -125,10 +125,15 @@ def drive_run(  # noqa: PLR0913 — the real driver's injection inputs
         kwargs["toolset"] = toolset
     if resume is not None:
         kwargs.update(resume=resume, source_run=source_run)
-    with override_allow_model_requests(False):
-        return asyncio.run(driver.run_investigation(
-            run=run, alert_path=run.facts.alert.path, defender_dir=tree,
-            make_model=make_model, tenant=tenant,
-            box=box.unboxed_executor(env=run_common.run_env(tree, run.run_dir)),
-            review_stages=_review_bundle.bundle(composer=_review_bundle.composer_reply("holds")),
-            orient_shim=replay.no_orient_shims, **kwargs))
+    execution_box = replay.production_unboxed_box(run.run_dir, tree, tenant)
+    try:
+        with override_allow_model_requests(False):
+            return asyncio.run(driver.run_investigation(
+                run=run, alert_path=run.facts.alert.path, defender_dir=tree,
+                make_model=make_model, tenant=tenant,
+                box=execution_box,
+                review_stages=_review_bundle.bundle(composer=_review_bundle.composer_reply("holds")),
+                orient_shim=replay.no_orient_shims, **kwargs))
+
+    finally:
+        box.stop_box(execution_box)

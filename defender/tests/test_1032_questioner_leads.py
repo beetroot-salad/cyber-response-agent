@@ -341,7 +341,7 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     questioner = S.questioner_for()
     rc = T.mod("learning.branch.cli").main(
         ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-         "--continuation-prompt", "go"],
+         *T.retired_continuation_argv()],
         spawn=T.FakeSpawn(), questioner=questioner,
         oracle=S.oracle(then=S.submit(answer, S.EMPTY_CLAIM)).model,
         verifier=S.passing_verifier().model, roster=est.roster(),

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 _DEFENDER = Path(__file__).resolve().parents[1]
 
 from defender.hooks import budget_enforcer  # noqa: E402
@@ -78,7 +80,7 @@ def test_read_file_refuses_an_overlong_basename_instead_of_raising(tmp_path):
 
     run_dir, deps = _main_deps(tmp_path)
     with pytest.raises(ModelRetry) as excinfo:
-        tools._gated_read(deps, str(run_dir / _LONG_NAME))
+        tools._gated_read(deps, model_path(run_dir / _LONG_NAME, run_dir=run_dir))
     assert "too long" in str(excinfo.value)
 
 
@@ -97,7 +99,8 @@ def test_edit_file_refuses_an_overlong_basename_instead_of_raising(tmp_path):
     run_dir, deps = _main_deps(tmp_path)
     for old_string in ("", "some anchor"):
         with pytest.raises(ModelRetry) as excinfo:
-            tools._tool_edit_file(deps, str(run_dir / _LONG_NAME), old_string, "new")
+            tools._tool_edit_file(
+                deps, model_path(run_dir / _LONG_NAME, run_dir=run_dir), old_string, "new")
         assert "too long" in str(excinfo.value), \
             f"old_string={old_string!r}: the probe raised instead of drawing a refusal"
 

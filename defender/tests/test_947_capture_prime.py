@@ -30,7 +30,7 @@ T0 = dt.datetime(2026, 5, 25, 15, 30, 45, tzinfo=dt.UTC)
 
 #: A payload whose keys are NOT in sorted order, and nested, so a re-dump has to reach the
 #: subtree too. `json.dumps` without `sort_keys` preserves insertion order — which is exactly
-#: what `record_query.persist_payload` writes and what the primer has to normalise away.
+#: what `record_query.persist_payload` writes and (#1255 G8) what the primer must keep.
 UNSORTED_PAYLOAD = {"zebra": 1, "alpha": {"n": 2, "m": 3}, "beta": [3, 1]}
 
 #: A cmdb body answering differently from anything a source run captured, so "the capture was
@@ -160,18 +160,30 @@ def test_a_captured_call_becomes_a_family_row_the_ledger_can_read(tmp_path):
     assert json.loads(hit) == {"owner": "estate", "role": "canary"}
 
 
-def test_a_primed_payload_is_canonical_rather_than_the_sidecars_own_bytes(tmp_path):
-    """A sidecar whose keys are in the writer's order is RE-DUMPED, so the primed row is byte identical to what the serving path produces for the same..."""
+def test_a_primed_payload_is_the_sidecars_own_bytes(tmp_path):
+    """    #1255 G8 — a sidecar whose keys are in the writer's (the adapter's) order is primed
+    byte-for-byte: the family row's `payload_text` IS the sidecar's text, never a re-dump with
+    sorted keys. FLIPPED from #947's `..._is_canonical_rather_than_the_sidecars_own_bytes`,
+    which required the re-dump: a world must serve the source's answer exactly as the source
+    received it (design rev 4, "Served bytes"; O1 — a sorted re-spelling is a difference a
+    natural continuation never shows).
+
+    The fixture's own discriminating power is asserted first: if the sidecar bytes happened to
+    already be canonical, a re-dumping primer would pass this arm. The primed row is still
+    reachable through the key a sibling asks with (positive control on the same base)."""
     run_dir = source_run(tmp_path)
     sidecar = json.dumps(UNSORTED_PAYLOAD)
     assert sidecar != payload_text(UNSORTED_PAYLOAD), (
-        "the fixture's sidecar is already canonical, so a verbatim copy would pass this arm")
+        "the fixture's sidecar is already canonical, so a re-dumping primer would pass this arm")
     append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}), sidecar)
     root, base = episode(tmp_path)
 
     _prime(run_dir, root)
 
-    assert read_jsonl_rows(base)[0]["payload_text"] == payload_text(UNSORTED_PAYLOAD)
+    assert read_jsonl_rows(base)[0]["payload_text"] == sidecar
+    with Episode.open(root) as ep:
+        hit = Ledger.for_world(ep, "w1").base_payload("cmdb", "get-host", {"host": "canary-1"})
+    assert hit == sidecar, "the sibling's lookup is not handed the sidecar's own bytes"
 
 
 def test_a_primed_key_is_served_without_the_estate_being_asked(tmp_path):

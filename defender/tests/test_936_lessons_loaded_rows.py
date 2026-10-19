@@ -10,6 +10,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from defender.tests._1255_view import model_path
 from defender.tests._by_path import load_trace_lesson
 from defender.tests._fold_936 import (
     CLASS_LESSON,
@@ -61,8 +62,9 @@ def test_a_read_row_names_the_kind_and_the_role_of_the_reader(tmp_path):
     lesson = _write_lesson(corpus, "read-936", nodes=CLASS_SELECTOR)
     gather = _with_live_run_1165(bind(_tenants1106.fixture_gather_def(), run, defender_dir=dfn), run=_live_run_1165(run))
 
-    assert "lesson body" in _tool_read_file(main, str(lesson.resolve()))
-    assert "lesson body" in _tool_read_file(gather, str(lesson.resolve()))
+    m_lesson = model_path(lesson, run_dir=run, defender_dir=dfn)   # `/defender/lessons/…`
+    assert "lesson body" in _tool_read_file(main, m_lesson)
+    assert "lesson body" in _tool_read_file(gather, m_lesson)
     rows = _rows(run)
     assert [(r["lesson_name"], r.get("kind"), r.get("role")) for r in rows] == [
         ("read-936", "read", "main"),

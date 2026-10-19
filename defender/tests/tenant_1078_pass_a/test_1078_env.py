@@ -27,6 +27,13 @@ def _fresh_run(root: Path, run_id: str = "r2", tenant_id: str = TENANT) -> Path:
 
 
 
+def _box_env(run_dir: Path) -> dict[str, str]:
+    """The env a run's box is created with, read off the real `docker run` argv builder."""
+    argv = H.mod("runtime.box")._create_argv(
+        "defender-r1", Path(run_dir), H.DEFENDER, H.mod("runtime.box._spec").DEFAULT_SPEC).argv
+    return dict(argv[i + 1].partition("=")[::2] for i, a in enumerate(argv) if a == "--env")
+
+
 def _corpus_paths(corpus_root: str | Path) -> set[Path]:
     """The investigation documents the corpus reader actually LOADED from `corpus_root`."""
     corpus, _report = H.mod("skills.invlang.corpus").load_corpus(corpus_root)
@@ -130,13 +137,12 @@ def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):
     box = H.mod("runtime.box")
     assert H.run_common().run_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"] == \
         str(run_dir.parent)
-    assert box.infra_env(H.DEFENDER, run_dir)["DEFENDER_RUNS_BASE"] == str(run_dir.parent)
     argv = box._create_argv("defender-r1", run_dir, H.DEFENDER,
                             H.mod("runtime.box._spec").DEFAULT_SPEC).argv
     exported = [a for a in argv if a.startswith("DEFENDER_RUNS_BASE=")]
-    assert exported == [f"DEFENDER_RUNS_BASE={run_dir.parent}"], exported
-
-
+    # #1255 (design rev 4, P1): the box's value is the model view's constant, which still
+    # overwrites the stale inherited one.
+    assert exported == ["DEFENDER_RUNS_BASE=/runs"], exported
 
 
 

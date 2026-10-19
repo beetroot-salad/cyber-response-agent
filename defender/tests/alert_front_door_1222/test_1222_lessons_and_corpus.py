@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from defender import _tenant, _yaml
+from defender.tests import _1255_view as V
 from defender.tests import _drain719 as D
 from defender.tests import _judge_921 as J
 from defender.tests.alert_front_door_1222 import _spec1222 as S
@@ -372,9 +373,14 @@ def test_curated_checkout_lesson_is_discovered_and_read_by_main(tmp_path):
     assert committed.parent == paths.lessons_dir
     assert marker in committed.read_text(encoding="utf-8")
     product = S.prepare_checkout(Path(paths.repo_root) / "defender")
+    # MAIN names the committed lesson the way a model holds it: under the run's checkout at its
+    # model path `/defender` (#1255 design rev 4, P1), never the checkout's host path.
+    assert committed.is_relative_to(product), (
+        f"control: the committed lesson ({committed}) is not inside the run's checkout {product}")
+    in_view = f"{V.MODEL_DEFENDER}/{committed.relative_to(product).as_posix()}"
     main = S.MainScript([
-        S.call("read_file", path=str(committed)),
-        S.call("bash", command=f"cat {shlex.quote(str(committed))}"),
+        S.call("read_file", path=in_view),
+        S.call("bash", command=f"cat {shlex.quote(in_view)}"),
         S.text(S.DONE),
     ])
     d = S.run_alert(tmp_path / "later", alert=_lesson_alert(sig), main=main,
@@ -587,8 +593,17 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
     Observed: (1) the corpus CLI over a runs base holding only the current run, run as it runs in
     the sandbox (`DEFENDER_BOX` set — PR-24's observed in-box view, where past runs are not
     mounted) against the same CLI on the host, where that runs base truly holds no past run;
-    (2) MAIN's own `defender-invlang hypothesis-vocabulary --signature` call, handed the mapped
-    signature, over past runs whose records and `rule.id`s disagree.
+    (2) the corpus CLI on the host over the tenant's runs folder holding past runs whose records
+    and `rule.id`s disagree — handed the mapped signature it counts exactly the run recorded
+    under it — and MAIN's own `defender-invlang hypothesis-vocabulary --signature` call, handed
+    the mapped signature in its sandbox, which sees none of those past runs.
+
+    #1255 (design rev 4, P1; `e2e/test_1255_view_replay.py::test_b5_unboxed_invlang_scans_only_
+    this_run_as_the_box_would`): MAIN's `/runs` holds only `current` in every mode, so its in-box
+    lookup can no longer count a past run. Before #1255 half (2) asserted that MAIN's in-box call
+    counted exactly `p1` — another run's folder, which the model view forbids it to see (and
+    which PR-24, the premise this test's spec-graph entry cites, already says a box does not
+    mount). The exact-filter half moves to the same CLI over the same runs folder on the host.
     """
     sig = "M-777"
     only_current = tmp_path / "only-current"
@@ -615,14 +630,30 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
         "p4": dict(signature=sig + "0", rule_id="R-4"),
     }
     recorded = [_past_run(planted.runs, f"past-{tag}", tag=tag, **spec) for tag, spec in past.items()]
+    # The filter is exact over these past runs: the CLI, on the host, over the tenant's runs
+    # folder, counts the run recorded under the signature and none matched by rule.id, by case
+    # or by prefix.
+    _rc, over_runs = _vocab_cli(capsys, planted.runs, sig)
+    assert _probes(over_runs) == {"p1"}, (
+        f"the corpus lookup of {sig!r} over the runs folder counted "
+        f"{sorted(_probes(over_runs))}, not exactly the run recorded under it:\n{over_runs}")
     main = S.MainScript([S.call("bash", command=f"defender-invlang hypothesis-vocabulary --signature {sig}"),
                          S.text(S.DONE)])
     d = S.run_alert(tmp_path, alert=current, tenant=planted, main=main)
-    back = [t for kind, t in d.main.seen[1].parts if kind in ("tool-return", "retry-prompt")]
+    back = [(kind, t) for kind, t in d.main.seen[1].parts if kind in ("tool-return", "retry-prompt")]
     assert back, "MAIN's corpus call came back with nothing"
-    assert _probes(back[-1]) == {"p1"}, (
-        f"MAIN's in-box corpus lookup of {sig!r} counted {sorted(_probes(back[-1]))}, not exactly "
-        f"the run recorded under it:\n{back[-1]}")
+    kind, listing = back[-1]
+    # Control: the lookup ran in MAIN's sandbox and answered for the signature it was handed.
+    assert kind == "tool-return", (
+        f"MAIN's in-box corpus lookup did not run and answer for {sig!r}: {kind}\n{listing}")
+    assert f"signature {sig}" in listing, (
+        f"MAIN's in-box corpus lookup did not run and answer for {sig!r}: {kind}\n{listing}")
+    assert _probes(listing) == set(), (
+        f"MAIN's in-box corpus lookup of {sig!r} counted past runs {sorted(_probes(listing))} — "
+        f"the box's /runs holds only this run (#1255 P1):\n{listing}")
+    assert "past-p" not in listing, (
+        f"MAIN's in-box corpus lookup of {sig!r} names a past run — the box's /runs holds only "
+        f"this run (#1255 P1):\n{listing}")
     assert all(recorded), "records could not be planted (S.COINED accessors)"
     assert current_recorded, "the current run's record could not be planted (S.COINED accessors)"
 

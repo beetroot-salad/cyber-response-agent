@@ -14,6 +14,8 @@ from defender.tests._by_path import WORKTREE, load_module
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender._pricing import usage_cost
 from defender.run_repository import RunPaths
 from defender.tests._session_store_705 import (
@@ -48,9 +50,9 @@ def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
     inv = (GOLDEN / "investigation.md").read_text()
     rep = (GOLDEN / "report.md").read_text()
     scripted = turns if turns is not None else [
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "investigation.md"),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
                                          "content": inv})]),
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir),
                                          "content": rep})]),
         Turn(text=text),
     ]
@@ -282,9 +284,9 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
     inv = (GOLDEN / "investigation.md").read_text()
     rep = (GOLDEN / "report.md").read_text()
     replay = ReplayFn([
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "investigation.md"),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
                                          "content": inv})]),
-        Turn(tool_calls=[("write_file", {"path": str(run_dir / "report.md"),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir),
                                          "content": rep})]),
         Turn(text=payload),
     ])

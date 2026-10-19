@@ -179,6 +179,21 @@ class RecordingDocker:
         command = [*argv[-4:-1], str(source)]
         return run_box_python_command(command)
 
+    def _through_binds(self, inside: Path) -> Path:
+        """Where an in-box path lives on the host: through the captured bind table (nested
+        mounts winning), as a real daemon resolves it; unchanged when no bind covers it (or
+        before any create). A double modelling a bind mount, not a policy: since #1255 the box
+        mounts each tree at a fixed model path (`/runs/current`, …), so an in-box path is no
+        longer the host path it reads."""
+        if self.create_argv is None:
+            return inside
+        covering = [m for m in self.mounts()
+                    if m["source"] and m["target"] and inside.is_relative_to(Path(m["target"]))]
+        if not covering:
+            return inside
+        mount = max(covering, key=lambda item: len(Path(item["target"]).parts))
+        return Path(mount["source"]) / inside.relative_to(Path(mount["target"]))
+
     def _exec(self, argv: list[str]) -> subprocess.CompletedProcess:
         if argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id"):
             return self._read_marker(argv)
@@ -198,7 +213,7 @@ class RecordingDocker:
             return _cp(self.sentinel.rc, self.sentinel.stdout, self.sentinel.stderr)
         if self._exec_replies:
             return self._exec_replies.pop(0)
-        path = Path(argv[-1])            # sentinel readback: `cat <sentinel>`
+        path = self._through_binds(Path(argv[-1]))   # sentinel readback: `cat <sentinel>`
         try:
             return _cp(0, path.read_text(encoding="utf-8"))
         except OSError:

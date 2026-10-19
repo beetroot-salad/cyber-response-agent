@@ -30,14 +30,16 @@ TWO EPISODE BUILDERS — pick by the demand, as `80-survey.md` assigns:
    record + family stamp, samples, and per world `worlds/<X>/` (report, investigation, alert,
    lessons record, gather summaries, provenance, the query table with payload sidecars and lead
    claims), the served ledger `served/<token>.<X>.jsonl`, the oracle store `oracle/<X>/`. A
-   scenario is a few `World(...)` / `CallRow(...)` lines. Ledger and table rows carry the COINED
-   call id (`call_id()`), because A3/A12 make a ledger row without one malformed.
+   scenario is a few `World(...)` / `CallRow(...)` lines. Ledger rows carry the COINED call id
+   (`call_id()`), because A3/A12 make a ledger row without one malformed; since #1255 (G4/G6)
+   table rows carry none, and the world's host-only call-join record `worlds/<X>/call_join.jsonl`
+   names each own table row's id by its `(lead_id, seq)` (`J.write_call_join`).
 2. `real_family(...)` — the REAL path (I-10, 45-dispositions-drift): the launcher (`cli.main`)
    over the #1224 fixture tenant with real pre-flight; every sibling is the REAL
    `run.main --tenant T --episode <id> --world L`, run in-process by `InProcessSiblings` (the
    launcher's `spawn=` seam); then the real `verify_family` -> `archive_episode` -> family
    stamp. The call records are written by the real writers (registry `authorize_call`/`_deliver`/
-   `_record_beside`, query tool `append_query_row`/`_record_denied`, `_inherit_evidence`), so a
+   `_record_beside`, query tool `append_query_row`/`_record_denied`, `ForkSnapshot.restore_files`), so a
    test reads the call id OFF the rows (`call_ids`) and never plants it. Every A12/A14
    situation, d03b-d03d, d08a and the n_t8_* runtime demands use this path. The launcher's own
    JUDGE step is suppressed (its learning-state root is absent for the launch, so `cli._grade`
@@ -99,6 +101,7 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
+from defender.tests import _branch_947 as B947
 from defender.tests import _judge_921 as J
 from defender.tests import _triplet_947 as T
 from defender.tests.live_oracle_1224 import _spec1224 as S24
@@ -522,14 +525,22 @@ class CallRow:
     """One investigator call as BOTH records see it: the table row (`executed_queries.jsonl`,
     with its payload sidecar) and the served-ledger row, joined by one call id (A12).
 
+    #1255 G4/G6: the id is no longer ON the table row. The ledger row carries it, and the
+    world's host-only call-join record (`worlds/<X>/call_join.jsonl`, `J.CALL_JOIN`) names it
+    for the table row's `(lead_id, seq)` — one line per own table row that has an id.
+
     `source` is the ledger decision (`passthrough`, `oracle`, `real-error`, `refused`, `fault`);
     `None` writes no ledger row (a table-only sentinel: a reject, `∅.repeat-trip`,
     `∅.bash-shim`). `table=False` writes no table row (a ledger-only denial: the door closed,
     or an unmapped row). `inherited=True` is a pre-branch row seeded from the source: a table
-    row carrying NO id of this run, never a ledger row (A12) — pass it in `family(inherited=)`
-    so it lands identically at the head of every world's table. `call_id=None` omits the id,
-    `call_id="<text>"` writes that text (malformed / foreign rows); `AUTO` mints `call_id()`.
-    `world_id` likewise overrides the ledger row's world token (a foreign row).
+    row the join names NO id of this run for, never a ledger row (A12) — pass it in
+    `family(inherited=)` so it lands identically at the head of every world's table.
+    `call_id=None` gives the call no id (no join line, an id-less ledger row);
+    `call_id="<text>"` writes that text in both records (malformed / foreign ids); `AUTO` mints
+    `call_id()`. `world_id` likewise overrides the ledger row's world token (a foreign row).
+    `seq` overrides the table row's seq (`AUTO`: the lead's next): a row given the seq an
+    earlier row of its lead already holds shares that row's join key, so the join names both
+    table rows with ONE id — what a box duplicating a line of its own table leaves.
     """
 
     system: str = "idp"
@@ -545,6 +556,7 @@ class CallRow:
     call_id: Any = AUTO
     world_id: Any = AUTO
     ledger_extra: dict = field(default_factory=dict)
+    seq: Any = AUTO
 
     @property
     def the_params(self) -> dict:
@@ -726,6 +738,25 @@ class Built:
     def ledger_rows(self, label: str) -> list[dict]:
         return read_jsonl(self.ledger_path(label))
 
+    def join_path(self, label: str) -> Path:
+        """World `label`'s host-only call-join record (#1255 G6, `J.CALL_JOIN`)."""
+        return self.world_dir(label) / J.CALL_JOIN
+
+    def join_rows(self, label: str) -> list[dict]:
+        return J.read_call_join(self.world_dir(label))
+
+    def own_keys(self, label: str) -> dict[tuple[Any, Any], Any]:
+        """`(lead_id, seq)` -> call id, for every table row of world `label`'s own run that the
+        call-join record names (an inherited row is in none)."""
+        return {(r.get("lead_id"), r.get("seq")): r.get(CALL_ID) for r in self.join_rows(label)}
+
+    def lines_of_call(self, label: str, cid: Any) -> list[int]:
+        """The line indices of world `label`'s table rows that the call-join record joins to
+        call id `cid` (through the row's `(lead_id, seq)`, never its position)."""
+        keys = {k for k, v in self.own_keys(label).items() if v == cid}
+        return [i for i, r in enumerate(self.table_rows(label))
+                if (r.get("lead_id"), r.get("seq")) in keys]
+
     def own_row(self, label: str, i: int) -> int:
         """The table line index of world `label`'s `i`-th own call (inherited rows go first)."""
         return len(self.inherited) + sum(1 for c in (self.worlds[label].calls or [])[:i]
@@ -780,9 +811,9 @@ def _payload_of(call: CallRow) -> Any:
     return {"rows": []} if call.exit_code == 0 else {"error": "never reached a system"}
 
 
-def table_row(call: CallRow, *, seq: int, cid: Any) -> dict:
-    """One `executed_queries.jsonl` row in the writer's column set (`QUERY_ROW_COLUMNS`), plus
-    the coined call id where `cid` is not `None`."""
+def table_row(call: CallRow, *, seq: int) -> dict:
+    """One `executed_queries.jsonl` row in the writer's fourteen columns, in writer order, and
+    no call id (#1255 G4: the table is the model's; the id is in the call-join record)."""
     rq = mod(RECORD_QUERY)
     breaker = mod("runtime.circuit_breaker")
     params = call.the_params
@@ -797,8 +828,6 @@ def table_row(call: CallRow, *, seq: int, cid: Any) -> dict:
         "payload_status": rq.payload_status(call.exit_code, body), "payload_digest": "",
         "payload_sha256": rq.payload_sha256(text), "system_key": "",
     }
-    if cid is not None:
-        out[CALL_ID] = cid
     return out
 
 
@@ -898,6 +927,7 @@ def _archive_world(ep: Path, w: World, *, token: str, inherited: list[CallRow]) 
     seqs: dict[str, int] = {}
     table: list[tuple[CallRow, dict]] = []
     ledger_out: list[dict] = []
+    joined: list[dict] = []
     own_n = 0
     for call in [*inherited, *calls]:
         if call.inherited:
@@ -907,12 +937,22 @@ def _archive_world(ep: Path, w: World, *, token: str, inherited: list[CallRow]) 
                    else call.call_id)
             own_n += 1
         if call.table:
-            seq = seqs.get(call.lead, 0)
-            seqs[call.lead] = seq + 1
-            table.append((call, table_row(call, seq=seq, cid=cid)))
+            if call.seq is AUTO:
+                seq = seqs.get(call.lead, 0)
+                seqs[call.lead] = seq + 1
+            else:
+                seq = call.seq
+            row = table_row(call, seq=seq)
+            table.append((call, row))
+            # #1255 G6: the id lives in the host-only join record, keyed by the row's
+            # `(lead_id, seq)`; a row that shares an earlier row's key (and id) is one line.
+            entry = J.call_join_entry(row["lead_id"], row["seq"], cid)
+            if cid is not None and entry not in joined:
+                joined.append(entry)
         if call.source is not None and not call.inherited:
             ledger_out.append(ledger_row(call, label=w.label, token=token, cid=cid))
     _write_table(wd, table)
+    J.write_call_join(wd, joined)
     served = ep / "served"
     served.mkdir(exist_ok=True)
     (served / f"{world_token(w.label, episode_token=token)}.jsonl").write_text(
@@ -1696,7 +1736,7 @@ def capture_sentinel(src: Path, *, system: str = "edr", verb: str = "lookup",  #
                      query_id: str = DENIED_QUERY_ID, exit_code: int = DENIED_EXIT,
                      lead: str = "l-001") -> None:
     """Append one pre-branch sentinel row to the SOURCE run's table in the writer's own column
-    set (J3's inherited `∅.denied` by default) — a real row the real `_inherit_evidence` seeds
+    set (J3's inherited `∅.denied` by default) — a real row the real `ForkSnapshot.restore_files` seeds
     into every sibling."""
     rq = mod(RECORD_QUERY)
     breaker = mod("runtime.circuit_breaker")
@@ -1935,9 +1975,13 @@ class InProcessSiblings:
             self.run_dirs[label] = run_dir
             fam = kw["world"].family
             src = Path(kw["source"].run_dir)
+            # #1255 (D1, P4) COMPAT: the prompt is read off the family and handed to the spec
+            # only while both still carry it (`_branch_947.declares_retired_prompt`).
+            retired = ({B947.RETIRED_PROMPT_FIELD: fam.continuation_prompt}
+                       if B947.declares_retired_prompt() else {})
             spec = branch_mod.BranchSpec(
                 source_run_dir=src, branch_message_id=fam.branch_message_id,
-                continuation_prompt=fam.continuation_prompt, as_of=fam.as_of)
+                as_of=fam.as_of, **retired)
             leads = [("gather", {"lead_id": lid, "system": "idp", "goal": f"measure {lid}",
                                  "what_to_summarize": ["what the system says"]})
                      for lid in script.main_leads]
@@ -2045,7 +2089,8 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
     """One episode through the REAL launcher and REAL siblings (I-10). Default: control `a`
     (reaches benign), `b` (its oracle alters the post-branch call: shown its facts), `c`
     (passes), each running `default_turns()`; `edr lookup` withheld, so every sibling's third
-    call is refused. `after_source(src)` edits the source run before the launch (J3:
+    call is refused. `after_source(src)` edits the source run once its calls landed and before
+    its session is seeded, so before the launch and before any fork snapshot (J3:
     `capture_sentinel(src)` plants the inherited pre-branch denial). `estate=` lets a scenario
     script faults (`Estate1234.break_write`) before the launch. Grade with `grade(built, ...)`."""
     est = estate if estate is not None else Estate1234(Path(tmp_path) / "estate",
@@ -2054,10 +2099,11 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
                "b": RealWorld("b", oracle=altering_oracle()),
                "c": RealWorld("c")}
     scripts.update(dict(worlds or {}))
+    # `after_source` runs inside `source_run`, before the source's session is seeded: #1255's
+    # fork snapshot holds the source's table as it stood at the branch point, so a row appended
+    # after it (J3's sentinel) would leave the source unrestorable and the launch refused.
     _base, src = S24.source_run(tmp_path, est, calls=list(calls) if calls is not None
-                                else source_calls())
-    if after_source is not None:
-        after_source(src)
+                                else source_calls(), after_source=after_source)
     spawn = InProcessSiblings(est, scripts, verifier=verifier)
     doc = manifest if manifest is not None else real_manifest()
     pre = preflight if preflight is not None else preflight_oracle()
@@ -2071,7 +2117,7 @@ def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *
     with _launcher_judge_suppressed(tmp_path):
         try:
             rc = mod(CLI).main(["--tenant", src.parent.parent.name, src.name,
-                                str(T.BRANCH_MESSAGE_ID), "--continuation-prompt", "go"],
+                                str(T.BRANCH_MESSAGE_ID), *T.retired_continuation_argv()],
                                spawn=spawn, **seams)
         except SystemExit as stop:
             rc, message = (stop.code, "") if isinstance(stop.code, int) else (2, str(stop.code))

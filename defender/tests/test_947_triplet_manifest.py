@@ -180,7 +180,7 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
         with pytest.raises(T.refusals()) as refused:
             T.mod("learning.branch.cli").main(
                 ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                 "--continuation-prompt", "go"],
+                 *T.retired_continuation_argv()],
                 spawn=spawn, preflight=_no_preflight,
                 questioner=questioner, live_tree=T.source_capture())
         assert questioner.calls > 0, "the launch was refused before the identity gate ran"

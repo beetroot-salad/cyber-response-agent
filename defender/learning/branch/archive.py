@@ -112,10 +112,12 @@ def _single_files(run_dir: Path, world: WorldPaths) -> tuple[tuple[Path, Path], 
         (paths.report, world.report),
         (paths.investigation, world.investigation),
         (paths.provenance, world.provenance),
-        # The two sidecars beside the run dir. Inside `worlds/<X>/` they take the episode
+        # The sidecars beside the run dir. Inside `worlds/<X>/` they take the episode
         # owner's names, dropping the run-id-keyed spelling nothing here may resolve.
         (verdict_path(run_dir), world.scrub_verdict),
         (run_end_sidecar_path(run_dir), world.run_end),
+        # #1255 G4/G6: the host-only join of the query table's rows to the served ledger.
+        (paths.call_join(), world.call_join),
         (paths.lessons_loaded, world.lessons_loaded),
         (paths.alert, world.alert),
         (paths.alert_record, world.alert_record),

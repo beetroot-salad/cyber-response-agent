@@ -39,7 +39,7 @@ def test_query_writer_uses_run_and_keeps_state_before_failed_view_append(tmp_pat
     def before(root, relative, text, options):
         if relative == "executed_queries.jsonl":
             row = json.loads(text)
-            observed.append((row["seq"], state.last_row(LEAD), state.lock._is_owned()))
+            observed.append((row["seq"], state.lead_rows(LEAD)[-1], state.lock._is_owned()))
             assert (run.run_dir / row["payload_path"]).read_bytes() == b'{"hits": [1]}'
 
     io.before_write = before
@@ -74,7 +74,7 @@ def test_query_params_validate_before_any_run_operation_and_payload_fault_is_bes
     row = append(state, run)
     assert row["seq"] == 0
     assert row["payload_path"] is None
-    assert state.last_row(LEAD) == json.loads(run.tables.queries.path.read_text())
+    assert state.lead_rows(LEAD)[-1] == json.loads(run.tables.queries.path.read_text())
     assert "gather_raw/l-001/0.json" in io.names("rooted_write")
 
 
@@ -141,7 +141,7 @@ def test_actual_driver_gather_query_and_hooks_use_the_passed_run(tmp_path, fault
     else:
         assert summary["truncated_by"] is None
         assert backend_calls == ["select marker"]
-        assert state.last_row(LEAD)["payload_path"] == "gather_raw/l-001/0.json"
+        assert state.lead_rows(LEAD)[-1]["payload_path"] == "gather_raw/l-001/0.json"
         writes = io.names("rooted_write")
         assert "gather_raw/l-001.lead.json" in writes
         assert "gather_raw/l-001/0.json" in writes
@@ -213,7 +213,7 @@ def test_live_query_reads_ignore_model_file_edits_and_payload_cap_is_preserved(t
     planted = dict(first, seq=99, params={"q": "planted"})
     run.tables.queries.path.write_text(json.dumps(planted) + "\n")
     assert rq._next_seq(state, LEAD) == 1
-    assert state.last_row(LEAD)["params"] == {"q": "a"}
+    assert state.lead_rows(LEAD)[-1]["params"] == {"q": "a"}
     reads_before = list(io.calls)
     assert rq.repeat_note(state, LEAD, seq=1, system="elastic", verb="query",
                           params={"q": "a"}, payload_digest=first["payload_digest"],

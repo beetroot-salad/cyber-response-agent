@@ -9,7 +9,9 @@ from pathlib import Path
 from defender import _alert_input
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
+from defender._knowledge import KnowledgePaths
 from defender._untrusted import wrap_fresh
+from defender.runtime.model_view import ModelView
 from defender.runtime.system_status import NONE_DOWN
 
 _DEFENDER_DIR = Path(__file__).resolve().parents[1]
@@ -93,10 +95,37 @@ def _spoken(sig: str) -> str:
     return f"`{sig}`" if _SPOKEN_SIGNATURE.fullmatch(sig) else "that signature"
 
 
-def _build_lessons_section(env: dict[str, str], sig: str | None, shim: ShimRunner) -> str | None:
+def _hits_in_view(hits: str | None, view: ModelView) -> str | None:
+    """The signature lookup's `<path>\t<description>` lines with each path rendered in the
+    model view (#1255 P1, O3): the shim runs on the host and prints each lesson's resolved host
+    path, which names the checkout. A path under the run checkout's corpus is rendered as that
+    corpus's model path; the shim prints no other, and any other line is shown as printed."""
+    if not hits:
+        return hits
+    corpus = KnowledgePaths.of_defender_dir(view.defender_dir).lessons_dir
+    real, shown = corpus.resolve(), view.to_model(corpus)
+    lines = []
+    for line in hits.splitlines():
+        path, tab, description = line.partition("\t")
+        try:
+            rel = Path(path).relative_to(real)
+        except ValueError:
+            lines.append(line)
+            continue
+        lines.append(f"{shown}/{rel.as_posix()}{tab}{description}")
+    return "\n".join(lines)
+
+
+def _build_lessons_section(
+    env: dict[str, str], sig: str | None, shim: ShimRunner, view: ModelView | None = None,
+) -> str | None:
+    """The Lessons section. `view` is the run's model view the hits' paths are rendered in
+    (`orientation` always passes it); without one the hits are shown as the shim printed them."""
     tags = shim(["defender-lessons", "--tags"], env)
     # An exact, case-sensitive lookup of the whole entry: the signature is a key, not a pattern.
     hits = shim(["defender-lessons", "--signature", sig], env) if sig else ""
+    if view is not None:
+        hits = _hits_in_view(hits, view)
     lesson_lines = []
     if sig:
         # The key is alert-derived text: it is only ever printed inside an untrusted frame, so
@@ -167,10 +196,11 @@ def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a
     down: Mapping[str, str] = NONE_DOWN,
 ) -> str:
     """`shim` is the injection seam for the lessons and corpus-vocabulary sections' three
-    subprocesses; omitted, they run for real. `down` is each system down for the run as this
-    view is built, with its cause (#1256 O-3, `system_status.down_notes`), marked in the
-    workspace view."""
+    subprocesses; omitted, they run for real. `down` marks unusable systems with their causes.
+
+    Every path is rendered in the run's model view (#1255 P1)."""
     run_shim = shim if shim is not None else _shim
+    view = ModelView(Path(run_dir), Path(defender_dir), tenant_agent)
     try:
         from defender import run_common
         env = run_common.run_env(defender_dir, run_dir, tenant_agent=tenant_agent)
@@ -197,7 +227,7 @@ def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a
     try:
         from defender.scripts.workspace_map import workspace_map
         sections.append(
-            "## Workspace\n" + workspace_map(run_dir, systems=systems, down=down).strip())
+            "## Workspace\n" + workspace_map(run_dir, systems=systems, view=view, down=down).strip())
     except Exception as e:  # noqa: BLE001 — orientation must never break the run
         sections.append(f"## Workspace\n_(unavailable: {e!r} — discover via ls/Read)_")
 
@@ -213,7 +243,7 @@ def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a
     if grammar:
         sections.append(grammar)
 
-    lessons = _build_lessons_section(env, sig, run_shim)
+    lessons = _build_lessons_section(env, sig, run_shim, view)
     if lessons:
         sections.append(lessons)
 

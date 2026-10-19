@@ -459,19 +459,24 @@ def test_1224_world_with_no_facts_serves_base_with_no_oracle_turn(tmp_path):
     est = S.estate(tmp_path)
     ep = _episode(tmp_path)
     est.answer("idp", "query", BOB, BOB_BASE)
-    oracle, verifier = S.oracle(*_forged_moves()), S.passing_verifier()
-    control = S.sandboxed_registry(ep, "a", est, oracle=oracle, verifier=verifier)
+    control_oracle = S.oracle(S.submit(BOB_BASE, S.EMPTY_CLAIM))
+    control = S.sandboxed_registry(ep, "a", est, oracle=control_oracle,
+                                   verifier=S.passing_verifier())
     ctx = est.ctx(tmp_path / "run")
 
     captured_call = S.call(control, "idp", "query", ctx, **ALICE)
-    live_call = S.call(control, "idp", "query", ctx, **BOB)
     assert _text(captured_call) == _text(BASE_ALICE)
+    assert control_oracle.requests == 0, "a recorded answer cost the control world an oracle turn"
+    live_call = S.call(control, "idp", "query", ctx, **BOB)
     assert _text(live_call) == _text(BOB_BASE)
-    assert oracle.requests == 0
-    assert verifier.requests == 0
+    assert control_oracle.requests >= 1, (
+        "the control world served a question the source never asked as a raw live read (D3)")
+    assert "user:bob" in control_oracle.all_seen(), "the oracle was not handed the live call"
     assert _decisions(ep, "a") == [S.PASSTHROUGH, S.PASSTHROUGH]
+    assert not control_oracle.overrun
 
-    # Positive control: the same doubles ARE driven for a world with facts.
+    # Positive control: a world with facts takes a turn for the recorded call too.
+    oracle, verifier = S.oracle(*_forged_moves()), S.passing_verifier()
     fact_world = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=verifier)
     assert S.call(fact_world, "idp", "query", ctx, **ALICE) == SERVED_ALICE
     assert oracle.requests >= 1
@@ -665,11 +670,16 @@ def test_base_answer_is_a_non_answer_body(tmp_path, body):
     est.answer("idp", "query", BOB, payload)
     ctx = est.ctx(tmp_path / "run")
 
-    control_oracle = S.oracle()
-    control = S.sandboxed_registry(ep, "a", est, oracle=control_oracle, verifier=S.verifier())
+    # #1255 D3: the control world's live base goes through its oracle too, framed the same way
+    # (was M07=A: served with no turn).
+    control_oracle = S.oracle(S.submit(payload, S.EMPTY_CLAIM))
+    control = S.sandboxed_registry(ep, "a", est, oracle=control_oracle,
+                                   verifier=S.passing_verifier())
     assert _text(S.call(control, "idp", "query", ctx, **BOB)) == _text(payload)
-    assert control_oracle.requests == 0
+    assert control_oracle.requests >= 1
     assert _decisions(ep, "a") == [S.PASSTHROUGH]
+    if marker is not None:
+        S.assert_wrapped_untrusted(control_oracle.seen[0], marker, f"the {body} base body")
 
     oracle = S.oracle(S.submit(payload, S.EMPTY_CLAIM))
     reg = S.sandboxed_registry(ep, "b", est, oracle=oracle, verifier=S.passing_verifier())

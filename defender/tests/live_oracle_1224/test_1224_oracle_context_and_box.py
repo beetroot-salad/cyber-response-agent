@@ -1435,8 +1435,9 @@ def test_1224_family_blocks_compared_across_worlds_with_different_facts(tmp_path
     """s_fu12 — the family block is the same for every world and carries nothing of any world.
 
     Worlds b and c have different facts and declared verdicts; the control world, with no facts,
-    serves its call with no oracle turn at all (M07=A). The family block carries the base story
-    and both systems' example rows.
+    serves its call — one the family RECORDED — with no oracle turn at all (#1255 D3 keeps that
+    for a recorded call; only a base read live goes through the control's oracle). The family
+    block carries the base story and both systems' example rows.
     """
     doc = _family(b_statement="FACTB-1212 alice obtained a TGT on db-1 at 15:22Z",
                   c_statement="FACTC-1212 bob reset carol's password")

@@ -107,7 +107,7 @@ def _launch(source: Path, spawn: Any, *, tenant_id: str | None = None,
     try:
         return branch_cli.main(
             ["--tenant", requested, source.name, str(T.BRANCH_MESSAGE_ID),
-             "--continuation-prompt", P.CONTINUATION],
+             *T.retired_continuation_argv()],
             spawn=spawn, **seams)
     except SystemExit as refused:
         return refused

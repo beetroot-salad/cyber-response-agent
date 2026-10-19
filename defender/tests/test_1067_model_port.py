@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from defender._model import model
+from defender.tests import _branch_947 as B947
 
 
 # the decorator itself
@@ -66,14 +67,19 @@ def test_model_refuses_a_keyword_the_class_has_no_field_for():
 # the branch spec: every mistyped field is a `BranchError`, at construction
 
 
-_GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3, continuation_prompt="go",
+#: #1255 (D1, P4) COMPAT: the continuation prompt is offered only while `BranchSpec` still
+#: declares it (`_branch_947.declares_retired_prompt`), so every mistyped-field case below
+#: reaches its own refusal on both sides of the change. That the field is GONE is
+#: `test_920_branch_seam`'s demand and `test_branch_spec_field_types_are_read_off_the_class`'s.
+#: The mistyped-prompt case that stood in the table below retired with the field (D1).
+_RETIRED_PROMPT = {B947.RETIRED_PROMPT_FIELD: "go"} if B947.declares_retired_prompt() else {}
+_GOOD = dict(source_run_dir=Path("/x"), branch_message_id=3, **_RETIRED_PROMPT,
              as_of=datetime(2026, 1, 1, tzinfo=UTC))
 
 
 @pytest.mark.parametrize(("field_name", "bad"), [
     ("branch_message_id", "59"),
     ("branch_message_id", True),
-    ("continuation_prompt", None),
     ("source_run_dir", "/tmp/x"),
     ("as_of", "2026-01-01T00:00:00Z"),
 ])

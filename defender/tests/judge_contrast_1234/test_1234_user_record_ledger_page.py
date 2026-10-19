@@ -31,7 +31,7 @@ LANE = S.LANES
 #: `edr lookup` stays withheld, so every sibling's post-branch `edr lookup` is refused.
 WITHHELD = (("edr", "lookup"), ("siem-x", "lookup"))
 #: J3's row on the real path: a pre-branch `∅.denied` the source run wrote, which the real
-#: `_inherit_evidence` seeds into every sibling's table (params distinct from the post-branch
+#: `ForkSnapshot.restore_files` seeds into every sibling's table (params distinct from the post-branch
 #: refusal unless a scenario wants them equal).
 J3_PARAMS = {"entity": "j3-prebranch"}
 #: A frame-closing string of the prompt's untrusted frames (`_triplet_947.UNTRUSTED_FRAME`).

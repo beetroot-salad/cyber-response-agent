@@ -16,6 +16,7 @@ such read records a `base` row in the world's own file, so counting them sizes t
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from defender._model import model
@@ -25,7 +26,7 @@ from defender._io import NotPlainEntry, load_json_artifact, read_text_soft
 from defender.learning.lead_repository import QueryRow, load_queries_report
 from defender._query_rules import ParamsTooDeep
 
-from .ledger import CAPTURED, LedgerError, ServedCall, payload_text, served_line
+from .ledger import CAPTURED, LedgerError, ServedCall, request_key, served_line
 
 
 @model(frozen=True)
@@ -80,8 +81,9 @@ def prime_base(source_run_dir: Path, episode: Episode, *,
         "duplicates": 0, "failed": 0, "sentinels": 0,
         "unreadable": table_unreadable,
     }
+    skipped: list[tuple[QueryRow, str]] = []
     for row in rows:
-        call = _captured_call(row, counts)
+        call = _captured_call(row, counts, skipped)
         if call is None:
             continue
         # First key wins, the same rule the ledger's memo uses.
@@ -111,6 +113,12 @@ def prime_base(source_run_dir: Path, episode: Episode, *,
         base.create("".join(served_line(row) for row in out))
     except (FileExistsError, NotPlainEntry) as taken:
         raise _already_primed(episode) from taken
+    # After the base, by the same exclusive create: a key the base answers is never unrecorded.
+    # Only when a call was skipped: an absent record reads as no unrecorded key, which is what
+    # an empty one would say, so a clean capture's prime stays the one write of its base.
+    unrecorded = _unrecorded(skipped, primed=seen)
+    if unrecorded:
+        episode.served_unrecorded.create("".join(unrecorded_line(row) for row in unrecorded))
     # Named fields, not `**counts`: a field mismatch would raise after the base file is
     # written, leaving the episode id permanently unusable.
     return PrimeReport(
@@ -126,8 +134,44 @@ def _already_primed(episode: Episode) -> LedgerError:
         "episode directory to re-prime it")
 
 
-def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
-    """One capture row as a family-tier `ServedCall`, or `None` with `counts` advanced.
+#: The skip record's classes (#1255 D6): a call the source asked that reached its system,
+#: whose answer the base lacks.
+UNRECORDED_FAILED = "failed"
+UNRECORDED_UNREADABLE = "unreadable"
+
+
+def unrecorded_line(row: dict) -> str:
+    """One skip-record row as its JSONL line. @owns served_unrecorded — the primer's record of
+    the calls the source asked whose answer the base lacks: `{system, verb, params, skip}`,
+    `skip` one of `UNRECORDED_FAILED` / `UNRECORDED_UNREADABLE`. Read by
+    `ledger.Ledger.unrecorded_keys`."""
+    return json.dumps(row) + "\n"  # lint-jsonl-io: ok — one row, handed whole to the episode's create
+
+
+def _unrecorded(skipped: list[tuple[QueryRow, str]], *, primed: set[str]) -> list[dict]:
+    """The skip record's rows: each skipped call's key once (first skip wins), never a key the
+    base answers (the source asked it again and that answer was captured). A call whose params
+    no key can carry is left out, as the primer leaves it out of the base."""
+    out: list[dict] = []
+    seen = set(primed)
+    for row, skip in skipped:
+        try:
+            key = request_key(row.system, row.verb, row.params)
+        except ParamsTooDeep:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"system": row.system, "verb": row.verb, "params": row.params,
+                    "skip": skip})
+    return out
+
+
+def _captured_call(row: QueryRow, counts: dict,
+                   skipped: list[tuple[QueryRow, str]]) -> ServedCall | None:
+    """One capture row as a family-tier `ServedCall`, or `None` with `counts` advanced — and, for
+    a call that reached its system but whose answer is not recordable (it failed, or its payload
+    is unreadable), the row and its class appended to `skipped` (#1255 D6's skip record).
 
     Successful answers only. The family tier never holds a failure (a live adapter error is
     filed in the world tier as a fault). Priming an error digest would hand it to the applier as
@@ -143,28 +187,25 @@ def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
         # A `∅.` row never reached a system; there is no estate answer to replay.
         counts["sentinels"] += 1
         return None
+    system, verb = row.system, row.verb
     if row.exit_code != 0:
         counts["failed"] += 1
+        if system and verb:
+            skipped.append((row, UNRECORDED_FAILED))
         return None
-    if row.raw_ref is None:
+    text = read_text_soft(row.raw_ref)[0] if row.raw_ref is not None else None
+    if text is None or not _readable_payload(text):
         counts["unreadable"] += 1
+        if system and verb:
+            skipped.append((row, UNRECORDED_UNREADABLE))
         return None
-    text = read_text_soft(row.raw_ref)[0]
-    if text is None:
-        counts["unreadable"] += 1
-        return None
-    canonical = _canonical_payload(text)
-    if canonical is None:
-        counts["unreadable"] += 1
-        return None
-    system, verb = row.system, row.verb
     if not system or not verb:
         counts["unreadable"] += 1
         return None
     try:
         return ServedCall(
             system=system, verb=verb, params=row.params,
-            payload_text=canonical, source=CAPTURED, world_id=None,
+            payload_text=text, source=CAPTURED, world_id=None,
         )
     except ParamsTooDeep:
         # A row its own table can read but no ledger row can carry: written before the limit,
@@ -174,15 +215,16 @@ def _captured_call(row: QueryRow, counts: dict) -> ServedCall | None:
         return None
 
 
-def _canonical_payload(text: str) -> str | None:
-    """One captured sidecar re-spelled in the ledger's canonical form, or `None`.
+def _readable_payload(text: str) -> bool:
+    """Whether one captured sidecar decodes as a JSON answer.
 
-    Re-dumped, never copied: `query_tool` wrote the sidecar without `sort_keys` and the ledger
-    canonicalises with it, so copied bytes would never match a live serve's key and every call
-    would silently miss the base tier.
+    Kept as the source's own bytes, never re-dumped (#1255 G8): a world serves an answer the
+    source received exactly as the source received it, and a row is found by its request key,
+    which is canonical whatever the payload's spelling. Comparing two answers canonicalises
+    them where it compares (`comparator`), never by rewriting evidence.
 
     Decoded by `_io.load_json_artifact` so an undecodable sidecar (including one nested deeply
     enough to hit `RecursionError`) counts as unreadable rather than crashing the episode.
     """
-    payload, unreadable = load_json_artifact(text)
-    return None if unreadable is not None else payload_text(payload)
+    _payload, unreadable = load_json_artifact(text)
+    return unreadable is None

@@ -880,8 +880,28 @@ def test_fix_row_carries_the_recall_because_it_moves_the_frontier_too(tmp_path):
 
 
 def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
-    """CLAIM: the rendered path is ABSOLUTE, and the `matched` line is part of the block."""
-    from defender.runtime.tools import _tool_read_file
+    """CLAIM: the rendered path is ABSOLUTE, and the `matched` line is part of the block.
+
+    Both were unpinned, which is why the repo-relative spelling shipped green. MAIN's
+    `cwd_anchor` is the RUN DIR, so `_resolve_operand` rebases `defender/lessons/<name>.md`
+    onto the run dir and `decide_read` refuses it — `test_grant_gate_575.py::test_a11` pins
+    that spelling as DENY, on the grounds that "nothing hands MAIN that spelling any more".
+    A block that hands it one costs a refused tool call per lesson and degrades the whole
+    push to description-only, which is the one thing SKILL.md says not to decide on.
+
+    Asserted through the REAL gate rather than against a string shape, because the property
+    is "MAIN can read this", not "this starts with a slash". The `matched` half rides along:
+    `HIDDEN_KEYS` strips the selectors, so it is the model's only account of why a lesson was
+    pushed, and every other assertion in this file is satisfied by the `name:` key inside the
+    frontmatter dump.
+
+    #1255 (design rev 4, P1 Outbound/Inbound; rev 5, C9 and C11): the block is taken where the
+    model receives it -- the write return of MAIN's own `append_block`, over deps built by
+    `bind` -- rather than from `render(hits)` called bare, which knows no run and so no model
+    view. The path it quotes is the lesson's model path under `/defender`, and MAIN's
+    `read_file` maps it back through the same deps."""
+    from defender.runtime.tools import _tool_append_block, _tool_read_file
+    from defender.tests._1255_view import MODEL_DEFENDER
 
     deps, run, dfn = _main_deps(tmp_path)
     corpus = _corpus(dfn)
@@ -889,15 +909,22 @@ def test_the_block_hands_main_a_path_its_own_gate_will_read(tmp_path):
     lf = _lessons_frontier()
 
     hits = lf.match_lessons(_frontier(_FIXTURE_DOCS["open class"]), corpus)
-    rendered = lf.render(hits)
+    _tool_append_block(deps, PROLOGUE)
+    rendered = _tool_append_block(deps, OPEN_CLASS_BLOCK)
 
     assert hits, "positive control: the fixture should match the lesson"
+    assert "readable-from-the-block" in rendered, (
+        f"positive control: the write pushed the lesson:\n{rendered}")
     assert f"matched {hits[0].matched}" in rendered, (
         f"the block dropped its account of WHY the lesson was pushed:\n{rendered}"
     )
-    # The first hit row (#1206 frames the hits, so it follows the frame's opening line).
-    first = next(ln for ln in rendered.splitlines() if ln.startswith("- "))
+    # The first hit row (#1206 frames the hits, so it follows the frame's opening line; the write
+    # return's own text comes before the block, so the row is found by its `matched` account).
+    first = next(ln for ln in rendered.splitlines()
+                 if ln.startswith("- ") and " — matched " in ln)
     quoted = first.removeprefix("- ").split(" — matched ")[0]
+    assert quoted ==f"{MODEL_DEFENDER}/lessons/readable-from-the-block.md", (
+        f"the block quotes {quoted!r}, not the lesson's model path under {MODEL_DEFENDER}")
     body = _tool_read_file(deps, quoted)  # ModelRetry here IS the failure
     assert "lesson body" in body, f"the path the block quoted ({quoted!r}) did not read back"
 

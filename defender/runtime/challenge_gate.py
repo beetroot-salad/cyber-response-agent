@@ -118,6 +118,16 @@ class ReviewState:
     closed: bool = False
     disposition: str | None = None
 
+    def restore(self, *, turns: int, raised_asks: dict, closed: bool,
+                disposition: str | None) -> None:
+        """Resume a branch arm's gate where its source's stood at the branch point (#1255 D2):
+        the rounds already reviewed and the asks already raised, as the fork snapshot
+        recorded them. Before the arm's first turn, so no review of its own is lost."""
+        self.turns = turns
+        self.raised_asks = dict(raised_asks)
+        self.closed = closed
+        self.disposition = disposition
+
     @classmethod
     def of(cls, deps: Any) -> ReviewState:
         box = deps.review_state

@@ -51,6 +51,9 @@ RUNS_DIRNAME = "runs"
 SERVED_DIRNAME = SERVED_PREFIX.rstrip("/")
 JUDGE_DRAWS_DIRNAME = "judge"
 BASE_FILENAME = "base.jsonl"
+#: The primer's skip record (#1255 D6): the calls the source asked whose answer the recording
+#: lacks because the call failed or its payload was unreadable.
+UNRECORDED_FILENAME = "unrecorded.jsonl"
 PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
 RUN_DIR_POINTER_NAME = "run_dir"
 
@@ -59,6 +62,9 @@ RUN_DIR_POINTER_NAME = "run_dir"
 #: dir's own, from `run_repository._layout`.
 ARCHIVED_SCRUB_VERDICT_NAME = "scrub_verdict.json"
 ARCHIVED_RUN_END_NAME = "run_end.json"
+#: The run's call join (`RunPaths.call_join`, #1255 G4/G6), re-homed under the world beside the
+#: query table it joins to the served ledger.
+ARCHIVED_CALL_JOIN_NAME = "call_join.jsonl"
 
 
 def _check_label(label: object, *, what: str = "label") -> str:
@@ -140,9 +146,15 @@ class ArchivedWorldLeaves:
 
     @property
     def executed_queries(self) -> PurePosixPath:
-        """The archived query table: the sibling run's own, copied under the world (#1234 A12:
-        the judge joins it to the served ledger by call id)."""
+        """The archived query table: the sibling run's own, copied under the world. It carries
+        no call id (#1255 G4); the judge joins it to the served ledger through `call_join`."""
         return PurePosixPath(RUN_LAYOUT.executed_queries)
+
+    @property
+    def call_join(self) -> PurePosixPath:
+        """The run's call join (#1255 G4/G6): `(lead_id, seq)` -> call id for every table row
+        the run itself wrote; a table row with no line here is inherited (seeded)."""
+        return PurePosixPath(ARCHIVED_CALL_JOIN_NAME)
 
     def gather_summary(self, lead_id: str) -> PurePosixPath:
         """`gather_summaries/<lead_id>.md`.
@@ -235,6 +247,10 @@ class WorldLayout:
     def executed_queries(self) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.executed_queries
 
+    @property
+    def call_join(self) -> PurePosixPath:
+        return self.dir / WORLD_LEAVES.call_join
+
     def gather_summary(self, lead_id: str) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.gather_summary(lead_id)
 
@@ -323,6 +339,12 @@ class EpisodeLayout:
     @property
     def served_base(self) -> PurePosixPath:
         return self.served / BASE_FILENAME
+
+    @property
+    def served_unrecorded(self) -> PurePosixPath:
+        """The primer's skip record beside the base (#1255 D6): each call the source asked
+        whose answer the base lacks because the call failed or its payload was unreadable."""
+        return self.served / UNRECORDED_FILENAME
 
     @property
     def priming_lock(self) -> PurePosixPath:
@@ -536,6 +558,10 @@ class EpisodePaths:
         return self.episode_dir / LAYOUT.served_base
 
     @property
+    def served_unrecorded(self) -> Path:
+        return self.episode_dir / LAYOUT.served_unrecorded
+
+    @property
     def priming_lock(self) -> Path:
         return self.episode_dir / LAYOUT.priming_lock
 
@@ -634,6 +660,10 @@ class WorldPaths:
     @property
     def run_end(self) -> Path:
         return self._at(self.rel.run_end, what="run_end")
+
+    @property
+    def call_join(self) -> Path:
+        return self._at(self.rel.call_join, what="call_join")
 
     @property
     def lessons_loaded(self) -> Path:

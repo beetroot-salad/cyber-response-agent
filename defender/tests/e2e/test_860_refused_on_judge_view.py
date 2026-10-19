@@ -517,11 +517,10 @@ def test_m1_a_real_denial_inside_a_dispatched_lead_is_that_leads_sentinel_row(tm
 def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     """M2, the property the sentinel-row shape buys for free and a second stream never had: a
     denial the SOURCE run suffered before the branch point reaches every sibling world,
-    because it is a row of the table `_inherit_evidence` copies — truncated to the leads the
-    source held, sentinels included."""
+    because it is a row of the table the fork snapshot restores, sentinels included."""
     from defender._io import read_jsonl_rows
     from defender.run_repository import RunPaths
-    from defender.runtime.branch._seed import _inherit_evidence
+    from defender.tests._fork_snapshot_plant import recorded_snapshot
     from defender.runtime.run_state import RunState
 
     rec = VerbRecorder()
@@ -533,9 +532,12 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     sibling = tmp_path / "sibling"
     sibling.mkdir()
     state = RunState(sibling, "d860-sibling")
-    _inherit_evidence(_writer_run_1165(r.run_dir), state, {LEAD}, run=_writer_run_1165(state.run_dir))
+    source_run = _writer_run_1165(r.run_dir)
+    snapshot = recorded_snapshot(source_run)
+    snapshot.restore_files(source_run, _writer_run_1165(state.run_dir), state)
     inherited = {lead.lead_id: lead for lead in joined(sibling)}
-    assert set(inherited) == {LEAD}, f"the sibling inherited leads {sorted(inherited)}"
+    assert set(inherited) == {LEAD, "l-00c"}, (
+        f"the snapshot must retain the gather and correlation leads: {sorted(inherited)}")
     assert [(row.query_id, row.system, row.verb) for row in inherited[LEAD].sentinels] \
         == [(DENIED_QUERY_ID, *DENIED_PAIR)]
     assert [row.query_id for row in inherited[LEAD].queries] == ["elastic.query"]

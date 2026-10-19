@@ -346,7 +346,7 @@ def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
         ):
             return ""
         # Rendered only past the gate, since rendering is the costly part.
-        now = render(hits, lead=WRITE_RETURN_LEAD)
+        now = render(hits, lead=WRITE_RETURN_LEAD, show=lessons_push.shown_path(deps))
         lessons_push.record(deps, hits)
         return "\n\n" + now
     except Exception as e:  # noqa: BLE001 — fail open; the write already landed

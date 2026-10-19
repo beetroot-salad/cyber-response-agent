@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.messages import ToolReturnPart  # noqa: E402
@@ -62,7 +64,7 @@ def _planted_defender(root: Path, *, corpus: bool = True) -> Path:
 
 
 def _reads(run_dir: Path, n: int) -> list[Turn]:
-    return [Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})])
+    return [Turn(tool_calls=[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})])
             for _ in range(n)]
 
 
@@ -115,6 +117,15 @@ def _expected_hits(doc: str, corpus: Path) -> list[str]:
     return [h.name for h in match_lessons(frontier_from_text(doc), corpus)]
 
 
+def _model_path(lesson: Path) -> str:
+    """The block's hit line for a lesson of the planted checkout's corpus: the lesson named
+    through the model view's fixed checkout path (#1255, design rev 4 P1 outbound — "the lessons
+    block in the fold frontier row (today an absolute realpath)"), never the host realpath. The
+    line's own `- ` lead is part of the match: the planted tree is `<tmp>/repo/defender`, so a
+    bare `/defender/lessons/…` is a substring of the host realpath too."""
+    return f"- /defender/lessons/{lesson.name} — matched"
+
+
 # O1 / O2 / O3 — the fold row carries the block
 
 
@@ -135,8 +146,9 @@ def test_the_fold_row_carries_the_block_the_whole_document_matched(tmp_path, mon
     assert text.startswith(record), "the record is no longer the head of the frontier row"
     block = text[len(record):]
     assert block.startswith("\n\n"), f"the block is not separated from the record: {block[:40]!r}"
-    assert str(lesson.resolve()) in block, (
+    assert _model_path(lesson) in block, (
         f"the frontier row carries no path for the lesson the document matched:\n{text}")
+    assert str(lesson.resolve()) not in text, "the frontier row names the lesson's host path"
     assert FOLD_HEADER in block.strip().splitlines()[0], (
         f"the block's first line is not the fold header:\n{block.strip().splitlines()[0]}")
     assert WRITE_RETURN_HEADER not in text, (
@@ -144,7 +156,7 @@ def test_the_fold_row_carries_the_block_the_whole_document_matched(tmp_path, mon
         "the record when no write did")
     # the row is what MAIN sees, on every round after the fold
     assert replay.calls >= 2
-    assert str(lesson.resolve()) in replay.seen[-1], (
+    assert _model_path(lesson) in replay.seen[-1], (
         "the lesson path is in the store but not in the request MAIN received")
 
 
@@ -174,7 +186,10 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
         tmp_path, monkeypatch, tree=tree, doc=doc,
         turns=lambda rd: _reads(rd, 2) + [Turn(text="done")])
     (_rid, _seq, text), = _frontier_rows(store)
-    # Each render mints its own frame salt (#1206); compared with the salts masked.
+    # Each render mints its own frame salt (#1206); compared with the salts masked. The fold
+    # renders lesson paths in the model view (#1255 P1): the shared derivation's host corpus
+    # path is read as `/defender/lessons` (a no-op when `render` already speaks model paths).
+    expected = expected.replace(str(corpus.resolve()), "/defender/lessons")
     text, expected = (re.sub(r"run-[0-9a-f]{16}-", "run-<SALT>-", t) for t in (text, expected))
     assert text.endswith("\n\n" + expected), (
         f"the fold block is not the shared derivation:\n{text[-len(expected) - 200:]}")
@@ -202,9 +217,9 @@ def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, 
     rows = _frontier_rows(store)
     assert [seq for _id, seq, _t in rows] == [1, 2], rows
     (_r1, _s1, first), (_r2, _s2, second) = rows
-    assert str(class_lesson.resolve()) in first
-    assert str(loginuid_lesson.resolve()) not in first, "loop 2 had not opened loginuid yet"
-    assert str(loginuid_lesson.resolve()) in second, (
+    assert _model_path(class_lesson) in first
+    assert _model_path(loginuid_lesson) not in first, "loop 2 had not opened loginuid yet"
+    assert _model_path(loginuid_lesson) in second, (
         "boundary 2 re-used boundary 1's block — the lesson loop 2 opened never reached MAIN")
     assert second.count(FOLD_HEADER) == 1
     assert (rd / "investigation.md").read_text(encoding="utf-8").endswith(SECOND_LOOP), (
@@ -278,7 +293,7 @@ def test_a_malformed_lesson_beside_a_good_one_does_not_stop_the_mint(tmp_path, m
 
     assert result["exit_reason"] is None, result
     (_rid, _seq, text), = _frontier_rows(store)
-    assert str(good.resolve()) in text
+    assert _model_path(good) in text
     assert "malformed-936" not in text
     assert [(r["lesson_name"], r["kind"]) for r in _rows(rd)] == [(CLASS_LESSON, "push")]
 
@@ -307,8 +322,9 @@ def test_the_write_return_lane_keeps_pushing_after_the_fold_only_when_the_top_th
     assert CLASS_LESSON not in non_moving, (
         f"a write that moved nothing re-pushed after the fold:\n{non_moving}")
     assert WRITE_RETURN_HEADER in moving, f"the post-fold moving write returned no block:\n{moving}"
-    assert str(class_lesson.resolve()) in moving
-    assert str(loginuid_lesson.resolve()) in moving
+    assert _model_path(class_lesson) in moving
+    assert _model_path(loginuid_lesson) in moving
+    assert str(tree) not in moving, "the write-return block names the checkout's host path"
     assert FOLD_HEADER not in moving, "the write return borrowed the fold header"
     # still one frontier row: the appends are inside boundary 1's loop 2
     assert [seq for _id, seq, _t in _frontier_rows(store)] == [1]

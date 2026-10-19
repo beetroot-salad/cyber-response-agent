@@ -1,7 +1,6 @@
 """#1165 O1/O4/O7: fork reads belong to the opened source Run."""
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -9,22 +8,45 @@ from defender.runtime import branch
 from defender.runtime.run_state import RunState
 from defender.tests._1165_flows import RecordIO, drive_run, run_handle
 from defender.tests._alert_plant import plant_alert
-from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at
+from defender.tests._branch_947 import GOLDEN_INVESTIGATION, planted_source, spec_at
+from defender.tests._session_store_705 import runs_base
 from defender.tests.e2e._replay_harness import ReplayFn, Turn
 
 
-def source_and_sibling(tmp_path, *, document=None):
+#: The source's run folder name — `planted_source`'s, passed to it explicitly so `plant` can be
+#: handed the same folder before the source is built.
+SOURCE_RUN = "run-source-001"
+
+
+def source_and_sibling(tmp_path, *, document=None, plant=None):
+    """The planted source, its sibling, and the spec the sibling forks the source by.
+
+    `plant(source)` writes the source's own evidence (or the alias a test plants at one of its
+    names) BEFORE the source is built: #1255 P2 snapshots a source when its branch response
+    arrives — counters, appended lengths, the document's content, and a HASH of every
+    write-once file already there (gather summaries, raw payloads, lead claims) — and for a
+    hand-built source that point is at or after `planted_source` returns (the fixture-only
+    planting helper is applied to what it returns). A file written after that is one the snapshot never
+    recorded, so the fork would be judged against evidence the source did not have when it
+    branched. `planted_source` makes its folder with `exist_ok`, so what `plant` wrote stays."""
     text = document if document is not None else GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
-    store, directory, _session, ids = legal_source(tmp_path, investigation=text)
     source_io, target_io = RecordIO(), RecordIO()
-    source, target = run_handle(directory, source_io), run_handle(directory.parent / "run-sibling", target_io)
+    source = run_handle(runs_base(tmp_path) / SOURCE_RUN, source_io)
+    if plant is not None:
+        plant(source)
+    store, directory, _session, ids = planted_source(tmp_path, investigation=text, name=SOURCE_RUN)
+    assert directory == source.run_dir, (directory, source.run_dir)
+    target = run_handle(directory.parent / "run-sibling", target_io)
     spec = spec_at(store, directory, ids[-1])
     state = RunState(target.run_dir, str(target.id))
     return store, spec, source, target, state, source_io, target_io
 
 
 def seed(store, spec, source, target, state):
-    return branch.seed_investigation(store, spec, state, run=target, source_run=source)
+    snapshot = branch.snapshot_at(store, spec, source_run=source)
+    assert snapshot is not None
+    snapshot.verify(source)
+    branch.restore_run_folder(snapshot, state, run=target, source_run=source)
 
 
 def test_fork_retains_current_alert_bytes_for_the_same_id_and_inherits_verified_fallback(tmp_path):
@@ -62,22 +84,20 @@ def test_missing_alert_fallback_replaces_a_stale_record_through_target_run(tmp_p
 
 
 def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
-    """O7: canonical payload/claim/summary bytes survive even when they are not UTF-8."""
-    store, spec, source, target, state, source_io, target_io = source_and_sibling(tmp_path)
+    """O7: canonical payload/claim/summary bytes survive even when they are not UTF-8.
+
+    #1255 P2: every file — the canonical ones and the unknown shapes alike — is planted before
+    the source is built (`source_and_sibling(plant=…)`), so the source's fork snapshot is taken
+    over a folder that already holds them: the canonical bytes are evidence the source held at
+    its branch point, and the unknown shapes were already there beside them."""
     canonical = {
         "gather_raw/l-001/0.json": b'\xff\x00payload\xfe',
         "gather_raw/l-001/12.json": b'opaque 12',
         "gather_raw/l-001.lead.json": b'\xfeclaim\xff',
         "gather_summaries/l-001.md": b'\xffsummary\xfe',
     }
-    for name, data in canonical.items():
-        path = source.run_dir / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
     # Unknown shapes point outside, so even trying to read/copy them is observably wrong.
     outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "secret").write_bytes(b"must never inherit")
     unexpected = [
         "gather_raw/l-001/01.json", "gather_raw/l-001/+1.json",
         "gather_raw/l-001/-1.json", "gather_raw/l-001/notes.txt",
@@ -85,8 +105,19 @@ def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
         "gather_raw/l-001.evil", "gather_summaries/l-001.md.bak",
         "gather_summaries/l-001.extra", "gather_raw/l-001/unknown-dir",
     ]
-    for name in unexpected:
-        (source.run_dir / name).symlink_to(outside, target_is_directory=True)
+
+    def plant(source):
+        for name, data in canonical.items():
+            path = source.run_dir / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        outside.mkdir()
+        (outside / "secret").write_bytes(b"must never inherit")
+        for name in unexpected:
+            (source.run_dir / name).symlink_to(outside, target_is_directory=True)
+
+    store, spec, source, target, state, source_io, target_io = source_and_sibling(
+        tmp_path, plant=plant)
     seed(store, spec, source, target, state)
     for name, data in canonical.items():
         assert (target.run_dir / name).read_bytes() == data
@@ -101,167 +132,28 @@ def test_fork_copies_only_canonical_owner_names_as_opaque_bytes(tmp_path):
 
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_recognized_source_payload_refusal_still_fails_fork(tmp_path, kind):
-    """O4/O7: selecting a recognized artifact never turns a refused read into absence."""
-    store, spec, source, target, state, _source_io, _target_io = source_and_sibling(tmp_path)
-    path = source.tables.payloads("l-001", 0).path
-    path.parent.mkdir(parents=True)
-    if kind == "symlink":
-        outside = tmp_path / "secret"
-        outside.write_bytes(b"outside")
-        path.symlink_to(outside)
-    else:
-        path.mkdir()
+    """O4/O7: selecting a recognized artifact never turns a refused read into absence.
+
+    #1255 P2: the alias is planted before the source is built (`source_and_sibling(plant=…)`),
+    so it already sits at the payload's name when the source's fork snapshot is taken — the
+    refusal is about a recognized artifact the source held at its branch point, not about a
+    file that appeared after the snapshot and that the snapshot never recorded."""
+
+    def plant(source):
+        path = source.tables.payloads("l-001", 0).path
+        path.parent.mkdir(parents=True)
+        if kind == "symlink":
+            outside = tmp_path / "secret"
+            outside.write_bytes(b"outside")
+            path.symlink_to(outside)
+        else:
+            path.mkdir()
+
+    store, spec, source, target, state, _source_io, _target_io = source_and_sibling(
+        tmp_path, plant=plant)
     with pytest.raises(branch.BranchError):
         seed(store, spec, source, target, state)
     assert not target.tables.payloads("l-001", 0).path.exists()
-
-
-def query_snapshot_source(tmp_path, *, selected_empty):
-    """A nonempty source capture whose later dispatch lies beyond the chosen branch point."""
-    from defender.runtime import session_store
-    from defender.tests._session_store_705 import tool_call_response, tool_return_request
-
-    case = source_and_sibling(tmp_path)
-    store, _spec, source, _target, _state, _source_io, _target_io = case
-    first = {"lead_id": "l-001", "seq": 0, "params": {"tuple": [1, 2]}, "text": "café"}
-    later = {"lead_id": "l-002", "seq": 9, "query_id": "other.later"}
-    session = session_store.main_session_id(store)
-    store.append(session, [tool_call_response("gather", {"lead_id": "l-002"}, tool_call_id="late")],
-                 agent_id="main")
-    store.append(session, [tool_return_request("gather", "later summary", tool_call_id="late")],
-                 agent_id="main")
-    selected = [] if selected_empty else [first]
-    source.tables.queries.path.write_text(
-        "".join(json.dumps(row) + "\n" for row in selected) + "{broken\n[]\n" + json.dumps(later) + "\n",
-        encoding="utf-8")
-    return (*case, selected)
-
-
-@pytest.mark.parametrize("scaffold", ["absent", "empty"])
-@pytest.mark.parametrize("selected_empty", [False, True])
-def test_query_seed_replaces_the_snapshot_before_state_inheritance(tmp_path, scaffold, selected_empty):
-    """O2/O4/O6: selected rows, even none, replace scaffolding before entering live state."""
-    store, spec, source, target, state, source_io, target_io, selected = query_snapshot_source(
-        tmp_path, selected_empty=selected_empty)
-    path = target.tables.queries.path
-    if scaffold == "empty":
-        path.write_bytes(b"")
-    seen = []
-
-    def before(root, relative, data, options):
-        if relative == "executed_queries.jsonl":
-            # Refuse unlink/retry substitutions: scaffolding still exists at the backend call.
-            seen.append((list(state.lead_rows("l-001")), options["mode"], data))
-            assert path.exists() == (scaffold == "empty")
-            if scaffold == "empty":
-                assert path.read_bytes() == b""
-            assert target.documents.investigation.path.read_bytes(), "the document seeds first"
-
-    target_io.before_write = before
-    seed(store, spec, source, target, state)
-    expected = "".join(json.dumps(row) + "\n" for row in selected)
-    assert seen == [([], "replace", expected)]
-    assert path.is_file(), "an empty selected snapshot is a present zero-byte table"
-    assert path.read_bytes() == expected.encode("utf-8")
-    assert list(state.lead_rows("l-001")) == selected
-    assert state.lead_rows("l-002") == ()
-    assert any(relative == "executed_queries.jsonl" for _op, _root, relative, _mode in source_io.calls)
-
-
-@pytest.mark.parametrize("scaffold", ["absent", "empty"])
-@pytest.mark.parametrize("selected_empty", [False, True])
-def test_query_seed_failure_preserves_the_original_view_and_empty_live_state(tmp_path, scaffold, selected_empty):
-    """O2/O6: failed replace leaves the zero-byte scaffold intact and inherits no rows."""
-    store, spec, source, target, state, _source_io, target_io, _selected = query_snapshot_source(
-        tmp_path, selected_empty=selected_empty)
-    path = target.tables.queries.path
-    if scaffold == "empty":
-        path.write_bytes(b"")
-    original_inode = path.stat().st_ino if path.exists() else None
-    modes = []
-
-    def before(root, relative, data, options):
-        if relative == "executed_queries.jsonl":
-            modes.append(options["mode"])
-            assert state.lead_rows("l-001") == ()
-            assert path.exists() == (scaffold == "empty")
-            if scaffold == "empty":
-                assert path.read_bytes() == b""
-                assert path.stat().st_ino == original_inode
-
-    target_io.before_write = before
-    target_io.fail = ("rooted_write", "executed_queries.jsonl")
-    with pytest.raises((OSError, branch.BranchError)):
-        seed(store, spec, source, target, state)
-    assert state.lead_rows("l-001") == ()
-    assert state.lead_rows("l-002") == ()
-    assert modes == ["replace"]
-    assert path.exists() == (scaffold == "empty")
-    if scaffold == "empty":
-        assert path.read_bytes() == b""
-        assert path.stat().st_ino == original_inode
-
-
-@pytest.mark.parametrize("selected_empty", [False, True])
-def test_open_main_session_accepts_a_zero_byte_query_scaffold(tmp_path, selected_empty):
-    """O1/O2/O7: the actual pre-fork freshness check admits an empty table and seeds it."""
-    store, spec, source, target, state, _source_io, target_io, selected = query_snapshot_source(
-        tmp_path, selected_empty=selected_empty)
-    target.tables.queries.path.write_bytes(b"")
-    sessions_before = store.connection.execute("SELECT COUNT(*) FROM session").fetchone()[0]
-    session_id, visible = branch.open_main_session(store, spec, state, run=target, source_run=source)
-    assert visible
-    assert store.connection.execute("SELECT COUNT(*) FROM session").fetchone()[0] == sessions_before + 1
-    parent_id, truncated_by = store.connection.execute(
-        "SELECT parent_session_id, truncated_by FROM session WHERE session_id = ?", (session_id,)
-    ).fetchone()
-    assert parent_id is not None
-    assert truncated_by is None
-    assert target.tables.queries.path.read_bytes() == "".join(
-        json.dumps(row) + "\n" for row in selected).encode("utf-8")
-    assert list(state.lead_rows("l-001")) == selected
-    assert [mode for op, _root, relative, mode in target_io.calls
-            if op == "rooted_write" and relative == "executed_queries.jsonl"] == ["replace"]
-
-
-@pytest.mark.parametrize("occupied", ["nonempty", "symlink"])
-def test_open_main_session_refuses_occupied_queries_before_fork(tmp_path, occupied):
-    """O7: an occupied or linked sibling table is refused before a committed child exists."""
-    store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path)
-    path = target.tables.queries.path
-    content = b'{"existing": "sibling evidence"}\n'
-    outside = tmp_path / "existing-queries"
-    outside.write_bytes(content)
-    if occupied == "symlink":
-        path.symlink_to(outside)
-    else:
-        path.write_bytes(content)
-    sessions_before = store.connection.execute("SELECT COUNT(*) FROM session").fetchone()[0]
-    with pytest.raises(branch.BranchError, match="fresh sibling|already holds"):
-        branch.open_main_session(store, spec, state, run=target, source_run=source)
-    assert store.connection.execute("SELECT COUNT(*) FROM session").fetchone()[0] == sessions_before
-    assert path.is_symlink() == (occupied == "symlink")
-    assert path.read_bytes() == content
-    assert outside.read_bytes() == content
-    assert not target.documents.investigation.path.exists()
-    assert state.lead_rows("l-001") == ()
-    assert "executed_queries.jsonl" not in target_io.names("rooted_write")
-
-
-def test_seed_validates_against_itself_and_remains_writable(tmp_path):
-    """O4: inherited unfenced text is baseline, while global validation still applies."""
-    # The old writer explicitly permits a source prefix's existing prose as its own baseline.
-    document = "# Existing source heading\n\n" + GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
-    store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path, document=document)
-    fences = seed(store, spec, source, target, state)
-    assert fences > 0
-    seeded = target.documents.investigation.read()
-    assert seeded.startswith("# Existing source heading\n")
-    assert "investigation.md" in target_io.names("rooted_write")
-    # Fresh sibling refusal stays in force: do not overwrite a seed on a retry.
-    with pytest.raises(branch.BranchError, match="fresh sibling|already holds"):
-        seed(store, spec, source, target, state)
-    assert target.documents.investigation.read() == seeded
 
 
 def test_source_store_factory_uses_the_opened_source_record_and_cannot_bypass_its_fault(tmp_path):
@@ -290,69 +182,72 @@ def test_source_store_factory_uses_the_opened_source_record_and_cannot_bypass_it
 
 @pytest.mark.parametrize("fault", [False, True])
 def test_resumed_driver_threads_source_run_through_validation_seeding_and_lookup(tmp_path, fault):
-    """O1: real resumed driver uses separate source Run for every selected durable read."""
-    store, spec, source, target, state, source_io, target_io = source_and_sibling(tmp_path)
-    store.close()
+    """O1: real resumed driver uses separate source Run for every selected durable read.
+
+    #1255: re-fixtured onto a DRIVEN source branched at a D1 branch point (a MAIN response that
+    called tools). The hand-planted `legal_source` this used to branch has no fork snapshot (N4)
+    and its branch point was a tool RETURN, which D1 no longer admits. The read set no longer
+    names `investigation.md`: the document is restored from the snapshot's recorded CONTENT
+    (P2), so whether the restore reads the source's file at all is the implementation's.
+
+    Regression over the new branch point (D1): it passes once D1 lands, fork snapshot or not,
+    so it is not evidence for the snapshot (P2)."""
+    from defender.run_repository import RunPaths
+    from defender.tests import _1255_snapshot as S
+
+    driven = S.drive_source(tmp_path, (S.append(S.chunks(3)[0]), S.echo("x"), S.done()))
+    spec = S.spec_for(driven, S.tool_calling_responses(driven.store)[1])
+    store_path = driven.store.path
+    driven.store.close()
+    source_io, target_io = RecordIO(), RecordIO()
+    source = run_handle(driven.run_dir, source_io)
+    target = run_handle(tmp_path / "sibling" / "run-sibling", target_io)
+    plant_alert(target.run_dir, RunPaths(driven.run_dir).alert.read_bytes())
+    state = RunState(target.run_dir, str(target.id))
     model = ReplayFn([Turn(text="Resumed from held evidence")])
     source_io.fail_reads = fault
     summary = drive_run(target, model, state=state, resume=spec, source_run=source)
     if fault:
         assert summary["truncated_by"] == "store"
         assert model.calls == 0
-        assert state.lead_rows("l-001") == ()
+        assert state.lead_rows("l-00c") == ()
         assert not target.documents.investigation.path.exists()
         return
-    assert summary["truncated_by"] is None
-    assert str(summary["store_path"]) == str(store.path)
+    assert summary["truncated_by"] is None, summary
+    assert str(summary["store_path"]) == str(store_path)
     reads = {relative for op, _root, relative, _mode in source_io.calls if "read" in op}
-    assert "investigation.md" in reads
     assert "executed_queries.jsonl" in reads
     assert source.observability.session_pointer.path.name in reads
-    assert list(state.lead_rows("l-001"))
+    assert list(state.lead_rows("l-00c"))
     assert "investigation.md" in target_io.names("rooted_write")
     assert "executed_queries.jsonl" in target_io.names("rooted_write")
 
 
-def test_source_investigation_refusal_seeds_empty_only_at_an_empty_prefix(tmp_path):
-    """O4: missing/refused documents retain the current zero-prefix fallback semantics."""
-    store, spec, source, target, state, source_io, _target_io = source_and_sibling(tmp_path)
-    from defender.runtime import session_store
-
-    source_session = session_store.main_session_id(store)
-    ids = session_store.path_row_ids(store, source_session)
-    # Before the recorded append_block pair, this source prefix accounts for no fences.
-    spec = spec_at(store, source.run_dir, ids[2])
-    document = source.documents.investigation.path
-    outside = tmp_path / "outside-document"
-    outside.write_bytes(document.read_bytes())
-    document.unlink()
-    document.symlink_to(outside)
-    assert seed(store, spec, source, target, state) == 0
-    assert target.documents.investigation.path.read_bytes() == b""
-    assert any(name == "investigation.md" for _op, _root, name, _mode in source_io.calls)
-    assert outside.read_bytes()
-
-
-def test_fork_seed_keeps_document_global_schema_validation(tmp_path):
-    """O4: using a seed as its own baseline never bypasses document-wide size gates."""
-    from defender._artifact_schema import INVESTIGATION_FILE_MAX
-
-    document = "x" * (INVESTIGATION_FILE_MAX + 1) + "\n```invlang\n:V prologue.vertices\n```\n"
-    store, spec, source, target, state, _source_io, _target_io = source_and_sibling(tmp_path, document=document)
-    with pytest.raises((ValueError, branch.BranchError), match="limit|validation"):
-        seed(store, spec, source, target, state)
-    assert not target.documents.investigation.path.exists()
-    assert state.lead_rows("l-001") == ()
-
-
-def test_selected_empty_evidence_directories_retain_their_presence(tmp_path):
-    """O2: recognized empty source scaffolding survives the migration through Run."""
-    store, spec, source, target, state, _source_io, target_io = source_and_sibling(tmp_path)
-    (source.run_dir / "gather_raw" / "l-001").mkdir(parents=True, exist_ok=True)
-    (source.run_dir / "gather_summaries").mkdir(exist_ok=True)
-    seed(store, spec, source, target, state)
-    assert (target.run_dir / "gather_raw" / "l-001").is_dir()
-    assert (target.run_dir / "gather_summaries").is_dir()
-    assert not list((target.run_dir / "gather_raw" / "l-001").iterdir())
-    assert not list((target.run_dir / "gather_summaries").iterdir())
-    assert {"gather_raw/l-001", "gather_summaries"} <= set(target_io.names("rooted_mkdir"))
+# RETIRED AT #1255 (P2 replaces the per-file cut rules; D1 moves the branch point):
+#
+# - `test_query_seed_replaces_the_snapshot_before_state_inheritance`,
+#   `test_query_seed_failure_preserves_the_original_view_and_empty_live_state`,
+#   `test_open_main_session_accepts_a_zero_byte_query_scaffold` and
+#   `test_selected_empty_evidence_directories_retain_their_presence` pinned LEAD SELECTION —
+#   which leads' rows and folders an arm inherits. The fork snapshot replaces it: the queries
+#   table is cut to its recorded length and write-once evidence is checked by hash
+#   (tests/e2e/test_1255_snapshot_restore.py::test_p2_append_only_and_write_once_files_are_
+#   restored_up_to_the_cut, which also asks that the run state holds the restored rows).
+# - `test_seed_validates_against_itself_and_remains_writable`,
+#   `test_source_investigation_refusal_seeds_empty_only_at_an_empty_prefix` and
+#   `test_fork_seed_keeps_document_global_schema_validation` pinned the FENCE-BOUNDARY seed
+#   (a prefix cut by fence count, then validated). The document is now restored by content
+#   (test_1255_snapshot_restore.py::test_p2_the_investigation_document_is_restored_by_content).
+#   Their fresh-sibling refusal is kept, on a driven source:
+#   tests/e2e/test_1255_snapshot_legality.py::test_an_arm_folder_already_holding_work_is_
+#   refused_before_anything_forks.
+# - `test_open_main_session_refuses_occupied_queries_before_fork` -> the same e2e test
+#   (an occupied and a linked queries table).
+#
+# STILL HAND-PLANTED (kept, reported): the alert, opaque-bytes, payload-refusal and store-
+# factory tests above branch `_branch_947.planted_source` (not the N4 fixture) at a tool RETURN.
+# After #1255 they need the implementer's fixture-only snapshot planting on that source, and a
+# D1 branch point (`LEGACY_BRANCH_CALL`) once the restore's entry point replaces
+# `ForkSnapshot.restore_files`. The opaque-bytes and payload-refusal tests plant their files through
+# `source_and_sibling(plant=…)`, BEFORE `planted_source` builds the source, so whatever
+# snapshots it (at or after `planted_source` returns, on what it returns) sees them.

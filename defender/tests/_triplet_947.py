@@ -59,6 +59,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -421,11 +422,32 @@ def base_world() -> dict:
     return world_doc("a", role="A", axis=None, facts=[])
 
 
+#: Manifest fields #1255 retires: the continuation prompt (P4, stated). `family_doc` writes it
+#: only while `Family` still declares it. NOT `fences_at` (recheck review RC-L5): the design
+#: retires fence counting as a CUT RULE (P2) and says nothing of the field, which the judge
+#: reads and `test_947_triplet_manifest` requires — an implementer who drops it from `Family`
+#: must fail that suite loudly, not have this helper quietly stop writing it.
+RETIRED_FAMILY_FIELDS = ("continuation_prompt",)
+
+
+def _declared_family_fields() -> set[str]:
+    import dataclasses
+
+    return {f.name for f in dataclasses.fields(sym("runtime.branch._family", "Family"))}
+
+
 def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs/source",
                as_of: str = AS_OF, continuation_prompt: str = "Continue from here.",
                **over: Any) -> dict:
     """A v2 `Family` document: the launcher's derived half, the operator's instrument field and
-    the questioner's authored half, one document."""
+    the questioner's authored half, one document.
+
+    #1255 COMPAT. The fields in `RETIRED_FAMILY_FIELDS` are written only while `Family` still
+    declares them, so the suites built on this document stay about what they test on both sides
+    of #1255 instead of failing on a field the change removed (whether a manifest that still
+    CARRIES one is refused or ignored is not stated by the design). Whether the field is GONE is
+    asked by `test_1255_snapshot_instrument.py`, never answered here. Delete the filter once
+    #1255 has landed; `continuation_prompt=` goes with it."""
     doc: dict[str, Any] = {
         "episode_id": EPISODE_ID,
         "source_run_dir": source_run_dir,
@@ -446,8 +468,31 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
             world_doc("c", facts=[fact("f2")]),
         ],
     }
+    declared = _declared_family_fields()
+    for retired in RETIRED_FAMILY_FIELDS:
+        if retired not in declared:
+            doc.pop(retired, None)
     doc.update(over)
     return doc
+
+
+def retired_continuation_argv() -> list[str]:
+    """`["--continuation-prompt", "go"]` while the branch CLI still requires the flag, else `[]`.
+
+    #1255 (P4) removes the argument. Asked of the CLI's own parser (a bare request naming no
+    prompt either parses or is refused for the missing flag), so a launcher scenario keeps
+    reaching what it tests on both sides of the change. Whether the flag is GONE is
+    `test_947_branch_cli`'s demand, never answered here. Delete once #1255 has landed."""
+    import contextlib
+    import io
+
+    parse = sym("learning.branch.cli", "parse_branch_args")
+    with contextlib.redirect_stderr(io.StringIO()):
+        try:
+            parse(["--tenant", "t", "run-x", "1"])
+        except SystemExit:
+            return ["--continuation-prompt", "go"]
+    return []
 
 
 def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
@@ -575,8 +620,22 @@ def current_tenant() -> Any:
 
 
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
-              tenant_id: str | None = None, recorded: bool | None = None) -> tuple[Path, Path]:
+              tenant_id: str | None = None, recorded: bool | None = None,
+              pre_snapshot: bool = False,
+              land_calls: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
+
+    `pre_snapshot=True` (#1255, N4/C2) is a run recorded before the fork snapshot existed: its
+    session never gets one, whatever `seed_source_session` plants for the others.
+
+    `land_calls(src)` (#1255 P2/P3) writes the source's own pre-branch query rows and payloads
+    INSTEAD of the default one elastic capture, onto an empty table, BEFORE the session is
+    seeded. A fork snapshot holds what the source's model-readable files held when its branch
+    response arrived (the table's length, each payload's hash), and an arm whose source no
+    longer opens on that refuses at launch — so what the source held at the branch point is
+    final before `seed_source_session` (which is where a fixture snapshot is planted), and is
+    never rewritten after `runs_base` returns. Rows the source wrote after the branch point
+    are APPENDED afterwards (`_spec1224.source_run`): the table only grows past the snapshot.
 
     `recorded=False` is a run from before #1222: its alert at the former place and no record, so
     it is not a run any reader admits. `recorded=True` is the run the front door makes: the alert
@@ -623,16 +682,20 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     # ONE CAPTURED CALL, because a source that captured nothing is not branchable: every
     # proposed world agrees with an empty prefix by construction, which is the generated-world
     # design the redesign rejected, and `branch.validate` refuses it at the launch. A scenario
-    # that wants more lands its own rows on top; one that lands this same call again writes a
-    # duplicate the primer skips, so the primed key set is unchanged for it.
-    capture_call(src)
+    # that wants other rows lands them through `land_calls` (before the session is seeded);
+    # one that lands this same call again writes a duplicate the primer skips, so the primed
+    # key set is unchanged for it.
+    if land_calls is None:
+        capture_call(src)
+    else:
+        land_calls(src)
     # THE STAMP EVERY ORDINARY RUN DIR CARRIES. `materialize_run` writes one at the single
     # place a run the box will execute is ever created, so a source run without one is not a run
     # any production path could have produced — and the containment walks read exactly this file
     # to tell an ordinary run from an episode's contents.
     (src / "provenance.json").write_text(
         json.dumps(provenance_record(tenant_id=tenant_id)), encoding="utf-8")
-    seed_source_session(base, src)
+    seed_source_session(base, src, pre_snapshot=pre_snapshot)
     return base, src
 
 
@@ -642,7 +705,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
 SOURCE_CASE_ID = "case-947-fresh"
 
 
-def seed_source_session(base: Path, src: Path) -> None:
+def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) -> None:
     """Give the source run the session store a branch is actually taken from.
 
     A RUN WITHOUT ONE IS NOT BRANCHABLE, and pretending otherwise pushed the cost into the
@@ -653,8 +716,20 @@ def seed_source_session(base: Path, src: Path) -> None:
 
     LONG ENOUGH TO HOLD THE BRANCH POINT. `BRANCH_MESSAGE_ID` is a row id on the run's own main
     path, so the session has to have at least that many rows before the id names anything —
-    complete pairs are appended until it does, which is also the shape `validate` admits as a
-    branch point (a resolved call/return boundary rather than a dangling call).
+    complete pairs are appended until it does. Before #1255 the id lands on a RETURN (the
+    resolved boundary `validate` admitted); past it, on a CALL (D1) — see the body.
+
+    STILL A RUN RECORDED BEFORE #1255. Nothing here drives a run, so no fork snapshot exists
+    for any of its responses (N4), and design rev 5 C2 settles where that is refused: the fork
+    command (`learning/branch/cli.py`) refuses it before the questioner, pre-flight or any
+    episode spend (`tests/test_1255_snapshot_fork_command.py` drives exactly this source for
+    that). So after #1255 every launcher scenario built on this source needs a snapshot for
+    its branch point. Any snapshot-planting helper the implementer adds for that is
+    FIXTURE-ONLY — a test input, not evidence the driver records snapshots — and no
+    `test_1255_snapshot_*` module may import it; `_branch_947.legal_source` stays snapshot-less
+    (it is the N4 fixture). This function may call such a helper — but NEVER when
+    `pre_snapshot=True`, which is how the C2 test asks for the snapshot-less source. It calls
+    `_fork_snapshot_plant.plant_fork_snapshots` otherwise.
 
     Idempotent: `runs_base` is called more than once in some scenarios, and a second session
     under one case id would make "the run's own main session" ambiguous.
@@ -666,7 +741,10 @@ def seed_source_session(base: Path, src: Path) -> None:
     # #1235: the case pointer is a host-only sidecar beside the run dir, not a file in it.
     if RunPaths(src).session_pointer().exists():
         return
+    from defender.tests import _branch_947
     from defender.tests import _session_store_705 as S
+
+    assert isinstance(pre_snapshot, bool), pre_snapshot
 
     # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
     store = ss.open_store(case_id=SOURCE_CASE_ID, sessions=SessionPaths(base))
@@ -674,8 +752,19 @@ def seed_source_session(base: Path, src: Path) -> None:
         ss.write_case_pointer(_run_handle_1165(src), case_id=SOURCE_CASE_ID, store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")
+        if not _branch_947.declares_retired_prompt():
+            # #1255 (D1): a branch point is a MAIN response that CALLED tools, so the id must
+            # land on a call, not on its return — one leading row shifts every pair by one.
+            # Keyed on the same switch `_branch_947.spec_at` uses (is this tree past #1255?);
+            # before it, `validate` refuses a call as "unanswered", so the old shape stays.
+            store.append(session_id, [S.text_response("orienting")], agent_id="main")
         while BRANCH_MESSAGE_ID not in ss.path_row_ids(store, session_id):
             store.append(session_id, list(S.complete_pair()), agent_id="main")
+        if not pre_snapshot:
+            # #1255 deferred verification 4: the fixture-only planter (see its module).
+            from defender.tests._fork_snapshot_plant import plant_fork_snapshots
+
+            plant_fork_snapshots(store, session_id, src)
     finally:
         store.close()
 
@@ -693,22 +782,34 @@ def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
     Here rather than inside one scenario because it is the only way to give a LAUNCHER test a
     primed capture at all: the launcher primes from the source run's own table, so a test that
     needs the episode's base to hold a key has to put that key in the source.
+
+    THE WRITER'S FULL ROW (#1255 G4): the fourteen columns `append_query_row` writes, in writer
+    order, and no `call_id` — the shape every row of a real run's table has once the id leaves
+    it. A branch seeds the source's rows into each sibling's table verbatim, so a short row here
+    would be a short row in every arm's table (`test_1255_queries_rows`). `raw_command`,
+    `error_class`, `payload_status` and `payload_sha256` come from the writer's own rules over
+    the bytes the sidecar holds.
     """
+    rq = mod("scripts.gather_tools.record_query")
+    breaker = mod("runtime.circuit_breaker")
+    p = dict(params or {"index": EVENTS_PATTERN})
+    body = payload if payload is not None else {"hits": [{"_id": "d1"}]}
+    text = json.dumps(body, sort_keys=True)
     row = {
         "lead_id": lead, "seq": seq, "system": system, "verb": verb,
-        "query_id": f"{system}.{verb}", "params": params or {"index": EVENTS_PATTERN},
+        "query_id": f"{system}.{verb}", "params": p,
+        "raw_command": rq.raw_command(system, verb, p),
         "payload_path": f"gather_raw/{lead}/{seq}.json",
-        "exit_code": 0, "error_class": None, "payload_status": "ok",
+        "exit_code": 0, "error_class": breaker.error_class_for_exit(0),
+        "payload_status": rq.payload_status(0, body), "payload_digest": "",
+        "payload_sha256": rq.payload_sha256(text), "system_key": "",
     }
     table = run_dir / "executed_queries.jsonl"
     with table.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row) + "\n")
     sidecar = run_dir / str(row["payload_path"])
     sidecar.parent.mkdir(parents=True, exist_ok=True)
-    sidecar.write_text(
-        json.dumps(payload if payload is not None else {"hits": [{"_id": "d1"}]},
-                   sort_keys=True),
-        encoding="utf-8")
+    sidecar.write_text(text, encoding="utf-8")
     return row
 
 

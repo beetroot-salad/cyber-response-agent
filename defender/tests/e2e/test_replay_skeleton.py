@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests._1255_view import model_path
+
 from defender.tests.e2e._replay_harness import (
     AB3_ORIG_RUN_DIR,
     GOLDEN,
@@ -82,7 +84,7 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
 
     turns = load_turns_from_trace(
         GOLDEN_AB3 / "tool_trace.jsonl",
-        old_run_dir=AB3_ORIG_RUN_DIR, new_run_dir=str(run_dir),
+        old_run_dir=AB3_ORIG_RUN_DIR, new_run_dir=model_path(run_dir, run_dir=run_dir),
         as_appends=True,   # the golden predates #810; MAIN's writer is append_block now
     )
     replay = ReplayFn(turns)
@@ -207,7 +209,7 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
      lambda rd: {"path": "/etc/passwd"},
      "outside them"),
     ("raw-read-from-main", "read_file",
-     lambda rd: {"path": str(rd / "gather_raw" / "l-001" / "0.json")},
+     lambda rd: {"path": model_path(rd / "gather_raw" / "l-001" / "0.json", run_dir=rd)},
      "must not read gather_raw"),
     ("shell-from-main", "bash",
      lambda rd: {"command": "curl http://example.invalid/x"},
@@ -226,7 +228,24 @@ def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn, reason_subs
 
 
 def test_main_cannot_name_a_write_path_at_all(tmp_path):
-    """The successor to the retired `write-escape` deny bounce (#810)."""
+    """The successor to the retired `write-escape` deny bounce (#810).
+
+    That arm drove `write_file` at a path outside the run dir and asserted the allowlist
+    refused it. Main no longer HAS a verb that accepts a write path: `append_block` is bound
+    to `<run_dir>/investigation.md` in the handler, so a model that wants to write elsewhere
+    has nothing to say it with. Unreachable beats denied — but only if it is actually
+    unreachable, so this asserts both halves: no path-taking writer is registered, and the
+    one writer that is lands on the transcript and creates nothing else THE MODEL COULD HAVE
+    ASKED FOR — the HOST-WRITTEN exceptions are `run_end.sidecar_path`'s own record
+    (#1047), unconditional beside every run dir and on a path no tool call the model issues
+    can ever name, the run -> case session pointer (#1235 F2), and the scrub verdict
+    (`RunPaths.scrub_verdict`): the harness drives production's unboxed mode (#1255 C6), whose
+    startup fault writes the did-not-run marker beside the run dir before the opt-out takes
+    over.
+
+    Once #1255's staging tree for unboxed runs lands, it may sit beside the run folder too; it
+    then belongs in `host_sidecars` as well, named through `RunPaths` — where it sits is the
+    implementer's call."""
     run_id = "no-write-path"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -246,7 +265,8 @@ def test_main_cannot_name_a_write_path_at_all(tmp_path):
     assert (run_dir / "investigation.md").read_text() == "+ probe\n"
     # #1235 F2: the run -> case link is also a host sidecar beside the run dir.
     from defender.run_repository import RunPaths
-    host_sidecars = {sidecar_path(run_dir).name, RunPaths(run_dir).session_pointer().name}
+    host_sidecars = {sidecar_path(run_dir).name, RunPaths(run_dir).session_pointer().name,
+                     RunPaths(run_dir).scrub_verdict().name}
     assert {p.name for p in run_dir.parent.iterdir()} == before | host_sidecars, (
         "the append created something outside the run dir and the host's own sidecars"
     )

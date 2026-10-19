@@ -123,7 +123,7 @@ def _main(src: Path, *, stamp_tenant: str | None, roster: Any = None) -> tuple[A
         # `<root>/<T>/runs/<run id>` the source sits at, and the source by its id.
         outcome = T.mod("learning.branch.cli").main(
             ["--tenant", src.parent.parent.name, src.name, str(P.BRANCH_MESSAGE_ID),
-             "--continuation-prompt", "go"],
+             *P.retired_continuation_argv()],
             spawn=spawn, questioner=O.questioner_for(), preflight=O.no_preflight,
             live_tree=P.source_capture(tenant_id=stamp_tenant), roster=roster,
             oracle=O.oracle(then=O.submit(_BASE, O.EMPTY_CLAIM)).model,
@@ -261,7 +261,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("learning.branch.cli").main(
             ["--tenant", "acme", src.name, str(P.BRANCH_MESSAGE_ID),
-             "--continuation-prompt", "go"],
+             *P.retired_continuation_argv()],
             spawn=spawn, questioner=questioner,
             preflight=O.no_preflight, live_tree=P.source_capture(tenant_id="acme"))
     text = f"{refused.value} {capsys.readouterr().err}"
@@ -285,7 +285,11 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
     must be built over the RUN's `grants.gather` — the parity the ordinary arm already pins
     (`e2e/test_1106_run_start.py`). One process drives the world arm for two tenants whose
     tables differ; each registry holds exactly its own tenant's pairs, grants a pair only its
-    tenant holds and refuses the other's, and points its refusals at its own table."""
+    tenant holds and refuses the other's, and points its refusals at the table by its name.
+
+    #1255 O3 (owner decision 2026-10-16, as `test_1106_run_grants`' denied-verb test): the
+    model-facing pointer names no tenant — two tenants' arms are told the same words — and,
+    as before, never the host path to the table."""
     run = T.mod("run")
     base, src = P.runs_base(tmp_path)
     ep = P.episode(tmp_path, doc=P.family_doc(source_run_dir=str(src)))
@@ -316,6 +320,10 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
         assert {(s, v) for s, v, _ in registry.grant.entries} == set(pairs), tenant_id
         assert registry.decide(*own_pair).outcome == "GRANTED", (tenant_id, own_pair)
         assert registry.decide(*other_pair).outcome != "GRANTED", (tenant_id, other_pair)
-        # The MODEL-FACING pointer names this tenant's table, never the host path to it.
-        assert repr(tenant_id) in str(registry.grant_home), (tenant_id, registry.grant_home)
-        assert str(grants.path) not in str(registry.grant_home), registry.grant_home
+        # The MODEL-FACING pointer names the table, never a tenant (#1255 O3) and never the
+        # host path to it.
+        pointer = str(registry.grant_home)
+        assert "verb-grants.yaml" in pointer, (tenant_id, pointer)
+        named = [tid for tid in expected if tid in pointer]
+        assert not named, f"the model-facing pointer names tenant(s) {named}: {pointer!r}"
+        assert str(grants.path) not in pointer, pointer

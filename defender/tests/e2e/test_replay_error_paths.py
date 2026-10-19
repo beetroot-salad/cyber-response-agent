@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 
 import pytest
+
+from defender.tests._1255_view import model_path
 from pydantic_ai import ModelRetry
 
 from defender.tests.e2e._replay_harness import (
@@ -208,15 +210,16 @@ def test_edit_file_guards_bounce_then_recover(tmp_path):
     deps = bind(MAIN_DEF, run_dir,
                 defender_dir=Path(__file__).resolve().parents[2])
 
-    runtime_tools._tool_write_file(deps, str(notes), "alpha\nbeta\nalpha\n")
+    m_notes = model_path(notes, run_dir=run_dir)   # #1255 P1: the model's spelling
+    runtime_tools._tool_write_file(deps, m_notes, "alpha\nbeta\nalpha\n")
 
     reasons = []
     for old, new in (("", "x"), ("zzz", "x"), ("alpha", "A")):
         with pytest.raises(ModelRetry) as exc:
-            runtime_tools._tool_edit_file(deps, str(notes), old, new)
+            runtime_tools._tool_edit_file(deps, m_notes, old, new)
         reasons.append(str(exc.value))
 
-    runtime_tools._tool_edit_file(deps, str(notes), "beta", "BETA")
+    runtime_tools._tool_edit_file(deps, m_notes, "beta", "BETA")
 
     assert notes.read_text() == "alpha\nBETA\nalpha\n"
     seen = "\n".join(reasons)
@@ -232,14 +235,17 @@ def test_read_file_not_found_bounces_then_recovers(tmp_path):
     run_id = "read-missing"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
+    # #1255 (design rev 4, P1 inbound): the model names run files by the model view's
+    # `/runs/current/...` — the host run folder's own path is outside the three trees. The alert
+    # sits in the run's input directory.
     main = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "nope.txt")})]),
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
+        Turn(tool_calls=[("read_file", {"path": "/runs/current/nope.txt"})]),
+        Turn(tool_calls=[("read_file", {"path": "/runs/current/alert_input/alert.json"})]),
         Turn(text="done"),
     ])
     drive(run_dir, run_id=run_id, main=main)
 
     assert main.calls == 3
-    assert any("file not found" in s for s in main.seen)
+    assert any("file not found: /runs/current/nope.txt" in s for s in main.seen)
     assert re.search(r"<run-[0-9a-f]+-untrusted>", main.seen[-1]), \
         "the retry context carries no framed content at all"

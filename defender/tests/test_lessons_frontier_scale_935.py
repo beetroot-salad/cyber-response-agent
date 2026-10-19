@@ -12,7 +12,8 @@ if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
     sys.path.insert(0, str(DEFENDER.parent))
 
 from defender.runtime.lessons_engine import lessons_frontier as LF  # noqa: E402
-from defender.skills.invlang.frontier import frontier_at, frontier_from_text  # noqa: E402
+from defender.skills.invlang.frontier import frontier_from_text  # noqa: E402
+from defender.skills.invlang.parser import scan_fences  # noqa: E402
 from defender.skills.invlang.validate import diagnose  # noqa: E402
 from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
 
@@ -84,15 +85,13 @@ def _match(text: str, *, top_k: int = LF.DEFAULT_TOP_K) -> list:
 
 
 def _prefixes(text: str) -> list:
-    """The frontier after each of `text`'s first `n` fences, for every `n` in `0..total`.
-
-    ONE list, walked once. Fence by fence because that is when the recall FIRES:
-    `_frontier_recall` derives the block over the pre- and post-append document and injects only
-    when the two differ, so a defect that shows up as "the same three lessons as last time" is
-    invisible to any test that scores the terminal document once. Every caller below wants both
-    `n` and `n - 1`, and `frontier_at` re-scans and re-parses the whole document per call."""
-    total = frontier_at(text, sys.maxsize).total
-    return [frontier_at(text, n).frontier for n in range(total + 1)]
+    """Build each append-stage document to exercise lesson retrieval over its evolution."""
+    frontiers = [frontier_from_text("")]
+    document = ""
+    for body in scan_fences(text).bodies:
+        document += f"```invlang\n{body}\n```\n\n"
+        frontiers.append(frontier_from_text(document))
+    return frontiers
 
 
 # the missing table
@@ -307,9 +306,6 @@ def test_the_block_moves_on_the_append_that_opens_an_authorization_question(labe
     Asserted on the RENDERED block, which is the thing the diff actually compares."""
     assert path.is_file(), f"{label}'s document is tracked and must be present ({path})"
     text = path.read_text(encoding="utf-8")
-    # ONE walk of the prefixes. `frontier_at` re-scans the fences and re-parses the rebuilt
-    # prefix on every call, so asking for `n` and `n - 1` inside the comprehension paid for the
-    # whole document twice per fence.
     prefixes = _prefixes(text)
 
     opened = [

@@ -55,7 +55,7 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     worlds = [T.base_world(), T.world_doc("b", facts=[]), T.world_doc("c", facts=[])]
     questioner = T.FakeAgent(T.family_doc(worlds=worlds), *worlds[1:])
     rc = cli.main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
-                   "--continuation-prompt", "go"],
+                   *T.retired_continuation_argv()],
                   preflight=lambda model, **_kw: seen.append("family") or 0,
                   spawn=spawn, live_tree=T.source_capture(), questioner=questioner)
     assert rc == 1

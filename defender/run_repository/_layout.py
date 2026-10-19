@@ -110,10 +110,21 @@ TICKET_WRITE_SUFFIX = ".ticket-write.json"
 #: The run -> case link (which case's session store the run belongs to): host state, so it
 #: lives beside the run dir, not in it (#1235).
 SESSION_POINTER_SUFFIX = ".session-pointer.json"
-#: The five host-only sidecar names, each `<run id><suffix>` beside the run folder in the runs
-#: base (the accounting-failures name reserved, see above).
+#: The call join (#1255 G4/G6): one line per query-table row this run wrote, keyed by the row's
+#: `(lead_id, seq)` and holding the call's host-written id. The query table is the model's to read
+#: (and the box's to write), so the id that joins a row to the served ledger lives here, beside
+#: the run folder, where no box mount reaches. Private: the door's public layout surface is
+#: pinned (#1105 D1.3); `RunPaths.call_join` hands the path out.
+_CALL_JOIN_SUFFIX = ".call-join.jsonl"
+#: Every comment the run's record step got the store to accept (#1255 P5): the run's own writes
+#: to the world, which a world branched from it serves as never having happened. Host-only; the
+#: receipt's shape is the page's and stays `{key, status, url, ok, reason}`.
+_TICKET_COMMENTS_SUFFIX = ".ticket-comments.jsonl"
+#: The host-only sidecar names, each `<run id><suffix>` beside the run folder in the runs base
+#: (the accounting-failures name reserved, see above).
 _SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
-                     TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX)
+                     TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX, _CALL_JOIN_SUFFIX,
+                     _TICKET_COMMENTS_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -433,6 +444,16 @@ class RunPaths:
 
     def ticket_write(self, runs_base: Path | None = None) -> Path:
         return self._container(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
+
+    def call_join(self, runs_base: Path | None = None) -> Path:
+        """The run's call join (#1255 G4/G6): `(lead_id, seq)` -> the call's host-written id,
+        one line per query-table row the run wrote. Beside the run folder, so the box can
+        neither read the ids nor forge a row's partner."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_CALL_JOIN_SUFFIX}"
+
+    def ticket_comments(self, runs_base: Path | None = None) -> Path:
+        """Every comment the run posted on its case ticket (#1255 P5), beside the run folder."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_TICKET_COMMENTS_SUFFIX}"
 
     def session_pointer(self, runs_base: Path | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

@@ -38,9 +38,11 @@ def _renderer():
 
 
 def _warnings(caplog) -> list[str]:
-    """Every WARNING record captured, formatted WITH the exception it carried (if any):"""
+    """Every visualization WARNING, formatted WITH its exception (if any): the
+    design names what the warning must say, not whether it rides in the message or the
+    attached exception."""
     fmt = logging.Formatter()
-    return [fmt.format(r) for r in caplog.records if r.levelno == logging.WARNING]
+    return [fmt.format(r) for r in _warning_records(caplog)]
 
 
 def _assert_warned(caplog, needle: str) -> None:
@@ -51,7 +53,11 @@ def _assert_warned(caplog, needle: str) -> None:
 
 
 def _warning_records(caplog) -> list[logging.LogRecord]:
-    return [r for r in caplog.records if r.levelno == logging.WARNING]
+    # #1255 C6: a driven replay uses production's unboxed fallback, which warns
+    # about its missing boundary. The copy's one-warning contract belongs to
+    # the visualization logger; the fallback's own operator warning remains.
+    return [r for r in caplog.records if r.levelno == logging.WARNING
+            and r.name == "defender.scripts.visualize.visualize_run"]
 
 
 def _assert_one_warning_naming_the_destination_once(caplog, dest: Path) -> str:

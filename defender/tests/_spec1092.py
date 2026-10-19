@@ -515,7 +515,8 @@ def box_probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
     line. The script is written to the rw bind by the test, through the real filesystem."""
     script = run_dir / f"_probe1092_{name}.py"
     script.write_text(source, encoding="utf-8")
-    res = box_run(box, " ".join([f"python3 {script}", *args]), cwd=run_dir)
+    res = box_run(box, " ".join([f"python3 /runs/current/{script.name}", *args]),
+                  cwd=Path("/runs/current"))
     assert res.rc == 0, f"probe {name} did not complete: rc={res.rc} err={res.err!r}"
     return json.loads(res.out.decode("utf-8"))
 

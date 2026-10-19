@@ -53,6 +53,7 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "timing": ("write",),
     "learning_html": ("write",),
     "served_base": ("create",),
+    "served_unrecorded": ("create",),
     "served_world": ("append",),
     "priming_lock": ("create", "delete"),
     "wire_log": ("write",),
@@ -267,6 +268,11 @@ class Episode:
     @property
     def served_base(self) -> CreateRecord:
         return CreateRecord(*self._at(LAYOUT.served_base))
+
+    @property
+    def served_unrecorded(self) -> CreateRecord:
+        """The primer's skip record (#1255 D6), created once beside the base."""
+        return CreateRecord(*self._at(LAYOUT.served_unrecorded))
 
     @property
     def priming_lock(self) -> CreateDeleteRecord:

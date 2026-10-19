@@ -194,19 +194,20 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     family = _family()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     world_dir = ep / "worlds" / "b"
-    # #1234 A12/A21: b's own calls carry b's host-written ids (`<token>/<n>`, past the served
+    # #1234 A12/A21: b's own calls have b's host-written ids (`<token>/<n>`, past the served
     # row's `/0`) — a row with no id of the run is an inherited pre-branch row, and one no other
-    # world's table shares makes b's table refused as edited.
+    # world's table shares makes b's table refused as edited. #1255 G4/G6: the ids are not on
+    # the rows; b's host-only call-join record names them by each row's `(lead_id, seq)`.
     token = J.world_token("b")
     rows = [
-        {"lead_id": "l-001", "system": "elastic", "verb": "query",
-         "query_id": "q1", "params": {"index": "logs-*"},
-         "payload_digest": "d1", "call_id": f"{token}/1"},
-        {"lead_id": "l-001", "system": "elastic", "verb": "query",
-         "query_id": "q2", "params": {"index": "logs-2"},
-         "payload_digest": "d2", "call_id": f"{token}/2"},
+        {"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "query",
+         "query_id": "q1", "params": {"index": "logs-*"}, "payload_digest": "d1"},
+        {"lead_id": "l-001", "seq": 1, "system": "elastic", "verb": "query",
+         "query_id": "q2", "params": {"index": "logs-2"}, "payload_digest": "d2"},
     ]
     _write_issued(world_dir, rows)
+    J.write_call_join(world_dir, [J.call_join_entry(r["lead_id"], r["seq"], f"{token}/{n}")
+                                  for n, r in enumerate(rows, start=1)])
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
     base, _src = J.runs_base(tmp_path)
