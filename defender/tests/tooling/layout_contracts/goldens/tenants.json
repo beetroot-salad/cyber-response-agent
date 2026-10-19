@@ -535,7 +535,7 @@
    },
    "held_on_run_tenant": {
     "refused": "TenantRefused",
-    "message": "a required settings file is missing: <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml"
+    "message": "a required settings file is missing: <DATA_ROOT>/15081c45-7ea1-402b-8b0b-6501599f16e4/knowledge/settings/systems/case-history/mapping.yaml"
    }
   },
   "empty": {
@@ -551,7 +551,7 @@
   "whitespace_only": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
-    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not valid YAML: while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 2, column 1:\n    \t \n    ^"
+    "message": "case-history mapping <DATA_ROOT>/15081c45-7ea1-402b-8b0b-6501599f16e4/knowledge/settings/systems/case-history/mapping.yaml is not valid YAML: while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 2, column 1:\n    \t \n    ^"
    },
    "held_on_run_tenant": {
     "refused": "TenantRefused",
@@ -695,7 +695,7 @@
   "non_utf8": {
    "load_case_mapping": {
     "raises": "CaseTicketError",
-    "message": "case-history mapping <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml is not UTF-8: 'utf-8' codec can't decode byte 0xe9 in position 228: invalid continuation byte"
+    "message": "case-history mapping <DATA_ROOT>/15081c45-7ea1-402b-8b0b-6501599f16e4/knowledge/settings/systems/case-history/mapping.yaml is not UTF-8: 'utf-8' codec can't decode byte 0xe9 in position 228: invalid continuation byte"
    },
    "held_on_run_tenant": {
     "refused": "TenantRefused",
@@ -853,7 +853,7 @@
    },
    "held_on_run_tenant": {
     "refused": "TenantRefused",
-    "message": "a required settings file must be a regular file: <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml"
+    "message": "a required settings file must be a regular file: <DATA_ROOT>/15081c45-7ea1-402b-8b0b-6501599f16e4/knowledge/settings/systems/case-history/mapping.yaml"
    }
   },
   "directory": {
@@ -863,7 +863,7 @@
    },
    "held_on_run_tenant": {
     "refused": "TenantRefused",
-    "message": "a required settings file must be a regular file: <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml"
+    "message": "a required settings file must be a regular file: <DATA_ROOT>/15081c45-7ea1-402b-8b0b-6501599f16e4/knowledge/settings/systems/case-history/mapping.yaml"
    }
   },
   "fifo": {
@@ -873,7 +873,7 @@
    },
    "held_on_run_tenant": {
     "refused": "TenantRefused",
-    "message": "a required settings file must be a regular file: <DATA_ROOT>/playground/knowledge/settings/systems/case-history/mapping.yaml"
+    "message": "a required settings file must be a regular file: <DATA_ROOT>/15081c45-7ea1-402b-8b0b-6501599f16e4/knowledge/settings/systems/case-history/mapping.yaml"
    }
   }
  },

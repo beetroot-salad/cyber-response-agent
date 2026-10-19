@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.runtime.state._1255_view import model_path
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 pytest.importorskip("pydantic_ai")
 
@@ -659,6 +660,8 @@ def test_provider_key_absent_from_transport_children(tmp_path, monkeypatch):
 
 
 def test_verb_resolves_config_from_deps_tree(tmp_path):
+    tenant_id = fixture_uuid("tenant:query-tool-611")
+
     def _ctx_over(root: Path, tenant_id: str, url: str | None) -> VerbContext:
         configs = {} if url is None else {"elastic": (
             f"ELASTIC_URL_BASE={url}\nELASTIC_BASTION_HOST=bastion\nELASTIC_TIMEOUT_SEC=30\n"
@@ -668,9 +671,9 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
             DEFENDER, tmp_path / "run", {}, tenant=S1107.resolve(root, tenant_id))
 
     cfg_a = _stub_transport.load_config(
-        _ctx_over(tmp_path / "a", "t", "http://tree-a:9200"), "elastic", "ELASTIC")
+        _ctx_over(tmp_path / "a", tenant_id, "http://tree-a:9200"), "elastic", "ELASTIC")
     cfg_b = _stub_transport.load_config(
-        _ctx_over(tmp_path / "b", "t", "http://tree-b:9200"), "elastic", "ELASTIC")
+        _ctx_over(tmp_path / "b", tenant_id, "http://tree-b:9200"), "elastic", "ELASTIC")
 
     assert cfg_a["URL_BASE"] == "http://tree-a:9200"
     assert cfg_b["URL_BASE"] == "http://tree-b:9200", \
@@ -678,7 +681,7 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
 
     with pytest.raises(ConfigFault):
         _stub_transport.load_config(
-            _ctx_over(tmp_path / "nowhere", "t", None), "elastic", "ELASTIC")
+            _ctx_over(tmp_path / "nowhere", tenant_id, None), "elastic", "ELASTIC")
 
 
 ROW_KEYS = {

@@ -82,6 +82,7 @@ DEFENDER = Path(__file__).resolve().parents[2]
 #: `run_tree`'s run folder. #1187 (declared change 1): a run id is a canonical UUID — the
 #: folder is fixture_uuid(<label>), the label `run-771` it always carried.
 RUN_771 = fixture_uuid("run-771")
+CENSUS_TENANT = fixture_uuid("tenant:census-tenant")
 REPO_ROOT = DEFENDER.parent
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 #: The write lint's ratchet baseline. Named once and shared, because two demands read it and a
@@ -958,10 +959,10 @@ def _invoke_tenant_row_writer(run_dir: Path) -> None:
     the run dir (`tenant-root/`, never touched by `run_tree`) rather than `run_dir.parent`,
     because O10 refuses a data root holding anything beside the tenant it is creating — and
     `run_tree`'s own sibling (`RUN_771`) sits directly in `run_dir.parent`. `Writer.artifact`
-    names it `tenant-root/census-tenant/tenant.json`."""
+    names it `tenant-root/<CENSUS_TENANT>/tenant.json`."""
     from defender.tenancy import _tenant
 
-    _tenant.create_tenant(run_dir / "tenant-root", "census-tenant")
+    _tenant.create_tenant(run_dir / "tenant-root", CENSUS_TENANT)
 
 
 #: The census, one row per `no_write_through_planted_leaf` bind. It is a FLOOR, not a closed
@@ -1030,7 +1031,7 @@ CENSUS: tuple[Writer, ...] = (
     # #1078 D1: create_tenant's own row, the _tenant.py writer with its own artifact.
     # Still the guarded idiom since #1137: `Held.write`'s create lane off the held `<T>`, which
     # refuses an alias at the row as `write_guarded`'s did.
-    Writer("tenant_row_writer", "tenant-root/census-tenant/tenant.json", "guarded", "unmeasured",
+    Writer("tenant_row_writer", f"tenant-root/{CENSUS_TENANT}/tenant.json", "guarded", "unmeasured",
            _invoke_tenant_row_writer, "tenancy/_tenant.py", cite="#1078 D1"),
 )
 

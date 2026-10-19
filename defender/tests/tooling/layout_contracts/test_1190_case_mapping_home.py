@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 from defender.tests.tooling.layout_contracts.test_1080_writeback_tenants_and_views import (
     _golden,
@@ -22,7 +23,7 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as T7
 #: goldens were captured with exactly these.
 MARKER = "t1080"
 
-TENANT = "playground"
+TENANT = D9_TENANT_ID
 
 
 def _case_module() -> Any:

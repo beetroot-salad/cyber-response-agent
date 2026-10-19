@@ -29,7 +29,7 @@
     "uuid_probe": "100 arbitrary canonical UUIDs admitted by tenant/row/run/episode owners; 900 noncanonical tenant variants refused.",
     "previous_ci": "https://github.com/beetroot-salad/cyber-response-agent/actions/runs/39279519288",
     "previous_ci_status": "Cancelled after partial success; not a full-suite pass. New hosted run required after publication.",
-    "hosted_after_publication": "Pending; see PR #1269 checks. No full-suite pass claimed.",
+    "hosted_after_publication": "f1969346 / run39288627741: box-native, box-dood, lint and code-smells passed. Shard1 10235 passed/4 fixture failures; shard2 7790 passed/13 fixture or golden failures. All 17 repaired; affected file reruns 51, 24, 43 and 43 passed. New hosted rerun pending at publication; see PR checks.",
     "local_gates": "Both CI Ruff commands, mypy (348 files), and all 34 custom CI linters pass without new baselines/suppressions.",
     "affected_runs": {
       "root": "819 cases covered by passing runs (817 initially, both failures repaired in 46-case rerun).",
