@@ -1060,20 +1060,19 @@ def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name():
     bound — and so is 230; the label's OWN rule still refuses a label that does not start with
     an ASCII alphanumeric (`-a`, `_a`, `.a`: each makes a valid COMPOSED name, `<uuid>-a`, so a
     check kept on the composed name alone admits them), the empty label, a traversal and a
-    label with a separator. Same two-argument call the existing pin
-    (`test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_echoed_from_a_read`)
-    makes. NOT observable here: a refusal's wording. `is_valid_run_id` has no length bound
+    label with a separator. The label-only call follows declared change 4: an arm id is
+    independent of the label, so the gate needs only the label. NOT observable here: a
+    refusal's wording. `is_valid_run_id` has no length bound
     and a UUID prefix is always a valid start, so the composed half never changed an answer;
     only the census (`test_1187_ids`) sees a surviving composer. GREEN at base (a guard)."""
     from defender.learning.judge import family
 
-    episode_id = R.new_id()
     for long in ("w" * 200, "w" * 230):
-        assert family.world_label_names_directory(episode_id, long), (
+        assert family.world_label_names_directory(long), (
             f"a valid {len(long)}-character label was refused for its composed name")
-    assert family.world_label_names_directory(episode_id, "b")
+    assert family.world_label_names_directory("b")
     for bad in ("-a", "_a", ".a", "", "../x", "a/b", "..", "a\x00b"):
-        assert not family.world_label_names_directory(episode_id, bad), (
+        assert not family.world_label_names_directory(bad), (
             f"{bad!r} was admitted: the label's own rule no longer applies")
 
 

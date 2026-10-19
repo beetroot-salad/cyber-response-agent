@@ -693,8 +693,7 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
 
     #1187 declared change 4: `world_label_names_directory` loses its run-id half (the
     `<episode_id>-<label>` spelling) and keeps the label's own rule; the two assertions on it
-    below are that rule's, unchanged (whether it still takes the episode id is the
-    implementer's).
+    below are that rule's, unchanged, through the label-only helper.
     """
     ep = _episode(tmp_path)
     family = R.family()
