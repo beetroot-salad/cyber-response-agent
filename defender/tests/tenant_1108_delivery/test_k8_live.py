@@ -1,3 +1,9 @@
+"""Check daemon-visible tenant copies using the host data root; fixtures replace the usual root.
+
+    DEFENDER_K8_DATA_ROOT=/workspace/.defender-data PYTHONPATH="$PWD" \\
+        defender/.venv/bin/python -m pytest -m live \\
+        defender/tests/tenant_1108_delivery/test_k8_live.py
+"""
 from __future__ import annotations
 
 import dataclasses
