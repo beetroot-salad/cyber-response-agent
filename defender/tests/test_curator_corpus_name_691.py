@@ -41,9 +41,6 @@ def _assert_bind_accepts(wt, run_dir, name: str, expect_corpus_name: str):
 
 
 @pytest.mark.parametrize(("case", "name"), [
-    # x7/f14: ``'./x'`` has ``parts == 1`` and resolves under the tree. Tested on a SHIPPED
-    # name because MD-6 (D2) makes a normalised non-shipped tail a membership reject —
-    # normalisation and membership agree here.
     ("corpus_name has a leading dot slash", "./lessons"),
     # a trailing slash normalises away and the name is still one segment (g14 executed)
     ("corpus_name has a trailing slash", "lessons/"),
@@ -57,9 +54,6 @@ def test_a_corpus_name_that_normalises_to_one_segment_binds_the_same_dir(tmp_pat
 
 
 def test_the_names_that_resolve_to_the_tree_itself(tmp_path):
-    """Exactly ``""`` and ``"."`` normalise away to ``defender_dir`` itself (g14/PF); M7-as-corrected
-    (K4) must reject BOTH, or the corpus the spawn is scoped to is the whole tree above every corpus.
-    Complementary condition (positive control): a shipped name binds to a strict sub-tree corpus."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     _assert_bind_rejects_name(wt, rd, "")
     _assert_bind_rejects_name(wt, rd, ".")
@@ -69,9 +63,6 @@ def test_the_names_that_resolve_to_the_tree_itself(tmp_path):
 
 
 def test_the_standing_prohibition_on_a_whole_tree_authoring_scope(tmp_path):
-    """A committed demand (curator-glm-port.yaml:112, g23) already forbids a whole-``defender_dir``
-    write_allow; this change is the FIRST able to produce that shape FROM A NAME (via M1's corpus
-    carrier)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     _assert_bind_rejects_name(wt, rd, "")
     _assert_bind_rejects_name(wt, rd, ".")
@@ -80,5 +71,3 @@ def test_the_standing_prohibition_on_a_whole_tree_authoring_scope(tmp_path):
     assert (wt / "defender" / "lessons" / "lesson.md").is_file()
     with pytest.raises(Exception):  # noqa: PT011, B017 - the write surface may raise ModelRetry or ValueError
         write_file(deps, "defender/toplevel.md")
-
-

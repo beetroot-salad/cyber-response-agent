@@ -5,9 +5,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
-# and a bare module-scope import there is a COLLECTION error, which pytest answers by
-# interrupting the whole session. Guarded like `pydantic_ai` above it.
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from pydantic_ai.messages import ToolReturn  # noqa: E402
@@ -27,11 +24,6 @@ from defender.tests.e2e._toon872 import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-#: `fx-33`'s two arms. The dict-row arm is 37.6% of the wire JSON and the columnar arm is
-#: 101.3% — TOON larger — so one fixture supplies both a substitution and a passthrough
-#: without any test naming a bar. Re-derived at call time, so a regenerated corpus fails the
-#: selection loudly instead of silently turning the passthrough case into a second
-#: substitution case.
 FIXTURE = "fx-33"
 
 
@@ -52,9 +44,6 @@ def _over_bar() -> dict:
 
 
 def test_passthrough_carries_the_tools_own_json_unchanged_inside_the_frame() -> None:
-    """A foreign result the gate does NOT substitute reaches the model as the tool's own wire
-    JSON, byte for byte, between the frame's delimiters — on the byte-gate arm and on each
-    type-admission arm alike."""
     for value in (_over_bar(), "a plain string", 7, None):
         out = agent_run(toolset=foreign_toolset(value))
         delivered = out.dispatched.text()
@@ -81,9 +70,6 @@ def test_substitute_branch_return_shape() -> None:
 
 
 def test_the_byte_gate_and_the_stringify_step_measure_the_bytes_the_model_receives() -> None:
-    """ALL THREE of the gate's `to_json` sites — the byte gate's denominator, f2 = B's
-    stringify step, and M3's ROUND-TRIP ORACLE — are
-    `ToolReturnPart.model_response_str`'s serializer, not `pydantic_core.to_json`."""
     for value in ({"x": float("nan")}, {"x": b"ab"}, [], {"x": float("-inf")}):
         out = agent_run(toolset=foreign_toolset(value))
         assert framed_content(out.dispatched.text()) == wire_text(value), (
@@ -107,9 +93,6 @@ def test_the_byte_gate_and_the_stringify_step_measure_the_bytes_the_model_receiv
 
 
 def test_a_tool_body_that_returns_its_own_toolreturn_is_unwrapped_framed_and_loses_nothing() -> None:
-    """A foreign tool body that pre-wraps its own value in a `ToolReturn` is unwrapped, its
-    `return_value` gated and framed like any other foreign result, and the metadata the gate
-    returns carries BOTH the body's own keys and the gate's original JSON."""
     value = {"rows": [{"a": i, "b": f"row-{i}"} for i in range(40)]}
     ts = FunctionToolset()
 

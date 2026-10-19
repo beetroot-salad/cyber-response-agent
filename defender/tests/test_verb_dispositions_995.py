@@ -28,9 +28,6 @@ from defender.tests import _tenants1106 as T1106
 REPO_ROOT = PATHS.repo_root
 DEFENDER = PATHS.defender_dir
 ADAPTERS = PATHS.adapters_dir
-#: The committed fixture tenant's settings folder — the shipped table moved out of
-#: `defender/knowledge/environment/` by #1106; since #1120 (C26) the table these tests hold to
-#: is the frozen test fixture's (the repo-root `knowledge/tenant-fixture/`).
 SETTINGS = T1106.FIXTURE_SETTINGS
 
 #: A minimal well-formed row, for tests whose subject is some OTHER row's malformation.
@@ -42,10 +39,6 @@ def _walk(defender_dir: Path, systems: tuple[str, ...]) -> dict[str, frozenset[s
     roster = read_roster(adapters_under(defender_dir))
     return {s: roster.declared_verbs(s) for s in systems}
 
-
-# =========================================================================================
-# O1 — a connected system is reachable, or the connection fails loudly.
-# =========================================================================================
 
 def test_a_planted_system_with_no_disposition_turns_the_gate_red():
     """THE demand. A system declared by both halves the resolver reads, mentioned nowhere in
@@ -78,9 +71,6 @@ def test_the_gate_is_clean_on_a_table_that_decides_every_walked_verb():
 
 
 def test_a_disposition_naming_a_verb_no_adapter_declares_is_a_phantom():
-    """Residue in the other direction. A row surviving a deleted verb keeps asserting an
-    opinion about something that no longer exists, and the runtime would fail at registry
-    construction — the gate should say so first, in CI, naming the pair."""
     walked = {"newsystem": frozenset({"lookup", "health-check"})}
     table = write_table(_tmp(), {
         ("newsystem", "lookup"): OK,
@@ -135,10 +125,6 @@ def test_a_system_gather_reaches_but_cannot_health_check_warns_on_load():
 
 
 def test_a_system_gather_does_not_reach_at_all_does_not_warn():
-    """The negative control, and the reason the rule is not "every system grants health-check".
-
-    A system withheld from gather entirely is a legal, reviewed decision; warning on it would
-    turn the rule into a complaint that gather does not reach everything."""
     table = write_table(_tmp(), {
         ("alpha", "lookup"): {"roles": [], "reason": "withheld on purpose"},
         ("alpha", "health-check"): {"roles": [], "reason": "withheld with it"},
@@ -149,9 +135,6 @@ def test_a_system_gather_does_not_reach_at_all_does_not_warn():
 
 
 def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
-    """The wiring, not the logic. `census_gaps` going red is worth nothing if the CI entry
-    point does not propagate it — probed by running the gate as CI runs it, against a planted
-    repo whose table is silent about a system that repo declares."""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup", "beta": "lookup"})
     T1106.plant_census_settings(
         repo, {("alpha", "lookup"): OK, ("alpha", "health-check"): OK},
@@ -170,9 +153,6 @@ def test_the_lint_gate_exits_nonzero_on_a_tree_with_residue():
 
 
 def test_a_hostile_system_directory_name_does_not_blind_the_gate():
-    """A name a filesystem accepts and a naive reader mangles must not silently drop a system
-    from the walk — the #869/#908 class. These names are not well-formed system names, so the
-    correct behaviour is that they declare nothing; what is forbidden is CRASHING, or"""
     repo = planted_tree(_tmp_dir(), {"alpha": "lookup"})
     plant_named_dirs(repo / "defender" / "skills", HOSTILE_NAMES)
     T1106.plant_census_settings(
@@ -199,14 +179,7 @@ def test_a_hostile_system_directory_name_does_not_blind_the_gate():
     )
 
 
-# =========================================================================================
-# O5 — every withholding is on the record, with a reason.
-# =========================================================================================
-
 def test_a_withheld_pair_with_no_reason_is_rejected():
-    """The residue list is the gate's own escape hatch: if adding a name to it costs nothing,
-    the gate silences itself exactly the way the current guard does. A reason is what makes
-    the silence a decision someone has to write down and a reviewer can read."""
     with pytest.raises(DispositionError) as caught:
         load_dispositions(write_table(_tmp(), {("cmdb", "list-roles"): {"roles": []}}))
     assert "list-roles" in str(caught.value), "the refusal must name the offending pair"
@@ -232,11 +205,6 @@ def test_a_withheld_pair_with_a_reason_loads():
     assert "exercised" in (rows[0].reason or "")
 
 
-# =========================================================================================
-# O3 — presence on disk never confers access.
-# =========================================================================================
-
-
 def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
     """A misspelled role at a CALL SITE is the deny-all-by-accident state, one level up."""
     rows = load_dispositions(dispositions_path(SETTINGS))
@@ -246,9 +214,6 @@ def test_a_role_outside_the_known_set_raises_rather_than_projecting_nothing():
 
 
 def test_the_grant_is_not_a_function_of_what_is_on_disk():
-    """Sharper than the above: the same table over two different trees must project the same
-    grant. An implementation that unions the table with the walk — a plausible reading of
-    'make it total' — fails here while passing every totality test above."""
     table = write_table(_tmp(), {("alpha", "lookup"): OK, ("alpha", "health-check"): OK})
     rows = load_dispositions(table)
     before = grant_for("gather", rows).entries
@@ -265,14 +230,7 @@ def test_the_projection_is_exactly_the_rows_that_name_the_role(role: str):
         {(r.system, r.verb) for r in rows if role in r.roles}
 
 
-# =========================================================================================
-# Conservation — moving the table out of code changed no permission.
-# =========================================================================================
-
 def test_the_shipped_definitions_carry_the_projected_grants():
-    """The wiring: the driver's gather definition and the correlation lead's grant must be
-    BUILT from the table, not merely accompanied by it. Checked by identity of content against
-    the projection, so a leftover hardcoded literal that happens to agree today would still be"""
     # #1106 M4: the grants are per RUN, projected from the run's tenant table — no longer
     # module constants on `GATHER_DEF` / `lead_zero`. The wiring is `run_grants`.
     grants = T1106.run_grants(SETTINGS)
@@ -283,23 +241,13 @@ def test_the_shipped_definitions_carry_the_projected_grants():
 
 
 def test_every_projected_pair_survives_registry_construction():
-    """The existing cross-check, still holding after the move: a grant naming a verb no
-    adapter declares raises at construction. This is the positive control proving the
-    projection produces real pairs rather than an empty grant that trivially passes."""
     rows = load_dispositions(dispositions_path(SETTINGS))
     grant = grant_for("gather", rows)
     assert grant.entries, "an empty grant would pass every phantom check vacuously"
     ModuleVerbRegistry(read_roster(ADAPTERS), grant)  # raises GrantError if any pair is phantom
 
 
-# =========================================================================================
-# M3 — a missing or malformed table fails loud, never silently deny-all.
-# =========================================================================================
-
 def test_a_missing_table_raises_rather_than_granting_nothing():
-    """An empty grant reports every verb as unknown — probed on the base commit. So a config
-    that fails to load and degrades to empty reproduces this issue's exact symptom across the
-    whole product, silently. It must raise."""
     with pytest.raises(DispositionError):
         load_dispositions(_tmp_dir() / "absent.yaml")
 
@@ -312,9 +260,6 @@ def test_an_unparseable_table_raises():
 
 
 def test_a_table_with_no_dispositions_raises():
-    """A syntactically valid file granting nothing is indistinguishable, at runtime, from a
-    deployment whose config never loaded. Deny-all must be reached by deciding, never by
-    parsing something empty."""
     for text in ("dispositions: {}\n", "dispositions:\n", "{}\n", ""):
         path = _tmp()
         path.write_text(text, encoding="utf-8")
@@ -346,9 +291,6 @@ def test_a_malformed_system_name_raises():
         load_dispositions(path)
 
 
-#: The same duplicate, written the ways YAML allows it to be written. Parametrized rather than
-#: pinned as one string because a line-oriented duplicate check keyed on one indentation and
-#: one block style passes the single case and admits every other — an adversarial implementer
 _DUPLICATE_SPELLINGS = {
     "block-4-space": (
         "dispositions:\n"
@@ -387,12 +329,6 @@ _DUPLICATE_SPELLINGS = {
         "dispositions: {cmdb: {get-host: {roles: [gather]}}, "
         "cmdb: {list-hosts: {roles: [gather]}}}\n"
     ),
-    # The spelling a node-tree scan misses unless it expands merges first. `<<` is resolved
-    # while the mapping is CONSTRUCTED, so before flattening the two `get-host` keys sit in
-    # different nodes and neither looks repeated — while `safe_load` merges them and keeps the
-    # explicit one. Same silent collapse as every spelling above, reached the one way a reader
-    # of the composed tree cannot see without asking for the merge to be applied. Merged from an
-    # inline mapping: an alias is refused outright (#1127), a merge without one is not.
     "merge-key-shadowed": (
         "dispositions:\n"
         "  cmdb:\n"
@@ -404,9 +340,6 @@ _DUPLICATE_SPELLINGS = {
 
 @pytest.mark.parametrize("spelling", sorted(_DUPLICATE_SPELLINGS))
 def test_a_repeated_key_raises_rather_than_letting_one_row_win(spelling: str):
-    """YAML takes the LAST of two identical keys, silently. For a permission table that is the
-    same defect this issue is about: two rows in the file, one honoured, and a reviewer who
-    reads both. The parse must refuse rather than pick — however the repeat is spelled."""
     path = _tmp()
     path.write_text(_DUPLICATE_SPELLINGS[spelling], encoding="utf-8")
     with pytest.raises(DispositionError) as caught:
@@ -415,9 +348,6 @@ def test_a_repeated_key_raises_rather_than_letting_one_row_win(spelling: str):
 
 
 def test_a_key_written_three_times_is_named_once():
-    """`duplicate_key_paths` promises a set of repeated KEYS, and `_systems_block` renders it
-    into the refusal verbatim. One entry per surplus occurrence makes a key written three
-    times read as two separate defects in a message a human is meant to act on."""
     path = _tmp()
     path.write_text(
         "dispositions:\n"
@@ -441,14 +371,6 @@ def test_the_duplicate_check_agrees_with_an_independent_oracle():
         pass
 
     def _mapping(loader, node, deep=False):  # noqa: ANN001
-        # FLATTENED FIRST, exactly as `SafeConstructor.construct_mapping` does below. Without
-        # it the oracle agrees with the implementation on `merge-key-shadowed` for the WRONG
-        # reason: `<<` is an unregistered tag on `SafeConstructor`, so `construct_object`
-        # raises `ConstructorError` ("could not determine a constructor for the tag
-        # ...:merge") before any key is compared — a `YAMLError`, which `pytest.raises`
-        # accepts. The one spelling this oracle exists to cross-examine was the one it never
-        # examined, and a `duplicate_key_paths` with no merge handling at all would still have
-        # passed this half of the test.
         loader.flatten_mapping(node)
         seen = set()
         for key_node, _ in node.value:
@@ -463,10 +385,6 @@ def test_the_duplicate_check_agrees_with_an_independent_oracle():
     )
 
     for text in [_DUPLICATE_SPELLINGS[k] for k in sorted(_DUPLICATE_SPELLINGS)]:
-        # `match=`, not a bare `YAMLError`: the oracle must refuse for the reason it exists to
-        # give. A bare catch is satisfied by the tag error an unflattened `<<` raises before
-        # any key is compared, which is how the merge spelling passed while being the one
-        # spelling neither side examined.
         with pytest.raises(yaml.YAMLError, match="duplicate key"):
             yaml.load(text, Loader=_NoDupes)  # noqa: S506 — a SafeLoader subclass
         path = _tmp()
@@ -481,10 +399,6 @@ def test_the_duplicate_check_agrees_with_an_independent_oracle():
     )  # noqa: S506
 
 
-# =========================================================================================
-# O2 — a refusal names its real reason.
-# =========================================================================================
-
 def test_an_ungranted_systems_real_verb_keeps_the_unresolvable_label():
     """The LABEL is not #995's to change, and this pins that it did not."""
     grant = VerbGrant(
@@ -496,9 +410,6 @@ def test_an_ungranted_systems_real_verb_keeps_the_unresolvable_label():
 
 
 def test_the_ungranted_system_refusal_differs_from_a_typo_refusal():
-    """THE onboarding symptom, and the demand that closes it. Before #995 these two produced
-    byte-identical text, so a correctly built adapter on a system nobody had granted read
-    exactly like a spelling mistake — and the maintainer at `/connect`'s test step went"""
     grant = VerbGrant(
         role="gather",
         entries=tuple((s, v, "r") for s, v in GATHER_CENSUS if s != "cmdb"),
@@ -519,9 +430,6 @@ def test_the_ungranted_system_refusal_differs_from_a_typo_refusal():
     assert "verb-grants.yaml" not in (typo.refusal or ""), (
         "a typo must not be blamed on a missing grant — that sends the reader to the wrong file"
     )
-    # Not merely different TEXT. An adversarial implementer satisfied the inequality above by
-    # appending a single trailing space to the unchanged "unknown" wording — the maintainer
-    # still read "unknown" and still went hunting a spelling mistake.
     assert real.refusal.strip() != typo.refusal.strip()
     assert "unknown" not in (real.refusal or ""), (
         "the refusal for a declared verb still calls it unknown"
@@ -554,18 +462,7 @@ def test_an_unknown_system_entirely_is_still_undeclared():
     assert reg.decide("nosuchsystem", "anything").outcome == "UNDECLARED"
 
 
-# =========================================================================================
-# M7 — the lint scanner's per-system exclusions are derived, not remembered.
-# =========================================================================================
-
-# =========================================================================================
-# M5 / O4 — the table is read-only on every run path.
-# =========================================================================================
-
 def test_the_table_loads_from_a_read_only_file():
-    """Read-only by construction, not by convention. If any load path writes — a cache, a
-    normalisation, an 'autoheal' — this raises instead of silently succeeding on a tree where
-    the file happens to be writable."""
     src = dispositions_path(SETTINGS).read_bytes()
     ro = _tmp_dir() / "verb-grants.yaml"
     ro.write_bytes(src)
@@ -577,10 +474,6 @@ def test_the_table_loads_from_a_read_only_file():
     finally:
         ro.chmod(0o644)
 
-
-# =========================================================================================
-# O6 — the documented onboarding path is complete.
-# =========================================================================================
 
 # --- tmp helpers ---------------------------------------------------------------------
 

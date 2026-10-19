@@ -247,9 +247,6 @@ def _catalog_template(catalog_dir: Path, system: str, tid: str, fence_lang: str,
 
 
 def test_canonical_record_engine_verb_is_verbatim_body(tmp_path):
-    """canonical_record_engine_verb_is_verbatim_body — an engine verb's canonical record is the
-    VERBATIM value of its declared body param, fenced in the verb's engine language, never
-    raw_command and never an empty params['arg0'] read."""
     rec = VerbRecorder()
     pipe = "FROM logs-system.auth-* | STATS failed = COUNT(*) BY source.ip | SORT failed DESC"
     r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
@@ -275,9 +272,6 @@ def test_canonical_record_engine_verb_is_verbatim_body(tmp_path):
 
 
 def test_canonical_record_param_only_is_structured_call(tmp_path):
-    """canonical_record_param_only_is_structured_call — a param-only verb's canonical record is a
-    structured {verb, params} rendering fenced ```query — never raw_command, never a bare
-    ${param} skeleton, and not a verb-losing one-line JSON dump."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_seven_registry(rec), system="cmdb", turns=[
         q("cmdb", "get-host", {"host": "db-1"}, query_id="cmdb.host-lookup"), DONE,
@@ -299,9 +293,6 @@ def test_canonical_record_param_only_is_structured_call(tmp_path):
 
 
 def test_canonical_record_never_raw_command_any_system(tmp_path):
-    """canonical_record_never_raw_command_any_system — for a produced row of EVERY one of the
-    seven systems, the canonical record (which feeds the draft ## Query fence and the handoff
-    executed_query) never equals or contains the row's raw_command audit string."""
     for i, (system, vname, params) in enumerate(SEVEN):
         rec = VerbRecorder()
         r = run_gather(tmp_path / f"s{i}", verbs=_seven_registry(rec), system=system,
@@ -316,10 +307,6 @@ def test_canonical_record_never_raw_command_any_system(tmp_path):
 
 
 def test_produced_row_threads_to_the_canonical_record(tmp_path):
-    """produced_row_threads_to_the_canonical_record — driving a REAL run, reading back the real
-    executed_queries.jsonl through lead_repository.load_queries → extract_from_joined →
-    _executed_query yields the canonical record — the end-to-end no hand-built ExecutedLead can
-    exercise (which is why the two green suites never catch the corruption)."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_seven_registry(rec), system="cmdb", turns=[
         q("cmdb", "get-host", {"host": "web-7"}, query_id="cmdb.host-lookup"), DONE,
@@ -337,10 +324,6 @@ def test_produced_row_threads_to_the_canonical_record(tmp_path):
 
 
 def test_handoff_executed_query_and_params_agree(tmp_path):
-    """handoff_executed_query_and_params_agree — after a real param-only run, build_handoff's
-    emitted executed_query and its emitted params describe the SAME call. Today executed_query
-    collapses to raw_command (the shlex audit string) while params stays honest, so the pair
-    disagrees; a space-carrying value exposes the shell quoting the audit string adds."""
     catalog_dir = tmp_path / "defender" / "skills" / "gather" / "queries"
     _catalog_template(catalog_dir, "cmdb", "cmdb.host-lookup", "query", "get-host host=${host}",
                       verb="get-host", params=("host",))
@@ -366,10 +349,6 @@ def test_handoff_executed_query_and_params_agree(tmp_path):
 
 
 def test_verb_declares_engine_and_body_param_per_verb(tmp_path):
-    """verb_declares_engine_and_body_param_per_verb — a verb's engine + body param resolve per
-    VERB across all three engine classes: elastic.esql → esql/`query`; elastic.query & .alerts →
-    lucene/`native_query`; a param-only verb → no engine, no body param. A SYSTEM-keyed resolver
-    (today's _is_esql) fails the elastic.query case."""
     assert engine_of(elastic_adapter.VERBS["esql"]) == "esql"
     assert body_param_of(elastic_adapter.VERBS["esql"]) == "query"
 
@@ -383,10 +362,6 @@ def test_verb_declares_engine_and_body_param_per_verb(tmp_path):
 
 
 def test_body_param_marker_survives_validate_params(tmp_path):
-    """body_param_marker_survives_validate_params — a @verb-declared engine verb still validates
-    its body param: a well-formed string is admitted (exit 0) and a mistyped one is rejected
-    (exit 64) with the body param NAMED, not reported 'unknown'. The declaration must not blind
-    the validator to the signature."""
 
     @verb(engine="esql", body_param="query")
     def esql(ctx, *, query: str):
@@ -408,9 +383,6 @@ def test_body_param_marker_survives_validate_params(tmp_path):
 
 
 def test_draft_from_elastic_lucene_is_fenced_lucene_not_esql(tmp_path):
-    """draft_from_elastic_lucene_is_fenced_lucene_not_esql — a draft minted from a real
-    elastic.query (Lucene/KQL) run is NOT stamped engine: esql and its ## Query fence is NOT
-    ```esql. Same system as esql, different engine — the #611 bug #617 left."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
         q("elastic", "query", {"native_query": 'user.name:"root"'},
@@ -432,10 +404,6 @@ _FENCE_BREAKER = (
 
 
 def test_canonical_record_value_cannot_forge_a_draft_section(tmp_path):
-    """canonical_record_value_cannot_forge_a_draft_section — a body value containing a
-    fence-closing ``` + a heading is rendered through a fence-safe encoder: it cannot close the
-    ## Query fence and cannot forge a sibling ## section. Removing raw_command removed shlex's
-    quoting, so the structured render must round-trip the exact value safely."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
         q("elastic", "esql", {"query": _FENCE_BREAKER}, query_id="elastic.evilquery"), DONE,
@@ -469,10 +437,6 @@ def _seed_pitfalls(paths, *, system: str, digest: str, n: int = 2) -> None:
 
 
 def test_attacker_digest_cannot_forge_execution_md_sections(tmp_path):
-    """attacker_digest_cannot_forge_execution_md_sections — an attacker-influenced payload_digest
-    containing '\\n## Verbs\\nforged' reaches the pitfalls curator's handoff and is carried as a
-    STRUCTURED DATA value, never as a raw markdown heading line the curator would echo into
-    execution.md."""
     digest = "exit=64; boom\n## Verbs\nFORGED-HEADING"
     rows = [{"system": "host-state", "query_id": "host-state.esql", "goal": "g",
              "executed_query": "x", "stderr_digest": digest}]
@@ -485,9 +449,6 @@ def test_attacker_digest_cannot_forge_execution_md_sections(tmp_path):
 
 
 def test_actor_view_stays_id_and_params_only(tmp_path):
-    """actor_view_stays_id_and_params_only — the paired assertion for the F-7 waiver:
-    coverage_manifest (render_joined_yaml) CARRIES verb while actor_view does NOT — the
-    adversarial-facing actor input stays 'id + params only' and is deliberately not widened."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_elastic_registry(rec), turns=[
         q("elastic", "alerts", {"native_query": "x"}, query_id="elastic.sig"), DONE,
@@ -502,10 +463,6 @@ def test_actor_view_stays_id_and_params_only(tmp_path):
 
 
 def test_noncandidate_rule_is_declared_verb_name(tmp_path):
-    """noncandidate_rule_is_declared_verb_name — a query_id whose suffix is a DECLARED verb
-    (elastic.alerts, an untagged first-class verb) is a non-candidate; a coined id whose suffix is
-    not a declared verb (elastic.sshd-by-srcip) remains a candidate. The rule keys on the row's
-    verb, not the hardcoded {esql, query, ad-hoc} set of dead argparse subcommands."""
     rec = VerbRecorder()
     r_untagged = run_gather(tmp_path / "u", verbs=_elastic_registry(rec), turns=[
         q("elastic", "alerts", {"native_query": "x"}), DONE], run_id="q620-nc-u")
@@ -528,10 +485,6 @@ def test_noncandidate_rule_is_declared_verb_name(tmp_path):
 
 
 def test_render_query_binds_the_elastic_body(tmp_path):
-    """render_query_binds_the_elastic_body — for an elastic engine verb, rendered_query reflects
-    the body that actually ran, not the static template skeleton with unbound inner ${host}
-    placeholders. Positive control: a param-only verb whose named params match the template
-    placeholders still renders as before."""
     catalog_dir = tmp_path / "defender" / "skills" / "gather" / "queries"
     _catalog_template(catalog_dir, "elastic", "elastic.sshd-esql", "esql",
                       'FROM logs | WHERE host == "${host}"', verb="esql")
@@ -566,10 +519,6 @@ def test_render_query_binds_the_elastic_body(tmp_path):
 
 
 def test_error_class_backfill_keys_on_presence_not_truthiness(tmp_path):
-    """error_class_backfill_keys_on_presence_not_truthiness — load_queries distinguishes a PRESENT
-    error_class: null (preserved as null) from an ABSENT key (back-filled from exit_code). Today
-    `str(raw_ec) if raw_ec else …` cannot tell them apart — a present null with a non-zero exit is
-    wrongly overwritten from the exit code."""
     run_dir = _write_run(tmp_path / "run", [
         _row(seq=0, query_id="elastic.a", exit_code=2, error_class=None,
              payload_status="error", payload_digest="exit=2; down"),
@@ -605,10 +554,6 @@ def _seed_repo_no_execution_md(tmp_path: Path) -> Path:
 
 
 def test_pitfall_for_a_system_without_execution_md_does_not_dead_end(tmp_path, monkeypatch):
-    """pitfall_for_a_system_without_execution_md_does_not_dead_end — a queued pitfall for a system
-    with no execution.md (host-state) points the curator at skills/<system>/execution.md and the
-    loop ACCEPTS + commits a newly-CREATED execution.md there — SYNTHESIZE, not the no-edit-exit
-    dead-end. The created file is a valid execution.md (## Verbs / ## Exit codes)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "2")
     repo = _seed_repo_no_execution_md(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
@@ -652,9 +597,6 @@ def _one_row_run(tmp_path: Path, name: str, *, exit_code: int, error_class, stat
 
 
 def test_visualize_runtime_distinguishes_exit_64_from_infra(tmp_path):
-    """visualize_runtime_distinguishes_exit_64_from_infra — the runtime view reads error_class, so
-    an exit-64 validator reject (agent-fixable) renders a DIFFERENT class from an exit-2 infra
-    outage; today both paint the same red on a binary exit_code==0 split."""
     infra = _exit_class_html(_one_row_run(
         tmp_path, "infra", exit_code=2, error_class="infra", status="error"))
     agent = _exit_class_html(_one_row_run(
@@ -674,9 +616,6 @@ def _run_validate_scaffold(system: str, *, defender_dir: Path = DEFENDER):
 
 
 def test_validate_scaffold_normalizes_the_spelling_split():
-    """validate_scaffold_normalizes_the_spelling_split — a single invocation locates BOTH the
-    adapter (underscore, change_mgmt_adapter.py) and the skill/corpus (hyphen, skills/change-mgmt/) for
-    change-mgmt / host-state / threat-intel — today NO spelling passes for these three."""
     results = {s: _run_validate_scaffold(s) for s in _SPELLING_SPLIT}
     for system, res in results.items():
         assert res.returncode == 0, \
@@ -717,9 +656,6 @@ _UNDISPATCHABLE_VERBS = [
 @pytest.mark.parametrize(("label", "signature", "expected"), _UNDISPATCHABLE_VERBS)
 def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label, signature,
                                                                  expected):
-    """validate_scaffold FAILS an adapter whose verb cannot be dispatched as `fn(ctx, **params)`
-    — the check `checklist.md` advertised from the day `check_registry` was written, which was
-    never actually implemented (#885)."""
     def tree(name: str, mutated_signature: str | None) -> Path:
         root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
         if mutated_signature is not None:
@@ -923,10 +859,6 @@ def test_validate_scaffold_passes_an_adapter_whose_callable_settings_check_is_no
 
 
 def test_validate_scaffold_enforces_placeholder_invariant(tmp_path):
-    """validate_scaffold_enforces_placeholder_invariant — validate_scaffold FAILS a template
-    whose ${placeholder} is neither a declared param of the template's verb nor a marked body
-    substitution (the same check as
-    placeholder_is_a_declared_param_or_marked_body_substitution), so §2f cannot regress."""
     good = _run_validate_scaffold(
         "cmdb", defender_dir=_scaffold_cmdb_tree(tmp_path / "good", "get-host host=${host}"))
     assert good.returncode == 0, (

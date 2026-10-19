@@ -55,9 +55,6 @@ def _corpus_with_an_em_dash(tmp_path: Path) -> Path:
 
 
 def test_the_utf8_pin_covers_the_write_not_only_the_read(tmp_path):
-    """demand (review) — a corpus CLI must PRINT a non-ASCII lesson under a C locale, not just read
-    one. The read pin alone moves the crash from ``read_text`` to ``print``; it does not remove
-    it."""
     corpus = _corpus_with_an_em_dash(tmp_path)
     script = (
         f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
@@ -80,9 +77,6 @@ def test_the_utf8_pin_covers_the_write_not_only_the_read(tmp_path):
 
 
 def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path):
-    """demand (review) — the end-to-end control for the unit above, on the REAL corpus through the
-    REAL entrypoint. This is the command ``SKILL.md`` §Lessons tells the defender to run at PLAN:
-    before the fix it exited 1 partway through the corpus, having emitted a truncated listing."""
     proc = subprocess.run(
         [str(WORKSPACE_ROOT / "defender/bin/defender-lessons")],
         capture_output=True, text=True, env=C_LOCALE_ENV,
@@ -129,11 +123,6 @@ def test_the_discovery_rule_has_one_definition(tmp_path):
 
 
 def test_on_skip_receives_exactly_the_warn_skipped_paths(tmp_path, capsys):
-    """``on_skip`` is the walk's own report of what it skipped (#590): it must fire for every warn-
-    skipped DISCOVERED lesson (malformed and unreadable alike), in walk order, and never for a
-    well-formed lesson or a file the discovery rule excludes — so a consumer that accounts for
-    skipped lessons (``trace_lesson --all``'s marker rows) needs no second glob to diff against,
-    and nothing to race."""
     d = tmp_path / "lessons"
     d.mkdir()
     (d / "good.md").write_text("---\nname: good\n---\nbody\n")

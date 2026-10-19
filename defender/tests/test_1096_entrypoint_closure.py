@@ -7,11 +7,6 @@ from defender.runtime import bash_exec, box, box_codec
 from defender.tests._by_path import WORKTREE as REPO_ROOT
 from defender.tests._import_blocker import run_blocked
 
-#: The closure is held to an ALLOWLIST — the standard library plus this tree — not to a
-#: denylist of the packages that happen to be expensive today. `pyyaml`, `duckdb` and
-#: `typing-extensions` are in the box image too, and an import of any of them would be paid on
-#: the same hot path. `_virtualenv` is the one exemption: a `.pth` hook this repo's venv runs
-#: at interpreter start, before any test code, which no box has.
 _ALLOWED = ("defender", "__main__", "_virtualenv")
 
 # The entrypoint, run exactly as a box runs it: module main, request frame on stdin, response
@@ -37,9 +32,6 @@ def _frame(*argv: str) -> bytes:
 
 
 def test_the_entrypoint_answers_a_frame_with_no_third_party_package_importable():
-    """The entrypoint decodes the request, runs it, and answers with a response frame carrying
-    the command's own stdout — without reaching for the `box` package door or for anything
-    else outside the stdlib."""
     done = _run_entrypoint(_frame("echo", "hi from the box"), {"PATH": "/usr/bin:/bin"})
     assert done.returncode == 0, (
         f"the entrypoint died before answering (rc={done.returncode}):\n"
@@ -51,9 +43,6 @@ def test_the_entrypoint_answers_a_frame_with_no_third_party_package_importable()
 
 
 def test_the_entrypoint_hands_the_command_exactly_the_allowlisted_keys():
-    """The env the command sees is the allowlist's members that were present, no more and no
-    fewer: a credential-shaped key in the entrypoint's own environment does not reach the
-    command, the in-box mark does, and a key the filter wrongly dropped is caught too."""
     done = _run_entrypoint(_frame("env"), {
         "PATH": "/usr/bin:/bin", "DEFENDER_BOX": "1", "TZ": "UTC",
         "AWS_SECRET_ACCESS_KEY": "hunter2",
@@ -68,9 +57,6 @@ def test_the_entrypoint_hands_the_command_exactly_the_allowlisted_keys():
     assert "hunter2" not in done.stdout.decode("utf-8", "replace")
 
 
-#: Runs the entrypoint to completion and then reports what the interpreter has registered
-#: under the module's own import name. A box starts the file as `__main__`, and `box_codec`
-#: imports it by name, so without the alias the two are different module objects.
 _REPORT_SECOND_COPY = (
     "import runpy, sys\n"
     "try:\n"
@@ -83,11 +69,6 @@ _REPORT_SECOND_COPY = (
 
 
 def test_the_entrypoint_does_not_load_a_second_copy_of_itself():
-    """The codec imports `bash_exec` by name while `bash_exec` is the running main module, so
-    the entrypoint would execute its own 600-odd lines twice per `docker exec` — and the tree
-    is mounted read-only, so no bytecode cache makes the second pass cheap. The main module
-    registers itself under its import name first, and this is what says so: the object found
-    under that name IS the running main module, not a second copy of it."""
     done = run_blocked(_REPORT_SECOND_COPY, allow_only=_ALLOWED, cwd=REPO_ROOT,
                        stdin=_frame("true"),
                        env={"PYTHONPATH": str(REPO_ROOT), "PATH": "/usr/bin:/bin"})
@@ -99,9 +80,6 @@ def test_the_entrypoint_does_not_load_a_second_copy_of_itself():
         "paid on every `docker exec`")
 
 
-#: Imports the module the ordinary way FIRST, then runs it as the main module, and reports
-#: whether the ordinary import survived. This is the case `setdefault` exists for: a plain
-#: assignment would replace a module other code already holds references into.
 _REPORT_CLOBBER = (
     "import runpy, sys\n"
     "import defender.runtime.bash_exec as real\n"
@@ -115,9 +93,6 @@ _REPORT_CLOBBER = (
 
 
 def test_running_as_main_never_displaces_an_ordinary_import_of_itself():
-    """The alias is `setdefault`, not an assignment, and this is the difference: where the
-    module was already imported under its own name, that one stays. An assignment would swap
-    it for the main-module copy under everything already holding a reference to it."""
     done = run_blocked(_REPORT_CLOBBER, allow_only=_ALLOWED, cwd=REPO_ROOT,
                        stdin=_frame("true"),
                        env={"PYTHONPATH": str(REPO_ROOT), "PATH": "/usr/bin:/bin"})

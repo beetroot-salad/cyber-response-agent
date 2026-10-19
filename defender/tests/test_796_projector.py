@@ -1,7 +1,3 @@
-"""#796 — the cut every blind lens reads through.
-
-"""
-
 from __future__ import annotations
 
 import json
@@ -58,9 +54,6 @@ def _every_lens(companion) -> list:
 
 
 def test_the_golden_yields_both_lens_projections(companion):
-    """`_every_lens` skips the ablation on a record with no load-bearing edge, so on a golden
-    that had none every leak test below would quietly cover one projection instead of two and
-    still pass."""
     assert len(_every_lens(companion)) == 2
 
 
@@ -142,9 +135,6 @@ def test_no_hypothesis_carries_its_weight_into_a_lens():
 
 
 def test_no_belief_movement_reaches_a_lens_verbatim(companion):
-    """The leak test that matters. A key can be dropped while its CONTENT survives inside
-    another block, so this asserts on the values the investigation actually wrote: the
-    reasoning prose attached to each weight move must appear nowhere in what a lens reads."""
     reasons = [
         r["reasoning"] for _lid, r in _walkers.iter_resolutions(companion)
         if isinstance(r.get("reasoning"), str) and len(r["reasoning"]) > 20
@@ -165,9 +155,6 @@ def test_the_disposition_reaches_no_lens(companion):
 
 
 def test_the_record_reaches_every_lens_inside_the_calls_own_untrusted_frame(companion):
-    """A lens reads a document assembled out of alert-derived bytes — SIEM messages, entity
-    identifiers an attacker's own activity shaped — and its reading is what the composer
-    weighs."""
     for projection in _every_lens(companion):
         assert f"<run-{SALT}-untrusted>" in projection.text
         assert f"</run-{SALT}-untrusted>" in projection.text
@@ -175,9 +162,6 @@ def test_the_record_reaches_every_lens_inside_the_calls_own_untrusted_frame(comp
 
 
 def test_the_observation_side_survives_the_cut(companion):
-    """The mirror failure, and the more expensive one: a cut that also removed `:R` would
-    take the learned facts — an entity's classification, an authorization verdict — with it,
-    and every lens would report `unsupported` on a well-supported close."""
     pruned = observation_only(companion)
     assert pruned.get("prologue", {}).get("vertices"), ":V did not survive"
     assert pruned.get("prologue", {}).get("edges"), ":E did not survive"
@@ -213,9 +197,6 @@ def _edges(body: dict) -> set[str]:
 
 
 def test_the_ablation_removes_exactly_one_edge_and_changes_nothing_else(companion):
-    """The ablation reading is only interpretable as a difference against the support
-    reading, so the two projections must differ in the edge and in nothing else — including
-    the prompt."""
     full = support_projection(companion, SALT)
     target = sorted(_edges(_body(full)))[0]
     ablated = support_projection(companion, SALT, without_edge=target)
@@ -266,9 +247,6 @@ def test_the_ablation_takes_the_rows_that_are_about_the_withheld_edge_with_it(co
     assert target not in _edges(ablated)
 
 
-#: A record whose ablation target IS the edge its `:H h-001.authz` contract cites. The golden's
-#: contracts name `e-002` while its target is `e-004`, so only a fixture built for the overlap
-#: can witness what a surviving citation does.
 _CONTRACT_CITES_THE_TARGET = (
     "```invlang\n"
     ":V prologue.vertices [id|type|class|ident|attrs?]\n"
@@ -408,11 +386,6 @@ def test_a_record_with_no_strong_movement_has_no_target():
     assert ablation_target(weak) is None
 
 
-#: One resolution naming `e-002` three times in its `⟂` cell, and TWO resolutions each naming
-#: `e-001` once. The counts a reader means are e-002:1 and e-001:2, so `e-002` is the
-#: narrowest-supported edge and the one to withhold. Counting MENTIONS reverses that — e-002:3,
-#: e-001:2 — and withholds `e-001` instead. Chosen so neither state is a tie: the pre-fix answer
-#: and the post-fix answer are different edges AND different counts.
 _AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION = (
     "```invlang\n"
     ":V prologue.vertices [id|type|class|ident|attrs?]\n"

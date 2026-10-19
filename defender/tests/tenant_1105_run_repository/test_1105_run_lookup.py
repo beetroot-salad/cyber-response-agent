@@ -14,10 +14,6 @@ from defender.tests.tenant_1105_run_repository import _spec1105 as H
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 
 
-# ==========================================================================================
-# Same-file helpers: they build state and hand answers back; the tests assert.
-# ==========================================================================================
-
 def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
     """A data root holding `tenant_id` with a checked runs folder (its `_tenant.json` naming it)
     and a real run folder per id."""
@@ -49,7 +45,6 @@ def _every_function(t, *, run_id: str = "r1", episode_id: str = "ep9"):
     ]
 
 
-
 def _hold_calls(rec: H.RecordingIO):
     return rec.named("hold")
 
@@ -73,10 +68,6 @@ def _is_one_nofollow_hold_of(rec: H.RecordingIO, runs: Path) -> bool:
     return Path(holds[0][0][0]) == Path(runs) and holds[0][1].get("follow") is False
 
 
-#: Run names just outside the sidecar clause (MF-21 B; I061, DV-5): no sidecar suffix at the
-#: end, or a staged tail that is not lowercase hex, or a suffix the clause no longer holds
-#: (#1235 retired `.oracle-held.json`: the oracle's held time is in-memory run state). Each is
-#: a run.
 _OUTSIDE_THE_SIDECAR_CLAUSE = ("r1.run-end.json-2", "run-end.json", "r1.run-end.json.staged-g",
                                "r1.oracle-held.json")
 
@@ -100,18 +91,7 @@ def _episodes_from_link(runs: Path, scratch: Path) -> None:
     os.rename(Path(scratch) / "episodes-real", Path(runs) / "_episodes")
 
 
-# ==========================================================================================
-# open_run's return contract and its checks.
-# ==========================================================================================
-
 def test_1105_open_run_returns_the_tenants_run_under_tenant_runs(tmp_path):
-    """open_run(tenant, RunId.parse(id)) over a runs folder whose _tenant.json names the tenant
-    and whose entry tenant.runs/<id> is a real directory returns the Run that
-    Run.under(tenant.runs, id, tenant_id=tenant.id) builds: its tenant_id is tenant.id, its
-    runs_base is tenant.runs (tenant.data_root / tenant.id / 'runs'), its run_dir is
-    tenant.runs / id; the tenant record is read once, through the held view, and not a second
-    time by path (Run.for_tenant would re-read it, R41-18); nothing is written. Observed through
-    the recording io= seam: one no-follow hold of tenant.runs and no path read of _tenant.json."""
     from defender.run_repository import Run, RunId, RunsRepository
 
     root, t = _good(tmp_path, "r1")
@@ -134,21 +114,7 @@ def test_1105_open_run_returns_the_tenants_run_under_tenant_runs(tmp_path):
     assert H.tree_state(root) == before, "runs.open wrote something"
 
 
-
-# ==========================================================================================
-# The name rule and the entry rule.
-# ==========================================================================================
-
 def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path):
-    """open_run refuses with RunRefused an id ending in each of the host-only sidecar
-    suffixes (.run-end.json, .scrub-verdict.json, .accounting_failures.json, .ticket-write.json,
-    .session-pointer.json — `H.SIDECAR_SUFFIXES`)
-    and an id of the staged shape (a sidecar suffix, then '.staged-', then lowercase hex
-    digits), even when the runs folder is absent (the clause runs before the hold). Positive
-    control: 'r1' over a good folder holding r1 opens, and so does each name just outside the
-    clause, a real run folder named 'r1.run-end.json-2', 'run-end.json',
-    'r1.run-end.json.staged-g' or 'r1.oracle-held.json' (no sidecar suffix at the end; a staged
-    tail that is not lowercase hex; a suffix #1235 retired)."""
     from defender.run_repository import RunId, RunRefused
 
     root = tmp_path / "data"
@@ -178,12 +144,6 @@ def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path)
 
 def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listings_refuse(
         tmp_path):
-    """A real directory named 'r1.run-end.json', or 'r1.run-end.json.staged-0123456789abcdef', in
-    tenant.runs makes list_run_ids raise RunRefused naming it (a
-    directory is not a known sidecar file, and the sidecar clause refuses it as a run). Positive
-    control: the same folder with a regular file of each name beside the run r1 lists r1, and a
-    real directory named 'r1.run-end.json-2', 'run-end.json', 'r1.run-end.json.staged-g' or
-    'r1.oracle-held.json' (#1235 retired its suffix) is a run the listing lists."""
     from defender.run_repository import RunRefused
 
     _root, t = _good(tmp_path, "r1")
@@ -204,10 +164,6 @@ def test_1105_a_directory_named_like_a_sidecar_or_staged_sidecar_makes_the_listi
 
 
 def test_1105_a_refused_name_is_never_probed_on_disk(tmp_path):
-    """Through the repository's injected seam, used to record calls and never to inject a fault,
-    open_run(tenant, <sidecar-suffixed RunId>) makes no filesystem call before raising
-    RunRefused. Positive control: open_run(tenant, RunId.parse('r1')) through the same seam
-    opens tenant.runs once, no-follow, and stats the entry."""
     from defender.run_repository import RunId, RunRefused, RunsRepository
 
     _root, t = _good(tmp_path, "r1")
@@ -224,13 +180,7 @@ def test_1105_a_refused_name_is_never_probed_on_disk(tmp_path):
     assert stats, f"the entry was not stat'ed through the seam: {rec.calls}"
 
 
-
 def test_1105_the_lookups_refuse_a_tenant_record_exactly_when_read_tenant_does(tmp_path):
-    """The lookups judge _tenant.json by read_tenant served through the held view: a record
-    read_tenant admits with an extra key is served, a record read_tenant refuses (a UTF-8 BOM)
-    refuses with TenantRefused, and a record whose read raises anything else (200,000-deep
-    nesting, where read_tenant raises RecursionError) refuses with TenantRefused, never the raw
-    error; the record's tenant_id is then compared with tenant.id exactly."""
     from defender.run_repository import RunId
 
     _root, t = _good(tmp_path, "r1")
@@ -264,12 +214,6 @@ def test_1105_the_lookups_refuse_a_tenant_record_exactly_when_read_tenant_does(t
 
 def test_1105_an_other_tenant_refusal_names_the_file_and_the_id_and_no_run_of_that_tenant(
         tmp_path):
-    """When _tenant.json names another tenant, the TenantRefused message names the record file
-    and the tenant id found and carries none of the run ids present in that folder. Positive
-    control: the message does carry the found id. A _tenant.json whose tenant id holds a newline
-    and an ESC still refuses with TenantRefused naming the record file, and the message carries
-    no raw control character and no run id (design NF-8: text read from disk is quoted
-    repr-style)."""
     from defender.run_repository import RunId
 
     root, t = _good(tmp_path, "zq-run-alpha", "zq-run-omega")
@@ -295,16 +239,8 @@ def test_1105_an_other_tenant_refusal_names_the_file_and_the_id_and_no_run_of_th
         assert "zq-run" not in text, f"{name}'s refusal leaks a run id: {text!r}"
 
 
-
 def test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidecar_files(
         tmp_path):
-    """list_run_ids lists each real directory (judged from its directory entry,
-    never followed) whose name RunId.parse admits and the sidecar clause passes, a 206-byte name
-    included, and accept without listing _tenant.json, _episodes and the known sidecar files
-    (regular files <id><suffix>, a staged one included); every other entry is unexpected and
-    refuses (p2_run_entry_link_refuses, d2_legacy_folder_refuses,
-    d2_listings_refuse_sidecar_named_dir). One such entry, a plain regular file 'notes', shows
-    the refusal here."""
     from defender.run_repository import RunRefused
 
     long_id = "r" + "1" * 205
@@ -321,9 +257,6 @@ def test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidec
 
 
 def test_1105_run_for_tenant_refuses_a_runs_folder_with_no_tenant_record(tmp_path):
-    """Run.for_tenant(tenant_id, run_id, runs_base=...) raises TenantRefused when runs_base has no
-    _tenant.json (today it returns a handle); with a record naming tenant_id it returns the
-    handle, and with a record naming another tenant it raises today's TenantRecordMismatch."""
     from defender.run_repository import Run
 
     runs = tmp_path / H.T_ID / "runs"
@@ -339,15 +272,8 @@ def test_1105_run_for_tenant_refuses_a_runs_folder_with_no_tenant_record(tmp_pat
     assert H.is_a(err, TenantRecordMismatch), f"another tenant's record gave {err!r}"
 
 
-
 def test_1105_open_run_serves_a_real_directory_entry_and_refuses_an_absent_one_naming_it(
         tmp_path):
-    """Over a good runs folder, open_run judges tenant.runs/<id> by stat_entry from the held view:
-    it hands out a Run when the entry is a real directory, prefix-extending names such as r1-,
-    r10 and r1.x included, and raises RunRefused naming the path when the entry is absent;
-    nothing is created. An occupant that is not a real directory is P2's: the link is the
-    representative pinned (p2_run_entry_link_refuses), the others are not pinned per
-    condition."""
     from defender.run_repository import RunId, RunRefused
 
     root, t = _good(tmp_path, "r1-", "r10", "r1.x")
@@ -360,15 +286,7 @@ def test_1105_open_run_serves_a_real_directory_entry_and_refuses_an_absent_one_n
     assert H.tree_state(root) == before, "runs.open created something"
 
 
-
 def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
-    """Driving every lookup and record reader over an absent, an empty and a populated runs
-    folder leaves the data root's tree byte-for-byte and entry-for-entry unchanged: no folder,
-    record or file is created. Over the empty folder, whose _tenant.json is absent, open_run,
-    list_run_ids, episode_runs and sibling_run_ids each refuse the container (O3: a runs folder
-    with no _tenant.json refuses; `_container_refusal`). Positive control: run setup
-    does create the runs folder and _tenant.json, and record_episode_runs does create
-    _episodes/."""
     from defender.run_repository import (
         RunId, episode_runs, episode_sibling_ids, record_episode_runs, sibling_run_ids,
     )
@@ -419,10 +337,6 @@ def test_1105_no_lookup_or_record_reader_writes_anything(tmp_path):
 
 
 def test_1105_list_run_ids_returns_sorted_run_ids_minus_record_claimed_ids(tmp_path):
-    """list_run_ids(tenant) — PR 2: tenant.runs_repository().list(), a Listed (declared change
-    0) — returns the RunIds, sorted by text, of the runs in tenant.runs, minus every id a good
-    episode record claims (the record written in the test through record_episode_runs); a folder
-    holding only its good _tenant.json lists []."""
     from defender.run_repository import Listed, RunId, record_episode_runs
 
     _root, t = _good(tmp_path)
@@ -441,17 +355,7 @@ def test_1105_list_run_ids_returns_sorted_run_ids_minus_record_claimed_ids(tmp_p
     assert all(H.is_a(i, RunId) for i in listed), "every entry is a RunId"
 
 
-# ==========================================================================================
-# Tenant isolation (O3, S1, S2).
-# ==========================================================================================
-
-
 def test_1105_open_run_never_hands_out_a_handle_into_another_tenants_folder(tmp_path):
-    """With tenant A's run r1 on disk, open_run(B, r1) never returns a Run whose run_dir resolves
-    under A.runs: B.runs as a link to A.runs, B's _tenant.json naming A, and B.runs/r1 as a link
-    to A.runs/r1 each raise (RunUnreachable, RunUnreachable — each from TenantRefused — and
-    RunRefused). Positive control:
-    open_run(A, r1) reaches A's run."""
     from defender.run_repository import RunId, RunRefused
 
     root, a = _good(tmp_path, "r1")
@@ -475,9 +379,6 @@ def test_1105_open_run_never_hands_out_a_handle_into_another_tenants_folder(tmp_
 
 
 def test_1105_a_box_writable_tenant_claim_neither_grants_nor_refuses_a_lookup(tmp_path):
-    """A run's provenance stamp, an episode manifest and an episode folder that name another
-    tenant change no answer of open_run or list_run_ids for the request's tenant.
-    Positive control: a _tenant.json naming another tenant does refuse."""
     from defender.run_repository import RunId
 
     _root, t = _good(tmp_path, "r1", "r2")
@@ -501,21 +402,7 @@ def test_1105_a_box_writable_tenant_claim_neither_grants_nor_refuses_a_lookup(tm
     assert H.is_a(err, TenantRefused), f"the host-only record naming {H.U_ID} gave {err!r}"
 
 
-
-# ==========================================================================================
-# P2's representatives and the expected states.
-# ==========================================================================================
-
 def test_1105_a_link_at_tenant_runs_refuses_every_function_naming_it(tmp_path):
-    """With tenant.runs a link to another tenant's runs folder, each lookup and tenant-keyed
-    record function refuses the container (`_container_refusal`) naming tenant.runs and the
-    link fault, never a raw
-    OSError, and the other tenant's folder is byte-unchanged; a link to a folder whose own record
-    names this tenant refuses the same way, so it is the no-follow hold that refuses, not the
-    record compare. Positive control: the same calls answer over a real tenant.runs, and over a
-    real tenant.runs under a linked ANCESTOR (a data root reached through a link), open_run
-    handing out the run and list_run_ids listing it: only a link AT tenant.runs refuses (P1,
-    R41-03)."""
     from defender.run_repository import RunId
 
     root = tmp_path / "data"
@@ -559,11 +446,6 @@ def test_1105_a_link_at_tenant_runs_refuses_every_function_naming_it(tmp_path):
 
 
 def test_1105_a_tenant_record_naming_another_tenant_refuses_every_function(tmp_path):
-    """With tenant.runs/_tenant.json naming another tenant, each lookup and tenant-keyed record
-    function refuses the container (`_container_refusal`) naming the record, writes nothing and
-    returns no run of that
-    folder (O3's 'refused for any other tenant'); two accepted tenants with their records swapped
-    are each refused. Positive control: the record naming this tenant answers."""
     root = tmp_path / "data"
     root.mkdir()
     t = H.tenant(root, H.T_ID)
@@ -589,12 +471,6 @@ def test_1105_a_tenant_record_naming_another_tenant_refuses_every_function(tmp_p
 
 
 def test_1105_a_link_at_a_runs_name_refuses_naming_it_and_is_never_followed(tmp_path):
-    """With tenant.runs/r2 a link to a run folder (inside the same runs folder, or another
-    tenant's), list_run_ids raises RunRefused naming r2, open_run(tenant,
-    r2) raises RunRefused naming the path, and record_episode_runs refuses an arm whose name is
-    such a link (planted at ep-b: an arm is shaped f'{episode_id}-{label}', so no arm is named
-    r2); nothing reads through the link. Positive control: the same folder without the link
-    answers."""
     from defender.run_repository import RunId, RunRefused, record_episode_runs
 
     root, t = _good(tmp_path, "r1")
@@ -626,18 +502,6 @@ def test_1105_a_link_at_a_runs_name_refuses_naming_it_and_is_never_followed(tmp_
 
 def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_name_in_episodes(  # name kept: the spec graph cites it; run_exists is gone (#1105 PR 2 review)
         tmp_path):
-    """P2's Reach: each function judges what it reads, and only that (design D2: open_run does
-    not read _episodes, episode_runs(ep) reads only ep's record, and open_run judges only its own
-    entry). With tenant.runs/_episodes holding a torn record (a good record claiming ep-a, cut
-    short) and a stray file README, open_run(tenant, id) still hands out the run for r1 and for
-    ep-a, the id the torn record would claim, as it would with no _episodes: it does not read
-    _episodes. Beside the same torn record and README, episode_runs(tenant, 'nope') answers {}
-    and a good record ep2 is answered by episode_runs(tenant, 'ep2'). With a directory
-    'Bad Name' planted beside r1 (and _episodes removed), open_run(tenant, r1) still serves.
-    Positive control: over the same tree the _episodes readers refuse, sibling_run_ids and
-    list_run_ids raising RunRefused, episode_runs(tenant, 'ep') raising RunRefused
-    for its own torn record, and list_run_ids, which lists both runs before 'Bad Name' is
-    planted, refusing the folder once it holds it."""
     from defender.run_repository import RunId, RunRefused, episode_runs, sibling_run_ids
 
     root, t = _good(tmp_path, "r1", "ep-a")
@@ -678,13 +542,6 @@ def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_na
 
 
 def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
-    """For an accepted tenant with no runs folder, list_run_ids (PR 2: runs.list, a Listed)
-    lists [] with absent=True, episode_runs returns {} and sibling_run_ids the empty set,
-    episode_sibling_ids over a Bound of the absent folder returns the empty set, open_run raises
-    RunAbsent (the run is gone with its folder) and record_episode_runs TenantRefused; none of
-    them creates anything.
-    Afterwards run setup creates the folder, its record and a run, and the same Tenant gets that
-    run from open_run and list_run_ids."""
     from defender.run_repository import (
         Listed, RunAbsent, RunId, episode_runs, episode_sibling_ids, record_episode_runs,
         sibling_run_ids,
@@ -715,12 +572,6 @@ def test_1105_an_absent_runs_folder_answers_empty_and_creates_nothing(tmp_path):
 
 
 def test_1105_a_run_with_sidecar_files_beside_it_lists_as_the_one_run(tmp_path):
-    """A run folder r1 with its sidecar files (`H.SIDECAR_SUFFIXES`) beside it and a staged one
-    (r1.run-end.json.staged-<16 hex>) lists as the one run r1 in list_run_ids, which does not
-    refuse; sidecar files left for a run whose folder is gone are accepted the same way, and
-    that id is not listed. A run whose id is 206 bytes (the bound) with the longest sidecar
-    suffix's staged file beside it (<id>.accounting_failures.json.staged-<16 hex>, a 255-byte
-    name made on the real filesystem) lists as that one run in list_run_ids."""
     _root, t = _good(tmp_path, "r1")
     H.plant_sidecars(t.runs, "r1")
     H.plant_sidecars(t.runs, "gone")
@@ -738,13 +589,6 @@ def test_1105_a_run_with_sidecar_files_beside_it_lists_as_the_one_run(tmp_path):
 
 
 def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_path(tmp_path):
-    """the process's open descriptor count (/proc/self/fd) is the same before and after each
-    lookup and record function on its success path and on each refusal path (TypeError before
-    any read opens none; TenantRefused; RunRefused). The RunRefused paths include one after the
-    hold for each lookup and record function: a folder named 'Bad Name' (list_run_ids), a stray
-    README in _episodes (sibling_run_ids), a link at runs.open's own entry, for
-    record_episode_runs an arm another record claims, a link at _episodes and a different record
-    already at the episode's name, and for episode_runs its own torn record."""
     from defender.run_repository import (
         RunId, RunRefused, RunsRepository, episode_runs, record_episode_runs, sibling_run_ids,
     )
@@ -818,11 +662,6 @@ def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_pa
 
 def test_1105_run_for_tenant_over_a_deeply_nested_tenant_record_refuses_as_tenant_refused(
         tmp_path):
-    """Run.for_tenant over a runs folder whose _tenant.json nests 200,000 levels deep raises
-    TenantRefused (TenantRecordCorrupt is one) naming the record, never RecursionError; positive
-    control: the same call over a good record returns the handle. The implementer chooses where
-    the check lives; tenant_of_run_dir and family_base_world_id are not required to change (D5,
-    PR 2). A declared O5 change (run setup's deep-record refusal is the other)"""
     from defender.run_repository import Run
 
     runs = tmp_path / H.T_ID / "runs"
@@ -837,15 +676,6 @@ def test_1105_run_for_tenant_over_a_deeply_nested_tenant_record_refuses_as_tenan
 
 
 def test_1105_refusals_quoting_a_disk_read_entry_name_escape_it_and_stay_one_line(tmp_path):
-    """a run folder named 'a<newline>[run.py] forged' or 'x<ESC>[31m' makes list_run_ids
-    raise RunRefused, and a stray entry of that kind in _episodes makes
-    the _episodes readers list_run_ids and sibling_run_ids raise RunRefused (255-byte
-    names included on both arms), each message holding no raw newline or escape character and
-    still naming the entry (a visible run of its characters appears); run setup's claimed-id refusal over the same _episodes is exactly one
-    stderr line (splitlines() == 1) with no traceback; positive control: the same call over a
-    plain-named stray entry names it verbatim
-    A run folder and a stray entry carrying DEL, a C1 control (U+009B) and U+2028 are among the
-    hostile names (91 BF-09)."""
     from defender.run_repository import RunRefused, sibling_run_ids
 
     _root, t = _good(tmp_path, "r1")

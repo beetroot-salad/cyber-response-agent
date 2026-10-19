@@ -1,10 +1,3 @@
-"""#1166 — only `direction: family` rows reach the lessons curator.
-
-The forward check and its per-case readers are deleted, so a defender row with any other
-direction has nothing left that could judge it. The appender refuses one at the door; one
-already on a queue (a pre-#1234 host) is HELD under a named reason, never raised (a raise sends
-the whole tick's batch to stuck) and never authored.
-"""
 from __future__ import annotations
 
 import pytest
@@ -48,9 +41,6 @@ def test_1166_the_appender_refuses_a_defender_row_that_is_not_family(tmp_path, d
 @pytest.mark.parametrize("direction", ["benign", "adversarial", None])
 def test_1166_a_queued_non_family_row_is_held_by_name_and_the_batch_still_authors(
         tmp_path, direction):
-    """A row whose direction is not `family` — including one with no direction at all, which
-    used to raise `KeyError` and stuck the whole batch — is held naming its direction; the
-    family row beside it authors and is consumed."""
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
     legacy = _family_row("old/0", run_id="fresh-01")

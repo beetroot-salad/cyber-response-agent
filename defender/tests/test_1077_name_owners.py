@@ -165,9 +165,6 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
         assert not plain_file(non_plain), f"the plain-file screen admitted {why}"
     assert not plain_file(Path("/dev/null")), "the screen admitted a device"
 
-    # D1's own constraint on the cell: the screen lives in the owner module, which drops
-    # pydantic for a stdlib dataclass so the box entrypoint closure can import it (claim C4).
-    # A screen that pulls in a third-party package would take the sentinel's owner with it.
     from defender._paths import PATHS
     from defender.tests._import_blocker import run_blocked
 
@@ -243,17 +240,11 @@ def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_di
 
 def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stability_refusal(
         base, run_dir, episode_dir):
-    """The composed sibling run id, the composed world token and the session-database path each
-    carry the same case-stability refusal the handle's own bare run-id admission carries — one
-    rule reached by reference at four sites, not an old accident beside three new rules."""
     from defender._run_id import is_case_stable_id
     owner = S.EpisodePaths(episode_dir)
     by_reference = "the rule is today's `_run_id.is_case_stable_id`, reached by reference"
     assert is_case_stable_id("plain"), by_reference
     assert not is_case_stable_id("Plain"), by_reference
-    # The FOURTH site is the bare run id, which h54 drives: before §7 decision 20 the rule ran
-    # on the episode id alone (claim RC-3), so "the refusal a directly-offered run id already
-    # clears" was false of this repo. These two demands are siblings, not one demand twice.
 
     for label in ("Overlay", "OVERLAY", "oVerlay"):
         with pytest.raises(Exception):  # noqa: B017,PT011
@@ -275,5 +266,3 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
 
 
 # What the move must NOT change
-
-

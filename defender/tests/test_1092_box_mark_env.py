@@ -34,11 +34,6 @@ def _request(root: Path, run_dir: Path, env: dict[str, str] | None = None) -> Bo
 
 # ---- d29 -------------------------------------------------------------------------------------
 def test_the_run_dir_lane_argv_carries_env_defender_box_1(tmp_path):
-    """The run-dir lane's `docker run` argv carries `--env DEFENDER_BOX=1` beside the existing
-    allowlisted keys — exactly one such pair, spread from `_BOX_MARK_ENV = {"DEFENDER_BOX":
-    "1"}` into `env_pairs` so the allowlist loop finds it (C17) — and `DEFENDER_BOX` is a
-    member of `BOX_ENV_ALLOWLIST`. This tenant-free fixture omits optional
-    `DEFENDER_AGENT_DIR`."""
     assert box_mod._BOX_MARK_ENV == {"DEFENDER_BOX": "1"}  # type: ignore[attr-defined]
     assert "DEFENDER_BOX" in BOX_ENV_ALLOWLIST
     run_dir = make_run_dir(tmp_path)
@@ -59,16 +54,6 @@ def test_the_run_dir_lane_argv_carries_env_defender_box_1(tmp_path):
     {"defender_box": "1", " DEFENDER_BOX": "1", "DEFENDER_BOX ": "1"},
 ])
 def test_the_request_lane_argv_carries_env_defender_box_1_whatever_the_request_env_says(tmp_path, request_env):
-    """The request lane's `docker run` argv carries `--env DEFENDER_BOX=1` whether the request
-    env omits the key, names it `""`, or names it with any other value — the mark is spread
-    after the caller's keys in `_render_env`, so no request can switch venv-first back on
-    inside a box; a padded or lower-cased spelling is not the allowlisted key and has no
-    effect (#31: exact-key indexing).
-
-    # rejected: a caller-overridable default (the value-blind rule for other allowlisted
-    # keys): a request env carrying `DEFENDER_BOX=""` would silently restore the host-venv
-    # path inside a box (JF3). An embedded NUL in a value raises `ValueError` before any
-    # docker call and other bytes pass verbatim — pre-existing plumbing (ENV #32, PJ-r2-2)."""
     run_dir = make_run_dir(tmp_path)
     request = _request(tmp_path / "wt", run_dir, request_env)
     argv = box_mod._render_argv(request, ()).argv
@@ -80,17 +65,6 @@ def test_the_request_lane_argv_carries_env_defender_box_1_whatever_the_request_e
 
 # ---- d32 (negative; positive control: d30 — the same request env DOES carry the mark on the box lane) ----
 def test_both_host_lanes_strip_defender_box_from_the_shell_and_request_env_and_the_locale_env_is_unchanged(tmp_path, monkeypatch):
-    """With `DEFENDER_BOX=1` present in this process's environment and in `request.env`,
-    neither `_host_fallback_env` nor `run_common.run_env` carries `DEFENDER_BOX` — both host
-    lanes strip the key from what they copy, while another allowlisted request key (`TZ`) and
-    an ordinary shell key still come through — and `_LOCALE_ENV` is still exactly `LANG` and
-    `TZ`. Same request env through `_render_env`: the box lane carries the mark.
-
-    # rejected: the marker rides in `_BOX_MARK_ENV`, NOT in `_LOCALE_ENV` (the encoding
-    # contract). M6's "NOT via `request.env`, so `_host_fallback_env` never carries it" was
-    # false as a mechanism (JF3): the host lanes now STRIP the key, which makes the sentence
-    # true by construction. An operator's own shell carrying DEFENDER_BOX into a by-hand shim
-    # is misuse outside every lane JF3 governs (silent #98); no sitecustomize exists (#58)."""
     monkeypatch.setenv("DEFENDER_BOX", "1")
     monkeypatch.setenv("SPEC1092_SHELL_KEY", "kept")
     request_env = {"DEFENDER_BOX": "1", "TZ": "Europe/Oslo"}
@@ -113,12 +87,6 @@ def test_both_host_lanes_strip_defender_box_from_the_shell_and_request_env_and_t
 # ---- d33 -------------------------------------------------------------------------------------
 @pytest.mark.parametrize("shim", SHIMS)
 def test_each_granted_shim_execs_bare_python3_when_defender_box_is_set_and_the_venv_python_otherwise(tmp_path, shim):
-    """Each of `bin/defender-sql`, `bin/defender-invlang`, `bin/defender-lessons`, run against
-    a fake `DEFENDER_DIR` holding an executable `.venv/bin/python3` stub, execs bare
-    `python3` (the one on PATH) when `DEFENDER_BOX` is set and the stub when it is unset.
-
-    # rejected: `bin/defender-policy` (operator tool, ungranted, `OPERATOR_TOOLS`) keeps its
-    # venv lookup and is deliberately outside this test."""
     world = shim_world(tmp_path)
     assert run_shim(shim, world, marked=False) == str(world.venv_python)
     assert run_shim(shim, world, marked=True) == str(world.bare_python)
@@ -157,5 +125,3 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
 
     assert run(marked=False) == "STUB-EXEC lessons_fm.py --tags"
     assert run(marked=True) == "NO-EXEC"
-
-

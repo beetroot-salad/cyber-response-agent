@@ -51,11 +51,6 @@ def test_placeholder_is_a_declared_param_or_marked_body_substitution(tmp_path):
     assert not passes(bad_undeclared), "an undeclared ${placeholder} must FAIL the invariant"
     assert not passes(bad_no_verb), "a template that declares no verb is undecidable -> FAIL"
 
-    # Over the corpus IN PLACE — a template's system is derived from where it sits, so the
-    # fixtures above are checked through a `cmdb/` tmp dir and the shipped files are not moved.
-    # Drafts included: `_established()` was this sweep's scope until #901, which is the same
-    # exclusion `validate_scaffold` carried and the reason the lead lane's output was outside
-    # every content check.
     failing = [
         f"{t.path}: {f.message}"
         for t in _corpus.iter_query_templates(_QUERIES)
@@ -124,5 +119,3 @@ def test_connect_examples_compile_against_the_live_tree():
         for dead in ("AdapterArgumentParser", "build_parser", "main", "die", "resolve_auth",  # lint-stale-ref: ok — asserts the retired shim name is absent from connect/
                      "EXIT_USAGE"):
             assert not hasattr(mod, dead), f"examples/{name}.py still defines the dead symbol {dead!r}"
-
-

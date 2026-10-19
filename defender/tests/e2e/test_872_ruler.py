@@ -7,9 +7,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
-# and a bare module-scope import there is a COLLECTION error, which pytest answers by
-# interrupting the whole session. Guarded like `pydantic_ai` above it.
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender.tests.e2e._toon872 import (  # noqa: E402
@@ -40,9 +37,6 @@ def _pick(bar: int, *, clearing: bool):
 
 
 def test_foreign_dict_row_clearing_the_bar_reaches_the_model_as_toon() -> None:
-    """A dict-row result from a toolset defender does not own, whose TOON form clears the
-    CONFIGURED bar, arrives at the model as TOON — read off the `ToolReturnPart` the model
-    received, not off an internal variable."""
     for bar in (85, 90):
         label, value = _pick(bar, clearing=True)
         out = agent_run(toolset=foreign_toolset(value), env={MAX_PERCENT_ENV: str(bar)})
@@ -128,18 +122,6 @@ def test_a_payload_just_under_the_configured_bar_substitutes_and_one_just_over_i
             f"{over_label} substituted at bar {bar}"
         )
 
-    # The boundary at the finest granularity the integer knob admits: ONE payload, two bars
-    # one percentage point apart, straddling its own measured ratio. This is what makes the
-    # demand about the RELATION rather than about either fixture — a gate keying on a
-    # hard-coded constant passes both loops above and fails here.
-    #
-    # THE RATIO IS THE DELIVERED ONE (`d3`), and at this granularity the difference decides the
-    # sub-case. `fx-00/dict-rows` measures 46.63% on encoder bytes and 47.19% once the frame is
-    # counted on both sides, so floors and ceils taken on the encoder ratio ask for
-    # substitution at a configured bar of 47 — which the delivered-bytes gate `d3`'s resolution
-    # requires must pass through. Derived from `delivered_percent`, the two demands agree
-    # (`92-reconciliation.md` F1, resolved at §7: the delivered-bytes gate stands and this
-    # sub-case moves).
     import math
     _, value = _pick(85, clearing=True)
     ratio = delivered_percent(value)

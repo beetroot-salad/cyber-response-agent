@@ -60,13 +60,6 @@ def test_env_str_validates_the_default_against_choices(monkeypatch):
         env_str(_NAME, "typo", choices=("a", "b"))
 
 
-# ---------------------------------------------------------------------------------------
-# env_choice — the LENIENT choice (#1110 second review): one rule for every setting whose bad
-# value must cost the setting, never the process (`DEFENDER_DEPLOYMENT`, `DEFENDER_LOG_FORMAT`).
-# `env_str(choices=)` above is the STRICT twin and is unchanged. Imported inside each test, so
-# this file collects against a tree that does not have it yet.
-# ---------------------------------------------------------------------------------------
-
 _CHOICES = ("dev", "production")
 
 
@@ -111,9 +104,6 @@ def test_env_choice_a_choice_is_read_stripped_and_lowercased_with_no_notice(
 
 @pytest.mark.parametrize("raw", ["staging", "development", "prod", " Yaml ", "²", "dev production"])
 def test_env_choice_anything_else_is_the_default_with_a_notice_naming_it(monkeypatch, caplog, raw):
-    """Anything else answers the DEFAULT — never a raise, never a guess at the nearest choice — WITH
-    a notice for the caller to log, naming the variable, the raw value as it was set (its repr,
-    so stray whitespace is visible), every choice, and the default it fell back to."""
     monkeypatch.setenv(_NAME, raw)
     caplog.set_level(logging.DEBUG)
 

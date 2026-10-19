@@ -213,10 +213,6 @@ def test_spread_dict_has_no_closed_key_set(tmp_path):
      "        return checker\n"
      "    return checker\n"),
 
-    # Pinned, not endorsed. The detector fires on the GAP, so a consumer that spells out ALL
-    # of the table's keys — the fullest copy of someone else's dispatch, and the one that goes
-    # stale the day a key is added — produces nothing. Module docstring, "WHAT IS NOT
-    # MECHANIZED" (1). If this ever starts firing, the docstring is the thing to fix.
     ("every-key-enumerated-is-a-documented-blind-spot",
      "from owner import entry_price\n"
      "\n"
@@ -228,9 +224,6 @@ def test_spread_dict_has_no_closed_key_set(tmp_path):
      "    return 0\n"),
 ], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and "\n" not in v else "")
 def test_a_consumer_the_gate_leaves_alone(tmp_path, case, consumer):
-    """Not every literal beside an owned key is a half-read: without the import edge there is
-    no table to half-read, with the owner's lookup in hand the decision was delegated, and a
-    consumer that enumerates every key has copied the dispatch whole."""
     assert _GATE._scan(_tree(tmp_path, consumer=consumer)) == []
 
 
@@ -244,9 +237,6 @@ def test_tests_directory_is_out_of_scope(tmp_path):
 # (c) the suppression marker
 
 
-# The marker is scoped to ITS OWN SITE — the branch line, or the comment block directly above
-# it. A marker anywhere else in the module is not this site's answer, and a gate that honoured
-# it would let one stale comment disarm every half-read below it.
 @pytest.mark.parametrize(("case", "consumer", "suppressed"), [
     ("marker-on-the-branch-line",
      _CONSUMER.replace(
@@ -282,5 +272,3 @@ def test_the_marker_suppresses_only_at_its_own_site(tmp_path, case, consumer, su
 
 
 # the ratchet
-
-

@@ -25,12 +25,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 from defender.tests.e2e.test_855_model_named_systems import PARAMS, _bad_args  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _reduce, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
-# The companion guard's replay oracle, imported rather than re-written: O2 is the claim that a
-# replay built from the SURFACE reaches the live verdict, and a second copy of the oracle here
-# could only ever agree with itself.
-# The unit suite's fixtures for the same schema — the row literal, the markers no real value
-# hashes to, and the two run-dir builders — imported rather than re-spelled: a fifteenth
-# column is then added to ONE fixture row, not to one per suite.
 from defender.tests.test_1017_row_schema import (  # noqa: E402
     KEY_MARKER,
     SHA_MARKER,
@@ -43,11 +37,6 @@ from defender.tests import _state1135  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 HEX64 = re.compile(r"[0-9a-f]{64}")
-
-
-# ---------------------------------------------------------------------------------------
-# O6 / D1 — one constructor, every writer
-# ---------------------------------------------------------------------------------------
 
 
 def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_path):
@@ -63,11 +52,6 @@ def test_every_writer_of_the_table_leaves_rows_keyed_exactly_as_declared(tmp_pat
     for row in r.rows:
         assert tuple(row) == QUERY_ROW_COLUMNS, \
             f"{row['lead_id']}/{row['query_id']}: keys {tuple(row)} != the declared columns"
-
-
-# ---------------------------------------------------------------------------------------
-# O1 / D2 — the surface reads what the writer wrote
-# ---------------------------------------------------------------------------------------
 
 
 def test_the_surface_reads_system_key_and_payload_sha256_off_a_real_table(tmp_path):
@@ -100,11 +84,6 @@ def test_the_surface_reads_system_key_and_payload_sha256_off_a_real_table(tmp_pa
         "a row's payload_sha256 is not the 64-hex the writer derives"
 
 
-# ---------------------------------------------------------------------------------------
-# O2 / D2 — a replay through the surface reaches the live verdict
-# ---------------------------------------------------------------------------------------
-
-
 def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp_path):
     """O2/D2 — `[r.record() for r in load_queries(run_dir) if r.lead_id == LEAD]` is EXACTLY what the guard read..."""
     rec = VerbRecorder()
@@ -121,10 +100,6 @@ def test_records_off_the_surface_are_byte_for_byte_what_the_guard_reads_live(tmp
     assert json.dumps(records) == json.dumps(live), \
         "the surface's records are not what the guard read live"
 
-
-# ---------------------------------------------------------------------------------------
-# O3 / D3 — the judge reads the surface and dumps no row
-# ---------------------------------------------------------------------------------------
 
 @pytest.fixture
 def judge_roots(tmp_path, monkeypatch):
@@ -150,12 +125,6 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
     base, _src = J.runs_base(tmp_path)
     world = ep / "worlds" / "b"
     _lead_file(world, goal)
-    # #1234 A12/A21: a row of world b's own run has a call id of b's run (a row with no id of
-    # any run is an inherited, pre-branch row, which must match every other table's). Numbered
-    # from 1 so none joins the ledger's one oracle row (`<token>/0`, another call). #1255
-    # G4/G6: the id is not on the row; b's host-only call-join record names it by the row's
-    # `(lead_id, seq)` — the host's own integer seq, also where a stressed row spells it as a
-    # string (`..._stresses_every_coercion`).
     token = J.world_token("b", episode_token=J.EPISODE_TOKEN)
     _table(world, rows)
     J.write_call_join(world, [J.call_join_entry(r["lead_id"], int(r["seq"]), f"{token}/{i + 1}")
@@ -223,9 +192,6 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
     assert table.is_symlink(), "the fixture did not plant a link"
     assert read_jsonl_rows(table) == target_rows, \
         "the link does not resolve to the planted table, so the refusal below is vacuous"
-    # #1234 A3: the judge's usability read is no-follow, so a link at the table's name makes
-    # world b malformed (named, ungradable) rather than rendering its rows; no prompt the pass
-    # hands the judge carries the link target's rows.
     judge = J.scripted_judge()
     J.grade(ep, judge=judge)
     row_b = J.world_rows(J.judge_record(ep))["b"]
@@ -279,4 +245,3 @@ def test_the_judges_chain_is_the_surfaces_own_reading_on_a_row_that_stresses_eve
     assert chain["payload"] == [q.payload_digest for q in surface.queries] == ["DIGEST_0", "5"]
     assert "not-a-dict" not in text
     assert "SEQ_ZERO" in text
-

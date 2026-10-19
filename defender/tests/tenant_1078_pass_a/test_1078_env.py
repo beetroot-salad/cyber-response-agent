@@ -25,8 +25,6 @@ def _fresh_run(root: Path, run_id: str = "r2", tenant_id: str = TENANT) -> Path:
     return H.run_common().materialize_run(alert, run_id, tenant=tenant).run_dir
 
 
-
-
 def _box_env(run_dir: Path) -> dict[str, str]:
     """The env a run's box is created with, read off the real `docker run` argv builder."""
     argv = H.mod("runtime.box")._create_argv(
@@ -64,10 +62,6 @@ def _plant_corpus_layout(root: Path) -> tuple[Path, Path, Path]:
     return Path(run_dir), prior, planted
 
 
-# ======================================================================================
-# O8 — the model's prior-run corpus is the run's own runs base
-# ======================================================================================
-
 def test_o8_corpus_is_own_runs_base(tmp_path, monkeypatch):
     """Orient's corpus for a fresh run under <root>/T/runs/ includes a prior run's
     investigation.md in <root>/T/runs/."""
@@ -97,16 +91,6 @@ def test_o8_episode_runs_absent(tmp_path, monkeypatch):
     loaded = _corpus_paths(corpus_root)
     assert planted.resolve() not in loaded, "an episode's sibling run leaked into the corpus"
     assert prior.resolve() in loaded, "the corpus is empty — the absence above proves nothing"
-
-
-
-
-# ======================================================================================
-# D5 and the box/host env (settled s077-s081)
-# ======================================================================================
-
-
-
 
 
 def test_data_root_value_reaches_host_subprocesses(tmp_path, monkeypatch):
@@ -143,19 +127,3 @@ def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):
     # #1255 (design rev 4, P1): the box's value is the model view's constant, which still
     # overwrites the stale inherited one.
     assert exported == ["DEFENDER_RUNS_BASE=/runs"], exported
-
-
-
-
-# ======================================================================================
-# Survivals: N9's directory tools, D9's replay harness, the pre-(C) lead-author drain
-# ======================================================================================
-
-
-
-
-
-
-
-
-

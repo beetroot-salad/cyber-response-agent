@@ -19,11 +19,6 @@ LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations",
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
 
 
-# ==========================================================================================
-# Local helpers — they return values; the tests assert.
-# ==========================================================================================
-
-
 def _child_env() -> dict[str, str]:
     """The child's environment: this worktree first on PYTHONPATH (RG-09-a), then whatever
     the parent already carries."""
@@ -41,7 +36,6 @@ def _child(body: str, *, block: tuple[str, ...] = ()) -> subprocess.CompletedPro
 
 def _out(proc: subprocess.CompletedProcess[bytes]) -> str:
     return proc.stdout.decode("utf-8", "replace") + proc.stderr.decode("utf-8", "replace")
-
 
 
 def _type_checking_imports(tree: ast.Module, package: str) -> list[tuple[str, str]]:
@@ -64,19 +58,10 @@ def _type_checking_imports(tree: ast.Module, package: str) -> list[tuple[str, st
     return out
 
 
-
 _DOOR = "defender.run_repository"
 
 
-
-# ==========================================================================================
-# The tests.
-# ==========================================================================================
-
 def test_1105_run_refused_is_a_plain_exception_distinct_from_tenant_refused():
-    """RunRefused, served by the door, is an Exception subclass that is neither a ValueError nor a
-    TenantRefused, and TenantRefused is not a RunRefused: an except clause for one never catches
-    the other."""
     from defender._tenant import TenantRefused
     from defender.run_repository import RunRefused
 
@@ -101,11 +86,7 @@ def test_1105_run_refused_is_a_plain_exception_distinct_from_tenant_refused():
     assert not catches(RunRefused, ValueError), "an except ValueError caught RunRefused"
 
 
-
 def test_1105_the_doors_all_its_type_checking_names_and_its_getattr_names_are_one_set():
-    """The door's __all__, the names it declares under TYPE_CHECKING, and the names its __getattr__
-    serves are one set with no duplicate in any of them, each served name is the very object its
-    submodule defines, and __getattr__ raises AttributeError for any other name."""
     import importlib
 
     from defender import run_repository as door
@@ -135,11 +116,6 @@ def test_1105_the_doors_all_its_type_checking_names_and_its_getattr_names_are_on
 
 
 def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_without_pydantic():
-    """In a fresh interpreter with pydantic* blocked, `from defender.run_repository import
-    RunPaths, RUN_LAYOUT` succeeds with the layout submodule loaded and the handle submodule,
-    defender._tenant and pydantic not loaded (NM-05: the pin names what must not load, not an
-    exact module set); RunId and RunRefused import from the door under the same block; and in a
-    fresh interpreter without the block every public name imports."""
     from defender.run_repository import RUN_LAYOUT, RunPaths
 
     probe = (
@@ -174,9 +150,6 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
 
 
 def test_1105_a_failed_first_import_through_the_door_propagates_and_is_retried():
-    """In one interpreter, reading Run from the door while pydantic is blocked raises the import
-    error, and reading it again once the block is removed returns the class: the failure is not
-    cached."""
     from defender.run_repository import Run
 
     probe = (
@@ -201,14 +174,7 @@ def test_1105_a_failed_first_import_through_the_door_propagates_and_is_retried()
             f"{_DOOR}._handle")), f"the second read did not return the handle's Run — the failure was cached: {seen}"
 
 
-
-
 def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_path):
-    """The box's create argv for a run under tenant.runs (runtime/box/_lifecycle._create_argv)
-    binds no source at or above tenant.runs read-write, so neither _episodes/ nor _tenant.json is
-    under a writable bind. Positive control: the run's own run_dir is bound read-write. (A BoxSpec
-    with an explicit rootfs keeps _create_argv off the filesystem: resolve_rootfs returns it
-    verbatim, _docker.py:65-70; GR-A1, executed, is the design's own discharge.)"""
     from defender.run_repository import RunId
     from defender.runtime.box import BoxSpec
     from defender.runtime.box._lifecycle import _create_argv
@@ -240,10 +206,6 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
 
 
 def test_1105_a_handles_address_is_frozen_after_init(tmp_path):
-    """After a Run is built, assigning or deleting run_dir, runs_base or tenant_id on it raises
-    AttributeError (the frozen-dataclass convention, DV-4), and assigning tenant_id to a Run.at
-    handle, which has none, raises too; partial_failures and the handle's five group attributes
-    stay its own mutable state."""
     from defender.run_repository import Run
 
     runs = tmp_path / H.T_ID / "runs"

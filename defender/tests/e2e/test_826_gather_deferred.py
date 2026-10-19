@@ -1,10 +1,3 @@
-"""#826 end to end — the terminator stamp (item 1), and the live behaviour of items 3 and 4.
-
-Everything between the two replay models is production code: dispatch, the query tool, both
-repeat guards, the capture capability, the infra breaker, the session store, the two tables.
-The unit-level halves (the elastic sort surface, `repeat_note`'s wording, the companion
-guard's predicate) live in `tests/test_826_deferred_defects.py`.
-"""
 from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165
@@ -20,10 +13,6 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded  # noqa: E402
 
-# `runtime.tools` and `runtime.tools_gather` import each other, the cycle broken by a bottom
-# import in `tools`. Reaching `tools_gather` FIRST from outside the package enters that cycle
-# at its unfinished end, so the driver (which pulls `tools` in properly) is imported ahead of
-# it — the same order every other suite that touches `_run_gather` arrives in.
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
@@ -167,11 +156,6 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
         assert "Treat this lead as incomplete" in out, \
             "stamping the terminator changed what main is told"
 
-    # The two RUN-level ends. These are NOT degraded into a summary — they must reach
-    # `run_investigation`'s own catch, and `test_budget_kill_is_not_control_flow` pins that
-    # they do — so they are named on the way past instead. An unstamped session here would be
-    # item 1's defect intact for the two shapes the main loop already records under these very
-    # words, which is the whole reason the census cannot stop at the four arms above.
     propagating = {
         BudgetKill("tail exhausted"): session_store.TRUNCATED_BY_BUDGET,
         circuit_breaker.RunAborted(5, ["elastic"]): session_store.TRUNCATED_BY_ABORTED,
@@ -209,9 +193,6 @@ def test_every_gather_terminator_arm_stamps_its_own_reason(tmp_path):
 
 
 def test_a_cut_off_lead_is_distinguishable_in_the_store_from_one_that_finished(tmp_path):
-    """The whole chain, on a real store: the composition root opens a session per gather agent
-    and owns the stamp, so a reader joining `session` rows can separate the lead that was cut
-    off from the lead that finished — the discrimination item 1 says does not exist."""
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='d826-store')
     rec = VerbRecorder()
     main = ReplayFn([
@@ -318,10 +299,6 @@ def test_both_writers_of_the_column_draw_on_one_vocabulary(tmp_path):
 # ITEM 3 — the failing repeat, live.
 
 def test_a_lead_repeating_a_failing_request_is_told_so_before_it_is_stopped(tmp_path):
-    """Live proof of item 3: `_model_view`'s early return meant the notice never reached a
-    lead whose calls keep failing. The second identical failure now carries it, one call
-    BEFORE the repeat guard's dead end — which is the whole point of a notice, since a lead
-    that is only ever stopped is never given the chance to change course itself."""
     rec = VerbRecorder()
     res = _run(
         tmp_path / "run", tmp_path=tmp_path, run_id="d826-failrepeat",
@@ -377,11 +354,6 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
     summary = res.summary()
     assert "repeats the one already turned back at seq 0" in summary
     assert "Treat this lead as incomplete" in summary, "the shipped idiom was dropped"
-    # SCOPE since #987: the refusal-path invariant binds the HARNESS-AUTHORED HEADER — the
-    # notice above — not the whole message. The lead's own summary follows it after a blank
-    # line, through the same `untrusted` channel a clean lead's summary uses, where the model
-    # could always echo its own arguments. Here that text is `DONE`'s fixed string, so the
-    # assertion is scoped to the header and still says exactly what it always said.
     header = summary.split("\n\n", 1)[0]
     assert PARAMS["native_query"] not in header, \
         "model-authored params crossed into main's context on a refusal path"
@@ -393,9 +365,6 @@ def test_a_schema_rejected_repeat_loop_ends_the_lead_and_leaves_a_trip_row(tmp_p
 
 
 def test_two_rejections_and_a_corrected_call_still_execute(tmp_path):
-    """The guard must refuse only a call that REPEATS, never one that differs — the same O3
-    property the first guard carries, at the second placement. Two rejections are below the
-    threshold, and the corrected third call runs."""
     rec = VerbRecorder()
     res = _run(
         tmp_path / "run", tmp_path=tmp_path, run_id="d826-corrected", verbs=elastic_ok(rec),
@@ -406,10 +375,6 @@ def test_two_rejections_and_a_corrected_call_still_execute(tmp_path):
 
 
 def test_the_two_guards_never_both_own_one_lead(tmp_path):
-    """Complementary domains, live: rejections do not top up an executed-call count and
-    executed calls do not top up a rejection count. Two of each at ONE key is four
-    occurrences and no trip — under a single merged domain it would be a stop the lead never
-    earned at either placement."""
     rec = VerbRecorder()
     res = _run(
         tmp_path / "run", tmp_path=tmp_path, run_id="d826-disjoint", verbs=elastic_ok(rec),

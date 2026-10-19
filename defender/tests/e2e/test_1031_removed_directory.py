@@ -29,10 +29,6 @@ from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-#: A REAL adapter — read cold by the registry's load check at construction, imported by the
-#: dispatch on the corrected call — declaring the one verb the harness's `q("elastic",
-#: "query", PARAMS)` turn names, with the harness's param contract (`native_query` required).
-#: It writes its payload to the run dir so a call that reached it is observable on disk.
 ELASTIC_ADAPTER = '''\
 from pathlib import Path
 
@@ -55,9 +51,6 @@ def query(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]
 VERBS = {"query": query}
 '''
 
-#: The grant the registry is built under: the one system, the one verb. Real, so `decide`
-#: reaches `elastic` (an unknown verb on it is the GRANT placement's unresolvable branch, not
-#: an ungranted-system refusal) and the corrected call is GRANTED.
 GRANT = grant_of("gather", (("elastic", "query"),))
 
 ELASTIC_KEY = record_query.system_fingerprint("elastic", "")
@@ -79,11 +72,6 @@ def _assert_no_forbidden_pair(r: _Res) -> None:
     for row in r.rows:
         assert not (row["system"] == "" and row["system_key"] == ELASTIC_KEY), \
             f"a declared name's fingerprint is on a coarsened row: {row!r}"
-
-
-# ---------------------------------------------------------------------------------------
-# O3 — a rejection against a declared system is recorded as its own after the directory is gone
-# ---------------------------------------------------------------------------------------
 
 
 def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_removed(tmp_path):
@@ -131,10 +119,3 @@ def test_a_declared_systems_rejection_keeps_its_name_after_the_directory_is_remo
     assert control == [(row["system"], row["system_key"], row["exit_code"]) for row in rows], \
         "the removed-directory run and the intact one disagree on the above-guard rows"
     _assert_no_forbidden_pair(healthy)
-
-
-# ---------------------------------------------------------------------------------------
-# O4 — the rejection guards bound a loop against a declared system; the breaker is charged
-#      to the row's own system
-# ---------------------------------------------------------------------------------------
-

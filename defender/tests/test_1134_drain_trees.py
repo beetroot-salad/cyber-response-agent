@@ -1,8 +1,3 @@
-"""#1134: `DrainTrees` (`defender/learning/core/lane_trees.py`), the drain's holder of one `Held` per
-writable mount. Covers open validation and failure cleanup, the lexical `tree_for` / `mount` mapping,
-close lifetime, mounts swapped after open, and D7's plant matrix (writes, reads, listings, the
-catalog-folder draft regression) plus a child-interpreter audit-hook check that nothing opens by a
-spelling that could follow a link. Every plant is a real filesystem entry."""
 from __future__ import annotations
 
 import asyncio
@@ -41,9 +36,6 @@ from defender.tests._tree_listing_1134 import (
 )
 from defender.tests.test_1111_rooted_io import in_time
 
-# ---------------------------------------------------------------------------------------
-# The working copy: three drain mounts and an outside folder
-# ---------------------------------------------------------------------------------------
 
 LESSONS, QUESTIONER, SKILLS = "lessons", "lessons-questioner", "skills"
 #: The three trees a drain box mounts writable, in `DrainLabel.writable_trees`' order.
@@ -191,10 +183,6 @@ def refused_value_error(fn: Callable[[], Any], what: str) -> None:
     pytest.fail(f"{what} was not refused with ValueError; it answered {got!r}")
 
 
-# ---------------------------------------------------------------------------------------
-# Plants, their state, and the deadline
-# ---------------------------------------------------------------------------------------
-
 #: Plants AT the record's name: a link to an outside file, a link to an outside folder (holding
 #: `inner.md`), a hard link (its other name outside), a FIFO, a directory (holding `keep`).
 NAME_PLANTS = ("symlink", "dir_link_outside", "hardlink", "fifo", "directory")
@@ -202,9 +190,6 @@ NAME_PLANTS = ("symlink", "dir_link_outside", "hardlink", "fifo", "directory")
 #: name (so a following verb would find a real file there), and a plain file.
 FOLDER_PLANTS = ("folder_link_outside", "folder_file")
 
-#: The record's row in its folder's listing for a plant AT the record's name: the entry itself,
-#: as the listing judges it. A plant at a holding folder is never a row: it is that listing's
-#: refusal, with `READ_REASON`'s reason (`expected_row`).
 KIND_OF = {"symlink": "other", "dir_link_outside": "other", "hardlink": "file", "fifo": "other",
            "directory": "dir"}
 #: How a listing lists a plant at its own name: a link of any sort is `other`, a plain file `file`.
@@ -292,10 +277,6 @@ def assert_landed(d: Drain, label: str) -> None:
     assert not [n for n in os.listdir(at.parent) if ".staged-" in n], "a staged name was left"
 
 
-# =======================================================================================
-# Opening: the whole list judged first, then one hold per mount
-# =======================================================================================
-
 def _malformed(d: Drain) -> dict[str, tuple[Any, ...]]:
     """Mount lists `open` refuses, each with its bad member LAST, so a judge that opened as it
     went would already have opened the good ones."""
@@ -328,13 +309,6 @@ def _malformed(d: Drain) -> dict[str, tuple[Any, ...]]:
 
 @pytest.mark.parametrize("case", list(_malformed(Drain(Path("/x")))))
 def test_open_judges_the_whole_list_before_opening_anything(drain, case):
-    """A relative mount, a `..`, a NUL or a `//` anchor in one, a duplicate (equal once `Path`
-    normalises a trailing `/` or a `.`) or one mount inside another (adjacent in the list or not)
-    is `ValueError`, and nothing is opened through `os_`,
-    nothing is left open, and nothing changes. That holds even when the bad mount comes after
-    good ones, or after a missing one (which a hold would answer `FileNotFoundError`).
-    Control: two mounts whose names only share a prefix (`lessons`, `lessons-questioner`) are
-    not nested, and open, once each."""
     d = drain
     spy = S.OsSpy()
     before = census(d.tmp)
@@ -359,10 +333,6 @@ ORDERS = {"drain": (LESSONS, QUESTIONER, SKILLS), "skills-first": (SKILLS, LESSO
 @pytest.mark.parametrize("order", list(ORDERS))
 def test_open_holds_each_mount_once_in_order_by_its_spelling_and_never_again_by_path(
         drain, order):
-    """Exactly one open by path per mount, in the order given (never sorted), of the mount as
-    spelled, through the `os_` given. `.mounts` is the tuple as given, in that order, each a
-    `Path` (a `str` member is coerced). Then every verb through every handle opens nothing by
-    path: the roots are held, not re-resolved and not re-held per call."""
     d = drain
     spy = S.OsSpy()
     given = tuple(d.mount(label) for label in ORDERS[order])
@@ -418,13 +388,6 @@ class RefusesToOpen(S.OsSpy):
 @pytest.mark.parametrize("failing", [0, 1, 2], ids=LABELS)
 def test_a_mount_that_cannot_be_held_raises_as_itself_once_every_root_held_before_it_is_closed(
         drain, failing, fault):
-    """The failing mount's own exception propagates unchanged: the very instance `os_` raised
-    (an `OSError`, a `ValueError`, or a `BaseException` that is no `Exception`), or the hold's
-    `FileNotFoundError` / `NotADirectoryError` naming that mount. Every root held
-    before it was passed to `os_.close` and no descriptor is left open on the tree. Both are
-    checked while `info` still holds the traceback, so a handle the call only dropped would
-    still be alive (and open) there. No mount after the failing one was opened. Nothing
-    changes."""
     d = drain
     bad = d.mounts[failing]
     error = INJECTED[fault](bad) if fault in INJECTED else None
@@ -455,9 +418,6 @@ def test_a_mount_that_cannot_be_held_raises_as_itself_once_every_root_held_befor
 
 
 def test_an_empty_mount_list_holds_nothing_and_maps_nothing(drain):
-    """An unknown label's list is `()`: nothing is opened, `.mounts` is `()`, every absolute
-    path is `None` (the real mount points included), every `mount` is `ValueError`, and a
-    relative path is still `ValueError`."""
     d = drain
     spy = S.OsSpy()
     with DrainTrees.open((), os_=spy) as trees:
@@ -470,10 +430,6 @@ def test_an_empty_mount_list_holds_nothing_and_maps_nothing(drain):
         refused_value_error(lambda: trees.mount("defender/lessons"), "a relative mount")
     assert (spy.opens, spy.closes) == ([], [])
 
-
-# =======================================================================================
-# tree_for: lexical, by components, the held root and the POSIX name below it
-# =======================================================================================
 
 #: Names below each mount: its own files, a deep name, the catalog folder, and names under
 #: folders that do not exist (mapping makes nothing).
@@ -494,9 +450,6 @@ MAPPED = [
 @pytest.mark.parametrize(("label", "name"), MAPPED)
 def test_tree_for_maps_a_path_in_a_mount_to_that_mounts_held_root_and_its_posix_name(
         drain, trees, label, name):
-    """As a `Path` and as a `str`: the `Held` held for that mount (the same object
-    `mount(...)` answers) and the name below it, a POSIX `str` with no leading `./`. Mapping
-    reads and makes nothing: an absent name stays absent."""
     d = drain
     before = census(d.tmp)
     for spelled in (d.mount(label) / name, str(d.mount(label) / name)):
@@ -512,10 +465,6 @@ def test_a_mount_point_maps_to_dot_however_pathlib_spells_it(drain, trees, label
 
 
 def test_containment_is_by_whole_path_components_never_by_string_prefix(drain):
-    """With all three mounts held, a questioner path maps to the questioner mount, never to
-    `lessons`. With `lessons` alone, the questioner mount and every sibling whose name only
-    extends `lessons` (`lessons-other/`, `lessons.md`) are `None`; with `skills` alone, so are
-    `skillsX/` and `skills-old/`. Controls: a path in the held mount maps."""
     d = drain
     les, que, ski = d.mounts
     with DrainTrees.open(d.mounts) as all_three:
@@ -548,9 +497,6 @@ DOTDOT_BELOW = [
 
 @pytest.mark.parametrize(("label", "dotted"), DOTDOT_BELOW)
 def test_a_dotdot_below_a_mount_is_value_error(drain, trees, label, dotted):
-    """`ValueError`, as a `Path` and as a `str`: never `None` (which would send the caller to a
-    plain path) and never a name with `..` in it. Control: the same path with each `..` a plain
-    folder maps, the name kept as written."""
     m = drain.mount(label)
     for spelled in (m / dotted, f"{m}/{dotted}"):
         refused_value_error(lambda s=spelled: trees.tree_for(s), f"tree_for({spelled})")
@@ -582,9 +528,6 @@ def test_a_dotdot_outside_every_mount_is_none_never_rehomed_into_one(drain, tree
 
 
 def test_a_path_outside_every_mount_is_none(drain, trees):
-    """The mounts' parent, the working copy, other trees in it, siblings whose names extend a
-    mount's, another working copy, the outside folder, a host path and `/`: each `None`, as a
-    `Path` and as a `str`. Control: a name in each mount maps."""
     d = drain
     outside = [d.defender, d.wc, d.tmp, d.defender / "learning" / "x", d.defender / "tests" / "x.py",
                d.defender / "lessons-other" / "x.md", d.defender / "lessons.md",
@@ -606,10 +549,6 @@ RELATIVE = ("defender/lessons/x.md", "defender/lessons", "lessons/x.md", "lesson
 @pytest.mark.parametrize("cwd", ["wc", "defender", "lessons"])
 def test_a_relative_path_is_refused_even_where_the_cwd_makes_it_name_a_mount(
         drain, trees, monkeypatch, cwd):
-    """`DrainTrees` has no repo root: a relative path is `ValueError` for `tree_for` and for
-    `mount`, as a `str` and as a `Path`. The cwd is set so that each relative spelling names a
-    real mount or a path in one, so joining it to the cwd would have mapped it. Control: the
-    absolute spellings map."""
     d = drain
     monkeypatch.chdir({"wc": d.wc, "defender": d.defender, "lessons": d.mount(LESSONS)}[cwd])
     for spelled in RELATIVE:
@@ -621,10 +560,6 @@ def test_a_relative_path_is_refused_even_where_the_cwd_makes_it_name_a_mount(
 
 
 def test_a_path_anchored_at_two_slashes_is_value_error_never_none(drain, trees):
-    """`//x` is its own anchor to `pathlib`, so it lies lexically under no mount, while the OS
-    opens it as `/x`. `tree_for` and `mount` refuse it (`ValueError`), as a `str` and as a
-    `Path`, for a record, a mount point and an outside path alike: never `None`, which would
-    send the caller to a plain path that reaches the mount. Control: one `/` maps."""
     d = drain
     for p in (d.path(LESSONS), d.mount(SKILLS), d.mount(QUESTIONER) / "x.md", d.outside / "x.md"):
         doubled = "//" + str(p).lstrip("/")
@@ -637,10 +572,6 @@ def test_a_path_anchored_at_two_slashes_is_value_error_never_none(drain, trees):
 
 
 def test_a_catalog_path_maps_to_the_skills_mounts_handle_never_one_rooted_at_the_catalog(drain):
-    """A template, a draft and the catalog folder itself map to the `skills/` mount's `Held`
-    with their full names below `skills/` (decision 2: the trust root is the mount point). The
-    catalog is no mount (`mount(catalog)` is `ValueError`) and is never opened by path. A draft
-    spelled from the catalog folder, written through that handle, lands at `skills/<name>`."""
     d = drain
     ski = d.mount(SKILLS)
     spy = S.OsSpy()
@@ -655,12 +586,6 @@ def test_a_catalog_path_maps_to_the_skills_mounts_handle_never_one_rooted_at_the
 
 
 def test_tree_for_is_lexical_no_link_moves_a_path_into_or_out_of_a_mount(drain):
-    """Nothing is resolved. Held by their real spelling, the mounts do not map a path spelled
-    through a link to the working copy, and `mount` refuses it. Held through that link, they map
-    only the linked spelling, and `.mounts` keeps it. A record that is a link to an outside file,
-    and a draft under a `gather/queries` replaced by a link to the outside folder, still map to
-    their mount with their own names, while what those links reach is `None`. Nothing on disk
-    changes."""
     d = drain
     les, _que, ski = d.mounts
     alias = d.tmp / "wc-alias"
@@ -690,17 +615,7 @@ def test_tree_for_is_lexical_no_link_moves_a_path_into_or_out_of_a_mount(drain):
     assert census(d.tmp) == before
 
 
-# =======================================================================================
-# mount(): the held root of an exact mount point, and nothing else
-# =======================================================================================
-
 def test_a_mount_spelled_through_a_link_is_held_by_that_spelling_through_the_os_given(drain):
-    """Each mount is opened by path exactly as spelled, never by a spelling resolved first:
-    with the mounts spelled through a link to the working copy, the `os_` given sees one open
-    by path per mount, of the linked spelling, in order (v3 step 2's adversary, H1: a holder
-    that `realpath`s each mount before holding it greened every row whose mounts are
-    `tmp_path`, already resolved). Through those handles a write lands in the real folder the
-    link reaches, its folder's listing sees it, and nothing more is opened by path."""
     d = drain
     alias = d.tmp / "wc-alias"
     alias.symlink_to(d.wc, target_is_directory=True)
@@ -718,10 +633,6 @@ def test_a_mount_spelled_through_a_link_is_held_by_that_spelling_through_the_os_
 
 
 def test_mount_answers_the_held_root_of_an_exact_mount_point_and_nothing_else(drain, trees):
-    """For each mount point, however `pathlib` spells it: the `Held` `tree_for` hands out for
-    every path in that mount. A path in a mount, the mounts' parent, the catalog, a `..`
-    spelling of a mount, a sibling whose name extends a mount's, the outside folder and `/`
-    are each `ValueError`, as a `Path` and as a `str`."""
     d = drain
     les, _que, ski = d.mounts
     for label in LABELS:
@@ -737,10 +648,6 @@ def test_mount_answers_the_held_root_of_an_exact_mount_point_and_nothing_else(dr
         for spelled in (p, str(p)):
             refused_value_error(lambda s=spelled: trees.mount(s), f"mount({spelled})")
 
-
-# =======================================================================================
-# Lifetime
-# =======================================================================================
 
 def _root_fds(spy: S.OsSpy, mounts: tuple[Path, ...]) -> list[int]:
     roots = [o.fd for o in spy.opens if o.dir_fd is None and o.path in {str(m) for m in mounts}]
@@ -773,9 +680,6 @@ WORK_FAULTS: dict[str, Callable[[], BaseException]] = {
 @pytest.mark.parametrize("kind", list(WORK_FAULTS))
 def test_an_exception_in_the_with_block_propagates_as_itself_after_every_root_is_closed(
         drain, kind):
-    """Whatever the work step raises, an `Exception` or not: that very instance propagates, and
-    every root was closed on the way out (checked while `info` holds the traceback, so trees the
-    exit left open would still be alive there)."""
     d = drain
     spy = S.OsSpy()
     fault = WORK_FAULTS[kind]()
@@ -798,10 +702,6 @@ def test_an_exception_in_the_with_block_propagates_as_itself_after_every_root_is
 
 
 def test_close_is_idempotent_and_closes_each_root_exactly_once(drain):
-    """`close()` closes each root once. After it, nothing closes any root again: not a second
-    `close()`, not the `with` exit, not an explicit `close()` of each handle, not collecting
-    them. A second close of a number the process may have reused by then would close another
-    file."""
     d = drain
     spy = S.OsSpy()
     trees = DrainTrees.open(d.mounts, os_=spy)
@@ -857,12 +757,6 @@ def _chain(exc: BaseException | None) -> list[BaseException]:
 @pytest.mark.parametrize("how", ["close", "with_exit", "with_exit_unwinding"])
 @pytest.mark.parametrize("failing", [0, 1, 2], ids=LABELS)
 def test_a_root_whose_close_fails_never_keeps_the_other_roots_open(drain, failing, how):
-    """Closing one root fails (EIO). Every other root is still closed (`os_.close` saw each root
-    exactly once) and nothing is left open, by `close()`, by the `with` exit, and by the exit
-    while a work-step exception unwinds. The close fault is never swallowed: `close()` and the
-    plain exit raise it as itself. While unwinding, the work step's exception is not lost: both
-    are reachable from what propagates (the implementation raises the close fault with the work
-    exception as its `__context__`). A later `close()` closes nothing more."""
     d = drain
     fault = OSError(errno.EIO, "closing the root failed", str(d.mounts[failing]))
     work = RuntimeError("the work step's own fault")
@@ -895,11 +789,6 @@ def test_a_root_whose_close_fails_never_keeps_the_other_roots_open(drain, failin
 @pytest.mark.parametrize("label", LABELS)
 def test_after_close_the_verbs_are_ebadf_the_views_answer_bad_fd_and_the_map_still_answers(
         drain, label):
-    """A handle taken inside the block, and its view (and the catalog and record-folder `under`
-    views) taken before the close: `write`, `mkdir` and `unlink` raise `OSError(EBADF)` and
-    nothing changes; `read` answers `Bad file descriptor`, and so does `entries()` of the
-    record's folder and of the folder the drain lists, over those views (neither raises).
-    `tree_for` and `mount` still answer, with that same (closed) `Held`."""
     d = drain
     put_plain(d.path(label), PAYLOAD)
     with DrainTrees.open(d.mounts) as trees:
@@ -929,10 +818,6 @@ def test_after_close_the_verbs_are_ebadf_the_views_answer_bad_fd_and_the_map_sti
     assert trees.mount(d.mount(label)) is held
 
 
-# =======================================================================================
-# The handles are the real Held: one per mount, held by descriptor
-# =======================================================================================
-
 #: How the drain reaches a held mount: `tree_for` of a record, `mount` of the mount point, and
 #: `tree_for` of the mount point itself (`"."`). Each answers `(held, record name)` here.
 ROUTES: dict[str, Callable[[Any, Drain, str], tuple[Any, str]]] = {
@@ -946,14 +831,6 @@ ROUTES: dict[str, Callable[[Any, Drain, str], tuple[Any, str]]] = {
 @pytest.mark.parametrize("route", list(ROUTES))
 @pytest.mark.parametrize("swap", ["fresh_folder", "link_to_outside"])
 def test_mounts_swapped_after_open_are_never_reached_the_held_folders_are(drain, swap, route):
-    """After `open`, every mount is renamed away and a fresh empty folder, or a link to an
-    outside folder holding a decoy of every file, is put at its path. Asked AFTER the swap, each
-    route (`tree_for` of a record, `mount`, `tree_for` of the mount point) answers the same
-    `Held` it answered at `open` (both are lexical), and through it the write lands in the
-    renamed folder, the read and every listing of the tree's shape see it, and the delete
-    removes from it. The folders
-    now at the mount paths, and what the links reach, are untouched: no route re-resolves the
-    mount by its name (#1134 step 2, H1)."""
     d = drain
     with DrainTrees.open(d.mounts) as trees:
         at_open = {label: trees.mount(d.mount(label)) for label in LABELS}
@@ -990,19 +867,10 @@ def test_mounts_swapped_after_open_are_never_reached_the_held_folders_are(drain,
             label: census(d.mount(label)) for label in LABELS}), "a swapped-in folder was touched"
 
 
-# =======================================================================================
-# D7's matrix through the drain's handles: every verb at every plant site of every tree
-# =======================================================================================
-
 @pytest.mark.parametrize("verb", ["replace", "create", "unlink"])
 @pytest.mark.parametrize(("label", "site", "kind"), PLANT_ROWS)
 def test_a_write_or_delete_through_a_drain_handle_refuses_a_plant_and_lands_once_it_is_gone(
         drain, trees, label, site, kind, verb):
-    """The core's refusal, exactly typed, promptly; over a FIFO, without opening it. (1) Nothing
-    is written anywhere, what the plant reaches included, and (2) the plant stays. (3) Through
-    the same handle, the plant removed: `replace` over a plain file and `create` over nothing
-    land `PAYLOAD` byte-exact (making any holding folder the plant took), and `unlink` removes
-    a plain file and keeps its folder. The outside folder is untouched."""
     d = drain
     planted = plant(d, label, site, kind)
     held, name = handle(trees, d, label)  # mapped with the plant in place: lexical, it never looks (H2)
@@ -1034,11 +902,6 @@ def test_a_write_or_delete_through_a_drain_handle_refuses_a_plant_and_lands_once
 @pytest.mark.parametrize(("label", "site", "kind"), PLANT_ROWS)
 def test_a_read_through_a_drain_handles_view_refuses_a_plant_and_reads_a_plain_file_exactly(
         drain, trees, label, site, kind):
-    """The read's record, refused: no content, not absent, the core's path-free reason (the
-    alias sentence, or `Not a directory` for a file at a folder), and none of the planted bytes
-    anywhere in it, promptly. (1) Nothing changes, (2) the plant stays. (3) Through the same
-    view, the plant removed and its folders real: `read` returns a plain file's text exactly,
-    and a file holding `PAYLOAD` reads as `PAYLOAD_TEXT` with `errors="replace"`."""
     verb = "read"
     d = drain
     planted = plant(d, label, site, kind)
@@ -1087,13 +950,6 @@ def row_answer(got: Any, label: str) -> tuple[Any, ...]:
 @pytest.mark.parametrize(("label", "site", "kind"), PLANT_ROWS)
 def test_the_record_folders_listing_through_a_drain_handles_view_lists_the_plant_itself(
         drain, trees, label, site, kind):
-    """`entries()` of the record's folder through `held.view()`: the record's row is the
-    entry's own kind, without following it or opening it (a FIFO writer stays parked): a link of
-    any sort is `other` (never the `file` or `dir` it reaches), a hard link `file`, a FIFO
-    `other`, a directory `dir`. A linked or file holding folder is that listing refused, with
-    the reason a read gets (no row, never what the link reaches). (1) Nothing changes, (2) the
-    plant stays. (3) Through the same view, the plant removed: the folder is listed without the
-    record, then with `file` for a plain file there."""
     d = drain
     planted = plant(d, label, site, kind)
     held, name = handle(trees, d, label)  # mapped with the plant in place: lexical, it never looks (H2)
@@ -1123,11 +979,6 @@ DRAFT_FOLDER = str(PurePosixPath(RECORD[SKILLS]).parent)
     pytest.param(site, kind, id=f"{kind}@{site}") for site in SKILL_SITES for kind in FOLDER_PLANTS])
 def test_mkdir_of_the_draft_folder_through_the_skills_handle_refuses_a_plant_on_the_way(
         drain, trees, site, kind):
-    """`mkdir("gather/queries/elastic/_draft")` through `tree_for`'s handle, with a link or a
-    file at that folder or at any folder above it: the core's folder refusal, exactly typed.
-    (1) Nothing is made anywhere (a linked folder's target gains nothing), (2) the plant stays.
-    (3) Plant removed: the same `mkdir` makes every folder, real, and the outside folder is
-    untouched."""
     d = drain
     ski = d.mount(SKILLS)
     planted = plant(d, SKILLS, site, kind)
@@ -1194,14 +1045,6 @@ def listings_answer(got: dict[str, Any]) -> dict[str, tuple[Any, ...]]:
 @pytest.mark.parametrize(("label", "site", "kind"), LIST_ROWS)
 def test_the_drains_listings_through_a_held_mount_list_a_plant_as_itself_and_never_follow_it(
         drain, trees, label, site, kind):
-    """The listings of each tree's fixed shape, from `tree_for` of the listed folder: the
-    catalog (`view().under("gather/queries")`) and, below it, `elastic` and `elastic/_draft`,
-    each by its own `entries()`; a corpus `view()` (flat). A link or file at the catalog folder
-    or at `gather` refuses every listing with the core's reason and lists nothing. A link at
-    `<sys>`, `_draft` or the record is one row of its parent's listing, `other` (a file there
-    `file`), and every listing that would go through it is refused with the core's reason:
-    nothing behind it is listed. (1) Nothing changes, (2) the plant stays. (3) Plant removed,
-    folders real, record plain: the listings hold the whole shape."""
     d = drain
     planted = plant(d, label, site, kind)
     assert_maps(trees, listed_path(d, label), d.mount(label),
@@ -1225,10 +1068,6 @@ def test_the_drains_listings_through_a_held_mount_list_a_plant_as_itself_and_nev
                                     for f, rows in LISTINGS[label].items()}, got
 
 
-# =======================================================================================
-# O3: a link at a catalog folder never lets a draft land outside skills/
-# =======================================================================================
-
 #: C2's plants at a holding folder: a link to an EMPTY outside folder (a write that followed it
 #: would CREATE the draft there), a dangling link (it would create the target folder), a file.
 O3_PLANTS = ("folder_link_empty_outside", "folder_link_dangling", "folder_file")
@@ -1239,13 +1078,6 @@ O3_PLANTS = ("folder_link_empty_outside", "folder_link_dangling", "folder_file")
 @pytest.mark.parametrize("site", SKILL_SITES, ids=str)
 def test_o3_a_draft_written_through_the_skills_handle_never_lands_outside_skills(
         drain, trees, site, kind, mode):
-    """The headline regression. The draft writer's call, `held.write(name, ...)` with
-    `(held, name) = tree_for(<skills>/gather/queries/elastic/_draft/x.md)`, with
-    `gather/queries` (or `gather`, `elastic`, `_draft`) replaced by a link to an empty outside
-    folder, a dangling link, or a plain file. It is refused, a linked folder as exactly
-    `OSError(ELOOP)` and a file as exactly `NotADirectoryError`, never the leaf class. Nothing
-    lands at the target, which stays empty or absent. The plant stays, and nothing anywhere
-    changes. Control: the plant removed, the same write lands the draft under `skills/`."""
     d = drain
     ski = d.mount(SKILLS)
     planted = plant(d, SKILLS, site, kind)
@@ -1274,21 +1106,6 @@ def test_o3_a_draft_written_through_the_skills_handle_never_lands_outside_skills
     assert_landed(d, SKILLS)
 
 
-# =======================================================================================
-# No following open, by any route: an audit hook in a child interpreter
-# =======================================================================================
-#
-# The core opens each mount by its own spelling (in `open`, before the watch is armed) and
-# everything below it by ONE component relative to a held descriptor, no-follow (`O_NOFOLLOW`),
-# or `.` reopened off such a descriptor. Anything else opened by name while a verb runs could
-# follow a link at the name or at a holding folder, whatever the verb answers: a path under the
-# tmp dir or `/proc` spelled absolutely, a relative name that spans folders, or a relative name
-# opened without `O_NOFOLLOW`. A descriptor opened or listed (`fdopen`, `scandir`) must not name
-# anything under the outside folder. No target may be named at all, and no process spawned.
-
-#: The names the plants' targets carry (`plant_entry`, `plant_folder`): a link's file or
-#: folder, a hard link's other name, a linked holding folder's stand-in, and the file inside a
-#: linked folder.
 TARGET_PREFIXES = ("link-target-of-", "linked-dir-of-", "other-name-of-", "elsewhere-")
 #: The plants that reach something outside the mount.
 REACHING_AT_NAME = ("symlink", "dir_link_outside", "hardlink")
@@ -1376,12 +1193,6 @@ def _assert_watched_answer(row: dict[str, Any], label: str, site: PurePosixPath 
                          [pytest.param(*row, id=row[0]) for row in WATCH_ROWS])
 def test_no_verb_through_a_drain_handle_opens_anything_by_a_spelling_that_could_follow_a_plant(
         watched, row_id, label, site, kind, verb):
-    """Below the `os_` seam, by any route (an audit hook in a child interpreter): with the
-    plant in place, `tree_for` and the verb open nothing by a following spelling, list or read
-    nothing under the outside folder, name no target and spawn nothing, and the verb still
-    answers its refusal. Non-vacuity: the watch saw, and the rule flagged, an `O_PATH` open of
-    the plant by its absolute spelling; for a skills row it saw the call's own open of
-    `gather`; for a corpus read, the leaf's own no-follow open; for a corpus listing, its `.`."""
     row, d, planted = watched[row_id]
     assert "failed" not in row, row["failed"]
     assert following(row["control"], d) == [str(planted.at)], (

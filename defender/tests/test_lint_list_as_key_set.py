@@ -7,9 +7,6 @@ from defender.tests._by_path import load_lint_gate
 
 _GATE = load_lint_gate("lint_list_as_key_set")
 
-#: The defect as it actually shipped (`scripts/visualize/visualize_run.py`, #956), reduced
-#: to the two lines that carry it: a table keyed by `phase_order`, then patched by walking
-#: `phase_order`. A name appearing twice bills its gather cost twice.
 _THE_BUG = """
 def render(events, phase_order, tags):
     attribution = phase_attribution(events, phase_order, tags)
@@ -88,9 +85,6 @@ def render(events, order):
 
 
 def test_the_counting_idiom_is_not_flagged(tmp_path):
-    """`Counter()`/`{}` DISCOVERS its keys from the iteration, so a repeat is the point.
-    This is the shape of all six sites the plain rule fires on in this tree — the reason
-    the plain rule is not the gate."""
     assert not _flags(tmp_path, """
 def build_idf(token_sets):
     df = Counter()
@@ -123,9 +117,6 @@ def render(events, order):
 
 
 def test_a_sequence_rebound_from_a_unique_source_is_not_flagged(tmp_path):
-    """`keys = list(dict.fromkeys(order))` is the same cure spelled over two lines. The
-    detector looks THROUGH `list`/`sorted` to what produced the elements rather than
-    trusting the outer call's name."""
     assert not _flags(tmp_path, """
 def render(events, order):
     table = build(events, order)
@@ -178,5 +169,3 @@ def render(events, order):
             table[ph] = 0
     return fix
 """)
-
-

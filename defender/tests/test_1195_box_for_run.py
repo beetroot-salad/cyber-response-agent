@@ -1,61 +1,3 @@
-"""#1195 design amendment 3 (2026-10-06): the stop fault wins, the box carries its docker, and
-lanes get a run handle.
-
-The units: `runtime.box.BoxRuns(box)`, the lanes' handle on the batch's box (`.stop()`, the
-post-create stop; `.run()`, one agent run), `runtime.box.box_for_run(handle)`, the spawn sites'
-`with`, the executor's carried `docker`, and `stop_box`'s use of it. The executor carries a fake
-daemon (`_box1195.FakeDaemon`, a container's state as a daemon keeps it) as its `docker`, and a
-`Tripwire` is the `docker` first on `PATH`; never `monkeypatch.setattr`. The handle's executor
-is private: rows reach it only as what `.run()` yields.
-
-Tests -> obligations:
-
-- F3 construction (O6, fail closed):
-  `test_a_handle_on_an_object_that_cannot_say_whether_it_is_sandboxed_is_a_box_fault`,
-  `test_a_handle_on_a_sandboxed_box_that_carries_no_docker_is_a_box_fault`,
-  `test_a_handle_on_a_sandboxed_box_that_names_no_container_is_a_box_fault`; the opt-out (N12):
-  `test_the_opt_out_handle_yields_the_executor_and_asks_no_docker`.
-- The run's sequence (E2', O2'', O3'): `test_a_run_starts_the_stopped_box_for_its_body_and_stops_it_after`,
-  `test_each_run_starts_and_stops_the_one_box`.
-- The check before the start (E3', F4):
-  `test_a_box_that_is_not_exited_before_the_start_is_refused_naming_its_status` (dead, paused,
-  running, created, restarting, absent; a best-effort stop),
-  `test_a_stop_that_failed_and_was_swallowed_makes_the_next_run_refuse_before_its_body` (with
-  `test_control_a_stop_that_holds_lets_the_next_run_start`).
-- An unproven start: `test_a_start_that_cannot_be_proven_runs_no_body_and_is_stopped_again`,
-  `test_a_seam_fault_at_the_best_effort_stop_still_refuses_with_a_box_fault`.
-- F1 (O5), the stop fault wins: `test_a_stop_fault_with_nothing_in_flight_is_a_box_fault`,
-  `test_a_stop_fault_under_an_in_flight_failure_wins_with_the_failure_as_its_context` (an
-  exception, the agent's process faults (`subprocess.TimeoutExpired`, an `OSError`),
-  `KeyboardInterrupt`, `SystemExit`, a body's own `BoxFault`; a stop refused, taking no effect,
-  its proof unanswered, the seam raising at the stop or at the status read after it); control:
-  `test_a_run_stops_its_box_when_the_body_raises` (the stop holds: the body's exception escapes
-  as itself).
-- F4: `test_a_stop_that_leaves_the_box_dead_counts_as_stopped`,
-  `test_stop_stops_the_box_and_proves_it_exited_or_dead`,
-  `test_a_stop_that_cannot_prove_the_box_stopped_is_a_box_fault_naming_its_status`; only
-  `exited`/`dead` prove a stop: `test_a_stop_that_leaves_the_box_paused_or_restarting_proves_nothing`
-  (`.stop()`), `test_a_run_whose_stop_leaves_the_box_paused_or_restarting_is_a_box_fault` (the
-  run's exit; `dead` the control in both).
-- `box_for_run` (O6): `test_box_for_run_of_none_yields_none`,
-  `test_box_for_run_of_a_handle_yields_its_executor_only_inside_the_run`,
-  `test_box_for_run_refuses_anything_but_a_handle` (a raw executor included); the handle is
-  no `BoxLike`, so no `AgentDeps` takes it as its box: `test_the_handle_is_no_box` (the
-  executor is the control).
-- F2, the carried docker:
-  `test_every_lifecycle_call_reaches_the_carried_docker_and_none_reaches_path`,
-  `test_stop_box_removes_a_sandboxed_box_through_its_carried_docker`,
-  `test_stop_box_of_a_sandboxed_box_that_carries_no_docker_is_a_box_fault`,
-  `test_start_box_stamps_the_docker_it_created_the_box_with` (both creation paths),
-  `test_the_production_default_stamps_the_real_docker`,
-  `test_the_opt_out_executor_carries_no_docker`,
-  `test_the_carried_docker_is_left_out_of_equality_and_repr`.
-- Every docker call goes through `_call`: the seam raising at one call
-  (`FakeDaemon.seam_raises`: the status after the start, the best-effort stop, the run's stop
-  and the status read that proves it, `.stop()` and its proof), and
-  `test_a_docker_seam_that_raises_everywhere_is_a_box_fault`; each such row also asserts the
-  `PATH` tripwire untouched (`no_path_docker`), so a seam fault never falls back on `PATH`.
-"""
 from __future__ import annotations
 from defender.tests._alert_plant import plant_alert
 
@@ -108,11 +50,6 @@ def _proven_after_the_stop(daemon: X.FakeDaemon) -> bool:
     return "status" in steps[last + 1:]
 
 
-# ---------------------------------------------------------------------------------------
-# F3: constructing the handle fails closed; the opt-out handle asks nothing
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("make", [
     pytest.param(object, id="object"),
     pytest.param(lambda: SimpleNamespace(name=NAME), id="no-sandboxed-attribute"),
@@ -146,9 +83,6 @@ def test_a_handle_on_a_sandboxed_box_that_names_no_container_is_a_box_fault(
 
 
 def test_the_handle_is_no_box(tmp_path: Path, monkeypatch):
-    """O6/F3: the handle is not a `BoxLike` (it has no `run_parsed`), so nothing that takes a box
-    can be handed it in the executor's place: a command run through it would get a run window
-    of its own outside any spawn site's `with`. Control: the executor it wraps is one."""
     _daemon, box, runs = _stopped(tmp_path, monkeypatch)
     assert isinstance(box, box_mod.BoxLike), "the control: the executor is a BoxLike"
     assert not isinstance(runs, box_mod.BoxLike), "the run handle passes as a box"
@@ -175,16 +109,8 @@ def test_the_opt_out_handle_yields_the_executor_and_asks_no_docker(
     X.no_path_docker(daemon)
 
 
-# ---------------------------------------------------------------------------------------
-# A run: exited -> start -> running -> body (the executor) -> stop -> exited
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_run_starts_the_stopped_box_for_its_body_and_stops_it_after(tmp_path: Path,
                                                                       monkeypatch):
-    """The box is `exited`: the run asks its status, `docker start <name>`, proves it
-    `running`, yields the executor (whose body sees it running), then `docker stop -t 0 <name>`
-    and proves it stopped, all through the executor's own docker."""
     daemon, box, runs = _stopped(tmp_path, monkeypatch)
     saw: list[str | None] = []
     got = _run(daemon, runs, body=lambda: saw.append(daemon.status(NAME)))
@@ -209,19 +135,10 @@ def test_each_run_starts_and_stops_the_one_box(tmp_path: Path, monkeypatch):
     assert [c for c in daemon.docker_calls() if c[1] in ("run", "rm")] == []
 
 
-# ---------------------------------------------------------------------------------------
-# E3', F4: the status before the start must be `exited`
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("status", ["running", "paused", "dead", "created", "restarting", None],
                          ids=lambda s: s or "absent")
 def test_a_box_that_is_not_exited_before_the_start_is_refused_naming_its_status(
         tmp_path: Path, monkeypatch, status: str | None):
-    """The box is not `exited` when its run is entered (`docker start` on a running container
-    answers 0 and does nothing, C3, so only the status can tell): `BoxFault` naming the status
-    it saw, the body never runs, nothing is started, and a best-effort stop was tried, so a box
-    left running is stopped before the refusal unwinds. Control: the rows above (`exited`)."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     if status is None:
         daemon.forget(NAME)
@@ -243,9 +160,6 @@ def test_a_box_that_is_not_exited_before_the_start_is_refused_naming_its_status(
                                    "status-seam-OSError", "status-seam-TimeoutExpired"])
 def test_a_start_that_cannot_be_proven_runs_no_body_and_is_stopped_again(
         tmp_path: Path, monkeypatch, start: str):
-    """`docker start` is refused, answers 0 and changes nothing, or takes while the status asked
-    after it goes unanswered or raises at the seam: `BoxFault`, the body never runs, and a stop
-    follows the start, so a start that took is undone before the refusal unwinds."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     if start == "refused":
         daemon.refuse_start()
@@ -269,9 +183,6 @@ def test_a_start_that_cannot_be_proven_runs_no_body_and_is_stopped_again(
 @pytest.mark.parametrize("kind", ["OSError", "TimeoutExpired"])
 def test_a_seam_fault_at_the_best_effort_stop_still_refuses_with_a_box_fault(
         tmp_path: Path, monkeypatch, kind: str):
-    """The start is refused, and the best-effort stop after it raises at the seam: the refusal
-    still surfaces as `BoxFault`, never the seam's exception, and the body never runs. Control:
-    `test_a_start_that_cannot_be_proven_runs_no_body_and_is_stopped_again[refused]`."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     daemon.refuse_start()
     daemon.seam_raises(kind, step="stop")
@@ -284,9 +195,6 @@ def test_a_seam_fault_at_the_best_effort_stop_still_refuses_with_a_box_fault(
 
 def test_a_stop_that_failed_and_was_swallowed_makes_the_next_run_refuse_before_its_body(
         tmp_path: Path, monkeypatch):
-    """E3': run 1's stop is refused, and a layer above swallows the `BoxFault` (N11''): the box
-    is still running. Run 2 refuses before its body, naming the status, starts nothing, and
-    stops the box best-effort, so it is `exited` once the refusal unwinds."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     daemon.refuse_stop()
     swallowed = X.caught(lambda: _run(daemon, runs))
@@ -309,11 +217,6 @@ def test_control_a_stop_that_holds_lets_the_next_run_start(tmp_path: Path, monke
     _run(daemon, runs)
     assert daemon.steps().count("body") == 2
     assert daemon.steps().count("start") == 2
-
-
-# ---------------------------------------------------------------------------------------
-# F1 (O5): the stop fault wins, on every exit
-# ---------------------------------------------------------------------------------------
 
 
 def _body_failures() -> list:
@@ -361,10 +264,6 @@ def test_a_run_stops_its_box_when_the_body_raises(tmp_path: Path, monkeypatch, f
 @pytest.mark.parametrize("stop", X.STOP_FAULTS)
 def test_a_stop_fault_with_nothing_in_flight_is_a_box_fault(tmp_path: Path, monkeypatch,
                                                             stop: str):
-    """The body returns; the stop fails: `BoxFault`, never the seam's own exception, whether
-    the seam raised at the stop or at its proof, and nothing reaches the `docker` on `PATH`.
-    Short of a seam fault, the stop's outcome was asked of the status after it. Control:
-    `test_a_run_starts_the_stopped_box_for_its_body_and_stops_it_after`."""
     daemon, _box, runs = _failing_stop(tmp_path, monkeypatch, stop)
     got = X.caught(lambda: _run(daemon, runs))
     assert isinstance(got, BoxFault), f"a stop fault escaped as {got!r}"
@@ -381,13 +280,6 @@ def test_a_stop_fault_with_nothing_in_flight_is_a_box_fault(tmp_path: Path, monk
 @pytest.mark.parametrize("failure", _body_failures())
 def test_a_stop_fault_under_an_in_flight_failure_wins_with_the_failure_as_its_context(
         tmp_path: Path, monkeypatch, failure: Any, stop: str):
-    """F1: the body raises X (an exception, an interrupt, `SystemExit`, its own `BoxFault`, or
-    its own process fault: a `TimeoutExpired`, an `OSError`) and the stop fails too (refused,
-    without effect, unproven, the seam raising at the stop or at its proof): a `BoxFault` from
-    the stop escapes, never X, with X as its `__context__` (one link further, behind the seam's
-    own exception, when the seam raised), and nothing reaches the `docker` on `PATH`. The
-    host's next step must not run beside a box that may still be running. Control:
-    `test_a_run_stops_its_box_when_the_body_raises` (the stop holds: X escapes as itself)."""
     daemon, _box, runs = _failing_stop(tmp_path, monkeypatch, stop)
     raised = failure()
     got = X.caught(lambda: _run(daemon, runs, body=_raise(raised)))
@@ -397,17 +289,9 @@ def test_a_stop_fault_under_an_in_flight_failure_wins_with_the_failure_as_its_co
     X.no_path_docker(daemon)
 
 
-# ---------------------------------------------------------------------------------------
-# F4: `.stop()`, proven `exited` or `dead`
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("before", ["running", "exited", "running-left-dead"])
 def test_stop_stops_the_box_and_proves_it_exited_or_dead(tmp_path: Path, monkeypatch,
                                                          before: str):
-    """`.stop()` (the drain's post-create stop): `docker stop -t 0 <name>`, then the status
-    is asked, and `exited` or `dead` (nothing runs in either) is proven stopped. An
-    already-stopped box is proven the same way."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     daemon.hold(NAME, "exited" if before == "exited" else "running")
     if before == "running-left-dead":
@@ -422,10 +306,6 @@ def test_stop_stops_the_box_and_proves_it_exited_or_dead(tmp_path: Path, monkeyp
 @pytest.mark.parametrize("stop", X.STOP_FAULTS)
 def test_a_stop_that_cannot_prove_the_box_stopped_is_a_box_fault_naming_its_status(
         tmp_path: Path, monkeypatch, stop: str):
-    """`.stop()` is refused, answers 0 with the box still running, takes while its proof goes
-    unanswered, or the seam raises at it or at its proof: `BoxFault` (the status is the proof,
-    never the stop's own exit code, and it is asked through `_call`); a box seen still running
-    is named so; nothing reaches the `docker` on `PATH`. Control: the row above."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     daemon.hold(NAME, "running")
     X.fail_stop(daemon, stop, at=1, inspect_at=1)
@@ -440,9 +320,6 @@ def test_a_stop_that_cannot_prove_the_box_stopped_is_a_box_fault_naming_its_stat
 
 
 def test_a_stop_that_leaves_the_box_dead_counts_as_stopped(tmp_path: Path, monkeypatch):
-    """F4: run 1's stop leaves the box `dead`: the run returns, as stopped (nothing runs in a
-    dead box). Run 2 then finds it `dead`, not `exited`, and refuses to start it, naming the
-    status, before its body. Control: `test_control_a_stop_that_holds_lets_the_next_run_start`."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     daemon.stop_leaves_it_dead()
     _run(daemon, runs)
@@ -454,9 +331,6 @@ def test_a_stop_that_leaves_the_box_dead_counts_as_stopped(tmp_path: Path, monke
     assert daemon.steps().count("start") == 1
 
 
-#: Statuses a stop may leave the box in that do not prove it stopped: `paused` (its processes
-#: frozen, not killed: main's `_FROZEN_STATES` admits it, F4 does not) and `restarting`. `dead`
-#: is the control: nothing runs in a dead box, so it is proven stopped.
 LEFT_AFTER_A_STOP = ["paused", "restarting", "dead"]
 
 
@@ -481,10 +355,6 @@ def test_a_stop_that_leaves_the_box_paused_or_restarting_proves_nothing(
 @pytest.mark.parametrize("left", LEFT_AFTER_A_STOP)
 def test_a_run_whose_stop_leaves_the_box_paused_or_restarting_is_a_box_fault(
         tmp_path: Path, monkeypatch, left: str, in_flight: bool):
-    """F4/F1: a run's stop answers 0 and leaves the box `paused` or `restarting`: the run ends in
-    a `BoxFault` naming the status, whether its body returned or raised (then with the body's
-    exception as its context). Control (`dead`): the run returns, or its body's exception
-    escapes as itself."""
     daemon, _box, runs = _stopped(tmp_path, monkeypatch)
     daemon.stop_leaves_it_as(left, at=1)
     raised = RuntimeError("the agent crashed")
@@ -498,11 +368,6 @@ def test_a_run_whose_stop_leaves_the_box_paused_or_restarting_is_a_box_fault(
     assert left in str(got), f"the fault does not name the status it saw: {got}"
     if in_flight:
         assert got.__context__ is raised, X.chain(got)
-
-
-# ---------------------------------------------------------------------------------------
-# `box_for_run` (O6): only a handle opens a run
-# ---------------------------------------------------------------------------------------
 
 
 def test_box_for_run_of_none_yields_none(tmp_path: Path, monkeypatch):
@@ -550,16 +415,8 @@ def test_box_for_run_refuses_anything_but_a_handle(tmp_path: Path, monkeypatch, 
     X.no_path_docker(daemon)
 
 
-# ---------------------------------------------------------------------------------------
-# F2: the box carries its docker
-# ---------------------------------------------------------------------------------------
-
-
 def test_every_lifecycle_call_reaches_the_carried_docker_and_none_reaches_path(
         tmp_path: Path, monkeypatch):
-    """A post-create stop, a run, and the batch-end `stop_box`, over an executor carrying the
-    daemon, with a tripwire as the `docker` on `PATH`: every call reaches the daemon (stop,
-    start, stop, `rm -f`), none the tripwire, and the box is gone."""
     daemon, box, runs = _stopped(tmp_path, monkeypatch)
     daemon.hold(NAME, "running")
     runs.stop()
@@ -583,9 +440,6 @@ def test_stop_box_removes_a_sandboxed_box_through_its_carried_docker(tmp_path: P
 
 def test_stop_box_of_a_sandboxed_box_that_carries_no_docker_is_a_box_fault(tmp_path: Path,
                                                                            monkeypatch):
-    """F2: the batch-end removal of a sandboxed executor with no docker is a `BoxFault`, never
-    a fall-back on the `docker` on `PATH`. A box naming no container is still a no-op. Control:
-    the row above."""
     daemon, _box, _runs = _stopped(tmp_path, monkeypatch)
     got = X.caught(lambda: box_mod.stop_box(X.sandboxed(NAME)))
     assert isinstance(got, BoxFault), got
@@ -595,9 +449,6 @@ def test_stop_box_of_a_sandboxed_box_that_carries_no_docker_is_a_box_fault(tmp_p
 
 
 def test_start_box_stamps_the_docker_it_created_the_box_with(tmp_path: Path, monkeypatch):
-    """Both sandboxed creation paths: `start_box(request, docker=d)` and `start_box(run_dir,
-    defender_dir, spec=..., docker=d)` create, check and probe through `d`, and the executor
-    they hand back carries `d`; none of it reaches the `docker` on `PATH`."""
     X.clear_opt_out(monkeypatch)
     daemon = X.FakeDaemon(tmp_path)
     daemon.tripwire = X.Tripwire(tmp_path).install(monkeypatch)
@@ -620,9 +471,6 @@ def test_start_box_stamps_the_docker_it_created_the_box_with(tmp_path: Path, mon
 
 
 def test_the_production_default_stamps_the_real_docker(tmp_path: Path, monkeypatch):
-    """`start_box(request)` with no `docker=`: the executor carries the default docker seam, so
-    its handle's calls reach the `docker` on `PATH` (here the fake daemon installed there); a
-    box stamped with no docker would be refused its handle instead."""
     X.clear_opt_out(monkeypatch)
     daemon = X.FakeDaemon(tmp_path)
     daemon.install(monkeypatch)

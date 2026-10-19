@@ -104,9 +104,6 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
 
 @pytest.mark.parametrize("case_id", NOT_A_STRING, ids=repr)
 def test_store_path_for_refuses_a_value_that_is_not_a_string(runs_base, case_id):
-    """A case id that is not a string at all is refused as `InvalidCaseId` — the pattern check
-    comes first — never as an `AttributeError`/`TypeError` from a check that ran before it
-    (those escape the resume door's handler and take the run down)."""
     with pytest.raises(InvalidCaseId):
         store_path_for(case_id, sessions=SessionPaths(runs_base))
     assert store_path_for("case-alpha", sessions=SessionPaths(runs_base)) == _owner_path(
@@ -115,18 +112,12 @@ def test_store_path_for_refuses_a_value_that_is_not_a_string(runs_base, case_id)
 
 @pytest.mark.parametrize("case_id", ADMITTED)
 def test_the_store_and_the_owner_agree_on_every_admitted_id(runs_base, case_id):
-    """D1: `store_path_for` IS the owner's answer, for every id the pattern admits — including
-    its edges (a single character, a digit-leading id, the 128-character maximum, `.`/`_`/`-`),
-    not only the id the other tests use."""
     assert CASE_ID_RE.match(case_id)
     assert case_id == case_id.casefold()
     assert store_path_for(case_id, sessions=SessionPaths(runs_base)) == _owner_path(runs_base, case_id)
 
 
 def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_exit(tmp_path):
-    """A fresh run whose store factory is handed a case-unstable id ends through the driver's
-    handled `truncated_by="store"` exit, and no store is created: `InvalidCaseId` is a
-    `StoreError`, which the driver's store-setup handler catches."""
     assert issubclass(InvalidCaseId, StoreError)
     assert issubclass(InvalidCaseId, ValueError), "callers that catch `ValueError` still do"
     runs = tmp_path / "runs"
@@ -174,9 +165,6 @@ def source_run(_finished_run) -> Iterator[tuple[Path, Path]]:
 
 
 def test_a_resume_whose_pointer_carries_a_case_unstable_id_fails_as_branch_error(source_run):
-    """`branch.open_source_store` over a real run whose case pointer names the run's own case id in
-    the wrong case refuses as `BranchError`, caused by the store's `InvalidCaseId`, and creates
-    no store; over the same run's own, lowercase pointer it opens the run's store."""
     from defender.runtime import branch, session_store
 
     root, run_dir = source_run

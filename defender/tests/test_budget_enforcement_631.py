@@ -53,19 +53,6 @@ def _reads_as_healthy(state: dict, limits: dict) -> bool:
 
 
 def test_tail_ends_on_count_or_clock(tmp_path):
-    """The post-trip tail ends when tool_calls reaches max_tool_calls + 10 OR when
-    elapsed exceeds wall_clock_timeout + grace_seconds, whichever comes first — the
-    count limb alone does not bound duration.
-
-    F3(b) is what makes the grace limb load-bearing rather than belt-and-braces:
-    refusals never advance the count limb, so a model that only re-issues stopped
-    tools never reaches N + 10 and the CLOCK is the only thing that ends its tail.
-
-    #1255 ("Time"): this file keeps the COUNT arm. The clock arm used to be driven by handing
-    `tail_exhausted` a `started_monotonic` backdated by 119 s and 121 s; elapsed is now measured
-    on the run clock alone (`run_investigation(clock=…)`), so that arm is
-    `test_the_tail_ends_on_the_run_clocks_grace_not_on_real_time` below, driven through the
-    seam. The count states carry no origin on purpose: the count limb must not depend on one."""
     limits = _tight(max_tool_calls=5, wall_clock_timeout=100, grace_seconds=20)
 
     assert TAIL_ALLOWANCE == 10
@@ -79,17 +66,6 @@ def test_tail_ends_on_count_or_clock(tmp_path):
                          ids=["past-the-grace", "inside-the-grace"])
 def test_the_tail_ends_on_the_run_clocks_grace_not_on_real_time(tmp_path, monkeypatch,
                                                                  second_step, killed):
-    """#1255 "Time" (the clock arm of `test_tail_ends_on_count_or_clock`, re-expressed through
-    the run clock seam): with a 100 s limit and 20 s of grace, a run whose clock reads 119 s
-    after its start is refused (past the limit) but alive; at 121 s the next tool call ends the
-    run with `truncated_by == "budget"`. Real time is milliseconds either way.
-
-    MAIN's second `bash` call comes after a 119 s step (refused, run alive); its third after
-    `second_step` more seconds (121 s: killed; 119 s: refused again, run alive). The two cases
-    are each other's control on the same channel, and the refusal in BOTH shows the 119 s step
-    really reached the limit limb (so a kill that never fires is not a dead limb).
-
-    Red (class a) until `run_investigation` accepts `clock=`."""
     monkeypatch.setenv(C.FLAG, "true")
     clock = C.FakeClock(C.SOURCE_START)
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id="tail")
@@ -119,23 +95,6 @@ def test_the_tail_ends_on_the_run_clocks_grace_not_on_real_time(tmp_path, monkey
     {"created_at": [], "started_at": []},
 ], ids=["no-origin", "none", "not-a-timestamp", "a-list"])
 def test_an_origin_less_state_fails_closed_rather_than_reading_as_healthy(tmp_path, bad_origin):
-    """A state that names no readable clock origin does not conclude 'under cap, clock
-    unreadable' and admit the call: the enforcing read FAILS CLOSED with a wall_clock trip.
-
-    "No readable origin" is each shape the retired test drove (RC-L2): the origin absent, or
-    present and unreadable — `None`, a string that is not a timestamp, a list — in the form a
-    budget snapshot carries its origin today (`created_at` and `started_at`, both bad, so
-    neither reads).
-
-    #1255 ("Time") RETIRES the rest of what stood here, `test_unreadable_started_at_does_not_
-    silently_drop_the_wall_clock_limb`: its four bad-`started_at` cases each carried a valid
-    `started_monotonic` past the cap and asserted the limb still fired "off the monotonic
-    backup" under `elapsed = max(wall_delta, local_monotonic_delta)`. Monotonic is no longer a
-    source: elapsed is measured on the run clock alone, so there is no backup to fire from. What
-    survives is the fail-closed half, which does not depend on a source.
-
-    Positive control, same function: a fresh run's own enforcement view is healthy, so the trip
-    is the missing origin's, not a limb that always fires."""
     limits = _tight(wall_clock_timeout=100, max_tool_calls=10_000)
     state = {"run_id": "r", "tool_calls": 1, **bad_origin}
 
@@ -149,15 +108,6 @@ def test_an_origin_less_state_fails_closed_rather_than_reading_as_healthy(tmp_pa
         "a fresh run's own enforcement view tripped — the fail-closed assertion above proves "
         "nothing")
 
-
-# #1255 ("Time") RETIRES `test_elapsed_reads_a_monotonic_source_and_survives_a_backward_clock_
-# step`. It pinned `elapsed = max(wall_delta, local_monotonic_delta)`: a monotonic source firing
-# the limb "whichever way the wall clock is pushed" (a forward-dated or stepped-back `started_at`
-# against a `started_monotonic` backdated by 500 s). The design measures the wall-clock limb on
-# the run clock alone — `run_investigation(clock=…)` — so there is no second origin to fire off.
-# What the design keeps of it, "a limit trips when the clock has passed it and not before", is
-# `tests/test_1255_clock_natural.py::test_n4_the_wall_clock_limb_measures_the_run_clock`
-# (past-the-limit / inside-the-limit) and `test_n5_…`; the tail's grace is the test above.
 
 def test_a_counter_failing_validation_trips_rather_than_returning_no_messages(tmp_path):
     """A counter that fails type or range validation TRIPS: a negative or boolean tool_calls does not silently..."""
@@ -273,15 +223,6 @@ def test_concurrent_increments_to_the_run_budget_are_neither_lost_nor_duplicated
     final = run.budget_snapshot()
     assert final["tool_calls"] == n_workers * per_worker
     assert final["subagent_spawns"] == 4 * per_worker
-
-
-# #1255 ("Time") RETIRES `test_budget_origin_is_a_wall_clock_the_elapsed_check_honours`. It
-# pinned VR1, `elapsed = max(wall_delta, local_monotonic_delta)`: a state whose wall origin was
-# 500 s old and whose monotonic origin was fresh still tripped, "the wall origin is what still
-# sees the run's real age". Elapsed is now measured on the run clock alone, with one origin (the
-# clock's reading at the run's start), so a fresh second origin cannot hide a run's age — there
-# is no second origin. The kept half, "an old run trips", is
-# `tests/test_1255_clock_natural.py::test_n4_the_wall_clock_limb_measures_the_run_clock`.
 
 
 def test_a_second_run_state_for_the_folder_starts_a_fresh_budget(tmp_path):

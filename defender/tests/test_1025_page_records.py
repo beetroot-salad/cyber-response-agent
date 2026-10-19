@@ -28,9 +28,6 @@ RECORD_NAMES = ("judge.yaml", "outcome.yaml", "samples.yaml", "family.yaml", "ti
                 "provenance.json")
 PACKAGE_READERS = ("read_grade", "draws_on_disk_report", "read_stage_timings", "read_manifest",
                    "read_outcome", "failed_worlds", "read_samples_record",
-                   # The ledger and the investigation document are TWO reads, each its own
-                   # slot (#1025): the page never asks the composed `read_world_facts`, whose
-                   # ledger-first refusal cost the leads block an intact `investigation.md`.
                    "read_world_ledger", "read_investigation_facts",
                    "leads_by_id", "lead_chain", "json_mapping", "read_family_stamp")
 MARKUP = "<script>alert(1)</script><img src=x onerror=alert(1)>"
@@ -67,11 +64,6 @@ def _records(page: E.Page) -> str:
 def _sections(page: E.Page) -> dict[str, str]:
     return {s: page.text_of(s) for s in ("sec-verdict", "sec-worlds", "sec-findings",
                                           "sec-stages", "sec-leads", "sec-records")}
-
-
-# ---------------------------------------------------------------------------------------
-# d31 / d32 — records tolerate absence; the value channel is escaped
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_each_record_in_the_records_section_renders_as_absent_when_missing_and_its_content_when_present(
@@ -191,11 +183,6 @@ def test_1025_the_page_encodes_with_errors_replace_before_the_guarded_write(tmp_
     assert "\ud800" not in text
 
 
-# ---------------------------------------------------------------------------------------
-# J6 — the per-record refusal policy
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_judge_yaml_has_invalid_yaml_syntax(tmp_path):
     """A present-but-corrupt `judge.yaml` is a different state from absence."""
     ep = E.sample_episode(tmp_path)
@@ -220,10 +207,6 @@ def test_1025_timing_json_is_present_but_not_the_stageclock_record_shape(tmp_pat
         stages = page.text_of("sec-stages")
         assert "timing record unreadable" in stages, stages
         assert "not on the record" not in stages, stages
-        # Scoped to the TABLE (`stage-timing`), not the whole section: `sec-stages` also holds
-        # every call's own transcript block, and the sample's real judge response durations
-        # legitimately format to "1m00s" there — unrelated to whether `timing.json` itself
-        # parsed. The docstring's own claim is about the table's wall column, not the section.
         assert "1m00s" not in page.text_of("stage-timing")
         assert page.text_of("sec-verdict") == intact["sec-verdict"]
         assert page.text_of("sec-worlds") == intact["sec-worlds"]
@@ -314,21 +297,6 @@ def test_1025_one_malformed_sidecar_record_sits_beside_otherwise_intact_ones(tmp
     assert broken["sec-verdict"] == never_timing["sec-verdict"]
     for section in ("sec-worlds", "sec-findings", "sec-leads", "sec-records"):
         assert broken[section] == intact[section], section
-
-
-# ---------------------------------------------------------------------------------------
-# J12 — the root stamp
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# d34 / d35 / census — one reader, the baseline, the tree-read lint
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# the two coherence demands minted at §7 — the same screen for every reader of world_archive
-# ---------------------------------------------------------------------------------------
 
 
 def _refused():

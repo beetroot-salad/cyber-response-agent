@@ -76,10 +76,6 @@ def _attr_updates(*rows: str) -> str:
 _OPENING = _fence(_prologue()) + _fence(_findings("l-001"))
 
 
-# ---------------------------------------------------------------------------
-# 1. the orphan: one diagnostic, naming the lead and the vertex, carrying every repair
-# ---------------------------------------------------------------------------
-
 _ORPHAN_DOC = _OPENING + _fence(_obs_vertices("l-001", _ORPHAN_VERTEX))
 
 
@@ -88,11 +84,6 @@ def test_orphan_vertex_is_refused_with_exactly_one_diagnostic():
     assert len(errors) == 1, errors
     assert "l-001" in errors[0]
     assert "v-010" in errors[0]
-
-
-# ---------------------------------------------------------------------------
-# 2. an edge in the SAME lead's block, either direction, clears the vertex
-# ---------------------------------------------------------------------------
 
 
 def test_edge_in_same_lead_naming_it_as_source_clears_it():
@@ -111,11 +102,6 @@ def test_edge_in_same_lead_naming_it_as_target_clears_it():
     assert validate_companion(doc, None) == []
 
 
-# ---------------------------------------------------------------------------
-# 3. participation is document-wide: an edge in a DIFFERENT lead's block clears it too
-# ---------------------------------------------------------------------------
-
-
 def test_edge_in_a_different_leads_block_clears_it():
     doc = (
         _fence(_prologue())
@@ -124,11 +110,6 @@ def test_edge_in_a_different_leads_block_clears_it():
         + _fence(_obs_edges("l-002", "e-001|spawned|v-010|v-001||siem-event:siem|"))
     )
     assert validate_companion(doc, None) == []
-
-
-# ---------------------------------------------------------------------------
-# 4. the prologue exemption: first declaration wins, matching `_walkers.vertex_types`
-# ---------------------------------------------------------------------------
 
 
 def test_prologue_declared_vertex_with_no_edge_is_exempt():
@@ -142,11 +123,6 @@ def test_lead_redeclaring_a_prologue_id_with_no_edge_is_exempt():
     assert validate_companion(doc, None) == []
 
 
-# ---------------------------------------------------------------------------
-# 5. participation is `:E` rows only — an `:R attr_updates` target does not count
-# ---------------------------------------------------------------------------
-
-
 def test_vertex_named_only_by_an_attr_updates_row_still_gets_a_diagnostic():
     doc = _OPENING + _fence(
         _obs_vertices("l-001", _ORPHAN_VERTEX),
@@ -156,10 +132,6 @@ def test_vertex_named_only_by_an_attr_updates_row_still_gets_a_diagnostic():
     assert len(errors) == 1, errors
     assert "v-010" in errors[0]
 
-
-# ---------------------------------------------------------------------------
-# 6. two orphans in one lead → two diagnostics, one per vertex, one repair paragraph
-# ---------------------------------------------------------------------------
 
 _TWO_ORPHAN_DOC = _OPENING + _fence(
     _obs_vertices("l-001", _ORPHAN_VERTEX, _SECOND_ORPHAN_VERTEX)
@@ -175,25 +147,13 @@ def test_two_orphan_vertices_in_one_lead_get_two_diagnostics():
 
 
 def test_the_repair_paragraph_is_printed_once_per_write():
-    """The guidance rides on the FIRST diagnostic and nowhere else. `diagnose` already paid
-    for the alternative once (`validate/__init__.py`, the benign-gating dedup): a refusal that
-    hands the model the same wall of text N times buries the one line that differs — which
-    vertex — under N copies of the one that does not."""
     first, second = validate_companion(_TWO_ORPHAN_DOC, None)
     assert "attr_updates" in first
     assert "attr_updates" not in second
     assert "v-011" in second
 
 
-# ---------------------------------------------------------------------------
-# 7. a hypothesis attached to the vertex discharges it
-# ---------------------------------------------------------------------------
-
-
 def test_a_hypothesis_attached_to_the_vertex_clears_it():
-    """The shape the language exists to carry: a lead found an entity and can only
-    HYPOTHESIZE how it connects. Without this arm the rule is unsatisfiable — writing the
-    `:E` row commits an observation the lead does not have (and the refusal's own last"""
     doc = _OPENING + _fence(
         _obs_vertices("l-001", _ORPHAN_VERTEX),
         _new_hypotheses("l-001", _HYPOTHESIS_ON_ORPHAN),
@@ -213,15 +173,7 @@ def test_a_hypothesis_attached_elsewhere_does_not_clear_it():
     assert "v-010" in errors[0]
 
 
-# ---------------------------------------------------------------------------
-# 8. what an `:E` row has to be to count: a connection, not a mention
-# ---------------------------------------------------------------------------
-
-
 def test_an_edge_to_an_undeclared_id_does_not_clear_it():
-    """The cheapest way past the refusal, if a mention were enough: point the edge at an id
-    nothing declares. Nowhere else in the validator refuses that, and `frontier`'s edge index
-    and the review projector both read an endpoint as a real graph object."""
     doc = _OPENING + _fence(
         _obs_vertices("l-001", _ORPHAN_VERTEX),
         _obs_edges("l-001", "e-001|spawned|v-010|v-999||siem-event:siem|"),
@@ -242,9 +194,6 @@ def test_a_self_edge_does_not_clear_it():
 
 
 def test_an_edge_to_an_open_endpoint_clears_it():
-    """`??` is §Open questions' honest spelling of "observed, not yet identified", not a
-    phantom: the event was recorded and the slot is tracked to the close. Demanding that both
-    ends resolve would refuse `_golden_invlang/turnN-A`'s three such rows."""
     doc = _OPENING + _fence(
         _obs_vertices("l-001", _ORPHAN_VERTEX),
         _obs_edges("l-001", "e-001|spawned|v-010|??||siem-event:siem|"),
@@ -252,15 +201,7 @@ def test_an_edge_to_an_open_endpoint_clears_it():
     assert validate_companion(doc, None) == []
 
 
-# ---------------------------------------------------------------------------
-# 9. the prologue exemption is anchored to POSITION, not to the block name
-# ---------------------------------------------------------------------------
-
-
 def test_a_prologue_block_written_after_a_lead_reported_is_not_exempt():
-    """`parser/_project.py` extends `prologue.vertices` from wherever the block sits, because
-    append-only makes a second block the only legal way to add one. Keyed on the block NAME,
-    the whole rule is then defeated by renaming one header."""
     doc = (
         _OPENING
         + _fence(
@@ -275,9 +216,6 @@ def test_a_prologue_block_written_after_a_lead_reported_is_not_exempt():
 
 
 def test_a_prologue_block_sharing_a_fence_with_a_lead_report_is_not_exempt():
-    """The fence is the unit, so ordering inside one write buys nothing either: a model that
-    puts its `:V prologue.vertices` block above its `:V l-001.observations.vertices` block in
-    the same `append_block` call has still filed a lead's finding as an opening declaration."""
     doc = _OPENING + _fence(
         _prologue(_ORPHAN_VERTEX),
         _obs_vertices("l-001", _SECOND_ORPHAN_VERTEX),
@@ -289,32 +227,16 @@ def test_a_prologue_block_sharing_a_fence_with_a_lead_report_is_not_exempt():
 
 
 def test_a_second_prologue_fence_before_any_observation_is_still_exempt():
-    """Position, not "the first block wins". `lead_zero` writes lead-0's declaring
-    `:L findings` row before main's first turn, so in every real run the ORIENT prologue lands
-    after a `:L findings` block — the opening ends when a lead says what it FOUND, and until
-    then the graph is still being declared, over as many writes as the author takes."""
     doc = _fence(_prologue()) + _fence(_findings("l-001")) + _fence(_prologue(_ORPHAN_VERTEX))
     assert validate_companion(doc, None) == []
 
 
-# ---------------------------------------------------------------------------
-# 10. scoped to what THIS write introduces
-# ---------------------------------------------------------------------------
-
-
 def test_an_orphan_the_baseline_already_carries_is_not_refused():
-    """`investigation.md` is append-only: a committed `:V` row can never be removed and
-    `fix_row` reaches only flagged `attr_updates` rows, so a document-global reading refuses
-    every later write of a run that already carries an orphan — for bytes no repair reaches."""
     proposed = _ORPHAN_DOC + _fence(_attr_updates("l-001|v-010|attrs.user|postgres"))
     assert validate_companion(proposed, _ORPHAN_DOC) == []
 
 
 def test_a_committed_document_read_as_its_own_baseline_is_not_refused():
-    """The two callers that pass a document as both halves — the learning loop's persist gate
-    and the branch seeder — mean "this write introduces nothing". Read document-globally, the
-    first dead-letters every finished run carrying an orphan into `queue/failed/` with no
-    repair available, and the second makes any such run unbranchable and unresumable."""
     assert validate_companion(_ORPHAN_DOC, _ORPHAN_DOC) == []
 
 
@@ -327,9 +249,6 @@ def test_an_orphan_this_write_adds_is_still_refused_against_a_baseline():
 
 
 def test_a_whole_document_written_as_one_fence_keeps_its_prologue_exemption():
-    """The document's FIRST fence is its opening whatever else it carries: a document written
-    all at once — the shipped examples, and the one-fence `_companion` fixtures the invlang
-    tests are built on — declares its graph and reports on it in the same breath, with no"""
     one_fence = _fence(
         _prologue(),
         _findings("l-001"),

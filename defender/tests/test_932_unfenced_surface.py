@@ -59,9 +59,6 @@ def test_fenced_plan_is_accepted_and_actually_parses() -> None:
 
 
 def test_unfenced_rows_reach_no_rule_at_all() -> None:
-    """Why this is a surface rule and not a per-rule fix. With the PLAN unfenced the
-    companion holds no hypothesis, so no hypothesis-side rule has anything to refuse — the
-    document is not failing them, it is invisible to them."""
     companion, _ = parse_dense_companion(_UNFENCED_PLAN)
     assert _walkers.all_hypotheses(companion) == {}
 
@@ -123,9 +120,6 @@ def test_a_prose_mention_of_the_fence_does_not_disarm_the_gate() -> None:
 
 
 def test_an_indented_orphan_header_is_still_an_orphan() -> None:
-    """`_tokenize_fence` matches `_HEADER_ATTEMPT_RE` on the STRIPPED line, so an indented
-    `:H` inside a fence opens a block. Outside one it is exactly as invisible as a flush-left
-    header, and the accounting has to agree with the tokenizer about what a header is."""
     indented = f"{_ORIENT_ONLY}\n## PLAN\n\n" + "\n".join(
         f"  {line}" for line in _PLAN_ROWS.splitlines()
     )
@@ -135,9 +129,6 @@ def test_an_indented_orphan_header_is_still_an_orphan() -> None:
 
 
 def test_a_write_that_drops_one_orphan_and_adds_two_reports_both() -> None:
-    """A count comparison nets those to "+1" and names the survivor's LAST line. The
-    subtraction is a multiset difference, so both new headers are reported and the dropped
-    one is not mistaken for one of them."""
     baseline = f"{_ORIENT_ONLY}\n:T old_orphan\n"
     proposed = f"{_ORIENT_ONLY}\n:H new_one [id|name]\n:H new_two [id|name]\n"
     errors = _surface_errors(proposed, baseline)

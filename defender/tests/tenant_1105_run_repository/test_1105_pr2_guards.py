@@ -31,21 +31,8 @@ def _episode_names() -> set[str]:
     return {p.name for p in root.iterdir()} if root.is_dir() else set()
 
 
-# ==========================================================================================
-# The launcher (G1, G15, G16): refused before anything is spent; the control launches.
-# ==========================================================================================
-
 def test_g1_a_source_whose_runs_record_names_another_tenant_is_refused_before_anything_is_spent(
         tmp_path):
-    """G1(ii). The launch fixture tenant T's source run sits in T's natural runs folder, and that
-    folder's `_tenant.json` names U — another REAL tenant under the same data root. Today the
-    launcher derives the tenant from the record and refuses the location; after PR 2 the
-    request names T and `runs.open` judges the record against T. Either way: a refusal before
-    the question-writer is paid, and no episode folder.
-
-    No existing launcher test plants a record naming another EXISTING tenant at T's folder
-    (`test_1105_review_followups` covers it only through PR 1's lookups). The positive control
-    is the same source with the record naming T: the launch reaches the questioner."""
     est, src = P.launch_source(tmp_path)
     P.second_tenant(P.data_root(), "beta")
     record = src.parent / "_tenant.json"
@@ -73,11 +60,6 @@ def test_g1_a_source_whose_runs_record_names_another_tenant_is_refused_before_an
 
 def test_g15_the_launcher_refuses_an_unusable_episodes_base_before_anything_is_spent(
         tmp_path, monkeypatch):
-    """G15(i), at the entry point. `episodes_root`'s refusals — the setting unset, and a base
-    inside the data root — fire before the question-writer is paid and make no episode folder.
-    Today every pin calls `episodes_root` / `episode_dir_for` directly; PR 2 moves that code
-    into the episode owner (D-ep), so only the launcher's observable survives. The positive
-    control is the same source with the configured base outside both: it launches."""
     est, src = P.launch_source(tmp_path)
     configured = os.environ[P.EPISODES_BASE_ENV]
 
@@ -106,12 +88,6 @@ def test_g15_the_launcher_refuses_an_unusable_episodes_base_before_anything_is_s
 
 def test_g15_a_source_id_that_leaves_no_room_for_a_sibling_is_refused_before_anything_is_spent(
         tmp_path, monkeypatch):
-    """G15(ii), at the entry point. The derived episode id is `<source run id>-n<message>`;
-    `refuse_bad_episode_id` refuses one that leaves no room for `-<label>` within a run id's
-    206 bytes. A 201-byte source id is a valid run id (so after PR 2 `runs.open` admits it),
-    and so is its 205-byte episode id — but that one leaves no room for a sibling, so it is
-    refused before the questioner, with no episode folder. The positive control is a short
-    source id under a fresh data root: it launches."""
     long_id = ("2026" + "x" * 199)[:201]
     est, src = P.launch_source(tmp_path, source_run_id=long_id)
     assert len(src.name.encode()) == 201
@@ -134,10 +110,6 @@ def test_g15_a_source_id_that_leaves_no_room_for_a_sibling_is_refused_before_any
 
 
 def test_g15_a_link_at_the_derived_episode_name_is_passed_over_and_left_untouched(tmp_path):
-    """G15(iii), at the entry point. N17's exclusive claim adopts nothing: a link planted at the
-    derived episode name (pointing at a real folder outside the root) is passed over, the launch
-    claims `<id>-r2` and runs there, and the link and its target are untouched. Today the only
-    pins call `prepare_episode` directly."""
     est, src = P.launch_source(tmp_path)
     root = _episodes()
     root.mkdir(parents=True, exist_ok=True)
@@ -161,11 +133,6 @@ def test_g15_a_link_at_the_derived_episode_name_is_passed_over_and_left_untouche
 
 def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_anything_is_spent(
         tmp_path):
-    """G16. `open_source_store` refuses a source whose session pointer names a store other than
-    the one derived from the run folder — here another real tenant's `sessions/` holding a copy
-    of the store. Driven through the launcher's branch-point check: refused before the
-    questioner, no episode folder. (Fork S moves where `runs_base` comes from; the compare and
-    its `.resolve()` stay.) The positive control is the source's own pointer: it launches."""
     import json
 
     from defender.run_repository import RunPaths
@@ -194,16 +161,8 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
     assert control.questioner.calls > 0, f"the control never launched: {control.message!r}"
 
 
-# ==========================================================================================
-# The sibling (G4, G5, G6, G19): refused before the spend; the control runs its arm.
-# ==========================================================================================
-
 def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its_target(
         tmp_path):
-    """G4, the sibling's screen (`run.py:460-475`), pinned today only through `--resume`. The
-    source run's `alert.json` is a link to a file outside it: the sibling refuses before any
-    lifecycle, and no arm's alert carries the target's bytes. The positive control restores a
-    plain alert: the sibling reaches its lifecycle, its arm's alert being the source's."""
     src, ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
     secret = tmp_path / "secret.json"
     secret.write_text('{"secret": "outside the source run"}\n', encoding="utf-8")
@@ -235,14 +194,6 @@ def test_g4_a_sibling_refuses_a_source_alert_that_is_a_link_and_never_copies_its
 
 def test_g5_a_sibling_whose_container_names_another_tenant_is_refused_and_writes_nothing(
         tmp_path):
-    """G5. The episode's container `runs/_tenant.json` names another real tenant (`acme`) while
-    the request names T. Today run setup's record check refuses it (`run_common.py:102`); after
-    PR 2 `runs.episode(ep)` refuses it before the manifest. Observable either way: a refusal,
-    no lifecycle, no arm folder, and the foreign record byte-for-byte unchanged.
-
-    The positive control is NEW: the existing ones run over a container with no record, which
-    PR 2 refuses (declared change 6). Here the same episode with its container naming T resumes,
-    and its arm lands inside that container."""
     src, ep = P.sibling_scene(tmp_path, container="acme")
     P.second_tenant(P.data_root(), "acme")
     record = ep / "runs" / "_tenant.json"
@@ -268,14 +219,6 @@ def test_g5_a_sibling_whose_container_names_another_tenant_is_refused_and_writes
 
 def test_g6_a_sibling_whose_tenant_lies_under_the_episode_container_is_refused(
         tmp_path, monkeypatch):
-    """G6. A sibling's box mounts its episode container; the tenant's settings half must lie
-    under no tree a box mounts. Here the data root itself lies inside `<episode>/runs`, so the
-    tenant's settings would be inside the box's mount. Today acceptance refuses it
-    (`box_mounted=(episode.runs.path,)`); after PR 2 the episode owner's root check refuses an
-    episodes base containing the data root first. Either way: refused before the preflight and
-    the lifecycle. No existing test drives this through `run.py`.
-
-    The positive control is the same episode with the data root outside it: the sibling runs."""
     episodes = _episodes()
     ep = episodes / P.EPISODE_ID
     inner_root = ep / "runs" / "data"
@@ -304,12 +247,6 @@ def test_g6_a_sibling_whose_tenant_lies_under_the_episode_container_is_refused(
 
 
 def test_g19_a_sibling_for_another_tenant_is_refused_before_any_write_or_spend(tmp_path):
-    """G19. A hand resume naming another real tenant (`acme`) over T's episode — whose container
-    record names T — is refused before the preflight (no model key spent), before the lifecycle,
-    and BEFORE ANY WRITE: the episodes root and the data root are census-identical after it.
-    Today `_sibling_tenant_agrees` refuses after the manifest read; PR 2 refuses earlier, at
-    `runs.episode(ep)`. The existing pins assert no spend but take no write census. The positive
-    control is the same episode resumed by T: it runs."""
     src, ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
     P.second_tenant(P.data_root(), "acme")
     episodes_before, data_before = P.tree(_episodes()), P.tree(P.data_root())
@@ -331,10 +268,6 @@ def test_g19_a_sibling_for_another_tenant_is_refused_before_any_write_or_spend(t
     assert rc == 0, f"the control was refused: {P.refusal_text(refused)} {err}"
 
 
-# ==========================================================================================
-# The pages (G9, G11, G23).
-# ==========================================================================================
-
 def _sample(tmp_path: Path, tenant_id: str) -> E.Episode:
     """`_episode_1025`'s sample episode under the configured episodes base, its container
     `runs/` carrying the `_tenant.json` naming `tenant_id` that the launcher's `start_family`
@@ -345,11 +278,6 @@ def _sample(tmp_path: Path, tenant_id: str) -> E.Episode:
 
 
 def test_g9_a_linked_episode_container_reads_as_absent_on_the_page(tmp_path, d9_tenant):
-    """G9(ii) (R51-20). A link at `<episode>/runs` — to a real folder holding T's record and the
-    arms — is never followed by the page: the page renders, every arm reads "run directory
-    absent", and no arm's run-page link appears. PR 2 keeps this: the view records an
-    unreadable container and does not raise. The positive control is the same episode with a
-    real `runs/`: the page links each arm's run page."""
     ep = _sample(tmp_path, d9_tenant)
     arm_link = f"runs/{P.EPISODE_ID}-{E.CONTROL}/runtime.html"
 
@@ -370,10 +298,6 @@ def test_g9_a_linked_episode_container_reads_as_absent_on_the_page(tmp_path, d9_
 
 
 def test_g11_the_run_page_refuses_an_absent_run_and_a_file_at_the_runs_name(tmp_path):
-    """G11, at the CLI (today's pin calls `Run.at`, which leaves the run page). For a run id
-    with nothing at it, and for one whose name is a regular file in T's runs folder, the run
-    page exits non-zero and writes nothing: the absent name stays absent, the file is
-    byte-for-byte unchanged. The positive control renders T's real run."""
     src, _ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
     runs = src.parent
     absent = runs / "20990101t000000z-absent"
@@ -396,10 +320,6 @@ def test_g11_the_run_page_refuses_an_absent_run_and_a_file_at_the_runs_name(tmp_
 
 def test_g23_the_page_refuses_a_file_at_the_episodes_name_and_leaves_it_untouched(
         tmp_path, d9_tenant):
-    """G23 (#1133 O4.8.2), the file case at the page — pinned today only through the CLI's bare
-    path. A regular file at `<episodes root>/<episode id>` is refused: non-zero exit, the file
-    unchanged, nothing made beside it. The positive control is a real episode at the same name:
-    its page renders."""
     root = _episodes()
     root.mkdir(parents=True, exist_ok=True)
     squatter = root / P.EPISODE_ID

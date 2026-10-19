@@ -63,13 +63,6 @@ def image_run_base(tmp_path: Path) -> Iterator[Path]:
 # ---- d18 -------------------------------------------------------------------------------------
 @requires_real_box
 def test_duckdb_imports_inside_the_box(image_run_base):
-    """Inside a started box, bare `python3 -c 'import duckdb'` succeeds, from the image's own
-    site-packages.
-
-    # rejected: duckdb's default spill target is the cwd-relative `.tmp`, so a spilling query
-    # on the drain lane's read-only worktree cwd fails with EROFS — pre-existing (the host-venv
-    # duckdb behaves the same), unchanged here, recorded as a follow-up, not mechanised (rg3).
-    # Thread sizing under runsc is out of scope (#66); the wheel's cost is C15's (#10)."""
     run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
         res = box_run(box, "python3 -c 'import duckdb'", cwd=Path("/runs/current"))
@@ -82,13 +75,6 @@ def test_duckdb_imports_inside_the_box(image_run_base):
 # ---- d23 (negative; positive control: the two copied files ARE in the image) ----------------------
 @requires_daemon
 def test_the_image_holds_no_checkout_no_env_file_and_no_ssh_material():
-    """The image filesystem holds no checkout, no `.env`, no `.ssh` material and no
-    `defender/` code — only the two copied manifest files (`pyproject.toml` beside `uv.lock`,
-    exactly one of each) beside the installed packages.
-
-    # rejected: a nested secret-shaped file in the build context: O7's image guarantee is
-    # the COPY list (two files); the `defender/` context (#1098) only bounds the transfer
-    # (PJ-r2-1 executed the legacy builder: one added layer, the two files)."""
     seen = image_shell(IMAGE_WALK_PROBE)
     files, dirs = seen["files"], seen["dirs"]
     assert [f for f in files if f.endswith("/.env") or f.endswith(".env.bak")] == []
@@ -104,11 +90,6 @@ def test_the_image_holds_no_checkout_no_env_file_and_no_ssh_material():
 # ---- d31 -------------------------------------------------------------------------------------
 @requires_real_box
 def test_a_command_inside_the_box_sees_defender_box_1_and_the_env_is_still_exactly_the_allowlist(image_run_base):
-    """A command run inside the box sees `DEFENDER_BOX=1` in its environment (the entrypoint's
-    re-filter passes the allowlisted key through to the command), and the box environment is
-    exactly the required allowlist keys plus what the runtime injects. Optional
-    `DEFENDER_AGENT_DIR` is absent from this tenant-free fixture; a second exec sees the same
-    mark (#51/#52: the container env is fixed at `docker run`)."""
     daemon_injected = {"HOSTNAME", "HOME", "PWD", "SHLVL", "_", "OLDPWD", "TERM"}
     run_dir = make_run_dir(image_run_base)
     with real_box(run_dir) as box:
@@ -128,14 +109,6 @@ def test_a_command_inside_the_box_sees_defender_box_1_and_the_env_is_still_exact
 @pytest.mark.live
 @requires_live_box
 def test_the_live_suites_duckdb_startup_probe_exits_zero_in_a_box_from_the_owned_image(tmp_path):
-    """The live suite's startup probe `python3 -c 'import duckdb'`
-    (`test_665_box_live.py::test_box_start_probes_the_granted_repertoire_by_running_it`, red on
-    every daemon at base) exits 0 in a box started the live suite's way — `start_box(run_dir,
-    DEFENDER, docker=box_mod._docker)`, no explicit rootfs — from the owned image; the live
-    suite's two tmp-workdir requests pin `rootfs=image_tag(DEFENDER)` (N4).
-
-    # rejected: a real-box test on a daemon without the image FAULTS, never skips (O3, #84);
-    # every live row faults with the remedy before the first build (#79)."""
     run_dir = make_run_dir(tmp_path)
     box = box_mod.start_box(run_dir, DEFENDER, docker=box_mod._docker)
     try:

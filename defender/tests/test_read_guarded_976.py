@@ -70,9 +70,6 @@ def test_a_looped_parent_keeps_the_os_own_words_and_blames_no_leaf(tmp_path):
 
 
 def test_a_hard_link_is_refused(tmp_path):
-    """THE SHAPE THAT GOT THROUGH. `O_NOFOLLOW` never fires for a hard link — the open
-    SUCCEEDS — so the link count has to be asked of the descriptor rather than inferred from
-    the open having worked. The `S_ISREG` screen this replaced accepted it."""
     real = _content(tmp_path)
     link = tmp_path / "hard.txt"
     os.link(real, link)
@@ -84,9 +81,6 @@ def test_a_hard_link_is_refused(tmp_path):
 
 
 def test_a_directory_at_the_name_is_refused(tmp_path):
-    """Folded into the same refusal as an alias, for the reason `_refuse_unless_plain` gives:
-    a caller must not have to tell a squatting directory apart from a planted symlink to know
-    it has no artifact."""
     d = tmp_path / "dir.txt"
     d.mkdir()
     text, err = _io.read_guarded(d)
@@ -95,15 +89,9 @@ def test_a_directory_at_the_name_is_refused(tmp_path):
 
 
 def test_a_fifo_at_the_name_is_refused_rather_than_blocking_forever(tmp_path):
-    """The shape whose failure mode is not a wrong answer but NO answer: an ordinary read of a
-    fifo with no writer blocks until one appears, so a reader without this screen hangs
-    whatever called it."""
     fifo = tmp_path / "pipe.txt"
     os.mkfifo(fifo)
     assert stat.S_ISFIFO(os.lstat(fifo).st_mode)
-    # THE ARM ENFORCES ITS OWN BOUND. Without `O_NONBLOCK` this call never returns, and a test
-    # that demonstrated the hang BY hanging would wedge CI instead of reporting a failure —
-    # the alarm turns "never answers" into the assertion failure it is.
     with _deadline(5):
         text, err = _io.read_guarded(fifo)
     assert text is None

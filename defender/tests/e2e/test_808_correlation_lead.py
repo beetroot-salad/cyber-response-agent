@@ -1,13 +1,3 @@
-"""The harness-dispatched correlation lead `l-00c` — what #808 pinned that #1222's suite does not.
-
-#1222 retired item 1 (the ancestor fetch) and with it the scenarios built on it
-(`test_808_ancestor_resolution`, `_lead_zero_contract`, `_orient_framing`, `_run_dir_tables`,
-`_downstream_readers` and the item-1 halves of this file). What survives are the three
-properties of the lead's dispatch that no #1222 test observes: its grant stays narrower than
-MAIN's leads' (`esql` is denied), its own ceiling is eight requests while MAIN's leads keep
-their forty, and a session cut at that ceiling reads back as cut. Driven through the #1222
-front door (`S.run_alert`), so admission, the record and the one deadline are production's.
-"""
 from __future__ import annotations
 
 import sqlite3

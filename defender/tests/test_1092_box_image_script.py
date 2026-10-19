@@ -58,10 +58,6 @@ def _run_script(script: Path, *args: str, cwd: Path, env: dict[str, str] | None 
 
 # ---- d6 --------------------------------------------------------------------------------------
 def test_the_image_module_imports_only_the_stdlib_and_loads_by_file_path_without_the_box_package(tmp_path):
-    """`runtime/box/_image.py` imports only standard-library modules and no package-relative
-    name, and loading it through `importlib.util.spec_from_file_location` on a bare
-    interpreter with `pydantic` blocked leaves no `defender.*` module imported — and names
-    the same image the package import names."""
     assert IMAGE_PY.is_file(), f"{IMAGE_PY} does not exist"
     names, relative = _imported_modules(IMAGE_PY)
     assert relative == [], "the module uses a package-relative import (G22: it cannot)"
@@ -87,11 +83,6 @@ def test_the_image_module_imports_only_the_stdlib_and_loads_by_file_path_without
 
 # ---- d7 --------------------------------------------------------------------------------------
 def test_the_box_image_script_imports_only_the_stdlib_and_never_the_defender_package(tmp_path):
-    """`defender/scripts/box_image.py` imports only standard-library modules, obtains
-    `image_tag` by loading `runtime/box/_image.py` from its file path (never
-    `import defender…`), and so runs on a bare runner `python3` with no uv and no venv:
-    executed as `__main__` with `pydantic` blocked and nothing but the stdlib on `sys.path`,
-    `tag` prints the planted tree's name and leaves no `defender.*` module imported."""
     assert BOX_IMAGE_PY.is_file(), f"{BOX_IMAGE_PY} does not exist"
     names, relative = _imported_modules(BOX_IMAGE_PY)
     assert relative == []
@@ -120,11 +111,6 @@ def test_the_box_image_script_imports_only_the_stdlib_and_never_the_defender_pac
 
 # ---- d8 --------------------------------------------------------------------------------------
 def test_box_image_tag_prints_the_name_derived_from_the_scripts_own_tree_and_nothing_else(tmp_path):
-    """`python3 <tree>/defender/scripts/box_image.py tag` prints `image_tag(<tree>/defender)`
-    — the tree derived from the script's own location, the same from any working directory
-    (this checkout's, a scratch dir) and different from this checkout's own name — alone on
-    stdout and exits 0. Its argument contract is argparse's: no subcommand, an unknown one,
-    or trailing arguments print usage on stderr and exit 2 (CLI #27/#28/#29)."""
     root, script = _planted_script(tmp_path)
     expected = image_tag(root / "defender")
     for cwd in (tmp_path, DEFENDER.parent, Path("/")):
@@ -144,18 +130,6 @@ def test_box_image_tag_prints_the_name_derived_from_the_scripts_own_tree_and_not
 
 # ---- d9 --------------------------------------------------------------------------------------
 def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_the_derived_name(tmp_path):
-    """`python3 <tree>/defender/scripts/box_image.py build` runs `docker build -f
-    <tree>/defender/box.Dockerfile -t <image_tag(<tree>/defender)> <tree>/defender` — an argv list,
-    never a shell string (a tree path with a space arrives as ONE argument; no `{`-template
-    token survives on the argv), the context is the tree's `defender/` — the only directory the
-    recipe COPYs from, so no repo-root exclusion list has to keep the context lean (#1098) — the build runs under BuildKit (`DOCKER_BUILDKIT=1` in docker's environment —
-    the recipe's `RUN --mount` is BuildKit syntax, #1095) — and propagates a non-zero build
-    exit as its own non-zero exit. The daemon-side failures settled at phase C (a base pull,
-    a hash mismatch, a full daemon, no `docker` on PATH) are all the same observable: the
-    build's non-zero exit, no fallback, no retry.
-
-    # rejected: `start_box` does NOT auto-build (D2 C: a sandbox start that reaches the
-    # network to build its own boundary inverts fail-loud). A registry pull path is not added."""
     root, script = _planted_script(tmp_path, root_name="tree with space")
     expected_tag = image_tag(root / "defender")
 
@@ -180,9 +154,6 @@ def test_box_image_build_runs_docker_build_on_the_trees_dockerfile_tagged_with_t
 
 # ---- #1095 round 2: no docker to run ---------------------------------------------------------------
 def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_path):
-    """`build` on a machine with no `docker` on PATH prints `box_image.py: could not run
-    docker: …` on stderr, nothing on stdout, and exits 1 — the CLI's own surface, not a
-    `FileNotFoundError` traceback (d9's "no docker on PATH is the build's non-zero exit")."""
     _, script = _planted_script(tmp_path)
     empty = tmp_path / "empty-bin"
     empty.mkdir()
@@ -196,10 +167,6 @@ def test_box_image_build_without_docker_on_path_prints_one_line_and_exits_1(tmp_
 # ---- MF1's script side (CLI #18) ----------------------------------------------------------------
 @pytest.mark.parametrize("verb", ["tag", "build"])
 def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_path, verb):
-    """On a tree whose input it cannot read — a directory sitting where `uv.lock` should be —
-    `tag` and `build` print `<tree>/defender: cannot read uv.lock: <reason>` on stderr
-    (the same sentence shape as the resolver's `BoxFault`, which the stdlib script cannot
-    import), print nothing on stdout, exit 1, and `build` never invokes `docker`."""
     root, script = _planted_script(tmp_path)
     defender_dir = root / "defender"
     (defender_dir / "uv.lock").unlink()
@@ -215,11 +182,6 @@ def test_box_image_reports_a_tree_whose_input_it_cannot_read_and_exits_1(tmp_pat
     assert recorded_docker_calls(log) == []
 
 
-#: A lock that READS but cannot be used, each spelled as bytes over the planted lock: not TOML;
-#: a reached entry's link with no `name` (#1097 amendment 2's shape check — today's walk would
-#: go hunting a package called "name"); a reached entry's `dependencies` as a string (a walk
-#: over it raises TypeError); a reached entry nested past what the canonical form can encode
-#: (RecursionError). Each must reach the operator as the resolver's one-line fault.
 _ALPHA_BETA_LINK = b'{ name = "beta", extra = ["speed"] }'
 _ALPHA_LINKS = (
     b'dependencies = [\n    ' + _ALPHA_BETA_LINK + b',\n'
@@ -231,10 +193,6 @@ _UNUSABLE_LOCKS: dict[str, tuple[bytes, bytes]] = {
     "a link with no name": (_ALPHA_BETA_LINK, b'{ extra = ["speed"] }'),
     "dependencies a string": (_ALPHA_LINKS, b'dependencies = "beta"\n'),
     "a value nested past the encoder": (b"", b"\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
-    # #1097 amendment 3's ONE fault boundary (the /code-review round-3 reproductions): a
-    # nameless entry whose body is 20000 tables deep (the shape fault's `repr` of it recursed),
-    # and a 5000-digit integer in an entry nothing reaches (tomllib's bare ValueError).
     "a nameless entry nested past repr": (b"", b"\n[[package]]\n[package." + b".".join([b"x"] * 20_000) + b"]\nb = 1\n"),
     "an integer past the digit limit": (b"", b'\n[[package]]\nname = "zz"\nversion = "1.0.0"\nx = ' + b"1" * 5000 + b"\n"),
 }
-

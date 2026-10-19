@@ -296,18 +296,6 @@ def _same_shape_other_content() -> dict[str, bytes]:
 
 
 def test_a8_admission_refuses_a_bad_alert_before_any_run_folder(tmp_path):
-    """Run start checks the input alert's raw bytes before any run folder exists: a byte-order
-    mark, non-UTF-8 or UTF-16 bytes, text that is not JSON, a top-level array or scalar, an empty
-    or whitespace-only file, nesting the parser cannot follow, an unpaired surrogate escape and
-    an over-size file are each refused with a fixed reason naming why and leave nothing under the
-    runs base; a valid object — one holding raw U+2028/U+2029/U+0085 included — is admitted.
-
-    Each shape is the real bytes `S.admission_bytes` writes to the operator's input file (PR-02:
-    base admits every one; PA-01: base refuses only the over-size file, after the folder exists).
-    "Fixed" is observed as: the same shape spelled over other content gets the same reason.
-    "Naming why" is observed as: refusals of different causes differ — encoding, not one JSON
-    object, nesting, an unpaired surrogate, size (`CAUSE_CLASSES`); shapes of one cause may share
-    a reason."""
     planted = S.plant_tenant()
     reasons: dict[str, str] = {}
     for shape in REFUSED_SHAPES:
@@ -342,14 +330,6 @@ def test_a8_admission_refuses_a_bad_alert_before_any_run_folder(tmp_path):
 
 
 def test_p015_non_json_alert_text_with_fence_lines_of_every_sh(tmp_path):
-    """A non-JSON alert is refused at run start, naming why. No alert byte reaches the lead's
-    prompt.
-
-    The bytes carry a backtick-fence line of every shape PR-03 drove (three, five and twenty
-    backticks, one to three leading spaces, an info string, a tilde fence, a fence as the first
-    and the last line) around a unique marker. Positive control: the same text as a string inside
-    an admitted JSON alert — the correlation lead is dispatched, and its prompt still carries no
-    alert byte (A3)."""
     marker = "P015-FENCE-MARKER-41c9"
     fence_lines = ["```", marker, "`````", "`" * 20, " ```", "  ```", "   ```yaml", "```yaml",
                    "~~~", "```"]
@@ -369,13 +349,6 @@ def test_p015_non_json_alert_text_with_fence_lines_of_every_sh(tmp_path):
 
 
 def test_p018_alert_bytes_not_utf8(tmp_path):
-    """An alert whose bytes carry a byte-order mark or are not UTF-8 is refused at admission,
-    before any run folder exists, with a fixed reason; no lead is dispatched and nothing is left
-    under the runs base.
-
-    PR-02: base admits both and stores them byte-identical. Each shape is driven over two
-    different alerts (the reason must not change). Positive control: the same alert without the
-    mark is admitted and its correlation lead is dispatched."""
     planted = S.plant_tenant()
     first, second = S.generic_alert(), S.generic_alert(rule_id="R-3003", user={"login": "ops-9"})
     for shape in ("bom", "non_utf8"):
@@ -394,14 +367,6 @@ def test_p018_alert_bytes_not_utf8(tmp_path):
 
 
 def test_p045_alert_nests_deeper_than_the_parser_follows(tmp_path):
-    """An alert the parser cannot follow is refused at run start, naming why. No later reader
-    parses alert bytes for facts.
-
-    PR-04: at base a deep alert makes orientation raise RecursionError (the run does not start
-    cleanly), and ONE past run whose alert is deep makes `load_corpus` raise and the judge's union
-    skip it. The second sentence is driven with a past run whose record holds the facts and whose
-    alert file was rewritten on the host to deep bytes: the corpus and the judge's sibling union
-    read the record, never the alert bytes."""
     planted = S.plant_tenant()
     d = _drive(tmp_path, planted, "p045-deep", alert=S.admission_bytes("deep_nesting"))
     _assert_refused_before_any_folder(d, "deep nesting")
@@ -423,13 +388,6 @@ def test_p045_alert_nests_deeper_than_the_parser_follows(tmp_path):
 
 
 def test_p086_mapped_value_has_an_unpaired_surrogate_escape_at(tmp_path):
-    """An alert holding an unpaired surrogate escape is refused at admission, naming why, so
-    neither ticket leg meets it; a NUL in summary or event_time is ordinary data on both legs.
-
-    PR-09: a lone surrogate (here in the mapped summary, `rule.description`) is valid JSON that
-    no strict UTF-8 sink can write. Both ticket legs are on (`--update-ticket`) through the real
-    ticket writer at its request seam. The NUL arm: summary and event_time carrying a NUL escape
-    are admitted and reach the open leg's payload as they are, and the record leg still posts."""
     planted = S.plant_tenant()
     refused_store = S.TicketStore()
     d = _drive(tmp_path, planted, "p086-surrogate", alert=S.admission_bytes("lone_surrogate"),
@@ -453,13 +411,6 @@ def test_p086_mapped_value_has_an_unpaired_surrogate_escape_at(tmp_path):
 
 
 def test_p138_refused_alert_leaves_a_run_folder_without_a_reco(tmp_path):
-    """Admission runs before any run folder is created, so a refused alert leaves nothing under
-    the runs base; no box and no lead start, and a refused start is never counted as a trial.
-
-    PA-01: at base the folder is made before the alert is read, so a malformed alert leaves one
-    behind. Observed after the refused start: the runs base's listing is unchanged, the invlang
-    corpus scans only the earlier finished run, and the judge's sibling union of that alert lists
-    only it."""
     planted = S.plant_tenant()
     source = S.alert_bytes(S.generic_alert())
     finished = _drive(tmp_path, planted, "p138-finished", alert=source, main=S.closing_main_turns())
@@ -485,12 +436,6 @@ def test_p138_refused_alert_leaves_a_run_folder_without_a_reco(tmp_path):
 
 
 def test_p139_record_cannot_be_written_at_run_start(tmp_path):
-    """A record that cannot be written stops run start loudly, naming the fault. No box and no
-    lead start.
-
-    The fault is a real file-system state: a re-driven folder holding only the input directory,
-    with a directory squatting the record's name. Positive control: the same folder shape with
-    the name free starts the run and writes the record there."""
     planted = S.plant_tenant()
     squatted = planted.runs / "p139-squatted"
     squatter = S.record_file(squatted)
@@ -519,16 +464,6 @@ def test_p139_record_cannot_be_written_at_run_start(tmp_path):
 # A1 — the record, written once beside the alert
 
 def test_facts_are_recorded_beside_the_alert_at_run_start(tmp_path):
-    """After run start the run's record holds the alert's byte digest and the derived signature,
-    event_time and summary (a fact absent when unmapped or not a key, with the note an unmapped
-    one gets); alert.json holds exactly the admitted bytes; neither is rewritten for the rest of
-    the run, by a restart or by a sibling resume.
-
-    Observed at run start — in `before=`, after setup and before the driver — and again after
-    the run: the record sits beside the alert in the run's input directory, holds the mapped
-    signature and event_time and no summary (the mapping leaves `summary` unmapped although the
-    alert carries a description), and neither file's bytes, inode or mtime moved during the run.
-    A restart is p118's subject and a sibling resume's seeding is p152's (S08)."""
     planted = S.plant_tenant(alert_mapping={"signature": "rule.id", "event_time": "detected_at"})
     at_start: dict[str, Tree] = {}
 
@@ -560,14 +495,6 @@ def test_facts_are_recorded_beside_the_alert_at_run_start(tmp_path):
 
 
 def test_alert_mapping_is_read_once_at_run_start(tmp_path):
-    """The tenant's alert mapping (settings/alert-mapping.yaml) is read once, at run start,
-    through the one tenant check; the facts it derives are recorded then, and no later reader
-    reads the mapping.
-
-    The mapping keys the signature on `host.hostname` (app-7) when the run starts and is
-    rewritten to `rule.id` (R-1001) in `before=` — after setup, before the driver. Every reader
-    after that point still carries app-7: orientation's lessons and vocabulary lookups, the
-    post-run ticket record leg, and the record; so does the ticket open leg."""
     planted = S.plant_tenant(
         alert_mapping={"signature": "host.hostname", "event_time": "detected_at",
                        "summary": "rule.description"},
@@ -599,15 +526,6 @@ def test_alert_mapping_is_read_once_at_run_start(tmp_path):
 
 
 def test_p141_record_for_a_value_the_signature_rule_refuses(tmp_path):
-    """When the key rule refuses a mapped value, the record holds no signature, with the same
-    note as for an unmapped path. The refused value reaches no sink, the record included.
-
-    Signature mapped to `rule.id` throughout. The refused values: "R 1001" (whitespace) and a
-    129-character key-shaped value (over the bound; its 128-character prefix must not reach a
-    sink either). The unmapped arm: an alert with no `rule.id`, driven twice over different hosts
-    so a key that varies per run is told apart from the note. Sinks observed: the record,
-    orientation's lookups, MAIN's opening message outside the alert's own frame, both ticket
-    legs. Positive control: a key-shaped value reaches each of those sinks."""
     planted = S.plant_tenant(case_mapping=_case_mapping_naming_the_signature())
     over_bound = "X" + "7" * S.SIGNATURE_MAX
     arms: dict[str, dict[str, Any]] = {
@@ -657,14 +575,6 @@ def test_p141_record_for_a_value_the_signature_rule_refuses(tmp_path):
 
 
 def test_p118_run_restarted_in_the_same_run_directory_after_th(tmp_path):
-    """A restart never rewrites the alert or the record. A restart whose input alert differs from
-    what the folder holds is refused, naming the difference.
-
-    Three interrupted runs (stopped after setup, before the box; PR-28: such a folder is
-    resumed). (a) restarted with the same input: it resumes, and the alert and record keep their
-    bytes, inode and mtime. (b) restarted with a different input: refused, neither rewritten.
-    (c) the folder's stored alert was rewritten on the host, then restarted with the original
-    input: refused, and the alert and record are left exactly as found."""
     planted = S.plant_tenant()
     original, other = _alert(), _alert(id="R-5005")
 
@@ -706,21 +616,6 @@ def test_p118_run_restarted_in_the_same_run_directory_after_th(tmp_path):
 # A8 / C47 — the recorded digest is the alert's one identity
 
 def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
-    """The held-out check, the curation key, the launch byte check and the sibling union all take
-    the alert's identity from the record's digest; changing or removing the operator's input file
-    after admission changes none of them.
-
-    PA-03: at base the held-out check and the curation key re-read the OPERATOR'S INPUT FILE
-    after the run, so a changed input moves both and a removed one loses the request. Driven with
-    production's learning enqueue over a planted held-out set holding alert H:
-    * held-out check — a run of H whose input is rewritten to an ordinary alert mid-run files no
-      request; a run of an ordinary alert O whose input is rewritten to H's bytes still files one;
-    * curation key — runs of O with the input untouched, removed, or rewritten all file under
-      ONE key;
-    * launch byte check — a launch from the run whose input was removed copies O and its record;
-      a launch from a run whose stored alert no longer matches its recorded digest is refused;
-    * sibling union — the judge's union for an episode of O lists every run of O, the one whose
-      stored alert was rewritten on the host included, and not the run of H."""
     planted = S.plant_tenant()
     held_out, ordinary = S.alert_bytes(_alert(id="H-1")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
@@ -772,14 +667,6 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
 
 
 def test_p145_input_file_changes_during_the_run_and_post_run_s(tmp_path):
-    """The held-out check and the curation key use the recorded digest; an input file changed or
-    removed while the run is in progress changes neither.
-
-    PA-03 (executed at base): both re-read the operator's input file post-run. Production's
-    learning enqueue over a planted held-out set holding alert H, with the input file changed or
-    removed in `before=` (after admission, before the driver): runs of H file no request either
-    way; runs of an ordinary alert O file one request each, all under the key of an untouched run
-    of O — including the run whose input became H's bytes."""
     planted = S.plant_tenant()
     held_out, ordinary = S.alert_bytes(_alert(id="H-2")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
@@ -815,14 +702,6 @@ def test_p145_input_file_changes_during_the_run_and_post_run_s(tmp_path):
 
 
 def test_p128_held_out_copies_of_the_alert_exist_under_the_run(tmp_path):
-    """No special case for held-out copies. A run byte-identical to a held-out alert is itself
-    held-out, and the learning gate already refuses that episode's learning.
-
-    C47 / A8: the held-out check reads the recorded digest, so the copy is recognised by the
-    bytes the run admitted even when the operator's input file is rewritten mid-run. Production's
-    learning enqueue over a planted held-out set (PR-18: the check is a byte digest): the copy
-    files no curation request, an ordinary run does. No special case in the union: the judge's
-    union for an episode of that alert lists the held-out copy like any other trial."""
     planted = S.plant_tenant()
     held_out, ordinary = S.alert_bytes(_alert(id="H-3")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
@@ -848,15 +727,6 @@ def test_p128_held_out_copies_of_the_alert_exist_under_the_run(tmp_path):
 
 
 def test_p142_record_present_but_alert_file_gone_or_rewritten_(tmp_path):
-    """Every reader of the record trusts it alone and never re-derives from the alert file; any
-    host-side read of the alert's bytes, the launcher's included, checks them against the recorded
-    digest and refuses a mismatch, naming it (a1_host_reads_recheck_the_recorded_digest).
-
-    Three finished runs of one alert; after they end, one run's alert file is rewritten on the
-    host to another alert (rule R-9999) and another's is removed, each record left as it was.
-    The corpus takes every run's signature from its record (R-1001), the judge's union lists all
-    three by their recorded digest, and a launch from the rewritten or the removed run is refused
-    naming that run, while a launch from the intact run copies its alert and record."""
     planted = S.plant_tenant()
     source = S.alert_bytes(_alert())
     for run_id in ("p142-rewritten", "p142-gone", "p142-intact"):
@@ -889,4 +759,3 @@ def test_p142_record_present_but_alert_file_gone_or_rewritten_(tmp_path):
 
 
 # R7 — the shared test builders make admissible alerts
-

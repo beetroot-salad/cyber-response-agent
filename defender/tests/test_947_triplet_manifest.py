@@ -29,9 +29,6 @@ def _no_preflight(*_args, **_kw) -> int:
 
 
 def test_947_world_a_is_the_control_with_no_facts_and_null_axis():
-    """World A is the control: its role is A, its facts are the explicit empty list and its
-    axis is the null sentinel, and the loader admits that combination as a first-class world
-    rather than refusing it as an unauthored one."""
     fam = _load(T.family_doc(worlds=[T.base_world(), T.world_doc("b")]))
     a = fam.worlds[0]
     assert a.role == "A"
@@ -85,9 +82,6 @@ def test_947_a_naive_or_non_utc_as_of_is_refused_as_a_fault():
 
 
 def test_947_a_model_authored_free_text_field_stays_one_scalar(tmp_path):
-    """A model-authored free-text field carrying document-structural syntax is written back as a
-    single opaque scalar: re-reading the manifest yields the same string and no sibling key the
-    text tried to introduce."""
     import yaml
 
     payload = "a story\nepisode_id: hijacked\n- not a list item\n"
@@ -121,9 +115,6 @@ def test_947_the_family_loader_enforces_world_cardinality_and_one_base():
 
 
 def test_947_an_empty_string_axis_on_a_non_base_world_is_refused():
-    """An empty-string axis on a non-base world is refused by name: the house sentinel for
-    `axis` is the null value, so an empty string is a real value and a world declaring one
-    declares a difference it cannot name."""
     with pytest.raises(_refusal()) as bad:
         _load(T.family_doc(worlds=[T.base_world(), T.world_doc("b", axis="")]))
     assert "axis" in str(bad.value)
@@ -174,9 +165,6 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
         monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / f"episodes-root-{i}"))
         spawn = T.FakeSpawn()
         questioner = T.FakeAgent(T.family_doc(worlds=worlds), *worlds[1:])
-        # The live-tree seam is injected to match the fixture source (#976 M2): without it the
-        # anchor preflight refuses on the suite's own HEAD before the questioner is asked, and
-        # the assertions below are satisfied by the wrong refusal.
         with pytest.raises(T.refusals()) as refused:
             T.mod("learning.branch.cli").main(
                 ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
@@ -223,9 +211,6 @@ def test_947_a_fact_entity_outside_its_declared_domain_is_refused():
 
 
 def test_947_write_family_renders_a_fact_entity_as_one_scalar(tmp_path):
-    """An invented but admissible entity is rendered as ONE list item that reads back as exactly
-    the authored text — the rendered document gains no sibling key or item the entity's own
-    text introduced."""
     import yaml
 
     fam = _family()

@@ -76,9 +76,6 @@ class _Recorder:
 
 
 def test_947_resume_makes_the_positional_alert_illegal(tmp_path):
-    """Under `--episode` the positional alert is illegal: supplying both refuses at the
-    parser, naming the conflict, because the manifest already names the source run the alert
-    would come from."""
     manifest = T.write_family(tmp_path / "ep")
     alert = tmp_path / "alert.json"
     alert.write_text("{}", encoding="utf-8")
@@ -95,9 +92,6 @@ def test_947_resume_makes_the_positional_alert_illegal(tmp_path):
 
 
 def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
-    """A sibling runs from the manifest and what it points at and nothing hand-supplied: given
-    only the manifest path and a world label it resolves the episode dir, the source run, the
-    branch point and its own world, and completes."""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     order: list[str] = []
@@ -108,9 +102,6 @@ def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
 
 
 def test_947_resume_run_returns_its_own_run_dir_and_verdict(tmp_path):
-    """A resumed run returns the same contract an ordinary run does: a zero status, its own run
-    dir on disk carrying the report, and its scrub verdict written at the sidecar path beside
-    that directory."""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     rec = _Recorder([])
@@ -196,9 +187,6 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
 
 
 def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
-    """On the resume path the drive function builds a world registry over the world's own
-    ledger file and the world's facts, and hands it to the driver as the injected verb
-    registry."""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     seen: dict = {}
@@ -217,9 +205,6 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
 
 
 def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
-    """The resume path never constructs the production module registry: a sibling's queries go
-    through its world registry, so no post-branch query can reach a real adapter body by way of
-    the registry the ordinary path builds."""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     built: list[str] = []
@@ -241,9 +226,6 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
 
 
 def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
-    """The entry point end to end: `run.py --resume --tenant T` reaches the lifecycle with the
-    world as the manifest records it — its served systems read off the document, no settings
-    looked up — and with T as the run's tenant."""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     lifecycle = _Recorder([])
@@ -276,9 +258,6 @@ def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_ref
 
 
 def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
-    """Every site that compares a world reads ONE spelling of the world token: the resumed
-    world's identity, the world ledger's filename, and the ledger the episode derives for that
-    identity all carry the same composed token."""
     ledger_mod = T.mod("learning.branch.ledger")
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
@@ -295,9 +274,6 @@ def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
 
 
 def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path):
-    """A resumed run keeps `main`'s own order — role preflight, run-dir materialisation with
-    its stamp, the box lifecycle, then the verdict — so the sibling is an ordinary run in every
-    respect but where its evidence comes from."""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
     order: list[str] = []
@@ -305,9 +281,6 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     tenant = T.mod("_tenant").read_tenant(base)
 
     def materialize(*_a, **_kw):
-        # #1110: the seam answers the run's tenant-bound HANDLE, built the way the real builder
-        # builds it (the tenant record at the runs base, then `Run.for_tenant`) — `main` keeps
-        # it for the post-run page render and reads the run dir off it.
         order.append("materialize")
         run_dir = T.sibling_run_dir(base, "b", stamp=False)
         return T.sym("run_repository", "Run").for_tenant(
@@ -366,9 +339,6 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
 
 
 def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):
-    """The resume path screens the source run's alert before reading it: the source run dir is a
-    prior box's writable bind, so a link planted at the alert's name is refused rather than
-    followed into this run's evidence."""
     base, src = T.runs_base(tmp_path)
     secret = tmp_path / "secret.json"
     secret.write_text('{"stolen": true}', encoding="utf-8")

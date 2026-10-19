@@ -43,9 +43,6 @@ def _run(gate, tmp_path: Path, files: dict[str, str]) -> int:
 # lint_tree_read_follows_link
 
 def test_a_link_following_admit_check_in_a_tree_reader_is_refused(tmp_path: Path) -> None:
-    """`is_file()` answers about a link's TARGET, so admitting on it admits whatever the model
-    pointed the link at. This is the shape that copied a planted link's bytes into every
-    sibling run dir under the case alert's own name."""
     assert _run(READ_GATE, tmp_path, {"run_common.py": (
         "from pathlib import Path\n"
         "def go(p: Path) -> bool:\n"
@@ -73,9 +70,6 @@ def test_an_already_folded_id_is_case_stable(run_id: str) -> None:
 
 @pytest.mark.parametrize("run_id", ["Base", "W1", "wA"])
 def test_an_id_carrying_upper_case_is_not(run_id: str) -> None:
-    """`is_valid_run_id` admits these — that is the point. They are two ids to every string
-    compare in the repo and one file wherever the filesystem folds case, which is how a world
-    called `Base` reaches the family's immutable capture through `served/base.jsonl`."""
     assert is_valid_run_id(run_id)
     assert not is_case_stable_id(run_id)
 
@@ -84,11 +78,6 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
     """At the MINT, where every id rule belongs"""
     from defender.runtime.branch import _family
 
-    # NOT `Base`. The gate asks the RESERVED-label rule several lines before the case rule, so a
-    # label that is also the reserved base-capture name is refused for being reserved and this
-    # test would stay green with the case rule deleted outright. `Alpha` is unreserved, so the
-    # only rule that can refuse it is the one this test is named for — and the assertion names
-    # that rule's own words rather than a substring every message happens to carry.
     doc = {
         "world_id": "Alpha", "role": "B", "story": "s", "axis": "an axis",
         "disposition_declared": "malicious", "label_basis": "policy-rule",
@@ -124,9 +113,6 @@ def test_an_episode_id_carrying_upper_case_is_refused() -> None:
 # the outbound-body type
 
 def test_the_wire_takes_only_a_body_that_went_past_the_clock() -> None:
-    """Both minting functions consult `ctx.as_of`; `_http_json` accepts what they return and
-    nothing else. mypy is what enforces the second half — this pins the first, so a mint that
-    quietly stopped asking the clock fails here rather than in a branched run's evidence."""
     import inspect
 
     from defender.scripts.adapters import elastic_adapter as ea

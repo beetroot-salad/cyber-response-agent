@@ -10,10 +10,6 @@ from defender.tests.tenant_1107_settings import _census_1107 as C
 from defender.tests.tenant_1107_settings import _spec1107 as S
 
 
-# ======================================================================================
-# Planted trees.
-# ======================================================================================
-
 def _skeleton(root: Path) -> Path:
     """Give `root` all four swept trees (C.SWEPT), each holding one clean module, and return it."""
     for rel in C.SWEPT:
@@ -43,50 +39,6 @@ def _names(output: str, rel: str) -> bool:
     return rel.removeprefix("defender/") in output
 
 
-
-
-# ======================================================================================
-# D4 — the Elastic keys are interpreted in one place.
-# ======================================================================================
-
-
-
-
-
-# ======================================================================================
-# S3 — nothing copies settings/ into a run or an episode.
-# ======================================================================================
-
-
-
-
-
-# ======================================================================================
-# F7 — settings_dir survives only on the resolver side.
-# ======================================================================================
-
-
-
-
-
-# ======================================================================================
-# N3 — the swept trees take their location and env from the caller.
-# ======================================================================================
-
-
-
-
-
-# ======================================================================================
-# D2 — no SOC_PLAYGROUND_* setting is read from an environment.
-# ======================================================================================
-
-
-
-# ======================================================================================
-# O7 / NF-7 — the lint.
-# ======================================================================================
-
 _EACH_FORM = """\
 import os
 
@@ -110,15 +62,6 @@ def verb(ctx):
 
 
 def test_o7_lint_flags_each_form(tmp_path):
-    """lint_tenant_env_reads, run over a planted module in each of the four trees, reports each of
-    these: os.environ in any use (subscript, .get, bare reference, dict(os.environ)); os.getenv;
-    env_str, env_int, env_bool and env_choice; and ctx.env.get(...) or ctx.env[...] on a
-    context."""
-    # R8 (auto): F15's third bullet — `_env.env_choice` arrives with the rebase (G35); the lint is
-    # AST-based, so the planted call needs no symbol at base. `_env.deployment()` is a platform
-    # accessor (N5) and is recorded as no-consequence, not pinned either way.
-    # rejected: D6/N3: a lookup made through a shared helper (process_defender_dir, run_common.run_env) is not the lint's to catch
-    # rejected: N5: platform settings (data root, log format, provider keys, budgets) stay in the environment, outside the four trees
     _skeleton(tmp_path)
     planted = [
         "defender/scripts/adapters/planted_1107.py",
@@ -188,12 +131,6 @@ def test_o7_lint_allows_passthrough(tmp_path):
                                   _lines(flagged)["flagged"])), f"the control lookup was not reported, so the clean result above proves nothing:\n{out2}"
 
 
-
-
-
-
-
-
 _NF7 = """\
 import os
 from os import environ as e  # @environ-alias-import
@@ -229,11 +166,6 @@ class Tool:
 
 
 def test_s7_nf7_lint_flags_indirect_and_module_scope_reads(tmp_path):
-    """In the four trees, with an empty allow-list, the lint also flags: environ imported under any
-    name (from os import environ as e); .get(...), subscripts, in-tests and iteration on any
-    expression ending in .env or on a name bound from one (env = ctx.env; env.get(k)), including
-    dict(ctx.env)["X"] and {**ctx.env}.get("X"); and reads at module scope. Only a module-level def
-    main is exempt: a nested or method main is flagged."""
     # rejected: dynamic getattr(os, "environ"), /proc/self/environ and lookups inside shared helpers outside the trees (D6: direct lookups only)
     # rejected: flagging a child fork with no env= argument (#18: not a lookup; the four existing forks pass env=dict(ctx.env), G28)
     _skeleton(tmp_path)
@@ -253,10 +185,6 @@ def test_s7_nf7_lint_flags_indirect_and_module_scope_reads(tmp_path):
 
 
 def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, monkeypatch):
-    """The lint does not flag handing the whole ctx.env to an in-tree helper (dict(ctx.env) and
-    env=ctx.env are the allowed shapes) and does not follow the mapping into the helper. With a
-    config-key variable exported, the run's call still uses the tenant file's value: O1's run tests
-    are the net the lint is not."""
     lint_tree = _skeleton(tmp_path / "lint-tree")
     adapter = ("from defender.scripts.adapters import helper_1107\n"
                "\n"
@@ -311,10 +239,6 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
         f"the exported CMDB_URL_BASE reached the call's argv: {calls[-1]['argv']}")
 
 
-# ======================================================================================
-# MF-14 — the model-facing docs.
-# ======================================================================================
-
 #: G34's homonyms of "override": (file, a phrase on the listed line). They stay.
 HOMONYMS: tuple[tuple[str, str], ...] = (
     ("defender/skills/identity/SKILL.md", 'via: "override"'),
@@ -324,7 +248,3 @@ HOMONYMS: tuple[tuple[str, str], ...] = (
     ("defender/skills/connect/SKILL.md", "overrideable with cause"),
     ("defender/skills/tacit-knowledge/execution.md", "no environment variable to resolve"),
 )
-
-
-
-

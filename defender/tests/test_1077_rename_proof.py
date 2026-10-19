@@ -110,10 +110,6 @@ def _renamed_tree(tmp_path: Path, *, sabotage: str | None = None) -> Path:
 def _round_trip(tree: Path, work: Path, *, payload: str = "defender.tests._rename_proof_1077",
                 ) -> subprocess.CompletedProcess[str]:
     work.mkdir(parents=True, exist_ok=True)
-    # `cwd=tree`, not merely `PYTHONPATH=tree`: `python -m` puts the CURRENT DIRECTORY first
-    # on `sys.path`, so running from the repo root imports the REAL package and the whole
-    # proof passes having renamed nothing. The `ALERT_NAME=` line the payload prints is what
-    # the callers below check that against.
     return subprocess.run(
         [sys.executable, "-m", payload, str(work)],
         capture_output=True, text=True, timeout=300, cwd=str(tree),
@@ -132,4 +128,3 @@ def test_every_record_can_be_renamed_through_the_owner(tmp_path):
     assert f"ALERT_NAME={_TOKEN}" in result.stdout, (
         "the subprocess loaded the REAL package, not the renamed one — this run renamed "
         f"nothing and proves nothing:\n{result.stdout}")
-

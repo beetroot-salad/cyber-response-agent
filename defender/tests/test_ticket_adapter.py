@@ -28,12 +28,6 @@ def ctx(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _stub_config(monkeypatch):
-    # `_config(ctx)` → `transport.load_config`; stub it so the verbs reach the (also-stubbed)
-    # http layer without a real config file. It serves whatever key set the adapter asks for,
-    # so the stub cannot silently diverge from `ticket_adapter.REQUIRED_CONFIG_KEYS` — and it
-    # serves each key a value of the SHAPE the real config holds, so a test that stops
-    # stubbing the http layer reaches the transport instead of dying in
-    # `int(config["TIMEOUT_SEC"])` on a placeholder string.
     _SHAPED = {"URL_BASE": "http://x", "BASTION_HOST": "web-1", "TIMEOUT_SEC": "10"}
 
     def _fake(ctx, system, prefix, required=transport.REQUIRED_CONFIG_KEYS_TEMPLATE):
@@ -123,19 +117,12 @@ def real_config(monkeypatch):
 
 
 def test_key_pattern_verb_serves_the_configured_grammar(tmp_path, real_config):
-    """The store's key grammar is an ENVIRONMENT fact, declared in its own config and served
-    as a verb — so every consumer reaches it through the one registry seam, and swapping the
-    environment for a tracker with another key vocabulary is a config edit, not a code
-    change. The judge's closed-ticket screen (#672 Fork A) is the consumer."""
     ctx = _config_ctx(tmp_path, **_BASE_CONFIG, TICKET_KEY_PATTERN="SOC-[0-9]+")
     assert ticket_adapter.key_pattern(ctx) == "SOC-[0-9]+"
     assert ticket_adapter.VERBS["key-pattern"] is ticket_adapter.key_pattern
 
 
 def test_key_pattern_is_required_config_and_absence_takes_the_system_down(tmp_path, real_config):
-    """KEY_PATTERN is REQUIRED, on the same rule as URL_BASE: absent means the system is down
-    — a ConfigFault (infra, exit 2) — never a silent built-in default. Because it is required
-    at `_config`, the absence fails the WHOLE ticket surface closed, not just the screen that"""
     ctx = _config_ctx(tmp_path, **_BASE_CONFIG)  # no TICKET_KEY_PATTERN
     with pytest.raises(ConfigFault, match="TICKET_KEY_PATTERN"):
         ticket_adapter.key_pattern(ctx)
@@ -145,9 +132,6 @@ def test_key_pattern_is_required_config_and_absence_takes_the_system_down(tmp_pa
 
 
 def test_run_env_does_not_override_the_declared_grammar(tmp_path, real_config):
-    """The RUN's env overrides nothing in the record (#1107): the key grammar is the one the
-    tenant's config declared when the run began, so a variable of the same name in the run's env
-    — or the process's — cannot point the screen at another store's vocabulary."""
     over = _config_ctx(tmp_path, env={"TICKET_KEY_PATTERN": "CASE-[0-9]+"}, **_BASE_CONFIG,
                        TICKET_KEY_PATTERN="SOC-[0-9]+")
     assert ticket_adapter.key_pattern(over) == "SOC-[0-9]+"
@@ -186,9 +170,6 @@ def test_get_ticket_percent_encodes_the_key_into_the_path(monkeypatch, ctx, key,
 
 
 def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
-    """The reader asks for exactly the URL the writer wrote to, so a key the writer can mint
-    is a key this reader can fetch. `ticket_writer` has always encoded the keys it mints
-    (`urllib.parse.quote(..., safe="")` at every site that puts one in a path — one site since"""
     from defender.scripts.case_history import ticket_writer
 
     seen = {}
@@ -223,9 +204,6 @@ def test_reader_fetches_the_key_the_writer_minted(monkeypatch, ctx):
     ids=["shell-metachars", "spaces-and-words", "url-delimiters"],
 )
 def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
-    """The OTHER half of the symmetry: `list_tickets`' filters reach the verb OPAQUELY —
-    verbatim, no screen, #672's deliberate non-clause — and are then URLENCODED into the
-    query string by the transport. That encoding is what made "label/q need no screen """
     seen = {}
 
     def fake_request(c, cfg, url, system=None, method="GET", body=None):
@@ -243,10 +221,6 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
     assert parsed["label"] == [label], "the label did not survive the round trip verbatim"
     assert parsed["q"] == [q], "the q value did not survive the round trip verbatim"
     assert parsed["status"] == ["closed"], "require_closed's pin left the wire"
-    # No raw metacharacter reached the query string as a delimiter: the ONLY `&`s in the
-    # built query are the two separators the encoder put between three params. Counting
-    # them (rather than comparing segment count to `len(parsed)`, which an injected
-    # `&c=d` satisfies by adding one of each) is what makes this row discriminating.
     assert query.count("&") == 2, "a filter value injected a query-parameter separator"
 
 
@@ -254,9 +228,6 @@ def test_list_filters_ride_urlencoded_not_raw(monkeypatch, ctx, label, q):
 
 
 def test_case_opened_at_yields_a_timestamp_and_never_the_record(monkeypatch, ctx):
-    """This is the ONE verb that reaches a ticket without `require_closed`, because the case
-    under judgment is by definition still open. Its answer-key guarantee is therefore not a
-    status filter but the RETURN TYPE: the in-flight record is fetched, one field is read off"""
     record = {
         "key": "20260720T0000Z-sshd-672",
         "status": "in_progress",
@@ -290,10 +261,6 @@ def test_case_opened_at_percent_encodes_the_key_like_every_other_reader(monkeypa
 
 
 def test_case_opened_at_faults_as_infra_when_the_store_cannot_date_the_case(monkeypatch, ctx):
-    """A ticket carrying no string `created` is a malformed envelope, and must fail as INFRA
-    rather than resolve to "no boundary". The two are not interchangeable: the judge treats a
-    404 as permission to proceed with the other screens, so a missing-field answer that landed
-    in the same bucket would silently stand the recency arm down on a broken store."""
     monkeypatch.setattr(transport, "http_get_obj",  # lint-monkeypatch: ok — transport has no in-process DI seam (this file's established pattern)
                         lambda *a, **k: {"key": "SOC-1", "status": "open"})
     with pytest.raises(TransportFault):

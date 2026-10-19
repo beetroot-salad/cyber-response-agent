@@ -22,15 +22,6 @@ DECLARED = frozenset({"elastic"})
 
 
 def test_pitfalls_handoff_drops_an_undeclared_system(tmp_path):
-    """A queued row naming a system no source declares yields NO handoff, so no
-    `defender/skills/<name>/execution.md` path is ever composed from it.
-
-    The issue's headline, executed on base (G2): a row with `system: "gather"` yields
-    `path: defender/skills/gather/execution.md` today, purely because `gather`
-    carries a `SKILL.md`. Under the union it is still dropped — no adapter AND no
-    `execution.md` — and the drop is a MEMBERSHIP answer, not a shape accident: the same name
-    passes the shape predicate, which is asserted here so the two reasons cannot be confused.
-    """
     rows = [pitfall_row("r:0", "gather"), pitfall_row("r:1", "fakesys")]
     assert is_system_name("gather")
     assert is_system_name("fakesys")
@@ -43,13 +34,6 @@ def test_pitfalls_handoff_drops_an_undeclared_system(tmp_path):
 
 
 def test_pitfalls_handoff_keeps_a_declared_system(tmp_path):
-    """A queued row naming a DECLARED system still becomes a handoff carrying that system's
-    `execution.md` path and its failures.
-
-    `pitfalls_handoff_drops_undeclared`'s positive control on the same address: a predicate
-    that dropped everything would satisfy the negative and silently retire the whole pitfalls
-    channel.
-    """
     rows = [pitfall_row("r:0", "elastic"), pitfall_row("r:1", "gather")]
     handoffs = pitfalls_curator._build_pitfalls_handoffs(rows, systems=DECLARED)
     assert [h["system"] for h in handoffs] == ["elastic"]
@@ -58,21 +42,6 @@ def test_pitfalls_handoff_keeps_a_declared_system(tmp_path):
 
 
 def test_system_name_shape_still_refuses_a_traversal(tmp_path):
-    """#868's shape check survives the split intact and is still checked BEFORE membership,
-    so a traversal never becomes a set lookup.
-
-    `..` is the one that matters: `skills_dir / ".." / "SKILL.md"` IS `defender/SKILL.md`,
-    which exists, and `_is_in_scope('defender/skills/../SKILL.md')` is True — both measured
-    here rather than remembered, because they are why the shape half is load-bearing beyond
-    site 1. The four distinguished shapes are refused individually, and then the ORDER is
-    driven: a row whose `system` is `..` yields no handoff EVEN WHEN the threaded set contains
-    `..`, which it cannot under FK-5 but which is exactly the state a shape check running
-    after membership would admit.
-
-    `resolver_refuses_shape_anomalous_names` pins the SOURCE half; this demand keeps the
-    site-1 half, because a queued row's `system` field is a separate untrusted channel that
-    never passes through the resolver at all.
-    """
     assert (_git.REPO_ROOT / "defender" / "SKILL.md").is_file()
     assert _is_in_scope("defender/skills/../SKILL.md")
 
@@ -91,18 +60,6 @@ def test_system_name_shape_still_refuses_a_traversal(tmp_path):
 
 
 def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
-    """The last gate asks the same membership question the handoff builder does, FROM THE
-    SAME THREADED VALUE — and it stops re-deriving membership from the tree the agent just
-    wrote into.
-
-    NF2 settles WHICH value: the ADAPTER HALF ALONE, the same one `_build_pitfalls_handoffs`
-    is handed. "The same question the handoff builder asks" is a statement about these two
-    consumers sharing one argument, NOT about that argument matching the lead-author lane's —
-    it does not, by design.
-
-    Driven at the rule and through the composed gate, with the declared system's own
-    `execution.md` admitted in the same drive so the refusal is about the name.
-    """
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=())
     with pytest.raises(LeadAuthorError):
@@ -118,5 +75,3 @@ def test_pitfalls_path_rule_refuses_an_undeclared_directory(tmp_path):
             repo, baseline_stray=[], systems=DECLARED, reducer_offered=False,
             tree_for=lane_tree_for(repo), git=claim_git(repo))
     assert head_files(repo) == before
-
-

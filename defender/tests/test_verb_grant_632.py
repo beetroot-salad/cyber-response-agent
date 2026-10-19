@@ -38,7 +38,6 @@ from defender.runtime.verbs import read_roster  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-
 #: TWO DEMANDS LEFT THIS FILE WITH #922, AND THEY ARE NOT REPLACED — recorded here rather than
 #: deleted silently, because their absence is a real reduction in what this suite witnesses.
 
@@ -48,9 +47,6 @@ def _elastic(rec: VerbRecorder, granted=(("elastic", "query"),), declared=("quer
 
 
 def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):
-    """A verb_registry cannot be built without a verb_grant: every construction route —
-    the driver's ternary, the driver's fallback, the judge engine, the memoised catalog
-    builder and the dev scaffold — must supply one, so no execution path can mint a global"""
     with pytest.raises(TypeError):
         ModuleVerbRegistry(read_roster(ADAPTERS_DIR))  # type: ignore[call-arg]
 
@@ -62,14 +58,7 @@ def test_a_verb_registry_cannot_be_constructed_without_a_grant(tmp_path: Path):
     assert reg.grant.role == "gather", "a built registry does not carry the grant it was scoped by"
 
 
-
-
-
-
 def test_the_verb_grant_compiles_into_the_agent_policy(tmp_path: Path):
-    """A role's verb_grant is declared on its agent definition beside `bash_shapes` and
-    compiles into the same agent policy, so "what may this role do" is assembled in one
-    place. A seam claim, not a signature claim: `compile_policy` builds `bash_allow` by"""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's here).
@@ -89,10 +78,6 @@ def test_the_verb_grant_compiles_into_the_agent_policy(tmp_path: Path):
 def test_the_compiled_policy_answers_what_this_role_may_do_with_verbs_beside_bash_shapes(
     tmp_path: Path,
 ):
-    """The operator question "what may this role do" is answered by the compiled policy with
-    the granted verbs ALONGSIDE the bash shapes — one answer, one place. The grant compiling
-    in is one property; the compiled object answering is the other, and it is the one an
-    operator-facing audit reads."""
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     gather = compile_policy_for(T1106.fixture_gather_def(), run_dir)
@@ -108,9 +93,6 @@ def test_the_compiled_policy_answers_what_this_role_may_do_with_verbs_beside_bas
 
 
 def test_a_role_definition_without_a_grant_gets_an_empty_deny_all(tmp_path: Path):
-    """A role definition that names no verb_grant gets an explicit EMPTY DENY-ALL, never
-    `None` and never an absent field (§7 R7). Eight of the nine agent definitions get no
-    grant; an absent default would either break their construction or reopen the `None`"""
     assert MAIN_DEF.verb_grant is not None
     assert MAIN_DEF.verb_grant == DENY_ALL
     assert MAIN_DEF.verb_grant.entries == ()
@@ -128,16 +110,7 @@ def test_a_role_definition_without_a_grant_gets_an_empty_deny_all(tmp_path: Path
         "a system a grant reaches nowhere read as denied rather than unresolvable"
 
 
-
-
-
-
-
-
 def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
-    """A verb_grant naming a `(system, verb)` the registry does not admit fails at LOAD, and
-    the check is TOTAL — a phantom verb is caught even in a system the role never calls, and
-    even when that system's adapter would raise on import, because the names are read cold"""
     phantom = grant_of("gather", (*GATHER_PAIRS, ("cmdb", "host-trust-edges")))
     with pytest.raises(GrantError) as caught:
         ModuleVerbRegistry(read_roster(ADAPTERS_DIR), phantom)
@@ -147,12 +120,6 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
     with pytest.raises(GrantError):
         ModuleVerbRegistry(read_roster(ADAPTERS_DIR), wrong_system)
 
-    # THE COLD READER IS CROSS-CHECKED AGAINST THE IMPORTED NAMES, on every shipped adapter.
-    # Without this the reader is unfalsifiable in the direction that matters: a syntactic scan
-    # of the `VERBS = {...}` literal agrees with itself, so an adapter whose table is built any
-    # other way declares NOTHING to the check while declaring everything to the runtime — and
-    # a grant naming a phantom verb on that system then passes at load. Importing is legal
-    # HERE, in the test, precisely because it is what the production reader must not do.
     roster = read_roster(ADAPTERS_DIR)
     for system in SYSTEMS:
         module = importlib.import_module(f"defender.scripts.adapters.{system.replace('-', '_')}_adapter")
@@ -162,9 +129,6 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
             f"imported={sorted(module.VERBS)}"
         )
 
-    # An adapter whose table is assembled rather than written as a literal: the check must not
-    # go quiet on it. Either the reader resolves the names or the load fails — what it may not
-    # do is treat "I could not read this system" as "this system declares whatever you like".
     adapters = tmp_path / "adapters"
     adapters.mkdir()
     (adapters / "alpha_adapter.py").write_text(
@@ -176,9 +140,6 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
 
 
 def test_grant_authoring_integrity_rejects_a_bad_class_token_and_a_conflicting_duplicate():
-    """The verb_class vocabulary is CLOSED at two, and a verb_grant is rejected at load for a
-    class token outside it and for one `(system, verb)` declared twice with conflicting
-    classes (§7 R13). A third tier arrives with the deferred write-verb work and brings its"""
     assert frozenset({"r", "rw"}) == VERB_CLASSES
 
     with pytest.raises(GrantError):
@@ -210,10 +171,6 @@ def test_a_verb_whose_declared_class_contradicts_its_grant_cannot_be_invoked(tmp
 def test_compiling_a_policy_imports_no_adapter_and_a_broken_one_costs_only_its_own_system(
     tmp_path: Path,
 ):
-    """Compiling an agent policy imports NO adapter module, and one adapter that fails to
-    import costs its own system per call rather than the whole stage. This is the #672
-    fault-containment regression guard, and it is what makes the agreement check's stated
-    timing — first resolution, not policy compile — observable rather than a comment."""
     adapters = tmp_path / "adapters"
     adapters.mkdir()
     (adapters / "elastic_adapter.py").write_text(
@@ -235,9 +192,6 @@ def test_compiling_a_policy_imports_no_adapter_and_a_broken_one_costs_only_its_o
 
 
 def test_health_check_is_granted_uniformly_to_gather(tmp_path: Path):
-    """health-check is granted uniformly to gather rather than per system — a deliberate
-    uniformity exception, since gather does call it and the split carries no security
-    content. The investigator can call it on any system its verb_grant reaches; a non-gather"""
     rec = VerbRecorder()
     table = recording_table(rec, {"elastic": ("query", HEALTH_CHECK)})
 
@@ -256,10 +210,6 @@ def test_health_check_is_granted_uniformly_to_gather(tmp_path: Path):
     r = run_gather(tmp_path, verbs=gather, turns=[q("elastic", HEALTH_CHECK), DONE],
                    run_id="hc632")
     assert [c.verb for c in rec.calls] == [HEALTH_CHECK]
-    # lead-0 (#808) also attempts `alerts` against this table ahead of the model's own
-    # turn — `alerts` is nominally granted (the full gather grant) but not declared in
-    # this test's narrow table, so it lands one l-000 UNDECLARED usage row and never
-    # reaches a verb body. Scope the row assertion to the model's own lead.
     own_rows = [row for row in r.rows if row["lead_id"] not in RESERVED_LEAD_IDS]
     assert len(own_rows) == 1
     assert own_rows[0]["exit_code"] == 0

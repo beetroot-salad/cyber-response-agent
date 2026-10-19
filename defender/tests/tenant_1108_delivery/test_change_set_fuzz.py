@@ -1,16 +1,3 @@
-"""O-C/O-D, fuzzed (amendment 2's "fuzzed derivation" discharge): random box output, the
-invariant as the oracle.
-
-`hypothesis` is not a dependency of this tree, so a seeded `random.Random` drives it; a
-failure names its seed and round, and replays exactly. Each round lays random lane edits
-(adds at any depth, changes, deletions, random bytes); every other round adds one entry no
-claim may carry, at a random place. The oracle: such a claim is refused whole; otherwise the change set is exactly the
-draft against the batch's base (git's blobs at the branch's tip, or at the export commit
-before the first commit; amendment 3 has no worktree), and every `AgentChange` is in a lane,
-never a forbidden name, and a regular file in the draft holding exactly its bytes (or gone,
-for a deletion). No link is followed: the host folder links point at keeps its bytes and no
-change carries them. Some rounds commit; every round resets, after which the draft equals the
-base's blobs. The clone itself never changes."""
 from __future__ import annotations
 
 import os

@@ -10,10 +10,6 @@ from defender.tests._by_path import DEFENDER, load_module
 JOIN_FINDING = "literal-free join onto an owner-derived value"
 
 
-# ======================================================================================
-# lint_run_records — TenantPaths is an owner class (D1, brief R4(a)/(c))
-# ======================================================================================
-
 def test_d1_tenantpaths_owner_class(tmp_path):
     """TenantPaths is a member of _OWNER_CLASS_ORIGINS, so the #1077 lint treats a join onto a
     TenantPaths accessor as owner-derived."""
@@ -63,14 +59,6 @@ def test_d1_row_constant_not_exempt(tmp_path):
             f"importing the row-name constant {name} outside the owner is not refused")
 
 
-
-
-
-
-# ======================================================================================
-# The #1077 rename proof (settled #108)
-# ======================================================================================
-
 def test_rename_proof_with_a_new_row_constant(tmp_path):
     """The #1077 rename proof keeps passing with the new _tenant.py constants in its renamed
     set; DEFAULT_TENANT_ID's _SKIP_NAMES entry goes with the constant."""
@@ -100,21 +88,3 @@ def _upper_str_constants(source: str) -> dict[str, str]:
                 and isinstance(node.value.value, str)):
             out[node.targets[0].id] = node.value.value
     return out
-
-
-# ======================================================================================
-# lint_ci_hygiene (D8, corrected settled #106)
-# ======================================================================================
-
-
-
-
-
-
-
-
-
-
-
-
-

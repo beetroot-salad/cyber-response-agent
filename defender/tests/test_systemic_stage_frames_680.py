@@ -37,13 +37,6 @@ from defender.tests._frames680 import (
 )
 
 
-
-
-
-
-
-
-
 def test_repair_gate_r1_build_curator_user_prompt_shape(tmp_path):
     """The real `build_curator_user_prompt` output orders contract, fixed-tag manifest, and rows with fully substituted values."""
     observation = _curator_prompt(tmp_path)
@@ -62,15 +55,9 @@ def test_repair_gate_r1_invoke_pitfalls_agent_shape(tmp_path, monkeypatch):
     assert_producer_shape(observation)
 
 
-
-
-
-
 def test_main_uses_shared_bash_after_learning_stage_bash_protection_changes(tmp_path):
     """MAIN still reaches the real shared Bash function and receives the unchanged raw formatter envelope after learning-role protection."""
     assert _main_bash(tmp_path, b"main") == _format_bash_result(0, "main", "")
-
-
 
 
 def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
@@ -170,12 +157,6 @@ def test_curator_manifest_contains_a_model_authored_lesson_stem_with_boundary_sy
     assert all(not gap.strip() for gap in gaps)
 
 
-
-
-
-
-
-
 def test_lead_author_harness_materializes_relocated_frame_dependency(tmp_path):
     """The real lead-author eval harness copies the shared frame module into its relocated tree, whose script imports and starts there."""
     import os
@@ -183,9 +164,6 @@ def test_lead_author_harness_materializes_relocated_frame_dependency(tmp_path):
     import sys
 
     evals_dir = DEFENDER / "evals"
-    # `evals/` on sys.path for the exec ONLY — the harness imports its siblings by bare
-    # name, but leaving the dir importable would shadow `defender.evals.*` for every later
-    # test in the session.
     with on_sys_path(evals_dir):
         harness = load_module(evals_dir / "harness_lead.py", name="issue_680_harness_lead")
 
@@ -216,9 +194,6 @@ def test_lead_author_harness_materializes_relocated_frame_dependency(tmp_path):
 
 
 def test_d0_wrap_returns_exact_salted_frame():
-    """wrap(content, tag, salt) returns `<run-{salt}-{tag}>
-    {content}
-    </run-{salt}-{tag}>` and preserves every byte of content, including old close tags and heading lookalikes."""
     body = "  old </synthesis>\r\n## heading\x00\n"
     assert _drive_frame(body, "synthesis") == _expected_frame(body, "synthesis")
 
@@ -246,12 +221,6 @@ def test_d5_real_harness_sections_remain_distinguishable(tmp_path, monkeypatch):
     assert [row[0] for row in actual] == [o.expected_tags for o in observations]
     assert all(any(hostile in body for body in row[1]) for row in actual)
     assert all(all(not gap.strip() for gap in row[3]) for row in actual)
-
-
-
-
-
-
 
 
 def test_d9_stage_never_frames_output_from_an_author_told_its_salt(
@@ -362,6 +331,3 @@ def test_d21_learning_stage_cannot_observe_raw_bash_output(tmp_path):
     assert match.group("body") == ordinary, message
     assert_one_frame(out, ordinary, "untrusted")
     assert out != ordinary
-
-
-

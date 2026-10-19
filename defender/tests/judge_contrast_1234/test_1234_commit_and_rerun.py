@@ -15,9 +15,6 @@ from typing import Any
 from defender import _yaml
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
-# --------------------------------------------------------------------------------------
-# Labels, names and words.
-# --------------------------------------------------------------------------------------
 
 #: Distinctive labels, so "the refusal names the world" is a real substring test.
 CONTROL, B, C, D = "alpha", "bravo", "charlie", "delta"
@@ -59,11 +56,6 @@ def _kind_of(channel: Any) -> str:
 
 def _state_refused() -> type[BaseException]:
     return S.sym(S.STATE, "StateRefused")
-
-
-# --------------------------------------------------------------------------------------
-# The family and its replies.
-# --------------------------------------------------------------------------------------
 
 
 def _worlds(*labels: str) -> list[S.World]:
@@ -151,11 +143,6 @@ def _reply(*, bucket: str = "lead-quality", inv: Iterable[dict] = (),
                          gaps=list(gaps))
 
 
-# --------------------------------------------------------------------------------------
-# Reading what the pass left.
-# --------------------------------------------------------------------------------------
-
-
 def _row(record: Mapping[str, Any], label: str) -> dict:
     """World `label`'s row in a judge.yaml document (`{}` when it has none)."""
     for r in record.get("worlds") or []:
@@ -217,21 +204,12 @@ _VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "inpu
                         "meta", "source", "track", "wbr"})
 
 
-
-
-
-
 def _without(text: str, *episode_ids: str) -> str:
     """`text` with every episode id and token replaced, so two episodes' rows compare."""
     token_for = S.sym(S.FAMILY_LOADER, "episode_token_for")
     for ep in episode_ids:
         text = text.replace(ep, "<ep>").replace(token_for(ep), "<ep>")
     return text
-
-
-# --------------------------------------------------------------------------------------
-# The pass's two seams, watched and (at most once per declared fault) faulted.
-# --------------------------------------------------------------------------------------
 
 
 @dataclass
@@ -405,18 +383,7 @@ def _no_duplicate_ids(*queues: list[dict]) -> None:
         assert not twice, f"queued rows duplicated: {twice}"
 
 
-# ======================================================================================
-# d00a, d10a, d10b, d10c — the record, the order, the commit, the re-run.
-# ======================================================================================
-
-
 def test_1234_grade_returns_per_world_measurement_record(tmp_path):
-    """grade_episode(runs, episode_id, *, judge, state, draws, git_show) (main's signature at 463833df,
-    unchanged by #1234) returns the EpisodeGrade it writes to judge.yaml: each gradable world row carries the world's
-    bucket when every completed draw agrees on it (None, with the world withheld and the row saying the draws disagree,
-    otherwise), every draw's bucket, completed_draws, measured and (when not measured) a reason, and its A6 state;
-    the family row records its completed draws; the record carries a user section; and neither the returned record
-    nor the file has a verdict_word, episode_outcome or family_outcome field."""
     built = _built(tmp_path, B, C, D)
     agree = _reply(inv=[_inv(B, "agreed")])
     judge = S.judge({
@@ -465,12 +432,7 @@ def test_1234_grade_returns_per_world_measurement_record(tmp_path):
         assert _field(out, retired) is None, f"the returned record still has `{retired}`"
 
 
-
-
 def test_1234_world_row_commits_queueing_then_appends_then_queued(tmp_path):
-    """For each world and the family, judge.yaml's row is written `queueing` before any of its queue appends
-    and flipped to `queued` after them, carrying its serving findings and named gaps; the final write adds the found
-    gaps and runs on every pass; every later write carries recorded rows verbatim (A6)."""
     built = _built(tmp_path)
     judge = S.judge({
         B: _reply(inv=[_inv(B, "def")], world=[_design(B, "design"), _serving(B, "serving")],
@@ -542,10 +504,6 @@ _PRE_CHANGE_RECORD = {
 
 
 def test_1234_rerun_grades_only_worlds_without_a_completed_draw_and_keeps_rows_verbatim(tmp_path):
-    """After a first pass in which world b's draw failed (no row for b), a bare re-run judges only b (and
-    the family call only if the family has no row), leaves every row the first pass queued byte-identical, appends
-    only b's rows, and makes no model call once every gradable world and the family are `queued`; a re-run over a
-    pre-change judge.yaml refuses by name instead of carrying its rows (A4)."""
     built = _built(tmp_path)
     S.grade(built, S.judge({C: _reply(inv=[_inv(C, "first")], world=[_design(C, "first-q")]),
                             FAMILY: S.family_reply(world=[_family_design("plan")])},
@@ -594,21 +552,7 @@ def test_1234_rerun_grades_only_worlds_without_a_completed_draw_and_keeps_rows_v
     assert S.queue_bytes() == (defender_after, questioner_after)
 
 
-# ======================================================================================
-# The interrupted pass (A1, A3, A4, AM17, AM18, L8, L13, L22) and the stamp (L26).
-# ======================================================================================
-
-
-
-
-
-
 def test_1234_control_check_fails_on_rerun_after_first_pass_queued_rows(tmp_path):
-    """A re-run whose control report no longer reads stamps the family not graded, naming the control and
-    the cause (A3; the check runs after the unchanged gates). The stamp carries b's recorded row verbatim (A6), so
-    b's queued rows stay on the queue and b's row stays on the record. A stamp pass meeting a `queueing` row writes
-    its stamp carrying that row verbatim and names the `queueing` world in it; the next grade pass still refuses,
-    naming that world (NA01)."""
     built = _built(tmp_path)
     S.grade(built, S.judge({B: _reply(inv=[_inv(B, "kept")])}, fail={C}))
     graded = _row(S.record(built), B)
@@ -646,9 +590,6 @@ def test_1234_control_check_fails_on_rerun_after_first_pass_queued_rows(tmp_path
 
 
 def test_1234_am_pass_stops_after_queueing_before_or_between_appends(tmp_path):
-    """A pass stopped after the `queueing` write leaves the row; the next pass refuses loudly, naming
-    the world and saying its rows may be partly appended on either queue. The record keeps only A6's states, so an
-    operator reconciles by hand (NA01; AP-07: the record is always one whole state)."""
     reply = _reply(inv=[_inv(B, "split")], world=[_design(B, "split-q")])
     rows: dict[str, dict] = {}
     for episode_id, when in ((S.EPISODE_ID, "before any append"), (EP2, "between appends")):
@@ -687,8 +628,6 @@ def test_1234_am_pass_stops_after_queueing_before_or_between_appends(tmp_path):
     assert first == second, "the record tells a stop before the appends from one between them"
 
 
-
-
 def test_1234_rerun_when_draw_files_are_complete_on_disk_but_judge_yaml_is_absent(tmp_path):
     """judge.yaml decides (A6): with no row for the world the pass regrades it and overwrites its draw
     files; draw files on disk are not trusted."""
@@ -717,13 +656,6 @@ def test_1234_rerun_when_draw_files_are_complete_on_disk_but_judge_yaml_is_absen
 
 
 def test_1234_judge_yaml_cannot_be_written_after_rows_were_queued(tmp_path):
-    """The refused write is reported loudly (principle 2). Every world whose row had flipped to `queued`
-    stays skipped on the next run, which makes no model call for it, recomputes the found gaps and writes the final
-    record; no queued row is duplicated. If the refused write was a world's flip, that world's row stays `queueing`
-    and the next run refuses naming it (A6)."""
-    # The final write follows the family's own commit with no seam between them, so the
-    # refusal is planted as the family call starts: the last judge.yaml write any seam reaches
-    # (red-flagged in 82-writer-commit_and_rerun.md). Every world has flipped by then.
     built = _built(tmp_path)
     late = Refuse(tmp_path / "judge-alias", built.ep / "judge.yaml")
     first = S.judge({B: _reply(inv=[_inv(B, B)]), C: _reply(inv=[_inv(C, C)]),
@@ -758,8 +690,6 @@ def test_1234_judge_yaml_cannot_be_written_after_rows_were_queued(tmp_path):
     assert B in str(S.grade_refused(flipped, S.judge()))
 
 
-
-
 def test_1234_not_graded_stamp_then_the_control_is_repaired(tmp_path):
     """The re-run grades normally; the stamp is replaced, with recorded rows carried verbatim (A6); nothing
     else of the stamp remains."""
@@ -786,13 +716,6 @@ def test_1234_not_graded_stamp_then_the_control_is_repaired(tmp_path):
     assert _state_of(record, C) == S.QUEUED
     assert _carrying(S.from_world(S.defender_queue(), C), S.marker(C, "repaired"))
     assert len(_carrying(S.defender_queue(), S.marker(B, "kept"))) == 1
-
-
-# ======================================================================================
-# The bare re-run (L1, L2, L3, L4).
-# ======================================================================================
-
-
 
 
 def test_1234_bare_rerun_grades_only_the_world_with_no_completed_draw(tmp_path):
@@ -825,25 +748,6 @@ def test_1234_bare_rerun_grades_only_the_world_with_no_completed_draw(tmp_path):
     assert _carrying(S.from_world(S.defender_queue(), C), S.marker(C, "c"))
     assert _state_of(second, C) == S.QUEUED
 
-
-
-
-
-
-# ======================================================================================
-# The readers (L18, AM21).
-# ======================================================================================
-
-
-
-
-
-
-
-
-# ======================================================================================
-# The channels under per-world appends (g05, g20, g21).
-# ======================================================================================
 
 _G05_PROCESSES, _G05_EPISODES_EACH = 4, 3
 
@@ -939,11 +843,6 @@ def _g05_round(tmp_path: Path, name: str, state_cls: type) -> dict[str, Any]:
 
 
 def test_1234_per_world_appends_while_the_drain_retires_lose_no_row(tmp_path):
-    """Several judge processes append a world's defender rows and questioner rows (per world, A6) while
-    the curator drain retires and rotates the same channel: after all finish, every appended finding id is present
-    exactly once, in the queue or in consumed, with no duplicate and no unreadable line, and a re-run changes nothing.
-    The positive control removes the per-channel append lock (as GT-2 did, which lost 224 of 480 rows) and shows rows
-    lost, so the test can fail."""
     learning_state = S.sym(S.STATE, "LearningState")
 
     class Unlocked(learning_state):
@@ -1008,17 +907,7 @@ def _author_lesson(corpus: Path, name: str, finding_id: str) -> None:
     (corpus / f"{name}.md").write_text(lesson_text(finding_id), encoding="utf-8")
 
 
-
-
 def test_1234_questioner_dedup_and_gate_resolve_per_draw_ids_with_skipped_indexes(tmp_path):
-    """The questioner appender's dedup on finding_id (dedup_key) and _gate_questioner's idempotency
-    read resolve the new ids: re-appending one pass's rows adds none, two draws' design findings at the same position
-    are both queued under their own ids, and a family-scope finding keeps its draw's id; the control is a re-run
-    over a changed draw, which appends only the new id. On the record-less path, built the reachable way (R7 (b), human
-    2026-10-12: a pre-change pass queued a questioner row at the colliding id and stopped before its judge.yaml, then a
-    new-code pass runs), a new design finding whose id equals that row's is never silently lost to the dedup: it is on
-    the questioner queue (under its own or a fresh id) or named on the ledger with a lane other than the questioner's
-    (GT-6 showed the dedup drops it today; the mechanism is write-code-from-spec's)."""
     built = _built(tmp_path)
     replies: dict[Any, Any] = {
         (B, n): _reply(inv=[_inv(B, f"skipped-{n}", contrast=_nowhere(n))],

@@ -14,14 +14,8 @@ from defender.run_repository import SessionPaths
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
 
-#: The fixture's session id — present so the trace's `message.id` is a store COORD
-#: (`{session_id}/{agent_id}#{seq}`) rather than a wire id. Before #883 F-22 this fixture
-#: wrote the SAME `main#N` string as both the trace's `message.id` and the wire record's
 _SESSION = "9f2c1ab84e7d4f0e9c3b5a6d7e8f0a1b"
 
-#: `(coord_seq, wire_id, phase, investigation_content, lead_id)`. The two seq spaces
-#: diverge exactly as production's do: the store's counts ROWS (request, response,
-#: request, … so responses land on odd seqs), the logger's counts every emitted RECORD
 _TURNS = [
     (1, "main#1", "ORIENT", "## ORIENT\n\nOriented on the alert: ssh auth anomaly.\n", None),
     (3, "main#5", "PLAN", "## ORIENT\n\nOriented.\n\n## PLAN\n\nPlanning to gather ssh auth + identity.\n", "l-001"),
@@ -46,24 +40,12 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
 
     from defender.runtime import session_store as ss
 
-    # A per-test-unique case_id: `store_path_for` resolves off `runs_base.parent`, which
-    # for this fixture (`runs_base = run.parent = tmp_path`) is the shared parent every
-    # test in this file's pytest run gets its own `tmp_path` under — so a fixed case_id
-    # collides across tests into one shared store file and one shared `main` session
-    # lineage. #754's session pick refuses that ambiguity outright instead of
-    # silently picking one, which is what surfaces this fixture's own pre-existing
-    # cross-test collision.
     store = ss.open_store(
         case_id=f"visualize-runtime-fixture-{run.parent.name}", sessions=SessionPaths(run.parent))
     ss.write_case_pointer(_run_handle_1165(run), case_id=store.case_id, store_path=store.path)
     sessions: dict[str, str] = {}
     for rec in messages:
         agent_id = rec.get("agent_id", "main")
-        # `dict.setdefault(k, expr)` evaluates `expr` eagerly, so `store.new_session(...)`
-        # as the default arg minted one orphan `main` session PER MESSAGE — nine rows,
-        # only the first ever used for an append — and the old rowid-ordered picker
-        # masked it by always grabbing that same first row. #754's root-of-lineage
-        # picker refuses the ambiguity outright, which is what surfaces it.
         if agent_id not in sessions:
             sessions[agent_id] = store.new_session(agent_id=agent_id)
         session_id = sessions[agent_id]
@@ -167,10 +149,6 @@ def test_tagger_advances_on_write_file(tmp_path):
 
 
 def test_gather_dispatch_phase_and_cost(tmp_path):
-    """The gather call is *dispatched* from the PLAN turn that issued it, but its
-    subagent cost lands in the GATHER phase of that loop — the agent calls gather
-    before writing the ``## GATHER`` header, so raw tagging would bury the cost in
-    PLAN and leave the GATHER bar empty."""
     run = _build_run(tmp_path)
     events = read_jsonl_rows(run / "tool_trace.jsonl")
     order = _phase_order(run)
@@ -209,10 +187,6 @@ def test_gather_wall_and_model_reattribution(tmp_path):
 
 
 def test_gather_cost_not_dropped_without_gather_phase(tmp_path):
-    """A gather whose dispatch turn was never tagged (no matching trace event)
-    and a run with no ``## GATHER`` header still has its cost placed in a bar —
-    so gather_total stays equal to the full gather cost the per-model breakdown
-    reports, and the headline never under-counts what by_model shows."""
     order = ["ORIENT loop 1", "PLAN loop 1", "REPORT loop 1"]
     messages = [
         {"kind": "response", "agent_id": "gather:l-001", "model": "claude-haiku-4-5", "usage": _USAGE},
@@ -247,11 +221,6 @@ def test_transcript_from_messages(tmp_path):
     assert plan_calls
     assert plan_calls[0]["phase"].startswith("PLAN")
 
-    # The assertion this test was missing (#883 F-22). Everything above passes when the
-    # phase lookup misses on EVERY turn: `build_transcript` seeds `cur_phase` from
-    # `phase_order[0]` and carries it forward, so a total join failure renders as a
-    # transcript uniformly stamped ORIENT — which is what every run since #705 rendered.
-    # Distinctness is the property; the tagged phases are the fixture's own four.
     phases = {e["phase"] for e in entries}
     assert len(phases) > 1, (
         f"every entry carries one phase ({phases}) — the wire-id/coord join is dead and "
@@ -260,17 +229,11 @@ def test_transcript_from_messages(tmp_path):
 
 
 def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
-    """#883 F-22, at the seam itself: `tool_trace.jsonl` keys an assistant turn by the
-    session-store COORD and `llm_requests.jsonl` by the logger's own id, and those two
-    strings are never equal. Each reader therefore needs a map in ITS OWN space —"""
     run = _build_run(tmp_path)
     events = read_jsonl_rows(run / "tool_trace.jsonl")
     messages = d.load_messages(run)
 
     trace_ids = [e["message"]["id"] for e in events if e.get("type") == "assistant"]
-    # `agent_id` defaulted to "main" exactly as `deduped_main_records` and
-    # `transcript_phase_map` default it — an oracle that filters more narrowly than the
-    # code it checks stops being an oracle for the records the code would have kept.
     wire_ids = [r["id"] for r in messages
                 if r.get("kind") == "response" and r.get("agent_id", "main") == "main"]
     assert trace_ids
@@ -293,17 +256,10 @@ def test_the_trace_and_the_wire_log_name_a_turn_in_two_id_spaces(tmp_path):
         "the transcript's map must be keyed by wire id — `build_transcript` has nothing else")
     # Same turns, same phases, two spellings — the translation must not lose a phase.
     assert sorted(coord_map.values()) == sorted(wire_map.values())
-    # And it must not PERMUTE one either: turn n's wire id carries turn n's phase. The
-    # set/multiset assertions above are both blind to a map that pairs every turn with
-    # the wrong one — which is exactly the failure a fold produces, so it is the one
-    # thing this seam test has to say out loud.
     assert [wire_map[w] for w in wire_ids] == [coord_map[t] for t in trace_ids]
 
 
 def test_the_phase_join_survives_a_fold_that_left_the_trace_holding_only_the_tail(tmp_path):
-    """A fold re-parents the frontier onto the LINEAGE ROOT
-    (`test_folds_are_restart_shaped_with_an_empty_tail`), so `observe.write_trace` — which
-    hydrates the store's path — emits assistant events only for the turns since the last"""
     run = _build_run(tmp_path)
     events = read_jsonl_rows(run / "tool_trace.jsonl")
     messages = d.load_messages(run)
@@ -435,9 +391,6 @@ def test_a_bucket_that_appears_twice_is_tiled_once(tmp_path):
     order = [p["name"] for p in d.normalize_phase_names(phases)]
     assert order.count("GATHER (loop 1)") == 2, f"fixture names no repeat: {order}"
 
-    # The tagger never re-introduces a header it has already seen, so the turns written under
-    # the SECOND `## GATHER` stay tagged with the phase that preceded them — which is why the
-    # honest tiling puts their seconds on ANALYZE rather than inventing a second GATHER span.
     tags = ["ORIENT", "PLAN (loop 1)", "GATHER (loop 1)", "ANALYZE (loop 1)",
             "ANALYZE (loop 1)", "REPORT"]
     events = [
@@ -478,9 +431,6 @@ def _bar_figures(html: str) -> dict[str, dict[str, str]]:
 
 
 def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
-    """#956. `phase_order` is a render list, not a key set. Every per-phase number lives in a
-    dict keyed on the name, so a name that appears twice is ONE bucket visited twice: the
-    cost fix-up `+=`s the same entry, and the wall fix-up re-reads the duration the pass"""
     import re
 
     plain = _build_run(tmp_path / "plain")
@@ -504,9 +454,6 @@ def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
         f"the repeated name was counted twice: headline {headline} != bars {sum(segs)}"
     )
 
-    # And the § Investigation stats lines, which are the SAME buckets read phase by phase.
-    # The bar could agree with the headline while the block under the second header still
-    # re-prints the whole bucket's money — one reader reconciling is not the claim.
     per_block = [float(x) for x in re.findall(r'ps-cost">\$([0-9.]+)', doubled_html)]
     assert abs(headline - sum(per_block)) < 0.002, (
         f"the repeated header re-printed its bucket's stats: headline {headline} != "
@@ -515,9 +462,6 @@ def test_a_repeated_phase_name_is_one_bucket_not_two(tmp_path, monkeypatch):
 
 
 def test_a_repeated_planning_name_is_one_loop(tmp_path):
-    """#956's fourth site. The loop counter walks the render list and counts PLAN headers, so
-    a planning name that appears twice reports a loop the run never ran — while `attribution`,
-    the wall tiles and both bars, all keyed on the same name, see one."""
     written = [{"name": n} for n in ["PLAN (loop 2)", "GATHER", "PLAN (loop 2)", "REPORT"]]
     order = [p["name"] for p in d.normalize_phase_names(written)]
     assert order.count("PLAN (loop 2)") == 2, f"fixture names no repeat: {order}"

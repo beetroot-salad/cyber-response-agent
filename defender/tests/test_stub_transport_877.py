@@ -9,9 +9,6 @@ from defender.scripts.adapters import ticket_adapter
 from defender.scripts.adapters.faults import TransportFault
 from defender.tests import _tenants1106
 
-#: curl's three ways of failing before a response exists, as observed against real curl through
-#: a `docker` shim: DNS failure, connection refused, and the `--max-time` timeout. All three
-#: write `\n000` to stdout, which is why none of them used to raise.
 CURL_FAULTS = [
     (6, "curl: (6) Could not resolve host: ticket-store"),
     (7, "curl: (7) Failed to connect to ticket-store port 8080: Connection refused"),
@@ -49,16 +46,9 @@ def _curl(monkeypatch, rc: int, stdout: str, stderr: str) -> None:
 def test_a_curl_level_failure_is_a_transport_fault_not_an_empty_payload(
     monkeypatch, ctx, rc, stderr,
 ):
-    """Every curl exit that never produced a response is a down system. Previously each of these
-    returned `{'system': 'ticket', 'connected': True}` from `health_check` and `{}` from
-    `list_tickets` — a health check that reports a dead service as connected."""
     _curl(monkeypatch, rc, "\n000", stderr)
     with pytest.raises(TransportFault) as exc:
         ticket_adapter.health_check(ctx)
-    # `rc={rc}`, not a bare `str(rc)`: a one- or two-digit exit code occurs by accident in
-    # almost any message, so the loose disjunction passed on ANY `TransportFault` however
-    # raised — including one from a config error that never reached curl. The fault must name
-    # THIS curl exit, and carry curl's own stderr, which is the half a lead can act on.
     assert f"rc={rc}" in str(exc.value), str(exc.value)
     assert stderr.split(":")[0] in str(exc.value), str(exc.value)
 
@@ -67,9 +57,6 @@ def test_a_curl_level_failure_is_a_transport_fault_not_an_empty_payload(
 
 
 def test_http_000_raises_even_when_curl_reports_success(monkeypatch, ctx):
-    """The `000` guard in `_parse_status_code` is INDEPENDENT of the rc check, not a second
-    spelling of it: a status line that says no response happened is a down system whatever the
-    exit code claims, and this is the reading `elastic_adapter._http_json` has always made."""
     _curl(monkeypatch, 0, "\n000", "")
     with pytest.raises(TransportFault) as exc:
         ticket_adapter.health_check(ctx)

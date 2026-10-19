@@ -1,7 +1,3 @@
-"""A5/C19/C21, amendment 2's O-G and amendment 3's C4: the observed Forgejo wire format, one
-parsed forge address that every request goes to (pages asked for by number, Forgejo's `Link`
-never followed), repository identity by id (forks, namesakes and rows without a head
-repository are not ours), and fail-closed protection."""
 from __future__ import annotations
 
 import importlib
@@ -96,9 +92,6 @@ _FORGE_CALLS = {
                          ids=["connect", "read-timeout", "protocol"])
 @pytest.mark.parametrize("call", sorted(_FORGE_CALLS))
 def test_a_transport_fault_is_a_forge_error(fault, call):
-    """Refusal contract (deck #678): the forge unreachable, slow past the timeout, or
-    speaking broken HTTP is a `ForgeError` from every call, like an HTTP error status, never
-    an `httpx` exception escaping the forge."""
     http = ForgeHTTP()
     http.fault = lambda request: fault("the forge's transport failed", request=request)
     with pytest.raises(_forge_module().ForgeError):
@@ -130,15 +123,7 @@ def test_protection_verification_reads_branch_but_never_changes_rules():
     assert {r.method for r in http.requests} == {"GET"}
 
 
-# ---------------------------------------------------------------------------------------
-# O-G: one parsed address
-# ---------------------------------------------------------------------------------------
-
 def test_the_origin_is_parsed_once_into_one_forge_address():
-    """O-G: `ForgeAddress` holds scheme, host, port, owner and repo with the default port made
-    explicit and scheme and host case folded, so equivalent spellings are one address; the
-    forge keeps the one it parsed at construction. (Owner and repository case: the next
-    test.)"""
     address = _forge_module().ForgeAddress
     ours = address.parse(ORIGIN)
     assert (ours.scheme, ours.host, ours.port, ours.owner, ours.repo) == (
@@ -157,10 +142,6 @@ def test_the_origin_is_parsed_once_into_one_forge_address():
 
 
 def test_owner_and_repository_compare_without_case():
-    """O-G, orchestrator decision (README): Forgejo resolves owner and repository names
-    without regard to case, so an origin spelling them in another case is the same address:
-    equal once parsed, and under a cased origin the forge's own rows are counted as ours,
-    every page asked of our address. A fork stays excluded."""
     address = _forge_module().ForgeAddress
     cased = "http://forge.invalid:3000/Tenants/Blue.git"
     assert address.parse(cased) == address.parse(ORIGIN)
@@ -190,14 +171,6 @@ def test_an_origin_that_is_not_one_forge_repository_is_refused(origin):
     assert http.requests == []
 
 
-# ---------------------------------------------------------------------------------------
-# C4: pages asked for by number on our own address; Forgejo's Link never followed
-# ---------------------------------------------------------------------------------------
-
-#: What Forgejo may put in `Link` (built from its `ROOT_URL`, not our address: review finding
-#: #6), and worse: another host, scheme or port, another repository (one whose name begins
-#: with ours, one reached through dot-segments), a URL that does not parse, and our own
-#: address naming a page that skips one (followed, it hides page 2's rows).
 _LINKS = {
     "internal-root-url": None,
     "other-host": "http://other.invalid:3000/api/v1/repos/tenants/blue/pulls?page=2",
@@ -220,10 +193,6 @@ def _stored(http, heads):
 @pytest.mark.parametrize("link", sorted(_LINKS))
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_listings_ask_our_address_for_each_page_and_never_follow_link(link, method):
-    """C4 / O-G (R6): a listing asks for `?page=N&limit=L` on the parsed address, pages 1, 2,
-    3 in turn, and never follows or compares Forgejo's `Link`, whatever it names: no request
-    goes anywhere but our repository at our address, every one carries the token, and every
-    row past page 1 is found."""
     http = ForgeHTTP()
     http.page_size = 2
     http.link = _LINKS[link]
@@ -239,9 +208,6 @@ def test_listings_ask_our_address_for_each_page_and_never_follow_link(link, meth
 
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_a_listing_goes_on_past_a_page_the_server_clamped(method):
-    """C4 (R6): the server clamps `limit` to its `max_response_items`, so a page shorter than
-    the limit asked for is not the end: the listing goes on until the rows seen reach
-    `X-Total-Count`, or a page comes back empty."""
     http = ForgeHTTP()
     http.page_size = 1
     _stored(http, ["lessons/b", "unrelated", "lessons/a"])
@@ -256,9 +222,6 @@ def test_a_listing_goes_on_past_a_page_the_server_clamped(method):
 @pytest.mark.parametrize("total", [True, False], ids=["with-total-count", "without-total-count"])
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_a_long_listing_is_read_to_its_end(method, total):
-    """C4 (R2, R6): a listing stops only at an empty page or once the raw rows seen reach
-    `X-Total-Count`, never after some number of pages. 260 rows, the server clamping pages
-    to 5 (52 pages): the one row the query matches is the last."""
     http = ForgeHTTP()
     http.page_size = 5
     http.total_count = total
@@ -281,9 +244,6 @@ def test_a_total_count_that_is_not_a_number_is_a_forge_error(value):
 
 @pytest.mark.parametrize("total", [True, False], ids=["with-total-count", "without-total-count"])
 def test_a_short_page_before_the_end_is_not_the_end(total):
-    """C4 (R6): a page shorter than the others is not the end. With `X-Total-Count` the
-    listing goes on until the rows seen reach it; without the header it stops only at an
-    empty page, which it must then ask for."""
     http = ForgeHTTP()
     http.total_count = total
     http.pages = {1: [row(1, "lessons/a"), row(2, "lessons/b")], 2: [row(3, "lessons/c")],
@@ -298,10 +258,6 @@ def test_a_short_page_before_the_end_is_not_the_end(total):
 
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_a_server_that_ignores_the_page_is_read_once_by_its_total_count(method):
-    """C4: the rows seen are counted raw, before any fork or D-fork skip, against
-    `X-Total-Count`. A server that answers every page with the same rows (here a fork's and
-    ours: two rows, `X-Total-Count: 2`) is read once: one listing request, no row twice. A
-    count of the kept rows only would ask again and find ours twice."""
     http = ForgeHTTP()
     http.every_page = [pr_row(1, "lessons/a", repo=FORK), pr_row(2, "lessons/a")]
     query = "lessons/" if method == "list_open_prs" else "lessons/a"
@@ -321,9 +277,6 @@ def test_a_server_that_ignores_the_page_is_read_once_by_its_total_count(method):
 ])
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_every_page_is_asked_of_the_parsed_address(origin, address, method):
-    """O-G (review finding #6): whatever the origin's spelling (host or scheme case, a default
-    port explicit or not), every request goes to the one parsed address, with the token, and
-    page 2's rows count."""
     http = ForgeHTTP(origin=origin)
     http.pages = {1: [row(1, "lessons/ab")], 2: [row(2, "lessons/a")]}
     result = getattr(forge(http, origin=origin), method)("lessons/a")
@@ -335,10 +288,6 @@ def test_every_page_is_asked_of_the_parsed_address(origin, address, method):
             for r in http.requests} == {address}
     _all_ours(http)
 
-
-# ---------------------------------------------------------------------------------------
-# C1 / O-G: only PRs whose head repository id is the base repository's are ours (R10)
-# ---------------------------------------------------------------------------------------
 
 def test_prefix_listing_counts_only_prs_whose_head_is_the_base_repository():
     """O-G (review finding #9): forks, under another owner or beside ours under the same
@@ -361,9 +310,6 @@ def test_exact_head_lookup_ignores_a_fork_with_the_same_branch_name(fork):
 
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_repository_identity_is_the_repository_id(method):
-    """C1: a head repository is ours by its id, which a rename or a transfer keeps, not by its
-    full name: our repository under another name is ours, and another repository that took
-    our full name is not."""
     http = ForgeHTTP()
     http.pages = {1: [pr_row(1, "lessons/a", repo=NAMESAKE), pr_row(2, "lessons/a", repo=RENAMED)]}
     assert getattr(forge(http), method)("lessons/a" if method == "list_prs_for_head" else "lessons/") == \
@@ -371,9 +317,6 @@ def test_repository_identity_is_the_repository_id(method):
 
 
 def test_the_writer_lease_is_not_held_by_a_fork_pr(tmp_path):
-    """O-G on the prefix lease (`AuthorBranch.open_pr_exists`, the drain's writer lease): an
-    open fork PR under the lessons prefix does not hold it, nor does a namesake's or a row
-    with no head repository (D-fork); our own open PR does (control)."""
     from defender.learning.author.branch import AuthorBranch
     http = ForgeHTTP()
     branch = AuthorBranch(forge=forge(http), repo_root=tmp_path, branch_prefix="lessons/")
@@ -387,9 +330,6 @@ def test_the_writer_lease_is_not_held_by_a_fork_pr(tmp_path):
 
 @pytest.mark.parametrize("method", ["list_open_prs", "list_prs_for_head"])
 def test_a_pr_row_without_its_head_repository_is_skipped(method):
-    """R10 (D-fork, the user's decision; it replaces choice 9's `ForgeError`): a row whose
-    head repository is gone (Forgejo's listing of a deleted fork's PR) is skipped like any
-    fork, in every listing, on any page; our own rows around it are found."""
     http = ForgeHTTP()
     http.pages = {1: [pr_row(1, "lessons/a", repo=None), pr_row(2, "lessons/a")],
                   2: [pr_row(3, "lessons/a", repo=None)]}

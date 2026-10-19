@@ -65,10 +65,6 @@ def _table_rows(run_dir: Path, lead: str = LEAD) -> list[dict]:
             if r.get("lead_id") == lead]
 
 
-# ======================================================================================
-# O1 — a failing call is charged and recorded whether or not its view could be written.
-# ======================================================================================
-
 def _gather_deps(run_dir: Path, state: RunState):
     return dataclasses.replace(
         _with_live_run_1165(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
@@ -121,9 +117,6 @@ def test_a_failing_call_whose_view_write_is_refused_is_still_charged_and_recorde
 
 
 def test_a_succeeding_call_whose_view_write_is_refused_charges_nothing(tmp_path):
-    """The charge O1 keeps is the failure's, not a side effect of the refused write: a call that
-    SUCCEEDED (exit 0) while the view is squatted is in the state, the write's error propagates,
-    and the breaker is untouched."""
     run_dir = tmp_path / "run"
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "r3-o1-ok")
@@ -139,11 +132,6 @@ def test_a_succeeding_call_whose_view_write_is_refused_charges_nothing(tmp_path)
     assert state.breaker_snapshot() == {"systems": {}, "total_failures": 0}, \
         "a succeeding call was charged because its view write failed"
 
-
-# ======================================================================================
-# O2 — a non-enforced role with no run state neither counts nor raises (the enforced role's
-# raise is `test_1235_adversary_round2.py`'s).
-# ======================================================================================
 
 _LIMITS = {**DEFAULT_LIMITS, "max_tool_calls": 50, "wall_clock_timeout": 3600,
            "grace_seconds": 600}
@@ -164,10 +152,6 @@ def test_a_non_enforced_role_whose_deps_carry_no_state_neither_counts_nor_raises
     assert carried.budget_snapshot()["tool_calls"] == 1, \
         "the control: an unenforced role carrying a state did not count its call"
 
-
-# ======================================================================================
-# O3 — lead-0's budget gate reads the clock the budget hooks read.
-# ======================================================================================
 
 #: The tail sits at `wall_clock_timeout + grace_seconds` = 120s of investigator time.
 _CLOCK_LIMITS = {**DEFAULT_LIMITS, "max_tool_calls": 100, "wall_clock_timeout": 60,
@@ -203,10 +187,6 @@ def _hook_kills(run_dir: Path, state: RunState) -> bool:
     pytest.param(0, 0, 0, False, id="fresh"),
     pytest.param(1000, 1000, 0, True, id="spent"),
     pytest.param(1000, 1000, 990, False, id="oracle-held-time-is-not-the-investigators"),
-    # #1255 ("Time") RETIRES the fourth case, `wall-clock-stepped-back` (-1000, 1000, 0): it
-    # pinned the monotonic delta as a source that kills a run whose wall clock reads before its
-    # start. Elapsed is measured on the run clock alone now, so there is no second origin to
-    # disagree with the first.
 ])
 def test_lead_zeros_budget_gate_agrees_with_the_hooks_on_the_runs_clock(
         tmp_path, wall_back, mono_back, credited, killed):
@@ -219,10 +199,6 @@ def test_lead_zeros_budget_gate_agrees_with_the_hooks_on_the_runs_clock(
         "lead-0's budget gate disagrees with the budget hooks on the run's clock: "
         f"hooks kill={hook}, lead-0 kill={not hook}")
 
-
-# ======================================================================================
-# O4 — a reducer failure on deps with no run state raises; a refused write never does.
-# ======================================================================================
 
 def test_a_failed_reducer_on_gather_deps_with_no_state_raises(tmp_path):
     """O4."""
@@ -255,11 +231,6 @@ def test_a_refused_shim_row_write_never_fails_the_command(tmp_path, kind):
     assert [r["query_id"] for r in deps.run_state.lead_rows(deps.lead_id)] == \
         [BASH_SHIM_QUERY_ID], "the failed reduce's row is not in the run's state"
     assert outside.read_bytes() == b"", "the shim row's write followed the planted link"
-
-
-# ======================================================================================
-# O5 / O7 — what round 3 deletes is gone; the state's read accessors.
-# ======================================================================================
 
 
 def test_lead_rows_hands_out_a_tuple_of_the_rows_as_they_stood(tmp_path):

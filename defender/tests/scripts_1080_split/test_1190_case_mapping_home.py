@@ -25,11 +25,6 @@ MARKER = "t1080"
 TENANT = "playground"
 
 
-# ======================================================================================
-# Where the code lives
-# ======================================================================================
-
-
 def _case_module() -> Any:
     """The case-mapping module: the one module under `defender/runtime/` defining
     `load_case_mapping` (the base module under `SPEC1080_AT_BASE`)."""
@@ -59,13 +54,6 @@ def _writer() -> Any:
     return importlib.import_module(S.dotted(_writer_home()))
 
 
-# ======================================================================================
-# A tenant, its record, a run
-# ======================================================================================
-
-#: The case-history mapping every scenario's tenant carries — spelled here, never copied from a
-#: committed tenant. Its comment body renders the signature and case id too, so the alert and
-#: the run id reach the outbound comment.
 MAPPING = textwrap.dedent("""\
     open:
       key: "{case_id}"
@@ -83,9 +71,6 @@ MAPPING = textwrap.dedent("""\
       status: closed
     """)
 
-#: A mapping the loader refuses for its own lifecycle rule: a templated `open.status`. (It was
-#: `open.status == released.status` until #1221's amendment, which made that mapping load and
-#: left the literal-`open.status` rule the loader's only one.)
 MAPPING_REFUSED = MAPPING.replace("  status: open\n", '  status: "{signature}"\n')
 
 def report_text(disposition: str = "benign",
@@ -134,11 +119,6 @@ def _plain(mapping: Any) -> Any:
     return S.canon(mapping.plain())
 
 
-# ======================================================================================
-# s_case_mapping_read_at_run_start — the run-start record reads the moved module
-# ======================================================================================
-
-
 def _records_at_run_start() -> tuple[Any, Any]:
     """The run's record over a planted tenant, then again after its mapping is made one the
     loader refuses (a templated open.status): (good, bad)."""
@@ -158,16 +138,6 @@ def _view_at_run_start(good: Any, bad: Any, tmp: Path) -> dict[str, Any]:
 
 
 def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_path):
-    """The run-start record build (`run_tenant`) loads `CaseMapping` through `load_case_mapping`
-    in its new home under `defender/runtime/`. A fixture tenant's mapping reads as at the base,
-    and a bad mapping surfaces the moved `CaseTicketError`.
-
-    Observed through the unmoved readers: `run_tenant.resolve_tenant` over a planted tenant holds
-    an instance of the moved `CaseMapping` (content as at the base), and over a mapping the
-    loader refuses (a templated open.status) an instance of the moved `CaseTicketError` (text as
-    the loader spells it). (The release predicate the ticket writer built from the record was
-    observed here too until #1221's amendment removed it.) Every moved name is found under
-    `defender/runtime/`, so a home anywhere else fails here."""
     home = _case_module()
     case_mapping, case_error = _moved("CaseMapping"), _moved("CaseTicketError")
     assert {case_mapping.__module__, case_error.__module__} == {
@@ -183,15 +153,6 @@ def test_1080_the_case_mapping_is_read_at_run_start_from_the_tenants_home(tmp_pa
     assert _view_at_run_start(good, bad, tmp_path) == _golden(
         "s_case_mapping_read_at_run_start")
 
-
-# ======================================================================================
-# s090 — no import cycle, in any first-import order
-# ======================================================================================
-
-
-# ======================================================================================
-# s187 — the mapping file in each state
-# ======================================================================================
 
 _LARGE = 1 << 20  # `tenant_settings.SETTINGS_MAX_BYTES` at the base
 
@@ -249,23 +210,8 @@ def _observe_mapping_file(state: str, tmp: Path, mp: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("state", list(FILE_STATES))
 def test_case_mapping_file_in_each_state(state, tmp_path):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). A case-mapping file that is absent, empty,
-    whitespace-only, BOM- prefixed, non-UTF-8, very large, a symlink out of the tenant folder or
-    a directory loads, or yields the same CaseTicketError, as today and is held on RunTenant at
-    run start.
-
-    Each state is a real file put at the tenant's mapping path (the size states at the base's
-    1 MiB settings bound and one byte over it; a FIFO besides). Observed twice: the moved
-    `load_case_mapping` (its home under `defender/runtime/`) over the settings folder, and what
-    `run_tenant.resolve_tenant` holds as the record's `ticket_mapping` (or how run start
-    refuses) — both against the base golden."""
     assert _observe_mapping_file(state, tmp_path, None) == _golden("s187")[state]
 
-
-# ======================================================================================
-# s188 — YAML of the wrong shape
-# ======================================================================================
 
 #: YAML documents of the wrong shape (each a complete file).
 YAML_SHAPES: dict[str, str] = {
@@ -308,26 +254,4 @@ def _observe_yaml_shape(shape: str, tmp: Path, mp: Any) -> dict[str, Any]:
 
 @pytest.mark.parametrize("shape", list(YAML_SHAPES))
 def test_case_mapping_yaml_of_the_wrong_shape(shape, tmp_path):
-    """Behavior is exactly the pre-move behavior (the 10-03 scope is a pure move: wrap, cluster
-    and rename; O5 where it applies). A mapping that parses as a list, scalar or null, or with
-    duplicate or unknown keys, wrong-typed values, anchors/aliases or a language-object tag is
-    accepted or refused as today.
-
-    Each shape is a real file read by the moved `load_case_mapping` (its home under
-    `defender/runtime/`), against the base golden. (An accepted one was also used once through
-    the release predicate until #1221's amendment removed it; that amendment also made
-    `duplicate_nested_key` — whose last `released.status` equals `open.status` — load, where the
-    base refused it for the dropped open/released collision rule.)"""
     assert _observe_yaml_shape(shape, tmp_path, None) == _golden("s188")[shape]
-
-
-# ======================================================================================
-# s217 — the snapshot taken at run start is what the post-step uses
-# ======================================================================================
-
-
-# ======================================================================================
-# O3 — the env-read lint still sweeps the case-mapping code
-# ======================================================================================
-
-

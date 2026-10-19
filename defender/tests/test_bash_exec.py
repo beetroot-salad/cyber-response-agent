@@ -170,33 +170,23 @@ def test_non_utf8_output_does_not_crash():
 
 
 @pytest.mark.parametrize("cmd", [
-    "echo a\n| grep a",     # connector opens the second line
-    "echo a |\ngrep a",     # connector closes the first line
+    "echo a\n| grep a",
+    "echo a |\ngrep a",
     "echo a\n&& echo b",
     "echo a &&\necho b",
     "echo a\n|| echo b",
     "echo a ||\necho b",
     "echo a && ;\necho b",
     "echo a || ;\necho b",
-])
-def test_line_boundary_connector_fails_closed(cmd):
-    """A `|`/`&&`/`||` at a line boundary used to be DROPPED — each physical line is lexed on its own, so `A..."""
-    with pytest.raises(bash_exec.UntokenizableCommand):
-        _run(cmd)
-
-
-@pytest.mark.parametrize("cmd", [
-    "| grep a",                 # nothing at all to the left — the only spelling #854 covered
-    "cat /etc/hostname | ; grep a",   # `;` is not a dangling connector, so the :68 guard
-                                      # never saw this one at all — #884 F-28's repro
+    "| grep a",
+    "cat /etc/hostname | ; grep a",
     "cat /etc/hostname | && grep a",
     "cat /etc/hostname | || grep a",
-    "cat /etc/hostname | | grep a",   # used to COLLAPSE into a single pipe
-    "cat /etc/hostname | ;",          # the pipe's right side is the end of the command
-    "cat /etc/hostname | 2> /dev/null",  # right side empties itself, with no separator
+    "cat /etc/hostname | | grep a",
+    "cat /etc/hostname | ;",
+    "cat /etc/hostname | 2> /dev/null",
 ])
-def test_dangling_pipe_within_a_line_fails_closed(cmd):
-    """A `|` with no complete command on one side, spelled within a single line. #854 F-22 closed the..."""
+def test_incomplete_connector_fails_closed(cmd):
     with pytest.raises(bash_exec.UntokenizableCommand):
         _run(cmd)
 

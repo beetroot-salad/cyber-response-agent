@@ -2,13 +2,6 @@
 from __future__ import annotations
 
 
-
-
-
-
-
-
-
 import sys
 
 
@@ -57,9 +50,6 @@ from ._scenarios import (
 )
 
 def test_finish_pushes_the_commit_maker_branch_and_opens_its_pr_without_product_write(repo):
-    """O7: the commit lands on the tenant remote's batch branch, the PR opens against the tenant
-    repo's `main` at the forge's repository API, and neither tenant `main` nor the product
-    repository changes."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     tenant, remote, _ = repo
@@ -266,9 +256,6 @@ def test_finishing_twice_answers_the_one_open_pr(repo):
 
 
 def test_a_batch_with_no_commit_has_nothing_to_deliver(repo):
-    """C1: a batch whose branch tip equals its base, or which has no branch (here no claim was
-    committed, so it has none), answers `nothing to deliver`; nothing is pushed and no PR is
-    requested. (A branch holding a foreign commit refuses instead: choice 34.)"""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("idle", lanes=LANES)
@@ -300,9 +287,6 @@ def test_a_merged_batch_answers_merged_and_is_never_delivered_again(repo, tmp_pa
 
 @pytest.mark.parametrize("delete_branch", [False, True], ids=["branch-kept", "branch-deleted"])
 def test_a_closed_batch_answers_closed_and_is_never_delivered_again(repo, delete_branch):
-    """R2 (D-closed): a PR closed unmerged is a rejection. Finish and deliver, in this
-    process or a later one, answer `closed`: nothing is pushed (a deleted branch is not
-    pushed again) and no PR is opened."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("closed", lanes=LANES)
@@ -386,5 +370,3 @@ def test_only_the_commit_maker_makes_commits_and_only_the_push_routes_push(repo,
     assert {"finish", "revert"} <= sent <= {"finish", "deliver", "revert"}, events
     assert not [e for e in events if _worktree_made(e[1], e[2])], "a git worktree was made"
     assert _checkouts(events) <= {"publish", "start_batch", "revert"}, events
-
-

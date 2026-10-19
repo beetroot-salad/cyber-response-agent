@@ -1,8 +1,3 @@
-"""The structured-logging framework (`defender/_log.py`) and its one wiring point, `run.main`.
-
-Formatters are driven through a handler on a `StringIO`, so what is asserted is the exact line a
-log collector would receive.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -118,9 +113,6 @@ def test_a_reused_pool_thread_does_not_carry_the_previous_jobs_run(emit):
 
 
 def test_the_sync_bridges_thread_hop_keeps_the_run_bound():
-    """The sync-to-async bridge runs its coroutine on a pool thread when a loop is already
-    running (inside the driver); what it logs there must still name the run. (Lead-0 used this
-    hop until #1222 made the correlation lead a coroutine the driver awaits.)"""
     from defender._async import run_sync as _run_sync
 
     async def inner():
@@ -183,9 +175,6 @@ def _strict(raw: str) -> dict:
     (Path("/p"), "/p"),
 ])
 def test_a_value_json_cannot_hold_is_made_holdable_before_encoding(emit, value, as_json):
-    """Values are made JSON-safe BEFORE encoding — in `extra=` and in the bound context alike
-    (`log_context` is typed `str | None`, nothing enforces it) — so encoding cannot fail, the
-    record is never lost to logging's error handler, and the line stays strict JSON."""
     logger, _, buf = emit
     with _log.log_context(run_id=value):  # type: ignore[arg-type]
         logger.info("kept", extra={"odd": value})
@@ -266,13 +255,6 @@ def test_the_fallback_notice_cannot_be_hidden_by_the_level(monkeypatch, restore_
 ], ids=["empty", "spaces", "case", "case-and-space"])
 def test_the_format_is_read_by_the_one_lenient_choice_rule(
         monkeypatch, restore_root, capsys, value, fmt):
-    """#1110 second review: `DEFENDER_LOG_FORMAT` is read by the one lenient-choice rule
-    (`_env.env_choice`) `DEFENDER_DEPLOYMENT` is read by: stripped and lowercased, and empty —
-    or nothing but whitespace — is UNSET, the default with no notice (it used to be reported
-    as a bad value). The format really is the one chosen: the next line is JSON, or text.
-
-    Positive control: `test_an_unknown_setting_falls_back_and_says_so` — a genuinely bad value
-    on the same capture IS reported."""
     monkeypatch.setenv(_log.FORMAT_ENV, value)
     capsys.readouterr()
     _log.configure_from_env()

@@ -23,10 +23,6 @@ from defender.runtime.agent_definition import (  # noqa: E402
 from defender.scripts.gather_tools.record_query import persist_payload  # noqa: E402
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 
-#: A lead id the model is free to mint and never has: `LEAD_ID_RE` admits it, the documented
-#: spelling (`defender/SKILL.md`'s `lead_id="l-NNN"`, every invlang example `l-001`) does not,
-#: and no gate anywhere between the `:L findings` row and the payload read enforces the
-#: documentation. That gap is the whole trigger, so the pin uses a lettered id throughout.
 LETTERED = "l-2b"
 NUMERIC = "l-001"
 
@@ -61,10 +57,6 @@ def _gather(env):
     return compile_policy_for(T1106.fixture_gather_def(), run_dir=env.run, defender_dir=env.dfn)
 
 
-
-
-
-
 # F-09 — the payload shape and the lead-id validators are ONE alphabet
 
 def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
@@ -87,9 +79,6 @@ def test_f09_a_lettered_lead_id_survives_claim_persist_and_the_read_gate(env):
 
 
 def test_f09_the_widening_stays_shut(env):
-    """The fix widened the ALPHABET, not the family. The denials `test_grant_gate_575.py::test_a4`
-    holds still hold, and `[0-9]` closes the Unicode-digit door `\\d` carried: `٣.json` is a
-    filename no writer produces (`seq` is `f"{int}"`) and a str `\\d` admitted it."""
     gather = _gather(env)
     for bad in (f"gather_raw/{NUMERIC}/evil.sh", "gather_raw/evil.json",
                 f"gather_raw/{NUMERIC}/٣.json", "gather_raw/l-a b/0.json",
@@ -122,16 +111,6 @@ def _staged(env, run_dir):
                                               encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text("{}\n", encoding="utf-8")
     return run_dir
-
-
-
-
-
-
-
-
-
-
 
 
 def test_f19_main_still_reads_its_own_run_artifacts(env):

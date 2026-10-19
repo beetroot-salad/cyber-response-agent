@@ -106,9 +106,6 @@ def _spellings(name):
 
 
 def test_code_check_file_name_is_owned_by_the_box_package_and_absent_from_agent_text():
-    """D7 amendment 2: the box package owns the name as ONE constant, and nothing agent-facing
-    names it. Everything else (the oracle's runner list included) derives from that constant.
-    Lexical census over constant expressions, like the credential census above."""
     from defender.runtime import box
     from defender.runtime.box import _oracle
     name = box.CODE_CHECK_FILE  # a zero-implementation tree is not a successful census

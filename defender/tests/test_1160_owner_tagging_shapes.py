@@ -1,9 +1,3 @@
-"""The run-records owner lint (`lint_run_records`, tagging in `scripts/lint/_astlib.py`) reports a literal-free `/` join
-onto an owner instance through every binding shape (assign, annotated, multi-target, alias, await, factory call, relative
-and aliased imports, parameter annotations), keeps tags sticky across rebinding, never traces unpacking, and leaves the
-knowledge halves and shadowed factory names clean. Planted modules are scanned through the 1120 suite's `_scan_planted`,
-each clean cell beside a live control so emptiness cannot pass on a dead arm.
-"""
 from __future__ import annotations
 
 import re
@@ -61,10 +55,6 @@ def _assert_planted(fn: str, source: str) -> None:
     assert re.search(rf"^\s*(?:async\s+)?def {re.escape(fn)}\(", source, re.MULTILINE), (
         f"{fn} is not a function of the planted module")
 
-
-# ======================================================================================
-# O1 / O2 / O4 / D3 / D6 — one module, scanned under the stock table.
-# ======================================================================================
 
 #: Every cell here reaches a factory through an import the stock table already holds
 #: (`accept_tenant`, `resolve_tenant`, `run_tenant_for`), so no table entry is needed.
@@ -437,9 +427,6 @@ REPORTED = (
     "string_annotated_run_paths", "aliased_annotation_carrier", "aliased_annotation_tenant",
 )
 
-#: O2 — the join precedes a rebinding of the owner's name in the same scope: to a constant, an
-#: annotated or unpacked constant, a call, another name, an attribute; or as a `for` target, a
-#: `with ... as` target, an augmented assignment — on the tenant, carrier and full-owner side.
 STICKY = (
     "sticky_tenant", "sticky_run_paths", "sticky_carrier_parameter",
     "sticky_tenant_annotated_rebind", "sticky_run_paths_unpack_rebind",
@@ -467,10 +454,6 @@ CLEAN = {
     "unpack_call_result": "plain_assign_tenant",
 }
 
-#: D6 — unpacked cell -> its plain-assign twin. Each joins onto a bare-word member (`runs`,
-#: `worktrees`, `alert`), so an untagged name raises no "unresolvable accessor use" either and
-#: the cell is wholly clean. The swap cells are review finding #7: the swapped-in name held no
-#: owner when it was joined.
 UNPACKED = {
     "tuple_unpack": "plain_assign_tenant",
     "tuple_unpack_second": "plain_assign_tenant",
@@ -528,10 +511,6 @@ def test_knowledge_halves_and_untraced_shapes_stay_clean(displays: list[str], ce
 
 @pytest.mark.parametrize("cell", sorted(UNPACKED))
 def test_an_unpacked_name_is_never_tagged(displays: list[str], cell: str) -> None:
-    """D6 (a non-obligation, pinned): literal unpacking is not traced, on the tenant side or
-    the full-owner side, so `t, n = accept_tenant(...), 1; t.runs / x` reports nothing — beside
-    the live control and the plain assign of the same value, which is reported. Tracing it
-    leaked a tag through `a, b = b, a` onto a name that held no owner at its join."""
     _assert_planted(cell, PLANTED)
     _assert_control_live(displays)
     twin = UNPACKED[cell]
@@ -540,14 +519,6 @@ def test_an_unpacked_name_is_never_tagged(displays: list[str], cell: str) -> Non
         f"{cell}() tags an unpacked name, which D6 leaves untraced: {_in(displays, cell)}")
 
 
-# ======================================================================================
-# D1 / D3 — inside `runtime/run_tenant.py`, its own `RunTenant` and `resolve_tenant` resolve
-# as they do everywhere else.
-# ======================================================================================
-
-#: Planted AT `runtime/run_tenant.py`, so the module is `defender.runtime.run_tenant`:
-#: `resolve_tenant` here IS the stock table's `defender.runtime.run_tenant.resolve_tenant`, and
-#: `RunTenant` here IS the carrier class. Scanned under the stock table: no fresh entry.
 RUN_TENANT_OWN = textwrap.dedent("""\
     from pathlib import Path
 
@@ -617,10 +588,6 @@ def run_tenant_displays(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
 @pytest.mark.parametrize("cell", RUN_TENANT_OWN_REPORTED)
 def test_the_run_tenant_modules_own_names_resolve_as_everywhere_else(
         run_tenant_displays: list[str], cell: str) -> None:
-    """D1 / D3 (review finding #4): in `runtime/run_tenant.py`, `resolve_tenant(...)` is the
-    tabled factory and `RunTenant` the carrier class, by origin — so a join through a local
-    bound to the factory, through its chain, through a parameter annotated `RunTenant` (or
-    `"RunTenant"`), or through a construction is reported, as it is in any other module."""
     _assert_planted(cell, RUN_TENANT_OWN)
     _assert_control_live(run_tenant_displays, "run_tenant_module_control")
     assert _joins(run_tenant_displays, cell), (
@@ -640,10 +607,6 @@ def test_the_run_tenant_modules_knowledge_halves_stay_clean(
         f"{cell}'s twin {twin}() is not reported: {run_tenant_displays}")
     assert _in(run_tenant_displays, cell) == [], _in(run_tenant_displays, cell)
 
-
-# ======================================================================================
-# D3 — a class merely NAMED `Tenant` is not the owner: annotations resolve by origin.
-# ======================================================================================
 
 OWN_CLASS = textwrap.dedent(f"""\
     from pathlib import Path
@@ -705,10 +668,6 @@ def own_class_displays(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
 @pytest.mark.parametrize("cell", sorted(OWN_CLASS_CLEAN))
 def test_a_modules_own_class_named_tenant_is_not_the_accepted_tenant(
         own_class_displays: list[str], cell: str) -> None:
-    """D3: in a module that defines its own `class Tenant`, a parameter annotated with it (as a
-    Name or a string) and a construction of it hold no accepted `Tenant` — their joins stay
-    clean, beside the live control and a reported twin (the real `_tenant.Tenant` parameter, or
-    `accept_tenant(...)`) in the same module."""
     _assert_planted(cell, OWN_CLASS)
     _assert_control_live(own_class_displays, "own_class_control")
     twin = OWN_CLASS_CLEAN[cell]
@@ -718,10 +677,6 @@ def test_a_modules_own_class_named_tenant_is_not_the_accepted_tenant(
         f"a module's own class merely named `Tenant` is taken for the accepted one in {cell}(): "
         f"{_in(own_class_displays, cell)}")
 
-
-# ======================================================================================
-# D6 / D3 — shapes nothing traces: the scan completes and tags nothing.
-# ======================================================================================
 
 UNTRACED = textwrap.dedent(f"""\
     from pathlib import Path
@@ -784,9 +739,6 @@ def untraced_displays(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
 @pytest.mark.parametrize("cell", UNTRACED_CELLS)
 def test_an_untraceable_shape_scans_cleanly_and_tags_nothing(
         untraced_displays: list[str], cell: str) -> None:
-    """A starred, nested or length-mismatched unpack, and a string annotation that does not
-    parse, neither crash the scan nor tag a name — beside the live control and the plain
-    assign of the same value, which is reported."""
     _assert_planted(cell, UNTRACED)
     _assert_control_live(untraced_displays, "untraced_control")
     assert _joins(untraced_displays, "plain_assign_twin"), (
@@ -795,14 +747,6 @@ def test_an_untraceable_shape_scans_cleanly_and_tags_nothing(
         f"{cell}() tags a name nothing traces: {_in(untraced_displays, cell)}")
 
 
-# ======================================================================================
-# D1 / D2 / D5 / O4 — the table is the only route: same-module factories, shadowing,
-# module-level rebinding, imported entries, `await`, and the module's dotted name.
-# ======================================================================================
-
-#: Same-module factories `_f` / `_g` / `_h` / `_k` / `_af`, literal-free `...` bodies,
-#: annotated in each form the live tree uses. The annotations do not make them factories: the
-#: table entries do (`_TABLE_ENTRIES`).
 SAME_MODULE = textwrap.dedent("""\
     from pathlib import Path
 
@@ -985,9 +929,6 @@ SAME_MODULE = textwrap.dedent("""\
         return _f(root).tenant.runs / x
     """)
 
-#: Module-level rebinding shape -> the source line(s) rebinding `{name}` after its def. A
-#: module-level name bound by anything besides its one def/class does not resolve (D1), and a
-#: `global` declaration inside a function lets that function rebind it (D7).
 REBINDINGS = {
     "assign": "{name} = _other\n",
     "import": "from other import {name}\n",
@@ -1120,9 +1061,6 @@ TABLE_ROUTE = textwrap.dedent("""\
         return (await make_run_tenant(root)).tenant.runs / x
     """)
 
-#: Where each module is planted. `SAME_MODULE` is planted twice: once at the path its entries
-#: are keyed to, once in another package under the same file name — another module, with no
-#: entries.
 _SAME = "runtime/same_module_1160.py"
 _SAME_ELSEWHERE = "learning/branch/same_module_1160.py"
 _ROUTE = "runtime/table_route_1160.py"
@@ -1139,10 +1077,6 @@ _CONTROL = {
     **{_rebound_rel(shape): "rebound_control" for shape in REBINDINGS},
 }
 
-#: The entries the fresh `_astlib` copy adds to `_TENANT_FACTORIES`. The planted modules' dotted
-#: names are spelled out — `defender.` + the planted path, dotted, without `.py`, and a package's
-#: `__init__.py` as the package — rather than derived from the path, since that derivation is
-#: the plumbing under test.
 _TABLE_ENTRIES = {
     "defender.runtime.same_module_1160._f": RUN_TENANT,
     "defender.runtime.same_module_1160._g": TENANT,
@@ -1270,10 +1204,6 @@ def _assert_cell(rel: str, cell: str) -> None:
 @pytest.mark.parametrize(("rel", "cell"), STOCK_CELLS)
 def test_without_a_table_entry_a_factory_tags_nothing(
         stock: list[str], rel: str, cell: str) -> None:
-    """D2: being in `_TENANT_FACTORIES` is the only route by which a call tags its result. With
-    no entry, a same-module def annotated `-> Tenant` / `-> RunTenant` (sync or async) and an
-    imported function are not factories: every join in the tree is clean, beside each module's
-    live control."""
     _assert_cell(rel, cell)
     _assert_control_live(_at(stock, rel, _CONTROL[rel]), _CONTROL[rel])
     assert _at(stock, rel, cell) == [], (
@@ -1284,10 +1214,6 @@ def test_without_a_table_entry_a_factory_tags_nothing(
 @pytest.mark.parametrize(("rel", "cell"), TABLED_REPORTED)
 def test_a_table_entry_tags_its_factorys_callers(
         tabled: list[str], rel: str, cell: str) -> None:
-    """D1 / D2 / D5: a call to a tabled origin tags its result — a same-module def through its
-    resolved `<module>.<name>` origin (a package's `__init__.py` named as the package), an
-    imported function through its import — bound to a local or chained off the call, awaited
-    or not, from a function, a closure, or a method whose class has a same-named method."""
     _assert_cell(rel, cell)
     _assert_control_live(_at(tabled, rel, _CONTROL[rel]), _CONTROL[rel])
     assert _joins_at(tabled, rel, cell), (
@@ -1298,13 +1224,6 @@ def test_a_table_entry_tags_its_factorys_callers(
 @pytest.mark.parametrize(("rel", "cell"), sorted(TABLED_CLEAN))
 def test_a_shadowed_factory_name_and_the_knowledge_halves_stay_clean(
         tabled: list[str], rel: str, cell: str) -> None:
-    """O4 / D1 / D7: with the factory tabled, a scope that rebinds its name (a parameter, a
-    local, a nested def, a closure's enclosing parameter, a function-local import) calls
-    something else; so does every caller once the module itself rebinds it in any shape
-    (`REBINDINGS`: an assignment, plain, annotated or under `if`; an import, plain or under
-    `try`; a second def; a `for` target; a function's `global` rebinding); and a join onto a
-    knowledge half stays clean — beside the live control and a reported twin (`_k`, never
-    rebound, for the rebinding modules) in the same module."""
     _assert_cell(rel, cell)
     _assert_control_live(_at(tabled, rel, _CONTROL[rel]), _CONTROL[rel])
     twin = TABLED_CLEAN[(rel, cell)]
@@ -1317,10 +1236,6 @@ def test_a_shadowed_factory_name_and_the_knowledge_halves_stay_clean(
 
 @pytest.mark.parametrize("cell", SAME_MODULE_REPORTED)
 def test_a_factorys_origin_is_its_modules_path(tabled: list[str], cell: str) -> None:
-    """D1's module name: the gate names each scanned module `defender.` + its path, so the
-    same source planted in another package, under the same file name, is another module —
-    its same-named defs are no table entries, and its joins stay clean while the tabled
-    module's are reported."""
     _assert_cell(_SAME_ELSEWHERE, cell)
     _assert_control_live(_at(tabled, _SAME_ELSEWHERE, _CONTROL[_SAME_ELSEWHERE]),
                          _CONTROL[_SAME_ELSEWHERE])
@@ -1331,14 +1246,6 @@ def test_a_factorys_origin_is_its_modules_path(tabled: list[str], cell: str) -> 
         f"{_at(tabled, _SAME_ELSEWHERE, cell)}")
 
 
-# ======================================================================================
-# D7 — relative imports resolve against the module's package, in every scope.
-# ======================================================================================
-
-#: Planted at `runtime/driver_1160/__init__.py` — its own package, `defender.runtime.driver_1160`
-#: — AND at `runtime/driver_1160/beside_1160.py`, a plain module of that same package. The same
-#: spellings name the same origins in both: `..run_tenant` is `defender.runtime.run_tenant`,
-#: `..._tenant` is `defender._tenant`. Scanned under the stock table: no fresh entry.
 REL_IN_PACKAGE = textwrap.dedent(f"""\
     from pathlib import Path
 
@@ -1469,10 +1376,6 @@ def relative_displays(tmp_path_factory: pytest.TempPathFactory) -> list[str]:
 @pytest.mark.parametrize(("rel", "cell"), REL_REPORTED)
 def test_a_relative_import_resolves_against_the_modules_package(
         relative_displays: list[str], rel: str, cell: str) -> None:
-    """D7: a factory, a class or a module imported relatively resolves to its absolute origin
-    against the module's package — an `__init__.py` being its own package, a plain module's
-    being its parent — in every scope, so a parameter annotated through it, a factory called
-    through it, and a function-local relative import tag as their absolute spellings do."""
     _assert_planted(cell, RELATIVE_TREE[rel])
     _assert_control_live(_at(relative_displays, rel, _REL_CONTROL[rel]), _REL_CONTROL[rel])
     assert _joins_at(relative_displays, rel, cell), (
@@ -1492,25 +1395,8 @@ def test_a_relatively_imported_carriers_knowledge_halves_stay_clean(
     assert _at(relative_displays, rel, cell) == [], _at(relative_displays, rel, cell)
 
 
-# ======================================================================================
-# O3 / D4 — the census: the table holds every Tenant / RunTenant factory, and nothing else.
-# ======================================================================================
-
-
-
-
-
-
-
-
-
-
 # ---- D3 — one list of spellings drives the census AND the gate --------------------------
 
-#: (annotation as written, the class it names). The ONE list behind both a factory's return
-#: annotation in the census and a parameter's annotation in the gate (`ANNOTATION_MODULE`), so
-#: neither can resolve a spelling the other does not. Quoted dotted spellings, aliases, and
-#: relative imports (D7: the module sits in `defender.runtime`) included.
 ANNOTATION_FORMS = (
     ("Tenant", TENANT),
     ("_tenant.Tenant", TENANT),
@@ -1580,8 +1466,6 @@ def annotation_displays(annotation_tree: Path) -> list[str]:
     return [f.display for f in _lint_run_records().scan(annotation_tree)]
 
 
-
-
 @pytest.mark.parametrize(("i", "form"), _FORM_CASES, ids=_FORM_IDS)
 def test_the_gate_tags_a_parameter_in_each_annotation_spelling(
         annotation_displays: list[str], i: int, form: tuple[str, str]) -> None:
@@ -1594,18 +1478,4 @@ def test_the_gate_tags_a_parameter_in_each_annotation_spelling(
         f"{_in(annotation_displays, f'parameter_{i}')}")
 
 
-
-
 # ---- D4 — what the census counts, and what it reports ------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-

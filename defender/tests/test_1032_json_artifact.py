@@ -37,9 +37,6 @@ def _nested(depth: int) -> str:
 
 
 def test_the_depth_scan_is_exact_on_valid_json_and_blind_to_brackets_inside_strings():
-    """A `[` or `{` in a string value is text, not a level; an escaped quote does not end the
-    string early; a scalar has no depth at all. Each expected depth is what `json.loads` would
-    recurse to, so the scan and the decoder agree on every valid input."""
     cases = {
         "3": 0,
         '"[[[{"': 0,

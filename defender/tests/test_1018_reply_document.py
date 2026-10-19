@@ -32,13 +32,6 @@ def _malformed() -> type[BaseException]:
     return J.sym("learning.core.validate", "MalformedReply")
 
 
-# ---------------------------------------------------------------------------------------
-# The corpus. One verdict, spelled once; every shape is that verdict dressed differently.
-# ---------------------------------------------------------------------------------------
-
-#: The verdict every shape carries — the issue's own "`episode_outcome: caught` is the correct
-#: answer throughout". Realistic keys, a quoted colon and a flow sequence with a `#` in a
-#: scalar, so a parser that merely locates SOME mapping cannot pass on a stand-in.
 DOCUMENT = (
     "episode_outcome: caught\n"
     "noise_floor_note: one trial, no replicate\n"
@@ -76,9 +69,6 @@ VERDICT = {
     }],
 }
 
-#: The abandoned draft of shape 6: the same verdict with the OTHER outcome word. If a parser
-#: takes the first block, THIS is what gets recorded — the silent wrong verdict the issue is
-#: about.
 DRAFT = DOCUMENT.replace("episode_outcome: caught", "episode_outcome: survived")
 
 PROSE_BEFORE = "Here is my grading of world b, following the three passes you asked for.\n\n"
@@ -155,10 +145,6 @@ E2_INDENTED_FENCE = (
 )
 E2_NOTE = "the report embedded the query it ran:\n```\nFROM logs-* | LIMIT 5\n```\nand went on\n"
 
-#: A valid document whose DOUBLE-QUOTED scalar puts `</think>` and a verdict-shaped tail at
-#: column 0 — a shape YAML loads (a quoted scalar's continuation lines carry no indentation
-#: rule). A parser that cuts a prelude at any column-0 tag before asking whether the reply
-#: already loads records the quoted tail's `discard` in place of the real `caught`, silently.
 QUOTED_COLUMN_ZERO_THINK = (
     "episode_outcome: caught\n"
     'noise_floor_note: "the evidence row said:\n'
@@ -198,10 +184,6 @@ def _accepts(text: str, *, expected_text: str = DOCUMENT, expected_doc: dict = V
     assert safe_load(text_out) == expected_doc
 
 
-# THE SHAPE VOCABULARY, ONE MARKER PER REFUSAL. O2/M1 say the message NAMES the shape, and a
-# message that names every shape at once ("fence inside / text after / second fence / …")
-# would satisfy any single-substring check — so a refusal is pinned as carrying its own
-# marker and NONE of the others. Each marker is a word the design's own answer table uses.
 SHAPE_MARKERS = {
     "inside": "a fence inside the reply",
     "after": "text after the closing fence",
@@ -226,15 +208,7 @@ def _refuses(text: str, shape: str) -> None:
     assert not others, f"the refusal for {shape!r} also names {others}: {message!r}"
 
 
-# ---------------------------------------------------------------------------------------
-# M1 / O1 — the thirteen shapes, each with the design's stated answer
-# ---------------------------------------------------------------------------------------
-
-
 def test_1018_shape_1_plain_yaml_is_returned_as_is():
-    """Shape 1 (plain YAML, no fence): ACCEPT. The text comes back stripped and unchanged and
-    loads to the verdict. Failing: the parser rewrites or refuses a reply that was already
-    bare."""
     _accepts(SHAPE_1_PLAIN)
 
 
@@ -246,9 +220,6 @@ def test_1018_shape_2_whole_string_fence_is_unwrapped():
 
 
 def test_1018_shape_3_prose_then_fence_is_refused_as_a_fence_inside_the_reply():
-    """Shape 3 (prose, then fence): REFUSE, "a fence inside the reply". This was the C12 shape
-    #921's lenient parser recovered; the design's explicit non-obligation ("no leniency for
-    prose before or after the document") retires it. Failing: the fenced block is recovered."""
     _refuses(SHAPE_3_PROSE_THEN_FENCE, "inside")
 
 
@@ -265,16 +236,10 @@ def test_1018_shape_6_draft_then_corrected_verdict_is_refused_as_a_second_fence(
 
 
 def test_1018_shape_11_outer_fence_wrapping_an_inner_tagged_fence_is_refused():
-    """Shape 11 (an outer ``` wrapping an inner ```yaml fence): REFUSE, "a second fence".
-    Attempt 3 returned `{'Here is the grading': None}` for this one, SILENTLY. Failing: any
-    text comes back."""
     _refuses(SHAPE_11_OUTER_WRAPS_INNER, "second")
 
 
 def test_1018_shape_12_closer_with_trailing_text_is_refused():
-    """Shape 12 (a closing marker with trailing text on its line, ```END): REFUSE — a closer
-    with trailing characters is no closer, and "no repair of a mangled closer" is an explicit
-    non-obligation. Failing: ```END is accepted as a closer."""
     _refuses(SHAPE_12_TRAILING_CLOSER, "trailing")
 
 
@@ -283,11 +248,6 @@ def test_1018_shape_13_a_thinking_prelude_is_dropped_before_the_shape_rule():
     _accepts(SHAPE_13A_PRELUDE_THEN_PLAIN)
     _accepts(SHAPE_13B_PRELUDE_THEN_FENCE)
     _refuses(SHAPE_13C_PRELUDE_THEN_FENCE_PROSE, "after")
-
-
-# ---------------------------------------------------------------------------------------
-# M1 / O5 — the edge cases E1-E8, and the prelude's anchoring
-# ---------------------------------------------------------------------------------------
 
 
 def test_1018_e1_a_close_tag_quoted_inside_a_block_scalar_stays_in_the_document():
@@ -306,9 +266,6 @@ def test_1018_e1_a_close_tag_quoted_inside_a_block_scalar_stays_in_the_document(
 
 
 def test_1018_e2_an_indented_fence_inside_a_block_scalar_survives_and_loads():
-    """E2: an INDENTED ``` inside a block scalar is not a fence line (C13: column-0 anchoring)
-    — the document comes back whole, bare or fenced, and the fence lines load as part of the
-    scalar. Failing: the reply is refused as "a fence inside the reply", or the scalar is cut."""
     expected = dict(VERDICT, noise_floor_note=E2_NOTE, correlations=[], scope_checks=[],
                     derivations=[], findings=[])
     _accepts(E2_INDENTED_FENCE, expected_text=E2_INDENTED_FENCE.strip(), expected_doc=expected)
@@ -341,9 +298,6 @@ def test_1018_an_indented_quoted_close_tag_cannot_end_a_prelude_on_an_unloadable
 
 
 def test_1018_a_close_tag_with_nothing_after_it_is_named_not_called_empty():
-    """A complete document followed by a stray closing think tag on the last line: the cut
-    would leave nothing, and the refusal says so rather than calling a multi-KB reply "empty".
-    Failing: `empty reply` for a reply the wire log shows in full."""
     _refuses(DOCUMENT + "\n</think>\n", "no document following")
 
 
@@ -355,48 +309,34 @@ def test_1018_an_opening_fence_carrying_more_than_a_tag_is_refused_and_named(ope
 
 @pytest.mark.parametrize("tag", ["json", "YAML", "yml", "x-yaml", "text+yaml", ""])
 def test_1018_e3_any_fence_tag_on_one_fenced_document_is_still_one_document(tag):
-    """E3: the tag on a single fenced document is any `[A-Za-z0-9_+-]*` — `json`, upper-case
-    `YAML`, a `-`/`+` tag, none — because YAML subsumes JSON and a tag is not a second
-    document. Failing: an unfamiliar tag refuses a reply that holds exactly one document."""
     _accepts(fenced(DOCUMENT, tag) + "\n")
 
 
 def test_1018_e3_trailing_spaces_on_the_opener_and_closer_lines_are_tolerated():
-    """The whole-string fence is ```<tag>?<spaces>\\n<body>\\n```<spaces> — spaces after the tag
-    and after the closer are not "text after the closer" (a closer followed by NON-space is,
-    shape 12). Failing: a trailing space on either fence line refuses the reply."""
     _accepts("```yaml   \n" + DOCUMENT + "\n```   \n")
 
 
 def test_1018_e4_crlf_line_endings_are_normalised_before_the_shape_rule():
-    """E4: `\\r\\n` is normalised to `\\n` first, so a CRLF fenced reply is one whole-string
-    fence and the returned text carries no `\\r`. Failing: the closer is not recognised
-    (`\\r` before it), or `\\r` survives into the document."""
     crlf = (fenced(DOCUMENT) + "\n").replace("\n", "\r\n")
     _accepts(crlf)
     assert "\r" not in _parse(crlf)
 
 
 def test_1018_e5_a_leading_bom_is_dropped():
-    """E5: a leading U+FEFF is dropped before the shape rule, so a BOM-prefixed fence is still a
-    reply that STARTS with a fence. Failing: the fence is not seen as leading and the reply is
-    refused or the backticks reach the loader."""
     _accepts("\ufeff" + SHAPE_2_WHOLE_FENCE)
     _accepts("\ufeff" + SHAPE_1_PLAIN)
 
 
-@pytest.mark.parametrize("text", ["", "   ", "\n\n  \n", "\ufeff\n"])
-def test_1018_e6_an_empty_or_whitespace_only_reply_is_refused_and_named(text):
-    """E6: an empty completion is refused with a NAMED reason, never returned as "" for the
-    loader to turn into `None` and the consumer into "not a mapping". Failing: no
-    `MalformedReply`."""
-    _refuses(text, "empty")
-
-
-@pytest.mark.parametrize("text", ["```yaml\n```", "```yaml\n\n```\n", "```\n   \n```"])
-def test_1018_e7_an_empty_fence_is_refused_and_named(text):
-    """E7: a fence with a blank body is refused and named. Failing: an empty string comes back
-    and the loader's `None` is what the consumer sees."""
+@pytest.mark.parametrize("text", [
+    "",
+    "   ",
+    "\n\n  \n",
+    "\ufeff\n",
+    "```yaml\n```",
+    "```yaml\n\n```\n",
+    "```\n   \n```",
+])
+def test_empty_plain_or_fenced_reply_is_refused_and_named(text):
     _refuses(text, "empty")
 
 
@@ -440,20 +380,10 @@ def test_1018_e8_an_explicit_opening_tag_and_a_fenced_draft_inside_the_prelude_a
     _accepts(reasoning + SHAPE_2_WHOLE_FENCE)
 
 
-# ---------------------------------------------------------------------------------------
-# M4 — the three lenient rules the old parser carried are gone
-# ---------------------------------------------------------------------------------------
-
-
 def test_1018_a_dangling_closer_after_a_plain_document_is_refused():
     """M4 / "no dangling-closer trim": a plain document followed by a lone column-0 ``` is "a
     fence inside the reply". Failing: the closer is trimmed and the document recovered."""
     _refuses(DOCUMENT + "\n```\n", "inside")
-
-
-# ---------------------------------------------------------------------------------------
-# M2 / O2 / O3 at the judge — through the real `grade_episode`, `judge=` injected
-# ---------------------------------------------------------------------------------------
 
 
 def _episode(tmp_path, **kw):
@@ -483,9 +413,6 @@ def _fence_then_prose(body: str) -> str:
     return fenced(body.rstrip("\n")) + PROSE_AFTER
 
 
-#: How many times one draw asks the model before it gives the draw up (#1224 N22: a refused
-#: reply is asked again, and every refused ask is counted). A scenario about a draw that
-#: produced nothing scripts the same refused shape this many times.
 ASKS_PER_DRAW = 3
 
 
@@ -511,9 +438,6 @@ def test_1018_judge_fence_then_prose_reply_costs_one_draw_and_the_reply_is_on_di
 
 
 def test_1018_judge_a_bare_second_draw_completes_beside_a_malformed_first(tmp_path):
-    """The positive control at draw granularity: draws=2, draw 0 fence-then-prose and draw 1
-    the same verdict bare. `completed_draws` is 1, `1.yaml` exists and `0.yaml` does not.
-    Failing: the malformed draw poisons the world (0 completed) or is silently completed (2)."""
     ep = _episode(tmp_path)
     judge = J.scripted_judge(
         replies=[_fence_then_prose(_bare_verdict())] * ASKS_PER_DRAW + [_bare_verdict()],
@@ -537,10 +461,6 @@ def test_1018_validate_reply_wraps_the_parser_refusal_in_judge_refused(tmp_path)
     assert run_mod.validate_reply(_bare_verdict()).bucket == "lead-set"
     with pytest.raises(JudgeRefused):
         run_mod.validate_reply(_fence_then_prose(_bare_verdict()))
-    # BOTH SCOPES. `scope="family"` is the same seam's second caller (#1007 M5), and a wrap
-    # discharged for the default scope alone lets a `MalformedReply` cross the family lane
-    # bare — where `grade_episode`'s family arm swallows it as `draws_failed_reason` and
-    # makes no further family draw.
     family_bare = _family_verdict()
     # #1234 M6: a family reply carries family-scope world findings only, no bucket.
     family_parsed = run_mod.validate_reply(family_bare, scope="family")
@@ -575,11 +495,6 @@ def test_1018_judge_family_scope_fence_then_prose_costs_one_family_draw_not_the_
     assert family["completed_draws"] == 2, "the bare family draws did not count"
     assert family["draws"] == [{"draw": 0}, {"draw": 1}]
     assert _wire_row(ep, "family", 0)["reply"] == _fence_then_prose(_family_verdict())
-
-
-# ---------------------------------------------------------------------------------------
-# M2 / O2 at the questioner — through the real `author_family`, `invoke=` injected
-# ---------------------------------------------------------------------------------------
 
 
 def _questioner():
@@ -625,16 +540,6 @@ def test_1018_questioner_seat_call_fence_then_prose_aborts_naming_the_seat(tmp_p
     assert agent.calls == 2
 
 
-# ---------------------------------------------------------------------------------------
-# M3 / O4 — every sentence that tells the model the reply shape says the shape
-# ---------------------------------------------------------------------------------------
-
-#: The one phrase every shape-telling site carries, so the implementation has one string to
-#: write and this census one string to look for.
-#: THE WHOLE SENTENCE, not a substring: the shape the parser accepts, in the words every site
-#: must use. A substring pin ("not inside a code fence") was greened by a sentence that PERMITS
-#: the opposite — "anything not inside a code fence is commentary, so wrap the mapping in one"
-#: — which is the #700 attack-deck shape (prose describing content, pinned by presence alone).
 SHAPE_PHRASE = "not inside a code fence, with nothing before or after it"
 #: Words that would turn the sentence into permission for a shape the parser refuses. None
 #: may appear in the sentence that carries the phrase.
@@ -654,5 +559,3 @@ def _says_bare(text: str) -> bool:
     end = flat.find(". ", at)
     sentence = flat[start:end if end > 0 else None].lower()
     return not any(word in sentence for word in PERMISSIVE_WORDS)
-
-

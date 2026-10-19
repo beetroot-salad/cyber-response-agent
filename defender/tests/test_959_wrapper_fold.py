@@ -76,16 +76,6 @@ def test_no_word_is_parsed_as_a_wrapper():
         [["bash", "-c", f"cat {REPORT} | wc -l"]]
     ]
     assert _parsed("bash -c 'bash -c \"echo hi\"'") == [[["bash", "-c", 'bash -c "echo hi"']]]
-    # The reason itself must stop DESCRIBING a step the parser does not take: a model told its
-    # wrapper "did not fold to a single command string" would go on trying to spell one.
-    #
-    # Stated over the numbered CAUSES, not over the whole message. The first spelling of this
-    # scanned the whole reason with the one sentence this change added carved out by a
-    # byte-for-byte `.replace()` - a guard whose search surface was the text under review minus
-    # the text under review, so it could not fail on the only occurrence it was written for,
-    # and any reword of that sentence would have failed it on prose and sent the next author to
-    # edit the carve-out. The causes are the part that must not describe a fold; the closing
-    # paragraph is where the message is allowed to say what `bash -c` earns instead.
     causes = "\n".join(
         line for line in permission.UNTOKENIZABLE_REASON.splitlines()
         if line.startswith("(")

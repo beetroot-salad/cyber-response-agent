@@ -10,10 +10,6 @@ from defender.tests import _spec1047 as S
 
 def test_a_cut_short_world_files_no_finding_and_its_reason_travels_on_its_row_unchanged(
         tmp_path):
-    """#1234 retired `enqueue.py::route_finding` (and its `ROUTE_UNGRADABLE` lane): routing is
-    `route.fate`'s over the findings a world's draws FILED, and a cut-short world is excluded by
-    the usability read before any draw, so it files none and the ledger names none of its
-    findings."""
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
     judge = S.scripted_judge()
     record = S.graded_record(ep, judge=judge)
@@ -48,10 +44,6 @@ def _all_cut_short(tmp_path):
 
 
 def test_sibling_union_still_short_circuits_when_the_gradable_set_is_empty(tmp_path):
-    """`judge/__init__.py:583`'s short-circuit on an empty gradable set still holds once this piece
-    makes that set reachable in practice (a family whose every measuring world was cut short) —
-    probe #28's "nothing crashes" finding, pinned as a demand rather than left as a probed-but-
-    unpinned tolerance."""
     family = S.mod("learning.judge.family")
     ep = _all_cut_short(tmp_path)
     graded = S.graded(ep)
@@ -76,11 +68,6 @@ def test_pass_lessons_commit_still_returns_none_when_the_gradable_set_is_empty(t
 
 def test_a_host_write_into_the_run_dir_still_goes_through_write_guarded_and_the_destination_screen(
         tmp_path):
-    """The forced close's `report.md` write into a run dir this design's two new readers
-    (`archive_episode`, `record_case_ticket`) now depend on still goes through `write_guarded`
-    and the destination screen — the one cell this piece leans on harder for trust is still the
-    one actually enforcing `[write_guarded, destination-screen]`, not silently narrowed by this
-    change to something weaker."""
     from defender.tests import _spec923
 
     victim = tmp_path / "victim.md"
@@ -104,9 +91,6 @@ def test_a_host_write_into_the_run_dir_still_goes_through_write_guarded_and_the_
 
 
 def test_the_episode_reader_and_the_graded_record_disagree_about_a_cut_short_world(tmp_path):
-    """`branch/episode.py::verdicts` and the graded record may disagree about a cut-short world,
-    and that disagreement is ACCEPTED — the waiver `episode_verdicts_docstring_unaddressed` is
-    what this test pins, not a repair."""
     episode_mod = S.mod("learning.branch.episode")
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
     (ep / "worlds" / "b" / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
@@ -117,5 +101,3 @@ def test_the_episode_reader_and_the_graded_record_disagree_about_a_cut_short_wor
     assert said.get("b") == "unresolved", (
         "the episode reader stopped reading a cut-short world's archived report as its "
         "conclusion — that is a repair this piece deliberately did not make")
-
-

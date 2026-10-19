@@ -21,11 +21,6 @@ def rows_of(grade_result) -> dict[str, dict]:
     return {row["world"]: row for row in grade_result.worlds}
 
 
-# ---------------------------------------------------------------------------------------
-# Demand #0 — the return value, and the round trip it must survive
-# ---------------------------------------------------------------------------------------
-
-
 def test_grade_episode_returns_extended_record(tmp_path, monkeypatch):
     """`grade_episode` hands back the family-level record CARRYING the world fields, not a record a
     caller has to re-read `judge.yaml` to see."""
@@ -62,5 +57,3 @@ def test_judge_yaml_round_trips_every_new_field(tmp_path, monkeypatch):
                   "enqueued_rows", "enqueued_to", "validity"):
         assert getattr(second, field) == getattr(first, field), (
             f"{field!r} is written to judge.yaml and not read back off it")
-
-

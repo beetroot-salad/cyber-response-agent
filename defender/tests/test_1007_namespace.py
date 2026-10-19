@@ -12,9 +12,6 @@ from defender.tests import _world_1007 as W
 from defender.tests._spec1077 import fixture_run
 from defender.tests.live_oracle_1224 import _spec1224 as S
 
-#: The string an operator would name. Distinctive on purpose: the negative below sweeps every
-#: byte the launcher could have written for it, so a value that could occur by accident would
-#: make an absence assertion unreadable.
 OPERATOR_NAMED = "opnamed.token"
 
 #: The one answer every captured call of `launch`'s source run carries, so a single scripted
@@ -76,10 +73,6 @@ def test_an_episode_is_read_under_one_namespace(tmp_path):
 
     with pytest.raises(TypeError):
         fam.episode_token_for(family.episode_id, override=OPERATOR_NAMED)
-    # #1255 (D1, P4): `preflight_episode` takes a continuation prompt only while the CLI still
-    # does, so it is offered only then — otherwise the TypeError below would be the missing
-    # parameter, not the refused `episode_token`. The call names every OTHER parameter by the
-    # signature's own spelling, so the TypeError can only be about `episode_token`.
     params = inspect.signature(cli.preflight_episode).parameters
     assert "episode_token" not in params, "the operator-named token is still a parameter"
     retired = {"continuation_prompt": "go"} if "continuation_prompt" in params else {}
@@ -88,5 +81,3 @@ def test_an_episode_is_read_under_one_namespace(tmp_path):
             source=fixture_run(ep), branch_message_id=W.BRANCH_MESSAGE_ID,
             preflight=W.no_preflight, model=None, allow_dirty=False,
             live_tree=T.source_capture(), episode_token=OPERATOR_NAMED, **retired)
-
-

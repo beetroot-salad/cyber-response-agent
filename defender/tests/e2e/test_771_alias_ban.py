@@ -46,18 +46,12 @@ def _request(tmp_path: Path, *, writable: bool = True) -> object:
     """A REAL `BoxRequest` in the shape the generic builder produces — the tier C8-new made
     serve the drain lane AND the learning run-cycle."""
     src = tmp_path / "wt"
-    # parents=True: callers hand this a per-lane subdirectory that does not exist yet, and an
-    # exist_ok-only mkdir raises FileNotFoundError there — a failure that reads as the lane
-    # being unbuildable rather than as a missing directory.
     src.mkdir(parents=True, exist_ok=True)
     return box_mod.BoxRequest(
         name="r-771-lane",
         mounts=(box_mod.Mount(source=src, target=src, writable=writable),),
         workdir=src,
         env={},
-        # An explicit rootfs: `src` is a fake tree with none of the three hash inputs, and an
-        # unset rootfs resolves the image from `workdir / "defender"` and refuses (#1092).
-        # Every caller drives a scripted daemon, so the stock name is the right pin.
         spec=box_mod.BoxSpec(rootfs="python:3.11-slim"),
     )
 
@@ -80,9 +74,6 @@ def test_box_argv_carries_the_alias_profile(tmp_path):
 
 
 def test_every_box_lane_carries_the_alias_profile(tmp_path):
-    """alias_profile_on_every_box_lane — both argv builders attach the alias profile, and they
-    attach the IDENTICAL resolved value: the investigation lane's builder and the generic
-    request builder that serves the drain lane and the learning run-cycle alike."""
     lane_a = AliasProbeDocker()
     _start_investigation_lane(run_tree(tmp_path), lane_a)
 
@@ -96,9 +87,6 @@ def test_every_box_lane_carries_the_alias_profile(tmp_path):
 
 
 def test_alias_profile_denies_the_six_syscalls_and_allows_everything_else(tmp_path):
-    """profile_denies_exactly_six — the shipped profile denies each of the six banned shapes and
-    nothing the platform default allowed, by being the platform default with the six
-    SUBTRACTED from its allowlist."""
     profile = json.loads(alias_profile_path().read_text(encoding="utf-8"))
 
     assert profile["defaultAction"] == "SCMP_ACT_ERRNO", (
@@ -106,9 +94,6 @@ def test_alias_profile_denies_the_six_syscalls_and_allows_everything_else(tmp_pa
         "subtracted — and a default-ALLOW profile hands the box back every syscall the "
         "platform denies, which is what attaching it REPLACES"
     )
-    # Under a default-ERRNO allowlist a syscall is banned by ABSENCE, not by an explicit deny
-    # rule: naming it nowhere is what makes `defaultErrnoRet` answer for it. So the deny
-    # assertion is about what the profile does NOT name.
     allowed = allowed_syscalls(profile)
     assert not (allowed & set(BANNED_SHAPES)), (
         f"a banned shape is still reachable: {sorted(allowed & set(BANNED_SHAPES))}"
@@ -118,9 +103,6 @@ def test_alias_profile_denies_the_six_syscalls_and_allows_everything_else(tmp_pa
         "the startup probe and every guarded writer classify a refusal by"
     )
 
-    # SCAN_ONLY_SHAPES stays out of the ban, and under a subtractive profile "stays out" means
-    # the syscalls behind it are still ALLOWED rather than merely un-denied. Executed: AF_UNIX
-    # bind succeeds under this exact profile (X2/G5, and re-executed against Docker 29.6.1).
     scan_only_syscalls = {"bind", "socket"}
     assert scan_only_syscalls <= allowed, (
         f"the scan-only shape {SCAN_ONLY_SHAPES[0]} lost "
@@ -130,9 +112,6 @@ def test_alias_profile_denies_the_six_syscalls_and_allows_everything_else(tmp_pa
 
 
 def test_the_alias_profile_does_not_widen_the_platform_syscall_surface(tmp_path):
-    """profile_does_not_widen_the_platform_syscall_surface — the shipped profile allows nothing
-    the vendored platform default did not, and is byte-exactly what the generator derives from
-    that default, so the two cannot drift apart unobserved."""
     gen = load_seccomp_generator()
     shipped_text = alias_profile_path().read_text(encoding="utf-8")
 
@@ -160,9 +139,6 @@ def test_the_alias_profile_does_not_widen_the_platform_syscall_surface(tmp_path)
 
 @requires_daemon
 def test_the_profile_differs_from_the_live_daemon_default_by_exactly_the_ban(tmp_path):
-    """profile_matches_the_live_daemon_default_but_for_the_ban — the same syscall witness set,
-    attempted once under whatever the daemon applies BY ITSELF and once under the shipped
-    profile, differs on exactly the six banned shapes and on nothing else."""
     default_seen = run_probe_under_profile(PLATFORM_COMPARISON_PROBE, None)
     shipped_seen = run_probe_under_profile(PLATFORM_COMPARISON_PROBE, alias_profile_path())
 
@@ -192,9 +168,6 @@ def test_the_profile_differs_from_the_live_daemon_default_by_exactly_the_ban(tmp
 
 @pytest.mark.parametrize("shape", BANNED_SHAPES)
 def test_each_banned_syscall_is_denied_and_a_partial_ban_faults_the_box(shape, tmp_path):
-    """partial_enforcement_faults_the_box — when the box can still create ONE of the six shapes,
-    box startup faults exactly as it does when none of them is denied, and the fault names the
-    shape that was admitted."""
     rec = AliasProbeDocker(ProbeVerdict(allowed=(shape,), cite="G6"))
 
     with pytest.raises(ban_not_in_force_error()) as e:
@@ -207,10 +180,6 @@ def test_each_banned_syscall_is_denied_and_a_partial_ban_faults_the_box(shape, t
 
 
 def test_an_altered_or_unreadable_profile_faults_the_box_like_a_missing_one(tmp_path):
-    """altered_profile_faults_like_a_missing_one — a profile that is not the shipped one at box
-    create ends in a fault BEFORE the first model turn, the same way an absent one does, from
-    EITHER rejecting side: the create itself refusing to load it, and the box starting with a
-    profile that does not enforce."""
     rec = AliasProbeDocker(
         BAN_ABSENT,
         create=DockerFault(rc=1, stderr="docker: Error response from daemon: cannot load "
@@ -227,9 +196,6 @@ def test_an_altered_or_unreadable_profile_faults_the_box_like_a_missing_one(tmp_
 
 # M2 — the startup probe
 def test_startup_probe_refuses_each_banned_shape(tmp_path):
-    """probe_banned_shapes_fail — at every box start the probe attempts each banned shape inside
-    the box, observes each one refused, and confirms afterwards that no entry of that shape is
-    present in the tree it probed."""
     run = run_tree(tmp_path)
     rec = AliasProbeDocker(BAN_IN_FORCE)
     _start_investigation_lane(run, rec)
@@ -239,12 +205,6 @@ def test_startup_probe_refuses_each_banned_shape(tmp_path):
         f"the probe attempted {sorted(rec.shapes_attempted())} rather than each banned shape, "
         f"so 'observed each one refused' is a claim about shapes it never tried"
     )
-    # WRITE-CODE-FROM-SPEC FIX: the nlink check is scoped to REGULAR files. An ordinary
-    # directory carries nlink >= 2 on Linux (its own "." entry plus its parent's reference to
-    # it) — `run_tree` always creates some, so the unscoped check flagged every ordinary
-    # directory as if it were a planted hard link, on every run regardless of the probe's
-    # actual behavior. `scrub._check_entry` already gets this right by restricting the nlink
-    # test to `stat.S_ISREG`; this oracle now matches it.
     leftovers = [
         p for p in run.rglob("*")
         if os.path.islink(p) or (p.is_file() and os.lstat(p).st_nlink > 1)
@@ -255,9 +215,6 @@ def test_startup_probe_refuses_each_banned_shape(tmp_path):
 
 
 def test_startup_probe_ordinary_create_succeeds_in_the_same_exec(tmp_path):
-    """probe_ordinary_create_succeeds — the probe also demonstrates an ORDINARY create succeeding
-    in the same exec, and a box whose probe produced no such signal faults rather than
-    passing."""
     _start_investigation_lane(run_tree(tmp_path), AliasProbeDocker(BAN_IN_FORCE))
 
     silent = AliasProbeDocker(ProbeVerdict(create_ok=False, cite="E1"))
@@ -277,9 +234,6 @@ def test_startup_probe_set_is_the_banned_set_not_the_scrub_set(tmp_path):
         "the probe attempts a scan-only shape — it would fault every box at startup"
     )
 
-    # THE CONTROL: a probe narrowed to the two `*at` variants must read as two, not as six.
-    # These are exactly the two whose names contain the other four, so this is the argv the
-    # substring reader graded as full coverage.
     narrowed = shapes_named_in("docker exec box python3 -c os.symlinkat(); os.mknodat()")
     assert narrowed == {"symlinkat", "mknodat"}, (
         f"the shape reader cannot see a narrowed probe: it read {sorted(narrowed)} from an argv "
@@ -289,9 +243,6 @@ def test_startup_probe_set_is_the_banned_set_not_the_scrub_set(tmp_path):
 
 
 def test_the_alias_probe_runs_once_per_box_start(tmp_path):
-    """probe_runs_at_every_box_start — the probe runs exactly ONCE per box start, on every start,
-    with nothing cached across boxes: a host whose registration state changes between two
-    starts is re-observed on the second."""
     first = AliasProbeDocker(BAN_IN_FORCE)
     _start_investigation_lane(run_tree(tmp_path), first)
     assert first.probe_count() == 1, f"the probe ran {first.probe_count()} times for one box"
@@ -306,9 +257,6 @@ def test_the_alias_probe_runs_once_per_box_start(tmp_path):
 
 
 def test_an_interrupted_or_truncated_probe_sequence_reads_as_a_startup_fault(tmp_path):
-    """interrupted_probe_sequence_reads_as_failed — a probe exec that is INTERRUPTED — killed
-    mid-sequence, so it never reported an outcome at all — faults box startup: incomplete is
-    FAILED, never a pass."""
     rec = AliasProbeDocker(ProbeVerdict(exec_rc=137, cite="E2"))
 
     with pytest.raises(ban_not_in_force_error()):
@@ -320,9 +268,6 @@ def test_an_interrupted_or_truncated_probe_sequence_reads_as_a_startup_fault(tmp
 
 
 def test_the_alias_probe_reruns_in_full_and_cleans_its_own_leavings_on_both_arms(tmp_path):
-    """alias_probe_is_rerun_in_full_and_cleans_both_arms — after a transient box-start retry the
-    probe is re-run in FULL rather than resumed or skipped, and its own leavings are removed
-    on both the pass and the fault arm."""
     run = run_tree(tmp_path)
     transient = AliasProbeDocker(BAN_IN_FORCE, create=DockerFault(rc=1, stderr="daemon busy\n",
                                                                   cite="R3"))
@@ -339,11 +284,6 @@ def test_the_alias_probe_reruns_in_full_and_cleans_its_own_leavings_on_both_arms
     residue = [p.name for p in run.iterdir() if p.name.startswith(".alias-probe")]
     assert not residue, f"the probe left its own leavings behind on the pass arm: {residue}"
 
-    # THE FAULT ARM, driven on its own tree. The retry above faults BEFORE the probe runs (the
-    # create is what fails), so a residue check after a successful retry says nothing about a
-    # probe that ran and then faulted — and that is the arm where leavings matter most: a shape
-    # that succeeded when it should have been denied is a banned entry the probe itself created,
-    # and leaving it hands the reap scan a taint the box did not cause.
     faulted = run_tree(tmp_path / "probe-faulted")
     with pytest.raises(ban_not_in_force_error()):
         _start_investigation_lane(faulted, AliasProbeDocker(BAN_ABSENT))
@@ -364,9 +304,6 @@ def test_box_start_faults_when_the_ban_is_not_in_force(tmp_path):
 
 
 def test_ban_not_in_force_is_not_opt_out_able(tmp_path, monkeypatch):
-    """ban_failure_not_opt_out_able — with the unsandboxed opt-out set to its one live value, an
-    ordinary box-startup fault still degrades to the unboxed host executor, and the ban-not-
-    in-force fault still raises."""
     monkeypatch.setenv("DEFENDER_ALLOW_UNSANDBOXED", "1")
 
     ordinary = AliasProbeDocker(BAN_IN_FORCE,
@@ -397,9 +334,6 @@ def test_the_unsandboxed_opt_out_matches_exactly_one_value(value, tmp_path, monk
 
 
 def test_alias_ban_enforcement_by_runtime(tmp_path, monkeypatch):
-    """ban_enforcement_per_runtime — under `runc` the profile is enforced unconditionally; under
-    the shipped `runsc` default it is enforced IF AND ONLY IF the runtime is registered with
-    `--oci-seccomp`, and an unregistered runsc host faults rather than skipping."""
     monkeypatch.setenv(box_mod.BoxSpec.ENV_VAR, "runc")
     rec = AliasProbeDocker(BAN_IN_FORCE)
     _start_investigation_lane(run_tree(tmp_path / "runc"), rec)
@@ -465,9 +399,6 @@ def live_run_base(tmp_path: Path) -> Iterator[Path]:
 
 @requires_real_box
 def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(live_run_base):
-    """box_starts_and_creates_ordinarily_under_the_profile — a real box under the exact deny set
-    still starts, and ordinary file creation, `mkdir` and AF_UNIX `bind` all still succeed
-    inside it."""
     run = run_tree(live_run_base)
     box = box_mod.start_box(run, DEFENDER)
     try:
@@ -489,9 +420,6 @@ def test_box_under_the_alias_profile_still_starts_and_creates_ordinarily(live_ru
 
 @requires_real_box
 def test_no_unobserved_window_between_the_probe_and_the_first_real_write(live_run_base):
-    """ban_in_force_for_the_whole_box_life — the ban observed by the startup probe is still in
-    force at the first real driver write: an alias attempted after the probe returned is
-    refused exactly as it was during the probe."""
     run = run_tree(live_run_base)
     box = box_mod.start_box(run, DEFENDER)
     try:
@@ -546,11 +474,6 @@ print(json.dumps(out))
     )
 
 
-#: C7-new's FOUR falsified statements, one row each: the doc that carries it, the literal this
-#: change makes false, and an anchor the correction will NOT remove. The anchor is what keeps
-#: each row from going vacuously green — a `phrase not in body` check also passes when the
-#: section was renamed, moved to another file, or deleted wholesale, and three of these four
-#: are load-bearing justifications rather than passing remarks.
 FALSIFIED_STATEMENTS = (
     ("NO8's justification for not preventing symlink creation",
      "tests/intent_540.md", "no structural way to deny it", "**NO8."),
@@ -562,5 +485,3 @@ FALSIFIED_STATEMENTS = (
     ("the sandbox design's Network-isolation reasoning",
      "docs/runtime-sandbox-design.md", "does **not** honor the OCI", "Network isolation"),
 )
-
-

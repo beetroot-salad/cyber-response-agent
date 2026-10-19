@@ -35,9 +35,6 @@ def _repo(tmp_path: Path) -> Path:
     fourteen sites under five different placeholder identities."""
     repo = tmp_path / "repo"
     (repo / _provenance.CODE_SCOPE).mkdir(parents=True)
-    # SEEDED INSIDE THE SCOPE `dirty` speaks for. A file at the repo root would be invisible to
-    # every dirt arm below now that the bit is scoped to the code the box mounts, and the arms
-    # would pass while measuring nothing.
     (repo / SEED).write_text("seed\n", encoding="utf-8")
     return seed_repo(repo)
 
@@ -84,9 +81,6 @@ def test_the_path_sample_is_capped_but_the_count_is_not(tmp_path):
 
 
 def test_a_tree_git_cannot_answer_for_records_unknown_not_clean(tmp_path):
-    """THE ONE ERROR THIS RECORD MUST NOT MAKE. A directory that is not a repository has no
-    sha, and `dirty` stays `None` — collapsing it to `False` would file an unknown as a clean
-    bill of health, which every downstream consumer reads as "the sha names the bytes"."""
     plain = tmp_path / "not-a-repo"
     plain.mkdir()
     prov = _provenance.capture_tree(plain)
@@ -191,9 +185,6 @@ def test_a_git_that_cannot_be_EXECUTED_is_recorded_rather_than_raised(tmp_path, 
 
 
 def test_a_stamp_that_is_a_planted_link_reads_as_no_stamp(tmp_path):
-    """The read-side twin of the refusal `write` already makes. This file sits in the box's rw
-    bind, so an entry at its name may be a link the model planted — and following it would hand
-    back whatever it points at AS this run's record of what it ran against."""
     real = tmp_path / "elsewhere.json"
     _provenance.write(real, RunProvenance(commit="b" * 40, dirty=False))
     planted = tmp_path / PROVENANCE
@@ -202,9 +193,6 @@ def test_a_stamp_that_is_a_planted_link_reads_as_no_stamp(tmp_path):
 
 
 def test_a_deeply_nested_payload_reads_as_no_stamp(tmp_path):
-    """`json.loads` raises `RecursionError` on deep nesting, and it is not a `ValueError` — the
-    omission `learning/branch/capture.py` already paid for once, where one such row escaped
-    every frame and killed the episode."""
     path = tmp_path / PROVENANCE
     path.write_text("[" * 200_000 + "]" * 200_000, encoding="utf-8")
     assert _provenance.read(path) is None
@@ -216,15 +204,7 @@ def test_a_deeply_nested_payload_reads_as_no_stamp(tmp_path):
         {},
         {"commit": None, "dirty": None},
         {"commit": None, "dirty": False},
-        # `dirty is True` with no sha is no more producible than `dirty is False` with none —
-        # the guard is the RULE ("no answer about the dirt without a commit behind it"), not
-        # the one shape of it that is scariest. Admitting this one also printed an announce
-        # line reading `commit=unavailable (None)`.
         {"commit": None, "dirty": True},
-        # `isinstance("", str)` is True, so an EMPTY sha walks past a `commit is None` guard
-        # and lands as the clean bill of health with nothing behind it — the identical error,
-        # spelled with a string instead of a null, and `[run.py] commit=` on the operator's
-        # line.
         {"commit": "", "dirty": False},
         {"commit": "", "dirty": None},
     ],
@@ -310,9 +290,6 @@ def test_dirt_inside_the_mounted_code_still_counts(tmp_path):
 
 
 def test_the_build_stamp_answers_when_git_cannot(tmp_path, monkeypatch):
-    """The shipped runtime image carries neither git nor repository metadata, so without this
-    every containerised run files `unavailable` while carrying a file that LOOKS like the drift
-    problem was solved."""
     plain = tmp_path / "no-repo"
     plain.mkdir()
     monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
@@ -334,17 +311,11 @@ def test_a_live_sha_is_never_replaced_by_a_stale_baked_one(tmp_path):
 
 
 def test_a_read_refuses_a_hard_link_the_write_would_refuse(tmp_path):
-    """The two guards are twins by CONSTRUCTION now, not by a comment. The old screen was an
-    `S_ISREG` lstat, which accepts a hard link — the one alias shape `O_NOFOLLOW` cannot
-    refuse, and therefore the one the write side goes out of its way to catch."""
     real = tmp_path / "real.json"
     _provenance.write(real, RunProvenance(commit="a" * 40, dirty=False))
     link = tmp_path / "provenance.json"
     os.link(real, link)
     assert _provenance.read(link) is None, "a hard-linked stamp was read as this run's own"
-    # EMLINK, not ELOOP: `_io._refuse_unless_plain` distinguishes the two alias shapes by
-    # errno because `O_NOFOLLOW` never fires for a hard link, so ELOOP would name a cause a
-    # hard-link plant cannot produce.
     with pytest.raises(OSError, match="aliased entry"):
         _provenance.write(link, RunProvenance(commit="b" * 40, dirty=False))
 
@@ -363,9 +334,6 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     (runs / run_id).mkdir(parents=True)
     (runs / run_id / PROVENANCE).mkdir()
 
-    # A directory holding nothing but setup's own names is an interrupted setup: resumed, and
-    # the stamp's obstruction is met by the guarded write, which refuses it loudly and lets the
-    # run continue unstamped.
     assert run_common.materialize_run(
         alert, run_id, tenant=tenant).run_dir == runs / run_id
     assert "could not stamp" in capsys.readouterr().err
@@ -385,9 +353,6 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     rec = _provenance.read(RunPaths(run_dir).provenance)
     assert rec is not None
     assert rec.commit is not None or rec.unavailable is not None
-    # "No seam" is a fact about the signature, pinned as one: a `provenance=` keyword is the
-    # hoisted-capture path this change removed, and it is refused rather than accepted and
-    # ignored. Refused BEFORE the run dir exists, so the id is not burned by the attempt.
     handed = RunProvenance(commit="e" * 40, dirty=False, scope=_provenance.CODE_SCOPE)
     with pytest.raises(TypeError):
         run_common.materialize_run(
@@ -397,14 +362,6 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
 
 # The coherence rules as a CONSTRUCTOR invariant, not a parser habit.
 
-#: Every shape no capture can produce, as `description -> (kwargs, the refusal that must fire)`.
-#: Spelled as data so the two halves below — "nothing may construct one" and "the parser
-#: refuses one off disk" — are provably the SAME set rather than two lists that agree today.
-#:
-#: The expected refusal is pinned per shape rather than left as a bare `ValueError`, and that
-#: is load-bearing: several rules would refuse several of these, so without it a rule could
-#: quietly stop firing while another one caught its cases and the arm stayed green — the same
-#: "green while measuring nothing" this change's review already found once.
 IMPOSSIBLE = {
     "says nothing at all": (
         {"commit": None, "dirty": None}, "says nothing"),

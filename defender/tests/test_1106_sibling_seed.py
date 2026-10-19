@@ -54,18 +54,9 @@ def _child_data_root(launch: dict[str, Any]) -> Path:
     return Path(launch["env"][DATA_ROOT_ENV])
 
 
-#: #1120: the two argv-surface cases (`run.py` and the branch launcher each accepting a tenants
-#: root flag) are RETIRED — tenants are found under `DEFENDER_DATA_ROOT` only, so neither
-#: process takes a root on its command line. The hand-off they guarded is the env the child is
-#: spawned with, pinned by `_child_data_root` below.
-
-
 # ---- start_family: the seed and the hand-off ----------------------------------------------------
 
 def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path):
-    """#1105 PR 2: the episode tenant's record is seeded through the episode's view
-    (`EpisodeRuns.create_container`) — the launcher's step just before `start_family`, which no
-    longer makes the container — and every child is started over it."""
     from defender.tests.tenant_1105_run_repository import _spec1105 as H1105
 
     cli = T.mod("learning.branch.cli")
@@ -89,9 +80,6 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
 
 @pytest.mark.parametrize("tenant_id", [None, "Not A Tenant"])
 def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_path, tenant_id):
-    """A family with no tenant, or an id no tenant can have, gets no fallback — there is no
-    default tenant (#1078). Nothing is spawned and no record is minted (a minted record would
-    be the fallback, just written down)."""
     cli = T.mod("learning.branch.cli")
     ep = tmp_path / "episode"
     ep.mkdir()
@@ -187,9 +175,6 @@ def _knowledgeless_source(tmp_path: Path, tenant_id: str) -> Path:
 @pytest.mark.parametrize("stamp_tenant", [None, "default"])
 def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sibling(
         tmp_path, capsys, stamp_tenant):
-    """The negative on the same launch: only the source stamp's tenant differs from the
-    positive above, and no sibling starts and no tenant record is minted for the episode.
-    (`default` is a row in the data root with no knowledge folder, as it was before #1120.)"""
     src = None if stamp_tenant is None else _knowledgeless_source(tmp_path, stamp_tenant)
     _episode_tenant(current_data_root())
     outcome, spawn = _launch(tmp_path, stamp_tenant=stamp_tenant, source=src)
@@ -205,12 +190,6 @@ def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sib
 # ---- O2/O6 on the branching lane: the launcher reads the INJECTED episode tenant ------------------
 
 def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(tmp_path):
-    """The episode tenant, under an injected root, grants gather systems the checkout's
-    playground does not have (`_spec1224`'s estate: `edr`, `idp`, `siem-x`). The manifest the
-    launcher writes records THEM as `served_systems` — the set every sibling, the judge and the
-    question-writer re-read (#1224 M20/M21, which replaced the corpus patterns this file once
-    pinned) — and pre-flight's reads reach the episode tenant's estate. The episode still runs
-    (the positive control: siblings start)."""
     checkout = T.fixture_run_tenant().grants.gather
     outcome, spawn, est = _estate_launch(tmp_path)
     assert spawn.launches, f"no sibling was started: {outcome!r}"
@@ -225,10 +204,6 @@ def test_the_launcher_judges_and_records_the_episode_tenants_own_served_systems(
 
 def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any_sibling(
         tmp_path, capsys):
-    """The stamp is in the box's writable run dir; a model can rewrite its `tenant_id`. Both
-    tenants exist, the record says `acme`, the stamp says `bravo`: refused, naming both and the
-    record, before a sibling starts — never a family staged into bravo's estate. The control is
-    `test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant` (the two agree)."""
     root = current_data_root()
     _episode_tenant(root)
     T.place_tenant(root, "bravo", configs=S.config_texts(
@@ -243,10 +218,6 @@ def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any
 
 def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_questioner(
         tmp_path, capsys):
-    """The launcher applies the run start's content rules to the episode's tenant: a table
-    that loads but grants gather only `health-check` is refused before the questioner is paid,
-    pre-flight replays or any sibling starts — not by every sibling afterwards. The control is
-    `test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant`."""
     T.place_tenant(current_data_root(), "acme", table=(
         "dispositions:\n"
         "  cmdb:\n"
@@ -281,15 +252,6 @@ _ELASTIC_FOR_GATHER = """\
 
 
 def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path):
-    """`run.py --episode` builds a `WorldRegistry` rather than the production registry, and it
-    must be built over the RUN's `grants.gather` — the parity the ordinary arm already pins
-    (`e2e/test_1106_run_start.py`). One process drives the world arm for two tenants whose
-    tables differ; each registry holds exactly its own tenant's pairs, grants a pair only its
-    tenant holds and refuses the other's, and points its refusals at the table by its name.
-
-    #1255 O3 (owner decision 2026-10-16, as `test_1106_run_grants`' denied-verb test): the
-    model-facing pointer names no tenant — two tenants' arms are told the same words — and,
-    as before, never the host path to the table."""
     run = T.mod("run")
     base, src = P.runs_base(tmp_path)
     ep = P.episode(tmp_path, doc=P.family_doc(source_run_dir=str(src)))

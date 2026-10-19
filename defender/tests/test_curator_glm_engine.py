@@ -1,39 +1,3 @@
-"""Hermetic spec for the in-process PydanticAI curator engine (no API key, no network).
-
-The four lesson curators (A findings/lessons, B actor-tradecraft, C env-benign,
-D env-adversarial) are ported off ``claude -p`` onto the shared ``_pydantic_stage``
-transport, mirroring the lead-author port (#543). Their two invoke seams
-(``lessons.run.invoke_agent`` for A, ``curator.invoke_curator_agent`` for B/C/D) are
-rewritten to call a new ``curator_engine.run_curator_stage`` wrapper. These tests drive
-the REAL wrapper (key-sourcing order + fault mapping + the relocated ``AUTHOR_RESULT``
-parse), with a ``FunctionModel`` injected through the transport's ``make_model`` DI seam
-under ``override_allow_model_requests(False)`` so any real provider call raises, and with
-the ``source_key`` / ``run_author`` DI seams injected as kwargs (never ``monkeypatch``).
-
-Pins the port's load-bearing decisions:
-
-- ``run_curator_stage`` returns the PARSED ``AUTHOR_RESULT`` dict (not run_stage's text) —
-  the marker parse relocated out of the retired ``claude -p`` transport into the wrapper,
-  balanced-brace walk from the LAST marker; missing marker / bad JSON → ``AuthorError``.
-- The KEPT transaction-envelope guards (empty commit message, the ``commit_corpus`` trailer
-  refusal, the result-partition type validation) still reject the dict the new in-process
-  parse produces.
-- ``require_output=True`` (the OPPOSITE of the lead author's ``False``): an empty final —
-  GLM burned its budget in the thinking channel — becomes ``RunUnprocessable`` BEFORE any
-  parse, never a silent empty commit, because the curator's final text carries the
-  load-bearing marker.
-- Fault split: a per-run ``RunUnprocessable`` maps to ``AuthorError`` (→ rc 2, retry); a
-  systemic ``FatalConfigError`` / ``StageAbort`` PROPAGATES (exit 2, never wrapped).
-- The metered key is sourced BEFORE the spawn (the drain strips provider keys); the trace
-  anchor (batch_id + pid) is established before the spawn too — both hold.
-- The model/effort defaults flip to glm-5.2 @ low, the documented claude-* @ low A/B still
-  builds, and a NEW generous per-curator request cap (default 250) is threaded.
-
-NOTE (seams assumed beyond the tight contract): ``_run_curator_pydantic`` — the module
-default of ``run_author``, the mirror of ``lead_author_engine._run_lead_author_pydantic`` — is
-imported LOCALLY inside only the two tests that need the genuine in-process transport, so a
-naming divergence in the impl fails only those two rather than the whole binding suite.
-"""
 from __future__ import annotations
 
 import logging
@@ -121,9 +85,6 @@ def _stage(tmp_path: Path, *, wiring: StageWiring | None = None, **over):
 
 
 def test_return_contract_returns_parsed_dict_not_text(tmp_path):
-    """The ported invoke seam returns the ``AUTHOR_RESULT`` dict — committed:[bare-id-strings],
-    consumed_skip:[{id,reason}], commit_message:str — parsed out of run_stage's returned TEXT.
-    The DICT (not run_stage's text) is the whole output the envelope consumes."""
     text = (
         "the agent authored, then:\n"
         'AUTHOR_RESULT: {"committed": ["obs-1"], '
@@ -141,9 +102,6 @@ def test_return_contract_returns_parsed_dict_not_text(tmp_path):
 
 
 def test_marker_parse_from_last_occurrence_balanced_and_faults(tmp_path):
-    """run_curator_stage parses AUTHOR_RESULT out of the returned text via the balanced-brace walk
-    from the LAST marker occurrence (an earlier decoy marker is ignored; braces inside a JSON
-    string are not miscounted)."""
     text = (
         'AUTHOR_RESULT: {"committed": ["decoy"], "consumed_skip": [], "commit_message": "old"}\n'
         "the agent revised and re-emitted:\n"
@@ -169,9 +127,6 @@ def test_content_less_curator_text_is_no_edits_not_a_missing_marker(tmp_path):
 
 
 def test_marker_empty_commit_message_rejected(tmp_path):
-    """A parsed result with non-empty committed but a whitespace-only commit_message trips the
-    KEPT envelope guard (_commit_message) → AuthorError; never a silent empty-message commit.
-    Positive control: a real message is accepted."""
     result = _stage(
         tmp_path,
         run_author=lambda *a, **kw: (
@@ -190,9 +145,6 @@ def test_marker_empty_commit_message_rejected(tmp_path):
 
 
 def test_marker_commit_message_with_trailer_rejected(tmp_path):
-    """A commit_message that already carries a ``Generation:``/trailer key is rejected by
-    commit_corpus's trailer guard as AuthorError — model-authored text cannot smuggle a
-    provenance trailer the loop owns."""
     result = _stage(
         tmp_path,
         run_author=lambda *a, **kw: (
@@ -216,9 +168,6 @@ def test_marker_commit_message_with_trailer_rejected(tmp_path):
 
 
 def test_marker_malformed_result_types_rejected(tmp_path):
-    """A structurally-wrong AUTHOR_RESULT — committed not a list, an empty-string committed id, a
-    consumed_skip entry that is a bare string rather than an {id, reason} object — is rejected by
-    the KEPT partition validator → AuthorError (never a silent bad/partial commit)."""
     to_author = [{"observation_id": "obs-1"}]
 
     def _parsed(body: str) -> dict:
@@ -240,9 +189,6 @@ def test_marker_malformed_result_types_rejected(tmp_path):
 
 
 def test_inproc_transport_runs_run_stage_and_writes_trace(tmp_path):
-    """Each curator drives the LLM through run_curator_stage → the in-process run_stage
-    (PydanticAI), not a ``claude -p`` subprocess: a RequestLogger trace lands in the run dir and
-    the wrapper returns the dict parsed from that in-process run's final text."""
     from defender.learning.author.curator_engine import _run_curator_pydantic
 
     rd = _run_dir(tmp_path)
@@ -254,12 +200,6 @@ def test_inproc_transport_runs_run_stage_and_writes_trace(tmp_path):
     with override_allow_model_requests(False):
         out = _stage(tmp_path, run_author=_inproc, learning_run_dir=rd)
     assert out["committed"] == []
-    # The trace lands under `wire_logs/` (`observe.stage_trace_path`), so the walk has to be the
-    # tree and not the root — a root-only `iterdir` would find nothing and this test would go
-    # green against a stage that wrote no trace at all. Scoped to the TRACE files rather than
-    # to every file in the tree: this case is about where the wire log lands, and a blanket
-    # `all(... in p.parts)` over `rglob("*")` would also fail the day the stage writes a
-    # legitimate artifact of its own into that root, for a reason it has nothing to say about.
     traces = [p for p in rd.rglob("*.jsonl") if p.is_file()]
     assert traces, "the stage wrote no trace at all"
     assert all(WIRE_LOG_DIR in p.parts for p in traces), (
@@ -269,10 +209,6 @@ def test_inproc_transport_runs_run_stage_and_writes_trace(tmp_path):
 
 
 def test_require_output_true_quarantines_empty_final(tmp_path):
-    """The curator transport runs run_stage with require_output=True, so a CONTENT-LESS final
-    (whitespace — the observable content-less case; a truly-empty '' is rejected by pydantic-ai
-    before the guard) raises RunUnprocessable BEFORE any AUTHOR_RESULT parse — never a silent
-    empty commit."""
     from defender.learning.author.curator_engine import _run_curator_pydantic
 
     ctx = StageContext(
@@ -302,9 +238,6 @@ def test_require_output_true_quarantines_empty_final(tmp_path):
 
 
 def test_perrun_run_unprocessable_wrapped_as_author_error(tmp_path):
-    """A per-run authoring fault surfaced by the transport as RunUnprocessable (timeout /
-    usage-limit / model error / empty final) is wrapped as AuthorError so run_batch returns rc 2
-    and the drain keeps the queue intact for retry. The wrap is RunUnprocessable-ONLY."""
     def _boom(*a, **kw):
         raise RunUnprocessable("model timed out")
     with pytest.raises(AuthorError):
@@ -312,10 +245,6 @@ def test_perrun_run_unprocessable_wrapped_as_author_error(tmp_path):
 
 
 def test_systemic_faults_propagate_uncaught(tmp_path):
-    """A systemic FatalConfigError (unroutable model / missing key from source_key, or a build
-    ValueError surfaced by run_stage as FatalConfigError) or a StageAbort ESCAPES
-    run_curator_stage uncaught — a deployment-wide misconfig fails once, loudly, and is never
-    wrapped into an rc-2 retry loop (the wrap is RunUnprocessable/parse-error only)."""
     def _boom_key(model, label=None):
         raise FatalConfigError("needs FIREWORKS_API_KEY")
     with pytest.raises(FatalConfigError):
@@ -354,9 +283,6 @@ def test_key_sourced_before_spawn(tmp_path):
 
 
 def test_trace_anchor_established_before_spawn(tmp_path):
-    """The trace anchor (batch_id + pid) is established before the agent spawn and handed to the
-    transport, so a partial failure still leaves a complete, locatable, per-batch-distinct trace
-    (a distinct concern from key ordering — both hold)."""
     rd = _run_dir(tmp_path)
     seen: list[str] = []
 
@@ -397,5 +323,3 @@ def test_stage_refuses_a_wiring_that_did_not_come_from_for_batch(tmp_path, caplo
     caplog.clear()
     _stage(tmp_path, wiring=from_builder, log=logging.getLogger("defender.test"))
     assert any("batch-Z" in line for line in caplog.messages)
-
-

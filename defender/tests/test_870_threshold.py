@@ -53,19 +53,6 @@ def _tick(paths) -> Spawn:
 
 
 def test_the_threshold_gates_on_a_records_own_occurrences(scene, monkeypatch):
-    """Three `∅.bash-shim` rows sharing one `stderr_digest` merge to ONE record with
-    `occurrences=3` (C8/C17, executed), and at `threshold=3` that single record DOES trip the
-    tick gate and DOES wake the drain.
-
-    Normalizing `system` to `""` merges what attribution used to split, which moves the count
-    both threshold readers see. What FK-3 changes is WHAT is gated: a `system == ""` record is
-    measured by its own `occurrences`, not by the number of distinct merged records.
-
-    REJECTED — gating on the COUNT of distinct merged records, the original #840-applied-
-    verbatim reading: under it this exact record is `len(merge_pitfalls(rows)) == 1`, forever
-    below 3, so the anti-correlation with evidence quality was the shipped behaviour. That
-    arithmetic is asserted here as the thing being left behind, not as the contract.
-    """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     _repo, paths = scene
     persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)], state=open_state(paths))
@@ -82,21 +69,6 @@ def test_the_threshold_gates_on_a_records_own_occurrences(scene, monkeypatch):
 
 
 def test_the_motivating_incident_reaches_the_curator_alone(scene, monkeypatch):
-    """The round's own motivating incident, reproduced: one lead, one unchanging
-    `Binder Error`, eight varied attempts — one merged record, `occurrences=8`. BOTH
-    `run_pitfalls`' tick and `drains._has_lead_author_work`' wake clear on this record ALONE,
-    with no second unrelated mistake required.
-
-    A deployment whose only pending work is this ONE diagnosed reducer mistake reaches the
-    curator and wakes the drain — reversing the unreachability FK-3 found under the old,
-    record-counting gate, where the lane could only ever fire by riding on ≥2 unrelated
-    distinct mistakes that happened to be in the same queue window.
-
-    The rows are produced by the REAL collector over eight real `ExecutedLead`s, so the
-    `occurrences` count is the lane's own arithmetic rather than a number this test wrote.
-    `threshold_counts_distinct_reducer_mistakes` is the positive control at the merge seam;
-    this demand is the same criterion observed end to end at both readers.
-    """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     _repo, paths = scene
     persist.append_pitfalls(
@@ -117,39 +89,6 @@ def test_the_motivating_incident_reaches_the_curator_alone(scene, monkeypatch):
 
 
 def test_silent_reducer_failures_alone_do_not_open_the_lane(scene, monkeypatch):
-    """Silent reducer failures never open the lane on their OWN EVIDENCE: no number of them
-    ever satisfies the criterion FK-3 adds.
-
-    PO-R2 (executed): a content-less digest — nothing but the `exit=N; ` envelope — keys to
-    `(system, "\\x00" + pitfall_id)`, unique per row, so every one merges to its own record and
-    the whole class is pinned at `occurrences: 1` forever. FK-3's new disjunct asks a
-    `system == ""` record for `occurrences >= threshold`, and 1 is never 3.
-
-    WHAT THIS DEMAND DOES NOT CLAIM, because FK-3 does not: the pre-existing DISTINCT-COUNT
-    gate is untouched, so N >= threshold content-less rows still trip it, exactly as they do on
-    main (PO-R2: 3 content-less rows -> 3 records -> gate cleared). FK-3 ADDS a disjunct; it
-    removes nothing, and a systemless record still counts. The wider encoding — a systemless
-    record leaving the count entirely — was REJECTED at phase F, because it would have raised
-    the SYSTEM lane's own bar as a side effect; that is
-    `the_system_lanes_arrival_condition_is_unchanged`'s demand, not this one's to decide.
-
-    So the drive is in two arms and the second discriminates. Below threshold the lane stays
-    shut at both readers. At and above it the lane opens — and this demand asserts WHICH ROUTE
-    opened it: every record still carries `occurrences == 1`, so the COUNT is what cleared and
-    the new disjunct provably did not fire. An implementation that summed occurrences over
-    systemless records, or opened on the mere presence of one, agrees with the correct one on
-    the count alone and fails here.
-
-    THE COMPOSITION THIS ROUND CREATES IS PINNED HERE TOO, because no other demand sees it: on
-    main such a batch produced ZERO handoffs (every systemless row failed the membership
-    filter) and graveyarded; after M6 it produces a reducer entry full of undiagnosable
-    failures, which `lead_pitfalls.md`'s "skip that failure; never invent one" rule turns into
-    a no-edit tick. FK-7 is what keeps that safe rather than lossy, and the last block drives
-    exactly that: the rows are HELD, neither consumed nor graveyarded.
-
-    `the_motivating_incident_reaches_the_curator_alone` is the positive control — one record
-    whose occurrences DO reach the threshold opens both readers with the count at 1.
-    """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     _repo, paths = scene
     below = [silent_shim_row(f"r:l-00{i}:0") for i in range(2)]
@@ -191,24 +130,6 @@ def test_silent_reducer_failures_alone_do_not_open_the_lane(scene, monkeypatch):
 
 
 def test_the_system_lane_still_curates_at_its_own_threshold(scene, monkeypatch):
-    """Two declared-system mistakes plus one reducer record clear a threshold of 3 and the
-    SYSTEM lane still curates — the arrival condition merged code already had, unchanged.
-
-    FK-3 is a decision about the REDUCER lane's reachability. Its resolution adds a disjunct
-    (`a system == "" record clears on its own occurrences`) and touches nothing else, so a
-    systemless record still contributes to the distinct count exactly as it does on main. The
-    encoding phase E first wrote was wider — a systemless record leaving the count — and it
-    would have raised the system lane's bar without anyone deciding to: this same queue clears
-    3 on main and teaches both system lessons, and under the wider reading it would curate
-    NOTHING until a third SYSTEM mistake arrived, with the two system rows waiting in the
-    queue for it.
-
-    That is the survival demand `merged_work_is_not_reopened` asks for in prose: O1/O2/O5/O6
-    and M1-M4 are merged and are not re-implemented here, and where merged behaviour is
-    re-asserted it is because a branch now sits in front of it — never because this round
-    quietly moved it. Both readers are driven, because the wake gate is the one that would
-    strand the batch before the tick ever ran.
-    """
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "3")
     repo, paths = scene
     persist.append_pitfalls(
@@ -242,5 +163,3 @@ def test_the_system_lane_still_curates_at_its_own_threshold(scene, monkeypatch):
 
 
 # The other two readers of the same moved count.
-
-

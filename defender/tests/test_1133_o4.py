@@ -1,6 +1,3 @@
-"""#1133 O4: declared behaviour tightenings through the real migrated entry points (prime_base, Ledger,
-prepare_episode's claim, the judge's draw removal, draws_on_disk, grade/render on a missing episode,
-the --resume door). Plants are real filesystem entries; each negative has a positive control."""
 from __future__ import annotations
 
 from defender.run_repository import Run
@@ -50,10 +47,6 @@ def bare_episode(tmp_path: Path) -> tuple[Path, Path]:
     return ep, host
 
 
-# =======================================================================================
-# O4.3 / O4.8.3 — the primed base takes the Episode; the create is the check
-# =======================================================================================
-
 def _source_with_one_call(tmp_path: Path) -> Path:
     run_dir = source_run(tmp_path)
     append_call(run_dir, call_row("l-001", 0, "cmdb", "get-host", {"host": "canary-1"}),
@@ -63,15 +56,6 @@ def _source_with_one_call(tmp_path: Path) -> Path:
 
 def test_o4_3_prime_base_refuses_a_linked_served_folder_and_writes_nothing_where_it_points(
         tmp_path):
-    """`prime_base(source_run_dir, episode)` writes the base with `served_base.create(rows)`,
-    whose walk never follows a link at `served/`. A direct caller (no `served.ensure()` first)
-    reaches the core's FOLDER refusal there (R2): a plain `OSError(ELOOP)`, raised as is — not
-    the leaf class `NotPlainEntry` and not the "already holds a primed base" `LedgerError` (the
-    listing of a linked `served/` is refused, so the create judges it) — and the folder the link
-    points at gains no `base.jsonl`.
-
-    Control on the same address: a real `served/` takes the whole capture as one plain,
-    single-linked file; a second prime is the "already primed" `LedgerError`, base untouched."""
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     run_dir = _source_with_one_call(tmp_path)
@@ -106,11 +90,6 @@ def test_o4_3_prime_base_refuses_a_linked_served_folder_and_writes_nothing_where
 @pytest.mark.parametrize("kind", ["plain", "symlink", "dangling", "hardlink", "fifo",
                                   "directory"])
 def test_o4_8_3_anything_at_the_base_is_the_one_already_primed_refusal(tmp_path, kind):
-    """O4.8.3 / R3: anything named `base.jsonl` in `served/` — a plain file, a link (live or
-    dangling) or any non-plain entry (a hard link, a FIFO, a directory) — is the same "already
-    holds a primed base" `LedgerError`, and the entry is left exactly as it was — nothing
-    written through it, no dangling target made, no blocking on the FIFO. (That the capture is
-    not read first, and the base not read at all, is `test_1133_rev3.py`'s.)"""
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
     run_dir = _source_with_one_call(tmp_path)
@@ -132,10 +111,6 @@ def test_o4_8_3_anything_at_the_base_is_the_one_already_primed_refusal(tmp_path,
     assert S.census(tmp_path) == before, f"priming over a {kind} changed the tree"
 
 
-# =======================================================================================
-# O4.4 / O4.8.1 — the replay ledger takes the Episode
-# =======================================================================================
-
 def _ledger_episode(tmp_path: Path) -> tuple[Path, Path]:
     ep, host = bare_episode(tmp_path)
     (ep / "served").mkdir()
@@ -151,10 +126,6 @@ def _call(ledger: Any, world_id: str = TOKEN) -> Any:
 
 @pytest.mark.parametrize("kind", ["dangling", "symlink", "hardlink", "fifo"])
 def test_o4_4_a_plant_at_the_world_ledger_refuses_declare_and_record(tmp_path, kind):
-    """`Ledger.for_world(episode, token)`'s `declare()` and `record()` append through the
-    episode's `served_world(token)` record: a plant at `served/<token>.jsonl` is refused in the
-    core's row and left in place. Control on the same address: the plant removed, `declare()`
-    creates the file empty and `record()` appends the row."""
     ledger = T.mod("learning.branch.ledger")
     ep, host = _ledger_episode(tmp_path)
     world_file = ep / "served" / f"{TOKEN}.jsonl"
@@ -213,14 +184,6 @@ def test_o4_4_a_linked_served_folder_refuses_the_world_ledgers_declare(tmp_path)
     pytest.param("E1133.b", id="head-not-case-stable"),
 ])
 def test_o4_8_1_a_bad_world_id_is_a_ledger_error_at_construction(tmp_path, world_id):
-    """O4.8.1: `Ledger.for_world(episode, world_id)` builds its `served_world` record at
-    construction, so a bad id — not one component, not case-stable (the owner's minting
-    check, mapped to `LedgerError`), or naming the family's own capture — is a `LedgerError`
-    from `for_world` itself, before anything is written. The check is the OWNER's, whole: an id
-    a hand-rolled "one component, case-stable label" test would pass but the owner's component
-    grammar refuses (a newline, a NUL, a name longer than a file name may be) is refused at
-    construction too, not left for the first write. Control on the same episode: a good token
-    builds, its `.path` / `.base_path` derive from the episode, and it declares."""
     ledger = T.mod("learning.branch.ledger")
     ep, _host = _ledger_episode(tmp_path)
     with S.open_episode(ep) as episode:
@@ -235,10 +198,6 @@ def test_o4_8_1_a_bad_world_id_is_a_ledger_error_at_construction(tmp_path, world
         book.declare()
     assert (ep / "served" / f"{TOKEN}.jsonl").read_bytes() == b""
 
-
-# =======================================================================================
-# O4.5 — the priming claim; prepare_episode returns the Episode
-# =======================================================================================
 
 class Primed:
     """`prepare_episode`'s `prime=` seam, `(source_run_dir, episode)`: records what it was
@@ -268,11 +227,6 @@ def _prime_setup(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
 
 def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released(
         tmp_path, roots):
-    """`prepare_episode` creates the episode (`Episode.create`), claims with
-    `priming_lock.create("")` — a plain, single-linked regular file of mode 0644 while the
-    primer runs — hands the primer the source run and THE SAME `Episode` it returns, releases
-    the claim, and returns that `Episode` still open (it holds the episode dir until the
-    caller's `with` ends)."""
     cli, src, tenant, ep = _prime_setup(tmp_path)
     prime = Primed()
     with umask(0o022):
@@ -293,11 +247,6 @@ def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released
 @pytest.mark.parametrize("kind", ["plain", "symlink", "dangling", "hardlink"])
 def test_o4_5_an_occupied_or_aliased_claim_is_the_same_ledger_error_and_primes_nothing(
         tmp_path, roots, kind):
-    """An occupied claim (a plain file: another launcher) and an alias at the claim are the one
-    `LedgerError` naming another launcher; the primer never runs and the claim is left exactly
-    as it was. Driven through `_prime_once` on an `Episode` held over the planted directory:
-    since #1224 `prepare_episode` never adopts an existing directory (a taken name mints
-    `-r<n>`), so only the claim stands between two primers of one episode."""
     cli, src, _tenant, ep = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
@@ -367,10 +316,6 @@ def _swap_claim(kind: str, claim: Path, host: Path) -> Any:
                                   "served-link"])
 def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_exception(
         tmp_path, roots, caplog, kind):
-    """The claim's `delete()` in `prepare_episode`'s `finally` suppresses EVERY refusal it can
-    raise: the primer swaps the claim for a plant and fails; the refusal is logged, the
-    primer's own exception propagates, the plant is left as planted, and the episode is closed
-    before the exception leaves `prepare_episode`."""
     cli, src, tenant, ep = _prime_setup(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
@@ -391,9 +336,6 @@ def test_o4_5_a_claim_release_refused_in_finally_never_masks_the_primers_excepti
 
 def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
         tmp_path, roots, caplog):
-    """The primer swaps the claim for a symlink to a host file and succeeds: the release in
-    `finally` refuses the link (marked) and leaves it for the reap scan; the refusal is logged
-    and suppressed, so priming still returns the episode. The link's target is untouched."""
     cli, src, tenant, ep = _prime_setup(tmp_path)
     target = tmp_path / "host-claim-target"
     target.write_bytes(S.HOST_BYTES)
@@ -411,10 +353,6 @@ def test_o4_5_a_link_planted_at_the_claim_is_left_in_place_by_its_release(
     assert target.read_bytes() == S.HOST_BYTES
     assert S.warned(caplog, ".priming", "aliased"), "the refused release was not logged"
 
-
-# =======================================================================================
-# O4.6 / S1 — the judge's draw removal
-# =======================================================================================
 
 class ScriptedJudge:
     """The judge seam (`judge=`): `by_agent[agent_id]` or `default`, recording each call."""
@@ -453,11 +391,6 @@ def _judged_episode(tmp_path: Path) -> Path:
 @pytest.mark.parametrize("target", ["inside", "outside"])
 def test_o4_6_a_link_at_a_malformed_draws_name_is_refused_logged_and_left_and_the_loop_goes_on(
         tmp_path, roots, caplog, target):
-    """A malformed reply removes this index's draw file (`world.draw(n).delete()`). A symlink
-    planted at `worlds/b/judge/0.yaml` is refused and LEFT; the refusal is contained — logged,
-    and the loop continues: draw 1 is written, the pass completes with the malformed draw
-    counted, the link's target untouched. A later disk read (`draws_on_disk_report(view, "b")`)
-    counts that name unreadable and reads only draw 1."""
     enqueue = J.mod("learning.judge.enqueue")
     ep = _judged_episode(tmp_path)
     draw_dir = ep / "worlds" / "b" / "judge"
@@ -520,15 +453,6 @@ def _stale_draw(ep: Path) -> Path:
                          ids=["EACCES", "EPERM", "EROFS", "EIO", "ENOTDIR"])
 def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothing_silently(
         tmp_path, code):
-    """S1: only the core's non-plain refusal at the draw's name (rev 3: the leaf class
-    `NotPlainEntry`) is contained. Any other `OSError`
-    from removing a stale plain draw — the design's EACCES, EPERM and EROFS, and equally an EIO
-    or an ENOTDIR, which its parenthetical does not list — injected through the `Episode`'s
-    `io=` seam (the held root's `unlink` of `worlds/b/judge/0.yaml` raises it) propagates out of
-    the draw loop and stops it: draw 1 is never paid for, and the stale draw is still there for
-    the operator to see (it was never silently kept as this pass's).
-
-    Control on the same address, no fault: the stale draw is removed and the loop goes on."""
     ep = _judged_episode(tmp_path)
     draw = _stale_draw(ep)
     rel = LAYOUT.world("b").draw(0)
@@ -559,9 +483,6 @@ def test_s1_any_other_error_removing_a_stale_draw_stops_the_pass_and_keeps_nothi
 
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo", "directory"])
 def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind):
-    """The contained rows, through the same loop: a symlink or a FIFO or a directory at the
-    malformed draw's name (the core's leaf refusal, ELOOP) or a hard link (EMLINK) is refused,
-    logged, and left for the reap scan, and the loop goes on to draw 1."""
     ep = _judged_episode(tmp_path)
     draw = ep / "worlds" / "b" / "judge" / "0.yaml"
     host = tmp_path / "host"
@@ -580,16 +501,7 @@ def test_s1_a_non_plain_draw_is_contained_logged_and_left(tmp_path, caplog, kind
     assert S.warned(caplog, "0.yaml"), "the refused removal was not logged"
 
 
-# =======================================================================================
-# D3' — the draw reader takes a view and a label
-# =======================================================================================
-
 def test_d3_draws_on_disk_report_counts_every_yaml_entry_of_any_kind(tmp_path):
-    """`draws_on_disk_report(view, label)` reads `view.under(worlds/<label>/judge)`: every entry
-    whose name ends in `.yaml`, of any kind, is considered. A non-file entry (a symlink, a
-    directory, a FIFO) and a hard link count as `unreadable`, as does a non-digit stem; a
-    non-canonical stem (`01.yaml`) is `skipped`; only the plain `0.yaml` is read.
-    `draws_on_disk(view, label)` answers the same draws. The same through `episode.view()`."""
     enqueue = J.mod("learning.judge.enqueue")
     ep = tmp_path / "episodes" / EPISODE_ID
     draw_dir = ep / "worlds" / "b" / "judge"
@@ -616,11 +528,6 @@ def test_d3_draws_on_disk_report_counts_every_yaml_entry_of_any_kind(tmp_path):
 
 @pytest.mark.parametrize("at", ["worlds", "worlds/b", "worlds/b/judge"])
 def test_d3_a_link_at_worlds_or_the_world_or_its_draws_folder_yields_no_draws(tmp_path, at):
-    """C13's exploit: the draw reader walks from the episode root without following, so a link
-    at `worlds/`, `worlds/b` or `worlds/b/judge` — each pointing at a real folder holding a
-    draw (for `worlds/b`, the sibling world `worlds/c`, so `b` would read `c`'s draws) — yields
-    NO draws under `b`. Controls on the same episode: `c`'s own draws read as `c`'s, and with
-    the link replaced by a real folder holding a draw, `b` reads it."""
     enqueue = J.mod("learning.judge.enqueue")
     ep = tmp_path / "episodes" / EPISODE_ID
     ep.mkdir(parents=True)
@@ -656,19 +563,9 @@ def test_d3_a_link_at_worlds_or_the_world_or_its_draws_folder_yields_no_draws(tm
         assert enqueue.draws_on_disk(view, "b") == {0: {"findings": [{"bucket": "b-own"}]}}
 
 
-# =======================================================================================
-# O4.8.2 — the path doors refuse a missing episode dir and never recreate it
-# =======================================================================================
-
 @pytest.mark.parametrize("kind", ["missing", "missing-parent", "file"])
 def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreate_it(
         tmp_path, roots, kind):
-    """`grade_episode(runs, episode_id, ...)` opens the episode at its door, by id through the
-    tenant's repository (`runs.episode_files`, #1105 PR 2; `J.grade_at` names `ep`'s id under
-    the episodes root `ep.parent`): a missing dir (or a missing episodes root, or a file at the
-    name) is `JudgeRefused`, and nothing is created — rev 1 wrote a not-graded stamp and so
-    recreated the dir (C14). Control: an existing episode that is not `accepted` is graded
-    not-graded, its stamp written inside it."""
     judge_mod = J.mod("learning.judge")
     ep = tmp_path / "episodes" / EPISODE_ID
     if kind != "missing-parent":
@@ -690,11 +587,6 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
 @pytest.mark.parametrize("kind", ["missing", "missing-parent"])
 def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recreate_it(
         tmp_path, kind):
-    """`render_episode(runs, episode_id)` keeps raising `JudgeRefused` for a missing episode
-    (its door, `runs.episode`, converts the open's `FileNotFoundError`), and creates nothing —
-    neither the episode nor a missing episodes base. Control: an existing episode's page is
-    written inside it. (#1105 PR 2, declared change 4: the door takes the tenant's repository
-    and an id under the configured episodes base, no longer a folder.)"""
     page = T.mod("scripts.visualize.visualize_episode")
     runs = T.current_tenant().runs_repository()
     ep = tmp_path / "episodes" / EPISODE_ID
@@ -711,10 +603,6 @@ def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recrea
     assert Path(written) == control / "learning.html"
     assert (control / "learning.html").is_file()
 
-
-# =======================================================================================
-# The sibling door — run.py --episode refuses an id outside the episode-id grammar
-# =======================================================================================
 
 class Recorder:
     """`run.main`'s lifecycle seam: records that it ran and leaves a report, as a sibling does."""
@@ -756,15 +644,6 @@ def _sibling_episode(tmp_path: Path, monkeypatch: Any, src: Path) -> Path:
 @pytest.mark.parametrize("spelling", ["path", "case", "separator"])
 def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
         tmp_path, monkeypatch, spelling):
-    """`run.py --episode <episode_id>` is the sibling's door (#1105 PR 2: G18's manifest-name
-    rule is moot — the sibling names no manifest, only the episode's id): an `--episode` value
-    outside the episode-id grammar — a manifest's path, a spelling that is not case-stable, an
-    id with a separator — is refused, a `SystemExit` naming the refused value, before anything
-    is spent: no run dir is materialized and the lifecycle never runs, even though the episode
-    the value points at holds a valid manifest (so the refusal is about the id, not the
-    content).
-
-    Control on the same episode: its own id runs to completion."""
     run = T.mod("run")
     _base, src = T.runs_base(tmp_path)
     ep = _sibling_episode(tmp_path, monkeypatch, src)
@@ -795,10 +674,6 @@ def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
 
 def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(tmp_path,
                                                                               monkeypatch):
-    """`run.py --episode`'s door opens the episode once, around materialize -> lifecycle, and
-    that one handle serves the manifest read and the world ledger: while the lifecycle runs,
-    exactly one descriptor is open on the episode dir, and it is the `Episode` handed to the
-    lifecycle (its `.dir` the manifest's parent) — no second root held beside it by name."""
     run = T.mod("run")
     _base, src = T.runs_base(tmp_path)
     ep = _sibling_episode(tmp_path, monkeypatch, src)

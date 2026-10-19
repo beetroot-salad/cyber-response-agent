@@ -48,9 +48,6 @@ def _consultation_doc(row: str) -> str:
 
 
 def test_tacit_knowledge_authz_row_shape():
-    """The CELLS of a discharging `:R authz` row: `verdict=authorized`,
-    `anchor_kind=tacit-knowledge`, `grounding_kind=org-authority`, an `anchor_id` naming the
-    registry entry and a `fulfills` naming the `ac<n>` it closes — parsed and accepted"""
     doc = scene.document(rows=scene.authorized_rows())
     assert _errors(doc) == []
 
@@ -66,9 +63,6 @@ def test_tacit_knowledge_authz_row_shape():
 
 
 def test_authz_anchor_id_must_match_its_own_leads_recorded_hit():
-    """A `tacit-knowledge` `:R authz` row's `anchor_id` has to equal an `anchor_id` the lead
-    named by its OWN `resolved_by_lead` recorded as a lookup outcome. A citation no lead
-    produced is refused, and a benign close resting on it does not commit"""
     good = scene.benign_document(rows=scene.authorized_rows(baseline=True))
     assert _errors(good) == [], "positive control: the cited entry is the one the lead found"
     assert disposition_entry_price("benign", good).owed == (), (
@@ -155,9 +149,6 @@ def test_a_telemetry_baseline_cannot_ground_an_authz_row():
 
 
 def test_baseline_consultation_row_shape():
-    """A baseline consultation is a `:R consultations` row with `anchor_kind=runtime-evidence`
-    and `grounding_kind=telemetry-baseline`, carrying the window, the occurrence count and the
-    adverse-outcome finding — and NO `fulfills` cell, because `AnchorConsultation` has no"""
     good = _consultation_doc(scene.consultation_row())
     assert _errors(good) == []
 
@@ -183,9 +174,6 @@ def test_baseline_consultation_row_shape():
 
 
 def test_indeterminate_authz_row_carries_basis():
-    """A `:R authz` row whose verdict is `indeterminate` carries a `basis` cell that is one of
-    `retry` or `exhausted`; an absent cell reads as `retry`, and any other value is refused
-    (demand `indeterminate_basis_qualifier`, fork F3)."""
     for basis in vocab.AUTHZ_INDET_BASIS:
         row = scene.authz_row(verdict="indeterminate", basis=basis, grounding="", anchor_id="")
         assert _errors(scene.document(rows=scene.authz_block(row), settled=False)) == [], basis
@@ -210,9 +198,6 @@ def test_indeterminate_authz_row_carries_basis():
 
 
 def test_window_must_predate_the_alerted_event():
-    """A baseline consultation whose `effective_window` does not END STRICTLY BEFORE the
-    alerted event is refused — a pattern that begins with the incident IS the incident (demand
-    `consultation_window_predates_alert`)."""
     ok = _consultation_doc(scene.consultation_row(window=scene.WINDOW_BEFORE_ALERT))
     assert _errors(ok) == [], "positive control: a window that closes before the alert is legal"
 
@@ -238,9 +223,6 @@ def test_window_must_predate_the_alerted_event():
 
 
 def test_a_consultation_alone_cannot_buy_benign():
-    """A document whose only authorization-shaped evidence is a `runtime-evidence`
-    `:R consultations` row does not pay benign's entry price: the benign gate reads authz
-    resolutions and never walks `anchor_consultations` (demand"""
     assert "telemetry-baseline" in vocab.CONSULTATION_GROUNDING
 
     doc = scene.document(rows=scene.consult_block(scene.consultation_row()), settled=False)
@@ -255,9 +237,6 @@ def test_a_consultation_alone_cannot_buy_benign():
 
 
 def test_a_single_tacit_knowledge_row_is_full_authority():
-    """One `tacit-knowledge` `:R authz` row classified `grounding_kind: org-authority` is
-    sufficient ON ITS OWN to satisfy benign's entry price for its contract — no rule-27-shaped
-    "never sole grounding" cap, and no forced `authority_for_question: partial`"""
     doc = scene.benign_document(rows=scene.authorized_rows())
     assert _errors(doc) == []
     assert disposition_entry_price("benign", doc).owed == (), (
@@ -271,9 +250,6 @@ def test_a_single_tacit_knowledge_row_is_full_authority():
 
 
 def test_exhausted_must_be_paid_for_in_the_transcript():
-    """`basis=exhausted` is refused unless the row's own `resolved_by_lead` names a `:L findings`
-    lead THIS RUN dispatched AGAINST THE SYSTEM the contract's anchor kind maps to — verified
-    the way a `ceiling_test` receipt's `ref` is (demand `exhausted_checked_against_transcript`,"""
     paid = scene.authz_row(
         verdict="indeterminate", basis="exhausted", grounding="", anchor_id="",
         resolved_by=scene.LEAD,
@@ -316,9 +292,6 @@ def test_exhausted_must_be_paid_for_in_the_transcript():
 
 
 def test_exhausted_falls_back_to_the_loose_check_on_an_unmapped_kind():
-    """On a contract whose anchor kind `ANCHOR_KIND_SYSTEMS` does not cover, `basis=exhausted`
-    falls back to "this lead's own retrieval came back with something" — the looser check, kept
-    deliberately and PINNED so the limitation is documented rather than discovered."""
     mapping = _anchor_kind_systems()
     unmapped = next(k for k in vocab.ANCHOR_KINDS if k not in mapping)
 
@@ -347,9 +320,6 @@ def test_exhausted_falls_back_to_the_loose_check_on_an_unmapped_kind():
 
 
 def test_basis_does_not_change_the_verdict_or_the_escalation():
-    """Both values of `basis` leave `verdict: indeterminate` and its forced `on_indet`
-    escalation exactly as they are — a `basis=exhausted` row still blocks a benign close
-    (demand `indeterminate_escalation_unchanged`)."""
     for basis in vocab.AUTHZ_INDET_BASIS:
         doc = scene.document(
             rows=scene.authz_block(scene.authz_row(
@@ -372,9 +342,6 @@ def test_basis_does_not_change_the_verdict_or_the_escalation():
 
 
 def test_exhausted_contract_is_not_looped_back():
-    """An `indeterminate` contract carrying `basis=exhausted` is not re-dispatched, while an
-    otherwise identical contract carrying `basis=retry` is (demand
-    `exhausted_is_not_redispatched`)."""
     def contracts(basis: str) -> list[str]:
         doc = scene.document(
             rows=scene.authz_block(scene.authz_row(
@@ -427,9 +394,6 @@ def test_exhausted_drops_only_its_own_contract():
 
 
 def test_exhausted_is_well_defined_without_the_registry():
-    """With no tacit-knowledge entry in play, `basis=exhausted` still means every anchor kind
-    applicable to the predicate was tried: C's meaning narrows when B is absent but does not
-    become undefined (demand `exhausted_degrades_without_b`, a survival demand)."""
     assert _anchor_kind_systems()["iam-policy"] == "identity"
     doc = scene.document(
         contract_anchor_kind="iam-policy", system="identity",

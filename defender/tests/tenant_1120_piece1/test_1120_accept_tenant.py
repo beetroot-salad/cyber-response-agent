@@ -14,9 +14,6 @@ from defender import _tenant
 from defender.scripts import tenant as tenant_py
 from defender.tests.tenant_1120_piece1 import _spec1120 as H
 
-# ======================================================================================
-# Step 1 — the id grammar, before anything under the data root is named.
-# ======================================================================================
 
 #: O3's refused ids plus a control-character id (N16), with the gate's address tokens as the
 OFF_GRAMMAR_IDS = [
@@ -53,10 +50,6 @@ def test_1120_accept_tenant_refuses_an_off_grammar_id_before_touching_the_root(
     assert str(H.row_path(root, H.TID)) in control, (
         f"a valid id over an absent root must be refused for its row, naming it: {control!r}")
 
-
-# ======================================================================================
-# Same-file helpers: the plants. Each one makes a REAL fault on disk.
-# ======================================================================================
 
 def _other_file(tmp_path: Path, name: str = "outside.txt") -> Path:
     """A regular file OUTSIDE the tenant — what a planted link would hand the tenant."""
@@ -107,16 +100,6 @@ def _accept_within(owner, root: Path, tenant_id: str = H.TID, *, seconds: float 
     return box.get("value"), box.get("exc")  # type: ignore[return-value]
 
 
-# ======================================================================================
-# #0 — the return-value contract.
-# ======================================================================================
-
-
-
-# ======================================================================================
-# D1 — the seven checks run IN ORDER.
-# ======================================================================================
-
 def _off_grammar_and_no_row(root: Path, tmp_path: Path) -> tuple[str, str, str]:
     return "A", repr("A"), str(H.row_path(root, "A"))
 
@@ -165,22 +148,12 @@ ADJACENT_PAIRS = [
 
 @pytest.mark.parametrize("plant", ADJACENT_PAIRS)
 def test_1120_accept_tenant_reports_the_earliest_failing_check(tmp_path: Path, plant) -> None:
-    """For each adjacent pair of accept_tenant's seven checks, a tenant is planted that fails both, and
-    the refusal names the EARLIER check's fault: an off-grammar id with no row — the grammar; no row
-    and no knowledge/ — the row; knowledge/ a symlink with settings/ missing behind it — knowledge/;
-    settings/ missing and a symlink in agent/ — the missing half; a hard link in settings/ and a
-    mismatched agent/.tenant-id — the link; a mismatched .tenant-id with settings under a
-    box_mounted path — the .tenant-id."""
     root = tmp_path / "data"
     raw_id, earlier, later = plant(root, tmp_path)
     text = H.accept_refusal(_tenant, root, raw_id, box_mounted=(root,))
     assert earlier in text, f"the refusal does not name the earlier check's fault {earlier!r}: {text!r}"
     assert later not in text, f"the refusal names the LATER check's fault {later!r}: {text!r}"
 
-
-# ======================================================================================
-# Step 2 — the row.
-# ======================================================================================
 
 def _row_absent(root: Path) -> None:
     return None
@@ -199,10 +172,6 @@ BAD_ROWS = [
 @pytest.mark.parametrize("plant_bad_row", BAD_ROWS)
 def test_1120_accept_tenant_refuses_an_absent_corrupt_or_foreign_row(
         tmp_path: Path, plant_bad_row) -> None:
-    """With a complete knowledge/ in place, accept_tenant raises TenantRefused naming
-    <root>/<id>/tenant.json when the tenant_row is absent, is not valid JSON, is a JSON non-object,
-    names another tenant, is a directory standing at its name, or lacks created_at (J-PO2, executed:
-    a missing created_at is a TenantRefused naming tenant.json, never a TypeError)."""
     root = tmp_path / "data"
     H.place_knowledge(root)
     plant_bad_row(root)
@@ -215,10 +184,6 @@ def test_1120_accept_tenant_refuses_an_absent_corrupt_or_foreign_row(
     tenant = H.accept(_tenant, control)
     assert tenant.row.tenant_id == H.TID
 
-
-# ======================================================================================
-# Step 3 — knowledge/ is a real, unlinked directory at <T>/knowledge.
-# ======================================================================================
 
 def _knowledge_absent(root: Path, tmp_path: Path) -> None:
     H.plant_row(root)
@@ -255,10 +220,6 @@ KNOWLEDGE_NOT_REAL = [
 @pytest.mark.parametrize("plant", KNOWLEDGE_NOT_REAL)
 def test_1120_accept_tenant_refuses_a_knowledge_folder_that_is_not_a_real_unlinked_directory(
         tmp_path: Path, plant) -> None:
-    """With a valid row, accept_tenant raises TenantRefused naming the knowledge path when
-    <root>/<id>/knowledge is absent, is a symlink to a complete knowledge folder elsewhere (N13: an
-    operator-placed symlinked knowledge/ is refused here), is a regular file, or when <root>/<id>
-    itself is a symlink to a folder elsewhere so knowledge does not resolve to dir/knowledge."""
     # rejected: sidecar symlink publishing (N13) — a symlinked knowledge/ is refused, never
     # followed to where it points.
     root = tmp_path / "data"
@@ -274,10 +235,6 @@ def test_1120_accept_tenant_refuses_a_knowledge_folder_that_is_not_a_real_unlink
     H.adopted(control)
     assert H.accept(_tenant, control).knowledge == H.knowledge_dir(control)
 
-
-# ======================================================================================
-# Step 4 — the two halves and REQUIRED_SETTINGS.
-# ======================================================================================
 
 def _remove(rel: str):
     def plant(knowledge: Path, tmp_path: Path) -> Path:
@@ -317,10 +274,6 @@ MISSING_HALF_OR_SETTING = [
 @pytest.mark.parametrize("plant", MISSING_HALF_OR_SETTING)
 def test_1120_accept_tenant_refuses_a_missing_half_or_required_settings_file(
         tmp_path: Path, plant) -> None:
-    """accept_tenant raises TenantRefused naming the path when knowledge/settings/ is absent, when
-    knowledge/agent/ is absent, when settings/ is a symlink to a real folder, when each
-    REQUIRED_SETTINGS member (verb-grants.yaml, lead-zero.yaml, systems/case-history/mapping.yaml)
-    is missing in turn, and when a REQUIRED_SETTINGS member is a directory."""
     root = tmp_path / "data"
     folder = H.adopted(root)
     named = plant(folder / "knowledge", tmp_path)
@@ -333,10 +286,6 @@ def test_1120_accept_tenant_refuses_a_missing_half_or_required_settings_file(
     assert H.accept(_tenant, control).settings == H.settings_dir(control)
 
 
-# ======================================================================================
-# Step 5 — the link walk over settings/ and agent/ ONLY.
-# ======================================================================================
-
 LINKS_IN_HALVES = [
     pytest.param("settings", _plant_symlink, id="settings_half:symlink-inside"),
     pytest.param("settings", _plant_hardlink, id="settings_half:hardlink-inside"),
@@ -348,9 +297,6 @@ LINKS_IN_HALVES = [
 @pytest.mark.parametrize(("half", "plant"), LINKS_IN_HALVES)
 def test_1120_accept_tenant_refuses_a_symlink_or_hard_link_inside_either_half(
         tmp_path: Path, half: str, plant) -> None:
-    """A symlink planted in settings/ is refused, and so is a symlink in agent/, a second name for a
-    settings/ file (a hard link, st_nlink > 1), and a hard link in agent/ — each with TenantRefused
-    naming the planted entry, since a link can hand this tenant another's settings or knowledge."""
     # rejected: filesystem-portable hard-link detection (N11) — st_nlink > 1 is the rule.
     root = tmp_path / "data"
     H.adopted(root)
@@ -421,10 +367,6 @@ def test_1120_accept_tenant_walks_links_in_settings_and_agent_only(tmp_path: Pat
     assert str(in_nested) in text, f"a link in a .git nested inside agent/ was skipped: {text!r}"
 
 
-# ======================================================================================
-# Step 6 — agent/.tenant-id.
-# ======================================================================================
-
 TENANT_ID_FILE_CELLS = [
     pytest.param(None, False, id="absent"),
     pytest.param(f"{H.OTHER}\n", False, id="other-id"),
@@ -437,9 +379,6 @@ TENANT_ID_FILE_CELLS = [
 @pytest.mark.parametrize(("content", "accepted"), TENANT_ID_FILE_CELLS)
 def test_1120_accept_tenant_refuses_an_agent_tenant_id_that_is_absent_or_names_another_tenant(
         tmp_path: Path, content: str | None, accepted: bool) -> None:
-    """accept_tenant(root, "acme", …) raises TenantRefused naming knowledge/agent/.tenant-id when the
-    file is absent, when it holds another tenant's id (the message also names that id, beta), and
-    when it carries a control character (rendered escaped, never raw — N16)."""
     root = tmp_path / "data"
     H.adopted(root, tenant_id_file=content)
     tid_file = H.knowledge_dir(root) / H.TENANT_ID_FILE
@@ -452,12 +391,6 @@ def test_1120_accept_tenant_refuses_an_agent_tenant_id_that_is_absent_or_names_a
         assert H.OTHER in text, f"the refusal does not name the id the file holds: {text!r}"
     assert not any(ord(c) < 0x20 for c in text), f"a control character reached the text: {text!r}"
 
-
-# ======================================================================================
-# V3 as WIDENED by V12 and V15 (human, §7-verify; replaces M9 5(i) under DC2, overriding NF7):
-# knowledge/'s top level holds settings/, agent/, .github/, .git, archive/ (V15: A6's lab archive,
-# outside both halves, never mounted), README.md, .gitignore and .gitattributes — nothing else.
-# ======================================================================================
 
 #: The eight names V12 and V15 admit at knowledge/'s top level (sorted as `iterdir` is compared).
 ALLOWED_TOP_LEVEL = [".git", ".gitattributes", ".github", ".gitignore", "README.md", "agent",
@@ -515,10 +448,6 @@ def _clone_with_every_allowed_entry(tmp_path: Path, root: Path) -> Path:
 @pytest.mark.parametrize("plant", EXTRA_TOP_LEVEL)
 def test_1120_accept_tenant_refuses_a_knowledge_entry_outside_the_allow_list(
         tmp_path: Path, plant) -> None:
-    """A top-level entry of knowledge/ outside the allow-list — settings/, agent/, .github/, .git,
-    archive/, README.md, .gitignore and .gitattributes (V12 and V15, human, widening V3) — here a
-    .env, a secrets/ folder or a docs/ folder, is refused naming the entry (the folder rules keep an
-    operator's .env or secrets/ out of the data root; .tenant-id lives inside agent/)."""
     root = tmp_path / "data"
     H.adopted(root)
     entry = plant(H.knowledge_dir(root))
@@ -581,10 +510,6 @@ def _plant_byte_cell(knowledge: Path, content: object) -> None:
 
 def test_1120_accept_tenant_reads_the_tenant_id_file_bounded_and_admits_only_the_id_and_one_line_ending(
         tmp_path: Path) -> None:
-    """accept_tenant and `tenant.py check <id>` accept agent/.tenant-id holding exactly the id plus at
-    most one LF or CRLF, read bounded (at most 128 bytes), and refuse every other variant naming the
-    file: a BOM, a trailing space, uppercase, a second line, an empty file, a directory at the name,
-    invalid UTF-8, and an oversize file (refused unread)."""
     misjudged: list[str] = []
     for token, content, accepted in BYTE_RULE_CELLS:
         root = tmp_path / token
@@ -616,16 +541,8 @@ def test_1120_accept_tenant_reads_the_tenant_id_file_bounded_and_admits_only_the
                      str(folder / H.TENANT_ID_FILE))
 
 
-# ======================================================================================
-# Step 7 — settings outside every mounted tree.
-# ======================================================================================
-
 def test_1120_accept_tenant_refuses_settings_under_defender_dir_or_a_box_mounted_path(
         tmp_path: Path) -> None:
-    """accept_tenant raises TenantRefused naming the settings path and the mounted tree in two cases:
-    the defender_dir passed is a tmp tree that contains the data root, or box_mounted names a
-    directory that contains tenant.settings (the settings half is host-only; a box mounts defender/
-    and the runs base)."""
     fake_defender = tmp_path / "fake-defender"
     root = fake_defender / "data"
     H.adopted(root)
@@ -655,10 +572,6 @@ def test_1120_accept_tenant_accepts_an_unversioned_knowledge_folder(tmp_path: Pa
     assert tenant.knowledge == H.knowledge_dir(root)
     assert tenant.agent == H.agent_dir(root)
 
-
-# ======================================================================================
-# M9's surviving rule and NF2's named refusal.
-# ======================================================================================
 
 def _fifo(where: Path) -> Path:
     path = where / "planted.fifo"
@@ -694,9 +607,6 @@ NON_REGULAR = [
 @pytest.mark.parametrize(("half", "plant"), NON_REGULAR)
 def test_1120_accept_tenant_refuses_a_fifo_socket_or_device_inside_either_half_without_opening_it(
         tmp_path: Path, half: str, plant) -> None:
-    """A FIFO, socket or device inside settings/ or agent/ of an adopted knowledge/ is refused with
-    TenantRefused naming it, without being opened (a FIFO opened for reading would block acceptance
-    forever, which this test fails on a deadline)."""
     root = tmp_path / "data"
     H.adopted(root)
     planted = plant(H.knowledge_dir(root) / half)
@@ -738,9 +648,6 @@ UNREADABLE = [
 @pytest.mark.parametrize("plant", UNREADABLE)
 def test_1120_accept_tenant_names_an_unreadable_entry_as_a_refusal_never_a_traceback(
         tmp_path: Path, plant) -> None:
-    """An OSError from any read accept_tenant performs — the link walk meeting an unlistable directory
-    in settings/, an unlistable agent/, an unreadable agent/.tenant-id — is raised as TenantRefused
-    naming the path and the errno (NF2), never an escaping OSError."""
     root = tmp_path / "data"
     H.place_knowledge(root)
     target = plant(H.knowledge_dir(root))
@@ -760,10 +667,6 @@ def test_1120_accept_tenant_names_an_unreadable_entry_as_a_refusal_never_a_trace
     assert H.accept(_tenant, root).id == H.TID
 
 
-# ======================================================================================
-# Settled premises (45-dispositions, "Settled (30)").
-# ======================================================================================
-
 def test_1120_s0_id_grammar_length_boundary(tmp_path: Path) -> None:
     """A 63-character id that matches the unchanged TenantId grammar passes accept_tenant's step 1 (a
     finished tenant under that id is accepted)."""
@@ -779,10 +682,6 @@ def test_1120_s0_id_grammar_length_boundary(tmp_path: Path) -> None:
 
 
 def test_1120_s0_containment_string_prefix_near_miss(tmp_path: Path) -> None:
-    """Step 7 does not refuse a box_mounted path or a defender_dir that only shares a string prefix
-    with the settings path: a mounted `<root>/acme/knowledge/sett` or a defender tree at
-    `<root>/acme/knowledge/setting` beside settings/, and a sibling data root `<tmp>/T-other` beside
-    the data root `<tmp>/T`."""
     root = tmp_path / "T"
     H.adopted(root)
     knowledge = H.knowledge_dir(root)
@@ -825,10 +724,3 @@ def test_1120_s6_data_root_env_var_symlink_retargeted_mid_resolution(
     tenant = H.accept(_tenant, resolved)
     assert tenant.data_root == first.resolve()
     assert tenant.settings == first.resolve() / H.TID / "knowledge" / "settings"
-
-
-# ======================================================================================
-# R7 (minted at phase E) — every reader of the row agrees with accept_tenant.
-# ======================================================================================
-
-

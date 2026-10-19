@@ -1,28 +1,3 @@
-"""#1080 (group `lints`) — the path-keyed lints, their baselines, the spec-flow profile and the
-tracked pointers follow the move (M5), and the commands that stay keep working.
-
-THE NET FOR THE SILENT SCOPES (RG1, RG2). Four lint scopes narrow SILENTLY when a module they
-sweep moves out from under them: `lint_tenant_env_reads.SWEPT` (and its test twin
-`_census_1107.SWEPT`), `lint_tree_read_follows_link.LINT_TREE_READER_MODULES` and
-`lint_run_records.SWEEP_DIRS`. Each test here DRIVES the lint: it plants the offending idiom into
-a tmp copy of the moved module at the path the REAL tree gives it (found by the symbol the
-module defines, `_spec1080.home_of`), runs the lint's own scan function over that copy, and reads
-the finding — or runs the lint's own file-set function over the real tree. None builds a root
-from the lint's own list (RG1: such a root stays green after a move). The scan functions, never
-`main`, are called for the plants, so a baseline cannot hide a planted finding.
-
-THE BASE IS THE REFERENCE. What a gate reported for a plant IN PLACE at the base, which files
-the env-read lint swept, which scope entries and baseline keys were already dead, which profile
-rows named `defender/scripts/` paths, the dead `scripts/` pins that predate the change, and the
-staying commands' usage lines are captured once at 80888efb into `goldens/lints.json`. A test
-compares the tree to that record; it never runs old code.
-
-RED AT BASE. A test about a moved module finds the module's new home by symbol, so it fails at
-the base until the move happens. Tests that are green at the base by design (the coherence
-checks whose failure only a move can produce) say so in their docstrings.
-
-The pointer scans live in `_pointers1080.py` (shared with the placement group's s003 test).
-"""
 from __future__ import annotations
 
 import ast
@@ -44,9 +19,6 @@ from defender.tests._by_path import load_lint_gate, load_module
 from defender.tests.scripts_1080_split import _pointers1080 as P
 from defender.tests.scripts_1080_split import _spec1080 as S
 
-# ======================================================================================
-# Fixed tables
-# ======================================================================================
 
 LINT_DIR = S.REPO_ROOT / "scripts" / "lint"
 SPEC_GRAPH_DIR = S.REPO_ROOT / "spec-flow" / "scripts" / "spec_graph"
@@ -54,15 +26,6 @@ SPEC_GRAPH_DIR = S.REPO_ROOT / "spec-flow" / "scripts" / "spec_graph"
 PROFILE = S.REPO_ROOT / "docs/archive/spec-flow-project-config.json"
 CI = S.REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
-#: Every base module of `defender/scripts/` the design moves, and the symbols whose homes now
-#: hold its code (each with the home it must sit under, None = wherever it is outside
-#: `scripts/`). The anchors are the placement group's (`MODULE_ANCHORS`), filtered alike to the
-#: seven modules the 2026-10-04 scope cut moves (E2), plus `case_history/case_ticket.py`, which
-#: the case_ticket follow-up #1190 moves whole under `defender/runtime/` (F-C): its baseline
-#: keys, profile rows and lint plants follow it. The OUT modules (`adapters/`,
-#: `case_history/ticket_writer.py`, `record_query.py`, `visualize/`, `workspace_map.py`) stay
-#: where they are. The two engines' base paths keep no wrapper (post-review: the shims run the
-#: engines with `-m`, reversing M-H (a)); the anchor names the engine.
 MOVED_HOMES: dict[str, tuple[tuple[str, str | None], ...]] = {
     "defender/scripts/_venv.py": (("reexec_into_venv", S.FLAT_TIER),),
     "defender/scripts/pricing.py": (("usage_cost", S.PRICING),),
@@ -110,11 +73,6 @@ CONTROLS = {
     "defender/scripts/adapters/cmdb_adapter.py": ("run_records", "env_reads", "tree_write"),
     "defender/learning/branch/episode.py": ("tree_read",),
 }
-
-
-# ======================================================================================
-# Helpers
-# ======================================================================================
 
 
 def _golden() -> Mapping[str, Any]:
@@ -381,20 +339,7 @@ def path_triggers_dropping(ci_text: str, homes: Iterable[str]) -> list[tuple[str
     return out
 
 
-# ======================================================================================
-# m5 — the path-keyed lints sweep the new homes
-# ======================================================================================
-
-
 def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
-    """`lint_run_records`' swept trees cover every new home of a moved module: under the 2026-10-04 scope cut, the lessons engine, the `runtime/` homes and the flat tier. A record-name literal planted in a moved lessons-engine module is reported.
-
-    Observed through the lint's own `sweep_files` over the REAL `defender/` tree: every home of
-    every moved module (found by symbol) is in it — the lessons engine, the sql engine's and
-    `payload_view`'s `runtime/` homes and the flat tier (`_venv`, `_pricing`) among them.
-    Driven: a record-name literal planted in a tmp copy of the moved `lessons_frontier` is
-    reported by `scan`.
-    """
     lint = _lint("lint_run_records")
     swept = {S.rel(p) for p in lint.sweep_files(S.DEFENDER)}
     named = {
@@ -418,17 +363,6 @@ def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
 
 
 def test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_top_level_package(tmp_path, monkeypatch):
-    """A plant of a record-name literal, a tenant env read, an unguarded tree write and a tree read in a module under every new home (under the 2026-10-04 scope cut: the lessons engine, the `runtime/` homes, the flat tier) is reported by each path-scoped gate that reported the same plant at the old location, so no gate's scope narrows silently. Gate sweeps and profile code roots that were fixed lists are extended to the new top-level packages (M5).
-
-    The expected side is the base: one plant carrying all four idioms was appended to every
-    base module of `defender/scripts/` in place, and which of the four gates reported it was
-    captured at 80888efb (golden). Now the same plant goes into a tmp copy of every home of every
-    moved module (found by symbol; no wrapper is left in scripts/), the four gates' own scans
-    run once over that copy, and every gate that reported the plant at the old location must
-    report it at each new one. Controls: plants in a staying adapter and a staying listed tree
-    reader are reported. The profile half: every planted home is in the spec-flow census
-    (`_config.source_files` over `codeRoots`).
-    """
     at_base = _golden()["plant_reported_at_base"]
     owed: dict[str, set[str]] = {}
     for base, gates in at_base.items():
@@ -454,16 +388,6 @@ def test_gate_scope_that_walks_a_fixed_set_of_top_level_directories_meets_a_new_
 
 
 def test_1080_every_path_a_lint_scope_names_exists():
-    """Every repo-relative path in a `scripts/lint/*.py` scope, exclusion or sweep list exists in the tree, so no list names a moved `scripts/` path. That covers `lint_shippable_surface`, `lint_ci_hygiene`, `lint_tenant_env_reads` and `lint_tree_read_follows_link`.
-
-    The lists are read off every lint's source (each module-level collection of path-shaped
-    string constants, plus `lint_run_records.SWEEP_DIRS`), resolved against the repo root and
-    `defender/`. Entries already dead at 80888efb (golden: retired vendor skills, a settings
-    file, `runtime/branch.py`) predate this change and are accounted for separately; a
-    directory that exists only in some checkouts (a venv, a cache, the linked-worktree folder)
-    is the machine's. GREEN AT THE BASE BY DESIGN: every base `scripts/` path a list names
-    exists until something moves.
-    """
     lists = lint_scope_lists()
     assert {"lint_shippable_surface.py", "lint_ci_hygiene.py", "lint_tenant_env_reads.py",
             "lint_tree_read_follows_link.py"} <= {k.split("::")[0] for k in lists}, sorted(lists)
@@ -471,11 +395,6 @@ def test_1080_every_path_a_lint_scope_names_exists():
     new_dead = {k: sorted(set(v) - set(base_dead.get(k, []))) for k, v in dead_scope_entries().items()}
     new_dead = {k: v for k, v in new_dead.items() if v}
     assert not new_dead, f"lint scope lists name paths that no longer exist: {new_dead}"
-
-
-# ======================================================================================
-# m5 — the baselines are re-keyed
-# ======================================================================================
 
 
 def _moved_keys() -> dict[str, list[str]]:
@@ -517,18 +436,6 @@ def _rekeyed(entries: Mapping[str, str], key: str) -> list[str]:
 
 
 def test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists():
-    """No `scripts/lint/*_baseline.json` entry keys a file path that no longer exists, so a moved file's baselined finding is re-keyed rather than reappearing as new.
-
-    Every path-shaped token of every key of every baseline resolves against the repo root or
-    `defender/`. For each base key that named a module the design moves, the finding is at the
-    home of the symbol it names (found by symbol) wherever the current baseline still carries it
-    — never at the old path. Under the 2026-10-04 scope cut no base key names an IN module but
-    `case_ticket`, which the case_ticket follow-up #1190 moves under `defender/runtime/`: the
-    vulture baseline's four case-ticket findings are keyed at the home of the function each
-    names. The key that named `defender/scripts/` code the cut leaves in place (golden: the
-    vulture baseline's `derive_system`) stays at its base path wherever the current baseline
-    still carries it.
-    """
     stale = [(name, k, p) for name, entries in baselines().items() for k in entries
              for p in key_paths(k) if not resolves(p)]
     assert not stale, f"baseline keys naming paths that no longer exist: {stale}"
@@ -547,16 +454,6 @@ def test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists():
 
 @pytest.mark.gate
 def test_vulture_baseline_holds_fingerprints_keyed_by_files_that_moved(monkeypatch):
-    """No baseline entry (vulture, unnarrowed-parse) names a moved path: findings carried by moved files are re-keyed to their new paths, entries for files that no longer exist are removed, and a finding re-introduced at the old path is not excused by a stale entry. The gates are green after the change. (M5: update the path-keyed baselines.) Under the 2026-10-04 scope cut the golden key for `derive_system` stays at its base path: its file does not move. (The four `case_ticket` keys move with their file, #1190: `test_1080_no_lint_baseline_keys_a_path_that_no_longer_exists` holds them to its home.)
-
-    Read from the two baselines and the base record of their keys (golden; at 80888efb the only
-    `scripts/` keys are vulture's case-ticket and `derive_system` findings, `tenant.py`'s, and
-    unnarrowed-parse's adapters — none of them an IN module of the cut). No key of either
-    baseline names a path that no longer exists; the `derive_system` key's file is still at its
-    base path and, wherever the current baseline still carries the finding, it is keyed there.
-    Then both gates' `main` run over the real tree and exit 0 (a `gate` test: a repo-wide
-    re-run).
-    """
     current = baselines()
     for name in ("lint_vulture_baseline.json", "lint_unnarrowed_parse_baseline.json"):
         dead = [k for k in current[name] for p in key_paths(k) if not resolves(p)]
@@ -568,11 +465,6 @@ def test_vulture_baseline_holds_fingerprints_keyed_by_files_that_moved(monkeypat
     monkeypatch.setenv("PATH", f"{Path(sys.executable).parent}:{S.child_env()['PATH']}")
     assert _lint("lint_vulture").main([]) == 0, "the vulture gate is red after the change"
     assert _lint("lint_unnarrowed_parse").main([]) == 0, "the unnarrowed-parse gate is red"
-
-
-# ======================================================================================
-# m5 — the spec-flow profile
-# ======================================================================================
 
 
 def _moved_rows() -> list[dict[str, Any]]:
@@ -588,14 +480,6 @@ def _current_rows_for(row: Mapping[str, Any]) -> list[str]:
 
 
 def test_1080_the_spec_flow_profile_covers_the_new_homes_and_names_no_moved_path(monkeypatch):
-    """`.claude/spec-flow.json`'s `codeRoots` cover every new home. Every `resources` writer and reader row naming a moved file names its new path, and the file exists.
-
-    Coverage is the spec-flow tool's own census: `_config.source_files` over the profile holds
-    every home of every moved module (found by symbol). Every row's file exists; each base row
-    that named a moved module for a symbol that module defined (golden) is carried now by a row
-    for the same resource, side and symbol whose file exists, is outside `defender/scripts/`, and
-    defines that symbol.
-    """
     monkeypatch.chdir(S.REPO_ROOT)
     cfg = _spec_graph_config()
     census = {S.rel(p) for p in cfg.source_files(cfg.load(str(PROFILE)))}
@@ -620,13 +504,6 @@ def test_1080_the_spec_flow_profile_covers_the_new_homes_and_names_no_moved_path
 
 
 def test_profile_code_roots_leave_a_new_top_level_package_uncovered(monkeypatch):
-    """The profile's code roots include every new top-level package the moves create, so a trace over actors and drivers sees the moved modules' callers. (M5: update .claude/spec-flow.json codeRoots/resources.)
-
-    A new top-level package is the first folder under `defender/` of a moved module's home
-    (found by symbol) that `defender/` did not hold at 80888efb (golden). Every non-test `.py`
-    under each such package is in the spec-flow census (`_config.source_files` over the
-    profile), and so is every moved module's home, the flat-tier ones included.
-    """
     monkeypatch.chdir(S.REPO_ROOT)
     cfg = _spec_graph_config()
     census = {S.rel(p) for p in cfg.source_files(cfg.load(str(PROFILE)))}
@@ -640,20 +517,7 @@ def test_profile_code_roots_leave_a_new_top_level_package_uncovered(monkeypatch)
     assert not missing, f"codeRoots do not cover these homes: {missing}"
 
 
-# ======================================================================================
-# m5 — tracked pointers
-# ======================================================================================
-
-
 def test_1080_no_tracked_doc_or_comment_names_a_moved_scripts_path(tmp_path):
-    """No tracked non-archival text file names a `defender/scripts/…` path that no longer exists. That covers markdown under `defender/` and `docs/`, `bin/README.md`, `knowledge/*/settings/**/config.env` comments and `defender/CLAUDE.md`.
-
-    Observed by `_pointers1080.stale_scripts_pointers` over the real checkout (tracked files
-    only; archival trees and this suite excluded — see that module). Positive control: in a tmp
-    git repo, a pointer to a base `defender/scripts/` file the repo lacks, written into each of
-    the named surfaces, is reported from every one. GREEN AT THE BASE BY DESIGN: every base
-    pointer names a file that exists until something moves.
-    """
     stale = P.stale_scripts_pointers(S.REPO_ROOT)
     assert not stale, (
         f"{len(stale)} tracked pointer(s) name a defender/scripts/ path that no longer exists: "
@@ -668,18 +532,6 @@ def test_1080_no_tracked_doc_or_comment_names_a_moved_scripts_path(tmp_path):
 
 
 def test_vanished_directory_name_that_is_also_a_live_identifier(tmp_path):
-    """Moving a scripts module whose folder shares its name with a surviving content folder (`lessons`) or whose stem is a live identifier leaves no stale path reference to the old location in tests and docs, and does not false-flag the live identifier, the surviving `lessons` content folder or the surviving wrapper: the check distinguishes path references from live names. (The `visualize` case is parked with #1105 by the 2026-10-04 scope cut: `scripts/visualize/` does not move.)
-
-    The lessons engine moved (found by symbol outside `defender/scripts/`) and the real checkout
-    holds no stale pointer and no vanished-folder mention. (Post-review the wrapper went too, so
-    the real `scripts/lessons/` folder is gone; a bare `lessons/` there names the live content
-    folder and is not counted, while path pointers into the gone folder still are.) Both sides of the distinction, in a
-    tmp git repo that keeps `defender/scripts/lessons/lessons_fm.py` (the wrapper) and the
-    `defender/lessons/` content folder but not `defender/scripts/lessons/lessons_frontier.py`:
-    the path and module spellings of the moved engine's old location are reported; the word
-    `lessons_frontier` used as a name, the content folder, the surviving wrapper and its stem
-    are not, and the `lessons/` folder (which keeps the wrapper) is no vanished folder.
-    """
     S.home_of("match_lessons")
     real = P.stale_scripts_pointers(S.REPO_ROOT) + P.vanished_folder_mentions(S.REPO_ROOT)
     assert not real, f"stale references to an old location: {real[:40]}"
@@ -719,18 +571,6 @@ def test_vanished_directory_name_that_is_also_a_live_identifier(tmp_path):
 
 
 def test_path_scan_for_stale_text_meets_dead_pins_that_predate_the_change(tmp_path):
-    """The scan for tracked text naming a path that no longer exists reports a new miss from this change even when pre-existing dead pins (box-mount tests, retired helper names, archived specs, decision records) are present: the old debt is accounted for separately and does not hide a new moved-path pointer.
-
-    The old debt is the base's own dead `scripts/` pins (golden: what
-    `_pointers1080.dead_scripts_pointers` found at 80888efb, by file and spelling — retired
-    adapters and helpers, planted-file names in tests; archived specs and decision records are
-    not scanned at all). On the real checkout the change leaves no pointer naming a base
-    `defender/scripts/` entry that is gone. Driven, in a tmp git repo holding every debt pin
-    in its own file: one new pointer to a moved module is the ONLY finding the debt-filtered
-    dead scan reports, and a debt pin that itself names a moved module (`scripts/_venv.…`) is
-    still reported by the moved-path scan, the debt notwithstanding. GREEN AT THE BASE BY
-    DESIGN: the base points at nothing gone.
-    """
     assert not P.stale_scripts_pointers(S.REPO_ROOT), "a pointer names a moved scripts path"
     debt = {(r, t) for r, t in _golden()["dead_pointer_debt"]}
     assert debt, "golden: the base held no dead scripts/ pin"
@@ -755,22 +595,7 @@ def test_path_scan_for_stale_text_meets_dead_pins_that_predate_the_change(tmp_pa
         f"debt pins naming a moved module hidden from the moved-path scan: {sorted(set(moved_debt) - stale)}")
 
 
-# ======================================================================================
-# s095 / s112 — the commands that stay
-# ======================================================================================
-
-
 def test_staying_commands_import_modules_that_have_moved(tmp_path):
-    """The staying commands (tenant, policy_cli, box_image, tacit_cli) run by path and by module name from CI, the shims and the docs from any working directory as they do today; the tenant command imports the case-mapping module from its new home under `defender/runtime/` (an import from scripts/ outward is allowed, only the reverse is census-checked; the case_ticket follow-up #1190 restored this cell), and `box_image.py` still runs under the runner's bare interpreter before dependency sync.
-
-    `tenant.py`'s import statements name the case-mapping module's home (found by symbol, under
-    `defender/runtime/`) and nothing under the old case-history folder. Each command, run from a working directory
-    outside the checkout — by path with no `PYTHONPATH`, through `bin/defender-policy`, and by
-    module with the checkout importable — exits as at the base and prints the base's usage block
-    (golden). The runner's bare interpreter is stood in for by this interpreter with `-I -S` (no
-    site-packages, no environment), under which `box_image.py tag` prints exactly the tag the
-    image module computes for this tree; `tacit_cli check`, as CI runs it, exits 0.
-    """
     home = S.home_of("load_case_mapping", home=S.RUNTIME)
     stmts = list(S.import_statements("defender/scripts/tenant.py",
                                      (S.SCRIPTS / "tenant.py").read_bytes()))
@@ -799,16 +624,6 @@ def test_staying_commands_import_modules_that_have_moved(tmp_path):
 
 
 def test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working(tmp_path):
-    """The CI steps and docs that invoke staying commands by path or module keep working unchanged after the moves: `box_image.py build`, `-m defender.scripts.tacit_cli check`, `-m defender.scripts.policy_cli` (via its shim), and the tenant setup instructions; CI's path triggers (if any) still select the jobs for the moved files.
-
-    ci.yml's `run:` steps that invoke a `defender/scripts/` command are the base's, unchanged
-    (golden), and each names a file that exists with a `__main__` block; so does every staying
-    command a tracked doc invokes by path or `-m`, and every `tenant.py <subcommand>` a doc gives
-    is one the command's usage offers. Every `bin/` shim but the two that now run their engine
-    with `-m` is byte-identical to the base (M-H (a), narrowed post-review). Path triggers: every `on.<event>.paths` filter in ci.yml (there are none at
-    80888efb) must match each moved module's home (found by symbol), and no `paths-ignore`
-    filter may.
-    """
     ci = CI.read_text(encoding="utf-8")
     runs = ci_staying_runs(ci)
     assert runs == _golden()["ci_staying_runs"], f"CI's staying-command steps changed: {runs}"

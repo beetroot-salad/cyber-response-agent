@@ -256,13 +256,6 @@ def _resume_sibling_at(ep: Path, label: str, life: _Lifecycle) -> Path:
 # O11 — the judge's alert is the episode's copy
 
 def test_o11_episode_alert_is_the_episodes_copy(tmp_path):
-    """The judge takes the episode's alert and recorded signature from the copies branch launch
-    put in the episode, never from a world's copy, a vendor field, the tenant's mapping or the
-    source run folder.
-
-    The tenant's mapping would derive another value, the source run folder holds another alert
-    and record, and every world copy is the decoy: the findings key is the copy's recorded
-    signature, and the union is the runs whose recorded digest is the copy's."""
     planted = S.plant_tenant(TENANT, alert_mapping={"signature": "user.login",
                                                     "event_time": "detected_at",
                                                     "summary": "rule.description"})
@@ -283,11 +276,6 @@ def test_o11_episode_alert_is_the_episodes_copy(tmp_path):
 
 
 def test_o11_episode_without_a_record_is_refused_by_name(tmp_path):
-    """The judge, and a bare re-enqueue, refuse an episode whose copy holds no readable record,
-    naming the missing record, and do not hang.
-
-    Arms: no copy at all; the alert copied and no record; a torn record; a directory at the
-    record's name. Positive control: the same episode with its record grades and queues."""
     base = tmp_path / "runs"
     base.mkdir()
     bare, _raw = _episode(tmp_path, "nocopy", copy=False)
@@ -319,12 +307,6 @@ def test_o11_episode_without_a_record_is_refused_by_name(tmp_path):
 # A1 — the launch copies the alert and its record
 
 def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
-    """Branch launch copies the source run's alert and record into the episode after checking
-    the bytes against the recorded digest, refusing a mismatch by name; each sibling's input
-    directory is placed at its setup from the episode's copy, and the episode archive keeps both
-    files.
-
-    The source's alert is rewritten after the launch: the sibling still starts from the copy."""
     raw = _alert("a1")
     planted, _base, src = _source(tmp_path, raw, signature="SIG-a1")
     record_bytes = S.record_file(src).read_bytes()
@@ -361,12 +343,6 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
 # A8 — a folder without a record is not a run
 
 def test_a8_a_folder_without_a_record_is_not_a_run(tmp_path, capsys):
-    """A run folder with no readable record — a pre-change run, a crashed setup — is skipped by
-    name and counted by every walker (the corpus, the sibling union) and refused, naming the
-    missing record, by the launcher and the judge; the visualizer owes it nothing.
-
-    The folder here is a crashed setup's: the alert at its place, an investigation, a report,
-    no record."""
     raw = _alert("a8")
     planted, base, src = _source(tmp_path, raw, record=False)
     _assert_names_record(_refused_launch(planted, src), "the launcher's refusal")
@@ -391,15 +367,6 @@ def test_a8_a_folder_without_a_record_is_not_a_run(tmp_path, capsys):
 
 def test_r6_a_skipped_runs_name_cannot_forge_a_line_in_the_judge_notes_or_the_vocabulary(
         tmp_path, capsys):
-    """A run folder under the runs base with no readable record, whose name carries a newline, a
-    terminal escape, a markdown heading or a fence ('x', newline, '## Forged'; ESC[2K; a 255-byte
-    name), is skipped by name and counted: wherever the skip is named (the judge's union note,
-    the corpus listing's skip line, orientation's vocabulary count) it is one inert line,
-    escaped and bounded, and the count is exact; no note gains a second line, a forged section
-    or a closed frame. The union notes the judge receives are recorded by the model fake.
-    Positive control: a recordless folder with an ordinary name is named plainly and counted.
-
-    Covered here: the judge's union note and the corpus listing (its CLI's skip lines)."""
     raw = _alert("r6")
     base = tmp_path / "runs"
     hostile = {
@@ -443,12 +410,6 @@ def test_r6_a_skipped_runs_name_cannot_forge_a_line_in_the_judge_notes_or_the_vo
 
 
 def test_p070_mapping_changed_between_source_run_and_judge(tmp_path):
-    """The judge's key, the lesson's source_signature and a later lookup all come from the
-    recorded signature (the key in C27's form). A later mapping edit changes none of them, and
-    there is no rule.id fallback.
-
-    Observed: the queue row's key (what the lesson author is handed) and the corpus's lookup of
-    the source run, both after the tenant's mapping was edited."""
     planted = S.plant_tenant(TENANT, alert_mapping={"signature": "sig_field",
                                                     "event_time": "detected_at",
                                                     "summary": "rule.description"})
@@ -493,12 +454,6 @@ def test_p076_rule_key_from_an_enormous_or_path_shaped_signatu(tmp_path):
 
 
 def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
-    """No hang, no read outside the runs base, no target bytes in the judge's prompt. A
-    non-regular or linked candidate is skipped by name and counted.
-
-    Candidates: a record that is a link to a matching record outside the base, a record that is
-    a FIFO, a run folder that is a link to a matching run outside the base; the source run's own
-    alert is a link to a host file. Each link target carries a marker."""
     marker = "OUTSIDE-MARKER-p120"
     base = tmp_path / "runs"
     outside = tmp_path / "outside"
@@ -532,11 +487,6 @@ def test_p120_source_alert_json_is_not_a_regular_file(tmp_path):
 
 
 def test_p121_family_record_names_a_hostile_source_run(tmp_path):
-    """A source run id that escapes, is absolute or is empty reads no file. The pass uses the
-    episode's copy.
-
-    A decoy run with a marker sits where the escaping and the absolute id point. (An empty id is
-    already refused by the manifest loader at base and is not re-asserted here.)"""
     marker = "HOSTILE-SOURCE-p121"
     base = tmp_path / "d1" / "d2" / "runs"
     decoy = _alert("p121-decoy")
@@ -592,12 +542,6 @@ class _RewritingJudge(J.FakeJudge):
 # A sibling resumed after a mapping edit
 
 def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
-    """A sibling's ticket comment and lookups use the recorded signature copied into the
-    episode. Its inherited prompt and its own lookups agree.
-
-    The tenant's mapping is edited after the launch, so a re-derivation would give another
-    value; the case mapping's comment carries the signature. Observed: the sibling's record,
-    and the comment the ticket writer's record leg posts for the sibling's run."""
     mapping = {"signature": "sig_field", "event_time": "detected_at",
                "summary": "rule.description"}
     case_mapping = S.case_mapping_text(comment_body=S.SIGNED_COMMENT_BODY)

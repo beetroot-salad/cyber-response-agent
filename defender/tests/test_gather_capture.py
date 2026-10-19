@@ -11,10 +11,6 @@ from defender.scripts.gather_tools.record_query import _next_seq
 
 
 def test_next_seq_counts_rows_not_files(tmp_path):
-    """The next seq counts the lead's table ROWS — not the payload files under `gather_raw/` — as
-    the run's state holds them (#1235): a row counts once it is on the state (here a branch
-    sibling's inherited prefix, the one way a run starts holding rows, round 2), whether or not a
-    payload file backs it, and a payload file with no row counts nothing."""
     from defender.runtime.run_state import RunState
 
     state = RunState(tmp_path, "r-next-seq")
@@ -32,9 +28,6 @@ def test_next_seq_counts_rows_not_files(tmp_path):
 
 
 def test_a_small_payload_reaches_the_lead_whole(tmp_path):
-    """This asserted the opposite until #832: a 30-byte two-record payload came back as a "FIELD-
-    SHAPE sample" — the records replaced by a notice and a disk path — because the key happened
-    to be spelled `hits`."""
     payload = json.dumps({"hits": [{"id": 1}, {"id": 2}]})
     assert render(payload, "gather_raw/l-001/0.json", tmp_path) == payload
 

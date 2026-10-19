@@ -51,9 +51,6 @@ def _load_dryrun():
 # the encoding
 
 def test_wire_log_dumps_the_request_list_verbatim_with_no_delta_encoding(tmp_path):
-    """Across a SECOND fold the wire log holds the full request list actually sent for
-    that request, with no re-baselining and no request omitted because the history did not
-    shrink below a cursor."""
     log_path = tmp_path / "llm_requests.jsonl"
     logger = observe.RequestLogger(log_path)
 
@@ -112,9 +109,6 @@ def test_wire_log_encoder_fails_loudly_on_a_non_json_native_value(tmp_path):
 
 
 def test_two_wire_log_constructions_under_one_key_do_not_silently_clobber_each_other(tmp_path):
-    """Two `RequestLogger` constructions sharing a `(run_id, trace_name)` key do not
-    silently clobber each other: the second either preserves the first's lines or fails
-    loud, and nothing is lost without a signal."""
     path = tmp_path / "llm_requests.jsonl"
     first = observe.RequestLogger(path)
     first.log(request_messages=[user_request("first construction")],
@@ -141,9 +135,6 @@ def test_two_wire_log_constructions_under_one_key_do_not_silently_clobber_each_o
 
 @pytest.mark.e2e
 def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
-    """Each request row in the store and its wire-log line are JOINABLE on
-    `(session_id, run_step)`, each carries its own digest of what IT holds, and both
-    digests are recorded — so a `_clean_message_history` merge that changes what went out"""
     ss = store_mod()
     run_dir = materialize(tmp_path, GOLDEN, run_id='join')
     opened: list = []
@@ -178,9 +169,6 @@ def test_wire_sha_joins_a_store_row_to_its_wire_log_line(tmp_path):
 # the consumers the census missed — survival
 
 def test_compaction_dryrun_reader_survives_the_undelta_d_log(tmp_path):
-    """`compaction_dryrun` over a log written WITHOUT delta encoding reconstructs each
-    request's history once rather than re-appending the whole prefix every turn: the
-    per-step `full_chars` it computes matches the real history size at that step."""
     dryrun = _load_dryrun()
     log_path = tmp_path / "llm_requests.jsonl"
     logger = observe.RequestLogger(log_path)
@@ -204,4 +192,3 @@ def test_compaction_dryrun_reader_survives_the_undelta_d_log(tmp_path):
         ModelMessagesTypeAdapter.dump_python(lst, mode="json"))) for lst in lists), (
         "the reader re-appended the whole prefix each turn — finding 2(a) reproduced by "
         "the fix (X4)")
-

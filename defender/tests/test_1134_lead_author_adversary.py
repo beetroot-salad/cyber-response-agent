@@ -1,6 +1,3 @@
-"""Adversary holes for the lead author's commit gates and draft writer: every read goes through the held trees
-(never a plain path), beside a control on the same address.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -81,10 +78,6 @@ def _head_mode(repo: Path, rel: str) -> str:
     return _git.git(["ls-tree", "HEAD", "--", rel], cwd=repo).split(" ", 1)[0]  # lint-oracle: ok — not the code under test's query
 
 
-# ---------------------------------------------------------------------------------------
-# E2b: the pitfalls commit gate reads the reducer the curator left through the trees
-# ---------------------------------------------------------------------------------------
-
 #: The curator's edit: one pitfall appended under the reducer's `## Common pitfalls`, a
 #: document the content rule accepts, carrying the mark.
 EDITED_REDUCER = reducer_surface_text(bullets=(OUT_MARK,))
@@ -107,10 +100,6 @@ def _pitfalls_tree(tmp_path: Path) -> LoopPaths:
 @pytest.mark.parametrize("left", ["plain", "link", "hardlink"])
 def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
         tmp_path: Path, monkeypatch, left: str):
-    """E2b, through `run_pitfalls(trees=)`: the curator leaves the reducer surface as a symlink
-    to an outside file holding a valid edit, or as a hard link to it. The commit gate refuses
-    it as unreadable (`LeadAuthorError`), the kernel saw no open (link) or read (hard link) of
-    the outside file, and HEAD is unchanged: no mode-120000 entry, nothing committed."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     paths = _pitfalls_tree(tmp_path)
     repo = paths.repo_root
@@ -144,10 +133,6 @@ def test_the_pitfalls_gate_reads_the_reducer_the_curator_left_through_the_trees(
     assert _git.git_head_sha(repo) == head, "a link or a hard link was committed"
 
 
-# ---------------------------------------------------------------------------------------
-# E2a: the lead author's commit gate reads what the agent left through the trees
-# ---------------------------------------------------------------------------------------
-
 @dataclasses.dataclass(frozen=True)
 class Left:
     """What the agent leaves below `skills/`: the name, the bytes, how the gate refuses the
@@ -178,12 +163,6 @@ LEFTS = [
 @pytest.mark.parametrize("what", LEFTS, ids=lambda w: w.id)
 def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
         tmp_path: Path, what: Left, left: str, caplog):
-    """E2a, through `run(label=, deps=)`: the agent (rc 0) leaves a catalog template under
-    `skills/gather/queries/wazuh/`, or a declared system's `SKILL.md`, as a symlink to an
-    outside file or a hard link to it. The commit gate refuses it unread: `LeadAuthorError`
-    (the template is not a readable query template; the SKILL.md could not be read), no open
-    (link) or read (hard link) of the outside file in the kernel watch, nothing it says quoting
-    the outside bytes, and HEAD unchanged (no mode-120000 entry committed)."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
@@ -236,11 +215,6 @@ CHECKED = [pytest.param(TEMPLATE_NAME, CONTENT_CASES[1].good, "not a readable qu
 @pytest.mark.parametrize(("name", "good", "says"), CHECKED)
 def test_the_content_rule_refuses_a_non_file_at_a_checked_name(
         scene: Scene, name: str, good: str, says: str, plant: str):
-    """`_skills_content_rule(..., tree_for=)` at a promoted template's name and at a declared
-    system's `SKILL.md`: a symlink to an outside file holding good bytes, a dangling symlink
-    (`"other"`, not `"absent"`) or a FIFO is refused by the reading check (`LeadAuthorError`),
-    without blocking, nothing behind the link opened, and the entry left as it was. `plain` is
-    the control: the good bytes as a plain file pass."""
     at = scene.at(name)
     target = None
     if plant in ("plain", "link"):
@@ -266,11 +240,6 @@ def test_the_content_rule_refuses_a_non_file_at_a_checked_name(
     assert OUT_MARK not in repr(got), got
 
 
-# ---------------------------------------------------------------------------------------
-# E9: the draft is created through the held mount
-# ---------------------------------------------------------------------------------------
-
-
 class NoSpaceUnder(RealOs):
     """The real `os` handed to `DrainTrees.open` as `os_`, except that creating a file in or
     below the real folder `folder` (an `open` with `O_CREAT` off a descriptor naming it) fails
@@ -292,10 +261,6 @@ class NoSpaceUnder(RealOs):
 
 @pytest.mark.parametrize("full", [False, True], ids=["control", "ENOSPC"])
 def test_the_draft_is_created_through_the_held_mount(tmp_path: Path, full: bool, caplog):
-    """E9: the trees held over an `os_` whose disk is full under `gather/queries/elastic`. The
-    elastic draft is not created (`created == []`, nothing at its name), and the refusal is
-    logged naming the draft. `control`: over the same tree with room, the draft lands with
-    its bytes."""
     repo = bare_skills(tmp_path)
     skills_dir = repo / "defender" / "skills"
     seam = NoSpaceUnder(skills_dir / "gather/queries/elastic") if full else RealOs()
@@ -316,16 +281,8 @@ def test_the_draft_is_created_through_the_held_mount(tmp_path: Path, full: bool,
     assert os.strerror(errno.ENOSPC) in said[0]
 
 
-# ---------------------------------------------------------------------------------------
-# E8: each claim reads and writes through its own trees
-# ---------------------------------------------------------------------------------------
-
-
 def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
         tmp_path: Path, monkeypatch, caplog):
-    """E8: two claims through `drains._invoke_lead_author` with the SAME `paths`, one wazuh row
-    then one elastic row. Each mints its own draft and goes on to its agent (reached:
-    `FatalConfigError` from the unroutable model), and no log line says `Bad file descriptor`."""
     caplog.set_level(logging.DEBUG)
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     repo = _worktree(tmp_path)
@@ -347,10 +304,6 @@ def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
     assert reached == [WAZUH_LEAD.query_id, ELASTIC_LEAD.query_id]
 
 
-# ---------------------------------------------------------------------------------------
-# E5: the lift bypass reads a pending draft through the trees
-# ---------------------------------------------------------------------------------------
-
 CONTRADICTING = (f"---\nid: elastic.contradicts\nstatus: draft\ncontradicts_skill: true\n---\n"
                  f"# {OUT_MARK}\n")
 
@@ -358,11 +311,6 @@ CONTRADICTING = (f"---\nid: elastic.contradicts\nstatus: draft\ncontradicts_skil
 @pytest.mark.parametrize("left", ["plain", "hardlink"])
 def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
         tmp_path: Path, monkeypatch, left: str):
-    """E5, through `run(label=, deps=)` with no executed leads and the lift threshold at its
-    default: one pending system-skill draft saying `contradicts_skill: true`. As a hard link to
-    an outside file, its bytes are not read (no read in the kernel watch), so it does not
-    bypass the threshold and the agent is never spawned. `plain` is the control: the same
-    draft as a plain file bypasses the threshold and is handed to the agent."""
     monkeypatch.delenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", raising=False)
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
@@ -391,18 +339,8 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
     assert spawn.calls == [], "a hard link's outside bytes bypassed the lift threshold"
 
 
-# ---------------------------------------------------------------------------------------
-# E6: the run's catalog loads go through the held mount it was handed
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("refused", [False, True], ids=["control", "EIO"])
 def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, refused: bool):
-    """E6, through `run(label=, deps=)`: the trees are held over an `os_` that cannot list
-    `skills/gather/queries` (EIO). The lead `wazuh.probe`, answered only by a template there,
-    resolves to nothing: no handoff, the agent never spawned, the run done (rc 0).
-    `control`: over the real `os` the template answers the lead and is handed to the agent
-    (which fails, rc 1, so the run stops at the spawn, rc 2)."""
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
@@ -426,18 +364,6 @@ def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, r
     assert rc == 0
 
 
-# E7 (the label looked up in a mount list rather than compared to one constant) is dissolved by
-# #1179's amendment: the member answers its own trees, so there is no list apart from it to
-# consult, and a non-member raises at first use (`test_1134_lead_author_handle.py`'s
-# `test_run_consults_the_label_it_is_given` and `test_the_drain_seams_consult_the_label`).
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# E4: `where` only spells, for the readers too
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.fixture
 def scene(tmp_path: Path):
     with scene_over(tmp_path, seed_skills_repo(tmp_path / "repo")) as s:
@@ -449,9 +375,6 @@ def _respelled(paths: list[Path], s: Scene, where: Path) -> list[Path]:
 
 
 def test_where_only_spells_for_the_readers(scene: Scene, tmp_path: Path):
-    """E4: each reader handed the mount's view and a `where` that names somewhere that does not
-    exist answers exactly what it answers with `where=skills_dir`, non-empty, spelled under
-    the `where` it was given; and `where` is never made."""
     elsewhere = tmp_path / "spelled-elsewhere"
     view, home = scene.view, scene.skills_dir
 
@@ -478,29 +401,9 @@ def test_where_only_spells_for_the_readers(scene: Scene, tmp_path: Path):
     assert not os.path.lexists(elsewhere), "where= was made"
 
 
-# ---------------------------------------------------------------------------------------
-# E10: the two entry points step 6 gives production callers keep no vulture suppression
-# ---------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------------------
-# R8: `run_pitfalls` checks its trees before it reads its queue
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("how", ["lane_trees", *REFUSALS])
 def test_run_pitfalls_checks_its_trees_before_it_reads_its_queue(
         tmp_path: Path, monkeypatch, how: str):
-    """R8: `run_pitfalls` over trees that do not hold `skills/` exactly (the author label's,
-    an unknown label's, a moved or above lead mount, a mount below `skills/`) raises
-    `LeadAuthorError` without opening its queue file: the kernel watch on the queue sees
-    nothing. `lane_trees` is the control: under the lead drain's own trees the same tick does
-    read the queue (and, below its threshold, stops there, rc 0)."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "99")
     if how == "lane_trees":
         paths = LoopPaths(repo_root=_worktree(tmp_path), state_dir=tmp_path / "state")

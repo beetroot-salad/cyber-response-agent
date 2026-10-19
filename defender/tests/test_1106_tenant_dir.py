@@ -22,9 +22,6 @@ def _refusal(root: Path, tenant_id: str) -> str:
 # ---- the positive control every refusal below is measured against -----------------------------
 
 def test_a_well_formed_tenant_resolves_to_its_two_halves_under_root_and_id(tmp_path):
-    """The control: a complete tenant is accepted, and both halves are the paths under
-    `<root>/<id>/knowledge/` — the very folders planted (compared resolved too, because the box
-    mounts `agent` by its resolved path (M6) and a reader's path is compared by it)."""
     root = tmp_path / "tenants"
     knowledge = T.place_tenant(root, "acme")
     assert knowledge == root / "acme" / "knowledge"
@@ -50,11 +47,6 @@ def test_a_tenant_without_any_config_env_still_resolves(tmp_path):
 
 @pytest.mark.parametrize("bad_id", ["../x", "a/b", ".hidden", "", "..", ".", "Acme_Corp"])
 def test_an_id_that_is_not_a_single_plain_name_is_refused_naming_it(tmp_path, bad_id):
-    """An id with a path separator, `..`, a leading dot, no name at all, or anything else
-    outside the one tenant-id grammar a run is held to (`Acme_Corp`) is refused — and
-    refused even when the place it would reach EXISTS and is a complete tenant, so the refusal
-    is the id's grammar and not an accident of what is on disk. The positive control is the
-    same plant reached by a plain id."""
     root = tmp_path / "tenants"
     root.mkdir(parents=True)
     # Make every one of these ids point at a complete tenant, if it were followed.
@@ -72,9 +64,6 @@ def test_an_id_that_is_not_a_single_plain_name_is_refused_naming_it(tmp_path, ba
 # ---- O5: the link --------------------------------------------------------------------------
 
 def test_a_tenant_folder_symlinked_outside_the_root_is_refused_naming_it(tmp_path):
-    """A COMPLETE tenant planted outside the root and linked in under a plain id: an
-    acceptance that checks only the id grammar follows the link and serves another tree's
-    settings."""
     root = tmp_path / "tenants"
     root.mkdir(parents=True)
     outside = T.place_tenant(tmp_path / "outside", "acme").parent
@@ -101,9 +90,6 @@ def test_an_agent_half_linked_to_a_sibling_tenants_agent_is_refused(tmp_path):
 
 
 def test_an_agent_half_linked_to_its_own_settings_is_refused(tmp_path):
-    """`A/agent -> settings` resolves under A's own knowledge folder and still must be
-    refused: the box mounts `agent/`, so this link would put every settings file into the box
-    (O1, O5)."""
     root = tmp_path / "tenants"
     a = T.place_tenant(root, "acme")
     _swap_for_link(a / "agent", Path("settings"))
@@ -125,10 +111,6 @@ def test_a_settings_half_linked_to_a_sibling_tenants_settings_is_refused(tmp_pat
 
 
 def test_a_tenant_folder_linked_to_a_sibling_tenant_inside_the_root_is_refused(tmp_path):
-    """`root/acme -> bravo` stays INSIDE the root, so "the folder resolves under the root" is
-    satisfied — and every reader of acme would read bravo's table, settings and agent half.
-    The tenant folder must be THE folder `<root>/<id>`, not any folder under the root. The
-    control is bravo itself, reached by its own id through the same root."""
     root = tmp_path / "tenants"
     bravo = T.place_tenant(root, "bravo", table=T.TABLE_B)
     os.symlink(Path("bravo"), root / "acme", target_is_directory=True)
@@ -145,11 +127,6 @@ def test_a_tenant_folder_linked_to_a_sibling_tenant_inside_the_root_is_refused(t
                          ids=["a-subfolder-of-its-own-settings", "its-own-tenant-folder"])
 def test_an_agent_half_linked_inside_its_own_tenant_but_not_to_itself_is_refused(
         tmp_path, target):
-    """Two links that stay under `<root>/<id>/` and are not `settings/` itself, so a check of
-    "resolves under the tenant folder, and is not the settings half" passes both — yet each
-    puts settings files into the box that mounts `agent/` (O1): `agent -> settings/systems`
-    exposes every system's `config.env`, `agent -> ..` exposes the whole tenant. The control is
-    the same tenant with a real `agent/` directory, which is accepted."""
     root = tmp_path / "tenants"
     knowledge = T.place_tenant(root, "acme")
     acme = knowledge.parent
@@ -218,10 +195,6 @@ def test_a_required_file_that_is_a_directory_is_refused(tmp_path):
 
 @pytest.mark.parametrize("linked", T.REQUIRED_FILES)
 def test_a_required_file_linked_to_another_tenants_copy_is_refused(tmp_path, linked):
-    """The link rule reaches the FILES, not only the folder and its halves: a required file
-    that is a link to tenant B's copy stays inside the root, reads cleanly, and would hand A
-    B's grants (or lead-zero id, or released-status spelling). Paired with the control above:
-    the same two tenants, differing only by the link."""
     root = tmp_path / "tenants"
     a = T.place_tenant(root, "acme", table=T.TABLE_A)
     b = T.place_tenant(root, "bravo", table=T.TABLE_B)
@@ -256,10 +229,6 @@ def test_a_linked_directory_on_the_way_to_a_required_file_is_refused(tmp_path):
 ])
 def test_any_link_inside_a_tenant_folder_is_refused_not_only_the_required_files(
         tmp_path, linked):
-    """The link rule covers the whole folder, not a list of files: a system's `config.env` (or
-    its whole `systems/<sys>/` folder) linked to another tenant's copy hands this tenant that
-    tenant's endpoints, and a link in `agent/` would hand the model another tenant's knowledge
-    — all while staying inside the root. Control: the unlinked tenant is accepted (above)."""
     root = tmp_path / "tenants"
     a = T.place_tenant(root, "acme")
     b = T.place_tenant(root, "bravo")
@@ -312,4 +281,3 @@ def test_a_directory_the_link_check_cannot_read_is_refused_not_skipped(tmp_path)
 
 
 # ---- D2: the root is an input --------------------------------------------------------------
-

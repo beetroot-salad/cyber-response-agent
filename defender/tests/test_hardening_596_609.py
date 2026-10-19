@@ -124,9 +124,6 @@ def _case_ids(out: str) -> list[str]:
 
 
 def test_d_b1_or_none_tolerates_flood_and_recovers():
-    """d: b1 — flow AND block floods → None (a RecursionError from ``safe_load`` is a
-    malformed-frontmatter outcome, not a crash), and a healthy doc still parses in the
-    same process afterwards: the caught error leaves no parser state behind."""
     assert parse_frontmatter_or_none(_flood_doc(_flow_flood())) is None
     assert parse_frontmatter_or_none(_flood_doc(_block_flood())) is None
     assert parse_frontmatter_or_none("---\nname: ok\n---\nbody") == {"name": "ok"}
@@ -169,9 +166,6 @@ def test_d_b8_all_survives_flood_lesson_with_marker_row(tmp_path, capsys):
 
 
 def test_d_b9_named_flood_lesson_still_traces(tmp_path, capsys):
-    """d: b9 — naming a flooded lesson keeps the #608 tri-state posture: readable but
-    malformed → warn + unwindowed trace + rc 0 (an audit of a broken lesson is the
-    tool's most likely use), never a RecursionError traceback."""
     tl = _load_tl()
     lessons = tmp_path / "lessons"
     lessons.mkdir()
@@ -187,9 +181,6 @@ def test_d_b9_named_flood_lesson_still_traces(tmp_path, capsys):
 
 
 def test_d_b10_learn_normalize_disposition_flood_is_run_unprocessable(tmp_path):
-    """d: b10 — the LEARN gate stays fail-loud but TYPED: a flooded report.md raises
-    ``RunUnprocessable`` (dead-letterable by the drain), not RecursionError through the
-    worker. Control: plain invalid YAML already takes that path."""
     rp = tmp_path / "report.md"
     rp.write_text("---\ndescription: [unclosed\n---\nbody\n", encoding="utf-8")
     with pytest.raises(RunUnprocessable):
@@ -200,9 +191,6 @@ def test_d_b10_learn_normalize_disposition_flood_is_run_unprocessable(tmp_path):
 
 
 def test_d_a1_all_marks_unparseable_created_at_row(tmp_path, capsys):
-    """d: a1 — a VALID lesson whose created_at doesn't parse gets a self-marking row:
-    real description kept, marker names the quoted offending value, count is the
-    unwindowed count (still traces — never 0), and the row does not claim "malformed"."""
     row, _ = _all_row(tmp_path, "name: L\ndescription: real desc\ncreated_at: not-a-date", capsys)
     cols = row.split("\t")
     assert len(cols) == 4
@@ -240,9 +228,6 @@ def _named(tmp_path, body_frontmatter: str, capsys, stem: str = "L"):
 
 
 def test_d_a6_named_warn_echoes_offending_value(tmp_path, capsys):
-    """d: a6 — the named-path stderr warn tells the human what to fix without opening
-    the file: one line, quoted value, and it keeps the #608-pinned "trace is unwindowed"
-    phrase so existing consumers of that warn stay true."""
     cap = _named(tmp_path, "name: L\ndescription: d\ncreated_at: not-a-date", capsys)
     assert len(cap.err.splitlines()) == 1
     assert "trace is unwindowed" in cap.err
@@ -250,9 +235,6 @@ def test_d_a6_named_warn_echoes_offending_value(tmp_path, capsys):
 
 
 def test_d_a8_header_never_prints_since_none(tmp_path, capsys):
-    """d: a8 — the header renders an honest unwindowed form carrying the quoted value,
-    never the Python ``None`` sentinel; it stays exactly one ``#``-prefixed line so
-    ``_case_ids``-style consumers can't mistake it for a case row."""
     cap = _named(tmp_path, "name: L\ndescription: d\ncreated_at: not-a-date", capsys)
     lines = cap.out.splitlines()
     header = lines[0]
@@ -268,9 +250,6 @@ _HOSTILE_CREATED_AT = f"created_at: {_HOSTILE_VALUE}"
 
 
 def test_d_a9_all_echo_survives_every_line_breaker(tmp_path, capsys):
-    """d: a9 (negative + control) — a value carrying every splitlines breaker and a tab
-    forges no extra row and no fifth column in ``--all``; the control is the flattened
-    value visible in the marker (each breaker → one space), proving the echo happened."""
     row, cap = _all_row(tmp_path, f"name: L\ndescription: d\n{_HOSTILE_CREATED_AT}", capsys)
     assert len(cap.out.splitlines()) == 1
     assert row.count("\t") == 3
@@ -312,14 +291,9 @@ def test_d_a13_named_rows_flatten_disposition_and_ts(tmp_path, capsys):
 
 
 def test_d_a14_all_description_survives_every_line_breaker(tmp_path, capsys):
-    """d: a14 — the ``--all`` description column is the same LLM-authored value-in-TSV
-    class as the echo: every splitlines breaker + tab in it forges no row and no column
-    (the \\t/\\n-only flatten this column used to get is provably insufficient)."""
     row, cap = _all_row(
         tmp_path, f"name: L\ndescription: {_HOSTILE_VALUE}\ncreated_at: 2026-06-04", capsys
     )
     assert len(cap.out.splitlines()) == 1
     assert row.count("\t") == 3
     assert row.split("\t")[1] == "a b c d e f g h i"
-
-

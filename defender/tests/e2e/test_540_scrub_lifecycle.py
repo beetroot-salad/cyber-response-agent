@@ -53,9 +53,6 @@ pytestmark = pytest.mark.e2e
 
 REPO_ROOT = DEFENDER.parent
 RUN_PY = DEFENDER / "run.py"
-#: The module holding the bash tool BODY. Not `tools.py`, which is the registration
-#: facade: the structural leg below parses the function itself, so it has to read the
-#: file that defines it.
 BASH_PY = DEFENDER / "runtime" / "tools" / "_bash.py"
 GATHER_ONLY = REPO_ROOT / "scripts" / "testing" / "gather_only.py"
 
@@ -136,9 +133,6 @@ class FakeDocker:
             # whose mount table we do not model answers with an empty table, never a state.
             return (0, "", "")
         if "Config.Labels" in fmt:
-            # The start-token label. This double models a container held by SOMEONE ELSE (that
-            # is what `existing` means), and docker prints `<no value>` for a label a container
-            # does not carry — which `_start_token` reads as "not ours", the honest answer.
             return (0, "<no value>\n", "")
         return (0, f"{self.existing}\n", "")
 
@@ -334,9 +328,6 @@ def _drive_lifecycle(tmp_path, rec, *, fault=None, run_dir=None, **kw):
 
 
 def test_scrub_raises_on_a_planted_symlink(tmp_path):
-    """d_scrub_raises_on_symlink — a symlink anywhere in the frozen run dir fails the run LOUDLY:
-    the scrub raises `RunTainted`, names the offending path, and no host consumer runs over
-    the tree."""
     run = _clean_run_dir(tmp_path)
     planted = run / "gather_raw" / "l-001" / "passwd.json"
     os.symlink("/etc/passwd", planted)
@@ -406,9 +397,6 @@ def test_the_taint_names_every_planted_entry_not_only_the_first(tmp_path):
 
 
 def test_the_findings_are_structured_not_only_prose(tmp_path):
-    """d_taint_findings_are_structured (#747) — the findings ride on the exception as typed
-    `Finding` records, so a caller that needs to persist them (#747's quarantine manifest is
-    the first) reads fields instead of re-parsing the operator-facing message."""
     run = _clean_run_dir(tmp_path)
     os.symlink("/etc/passwd", run / "gather_raw" / "l-001" / "passwd.json")
     os.link(run / "report.md", run / "report.hardlink.md")
@@ -480,9 +468,6 @@ def test_scrub_removes_and_rewrites_nothing(tmp_path):
 
 
 def test_a_clean_run_dir_passes_the_scrub(tmp_path):
-    """d_clean_tree_passes_scrub — the POSITIVE CONTROL for the whole scrub family: a real, fully
-    populated run dir containing only regular files and real directories passes, and the scrub
-    returns rather than raising."""
     run = _clean_run_dir(tmp_path)
     assert scrub(run) is None
     assert (run / "report.md").is_file()
@@ -542,10 +527,6 @@ def test_scrub_raises_on_a_fifo_socket_or_device_node(tmp_path):
 
 
 def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
-    """d_scrub_precedes_first_consumer — in the entrypoint's composition the scrub is invoked
-    AFTER the investigation (the tree is frozen, no live writer, so the check is TOCTOU-free)
-    and BEFORE the first consumer of the tree, which is the artifact listing over
-    `sorted(...iterdir())`."""
     log: list[str] = []
     rec = BoxLifecycleRecorder(events=log)
     summary = _drive_lifecycle(tmp_path, rec)
@@ -561,16 +542,9 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
         "the tree walked is not the run dir the box was given"
 
     order = _call_order(_fn_node(RUN_PY, "main"))
-    # #791 R22: `main` now takes the lifecycle through an injection seam (defaulting to
-    # `_run_investigation_lifecycle`) rather than naming it directly, so the reap boundary in
-    # `main`'s own composition is the seam parameter's call, not the function's name.
     assert "lifecycle" in order, \
         "main no longer drives the lifecycle through its injection seam; re-site this demand"
     reap = order.index("lifecycle")
-    # `enqueue_learning` left this list under #791 (bullet 1: the automatic feed is unhooked
-    # at this call site — the surviving path is the operator's own hand invocation of the
-    # learning entrypoint, never a call inside `main`). `enqueue_curation` and
-    # `record_case_ticket` are the two new pre-certification consumers R6/R17 add.
     for consumer in ("iterdir", "cross_check_tables", "enqueue_curation", "record_case_ticket", "visualize"):
         assert consumer in order, f"{consumer} left the entrypoint; re-site this demand"
         assert reap < order.index(consumer), \
@@ -579,9 +553,6 @@ def test_scrub_runs_before_the_first_run_dir_consumer(tmp_path):
 
 
 def test_no_consumer_runs_when_the_scrub_raises(tmp_path):
-    """d_no_consumer_runs_on_a_tainted_tree — a tainted tree stops the run: the taint signal
-    propagates out of the entrypoint uncaught, so the artifact listing, the table cross-check,
-    the durable learning-state copy and the post-run page render never read the tree."""
     run = _clean_run_dir(tmp_path)
     os.symlink("/etc/passwd", run / "sneaky.json")
     with pytest.raises(RunTainted):
@@ -641,9 +612,6 @@ def test_the_drain_scrub_survives_a_crashed_do_work(tmp_path):
     def crashing_do_work(wt_paths, *, box=None):
         raise boom
 
-    # No `branch=`: `drive_worktree_batch` already defaults to a RecordingBranch over the
-    # recorder's own event log, which is what makes the branch events and the box events
-    # comparable. Rebuilding an identical one here would just be a second way to get it wrong.
     with pytest.raises(RuntimeError) as e:
         drive_worktree_batch(tmp_path, rec, do_work=crashing_do_work)
     assert e.value is boom, "the drain swallowed or replaced do_work's own failure"
@@ -678,9 +646,6 @@ def _reap_probe(*, stop_fault=None, scrub_fault=None):
 
 
 def test_the_reap_scrubs_once_the_box_is_down(tmp_path):
-    """d_reap_scrubs_a_dead_box — the shared reap's ordinary path: tear the box down, then walk
-    the tree. Teardown first, because the rw bind must be released before the walk — a scan
-    that races a live writer is a check in name only."""
     log, stop, scrub_tree = _reap_probe()
     assert stop_and_scrub(object(), tmp_path, stop_box=stop, scrub_tree=scrub_tree,
                           in_flight=False) is None
@@ -716,10 +681,6 @@ def test_a_failed_teardown_skips_the_scrub_rather_than_racing_it(tmp_path, capsy
 
 
 def test_a_taint_outranks_the_work_s_own_failure(tmp_path):
-    """d_reap_taint_outranks_in_flight — a taint raised by the walk reaches the caller even
-    when the work itself already failed: a tainted tree is the worse signal, and the crash
-    path's tree is the one a human then opens by hand. Python's implicit chaining keeps the
-    original reachable on `__context__`, so nothing is lost by preferring the taint."""
     taint = RunTainted("planted link")
     log, stop, scrub_tree = _reap_probe(scrub_fault=taint)
 
@@ -735,19 +696,12 @@ def test_a_taint_outranks_the_work_s_own_failure(tmp_path):
 
 
 def test_box_construction_failure_refuses_the_run(tmp_path):
-    """d_construction_failure_refuses_the_run — ANY box-construction failure refuses the run: the
-    box start raises the infrastructure fault, and the entrypoint starts the box BEFORE the
-    investigation, so a refusal means no untrusted input is ever processed."""
     run = _clean_run_dir(tmp_path)
     docker = FakeDocker(lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", ""))
 
     with pytest.raises(BoxFault):
         start_box(run, DEFENDER, docker=docker)
 
-    # ...and the lifecycle refuses on it: the investigation is never reached, so no untrusted
-    # input is processed. Executed rather than read off the statement order (#741) — a
-    # construction failure that fell through to the driver would occupy the same source
-    # position while behaving in exactly the way this demand forbids.
     log: list[str] = []
     rec = BoxLifecycleRecorder(events=log)
     fault = BoxFault("construction refused")
@@ -808,16 +762,6 @@ def test_path_identity_sentinel_fails_closed(tmp_path):
 
 
 def test_mid_run_exec_failure_degrades_to_a_tool_error(gate_env):
-    """d_mid_run_exec_failure_is_a_tool_error — a box exec that fails MID-RUN degrades to a
-    tool error the model sees and can react to; it does not abort the process and it does not
-    fall back in-process. The distinction is structural rather than heuristic: an exit code
-    INSIDE the frame is the program's own and reaches the model as a real result, while the
-    ABSENCE of a frame is by definition an infrastructure fault.
-
-    So a genuine `command not found` survives to the model as an actionable signal (the
-    positive control below), and only the frameless case becomes a tool error. The refuted C39
-    shape is deliberately not asserted: no assertion here depends on which stream the daemon
-    chose or on its line endings, because that shape already changed under us once."""
     cmd = f"cat {_m(gate_env, gate_env.run / 'report.md')}"
 
     faulting = _deps(gate_env, BoxRecorder(fault=BoxFault("no frame on stdout")))
@@ -861,9 +805,6 @@ def test_reaper_does_not_treat_stderr_as_failure(tmp_path):
 
 
 def test_a_stopped_box_of_the_same_name_does_not_block_a_new_run(tmp_path):
-    """d_pre_create_reap_clears_a_stopped_collision — a leaked-but-EXITED box of the same name
-    does not block a new run: the start reaps the name before creating, so the create
-    succeeds."""
     run = _clean_run_dir(tmp_path)
 
     class StoppedCollision(FakeDocker):
@@ -914,9 +855,6 @@ def test_no_box_failure_path_executes_in_process(tmp_path, gate_env):
 
 
 def test_allow_unsandboxed_is_the_sole_loud_opt_out(tmp_path, monkeypatch, capsys):
-    """d_allow_unsandboxed_is_the_only_opt_out — the POSITIVE CONTROL for the no-fallback
-    negative: there IS exactly one way to run un-boxed, it is an explicit operator opt-out,
-    and it is LOUD."""
     run = _clean_run_dir(tmp_path)
     broken = lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", "")  # noqa: E731
 
@@ -941,11 +879,6 @@ def test_a_colliding_run_id_refuses_rather_than_reaping_a_live_sibling(tmp_path)
     run = _clean_run_dir(tmp_path)
     name = container_name(run.name)
 
-    # `existing="running"` rather than a subclass answering every inspect with the state word:
-    # the state query and the START-TOKEN query are different questions down one verb, and a
-    # double that answers both with `running` hands `_start_token` a token no `uuid4().hex`
-    # can equal — so `_reap_on_fault` would silently skip its reap and this test's "no rm for
-    # that name" assertion would pass for the double's reason instead of production's.
     docker = FakeDocker(
         lambda verb: C43B_NAME_COLLISION if verb == "run" else (0, "", ""),
         existing="running",
@@ -971,9 +904,6 @@ def test_decide_bash_runs_host_side_before_every_box_call(gate_env):
     cmd = f"cat {report}"
     runtime_tools._tool_bash(_deps(gate_env, allowed), cmd)
     assert len(allowed.calls) == 1
-    # #1255 C8/C11: what the box receives is the command's own decomposition in the model view —
-    # one pipeline, one stage, `cat <model path>` — stated literally, because how the gate's own
-    # functions spell their inputs is the implementer's choice (C11).
     crossed = [[list(st.argv) for st in pl.stages] for pl in allowed.calls[0]["pipelines"]]
     assert crossed == [[["cat", report]]], crossed
 
@@ -1064,10 +994,6 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
 
 
 def test_a_box_write_cannot_overwrite_a_claimed_lead_sidecar(tmp_path):
-    """d_box_write_cannot_overwrite_a_claimed_lead — the lead claim stays EXCLUSIVE against a
-    write the box made into the shared tree: the atomic exclusive create is the claim, so a
-    sidecar that already exists — whoever wrote it — refuses the claim with the reuse signal
-    instead of overwriting it, and the ..."""
     run = _clean_run_dir(tmp_path)
     raw = run / "gather_raw"
     dispatch = {"run_dir": str(run), "lead_id": "l-002",
@@ -1085,5 +1011,3 @@ def test_a_box_write_cannot_overwrite_a_claimed_lead_sidecar(tmp_path):
     first = (raw / "l-003.lead.json").read_text(encoding="utf-8")
     assert claim_lead(dict(dispatch2, goal="a different goal"), run=fixture_run(run)) == ALREADY_CLAIMED
     assert (raw / "l-003.lead.json").read_text(encoding="utf-8") == first
-
-

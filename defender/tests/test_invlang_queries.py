@@ -1,11 +1,3 @@
-"""Defender invlang cross-case query helpers (Classes 5/6/8).
-
-Tests run against hand-constructed Companion objects, so the surface
-under test is the query logic itself — the parser has its own coverage
-in test_invlang_parser.py. Constructing the dicts inline also documents
-the canonical companion shape these helpers expect.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -399,9 +391,6 @@ def test_hypothesis_shape_uses_final_weight_from_resolutions():
 
 
 def test_hypothesis_shape_match_filters_via_anchor_field():
-    """Lock the canonical key: `hypothesis_shape_match` indexes off the
-    parser's `anchor` field (not the legacy `attached_to_vertex`). Built
-    by hand to bypass `_hyp`'s helper layer."""
     h = {
         "id": "h-001", "name": "?config-changed",
         "anchor": "v-001",

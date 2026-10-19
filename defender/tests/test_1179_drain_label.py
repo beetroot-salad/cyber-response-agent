@@ -1,27 +1,3 @@
-"""#1179: the drain labels are the members of a plain `enum.Enum`, so no string is a label.
-
-The contract is #1179's intent+design comment (2026-10-03) and its owner amendment (the same
-day, after `/code-review`):
-
-- O1', only a member names a lane. `DrainLabel.writable_trees(paths)` (`@owns
-  drain_writable_trees`) is each member's own list; a non-member (a string, a member's name, a
-  look-alike, an object carrying a value) has no such method and raises at its first use.
-  `_run_worktree_batch` asks it first, so a non-member raises before `_open_batch`, before a
-  worktree, a box, a held root or a record exists. `test_1134_mount_list.py` carries the box
-  and holder rows; here are the batch entry and the lead-author lane's own grant check.
-- O2, the two records that persist a label still write its value as a JSON string: the
-  pending-delivery record (`drains._record_pending_delivery`) and the quarantine manifest
-  (`quarantine.preserve_tainted_tree`). Each is read back from disk. The quarantine writer
-  swallows its own failures (a missed `.value` would lose the manifest silently and log an
-  error), so these rows assert on the written file, never on an exception.
-- O3, every message that carries a label shows its value, never `DrainLabel.AUTHOR` or
-  `<DrainLabel.AUTHOR: ...>`: the claim log of `LearningState.claim`, the quarantine log, and
-  the lead-author refusal (formatted with `!r` before #1179).
-
-Real primitives throughout: a real scrub taints a real tree with a planted link, the real writers
-write, and the records are read back with `json.loads`. Nothing is monkeypatched (`caplog`
-only captures).
-"""
 from __future__ import annotations
 
 import json
@@ -70,19 +46,8 @@ def _assert_shows_value(text: str, label: DrainLabel) -> None:
         assert leak not in text, (leak, text)
 
 
-# ---------------------------------------------------------------------------------------
-# O2: the written records carry the value
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("label", MEMBERS, ids=lambda m: m.value)
 def test_the_pending_delivery_record_writes_the_labels_value(tmp_path: Path, label: DrainLabel):
-    """The real `_record_pending_delivery` writes `"label": "<value>"`, a JSON string, beside
-    the branch and batch it already wrote.
-
-    Catches: the member handed to `json.dumps` (a `TypeError` out of the delivery path), its
-    `str()`/`repr()` or its name written instead of its value, and a record that drops the
-    label."""
     paths = _paths(tmp_path)
     branch = AuthorBranch(repo_root=paths.repo_root, worktree_base=tmp_path / "wts")
 
@@ -112,15 +77,6 @@ def _tainted(tree: Path) -> scrub_mod.RunTainted:
 @pytest.mark.parametrize("label", MEMBERS, ids=lambda m: m.value)
 def test_the_quarantine_manifest_writes_the_labels_value_and_logs_it(
         tmp_path: Path, label: DrainLabel, caplog: pytest.LogCaptureFixture):
-    """The real `preserve_tainted_tree` over a really tainted tree writes its archive and a
-    manifest whose `"label"` is the value, a JSON string, and logs the preservation under the
-    value.
-
-    The manifest is read back: the writer swallows any failure (it must not mask the taint),
-    so a member handed to `json.dumps` shows only as a missing manifest and an error log.
-
-    Catches: a missed `.value` (no manifest, the archive alone), a written `str()`/`repr()`,
-    and a log line that shows `DrainLabel.AUTHOR`."""
     wt = tmp_path / "wt"
     taint = _tainted(wt)
     qdir = tmp_path / "quarantine"
@@ -142,18 +98,9 @@ def test_the_quarantine_manifest_writes_the_labels_value_and_logs_it(
     _assert_shows_value(preserved, label)
 
 
-# ---------------------------------------------------------------------------------------
-# O3: messages show the value
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("label", MEMBERS, ids=lambda m: m.value)
 def test_the_claim_log_shows_the_labels_value(
         tmp_path: Path, label: DrainLabel, caplog: pytest.LogCaptureFixture):
-    """`state.claim(label=<member>)` logs its queue count under the value.
-
-    Catches: an f-string `{label}` over a member whose `str()` is the enum's default
-    (`DrainLabel.AUTHOR`)."""
     state = state_for_paths(_paths(tmp_path))
     with caplog.at_level(logging.INFO):
         assert list(state.claim(
@@ -164,14 +111,6 @@ def test_the_claim_log_shows_the_labels_value(
 
 
 def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
-    """`lead_author.run(deps=..., label=<member>)` whose list lacks `skills/` is refused, and the
-    refusal names the lane by its value, quoted: `the 'author_drain' lane does not mount`.
-
-    The author member is that case: its list is the two lessons corpora. The positive control,
-    the lead member over the same `deps.paths`, gets past the check (to the queue lock, which
-    the stub deps answers with a sentinel).
-
-    Catches: `{label!r}` over a member, rendering `<DrainLabel.AUTHOR: 'author_drain'>`."""
     run = run_of(curation_run_dir("run"))  # the opened run the lane is handed (#1105 PR 2)
     paths = _paths(tmp_path)
 
@@ -192,26 +131,9 @@ def test_the_lead_author_refusal_names_the_labels_value(tmp_path: Path):
         lead_author.run(run, label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)  # type: ignore[arg-type]
 
 
-# ---------------------------------------------------------------------------------------
-# O1 through the lead-author lane's own grant check
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("value", NON_MEMBERS, ids=repr)
 def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
         tmp_path: Path, value: object):
-    """`lead_author.run(label=<non-member>)` raises at its first use (`AttributeError`) before
-    the queue lock, on both paths:
-    - with deps, the deps' lock seam is never called;
-    - without deps, the real queue lock is already held by this test, so a run that took the
-      lock before using the label would answer the skip code instead of raising.
-
-    The controls: the lead member reaches the deps' lock (above), and without deps the same
-    held lock makes the lead member answer the skip code.
-
-    Catches: a `str`-mixin enum, a check that coerces a string, a name or a look-alike into a
-    member (`DrainLabel(label)`, `DrainLabel[label]`, `.value` lookups), and a run that takes
-    the queue lock before it uses the label."""
     run = run_of(curation_run_dir("run"))  # the opened run the lane is handed (#1105 PR 2)
     paths = _paths(tmp_path)
 
@@ -230,30 +152,12 @@ def test_the_lead_author_lane_raises_on_a_non_member_before_the_queue_lock(
             lead_author.run(run, label=value, paths=paths)  # type: ignore[arg-type]
 
 
-# ---------------------------------------------------------------------------------------
-# O1' at the batch entry: a non-member raises before any batch work
-# ---------------------------------------------------------------------------------------
-
-
 def _writable(request: Any) -> list[Path]:
     return [Path(m.source) for m in request.mounts if m.writable]
 
 
 @pytest.mark.parametrize("label", NON_MEMBERS, ids=repr)
 def test_a_batch_handed_a_non_member_raises_before_any_batch_work(tmp_path: Path, label: object):
-    """The real `_run_worktree_batch(label=<non-member>)` raises `AttributeError` before
-    `_open_batch`, over a lane that has a retained delivery from an earlier tick: the retained
-    batch is NOT delivered (its record stays on disk, `deliver` is never called), `has_work` is
-    never asked, the branch records no event and makes no worktree, no box is started, and
-    nothing is held.
-
-    The positive control, each member over a fresh drive with the same retained record: the
-    batch delivers it (one `deliver`, the record removed), asks `has_work`, starts one box, and
-    that box mounts the member's trees writable.
-
-    Catches: a string, a name or a look-alike coerced into a member at the batch entry, and a
-    batch that only meets the label late (inside `_open_batch` after the delivery pushed and
-    dropped the record, at the box, or at a record writer)."""
     asked: list[LoopPaths] = []
 
     def has_work(paths: LoopPaths) -> bool:
@@ -324,20 +228,8 @@ def _retain(root: Path, branch: Any) -> Path:
     return record
 
 
-# ---------------------------------------------------------------------------------------
-# O2 by lane: each member's own batch writes its own value into both records
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("label", MEMBERS, ids=lambda m: m.value)
 def test_each_lanes_batch_writes_its_own_label_into_both_records(tmp_path: Path, label: DrainLabel):
-    """Driven through the real `_run_worktree_batch` for each member: a rejected push records
-    a pending delivery whose `"label"` is that member's value, and a tainted tree (a real link
-    planted, the real scrub) leaves a quarantine manifest whose `"label"` is that member's value.
-
-    Catches: a lane constant (or the other lane's label) handed to `_land_batch` or
-    `preserve_tainted_tree` instead of the batch's own label: each path driven for one lane
-    only would stay green."""
     root = tmp_path / "push"
     root.mkdir()
     rec = B.BoxLifecycleRecorder()

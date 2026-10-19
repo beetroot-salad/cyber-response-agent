@@ -54,11 +54,6 @@ def assert_set_aside_for_its_sample(built, index: int, what: str) -> None:
     assert "samples.yaml" in str(entries[0].get("reason")), entries
 
 
-# ---------------------------------------------------------------------------------------
-# M4 — samples.yaml
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_launcher_writes_samples_yaml_at_step_2(tmp_path, monkeypatch):
     """The launcher writes `samples.yaml` at `Step.QUESTIONER`, holding exactly what the questioner
     was handed."""
@@ -169,11 +164,6 @@ def test_a_two_system_family_names_each_systems_sample_availability_independentl
         "the first, O5's own falsifier")
 
 
-# ---------------------------------------------------------------------------------------
-# M4 — the per-world prompt
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_judges_sample_is_byte_identical_to_the_questioners_within_one_attempt(
         tmp_path, monkeypatch):
     """WITHIN ONE ATTEMPT, the judge is shown the same real answers per served system that the
@@ -204,11 +194,6 @@ def test_every_attacker_influenced_section_of_the_judge_prompt_carries_the_run_s
 
     W.assert_wrapped_untrusted(prompt, "a-sample-marker-host", "the questioner's sample")
     W.assert_wrapped_untrusted(prompt, marker_fault, "pre-flight's recorded reason")
-
-
-# ---------------------------------------------------------------------------------------
-# H3 — a second write overwrites, and the accepted gap that follows
-# ---------------------------------------------------------------------------------------
 
 
 def test_a_second_attempts_step_2_overwrites_the_first_attempts_samples(

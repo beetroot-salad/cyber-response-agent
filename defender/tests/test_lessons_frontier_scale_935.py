@@ -19,10 +19,6 @@ from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
 
 CORPUS = DEFENDER / "lessons"
 
-#: The issue's reproduction of defect 1, verbatim. A `compute` vertex whose identifier is open
-#: and an `identity` vertex holding `loginuid=-1` — the shape #919 was filed about, in two rows.
-#: EXECUTED against the real `diagnose` and clean (asserted below), so an empty frontier here
-#: would be a bug rather than the honest answer.
 TWO_VERTEX_DOC = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-001|compute|ip-only/??/??|??|knowledge=partial
@@ -33,25 +29,12 @@ v-002|identity|user/known-corp|jsmith|uid=1000;loginuid=-1
 #: The lesson the whole lane exists to reach, and the one every defect cut.
 LOGINUID_LESSON = "falco-loginuid-tty-non-interactive-not-docker-exec"
 
-#: The two runs the issue replayed, at paths git actually tracks.
-#:
-#: `turnN-A` is COPIED into `_golden_invlang/` rather than read from `learning/runs/turnN-A/`,
-#: which is where the run itself lives and which `.gitignore:91` excludes — runs are kept out
-#: of the repo on purpose (`defender/CLAUDE.md`). Reading it there made every assertion about
-#: it a skip on any machine but the one that produced it, so the fence-by-fence evidence for
-#: #935's defect 2 could never run in CI. It is the document #919 was filed about and the one
-#: this lane is judged on; committing the ~11KB is what makes the claim checkable by anyone.
 REPLAYED_RUNS = (
     ("golden-sshpivot-ab3", DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3" / "investigation.md"),
     ("turnN-A", DEFENDER / "tests" / "_golden_invlang" / "turnN-A.investigation.md"),
 )
 
 
-#: One open authorization contract alongside THREE open node cells on three different vertices
-#: — the shape that separates the fix from the fix the issue rejects. Three distinct node items
-#: means `_spread_over_items` cannot rescue the edge lesson: each node lesson takes a first-pass
-#: slot of its own, so the edge lane has to win on SCORE or not at all. EXECUTED against the
-#: real `diagnose` and clean (asserted below).
 CONTRACT_AND_THREE_CELLS_DOC = """```invlang
 :V prologue.vertices [id|type|class|ident|attrs?]
 v-001|compute|bastion/internal/known-corp|bastion-01.corp|kind=physical
@@ -100,18 +83,6 @@ def _prefixes(text: str) -> list:
 # defect 3 — the class match is monotonic in what the document records
 
 def test_recording_more_about_a_class_slot_never_loses_a_selector():
-    """CLAIM: refining a class cell only ever ADDS matches — never removes one.
-
-    The filed table, which is the whole defect in four rows. Against
-    `sel='ip-only/internet/novel'`, cases `??`, `??/??` and `ip-only/??/??` all matched and
-    `ip-only/??` MISSED, because arity was guessed from the cell: a cell concrete enough to be
-    taken at its length was taken at the WRONG length. `_check_vocab_vertices` validates `type`
-    and never class arity, so `class=ip-only/??` on a `compute` vertex is diagnostic-clean —
-    there is no other line of defence.
-
-    Asserted as monotonicity rather than as four numbers because that is the property: a
-    document is refined one write at a time, and a retrieval that goes DARK on a refinement is
-    worse than one that never fired."""
     sel = "ip-only/internet/novel"
     refinements = ("??", "??/??", "??/??/??", "ip-only/??", "ip-only/??/??", "ip-only/internet/??")
     pins = {case: LF._class_pins(sel, case, "compute") for case in refinements}
@@ -135,13 +106,6 @@ def test_recording_more_about_a_class_slot_never_loses_a_selector():
         "a three-slot selector matched a two-slot type — arity is not being read from the type"
     )
 
-    # ...and the property holds ONE ARITY OVER, where the first fix left a second copy of the
-    # same defect. A selector naming more slots than its type has is mis-authored, and a
-    # "wholly-open cases say nothing about their own arity" clause widened the bound to the
-    # SELECTOR — so `class: bash/child` on a one-slot `process` matched `class=??` and then
-    # returned `None` the moment the run settled the basename to `bash`. Refusing it at every
-    # stage of the refinement is what the surrounding comment already claimed; refusing it at
-    # only some of them is the retrieval going dark on the write that says more.
     over_long = [
         LF._class_pins("bash/child", case, "process")
         for case in ("??", "{bash, sh}", "bash")
@@ -153,11 +117,6 @@ def test_recording_more_about_a_class_slot_never_loses_a_selector():
 
 
 def test_a_settled_slot_still_refuses_a_selector_that_disagrees_with_it():
-    """CLAIM: normalising arity WIDENS the case, it does not wildcard it.
-
-    The cheap wrong fix for defect 3 is to pad the case with `??` unconditionally and let
-    everything through. Slot 0 is settled to `ip-only` in both cells below, so a selector
-    naming `bastion` must still miss — at either spelling of the same cell."""
     for case in ("ip-only/??", "ip-only/??/??"):
         assert LF._class_pins("bastion/internal/novel", case, "compute") is None, (
             f"a concrete slot 0 stopped refusing a selector that disagrees with it ({case})"
@@ -165,11 +124,6 @@ def test_a_settled_slot_still_refuses_a_selector_that_disagrees_with_it():
 
 
 def test_a_cell_declaring_more_slots_than_its_type_is_widened_not_truncated():
-    """CLAIM: an over-long class cell keeps every slot it declared.
-
-    Truncating to the grammar's arity would silently drop what the author DID say and let a
-    selector match through the hole — a mis-authored document reading as a more permissive one.
-    `process` is a single token, so this cell is wrong; the selector still has to agree with it."""
     assert LF._class_pins("bash/child", "bash/child", "process") == 2
     assert LF._class_pins("bash/other", "bash/child", "process") is None, (
         "a slot past the type's arity stopped constraining — the cell was truncated"
@@ -179,14 +133,6 @@ def test_a_cell_declaring_more_slots_than_its_type_is_widened_not_truncated():
 # defect 1 — the node lane can tell a named attribute from a universal cell
 
 def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
-    """CLAIM: the issue's own two-row document, against the REAL corpus, at the REAL `top_k`.
-
-    Filed as rank 4 of 4 with everything tied at 2 and the alphabet deciding: two lessons whose
-    selector is a bare `slot: ident` — a cell every vertex carries — beat the one naming the
-    exact `attrs.loginuid` the document holds, because `c` sorts before `f`.
-
-    At `top_k=3`, which is what the model is handed. The suite's existing inversion test ran at
-    `top_k=9` and asserted only scores, which is precisely why it stayed green through this."""
     assert diagnose(TWO_VERTEX_DOC, None) == [], "the reproduction is no longer a clean document"
 
     hits = _match(TWO_VERTEX_DOC)
@@ -195,15 +141,6 @@ def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
         f"#919's motivating lesson is still cut from its own reproduction; got {top}"
     )
 
-    # ...and it is IN because it outscores the two bare-`ident` lessons that cut it, not
-    # because it happens to sort ahead of them. Asserted as a score relation rather than as
-    # `top[0] == ...`, and the difference is whether this test survives its own corpus:
-    # `defender/lessons/` is machine-authored and the curator commits to it one batch at a
-    # time (`defender/CLAUDE.md`), so a NEW lesson keyed on the same `attrs.loginuid` cell
-    # ties at the same score on the same item — `_spread_over_items` cannot separate two
-    # lessons about one cell, so the `name` tiebreak decides between them. Pinning the
-    # position would then red CI in a file nobody edited, and would be pinning the one thing
-    # this lane genuinely cannot promise.
     by_name = {h.name: h.score for h in _match(TWO_VERTEX_DOC, top_k=99)}
     cut_it = ["container-id-anchor-before-uid-lookup", "container-identity-gap-not-terminal"]
     for loser in cut_it:
@@ -214,15 +151,6 @@ def test_the_filed_reproduction_reaches_the_loginuid_lesson_at_the_real_cut():
 
 
 def test_a_named_attribute_outscores_a_cell_every_vertex_carries():
-    """CLAIM: `attrs.<name>` and `class`/`ident` are not the same amount of specificity.
-
-    The mechanism behind defect 1. `class` and `ident` exist on every vertex, so matching one
-    narrows the frontier to "a vertex of this type"; `attrs.loginuid` narrows it to the
-    vertices that HOLD that attribute, which is a claim about the document. Scoring them alike
-    is what made the whole node lane a constant 2.
-
-    Read off the selectors rather than off a corpus, so a reweight that fixed the shipped
-    ranking by accident — a name change, a lucky tie — cannot pass this."""
     universal = LF._NodeSelector(type="identity", class_pattern="*", slot="ident")
     named = LF._NodeSelector(type="identity", class_pattern="*", slot="attrs.loginuid")
 
@@ -237,13 +165,6 @@ def test_a_named_attribute_outscores_a_cell_every_vertex_carries():
 # defect 2 — the edge lane can be heard
 
 def test_the_edge_lane_is_not_floored_below_the_node_lane():
-    """CLAIM: an edge selector carrying only its mandatory field is not outranked by every
-    node match.
-
-    `anchor_kind` is the only mandatory field on an edge selector, so a count of declared
-    fields floored the lane at 1 against a node floor of 2 — and `_best_match` pools both into
-    one `max`. The lane could not win a slot from any node match at all, and `held` only
-    accumulates, so once three node selectors matched it never recovered within a run."""
     floor_edge = LF._EdgeSelector(rel="", auth_kind="", anchor_kind="iam-policy")
     floor_node = LF._NodeSelector(type="compute", class_pattern="*", slot="class")
 
@@ -258,20 +179,6 @@ def test_the_edge_lane_is_not_floored_below_the_node_lane():
 
 
 def test_the_edge_lane_wins_a_slot_on_score_rather_than_on_its_name(tmp_path):
-    """CLAIM: an edge lesson at its lane's FLOOR is retrieved against three bare node matches,
-    and it does not depend on how the lesson is named.
-
-    THE TEST FOR THE FIX THE ISSUE REJECTS. Raising the edge floor to 2 makes it TIE with a
-    bare node selector, and `match_loaded`'s `name` tiebreak then evicts whichever sorts later
-    — which is defect 1 wearing the other lane's clothes, and it passes any test whose edge
-    lesson happens to sort early. So the edge lesson here is named `zzz` and the three node
-    lessons `aaa`/`bbb`/`ccc`, which is the worst case for it.
-
-    Three DIFFERENT open cells on purpose: `_spread_over_items` gives each node lesson a
-    first-pass slot of its own, so it cannot rescue the edge lesson from a tie. The lane has to
-    carry its own weight — matching one of the run's ~2 open contracts under a named anchor is
-    a stronger claim about this document than matching one of its ~25 node cells by type plus a
-    universal cell, and `ANCHOR_KIND_WEIGHT` is where that is written down."""
     assert diagnose(CONTRACT_AND_THREE_CELLS_DOC, None) == [], "the fixture is not clean"
 
     corpus = tmp_path / "lessons"
@@ -294,16 +201,6 @@ def test_the_edge_lane_wins_a_slot_on_score_rather_than_on_its_name(tmp_path):
 
 @pytest.mark.parametrize(("label", "path"), REPLAYED_RUNS)
 def test_the_block_moves_on_the_append_that_opens_an_authorization_question(label, path):
-    """CLAIM: replayed fence by fence, the append where `contracts` goes 0 -> 2 changes what
-    the model is handed.
-
-    The filed defect, on the repo's own runs. Both authz lessons matched at 1, three node
-    matches at 2 saturated `top_k`, the emitted list was UNCHANGED from the block before —
-    and because `_frontier_recall` diffs the rendered block, the append that opened "what can
-    this anchor conclude" emitted nothing at all. A test that scores the terminal document
-    cannot see this: by then the list has moved for other reasons.
-
-    Asserted on the RENDERED block, which is the thing the diff actually compares."""
     assert path.is_file(), f"{label}'s document is tracked and must be present ({path})"
     text = path.read_text(encoding="utf-8")
     prefixes = _prefixes(text)
@@ -329,21 +226,6 @@ def test_the_block_moves_on_the_append_that_opens_an_authorization_question(labe
 # the selection — what a reweight alone cannot do
 
 def test_two_lessons_about_one_open_thing_do_not_take_the_whole_block(tmp_path):
-    """CLAIM: the head covers as many DISTINCT frontier items as the matches allow, before it
-    spends a second slot on any one of them.
-
-    Not "never repeats" — a document with two open things and a `top_k` of three must repeat,
-    and the third slot rightly goes to the runner-up on the better item. The property is that
-    no item takes a second slot while another item is still unrepresented.
-
-    The interlock the issue names: reweighting alone just changes WHICH lesson the alphabet
-    evicts. Two selectors at their lanes' floors are genuinely equally specific and no honest
-    weight orders them — so on `turnN-A` the two lessons keyed on `iam-policy` both matched the
-    same contract `ac2`, took two of three slots between them, and cut the `attrs.loginuid`
-    lesson a second time.
-
-    Three lessons about one cell is strictly less of the frontier covered than three about
-    three, and the runner-up is not lost — it sits behind the leader on every OTHER item."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     same = ("type: identity, slot: attrs.loginuid",)
@@ -374,24 +256,9 @@ def test_two_lessons_about_one_open_thing_do_not_take_the_whole_block(tmp_path):
 
 @pytest.mark.parametrize(("label", "path"), REPLAYED_RUNS)
 def test_no_replayed_block_leaves_an_open_thing_unrepresented(label, path):
-    """CLAIM: across every fence of both committed runs, the block covers as many distinct
-    frontier items as its matches allow.
-
-    The end-to-end reading of the spread, and the one that catches a regression in either
-    half: a weight change that re-crowds one item, or a selection change that stops spreading.
-    Every prefix of both runs, against the real 16-file corpus.
-
-    The bound is `min(top_k, distinct items matched)`, not `top_k` — an early fence may simply
-    not have three different open things to speak to, and filling the third slot with the
-    runner-up on a covered item is the right answer there."""
     assert path.is_file(), f"{label}'s document is tracked and must be present ({path})"
     text = path.read_text(encoding="utf-8")
     for n, frontier in enumerate(_prefixes(text)):
-        # ONE corpus walk per fence, and the two values derived from it separately. `top_k` is
-        # a CUT on one order rather than a second ranking — `test_the_order_is_total_and_stable
-        # _across_calls` pins that — so the emitted block is the head of this list, and asking
-        # `match_lessons` a second time re-opened and re-YAML-parsed all 16 lesson files per
-        # fence of both runs for an answer already in hand.
         ranked = LF.match_lessons(frontier, CORPUS, top_k=99)
         emitted = [h.matched for h in ranked[:LF.DEFAULT_TOP_K]]
         available = {h.matched for h in ranked}
@@ -402,13 +269,6 @@ def test_no_replayed_block_leaves_an_open_thing_unrepresented(label, path):
 
 
 def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
-    """CLAIM: once `turnN-A` holds `loginuid=-1`, the lesson about it stays in the block.
-
-    `test_the_shipped_corpus_reaches_the_motivating_investigation` asserts this on the terminal
-    document only, and the terminal document is the easiest one: this asserts it from the fence
-    that settles the value onward, which is where defect 2's fix could quietly evict it — the
-    contracts on this run are never discharged, so the edge lane holds a slot for the rest of
-    the run."""
     # BY LABEL, not by index: reordering `REPLAYED_RUNS` would otherwise point this silently
     # at the other run, and `assert holds` below would fail naming the wrong cause.
     path = dict(REPLAYED_RUNS)["turnN-A"]
@@ -434,20 +294,6 @@ def test_the_loginuid_lesson_survives_every_fence_of_its_own_run():
 
 
 def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers(tmp_path):
-    """CLAIM: a lesson that reaches its best score on several items is recorded against the
-    item the block is not already covering — not against whichever the walk saw first.
-
-    `_best_match` used to answer with `max`, which returns the FIRST maximal element, so a
-    lesson tied across two cells was attributed by the order the vertices happen to be declared
-    in. That was harmless while the answer was only rendered; the spread places a lesson BY its
-    item, which made block membership depend on declaration order. The tie is not an edge case:
-    replayed over both committed runs it holds on nearly every fence, including for the
-    `attrs.loginuid` lesson this lane exists to retrieve.
-
-    Below, the loose class lesson ties across both compute vertices. Placing it on the one the
-    `ip-only` lesson is not already occupying is what lets the block name two cells instead of
-    one — and it is a function of the frontier's content, so reversing the declaration order
-    cannot change it."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     _write_lesson(corpus, "aaa-any-compute-class", nodes=("type: compute, slot: class",))
@@ -476,27 +322,6 @@ def test_a_lesson_tied_across_two_cells_is_placed_on_the_one_nothing_else_covers
 
 
 def test_the_open_marker_in_a_selector_says_exactly_what_a_wildcard_says(tmp_path):
-    """CLAIM: a class-pattern slot the author spelled `??` behaves identically to `*` — it
-    never pins, never anchors, and never refuses.
-
-    Two defects meet here, and the second is why "never refuses" is in the claim.
-
-    It used to ANCHOR. `??` compares equal to an open case slot, so `??/internet/novel`
-    against `??/??/??` anchored on slot 0 and collected slots 1 and 2 as pins — a full pinned
-    triple for a selector agreeing with the document about nothing, where the honest
-    `*/internet/novel` scores zero. That is the inversion this scoring exists to refuse,
-    wearing the open marker. Harmless while every node selector scored 2; the new weights made
-    it block-saturating.
-
-    Refusing was the OTHER half, and it made the marker non-monotonic. A first fix credited
-    nothing but still refused against a SETTLED case slot, so `??/internet/novel` matched
-    `??/??/??` and returned `None` once a refinement settled slot 0 — the retrieval going dark
-    on the write that made the document more specific, which is exactly what
-    `test_recording_more_about_a_class_slot_never_loses_a_selector` forbids. A slot that says
-    nothing cannot also constrain.
-
-    Asserted as EQUIVALENCE to `*` over a refinement sequence rather than as three numbers,
-    because that is the property: whatever the wildcard does, the marker does."""
     refinements = ("??/??/??", "bastion/??/??", "bastion/internet/??", "bastion/internet/novel")
     wildcard = [LF._class_pins("*/internet/novel", c, "compute") for c in refinements]
 
@@ -521,22 +346,6 @@ def test_the_open_marker_in_a_selector_says_exactly_what_a_wildcard_says(tmp_pat
 
 
 def test_a_candidate_set_in_a_selector_is_a_disjunction_and_not_a_wildcard(tmp_path):
-    """CLAIM: `{a, b}` written by a LESSON AUTHOR scopes the lesson to `a` or `b` — it earns
-    no pin, but it refuses a cell settled outside it.
-
-    The two unresolved spellings part company here, and reading them as one thing was wrong.
-    In a DOCUMENT both mean "not settled" and the candidate set is the richer of the two, which
-    is why `is_open_slot` answers for both and why neither may anchor. In a SELECTOR the author
-    is stating a scope: `??` says nothing, and `{internal, dmz}` says "internal or dmz". Making
-    both behave like `*` let a lesson about internal-or-dmz hosts match — and score a pin
-    against — a `bastion` vertex.
-
-    The refusal is not the non-monotonicity the sibling test forbids. Losing a selector the
-    document CONTRADICTS is correct and already pinned by
-    `test_a_settled_slot_still_refuses_a_selector_that_disagrees_with_it`; losing one the
-    document merely REFINED is the bug. Inside the set the path stays monotonic, and it is
-    strictly better than the pre-#935 code, which compared the whole `{...}` string to the cell
-    and so refused even a member."""
     sel = "{internal, dmz}/internet"
     inside = [
         LF._class_pins(sel, c, "compute")

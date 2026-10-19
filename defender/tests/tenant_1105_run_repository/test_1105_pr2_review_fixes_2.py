@@ -44,19 +44,8 @@ def _pitfall_at_threshold(paths: Any, monkeypatch: Any) -> None:
                             state=state_for_paths(paths))
 
 
-# ==========================================================================================
-# 1 — the drain's data root: resolved once, before the batch, refused as configuration.
-# ==========================================================================================
-
 def test_1_a_tick_with_rows_and_no_data_root_is_the_stages_configuration_refusal(
         tmp_path, monkeypatch, caplog):
-    """`loop.py --lead-author-drain`'s stage runner (`_run_stage`) over a tick with a curation
-    row queued and `DEFENDER_DATA_ROOT` unset: exit 2 with the stage's one-line CRITICAL
-    refusal naming the variable, no traceback, no box started, the row still queued (not
-    claimed). The tick's own refusal is a `FatalConfigError` raised from the data root's
-    `TenantRefused`. Positive control: with the root restored the same stage exits 0 and serves
-    the row. RED before the fix: the `TenantRefused` is no systemic fault, so it escapes
-    `_run_stage` as a traceback."""
     from defender.learning.core.cli import _run_stage
     from defender.learning.core.config import FatalConfigError
 
@@ -109,13 +98,6 @@ class _EnqueueingBox(R1._Box):
 
 @pytest.mark.parametrize("root_set", [True, False], ids=["root-set", "root-unset"])
 def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(tmp_path, monkeypatch, root_set):
-    """No curation row is queued when the tick starts (pitfalls woke it). A row enqueued while
-    the tick runs (here, as its box starts) is not claimed: after the tick it is still in the
-    queue's top-level slot, not in `inflight/`, and the lead author was never handed it — with
-    the data root set or unset (unset, the tick also exits 0: it never needed the root). The
-    pitfalls step still ran. Positive control: the next tick, the row queued at its start,
-    serves it. RED before the fix: the claim loop resolved the root lazily and claimed the row
-    (root set: served; root unset: the tick raised `TenantRefused`)."""
     t = R1._good(tmp_path, "r1")
     root = os.environ[P.DATA_ROOT_ENV]
     paths = P.loop_paths(tmp_path)
@@ -140,17 +122,7 @@ def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(tmp_path, monkeypatch,
     assert lane.run_dirs == [Path(t.runs) / "r1"], "control: the next tick did not serve it"
 
 
-# ==========================================================================================
-# 2 — one acceptance step for a request's tenant; one opener for `--tenant T <run_id>`.
-# ==========================================================================================
-
 def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d9_tenant):
-    """`_tenant.requested_tenant(data_root, raw)`: a command line's raw `--tenant` text or a
-    stored `TenantId` accepted under `data_root` by one rule — the id grammar, then
-    `accept_tenant` with the process's `defender/` and no box mount. An absent id (`None`) and
-    an id off the grammar refuse (`TenantRefused`), as does an unknown tenant. Positive
-    control: the answer is the `Tenant` `accept_tenant` hands out for the same request. RED
-    before the fix: no such function."""
     from defender._paths import process_defender_dir
 
     root = _tenant.resolve_data_root()
@@ -165,15 +137,9 @@ def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d
                           _tenant.TenantRefused), bad
 
 
-
 @pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map"])
 def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant, monkeypatch,
                                                               cli):
-    """With `DEFENDER_DATA_ROOT` unset, each `--tenant T <run_id>` command line prints the data
-    root's refusal (naming the variable) on stderr and exits with its own refusal status,
-    nothing on stdout. Positive control for the shared opener: with the root set it opens the
-    run. Green before the fix for the CLIs (the behaviour moved, unchanged); RED for the opener
-    (no such function)."""
     from defender._command_line_run import open_command_line_run
     from defender.run_repository import Run
     from defender.tests._state1135 import curation_run_dir
@@ -200,21 +166,7 @@ def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant
     assert got.out == ""
 
 
-# ==========================================================================================
-# 3 — one hold of an episode's container for all its arms.
-# ==========================================================================================
-
-
-# ==========================================================================================
-# 4 — the failed-requests view shows the row's address.
-# ==========================================================================================
-
 def test_4_a_quarantined_curation_row_shows_its_address(tmp_path):
-    """A curation row the drain quarantined (`artifact-missing`: its run is gone), in the
-    `{case_id, tenant_id, run_id}` shape every row now has, is shown on the queue page's
-    failed-requests list with its `tenant_id` and `run_id` — rev 5.1 J13's address — and no
-    `run_dir`. Positive control: the row is there, with its failure. RED before the fix: the
-    view reads `run_dir`, which no row carries (always null), and drops the address."""
     from defender.learning.frontend import serialize_queues
     from defender.tests._state1135 import state_for_paths
 
@@ -233,18 +185,7 @@ def test_4_a_quarantined_curation_row_shows_its_address(tmp_path):
     assert "run_dir" not in row, row
 
 
-# ==========================================================================================
-# 6 — the judge's door judges the container's tenant record.
-# ==========================================================================================
-
 def test_6_grading_another_tenants_episode_is_refused(tmp_path):
-    """The judge (`grade_episode`) handed tenant U's repository and tenant T's episode (its
-    container's `_tenant.json` names T) refuses (`JudgeRefused`, naming the record) before
-    anything is graded: the judge is never asked, no `judge.yaml` is written, the learning
-    state is untouched. So does T's own repository once the record is removed (a present
-    container with no record). An ABSENT container is not the door's to refuse: the episode
-    opens. Positive control: T's own repository grades the episode. RED before the fix:
-    `episode_files` reads nothing in `runs/`, so U grades T's episode."""
     from defender.learning.judge import JudgeRefused, grade_episode
     from defender.tests import _judge_921 as J
     from defender.tests._state1135 import env_state
@@ -288,16 +229,7 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     assert (ep / "judge.yaml").is_file(), "control: the own tenant did not grade"
 
 
-# ==========================================================================================
-# 7 — the judge prompt's views are numbered without a gap.
-# ==========================================================================================
-
 def test_7_the_judge_prompts_views_are_numbered_without_a_gap(tmp_path):
-    """With the same-alert siblings view gone (J3), the judge's views are numbered 1..n with
-    no gap: in the section titles, and in every prompt a launch hands the judge (each number
-    there a title's). Positive control: the prompts carry VIEW 1 and the lessons view. RED
-    before the fix: the lessons view is VIEW 5 after VIEW 3. (#1234: the titles are the
-    focus section's host view labels, `layout.FOCUS_VIEW_TITLES`, spelled `VIEW <n>: ...`.)"""
     from defender.learning.judge import layout as judge_layout
 
     numbers = [int(m.group(1)) for title in judge_layout.FOCUS_VIEW_TITLES.values()

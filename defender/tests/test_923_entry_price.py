@@ -44,19 +44,7 @@ def _refusal(tmp_path, companion: str, disposition: str = GAP_MEMBER, **kw) -> s
     return str(e.value)
 
 
-# ---------------------------------------------------------------------------------------
-# O1 — the price, at the close and at the write gate.
-# ---------------------------------------------------------------------------------------
-
 def test_an_inconclusive_close_naming_no_gap_is_refused_at_the_close(tmp_path):
-    """A close supplying `inconclusive` whose parsed `:T conclude` carries no `ceiling_test`
-    row that pays the price is refused at `close_investigation`, by a `ModelRetry` whose text
-    names the owed row. The refusal covers the no-companion and the unparseable-companion cases
-    alike: no companion means no stating row, which means no payment.
-
-    All three inputs are real text through the real primitive — the file is absent, the file
-    holds prose that is not invlang at all, or the fence is there and the row is not — so the
-    taxonomy assumption is re-probed on every run rather than pinned once."""
     for case, companion in (
         ("a conclude block with no gap row", gapless()),
         ("no `investigation.md` at all", None),
@@ -68,18 +56,6 @@ def test_an_inconclusive_close_naming_no_gap_is_refused_at_the_close(tmp_path):
 
 
 def test_the_same_document_is_refused_at_the_investigation_md_write_gate(tmp_path):
-    """The one document that is refused at the close is refused at the `investigation.md` write
-    gate too, and for the same owed row: the price is a property of the TABLE
-    (`_DISPOSITION_GATES`), collected at both boundaries from one definition, not a branch
-    written twice.
-
-    Asserted PER COLLECTION SITE, never once at the table's altitude — a constraint pinned on
-    one surface and silently absent on its sibling is this repo's canonical fail-open, and it is
-    the exact hole `benign` carried until the close grew its own reader.
-
-    The document concludes `inconclusive` AND the close commits `inconclusive`, because the two
-    boundaries dispatch on different values by design: the write gate on the keyword the
-    DOCUMENT wrote, the close on the keyword the CALLER is about to commit."""
     gap_free = gapless()
 
     at_the_write_gate = validate_companion(gap_free, None)
@@ -97,14 +73,6 @@ def test_the_same_document_is_refused_at_the_investigation_md_write_gate(tmp_pat
 
 
 def test_an_inconclusive_close_naming_a_receipt_commits(tmp_path):
-    """An `inconclusive` close whose `ceiling_test` names a valid receipt commits: the price is
-    payable, the report lands, `ref`/`state` arrive in the committed FRONTMATTER unchanged, and
-    the `note` arrives in the report BODY (never the frontmatter — it gates nothing).
-
-    Without this control every refusal in this module passes on a build where the price gate
-    refuses everything, and this is also the paired positive for
-    `test_the_cause_stays_composed_from_report_causes_and_the_verdict_stays_host_chosen`: the
-    receipt DOES land, legitimately, lifted from the companion."""
     deps, run_dir = main_deps(tmp_path, paid(PAYING_ROW))
     result = close(deps, GAP_MEMBER)
 
@@ -130,14 +98,6 @@ def test_an_inconclusive_close_naming_a_receipt_commits(tmp_path):
 
 
 def test_neither_none_nor_a_blank_row_pays_the_inconclusive_price(tmp_path):
-    """The honest empty marker `none` and the blank string both project as stating nothing, so
-    neither pays the price: a close carrying only such a row is refused exactly as one carrying
-    no row at all.
-
-    These are the two inputs the design's own probe covered. `ceiling_test  ""` is the sharper
-    of the pair — it projects as a ONE-ELEMENT list holding the empty string, so a price written
-    as a truthiness test over the list makes the blank strictly easier to get past than the
-    honest marker."""
     for row in EMPTY_ROWS:
         text = _refusal(tmp_path / f"empty-{row or 'blank'}", paid(row))
         assert "close blocked" in text, row
@@ -145,14 +105,6 @@ def test_neither_none_nor_a_blank_row_pays_the_inconclusive_price(tmp_path):
 
 
 def test_a_close_owing_the_price_is_refused_before_any_stage_is_called(tmp_path):
-    """A close that owes the price is refused before any review stage is dispatched and before
-    any disposition branch is taken: no reviewer model call is spent on a close that is going to
-    be refused anyway.
-
-    Driven and OBSERVED, not inferred: the review bundle records every stage call, and the
-    assertion is that it recorded none. Asserting only that the close failed would pass on a
-    build that ran the whole review first and refused afterwards, which is the cost this
-    ordering exists to avoid."""
     from pydantic_ai.exceptions import ModelRetry
 
     stages = recording_stages("holds")
@@ -174,16 +126,6 @@ def test_a_close_owing_the_price_is_refused_before_any_stage_is_called(tmp_path)
 
 
 def test_a_non_string_gap_row_does_not_pay_the_price():
-    """A non-string `ceiling_test` row — a list, a mapping, an int, `None`, a bool — is treated
-    as not-stating, with no exception: the close is refused exactly as it would be for `none` or
-    `''`. It refuses CLOSED, not open, which is the safe direction.
-
-    Driven against the parsed companion dict rather than through `investigation.md` text, and
-    that is not a shortcut: the real parser's row regex can only ever produce a `str` (or drop
-    the row), so a non-string row is reachable only from a programmatically built companion —
-    an imported run dir, a replayed fixture, a caller that assembled the body itself. The
-    premise that first raised this ("a type check fails") described a mechanism that does not
-    exist; nothing raises, and the correction is what is pinned here."""
     from defender.skills.invlang.validate._gating import _check_disposition_gating
 
     for row in NON_STRING_ROWS:
@@ -192,41 +134,11 @@ def test_a_non_string_gap_row_does_not_pay_the_price():
         assert owed, f"a {type(row).__name__} row paid the price"
         assert any("ceiling_test" in e for e in owed), row
 
-    # The control on the same surface: a stating STRING row in the same position pays, so the
-    # refusals above are the row's type and not a check that refuses every companion dict.
-    # `CAPABILITY_ROW`, not `PAYING_ROW`: this companion carries no `:L findings` at all, and a
-    # `nothing-to-try` receipt is the one shape that needs no lead to resolve.
     paying = {"conclude": {"disposition": GAP_MEMBER, "ceiling_test": [CAPABILITY_ROW]}}
     assert _check_disposition_gating(paying) == []  # type: ignore[arg-type]
 
 
-# ---------------------------------------------------------------------------------------
-# The settled predicate, and the three hardenings.
-# ---------------------------------------------------------------------------------------
-
 def test_a_bare_host_row_does_not_pay_where_a_receipt_does(tmp_path):
-    """A `ceiling_test` row pays by being a RECEIPT the host verifies mechanically, never by
-    what a sentence about a limitation says.
-
-    Three rows decide this:
-
-    * bare free prose (`web-1 could not be fully checked`) does NOT pay. It carries no
-      `state=`/`ref=`/`cap=`/`note=` fields at all, so it does not even PARSE as a receipt —
-      this is the retired predicate's own shape, and it is the assertion a build that still
-      judges prose fails;
-    * a receipt anchored to a lead THIS RUN dispatched that came back with nothing
-      (`SOURCE_ONLY_ROW`... wait, see below) DOES pay when the state matches what that lead's
-      own row says happened;
-    * a receipt naming a CAPABILITY this deployment's closed verb roster does not declare at
-      all (`CAPABILITY_ROW`, `state=nothing-to-try`) DOES pay — the one lane with no lead to
-      point at, checked against code this repo owns rather than a catalogue of what exists in
-      the world.
-
-    All three directions are asserted at BOTH boundaries, because a predicate that drifts
-    between the write gate and the close reopens the bypass the two-boundary collection closed.
-    The bare-host row is what keeps the mechanical check falsifiable: a build that still reads
-    any sentence about a limitation as a claim pays for `web-1 could not be fully checked` and
-    fails here."""
     from pydantic_ai.exceptions import ModelRetry
 
     host_only = paid(HOST_ONLY_ROW)
@@ -265,15 +177,6 @@ def test_a_bare_host_row_does_not_pay_where_a_receipt_does(tmp_path):
 
 
 def test_a_receipt_contradicting_its_own_lead_does_not_pay(tmp_path):
-    """A well-FORMED receipt — `ref` resolves to a real `:L findings` lead — still does not pay
-    when it is INCONSISTENT with what that lead's own RETRIEVAL says happened: `SOURCE_ONLY_ROW`
-    names `l-001`, which `LEAD_RESULT` attaches an actual observation to, so the receipt claims
-    a gap the transcript itself contradicts. This is the mechanical check `_lead_retrieval_
-    came_back` runs — checked against `outcome`'s retrieval-populated keys, never against
-    whether a resolution exists (see `test_a_lead_resolved_purely_from_absent_data_still_
-    anchors_a_receipt` for why a resolution alone must NOT disqualify a lead) — and it is what
-    makes a receipt a RECEIPT rather than a structured-looking sentence: naming a real id is
-    not enough, the id's own retrieval has to have actually failed or come back empty."""
     document = paid(SOURCE_ONLY_ROW)
     refusal = _refusal(tmp_path, document)
     assert "close blocked" in refusal
@@ -283,26 +186,6 @@ def test_a_receipt_contradicting_its_own_lead_does_not_pay(tmp_path):
 
 
 def test_a_lead_resolved_purely_from_absent_data_still_anchors_a_receipt(tmp_path):
-    """A lead that reaches an analytical CONCLUSION about an absence of data still anchors a
-    `ceiling_test` receipt — a resolution alone does not disqualify it, only RETRIEVED DATA
-    does.
-
-    This is the shape `golden-v2sshd`'s real `l-004` takes, and it is the most common real gap
-    shape in that corpus: the query ran, found nothing, and the model drew a conclusion (an
-    authz verdict of `indeterminate`) from that absence anyway — "process-exec telemetry
-    unavailable... cannot be identified from available data sources". Before
-    `_lead_retrieval_came_back` replaced `_lead_returned_a_result` at this ONE call site, that
-    resolution alone made `l-004` read as "returned a result" — identical to a lead that
-    resolved from data it actually retrieved — so the most common real gap shape in the
-    shipped corpus was unanchorable by any receipt, and the only way to ship the fixture was to
-    fold that gap into another receipt's `note` as unstructured prose: exactly the shape this
-    redesign exists to remove, now smuggled back in through the one example that teaches the
-    format.
-
-    Driven through the REAL primitive: a lead with a `:R authz` resolution and no `:V`/`:E`
-    observations and no `:R attr_updates` of its own — the same shape, built minimally rather
-    than through the full golden fixture, so this test does not depend on that document's own
-    unrelated structure."""
     document = doc(
         PROLOGUE,
         "```invlang\n"
@@ -366,26 +249,6 @@ def test_a_lead_resolved_purely_from_absent_data_still_anchors_a_receipt(tmp_pat
 
 
 def test_a_non_identifier_shaped_cap_does_not_pay_and_is_refused_at_the_write_gate(tmp_path):
-    """`cap` is checked by ABSENCE — `not _capability_exists(cap)` — and a negative check
-    cannot constrain SHAPE: it is satisfied by any string that happens not to name a real
-    capability. Measured, `cap=</report>` reaches this far: it is a well-formed
-    `state=nothing-to-try` receipt, it is not a real capability, so the negative check alone
-    pays it — and PyYAML writes an UNQUOTED `cap: </report>` into the frontmatter, which
-    `_artifact_schema.validate_report` then refuses for carrying the judge's own report-block
-    delimiter. Companion writes are append-only, so that refusal is not repairable: a paid
-    write-gate close that fails at commit with no legal retry is exactly the #923 stranded-run
-    failure `_REPORT_CLOSE_DELIMITER` exists to prevent, reopened through a field that
-    delimiter check never looked at.
-
-    THE FIX IS SHAPE, NOT A SECOND DELIMITER CHECK: `cap` must match `<system>` or
-    `<system.verb>` — the same identifier alphabet `runtime.verbs.is_system_name` checks a real
-    system against — BEFORE the negative existence check ever runs. That closes the whole
-    class: the delimiter, YAML metacharacters (`cap=*alias`, `cap=---`), and anything else that
-    is not a valid `system[.verb]` token, none of which needs its own named check.
-
-    Pinned at the WRITE GATE, not only at the close — the point of the entry price is that a
-    paid close never fails for a reason the model could not see coming, and a defect reachable
-    only from the close would mean the write gate waved this document through first."""
     for bad_cap in ("</report>", "*alias", "disposition:malicious", "---", "UPPERCASE"):
         document = paid(f"state=nothing-to-try cap={bad_cap} note=harmless")
         write_gate = validate_companion(document, None)
@@ -398,28 +261,12 @@ def test_a_non_identifier_shaped_cap_does_not_pay_and_is_refused_at_the_write_ga
         assert "close blocked" in refusal
         assert "not shaped like" in refusal, refusal
 
-    # The control: a real capability this deployment does not provide, correctly shaped, still
-    # pays — the shape check refuses malformed tokens, not every `cap` a build could tighten
-    # into refusing everything.
     deps, run_dir = main_deps(tmp_path / "legit-cap", paid(CAPABILITY_ROW))
     assert close(deps, GAP_MEMBER).outcome == "stands"
     assert (run_dir / "report.md").is_file()
 
 
 def test_a_non_identifier_shaped_ref_does_not_pay(tmp_path):
-    """The SAME class of bug, the OTHER field: `ref` is checked by membership in `:L findings`
-    (`_lead_by_id`), which reads as a closed check but is not one — a `:L findings` row's `id`
-    cell is unquoted free text with no shape rule anywhere in the parser, so a lead literally
-    declared with `id=</report>` parses with zero warnings and `ref=</report>` then resolves
-    against it, exactly as cleanly as `ref=l-002` resolves against an ordinary lead. Measured
-    end to end: a companion carrying such a lead pays the write gate and renders an UNQUOTED
-    `ref: </report>` into the frontmatter, which `_artifact_schema.validate_report` refuses at
-    the close with no legal retry — the identical stranded-run shape `cap`'s fix above closes.
-
-    Fixed the same way: `ref` is checked against the shape every `:L findings` id takes in this
-    format (`l-<alphanumeric>`, `_LEAD_REF_RE`) BEFORE the table lookup, so a hostile id cannot
-    be planted in `:L findings` and then cited — the lookup alone was never enough, because the
-    table it checks membership in is not itself shape-constrained."""
     hostile_lead_doc = doc(
         PROLOGUE,
         "```invlang\n"
@@ -441,29 +288,6 @@ def test_a_non_identifier_shaped_ref_does_not_pay(tmp_path):
 
 
 def test_a_confusable_spelling_of_the_empty_marker_does_not_pay(tmp_path):
-    """A row that RENDERS to a human as the empty marker does not pay, whatever codepoints it
-    is spelled with, in ALL FOUR spellings an executed probe measured paying and at BOTH
-    boundaries.
-
-    A visually-blank row satisfying a coverage receipt is the sharpest thing in this change:
-    alert data is attacker-influenced, the row is model-authored after reading it, and the
-    receipt is what an analyst counts. The four spellings are P10's own output against a
-    checker that normalizes case, whitespace and quoting and does no Unicode normalization at
-    all.
-
-    THE DEMAND IS THE OUTCOME AND NOT THE MECHANISM THE RESOLUTION NAMED, because measured, the
-    named mechanism cannot meet it: the normalizer the disposition keywords already go through
-    (`_vocab.normalized_disposition` → `strip_zero_width`) catches 2 of these 4, NFKC would
-    reach a third, and the Cyrillic homoglyph needs a confusable/skeleton fold that exists
-    nowhere under `defender/`. Extending that shared normalizer is the route this repo's own
-    doctrine points at — a second, field-specific spelling of normalization is how its rules
-    have already drifted — and its existing callers need checking when it moves. Narrowing the
-    demand to the two the normalizer catches was refused: two documented ways to pay with an
-    invisible row, shipped knowingly.
-
-    BOTH boundaries, per collection site. J1, J25 and J28 each bind both; a confusable-blind
-    write gate beside a hardened close is this repo's canonical fail-open, and it leaves the
-    document every downstream reader actually reads unconstrained."""
     for row in CONFUSABLE_EMPTY_ROWS:
         text = _refusal(tmp_path / f"confusable-{len(row)}-{ord(row[0])}", paid(row))
         assert "close blocked" in text, repr(row)
@@ -476,9 +300,6 @@ def test_a_confusable_spelling_of_the_empty_marker_does_not_pay(tmp_path):
         )
         assert any("ceiling_test" in e for e in at_the_write_gate), repr(row)
 
-    # The control that keeps this from passing on a build that refuses every non-ASCII row: an
-    # ordinary receipt whose NOTE carries a non-ASCII character still pays, at both — the note
-    # is free text for a human and is never checked, so nothing about its content should matter.
     non_ascii = paid("state=query-failed ref=l-002 note=auditd execve logs on wéb-1 not retrieved")
     deps, run_dir = main_deps(tmp_path / "non-ascii-control", non_ascii)
     assert close(deps, GAP_MEMBER).outcome == "stands"
@@ -487,16 +308,6 @@ def test_a_confusable_spelling_of_the_empty_marker_does_not_pay(tmp_path):
 
 
 def test_the_same_gap_row_written_twice_does_not_pay_for_two_gaps(tmp_path):
-    """Rows must be DISTINCT: repetition does not pay for more than one gap. A `:T conclude`
-    whose `ceiling_test` rows repeat is refused, and the refusal names the repeat.
-
-    The cost was weighed and accepted: this is a policy call with no probe behind it and it will
-    refuse some legitimate runs — a run that genuinely writes the same sentence twice has to
-    edit one of them. What it buys is that the receipt's row COUNT means what an analyst reads
-    it as, on a channel whose whole output is counted gaps.
-
-    The control is the same document with the duplicate replaced by a second, different gap:
-    several rows are the ordinary case and must commit."""
     repeated = _refusal(tmp_path / "repeat", paid(PAYING_ROW, PAYING_ROW))
     assert "close blocked" in repeated
     assert "ceiling_test" in repeated
@@ -514,19 +325,6 @@ def test_the_same_gap_row_written_twice_does_not_pay_for_two_gaps(tmp_path):
 
 
 def test_the_accumulated_gap_text_is_bounded(tmp_path):
-    """The accumulated `ceiling_test` FRONTMATTER — `ref`/`state`/`cap` alone, never the notes,
-    which gate nothing and cannot be bounded without becoming a gate — is BOUNDED, and a close
-    whose receipts exceed it is refused at both boundaries.
-
-    A hundred DISTINCT `nothing-to-try` receipts (a hundred capabilities this deployment does
-    not provide) is the shape that exercises the bound honestly: each is individually tiny and
-    individually valid, so only the ACCUMULATED structured block — not any one receipt's
-    content — can be what trips it. The bound's exact value is an implementation choice this
-    test does not pin: it asserts the two ends far apart — one ordinary receipt commits, a
-    hundred distinct ones do not — so any sane bound satisfies it and NO bound fails it.
-
-    Accepted cost, on the record with distinctness: a run with genuinely many gaps has to
-    summarise, and this will refuse some legitimate runs."""
     huge = tuple(
         f"state=nothing-to-try cap=fake-system-{i:03d}.fake-verb note=capability {i:03d} "
         f"does not exist in this deployment" for i in range(100)
@@ -539,10 +337,3 @@ def test_the_accumulated_gap_text_is_bounded(tmp_path):
     deps, run_dir = main_deps(tmp_path / "ordinary", paid(PAYING_ROW))
     assert close(deps, GAP_MEMBER).outcome == "stands"
     assert (run_dir / "report.md").is_file(), "an ordinary one-row receipt hit the bound"
-
-
-# ---------------------------------------------------------------------------------------
-# The neighbour rule the price must not absorb.
-# ---------------------------------------------------------------------------------------
-
-

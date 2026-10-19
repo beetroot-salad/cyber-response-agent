@@ -63,9 +63,6 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
     leads = S.member(handle, "tables", "leads", S.LEAD_ID)
 
     queries.append([{"seq": 0, "system": "elastic"}])
-    # A lead claim is an EXCLUSIVE-CREATE sidecar (the design's own words for `tables`:
-    # "append-only; exclusive-create claims"): written once, and a second claim on the same
-    # lead id collides — which is what keeps two dispatches of one lead from being one row.
     leads.write(json.dumps({"lead_id": S.LEAD_ID, "goal": "first"}))
     with pytest.raises(Exception, match="write-once"):
         leads.write(json.dumps({"lead_id": S.LEAD_ID, "goal": "second"}))
@@ -153,9 +150,6 @@ def test_a_second_claim_on_one_lead_still_loses_the_exclusive_create(tmp_path: P
 
 
 def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
-    """O5's append-only, readable-mid-run property holds even in the mixed-route intermediate
-    state of D7(3), where one writer goes through the handle and another still spells the name:
-    the doc requires no regression on this axis at any step."""
     from defender._io import append_jsonl
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-mixed"))
@@ -175,9 +169,6 @@ def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
 
 
 def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
-    """The alias-ban probe (host-initiated inside the box) and the model's own shell write
-    outside the driver process today, and D5's 'writer methods wrap today's seams unchanged'
-    keeps that true after the migration."""
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-outside"))
 
@@ -226,14 +217,8 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
     assert _read_rows(trace.path) == [{"row": 2}]
     assert clean.partial_failures == ()
 
-    # THE CONTRAST, in one test: the SAME obstruction on an IDENTITY-BEARING write fails loudly
-    # rather than being recorded and shrugged off. (The record planted for the handle, #1105
-    # NH-3, gives its name up to the obstruction.)
     (base / S.TENANT_RECORD_NAME).unlink()
     (base / S.TENANT_RECORD_NAME).mkdir()
-    # #1078: `ensure_tenant` is renamed `ensure_runs_base_record(runs_base, tenant_id)` — the
-    # obstruction still fails loudly, as the one tenant refusal (demand #0) rather than a
-    # bare OSError.
     with pytest.raises(S.tenant().TenantRefused):
         S.tenant().ensure_runs_base_record(base, "census-tenant")
 
@@ -243,18 +228,12 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
 
 def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_subagent(
         tmp_path: Path):
-    """Every wire-log record carries a writer id, the main process's lines are distinguishable from
-    each concurrent gather sub-agent's, and both production consumers of the wire log still read
-    a record that carries the new field."""
     run_dir = materialize(tmp_path, GOLDEN, run_id='writerid-1077')
     drive(run_dir, run_id="writerid-1077", main=ReplayFn(_closing_turns()))
 
     from defender.runtime.observe import POLICY_DENIAL_EVENT_TYPE
     rows = _read_rows(S.RunPaths(run_dir).wire_log)
     assert rows, "the replay produced no wire-log records"
-    # Every AGENT-produced record: a message, a budget refusal. A policy denial is the host's
-    # bounded projection of a call, keyed by `role`, whose exact key set #632 pins
-    # (`test_denial_audit_632`) — it names its writer already and gains no second field.
     rows = [r for r in rows if r.get("event_type") != POLICY_DENIAL_EVENT_TYPE]
     missing = [i for i, r in enumerate(rows) if not r.get("writer_id")]
     assert missing == [], (
@@ -266,14 +245,6 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     # And this is the trade-off O3's second exemption pays for: the wire log's BYTES change.
     assert "writer_id" in S.RunPaths(run_dir).wire_log.read_text(encoding="utf-8")
 
-    # RG-9 — the reader leg. `load_messages` (`defender/scripts/visualize/visualize_messages.py`
-    # :27-34) reads through `defender/_io.py::read_jsonl_rows` (:643-644), the reader whose own
-    # sibling's docstring says "most artifact readers are deliberately tolerant" (:650). Handed
-    # a log whose every record carries the new key, it must return those records unchanged —
-    # neither dropping them nor validating a key set.
-    # `visualize_data` re-exports names from `visualize_messages` at its foot while the latter
-    # imports `visualize_data` at its head: imported in THIS order the cycle resolves, in the
-    # other it does not (a pre-existing cycle outside #1077's scope).
     import defender.scripts.visualize.visualize_data  # noqa: F401
     from defender.scripts.visualize.visualize_messages import load_messages
     assert load_messages(run_dir) == rows, (
@@ -284,10 +255,6 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
 
 def test_wire_log_writers_stay_distinguishable_under_concurrent_main_and_subagent_appends(
         tmp_path: Path):
-    """The one `RequestLogger` MAIN and every gather subagent share (flagged fact F5, concurrent
-    multiplicity) stays a well-formed JSONL stream under concurrent appends through the handle —
-    no torn line, and MAIN's and each subagent's lines stay distinguishable from one another by
-    the writer id §7 decision 18 adds to every record."""
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, "run-concurrent"))
     handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))

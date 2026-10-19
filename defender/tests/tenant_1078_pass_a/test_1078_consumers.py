@@ -18,20 +18,6 @@ TENANT = H.VALID_ID
 _AS_OF = datetime.fromisoformat(T.AS_OF)
 
 
-# ======================================================================================
-# Local builders
-# ======================================================================================
-
-
-
-
-
-
-
-
-
-
-
 def _held_out():
     return H.mod("evals.held_out")
 
@@ -68,18 +54,6 @@ def _drive_held_out(argv: list[str], capsys) -> tuple[Any, str]:
 SCORED = "# Held-out eval"
 
 
-# ======================================================================================
-# The judge — the collision probe and the sibling union (D4 rows 1-2)
-# ======================================================================================
-
-
-
-
-
-# ======================================================================================
-# The pre-flight replay (D4 row 5; the review replay's successor, #1224)
-# ======================================================================================
-
 def _preflight_context(ep: Path, source: Any, tenant: Any) -> Any:
     """The context pre-flight's host-side reads run in (`cli._preflight_context`), for the
     opened source `Run` (#1105 PR 2: the env's runs base is the source's own hand-out)."""
@@ -94,10 +68,6 @@ def _tenant_source(root: Path) -> Any:
 
 
 def test_d4_preflight_env_threaded(tmp_path, monkeypatch):
-    """The pre-flight replay's context takes the run's tenant, and its env's
-    DEFENDER_RUNS_BASE is that tenant's runs base — not the episode dir's parent `run_env`
-    would export, not the retired knob. A call handed no tenant is a TypeError, so no caller
-    can compose the context without one."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, TENANT)
@@ -115,17 +85,7 @@ def test_d4_preflight_env_threaded(tmp_path, monkeypatch):
         H.branch_cli()._preflight_context(ep, as_of=_AS_OF)
 
 
-
-
-# ======================================================================================
-# held_out (D4 row 6)
-# ======================================================================================
-
 def test_d4_held_out_exactly_one(tmp_path, monkeypatch, capsys):
-    """held_out <runs_dir> scores exactly that dir, and a `--tenant` (with or without a runs
-    dir) or no runs dir at all is refused. Superseded for #1120 (human, PR #1157): held_out is
-    an evaluation tool outside the application and takes no tenant, so the `--tenant` branch
-    this test once pinned (C27) is now a usage error."""
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     H.make_tenant(root, TENANT)
@@ -168,5 +128,3 @@ def test_s7_j50_held_out_positional_ignores_data_root(tmp_path, monkeypatch, cap
         assert "slug-one: predicted='benign'" in out, out
         assert "WRONG" not in out, out
     assert not (tmp_path / "rel").exists(), "the positional branch created the data root"
-
-

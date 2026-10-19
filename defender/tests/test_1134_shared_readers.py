@@ -1,9 +1,3 @@
-"""The shared readers (`_corpus.iter_lesson_paths`, `iter_lessons`, `iter_query_templates`, `read_query_template`,
-`lead_neighbors.load_catalog`) take a `Bound` plus `where` (or a bare `Path`) and list with `list_tree`: a link,
-hard link, FIFO or non-directory at a record name or holding folder is refused and skipped, a refused folder warns
-once and costs only itself, a folder swapped or removed mid-listing is never listed through, and the caller's
-`Bound` stays open.
-"""
 from __future__ import annotations
 
 import contextlib
@@ -58,15 +52,7 @@ from defender.tests._tree_listing_1134 import (
 )
 from defender.tests.test_1111_rooted_io import Planted, census, in_time, plant_leaf
 
-# ---------------------------------------------------------------------------------------
-# The tree
-# ---------------------------------------------------------------------------------------
 
-#: What every link target, hard link's other name, planted folder and decoy holds, inside a
-#: VALID record: a reader that followed the plant would yield it, not warn about it.
-#: `HOST_MARK` is outside every root (under `host`). `INSIDE_MARK` is inside the root the row
-#: opens, at a place no selection takes, so only a reader that followed (or re-resolved) the
-#: plant reaches it. `DECOY_MARK` is under the decoy `where`, which no reader may open.
 HOST_MARK = "host-bytes-7c1d"
 INSIDE_MARK = "inside-bytes-3e8a"
 DECOY_MARK = "decoy-bytes-5b20"
@@ -227,10 +213,6 @@ def scene(tmp_path: Path) -> Scene:
     built.put(FILES)
     return built
 
-
-# ---------------------------------------------------------------------------------------
-# The readers and their call forms
-# ---------------------------------------------------------------------------------------
 
 def lesson_record(path: Path, text: str) -> Lesson:
     fm, raw, body = split_frontmatter(text)
@@ -393,27 +375,17 @@ def gone(path: Path) -> str:
     return str(FileNotFoundError(errno.ENOENT, "No such file or directory", str(path)))
 
 
-# ---------------------------------------------------------------------------------------
-# Plants, the guarded run and the control
-# ---------------------------------------------------------------------------------------
-
 LEAF_PLANTS = ("symlink", "symlink_inside", "dangling", "directory", "hardlink", "fifo")
 FOLDER_PLANTS = ("link", "link_inside", "dangling_link", "file", "fifo")
 #: The walk's reason for each plant on the Bound's prefix (and `Bound.read`'s for each plant at
 #: a holding folder): a linked folder is `_step`'s ELOOP, a file or FIFO its ENOTDIR.
 PREFIX_REASON = {"link": ALIAS, "link_inside": ALIAS, "dangling_link": ALIAS,
                  "file": NOT_A_DIR, "fifo": NOT_A_DIR}
-#: Where a `symlink_inside` plant at each probe points: a folder no selection takes, inside
-#: every root that probe's rows open (`read_query_template`'s bare `Path` roots at the probe's
-#: own folder).
 INSIDE_LEAF = {
     "lessons/mid.md": "lessons/sub/inside-target.md",
     f"{CATALOG}/wazuh/probe.md": f"{CATALOG}/wazuh/notes/inside-target.md",
     f"{CATALOG}/wazuh/_draft/probe-draft.md": f"{CATALOG}/wazuh/_draft/deeper/inside-target.md",
 }
-#: Where a `link_inside` plant at each folder site points: inside every root the site's rows
-#: open (each strictly above the site), at a place no walk selects from (outside the walked
-#: folder, or at the catalog walk's last level, listed and never entered).
 INSIDE_ATTIC = {
     "lessons": "attic/lessons",
     "skills/gather": "skills/attic/gather",
@@ -423,10 +395,6 @@ INSIDE_ATTIC = {
     f"{CATALOG}/.dotsys": f"{CATALOG}/wazuh/notes/attic-dotsys",
     f"{CATALOG}/.dotsys/_draft": f"{CATALOG}/wazuh/notes/attic-dotsys-draft",
 }
-#: The folders each tree's plants go at: the walked folder and every folder above it below
-#: `t/skills`, then the `<sys>` and `_draft` levels: in the system that sorts LAST (`wazuh`), and
-#: in the one that sorts FIRST (`.dotsys`), so a reader that stops at the plant loses every
-#: system after it (H1).
 FOLDER_SITES = {
     "lessons": ("lessons",),
     "catalog": ("skills/gather", CATALOG, f"{CATALOG}/.dotsys", f"{CATALOG}/.dotsys/_draft",
@@ -575,10 +543,6 @@ def sentinel_of(scene: Scene, reader: Reader) -> Path | None:
     return scene.t / TREES[reader.tree].sentinel if reader.reads else None
 
 
-# =======================================================================================
-# The argument rules
-# =======================================================================================
-
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_a_bound_without_where_is_a_value_error_before_any_io(scene, reader):
     """A Bound has no path, so the Bound form needs `where`. Refused before the reader asks the
@@ -591,8 +555,6 @@ def test_a_bound_without_where_is_a_value_error_before_any_io(scene, reader):
         assert rec.calls[made:] == [], "the reader did I/O before refusing a missing `where`"
 
 
-
-
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_a_path_with_where_is_a_value_error(scene, reader):
     """The Path spells itself: `where` beside it is a caller's mistake."""
@@ -600,20 +562,6 @@ def test_a_path_with_where_is_a_value_error(scene, reader):
     with pytest.raises(ValueError):  # noqa: PT011
         reader.run(top, {"where": top})
 
-
-
-
-
-
-
-
-
-
-
-
-# =======================================================================================
-# Parity: every form reads a plain tree as today
-# =======================================================================================
 
 def assert_reads_the_whole_tree(scene: Scene, reader: Reader, form: str,
                                 caplog: pytest.LogCaptureFixture) -> None:
@@ -631,12 +579,6 @@ def assert_reads_the_whole_tree(scene: Scene, reader: Reader, form: str,
 @pytest.mark.parametrize("form", FORMS)
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_every_reader_reads_a_plain_tree_alike_in_each_call_form(scene, reader, form, caplog):
-    """Selection is today's: the corpus takes `*.md` directly in the folder, dot names
-    included, `_`-prefixed not; the catalog takes `<sys>/*.md` and `<sys>/_draft/*.md` (dot and
-    `_` names at every level, a top-level `_draft` system too) and nothing at `<sys>` level,
-    under another middle folder or deeper. Sorted by path parts (`cmdb` before `cmdb-ext`),
-    spelled `where / name` (today's `corpus_dir / "x.md"`), and silent: the `<sys>`-level
-    `SCHEMA.md` warns nothing."""
     assert_reads_the_whole_tree(scene, reader, form, caplog)
 
 
@@ -644,9 +586,6 @@ def test_every_reader_reads_a_plain_tree_alike_in_each_call_form(scene, reader, 
 @pytest.mark.parametrize("probe", TREES["catalog"].probes, ids=probe_id)
 def test_read_query_template_reads_one_plain_template_in_each_call_form(
         scene, probe, form, caplog):
-    """The template's `path` is `where / name` in every form (today's `repo_root / path` for
-    the drain's `skills` view; the catalog's spelling for a view under `gather/queries`, H7),
-    `system` comes from it (a draft's is the folder above `_draft`), and nothing is logged."""
     scene.put([probe])
     with rqt_called_as(scene, probe, form) as (args, kw):
         got = rqt_quietly(caplog, args, kw)
@@ -655,22 +594,6 @@ def test_read_query_template_reads_one_plain_template_in_each_call_form(
     assert got[0] is not None
     assert got[0].system == "wazuh"
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-# =======================================================================================
-# A non-plain entry at a record's name: selected by name, refused, skipped with its warning
-# =======================================================================================
 
 LEAF_ROWS = [
     pytest.param(reader, probe, plant, form,
@@ -685,11 +608,6 @@ LEAF_ROWS = [
 @pytest.mark.parametrize(("reader", "probe", "plant", "form"), LEAF_ROWS)
 def test_a_non_plain_entry_at_a_record_name_is_refused_and_skipped(
         scene, reader, probe, plant, form, caplog):
-    """The plant is selected by its `*.md` name whatever it is, reaches the read, is refused,
-    and costs exactly the reader's existing per-record warning with the read's path-free
-    reason; every other record still yields. `iter_lesson_paths` only lists, so it returns the
-    plant's path and warns nothing. Control: a plain record at the same address, through the
-    same Bound, yields as today."""
     shape = TREES[reader.tree]
     where = scene.t / shape.top
     planted = plant_record(scene, probe, plant)
@@ -759,18 +677,6 @@ def test_a_refused_lesson_reaches_warn_label_and_on_skip_spelled_under_where(
     assert said(caplog) == [f"warn: skipping <{scene.t / probe}> (malformed lesson: {ALIAS})"]
 
 
-# =======================================================================================
-# Today's fault text, byte for byte
-# =======================================================================================
-
-
-
-
-
-
-
-
-
 @pytest.mark.parametrize("form", BOUND_FORMS)
 @pytest.mark.parametrize("reader", READING, ids=reader_id)
 def test_a_record_gone_between_the_walk_and_the_read_warns_in_todays_exact_words(
@@ -796,9 +702,6 @@ def test_a_record_gone_between_the_walk_and_the_read_warns_in_todays_exact_words
 @pytest.mark.parametrize("reader", READING, ids=reader_id)
 def test_a_plain_record_refused_for_an_errno_warns_its_strerror_alone(
         scene, reader, form, err, caplog):
-    """A declared delta: a plain record that exists but cannot be opened (EACCES, EIO, through
-    an `os_` seam that refuses its open and nothing else: root reads anything) is skipped with
-    the read's reason, `strerror` alone."""
     shape = TREES[reader.tree]
     probe = shape.probes[0]
     scene.put([probe])
@@ -827,10 +730,6 @@ def test_read_query_template_of_a_plain_file_refused_for_an_errno_says_its_strer
     assert seam.refused, "the template's open was never refused, so the row is void"
 
 
-# =======================================================================================
-# Folders: a refused folder warns once (O5.5)
-# =======================================================================================
-
 FOLDER_ROWS = [
     pytest.param(reader, site, plant, form,
                  id=f"{reader.name}-{PurePosixPath(site).name}-{plant}-{form}")
@@ -845,12 +744,6 @@ FOLDER_ROWS = [
 @pytest.mark.parametrize(("reader", "site", "plant", "form"), FOLDER_ROWS)
 def test_a_linked_or_non_directory_folder_is_skipped_with_one_warning(
         scene, reader, site, plant, form, caplog):
-    """The walked folder, or one above it below the held mount, as a link (even to a folder
-    full of valid records), a dangling link, a file or a FIFO: nothing yields, ONE warning
-    `warn: skipping <where> (<the walk's reason>)`, no raise. A `<sys>` or `_draft` folder so
-    replaced is never entered and costs ONE `warn: skipping <where>/<name> (not a plain
-    folder)`; the rest of the catalog yields. As a plain file it is silent (as `SCHEMA.md` is).
-    Control: the real folder back at the same address yields the whole tree, silently."""
     shape = TREES[reader.tree]
     where = scene.t / shape.top
     planted = plant_folder_at(scene, site, plant)
@@ -894,9 +787,6 @@ RQT_FOLDER_ROWS = [
 @pytest.mark.parametrize(("probe", "site", "plant", "form"), RQT_FOLDER_ROWS)
 def test_read_query_template_refuses_a_linked_or_non_directory_holding_folder(
         scene, probe, site, plant, form, caplog):
-    """A holding folder below the Bound's folder, replaced: `(None, "malformed template:
-    <the read's reason>")`, never the template a link's target holds. Control: the real folders
-    back, the template reads."""
     planted = plant_folder_at(scene, site, plant)
     rec = SpellingRecorder()
 
@@ -945,25 +835,12 @@ def test_an_absent_root_or_folder_yields_nothing_and_warns_nothing(
 
 # -- a folder whose listing is refused, or found gone, through an `os_` seam ----------------
 
-#: Per tree, the folders (relative to the listed folder; `""` is the listed folder) the refusal
-#: rows refuse: the listed folder; in the catalog, each folder the selection reads from (a
-#: `<sys>` folder, a `<sys>/_draft` folder, the top-level `_draft` system), and two it never
-#: reads from (a middle folder that is not `_draft`, which IS listed, and a folder at the
-#: listing's last level, which is not); in the corpus, its nested folder (below its one level).
 REFUSED_FOLDERS = {"lessons": ("", "sub"),
                    "catalog": ("", ".dotsys", ".dotsys/_draft", "wazuh", "wazuh/_draft",
                                "_draft", "wazuh/notes", "wazuh/_draft/deeper")}
 #: The folders the selection reads from: refusing one costs its records and one warning.
 SELECTED_FOLDERS = (".dotsys", ".dotsys/_draft", "wazuh", "wazuh/_draft", "_draft")
-#: Folders no listing may reach: the corpus is listed one level deep (`depth=1`), so its nested
-#: folder is a row and is never listed; the catalog three (`depth=3`), so a folder at the third
-#: level is a row and is never listed. Refusing one must cost nothing, and the seam must never
-#: be asked for it.
 NEVER_ENTERED = ("sub", "wazuh/_draft/deeper")
-#: The errnos a refusal row refuses with. EACCES and EIO make the folder's listing refused, its
-#: reason `strerror` verbatim; ENOENT on the `step` or `reopen` route makes it gone (`entries()`
-#: answers absent): a folder its parent listed as a directory and found missing by its own
-#: listing. (ENOENT from `scandir` of an open descriptor is no real fault; not driven.)
 REFUSAL_ERRNOS = (errno.EACCES, errno.EIO, errno.ENOENT)
 
 REFUSAL_ROWS = [
@@ -1004,15 +881,6 @@ def refusal_outcome(reader: Reader, folder: str, err: int,
 @pytest.mark.parametrize(("reader", "folder", "route", "form", "err"), REFUSAL_ROWS)
 def test_a_refused_listing_warns_once_and_yields_what_it_should(
         scene, reader, folder, route, form, err, caplog):
-    """A `<sys>` or `_draft` folder whose own listing is refused (EACCES or EIO, on any route:
-    the listing's `refused`): exactly ONE `warn: skipping <where>/<name> (<strerror>)`, and
-    every other record, the other systems' included, yields exactly. The same folder found gone
-    by its own listing (ENOENT: the listing's `gone`): its records, and no warning, as a missing
-    folder never warned. At a folder the selection never reads from: silent, the whole tree. At
-    the listed folder itself: one `warn: skipping <where> (<strerror>)` and nothing, or, gone,
-    nothing and silence. A folder below the listing's depth is never entered: the seam is never
-    asked for it, and it costs nothing. Never a raise. Control: the same form over the real `os`
-    yields the whole tree, silently."""
     shape = TREES[reader.tree]
     where = scene.t / shape.top
     seam = RefusesFolder(where / folder if folder else where, route, err)
@@ -1056,16 +924,6 @@ SWAP_BETWEEN_ROWS = [
 @pytest.mark.parametrize(("reader", "site", "plant", "form"), SWAP_BETWEEN_ROWS)
 def test_a_folder_swapped_between_listings_is_refused_or_gone_and_never_listed_through(
         scene, reader, site, plant, form, caplog):
-    """The catalog's own listing shows `site` as a real directory. The moment the reader's
-    listing of `site` itself steps into it, the folder is REALLY moved out of the tree and a
-    link to a folder of marked records, a file, a FIFO or nothing is left at its name. The
-    folder's listing meets the plant: refused (a link, a file, a FIFO), which costs ONE
-    `warn: skipping <where>/<site> (<the listing's reason>)`, or gone (nothing there), which is
-    silent, as a missing folder always was (a declared choice). Either way its records are
-    gone, every other record yields exactly, and nothing below the plant is listed or read: the
-    kernel saw no open or listing of the link's target, of any marked record in it, or of the
-    moved folder (watched by its inode before the move), and no mark reaches the answer.
-    Control: the folder moved back, the same call yields the whole catalog, silently."""
     shape = TREES["catalog"]
     where = scene.t / shape.top
     rel = f"{CATALOG}/{site}"
@@ -1115,10 +973,6 @@ def test_a_folder_swapped_between_listings_is_refused_or_gone_and_never_listed_t
 @pytest.mark.parametrize("reader", CATALOG_READERS, ids=reader_id)
 def test_an_unlistable_directory_at_a_record_name_is_a_refused_record_not_a_folder(
         scene, reader, form, route, caplog):
-    """`<sys>/probe.md` is a directory whose own listing is refused (in the listing's
-    `refused`). It is still a SELECTED name: the read refuses it (a directory, or `Permission denied` when the
-    seam refuses the open itself), and it costs the malformed-template warning, never a folder
-    warning."""
     shape = TREES["catalog"]
     probe = shape.probes[0]
     (scene.t / probe).mkdir()
@@ -1148,9 +1002,6 @@ PERM_CASES: dict[str, tuple[str, str]] = {
     "lessons-nested": ("lessons", "sub"),
 }
 PERM_FORMS = ("path", "bound", "held-view-under")
-#: Each case: a tree, and one plain RECORD in it (relative to the walked folder) made mode 0o000:
-#: it exists, the walk lists it, and only its open is refused (H2: a Path form that judged the
-#: name by `lstat` and read it by its path would word the fault as today's `[Errno 13] ...`).
 PERM_RECORDS: dict[str, tuple[str, str]] = {
     "lessons-record": ("lessons", "alpha.md"),
     "catalog-record": ("catalog", "wazuh/auth-events.md"),
@@ -1264,11 +1115,6 @@ def test_the_real_permission_rows_ran_unprivileged(unprivileged_reads):
 @pytest.mark.parametrize(("case", "reader", "form"), PERM_ROWS)
 def test_a_folder_unreadable_for_real_warns_once_and_the_rest_yields(
         unprivileged_reads, case, reader, form):
-    """Through the real `os`, as the drain's unprivileged owner would read it: a `<sys>`, a
-    `<sys>/_draft` or a top-level `_draft` folder of mode 0o000 costs exactly its records and
-    ONE `warn: skipping <where>/<name> (Permission denied)`; the walked folder itself, ONE
-    `warn: skipping <where> (Permission denied)` and nothing; a folder the selection never
-    reads from, nothing at all. The bare Path form too."""
     base, answer = unprivileged_reads
     tree, folder = PERM_CASES[case]
     shape = TREES[tree]
@@ -1288,11 +1134,6 @@ def test_a_folder_unreadable_for_real_warns_once_and_the_rest_yields(
 @pytest.mark.parametrize(("case", "reader", "form"), PERM_RECORD_ROWS)
 def test_a_plain_record_unreadable_for_real_is_skipped_with_strerror_alone(
         unprivileged_reads, case, reader, form):
-    """H2, and a declared delta: a plain record of mode 0o000, read through the real `os` as an
-    unprivileged user, in the bare Path form too, is listed, refused at its open, and skipped
-    with the read's reason, `strerror` alone (`Permission denied`), never today's
-    `[Errno 13] Permission denied: '<path>'`. `iter_lesson_paths` only lists it. The rest
-    yields."""
     base, answer = unprivileged_reads
     tree, rel = PERM_RECORDS[case]
     shape = TREES[tree]
@@ -1321,18 +1162,11 @@ def test_read_query_template_of_a_template_unreadable_for_real_says_strerror_alo
     assert row["warnings"] == []
 
 
-# =======================================================================================
-# `where` only spells: it is never opened
-# =======================================================================================
-
 @pytest.mark.parametrize("where_is", ["nowhere", "decoy"])
 @pytest.mark.parametrize("form", BOUND_FORMS)
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_where_spells_the_bounds_records_and_is_never_opened(
         scene, reader, form, where_is, caplog):
-    """The records come from the Bound and are spelled under `where`, whatever `where` names:
-    a path that does not exist (nothing is created there), or a decoy tree holding a marked
-    record at every selected name (never opened, never listed, never read)."""
     shape = TREES[reader.tree]
     where = (scene.tmp / "nowhere" / shape.top if where_is == "nowhere"
              else plant_decoy(scene, reader.tree))
@@ -1346,12 +1180,6 @@ def test_where_spells_the_bounds_records_and_is_never_opened(
     assert warned == []
     assert not (scene.tmp / "nowhere").exists()
 
-
-
-
-# =======================================================================================
-# Lifetime
-# =======================================================================================
 
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_a_bound_passed_in_is_the_callers_and_stays_open(scene, reader):
@@ -1371,8 +1199,6 @@ def test_a_bound_passed_in_is_the_callers_and_stays_open(scene, reader):
         assert (after.absent, after.reason) == (False, None), after
         assert after.entries
         assert bound.read(first).text == TEXT[shape.records[0]]
-
-
 
 
 #: Path-form calls that must leave no descriptor open when they return.
@@ -1412,10 +1238,6 @@ def test_a_path_form_generator_holds_nothing_before_it_starts_or_after_it_ends(
     assert descriptors_under(scene.tmp) == []
 
 
-# =======================================================================================
-# The root is the trust root: opened following its spelling (N-h), by design
-# =======================================================================================
-
 def root_as_link(scene: Scene, root_rel: str) -> None:
     """The folder at `root_rel` (`""` is `t`) moved beside `t` and a symlink left at its name."""
     at = scene.t / root_rel
@@ -1427,15 +1249,9 @@ def root_as_link(scene: Scene, root_rel: str) -> None:
 @pytest.mark.parametrize("form", FORMS)
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_the_root_itself_is_opened_following_its_spelling(scene, reader, form, caplog):
-    """Not a guard: a documented fact. The folder a form opens (the bare Path's own folder, a
-    Bound's root, the held mount) is a trusted mount point, opened following its spelling, so a
-    root that is itself a symlink reads its target's records, spelled under the link. A Path
-    roots wherever it is pointed, which is why drain code never hands a shared reader one."""
     root_as_link(scene, form_root(reader.tree, form))
 
     assert_reads_the_whole_tree(scene, reader, form, caplog)
-
-
 
 
 @pytest.mark.parametrize("kind", ["file", "fifo"])
@@ -1443,9 +1259,6 @@ def test_the_root_itself_is_opened_following_its_spelling(scene, reader, form, c
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_a_non_directory_passed_as_the_root_warns_once_and_yields_nothing(
         scene, reader, form, kind, caplog):
-    """A declared delta: the root a Path (or `bind`) is given is a regular file or a FIFO.
-    Nothing yields, nothing raises, nothing blocks, and ONE `warn: skipping <path> (Not a
-    directory)` (today: silent)."""
     top = scene.t / TREES[reader.tree].top
     shutil.rmtree(top)
     if kind == "file":
@@ -1461,16 +1274,6 @@ def test_a_non_directory_passed_as_the_root_warns_once_and_yields_nothing(
     assert got == []
     assert warned == [f"warn: skipping {top} ({NOT_A_DIR})"]
 
-
-# =======================================================================================
-# The step-4 adversary's holes (H1-H7): rows added after the implementation
-# =======================================================================================
-#
-# H1 (a non-plain `<sys>` ends the whole walk), H5 (`.md` anywhere in a name) and H7
-# (`read_query_template` through a view under a prefix) are closed in the tables above: the
-# `.dotsys` sites and refusal folders, the near-miss names in `FILES`, and the
-# `held-view-under` form in `RQT_FORMS`. H4 (`read_query_template` logs) is closed by
-# `rqt_quietly` and the empty-warning asserts in every `read_query_template` row.
 
 # -- H2: the Path form reads through its held handle, never by a path it formats ------------
 
@@ -1503,13 +1306,6 @@ def swap_for_marked_link(scene: Scene, site: str) -> Planted:
 @pytest.mark.parametrize(("reader", "site", "form"), SWAP_ROWS)
 def test_a_folder_swapped_for_a_link_mid_iteration_is_never_read_through(
         scene, reader, site, form, caplog):
-    """H2: the walk lists the tree once, before the first record. Swap a folder for a link to
-    marked records after that, and the rest is still read through the handle the reader holds,
-    never by a path it formats (`where / name` would follow the link). The walked folder
-    itself swapped: the held handle keeps reading the real folder (moved), so every record
-    yields as today, spelled as before, silently. A `<sys>` folder swapped: each record listed
-    under it is refused at its read (the link is never stepped through), with the alias
-    warning, and every other record yields. Never a marked byte, by any route."""
     shape = TREES[reader.tree]
     where = scene.t / shape.top
     order = sorted(shape.records, key=lambda rel: PurePosixPath(rel).parts)
@@ -1565,10 +1361,6 @@ def following_opens(opens: list[list[Any]], root: str, tmp: str) -> list[list[An
 
 @pytest.mark.parametrize("scenario_id", AUDIT_IDS)
 def test_the_path_form_opens_nothing_below_its_root_by_a_spelling(path_form_opens, scenario_id):
-    """H2, below the seam: in the bare Path form, the root (a `read_query_template` file's
-    parent) is the one name opened as spelled; everything below it is opened one component at
-    a time, no-follow, off a held folder. Never `where / name`, which would follow any link on
-    the way. Non-vacuity: the hook saw the root's own open."""
     tmp, scenarios, answer = path_form_opens
     scenario = scenarios[scenario_id]
     row = answer["rows"][scenario_id]
@@ -1603,9 +1395,6 @@ def plant_marked_tree(scene: Scene, at: Path, names: Iterable[PurePosixPath], tr
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_a_bound_whose_folder_is_gone_reads_nothing_and_never_falls_back_to_where(
         scene, reader, form, what, caplog):
-    """H3: the folder a Bound holds is removed, and a marked tree (a real folder, or a link to
-    one) is put at its spelling, `where`. The Bound answers absent: nothing, silently. `where`
-    is never opened, listed or read to make up for it."""
     shape = TREES[reader.tree]
     top = scene.t / shape.top
     with called_as(scene, reader.tree, form) as (arg, kw):
@@ -1618,8 +1407,6 @@ def test_a_bound_whose_folder_is_gone_reads_nothing_and_never_falls_back_to_wher
 
     assert got == []
     assert warned == []
-
-
 
 
 # -- H6: the Path form spells what it was given, a relative path too -----------------------
@@ -1639,27 +1426,10 @@ def test_the_path_form_spells_a_relative_path_as_given(scene, reader, monkeypatc
     assert said(caplog) == []
 
 
-
-
-
-
-# =======================================================================================
-# The v3 step-4 adversary's holes (V3-H1 to V3-H5): rows added after the implementation
-# =======================================================================================
-#
-# Each was checked red against the adversary's green-but-wrong reader (scratchpad
-# `adv1134v3s4/`) and green against the implementation. V3-H1's other half is the exactly-once
-# assert in `test_a_refused_listing_warns_once_and_yields_what_it_should`.
-
 @pytest.mark.parametrize("route", REFUSAL_ROUTES)
 @pytest.mark.parametrize("form", BOUND_FORMS)
 @pytest.mark.parametrize("reader", CATALOG_READERS, ids=reader_id)
 def test_a_folder_refused_once_is_warned_from_that_one_listing(scene, reader, form, route, caplog):
-    """V3-H1: a reader that ignored `refused` and listed each `<sys>` again to see whether to
-    warn passed every row whose refusal is permanent. Here `wazuh`'s listing is refused with EIO
-    the FIRST time only (a transient fault); asked again it would list. The reader keeps what
-    its one listing said: wazuh's records are gone, and ONE warning names it with that reason.
-    Never silence, never wazuh's records."""
     shape = TREES["catalog"]
     where = scene.t / shape.top
     seam = RefusesFolder(where / "wazuh", route, errno.EIO, once=True)
@@ -1684,9 +1454,6 @@ UNCOMMON_ERRNOS = (errno.ENOMEM, errno.EMFILE, errno.ESTALE, errno.ENOTCONN)
 @pytest.mark.parametrize("site", ["wazuh", "wazuh/_draft"])
 def test_a_refused_folders_reason_is_the_listings_verbatim_whatever_the_errno(
         scene, site, form, route, err, caplog):
-    """V3-H2: a reader that passed through only the reasons the other rows produce (EACCES, EIO,
-    ENOTDIR, the alias sentence) and rewrote the rest passed them all. Any errno's `strerror`
-    reaches the warning verbatim."""
     reader = BY_NAME["iter_query_templates"]
     shape = TREES["catalog"]
     where = scene.t / shape.top
@@ -1715,10 +1482,6 @@ TWO_FAULTS = {
 @pytest.mark.parametrize("case", list(TWO_FAULTS))
 @pytest.mark.parametrize("reader", CATALOG_READERS, ids=reader_id)
 def test_several_folder_faults_warn_once_each_in_path_order(scene, reader, case, form, caplog):
-    """V3-H3: every other folder row plants ONE fault, so a reader that warned its refused
-    folders after its non-plain ones, or in any order but the catalog's, passed. With several,
-    the warnings are exactly one per warned folder, in path-parts order; a gone one is silent;
-    every system without a fault yields."""
     shape = TREES["catalog"]
     where = scene.t / shape.top
     seams: list[RefusesFolder] = []
@@ -1749,12 +1512,6 @@ def test_several_folder_faults_warn_once_each_in_path_order(scene, reader, case,
 @pytest.mark.parametrize("reader", CATALOG_READERS, ids=reader_id)
 def test_a_sys_folder_really_removed_during_its_listing_is_gone_and_silent(
         scene, reader, site, moment, form, caplog):
-    """Addendum 3, D2 at the readers: a `<sys>` folder REALLY removed (`shutil.rmtree`) after
-    `list_tree` stepped into it (before its reopen, before its scan, or after the scan's first
-    entry) is absent to its own listing, so it is the listing's `gone`: its records (its
-    `_draft` among them) are not yielded, NO warning is logged (a missing folder never warned),
-    and every other system yields exactly. Never a raise. Control: before the removal the same
-    form yields the whole catalog, silently."""
     shape = TREES["catalog"]
     where = scene.t / shape.top
     caplog.clear()
@@ -1772,19 +1529,11 @@ def test_a_sys_folder_really_removed_during_its_listing_is_gone_and_silent(
     assert said(caplog) == [], "a folder found gone was warned"
 
 
-#: Per tree, `(a folder below the listing's depth, a folder the listing must list)`, relative
-#: to the listed folder: the corpus is listed one level deep, so `sub/` is a row and never
-#: listed (the corpus itself is the control); the catalog three, so `wazuh/notes` (level 2) is
-#: listed and `wazuh/_draft/deeper` (level 3) is not.
 BELOW_THE_SHAPE = {"lessons": ("sub", ""), "catalog": ("wazuh/_draft/deeper", "wazuh/notes")}
 
 
 @pytest.mark.parametrize("reader", READERS, ids=reader_id)
 def test_the_path_form_never_lists_a_folder_below_the_shape(scene, reader, caplog):
-    """V3-H4: the never-entered rows run through an `os_` seam, which the bare Path form has
-    not, so a Path form that listed one level deeper than the shape passed. The kernel watch
-    sees the Path form list the folder it must list (non-vacuity) and never open or list the
-    one below the shape."""
     shape = TREES[reader.tree]
     top = scene.t / shape.top
     deep, listed = BELOW_THE_SHAPE[reader.tree]
@@ -1797,5 +1546,3 @@ def test_the_path_form_never_lists_a_folder_below_the_shape(scene, reader, caplo
     assert (str(control), "open") in seen, f"the watch never saw {control} listed: {seen}"
     assert [e for e in seen if e[0].startswith(str(top / deep))] == [], (
         f"{deep} lies below the listing's depth, yet was opened: {seen}")
-
-

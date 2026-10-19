@@ -1,28 +1,3 @@
-"""#836 M4 — `fix_row(old_row, new_row)`, the repair verb.
-
-`fix_row` is the FIRST verb that rewrites a line INSIDE an already-open fence: `append_block`
-only ever adds after the last fence close, so the parser has never had to validate a mid-fence
-splice. Everything M4 states as a guard is on `old_row`; what `new_row` may be was fork F-C,
-and §7 resolved it (H3) with a shape guard.
-
-The human decisions this module applies, from `.spec-flow/frontiers/70-resolutions.md`:
-
-  H3  `new_row` must be a SINGLE row of the SAME block with that block's cell count — no
-      newline, no fence delimiter, no `:V`/`:E` declaration
-  H4  the repair applies to EVERY flagged occurrence; it refuses if any match lies outside
-      the currently-flagged set; and matching compares against the STRIPPED row text the
-      renderer emits, not the raw on-disk line
-  H6  the write verbs execute sequentially within one model response
-  A3  deletion may empty its block — a header-only `:R attr_updates` block validates clean
-  A8  SEC2's discharge is CONDITIONAL on an in-process flag and the suite must say so
-
-H3 is FORCED, not preferred: claim `x1` ("`fix_row` cannot reach a committed `:V`/`:E`
-record") is REFUTED. `_check_append_only` compares `:V`/`:E` CORES only and never inspects
-`:R` rows (rt10), so a fresh-id `:V` is accepted outright (rt9), a colliding-id one is
-swallowed by the parser's first-declaration-wins fold before append-only sees it (rt8), and
-one carrying the document's own fence delimiter makes the injected row VANISH with no warning
-at all (rt11). Without the guard, O3/SEC1 ships as a negative universal with no enforcer.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -152,10 +127,6 @@ def test_fix_row_when_one_flagged_row_is_a_prefix_of_another(tmp_path):
     seed_investigation(run, PROLOGUE + attr_block(short_row, long_row))
     assert flagged_rows(_inv(run)) == (short_row, long_row)
 
-    # The repair's VALUE cell is a legal `compute` class tuple: the prefix relation under test
-    # is between the two FLAGGED rows, and since #986 a `class` refinement carrying an
-    # off-vocabulary role is refused for the value, which would refuse this write before the
-    # multiplicity rule was ever reached.
     _fix(deps, short_row, "l-001|v-001|class|file-server/internal/known-corp")
 
     assert flagged_rows(_inv(run)) == (long_row,), "the prefix repair took the longer row too"
@@ -263,13 +234,6 @@ def test_no_verb_mutates_or_removes_a_committed_v_or_e_record(tmp_path):
     reasons = _diagnose(mutated, committed)
     violations = [d for d in reasons if "append-only violation" in d.message]
     assert any("v-002" in d.message for d in violations), reasons
-    # Severity is asserted per FAMILY, not over the whole diagnosis. The baseline here is
-    # `WARN_DOC`, which carries `WARN_ROW` by construction — so a correct implementation
-    # returns that row's WARNING alongside the append-only error, and a blanket
-    # `all(severity == "error")` contradicted `test_only_attr_update_key_family_warns` on the
-    # same fixture. What O3/SEC1 needs is that the in-place mutation is an ERROR; the second
-    # assertion pins that the warn row is the only other thing here, so this is narrower in
-    # wording and stricter in effect than the census it replaces.
     assert all(d.severity == "error" for d in violations)
     assert [d.severity for d in reasons if d not in violations] == ["warning"]
 
@@ -309,9 +273,6 @@ def test_fix_row_old_row_is_empty(tmp_path):
 
 
 def test_fix_row_old_row_matches_no_line(tmp_path):
-    """A row that appears nowhere in the document is refused, nothing is written, and the
-    refusal carries the unchanged-notice invariant so the model does not anchor its next
-    edit to a repair that never happened."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender._artifact_schema import UNCHANGED_NOTICE

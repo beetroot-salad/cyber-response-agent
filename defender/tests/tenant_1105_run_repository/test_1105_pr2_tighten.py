@@ -37,11 +37,6 @@ def _refused(got: P.CliResult) -> bool:
     return got.rc not in (0, None) or got.raised is not None
 
 
-# ==========================================================================================
-# F1 — the fence's end state: the layout lint's allow-list is empty, and #1210's work list is
-# at zero (part 2: "PR 2 ends with every count at zero"; D7″: 18 entries -> 0; J15).
-# ==========================================================================================
-
 def _lint(name: str) -> ModuleType:
     """A lint program, imported as `test_1105_layout_lint` imports it (its own directory on
     `sys.path`, since the gates import `_astlib` by bare name)."""
@@ -50,13 +45,6 @@ def _lint(name: str) -> ModuleType:
         sys.path.insert(0, str(lint_dir))
     return importlib.import_module(f"scripts.lint.{name}")
 
-
-
-
-# ==========================================================================================
-# F2 — the container record is judged before ANY read of the episode (G19, G20, S-c1): the
-# order is observed, not inferred from which refusal's message wins.
-# ==========================================================================================
 
 _OPENED: list[str] = []
 _ARMED: list[bool] = [False]
@@ -95,13 +83,6 @@ def _episode_records(episode_dir: Path) -> set[str]:
 
 
 def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
-    """F2 / G19 / S-c1 amended: a sibling over an episode whose container record names another
-    real tenant is refused by the view's one read of `runs/_tenant.json`, "before it reads B's
-    manifest or any other episode record; that one read is the refusal". Observed through the
-    process's `open` audit events: no top-level episode record (`family.yaml`, `served`) is
-    opened before the refusal. POSITIVE CONTROL: with the record naming T the sibling runs, and
-    the same hook sees `family.yaml` opened (the hook reaches the read primitive). RED at base:
-    `--resume` reads the manifest first, then refuses on the record."""
     src, ep = P.sibling_scene(tmp_path, container="beta")
     P.second_tenant(P.data_root(), "beta")
     records = _episode_records(ep)
@@ -125,12 +106,6 @@ def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
 
 
 def test_f2_a_refused_page_reads_no_episode_record(tmp_path, d9_tenant):
-    """F2 / G20: the page judges `runs/_tenant.json` "before `_load_episode` … reads the
-    manifest, outcome, samples, archive or judge records". With the record naming another real
-    tenant the page is refused and no top-level episode record (`family.yaml`, `judge.yaml`,
-    `outcome.yaml`, `samples.yaml`, `worlds`, …) is opened. POSITIVE CONTROL: with the record
-    naming T the page renders and the hook sees `family.yaml` opened. RED at base: the page
-    checks no record and renders another tenant's episode."""
     ep = E.sample_episode(tmp_path, root=_episodes())
     P.second_tenant(P.data_root(), "beta")
     P.plant_record(ep.dir / "runs", "beta")
@@ -151,10 +126,6 @@ def test_f2_a_refused_page_reads_no_episode_record(tmp_path, d9_tenant):
     assert ok.rc == 0, ok.said
     assert "family.yaml" in opened, "the hook did not see the manifest read"
 
-
-# ==========================================================================================
-# F3 — J3: nothing of another run of the alert reaches the judge, whatever its headings.
-# ==========================================================================================
 
 _SALT = re.compile(r"run-[0-9a-f]{16}-")
 
@@ -181,13 +152,6 @@ def _judge_prompts(root: Path, monkeypatch, *, prior: bool) -> dict[str, str]:
 
 
 def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch):
-    """F3 / J3: "the judge reads only the episode it is handed". The same launch is run twice
-    under fresh roots — once with a finished run of the SAME alert (disposition `benign`, a
-    marker line in its report) in T's runs folder, once without — and every prompt the judge is
-    handed is byte-identical between the two, once the roots' path and the frame salt are
-    normalised: no view, tally, row or disposition of the other run, under any heading.
-    POSITIVE CONTROL: the prompts are real (each world's carries its own report view) and the
-    marker reaches none. RED at base: VIEW 4 lists the prior run and TRIAL SPREAD tallies it."""
     bare = _judge_prompts(tmp_path / "bare", monkeypatch, prior=False)
     with_prior = _judge_prompts(tmp_path / "prior", monkeypatch, prior=True)
     assert bare, "the judge was never asked"
@@ -205,17 +169,6 @@ def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch
             "\n".join(difflib.unified_diff(bare[agent].splitlines(), prompt.splitlines(),
                                            lineterm="", n=0)))
 
-
-# ==========================================================================================
-# F4 — decision A: an old manifest's `source_run_dir` is never read, even when the id names
-# nothing.
-# ==========================================================================================
-
-
-# ==========================================================================================
-# F5 — the run page and `workspace_map` open through the repository: the record is judged and
-# a linked `<T>/runs` is never followed (declared change 7, O3, O1).
-# ==========================================================================================
 
 def _swap_record(runs: Path, tenant_id: str) -> bytes:
     """Re-plant `<runs>/_tenant.json` naming `tenant_id`; returns the record it replaced."""
@@ -239,12 +192,6 @@ def _link_runs(runs: Path, elsewhere: Path) -> Path:
 
 
 def test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs(tmp_path):
-    """F5 / declared change 7 / O3: `visualize_run.py --tenant T <run_id>` opens through
-    `runs.open`. POSITIVE CONTROL first: T's run renders. Then T's runs folder's `_tenant.json`
-    names another real tenant: refused, no page written. Then (record restored) `<T>/runs` is a
-    link to a real folder holding the same run: refused, nothing written into the link's target.
-    A run page composing `<data root>/<T>/runs/<id>` by hand fails both. RED at base: the CLI
-    takes a folder path ("usage")."""
     src, _ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
     runs = src.parent
     argv = P.new_run_page_argv(P.SIBLING_TENANT, src.name)
@@ -267,10 +214,6 @@ def test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs(tmp_path):
 
 
 def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d9_tenant):
-    """F5 / declared change 10 / O3: `workspace_map.py --tenant T <run_id>` opens through the
-    repository. POSITIVE CONTROL first: it prints the library's map of T's run. Then T's
-    `_tenant.json` names another real tenant: refused, nothing printed. Then (record restored)
-    `<T>/runs` is a link to a real folder: refused. RED at base: the CLI takes a folder path."""
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
     from defender.scripts import workspace_map as wm
@@ -298,11 +241,6 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
     assert linked.out == ""
 
 
-# ==========================================================================================
-# F6(a) — D-stored: every named member of the malformed-row domain is quarantined, and the
-# drain goes on.
-# ==========================================================================================
-
 @pytest.mark.parametrize(("case_id", "body"), [
     ("no-run", {"tenant_id": H.T_ID}),
     ("run-null", {"tenant_id": H.T_ID, "run_id": None}),
@@ -315,12 +253,6 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
     ("tenant-dict", {"tenant_id": {"id": H.T_ID}, "run_id": "r1"}),
 ])
 def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_id, body):
-    """F6(a) / D-stored: "a row whose `tenant_id` or `run_id` is missing, not a string, or off
-    its grammar takes today's 'unreadable: …' quarantine". One such row and a well-formed row
-    are queued: the tick raises nothing, the bad row is dead-lettered "unreadable…", and the
-    good row is served (POSITIVE CONTROL). A second tick then raises nothing and serves the next
-    well-formed row — a row left in flight that raises on every reclaim would wedge it. RED at
-    base: the good new-shape row has no `run_dir`, so it is quarantined and nothing is served."""
     root = P.data_root()
     t = H.tenant(root, H.T_ID)
     H.runs_folder(t)
@@ -345,10 +277,6 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
     assert H.raised(P.drain, paths, again) is None, "the next tick raised: the drain is wedged"
     assert Path(t.runs) / "r2" in again.run_dirs, f"the next tick served {again.run_dirs}"
 
-
-# ==========================================================================================
-# F7 — the migrated CLIs as the operator runs them: real processes, their `__main__` lines lit.
-# ==========================================================================================
 
 _ABSENT = "20990101t000000z-pr2-absent"
 
@@ -375,12 +303,7 @@ def _script(*parts: str) -> str:
     return str(H.WORKTREE.joinpath("defender", *parts))
 
 
-
 def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
-    """F7 / declared change 10: `python defender/scripts/workspace_map.py --tenant T <run_id>`
-    exits 0 printing the library's map of T's run; for an absent run id it exits non-zero naming
-    the id, with no argument error. A `__main__` that hands `main` the wrong slice of argv fails
-    both. RED at base: the script takes a folder path ("usage")."""
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
     from defender.scripts import workspace_map as wm
@@ -397,7 +320,6 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     _refused_naming(_process(script, "--tenant", d9_tenant, _ABSENT), _ABSENT)
 
 
-
 def _done_run(tenant_id: str) -> Path:
     """A run of `tenant_id` the lead author has already served (its `done` sentinel written
     through the real writer), so serving it again is the clean no-op exit 0."""
@@ -410,19 +332,7 @@ def _done_run(tenant_id: str) -> Path:
     return run
 
 
-
-# ==========================================================================================
-# F9 — the lead author resolves (tenant, run id) and no longer takes a path (D5″ row 20,
-# O1(d)).
-# ==========================================================================================
-
 def test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path(tmp_path, d9_tenant):
-    """F9 / D5″ row 20 / O1(d): `lead_author --tenant T <run_id>` serves T's run (here already
-    served: the done sentinel's exit 0, reached only once the run was resolved and opened). The
-    SAME run named by its folder path is refused — a path is not a run id — and so is the id
-    under another real tenant and an absent id. A lead author that requires `--tenant` but keeps
-    the positional a path fails the first assertion. RED at base: the lead author does not know
-    `--tenant`."""
     from defender.learning.leads import lead_author
 
     run = _done_run(d9_tenant)
@@ -435,10 +345,3 @@ def test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path(tmp_pa
                  ["--tenant", d9_tenant, _ABSENT]):
         got = P.drive_cli(lead_author.main, argv)
         assert _refused(got), f"the lead author served {argv}"
-
-
-# ==========================================================================================
-# F10 — declared change 13: the CLI usage prose names the new arguments.
-# ==========================================================================================
-
-

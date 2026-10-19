@@ -72,9 +72,6 @@ def _body(**kw) -> dict:
 
 
 def test_the_default_sort_is_unchanged_newest_first():
-    """The knob is ADDITIVE. Every call that does not mention `sort` must produce the exact
-    body it produced before item 2 — `@timestamp` descending — or the fix is a silent
-    behaviour change to every shipped query template and every recorded run's meaning."""
     assert ea.DEFAULT_SORT == ea.SORT_NEWEST_FIRST == "desc"
     assert _body()["sort"] == [{"@timestamp": {"order": "desc"}}]
     assert ea.query.__kwdefaults__["sort"] == ea.DEFAULT_SORT
@@ -93,9 +90,6 @@ def test_a_lead_can_ask_for_the_start_of_its_window():
 
 
 def test_an_unusable_sort_is_refused_and_says_what_the_two_orders_are():
-    """`validate_params` checks param TYPES, not values, so `sort` is the adapter's own to
-    refuse — and it refuses toward the fix, naming both orders and saying neither pages, since
-    a lead that reaches for a third slice has to be told there is not one."""
     with pytest.raises(UpstreamFault) as exc:
         ea.resolve_sort("ascending")
     detail = exc.value.detail
@@ -121,9 +115,6 @@ def test_the_result_envelope_says_which_end_of_the_window_it_holds():
 
 
 def test_the_sort_param_is_visible_to_the_model_on_both_search_verbs():
-    """A knob the dispatch catalog does not advertise is not a knob. Both search verbs declare
-    it, with a default, so no existing call becomes invalid — the `esql` verb takes none of
-    this, its ordering living in the pipe."""
     from defender.runtime.verbs import declared_params
 
     for verb in (ea.query, ea.alerts):
@@ -162,9 +153,6 @@ def test_a_repeat_whose_calls_keep_failing_is_named(tmp_path):
 
 
 def test_a_failing_repeat_is_never_told_it_returned_a_payload(tmp_path):
-    """The wording is the point, not just the firing. A call that failed returned no payload
-    at all — telling it that "it returned the same payload byte for byte" describes an
-    observation it does not have, and the fact that actually matched is the identical ERROR."""
     digest = "exit=64; unknown param(s) ['fields']"
     state = _write(tmp_path, [_row(0, exit_code=64, digest=digest)])
     failing = rq.repeat_note(
@@ -189,9 +177,6 @@ def test_a_failing_repeat_is_never_told_it_returned_a_payload(tmp_path):
 
 
 def test_a_changed_request_that_fails_identically_is_a_no_op_too(tmp_path):
-    """The NO-OP arm carries over with the same correction: a *different* request that failed
-    with the identical error did not reach whatever is rejecting it, which is a different
-    (and more useful) fact than "the result set did not move"."""
     digest = "exit=64; unknown param(s) ['fields']"
     state = _write(tmp_path, [_row(0, exit_code=64, params={"native_query": "a"}, digest=digest)])
     note = rq.repeat_note(
@@ -257,9 +242,6 @@ def test_the_infra_half_of_the_above_guard_rows_stays_the_breakers():
 
 
 def test_the_companion_guard_keys_on_the_same_identity_as_the_first():
-    """One counting rule, two domains — never two definitions of what a repeat IS. A guard
-    that canonicalised `params` differently at its own placement would refuse a lead for
-    calls the other guard would have called distinct."""
     params = {"b": 2, "a": [1, {"z": None}]}
     reordered = {"a": [1, {"z": None}], "b": 2}
     rows = [_above(0, params=params), _above(1, params=params)]
@@ -272,12 +254,6 @@ def test_the_companion_guard_keys_on_the_same_identity_as_the_first():
         [_above(0, params=params, lead="l-002"), _above(1, params=params, lead="l-002")],
         LEAD, system="elastic", verb="query", params=params, system_key="",
     ) is None
-
-
-# #871 — the companion guard could not tell two UNDECLARED systems apart, because #855 keeps
-# their names off the row and every one of them coarsens to `system=""`. `system_key` carries
-# the identity across the seam as a digest. These are the predicate-level arms; the lead-level
-# ones are in `tests/e2e/test_855_model_named_systems.py`.
 
 
 def test_the_fingerprint_gives_three_answers_and_each_one_is_a_decision():
@@ -314,25 +290,6 @@ def test_the_fingerprint_hashes_the_whole_string_exactly_as_the_model_wrote_it()
 
 
 def test_an_unencodable_system_string_is_fingerprinted_rather_than_raising():
-    """A lone surrogate reaches this function: `json.loads('"\\ud800"')` yields one, and the
-    model's tool-call arguments arrive as JSON. The call site is inside
-    `wrap_tool_validate`'s `except (ValidationError, ModelRetry)` handler with no `try` of
-    its own, so a raising digest REPLACES the rejection — no row is written, the table loses
-    the call it is supposed to be counting, and the fault unwinds past the lead's own catch.
-
-    `surrogatepass` is the same encoding contract `payload_sha256` argues for two functions
-    above, and for the same reason: a codepoint that cannot round-trip must still produce a
-    digest, and it must be its OWN digest, or two distinct ghosts fold into one group.
-
-    THE COLLISION PARTNER IS A SECOND SURROGATE, not U+FFFD. On the ENCODE side `replace`
-    emits `?` (U+FFFD is the DECODE replacement), so `"\ud800x"` and `"\ufffdx"` stay distinct
-    under it and an assertion against U+FFFD pins only "did not raise" — which `errors="replace"`
-    also satisfies. Two different lone surrogates are what `replace` actually maps to one byte,
-    and they are the pair this has to compare.
-
-    No e2e twin: the replay harness serialises its own turns and refuses a lone surrogate
-    before the tool is ever reached, which is exactly why nothing above this level can cover
-    it."""
     lone = "\ud800ghost"
     fp = rq.system_fingerprint(lone, "")
     assert re.fullmatch(r"[0-9a-f]{64}", fp), \
@@ -424,18 +381,6 @@ def test_an_invisible_system_string_is_no_more_readable_than_an_empty_one():
 
 
 def test_the_dead_end_message_asks_the_same_readability_question_the_fold_does():
-    """#871's own rule, applied to the CONSUMER of `_undeclared_target`'s answer.
-
-    `rejection_dead_end_reason` chooses between naming the target and saying the arguments were
-    unreadable, and it chose with `.strip()` while `_undeclared_target` chose with
-    `names_something_readable`. The two disagree on exactly the codepoints the fold exists for:
-    a verb of one zero-width character is `.strip()`-truthy, so with the system half already
-    `""` the fallback never fired and MAIN was handed `the request (\u200b)` — which renders as
-    `the request ()`, the "( )" the branch's own comment says it exists to prevent, with an
-    unbounded invisible model string sitting inside the parens on a refusal path.
-
-    Both halves are driven, so this cannot pass on "always take the fallback": a readable verb
-    beside a coarsened system must still be named."""
     trip = rq.RepeatTrip(first_seq=0, occurrence=rq.REPEAT_THRESHOLD)
     unreadable = "system/verb unreadable in the call's own arguments"
 
@@ -467,9 +412,6 @@ def test_readability_is_a_fixed_function_of_the_string_not_of_the_interpreter():
 
 
 def test_a_non_string_system_is_coerced_rather_than_raising():
-    """The type axis of the same argument
-    `..._an_unencodable_system_string_is_fingerprinted_rather_than_raising` makes on the
-    encoding axis."""
     for raw in (None, 12345, True, {"n": 1}, ["ghost"], b"ghost"):
         assert rq.system_fingerprint(raw, "") == "", \
             f"a non-string system argument ({raw!r}) was fingerprinted or raised"

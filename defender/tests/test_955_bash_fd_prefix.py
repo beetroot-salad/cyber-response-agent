@@ -13,9 +13,6 @@ import pytest
 from defender.runtime import bash_exec
 from defender.tests import _tenants1106 as T1106  # noqa: E402
 
-#: The word every candidate runs. A shim rather than a real tool, because the oracle needs the
-#: argv bash actually passed — recovered from a FILE, not from stdout, so a candidate that
-#: redirects cannot erase the evidence of what it redirected.
 _SHIM = "w"
 _SHIM_SRC = """#!/bin/sh
 for a in "$@"; do printf '%s\\n' "$a" >> "$W_ARGV"; done
@@ -72,12 +69,6 @@ def test_the_verdict_does_not_depend_on_the_value_of_an_operand(operand):
     ("cat /etc/hosts 2 >/dev/null", None),
     ("tail -n 2 >&1", None),
     ("cut -f 2 >& 1", None),
-    # …and the ACCEPTED neighbours, which are where an operand can actually go missing. The
-    # expected argv is written out rather than derived from `cmd.split()`: a derivation has to
-    # re-implement the grammar under test to know which words are operator and which are
-    # operand, and gets it wrong on exactly the shapes that matter (for `cut -f 2 >& 1` it
-    # keeps the redirect TARGET `1` as an operand). Every case above refuses, so a body that
-    # only asserted on the accepted ones asserted NOTHING at all.
     ("head -c 2 2>/dev/null", ["head", "-c", "2"]),
     ("cat /etc/hosts 2>/dev/null", ["cat", "/etc/hosts"]),
     ("tail -n 2 2>&1", ["tail", "-n", "2"]),
@@ -102,9 +93,6 @@ def test_an_accepted_command_never_loses_an_operand(cmd, argv):
     ("echo 2>/dev/null", "devnull"),
 ])
 def test_the_glued_spelling_still_works(cmd, stderr):
-    """The fix must not cost the construct it is about. `2>` written the way bash means it —
-    glued, at the start of its own word — is still an fd 2 redirect, and the `2` that IS the
-    prefix is the only word removed."""
     result = _single(cmd)
     assert result is not None, f"{cmd!r} was refused — the fd redirect itself broke"
     argv, got = result
@@ -114,16 +102,9 @@ def test_the_glued_spelling_still_works(cmd, stderr):
 
 @pytest.mark.parametrize("cmd", [
     "echo '2' >/dev/null", 'echo "2" >/dev/null', "foo2>/dev/null",
-    # A character bash does not split on keeps the `2` INSIDE the previous word, so it is not
-    # an IO_NUMBER — `a\r2>` is the word `a\r2` redirecting stdout. Read `\r` as a blank and
-    # the same text becomes `a` plus an fd-2 redirect: the operand vanishes and the routing
-    # inverts. This is the fd question and the word-boundary question meeting on one input.
     "echo a\r2>/dev/null", "echo a\xa02>/dev/null",
 ])
 def test_a_quoted_or_suffixed_two_is_not_an_fd(cmd):
-    """Bash's IO_NUMBER is an UNQUOTED digit run that starts its own word. A quoted `2` is an
-    ordinary argument and `foo2>` is the word `foo2`; in both, bash redirects stdout, which
-    this executor does not implement — so the answer is a refusal, never a stderr redirect."""
     assert _single(cmd) is None
 
 
@@ -143,9 +124,6 @@ def test_a_quoted_or_escaped_operator_is_a_word(cmd, argv):
 
 
 @pytest.mark.parametrize(("cmd", "argv"), [
-    # An unquoted `#` that STARTS a word opens a comment, and the rest of the line is not
-    # command text. Everything after it — operands, and the `;`/`|` that would otherwise
-    # separate stages — is gone, as it is for bash.
     ("w a # b", ["w", "a"]),
     ("w a #b", ["w", "a"]),
     ("w a #", ["w", "a"]),
@@ -164,15 +142,15 @@ def test_an_unquoted_hash_that_starts_a_word_opens_a_comment(cmd, argv):
     assert parsed[0] == argv, f"{cmd!r} parsed to {parsed[0]}"
 
 
-@pytest.mark.parametrize("cmd", ["w a|#b", "w a&&#b", "w >#x", "w 2>#x"])
-def test_an_operator_left_dangling_by_a_comment_still_fails(cmd):
-    """The control the test above needs"""
-    assert _parsed(cmd) is None
-
-
-@pytest.mark.parametrize("cmd", ["w a)2>/dev/null", "w a(2>/dev/null"])
-def test_a_paren_is_not_a_word_boundary_an_fd_may_follow(cmd):
-    """`_SHLEX_PUNCTUATION` is wider than bash's operator set, and the gap is `(`/`)`."""
+@pytest.mark.parametrize("cmd", [
+    "w a|#b",
+    "w a&&#b",
+    "w >#x",
+    "w 2>#x",
+    "w a)2>/dev/null",
+    "w a(2>/dev/null",
+])
+def test_incomplete_operators_and_parenthesized_fd_prefixes_fail_closed(cmd):
     assert _parsed(cmd) is None
 
 
@@ -185,9 +163,6 @@ def test_a_real_operator_boundary_still_admits_the_fd(cmd):
 
 #: Characters `str.isspace()` OR `shlex.whitespace` calls whitespace and BASH does not. The
 _NOT_SHELL_BLANKS = [
-    # `\r` FIRST, because it is the one `shlex.whitespace` contains and bash does not, so it
-    # is the only member of this list a scanner copied from `shlex` gets wrong. `cat a\rb`
-    # is one word to bash; splitting it hands the gate an argv the model never wrote.
     "\r",
     "\x0b", "\x0c", "\x1c", "\x1f", "\x85", "\xa0", "\u2003", "\u3000",
 ]
@@ -293,12 +268,6 @@ _CANDIDATES = [
     f"{_SHIM} a # ; {_SHIM} b", f"{_SHIM} a '#' b", f"{_SHIM} -c 2 # 2>/dev/null",
     f"{_SHIM} a )2>/dev/null", f"{_SHIM} a;2>/dev/null",
 ] + [
-    # The separator question and the fd question, on ONE candidate each. A character bash does
-    # not split on, glued to the `2` of a redirect, is where the two defects meet: split the
-    # word and `a\r2>` becomes the word `a` plus an fd-2 redirect, where bash sees the word
-    # `a\r2` and a redirect of STDOUT — an operand lost AND the routing inverted, which is
-    # exactly what `_bash_meaning` is here to catch. `\r` is the member of `shlex.whitespace`
-    # that bash's IFS does not carry, so it is the one a scanner copied from `shlex` gets wrong.
     f"{_SHIM} -n a\rb", f"{_SHIM} -n a\rb 2>/dev/null", f"{_SHIM} a\xa0b 2>&1",
 ]
 
@@ -311,9 +280,6 @@ def shim_dir():
         path = Path(d) / _SHIM
         path.write_text(_SHIM_SRC, encoding="utf-8")
         path.chmod(0o755)
-        # The bash path is resolved ONCE, here, rather than per candidate: `shutil.which`
-        # walks the whole PATH with a stat per directory, and the candidate matrix is a
-        # cross product that only grows.
         yield Path(d), shutil.which("bash")
 
 
@@ -352,12 +318,6 @@ def _bash_meaning(shim: tuple[Path, str], cmd: str):
     proc = subprocess.run(
         [bash, "-c", cmd], capture_output=True, env=env, cwd=shim_dir, timeout=60,
     )
-    # BYTES, not `read_text`, and not `subprocess.run(text=True)` either: text mode translates
-    # a lone `\r` (and `\r\n`) to `\n`, and the split below is on `\n` — so an argv word bash
-    # kept whole came back as TWO words and the oracle agreed with a parse that had split it.
-    # The one character this file exists to police is the one the reader would have silently
-    # rewritten. #959 M6(b) extends that from the argv file to BOTH output streams, which the
-    # stderr-placement answer below is read from.
     raw = argv_file.read_bytes() if argv_file.exists() else b""
     words = raw.split(b"\n")
     argv = (
@@ -473,5 +433,3 @@ def test_our_blank_set_is_the_blank_set_bash_splits_on(shim_dir):
         "these characters end a word for us and not for bash (or the reverse): "
         f"{disagreements}"
     )
-
-

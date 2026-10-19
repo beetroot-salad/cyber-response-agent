@@ -34,20 +34,7 @@ def _ctx(record: object, tmp_path: Path, env: Mapping[str, str] | None = None) -
     return S.verb_context(record, run_dir, dict(env or {}))
 
 
-
-
-# ---------------------------------------------------------------------------------------------
-# Demand #0 — the return contract (§7 F0, human: the provisional reading accepted as written).
-# ---------------------------------------------------------------------------------------------
-
-
-
-
-
 def test_d_systems_verbatim(tmp_path):
-    """A SystemConfig holds its config.env's keys exactly as written, prefix included (CMDB_URL_BASE,
-    not URL_BASE), each mapped to its string value. systems has exactly one entry per folder under
-    settings/systems/, and the entry is keyed by the folder name."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="vb")
     S.write_config(folder, "extra-sys", 'EXTRA_SYS_URL_BASE="http://extra-vb:1"\n')
@@ -70,9 +57,6 @@ def test_d_systems_verbatim(tmp_path):
 
 
 def test_d_systems_fault_kept(tmp_path):
-    """A system folder whose config.env is missing, or whose config.env is not UTF-8 text, is kept in
-    systems as a ConfigFault, and resolve_tenant returns normally. Asking that system for a value
-    through load_config raises that ConfigFault."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="fk")
     S.config_path(folder, "cmdb").unlink()
@@ -94,12 +78,7 @@ def test_d_systems_fault_kept(tmp_path):
         assert str(raised.value) == str(rec.systems[system]), (system, str(raised.value))
 
 
-
-
 def test_d_ticket_mapping_kept(tmp_path):
-    """resolve_tenant loads systems/case-history/mapping.yaml once into ticket_mapping. A valid file
-    becomes a CaseMapping. A file that is not YAML, not a mapping, or fails the lifecycle check (a
-    templated open.status) is kept as its CaseTicketError and is never raised at resolve."""
     root = tmp_path / "tenants"
     CaseTicketError = S.case_ticket_error()
     cases = {
@@ -127,9 +106,6 @@ def test_d_ticket_mapping_kept(tmp_path):
 
 
 def test_o5_resolve_keeps_system_faults(tmp_path):
-    """resolve_tenant never raises because of a system's config. A missing or undecodable config.env, a
-    mapping with a templated open.status are each returned as the record's fault entry.
-    TenantRefused (defender._tenant) keeps only its current tenant-acceptance reasons."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="o5")
     S.config_path(folder, "cmdb").unlink()
@@ -161,10 +137,6 @@ def test_o5_resolve_keeps_system_faults(tmp_path):
 
 
 def test_s7_nf22_systems_keyed_by_exact_directory_name(tmp_path):
-    """systems has one entry per non-hidden directory under settings/systems/, keyed by its name
-    exactly as listed; plain files and dot-directories are skipped. A case variant (CMDB/, Elastic/)
-    is not the system: systems["cmdb"] gives "this tenant's settings do not configure this system"
-    and elastic is None. A stray directory such as cmdb.orig/ is an entry."""
     configs = S.config_texts("nf22")
     configs["CMDB"] = configs.pop("cmdb")
     configs["Elastic"] = configs.pop("elastic")
@@ -190,9 +162,6 @@ def test_s7_nf22_systems_keyed_by_exact_directory_name(tmp_path):
 
 
 def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
-    """Any OSError reading one system's config.env (a directory in its place, EACCES, EIO) is kept as
-    that system's ConfigFault in systems and never raised out of resolve; files in REQUIRED_SETTINGS
-    keep #1106's TenantRefused."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="nf16")
     cmdb_env = S.config_path(folder, "cmdb")
@@ -223,12 +192,7 @@ def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
         _resolve(root, "required-dir")
 
 
-
-
 def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
-    """Every resolve builds its record from the tenant folder as of that call: a second run.main in one
-    process, and each replay drive, reflects an edit made between them; nothing memoizes a record, a
-    parsed config or a mapping across calls or across tenants."""
     # No arm here forks a transport; the shim first on PATH makes sure a stray one cannot
     # reach the real docker (CX8).
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "shim").path_value())
@@ -311,9 +275,6 @@ def _closure(module: str) -> tuple[int, str, set[str]]:
 
 
 def test_d1096_record_types_outside_closure():
-    """Importing defender.runtime.bash_exec in a fresh interpreter, and separately
-    defender.runtime.box_codec, loads no module that defines SystemConfig or
-    CaseMapping."""
     closures = {}
     for module in ("defender.runtime.bash_exec", "defender.runtime.box_codec"):
         rc, err, loaded = _closure(module)
@@ -326,8 +287,6 @@ def test_d1096_record_types_outside_closure():
     for module, loaded in closures.items():
         leaked = {name: where for name, where in defining.items() if where in loaded}
         assert not leaked, f"importing {module} loads {leaked}"
-
-
 
 
 def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
@@ -363,8 +322,6 @@ def test_o1_resolver_ignores_env(tmp_path, monkeypatch):
     assert elastic["ELASTIC_DOCKER_CONTEXT"] == S.context_name("o1r", "elastic")
 
 
-
-
 def _config_keys(path: Path) -> set[str]:
     """The key names a committed `config.env` spells (`KEY=` lines; comments skipped)."""
     keys = set()
@@ -376,10 +333,6 @@ def _config_keys(path: Path) -> set[str]:
 
 
 def test_d2_shipped_tenants_complete():
-    """The committed fixture tenant and knowledge/tenant-template/ carry every new line. Each system
-    folder, host-state's new one included, has <PREFIX>_TRANSPORT and <PREFIX>_DOCKER_CONTEXT, and
-    elastic's also has ELASTIC_ES_CONTAINER and ELASTIC_KIBANA_CONTAINER. Resolving the fixture
-    tenant leaves no ConfigFault in systems or elastic."""
     for tenant_settings in (S.FIXTURE / "settings", S.TEMPLATE_DIR / "settings"):
         systems = tenant_settings / "systems"
         folders = sorted(p.name for p in systems.iterdir() if p.is_dir())
@@ -405,9 +358,6 @@ def test_d2_shipped_tenants_complete():
 
 
 def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys):
-    """defender-policy (policy_cli, which resolves through resolve_tenant) over a tenant whose system
-    configs are broken resolves without raising: the broken systems' entries in systems are
-    ConfigFault, and the grants answer for the working systems is unchanged."""
     policy_cli = S.mod("scripts.policy_cli")
     # #1120: policy_cli reads its tenants from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
@@ -434,11 +384,6 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
 
 
 def test_s60_config_env_fs_confinement(tmp_path):
-    """config.env is read only from the tenant's own settings/systems/<system>/ folder
-    (tenant-folder-only), the link walk happens once at resolve (link-walk-once-at-resolve), and the
-    file is parsed once, not on every adapter call (parsed-once-at-resolve). A break-attempt: a
-    config.env reached through a symlink outside the tenant folder, or edited after resolve, does
-    not change what the run addresses."""
     root = tmp_path / "tenants"
     outside = tmp_path / "outside.env"
     outside.write_text('CMDB_URL_BASE="http://outside:1"\nCMDB_BASTION_HOST="b"\n'
@@ -466,9 +411,6 @@ def test_s60_config_env_fs_confinement(tmp_path):
 
 
 def test_a_config_fault_observed_at_resolve_fixed_on_disk_mid_run(tmp_path):
-    """A config fault fixed on disk mid-run does not change what the already-resolved run addresses:
-    that system stays down (its entry stays the ConfigFault) for the run's whole life; only a fresh
-    resolve sees the fix."""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="s063")
     fixed = S.config_path(folder, "cmdb").read_text(encoding="utf-8")
@@ -493,10 +435,6 @@ def test_a_config_fault_observed_at_resolve_fixed_on_disk_mid_run(tmp_path):
 
 
 def test_s7_mf11_record_parts_read_only(tmp_path):
-    """The record's ticket_mapping and each SystemConfig are read-only snapshots: an in-place edit by
-    one consumer (the query tool's screen, the estate applier or the record step) raises or lands on
-    that consumer's own copy, and the next consumer, including one reached through a VerbContext
-    copy (_carrying), sees the resolve-time content."""
     root = tmp_path / "tenants"
     S.plant(root, marker="mf11")
     rec = _resolve(root)

@@ -30,10 +30,6 @@ def _shipped_rows():
 REPO_ROOT = PATHS.repo_root
 URL_BASE = "http://case-history.test"
 
-#: Every source file the shipping tree collects, tests excluded — the population every census
-#: below is a claim about. The tree's own `.venv` is third-party code, not shipped source:
-#: without this cut the census reads six thousand vendored files and a dependency's stray
-#: `get-ticket` turns it red for a reason that has nothing to do with defender.
 SHIPPED_PY = tuple(
     p for p in sorted(DEFENDER_DIR.rglob("*.py"))
     if "tests" not in p.relative_to(DEFENDER_DIR).parts
@@ -54,11 +50,6 @@ def _shipped_hits(pattern: str) -> dict[str, list[int]]:
         if lines:
             out[str(p.relative_to(REPO_ROOT))] = lines
     return out
-
-
-# =======================================================================================
-# O6 / S2 / N9 — no model role can reach a ticket write
-# =======================================================================================
 
 
 def test_767_no_model_role_reaches_a_ticket_write(tmp_path):
@@ -167,11 +158,6 @@ def test_767_adapter_http_confinement_and_capture_hold(tmp_path):
     )
 
 
-# =======================================================================================
-# D5 / N10 / S3′ — the resolution-decoding lane, closed structurally
-# =======================================================================================
-
-
 def test_767_query_tool_is_only_ticket_reader(tmp_path):
     """s3p_single_model_facing_reader — NEGATIVE, the path census."""
     consumers = _shipped_hits(r"(?<!def )\bscreen_(?:list|get|release_list|release_get)\s*\(")
@@ -194,24 +180,9 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
     allowed = {
         "defender/scripts/adapters/ticket_adapter.py",
         "defender/runtime/query_tool.py",
-        # A pre-existing, unrelated docstring example — `render_refused`'s illustration of one
-        # rendered denial line, predating #767 and untouched by D1-D8. Not a reader of the
-        # ticket store: the module never calls the verb at all.
         "defender/learning/judge/family.py",
     }
     assert set(subprocess_readers) <= allowed, (
         "a shipped module outside the adapter and the query tool names `get-ticket`: "
         f"{sorted(set(subprocess_readers) - allowed)}"
     )
-
-
-# =======================================================================================
-# O5 — the vendor spellings live in the mapping, and one loader serves both sides
-# =======================================================================================
-
-
-# =======================================================================================
-# D7 — the briefing the model reads about where rationale lives
-# =======================================================================================
-
-

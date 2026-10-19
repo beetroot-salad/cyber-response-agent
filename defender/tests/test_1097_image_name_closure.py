@@ -32,19 +32,11 @@ _INDEXES = (
     '\n[[tool.uv.index]]\nname = "{second}"\nurl = "https://{second}.example/simple"\n'
 )
 
-#: The planted closure (see `_spec1092.PLANTED_LOCK`): both `split` entries, the marker-gated
-#: `winonly`, the optional lists' targets `eta` (beta's `speed`) and `delta` (gamma's `fast`),
-#: and `epsilon` — the target of beta's `docs` and gamma's `slow`, extras NO link asks for
-#: (amendment 2: every optional list of a reached entry is walked).
 PLANTED_CLOSURE = sorted([
     ("alpha", "1.0.0"), ("beta", "2.0.0"), ("delta", "4.0.0"), ("epsilon", "5.0.0"),
     ("eta", "6.0.0"), ("gamma", "3.0.0"), ("split", "1.0.0"), ("split", "2.0.0"),
     ("winonly", "9.0.0"),
 ])
-#: In the planted lock and outside the closure: devtool/devdep are the ROOT's `dev` extra's,
-#: rtlib is its `runtime` extra's — of the root's optional lists only `box` is walked FROM the
-#: root; nothing in the planted lock links back to the root, so they stay out (amendment 3: a
-#: link that did reach the root would walk them too).
 PLANTED_OUTSIDE = ("devdep", "devtool", "rtlib")
 
 
@@ -225,24 +217,6 @@ def _foreign_extras(lock: dict) -> None:
 
 # ---- box_closure: the walk ---------------------------------------------------------------------
 def test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_every_reached_entry():
-    """`box_closure(lock, "planted")` over the planted lock returns exactly the entries
-    reachable BY LINK NAME from the root's `dependencies` + `optional-dependencies.box`, each
-    the lock's own parsed dict: BOTH `split` entries (a link reaches every entry with its name
-    — the superset rule); `winonly`, whose link's marker no Linux build satisfies (markers are
-    ignored); `eta` and `delta`, the targets of beta's `speed` and gamma's `fast` lists; and
-    `epsilon`, the target of beta's `docs` and gamma's `slow` — extras NO link asks for, walked
-    because every list under a reached entry's `optional-dependencies` is (amendment 2, M1″).
-    FROM the root only `dependencies` + `box` are taken, and nothing in the planted lock links
-    back to the root, so the `dev` and `runtime` extras' entries (devtool, devdep, rtlib) stay
-    out and the root itself is not returned (a lock whose link DOES reach the root is
-    `test_a_link_that_reaches_the_root_walks_and_hashes_it_like_any_entry`'s). The
-    `eta -> alpha` cycle ends the walk rather than looping it.
-
-    Nothing on a link but its `name` is read. A link's `version` does not narrow it: with the
-    root's two `split` links replaced by ONE transitive link carrying `version = "1.0.0"`, both
-    `split` entries are still returned. A link's `extra` neither widens nor narrows it: with
-    every `extra` stripped from the lock's links, or replaced by an extra no entry declares,
-    the closure is the same."""
     got = box_closure(copy.deepcopy(BASE_LOCK), ROOT)
     assert isinstance(got, list), type(got)
     assert _names(got) == PLANTED_CLOSURE, _names(got)
@@ -279,19 +253,6 @@ def test_box_closure_reads_only_link_names_and_walks_every_optional_list_of_ever
 
 # ---- O1: what does NOT rename the image --------------------------------------------------------
 def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
-    """Over the planted tree, none of these renames the image: in `pyproject.toml` a
-    `[tool.ruff]` or `[tool.mypy]` edit, a comment, and the `dev` or `runtime` extra changing
-    without a relock (amendment 3 moved a CORE or `box` requirement edited without a relock to
-    the renaming side — `test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_image`);
-    in `uv.lock` a version or artifact-hash change to an entry outside the closure (the dev
-    tool, its dependency, the runtime library — the ROOT's `dev`/`runtime` extras are never
-    taken FROM the root, and nothing in the planted lock links back to it),
-    a dev-extra relock that adds an entry, a link under the root's `optional-dependencies.dev`
-    and a `requires-dist` row, and a runtime-extra relock that links the root's `runtime` list to
-    an entry outside the closure; and a file outside the three inputs.
-
-    Positive controls, same tree: a closure entry's version change renames it (the lock is
-    read), and a `[tool.uv]` change renames it (the manifest is read)."""
     baseline = image_tag(_plant(tmp_path, "baseline"))
     assert TAG_RE.match(baseline), baseline
 
@@ -334,9 +295,6 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
         "the runtime library's entry": {"lock": _lock_edit(bump("rtlib", "8.0.1"))},
         "a dev-extra relock": {"lock": _lock_edit(dev_relock)},
         "a runtime-extra relock": {"lock": _lock_edit(runtime_relock)},
-        # uv re-emitting the lock under a newer format revision, and a release bump of the
-        # project itself (its own version, in pyproject and on the root entry): neither is
-        # anything the image installs (#1097 round-2 adversary H5).
         "the lock's format revision": {"lock": _lock_edit(lambda lock: lock.__setitem__("revision", 4))},
         # Dependency groups: the fenced sync (`--no-default-groups`) cannot install them, so a
         # group edit and its relock never rename (#1097 round-3 adversary H5).
@@ -369,35 +327,6 @@ def test_an_edit_that_cannot_change_the_image_does_not_rename_it(tmp_path):
 
 # ---- O2: what DOES rename the image ------------------------------------------------------------
 def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_image(tmp_path):
-    """Each of these renames the image — `defender-box:v2-` stays, the 12 hex move, and no two
-    edits collide: a closure entry's version (core `alpha`, marker-gated `winonly`, `eta`
-    behind beta's `speed` list), its `source`, one byte of an sdist or a wheel hash (`alpha`,
-    `delta` behind gamma's `fast` list), a closure entry gaining a link — to an entry already
-    in the closure (the entry is digested whole) or to one outside it (which the walk then
-    pulls in) — and a change to a closure entry's own optional-dependencies under an extra
-    nobody asks for; the version and one hash byte of `epsilon`, an entry ONLY unrequested
-    extras reach (beta's `docs`, gamma's `slow` — amendment 2 walks every optional list of a
-    reached entry, so it is in the hashed superset); the root's `dependencies` gaining a link to
-    an already-reached entry, a `box` link gaining a marker (the closure's entries unchanged:
-    the ROOTS moved), a `box` link asking for another extra, and `box` gaining a link;
-    `[tool.uv]` changing a value, gaining a key, or losing its only key; one byte of
-    `box.Dockerfile`; and — amendment 3, M1‴ (a) — `pyproject.toml`'s core or `box`
-    requirements edited WITHOUT a relock: a core requirement added, one dropped, one's
-    specifier changed, the `box` requirement's specifier changed, a `box` requirement added
-    (the lock untouched in each: the rename is what sends the next box start to the build,
-    whose `--locked` sync then fails loudly instead of the old name silently holding).
-
-    Both requirement lists read absent as `[]`: no `dependencies` key names the same image as
-    `dependencies = []`, and no `box` key — or no `[project.optional-dependencies]` table at
-    all — the same as `box = []`; each differs from the planted tree's name.
-
-    The walk through unrequested extras is transitive and needs no link to ask: with gamma's
-    `slow` list also naming `devdep`, a bump of devdep (reached ONLY that way) renames; and with
-    the root's `box` link carrying no `extra` at all, epsilon is still in the closure and its
-    bump still renames.
-
-    `[tool.uv]` absent reads as `{}`: an EMPTY `[tool.uv]` table and no `[tool.uv]` at all name
-    the same image (and it differs from `package = false`'s)."""
     baseline = image_tag(_plant(tmp_path, "baseline"))
     assert baseline.startswith("defender-box:v2-"), baseline
 
@@ -436,9 +365,6 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
         # without touching the lock (#1097 round-2 adversary H4).
         "[tool.uv] list key": _replace_once(PLANTED_PYPROJECT, "package = false\n", 'package = false\nno-binary-package = ["gamma"]\n'),
         "[tool.uv] nested table": PLANTED_PYPROJECT + "\n[tool.uv.pip]\nno-build = true\n",
-        # `[tool.uv]` lists keep their written order: `[[tool.uv.index]]` order is index
-        # priority (#1097 round-4 adversary A1 — sorting them hid a swap). The pair's two
-        # orders must name different images; see the assertion after the loop.
         "[tool.uv] indexes a, b": PLANTED_PYPROJECT + _INDEXES.format(first="a", second="b"),
         "[tool.uv] indexes b, a": PLANTED_PYPROJECT + _INDEXES.format(first="b", second="a"),
         # Requirement strings are hashed AS WRITTEN — extras and markers included (#1097
@@ -488,9 +414,6 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     assert no_box == empty_box == no_table, "an absent box requirement list is not read as []"
     assert empty_box != baseline, "the box requirement list is not digested"
 
-    # EVERY wheel's hash is digested, not the first: over an entry carrying two wheels, one
-    # byte of the second moves the name (#1097 round-2 adversary H1 — the image's own
-    # manylinux wheel is rarely wheels[0]).
     two = _lock_edit(_two_wheels)
     second_flipped = copy.deepcopy(two)
     wheel = _entry(second_flipped, "alpha")["wheels"][1]
@@ -507,9 +430,6 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     assert image_tag(_plant(tmp_path, "deeper", lock=deeper)) != image_tag(
         _plant(tmp_path, "deeper-bumped", lock=deeper_bumped)), "an unrequested extra's target did not rename"
 
-    # No link needs to ask for an extra (the round-2 walk followed only requested ones): with
-    # the root's `box -> gamma` link stripped of its `extra`, epsilon (and delta) are still in
-    # the closure, and epsilon's bump still renames.
     unasked = _lock_edit(lambda lock: _entry(lock, ROOT)["optional-dependencies"]["box"][0].pop("extra"))
     unasked_names = {e["name"] for e in box_closure(unasked, ROOT)}
     assert {"epsilon", "delta"} <= unasked_names, sorted(unasked_names)
@@ -522,9 +442,6 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
     dated = _replace_once(PLANTED_PYPROJECT, "package = false\n", "package = false\nexclude-newer = 2026-01-01T00:00:00Z\n")
     assert image_tag(_plant(tmp_path, "dated", pyproject=dated)) not in (baseline, *moved.values())
 
-    # An entry reached only THROUGH an optional list has its own optional lists walked too:
-    # give `delta` (reached via gamma[fast]) an optional list naming `rtlib`, and a bump to
-    # rtlib renames (#1097 round-3 adversary H2 — a two-phase walk read delta's links only).
     nested = _lock_edit(_set(["delta", "optional-dependencies"], {"x": [{"name": "rtlib"}]}))
     assert "rtlib" in {e["name"] for e in box_closure(nested, ROOT)}, "delta's optional list was not walked"
     nested_bumped = copy.deepcopy(nested)
@@ -543,16 +460,6 @@ def test_an_edit_to_the_box_closure_its_roots_tool_uv_or_the_recipe_renames_the_
 
 
 def test_a_package_split_across_two_lock_entries_renames_the_image_whichever_entry_changes(tmp_path):
-    """The planted lock resolves `split` to two versions the way uv writes a fork — two
-    same-named `[[package]]` entries, each with `resolution-markers`, root edges carrying
-    `version` + `marker`. One artifact-hash byte of EITHER entry renames the image, and the two
-    renames differ — including the `python_full_version >= '3.12'` entry the 3.11 image never
-    installs (the superset rule: at most an extra rename, never a missed one). So does a relock
-    that moves one side's version, edge and entry together.
-
-    # rejected: evaluating markers for the image's environment — the name would then depend on
-    # the builder's platform, and an entry the walk misjudged would never rename (the design
-    # amendment's M1')."""
     baseline = image_tag(_plant(tmp_path, "baseline"))
     assert _names([e for e in box_closure(copy.deepcopy(BASE_LOCK), ROOT) if e["name"] == "split"]) == [
         ("split", "1.0.0"), ("split", "2.0.0"),
@@ -583,16 +490,6 @@ def _named(project_name: str) -> str:
 
 
 def test_the_root_is_the_lock_entry_the_pep503_normalised_project_name_names(tmp_path):
-    """`image_tag` finds the lock's root entry by `[project].name` normalised the way uv writes
-    lock names (PEP 503: lowercase, every run of `-`, `_`, `.` becomes one `-`): `name =
-    "Planted"` or `"PLANTED"` over the planted lock (root entry `planted`) names the SAME image
-    as `name = "planted"` — `[project].name` is not itself hashed, only used to find the root —
-    and over a lock whose root entry is `planted-x`, `"planted_x"`, `"planted.x"`,
-    `"Planted__X"` and `"planted-_.x"` each name the same image as `"planted-x"`.
-
-    Positive control — normalising is not matching loosely: `"plantedx"` over that same lock
-    (a name that normalises to no entry) still raises `ImageInputError` naming `uv.lock` and the
-    missing name, as a lock with no root entry does."""
     image = image_module()
     baseline = image_tag(_plant(tmp_path, "baseline"))
     for i, spelling in enumerate(("Planted", "PLANTED")):
@@ -631,9 +528,6 @@ def _deep_header(table: str, depth: int = 20_000) -> str:
     return f"\n[{table}." + ".".join(["x"] * depth) + "]\nb = 1\n"
 
 
-#: An integer literal past CPython's 4300-digit int<->str limit: tomllib's `int()` raises a
-#: bare ValueError PARSING it (claim d1). The hex spelling parses (a power-of-two base has no
-#: limit) but cannot be turned back into decimal — its `repr` and any encoder raise instead.
 _BIG_INT = "1" * 5000
 _BIG_HEX = "0x" + "f" * 4000
 
@@ -663,11 +557,6 @@ def _into_a_directory(name: str) -> Callable[[Path], None]:
     return fn
 
 
-#: case -> (the file the fault names, the verb it says, a word of the reason it must carry,
-#: a phrase it must NOT carry, how to break the tree). ENTRY-level shape (a table with a string
-#: `name`) is pinned over any entry of the lock; LINK-level shape (`dependencies`,
-#: `optional-dependencies` and the links in them) only on entries the walk REACHES (alpha,
-#: beta, gamma) — whether a malformed link on an unreached entry must fault is left open.
 _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None]]] = {
     # -- cannot read: the file is not there to parse --
     "box.Dockerfile missing": ("box.Dockerfile", READ, None, None, lambda d: (d / "box.Dockerfile").unlink()),
@@ -718,9 +607,6 @@ _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None
         "pyproject.toml", PLANTED_PYPROJECT + _deep_header("tool.uv"))),
     "a reached lock entry nested 20000 tables deep": ("uv.lock", USE, None, None, _write(
         "uv.lock", PLANTED_LOCK + _deep_header("package"))),   # the last [[package]]: winonly
-    # -- amendment 3, M1‴ (b): ONE fault boundary after the reads — any exception while
-    #    parsing, checking, walking or digesting names the file being processed, "cannot use"
-    #    (the /code-review round-3 reproductions, and one per stage) --
     "a nameless entry nested 20000 tables deep": ("uv.lock", USE, None, None, _write(
         "uv.lock", PLANTED_LOCK + "\n[[package]]" + _deep_header("package"))),   # its repr recursed
     "a nameless entry holding a hex integer past the digit limit": ("uv.lock", USE, None, None, _write(
@@ -757,43 +643,6 @@ _FAULTS: dict[str, tuple[str, str, str | None, str | None, Callable[[Path], None
 
 @pytest.mark.parametrize("case", list(_FAULTS))
 def test_a_tree_the_resolver_cannot_read_parse_or_walk_raises_image_input_error_naming_the_file(tmp_path, case):
-    """`image_tag` over a tree it cannot fully read, parse or walk raises `ImageInputError` —
-    never a name, never a hash of the bytes it did read, never a TypeError, AttributeError,
-    KeyError or RecursionError — whose message carries the tree and names the ONE file at
-    fault, and says which kind of fault it is: "cannot read" for a file that is not there to
-    read (each of the three missing in turn, a directory in `uv.lock`'s place), "cannot use"
-    for one that reads but is not usable (and never the other verb):
-
-      - a `uv.lock` or `pyproject.toml` that is not TOML; a `pyproject.toml` with no
-        `[project].name`;
-      - a lock with no entry for the root (the message names the root), and a link — from a
-        closure entry or from the root's `box` extra — to a name the lock has no entry for
-        (the message names it);
-      - amendment 2's shape check: a link with no `name` (a shape fault, NOT a hunt for a
-        package called "name"), a link that is not a table, `dependencies` a string,
-        `optional-dependencies` a list, one of its lists a string (under an extra no link asks
-        for — the walk reads every list), an entry whose `name` is not a string, an entry that
-        is not a table;
-      - a value the canonical form cannot encode — `[tool.uv]` nested 2000 arrays or 20000
-        tables deep, a reached lock entry nested 20000 tables deep — naming the file it came
-        from;
-      - amendment 3's ONE fault boundary (M1‴ (b)): whatever raises while the read bytes are
-        parsed, checked, walked or digested is `ImageInputError` naming the file being
-        processed — the /code-review round-3 reproductions: a `[[package]]` entry with no
-        `name` whose body is a table 20000 deep (the shape fault's own `repr` of it recursed),
-        a 5000-digit integer literal (tomllib raises a bare ValueError parsing it) in
-        `[tool.uv]`, in a reached lock entry and in an UNREACHED one; and one per later stage:
-        a nameless entry holding a hex integer too long to print in decimal (its `repr`
-        raises), the same hex integer in `[tool.uv]` and in a reached entry (the encoder
-        raises);
-      - amendment 3's requirement lists (M1‴ (a)): `[project].dependencies` a string, a core
-        requirement an integer or a table, `optional-dependencies.box` a string, a `box`
-        requirement an integer, `[project].optional-dependencies` itself a string — each
-        naming `pyproject.toml`.
-
-    Positive control, same test: the complete tree names an image. The resolver's constants
-    are pinned exactly: `HASH_INPUTS` is the three files in read order, `RECIPE_VERSION` is
-    `v2` (#1097's rename of every image, once)."""
     image = image_module()
     assert tuple(image.HASH_INPUTS) == HASH_INPUTS == ("box.Dockerfile", "uv.lock", "pyproject.toml")
     assert image.RECIPE_VERSION == "v2"

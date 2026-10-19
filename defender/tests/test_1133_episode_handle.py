@@ -1,6 +1,3 @@
-"""#1133 `Episode` handle: holds the episode dir open and every verb works relative to it. Pins the
-D7' guard matrices (records x verbs x plant site, folders x ensure), create/open edge cases,
-removed/renamed-dir handles, close lifetime, and name/type validation."""
 from __future__ import annotations
 
 import errno
@@ -63,18 +60,11 @@ def verb_call(rec: Any, verb: str, key: str, tag: str) -> Any:
     return lambda: getattr(rec, verb)(payload(key, tag))
 
 
-# =======================================================================================
-# D7' matrix 1 — records x granted verbs x plant site, on an opened episode
-# =======================================================================================
-
 def _record_matrix():
     for key, verbs in S.RECORD_VERBS.items():
         try:
             rel = S.expected_record_rel(key)
         except AttributeError:
-            # A record the layout does not name yet (#1255 D6's skip record, before its
-            # accessor lands): one case per verb that fails in the test body, where the record
-            # is resolved, instead of an error that hides the whole file at collection.
             for verb in verbs:
                 yield pytest.param(key, verb, S.LEAF_PLANTS[0], None, id=f"{key}.{verb}-unnamed")
             continue
@@ -125,12 +115,6 @@ def _positive_controls(rec: Any, key: str, verb: str, path: Path) -> None:
 @pytest.mark.parametrize(("key", "verb", "kind", "site"), list(_record_matrix()))
 def test_o2_d7_a_record_verb_into_a_plant_is_refused_and_changes_nothing(
         tree, opened, key, verb, kind, site):
-    """O2: no handle write lands outside the episode dir or through a non-plain entry. A write
-    verb raises the core's refusal row for the plant (R2: `NotPlainEntry` at the name, the plain
-    folder refusal on the way) and does not block on a FIFO. The whole temp tree is unchanged.
-    Then, on the same address, the verb succeeds with nothing there and with a plain file there
-    (`create` over a plain file is the unmarked `FileExistsError`). A record's read is the
-    view's; its plant rows are in `test_1133_rev3.py`."""
     rec = S.resolve(opened, key)
     rel = S.expected_record_rel(key)
     path = tree.ep / rel
@@ -146,10 +130,6 @@ def test_o2_d7_a_record_verb_into_a_plant_is_refused_and_changes_nothing(
     _positive_controls(rec, key, verb, path)
 
 
-# =======================================================================================
-# D7' matrix 2 — folders x ensure x plant site
-# =======================================================================================
-
 def _folder_matrix():
     for key in S.FOLDERS:
         for site in S.folder_and_parents(S.expected_folder_rel(key)):
@@ -160,10 +140,6 @@ def _folder_matrix():
 @pytest.mark.parametrize(("key", "kind", "site"), list(_folder_matrix()))
 def test_o2_d7_a_folders_ensure_through_a_plant_is_refused_and_changes_nothing(
         tree, opened, key, kind, site):
-    """`ensure()` is `held.mkdir(rel)`: a link (outside or inside), a file or a FIFO at the
-    folder or at any folder above it below the episode dir is refused in the core's row and the
-    tree is unchanged. Control: the plant removed, `ensure` leaves a real directory, and a
-    second `ensure` over it is a no-op."""
     folder = S.resolve(opened, key)
     rel = S.expected_folder_rel(key)
     planted = S.plant_folder(tree.ep, rel, site, kind, host=tree.host)
@@ -182,19 +158,9 @@ def test_o2_d7_a_folders_ensure_through_a_plant_is_refused_and_changes_nothing(
     assert (target / "marker").read_text(encoding="utf-8") == "kept\n"
 
 
-# =======================================================================================
-# Episode.create (N-g, O6) and Episode.open's spelling
-# =======================================================================================
-
 @pytest.mark.parametrize("kind", ["folder_link_outside", "folder_link_inside", "folder_file",
                                   "folder_fifo", "dangling_dir_link"])
 def test_n_g_create_refuses_a_plant_at_the_episode_dirs_own_name(tmp_path, kind):
-    """`Episode.create(dir)` judges `dir` from its parent (`hold_new`): a link at its name (to a
-    real folder outside the episodes root or beside the episode, or dangling), a file or a FIFO
-    is the core's folder refusal, left in place, and nothing is created where a link points.
-    Control on the same address: the plant removed, `create` makes a real directory and holds
-    it; over an existing real directory it adopts it (its records kept); with the episodes root
-    itself missing, it makes both."""
     episodes = tmp_path / "episodes"
     episodes.mkdir()
     host = tmp_path / "host"
@@ -229,9 +195,6 @@ def test_n_g_create_refuses_a_plant_at_the_episode_dirs_own_name(tmp_path, kind)
 
 
 def test_n_g_open_follows_the_episode_dirs_own_spelling_and_create_does_not(tmp_path):
-    """N-g: only the creation door judges the episode dir's name. A handle opened over a
-    symlink to a real episode dir (the operator's spelling) writes, reads and ensures THROUGH
-    it — while `Episode.create` on the same spelling is refused."""
     real = tmp_path / "real" / EPISODE_ID
     real.mkdir(parents=True)
     alias = tmp_path / "alias-ep"
@@ -249,19 +212,12 @@ def test_n_g_open_follows_the_episode_dirs_own_spelling_and_create_does_not(tmp_
         S.create_episode(alias)
 
 
-# =======================================================================================
-# O6 — a handle verb never makes the episode dir
-# =======================================================================================
-
 @pytest.mark.parametrize(("kind", "exc"), [
     ("missing", FileNotFoundError), ("missing-parent", FileNotFoundError),
     ("dangling-link", FileNotFoundError), ("file", NotADirectoryError),
     ("fifo", NotADirectoryError)])
 def test_o6_open_refuses_a_missing_dir_or_a_non_directory_and_makes_nothing(
         tmp_path, kind, exc):
-    """`Episode.open(dir)` on a missing dir (or a missing episodes root, or a link to nothing)
-    is `FileNotFoundError`; on a file or a FIFO it is `NotADirectoryError`, without blocking.
-    Nothing is created. Control: a real directory at the same spelling opens."""
     ep = tmp_path / "episodes" / EPISODE_ID
     fifo = None
     if kind != "missing-parent":
@@ -296,9 +252,6 @@ def _write_verbs():
 @pytest.mark.parametrize(("key", "verb"), list(_write_verbs()))
 def test_o6_a_handle_whose_dir_was_removed_refuses_every_write_verb_and_never_recreates_it(
         tree, key, verb):
-    """C14's fix: a held episode whose dir was removed refuses each write verb with `OSError`,
-    and the episode dir's name stays absent (rev 1's `rooted_mkdir` made it again). Control:
-    the same verb on a present episode lands."""
     episode = S.open_episode(tree.ep)
     try:
         rec = S.resolve(episode, key)
@@ -339,15 +292,7 @@ def test_o6_a_handle_whose_dir_was_renamed_writes_into_the_moved_folder(tree, ke
     assert (moved / S.expected_record_rel(key)).read_bytes() == as_bytes(payload(key, "moved"))
 
 
-# =======================================================================================
-# O3 — the view
-# =======================================================================================
-
 def test_o3_the_view_is_a_bound_with_the_readers_surface_reading_through_the_same_handle(tree):
-    """`episode.view()` is a `Bound` whose public surface is exactly `read`, `read_bytes`, `read_jsonl`,
-    `entries`, `under`, `close` — write-free by type. It reads through the episode's own held
-    handle: after the episode dir is renamed it still reads the record the episode just wrote.
-    Its `close()` releases nothing (the episode still writes)."""
     moved = tree.episodes / "moved"
     with S.open_episode(tree.ep) as episode:
         view = episode.view()
@@ -362,10 +307,6 @@ def test_o3_the_view_is_a_bound_with_the_readers_surface_reading_through_the_sam
         episode.samples.write("samples: still held\n")
     assert (moved / LAYOUT.samples).read_text(encoding="utf-8") == "samples: still held\n"
 
-
-# =======================================================================================
-# Lifetime, the durable chain, text types, name checks
-# =======================================================================================
 
 def test_d1_a_write_after_close_raises_ebadf_and_lands_nowhere(tree):
     """Once the episode is closed its records do not reopen it: a write raises
@@ -382,13 +323,6 @@ def test_d1_a_write_after_close_raises_ebadf_and_lands_nowhere(tree):
 
 @pytest.mark.parametrize("dir_state", ["fresh", "adopted"])
 def test_d1_episode_create_fsyncs_the_episodes_root(tree, dir_state):
-    """`Episode.create` fsyncs the episodes root (the episode dir's own entry) on a directory
-    handle that is not `O_PATH`. Observed through the `os_` seam, reached through the `io=`
-    seam.
-
-    The episodes root is fsynced whether `create` made the episode dir or adopted one already
-    there (`adopted`): an entry an earlier, crashed launcher made may never have been synced, so
-    adopting it is no proof it is durable."""
     fresh = tree.episodes / "ep-durable"
     if dir_state == "adopted":
         fresh.mkdir()
@@ -440,11 +374,6 @@ _BAD_NAMES = [
 
 @pytest.mark.parametrize("call", _BAD_NAMES)
 def test_d1_a_bad_component_is_a_value_error_before_any_held_call(tree, call):
-    """Writers use the owner's MINTING checks (a case-stable label; a case-stable token, judged
-    whole since rev 3),
-    `wire_log` takes one component, and a draw index is a non-negative int. Each is a
-    `ValueError` raised before the held root is called and with the tree unchanged, whether the
-    check fires at the accessor or at the verb. Control: the matrices above."""
     rec_io = S.RecordingIo()
     with S.open_episode(tree.ep, io=rec_io) as episode:
         before = S.census(tree.tmp)

@@ -66,9 +66,6 @@ class Launch:
     #: The fixture tenant's estate (#1224): pre-flight replays the source's one captured call
     #: through it, under the tenant's own gather grant.
     estate: Any
-    #: Pre-flight's oracle and verifier (#1224), scripted: the oracle serves the base answer
-    #: unchanged and the verifier passes it, so every fact world calibrates and pre-flight
-    #: records `accepted`. Left to their production values each turn is a real model call.
     oracle: Any = field(default_factory=lambda: S.oracle(then=S.submit(BASE, S.EMPTY_CLAIM)))
     verifier: Any = field(default_factory=S.passing_verifier)
     #: The judge's model seam, scripted: an ACCEPTED family is graded at the tail of the
@@ -188,10 +185,6 @@ def test_976_a_source_whose_git_could_not_be_asked_is_refused_and_never_waived(t
         _restamp(launch.src, commit=None, dirty=None, unavailable=T.GIT_UNAVAILABLE)
         message = _refused_before_spending(launch, *argv)
         _never_waivable(message, "source", "names no commit", T.GIT_UNAVAILABLE)
-        # AND THE LIVE TREE WAS NOT ASKED: the capture is two git subprocesses on a 60 s
-        # timeout each, and against a source with no commit its answer cannot change the
-        # refusal — a launcher on a stalled index would otherwise wait two minutes to be told
-        # about a file it read in a millisecond.
         assert launch.live_tree.calls == 0, "the live tree was captured for a source with no anchor"
 
 
@@ -365,9 +358,6 @@ def test_976_a_launch_whose_siblings_ran_another_commit_ends_incomplete_end_to_e
 
 def test_976_the_override_does_not_waive_a_sibling_commit_mismatch_end_to_end(
         tmp_path, caplog):
-    """O4 through the real launcher: `--allow-dirty` with siblings at `cafe1` against a
-    `deadbee` source still has its family stamp withheld. Without this the override would waive the very
-    confound — a code difference between the source and the family — that it must never."""
     launch = _prepare(tmp_path, siblings_at="cafe1")
     assert launch.run("--allow-dirty") == 0
     assert launch.questioner.calls > 0
@@ -472,9 +462,6 @@ def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_
     assert "siblings disagree on commit" not in reason, reason
     assert "siblings disagree on scope" not in reason, reason
 
-    # The scope is pinned by the anchor only when the source has one: against a pre-scope
-    # source, two siblings measured over two scopes are still a disagreement — the one place
-    # the sibling-to-sibling loop is the sole reader of the field.
     def two_scopes(ep, w):
         arm = T.arm_run_dir(ep, w)
         if w == T.WORLDS[1]:
@@ -524,10 +511,6 @@ def test_976_the_accepted_family_stamp_carries_the_sources_whole_record(tmp_path
     assert stamp["source"]["model"] == "m-1", "the source's model, not the capture's None"
     assert stamp["source"]["dirty"] is False
     assert stamp["allow_dirty"] is False
-    # #1106 M2: the launcher now SEEDS each sibling's runs base with the episode's tenant record
-    # before any child starts (real siblings always minted one), so the family's base world is
-    # read from it — and it is exactly the seeded record's.
-    # #1204: `waived` names the fault kinds the override waived — none, for a clean family.
     assert set(stamp) == {"agreed", "allow_dirty", "source", "base_world_id", "waived"}
     assert stamp["waived"] == []
     from defender import _tenant
@@ -566,5 +549,3 @@ def test_976_a_forged_source_commit_is_refused_at_preflight_not_raised_out_of_th
 
 
 # C13 — the source commit is never spent in argv or shown to a model
-
-

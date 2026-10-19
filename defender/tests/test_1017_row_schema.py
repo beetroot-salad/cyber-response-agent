@@ -24,24 +24,12 @@ from defender._query_rules import ABOVE_GUARD_QUERY_ID
 
 LEAD = "l-001"
 
-#: The fourteen columns the writer records, IN WRITER ORDER — the order `append_query_row`'s
-#: dict literal spells them today and the order every row on disk carries. Spelled here as a
-#: literal rather than read off the writer, because a test that recovered the expectation from
-#: the code under test could not fail.
 EXPECTED_COLUMNS = (
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command", "payload_path",
     "exit_code", "error_class", "payload_status", "payload_digest", "payload_sha256",
     "system_key",
-    # #1255 G4 (reversing #1234 A12's fifteenth column): no `call_id`. The table is the model's
-    # to read, and the call's host-written id is host bookkeeping it never uses (G5); the join to
-    # the served ledger lives in a host-only record keyed by `(lead_id, seq)`.
 )
 
-#: #1032 O1 — the questioner's "joined leads" section, per lead and per query, as EXACT key
-#: sets. Spelled as literals for the reason `EXPECTED_COLUMNS` is: an expectation recovered
-#: from the render under test could not fail. `payload_digest` is in (D3: it is how a model
-#: tells an empty answer from a real one, and two renders already show it); `raw_command`,
-#: `raw_ref`/`payload_path`, `payload_sha256`, `system_key`, `orphan` and `sentinels` are OUT.
 QUESTIONER_LEAD_KEYS = frozenset({"lead_id", "goal", "what_to_summarize", "provenance", "queries"})
 QUESTIONER_QUERY_KEYS = frozenset({
     "seq", "system", "verb", "query_id", "params", "exit_code", "error_class",
@@ -116,43 +104,18 @@ def _lead_file(run_dir: Path, goal: str = "a goal", *, lead_id: str = LEAD,
     (gather / f"{lead_id}.lead.json").write_text(json.dumps(data), encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------------------
-# D1 / O6 — one declaration of the row's columns, in writer order
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# D2 / O1 — the surface projects every column, with the writer's own coercions
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_surface_projects_every_declared_column_with_payload_path_as_raw_ref():
     """D2/O1 — `QueryRow`'s field set is `QUERY_ROW_COLUMNS` with the ONE recorded derivation:
     `payload_path` is read as the containment-checked `raw_ref`. Bound to the."""
-    # The PUBLIC fields: D2 also keeps the parsed record on the row for `record()`, and a
-    # retained record is not a projection of a column — however the implementer stores it, an
-    # underscore-prefixed slot is the one shape that says so.
     fields = {f.name for f in dataclasses.fields(QueryRow) if not f.name.startswith("_")}
     expected = (set(QUERY_ROW_COLUMNS) - {"payload_path"}) | {"raw_ref"}
     assert fields == expected, \
         f"QueryRow projects {sorted(fields ^ expected)} differently from the writer's columns"
-    # The two columns the issue names, by name: the set arithmetic above would also pass on a
-    # surface that dropped a column the writer dropped, so the two that motivated the change
-    # are pinned outright.
     assert "system_key" in fields, "the rejection guard's identity half is not on the surface"
     assert "payload_sha256" in fields, "the payload's content identity is not on the surface"
-    # `_record` stays off the repr AND off equality (#1032 D4 keeps it so): it is the SOURCE
-    # of the typed fields, not a fifteenth column, and two rows read from byte-identical
-    # records must compare equal by their columns alone. The two columns #1032 un-flagged are
-    # deliberately NOT pinned either way — the repr is no model-facing contract any more.
     flags = {f.name: (f.repr, f.compare) for f in dataclasses.fields(QueryRow)}
     assert flags["_record"] == (False, False), \
         f"_record is on the repr or in equality again: {flags['_record']}"
-
-
-# ---------------------------------------------------------------------------------------
-# D2 / O2 — `record()` is the row as read, never a re-projection (C16)
-# ---------------------------------------------------------------------------------------
 
 
 def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
@@ -164,9 +127,6 @@ def test_record_returns_the_parsed_row_as_read_not_a_reprojection(tmp_path):
         pre_871.pop(key)
     no_class = _row(2, exit_code=64, payload_status="error", payload_digest="exit=64; x")
     no_class.pop("error_class")
-    # NON-CANONICAL BYTES in every column the typed view coerces: a re-projection of the typed
-    # fields over the retained dict agrees with the raw line on writer-canonical rows and
-    # differs on this one (adversary H6) — the record must be the line, coercions and all.
     odd = _row(3, system=None, verb=7, params="not-a-dict", exit_code="64",
                payload_digest=5, payload_status=None)
     odd["seq"] = "3"
@@ -229,11 +189,6 @@ def test_c16_a_replay_over_records_does_not_trip_where_the_run_did_not(tmp_path)
         "re-projection, not the row as read"
 
 
-# ---------------------------------------------------------------------------------------
-# S2 — the model-facing renders the surface owns gain neither column
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
     """S2, and #1032 O1 — every model-facing render of the rows ENUMERATES its fields: `actor_view`
     / `render_actor_view_yaml`, `render_joined_yaml`, and (since #1032 M1) the."""
@@ -282,9 +237,6 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
     ):
         assert needle not in section, f"the questioner's section carries {needle!r} to a model"
 
-    # The census: exactly the enumerated keys, on every lead and every query each render
-    # returns — the questioner's, and the two other renders the `QueryRow` comment names, so a
-    # column added to the row tomorrow reaches none of the three without being named there.
     censuses = {
         "questioner_leads": (
             lead_repository.questioner_leads(lead_repository.joined(tmp_path)),
@@ -309,11 +261,6 @@ def test_the_model_facing_renders_emit_neither_new_column(tmp_path):
                     f"{name}: a query dict carries {sorted(set(query) ^ query_keys)}"
 
 
-# ---------------------------------------------------------------------------------------
-# D3 — the surface refuses a link at a lead file's name, as the judge's own read did
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
     """D3 — the judge's per-lead goal used to be read behind its own `artifact_file` gate; with the
     read moved to the surface (`load_leads`), the surface keeps that posture: a."""
@@ -335,9 +282,6 @@ def test_the_surface_refuses_a_link_at_a_lead_files_name(tmp_path):
         elsewhere.read_text(encoding="utf-8"), encoding="utf-8")
     assert lead_repository.load_leads(regular)[LEAD]["goal"] == "PLANTED_GOAL"
 
-    # A HARD link is a regular file to an `lstat`, which is why the read goes through
-    # `read_guarded` (the open's own `fstat` sees the link count) and not `artifact_file`
-    # then a read: the same planted file under a lead's name, as a second name for one inode.
     hard = tmp_path / "hard"
     RunPaths(hard).gather_raw.mkdir(parents=True)
     os.link(elsewhere, RunPaths(hard).gather_raw / f"{LEAD}.lead.json")
@@ -381,13 +325,6 @@ def test_the_surface_refuses_a_link_at_the_tables_name_and_reads_an_absent_table
         "the positive control's regular table did not read"
 
 
-# ---------------------------------------------------------------------------------------
-# D1 / O6 — the row literal exists ONCE, inside the constructor
-# ---------------------------------------------------------------------------------------
-
-#: The modules C1's census names as reaching the queries table (the two writer sites and the
-#: two `append_query_row` callers), plus the read surface — every place a row literal could
-#: hide beside the constructor.
 _ROW_MODULES = (
     "scripts/gather_tools/record_query.py",
     "runtime/lead_zero/_capture.py",
@@ -422,5 +359,3 @@ def _row_literals(source: str) -> list[str | None]:
             owner = parents[owner]
         found.append(owner.name if isinstance(owner, _DEFS) else None)
     return found
-
-

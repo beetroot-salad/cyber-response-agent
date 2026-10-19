@@ -27,14 +27,6 @@ def _roots(tmp_path, monkeypatch):
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
-
-
-
-# --------------------------------------------------------------------------------------
-# Private helpers (listed as helper requests in the hand-back).
-# --------------------------------------------------------------------------------------
-
-
 @dataclass
 class _JudgeByScope(S.FakeJudge):
     """#921's recording `FakeJudge`, whose reply is chosen by the world (or the family scope)
@@ -167,12 +159,6 @@ def _prompt_for(judge: Any, label: str) -> str:
         f"the judge model was never called for world {label!r} (calls: {judge.agent_ids})")
 
 
-
-
-
-
-
-
 def _topics(findings: Any) -> set[str]:
     return {f.get("topic") for f in findings or [] if isinstance(f, dict)}
 
@@ -252,36 +238,11 @@ def _page(ep: Path) -> tuple[str | None, str | None]:
     return Path(path).read_text(encoding="utf-8"), None
 
 
-
-
 def _validate(text: str, *, scope: str = "world") -> Any:
     return S.sym(S.JUDGE_RUN, "validate_reply")(text, scope=scope)
 
 
-# --------------------------------------------------------------------------------------
-# M21 / O15 — what the judge reads the family from
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# O5 / S9 — family validity, counted from pre-flight plus each world's own record
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_family_with_one_unservable_sibling_is_graded_on_the_rest(tmp_path):
-    """d06a_one_unservable_still_graded — a family with exactly one unservable sibling is
-    graded: the healthy worlds get the judge model's buckets and findings, and the unservable
-    world gets none.
-
-    O5, M07=A. World c's sibling went unservable mid-run (its own record says "oracle
-    unservable", S8). The judge double would answer c with a bucket and a finding if asked;
-    neither may be recorded or enqueued, while world b's model bucket and finding are, and the
-    family is recorded usable.
-    """
     ep = S.judged_episode(tmp_path)
     S.world_record(ep, "c", S.REASON_UNSERVABLE, call=_call("user:carol"),
                    detail="the call failed check 2 on every attempt")
@@ -309,15 +270,6 @@ def test_1224_family_with_one_unservable_sibling_is_graded_on_the_rest(tmp_path)
 
 def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_findings(
         tmp_path, monkeypatch):
-    """d06b_two_unservable_unusable — two or more failed worlds make the family unusable at
-    both sites, with no findings and no model call at the judge.
-
-    RE-PINNED (48: S9; two sites). M04=A, M19=A (validity is its own field).
-
-    The judge site counts BOTH sources: the outcome record (written `accepted` by pre-flight
-    with one failed world, b) plus world c's own "did not finish" record written after launch.
-    Positive control: the same family with only pre-flight's one failure is graded.
-    """
     # Positive control: one unservable world (pre-flight's) — graded, the model is called.
     one = tmp_path / "one"
     ep1 = S.judged_episode(one, outcome=None)
@@ -363,23 +315,7 @@ def test_1224_family_with_two_unservable_siblings_is_unusable_and_yields_no_find
     assert spawn.launches == [], "a sibling started for a family pre-flight found unusable"
 
 
-# --------------------------------------------------------------------------------------
-# O11 / M19 / M20 — the model decides the bucket; the host only refuses
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_world_bucket_is_the_judge_models_output(tmp_path):
-    """d12a_bucket_is_the_models — each bucket the judge model returns for a world is the one
-    recorded for it, whatever the world's ledger decisions and the sibling's verdict were.
-
-    O11, M19=A (`none` is an explicit bucket on the defender arm, recorded, never enqueued).
-
-    Every episode is held fixed — world b's ledger is `passthrough` but for one `oracle` row
-    (#1234 A5: the discipline buckets are unavailable to a world never shown its facts, so the
-    world is shown them once) and its sibling concluded `benign` against a declared
-    `malicious` — so only the model's reply varies, and the recorded bucket follows it.
-    `validate_reply` admits each member on its own.
-    """
     for bucket in ("lead-set", "lead-quality", "analyze-discipline", "decision-discipline",
                    "none"):
         root = tmp_path / bucket
@@ -407,16 +343,6 @@ def test_1224_world_bucket_is_the_judge_models_output(tmp_path):
 
 
 def test_1224_world_whose_facts_sit_only_on_unserved_systems_is_never_lead_set(tmp_path):
-    """d12c_couldnt_look_is_never_lead_set — a world whose facts touch only systems outside the
-    manifest's served_systems is never recorded lead-set, even when the model says lead-set.
-
-    M20=A: the host refusal lives in `validate_reply` — it refuses `lead-set` when the reply's
-    systems share nothing with served_systems, and it never computes a bucket, so the refused
-    world carries NO bucket rather than a substituted one. The world is still admitted to the
-    judge (the model is called for it).
-
-    Positive control: world b, whose reply names a served system, is recorded lead-set.
-    """
     doc = S.family_v2(served_systems=("edr", "idp"), worlds=[
         S.control_world("a"),
         S.world_v2("b", facts=[S.fact("f1")]),
@@ -443,13 +369,6 @@ def test_1224_world_whose_facts_sit_only_on_unserved_systems_is_never_lead_set(t
 
 def test_1224_judge_model_gets_facts_verdict_calls_claims_movement_and_served_systems(
         tmp_path):
-    """d12d_judge_input — the judge model's world prompt carries the world's facts and declared
-    verdict, the sibling's calls, the verified claims, the sibling's verdict and conclusion
-    movement, and served_systems.
-
-    M26: every non-host-authored text among them (the fact statement, the call's params, the
-    claim) arrives inside an untrusted frame and nowhere outside one.
-    """
     doc = S.family_v2(served_systems=("edr", "idp", "siem-x", "recorded-sys-d12d"), worlds=[
         S.control_world("a"),
         S.world_v2("b", disposition_declared="malicious", facts=[S.fact(
@@ -476,15 +395,8 @@ def test_1224_judge_model_gets_facts_verdict_calls_claims_movement_and_served_sy
         "the sibling's conclusion movement (its resolutions) never reached the judge")
 
 
-
-
 def test_1224_world_whose_change_never_reached_the_investigator_is_judged_not_withheld(
         tmp_path):
-    """d12f_unreached_change_is_judged — a world whose every sibling call was passthrough is
-    sent to the judge model, can yield findings, and carries no withheld reason.
-
-    Design non-obligation "No mechanical bucket": such a world is a finding, not withheld.
-    """
     ledger = [S.ledger_row(S.PASSTHROUGH, params=S.query_params(f"user:p{i}")) for i in range(4)]
     ep = S.judged_episode(tmp_path, ledgers={"b": ledger})
     judge = _judge({"b": _world_reply("lead-set", ("idp",),
@@ -502,12 +414,6 @@ def test_1224_world_whose_change_never_reached_the_investigator_is_judged_not_wi
 
 
 def test_1224_preflight_drift_reaches_the_judge_model(tmp_path):
-    """d12g_drift_reaches_the_judge — the drift calls pre-flight recorded appear in the judge
-    model's prompt.
-
-    Whether drift spoils the family is the model's call (design "No mechanical control-drift
-    discard"). The call's params are the source run's own, so they arrive framed (M26).
-    """
     ep = S.judged_episode(tmp_path, outcome=None)
     S.outcome_record(ep, "accepted", drift=[
         {**_call("user:MARKERDRIFT"), "status": "drifted"}])
@@ -522,17 +428,6 @@ def test_1224_preflight_drift_reaches_the_judge_model(tmp_path):
 
 
 def test_1224_drift_on_the_discriminating_call_discards_nothing_mechanically(tmp_path):
-    """d12h_no_mechanical_drift_discard — a family whose recorded drift includes the call the
-    discriminator describes is not discarded by any code path; its outcome is the model's.
-
-    The mechanical discard keyed on `discriminator.envelope` is gone (design, confirmed by the
-    human); drift is the model's to weigh.
-
-    Two episodes, the same drift on the discriminating call: the model filing nothing against
-    the world keeps the findings; the model filing an `incoherent` world finding for each
-    world (the positive control — #1234's channel for validity: the world is then not measured,
-    A7) keeps their defender findings off the queue.
-    """
     def episode(root: Path) -> Path:
         doc = S.family_v2(predicate="did the analyst query idp for user:MARKERDISC after the "
                                     "branch")
@@ -565,17 +460,6 @@ def test_1224_drift_on_the_discriminating_call_discards_nothing_mechanically(tmp
         f"the positive control: the model's incoherent finding was not honoured: "
         f"{_row(ep, 'b')!r}")
     assert _queue(state) == [], "a world the model found incoherent enqueued defender findings"
-
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# O13 / M05 — the gate
-# --------------------------------------------------------------------------------------
 
 
 def _gate_case(root: Path, word: str | None, *, raw: str | None = None) -> tuple[Path, Any]:
@@ -611,22 +495,6 @@ def _torn_outcome_text(scratch: Path) -> str:
 
 
 def test_1224_judge_grades_only_an_accepted_outcome(tmp_path):
-    """d14h_judge_gated_on_accepted — the judge grades only an exactly-`accepted` outcome;
-    unusable, refused and an absent or torn record are stamped not-graded with no model call.
-    pco02_judge_gate_new_words — the gate stamps `unusable` and `refused` not-graded with
-    their word and reason, and an absent, empty or torn outcome record not-graded with one
-    distinct 'no record' word, all with no model call.
-
-    RE-PINNED (48: S9; M05=A). M05=A (R-05): an absent or torn record is a distinct "no record"
-    state, so the word stamped for an absent, an empty and a torn record is in NONE of
-    {`accepted`, `unusable`, `refused`, `incomplete`} — never read as accepted, never conflated
-    with a judged-bad family, never the retired word — and the three share that one word: 70's
-    M05 reading makes them ONE state that "every reader reports as missing", and the gate is one
-    of those readers (PCO-02's absent-record default). The torn record is a REAL torn write
-    (rung 1): pre-flight's record shape written whole by the suite's writer, then cut inside its
-    quoted reason, after `outcome: accepted` — the bytes still carry the word and are no record.
-    Positive control: an exactly `accepted` record is graded and carries no stamp.
-    """
     for word in ("unusable", "refused"):
         root = tmp_path / word
         ep, judge = _gate_case(root, word)
@@ -661,22 +529,6 @@ def test_1224_judge_grades_only_an_accepted_outcome(tmp_path):
 
 
 def test_1224_judge_citation_check_matches_samples_by_system(tmp_path):
-    """d16c_citation_check_by_system — pointer assessment accepts a finding citing the samples
-    section of a served system with a section, and refuses one citing a system's section the
-    record marks unavailable.
-    s_p242 — only a served system's own samples section passes the citation check; an
-    unavailable section, a case or lookalike spelling, an old pattern key and a dot-dot path all
-    fail it.
-
-    O16: the samples record is keyed by system (`samples.yaml#<system>`). Driven through the
-    whole pass, which is where the check gates the queue. The reply names siem-x among its
-    systems, so its section fails for being unavailable, not for being unnamed.
-
-    #1234 A13: what the check decides is each finding's ledger lane. A finding whose only
-    pointer is a samples citation cites no manifest entry, so a passing one is a serving
-    finding (`user_record`); a failing one is `unqueueable` (or `dropped_unresolved` where the
-    pointer resolves nowhere) — never queued, never kept.
-    """
     ep = S.judged_episode(tmp_path)
     S.samples_record(ep, {
         "edr": {"verbs": {"query": ['{"events": [{"host": "db-1"}]}']}},
@@ -729,24 +581,7 @@ def test_1224_judge_citation_check_matches_samples_by_system(tmp_path):
                for topic, lane in lanes.items()), lanes
 
 
-
-
-# --------------------------------------------------------------------------------------
-# Premises — couldn't-look (M20=A)
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
 def test_p078_judge_reply_lead_set_for_a_world_whose_facts_are_only_partly_servable(tmp_path):
-    """b_p012 — lead-set stands for a world whose reply touches at least one served system, and
-    is refused for one whose reply touches none.
-
-    M20=A: `validate_reply` refuses `lead-set` only when the reply's systems share NOTHING with
-    served_systems; it never computes a bucket.
-    """
     doc = S.family_v2(served_systems=("edr", "idp"), worlds=[
         S.control_world("a"),
         S.world_v2("b", facts=[S.fact("f1")]),
@@ -771,14 +606,6 @@ def test_p078_judge_reply_lead_set_for_a_world_whose_facts_are_only_partly_serva
 
 
 def test_served_system_grants_only_health_checks(tmp_path, monkeypatch):
-    """b_p042 — a granted system readable only through a health check is not served: the
-    launcher leaves it out of served_systems, the judge never records lead-set for a world
-    whose facts sit only there, and no query uses a verb the grant lacks.
-
-    M20=A: a served system is one with at least one non-health-check read verb in the grant.
-    Settled regardless: the oracle never forges telemetry the investigator can read nowhere and
-    no query uses a verb the grant lacks.
-    """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est = S.estate(tmp_path / "estate-root", withheld=(("siem-x", "query"), ("siem-x", "lookup")))
     authored = S.family_v2()
@@ -819,13 +646,6 @@ def test_served_system_grants_only_health_checks(tmp_path, monkeypatch):
 
 
 def test_1224_couldnt_look_because_the_only_served_system_was_down(tmp_path):
-    """b_p248 — a world whose facts sit only on a served system that was down for the whole
-    sibling run is NOT couldn't-look: the outage reaches the judge as telemetry and lead-set
-    may stand.
-
-    M20=A: an outage of a served system is telemetry, not couldn't-look, so the host does not
-    refuse the model's lead-set for it; the outage itself reaches the judge model.
-    """
     ledger = [S.ledger_row(S.REAL_ERROR, params=S.query_params(f"user:alice-{i}"),
                            payload={"error": f"MARKER-OUTAGE 503 from idp ({i})"})
               for i in range(3)]
@@ -841,29 +661,7 @@ def test_1224_couldnt_look_because_the_only_served_system_was_down(tmp_path):
         "an outage of a served system was treated as couldn't-look and lead-set refused")
 
 
-# --------------------------------------------------------------------------------------
-# Premises — old and unreadable manifests (O15, F-11)
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# Premises — unservable worlds at the judge (O5, S9, S10, N22 / FU22)
-# --------------------------------------------------------------------------------------
-
-
 def test_judge_reads_a_family_whose_unservable_sibling_left_a_partial_ledger(tmp_path):
-    """s_p199 — an unservable sibling's partial records stay readable, contribute no findings,
-    and the judge and page show the world as unservable while the rest is graded.
-
-    O5. N22: the unservable world appears to the judge as an explicit entry built from its own
-    record — its label, reason and the call it failed on. #1234: never the record's `detail`
-    (the oracle's last refusal can quote the rows it forged for that world's facts, and this
-    entry reaches every judged world's prompt; `render.render_family_text`).
-    """
     partial = [S.ledger_row(S.PASSTHROUGH, params=S.query_params("user:MARKER-PARTIAL"), label="c")]
     ep = S.judged_episode(tmp_path, ledgers={"c": partial})
     S.world_record(ep, "c", S.REASON_UNSERVABLE, call=_call("user:carol"),
@@ -894,12 +692,6 @@ def test_judge_reads_a_family_whose_unservable_sibling_left_a_partial_ledger(tmp
 
 
 def test_input_judge_gives_an_unservable_world_a_bucket(tmp_path):
-    """s_p243 — a bucket and findings the judge model gives a world recorded unservable are not
-    recorded as findings, and an unusable family carries none at all.
-
-    O5. The model is never asked about such a world, so its "answer" is planted where an answer
-    lives: a draw document under the world's own judge directory, beside a scripted reply.
-    """
     def plant(ep: Path, label: str) -> None:
         draws = ep / "worlds" / label / "judge"
         draws.mkdir(parents=True, exist_ok=True)
@@ -938,19 +730,6 @@ def test_input_judge_gives_an_unservable_world_a_bucket(tmp_path):
 
 
 def test_1224_original_call_unservable_in_preflight_and_the_worlds_ledger(tmp_path, monkeypatch):
-    """b_fu22 — pre-flight exhausts the oracle on an original call for world b: b's ledger stays
-    empty, the base recording is the original run's alone, b is never graded, and with one
-    unservable world the family is accepted and graded on the rest.
-
-    Pre-flight queries never land in a sibling's ledger (O9); the family's base recording is
-    unchanged by pre-flight's replay or by the failure (O9; FA-11). World b is not graded and
-    not bucketed, as a miss or otherwise (O5, O11). N22: b appears in the judge's input as an
-    explicit entry with no calls, built from pre-flight's result.
-
-    The launcher half runs a two-world family (the control and b), so the oracle double that
-    never submits fails exactly world b; the judge half grades the archived three-world shape
-    of the same outcome.
-    """
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     site = tmp_path / "launch"
     est = S.estate(site)
@@ -987,23 +766,7 @@ def test_1224_original_call_unservable_in_preflight_and_the_worlds_ledger(tmp_pa
         "world b is not an explicit entry in the judge's input, built from pre-flight's result")
 
 
-# --------------------------------------------------------------------------------------
-# Premises — reply handling (N22, M19)
-# --------------------------------------------------------------------------------------
-
-
 def test_judge_input_has_a_served_call_with_no_verified_claim(tmp_path):
-    """b_p200 — an `oracle` row whose claim or verifier verdict was never stored reaches the
-    judge as that call with "claim unavailable", never as a verified claim.
-
-    Scenario: a sibling's ledger has an `oracle` row whose claim or verifier verdict was never
-    stored (the sibling died, or the write failed). N22 reading: "claim unavailable" for a call
-    with no stored claim.
-
-    The ledger holds a verified row first (its claim reaches the judge — the positive control)
-    and the claimless row LAST, so the text around the claimless call's own marker is that
-    call's entry: it must say the claim is unavailable.
-    """
     verified = _oracle_row("user:MARKER-VERIFIED", claim=S.claim(changed=[
         S.changed("alice", "MARKER-CLAIMED", "absent", "present")]),
         verdict={"passed": True, "reason": "fact f1's logon is present"})
@@ -1022,12 +785,6 @@ def test_judge_input_has_a_served_call_with_no_verified_claim(tmp_path):
 
 
 def test_judge_model_call_fails_for_one_world_but_not_the_rest(tmp_path):
-    """b_p237 — a judge call that fails for one world's draw leaves that world ungraded, the
-    others graded and enqueued, and a bare re-run grades only the missing world.
-
-    The failure is #921's P9 shape (executed): a transport failure and a timeout both arrive as
-    `RunUnprocessable`.
-    """
     # #1234 A5: the discipline buckets are unavailable to a world never shown its facts.
     reply_b = _world_reply("lead-set", ("idp",), findings=[_finding("b-later", bucket="lead-set")])
     reply_c = _world_reply("lead-quality", ("edr",), findings=[_finding("c-now")])
@@ -1051,14 +808,6 @@ def test_judge_model_call_fails_for_one_world_but_not_the_rest(tmp_path):
 
 
 def test_judge_reply_gives_a_bucket_outside_the_five(tmp_path):
-    """b_p238 — a bucket outside the set (a lookalike, a padded or capitalised spelling, null,
-    two buckets, a new word) is refused, never recorded or enqueued as written and never
-    coerced. #1234 (P-a, A4): `observability` left the bucket set — a gap is a deployment
-    gap, never a teachable defender bucket — so it is refused like any other word outside the
-    set.
-
-    M19=A: the bucket set is O11's five; `none` is an explicit member.
-    """
     refused = S.judge_refused_cls()
     for bad in ("lead_set", "Lead-Set", " lead-set ", "lead-set\n", None,
                 ["lead-set", "lead-quality"], "missed-lead", "", "observability"):
@@ -1083,29 +832,6 @@ def test_judge_reply_gives_a_bucket_outside_the_five(tmp_path):
 
 
 def test_judge_reply_leaves_a_world_out(tmp_path):
-    """b_p240 — no code supplies a bucket for a world the replies leave unanswered, an invalid
-    reply is retried as a whole, and a world the family does not have is never recorded.
-
-    N22 reading: a reply with missing, extra or duplicated worlds is invalid as a whole and
-    retried.
-
-    The coined reply is per world (one call per world), so the three shapes are driven as that
-    shape spells them: world c's every reply is invalid (it never answers its own bucket); world
-    d's first reply is invalid and its retry valid; a reply giving its world's bucket twice is
-    refused whole.
-
-    The foreign world: the only place a per-world reply can name another world is a finding's
-    `world` field, which the pre-#1234 pass copied VERBATIM into the draw document and the
-    family record's world findings; the #1234 draw document (`run.draw_document`) files only a
-    world finding's own fields, and `judge.yaml` carries no findings list. World b's first reply carries, beside its own
-    two findings, a world-lane finding whose `world` is "z" (a world the family lacks); its
-    retry is the same reply without that finding. Under either reading — the reply is refused
-    whole and retried (N22), or the stray field is ignored — "z" must never be recorded: no
-    `world: z` anywhere in the family record (judge.yaml) or on any queue row, no row keyed
-    "z", no finding id under "/z/". Positive controls: world b is graded from its reply, its own
-    two findings are recorded and queued under b, and the record names its worlds through the
-    same `world` keys the negative reads. Draw files are not pinned (b_p241's scope).
-    """
     doc = S.family_v2(worlds=[S.control_world("a"), *[
         S.world_v2(label, facts=[S.fact(f"f-{label}")]) for label in ("b", "c", "d")]])
     ep = S.judged_episode(tmp_path, doc=doc, labels=("a", "b", "c", "d"))
@@ -1150,19 +876,7 @@ def test_judge_reply_leaves_a_world_out(tmp_path):
         _validate(twice)
 
 
-
-
-
-
 def test_1224_judge_draws_disagree_on_a_worlds_bucket_or_systems(tmp_path):
-    """b_p246 — when two draws give one world different buckets or systems, every draw's answer
-    is recorded and no code reduces them to a bucket of its own.
-
-    N22 reading: disagreeing draws are all recorded with the disagreement flagged. The
-    disagreement flag has no coined name (hand-back red flag); what is pinned is that both
-    draws' buckets and systems are recorded and the world's row names no bucket neither draw
-    gave.
-    """
     ep = S.judged_episode(tmp_path)
     judge = _judge({"b": [_world_reply("lead-set", ("idp",)),
                           _world_reply("lead-quality", ("edr",))]})
@@ -1183,29 +897,7 @@ def test_1224_judge_draws_disagree_on_a_worlds_bucket_or_systems(tmp_path):
         f"the record names a bucket neither draw gave: {named!r}")
 
 
-
-
 def test_1224_judge_prompt_over_a_world_with_hundreds_of_verified_claims(tmp_path, monkeypatch):
-    """b_p249 — under the payload cap every one of a world's calls still reaches the judge model
-    with its decision kind, the served-answer bytes reaching it stay within the cap knob, and
-    the world's bucket is the model's.
-
-    N22 reading; O11. An unchanged world is a finding, not a withheld case (world c's every
-    call is `passthrough`).
-
-    Rows are counted by UNIQUE per-row markers — `MARKER-ORC-nnn` in the params of each of the
-    120 `oracle` calls, `MARKER-PAS-nnn` in each of the 80 `passthrough` calls — never by
-    occurrences of a common word: every one of the 200 markers must be in world b's prompt (a
-    call cut by the cap is a missing marker). The decision-word counts stay as a secondary floor.
-
-    The bound is relative to the knob and to what it caps: each served answer carries a 2000-byte
-    `QZ` run (400000 bytes over 200 calls), and the `QZ` bytes reaching the prompt are at most
-    the knob's value. The knob is 60000 so that the 200 calls with their decision kinds (about
-    250 rendered bytes each, ~50000) can fit under it however the implementation charges the
-    cap, while the answers (400000) cannot. Positive control: the same episode under a cap too
-    large to bind (10**7) hands the model more `QZ` bytes than 60000 — the answers do reach the
-    judge (b_p245), so the bound is the cap's work and not an absent channel.
-    """
     cap = 60000
     blob = "QZ" * 1000                                  # 2000 bytes per served answer
 
@@ -1261,19 +953,6 @@ def test_1224_judge_prompt_over_a_world_with_hundreds_of_verified_claims(tmp_pat
 
 
 def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
-    """b_p250 — a graded episode is final: a bare re-run after its outcome record or a ledger
-    changed makes no model call and changes neither the record nor the queue; an old-manifest
-    episode is never graded, even over a pre-oracle grade record.
-
-    N22 reading: a graded episode is final unless re-run explicitly. Settled regardless: an
-    old-manifest episode is not graded (O15).
-
-    #1234 A6: a re-run runs the gates again before it grades anything — so a changed outcome
-    record may now stamp the record not graded — but it never re-judges a world whose rows are
-    `queued`: every recorded world row and ledger entry is carried verbatim, no model is
-    called and no queue changes (the unchanged-archive case is
-    `test_1234_bare_rerun_after_a_fully_graded_pass`).
-    """
     ep = S.judged_episode(tmp_path / "graded")
     first = _judge({"b": _world_reply(findings=[_finding("once")])})
     _grade(tmp_path, ep, first)
@@ -1306,27 +985,7 @@ def test_judge_is_run_again_on_an_episode_it_already_graded(tmp_path):
     assert _all_queued(state) == [], "an old-manifest episode enqueued findings"
 
 
-# --------------------------------------------------------------------------------------
-# Obligations — readers that survive the change (O-21, O-22, O-24, O-39, O-41, O-42, O-51)
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
 def test_1224_enqueue_admits_a_finding_citing_a_systems_samples_section(tmp_path):
-    """o39_enqueue_samples_by_system — a design finding citing a served system's samples
-    section is enqueued and one citing a section marked unavailable is not, by the per-system
-    samples record.
-
-    O-39. #1234 (A8) removed the bare re-enqueue this test once drove (`enqueue_report` reading
-    the draw files and the samples record back itself): rows are built only from the replies
-    the pass just drew, so the check is driven through the pass, and a re-enqueue with no
-    `drawn=` rows is refused by name and appends nothing.
-    """
     ep = S.judged_episode(tmp_path)
     S.samples_record(ep, {
         "edr": {"verbs": {"query": ['{"events": [{"host": "db-1"}]}']}},
@@ -1351,15 +1010,6 @@ def test_1224_enqueue_admits_a_finding_citing_a_systems_samples_section(tmp_path
 
 
 def test_1224_curator_gate_authors_a_row_built_from_the_judge_models_output(tmp_path):
-    """o41_gate_family_keeps_authoring (rewritten for #1234) — a defender row the pass built
-    from the judge model's output passes enqueue's row validation and is admitted for authoring
-    by `_gate_family`; the same row in its pre-#1234 shape (a family word on `judge_outcome`)
-    is held naming the retired name, never authored or consumed.
-
-    Was `test_1224_curator_gate_authors_a_lesson_for_the_judge_models_family_word`, which
-    pinned `survived` authored and `caught`/`undecidable` consumed (M19=A, RF-6). #1234 retired
-    the family word (A17): the row's own fields are its ground truth (I10).
-    """
     gate = S.sym(S.LESSONS_RUN, "_gate_family")
     validate_row = S.sym(S.JUDGE_ENQUEUE, "_validate_row")
     ep = S.judged_episode(tmp_path)
@@ -1380,26 +1030,8 @@ def test_1224_curator_gate_authors_a_row_built_from_the_judge_models_output(tmp_
             assert "judge_outcome" in routed[1].get("held_reason", ""), routed
 
 
-
-
-
-
-# --------------------------------------------------------------------------------------
-# Re-ground coherence (PCO-02, PCO-06, PCO-07, PCO-08)
-# --------------------------------------------------------------------------------------
-
-
-
-
 def test_1224_judge_reads_a_real_error_row_and_an_adapter_cannot_load_fault_row_as_decided(
         tmp_path):
-    """pco07_fault_and_real_error_rows_read — an erroring original query is a `real-error` row
-    and an adapter that cannot load is a `fault` row; the judge reads each as such and no code
-    computes a bucket from either.
-
-    PCO-07, F-02=A. Today a `fault` row on the holding system makes the world ungradable by rule
-    (family.py:1051); here the world whose only row is that `fault` row is graded by the model.
-    """
     real_error = S.ledger_row(S.REAL_ERROR, params=S.query_params("user:MARKER-PCO7-REALERR"),
                               payload={"error": "502 from idp"})
     fault = S.ledger_row(S.FAULT, system="edr", params=S.query_params("host:MARKER-PCO7-FAULT"),
@@ -1418,5 +1050,3 @@ def test_1224_judge_reads_a_real_error_row_and_an_adapter_cannot_load_fault_row_
     assert _row(ep, "b").get("bucket") == "lead-quality"
     assert _row(ep, "c").get("bucket") == "lead-set", (
         "a code rule decided the world with a `fault` row instead of the model")
-
-

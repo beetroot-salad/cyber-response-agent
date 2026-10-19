@@ -1,26 +1,3 @@
-"""#1080 — the placement contract, the O1 import census, the O2 direction test, the wrapper
-rules and the shippable-surface lint's reach into integrations (spec
-`spec-flow/specs/spec_graph_1080-scripts-split.yaml`, §7 record `70-resolutions.md`).
-
-Every check here is STATIC (s129): it reads tracked files and parses ASTs through
-`_census1080`, never imports a moved module to learn where it lives. Moved code is reached at
-call time through `_spec1080`'s symbol locator, so a home that does not exist yet is one
-failing test, not a collection error. Faults are planted in a tmp git copy of the tree
-(`tree_copy` / `plant`) or in an `overlay`, never in the real tree.
-
-SCOPE CUT (2026-10-04, human): only the reshaping half moves (`_spec1080`'s docstring). The O2
-direction tests, the O7 shippable-surface tests and the placement cells of the OUT modules are
-parked with their owners (`spec-flow/specs/parked/1080/parked_placement_census_direction.py`); the
-tables below keep their IN rows, and O1's exception list is the cut's named pairs (E1, E2): 35
-at the cut, 32 since the case_ticket follow-up #1190 moved `case_ticket` under `defender/runtime/`
-and joined its file to the IN rows here (`MODULE_ANCHORS`, and the moved-file tests through
-`_moved_old_py`).
-
-At the base (80888efb) the demands the move must satisfy are red here — the files are still
-under `defender/scripts/`, the old edges still exist, the new homes do not. The tests that pin a
-property of the census itself (a planted edge is found, junk is ignored, a string is not an
-import) are green at the base by construction: they drive the same scan over a planted copy.
-"""
 from __future__ import annotations
 
 import ast
@@ -39,13 +16,7 @@ from defender.tests import _import_blocker
 from defender.tests.scripts_1080_split import _census1080 as C
 from defender.tests.scripts_1080_split import _spec1080 as S
 
-# ======================================================================================
-# Tables (from demand #0's placement map, amended by §7)
-# ======================================================================================
 
-#: Investigation symbols: under `defender/runtime/` (E2 of the 2026-10-04 cut: `payload_view`'s
-#: and the sql engine's own anchors; the `record_query` guards and `workspace_map` stay in
-#: `scripts/`, owned by #1165 and #1105).
 INVESTIGATION = ("passthrough_max_bytes", "_load_payload", "_arrow_refusal")
 #: The flat tier (`defender/_*.py`): the query-id and request-key rules under their BASE names
 #: (`S.QUERY_RULE_PUBLIC` is the identity map since the cut) and the venv helper.
@@ -60,9 +31,6 @@ LESSONS_ENGINE = (
     "WRITE_RETURN_LEAD", "FOLD_LEAD", "resolve_corpus", "as_list", "csv_set",
 )
 
-#: One anchor symbol per moved module (base path → a name only it defines), for the scans that
-#: read "every moved module": m2's anchor scan, the engines. E2: the seven modules the cut moves,
-#: and `case_ticket`, which the follow-up #1190 moves to `defender/runtime/case_ticket.py`.
 MODULE_ANCHORS = {
     "defender/scripts/gather_tools/payload_view.py": "passthrough_max_bytes",
     "defender/scripts/gather_tools/sql.py": "_load_payload",
@@ -89,11 +57,6 @@ NOT_IN_DEV_JOB = ("pydantic_ai*", "pydantic_graph", "pydantic_evals", "anthropic
                   "starlette")
 
 PLANT_IMPORT = "from defender.scripts.policy_cli import main\n"
-
-
-# ======================================================================================
-# Small helpers
-# ======================================================================================
 
 
 def _base_files() -> list[str]:
@@ -167,30 +130,7 @@ def _child_find_spec(names: list[str]) -> dict[str, bool]:
     return result
 
 
-# ======================================================================================
-# D0 — what `scripts/` holds, and where each moved symbol lives
-# ======================================================================================
-
-
 def test_1080_scripts_holds_only_entry_points():
-    """D1 under the 2026-10-04 scope cut: the IN files are gone from `defender/scripts/`, no
-    re-export shim is left, and their old dotted names do not resolve. Every tracked file under
-    `defender/scripts/` is one of these: `tenant.py`, `policy_cli.py`, `box_image.py`,
-    `tacit_cli.py`; a thin wrapper that a `bin/` shim invokes, which means the `defender-sql`
-    and `defender-lessons` engines' wrappers; a file under `scripts/adapters/` (all of its base
-    files stay until #1172); or one of the cut's named OUT files that stay with their owners
-    (`visualize/`'s eight modules and three assets and `workspace_map.py`, #1105;
-    `case_history/ticket_writer.py` and `gather_tools/record_query.py`, #1165). The IN files
-    (`_venv.py`, `pricing.py`, `gather_tools/payload_view.py`, `lessons/lessons_frontier.py`,
-    `lessons/_lessons_common.py`, and `case_history/case_ticket.py`, which the case_ticket
-    follow-up #1190 moves to `defender/runtime/`) are not left there, and no re-export shim
-    keeps their old `defender.scripts.*` path importable.
-
-    Observed: the placement check over every TRACKED file under `defender/scripts/` (any file
-    type), the adapters folder against its base files, and a child pinned to this tree asked
-    whether each IN module's old dotted name still resolves. Positive control: the staying
-    adapters' dotted names do resolve in the same child.
-    """
     assert C.placement_findings() == [], "files left under defender/scripts/ that are none " \
         "of the staying commands, the shims' wrappers or the adapters' files"
     assert C.tracked_files(S.REPO_ROOT, C.ADAPTERS) == sorted(C.adapters_expected())
@@ -222,45 +162,12 @@ def _outside_lessons_content(name, where):
 
 
 def test_1080_each_moved_symbol_is_defined_under_its_home():
-    """Homes are found by the symbol each moved module defines (dF0). Under the 2026-10-04
-    scope cut each moved symbol of the reshaping half is defined (as a `def`, `class` or
-    module-level assignment) outside `defender/scripts/`, in a module under its home:
-    `payload_view`'s and the sql engine's symbols under `defender/runtime/` (not in its
-    `tools/` or `branch/` packages); the query-id and request-key rules (under their base names)
-    `reexec_into_venv` and `usage_cost` in flat-tier `defender/_*.py` modules (`usage_cost` was
-    first pinned under `runtime/providers/`; moved after review); the lessons engine outside `defender/lessons/`. The groups the cut
-    parks (verbs, the exit-code vocabulary, integrations, the Elastic module, reports and its
-    assets, the tenants home, the runs writers) are not asserted here.
-
-    Observed through the symbol locator: each name's one definition outside `scripts/`, inside
-    its home, and no second new definition anywhere (the one-home rule).
-    """
     _check_group(INVESTIGATION, S.RUNTIME, _not_tools_or_branch)
     _check_group(FLAT_TIER_RULES, S.FLAT_TIER)
     _check_group(LESSONS_ENGINE, None, _outside_lessons_content)
 
 
-# ======================================================================================
-# O1 — the import census
-# ======================================================================================
-
-
 def test_1080_no_module_outside_scripts_imports_a_module_under_it():
-    """An AST census over every `.py` under `defender/` and the repo's `scripts/`, excluding
-    `tests/` directories, finds no `import` or `from … import` that names `defender.scripts` or
-    anything under it. Relative imports are resolved against their package. Under the
-    2026-10-04 scope cut the allowed exceptions are the 20 named (importer, target) pairs (20
-    import statements) into the `scripts/` modules the cut leaves where they are, each tagged
-    with the issue that retires it (#1172/#1121, #1165, #1105; the case_ticket follow-up #1190
-    retired its 3 pairs when it moved `case_ticket` under `defender/runtime/`, the live oracle
-    #1224 its 10 when cluster staging went). Any
-    other import into the folder fails, and an exception whose edge no longer exists is itself a
-    finding ([218]); o1_exception_list_is_the_named_edges pins the list.
-
-    Observed: the census over the real tree, minus the named pairs, is empty, and no pair is
-    stale. Positive control (cheap form of o1_census_flags_a_planted_edge): the
-    same census with one import planted in a runtime module (an overlay) reports it.
-    """
     violations = C.o1_violations()
     assert _rel_edges(violations) == [], "imports of defender.scripts.* from outside it"
     assert C.stale_o1_exceptions() == []
@@ -272,17 +179,6 @@ def test_1080_no_module_outside_scripts_imports_a_module_under_it():
 
 
 def test_1080_the_import_census_flags_a_planted_edge_and_exempts_tests(tmp_path):
-    """The same census, run over a copy of the tree with `from defender.scripts.policy_cli
-    import main` planted in a runtime module, reports exactly that file and line. The same line
-    planted in a file under `defender/tests/` is not reported, and neither is a line in
-    `conftest.py`; the same line planted in a `test_*.py` file beside production code outside
-    any `tests` directory is reported ([155]). The test-import lane is the one deliberate
-    asymmetry: a census that began flagging files under `tests/`, or that exempted a non-test
-    path, fails here.
-
-    Observed: the census of a tmp git copy before and after four planted (tracked) files; the
-    difference is exactly the runtime line and the beside-production `test_*.py` line.
-    """
     root = C.tree_copy(tmp_path / "copy")
     before = set(_rel_edges(C.census(root)))
     runtime_line = C.plant(root, "defender/runtime/verbs.py", PLANT_IMPORT)
@@ -298,25 +194,6 @@ def test_1080_the_import_census_flags_a_planted_edge_and_exempts_tests(tmp_path)
 
 
 def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale():
-    """The import census's exception list holds exactly the 20 named (importer, target) pairs
-    the 2026-10-04 scope cut, the case_ticket follow-up #1190 and the live oracle #1224 leave
-    standing — 20 import statements, the 59 base edges less the 22 the cut's moves retire, the 4
-    that #1190's move of `case_ticket` under `defender/runtime/` retires (`run_tenant`'s two,
-    `query_tool`'s and `estate/applier`'s) the 11 that #1224's removal of cluster staging
-    retires and the 2 that #1222's removal of lead-zero's item 1 retires — each tagged with the owner that retires it: #1172/#1121 (9: into
-    `_stub_transport`, `elastic_adapter`, `esql_text` and `faults`), #1165 (5:
-    into `record_query` and `ticket_writer`) and #1105 (6: into the `visualize/` modules and
-    `workspace_map`). No pair names `case_ticket` (it is no longer under `scripts/`). H4 (i)'s
-    `ticket_writer -> _stub_transport` edge is internal to `scripts/` and is not listed. Every listed pair still exists in the tree, so an entry that outlives the
-    edge it excused is a finding, not a silent widening, and the list can only shrink. A new
-    import from outside `scripts/` into `scripts/adapters/` (another importer, or another
-    adapters module) planted in a copy of the tree is reported. `scripts/adapters/` keeps all
-    of its base files until #1172. (E1; M-A (a); [218].)
-
-    Observed: the list's pairs and owners, its liveness over the real tree, an overlay that
-    removes the example adapter's `_stub_transport` edge (reported stale), two planted new edges (both
-    reported), and the adapters folder's tracked files.
-    """
     exceptions = C.o1_exceptions()
     pairs = [(i, t) for i, t, _ in exceptions]
     assert len(pairs) == len(set(pairs)) == 20
@@ -344,11 +221,6 @@ def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale
     assert C.tracked_files(S.REPO_ROOT, C.ADAPTERS) == sorted(C.adapters_expected())
 
 
-# ======================================================================================
-# D1 — the wrappers, and the mains that no caller runs
-# ======================================================================================
-
-
 def _sys_path_mutations(tree: ast.AST) -> list[ast.AST]:
     out: list[ast.AST] = []
     for n in ast.walk(tree):
@@ -362,20 +234,6 @@ def _sys_path_mutations(tree: ast.AST) -> list[ast.AST]:
 
 
 def test_1080_each_wrapper_left_in_scripts_only_delegates_to_its_engine():
-    """No wrapper is left in `defender/scripts/`: each of `bin/defender-sql` and
-    `bin/defender-lessons` runs its engine AS A MODULE (`exec "$PY" -P -m <engine>`), with the
-    shim's own checkout root put first on `PYTHONPATH`. The engines carry no import-root
-    bootstrap. (Post-review change, human, 2026-10-04: this replaces M-H (a)'s thin wrapper with
-    one root-first bootstrap. Moving the launch into the shim removes every Python-side path
-    bootstrap and self re-exec on the command path; the name of this test is kept for the
-    record.)
-
-    Observed: no `.py` file under `defender/scripts/` outside the staying commands, the
-    adapters and the cut's OUT files; each shim's exec line runs `-P -m` on the module that
-    defines the engine's anchor; the line that sets `PYTHONPATH` puts the shim's tree root
-    (`dirname` of its `defender/`) before any inherited value; the engine has no `sys.path`
-    mutation and is a `__main__` program (its `main` runs under a module-level guard).
-    """
     leftover = [r for r in C.tracked_files(S.REPO_ROOT, "defender/scripts")
                 if r.endswith(".py") and r not in C.STAYING_COMMANDS
                 and not S.under(r, C.ADAPTERS) and r not in C.OUT_STAYING]
@@ -412,15 +270,6 @@ def _command_guard(source: bytes | str) -> ast.If | None:
 
 
 def test_1080_the_moved_lessons_frontier_keeps_its_main_block():
-    """The moved `lessons_frontier` keeps its command block in its new home: the module-level `if __name__ == "__main__":` guard that runs its own `main` (`sys.exit(main(sys.argv))`, `lessons_frontier.py:546` at the base), not only the venv re-exec guard above its imports (:36). Human, 2026-10-04: the block travels with the module, though no `bin/` shim, `run_common`, CI step or doc invokes it. The other three modules M-D (a) would have stripped (`workspace_map`, `visualize_run`, `visualize_episode`) do not move under the cut; their cells are parked with #1105.
-
-    Observed: the module, found by a symbol only it defines (outside `defender/scripts/`), read
-    for a module-level `__main__` guard whose body calls the module's `main`. Controls, on files
-    that stay put: the reader finds the command guard of `box_image.py` (a staying command CI
-    invokes) and none in `scripts/adapters/faults.py`. The discriminating control is the module
-    itself: with its command guard cut out of its source, the reader finds none, even though the
-    venv re-exec guard is still there. A move that drops the command block therefore fails.
-    """
     assert _command_guard((S.SCRIPTS / "box_image.py").read_bytes())
     assert not _command_guard((S.SCRIPTS / "adapters" / "faults.py").read_bytes())
     for anchor, home in UNCALLED:
@@ -438,19 +287,7 @@ def test_1080_the_moved_lessons_frontier_keeps_its_main_block():
             f"that the move must keep")
 
 
-# ======================================================================================
-# Lessons content, the flat tier, file-depth anchors
-# ======================================================================================
-
-
 def test_1080_no_python_module_lands_in_the_lesson_content_folder():
-    """No `.py` file exists under `defender/lessons/`. Its lesson `.md` files are still there
-    (positive control).
-
-    Observed: every file under `defender/lessons/` on disk (junk directories skipped), and the
-    lessons engine found by its symbols outside that folder (it exists: the folder is not empty
-    of `.py` because the engine vanished).
-    """
     on_disk = [p for p in S.LESSONS_CONTENT.rglob("*")
                if p.is_file() and not set(p.relative_to(S.REPO_ROOT).parts) & S.JUNK_DIRS]
     assert [S.rel(p) for p in on_disk if p.suffix == ".py"] == []
@@ -462,12 +299,6 @@ def test_1080_no_python_module_lands_in_the_lesson_content_folder():
 
 
 def test_1080_every_flat_tier_module_at_the_base_keeps_its_name():
-    """Every `defender/_*.py` module present at the base still exists at the same path. New
-    flat-tier modules may be added.
-
-    Observed against the base inventory's flat tier (30 modules at 80888efb). Green at the base
-    by construction: it guards the move against regrouping the tier (N10).
-    """
     base = S.base_inventory()["flat_tier"]
     assert len(base) == 30
     # Owner ruling (merge with #1105 PR 1): the run layout and the run handle moved into
@@ -478,17 +309,6 @@ def test_1080_every_flat_tier_module_at_the_base_keeps_its_name():
 
 
 def test_1080_no_moved_module_derives_a_path_from_its_own_file_depth():
-    """No moved module computes a path as `Path(__file__)…parents[N]` or `.parent.parent`. A
-    sibling `Path(__file__).parent / "assets"` that travels with its module is allowed. Positive
-    control: the scan flags a planted `parents[2]`. Under the 2026-10-04 cut "every moved
-    module" is the IN set: `_venv`, `pricing`, `payload_view`, the sql engine, the three lessons
-    engine modules and `record_query`'s query-rule slice — and `case_ticket`, which the
-    case_ticket follow-up #1190 moves under `defender/runtime/`.
-
-    Observed: every moved module, found by an anchor symbol it defines (record_query's rule
-    slice by its own anchor), scanned for a file-depth anchor; the control plants
-    `parents[2]` and `.parent.parent` (both flagged) beside an allowed `.parent / "assets"`.
-    """
     planted = textwrap.dedent('''\
         from pathlib import Path
         ASSETS = Path(__file__).parent / "assets"
@@ -501,11 +321,6 @@ def test_1080_no_moved_module_derives_a_path_from_its_own_file_depth():
     found = {h: C.file_depth_anchors((S.REPO_ROOT / h).read_bytes(), h) for h in homes}
     assert {h: lines for h, lines in found.items() if lines} == {}
     assert not any(S.under(h, "defender/scripts") for h in homes)
-
-
-# ======================================================================================
-# The census's reach (sNNN settled premises)
-# ======================================================================================
 
 
 _RARE = textwrap.dedent('''\
@@ -527,16 +342,6 @@ _RARE = textwrap.dedent('''\
 
 
 def test_census_meets_an_edge_seen_only_on_a_rare_path():
-    """The import census flags an import of a module under scripts/ wherever the statement
-    sits: module level, inside a function body, inside a try, under `if TYPE_CHECKING:`, or
-    behind a platform/interpreter conditional. The tree is reported clean only when none exist,
-    and the census's positive control (a planted ordinary module-level import) and a planted
-    rare-path import are each reported. K1's census already counts nested imports
-    (lessons_push.py:28 under TYPE_CHECKING is a hit today).
-
-    Observed: the real tree's census is clean (beyond the three named exceptions), and a
-    planted module holding one import in each position is reported once per position.
-    """
     assert _rel_edges(C.o1_violations()) == []
     rel = "defender/runtime/_spec1080_rare.py"
     got = {(e.line, e.target) for e in C.census(overlay={rel: _RARE}) if e.importer == rel}
@@ -570,16 +375,6 @@ def _junk_checkout(root: Path, tmp: Path) -> None:
 
 
 def test_census_and_pointer_scans_run_in_a_checkout_holding_nested_checkouts(tmp_path):
-    """The census, the 'scripts holds only entry points' check and the doc-pointer scan give
-    the same verdict in the main checkout, in a linked worktree and in CI. They cover only that
-    checkout's own defender/ and repo scripts/ trees; untracked nested checkouts at older
-    commits, a .venv link, __pycache__ and scratch files change nothing and are never reported
-    as hits. (O1 scopes the census to defender/ and the repo's scripts/.)
-
-    Observed: a committed tmp copy (the main checkout) given untracked junk that spells
-    `defender.scripts`, a linked worktree of it (`git worktree add`) and a fresh clone (CI's
-    checkout): the three verdicts are equal, and no hit names a junk path.
-    """
     main = C.tree_copy(tmp_path / "main", commit=True,
                        also=("docs", "defender/docs", "defender/CLAUDE.md", "defender/skills"))
     _junk_checkout(main, tmp_path)
@@ -594,9 +389,6 @@ def test_census_and_pointer_scans_run_in_a_checkout_holding_nested_checkouts(tmp
     assert not [e for e in verdicts[0][0] if any(j in e[0] for j in junk)]
 
 
-#: Split modules' names that may vanish: lessons_frontier's location-derived root (m2: it may
-#: become an import of the paths helper). Its `main` and `_positive_int` stay: its `__main__`
-#: block travels with it (human, 2026-10-04).
 ALLOWED_DROPS = {"defender/scripts/lessons/lessons_frontier.py": {"REPO_ROOT"}}
 #: Remainder names a later issue deleted outright, so they are defined nowhere: #1235 moved the
 #: per-lead row read onto the run's `RunState.lead_rows`, and the file reader `lead_rows` left.
@@ -659,22 +451,6 @@ def _name_census(base_path: str, shared: set[str]) -> list[str]:
 
 
 def test_a_name_in_a_split_module_that_no_placement_row_claims():
-    """Every top-level name defined in a split module has exactly one home after the move: none
-    dropped, none defined twice, none left importable from the old path, every importer
-    repointed. Under the 2026-10-04 scope cut the split modules are `record_query` (its
-    query-rule slice moves to the flat tier under base names; its remainder, the guards and
-    writers owned by #1165, stays in `record_query.py`) and `lessons_frontier` (moved whole with
-    its `__main__` block; only its location-derived `REPO_ROOT` may go, m2). The name census
-    (old names in = new names out, per P9) reconciles. Where a name goes when the doc's table
-    does not place it is the implementer's within the 10-03 module placement, but the one-home
-    rule is not.
-
-    Observed: each base name (golden inventory) counted among the new definitions outside
-    `scripts/` (a name several scripts modules define is counted inside the homes of its own
-    module's other names); each record_query remainder name is still defined in
-    `record_query.py` and nowhere new, and no rule-slice name is; `lessons_frontier.py` is
-    gone and the census holds no edge into it.
-    """
     inv = S.base_inventory()["py_names"]
     seen: dict[str, int] = {}
     for names in inv.values():
@@ -749,23 +525,6 @@ OUT_MAIN_BLOCKS = (
 
 @pytest.mark.gate
 def test_wrapper_and_engine_each_may_carry_a_main_block():
-    """Every `__main__` block that survives under scripts/ has a non-test caller (a bin shim,
-    run_common, CI, docs), except the named OUT modules' blocks, which stay in scripts/ with
-    their modules under the 2026-10-04 cut (`visualize/_mirror_write.py`,
-    `visualize/visualize_episode.py`, `visualize/visualize_run.py`, `workspace_map.py`; their
-    drops are parked with #1105). Each surviving block configures logging
-    or carries the logging-setup marker, so the logging-setup gate stays green. The wrapper set
-    passes the repository-wide gates (logging setup, python duplication, dead code, import
-    order) without exemption and without growing a baseline; the engine keeps a main only if
-    the wrapper calls it.
-
-    Observed: each tracked `scripts/` module with a `__main__` guard is invoked by path or `-m`
-    from a shim, `run_common`, a CI workflow or a tracked doc; the real logging-setup lint's
-    scan reports no `scripts/` file; no lint baseline names a wrapper and no wrapper carries an
-    inline exemption other than the logging-setup marker; an engine that defines `main` is
-    called through it by its wrapper; each named OUT module still carries its block. Positive
-    control: the invocation finder sees CI's `box_image.py` call.
-    """
     calls = _invocations()
     invoked = {t for _, _, t in calls}
     assert "defender/scripts/box_image.py" in invoked
@@ -794,17 +553,6 @@ def test_wrapper_and_engine_each_may_carry_a_main_block():
 
 
 def test_a_test_or_child_process_loads_a_moved_module_by_its_old_file_path():
-    """A test that loads a moved module by its old file path or spawns a moved program by that
-    path fails with a clear missing-file error once the file is gone; none passes on a stale
-    compiled copy (an orphan __pycache__ is not importable without its source). O5's suites are
-    repointed (fixtures may change, assertions do not), by-path loaders and child spawns going
-    to the wrapper or the engine's new path.
-
-    Observed: no test file outside this suite holds a string literal (docstrings aside) naming
-    a moved module's old path; each old path is absent, so a path load raises the missing-file
-    error naming it (scripts_path_load_of_a_moved_file_errors_and_serves_no_stale_copy drives
-    the loads, spawns and the orphan cache).
-    """
     old = [f.split("defender/", 1)[1] for f in _moved_old_py()]
     assert [f for f in _moved_old_py() if (S.REPO_ROOT / f).exists()] == []
     suite = S.rel(S.SUITE)
@@ -825,18 +573,6 @@ def test_a_test_or_child_process_loads_a_moved_module_by_its_old_file_path():
 
 
 def test_old_directory_survives_holding_only_compiled_caches_or_assets(tmp_path):
-    """An old scripts subfolder left in a working tree holding only caches, assets or nothing
-    has no package initialiser, so the old dotted name would import as an empty namespace
-    package; the placement check and the O1 census give the same verdict in that tree and in a
-    fresh clone: no module remains there, an outside importer of the old name is a hit, and the
-    empty folder is not treated as holding an entry point or a module.
-
-    Observed: a committed tmp copy with an outside importer of an old subfolder's name planted
-    (and committed), then given an untracked leftover subfolder (a compiled cache, an asset, an
-    empty directory) — its placement and census verdicts equal a fresh clone's; the clone's
-    placement verdict is empty (no module remains under scripts/) and the importer is a hit in
-    both.
-    """
     work = C.tree_copy(tmp_path / "work")
     line = C.plant(work, "defender/runtime/verbs.py",
                    "from defender.scripts.visualize import visualize_run\n")
@@ -859,16 +595,6 @@ def test_old_directory_survives_holding_only_compiled_caches_or_assets(tmp_path)
 
 def test_old_dotted_name_that_still_resolves_because_another_checkout_with_the_old_layout_is_importable(
         tmp_path):
-    """A leftover import of a vanished defender.scripts module is found by the census (an AST
-    check that does not depend on resolution) and by CI's clean checkout, even where a second
-    checkout with the old layout makes the name resolve locally; a local green run proves
-    nothing about it, and the suite must not rely on resolution to detect it.
-
-    Observed: a child whose path holds this checkout and then a foreign checkout with the old
-    layout; the vanished name resolves there (through the `defender` namespace), and the census
-    run in that same child over a copy holding the leftover import reports it — as does the
-    census over a fresh clone of the copy.
-    """
     foreign = tmp_path / "foreign"
     (foreign / "defender" / "scripts").mkdir(parents=True)
     (foreign / "defender" / "scripts" / "vanished_1080.py").write_text("X = 1\n", "utf-8")
@@ -896,15 +622,6 @@ def test_old_dotted_name_that_still_resolves_because_another_checkout_with_the_o
 
 
 def test_new_home_directory_with_no_package_marker_among_packages_that_have_one(tmp_path):
-    """A moved module's directory is seen by the census and the placement test whether or not
-    it has an __init__.py (they find modules by walking files or resolving imports, not by
-    package markers): the new directory choice cannot make a module invisible to either. (The
-    direction-test half is parked with the O2 test, #1105 / #1172, by the 2026-10-04 cut.)
-
-    Observed: in a tmp git copy, two directories with no `__init__.py` — a runtime one holding
-    an import of scripts (census hit) and a scripts one holding a stray module (placement
-    finding).
-    """
     root = C.tree_copy(tmp_path / "copy")
     a = C.plant(root, "defender/runtime/nomark_a/m.py", PLANT_IMPORT)
     C.plant(root, "defender/scripts/nomark_d/stray.py", "X = 1\n")
@@ -916,18 +633,6 @@ def test_new_home_directory_with_no_package_marker_among_packages_that_have_one(
 
 
 def test_placement_and_direction_checks_run_in_the_environment_of_the_job_that_runs_them():
-    """The placement, census and lint checks are static (AST or file reads): none imports a
-    moved module to find where it is defined, so each runs in the dev-only code-smells job. A
-    lint that already reaches platform code (shippable-surface via declared_systems, the
-    disposition census via the verb roster) keeps its import chain inside what that job
-    installs after the moves. (The direction-test half is parked with the O2 test by the
-    2026-10-04 cut.)
-
-    Observed: (1) a child runs the census, the placement check and the anchor scan, then
-    reports which `defender.*` modules it loaded — no scripts module, no integrations or reports
-    module; (2) a child that refuses every package the dev-only job does not install imports
-    both lints and resolves the shippable-surface exclusions.
-    """
     body = ("import json, sys\n"
             "from defender.tests.scripts_1080_split import _census1080 as C\n"
             "C.census(); C.placement_findings()\n"
@@ -958,12 +663,6 @@ _ALIASES = textwrap.dedent('''\
 
 
 def test_import_aliased_or_wildcard():
-    """An import of a scripts module under an alias, with a trailing wildcard or as one of
-    several names on one line is a census hit: aliasing and multiplicity do not hide it, and a
-    wildcard from a scripts module is flagged.
-
-    Observed: a planted module with each form; every target is reported on its line.
-    """
     rel = "defender/runtime/_spec1080_alias.py"
     got = [(e.line, e.target) for e in C.census(overlay={rel: _ALIASES}) if e.importer == rel]
     assert {line for line, _ in got} == {1, 2, 3, 4}
@@ -973,13 +672,6 @@ def test_import_aliased_or_wildcard():
 
 
 def test_relative_import_that_climbs_into_scripts():
-    """A relative import of two or more dots that reaches a scripts module from another
-    defender package is a census hit: relative forms are resolved to the target module before
-    the check (as in the K1 census).
-
-    Observed: planted relative imports of two and three dots from runtime packages, and of
-    the bare package; each is reported as the absolute scripts target.
-    """
     overlay = {
         "defender/runtime/_spec1080_rel.py": "from ..scripts.pricing import usage_cost\n",
         "defender/runtime/branch/_spec1080_rel.py": "from ...scripts import pricing\n",
@@ -1007,14 +699,6 @@ _STRINGS = textwrap.dedent('''\
 
 
 def test_module_named_only_in_a_string_a_comment_or_a_docstring():
-    """A module outside scripts/ that spells a scripts path only in a docstring, comment, log
-    message, remedy string or data constant, and imports nothing from it, is not an
-    import-census hit (no import statement). Its stale path text is the pointer gate's concern
-    (A43), not O1's.
-
-    Observed: a planted module spelling scripts paths in each of those places is not reported;
-    the same module with one real import added is (positive control).
-    """
     rel = "defender/runtime/_spec1080_strings.py"
     assert [e for e in C.census(overlay={rel: _STRINGS}) if e.importer == rel] == []
     with_import = _STRINGS + "from defender.scripts.pricing import usage_cost\n"
@@ -1023,18 +707,6 @@ def test_module_named_only_in_a_string_a_comment_or_a_docstring():
 
 
 def test_scripts_path_exec_from_shell_ci_and_docs(tmp_path):
-    """A bin/ shim, a CI step or a markdown file that invokes a scripts file by path or `-m`,
-    with no Python file importing it, is not an O1 hit: those callers are legitimate and are
-    exactly why a wrapper stays; the path or module they name keeps working after the move
-    (F40).
-
-    Observed: every invocation by path or `-m` in the shims, `run_common`, CI workflows and
-    tracked docs that named a live file at the base still names a file that exists (a pin
-    already dead at the base, such as a doc's `wazuh_adapter.py`, is s110's, not this demand's);
-    and a tmp copy given a planted shell
-    script, CI step, markdown invocation and a by-path spawn in Python reports the same census
-    as before.
-    """
     base = set(S.base_inventory()["files"])
     calls = [(caller, line, target, target if target.endswith(".py")
               else target.replace(".", "/") + ".py") for caller, line, target in _invocations()]
@@ -1062,14 +734,6 @@ _JUNK = ("defender/.venv/lib/m.py", "defender/runtime/__pycache__/m.py",
 
 
 def test_python_files_in_caches_vendored_trees_and_build_output(tmp_path):
-    """The census scans the source of the checkout's defender/ and the repo's scripts/ and
-    ignores virtualenvs, __pycache__, node_modules, build or dist output and tool caches: files
-    there that spell `scripts` produce no hits and cannot flip the verdict.
-
-    Observed: a tmp git copy where each junk location holds a module importing a scripts
-    module — once untracked, once force-added to the index — reports the same census as the
-    clean copy. Positive control: the same module in a source directory is a hit.
-    """
     root = C.tree_copy(tmp_path / "copy")
     clean = _rel_edges(C.census(root))
     for i, rel in enumerate(_JUNK):
@@ -1094,15 +758,6 @@ _OTHER_SCRIPTS = textwrap.dedent('''\
 
 
 def test_the_other_scripts_package():
-    """The repo's top-level `scripts/` (lint, testing, analytics) importing `from
-    scripts.lint…` is not an import of defender/scripts: only modules under defender/scripts/
-    are targets of O1. The repo's scripts/ is an importer scope (O1 scans it), not a target,
-    and a dotted path merely containing the word scripts is not a hit.
-
-    Observed: a planted module under the repo's `scripts/` importing the repo's own scripts
-    package and look-alike dotted paths is not reported; the same module with a real
-    `defender.scripts` import is (the repo's scripts/ is scanned).
-    """
     rel = "scripts/lint/_spec1080_other.py"
     assert [e for e in C.census(overlay={rel: _OTHER_SCRIPTS}) if e.importer == rel] == []
     real = _OTHER_SCRIPTS + "from defender.scripts.tenant import main\n"
@@ -1111,14 +766,6 @@ def test_the_other_scripts_package():
 
 
 def test_importer_inside_scripts_of_a_moved_module():
-    """A staying wrapper under defender/scripts/ importing its engine from the new home, and a
-    staying scripts file importing another scripts file, are not O1 hits: the census flags
-    importers outside scripts/ of modules under it. Inside-scripts edges are free.
-
-    Observed: a staying command importing another staying command and an adapter importing the
-    stub transport and the integrations faults, planted inside `scripts/`, are not reported; the
-    same line in a runtime module is (positive control).
-    """
     overlay = {
         **_overlay_with("defender/scripts/tenant.py", PLANT_IMPORT),
         **_overlay_with("defender/scripts/adapters/cmdb_adapter.py",
@@ -1132,20 +779,6 @@ def test_importer_inside_scripts_of_a_moved_module():
 
 def test_1080_a_path_load_or_spawn_of_a_moved_scripts_file_errors_with_a_missing_file_message(
         tmp_path):
-    """A path load (`spec_from_file_location`), a spawn by path or a `-m` run of a file that
-    moved out of `defender/scripts/` fails with a missing-file error that names the old path,
-    and no orphan compiled copy answers in its place. The registry's path load of the adapters
-    that stay under `scripts/adapters/` still succeeds. The import census counts import
-    statements only, so a path load is not a census hit (H1 (a)); this is the fail-loud half the
-    census does not give the lane.
-
-    Observed: each moved file is absent and a path load of it raises `FileNotFoundError` naming
-    it; a spawn by path and by `-m` of the moved `lessons_frontier` exits nonzero naming the
-    path or module (the 2026-10-04 cut keeps `visualize_run` and `workspace_map` in place, so
-    their two spawns are parked with #1105); an orphan
-    `__pycache__` copy of a module whose source is gone is not importable in a child; the
-    registry's own loader runs every staying adapter and reads the base roster's verbs (golden).
-    """
     old = _moved_old_py()
     assert [f for f in old if (S.REPO_ROOT / f).exists()] == [], "moved files are still there"
     for f in old:

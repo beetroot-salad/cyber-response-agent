@@ -333,9 +333,6 @@ def _assert_setup_fault_stopped_the_run(d: S.Drive) -> None:
 
 def test_n12_kills_from_other_causes_end_the_run(tmp_path: Path,
                                                  monkeypatch: pytest.MonkeyPatch) -> None:
-    """A budget kill raised while the lead runs, a run-level failure kill reached by MAIN's own
-    failures, a store fault after the lead produced output, and a setup fault each stop the run
-    loudly; none is turned into a correlation ending."""
     tenant = S.plant_tenant()
 
     stores: list = []
@@ -366,10 +363,6 @@ def test_n12_kills_from_other_causes_end_the_run(tmp_path: Path,
 
 
 def test_a7_one_deadline_bounds_how_late_main_starts(tmp_path: Path) -> None:
-    """However the lead stalls — a hung model request, a retried one, a trickling response, a slow
-    backend call — MAIN's opening request follows within the correlation deadline (plus the
-    longest step that cannot be cut, a bash call of up to 120 s) of the lead's start, and the
-    lead's ending is then 'timed out'."""
     tenant = S.plant_tenant()
     limits = S.with_deadline(DEADLINE_S)
     stall_kinds: dict[str, dict[str, Any]] = {
@@ -449,15 +442,6 @@ def test_a7_a_timed_out_lead_session_reads_back_as_timed_out(tmp_path: Path) -> 
 
 def test_r5_a_correlation_dispatch_without_a_usable_deadline_refuses_to_run(
         tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    """The correlation dispatch cannot be driven without a deadline: no deadline, zero, a negative
-    value, a non-number and a non-finite one are each refused before the lead starts, naming the
-    setting, and none is replaced by a fallback value (a zero is not a spelling of 'unbounded' or
-    of 'use a default'). The deadline is a configured positive bound at or under 1200 s - 120 s -
-    MAIN's minimum time; the spec fixes that ceiling against the default run clock, checked once
-    and never recomputed per run (B3), and the implementer picks the number from real
-    correlation timings (78, H1). A refused dispatch is a setup fault that stops the run loudly,
-    not the lead's own 'timed out' ending. Positive control: the smallest valid deadline times a
-    stalled lead out as 'timed out'."""
     tenant = S.plant_tenant()
 
     # Positive control: a small positive deadline cuts a stalled lead as "timed out".
@@ -503,11 +487,6 @@ def test_r5_a_correlation_dispatch_without_a_usable_deadline_refuses_to_run(
 
 def test_r7_a_lead_main_dispatched_is_stamped_and_read_back_as_before(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A lead MAIN dispatches, ended by each existing ending (request limit, retry exhausted,
-    aborted, budget, store, dead end), is stamped with the same truncated_by member as at base and
-    normalized_truncated_by reads each back as that member -- none as 'timed-out', none as no
-    ending -- and the correlation deadline does not cut it. Positive control: the correlation
-    lead's timed-out session reads back as timed-out beside it."""
     rb = _run_end()
     tenant = S.plant_tenant()
     stalled = {"leads_l3": [S.text(LATE)], "fault_l3": S.LeadFault(delay=STALL_S)}
@@ -572,9 +551,6 @@ def test_r7_a_lead_main_dispatched_is_stamped_and_read_back_as_before(
 
 def test_p002_spawn_budget_sized_to_mains_own_leads(tmp_path: Path,
                                                     monkeypatch: pytest.MonkeyPatch) -> None:
-    """The lead's spawn and calls spend the run's one budget with no reserved allowance; the
-    lead's failures never count toward the run-level failure kill; a budget kill raised while
-    the lead runs stops the run loudly as a kill from another cause."""
     tenant = S.plant_tenant()
 
     # One budget, no reserved allowance: a spawn cap sized for exactly one lead is spent by the
@@ -619,10 +595,6 @@ def test_p002_spawn_budget_sized_to_mains_own_leads(tmp_path: Path,
 
 
 def test_p003_correlation_lead_still_running_at_mains_second_r(tmp_path: Path) -> None:
-    """MAIN's first request follows the lead's end. A hung model request in the lead ends as the
-    named ending "timed out". Every backend call is bounded by its transport timeout (at most 40 s
-    per HTTP call, 120 s per bash call; RJ-04). The run reaches report.md after the named
-    ending."""
     tenant = S.plant_tenant()
     done = S.run_alert(tmp_path / "done", tenant=tenant, run_id="r1222-p003-done",
                        leads={L3: [_alerts_call(), S.text(SUMMARY)]},
@@ -731,9 +703,6 @@ def test_p167_model_request_slow_retried_or_just_past_the_time(tmp_path: Path) -
 
 def test_p171_run_stopped_before_mains_first_request(tmp_path: Path,
                                                      monkeypatch: pytest.MonkeyPatch) -> None:
-    """A handled stop before MAIN's first request goes down the existing early-stop path: the run
-    summary names the cause and that the agent never started, and the post-run steps do what they
-    do for any truncated run."""
     tenant = S.plant_tenant()
     real_enqueue = S.sym("run_common", "enqueue_curation")
 

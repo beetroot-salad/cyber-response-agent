@@ -184,9 +184,6 @@ def test_branch_point_ignores_a_log_row_with_a_non_null_from_message_id(tmp_path
 
 def test_branch_point_requires_a_fork_reason_not_just_a_null_origin(tmp_path):
     """A branch point is a log row that is BOTH origin-less and fork-reasoned: the reader"""
-    # provenance: the premise this closes was implicit in FK-A(c) and never written down —
-    # a NULL origin was unreachable except through fork() until a linear reason-bearing move
-    # became legal. PR-6 (executed) is what makes the fold-shaped route real.
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -222,9 +219,6 @@ def test_branch_point_requires_a_fork_reason_not_just_a_null_origin(tmp_path):
 
 def test_head_and_log_move_in_one_transaction(tmp_path):
     """The head UPDATE and the conditional log INSERT ride inside the same transaction as the"""
-    # provenance: issue obligation 8; P11-P14 and P16. The fault object cites B8 (executed).
-    # The coroutine-shape assertion records the no-await constraint; it is true of today's
-    # code and does not discriminate on its own.
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     r1, r2, r3 = linear_turns(store, session_id, 3)
@@ -260,10 +254,6 @@ def test_head_and_log_move_in_one_transaction(tmp_path):
 
 def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(tmp_path):
     """A refused append is invisible to a later reader, whatever refused it: when the wait for a"""
-    # provenance: P1, P2 (the class is deliberately unpinned — the assertion is the rollback),
-    # P7, P8 and P86. rp-c1 (executed) measured the exhaustion failure: SQLITE_FULL with
-    # already-committed rows still readable. What a contention outlasting the timeout raises
-    # is unprobed, which is why nothing here names its class.
     ss = store_mod()
     base = runs_base(tmp_path)
     real = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
@@ -318,13 +308,6 @@ def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(t
 
 
 def test_a_unique_seq_collision_rolls_back_the_head_move_and_the_log(tmp_path):
-    """    A caller-supplied `seq` that collides with an existing row drives the UNIQUE constraint
-    and rolls the whole call back identically to a payload failure: head and log are left
-    exactly where they were, and the connection stays usable afterwards."""
-    # provenance: P37, the one failure shape a probe drove end to end. PR-9 (executed, on the
-    # real append): zero message and message_payload rows survive, the tip is unchanged, a
-    # subsequent append succeeds — and the organic case cannot arise, since _next_seq
-    # recomputes MAX(seq)+1 before every insert, so the explicit coordinate is the only route.
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
     r1 = store.append(session_id, [user_request("root")], agent_id="main", seq=0)[0]
@@ -348,10 +331,6 @@ def test_a_unique_seq_collision_rolls_back_the_head_move_and_the_log(tmp_path):
 
 def test_foreign_key_violations_on_the_head_and_log_writes_raise_and_roll_back(tmp_path):
     """Every foreign key this change relies on is enforced at write time and every violation"""
-    # provenance: P3, P4, P22, P34 and P36. PR-8 (executed) probed the UPDATE path B9 had not
-    # and confirmed PRAGMA foreign_keys is ON on the real connection; PR-4: message.session_id
-    # does carry a key to session; PR-10: a nonexistent parent raises at the INSERT inside
-    # BEGIN IMMEDIATE. P29 collapses onto this.
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")

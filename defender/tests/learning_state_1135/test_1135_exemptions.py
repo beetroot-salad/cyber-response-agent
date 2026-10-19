@@ -42,11 +42,6 @@ ENV = "DEFENDER_LEARNING_STATE_DIR"
 LEAKED = "outside-leak-1135"
 
 
-# ---------------------------------------------------------------------------------------------
-# helpers (this file only)
-# ---------------------------------------------------------------------------------------------
-
-
 def _judge_roots(tmp_path: Path, monkeypatch, root: Path) -> Path:
     """The judge's three roots inside `tmp_path`, the state root spelled through the env var (as
     the launcher's `_grade` resolves it). Returns the runs base."""
@@ -104,21 +99,9 @@ def _channel(view: dict, name: str) -> dict:
     return next(c for c in view["channels"] if c["name"] == name)
 
 
-# ---------------------------------------------------------------------------------------------
-# E1 — the run-end enqueue logs and continues (#33)
-# ---------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("at", ["queue-folder", "record"])
 def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path: Path, monkeypatch,
                                                                       caplog, at):
-    """With a symlink planted at author-queue/ (or at the case's record name):
-    run_common.enqueue_curation catches the StateRefused by name, logs "could not enqueue" naming
-    the refused entry, and returns False; nothing is written through the link; the investigation's
-    exit status and its render step are unchanged. run_common.enqueue_curation keeps its existing
-    OSError arm beside the new one (X15's test drives it) and has a third arm for the missing
-    root's FatalConfigError (3.1 C, F40; #13 drives it). A failure of any other class escapes as
-    today (JF4 A)."""
     paths = S.built_paths(tmp_path)
     monkeypatch.setenv(ENV, str(paths.state_root))
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
@@ -178,21 +161,7 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
         "the handle does not see the request the run-end enqueue wrote"
 
 
-# ---------------------------------------------------------------------------------------------
-# E2 — the queue page counts a refused sidecar unreadable (#34)
-# ---------------------------------------------------------------------------------------------
-
-
 def test_e2_the_queue_page_counts_a_refused_sidecar_unreadable(tmp_path: Path):
-    """With a symlink planted at a channel's deadletter (graveyard) file, the queue page still
-    builds: that channel's unreadable count includes the refused sidecar; none of the link
-    target's rows appear on the page; no other field of the page contract changes (R16: no names,
-    no contract change); building the page writes nothing (JF17).
-
-    The tree also holds one torn live delivery record in the pending_delivery_dir (JF17, D20):
-    the page reads it (it counts it unreadable, as today) and never quarantines it, because
-    quarantining an unreadable delivery record is the drain's verb, never the page's. Each page
-    build, before and after the plant, leaves the tree byte for byte as it found it."""
     paths = S.built_paths(tmp_path)
     S.write_jsonl(paths.state_root / FINDINGS.queue, [{"finding_id": "ep-1/b/0/0", "run_id": "ep-1"}])
     graveyard = paths.state_root / QUESTIONER_FINDINGS.deadletter
@@ -236,27 +205,9 @@ def test_e2_the_queue_page_counts_a_refused_sidecar_unreadable(tmp_path: Path):
     assert kept == ["ep-2/c/0/0"], f"the plain graveyard beside the refused one reads {kept}"
 
 
-# ---------------------------------------------------------------------------------------------
-# E3 — the judge logs and continues (#35)
-# ---------------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("fault", ["linked-queue", "missing-root"])
 def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path, monkeypatch,
                                                                   caplog, fault):
-    """With a symlink planted at the findings channel's queue file and a grade that enqueues at
-    least one row: grade_episode raises StateRefused out of the enqueue; the launcher's _grade logs
-    a warning naming the refused entry; the launch continues with its own outcome unchanged (R13);
-    nothing is appended through the link. A missing root takes the same route (3.1 C):
-    LearningState.open raises FatalConfigError naming the root and DEFENDER_LEARNING_STATE_DIR,
-    _grade's catch logs it as a warning, and the launch continues. Whether judge.yaml is written
-    is not asserted (JF5 A).
-
-    "Its own outcome unchanged" is observed on the episode's archive: every record the episode
-    held before the grade (its manifest, review, world archives and ledgers) is byte for byte
-    the same after the failed grade, which may only add its own files (today's grade only adds,
-    probed at base). Positive control: with the fault removed, a fresh episode's grade logs no
-    warning and appends its rows to the findings queue at today's name."""
     if fault == "linked-queue":
         paths = S.built_paths(tmp_path)
         root = paths.state_root
@@ -319,16 +270,8 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
         f"the control's grade appended {len(queued)} rows, not the episode's enqueued count")
 
 
-# ---------------------------------------------------------------------------------------------
-# I10 — the page's failed folder is a planted entry (s_i10)
-# ---------------------------------------------------------------------------------------------
-
-
 def test_1135_the_failed_folder_is_a_planted_entry_when_the_page_lists_failed_requests(
         tmp_path: Path):
-    """The planted failed folder is counted unreadable on the page and the page still builds
-    (E2); the other channels and the other failed records show normally, and building the page
-    changes nothing on disk."""
     paths = S.built_paths(tmp_path)
     S.write_jsonl(paths.state_root / FINDINGS.queue, [{"finding_id": "ep-1/b/0/0", "run_id": "ep-1"}])
     delivered = paths.state_root / "_pending_delivery" / "failed" / "delivery-1135.json"
@@ -368,17 +311,7 @@ def test_1135_the_failed_folder_is_a_planted_entry_when_the_page_lists_failed_re
     assert LEAKED not in repr(answer), "failed_requests answered a record read through the link"
 
 
-# ---------------------------------------------------------------------------------------------
-# #43 — every display reader of a describe string stays coherent (F7 = JF8 reading A)
-# ---------------------------------------------------------------------------------------------
-
-
 def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, monkeypatch):
-    """Every reader of a describe string agrees with the record it names: the judge yaml's
-    enqueued_to/world_enqueued_to come from describe, and reading the queue back through
-    enqueued_to (_judge_921.enqueued_rows, test_921_enqueue_gate.py:531) finds the rows the grade
-    appended; the queue page's state_root field (rendered by frontend/build.py) and
-    visualize_episode's "enqueued to" line render the same string."""
     paths = S.built_paths(tmp_path)
     _judge_roots(tmp_path, monkeypatch, paths.state_root)
     ep = _gradable_episode(tmp_path)
@@ -424,21 +357,8 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
         "frontend/build.py does not render the page's state_root"
 
 
-# ---------------------------------------------------------------------------------------------
-# #12 — the pitfalls stage writes under its own root (X6)
-# ---------------------------------------------------------------------------------------------
-
-
 def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default_root(
         tmp_path: Path, monkeypatch):
-    """run_pitfalls driven on a handle over a non-default root writes nothing under the default
-    root: the pitfalls stage's learning_run_dir is the held root's _pending_leads (from
-    stage_dir), and no folder, trace or budget.json appears under
-    the default root's `_pending_leads/`.
-
-    Only the model is out of reach (JF12): the real spawn (`_spawn_author_agent`, F32) runs its
-    own folder preparation, and the stage stops at the model's key sourcing, because the
-    configured model is one no provider serves."""
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", "no-such-model-1135")
     paths = S.built_paths(tmp_path, repo_root=seed_skills_repo(tmp_path / "repo"))

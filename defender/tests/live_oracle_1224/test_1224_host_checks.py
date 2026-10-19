@@ -1,6 +1,3 @@
-"""Host checks 1-5 on an oracle submission (`check_submission`): structural diff, forged-row shape, id collision, exact recorded facts,
-counting arithmetic; failing submissions are never served and go back to the oracle; forged rows commit atomically with the verified answer.
-"""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _run_handle_1165
@@ -44,11 +41,6 @@ DEPT_FACT = S.fact("f1", "alice moved to the finance department and logged on to
                    ("alice", "db-1"))
 #: World c's fact (another world's fact_id for world b's scenarios).
 C_FACT = S.fact("f2", "bob reset carol's password from 10.0.0.9", ("bob", "carol", "10.0.0.9"))
-
-
-# --------------------------------------------------------------------------------------
-# The scene: one world served through the production registry over the fixture estate.
-# --------------------------------------------------------------------------------------
 
 
 def _doc(*b_facts: dict, source_run_dir: str | None = None) -> dict:
@@ -127,11 +119,6 @@ def _honest(fid: str = "fg-1", *, row: dict = FORGED_ROW, base_rows: tuple = (BA
                      S.claim(added=[S.added(fid, fact_id)], **claim_kw))]
 
 
-# --------------------------------------------------------------------------------------
-# Observing the oracle's conversation: only what the HOST appended after a given move.
-# --------------------------------------------------------------------------------------
-
-
 def _move_index(o: S.ScriptedModel, tool: str, k: int) -> int:
     n = 0
     for i, move in enumerate(o.consumed):
@@ -200,19 +187,9 @@ def _only_oracle_row(sc: _Scene, *, attempts: int, served: Any) -> dict:
     return row
 
 
-
-
-# --------------------------------------------------------------------------------------
-# The verifier's side (F-01): what its pass was handed, and what never reaches it.
-# --------------------------------------------------------------------------------------
-
 #: World b's default fact (f1), as the verifier must be handed it.
 F1_STATEMENT = S.fact()["statement"]
 
-#: A sentinel in the oracle's OWN work during the attempt the verifier refuses — its python
-#: scratch source. That is the oracle's transcript, which the verifier is never handed (design
-#: step 5: "never the oracle's reasoning"; M17=A). A `python` move costs no attempt (M03=A) and
-#: the scene's sandboxed box answers it.
 SCRATCH = "ORACLE-SCRATCH-7e3a"
 
 
@@ -250,17 +227,7 @@ def _control(tmp_path: Path, **scene_kw: Any) -> _Scene:
     return _scene(tmp_path / "control", **scene_kw)
 
 
-# --------------------------------------------------------------------------------------
-# d04e — the positive every refusal below is paired with.
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_answer_differing_exactly_by_its_claim_is_served_as_oracle(tmp_path):
-    """d04e_honest_answer_served — an answer differing from the base exactly by its claim passes checks 1-5 and the verifier and is served and recorded `oracle` on the first attempt.
-
-    The removal's side query re-runs through the run_query door to the claimed count (check 5,
-    H-02); the change is claimed by (entity, field) (check 4).
-    """
     vpn = {"user": "alice", "event_id": "e-101", "action": "vpn", "host": "vpn-1", "ts": TS_BASE}
     side = S.query_params("event_id:e-101")
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001"}
@@ -307,17 +274,7 @@ def test_1224_answer_differing_exactly_by_its_claim_is_served_as_oracle(tmp_path
     assert len(sc.rows("answers")) == 2, sc.rows("answers")
 
 
-# --------------------------------------------------------------------------------------
-# Recorded facts and frozen forged rows (check 4; the forged store; M13=A, M15=B, S4).
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_answer_contradicting_a_recorded_fact_fails_check_4_and_retries(tmp_path):
-    """d03a_recorded_fact_holds_across_systems — a later submission on another system giving a recorded (entity, field) another value fails check 4, is not served, and goes back to the oracle.
-
-    M13=A: check 4 keys on the exact (entity string, field) and compares exact JSON values; the
-    record is committed with the verified answer that carried it (M15=B).
-    """
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001", "department": "sales"}
     sc = _scene(tmp_path, doc=_doc(DEPT_FACT),
                 live=[("idp", "query", ALICE, BASE), ("siem-x", "lookup", SIEM_ALICE, siem)])
@@ -347,11 +304,6 @@ def test_1224_answer_contradicting_a_recorded_fact_fails_check_4_and_retries(tmp
 
 
 def test_1224_forged_row_is_written_once_and_never_rewritten(tmp_path):
-    """d03b_forged_rows_frozen — a forged row is stored once under its forged_id; a second write with other content is refused and a submission contradicting the frozen row fails check 4.
-
-    M15=B: the row freezes when the verified answer carrying it is stored; S4: a later call reuses
-    it (same forged_id, same values).
-    """
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE),
                                 ("idp", "query", DB1, {"rows": []})])
     rewritten = _forged(action="tgs", host="db-2")
@@ -377,12 +329,6 @@ def test_1224_forged_row_is_written_once_and_never_rewritten(tmp_path):
 
 
 def test_1224_forged_store_and_recorded_facts_live_under_the_world_dir(tmp_path):
-    """d03c_store_outside_the_conversation — forged rows and recorded facts are stored on disk in the world's own oracle directory and survive a restarted oracle conversation unchanged.
-
-    N14: the world's oracle-side state lives in its own per-world directory, outside the archive
-    tree and the run dir. The restart here is a fresh registry and a fresh oracle conversation over
-    the same episode (a resumed sibling); its prefix carries the recorded facts back.
-    """
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001"}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE),
                                 ("siem-x", "lookup", SIEM_ALICE, siem)])
@@ -414,17 +360,7 @@ def test_1224_forged_store_and_recorded_facts_live_under_the_world_dir(tmp_path)
     assert facts_file.read_bytes().startswith(before[1]), "the recorded facts are unchanged"
 
 
-# --------------------------------------------------------------------------------------
-# Check 1 (N09) — every base-to-served difference is in the claim — and its pairs.
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_undeclared_added_row_fails_check_1_and_is_not_served(tmp_path):
-    """d04a_undeclared_row_not_served — an added row the claim does not list fails check 1, never reaches the investigator, and goes back to the oracle.
-
-    Observed through the whole gather loop: the query tool (the investigator's side) receives only
-    the retried, honest answer.
-    """
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE)])
     undeclared = _forged(event_id="e-bad1", action="tgs")
     o = S.oracle(S.submit({"rows": [BASE_ROW, undeclared]}, S.EMPTY_CLAIM), *_honest())
@@ -443,10 +379,6 @@ def test_1224_undeclared_added_row_fails_check_1_and_is_not_served(tmp_path):
 
 
 def test_1224_silent_edit_of_a_base_row_fails_check_1(tmp_path):
-    """d04b_silent_edit_not_served — a base row edited without a claimed change fails check 1 and the edited answer is not served.
-
-    N09: parsed JSON is diffed structurally and every difference must be claimed.
-    """
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE)])
     edited = {**BASE_ROW, "host": "db-9"}
     o = S.oracle(S.forge("fg-1", "f1", "idp", FORGED_ROW),
@@ -461,14 +393,7 @@ def test_1224_silent_edit_of_a_base_row_fails_check_1(tmp_path):
     assert "db-9" not in row["payload_text"], row
 
 
-
-
 def test_1224_wrong_count_or_unreproducible_removal_fails_check_5(tmp_path):
-    """d04d_counting_arithmetic — wrong per-group arithmetic fails check 5, and so does a removal whose side query, re-run by the host, selects another count.
-
-    The re-run is an oracle-side query through the run_query door: granted, at the branch-point
-    clock, recorded in the oracle-side ledger and never in the world ledger (H-02).
-    """
     count_q = S.query_params("count by host")
     counts = {"counts": [{"host": "web-1", "count": 3}, {"host": "db-1", "count": 1}]}
     vpn = {"user": "alice", "event_id": "e-101", "action": "vpn", "host": "vpn-1", "ts": TS_BASE}
@@ -521,12 +446,6 @@ def test_1224_wrong_count_or_unreproducible_removal_fails_check_5(tmp_path):
 
 
 def test_1224_check_tool_and_host_return_one_verdict(tmp_path):
-    """d04h_check_tool_parity — for one base answer, served answer and claim, the oracle's advisory check tool and the host's gate return the same verdict.
-
-    Both call one checker function (M4). Both callers are driven: the oracle checks, then submits,
-    the same input — once failing check 1, once honest. The tool is advisory: it ends no turn and is
-    not an attempt.
-    """
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE)])
     bad = {"rows": [BASE_ROW, _forged(event_id="e-bad1")]}
     honest_claim = S.claim(added=[S.added("fg-1", "f1")])
@@ -547,18 +466,7 @@ def test_1224_check_tool_and_host_return_one_verdict(tmp_path):
     _only_oracle_row(sc, attempts=2, served=SERVED)
 
 
-# --------------------------------------------------------------------------------------
-# Check 2 (M14 re-ruled, D2) — an added row carries one real row's columns and their types.
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_forged_row_with_missing_extra_or_mistyped_column_fails_check_2(tmp_path):
-    """d09a_forged_row_has_real_columns_and_types — where real rows exist, a forged row missing a column of their union, carrying one outside it, or retyping one fails check 2; with no example the call is served.
-
-    RE-PINNED (M14=B; D2). A null in a real row keeps its column. M14 re-ruled 2026-10-10 (PR
-    #1232 round 7): the reference is one real row's column set, not the union; both real rows
-    here share one column set, so the three refused rows fail under either reading.
-    """
     with_null = {"user": "alice", "event_id": "e-099", "action": "logoff", "host": None,
                  "ts": "2026-07-28T14:55:00Z"}
     base = {"rows": [BASE_ROW, with_null]}
@@ -589,10 +497,6 @@ def test_1224_forged_row_with_missing_extra_or_mistyped_column_fails_check_2(tmp
     assert [(r["source"], r.get("attempts")) for r in ledger] == [
         (S.ORACLE_DECISION, 4), (S.ORACLE_DECISION, 1)], ledger
 
-
-# --------------------------------------------------------------------------------------
-# Check 3 (M12=A, S21) — no id-like value of a forged row equals a value in real data.
-# --------------------------------------------------------------------------------------
 
 SID = "S-1-5-21-1004"
 SID_ROW = {"user": "alice", "user_id": SID, "event_id": "e-100", "action": "logon",
@@ -626,15 +530,6 @@ def _plant_alert(tmp_path: Path) -> Path:
 
 
 def test_1224_forged_id_occurring_in_any_real_answer_fails_check_3(tmp_path):
-    """d09b_forged_id_absent_from_real_data — a forged id-like value equal to a value in this world's real data fails check 3, separately for each real source; a claimed entity reference is exempt.
-
-    RE-PINNED (M12=A, S21). Id-like: a column named *id/*_id/uuid/guid/hash, or a UUID or 16+ hex
-    value, matched by exact whole-value text. M12 re-ruled 2026-10-10 (PR #1232 round 7): every
-    colliding value below sits in a real `*_id` column (event_id, record_id, alert_id, user_id),
-    so each stays a real identifier under the narrower rule. Real data: the base recording, this world's live base
-    answer, this world's exploration result (and verifier run_query results and the source alert).
-    Each colliding value below occurs in exactly one source.
-    """
     src = _plant_alert(tmp_path)
     bob = {"user": "bob", "user_id": "S-1-5-21-2002", "event_id": "e-555", "action": "logon",
            "host": "web-2", "ts": TS_BASE}
@@ -682,27 +577,7 @@ def test_1224_forged_id_occurring_in_any_real_answer_fails_check_3(tmp_path):
     assert forged_ids == {"fg-1", "fg-2"}, f"only the served attempts' rows froze: {forged_ids}"
 
 
-# --------------------------------------------------------------------------------------
-# Premises: entity identity and recorded facts (M13=A — host-exact check 4).
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
 def test_input_record_fact_value_is_null_empty_or_typed_differently(tmp_path):
-    """b_p066 — check 4 compares exact JSON values: "true" vs true, "Alice" vs "alice", 5 vs "5" and null vs "" each contradict a recorded fact.
-
-    M13=A: host-exact check 4 compares exact JSON values, so each is a contradiction; normalised
-    equality is not host code.
-    """
     siem = {"entity": "alice", "mfa": "true", "display": "Alice", "logons": 5, "manager": None,
             "record_id": "r-0001"}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, BASE),
@@ -729,12 +604,6 @@ def test_input_record_fact_value_is_null_empty_or_typed_differently(tmp_path):
 
 
 def test_input_record_fact_conflicts_with_itself_or_names_a_stranger(tmp_path):
-    """b_p067 — a second record of one (entity, field) with another value is refused and the field keeps one value; a record for an entity no fact names is accepted.
-
-    M13=A: record_fact may name any entity; a second record of one (entity, field) with a different
-    value is refused. Settled regardless (O2): a later submission giving it the refused value fails
-    check 4.
-    """
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001", "department": "sales"}
     sc = _scene(tmp_path, doc=_doc(DEPT_FACT),
                 live=[("idp", "query", ALICE, BASE), ("siem-x", "lookup", SIEM_ALICE, siem)])
@@ -764,20 +633,7 @@ def test_input_record_fact_conflicts_with_itself_or_names_a_stranger(tmp_path):
             if r.get("entity") == "alice" and r.get("field") == "department"] == ["finance"]
 
 
-# --------------------------------------------------------------------------------------
-# Premises: what a forged row may be tied to, and the forged-row identity.
-# --------------------------------------------------------------------------------------
-
-
 def test_input_oracle_forges_for_a_fact_the_call_does_not_cover_or_that_does_not_exist(tmp_path):
-    """s_p068 — rows tied to another world's fact_id or to a fact_id that exists nowhere fail a host check; for rows tied to a fact the call does not cover, the host honours the verifier's failing verdict (handing it the call, answers and fact); nothing of a refused attempt is frozen.
-
-    The cause is appended to the oracle's conversation (O3: nothing extra). A fact_id outside this
-    world is the HOST's to see: those two attempts fail a host check and never reach the verifier.
-    Whether a call's filters cover a fact is the verifier's judgement (the host parses no query
-    language, O1), and its quality is a non-obligation (F-01); the next pass runs cold. Control: the
-    SAME f1 submission under a passing verifier IS served.
-    """
     bob_base = {"rows": [{"user": "bob", "event_id": "e-200", "action": "logon",
                           "host": "web-2", "ts": TS_BASE}]}
     bob_rows = tuple(bob_base["rows"])
@@ -815,8 +671,6 @@ def test_input_oracle_forges_for_a_fact_the_call_does_not_cover_or_that_does_not
     _only_oracle_row(ctl, attempts=1, served=with_f1)
 
 
-
-
 def test_input_two_forged_rows_get_one_forged_id(tmp_path):
     """s_p070 — two different rows under one forged_id in a call, or a frozen forged_id reused for another fact's row, are refused; forged_id names one frozen row of one fact."""
     carol_fact = S.fact("f3", "carol ran a credential dumper on web-1 at 15:40Z",
@@ -850,29 +704,7 @@ def test_input_two_forged_rows_get_one_forged_id(tmp_path):
     assert _has_row(forged, forged_id="fg-1", row=FORGED_ROW), forged
 
 
-
-
-# --------------------------------------------------------------------------------------
-# Premises: forging with and without real examples (check 2, M14 re-ruled / D2).
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
 def test_input_base_answer_is_a_scalar_or_a_count(tmp_path):
-    """s_p076 — a served count equals the base count adjusted by exactly the claimed rows per group, held exactly by check 5 for integer counts, past 2**53; a forged-only group shows its rows' count.
-
-    Pinned: a scalar count whose claim says 0 + 1 = 2 fails check 5 and the corrected one is served;
-    a grouped count at 2**53 + 1 (an integer past where a float is exact, so a host computing in
-    float would lose it) is held exactly. Not pinned: float-valued counts. The seed prose says
-    "integer and float limits", but a claim's `added` / `removed` are row counts, and nothing in the
-    design or the rulings says which arithmetic (binary-float or exact) check 5 applies to a
-    non-integer group value, so a float case would pin a choice nobody made. A group emptied by
-    removals appears as the source system itself would show it for that query (the oracle's
-    judgement, not pinned here).
-    """
     scalar_q = S.query_params("count user:alice")
     grouped_q = S.query_params("count by host")
     big = 2 ** 53 + 1   # a float cannot hold it, nor big + 1
@@ -910,18 +742,6 @@ def test_input_base_answer_is_a_scalar_or_a_count(tmp_path):
 
 
 def test_input_base_rows_are_heterogeneous(tmp_path):
-    """b_p077 — with heterogeneous real rows, check 2's reference is the union of the observed columns (a null-only column included); a row outside or short of it fails.
-
-    M14=B: check 2's reference is the union of observed columns where examples exist, and a null in
-    a real row keeps its column; order, size and id format are unchecked by the host.
-
-    RE-PINNED 2026-10-10 (M14 re-ruled by the implementer, the human having delegated it; PR
-    #1232 round 7): the reference is the column set of SOME real row — a forged row has one real
-    row's shape, never the union (with event and alert documents at one path, the union is a row
-    no system writes). Refused: r2's shape short its null-only `parent` (a null keeps its
-    column), the union of r1 and r2, and r2's shape plus an extra column. Served: a row with
-    exactly r2's columns, `parent` null included — which the union reading refuses (no `host`).
-    """
     r1 = dict(BASE_ROW)
     r2 = {"user": "alice", "event_id": "e-101", "action": "vpn", "ts": TS_BASE,
           "src_ip": "10.0.0.9", "parent": None}
@@ -945,36 +765,7 @@ def test_input_base_rows_are_heterogeneous(tmp_path):
     _only_oracle_row(sc, attempts=4, served={"rows": [r1, r2, r2_shaped]})
 
 
-
-
-
-
-# --------------------------------------------------------------------------------------
-# Premises: totals, metadata and payload-borne instructions (N09, check 5, O7).
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# Premises: what check 3 calls an id and a collision (M12=A — narrow, exact, in memory).
-# --------------------------------------------------------------------------------------
-
-
-
-
 def test_input_forged_id_is_a_substring_of_a_real_id_or_contains_one(tmp_path):
-    """b_p100 — a prefix or substring of a real id, a value containing one, or one embedded in a non-id column is not a check-3 collision; an exact one is.
-
-    M12=A: "occurs" is exact whole-value equality, no substring rule. The real id here is in this
-    world's live base answer.
-    """
     real = {**BASE_ROW, "event_id": "e-100200", "message": "logon ok"}
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, {"rows": [real]})])
     rows = [_forged(event_id="e-100", message="tgt issued"),
@@ -994,12 +785,6 @@ def test_input_forged_id_is_a_substring_of_a_real_id_or_contains_one(tmp_path):
     _only_oracle_row(sc, attempts=2, served={"rows": [real, *rows]})
 
 
-
-
-#: A judge reply in the coined v2 shape (a world-scope `bucket` and `systems`, the family-scope
-#: `verdict_word`), so one default answers both scopes; its content is not the subject.
-#: #1234: no `verdict_word` — the family word is retired and a reply carrying it is refused
-#: by that name (A17).
 _JUDGE_REPLY = S.as_reply_text(J.reply_doc(findings=[], bucket="none", systems=[]))
 
 
@@ -1046,19 +831,6 @@ def _grade(ep: Path, judge: Any, where: Path) -> BaseException | None:
 
 
 def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp_path):
-    """b_p102 — a frozen forged row stays frozen when this world's real data later collides with its id: it is not rewritten and is still reused and served, and the collision reaches the judge: world b's judge prompt carries the colliding real row.
-
-    M12=A: a frozen row stays frozen when real data later collides, the collision recorded for the
-    judge. S21: the real data that can collide is this world's own (here an exploration result). The
-    record's spelling and location are the implementer's (nothing is coined): the second half is
-    pinned at the JUDGE'S INPUT only. The registry-written episode is graded IN PLACE (world b's
-    ledger and oracle-side store as the registry left them; the #921 archives and the other worlds'
-    records added beside them), and world b's prompt must carry both halves of the collision: the
-    frozen row (its colliding id `e-9f01` or its forged_id `fg-1`, whichever the record names) and
-    the colliding real row — dave's, which only the oracle's exploration ever read (O9 keeps it out
-    of the sibling's evidence and ledger), so it is the discriminating half. Positive control: world
-    b was graded and its `oracle` ledger rows reached the judge (PCO-08's decision words).
-    """
     dave = {"user": "dave", "event_id": "e-9f01", "action": "logon", "host": "web-3",
             "ts": TS_BASE}
     dave_q = S.query_params("user:dave")
@@ -1103,10 +875,6 @@ def test_input_real_id_appears_in_family_data_after_the_forged_id_was_frozen(tmp
 
 
 def test_1224_id_occurs_only_in_a_verifier_query_result_or_the_source_alert(tmp_path):
-    """b_p103 — a forged id equal to a value in a verifier run_query result or in the source alert fails check 3; a fresh id is served.
-
-    M12=A: real data is S21's set plus verifier run_query results and the source alert.
-    """
     src = _plant_alert(tmp_path)
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0042"}
     sc = _scene(tmp_path, doc=_doc(), source_run_dir=src,
@@ -1129,16 +897,7 @@ def test_1224_id_occurs_only_in_a_verifier_query_result_or_the_source_alert(tmp_
     assert [r.get("attempts") for r in sc.ledger()] == [1, 3], sc.ledger()
 
 
-
-
 def test_1224_forged_row_must_reuse_a_real_entitys_identifier(tmp_path):
-    """b_p106 — a forged row carrying a real entity's identifier passes check 3 only when the claim declares it a reference to that entity and it is that entity's identifier.
-
-    The identifier here is alice's SID. M12=A: a value the claim declares as a reference to an
-    entity, equal to that entity's real identifier, is exempt (the claim's entity-reference field);
-    undeclared, or declared for an entity whose identifier it is not, it is a collision like any
-    other.
-    """
     bob_row = {**SID_ROW, "user": "bob", "user_id": "S-1-5-21-2002", "event_id": "e-101"}
     base_rows = (SID_ROW, bob_row)
     sc = _scene(tmp_path, live=[("idp", "query", ALICE, {"rows": list(base_rows)})])
@@ -1160,19 +919,7 @@ def test_1224_forged_row_must_reuse_a_real_entitys_identifier(tmp_path):
     _only_oracle_row(sc, attempts=3, served=served)
 
 
-
-
-
-
-
-
 def test_input_served_answer_differs_only_in_row_order_or_spacing(tmp_path):
-    """b_p110 — rows reordered with an empty claim fail check 1; mapping key order is no difference, so the same rows with keys reordered are served as `passthrough`.
-
-    The base rows carry no identifying field. N09: parsed JSON is diffed structurally; mapping key
-    order and whitespace are not differences, list order is. (Whitespace cannot differ in a tool
-    call's parsed arguments.)
-    """
     r1 = {"action": "logon", "host": "web-1"}
     r2 = {"action": "logoff", "host": "web-1"}
     base = {"rows": [r1, r2]}
@@ -1202,16 +949,7 @@ def test_p040_served_answer_changes_a_value_to_a_textually_equal_value_of_anothe
     assert [_payload(r) for r in sc.ledger()] == [base], sc.ledger()
 
 
-
-
-
-
 def test_1224_claim_arithmetic_arrives_as_an_expression(tmp_path):
-    """s_p114 — counting arithmetic sent as an expression or code is never evaluated by the host: it is refused as malformed and retried.
-
-    No oracle code runs on the host (O7). "1+1" evaluates to the right count, so only a host that
-    evaluates it would pass it; the code-like text would leave a file behind if run.
-    """
     count_q = S.query_params("count user:alice")
     canary = tmp_path / "evaluated-on-the-host"
     code = f"__import__('pathlib').Path({str(canary)!r}).write_text('ran')"
@@ -1235,13 +973,6 @@ def test_1224_claim_arithmetic_arrives_as_an_expression(tmp_path):
     _only_oracle_row(sc, attempts=3, served={"count": 2})
 
 
-
-
-# --------------------------------------------------------------------------------------
-# Premises: when rows freeze (M15=B) and what a fresh conversation must still honour (S4).
-# --------------------------------------------------------------------------------------
-
-
 class _StoreWitness(S.ScriptedModel):
     """A verifier double that also RECORDS the world's committed stores as they stand on disk
     at the moment it is consulted — after the attempt forged and recorded, before the verified
@@ -1259,12 +990,6 @@ class _StoreWitness(S.ScriptedModel):
 
 
 def test_sibling_dies_after_forging_a_row_before_storing_the_served_answer(tmp_path):
-    """b_p165 — no forged row or recorded fact is on disk until the verified answer carrying it is stored, so a sibling dying in between leaves nothing frozen; after the commit a resumed sibling is served the stored answer and the fact's row is never duplicated.
-
-    M15=B: forged rows and recorded facts are staged per attempt and committed atomically with the
-    verified, stored answer. The window between forging and storing is observed from inside it (the
-    verifier pass), without a kill.
-    """
     sc = _scene(tmp_path, doc=_doc(DEPT_FACT), live=[("idp", "query", ALICE, BASE)])
     o1 = S.oracle(S.record_fact("alice", "department", "finance"), *_honest())
     witness = _StoreWitness(sc.ep, then=S.verdict(True))
@@ -1287,14 +1012,7 @@ def test_sibling_dies_after_forging_a_row_before_storing_the_served_answer(tmp_p
     assert [r["payload_text"] for r in ledger] == [ledger[0]["payload_text"]] * 2, ledger
 
 
-
-
 def test_failed_attempt_forged_rows_and_facts_when_the_next_attempt_differs(tmp_path):
-    """b_p201 — rows forged and facts recorded in a failed attempt are never committed: nothing of them is served, frozen, or held against a later call.
-
-    M15=B: forged rows and recorded facts are staged per attempt and committed atomically with the
-    verified, stored answer.
-    """
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001", "department": "sales"}
     sc = _scene(tmp_path, doc=_doc(DEPT_FACT),
                 live=[("idp", "query", ALICE, BASE), ("idp", "query", DB1, {"rows": []}),
@@ -1321,19 +1039,7 @@ def test_failed_attempt_forged_rows_and_facts_when_the_next_attempt_differs(tmp_
     assert all("db-9" not in r["payload_text"] for r in sc.ledger()), sc.ledger()
 
 
-
-
 def test_1224_sibling_reissues_an_original_call_after_recording_a_conflicting_value(tmp_path):
-    """b_fu04 — a re-issued original call gets its own oracle turn, and serving its base row unchanged where it contradicts a fact the sibling recorded fails check 4; it is served holding the recorded value.
-
-    Scenario: in world b's sibling, an oracle turn for a call pre-flight never saw records an
-    entity's field with a value that differs from what a base row of an original call shows;
-    the investigator then issues that original call. M13=A: check 4 keys on the exact (entity
-    string, field) and compares exact JSON values, so the base row's value, served unchanged,
-    contradicts the record; S3/S4: the re-issued call is uncached and gets a turn, and
-    pre-flight binds nothing beyond its frozen rows and facts. Both answers the investigator
-    holds then read alice's department as the recorded value.
-    """
     original = {"entity": "alice", "risk": "low", "record_id": "r-0001", "department": "sales"}
     sc = _scene(tmp_path, doc=_doc(DEPT_FACT),
                 recorded=[("siem-x", "lookup", SIEM_ALICE, original)],
@@ -1352,20 +1058,7 @@ def test_1224_sibling_reissues_an_original_call_after_recording_a_conflicting_va
     assert sc.est.calls("siem-x") == [], "the original call's base came from the recording"
 
 
-# --------------------------------------------------------------------------------------
-# Premises: check 3 never looks anything up on the tenant (M12=A, H-01).
-# --------------------------------------------------------------------------------------
-
-
-
-
 def test_1224_collision_check_while_the_tenant_system_is_unreachable(tmp_path):
-    """b_fu06 — with every tenant system down, check 3 still decides in memory: a recorded id collides, a fresh one is served, and the outage costs no attempt.
-
-    M12=A: check 3 is in memory, with no tenant lookup, so the outage cannot change its verdict or
-    the call's attempt count. Positive control: an uncaptured call in the same outage reaches the
-    real system and its error passes through unchanged (F-02).
-    """
     sc = _scene(tmp_path, recorded=[("idp", "query", ALICE, BASE)])
     for system in S.SYSTEMS:
         for verb in S.READ_VERBS:
@@ -1382,5 +1075,3 @@ def test_1224_collision_check_while_the_tenant_system_is_unreachable(tmp_path):
         sc.call(reg, "edr", "query", **DB1)
     assert len(sc.est.calls("edr", "query")) == 1, "the outage is real (positive control)"
     _spent(o)
-
-

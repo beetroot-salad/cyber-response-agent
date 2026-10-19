@@ -2,16 +2,6 @@
 from __future__ import annotations
 
 
-
-
-
-
-
-
-
-
-
-
 import pytest
 
 
@@ -93,9 +83,6 @@ def test_a_revert_whose_pr_was_closed_refuses_the_next_and_skips_nothing(repo, t
 
 
 def test_a_revert_whose_pr_is_open_answers_that_pr(repo, tmp_path):
-    """R1: while a revert's PR is open, the next revert of that lesson, from a new delivery
-    object and from a freshly started process, answers `open` with that PR's URL: nothing is
-    pushed and no second PR is requested."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND)
     url = opened(delivery(repo, ForgeHTTP()).revert(_LEARNED, "learned"), None)
     refs = remote_refs(repo[1])
@@ -168,9 +155,6 @@ def test_a_revert_whose_pr_was_created_but_unanswered_is_found_not_made_again(re
 
 @pytest.mark.parametrize("failure", ["pr-request", "push"])
 def test_a_revert_that_never_got_a_pr_is_made_again(repo, tmp_path, failure):
-    """R1: a revert whose PR request failed (503), or whose push the remote refused (its
-    `pre-receive` hook), never had a PR, so the next revert of that lesson makes the same
-    revert again: one PR whose one commit, directly on `main`, restores the same bytes."""
     _agent_wrote(repo, tmp_path, _FIRST, _SECOND)
     http = ForgeHTTP()
     d = delivery(repo, http)
@@ -217,9 +201,6 @@ def test_revert_deletes_a_lesson_the_commit_maker_created(repo, tmp_path, style)
 
 @pytest.mark.parametrize("style", MERGE_STYLES)
 def test_revert_restores_what_a_lesson_held_before_the_commit_maker_changed_it(repo, tmp_path, style):
-    """Flow 4, choice 5: a lesson the commit-maker changed, merged by a human in any style and
-    unchanged on `main` since, reverts to its bytes from just before the agent's change, mode
-    100644, as one commit-maker commit on `main` with a PR against `main`."""
     merged_agent_lesson(repo, tmp_path, "changed", "agent/lessons/seed.md",
                         b"seed, as the agent rewrote it\n", style)
     tip = _reverted(repo, "agent/lessons/seed.md", "seed")
@@ -307,9 +288,6 @@ def test_revert_refuses_a_lesson_changed_on_main_since_the_commit_maker_wrote_it
 @pytest.mark.parametrize("path", ["agent/lessons/seed.md", "agent/lessons/merged.md"],
                          ids=["seeded", "human-merged"])
 def test_revert_refuses_a_lesson_the_commit_maker_never_wrote(repo, tmp_path, path):
-    """Choice 5 (orchestrator ruling): a lesson only humans wrote (the tenant's seed, or one a
-    human merged later) has no commit-maker change to undo; its revert is refused with
-    nothing pushed or requested."""
     advance_remote(repo, tmp_path)
     _refused_revert(repo, path, "human")
 
@@ -402,5 +380,3 @@ def test_revert_refuses_a_path_that_is_not_a_lesson_on_main(repo, path):
         d.revert(path, "x")
     assert _branches(repo[1]) == ["refs/heads/main"]
     assert not http.creates
-
-

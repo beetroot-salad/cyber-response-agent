@@ -8,12 +8,6 @@ import json
 import shutil
 
 
-
-
-
-
-
-
 import pytest
 
 
@@ -98,9 +92,6 @@ def test_tenant_identity_must_match_before_forge_http(repo):
 
 @pytest.mark.parametrize("ambient", ["git-dir", "work-tree", "both"])
 def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, tmp_path, monkeypatch, ambient):
-    """O7 under amendment 2: inherited `GIT_DIR`/`GIT_WORK_TREE` cannot redirect publish, the
-    batch, the commit-maker, finish, retained delivery or, once a human has merged the PR,
-    the revert of its lesson into another repository."""
     foreign = tmp_path / "foreign"
     foreign.mkdir()
     git(foreign, "init", "-b", "main")
@@ -146,8 +137,6 @@ def test_delivery_git_context_cannot_be_redirected_by_ambient_repository(repo, t
     assert git(foreign, "rev-parse", "HEAD") == foreign_head
     assert not (foreign / "agent").exists()
     assert _branches(foreign) == ["refs/heads/main"]
-
-
 
 
 def test_no_legacy_credential_file_is_needed(repo):

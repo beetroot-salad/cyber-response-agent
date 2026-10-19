@@ -51,9 +51,6 @@ def test_write_allow_roots_at_the_worktree_corpus_not_run_dir(tmp_path):
 
 
 def test_the_curator_cannot_write_outside_its_own_corpus(tmp_path):
-    """A write/edit to a SIBLING corpus, to run_dir, and to the MAIN checkout (defender/skills) is
-    DENIED on BOTH write surfaces and nothing lands; the own-corpus .md write succeeds (control).
-    Binds every write surface the operand could reach (write_file + edit_file)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     _denied_on_both_write_surfaces(deps, rel("lessons-actor", "x.md"))    # a sibling corpus
@@ -83,9 +80,6 @@ def test_a_write_operand_filename_extension_differs_only_in_letter_case_from_md(
 
 
 def test_a_write_operand_path_is_given_relative_with_a_leading_dot_slash(tmp_path):
-    """`./defender/lessons/x.md` resolves identically to `defender/lessons/x.md` against the same
-    cwd_anchor and is ADMITTED — the write lands at the one corpus path either spelling names
-    (f14/P11)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     write_file(deps, "./" + rel("lessons", "dot.md"), "body\n")
@@ -123,9 +117,6 @@ def test_a_shipped_corpus_write_is_denied_when_its_read_confine_excludes_it(tmp_
 # S3 / MD-3 / MD-4 / MD-5 — the rm lane and the four-lane parity
 
 def test_the_rm_lane_is_scoped_to_the_same_corpus_as_the_write_lane(tmp_path):
-    """Parity: the rm grant admits exactly the spawn's OWN corpus, the same set the write lane
-    admits — `rm defender/lessons/x.md` ALLOW, a sibling corpus DENY, a flag or a second path DENY;
-    the own-corpus single rm is the control."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     assert bash_decision(deps, "rm defender/lessons/draft.md").allow          # own corpus (control)
@@ -135,11 +126,6 @@ def test_the_rm_lane_is_scoped_to_the_same_corpus_as_the_write_lane(tmp_path):
 
 
 def test_all_write_lanes_deny_a_symlink_out_of_corpus(tmp_path):
-    """MD-3 (RG-adv4, the standout): one crafted operand — a symlink under the corpus pointing at a
-    sibling corpus, so `defender/lessons/escape/secret.md` RESOLVES out of the corpus — presented
-    to every write-capable lane must be DENIED by all of them. #773 M1 removed the fourth
-    (`forward_check`, a tool the curator no longer carries at all) — the remaining three are
-    write_file, edit_file and the `rm` bash grant."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     # a symlink inside the corpus pointing at the sibling corpus
@@ -160,10 +146,6 @@ def test_all_write_lanes_deny_a_symlink_out_of_corpus(tmp_path):
 
 
 def test_the_rm_grant_matches_the_shell_tokenized_argv(tmp_path):
-    """MD-4 (RG-adv3): a `$(...)`/backtick operand DENIES because the shell TOKENIZER splits the
-    substitution into separate tokens before the grant matches (NOT because of `_stage_unsafe`,
-    which is dead code for this shape), and a `;`-joined command denies on the ungranted second
-    stage."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     assert not bash_decision(deps, "rm defender/lessons/$(whoami).md").allow
@@ -173,18 +155,12 @@ def test_the_rm_grant_matches_the_shell_tokenized_argv(tmp_path):
 
 
 def test_a_single_operand_in_corpus_rm_is_admitted(tmp_path):
-    """MD-5 (RG-ispo4): a single in-corpus `rm defender/lessons/draft.md` is ADMITTED — the curator
-    promotes or discards one draft. This is the positive control the degenerate-name negative
-    (test_the_rm_grant_under_a_degenerate_empty_or_dot_corpus_name) lacks (RF2)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     assert bash_decision(deps, "rm defender/lessons/draft.md").allow
 
 
 def test_a_single_rm_naming_two_corpora_is_denied(tmp_path):
-    """A single `rm` naming two operands in different corpora is DENIED — the compiled grant is a
-    single-operand grammar (RG-ispo4), so a two-operand invocation matches no pattern; a same-corpus
-    two-file rm is also denied; the single in-corpus rm is the control."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     assert not bash_decision(
@@ -197,9 +173,6 @@ def test_a_single_rm_naming_two_corpora_is_denied(tmp_path):
 # MD-7 / F77 / f7 — the write lane and the read lane admit the same names
 
 def test_a_lesson_the_curator_can_write_it_can_read_back(tmp_path):
-    """MD-7 / D3: every lesson filename the write lane admits, the read lane admits too — the write
-    lane is narrowed to the read segment class `[\\w.@=+-]+` via ONE shared derivation,
-    foreclosing the `[^\\x00]*` newline frame-injection channel (R6)."""
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     deps = curator_deps(wt, rd, "lessons")
     out_of_class = rel("lessons", "my lesson.md")   # a space — outside the read segment class
@@ -208,12 +181,6 @@ def test_a_lesson_the_curator_can_write_it_can_read_back(tmp_path):
     assert not bash_decision(deps, "cat " + out_of_class).allow
     with pytest.raises(ModelRetry):
         write_file(deps, out_of_class, "body\n")     # RED today: the write tail admits the space
-    # positive control: an in-class name — write admits AND both read surfaces read it back.
-    # The read-back is driven through a FRESH deps bound to the same corpus (a different
-    # invocation): main's #700 (landed after this test) denies a learning role reading a path
-    # it authored within the SAME invocation, after it has learned its own stage salt — a
-    # different axis (self-authored-read hardening) from MD-7's read/write filename parity
-    # this test pins, so the two are deliberately isolated here.
     write_file(deps, rel("lessons", "good.md"), "hello\n")
     assert bash_decision(deps, "cat " + rel("lessons", "good.md")).allow
     reader = curator_deps(wt, rd, "lessons")

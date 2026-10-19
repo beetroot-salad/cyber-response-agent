@@ -130,19 +130,10 @@ RESIDUE = {
     ("hooks.inject_system_skill_description", "read_description", "read_text_soft"): (1, "nonrecord", ('skill_path',)),
     ("runtime.bash_policy", "_load_policy", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("runtime.box._docker", "_own_container_ids", "read_text_soft"): (2, "nonrecord", ('hostname_path', 'mountinfo_path')),
-    # #1255 "Time / Into the box": a preload's clock-offset projection lives in
-    # <runs base>/../clocks/<run>, outside the run's records. This is job state,
-    # not a durable record or a second authority for the in-memory run clock.
     ("runtime.box._clock", "write_clock", "write_guarded"): (1, "job_state", ('clock_file',)),
     ("runtime.box._clock", "prepare_clock", "guarded_mkdir"): (1, "job_state", ('where',)),
     ("runtime.box._clock", "prepare_clock", "write_guarded"): (1, "job_state", ('clock_file',)),
     ("runtime.box._clock", "remove_clock", "shutil.rmtree"): (1, "job_state", ('clock_file.parent',)),
-    # #1255 P1 "Every mode", C6/C8: the unboxed transport mirrors model-readable
-    # file views into its own temporary runs/current, with checkout/agent links.
-    # Source files are read, never written; copy/mkdir/remove target the staging
-    # tree. It is neither a durable record sink nor authority for host decisions.
-    # Name this transport residue separately from #1136's rooted model tools:
-    # the source side may read run evidence, so it is not "nonrecord" I/O.
     ("runtime.box._stage", "_remove", "shutil.rmtree"): (1, "model_view", ('entry',)),
     ("runtime.box._stage", "_remove", ".unlink"): (1, "model_view", ('entry',)),
     ("runtime.box._stage", "_same_bytes", "builtins.open"): (2, "model_view", ('a', 'b')),

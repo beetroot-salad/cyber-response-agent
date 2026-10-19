@@ -78,11 +78,6 @@ def _err_lines(err: str) -> list[str]:
     return [line for line in err.splitlines() if line.strip()]
 
 
-# ---------------------------------------------------------------------------------------
-# d00 / d01 / d04 / d36 — the function, the CLI, the write
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_render_episode_writes_learning_html_beside_judge_yaml_and_returns_its_path(tmp_path):
     """Driving `render_episode` on a sample-shaped episode returns `<dir>/learning.html`."""
     ep = E.sample_episode(tmp_path)
@@ -164,11 +159,6 @@ def test_1025_a_render_creates_or_changes_exactly_one_file_learning_html_and_tou
     assert "sec-verdict" in page.by_id, "positive control: the one changed file is the page"
 
 
-# ---------------------------------------------------------------------------------------
-# d02 / d03 / J1 / J2 — the launcher hook
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_the_launcher_renders_the_page_after_the_judge_frame_with_every_step_on_it(tmp_path):
     """After `cli.main` returns 0 on a full fake-seamed episode, `learning.html` sits beside
     `judge.yaml` and its stage table carries every `Step` row on the record ."""
@@ -200,9 +190,6 @@ class _PlantingJudge(J.FakeJudge):
 
 def test_1025_a_render_fault_is_printed_and_changes_neither_the_exit_status_nor_judge_yaml(
         tmp_path, monkeypatch, capsys):
-    """With a symlink planted at `<episode_dir>/learning.html` before the render, `cli.main` still
-    returns 0, `judge.yaml` is written, stderr carries a "could not be rendered" line and the
-    link's target is untouched."""
     outside = tmp_path / "outside.html"
     outside.write_text("OUTSIDE", encoding="utf-8")
     episode_dir = EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID)
@@ -243,11 +230,6 @@ def test_1025_preflight_refused_episode_and_the_page(tmp_path, capsys):
     assert page.ids_with("world-") == [], page.ids_with("world-")
 
 
-# ---------------------------------------------------------------------------------------
-# settled — the CLI's refusals and argument spellings
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_cli_invoked_with_no_positional_argument(tmp_path, capsys):
     """`main([])` returns 1, prints one reason line to stderr, writes no page (d01)."""
     ep = E.sample_episode(tmp_path)
@@ -277,11 +259,6 @@ def test_1025_family_yaml_has_invalid_yaml_syntax(tmp_path, capsys):
     assert "could not be read" in lines[0], lines[0]
     assert "nothing is at that name" not in lines[0], lines[0]
     assert "missing" not in lines[0], lines[0]
-
-
-# ---------------------------------------------------------------------------------------
-# d05 / J3 / J4 — location and process independence; concurrency
-# ---------------------------------------------------------------------------------------
 
 
 def _live996_shaped(tmp_path: Path, root: Path) -> E.Episode:
@@ -314,11 +291,6 @@ def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys):
     assert "latest" not in page.raw
 
 
-# ---------------------------------------------------------------------------------------
-# settled — the launch's partial states, the interrupt, the write discipline
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path, monkeypatch, capsys):
     """The launcher writes no page on an abort (the hook is after JUDGE)."""
     launcher = _cli()
@@ -349,10 +321,6 @@ def test_1025_questioner_or_preflight_abort_leaves_a_partial_directory(tmp_path,
     questioner = ST._Interrupting(EH.episode_dir(ST._tenant_paths().data_root, T.EPISODE_ID))
     ep2, _b, _a = ST._abort(tmp_path, launcher.LauncherRefused, questioner=questioner)
     assert not (ep2 / "family.yaml").exists(), "the control failed: the manifest was written"
-    # The abort above still primes the capture before the interrupt lands (priming precedes the
-    # questioner in the launcher's own order) and that print is real launcher stderr, not the
-    # standalone CLI's — drained here so the assertion below is about the CLI's OWN report,
-    # not noise the launcher run left sitting in the shared capsys buffer.
     capsys.readouterr()
     rc, out, err = cli_on(ep2, capsys)
     assert rc == 1, (out, err)
@@ -400,9 +368,6 @@ def test_1025_a_refused_write_leaves_no_residue(tmp_path):
 
 
 def test_1025_a_render_that_raises_midway_keeps_the_previous_page(tmp_path):
-    """The whole document is built before the single guarded replace, so a raise mid-build (an
-    `Exception` injected inside the page module's frame) propagates out of `render_episode` and
-    leaves the previous `learning.html` intact ."""
     ep = E.sample_episode(tmp_path)
     listing = sorted(p.name for p in ep.dir.iterdir())
     with pytest.raises(RuntimeError, match="mid-build"), \
@@ -455,12 +420,6 @@ def test_1025_a_read_only_episode_directory(tmp_path, capsys):
     assert launch.rc == 0, "a refused page write changed the exit status"
     assert "could not be rendered" in err, err
     assert not (launched / E.PAGE_NAME).exists()
-
-
-# ---------------------------------------------------------------------------------------
-# The review of PR #1042 — the page's own stylesheet, the standalone script, and location
-# independence for an UNHEALTHY episode
-# ---------------------------------------------------------------------------------------
 
 
 def _css_classes(css: str) -> set[str]:

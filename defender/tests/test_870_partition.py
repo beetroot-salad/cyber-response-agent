@@ -62,19 +62,6 @@ def _shim_batch(paths, n: int = 3) -> list[str]:
 
 
 def test_a_taught_reducer_row_is_consumed_not_retired(scene):
-    """On a tick that emits a reducer handoff AND whose curator's commit actually changes the
-    reducer literal, the shim rows behind it rotate as `consumed_committed` carrying the
-    commit sha, and appear in NO deadletter entry.
-
-    Today they land in `dropped_ids`, because the curated set is computed as
-    `row.system in kept` and a reducer row has no system (C18/C9's row `s1`, executed): taught
-    on the same tick it was buried, and stamped with a sha of a commit that contains nothing
-    about them.
-
-    FK-7's criterion is ASYMMETRIC and this is its positive arm: the handoff AND the confirmed
-    edit. The no-edit half is `a_no_edit_reducer_tick_holds_its_rows`' own arm, and it is that
-    demand's positive control.
-    """
     repo, paths = scene
     ids = _shim_batch(paths)
     spawn = Spawn(curate_reducer_surface())
@@ -82,9 +69,6 @@ def test_a_taught_reducer_row_is_consumed_not_retired(scene):
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=spawn, trees=lead_trees(paths)) == 0
     assert by_surface(spawn.handoffs)["reducer"], "no reducer handoff, so the arm is vacuous"
-    # THIS TICK's commit, not HEAD's file list: the fixture seeds the reducer surface in its
-    # own commit, so `REDUCER_REL in head_files(repo)` is true from the seed whenever the tick
-    # commits nothing at all — the assertion would hold on a build that never wrote the file.
     assert git(repo, "rev-parse", "HEAD").stdout.strip() != head_before, (
         "the curator's edit never reached a commit"
     )
@@ -100,36 +84,6 @@ def test_a_taught_reducer_row_is_consumed_not_retired(scene):
 
 
 def test_a_no_edit_reducer_tick_holds_its_rows(scene):
-    """A tick that emits a reducer handoff but whose curator declines to edit leaves the shim
-    rows behind it STILL IN THE QUEUE afterwards — neither `consumed_committed` nor
-    `consumed_unattributable`, and in no deadletter entry.
-
-    `lead_pitfalls.md`'s "skip that failure; never invent one" rule makes a no-edit outcome
-    legitimate, and PO-R2 shows the batch most likely to produce one — silent reducer failures
-    carrying no diagnosis. A handoff alone is not curation; only a confirmed edit is. Without
-    this arm a reducer row would be discarded on the tick it was merely OFFERED, before
-    anything was taught, and its queue row is the only record of the mistake that any test
-    here demonstrates — the graveyard's unreadness is NOT shown by this suite; it is the
-    clause demand `graveyard_is_still_unread`'s recorded deferral, discharged by #903's queue page.
-
-    Every surface the row could have left through is bound, because a row that vanished
-    quietly would satisfy a negative asserted on one of them: the queue HOLDS it, the consumed
-    ledger does not have it, the deadletter does not have it, and nothing was committed.
-    `a_taught_reducer_row_is_consumed_not_retired` is the positive control on the same
-    address.
-
-    THE SECOND ARM IS THE DISCRIMINATING ONE, AND IT IS THE LIKELIER TICK. FK-7's criterion is
-    a CONJUNCTION — a reducer handoff emitted AND the commit's changed set containing the
-    reducer literal — and an arm that fails both conjuncts together cannot tell it apart from
-    the loose reading "a handoff was emitted and the tick committed something". So the second
-    arm commits: a mixed batch where the curator teaches a declared system's `execution.md`
-    and SKIPS the reducer entry, which `lead_pitfalls.md`'s "skip that failure; never invent
-    one" rule makes a first-class outcome and PO-R2 makes frequent (an undiagnosable reducer
-    failure is exactly what a curator should decline to guess at). Under the loose reading the
-    shim rows rotate as `consumed_committed` carrying ELASTIC's sha — a sha of a commit that
-    contains nothing about them, which is verbatim the data loss FK-7 was resolved to close,
-    on the one record the mistake ever produced.
-    """
     repo, paths = scene
     ids = _shim_batch(paths)
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -174,25 +128,6 @@ def test_a_no_edit_reducer_tick_holds_its_rows(scene):
 
 
 def test_an_unoffered_reducer_edit_is_refused(scene):
-    """A tick whose batch holds NO reducer row may not commit the reducer surface, even though
-    the path is in the lane's vocabulary.
-
-    M7 opened `REDUCER_REL` as ONE literal allowance in `_pitfalls_path_rule`, and a path rule
-    is a constant of the deployment: it admitted the surface on every tick. But the curator's
-    static prompt names that path unconditionally, and every failure's `stderr_digest` —
-    alert-derived text — is in its context. So on a pure `elastic` batch a digest carrying
-    "also record this in <the reducer surface>" was obeyable, admitted by the gate on the
-    literal, and INVISIBLE to FK-7, which computes `reducer_taught` from the offer and
-    therefore sees none. The write landed on the one file EVERY system's reduce reads before
-    EVERY attempt. Before this round the same path was refused outright, so the round opened
-    it wider than the lesson it exists to teach.
-
-    "May the lane ever write this path" and "was this tick offered it" are different questions
-    and the second is a fact about the BATCH, which is why the path rule's own verdict is
-    unchanged and asserted so below.
-
-    The positive control is the same curator, the same edit, one shim row added to the queue.
-    """
     repo, paths = scene
     persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
     head_before = git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -222,25 +157,6 @@ def test_an_unoffered_reducer_edit_is_refused(scene):
 
 
 def test_a_perpetually_declined_hold_retires_at_the_ceiling(scene, monkeypatch):
-    """A held reducer row survives being declined, and being declined again, and then LEAVES —
-    on the same `author_max_attempts()` ceiling every other exit from this queue rides on.
-
-    FK-7 made a no-edit reducer tick a first-class outcome and left the rows in the queue,
-    which is right: `lead_pitfalls.md`'s "skip that failure; never invent one" makes declining
-    a correct answer, and PO-R2 makes the undiagnosable reduce the frequent shape. What the
-    hold had no version of was an EXIT. The row satisfied the arrival gate on its own
-    occurrences, was offered, was declined, and came back byte-identical: the wake gate stayed
-    open, `attempts` was never bumped by anything, and the drain re-spawned an LLM curator on
-    every pass with nothing to show for it and no operator signal beyond "held for a later
-    tick". Every other route out of this queue is bounded — `consumed_committed` on a taught
-    row, `consumed_unattributable` plus the graveyard on an undeclared name, the `batch-error:`
-    ceiling on a faulting batch — and the hold was the one that was not.
-
-    So the ceiling is what this pins, and the HOLD is what it does not touch: the row is still
-    there after the first decline and after the second, which is `a_no_edit_reducer_tick_holds_
-    its_rows`' demand and stays true. The attempt is spent only on a tick that actually made
-    the offer.
-    """
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
     repo, paths = scene
     ids = _shim_batch(paths)
@@ -271,22 +187,6 @@ def test_a_perpetually_declined_hold_retires_at_the_ceiling(scene, monkeypatch):
 
 
 def test_a_faulting_tick_does_not_spend_the_offer_budget(scene, monkeypatch):
-    """The hold's ceiling counts DECLINES. A tick that raised is not a decline, and must not
-    bring a row any closer to retiring as `reducer-offered-never-taught`.
-
-    The ceiling above was first written on `drain.retire`'s default `attempts`, which is the
-    lane's FAULT counter — `drains._retire_pitfalls_batch` bumps it for every row in the batch
-    on any tick that raised, whether or not that row was ever offered anything. One counter
-    serving both ceilings makes each arrive early in the other's traffic, and the direction
-    that bites is this one: two infra-faulting ticks spend a freshly-queued row's whole offer
-    budget, so its FIRST decline retires it terminally with its lesson never taught. That is
-    verbatim the loss FK-7's hold exists to prevent, reintroduced by the bound meant to
-    complete it — and it is invisible in the ceiling demand above, whose ticks all decline.
-
-    So the two counters are driven apart here: faults accumulate on `attempts` while the offer
-    budget stays untouched, and the row still gets its full complement of declines afterwards.
-    The converse (a decline not spending the fault budget) rides on the same separation.
-    """
     monkeypatch.setenv("LEARNING_AUTHOR_MAX_ATTEMPTS", "3")
     _repo, paths = scene
     ids = _shim_batch(paths, n=1)
@@ -321,16 +221,6 @@ def test_a_faulting_tick_does_not_spend_the_offer_budget(scene, monkeypatch):
 
 
 def test_a_reducer_only_batch_still_reaches_the_curator(scene):
-    """A batch whose every row is a systemless `∅.bash-shim` row REACHES the curator: handoffs
-    is non-empty (one reducer entry), so `run_pitfalls` does not take the `not handoffs` arm
-    that retires the batch unread.
-
-    That arm is correct only when nothing could ever be taught, and at this base it is the arm
-    a reducer-only batch takes — every systemless row fails `_build_pitfalls_handoffs`'
-    membership filter, the tick logs "none named a system the adapter set declares", and the
-    whole batch is graveyarded and rotated away (PO-R2's own observation: handoffs from pure
-    reducer traffic = `[]`).
-    """
     repo, paths = scene
     ids = _shim_batch(paths)
     spawn = Spawn(curate_reducer_surface())
@@ -345,17 +235,6 @@ def test_a_reducer_only_batch_still_reaches_the_curator(scene):
 
 
 def test_no_row_leaves_the_queue_without_a_record(scene):
-    """Over a batch of a declared-system row, an undeclared-name row, a systemless non-shim
-    row, a malformed `'../evil'` row and a shim row, every id lands in EXACTLY ONE of two
-    places after the tick — `consumed_committed` with a sha, or the deadletter plus
-    `consumed_unattributable` — and the queue is empty.
-
-    O1's oracle reads the queue file, the consumed ledger and the deadletter, never the drain
-    log: a row is conserved when a durable record says where it went, not when a line said so
-    once. The curator teaches BOTH surfaces on this tick, so the shim row meets FK-7's
-    confirmed-edit condition and the mixed batch is the one shape that can see every route at
-    once.
-    """
     repo, paths = scene
     persist.append_pitfalls(
         [pitfall_row("r:l-000:0", "elastic"),
@@ -393,22 +272,6 @@ def test_no_row_leaves_the_queue_without_a_record(scene):
 
 
 def test_the_commit_carries_exactly_what_the_rule_admitted(scene):
-    """The commit's path list EQUALS the rule's `changed` list.
-
-    `commit_corpus` stages `git add -- defender/skills` — the whole pathspec — while
-    `_pitfalls_path_rule` only ever adjudicated the records `_verify_corpus_scope` handed it,
-    so "this round widens the write surface by exactly one literal path" is a claim about the
-    rule that only the COMMIT can confirm. Driven over a two-surface tick, the paths the
-    commit message names and the paths the commit actually touches are the same set.
-
-    THE CONVERGED PREMISE BEHIND FK-5 IS REFUTED AND THE CORRECTION IS WHAT IS PINNED: a
-    newly-dirty NON-`.md` file under the corpus does NOT ride the commit unexamined —
-    `_verify_corpus_scope` computes `new_stray` from `not _in_corpus(p)` and RAISES on it, so
-    the tick refuses outright and nothing is committed. The residual gap is different and is
-    recorded as a known limitation rather than pinned here: `baseline_stray` snapshots only
-    files OUTSIDE `defender/skills/*.md`, so pre-existing IN-corpus dirt is folded into this
-    tick's commit and sha-stamped onto this tick's rows.
-    """
     repo, paths = scene
     _shim_batch(paths, n=1)
     persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
@@ -448,5 +311,3 @@ def _leg(paths, spawn):
     """`_invoke_pitfalls`' shape, so the drain drives the REAL curation leg."""
     return lambda p, st, box=None, **_kw: pitfalls_curator.run_pitfalls(
         paths=p, state=st, invoke=spawn, box=box, trees=lead_trees(p))
-
-

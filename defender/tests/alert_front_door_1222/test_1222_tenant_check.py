@@ -427,12 +427,6 @@ def carried_values(doc: Any) -> set[str]:
 @pytest.mark.parametrize("shape", FAULT_PARAMS)
 def test_bad_alert_mapping_is_refused_by_the_tenant_check(tmp_path: Path, capsys: Any,
                                                           shape: str) -> None:
-    """A missing, empty, comment-only, null, unparseable, non-UTF-8, non-regular (directory,
-    symlink, hard link, FIFO) or unreadable alert mapping, an unknown or misspelled key, and
-    an entry that is null, empty, a number, a list or a path with an empty segment are each
-    refused by the tenant check with a fixed reason naming the file, with no parser text or
-    host path; no run starts on it, and every fault is reported, one fixed reason each, in a
-    fixed order."""
     w = world(tmp_path, capsys)
     # Positive control: the same tenant with its valid mapping is accepted and its run starts.
     for v in verdicts(w, ("acceptance", "run-start")).values():
@@ -467,9 +461,6 @@ def test_bad_alert_mapping_is_refused_by_the_tenant_check(tmp_path: Path, capsys
 @pytest.mark.parametrize("shape", sorted(S.CASE_SOURCE_SHAPES))
 def test_case_mapping_carrying_a_top_level_source_is_refused(tmp_path: Path, capsys: Any,
                                                              shape: str) -> None:
-    """A case-history mapping.yaml carrying a top-level source key — populated, empty or
-    null — is refused by the tenant check with a fixed reason naming the section and its
-    move to the alert mapping; a source field inside open: is not refused."""
     w = world(tmp_path, capsys)
     # Positive control: a `source` field inside `open:` is ticket configuration — accepted.
     w.case_source("open_source_field")
@@ -498,9 +489,6 @@ A5_FAULTS: dict[str, tuple[str | None, str | None, tuple[str, ...]]] = {
 @pytest.mark.parametrize("fault", sorted(A5_FAULTS))
 def test_a5_every_entry_point_gives_the_same_tenant_verdict(tmp_path: Path, capsys: Any,
                                                             fault: str) -> None:
-    """For one tenant folder read by one user, acceptance, tenant.py setup, check --folder,
-    run start, branch launch, sibling resume and the policy CLI reach the same verdict on
-    the alert mapping and the case mapping, with the same fixed reasons in the same order."""
     w = world(tmp_path, capsys, launchable=True)
     # Positive control: the valid tenant passes every one of the seven.
     for v in verdicts(w).values():
@@ -527,13 +515,6 @@ def test_a5_every_entry_point_gives_the_same_tenant_verdict(tmp_path: Path, caps
 @pytest.mark.parametrize("shape", _shape_params(CASE_FAULTS))
 def test_r7_run_start_never_carries_a_faulted_case_mapping_into_a_started_run(
         tmp_path: Path, capsys: Any, shape: str) -> None:
-    """For each case-history mapping the one tenant check refuses -- non-UTF-8 bytes, an
-    unreadable file, unparseable or non-mapping YAML, a top-level source: key (populated,
-    empty or null) -- run start, branch launch and sibling resume, each driven over that
-    tenant, stop at the check with its fixed reason naming the file; none starts a run, or
-    opens a sibling, with ticket_mapping carried as a kept fault (which is what base does,
-    MP14). Positive control: a mapping with a source: field inside open: loads and the run
-    starts."""
     w = world(tmp_path, capsys, launchable=True)
     sites = ("run-start", "branch-launch", "sibling-resume")
     # Positive control: `open.source` loads, the run starts and its tenant record carries the
@@ -568,9 +549,6 @@ ENTRY_SHAPES = ("null_entry", "empty_entry", "number_entry", "list_entry", "empt
 
 @pytest.mark.parametrize("shape", ENTRY_SHAPES)
 def test_p051_mapping_entry_is_not_a_dotted_path(tmp_path: Path, capsys: Any, shape: str) -> None:
-    """A mapping entry that is null, empty, a number, a list or a path with an empty segment
-    makes the mapping malformed. The tenant check refuses it with a fixed reason naming the
-    file, and no run starts. A fact's absence is expressed by omitting its key (p054)."""
     w = world(tmp_path, capsys)
     # Positive control: omitting the key is how absence is said — accepted, and the run starts.
     w.alert_shape("no_signature_key")
@@ -586,9 +564,6 @@ def test_p051_mapping_entry_is_not_a_dotted_path(tmp_path: Path, capsys: Any, sh
 @pytest.mark.parametrize("shape", _shape_params(
     ("directory", "unreadable", "non_utf8", "symlink", "hard_link", "fifo")))
 def test_p058_alert_mapping_file_unreadable(tmp_path: Path, capsys: Any, shape: str) -> None:
-    """The tenant check refuses, naming the file, any of these at the mapping's name: a
-    directory, a file the reading site cannot read, non-UTF-8 bytes, a symlink, a hard link,
-    a FIFO. No run starts."""
     w = world(tmp_path, capsys)
     for v in verdicts(w, ("acceptance", "run-start")).values():
         assert_passed(v)
@@ -667,5 +642,3 @@ def test_p102_run_starts_with_a_faulted_alert_mapping(tmp_path: Path, capsys: An
         assert not v.detail.enqueued, "a refused run reached the curation enqueue"
     finally:
         S.restore_modes(w.planted.root)
-
-

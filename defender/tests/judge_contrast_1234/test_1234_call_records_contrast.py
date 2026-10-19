@@ -13,16 +13,9 @@ from defender.tests._1255_view import model_path
 
 from defender.tests.judge_contrast_1234 import _spec1234 as S
 
-# --------------------------------------------------------------------------------------
-# Names: the contrast row's fields live in `S.COINED` (`ctx.*`, `contrast.*`, `entry.*`,
-# `cut.*`); main's own cut-short mark in `S.EXISTING`.
-# --------------------------------------------------------------------------------------
 
 CUT_SHORT = S.EXISTING["row.cut_short"]
 
-# --------------------------------------------------------------------------------------
-# Scenario vocabulary.
-# --------------------------------------------------------------------------------------
 
 #: Fresh keys no recording holds, so they reach the estate's adapter (Estate1234's docstring).
 BOB = S.query_params("user:bob")
@@ -147,11 +140,6 @@ def launch(tmp_path: Path, est: Any = None, *,
                          after_source=after_source, calls=calls)
 
 
-# --------------------------------------------------------------------------------------
-# Locating rows (the subjects) in the archived records.
-# --------------------------------------------------------------------------------------
-
-
 def lines(rows: list[dict], params: Mapping[str, Any], *, query_id: str | None = None) -> list[int]:
     """Line indices of `rows` whose params are `params` (and query id, when given)."""
     want = S.canonical(params)
@@ -184,11 +172,6 @@ def estate_calls(built: Any, params: Mapping[str, Any]) -> list[dict]:
     """Calls the estate's adapter RECEIVED with `params` (the wire, as the tenant saw it)."""
     want = S.canonical(params)
     return [c for c in built.est.calls() if S.canonical(c["params"]) == want]
-
-
-# --------------------------------------------------------------------------------------
-# The coined accessors — this file's only readers of the contrast row's coined names.
-# --------------------------------------------------------------------------------------
 
 
 def _get(obj: Any, key: str) -> Any:
@@ -243,24 +226,7 @@ def _cut_short_reason(row: Mapping[str, Any]) -> str:
     return str(row.get(S.COINED["row.ungradable_reason"]) or "")
 
 
-# ======================================================================================
-# The contrast row (render -> JudgeContext), over real records.
-# ======================================================================================
-
-
 def test_1234_contrast_row_names_the_first_altered_investigator_call(tmp_path: Path) -> None:
-    """A run's contrast row names its first altered investigator call: the lowest post-branch
-    query-table call number whose row joins by call id to an `oracle` ledger row of that run
-    (A12); inherited rows (no id of this run) never pair; or it says there was none.
-
-    render builds the JudgeContext from executed_queries and the served_ledger, joined on their
-    identity (the host-written call id). The default triad: b's oracle alters QP (b's own row
-    after the seeded prefix); a and c were served no altered answer. The seeded prefix holds an
-    `idp query user:alice` row and J3's `∅.denied` row, and every sibling repeats both calls
-    after the branch — the exact shape in which JQ-01 (iv) saw a key join steal the post-branch
-    rows' ledger partners for the inherited rows. With the id join each post-branch row keeps
-    its partner: nothing is unserved or unmapped, and b's refused ledger row joins its OWN
-    `∅.denied` row, not J3's."""
     built = launch(tmp_path)
     inherited = PRE_BRANCH + 1
     rows_b = built.table_rows("b")
@@ -283,21 +249,6 @@ def test_1234_contrast_row_names_the_first_altered_investigator_call(tmp_path: P
 
 
 def test_1234_contrast_row_counts_calls_leads_and_external_refusals(tmp_path: Path) -> None:
-    """A run's contrast row says whether it was shown its facts (any oracle ledger row), names
-    the leads that received altered answers, counts its calls by system and verb from the query
-    table (inherited pre-branch rows counted as pre-branch calls in the shared baseline), lists
-    its blocked calls (ledger refused/fault rows and J3's inherited ∅.denied row; outage
-    real-error rows are listed as served with an error, not blocked), lists as unserved each
-    table row carrying this run's call id with no ledger row (rejects, ∅.repeat-trip and
-    ∅.bash-shim included, I-1), and as unmapped each ledger row whose id is in no table row; a
-    sibling's seeded lead-zero row is inherited, not unserved (I-2).
-
-    render reads executed_queries (its inherited rows seeded by ForkSnapshot.restore_files) and the
-    served_ledger into the JudgeContext. World b runs: a reject; a repeat of the inherited
-    call; QP (altered); the withheld edr lookup (refused); an outage (BOB); a failing reduce
-    (∅.bash-shim); three identical failing calls (the repeat guard trips: ∅.repeat-trip, and
-    the door closes); then the withheld idp lookup, which the closed door leaves as a
-    ledger-only refusal (JP-02 s_door, reproduced in this writer's smoke)."""
     est = estate(tmp_path, WITHHELD)
     est.fail("idp", "query", BOB, fault="UpstreamFault", detail="shard down")
     est.fail("idp", "query", REP, fault="UpstreamFault", detail="500 upstream")
@@ -351,19 +302,7 @@ def test_1234_contrast_row_counts_calls_leads_and_external_refusals(tmp_path: Pa
         assert _field(ref, "contrast.first_altered") is None
 
 
-
-
 def test_1234_retried_call_first_live_error_then_altered_answer(tmp_path: Path) -> None:
-    """The host ledger owns what was served, read in full (no first-row-wins); the query table
-    owns call order and numbering; the join is exact on the host-written call id carried by
-    every ledger row and every table row of this run (A12). The live error and the altered
-    retry are two calls with two ids, each joined to its own ledger row [real-error, altered]:
-    shown-its-facts is true, the first altered call is the retry's call number, the first error
-    is a counted real-error call (not a gap, A2), and the call list shows both.
-
-    render reads the served_ledger and executed_queries (joined on their identity) into the
-    JudgeContext's contrast row and the judged world's call list. World b asks BOB, gets the
-    live system's error, the estate recovers, and the identical retry is served altered."""
     est = estate(tmp_path)
     est.fail("idp", "query", BOB, fault="UpstreamFault", detail="shard down")
     turns_b = [q("idp", "query", BOB),
@@ -386,20 +325,7 @@ def test_1234_retried_call_first_live_error_then_altered_answer(tmp_path: Path) 
     assert len(_entry_at(calls, retry, "oracle")) == 1, "and the altered retry, numbered apart"
 
 
-
-
 def test_1234_altered_answer_matching_no_investigator_call(tmp_path: Path) -> None:
-    """Join is exact on the call id (A12). A ledger row whose id is in no table row of this run
-    is reported as an unmapped altered call (no call number or lead invented); a table row
-    carrying this run's id and no ledger row is counted with its system/verb and flagged
-    unserved. A table row with no id of this run is inherited: shared baseline, never paired and
-    never listed unserved (in a sibling run, lead zero's row, when present, is such a seeded
-    copy). No ambiguity flag is raised (A12). Neither unmapped nor unserved is silently dropped.
-
-    render reads executed_queries and the served_ledger into the JudgeContext. The real writers
-    leave b's records with a reject (b's id, no ledger row) and QP's altered call; QP's table
-    row is then removed from the archived table (`S.rewrite_jsonl`), so b's `oracle` ledger row
-    matches no row of b's query table — the situation A30 names, which no single run writes."""
     built = launch(tmp_path, after_source=j3_and_lead_zero,
                    b=S.RealWorld("b", turns=[reject_turn(), q("idp", "query", S.Q1),
                                              q("idp", "query", S.QP), S.done_turn()],
@@ -426,34 +352,7 @@ def test_1234_altered_answer_matching_no_investigator_call(tmp_path: Path) -> No
     assert lead_zero not in _field(b, "contrast.unserved")
 
 
-
-
-
-
-
-
 def test_1234_am_repeat_pairing_when_one_attempt_left_no_ledger_row(tmp_path: Path) -> None:
-    """Each call carries its own host-written call id on both records (A12), so each ledger row
-    joins its own table row exactly; ledger order, lead stalls and repeats of one key do not
-    matter. A table row carrying this run's id and no ledger row is unserved (exactly that row);
-    a ledger row whose id is in no table row is unmapped. A failed write to either record ends
-    the run and the world is cut short naming the failed write (A12), so the first attempt
-    cannot lose its refused or fault row silently; an attempt cancelled mid-delivery leaves no
-    row on either side (AP-01). The first altered call is the lowest table call number among
-    the calls whose id joins an altered ledger row (A2; #28). Calls the query tool rejected
-    before any system was reached carry this run's id on their table row and have no ledger
-    row, so they are unserved (A12; T8 names rejects among the native unserved kinds); they are
-    not blocked calls. A pointer to an unserved row is an ordinary conduct pointer, not a
-    blocked-call row (a table `∅.` row counts as blocked only via its ledger partner, J3's row
-    aside).
-
-    render joins the served_ledger and executed_queries on identity into the JudgeContext. World
-    b: a reject, the withheld edr lookup (refused), BOB erroring live, then (the estate
-    recovered) BOB's identical retry served altered. The control makes the same reject and
-    refusal. b's reply files two investigator findings: one whose pair is the two reject rows,
-    one whose pair is the two `∅.denied` rows (blocked through their ledger partners) — the
-    second is gap-only, the first is not. (The failed-write arm is pinned by
-    test_1234_failed_served_ledger_write_ends_the_run and its table twin.)"""
     est = estate(tmp_path)
     est.fail("idp", "query", BOB, fault="UpstreamFault", detail="shard down")
     turns_b = [reject_turn(), q("edr", "lookup", S.DENIED_LOOKUP), q("idp", "query", BOB),
@@ -491,22 +390,6 @@ def test_1234_am_repeat_pairing_when_one_attempt_left_no_ledger_row(tmp_path: Pa
 
 
 def test_1234_am_blocked_call_with_only_one_record_in_the_rendered_views(tmp_path: Path) -> None:
-    """Views render blocked calls from ledger rows (A2) plus J3's row (A14). A ledger-only denial
-    (the door closed) is listed in the judged world's call list and in the contrast table's
-    refusal list as a blocked call with no table call number (unmapped, A12). J3's row (the
-    inherited `∅.denied` row: no id of this run, identical in every readable run's table, A12)
-    appears in the judged world's call list, in section 5's reference call list and in the
-    contrast table's refusal list as a blocked call under its table call number, identically in
-    every run, and once in the user record. A killed-shim infra sentinel has no ledger partner
-    and is not J3's row, so it is not blocked: an ordinary table call under its table call
-    number, inherited (shared baseline) when it is a seeded pre-branch copy and unserved when it
-    carries this run's id.
-
-    render and _build_prompt present the served_ledger and executed_queries through the
-    JudgeContext's call lists and contrast rows. The source holds J3's row and a pre-branch
-    `∅.bash-shim` row (both seeded); world b makes a failing reduce of its own, trips the repeat
-    guard (the door closes), then asks the withheld idp lookup: a `refused` ledger row and no
-    table row (JP-02 s_door)."""
     est = estate(tmp_path, WITHHELD)
     est.fail("idp", "query", REP, fault="UpstreamFault", detail="500 upstream")
 
@@ -559,14 +442,6 @@ def test_1234_am_blocked_call_with_only_one_record_in_the_rendered_views(tmp_pat
 
 
 def test_1234_world_ledger_read_keeps_every_row_of_a_repeated_triple(tmp_path: Path) -> None:
-    """The world-ledger read keeps every well-formed row of the world in file order: two calls
-    with one (system, verb, params) triple and distinct call ids are two rows (A2: read in full,
-    no first-row-wins), and the contrast table joins each to its own table row by call id;
-    today judge/family.py mapping_key keeps the first row of a triple (three ledger rows read as
-    two, GT-7). The control is a ledger with no repeated triple.
-
-    read_world_ledger over b's served_ledger (its identity: the call id). World b asks CAROL
-    twice, both answered; world c (the control here) repeats no triple."""
     est = estate(tmp_path)
     est.answer("idp", "query", CAROL, S.BASE_ANSWER)
     built = launch(tmp_path, est, b=S.RealWorld(
@@ -594,17 +469,6 @@ def test_1234_world_ledger_read_keeps_every_row_of_a_repeated_triple(tmp_path: P
 
 
 def test_1234_outage_rows_and_the_user_record(tmp_path: Path) -> None:
-    """An outage (`real-error`) is not a blocked call (A2): the contrast table lists it as
-    served with an error, and it is in neither the found gaps nor the user record's gap list. A
-    finding resting only on outage rows is not gap-only; an investigator finding resting on them
-    is an investigator finding (T2) and is queued when it passes the two-run rule.
-
-    render reads the served_ledger into the JudgeContext; the user_record is judge.yaml's user
-    section. BOB is down for every world (a live UpstreamFault). b's reply files one finding
-    whose pair is the two outage rows (b's and the control's served_ledger rows) and, as the
-    observable control, one whose pair is the two refused rows (gap-only); and it names two
-    gaps, unflagged, one on b's outage row and, as the observable control of the user record's
-    gap list, one on b's refused row."""
     est = estate(tmp_path)
     est.fail("idp", "query", BOB, fault="UpstreamFault", detail="shard down")
     with_outage = [*S.default_turns()[:-1], q("idp", "query", BOB), S.done_turn()]
@@ -644,11 +508,6 @@ def test_1234_outage_rows_and_the_user_record(tmp_path: Path) -> None:
     assert built.finding_id("b", 0, 1) not in queued, "resting on refusals: gap-only"
 
 
-# ======================================================================================
-# A failed write of either call record ends the run (A12).
-# ======================================================================================
-
-
 def _cut_short_family(tmp_path: Path, variant: str) -> tuple[Any, str, str]:
     """One of s_AN01's three failed writes: b's served ledger, b's query table, or the
     control's served ledger. Returns the family, the run whose write failed and its record."""
@@ -674,23 +533,6 @@ def _cut_short_family(tmp_path: Path, variant: str) -> tuple[Any, str, str]:
 @pytest.mark.parametrize("variant", ["ledger", "control"])
 def test_1234_an_world_cut_short_by_a_failed_call_record_write(tmp_path: Path,
                                                              variant: str) -> None:
-    """A failed write of either call record ends the run and the world is cut short naming the
-    failed write (A12): M1's existing cut-short state, with the failed write as its named
-    reason, not a new state. A cut-short planted world is ungradable and leaves every reference
-    set (M1, A3); a cut-short control stamps the family not graded, naming it (A3). The run's
-    already-recorded ledger rows are read for found gaps like every run's, so its earlier
-    refused and fault calls are listed, one entry per blocked call with a count. The call whose
-    write failed is no found gap (no row of it was recorded); it is named on the world's row as
-    the cut-short cause. A failed query-table write leaves that call's ledger row in place, so a
-    `refused` or `fault` ledger row of it is a found gap. A ledger the failed write left
-    unreadable is contained to that run's census entry, named unread with its cause.
-
-    grade_episode over the archive: the world's cut_short state, the reference sets, and the
-    user_record's found gaps read from each served_ledger. `ledger`: b's ledger write for BOB
-    fails (the adapter planted a directory at it) after an earlier refusal was recorded — the
-    directory leaves b's ledger unreadable. `table`: b's earlier refusal (sent-two) is recorded
-    whole, then the table becomes a directory just before the second refusal, whose ledger row
-    lands and whose `∅.denied` table write fails. `control`: the control's ledger write fails."""
     built, run, record = _cut_short_family(tmp_path, variant)
     judge = S.judge()
     S.grade(built, judge, draws=1)
@@ -735,15 +577,6 @@ def _ledger_fails(est: Any, writer: str) -> Any:
 
 @pytest.mark.parametrize("writer", ["_deliver", "_record_beside", "authorize_call"])
 def test_1234_failed_served_ledger_write_ends_the_run(tmp_path: Path, writer: str) -> None:
-    """A served-ledger write that fails (authorize_call's refused row or resolve_call's fault row, _deliver's delivered
-    row, _record_beside's error or refusal row) ends the run: the failure is not swallowed, no
-    further call is served, and the world is archived cut short naming the failed write (A12;
-    today _record_beside swallows it, AP-01/JP-02).
-
-    One parametrized case per writer of the served_ledger: the record becomes a directory just
-    before that writer's row. CAROL — a fresh key the estate answers — is the next call b's
-    investigator asks; the estate's own call log shows whether it was served. ERIN, asked
-    before the failing call, is the positive control: the same log shows it received."""
     est = estate(tmp_path)
     est.answer("idp", "query", CAROL, S.BASE_ANSWER)
     est.answer("idp", "query", ERIN, S.BASE_ANSWER)
@@ -760,25 +593,7 @@ def test_1234_failed_served_ledger_write_ends_the_run(tmp_path: Path, writer: st
         f"the failed served-ledger write is named: {reason}")
 
 
-
-
-
-
-# ======================================================================================
-# The call id itself (A12, I-1).
-# ======================================================================================
-
-
 def test_1234_one_call_carries_one_host_written_id_on_both_records(tmp_path: Path) -> None:
-    """(Name kept: `spec_graph_1234.yaml` binds it; #1255 reverses the table half.) Before a call reaches the registry the query tool allocates a host-written call id naming
-    the run and the call; the registry writes it on every served-ledger row of that call
-    (refused from authorize_call / fault from resolve_call, delivered/real-error from _deliver/_record_beside) and the
-    query tool writes the same id on the call's table row; no two calls of one run share an id,
-    and a repeated identical call gets its own id (A12; JP-01: no id is in scope today).
-
-    QueryCapture drives authorize_call and the serve path; the served_ledger and executed_queries
-    (append_query_row's rows) carry the identity. World b makes a passthrough call, CAROL twice,
-    the altered QP, the withheld edr lookup (refused before anything is served) and an outage."""
     est = estate(tmp_path)
     est.answer("idp", "query", CAROL, S.BASE_ANSWER)
     est.fail("idp", "query", BOB, fault="UpstreamFault", detail="shard down")
@@ -815,16 +630,6 @@ def test_1234_one_call_carries_one_host_written_id_on_both_records(tmp_path: Pat
     assert not carrying, f"#1255 G4: a query-table row carries the call id: {carrying[:2]}"
 
 
-
-
-# --------------------------------------------------------------------------------------
-# The writer census (47-dissolve-amended "For the writer" (1); I-1).
-# --------------------------------------------------------------------------------------
-
-#: Every production write site of a world's call records: `<file>::<function>` holding the call
-#: that writes (`writes_by`); the functions that reach it in the same file (each must let a
-#: failed write through except #1235's best-effort views); how failure is handled; whose call id its rows carry; the
-#: test that drives it.
 CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
     "learning/branch/estate/registry.py::WorldRegistry._deliver": {
         "writes_by": "record", "via": (), "failed_write": "ends the run",
@@ -846,9 +651,6 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "writes_by": "append", "via": (), "failed_write": "records state, then raises OSError",
         "call_id": "none on the row (#1255 G4)",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    # #1255 P2: an arm's queries table is restored from the source's fork snapshot (the table
-    # cut to the length it held when the branch response arrived) — the production seeder of a
-    # sibling's table. Its rows are the source's, so none carries this run's call id.
     "runtime/branch/_snapshot.py::ForkSnapshot.restore_files": {
         "writes_by": "seed", "via": (), "failed_write": "refuses the restore",
         "call_id": "none of this run's (restored from the source's snapshot)",
@@ -861,45 +663,8 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ======================================================================================
-# Concurrency (GT-1).
-# ======================================================================================
-
-
 def test_1234_two_leads_calls_at_once_leave_intact_distinct_ledger_and_table_rows(
         tmp_path: Path) -> None:
-    """The served-ledger writers (authorize_call, _deliver, _record_beside) run on separate worker
-    threads (GT-1): two gather leads dispatched in one main turn issue calls whose ledger writes
-    overlap in those threads, including two identical calls, one refused call and one errored
-    call. After both leads finish, every ledger row is whole and parses, the row count equals the
-    calls made, no row is lost or duplicated, and each call has its own host-written call id on
-    its ledger row and its table row (the table writer, append_query_row, stays on the event loop
-    thread, so the table needs the in-turn form only). The exact join pairs every call with its
-    own partner. The failure signal is count, parse and key distinctness, not a torn line: the
-    lock-removed control did not tear a line at 500 B to 3 MB.
-
-    QueryCapture serves both leads; the served_ledger and executed_queries carry the identity.
-    World b's main dispatches two new leads in ONE turn (`RealWorld.concurrent_leads`, requested
-    of the shared machinery); the shared gather script's five calls land on whichever lead asks
-    next (the set is fixed, the interleaving is not)."""
     est = estate(tmp_path)
     est.answer("idp", "query", BOB, S.BASE_ANSWER)
     est.answer("idp", "query", DAVE, S.BASE_ANSWER)

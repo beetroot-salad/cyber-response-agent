@@ -1,8 +1,3 @@
-"""The tenant row (`<data root>/<T>/tenant.json`): one characterization table per entry point (`require_tenant`,
-`accept_tenant`, `accept_placed_knowledge`, `create_tenant`) over real filesystem plants. A link, hard link, FIFO,
-directory or malformed row is refused with its exact class and subject, each paired with a positive control on the same
-address; a refusal leaves the tree as it found it; a created row is a plain one-name file at the umask's mode.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -39,10 +34,6 @@ _PATIENCE = 60
 
 _NEEDS_FIFO = pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="this platform has no FIFOs")
 
-
-# ======================================================================================
-# The address under test, spelled by hand (never read back from the owner's layout).
-# ======================================================================================
 
 @dataclasses.dataclass(frozen=True)
 class Where:
@@ -128,10 +119,6 @@ def _tree_state(top: Path) -> dict[str, tuple[int, int, int, str | None]]:
     return state
 
 
-# ======================================================================================
-# Calling an entry point: served, or refused with the one refusal class.
-# ======================================================================================
-
 def _outcome(fn: Callable[..., Any], *args: Any, **kw: Any) -> tuple[Any, Exception | None]:
     """`fn(*args, **kw)`'s value, or the exception it raised. The call runs in a daemon thread
     with `_PATIENCE` seconds to finish, so a reader that opened a planted FIFO blocking fails the
@@ -176,10 +163,6 @@ def _assert_names(message: str, subject: Path, *, folder: bool = False) -> None:
     assert message.startswith(opening), (
         f"the refusal does not open with {opening!r}: {message!r}")
 
-
-# ======================================================================================
-# O2, the read: require_tenant, accept_tenant, accept_placed_knowledge.
-# ======================================================================================
 
 @dataclasses.dataclass(frozen=True)
 class ReadShape:
@@ -294,10 +277,6 @@ def _assert_row_refusal(message: str, w: Where, shape: str) -> None:
 
 @pytest.mark.parametrize("shape", _read_params(sorted(READ_SHAPES)))
 def test_require_tenant_reads_the_row_as_it_did(tmp_path, shape):
-    """require_tenant serves a good row, and a row reached through a linked `<T>` (N2: the
-    read follows `<T>`'s spelling, and that row is the one served). It refuses every other
-    shape with TenantRefused, opening with the row's path and leaving the tree untouched; the
-    same address, made plain, is then served."""
     w = _where(tmp_path)
     case = READ_SHAPES[shape]
     case.plant(w)
@@ -354,10 +333,6 @@ def _refuse_then_repair(accept: Callable[..., Any], w: Where, shape: str, top: P
 
 @pytest.mark.parametrize("shape", _read_params(sorted(READ_SHAPES)))
 def test_accept_tenant_reads_the_row_as_it_did(tmp_path, shape):
-    """accept_tenant over a real knowledge folder. A good row is accepted. Every row shape that
-    require_tenant refuses is refused here first, at step 2, naming the row and not the
-    knowledge folder, with the tree untouched. A linked `<T>` passes the row and is refused at
-    the knowledge step. Each refused address, made plain, is then accepted."""
     w = _where(tmp_path)
     READ_SHAPES[shape].plant(w)
     _place_knowledge_if_reachable(w)
@@ -378,11 +353,6 @@ _NO_ROW_READ = frozenset({"absent-T", "file-at-T"})
 
 @pytest.mark.parametrize("shape", _read_params(sorted(set(READ_SHAPES) - _NO_ROW_READ)))
 def test_accept_placed_knowledge_reads_a_present_row_as_it_did(tmp_path, shape):
-    """Setup's half of acceptance, over a real knowledge folder. With no row it serves and says
-    the row is absent; with a good row it serves and says it is present. A row that IS there is
-    read as require_tenant reads it, so every refused shape is refused naming the row, with the
-    tree untouched, and then served once made plain. A linked `<T>` is refused at the knowledge
-    step."""
     w = _where(tmp_path)
     READ_SHAPES[shape].plant(w)
     _place_knowledge_if_reachable(w)
@@ -394,10 +364,6 @@ def test_accept_placed_knowledge_reads_a_present_row_as_it_did(tmp_path, shape):
     _refuse_then_repair(place, w, shape, tmp_path)
     assert _served(place, w.root, TID) == (settings, True), "the positive control"
 
-
-# ======================================================================================
-# O2, the create: create_tenant.
-# ======================================================================================
 
 def _file_mode(mask: int) -> int:
     return 0o644 & ~mask
@@ -430,10 +396,6 @@ CREATE_FRESH: dict[str, Callable[[Where], Any]] = {
 @pytest.mark.parametrize("mask", [0o022, 0o027, 0o077], ids=lambda m: f"umask-{m:03o}")
 @pytest.mark.parametrize("shape", sorted(CREATE_FRESH))
 def test_create_tenant_mints_the_row_into_a_fresh_root(tmp_path, shape, mask):
-    """A missing root, an empty root, and a `<T>` holding only the operator's `knowledge/` each
-    get the row. It is plain, has one name and holds exactly the row; the file and any folder
-    the create made have the modes the umask gives; and nothing else lands beside it. A
-    knowledge folder already there is left exactly as it was."""
     w = _where(tmp_path)
     CREATE_FRESH[shape](w)
     made_root, made_dir = not w.root.exists(), not w.dir.exists()
@@ -524,10 +486,6 @@ CREATE_REFUSED: dict[str, CreateShape] = {
     "foreign-entry-in-rowless-T": CreateShape(lambda w: (w.dir / "runs").mkdir(parents=True),
                                               lambda w: (w.dir / "runs").rmdir(), "root",
                                               _NOT_FRESH),
-    # The data root itself is not a folder: the OS error of opening (or making) the root,
-    # naming `<T>`. A file at the root was "File exists" before #1137 (guarded_mkdir's
-    # makedirs) and is "Not a directory" after (hold_new opens it as a folder): a declared
-    # message change. A dangling link at the root is "File exists" both times.
     "root-is-a-file": CreateShape(
         lambda w: w.root.write_text("x\n", encoding="utf-8"), lambda w: w.root.unlink(), "dir",
         os.strerror(errno.ENOTDIR)),
@@ -540,11 +498,6 @@ CREATE_REFUSED: dict[str, CreateShape] = {
 @pytest.mark.parametrize("shape", [pytest.param(n, marks=_NEEDS_FIFO) if n == "fifo-at-row"
                                    else n for n in sorted(CREATE_REFUSED)])
 def test_create_tenant_refuses_as_it_did(tmp_path, shape):
-    """create_tenant refuses every address that is not a fresh root or a plain path to the row,
-    with TenantRefused naming the same path in the same words. Only an occupied row is told it
-    "already exists". The refusal leaves the tree exactly as it was: the plant stays in place,
-    a link's target is untouched, and no `<T>` or row is made. Once the plant is removed, the
-    same create succeeds."""
     w = _where(tmp_path)
     case = CREATE_REFUSED[shape]
     first = case.plant(w)
@@ -569,38 +522,6 @@ def test_create_tenant_refuses_as_it_did(tmp_path, shape):
     _assert_created(w, row, 0o022)
 
 
-# ======================================================================================
-# O1: no path seam reached from the tenant module, except by the stamp until #1187.
-# ======================================================================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ======================================================================================
-# Permission denied: the OSError → TenantRefused mappings. Root ignores permission bits, so
-# these run only unprivileged (CI); each restores the bits before the positive control.
-# ======================================================================================
-
 _UNPRIVILEGED = pytest.mark.skipif(
     not hasattr(os, "geteuid") or os.geteuid() == 0,
     reason="root ignores permission bits")
@@ -622,9 +543,6 @@ def test_an_unreadable_row_is_refused_naming_it(tmp_path):
 
 @_UNPRIVILEGED
 def test_a_row_create_into_an_unwritable_folder_is_refused_naming_the_row(tmp_path):
-    """`<T>` exists (holding only the operator's `knowledge/`) but cannot be written: the row's
-    create is refused with TenantRefused naming the row, and nothing is left at its name;
-    writable again, the same create succeeds."""
     w = _where(tmp_path)
     (w.dir / "knowledge").mkdir(parents=True)
     w.dir.chmod(0o555)

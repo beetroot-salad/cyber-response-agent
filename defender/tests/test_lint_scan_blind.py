@@ -29,11 +29,6 @@ def tree(tmp_path):
 
 @pytest.mark.parametrize("mod_name", DI_GATES)
 def test_unparseable_file_in_scope_exits_2_not_0(mod_name, tree, capsys):
-    """A file the gate cannot parse must not be skipped into a clean report.
-
-    Exit 2 specifically, not merely non-zero: exit 1 means "the gate looked and found a
-    violation", and a `!= 0` assertion would pass against that conflation. The gate found
-    nothing here — it could not look."""
     scope, baseline = tree
     (scope / "broken.py").write_text("def (:\n", encoding="utf-8")
     mod = importlib.import_module(mod_name)
@@ -89,10 +84,6 @@ def test_read_and_parse_returns_text_and_tree_on_a_good_file(tmp_path):
 
 
 def test_read_and_parse_still_replaces_undecodable_bytes(tmp_path):
-    """`errors="replace"` is preserved from the eight copies this seam replaced, so a latin-1
-    byte is still substituted rather than raising. Pinned because the alternative — letting
-    UnicodeDecodeError through — would turn a merely-odd file into an exit-2 gate failure, a
-    behaviour change the fix does not intend and the old copies never had."""
     import _astlib
 
     p = tmp_path / "l.py"

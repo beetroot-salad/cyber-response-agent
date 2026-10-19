@@ -40,13 +40,7 @@ def _forged_in_place(rid: object, text: str, forged: str, protocol: int) -> byte
     return blob.replace(old, new)
 
 
-
 def test_1105_run_id_is_a_frozen_value_ordered_by_its_text_and_never_equal_to_a_str():
-    """A RunId is frozen (assigning an attribute raises), is not a str subclass, gives its text
-    through str(), survives copy.copy, copy.deepcopy and a pickle round trip equal to the
-    original (each rebuilt through RunId.parse, MF-02), compares, hashes and sorts by its text
-    against another RunId, and never equals a str: RunId.parse('a') == 'a' is False in both
-    operand orders, and a dict holds the RunId and the str of the same text as two keys."""
     from defender.run_repository import RunId
 
     a = RunId.parse("a")
@@ -76,11 +70,6 @@ def test_1105_run_id_is_a_frozen_value_ordered_by_its_text_and_never_equal_to_a_
 
 
 def test_1105_run_id_parse_refuses_what_refuse_bad_run_id_refuses_and_any_non_str_as_run_refused():
-    """RunId.parse raises RunRefused, never ValueError or AttributeError, for every text
-    refuse_bad_run_id refuses ('', '_episodes', '_tenant.json', '../x', 'a/b', '.hidden', 'r1\\n'),
-    for text that is not case-stable ('Run1'), and for a non-str (5, None, b'r1'); RunId.mint
-    refuses a non-str label (5) the same way, where mint_run_id(5) mints today. Positive control:
-    'r1', '2026-x.y_z' and a 206-byte id parse."""
     from defender._run_id import refuse_bad_run_id
     from defender.run_repository import RunId, RunRefused
 
@@ -101,10 +90,6 @@ def test_1105_run_id_parse_refuses_what_refuse_bad_run_id_refuses_and_any_non_st
 
 
 def test_1105_run_id_parse_admits_206_bytes_and_refuses_207():
-    """RunId.parse admits a grammar-valid id of exactly 206 bytes and refuses one of 207 bytes
-    with RunRefused. The literal 206 is kept in the code, and this test also derives it: 255
-    (NAME_MAX) minus the longest sidecar suffix (.accounting_failures.json, 25 bytes) minus the
-    staged-name tail '.staged-' plus 16 hex digits (24 bytes) is 206 (NM-07)."""
     from defender import _io
     from defender.run_repository import RunId, RunRefused
 
@@ -128,11 +113,6 @@ def test_1105_run_id_parse_admits_206_bytes_and_refuses_207():
 
 
 def test_1105_run_id_mint_folds_then_bounds_the_id_and_never_truncates():
-    """RunId.mint(label, clock=<fixed UTC time>) returns '<%Y%m%dT%H%M%SZ>-<label>' case-folded
-    (a 17-character prefix); it admits an ASCII label of 189 characters (a 206-byte id) and
-    refuses one of 190 with RunRefused, measures the bound after folding (94 x 'ß' mints a
-    205-byte id; 95 x 'ß' folds to 207 bytes and is refused), and never truncates the label to
-    fit."""
     from defender.run_repository import RunId, RunRefused
 
     assert len(H.MINT_PREFIX) == 17
@@ -149,12 +129,6 @@ def test_1105_run_id_mint_folds_then_bounds_the_id_and_never_truncates():
 
 
 def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
-    """RunId.parse admits 'r1.run-end.json', 'r1.scrub-verdict.json',
-    'r1.accounting_failures.json', 'r1.ticket-write.json', 'r1.session-pointer.json' and the
-    staged shape
-    'r1.run-end.json.staged-0123456789abcdef': the sidecar clause, staged shape included, belongs
-    to the repository's open and run setup, not to RunId, because its `exists` takes a RunId and
-    answers for a known sidecar file at such a name."""
     from defender.run_repository import RunId
 
     names = [f"r1{s}" for s in H.SIDECAR_SUFFIXES] + [f"r1.run-end.json{H.STAGED_TAIL}"]
@@ -162,16 +136,7 @@ def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
         assert str(RunId.parse(name)) == name, name
 
 
-
 def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subclassing_are_refused():
-    """Unpickling, copy.copy, copy.deepcopy and dataclasses.replace (and copy.replace where it
-    exists) rebuild a RunId through RunId.parse, so a pickled payload carrying '../x', a
-    300-character text or '_episodes' raises RunRefused at unpickling and the repository's open
-    and exists are never reached with it; RunId.__new__(RunId) and defining a subclass of RunId each raise
-    RunRefused. Positive control: a valid RunId round-trips by each route equal to the original.
-    The forged payloads cover every pickle protocol (0 to pickle.HIGHEST_PROTOCOL), each RunId's
-    own stream with its text overwritten in place; every replace route is driven, and one that
-    does not exist must raise TypeError rather than be skipped (91 BF-08)."""
     from defender.run_repository import RunId, RunRefused
 
     text = "abcd" * 50  # 200 bytes: room to forge each payload below in place
@@ -206,5 +171,3 @@ def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subcla
     assert H.is_a(err, RunRefused), f"RunId.__new__(RunId) gave {err!r}"
     err = H.raised(type, "Forged", (RunId,), {})
     assert H.is_a(err, RunRefused), f"subclassing RunId gave {err!r}"
-
-

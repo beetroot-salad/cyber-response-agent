@@ -10,10 +10,6 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip("pydantic_ai")
-# `find_spec` LOCATES the openai SDK without executing it. Importing the two pydantic-ai
-# model modules below costs 38 MB, and EVERY xdist worker was paying it at collection
-# time for the four tests in this file that assert on the classes. The defender source
-# builds providers lazily, so nothing else here pulls them — they moved into those four.
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("openai") is None, reason="openai SDK not installed"
 )
@@ -203,12 +199,16 @@ def test_cache_affinity_preserves_the_effort_setting_it_merges_into():
     (_KIMI_ID, "kimi-k3"),
     ("kimi-k3", "kimi-k3"),
     ("accounts/fireworks/models/deepseek-v4p1-flash", "deepseek-v4.1-flash"),
-    # decommissioned, still priced: an archived trace that named them keeps its bill
     ("accounts/fireworks/models/glm-5p2", "glm-5.2"),
     ("kimi-k2p6", "kimi-k2.6"),
     ("claude-haiku-4-5", "claude-haiku-4-5"),
     ("claude-sonnet-4-6-20260101", "claude-sonnet-4-6"),
     ("", "claude-sonnet-4-6"),
+    ("glm-5.3", "glm-5.3"),
+    (f"fireworks:{_GLM_ID}", "glm-5.3"),
+    ("glm-5.3-flash", "glm-5.3-flash"),
+    ("glm-5p3-flash", "glm-5.3-flash"),
+    ("accounts/fireworks/models/glm-5p3-flash", "glm-5.3-flash"),
 ])
 def test_pricing_model_key(model, key):
     assert pricing.model_key(model) == key
@@ -224,9 +224,6 @@ def test_pricing_glm_uses_fireworks_rates():
 
 
 def test_fireworks_cached_input_is_discounted_against_its_own_input():
-    """Every Fireworks row prices a cache READ below its own input and a cache WRITE at
-    exactly it. A row that priced the read at the input rate would silently make the
-    highest-caching lane in the tree — gather runs at ~92% — look four times its real cost."""
     for key in ("glm-5.2", "kimi-k2.6", "kimi-k3", "glm-5.3", "glm-5.3-flash", "deepseek-v4.1-flash"):
         row = pricing.PRICING[key]
         assert row["cache_r"] < row["in"], key
@@ -275,28 +272,6 @@ def test_preflight_missing_required_key_exits_2(monkeypatch):
 
 # --- #1023: GLM 5.3 ---------------------------------------------------------
 
-_GLM53_ID = "accounts/fireworks/models/glm-5p3"
-
-
-@pytest.mark.parametrize(("model", "key"), [
-    ("glm-5.3", "glm-5.3"),
-    ("glm-5p3", "glm-5.3"),
-    (f"fireworks:{_GLM53_ID}", "glm-5.3"),
-    (_GLM53_ID, "glm-5.3"),
-    # Flash is a DIFFERENT row ($0.15/$0.50), and its name CONTAINS the plain-5.3 name, so
-    # the two branches are order-dependent: flash has to be tested first or every flash call
-    # bills at 5.3's nine-times-higher input rate. Nothing pinned this before #1023.
-    ("glm-5.3-flash", "glm-5.3-flash"),
-    ("glm-5p3-flash", "glm-5.3-flash"),
-    ("accounts/fireworks/models/glm-5p3-flash", "glm-5.3-flash"),
-])
-def test_pricing_model_key_routes_5p3_to_its_own_row(model, key):
-    """5.3 is not 5.2. The generic `"glm" in m` fallthrough answers `glm-5.2` for every GLM
-    spelling it is reached with, and 5.2's row is RIGHT on input and output ($1.40/$4.40) —
-    which is what makes the miss quiet. Only the cached-input rate differs."""
-    assert pricing.model_key(model) == key
-
-
 def _own_row_key(model: str) -> str:
     """The row name a model spells for itself: `kimi-k2p6` -> `kimi-k2.6`. Compared against
     `model_key`, this is what separates a row a model OWNS from a neighbour's row it merely
@@ -323,13 +298,10 @@ def test_gather_effort_is_floored_for_a_thinking_only_model():
     """`gather_effort="none"` is the PROVIDER saying "gather wants the cheapest thinking on offer"."""
     assert providers.effort_for_role("glm-5.3", AgentRole.GATHER) == "low"
     assert providers.effort_for_role("glm-5p3", AgentRole.GATHER) == "low"
-    assert providers.effort_for_role(f"fireworks:{_GLM53_ID}", AgentRole.GATHER) == "low"
+    assert providers.effort_for_role(f"fireworks:{_GLM_ID}", AgentRole.GATHER) == "low"
 
 
 def test_a_model_that_accepts_none_still_gets_none():
-    """The floor is per-model, not a blanket raise of gather's effort. Kimi K3 and DeepSeek
-    V4.1 Flash take `none` and must keep getting it under a gather override, or a lane on
-    them silently starts paying for reasoning tokens it never asked for."""
     assert providers.effort_for_role("kimi-k3", AgentRole.GATHER) == "none"
     assert providers.effort_for_role("deepseek-v4.1-flash", AgentRole.GATHER) == "none"
 
@@ -358,9 +330,6 @@ def test_a_model_no_row_claims_is_refused_not_absorbed(model):
 
 
 def test_a_longer_name_does_not_absorb_a_shorter_row():
-    """The containment trap in one assertion: `glm-5p3-flash` CONTAINS `glm-5p3`, and under
-    substring matching which row won depended only on branch ORDER. Under equality the two
-    names are simply different, and no ordering can make them collide."""
     assert pricing.model_key("glm-5p3-flash") == "glm-5.3-flash"
     assert pricing.model_key("glm-5p3") == "glm-5.3"
     assert pricing.PRICING["glm-5.3-flash"]["in"] != pricing.PRICING["glm-5.3"]["in"]

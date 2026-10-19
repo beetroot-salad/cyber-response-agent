@@ -21,10 +21,6 @@ def _roomy_payload_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(S.CAP_KNOB, "10000000")
 
 
-# --------------------------------------------------------------------------------------
-# Local helpers (requested as shared machinery in 82-writer-family_and_questioner.md).
-# --------------------------------------------------------------------------------------
-
 #: The pass tables a reply keeps (main's names; #1234 does not rename them).
 _PASS_TABLES = ("correlations", "scope_checks", "derivations")
 
@@ -114,34 +110,9 @@ def _lane(built: Any, finding_id: str) -> str | None:
     return S.lane_of(built, finding_id)
 
 
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# The family reply and its prompt.
-# --------------------------------------------------------------------------------------
-
-
-
-
 @pytest.mark.parametrize("retired", S.RETIRED_REPLY_WORDS)
 def test_1234_family_reply_is_family_scope_world_findings_only(tmp_path: Path,
                                                                retired: str) -> None:
-    """d00c_family_reply_contract — validate_reply over a family_reply, written by the family
-    call's draw loop.
-
-    A family draw document holds family-scope world findings, each carrying its own systems
-    (A5; the manifest's served systems are never stamped on), and the pass tables only; it
-    carries no verdict_word and no episode_outcome, and a family reply carrying a retired
-    verdict_word is refused at validation by that name and re-asked within _REPLY_ATTEMPTS
-    (A4, A5), so no such word is read by anything the pass writes.
-
-    How: the family's first ask returns a reply carrying the retired word (parametrized over
-    both retired reply words, HOLE-2), the second the same findings without it. The finding
-    names `siem-x` alone, so a row stamped with the served systems is told apart."""
     built = S.family(tmp_path)
     claim = S.marker(S.FAMILY, "own-systems")
     finding = S.wf("unreachable", systems=("siem-x",), evidence=[S.plan_ptr()], claim=claim)
@@ -178,21 +149,8 @@ def test_1234_family_reply_is_family_scope_world_findings_only(tmp_path: Path,
         "the validator must refuse the retired word BY NAME")
 
 
-
-
 def test_1234_family_prompt_carries_header_contrast_tables_and_fact_surfaces_for_every_run(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """d07b_family_input — _build_family_prompt over the JudgeContext of every run, under
-    JUDGE_PAYLOAD_CAP (its small value), for the family_reply.
-
-    The family prompt carries the computed header, a contrast table and the fact surfaces for
-    every run, the control included, each whole; a family prompt whose computed sections exceed
-    the cap is refused with its reason named on the family row, and no family call runs.
-
-    How: each run has its own lead (`l-run<X>`) querying a system or entity a planted fact
-    touches, so the run's contrast row and fact-surface hits name it; the header carries each
-    run's story marker and the fact surfaces each planted fact. Then the same family under a
-    64-character cap."""
     built = S.family(tmp_path, _lead_triad(), root=tmp_path / "whole")
     judge = S.judge()
     S.grade(built, judge, draws=1)
@@ -219,26 +177,8 @@ def test_1234_family_prompt_carries_header_contrast_tables_and_fact_surfaces_for
     assert _names_the_cap(family), f"the family row does not name the cap: {family}"
 
 
-
-
-# --------------------------------------------------------------------------------------
-# Family findings: routing, systems, union across draws.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_family_finding_citing_the_manifest_reaches_the_questioner_queue(
         tmp_path: Path) -> None:
-    """d07d_family_manifest_allowlist — _resolves over family_manifest.access[pointer];
-    route_finding; append_world_rows -> QUESTIONER_FINDINGS.
-
-    Each completed family draw's family-scope finding that is not gap-only and has a resolving
-    plan pointer (family.yaml#..., alone or with context) routes design and is queued on the
-    questioner channel under its own draw's finding id (A13: the family combines by union),
-    while one citing only outcome.yaml routes serving to the user record.
-
-    How: two family draws. Draw 0 files a finding citing the family-level part of the plan
-    alone and one citing only pre-flight's record; draw 1 files one citing world b's plan entry
-    beside pre-flight's record."""
     built = S.family(tmp_path)
     alone, serving, with_context = (S.marker(S.FAMILY, "plan-alone"),
                                     S.marker(S.FAMILY, "outcome-only"),
@@ -268,30 +208,8 @@ def test_1234_family_finding_citing_the_manifest_reaches_the_questioner_queue(
     assert not S.from_world(S.defender_queue(), S.FAMILY)
 
 
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# The family's commit (A6) and the call count.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_family_call_runs_once_and_a_rerun_only_without_a_completed_draw(
         tmp_path: Path) -> None:
-    """d07e_family_runs_once — grade_episode, family_reply, EpisodeGrade, with the family row's
-    world_row_state at `queued` and at `queueing`.
-
-    A bare re-run makes no family call when judge.yaml's family row is `queued`, makes one when
-    the family has no row, and refuses naming the family when its row is left `queueing` (A6).
-
-    How: three families. `queued` is what a completed pass leaves. No row: a pass whose family
-    call failed (P9) appended nothing of the family; its family row, if any, is removed — the
-    state a pass stopped before the family's first write leaves. `queueing`: a completed
-    pass's family row put back to `queueing` — the state a stop between the family's append and
-    its flip leaves."""
     first = S.family_reply(world=[S.wf("unreachable", systems=("idp",),
                                        evidence=[S.plan_ptr()], claim=S.marker(S.FAMILY, "1"))])
     second = S.family_reply(world=[S.wf("incoherent", systems=("edr",),
@@ -336,19 +254,6 @@ def test_1234_family_call_runs_once_and_a_rerun_only_without_a_completed_draw(
 
 
 def test_1234_family_findings_requeued_after_a_stopped_pass(tmp_path: Path) -> None:
-    """s_A2 — grade_episode, family_reply, the family row's world_row_state `queueing` then
-    `queued`, append_world_rows -> QUESTIONER_FINDINGS.
-
-    The family call commits the same way (A6): `queueing`, append, `queued`. A family row left
-    `queueing` refuses the re-run naming the family; a `queued` family row is skipped, so the
-    family call is not asked again and the questioner queue holds each family-scope finding
-    once. judge.yaml, not draw files on disk, decides whether the family call has completed;
-    the record of what was queued agrees with the queue.
-
-    How: (1) the pass stops at the family's append — a directory planted at the questioner
-    queue's name refuses the write. The family row is left `queueing` though its draw is
-    complete on disk, and the re-run refuses naming the family. (2) A completed two-draw pass;
-    the re-run would answer different findings at the same coordinates and is never asked."""
     d0, d1 = (S.wf("unreachable", systems=("idp",), evidence=[S.plan_ptr()],
                    claim=S.marker(S.FAMILY, "draw0")),
               S.wf("mislabelled", systems=("edr",), evidence=[S.plan_ptr("b")],
@@ -402,14 +307,6 @@ def test_1234_family_findings_requeued_after_a_stopped_pass(tmp_path: Path) -> N
 @pytest.mark.parametrize("failure", ["faulted", "completed-no-draw"])
 def test_1234_family_call_failed_while_every_world_completed(tmp_path: Path,
                                                              failure: str) -> None:
-    """s_L5 — grade_episode, family_reply, the family call's draws, world_row_state `queued`.
-
-    A family call that faulted or completed no draw leaves the family row without `queued`;
-    the next run asks it again (A6: no row, regrade); `queued` worlds stay skipped.
-
-    How: the family call faults (P9), or every ask returns the retired verdict_word shape and
-    is refused; both planted worlds complete. The re-run answers the family with one design
-    finding."""
     built = S.family(tmp_path)
     first = (S.judge(fail={S.FAMILY}) if failure == "faulted"
              else S.judge({S.FAMILY: S.family_reply(verdict_word="survived")}))
@@ -437,13 +334,6 @@ def test_1234_family_call_failed_while_every_world_completed(tmp_path: Path,
 
 
 def test_1234_family_call_faults_after_the_worlds_rows_were_queued(tmp_path: Path) -> None:
-    """s_L12 — grade_episode, family_reply, world_row_state `queued`.
-
-    The family fault is recorded; the family row is not `queued`, so the next run retries the
-    family call; queued world rows stay (A6).
-
-    How: b files an investigator finding (a defender row), c a design world finding (a
-    questioner row), and the family call faults (P9). The retry files one family finding."""
     built = S.family(tmp_path)
     replies = {
         "b": S.world_reply("lead-quality", ["idp"],
@@ -479,15 +369,6 @@ def test_1234_family_call_faults_after_the_worlds_rows_were_queued(tmp_path: Pat
     assert S.from_world(S.questioner_queue(), "c") == c_rows
 
 
-
-
-# --------------------------------------------------------------------------------------
-# What the family prompt carries about each world.
-# --------------------------------------------------------------------------------------
-
-
-
-
 def _unusable_world(kind: str) -> dict[str, Any]:
     """World `zulu` (role D, its own lead) made O5-failed by its own world record (archive kept,
     a detail that must never be shown), or cut short. `malformed` is planted after the build."""
@@ -503,19 +384,6 @@ def _unusable_world(kind: str) -> dict[str, Any]:
 @pytest.mark.parametrize("kind", ["o5-failed", "cut-short", "malformed"])
 def test_1234_family_prompt_lists_each_unusable_world_once_and_never_as_a_reference(
         tmp_path: Path, kind: str) -> None:
-    """g17_family_prompt_account_of_failed_worlds_agrees_with_the_references —
-    render_family_text over the outcome_record, into the family prompt.
-
-    The family prompt's account of pre-flight outcomes (render_family_text: failed worlds with
-    reason and call, never detail) lists each O5-failed, cut-short and malformed world once,
-    with its reason in an untrusted frame, and none of them as a reference run or fact
-    surface; it agrees with the per-world prompts' reference sets for the same family. The
-    control is a usable world, listed as a reference.
-
-    How: the lead triad plus a fourth world `zulu` that is O5-failed (its own world record,
-    archive present), cut short, or malformed (a report with two `disposition:` keys), one per
-    case so O5's two-world bar is never reached. Every run's lead names it wherever its
-    computed context appears."""
     built = S.family(tmp_path, _lead_triad(zulu=_unusable_world(kind)))
     if kind == "malformed":
         S.second_disposition(built.world_dir("zulu") / "report.md")
@@ -548,17 +416,6 @@ def test_1234_family_prompt_lists_each_unusable_world_once_and_never_as_a_refere
 
 def test_1234_am_family_prompt_computed_sections_exceed_the_cap(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """s_AM27 — _build_family_prompt under JUDGE_PAYLOAD_CAP (its small value), for the
-    family_reply.
-
-    The family prompt has none of the sections A9 trims first, and A9 never cuts sections 1-4:
-    its computed sections (every run's header, contrast table and fact surfaces) are charged
-    whole and never trimmed; a family prompt over the cap is refused with its reason named on
-    the family row, and no family call runs (NA06).
-
-    How: world c's story (header material) is ~85K characters between two markers. Under a
-    10M cap the family prompt carries it whole; under the default 20000 the family call is
-    refused rather than sent trimmed."""
     head, tail = S.marker("c", "story-head"), S.marker("c", "story-tail")
     story = " ".join([head, *(["the second analyst re-read every host log before closing"]
                               * 1500), tail])
@@ -585,21 +442,7 @@ def test_1234_am_family_prompt_computed_sections_exceed_the_cap(
     assert _names_the_cap(family), f"the family row does not name the cap: {family}"
 
 
-# --------------------------------------------------------------------------------------
-# World findings: design to the questioner channel, serving and gaps to the user record.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_questioner_row_is_design_only_with_systems(tmp_path: Path) -> None:
-    """d00e_questioner_row_contract — build_finding_row, the append_world_rows ->
-    QUESTIONER_FINDINGS payload.
-
-    A questioner row is built only from a design world finding (world or family scope: not
-    gap-only, with a resolving plan pointer, A1/A15), carries that finding's own systems (A5),
-    and has no judge_outcome key.
-
-    How: b files a design, a serving and a gap-only world finding; c a design one naming two
-    systems; the family a design one. Read off what the appender wrote to the channel."""
     built = S.family(tmp_path, S.triad(b={"calls": _b_with_blocked_calls()}))
     claims = {k: S.marker("b", k) for k in ("design", "serving", "gap")}
     b_findings = [
@@ -637,21 +480,8 @@ def test_1234_questioner_row_is_design_only_with_systems(tmp_path: Path) -> None
             assert retired not in row, f"a questioner row carries {retired!r}: {row}"
 
 
-
-
 def test_1234_serving_only_world_finding_reaches_the_user_record_not_the_questioner_queue(
         tmp_path: Path) -> None:
-    """d06b_serving_finding_to_user_record — route_finding, user_record, append_world_rows ->
-    QUESTIONER_FINDINGS.
-
-    A world finding with no resolving plan pointer (one citing only samples.yaml#<system> and
-    served answers included) is absent from the questioner channel and listed among the user
-    record's serving findings.
-
-    How: b files a finding citing only a samples section, one citing a samples section and
-    b's own altered served answer, and — the positive control on the same reply — one citing
-    b's plan entry. Every surface a serving finding could reach is read: both queues, the
-    ledger, the user record."""
     built = S.family(tmp_path)
     samples_only, served_too, control = (S.marker("b", "samples-only"),
                                          S.marker("b", "served-answer"), S.marker("b", "plan"))
@@ -676,11 +506,3 @@ def test_1234_serving_only_world_finding_reaches_the_user_record_not_the_questio
         assert _mentions(S.serving_findings(built), finding_id, claim), (
             f"{claim} is not among the user record's serving findings")
     assert not _mentions(S.serving_findings(built), control)
-
-
-
-
-
-
-
-

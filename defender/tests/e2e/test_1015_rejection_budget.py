@@ -25,9 +25,6 @@ from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
     _dead_end,
     _summary,
 )
-# The COMPANION guard's replay oracle and main's one idiom, imported rather than re-written:
-# O3 is the claim that the live verdict and a replay over the recorded table are ONE predicate,
-# and a second copy of the oracle here could only ever agree with itself.
 from defender.tests.e2e.test_repeat_breaker_807 import (  # noqa: E402
     INCOMPLETE_IDIOM,
     _replay_rejections,
@@ -44,9 +41,6 @@ pytestmark = pytest.mark.e2e
 
 B = REJECTION_BUDGET
 
-#: A ghost family, a verb and a params fragment that could not be mistaken for prose if any of
-#: them crossed into main's context. Used where the claim is a NEGATIVE about the summary, so
-#: none of the three may be a word the host's own sentences could plausibly contain.
 LOUD_SYSTEM = "Zq7-Wintermute-Phantom"
 LOUD_VERB = "Zq7-Sunspot-Verb"
 LOUD_PARAM = "Zq7-CANARY-PARAM"
@@ -117,15 +111,6 @@ def _assert_budget_stop(r: _Res, *, occurrence: int = B) -> None:
     assert rq.REPEAT_ESCAPE not in summary, \
         "a budget stop handed main the repeat guard's escape"
 
-    # EQUALITY, not `reason in summary`. S1 discharges O4 with TWO facts, and the second is
-    # that `_run_gather`'s dead-end arm composes this NOTICE from `reason` and `escape` ALONE.
-    # A substring check tests only the first: it stays green while a placement appends (or
-    # prepends) a model-authored fragment of its own around the dispatcher's sentences — a
-    # truncated ghost name, a params key, a hash prefix — none of which is a substring of any
-    # canary a negative could name. Stated whole, there is nowhere in the header for a byte
-    # the model authored to be.
-    #
-    # Taken over the HEADER since #987, which gave the notice a body: see `_summary_header`.
     assert _summary_header(r) == (
         f"gather for {LEAD} hit a dead end: {reason} {REJECTION_BUDGET_ESCAPE} "
         f"{INCOMPLETE_IDIOM}"
@@ -180,11 +165,6 @@ def test_a_successful_query_between_rejections_does_not_refill_the_budget(tmp_pa
 
     assert [row["exit_code"] for row in r.own_rows] == [64, 64, 0, 64, 64, 0, 64, 64], \
         "the lead did not run the interleaved shape through to its sixth rejection"
-    # The PREMISE, stated as the weakest thing that establishes it: some successful call
-    # reached the backend, so the framework's per-tool counter did drop at least once. The
-    # exact count is the run-on CONTROL below, and the two must not be the same expression —
-    # `rec.calls` is frozen once `_run` returns, so a closing assertion identical to this one
-    # can never fail on its own and the arm would carry no run-on evidence at all.
     assert rec.calls, \
         "no successful call reached the backend, so no reset was ever available"
     assert len(_above_guard(r)) == B
@@ -316,16 +296,6 @@ def test_no_byte_the_model_authored_reaches_main_through_the_grant_placements_st
     _assert_budget_stop(r)
 
     body = _summary_body(r)
-    # THE VACUITY CONTROL IS PER-COLUMN SINCE #1016, and the split is that issue's N1: `verb`
-    # and `params` are the call's own arguments, which a coarsened row KEEPS — they are what
-    # makes it an audit record of what was attempted — while the model's `system` is now
-    # withheld from the ROW too (`UNDECLARED_SYSTEM_DETAIL` replaces the refusal that named it).
-    #
-    # So "it reached the table" is the right control for the two columns still carrying model
-    # text, and the WRONG one for the system name: asserting it would now fail on #1016 working.
-    # What makes the system's absence from main non-vacuous instead is that the call demonstrably
-    # happened and was identified — B rows, each with its own fingerprint (asserted below) — so
-    # there was a name to leak and the host declined to spend it at either surface.
     for canary in (LOUD_VERB, LOUD_PARAM):
         assert canary in str(r.rows), \
             f"{canary} never reached the table, so its absence from main's context says nothing"
@@ -357,17 +327,6 @@ def test_a_lead_iterating_on_a_declared_systems_parameters_is_not_the_budgets(tm
         q("elastic", "query", PARAMS), DONE,
     ])
 
-    # The domain's OWN predicate, negated — not a hand-spelled complement of it. C13's
-    # population is "agent-fixable, and NOT what the guard counts", and `in_rejection_domain` is
-    # the one home of the second half (its docstring: a fourth copy "would split the guards in
-    # silence while every fixture stayed green"). Written out here, widening the domain would
-    # leave this arm — the only live guarantee that a healthy lead is not the budget's — green
-    # over a population that had moved inside it.
-    #
-    # `own_rows`, not `rows`: #808's reserved lead-0 resolves against `GOLDEN_AB3` before MAIN's
-    # first turn and writes its own rows into this table (an above-guard agent-fixable one, on
-    # this fixture). `_above_guard` already excludes them, and a census that did not would be
-    # counting another lead's refusals into this one's five.
     below = [row for row in r.own_rows
              if not rq.in_rejection_domain(row)
              and row.get("error_class") == AGENT_FIXABLE_ERROR_CLASS]

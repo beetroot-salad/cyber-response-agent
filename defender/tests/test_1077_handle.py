@@ -61,9 +61,6 @@ def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
 
 
 def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base):
-    """`Run.for_tenant`/`Run.under` apply `is_case_stable_id` beside `is_valid_run_id`, so a
-    case-variant of an existing run id is REFUSED rather than silently resolving onto that
-    run's directory."""
     from defender._run_id import CASE_STABLE_REQUIRED
     _with_record(base)
     S.seed_run_tree(S.make_run_dir(base, "run-1"))
@@ -151,9 +148,6 @@ def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path
 # Settled premises on the constructors' admission domain
 
 def test_run_under_run_id_containing_path_separator(base):
-    """Security dive universal (1): no accessor resolves outside its root for any input — a
-    '/'-bearing run_id handed to the constructors must not escape the runs base, whether it
-    arrives at the public `Run.for_tenant` or at the internal `Run.under` it is built on."""
     _with_record(base)
     escaped = base.parent / "escaped"
     escaped.mkdir(exist_ok=True)
@@ -185,10 +179,6 @@ def test_run_under_run_id_containing_parent_traversal(base):
 
 
 def test_handle_over_the_learning_run_directory_that_this_issue_leaves_unowned(tmp_path: Path):
-    """Receiver kind (5) stays out of D1-D7's scope: `Run.at` still accepts a
-    `LoopPaths.runs_dir/<run_id>` learning run dir as run-dir-shaped (N8), no accessor covers
-    it, and no demand may assert that it is unwritten — the forward-check verifier writes a wire
-    trace there."""
     learning_run = tmp_path / "state" / "runs" / "source-42"
     S.seed_run_tree(learning_run)
     run = S.Run().at(learning_run)
@@ -204,9 +194,6 @@ def test_handle_over_the_learning_run_directory_that_this_issue_leaves_unowned(t
 
 
 def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent(tmp_path: Path):
-    """Receiver kind (6) is also out of scope: `RunPaths` continues to be constructed ad hoc over
-    an arbitrary companion-corpus directory, outside the gate's sweep, unaddressed by this
-    issue."""
     corpus = tmp_path / "skills" / "invlang" / "corpus"
     corpus.mkdir(parents=True)
     companion = corpus / "a-document.md"
@@ -240,9 +227,6 @@ def test_a_field_whose_record_is_unparseable_reads_none_and_records_the_fault(ba
 
 
 def test_a_field_whose_record_is_wrong_shaped_reads_none_and_records_the_fault(base, run_dir):
-    """A run-record field whose backing record parses but carries the wrong shape — a `world_id`
-    that is a number, a report whose disposition is a list — reads `None` and the fault is
-    recorded."""
     S.plant_stamp(run_dir, commit="c0ffee", dirty=False, tenant_id="t", world_id=17)
     (run_dir / "report.md").write_text("disposition: [a, list]\n", encoding="utf-8")
     record = S.Run().at(run_dir).record
@@ -264,9 +248,6 @@ def test_a_field_whose_record_is_wrong_shaped_reads_none_and_records_the_fault(b
 # Decision 10 (dissolved) — each accessor's OWN root
 
 def test_each_accessor_is_checked_against_its_own_root_not_one_assumed_root(base, run_dir):
-    """Each accessor is checked against its own root — the sidecars against the runs base, the
-    session db against the sessions directory, everything else against the run directory — not
-    against one assumed root."""
     owner = S.RunPaths(run_dir)
     sessions = base.parent / "sessions"
     for name in S.SIDECAR_ACCESSORS:
@@ -286,10 +267,6 @@ def test_each_accessor_is_checked_against_its_own_root_not_one_assumed_root(base
 
 
 def test_run_observability_group_stays_append_only_through_the_handle(base, run_dir):
-    """`run.observability` (wire_log, review_trace, tool_trace, review_record, lessons_loaded,
-    ticket_write, runtime_html, box_sentinel, session_pointer) is readable everywhere and
-    append-only for the host that produces it — no accessor exposes an in-place rewrite of an
-    existing entry — per §7 decision 11's uniform rule."""
     run = _tenanted(base)
     trace = S.member(run, "observability", "tool_trace")
     trace.append([{"row": 1}])
@@ -306,13 +283,8 @@ def test_run_observability_group_stays_append_only_through_the_handle(base, run_
             assert not hasattr(rec, "write"), (
                 f"run.observability.{name} exposes a whole-record rewrite of an existing entry")
         else:
-            # A whole JSON/HTML document the host writes once per run (the ticket write, the
-            # session pointer, the rendered page, the review record) is not a log: it has no
-            # entries to append to, and appending JSONL to it would corrupt it.
             assert not hasattr(rec, "append"), (
                 f"run.observability.{name} is a whole document; an append would corrupt it")
 
 
 # Decision 9 — read purity
-
-

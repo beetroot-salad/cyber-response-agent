@@ -8,7 +8,6 @@ from defender.tests._by_path import import_lint_lib
 import pytest
 
 
-
 def _load():
     return import_lint_lib("_astlib")
 
@@ -137,9 +136,6 @@ def test_a_parameter_cannot_fabricate_a_builtin_origin():
 
 
 def test_a_module_import_still_reaches_into_every_function():
-    """The load-bearing non-regression: scoping must not make the jsonl/frontmatter gates
-    BLIND. For those two, an unresolvable callee means SKIP — so a module-level import
-    failing to reach a nested call would silently switch the gate off."""
     astlib = _load()
     tree = ast.parse(
         "import json\n"
@@ -217,10 +213,6 @@ def test_str_value_resolves_a_hoisted_mode_constant():
 
 
 def test_opener_table_matches_the_real_signatures():
-    """The slot and default in OPENERS are claims about the stdlib. Check them against the
-    stdlib rather than against a hand-written table — `tempfile.SpooledTemporaryFile` was
-    tabled at slot 0 like its siblings when max_size actually comes first, so the gate read
-    an int as the mode string."""
     import bz2
     import codecs
     import gzip
@@ -266,12 +258,6 @@ def _open_call(src: str):
 
 
 def test_opener_slot_never_skips_merely_because_the_origin_resolved():
-    """`callee() is not None` does NOT mean "the receiver is a module" — it may be an
-    imported OBJECT. `PATHS` is a module-level Path-holder, so `PATHS.lessons_dir.open()`
-    resolves; reading "it resolved" as "not an opener" would drop a real text open.
-
-    Scoping (#607) does NOT close this one — `PATHS` is never rebound, so it still
-    resolves — which is why opener_slot's positive-table rule stays load-bearing."""
     call, env, astlib = _open_call(
         "from defender._paths import PATHS\nPATHS.lessons_dir.open()\n"
     )
@@ -280,10 +266,6 @@ def test_opener_slot_never_skips_merely_because_the_origin_resolved():
 
 
 def test_a_local_shadows_an_import_bound_in_another_function():
-    """#607. `module_env` collects function-local imports (a local `import re as regex` is
-    a plausible evasion), but binds them to THEIR OWN SCOPE. Before scoping, the `p` bound
-    by one function's import made every other function's local `p` resolve to that module —
-    live in judge/compare.py, and it turned a real `Path.open` into a missed violation."""
     call, env, astlib = _open_call(
         "def _invlang():\n"
         "    from defender.skills.invlang import parser as p\n"

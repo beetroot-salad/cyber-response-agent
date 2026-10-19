@@ -13,10 +13,6 @@ from defender.tests import _state1135
 def _tmp_roots(tmp_path, monkeypatch):
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    # The learning STATE root too, so the shared findings queue this pass appends to is
-    # this test's own and not the checkout's real `learning/_pending/`. Isolation belongs
-    # here rather than in the appender: a production path that picks a different queue when
-    # an env var is unset is a pass whose rows can land where no drain reads.
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 
 
@@ -35,19 +31,7 @@ def _rows(ep):
     return J.rows(_grade(ep))
 
 
-# ---------------------------------------------------------------------------------------
-# the record's own shape
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_family_record_carries_a_row_per_graded_world(tmp_path):
-    """`episodes/<id>/judge.yaml` carries one row per graded non-control world, each with every
-    per-world fact and its bucket.
-
-    A graded world with no row is O3's stated failing mode. The facts are `verdict` against
-    `declared`, `resolution_moved`, `malformed_rows` and `served_nothing` — all read off X's own
-    archived record plus the manifest; the bucket is the judge model's (O11).
-    """
     ep = J.accepted_episode(tmp_path, ledgers={
         "b": [J.oracle_row("b")],
         "c": [J.ledger_row(source="passthrough", world_label="c")],
@@ -63,26 +47,7 @@ def test_921_family_record_carries_a_row_per_graded_world(tmp_path):
             "the ground truth known by construction is not on the row")
 
 
-# ---------------------------------------------------------------------------------------
-# served_nothing — X's own rows, off the composed token
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_served_nothing_reads_x_own_rows_off_the_composed_token(tmp_path):
-    """`served_nothing` is computed from rows in X's OWN ledger file —
-    `episodes/<id>/served/<world_token>.jsonl`, joined to `worlds/<label>/` through
-    `world_token_for(episode_token_for(episode_id), label)` — and from the world's OWN decision
-    rows within it.
-
-    THE WORLD IS NAMED TWICE AND THE TWO NAMES ARE DIFFERENT KEYS (G5): the archive is keyed on
-    the short manifest label, the ledger on the composed token, so a reader that opens
-    `served/<label>.jsonl` reads the wrong file.
-
-    J2 is AMENDED by #1234 (A3, A12): the grading read requires every row of X's ledger to
-    name X's run (`world_id`) and carry a call id of it, so a family-tier `base` row spelled
-    `world_id: null` in X's file is no longer filtered out silently — it makes the world
-    MALFORMED, its reason naming the row; it is never counted as the world's own served call.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={
         # b: one family-tier base row and nothing of its own — J2's whole case.
         "b": [J.ledger_row(source="base", world_label=None)],
@@ -106,13 +71,6 @@ def test_921_served_nothing_reads_x_own_rows_off_the_composed_token(tmp_path):
 
 
 def test_921_an_empty_or_absent_ledger_is_a_world_that_served_nothing(tmp_path):
-    """An EMPTY ledger file has zero rows, so the world served nothing — and it stays gradable.
-
-    #1224 (S8) moved the ABSENT case: whether a world ran is its own record's to say
-    (`world_records/`), so an archived world with no ledger file is one whose investigator made
-    no call that reached it — `served_nothing`, gradable — not a missing input. Both are driven
-    against the same world so the reading is visible rather than asserted.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [], "c": []})
     rows = _rows(ep)
     assert rows["b"]["served_nothing"] is True
@@ -126,14 +84,6 @@ def test_921_an_empty_or_absent_ledger_is_a_world_that_served_nothing(tmp_path):
 
 
 def test_921_a_served_call_with_no_row_is_invisible_to_the_mechanical_half(tmp_path):
-    """The row reads only what is in the file.
-
-    A served call whose ledger write failed upstream — reported to stderr and dropped (G2) —
-    leaves no row at all, so the world served nothing; the pass invents nothing to cover it and
-    raises nothing about it. Positive control on the same world: adding the row the failed
-    write would have made flips the fact, so the negative cannot pass on a reader that always
-    answers the same.
-    """
     ep = J.accepted_episode(tmp_path, ledgers={"b": []})
     quiet = _rows(ep)["b"]
     assert quiet["served_nothing"] is True
@@ -144,20 +94,7 @@ def test_921_a_served_call_with_no_row_is_invisible_to_the_mechanical_half(tmp_p
     assert _rows(ep)["b"]["served_nothing"] is False
 
 
-# ---------------------------------------------------------------------------------------
-# resolution_moved, verdict vs declared
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_resolution_moved_needs_a_row_past_fences_at_with_before_ne_after(tmp_path):
-    """`resolution_moved` is a `:T resolutions` row past the manifest's `fences_at` with
-    `before != after`, read out of X's ARCHIVED `investigation.md`.
-
-    J4, settled: read ANY qualifying row — the intent is "was the hand-off revisited", not "did
-    the net state move". P7 shows `iter_resolutions` yields every resolution of a lead in
-    document order, with no dedup, so a lead that oscillates back to where it started is
-    structurally reachable and still counts.
-    """
     ep = J.accepted_episode(tmp_path, fences_at=1)
     # `b` oscillates: row 1 moves the lead, row 2 moves it back. ANY qualifying row counts.
     rows = _rows(ep)
@@ -173,14 +110,6 @@ def test_921_resolution_moved_needs_a_row_past_fences_at_with_before_ne_after(tm
 
 
 def test_921_verdict_is_read_off_the_archived_report_against_the_manifest(tmp_path):
-    """The verdict is X's archived `report.md` disposition, normalized through
-    `_vocab.normalized_disposition`, beside `disposition_declared` from the manifest — the
-    ground truth known by construction.
-
-    That normalizer is EXACT by decision (#923 removed the zero-width strip from it): a world
-    that laced its own headline would otherwise read as AGREEING with its declared disposition.
-    So a laced headline is refused, exactly as a headline outside the vocabulary is.
-    """
     ep = J.accepted_episode(tmp_path,
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
     (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
@@ -208,26 +137,8 @@ def test_921_verdict_is_read_off_the_archived_report_against_the_manifest(tmp_pa
     assert _rows(ep)["c"]["verdict"] == "malicious"
 
 
-# ---------------------------------------------------------------------------------------
-# J5 / J3 — the postures the human settled
-# ---------------------------------------------------------------------------------------
-
-
 def test_921_a_world_missing_an_input_is_ungradable_named_and_excluded_from_the_verdict_word(
         tmp_path):
-    """J5 tier 1, settled with the human: a world whose input is ABSENT is `ungradable`, carried
-    on the family record WITH THE NAME of the missing input, and EXCLUDED from the graded set
-    the family's word is taken over.
-
-    Silent exclusion is authoring-active in both directions, which is why the exclusion must be
-    on the record: quietly dropping a world flips the family's word with no trace that a world
-    was skipped.
-
-    Three absences are driven, each by deleting the real artifact: the archived report (a state
-    `verify_family` deliberately produces — `verdicts` SKIPS such a world, A8 executed), the
-    archived `investigation.md`, and `disposition_declared` on the manifest entry. (#1224 made
-    the served ledger and `alert.json` optional — S8.)
-    """
     import yaml
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
@@ -245,9 +156,6 @@ def test_921_a_world_missing_an_input_is_ungradable_named_and_excluded_from_the_
     assert gone["ungradable"] is True
     assert "investigation" in json.dumps(gone)
 
-    # `disposition_declared` absent from the manifest entry: #1224 moved this case to the
-    # manifest load — the runtime loader the judge reads through refuses the manifest, naming
-    # the field, before any world is read.
     both = J.accepted_episode(tmp_path / "no-declared")
     doc = yaml.safe_load((both / "family.yaml").read_text(encoding="utf-8"))
     for world in doc["worlds"]:
@@ -261,18 +169,6 @@ def test_921_a_world_missing_an_input_is_ungradable_named_and_excluded_from_the_
 
 
 def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest(tmp_path):
-    """J5 tier 2, settled: a MALFORMED input sets its own world aside loudly — `ungradable`,
-    `malformed: true`, with a reason naming the world — and grades the rest.
-
-    FOUR malformations, each written as real bytes: a disposition outside the vocabulary, a
-    report that cannot be read at all, a document truncated inside an open invlang fence, and
-    — F-7, settled at the phase-F seam — A PARTIALLY ARCHIVED WORLD (every required input
-    present, the supporting directory short of a lead the world's own document names: the state
-    a mid-copy fault in `archive.py` leaves, P10).
-
-    THE MESSAGE IS PART OF THE DEMAND: a partial archive is otherwise indistinguishable from a
-    genuine malformation, so the refusal must NAME THE INPUT THAT WAS SHORT.
-    """
     def _malform(name, mutate):
         """One episode with world `b`'s archive malformed, graded. Returns b's row."""
         ep = J.accepted_episode(tmp_path / name, ledgers={"b": [J.oracle_row("b")], "c": []})
@@ -324,14 +220,6 @@ def test_921_a_malformed_input_excludes_its_own_world_loudly_and_grades_the_rest
 
 
 def test_921_two_world_entries_under_one_label_are_refused_at_manifest_load(tmp_path):
-    """J5 tier 3, settled: a DUPLICATE or ambiguous key — two world entries under one label — is
-    refused at manifest load.
-
-    A duplicate label makes "X's own archived record" ambiguous at the one join every per-world
-    fact goes through (`worlds/<label>/` on one side, `served/<world_token>.jsonl` on the
-    other), and picking either entry silently is a grade computed from a world nobody named.
-    Positive control: the same manifest with distinct labels loads and grades.
-    """
     import yaml
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
@@ -346,16 +234,6 @@ def test_921_two_world_entries_under_one_label_are_refused_at_manifest_load(tmp_
 
 
 def test_921_a_world_label_equal_to_a_real_run_id_grades(tmp_path):
-    """#1105 PR 2 (declared change 3, J3 as settled; was F-3's
-    `..._colliding_with_a_real_run_id_is_refused_at_manifest_load`, G17's pin): a world label
-    spelled like a REAL RUN ID under the tenant's runs base now GRADES. The collision probe over
-    `<T>/runs` guarded `resolve_run_bundle`, which has no production caller left (E-27), and the
-    judge reads only the episode it is handed — so a run of that name changes nothing it reads.
-    The reserved-label and label-grammar refusals stay.
-
-    Control FIRST, on the same manifest: with no such run on disk the episode loads and grades;
-    then the run appears, and the same episode grades to the same rows.
-    """
     # #1224: a label is a world token (lower-case), so the collision is with a run of that name.
     colliding = "fresh_case_n59"
     ep = J.accepted_episode(
@@ -377,13 +255,6 @@ def test_921_a_world_label_equal_to_a_real_run_id_grades(tmp_path):
 
 
 def test_921_the_family_pass_reader_takes_the_first_row_and_counts_a_torn_line(tmp_path):
-    """J3 AMENDED by #1234 (A2, A3). The LENIENT reader (`read_world_ledger`, the page's)
-    keeps EVERY row in ledger order — two rows for one pair-key are two calls (A2; first-row-
-    wins is retired) — and still RE-VALIDATES `source` against the ledger's words, skipping and
-    COUNTING a torn or out-of-vocabulary line. The GRADING read is strict (A3): such a ledger
-    makes the world malformed, its reason naming the file, and the rest of the family is still
-    graded — a world's measurement is never taken off a partly-read record.
-    """
     from defender._io import bind
 
     first = J.oracle_row("b")

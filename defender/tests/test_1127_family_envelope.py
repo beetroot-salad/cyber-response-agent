@@ -20,9 +20,6 @@ from defender.tests.test_1127_params_nesting_limit import raised
 
 _PLACEHOLDER = "__WORLD_B_FACTS__"
 
-#: How long the child that loads the alias bomb may run before it is killed. Generous: it
-#: covers interpreter start and imports on a loaded box. The load itself is held to
-#: `BOMB_LOAD_SECONDS`, timed inside the child.
 BOMB_TIMEOUT = 30
 BOMB_LOAD_SECONDS = 2.0
 
@@ -129,10 +126,6 @@ _READERS: dict[str, Callable[[str], Any]] = {
 @pytest.mark.parametrize("reader", list(_READERS))
 @pytest.mark.parametrize("text", list(_ALIASED.values()), ids=list(_ALIASED))
 def test_every_yaml_reader_refuses_any_alias_as_a_yaml_error(text, reader):
-    """C, made the default (#1127 review): an alias — of a mapping, of a scalar, one that makes
-    a cycle, or one a merge key spends — is refused by EVERY reader in `defender._yaml`, with
-    the `AliasRefused` `yaml.YAMLError` every caller already catches for malformed YAML. No
-    reader opts in, so no reader can be left out. PyYAML's own safe loader accepts each."""
     assert _has_alias(text), "the fixture carries no alias"
     assert yaml.safe_load(text) is not None
 
@@ -143,10 +136,6 @@ def test_every_yaml_reader_refuses_any_alias_as_a_yaml_error(text, reader):
 
 
 def test_the_yaml_writer_writes_a_shared_value_in_full_and_refuses_a_cycle():
-    """The writer's half: `_yaml.safe_dump` writes a value held twice out in full, so what the
-    tree writes the tree can read back; PyYAML's own dumper writes `&id001`/`*id001` for it. A
-    value that holds itself cannot be written in full, and is `AliasRefused`, not a
-    `RecursionError`."""
     shared = {"host": "web-1", "tags": ["p", "q"]}
     doc = {"a": shared, "b": shared, "c": [shared]}
     assert _has_alias(yaml.safe_dump(doc)), "the fixture shares no object, so this tests nothing"
@@ -226,15 +215,6 @@ print(json.dumps({"outcome": outcome, "yaml_cause": yaml_cause,
 
 @pytest.mark.parametrize("placement", list(_BOMBS))
 def test_an_alias_bomb_manifest_is_refused_fast_without_being_expanded(tmp_path, placement):
-    """C against the billion-laughs shape, wherever it sits: `load_family` refuses it with a
-    `FamilyError` from the YAML loader in well under two seconds. An alias-honouring loader
-    builds it cheaply (shared references) and any walk then visits every one of its 10**9
-    leaves; only refusing aliases EVERYWHERE in the document refuses it before it is built.
-    (Each placement also carries a field its mapping does not declare, so the arm reads the
-    refusal's CAUSE: a loader that built the bomb would still refuse, but not by `YAMLError`.)
-
-    Loaded in a child process under a timeout, timed inside the child: a hang is killed and
-    fails this arm; nothing is left spinning."""
     text, bomb = _BOMBS[placement]()
     assert len(bomb) < 1024, "the bomb is not small"
     assert _expanded_leaves(yaml.safe_load(text)) >= 10**9, \
@@ -297,9 +277,6 @@ _ANYWHERE = {
 
 @pytest.mark.parametrize("where", list(_ANYWHERE))
 def test_an_alias_anywhere_in_the_manifest_is_refused_at_load(tmp_path, where):
-    """C is about the DOCUMENT, not one field: an alias anywhere in the manifest — across two
-    top-level fields, across two worlds' facts — is refused by the loader. A reader that
-    honoured aliases and only checked one field would load every one of these."""
     text = _ANYWHERE[where]()
     assert _has_alias(text), "the fixture carries no alias, so this arm tests nothing"
 
@@ -325,9 +302,6 @@ def _world_b_facts_on_disk(path: Path) -> Any:
 
 
 def test_a_cyclic_fact_list_built_by_a_yaml_anchor_is_refused_at_load(tmp_path):
-    """C10: an anchor whose body aliases itself would load as a CYCLIC value. It is refused by
-    the loader, as an alias, before any walk of the value — so the refusal is the loader's
-    `YAMLError`."""
     path = manifest(tmp_path, '&a [{"fact_id": "f1", "statement": "s", "entities": *a}]')
     facts = _world_b_facts_on_disk(path)
     assert facts[0]["entities"] is facts, "the spliced anchor did not load as a cycle"
@@ -336,9 +310,6 @@ def test_a_cyclic_fact_list_built_by_a_yaml_anchor_is_refused_at_load(tmp_path):
 
 
 def test_write_family_writes_a_shared_object_longhand_and_it_loads_back(tmp_path):
-    """C's other half: `write_family` dumps with no aliases, so a document holding one object
-    in two places — the ordinary result of composing it in Python — round-trips through the
-    loader that now refuses aliases. PyYAML's default dumper emits `&id001`/`*id001` for it."""
     doc = T.family_doc()
     shared = ["web-1", "10.0.0.9"]
     for world in doc["worlds"][1:]:
@@ -398,9 +369,6 @@ _ALIASED_REPLIES: dict[str, Callable[[], str]] = {
 
 @pytest.mark.parametrize("kind", list(_ALIASED_REPLIES))
 def test_a_questioner_reply_carrying_a_yaml_alias_is_refused_naming_call_1(tmp_path, kind):
-    """C at the questioner: call 1's reply is parsed by the alias-refusing loader, so an alias
-    is refused like any other malformed YAML — `BranchError` naming call 1, chained from the
-    loader's `YAMLError` — and no seat call is paid against it."""
     text = _ALIASED_REPLIES[kind]()
     assert _has_alias(text), "the reply carries no alias, so this arm tests nothing"
     agent = T.FakeAgent(_fenced(text), *_seats())
@@ -427,12 +395,6 @@ def _cyclic_facts_doc() -> dict:
 @pytest.mark.parametrize("build", [_shared_facts_doc, _cyclic_facts_doc],
                          ids=["shared", "cyclic"])
 def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tmp_path, build):
-    """#1127 review: a driver that hands back an already-parsed reply skipped the loader, so
-    the family's "no shared or cyclic values" rule held only for text replies — and a cycle
-    reached `parse_family` and the manifest writer. A parsed reply is held to the loader's rule:
-    one holding a value twice, or inside itself, is the same `BranchError` naming call 1,
-    chained from `AliasRefused`, and no seat call is paid against it. (The control, a parsed
-    reply that is a tree, is every launcher test whose fake questioner hands back dicts.)"""
     agent = T.FakeAgent(build(), T.world_doc("b"), T.world_doc("c"))
 
     err = raised(lambda: _author(tmp_path, agent))
@@ -462,9 +424,6 @@ def _family_reply() -> str:
 
 @pytest.mark.parametrize("kind", list(_ALIASED_SEAT_REPLIES))
 def test_a_seat_reply_carrying_a_yaml_alias_is_refused_naming_the_seat(tmp_path, kind):
-    """C on every questioner call, not only call 1: seat B's reply (call 2) is parsed by the
-    same alias-refusing loader — `BranchError` naming seat B, chained from the loader's
-    `YAMLError` — and the episode stops there: seat C is never called."""
     text = _ALIASED_SEAT_REPLIES[kind]
     assert _has_alias(text), "the reply carries no alias, so this arm tests nothing"
     agent = T.FakeAgent(_family_reply(), _fenced(text), _seats()[1])
@@ -478,5 +437,3 @@ def test_a_seat_reply_carrying_a_yaml_alias_is_refused_naming_the_seat(tmp_path,
     assert isinstance(err.__cause__, yaml.YAMLError), \
         f"refused, but not as malformed YAML (cause: {type(err.__cause__).__name__})"
     assert agent.calls == 2, "the questioner went on to seat C after refusing seat B"
-
-

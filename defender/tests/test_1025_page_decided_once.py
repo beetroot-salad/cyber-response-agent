@@ -35,11 +35,6 @@ def _every_step_wall() -> str:
     return f"{2 * (len(E.every_step()) - 1) + 1}m00s"
 
 
-# ---------------------------------------------------------------------------------------
-# The clock: one `measured` bit for the header, the caption and the verdict tile
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_path):
     """Every row inverted: no trusted pair, so there is no wall. The stages header and the verdict
     tile BOTH fall back to the lower bound (before: the header did, the tile did."""
@@ -54,11 +49,6 @@ def test_1025_an_all_inverted_timing_record_is_unmeasured_on_every_surface(tmp_p
     assert "timing record unreadable" not in stages
 
 
-# ---------------------------------------------------------------------------------------
-# Cost: one `costed` flag, never the float's truthiness
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_an_episode_whose_every_run_cost_nothing_still_owes_its_total(tmp_path):
     """Every result event prices its run at $0.0000 and no wire log exists."""
     ep = E.sample_episode(tmp_path, traces=False)
@@ -69,11 +59,6 @@ def test_1025_an_episode_whose_every_run_cost_nothing_still_owes_its_total(tmp_p
     assert page.elements(cls="rn-total"), runs
     assert page.elements(cls="st-total"), page.text_of("stage-timing")
     assert "$0.0000" in page.text_of("stage-timing")
-
-
-# ---------------------------------------------------------------------------------------
-# A run's result state reads as one sentence, wherever it is shown
-# ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(("plant", "sentence"), [
@@ -103,11 +88,6 @@ def test_1025_a_runs_result_state_reads_the_same_sentence_in_both_sections(tmp_p
         # "no result event" is a prefix of "no result event (refused)" — none of these three
         # plants is a refusal, so the bare check is exact enough.
         assert wrong not in world.replace(sentence, ""), (plant, wrong, world)
-
-
-# ---------------------------------------------------------------------------------------
-# Untrusted input is validated once, into a type — never fallen back on per site
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_a_manifest_id_that_names_no_token_reads_no_ledger_outside_the_episode(tmp_path):
@@ -143,11 +123,6 @@ def test_1025_a_runs_directory_wearing_a_worlds_label_is_sectioned_once(tmp_path
     assert f"Worlds ({len(E.WORLDS)})" in page.text_of("sec-worlds")
 
 
-# ---------------------------------------------------------------------------------------
-# One population for tile 3
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_path):
     """A bare `runs/<ep>-x` world — no manifest entry, no grade row — is a section with no findings:
     the walk never opens its draws. Its `dropped_findings: 4` was still summed."""
@@ -165,11 +140,6 @@ def test_1025_a_dropped_count_covers_only_the_draws_the_findings_walk_opens(tmp_
     assert "world-x" not in page.by_id
 
 
-# ---------------------------------------------------------------------------------------
-# A row type that refuses a misspelled field
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_finding_row_refuses_an_unknown_field():
     """`_Finding(clam=...)` raised nothing and rendered every row with no claim. A typo at any
     of the construction sites is now a `TypeError` at construction."""
@@ -179,11 +149,6 @@ def test_1025_a_finding_row_refuses_an_unknown_field():
     row = module._Finding(row_id="f-x-0-0", claim="the claim")
     assert row.claim == "the claim"
     assert row.topic is None
-
-
-# ---------------------------------------------------------------------------------------
-# The archived report's absent branch does not reopen the window
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_an_absent_archived_report_is_decided_after_the_guarded_read(tmp_path):

@@ -1,23 +1,3 @@
-"""#1174 — one bounded read step under every whole-file read of a guarded plain file.
-
-The design (issue comment on #1174): every plain-file reader in `_io` — `Bound.read` (so
-`read_jsonl`), `rooted_read`, `read_plain`, `read_plain_bytes`, `read_guarded`,
-`read_bytes_guarded` — and the two read-modify-write reads through the rewrite handles
-(`_run_handle`'s `update` verb, `_io.locked_json_update` over `locked_for_rewrite`) owe:
-
-- O1: a file over `READ_LIMIT` (64 MiB) is refused before any byte is read, path-free; a file
-  that grows past it while read is refused too; no `MemoryError`.
-- O2: a read that gets no data on the non-blocking descriptor (`EAGAIN`) is a refusal.
-- O3: absent means absent at the walk or the open only; an `ENOENT` after the descriptor was
-  judged plain (a `read`, or any `fstat` after the plainness one) is never absent, and a
-  refusal's reason differs from the absent answer word for word.
-- O4: a name or path that does not encode is refused before any I/O; a surrogateescape name
-  (an undecodable byte) is still a name.
-- O5: a successful read is unchanged — universal newlines, `errors=`, exact bytes.
-
-Real faults where they are cheap (a sparse file costs no disk); the rest enter through each
-reader's `os_=` seam (`FaultOs`), never `monkeypatch.setattr`.
-"""
 from __future__ import annotations
 
 import errno
@@ -39,11 +19,6 @@ ITEM1_SYSTEM = "elastic"  # the breaker file's system key; the lead_zero constan
 MiB = 1024 * 1024
 NAME = "rec.txt"
 ABSENT_TEXT = os.strerror(errno.ENOENT)
-
-
-# ---------------------------------------------------------------------------------------
-# The seam: a pass-through `os` with one fault switched on
-# ---------------------------------------------------------------------------------------
 
 
 class FaultOs:
@@ -97,15 +72,6 @@ class Endless:
     def __call__(self, _fd: int, n: int) -> bytes:
         self.handed += n
         return b"a" * n
-
-
-# ---------------------------------------------------------------------------------------
-# The readers, each answering one normalized outcome
-# ---------------------------------------------------------------------------------------
-#
-# ("ok", value) | ("absent", None) | ("refused", reason). `rooted_read` and the `_guarded`
-# readers fold absence into a reason; their "absent" is recognised by the reason they give for
-# a really missing file (`absent_reason`), so a read-phase refusal must differ from it.
 
 
 def _bound(root: Path, name: str, os_: Any, binary: bool) -> tuple[str, Any]:
@@ -203,11 +169,6 @@ def assert_refused_vanished(reader: str, root: Path, outcome: tuple[str, Any],
     assert_path_free(payload, root)
 
 
-# ---------------------------------------------------------------------------------------
-# O1 — size
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_read_limit_is_64_mib():
     assert 64 * MiB == _io.READ_LIMIT
 
@@ -215,9 +176,6 @@ def test_the_read_limit_is_64_mib():
 @pytest.mark.parametrize("reader", READERS)
 @pytest.mark.parametrize("size", [64 * MiB + 1, 1 << 40], ids=["limit+1", "1TiB"])
 def test_o1_a_sparse_file_over_the_limit_is_refused_before_any_read(root, reader, size):
-    """A planted sparse file (`truncate -s`) just over the limit, and a 1 TiB one, is refused:
-    no `MemoryError` (CPython would pre-size a buffer of `st_size + 1`), no read, a reason that
-    names no path. The descriptor is closed."""
     sparse(root / NAME, size)
     rec = FaultOs()
     before = open_fds()
@@ -263,11 +221,6 @@ def test_o1_a_file_growing_past_the_limit_while_read_is_refused(root, reader):
         "looser than the limit")
 
 
-# ---------------------------------------------------------------------------------------
-# O2 — EAGAIN on the non-blocking descriptor
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("reader", READERS)
 def test_o2_a_read_with_no_data_yet_is_a_refusal(root, reader):
     """FUSE/procfs can answer `EAGAIN` on the `O_NONBLOCK` descriptor. That is a refusal — not
@@ -287,11 +240,6 @@ def test_o2_control_the_same_seam_without_the_fault_reads_the_file(root, reader)
     assert value in ("payload\n", b"payload\n")
 
 
-# ---------------------------------------------------------------------------------------
-# O3 — absent only at the walk or the open
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("reader", READERS)
 def test_o3_enoent_from_read_is_a_refusal_not_absent(root, reader):
     missing = absent_reason(reader, root)
@@ -304,10 +252,6 @@ def test_o3_enoent_from_read_is_a_refusal_not_absent(root, reader):
 
 @pytest.mark.parametrize("reader", READERS)
 def test_o3_enoent_from_an_fstat_after_the_plainness_judgement_never_answers_absent(root, reader):
-    """After the open judged the descriptor plain, an `fstat` raising ENOENT never answers
-    absent. The read step takes the size from the open's own `fstat` (#1049 pins one `fstat`
-    per opened handle), so it asks no second one, and the read succeeds; any second `fstat`
-    an implementation adds must refuse, not answer absent."""
     missing = absent_reason(reader, root)
     (root / NAME).write_text("payload\n")
     kind, payload = read(reader, root, os_=FaultOs(vanish_on_second_reg_fstat=True))
@@ -335,11 +279,6 @@ def test_o3_read_plain_raises_a_non_filenotfound_oserror_for_a_read_phase_enoent
     with pytest.raises(OSError, match="vanished") as ei:
         fn(root / NAME, os_=FaultOs(read_fault=vanishing_read))
     assert not isinstance(ei.value, FileNotFoundError), type(ei.value)
-
-
-# ---------------------------------------------------------------------------------------
-# O4 — names and paths that do not encode
-# ---------------------------------------------------------------------------------------
 
 
 #: Lone surrogates `os.fsencode` cannot encode: everything in U+D800..U+DFFF except the
@@ -398,9 +337,6 @@ PATH_READERS = ["read_plain", "read_plain_bytes", "read_guarded", "read_bytes_gu
 @pytest.mark.parametrize("reader", PATH_READERS)
 @pytest.mark.parametrize("ch", UNENCODABLE)
 def test_o4_a_path_reader_refuses_an_unencodable_path_as_a_read_error(root, reader, ch):
-    """`read_guarded` promises `(None, reason)`; a `UnicodeEncodeError` (not a
-    `TEXT_READ_ERRORS` member) must not escape it, nor `read_plain`'s contract. The refusal
-    names no path."""
     rec = FaultOs()
     kind, reason = read(reader, root, name=f"x{ch}", os_=rec)
     assert kind == "refused", (reader, kind, reason)
@@ -417,11 +353,6 @@ def test_o4_control_a_path_reader_opens_through_its_seam(root, reader):
     kind, _value = read(reader, root, os_=rec)
     assert kind == "ok"
     assert "open" in rec.calls, f"{reader}: the open did not go through os_: {rec.calls}"
-
-
-# ---------------------------------------------------------------------------------------
-# O5 — a successful read is unchanged
-# ---------------------------------------------------------------------------------------
 
 
 def _mixed_content() -> bytes:
@@ -502,26 +433,6 @@ def test_o5_errors_replace_and_strict_are_unchanged(root):
 def test_o5_an_empty_file_is_an_empty_read(root, reader):
     (root / NAME).write_bytes(b"")
     assert read(reader, root) in (("ok", ""), ("ok", b""))
-
-
-# ---------------------------------------------------------------------------------------
-# Amendment 2 — the locked JSON update and read (M4/M7), the wrappers (M5), the breaker (M6)
-# ---------------------------------------------------------------------------------------
-#
-# Callers get contents, never a handle to read. Unusable state content — too big,
-# undecodable, not JSON, nested past `JSON_NESTING_LIMIT`, not an object — heals to the default
-# on the update (O6) and reads as `{}` (O8). A read fault that is not about the content
-# propagates out of the update (O7).
-#
-# #1235: the budget counters and the circuit breaker left the run folder for the run process's
-# memory, and the run handle's two locked `update` members (`budget`, `circuit_breaker`) went
-# with them. The arms that planted unusable `budget.json` / `circuit_breaker.json` content, and
-# the breaker's "unusable state reads as tripped" branch (O10, H3, H8, H9), retired with the
-# files. O6/O8 are pinned on the shared locked update and read (`_io.locked_json_update` over
-# `locked_for_rewrite`, `_io.locked_json_read` over `locked_for_read`) over a plain state file.
-# (The oracle-held sidecar left with #1235 too: the oracle's held time is the run's in-memory
-# state. Round 3 deleted `hooks/_run_dir`'s two wrappers over these, which had no production
-# caller left; the arms that pinned only the wrappers — H6, H13 — left with them.)
 
 
 def update_locked(path: Path, mutate: Callable[[dict], Any], **kw: Any) -> dict:
@@ -629,9 +540,6 @@ def efbig_fault(_fd: int, _n: int) -> bytes:
 @pytest.mark.parametrize("fault", [eio, eagain, vanishing_read, efbig_fault],
                          ids=["EIO", "EAGAIN", "vanished", "EFBIG-from-a-fault"])
 def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(tmp_path, fault):
-    """Healing is decided by type: only the step's own size refusal heals, so an unrelated
-    `EFBIG` raised by a fault propagates like `EIO`. (The rooted opener's arm left with #1235,
-    which deleted `_io.rooted_locked_for_rewrite`.)"""
     p = tmp_path / "state.json"
     p.write_text('{"keep": true}')
     f = FaultOs(read_fault=fault)
@@ -783,11 +691,6 @@ def test_o5_a_procfs_file_reporting_size_zero_reads_in_full():
     assert text.splitlines()[0] == proc.read_text().splitlines()[0]
 
 
-# ---------------------------------------------------------------------------------------
-# The independent adversary's second pass over amendment 2 (H1-H13)
-# ---------------------------------------------------------------------------------------
-
-
 class OpenerFaultOs(FaultOs):
     """`os`, except `open` or `fstat` (by `fail`) raises `EIO` — a fault inside the opener."""
 
@@ -893,9 +796,6 @@ def test_h2_the_streaming_reader_refuses_a_planted_link(tmp_path):
 
 
 def test_h2_the_streaming_reader_refuses_a_hard_link_and_a_fifo(tmp_path):
-    """The same plain-entry refusal as `read_plain`: a hard link (`O_NOFOLLOW` cannot refuse it)
-    and a FIFO (refused at the non-blocking open, never waited on). Control: the original name
-    of the hard-linked file streams."""
     original = tmp_path / "original.jsonl"
     original.write_text('{"a": 1}\n', encoding="utf-8")
     hard = tmp_path / "hard.jsonl"

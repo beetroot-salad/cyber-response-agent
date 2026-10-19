@@ -27,12 +27,6 @@ RETIRED_NAMES = frozenset({*S.RETIRED_RECORD_FIELDS, *S.RETIRED_ENUMS,
                            "normalized_judge_outcome", "_UNQUEUEABLE_VERDICTS"})
 
 
-
-# --------------------------------------------------------------------------------------
-# Local readers and builders (scenario data only; every observation goes through `S`).
-# --------------------------------------------------------------------------------------
-
-
 def _ids(rows: list[dict]) -> list[str]:
     return [str(r.get("finding_id")) for r in rows]
 
@@ -99,24 +93,8 @@ def _first_row(rows: list[dict], *, query_id: str | None = None, exit_code: int 
                          f"exit_code={exit_code!r} in {rows!r}")
 
 
-
-
-# --------------------------------------------------------------------------------------
-# A13 / A7: every completed draw routes its own findings.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_every_completed_draws_findings_route_by_class_under_their_own_ids(
         tmp_path: Path) -> None:
-    """Every completed draw's kept findings route by class under their own finding_id, for
-    worlds and the family (A13): when every draw of a measured world agrees on an investigator
-    bucket, the investigator findings of every completed draw are queued on the defender
-    channel; design findings reach the questioner queue from every draw; withholding stops only
-    defender rows (F-09 kept).
-
-    Three draws. World b agrees on lead-quality in every draw; world c's draws disagree (draw 1
-    files lead-set), so c is withheld; each world files one investigator and one design finding
-    per draw, and every family draw files one family-scope design finding."""
     draws = 3
     built = S.family(tmp_path, S.triad())
     replies: dict[Any, Any] = {}
@@ -153,19 +131,7 @@ def test_1234_every_completed_draws_findings_route_by_class_under_their_own_ids(
         "the family's draws combine by union: every family draw's design finding is queued")
 
 
-# --------------------------------------------------------------------------------------
-# M5 / M7: measured worlds queue; the doubt mark.
-# --------------------------------------------------------------------------------------
-
-
-
-
 def test_1234_mislabelled_world_still_queues_with_the_doubt_mark(tmp_path: Path) -> None:
-    """A measured world any of whose completed draws files mislabelled still queues its
-    investigator findings, each with world_label_doubted true; a world none of whose draws files
-    mislabelled queues rows with world_label_doubted false (A7, A13).
-
-    Two draws: b's draw 0 files mislabelled and its draw 1 does not; c files it in neither."""
     built = S.family(tmp_path, S.triad())
     replies = {
         ("b", 0): S.world_reply(LQ, investigator=[S.inv(claim=S.marker("b", "inv-0"))],
@@ -188,13 +154,6 @@ def test_1234_mislabelled_world_still_queues_with_the_doubt_mark(tmp_path: Path)
 
 
 def test_1234_family_call_mislabelled_finding_never_marks_world_rows(tmp_path: Path) -> None:
-    """A family-call finding bucketed mislabelled leaves every per-world row's
-    world_label_doubted as that world's own replies set it.
-
-    Two draws. Every family draw files mislabelled at b's manifest entry and at the
-    family-level part; b's own draws never file it, so b's rows stay false. The positive
-    control: c's own draw 1 files mislabelled, so c's rows are true — the mark's channel is
-    live and only a world's own replies drive it."""
     built = S.family(tmp_path, S.triad())
     family_mislabelled = S.family_reply(world=[
         S.wf(MISLABELLED, evidence=[S.plan_ptr("b")], claim=S.marker("family", "about-b")),
@@ -223,37 +182,8 @@ def test_1234_family_call_mislabelled_finding_never_marks_world_rows(tmp_path: P
         assert row.get(S.DOUBT) is True, f"{fid}: c's own draw filed mislabelled"
 
 
-# --------------------------------------------------------------------------------------
-# P-c / I2: one world's eligibility never reads another's reply.
-# --------------------------------------------------------------------------------------
-
-
-
-
-# --------------------------------------------------------------------------------------
-# M8 / N-f: nothing combined or ranked before enqueue.
-# --------------------------------------------------------------------------------------
-
-
-
-
-# --------------------------------------------------------------------------------------
-# I3 / P-a: gap-only evidence goes to the user record, never a queue.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_defender_finding_resting_only_on_external_refusals_goes_to_the_user_record(
         tmp_path: Path) -> None:
-    """An investigator finding with at least one resolving conduct pointer, every resolving
-    conduct pointer (context set aside) being a blocked-call row (a ledger refused/fault row,
-    or J3's inherited ∅.denied row; outage real-error rows are not blocked), is not queued on
-    the defender channel and appears in the user record instead (A1, A2, A14, A15).
-
-    The control and b each carry a refused call, a fault and an outage, and both inherit J3's
-    pre-branch denial. b's reply pairs b's row with the control's for each: the refused pair
-    (served-ledger rows, and again as the query-table ∅.denied rows their ledger rows join),
-    the fault pair and J3's pair go to the user record; the outage pair is ordinary conduct and
-    queues — the in-test control that the defender channel is live."""
     extra = (S.refused_call(), S.fault_call(), S.error_call())
     built = S.family(tmp_path, S.triad(a={"calls": _calls("a", *extra)},
                                         b={"calls": _calls("b", *extra)}),
@@ -284,15 +214,6 @@ def test_1234_defender_finding_resting_only_on_external_refusals_goes_to_the_use
 
 
 def test_1234_a_deployment_gap_reaches_neither_queue(tmp_path: Path) -> None:
-    """A deployment gap, whether named as a gap, filed under an investigator bucket with only
-    blocked-call conduct evidence (J3's inherited ∅.denied row cited in b and in the control
-    included), or filed as a world finding citing only blocked-call rows, reaches neither the
-    defender nor the questioner channel.
-
-    One draw of b files all three shapes beside an ordinary investigator finding and a design
-    world finding, which reach the defender and questioner channels (both channels are live).
-    The gap content is looked for on every surface of both channels (their raw text); its
-    sanctioned destination, the user record, is checked to hold it."""
     built = S.family(tmp_path, S.triad(a={"calls": _calls("a", S.refused_call())},
                                         b={"calls": _calls("b", S.refused_call())}),
                      inherited=[S.inherited_denial()])
@@ -327,43 +248,8 @@ def test_1234_a_deployment_gap_reaches_neither_queue(tmp_path: Path) -> None:
     assert S.named_gaps(built), "the named gap is listed in the user record (A2, A7)"
 
 
-
-
-
-
-# --------------------------------------------------------------------------------------
-# I4 / I9: not-measured and none worlds; design findings still route.
-# --------------------------------------------------------------------------------------
-
-
-
-
-
-
-# --------------------------------------------------------------------------------------
-# A12 / A14 on the real path: J3's row and the exit-64 reject.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
         tmp_path: Path) -> None:
-    """J3's row, a `∅.denied` table row carrying no id of this run and present identically in
-    every readable run's table, the control's included (A12), is a blocked call (A14). A
-    finding whose every resolving conduct pointer is that row (or another blocked-call row) is
-    gap-only and goes to the user record: a world finding whose only conduct pointer is that
-    row in b, and an investigator pair whose halves are that row in b and in the control,
-    never reach the defender queue (I3, P-a). A refused call whose ledger row was never
-    written cannot occur silently (A12: a failed write ends the run). A call the query tool
-    rejected before any system was reached (exit-64 sentinel) is not a blocked call: it is an
-    ordinary conduct row of the run and does not make a finding gap-only.
-
-    The REAL path: the source run's table carries the pre-branch denial, which the real
-    `ForkSnapshot.restore_files` seeds into every sibling; b's gather also calls an unresolvable verb,
-    which the real query tool rejects with exit 64 and no ledger row. The pair of b's reject
-    with the control's J3 row is the positive control: it queues. On the refused-call clause:
-    every refused call in the archive the judge reads has its ledger row, joined to its table
-    row (#1255 G6: by the host-only join record, the table carrying no id); the failed-write
-    path itself is test_1234_failed_served_ledger_write_ends_the_run's."""
     turns_b = [*S.default_turns()[:-1], S.query_turn("idp", "bogus_verb", {"q": "x"}),
                S.done_turn()]
     built = S.real_family(tmp_path, {"b": S.RealWorld("b", oracle=S.altering_oracle(),
@@ -421,17 +307,6 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
 
 def test_1234_served_system_with_unavailable_samples_refused_at_run_time(
         tmp_path: Path) -> None:
-    """The run-time refusals are ledger `refused` rows, so they are blocked calls and appear in
-    the user record's found gaps either way (A2). The judge's finding that the planted fact
-    could not be seen is `unreachable` (M4: the samples showed the system unavailable, so the
-    questioner could have known), and it routes by A1's rules over its pointers: design when
-    it cites the plan and is not gap-only.
-
-    The REAL path: the source run's captured edr answer cannot be read back, so pre-flight's
-    samples record marks edr unavailable; edr lookup is withheld by the grant, so every
-    sibling's call to it is refused at run time. b files unreachable citing its manifest entry
-    (design: the questioner queue); c files unreachable citing its entry and its own refused
-    row (gap-only: the user record) — routing reads the pointers, not the bucket."""
 
     def unreadable_edr_answer(src: Path) -> None:
         for r in S.read_jsonl(src / "executed_queries.jsonl"):
@@ -469,26 +344,7 @@ def test_1234_served_system_with_unavailable_samples_refused_at_run_time(
     assert _user_mentions(built, built.finding_id("c", 0, 0), m_c)
 
 
-# --------------------------------------------------------------------------------------
-# The defender row's contents (A1, OB13) and the lesson writer's view of them.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_defender_row_cites_the_manifest_or_the_oracle_store(tmp_path: Path) -> None:
-    """Defender rows come from investigator findings, whose `citations` are
-    `contrast_evidence`'s resolving pointers (A1). Manifest and oracle-store pointers listed in
-    `contrast_evidence` beside the pair ride along (T1 rule 1) and, when they resolve, are among
-    `citations` (rule 2): they are carried onto the defender row as inert strings the lesson
-    author cannot open (OB13) and never count as a half of the pair. A world finding with a
-    resolving plan pointer that is not gap-only (gap-only needs at least one resolving conduct
-    pointer, every one blocked, A15) is design and goes to the questioner queue, never the
-    defender queue.
-
-    b files: the pair plus b's manifest entry and b's oracle store (queued, all four among
-    citations); one conduct pointer of b beside b's entry and c's oracle store (no two-run
-    pair: dropped); a design world finding citing b's entry and b's report. The row and the
-    lesson writer's prompt over it carry the pointer strings, never the content they name
-    (the planted fact, the forged row, the story)."""
     built = S.family(tmp_path, S.triad())
     plan_b, store_b = S.plan_ptr("b"), S.oracle_ptr("b")
     reply = S.world_reply(
@@ -526,27 +382,8 @@ def test_1234_defender_row_cites_the_manifest_or_the_oracle_store(tmp_path: Path
         assert marker not in prompt, f"{marker}: archive content reached the lesson writer"
 
 
-
-
-
-
-# --------------------------------------------------------------------------------------
-# R5 survival: the defender lane decision without a verdict word.
-# --------------------------------------------------------------------------------------
-
-
 def test_1234_defender_lane_decision_rests_on_world_state_not_a_verdict_word(
         tmp_path: Path) -> None:
-    """The defender-lane block decision (enqueue.defender_lane_blocked, today keyed on the
-    verdict word) completes without any outcome word: an investigator finding of a measured,
-    unanimous, non-none world passes the lane; a finding of a not-measured, withheld or none
-    world, and a gap-only finding, does not; and no outcome literal is read. The control is the
-    measured world's finding reaching the defender queue.
-
-    Two draws over four planted worlds: b measured and unanimous (an ordinary finding and a
-    gap-only one), c not measured (unreachable), d withheld (draws disagree), e none. The lane
-    decision's own code holds no outcome word, literal or name, and takes no outcome word;
-    neither judge.yaml nor any queued row carries one."""
     built = S.family(tmp_path, S.triad(
         a={"calls": _calls("a", S.refused_call())}, b={"calls": _calls("b", S.refused_call())},
         d={"role": "D", "calls": [S.CallRow()]}, e={"role": "E", "calls": [S.CallRow()]}))
@@ -596,10 +433,3 @@ def test_1234_defender_lane_decision_rests_on_world_state_not_a_verdict_word(
     assert not set(S.record(built)) & set(S.RETIRED_RECORD_FIELDS)
     for row in S.defender_queue():
         assert not set(row) & set(S.RETIRED_RECORD_FIELDS), row
-
-
-# --------------------------------------------------------------------------------------
-# OB14: each row's own world's alert.
-# --------------------------------------------------------------------------------------
-
-

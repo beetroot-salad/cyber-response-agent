@@ -1,48 +1,3 @@
-"""#933 bucket B — the seven spec'd-but-unbuilt validator rules, pinned from the spec text.
-
-Rules #13, #18, #26, #29, #30, #31 and #34 are written down in
-`docs/investigation-language.md` §Validator rules and given column shapes in
-`docs/dense-investigation-format.md`, and none of them is enforced. Their data is not even
-projected: `parser._project_t_block` swallows every `:T conclude.*` sub-table but
-`conclude.surviving`, and `_project_lead_subblock` has no branch for `:L l-NNN.lead_preds` or
-`:L l-NNN.impact_preds`, so a companion can declare an impact threshold, never grade it, and
-validate clean. Every test below therefore FAILS until the projection and the checks land —
-that is the point of writing them first.
-
-This file was written as an independent oracle: from the rule text, with the implementation
-deliberately unread. So it enumerates each rule's arms rather than the arms some code happens
-to have. Concretely that means, per rule: every legal enum member gets its own passing test and
-illegal members get failing ones (a rule pinned by one member of three is a rule two thirds
-free to be wrong); every id shape is probed at several points of the malformation space
-(trailing junk, leading junk, no digits, wrong case, wrong namespace) rather than one; every
-conditional-presence rule gets all four cells of its truth table; every closure rule gets
-resolved / deferred-with-rationale / deferred-with-EMPTY-rationale / neither, plus the mixed
-case; every reference rule gets local, cross-scope, wrong-scope and dangling.
-
-Each rule also gets a **liveness control** — a clean document asserted `== []`. A check that
-refuses everything passes every failure test in here and only the controls catch it. For the
-same reason failures assert an exact error count and a token the message cannot omit (the
-offending id), never merely "something was raised": an assertion that only demands non-empty
-is satisfied by the wrong rule firing.
-
-Where the spec contradicts itself the fixture follows the reading the rest of the surface
-already implements, and the docstring says so. Three such places are load-bearing here:
-
-* `ceiling_test` — `dense-investigation-format.md` gives it a `:T conclude.ceiling_test
-  [kind|subject]` sub-table; `SKILL.md`, `schema.Conclude.ceiling_test: list[str]` and
-  `parser._CONCLUDE_LISTS` all make it a REPEATED flat `<key> <value>` row in `:T conclude`.
-  Three surfaces to one, so the flat row is what these tests write.
-* the contract reference spelling — rule #26 names a deferred contract `h-{id}.ac{n}` while
-  `:R authz`'s own `fulfills` column is the bare `ac{n}` (`ac<n>` numbers across the document,
-  per SKILL.md §Authz contracts). Both spellings are used here, each on the side that
-  specifies it.
-* `impact_verdict` — rule #31's enum is `{none, within, exceeds, indeterminate}`, but
-  `examples/example-c-cumulative-escalation.md` ships `none-detected` and both e2e goldens
-  ship `none-detected` / `attempted-lateral-movement`. `test_shipped_invlang_documents.py`
-  requires every shipped document to be gate-clean, so landing #31's enum breaks those
-  documents until they are fixed. The test that pins `none-detected` as illegal says so.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -64,9 +19,6 @@ v-002|compute|bastion/internal/known-corp|bastion-01|os=linux
 :E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]
 e-001|attempted_auth|v-002|v-001|2026-05-05T03:47:12Z|siem-event:siem|outcome=failed"""
 
-#: Two leads in document order. `volume-baseline` carries the pre-registrations; the follower
-#: `dlp-scope-check` is what rule #18's route-compliance clause compares an `advance_to`
-#: against, and what a cross-lead `l-002.ip*` reference needs to exist.
 _LEADS = """\
 :L findings [id|loop|name|target|tests|system|window]
 l-001|1|volume-baseline|v-001||siem|30d
@@ -105,11 +57,6 @@ def _conclude(
     rows = [
         ":T conclude",
         f"termination.category   {category}",
-        # #923: `inconclusive` now carries its own entry price (a `ceiling_test` row naming a
-        # source or capability), unrelated to anything this module's tests are about — rule
-        # #13's severity-ceiling class here cares about `termination.category` and
-        # `ceiling_test`, never `disposition`. `malicious` carries no price under any rule and
-        # keeps every fixture below exercising only what it names.
         "disposition            malicious",
         f"impact_verdict         {impact_verdict}",
         "confidence             medium",
@@ -144,10 +91,6 @@ def _deferred_preds(*rows: str) -> str:
 
 # rule #13 — `ceiling_test` required when termination is severity-ceiling, forbidden otherwise
 
-#: The four members of the termination-category enum (§Conclude → Termination categories).
-#: Parametrising over all four is deliberate: `severity-ceiling` is the only cell where
-#: `ceiling_test` is required, and a check keyed on "not severity-ceiling" that actually reads
-#: "is exhaustion-escalation" passes a one-member test and fails the other two.
 _TERMINATION_CATEGORIES = [
     "trust-root",
     "adversarial-refuted",
@@ -172,9 +115,6 @@ def test_severity_ceiling_without_a_ceiling_test_is_refused() -> None:
 
 
 def test_severity_ceiling_whose_ceiling_test_is_the_none_marker_is_refused() -> None:
-    """`none` is the format's spelling of absence — `parser.is_conclude_empty_marker` drops it
-    from the projected list — so it must land in the same cell as omitting the row, not buy the
-    termination category a row that says nothing."""
     _one_error(_ceiling_doc("severity-ceiling", "none"), "ceiling_test")
 
 
@@ -227,9 +167,6 @@ def test_a_well_formed_lead_prediction_validates_clean() -> None:
 
 
 def test_lead_predictions_project_onto_the_lead() -> None:
-    """#18 cannot be checked over data nobody carries: `_project_lead_subblock` has no
-    `lead_preds` branch today, so the block is dropped in silence — no warning, no rows. The
-    schema-mapping table binds it to `findings[].predictions[]`."""
     body, warnings = parse_dense_companion(_lp_doc())
     assert warnings == []
     lead = next(f for f in body["findings"] if f["id"] == "l-001")
@@ -326,10 +263,6 @@ def test_a_dangling_advance_to_is_an_error_and_not_merely_a_warning() -> None:
 
 # rule #26 — authorization contract closure at CONCLUDE
 
-#: A contract-carrying hypothesis with NO predictions, deliberately: rule #34 would otherwise
-#: fire on the same documents and every count assertion below would be reading two rules at
-#: once. Predictionless hypotheses are legal (rule #23 exempts them explicitly) and are exactly
-#: the shape SKILL.md §Sibling-fork uniqueness writes for a legitimacy question.
 _ONE_CONTRACT = """\
 :H hypothesize.hypotheses [id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]
 h-001|?documented-monitoring-probe|v-002|runs_on|identity|service-account/known-corp||null|active
@@ -391,9 +324,6 @@ def test_a_contract_neither_resolved_nor_deferred_is_refused() -> None:
 
 
 def test_one_contract_resolved_and_the_other_abandoned_is_refused_for_the_orphan_only() -> None:
-    """The other half of the boundary: resolving one contract must not discharge its sibling.
-    Exactly one error, and it names `ac2` — the count is what catches a check that gives up on
-    the whole hypothesis once any contract on it resolves."""
     doc = _authz_closure_doc(_TWO_CONTRACTS, _authz_row("ac1"), _deferred_authz())
     _one_error(doc, "ac2")
 
@@ -414,16 +344,10 @@ def test_a_contract_on_a_lead_born_hypothesis_is_in_scope() -> None:
 
 
 def test_an_unresolved_contract_without_a_conclude_block_is_not_yet_a_failure() -> None:
-    """"When a `conclude:` block is written" — the gate is the REPORT boundary. A mid-run
-    companion whose contract has not been resolved yet is a companion in progress, and a check
-    that fires on it denies every write on the way to satisfying it."""
     assert _errors(_doc(_PROLOGUE, _ONE_CONTRACT, _LEADS)) == []
 
 
 def test_deferred_authorizations_project_onto_the_conclude_block() -> None:
-    """`_project_t_block` returns True for every unrecognised `conclude.*` name and keeps
-    nothing, so the deferral table is discarded today. #26 has nothing to read until it lands
-    at `conclude.deferred_authorizations[]` (the schema-mapping table's binding)."""
     doc = _authz_closure_doc(
         _ONE_CONTRACT,
         "",
@@ -448,9 +372,6 @@ _IP_DEFAULTS = {
     "escalation_on": "exceeds",
 }
 
-#: The `dimension` enum rule #29 declares. All four are tested as passing, individually: two of
-#: three legal members of a neighbouring enum were once pinned by nothing but a substring of an
-#: error message, which is what testing one member and assuming the rest buys.
 _IMPACT_DIMENSIONS = ["confidentiality", "integrity", "availability", "scope"]
 
 
@@ -474,9 +395,6 @@ def test_a_well_formed_impact_prediction_validates_clean() -> None:
 
 
 def test_impact_predictions_project_onto_the_lead() -> None:
-    """As with `lead_preds`, the block is dropped in silence today. The schema-mapping table
-    binds it to `findings[].impact_predictions[]`, and rules #30 and #31 both resolve against
-    that list — neither can be written until it exists."""
     body, warnings = parse_dense_companion(_ip_doc())
     assert warnings == []
     lead = next(f for f in body["findings"] if f["id"] == "l-001")
@@ -498,9 +416,6 @@ def test_impact_predictions_project_onto_the_lead() -> None:
     ],
 )
 def test_a_malformed_ip_id_is_refused(ip_id: str) -> None:
-    """`^ip\\d+$`, sampled across the malformation space. `l-001.ip1` is in the list on
-    purpose: rule #29 says "the full cross-lead identity of the prediction is `l-{lead_id}.
-    ip{n}`" — derived, never written into the `id` cell, which the anchored shape forbids."""
     _one_error(_ip_doc({"id": ip_id}), ip_id)
 
 
@@ -572,10 +487,6 @@ _R_IMPACT_DEFAULTS = {
     "reasoning": '"observed 3 sigma against a 2 sigma threshold"',
 }
 
-#: Two leads, each declaring one impact prediction under a DIFFERENT id and dimension. That is
-#: what makes the reference arms separable: `ip1` exists only on l-001, `ip2` only on l-002,
-#: so a bare `ip1` written on an l-002 row is a reference that resolves somewhere in the
-#: companion and must still be refused.
 _TWO_LEADS_WITH_IMPACT_PREDS = """\
 :L l-001.impact_preds [id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]
 ip1|confidentiality|"session_total_bytes stays within the 30d baseline plus 2 sigma"|within|exceeds|indeterminate|exceeds
@@ -603,9 +514,6 @@ def test_an_impact_resolution_against_a_local_prediction_validates_clean() -> No
 
 
 def test_a_bare_prediction_ref_does_not_reach_another_leads_prediction() -> None:
-    """The arm that separates a real scope check from a document-wide id lookup: `ip1` IS
-    declared in this companion, just not on l-002. A resolver that searches every lead accepts
-    this and silently grades l-002's row against l-001's threshold."""
     _one_error(_r_impact_doc({"resolved_by": "l-002", "pred_ref": "ip1"}), "ip1")
 
 
@@ -624,9 +532,6 @@ def test_a_qualified_prediction_ref_naming_a_real_lead_without_that_id_is_refuse
 
 
 def test_a_dimension_that_disagrees_with_the_referenced_prediction_is_refused() -> None:
-    """"`dimension` must match the referenced prediction's `dimension`." `ip1` was registered
-    on confidentiality; grading it as availability re-labels the threshold after the fact,
-    which is the retroactive-shift the whole impact axis is built to prevent."""
     _one_error(_r_impact_doc({"dim": "availability"}), "ip1")
 
 
@@ -635,16 +540,10 @@ def test_a_dimension_that_disagrees_with_the_referenced_prediction_is_refused() 
     ["none", "breached", "Exceeds", "authorized", "unauthorized"],
 )
 def test_an_off_enum_resolution_verdict_is_refused(verdict: str) -> None:
-    """`none` and the two authz verdicts are in the list on purpose: `none` is legal on
-    `conclude.impact_verdict` and illegal here, and `authorized`/`unauthorized` are what a
-    check that reuses the `:R authz` verdict enum would wave through."""
     _one_error(_r_impact_doc({"verdict": verdict}), verdict)
 
 
 def test_past_case_grounding_on_an_impact_resolution_is_refused() -> None:
-    """Called out by name in the rule: "`past-case` is forbidden on impact resolutions (impact
-    is per-instance reasoning, not category-of-event)." It is also the one off-enum value that
-    is legal on a neighbouring row shape (`:R authz`), so a shared grounding enum accepts it."""
     _one_error(_r_impact_doc({"grounding": "past-case"}), "past-case")
 
 
@@ -704,9 +603,6 @@ _TWO_IMPACT_PREDS = _impact_preds(
 
 
 def test_an_impact_prediction_deferred_with_a_rationale_closes_clean() -> None:
-    """Liveness control for #31 arm (b). The reference is the cross-lead identity rule #29
-    defines, `l-{lead_id}.ip{n}` — rule #31 does not restate the shape, and the bare `ip1`
-    would be unresolvable in a document-level table where no lead is in scope."""
     doc = _impact_closure_doc(
         preds=_ONE_IMPACT_PRED,
         deferred=_deferred_impact('l-001.ip1|"volume telemetry adapter was down for the window"'),
@@ -769,9 +665,6 @@ def _verdict_doc(impact_verdict: str, impact_severity: str | None) -> str:
 
 
 def test_impact_verdict_none_is_legal_on_a_companion_that_declared_no_thresholds() -> None:
-    """"`impact_verdict: none` means the investigation declared no impact predicates." So the
-    member is tested on the document shape it describes, with no `impact_preds` block at
-    all."""
     doc = _doc(_PROLOGUE, _LEADS, _conclude(impact_verdict="none"), _deferred_impact())
     assert _errors(doc) == []
 
@@ -812,16 +705,10 @@ def test_severity_absent_under_a_verdict_that_requires_it_is_refused(impact_verd
 
 @pytest.mark.parametrize("impact_severity", ["low", "moderate", "high"])
 def test_a_severity_under_verdict_within_is_refused(impact_severity: str) -> None:
-    """Forbidden-and-present. "`impact_severity` is null unless `impact_verdict ∈ {exceeds,
-    indeterminate}`" — `within` means every threshold cleared, so there is no severity to
-    report and a number here is a claim the resolutions do not carry."""
     _one_error(_verdict_doc("within", impact_severity), "impact_severity")
 
 
 def test_a_severity_under_verdict_none_is_refused() -> None:
-    """Forbidden-and-present on the other non-demanding member — `none` and `within` are
-    different states (nothing declared vs everything cleared) and a check pinned by one leaves
-    the other open."""
     doc = _doc(
         _PROLOGUE,
         _LEADS,
@@ -841,9 +728,6 @@ def test_a_severity_under_verdict_none_is_refused() -> None:
     "`docs/investigation-language.md`, 'Open, from #933' in the enforcement ramp.",
 )
 def test_an_off_enum_impact_severity_is_refused(impact_severity: str) -> None:
-    """`conclude.impact_severity ∈ {null, low, moderate, high}`. `severe` is in the list
-    because it IS a member of the neighbouring `severity_of_test` enum on `:T resolutions`, and
-    `medium` because it is a member of `confidence` two rows up in the same block."""
     _one_error(_verdict_doc("exceeds", impact_severity), impact_severity)
 
 

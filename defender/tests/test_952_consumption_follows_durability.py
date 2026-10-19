@@ -58,9 +58,6 @@ SHA = "abc123"
 COMMITTED_ID = "p:committed:0"
 HELD_ID = "p:held:0"
 
-#: The not-consumed log's retained-counts clause for the one-marker, one-committed, one-held
-#: tick every drain-level test here seeds — spelled as a LITERAL, never read off the
-#: disposition, so a summary that miscounts cannot agree with the test that checks it.
 RETAINED = (
     "1 served marker(s) left in inflight/, 1 committed pitfall row(s) left queued, "
     "1 held row(s) not bumped"
@@ -492,9 +489,6 @@ def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfall
 def test_952_m1_a_malformed_lock_wait_refuses_the_tick_before_any_work(
     tmp_path: Path, monkeypatch,
 ):
-    """The wait the apply passes into the rotation is configuration, and configuration is
-    read at the tick's entry — never after an agent has run and a commit exists. Malformed,
-    it refuses the tick before a worktree is minted or a marker claimed."""
     from defender.learning.core.config import FatalConfigError
 
     monkeypatch.setenv("LEARNING_REPO_LOCK_WAIT_SECONDS", "soon")
@@ -517,9 +511,6 @@ def test_952_m1_a_malformed_lock_wait_refuses_the_tick_before_any_work(
 def test_952_o7_the_next_tick_delivers_the_retained_branch_before_serving(
     tmp_path: Path, capsys,
 ):
-    """O7. The tick after a rejected push delivers the retained branch FIRST — push and PR
-    from the branch alone, no agent — then goes on to serve whatever is queued. The record
-    is removed once delivered, and the log names the PR."""
     paths = loop_paths(tmp_path)
     _queued_run("case-1", "run-1", paths)
     served: list[Path] = []
@@ -610,9 +601,6 @@ def test_952_o7_a_retained_branch_with_nothing_to_deliver_is_forgotten(tmp_path:
 
 
 def test_952_o7_each_lane_delivers_only_its_own_records(tmp_path: Path):
-    """The two lanes share one record dir and one `_run_worktree_batch`, and each runs under
-    its own drain lock — so the lessons lane must neither deliver nor be parked by a
-    `lead-author/` record, and vice versa."""
     paths = loop_paths(tmp_path)
     _queued_run("case-1", "run-1", paths)
     failing = _Branch(tmp_path / "worktrees", fail=BranchError("push rejected"))
@@ -804,9 +792,6 @@ def test_952_m4_the_post_commit_sentinel_is_written_or_handed_over(
 def test_952_m4_the_none_resolved_sentinel_is_written_or_handed_over(
     tmp_path: Path, deferred: bool,
 ):
-    """O5 + M4, the `_prepare_handoffs` write site: executed leads that resolve to no catalog
-    template, and no pending drafts — the agent is never spawned and the run is recorded done
-    with `commit: none`. Both modes, same record; only where it goes differs."""
     repo = seed_skills_repo(tmp_path / "repo")
     run_dir = _state1135.curation_run_dir("lead-run")
     deps = _curator_deps(
@@ -1133,5 +1118,3 @@ def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Pa
     assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
     assert not (paths.state_root / PITFALLS.consumed).exists()
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
-
-

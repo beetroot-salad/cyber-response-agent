@@ -40,10 +40,6 @@ TICKET_TABLE = """dispositions:
 """
 
 
-# ======================================================================================
-# Fixture plumbing — returns, never asserts.
-# ======================================================================================
-
 def _seeded_run(tmp_path: Path, name: str) -> Path:
     """A run dir the renderer accepts: the alert and a real session store behind its pointer."""
     run_dir = tmp_path / "runs" / name
@@ -150,20 +146,7 @@ def _plain(value: Any) -> Any:
     return value
 
 
-
-
-
-
-# ======================================================================================
-# The run page's ticket line.
-# ======================================================================================
-
 def test_o6_run_page_renders_receipt(tmp_path):
-    """The run page renders a failure receipt's key, status and reason, and a success receipt's key and
-    status. A run dir without the file renders no ticket line. At base no renderer reads the file
-    (C9). The run is started with --update-ticket, which run.py passes to the renderer as an
-    argument; without it the page shows no ticket line
-    (s7pg_page_ticket_line_only_with_update_ticket)."""
     from defender.scripts.visualize import visualize_run
 
     run_dir = _seeded_run(tmp_path, "r-o6")
@@ -192,10 +175,6 @@ def test_o6_run_page_renders_receipt(tmp_path):
 
 
 def test_s7_nf26_page_reads_receipt_without_following_links(tmp_path):
-    """The run page reads ticket_write.json only as a regular file, never following a link: a symlink
-    at that name, to a host settings file or any other file, renders "receipt unreadable" on the
-    ticket line and none of the link target's bytes. (The secrets.env target moved with credential
-    delivery to #1163; a system's config.env stands for the host-only settings here.)"""
     secret = "HOSTONLY-NF26-1107-do-not-render"
     folder = S.plant(tmp_path / "tenants", marker="nf26")
     settings_file = S.set_key(folder, "case-history", "CASE_HISTORY_MARKER_1107", secret)
@@ -229,9 +208,6 @@ def test_s7_nf26_page_reads_receipt_without_following_links(tmp_path):
 
 
 def test_s7_nf26_page_tolerates_and_escapes_receipt(tmp_path):
-    """A receipt that is not JSON, or whose fields have the wrong types, renders "receipt unreadable"
-    on the ticket line while the rest of the page still renders; every receipt field the page
-    renders is escaped, so markup in a reason renders as inert text."""
     good = _failure_receipt("SOC-TYPES-1107", "REASON-TYPES-1107")
     bad: dict[str, str] = {
         "not JSON": '{"key": "SOC-TRUNC-1107", "status": "err',
@@ -270,14 +246,6 @@ def test_s7_nf26_page_tolerates_and_escapes_receipt(tmp_path):
 
 
 def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
-    """The run page shows a ticket line only when the run was started with --update-ticket, and it
-    learns that from run.py directly: run.py renders the page after the box is torn down (RG7) and
-    passes its own --update-ticket flag to the renderer as an argument. With the flag, a receipt in
-    the run dir renders its key, status and reason; without it, any ticket_write.json (one an
-    earlier attempt left, or a symlink) is ignored, the page renders no ticket line and none of the
-    file's bytes, and the rest of the page renders. A render that is not handed the flag (the
-    renderer run standalone) shows no ticket line. The renderer reads the flag from no manifest, no
-    provenance stamp and no other run-dir file."""
     from defender.scripts.visualize import visualize_run
 
     root, alert, _shim = _run_world(tmp_path, monkeypatch, "pg")
@@ -340,12 +308,6 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
 
 
 def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monkeypatch):
-    """A run started without --update-ticket whose box, while alive, wrote an update_ticket: true flag
-    into the provenance stamp and into a manifest-shaped file in the run dir, and planted a forged
-    ticket_write.json ({status: commented, ok: true}): the page run.py renders after teardown shows
-    no ticket line and none of the receipt's bytes. Positive control, same planted run dir: rendered
-    with run.py's flag passed as true, the page shows the ticket line, so the absence above is the
-    argument's doing and not a renderer that never reads receipts."""
     from defender.scripts.visualize import visualize_run
 
     root, alert, _shim = _run_world(tmp_path, monkeypatch, "box")
@@ -390,24 +352,8 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
         "nothing")
 
 
-# ======================================================================================
-# The record's case mapping and its consumers.
-# ======================================================================================
-
-
-
-
-
 def test_d_mapping_error_consumers(tmp_path, caplog):
-    """With record.ticket_mapping a CaseTicketError, the record step warns and writes an error
-    receipt (CX21, as at base), and nothing else is touched by it: the query tool reads no
-    mapping, so a ticket listing reaches gather whole — keys and comments, open or closed — with
-    no warning about the mapping. (#1221 removed the query tool's release screen, which degraded
-    to serving no comments here, and the estate applier's comment-patch refusal.)"""
     root = tmp_path / "tenants"
-    # A templated `open.status`: the loader's own lifecycle refusal (#767; since #1221's amendment
-    # its only one), a mapping file present (so the tenant is accepted, REQUIRED_SETTINGS) and
-    # unusable.
     S.plant(root, marker="bad", table=TICKET_TABLE, open_status="{summary}")
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
@@ -449,12 +395,6 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
 
 
 def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
-    """Neither the record's ticket_mapping nor an edit of mapping.yaml after the record is built
-    changes what a ticket reply serves: the query tool reads no mapping, so a case closed under
-    the mapping as built, one closed only under the edited file, and an open one all reach
-    gather with their comments. (#1221 removed the release screen that once read the record's
-    released status here; its amendment removed the released status itself, so the mid-run edit
-    moves the reporter, and the "edited" case's status is one only that edit names.)"""
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="o2", table=TICKET_TABLE)
     record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
@@ -481,11 +421,6 @@ def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
 
 
 def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
-    """A resumed sibling's WorldRegistry, built in run.py, builds a world whose facts put a note
-    on a case whatever status the case is in — the status the record was built with, or one only
-    a mid-run edit of mapping.yaml names: no ticket reply is screened any more, so the registry
-    consults no mapping. (#1221 removed the estate applier's refusal, which judged a comment
-    patch against the record's ticket_mapping; #1224 replaced the patches with world facts.)"""
     # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
     folder = S.plant(root, marker="est", table=TICKET_TABLE)

@@ -74,24 +74,10 @@ def _write_issued(world_dir: Path, rows: list[dict]) -> Path:
     return table
 
 
-# ---------------------------------------------------------------------------------------
-# Decision 1 — the file names: one home, one spelling
-# ---------------------------------------------------------------------------------------
-
-#: The shipped code roots — the project profile's `sourceRoots`, READ from the profile
-#: rather than re-spelled so a root added there is censused here — relative to the `defender/`
-#: package the code under test is actually IMPORTED from, so a worktree census reads the
-#: worktree, never the checkout the shared venv's editable install points at.
 _CODE_ROOTS = tuple(
     Path(root).relative_to("defender").as_posix()
     for root in json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))["sourceRoots"])
-#: The ONE home of the three names — `_episode_paths.py`, the episode-layout owner (#1077 D1
-#: re-homed them off `learning/branch/archive.py`, which now binds them by import). The
-#: run-level owner is censused beside it: the family stamp's name is its `PROVENANCE`.
 _OWNER_MODULE = "_episode_paths.py"
-#: The run-layout owner, by its path under `defender/` since #1105 moved it into the runs
-#: repository package (D1.1). A stale path here would silently drop it from the census (`rglob`
-#: of a missing path yields nothing), so `_shipped_modules` asserts the census saw it.
 _LAYOUT_MODULE = "run_repository/_layout.py"
 _OWNER_MODULES = (_OWNER_MODULE, _LAYOUT_MODULE)
 _ARCHIVE_MODULE = "learning/branch/archive.py"
@@ -174,14 +160,6 @@ def _string_constants(source: str, path: str) -> set[str]:
     return _census(source, path)[0]
 
 
-# ---------------------------------------------------------------------------------------
-# Decision 2 — the derived accessors: one home, public names, the same behaviour
-# ---------------------------------------------------------------------------------------
-
-#: The `family.py` private `render.py` imported across the module line, and the two
-#: `render.py` privates the page needs — each as `(private spelling, public spelling)`. The
-#: overlay and holding-system accessors (`staged_patterns`, `world_pattern`, `own_h_rows`) and
-#: the review join retired with #1224.
 _MOVED = (
     ("_raw_manifest", "raw_manifest"),
     ("_leads_by_id", "leads_by_id"),
@@ -194,10 +172,6 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
     family = _family()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     world_dir = ep / "worlds" / "b"
-    # #1234 A12/A21: b's own calls have b's host-written ids (`<token>/<n>`, past the served
-    # row's `/0`) — a row with no id of the run is an inherited pre-branch row, and one no other
-    # world's table shares makes b's table refused as edited. #1255 G4/G6: the ids are not on
-    # the rows; b's host-only call-join record names them by each row's `(lead_id, seq)`.
     token = J.world_token("b")
     rows = [
         {"lead_id": "l-001", "seq": 0, "system": "elastic", "verb": "query",
@@ -417,11 +391,6 @@ def test_raw_manifest_reads_the_screened_manifest_and_refuses_a_link_or_a_non_ma
         family.raw_manifest(ep)
 
 
-# ---------------------------------------------------------------------------------------
-# Decision 3 — the tolerant grade reader, public
-# ---------------------------------------------------------------------------------------
-
-
 def test_read_grade_is_none_before_a_grade_and_the_same_record_grade_episode_returns_after(
         tmp_path):
     """`judge.read_grade(episode_dir)` is the ONE reader of `judge.yaml`."""
@@ -526,9 +495,6 @@ def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):
     reader of the episode tree."""
     enqueue = J.mod("learning.judge.enqueue")
     owner = J.mod("_episode_paths")
-    # `draws_on_disk` now takes the episode-root view plus the label (#1133 rev 2): the draws
-    # dir it reads is `worlds/<label>/judge`, derived from the episode root, never handed in
-    # directly as a path.
     episode_dir = tmp_path / "ep"
     label = "b"
     draw_dir = owner.EpisodePaths(episode_dir).world(label).draws

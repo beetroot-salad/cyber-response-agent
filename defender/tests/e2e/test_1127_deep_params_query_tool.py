@@ -59,9 +59,6 @@ REFUSED = 300
 RECURSION = 680
 UNDECODABLE = 5000
 
-#: Distinctive, digit-free strings placed inside the deep params: one as a KEY in the deep part,
-#: one as the VALUE of the shallow `native_query`. Digit-free so a search for the limit's own
-#: number can never be satisfied by one of them.
 SENTINEL_KEY = "ZqNestCanaryKey"
 SENTINEL_VALUE = "ZqNestCanaryValue"
 #: An UNDECLARED system name, digit-free for the same reason: the row coarsens it away, so the
@@ -365,10 +362,6 @@ def test_a_call_at_the_limit_leaves_every_wire_log_line_readable(tmp_path, form)
     assert len(read_jsonl_rows(path)) == len(lines)
 
 
-#: Past the session store's own bound (200 levels of payload): the depth at which a refused
-#: call still in the history ended the lead. Past pydantic's own message dump (about 252) the
-#: replay harness's model cannot run at all (it serializes every argument to estimate usage);
-#: the wire log's side of that depth is pinned on the logger itself (`test_1127_wire_log`).
 PAST_THE_STORE = 205
 
 

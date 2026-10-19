@@ -7,9 +7,6 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
-# and a bare module-scope import there is a COLLECTION error, which pytest answers by
-# interrupting the whole session. Guarded like `pydantic_ai` above it.
 toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender.tests.e2e._replay_harness import (  # noqa: E402
@@ -92,9 +89,6 @@ def test_a_hazard_value_in_a_foreign_dict_rows_field_name_forges_no_field_bounda
         assert declared == emitted, "a key forged a row boundary"
 
     if view == wire_text(value):
-        # Passthrough: the guard refused to substitute. Whatever the decoder does with the
-        # view — raise, or hand back something else — it must not reproduce the original,
-        # because that is the only reason a passthrough was the right answer.
         try:
             recovered = toons.loads(toons.dumps(value))
         except BaseException:  # noqa: BLE001 — a decoder that raises discharges this too
@@ -160,9 +154,6 @@ def test_a_result_is_framed_exactly_once_and_a_value_cannot_close_the_frame() ->
 
 
 def test_a_foreign_result_is_framed_once_however_many_times_the_gate_is_installed() -> None:
-    """A foreign result carries exactly ONE frame however many times the gate capability is
-    installed, and the text the model receives under two installs is the text it receives
-    under one — the SAME view, inside a lone well-formed frame, on both arms."""
     value = toon_rows(corpus()["fx-33"])
 
     single = agent_run(toolset=foreign_toolset(value))
@@ -188,9 +179,6 @@ def test_a_foreign_result_is_framed_once_however_many_times_the_gate_is_installe
 
 
 def test_a_payload_that_is_both_hazardous_and_clears_the_byte_bar_meets_the_identical_guard() -> None:
-    """A payload that is BOTH hazardous and clears the byte bar meets the same guard as one that
-    is only hazardous: the two checks compose, the byte gate runs first and M3 runs after it,
-    and nothing exempts a clearing payload from the hazard guard."""
     value = toon_rows(corpus()["fx-33"])
     assert delivered_percent(value) <= 85, (
         "fx-33 no longer clears the DELIVERED-bytes bar (`d3`); this test would pass vacuously"

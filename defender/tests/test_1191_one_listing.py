@@ -1,41 +1,3 @@
-"""#1191 design amendment 2, O8 — every lint under `scripts/lint/` that lists source files does it
-through `_astlib.source_files`, so all of them share O5: an excluded directory name applies only
-BELOW the scanned root (never to its ancestors), git-ignored content is not source, and a new
-uncommitted file still is. And O9/O10 reach every one of them.
-
-(a) THE CENSUS, both ways.
-    POSITIVE: each of the amendment's 24 lints, and each of amendment 1's five scoped lints,
-    calls `_astlib.source_files` — resolved through its imports, not by the call's spelling.
-    NEGATIVE: an AST census over `scripts/lint/` (subdirectories included; resolved through
-    `_astlib`, so an aliased `os.walk` counts and `ast.walk` does not) finds no file walk
-    outside the top-level `_astlib.py`: no `os.walk` / `os.fwalk` / `Path.walk`, no `.rglob`
-    (bound, unbound `Path.rglob(root, ...)`, or fetched by `getattr` / `methodcaller`), no glob
-    that can cross a directory (`**`, a `/`, `recursive=True`, or a pattern the census cannot
-    read), no directory listing (`iterdir` / `scandir` / `listdir`) inside a recursive function
-    (direct, nested or mutual) or a loop that feeds it back into itself, and no `find` run as
-    a program. A one-level `.glob("*.py")` is not a walk — `lint_run_records`' owner-package
-    discovery is one. The amendment's other non-obligations (`lint_stale_refs`: `grep`;
-    `lint_vulture`: an external tool) are named in `NON_OBLIGATIONS`.
-(b) BEHAVIOUR, ALL 24, the way CI runs them (`python scripts/lint/<lint>.py` in a mini repo):
-    a plant under a checkout nested in dirs carrying every excluded name (each holding a
-    `pyvenv.cfg`) is reported; in a git fixture ignoring `zz_ign_1191/` and `*_ignored_1191.py`
-    (names nothing could prune by spelling), an untracked plant is reported and ignored ones
-    are not; a mode-000 dir (O9) or a module whose own or directory name is not UTF-8 (O10)
-    blinds the gate — exit 2, named, no traceback on a strict-UTF-8 stdout — outside a repo
-    and, untracked, inside one. Six lints also through their in-process doors
-    (`main(scope=...)`, `scan(root, ...)`). `lint_unbounded_whole_read` (#1188, later) is held
-    to all of it.
-(c) DESIGN AMENDMENT 3 (what git would put in the tree), all lints as CI runs them, in a git
-    repo: bad names or a mode-000 dir inside an IGNORED dir neither blind the gate nor show up —
-    the plant elsewhere is still reported (O5 restated (a)); a tracked module deleted from the
-    working tree is not scanned and changes nothing (O17); `lint_run_layout_imports --root
-    <relative>` keeps an anchored ignore (O5 (c)); `lint_ci_hygiene` and `lint_raw_yaml` run
-    ONE `git ls-files -z --cached --others --exclude-standard` in `defender/` and at most one
-    `check-ignore` per run (O18), seen through a logging `git` first on PATH. What IS in the tree
-    is scanned: tracked files git would ignore, names git would C-quote, a tracked dangling
-    symlink (named, non-zero); a module under a mode-0644 dir is blind (the D17 correction:
-    only a GONE path is dropped); with git missing or failing, the walk still finds the plant.
-"""
 from __future__ import annotations
 
 import ast
@@ -258,18 +220,11 @@ def _calls_source_files(source: str) -> bool:
 
 @pytest.mark.parametrize("stem", LISTERS + SCOPED_5)
 def test_o8_every_listing_lint_calls_the_shared_listing(stem):
-    """O8 (positive census): each of the amendment's 24 lints (and the later
-    `lint_unbounded_whole_read`), and each of amendment 1's five scoped lints, calls
-    `_astlib.source_files` — the walk census below only forbids the shapes
-    it knows; this one requires the shared listing itself."""
     source = (LINT_DIR / f"{stem}.py").read_text(encoding="utf-8")
     assert _calls_source_files(source), f"{stem} never calls _astlib.source_files"
 
 
 def test_o8_the_positive_census_resolves_the_call():
-    """POSITIVE CONTROL for the positive census: an imported, aliased, module-qualified or
-    package-relative `source_files` counts; a local function that merely shares the name, or
-    another module's `source_files`, does not."""
     counted = [
         "from _astlib import source_files\nsource_files(r, ())\n",
         "from _astlib import source_files as listing\nlisting(r, ())\n",
@@ -289,9 +244,6 @@ def test_o8_the_positive_census_resolves_the_call():
 
 
 def test_o8_no_lint_lists_files_outside_the_shared_listing():
-    """O8(a): no module under `scripts/lint/` (subdirectories included) other than its
-    `_astlib.py` walks the file tree — every lint lists its files through
-    `_astlib.source_files` (the named non-obligations aside)."""
     walks = _census(LINT_DIR)
     assert not walks, (
         f"{len(walks)} file walk(s) outside _astlib.source_files — list through it instead:\n"
@@ -369,10 +321,6 @@ def test_o8_the_census_ignores_what_is_not_a_walk(shape):
 
 
 def test_o8_the_census_sees_a_walk_planted_in_a_copied_lint(tmp_path):
-    """POSITIVE CONTROL on real files: a copy of `scripts/lint/` with an `rglob` appended to one
-    converted lint (`lint_stage_prompt_frames.py`, which lists through `source_files`) is
-    reported by the census at that file; so is one in a module in a SUBDIRECTORY of the copy,
-    and one in a nested module that happens to be named `_astlib.py`."""
     lint_dir = tmp_path / "lint"
     shutil.copytree(LINT_DIR, lint_dir, ignore=shutil.ignore_patterns("__pycache__"))
     walk = "\n\ndef _planted_walk_1191(root):\n    return sorted(root.rglob('*.py'))\n"
@@ -388,10 +336,6 @@ def test_o8_the_census_sees_a_walk_planted_in_a_copied_lint(tmp_path):
         assert any(w.startswith(f"{rel}:") for w in found), f"the census missed the walk in {rel}"
 
 
-# ======================================================================================
-# (b) Behaviour: every listing lint as CI runs it, and five through their in-process doors
-# ======================================================================================
-
 #: The violating file's path under a lint's scanned root; the report names it (root- or
 #: repo-relative, so this suffix is in it either way).
 PLANT_REL = "pkg_1191/planted_1191.py"
@@ -404,9 +348,6 @@ IGNORED_PLANTS = ("zz_ign_1191/top_1191.py", "pkg_1191/zz_ign_1191/deep_1191.py"
                   "pkg_1191/deep_ignored_1191.py")
 IGNORED_MARKERS = ("zz_ign_1191", "_ignored_1191")
 
-#: The excluded names an ancestor of the checkout carries in the ancestor case — the
-#: amendment's (".venv", "__pycache__", "node_modules", "runs"), "tests", and each lint's own
-#: EXCLUDED_DIRS on top (see `_ancestors`).
 ANCESTOR_NAMES = (".venv", "__pycache__", "node_modules", "runs", "tests")
 
 RAW_YAML_PLANT = "import yaml\n\n\ndef load_1191(text):\n    return yaml.safe_load(text)\n"
@@ -564,10 +505,6 @@ def _ancestors(stem: str) -> list[str]:
 
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o8_each_listing_lint_as_ci_runs_it_scans_under_excluded_ancestors(tmp_path, stem):
-    """O8(b), all 24, through the entry point CI uses (`python scripts/lint/<lint>.py`): a
-    checkout nested under directories carrying every excluded name — each holding a
-    `pyvenv.cfg`, so a venv rule by marker file cannot prune it either — still reports the
-    plant (exit 1, named): excluded names apply below the scanned root only."""
     names = _ancestors(stem)
     parent = tmp_path.joinpath(*names)
     for depth in range(1, len(names) + 1):
@@ -581,10 +518,6 @@ def test_o8_each_listing_lint_as_ci_runs_it_scans_under_excluded_ancestors(tmp_p
 
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o8_each_listing_lint_as_ci_runs_it_skips_ignored_content_not_untracked(tmp_path, stem):
-    """O8(b), all 24, as CI runs them, in a git-repo fixture ignoring `zz_ign_1191/` and
-    `*_ignored_1191.py`: an untracked, not-ignored plant is reported (exit 1, named); the same
-    plant where git ignores it — a top-level and a nested ignored dir, an ignored file name — is
-    not."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     new = T._write(root / PLANT_REL, PLANTS[stem].source())
@@ -615,10 +548,6 @@ WHERE_LISTED = {"walk": None, "git": IGNORES}
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o10_each_listing_lint_as_ci_runs_it_is_blind_on_an_undecodable_name(tmp_path, stem,
                                                                               where, listing):
-    """O10, all 24, as CI runs them on a strict-UTF-8 stdout: a module whose name — its own or
-    its directory's — is not valid UTF-8 makes the gate blind (exit 2, the name escaped on
-    stderr), with no traceback — outside a repo, and in a git repo where it is untracked and
-    not ignored (amendment 3 (b))."""
     raw, escaped = UNDECODABLE[where]
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=WHERE_LISTED[listing])
@@ -636,9 +565,6 @@ def test_o10_each_listing_lint_as_ci_runs_it_is_blind_on_an_undecodable_name(tmp
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o9_each_listing_lint_as_ci_runs_it_is_blind_on_an_unreadable_directory(tmp_path, stem,
                                                                                  listing):
-    """O9, all 24, as CI runs them: a mode-000 directory under the scanned root — outside a
-    repo, or untracked and not ignored in a git repo — makes the gate blind (exit 2 naming it).
-    Skipped where the mode is not enforced (root with the DAC capabilities)."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=WHERE_LISTED[listing])
     locked = T._locked_dir(root / "pkg_1191" / "locked_1191")
@@ -660,11 +586,6 @@ def _quiet_about(result: subprocess.CompletedProcess[str], *markers: str) -> lis
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o5_each_listing_lint_as_ci_runs_it_never_enters_an_ignored_dir_of_bad_names(tmp_path,
                                                                                      stem):
-    """O5 restated (a), all lints as CI runs them, in a git repo: non-UTF-8 names that git
-    ignores — a module and a directory inside ignored `zz_ign_1191/` dirs (top-level and in a
-    package), and an ignored file name that is not UTF-8 — neither blind the gate nor show up:
-    the plant elsewhere is still reported (exit 1, named), with no traceback on a strict-UTF-8
-    stdout."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     text = PLANTS[stem].source()
@@ -686,10 +607,6 @@ def test_o5_each_listing_lint_as_ci_runs_it_never_enters_an_ignored_dir_of_bad_n
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o5_each_listing_lint_as_ci_runs_it_never_enters_an_ignored_unreadable_dir(tmp_path,
                                                                                    stem):
-    """O5 restated (a), all lints as CI runs them, in a git repo: a mode-000 directory inside an
-    ignored `zz_ign_1191/` does not blind the gate — the plant elsewhere is still reported
-    (exit 1, named) and the locked dir is not mentioned. Skipped where the mode is not enforced
-    (root with the DAC capabilities)."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     T._write(root / PLANT_REL, PLANTS[stem].source())
@@ -704,10 +621,6 @@ def test_o5_each_listing_lint_as_ci_runs_it_never_enters_an_ignored_unreadable_d
 
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o17_each_listing_lint_as_ci_runs_it_skips_a_deleted_tracked_module(tmp_path, stem):
-    """O17, all lints as CI runs them: a tracked module (staged with the layout) deleted from the
-    working tree is not scanned and does not blind the gate — the run exits as the untouched
-    repo does (0 clean; the run-layout lint's mini repo carries its stale allow-list), never 2,
-    and never names the gone file."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     clean = _as_ci_runs_it(repo, stem)
@@ -723,9 +636,6 @@ def test_o17_each_listing_lint_as_ci_runs_it_skips_a_deleted_tracked_module(tmp_
 
 @pytest.mark.parametrize("spelled", ["defender", "./defender", "defender/pkg_1191/.."])
 def test_o5_run_layout_imports_from_a_relative_root_keeps_anchored_ignores(tmp_path, spelled):
-    """O5 restated (c): `lint_run_layout_imports --root <relative defender/>`, run from its
-    repo's top, keeps an ANCHORED ignore (`/defender/zz_ign_1191/`): a plant there is not
-    reported. Control: the same plant where git does not ignore it is (exit 1, named)."""
     stem = "lint_run_layout_imports"
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores="/defender/zz_ign_1191/\n")
@@ -786,11 +696,6 @@ def test_the_git_shim_logs_what_runs_through_it(tmp_path):
 
 @pytest.mark.parametrize("stem", ["lint_ci_hygiene", "lint_raw_yaml"])
 def test_o18_a_lint_run_makes_one_full_listing_of_its_root(tmp_path, stem):
-    """O18/D17 ("each lint makes one `git ls-files` call, plus one `check-ignore` on the root";
-    `lint_ci_hygiene` "lists defender/ once per run"): through the logging `git` first on PATH,
-    a run over a git mini repo with nested untracked packages makes exactly ONE `git ls-files`,
-    in `defender/`, asking for `-z --cached --others --exclude-standard`, and at most one
-    `check-ignore` — no per-directory or per-file git traffic standing in for a walk."""
     env, log = _shimmed_git(tmp_path)
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
@@ -813,9 +718,6 @@ def test_o18_a_lint_run_makes_one_full_listing_of_its_root(tmp_path, stem):
 
 
 def test_o5_ci_hygiene_never_reads_an_ignored_top_level_json(tmp_path):
-    """O5 restated (nothing inside an ignored tree is source) for `lint_ci_hygiene`'s top-level
-    `.json` listing: an IGNORED, unparseable `defender/x_ignored_1191.json` is never read — the
-    gate stays clean (exit 0)."""
     stem = "lint_ci_hygiene"
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES + "*_ignored_1191.json\n")
@@ -832,9 +734,6 @@ FORCED = {"dir": "zz_ign_1191/forced_1191.py", "name": "pkg_1191/forced_ignored_
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o5_each_listing_lint_as_ci_runs_it_scans_tracked_files_git_would_ignore(tmp_path, stem,
                                                                                 forced):
-    """O5 restated ("tracked files plus untracked files that are not ignored"), all lints as CI
-    runs them: a plant force-added (`git add -f`) where git would ignore it — under an ignored
-    dir, or under an ignored name — is TRACKED, so scanned and reported (exit 1, named)."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     rel = FORCED[forced]
@@ -853,10 +752,6 @@ NO_GIT = {"missing": None, "failing": "#!/bin/sh\necho 'fatal: broken_1191' >&2\
 @pytest.mark.parametrize("how", sorted(NO_GIT))
 @pytest.mark.parametrize("stem", [s for s in LISTERS if not PLANTS[s].committed])
 def test_d17_each_listing_lint_as_ci_runs_it_walks_when_git_lets_it_down(tmp_path, stem, how):
-    """D17 step 3 ("git is unavailable or fails" → the walk), all lints as CI runs them, inside
-    a git repo: with no `git` on PATH, or a `git` that exits 128, the plant is still reported
-    (exit 1, named) — never an empty listing. (shippable_surface resolves its systems through
-    git itself, so it has no git-less run to check.)"""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     T._write(root / PLANT_REL, PLANTS[stem].source())
@@ -893,9 +788,6 @@ def test_o5_each_listing_lint_as_ci_runs_it_reports_a_plant_git_would_quote(tmp_
 
 @pytest.mark.parametrize("stem", LISTERS)
 def test_d17_each_listing_lint_as_ci_runs_it_names_a_tracked_dangling_module(tmp_path, stem):
-    """D17 (as corrected: only a GONE path is dropped), all lints as CI runs them: a tracked
-    dangling symlink module is listed, and the gate that cannot read it says so — a non-zero
-    exit naming it, never a silent skip."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     (root / "pkg_1191").mkdir(parents=True, exist_ok=True)
@@ -911,10 +803,6 @@ def test_d17_each_listing_lint_as_ci_runs_it_names_a_tracked_dangling_module(tmp
 @pytest.mark.parametrize("stem", LISTERS)
 def test_o9_each_listing_lint_as_ci_runs_it_is_blind_on_a_module_it_cannot_stat(tmp_path, stem,
                                                                                 case):
-    """O9 + the D17 correction, all lints as CI runs them, in a git repo: a module under a
-    mode-0644 dir (names readable, entries not statable) — git lists it with no warning — makes
-    the gate blind (exit 2 naming it), tracked or untracked. Skipped where the mode is not
-    enforced (root with the DAC capabilities)."""
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
     T._write(root / "pkg_1191" / "rd_1191" / "m_1191.py", PLANTS[stem].source())
@@ -930,9 +818,6 @@ def test_o9_each_listing_lint_as_ci_runs_it_is_blind_on_a_module_it_cannot_stat(
 
 
 def test_o5_run_layout_imports_prunes_nested_venv_and_hidden_dirs_in_a_git_repo(tmp_path):
-    """D17 step 4 (`prune` on either path), as CI runs `lint_run_layout_imports` in a git repo:
-    plants in a nested venv (`pyvenv.cfg`) and a nested hidden dir, untracked and not ignored,
-    are not reported. Control: the plant beside them is (exit 1, named)."""
     stem = "lint_run_layout_imports"
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)
@@ -988,10 +873,6 @@ SAMPLES: dict[str, Callable[[Path, Path, pytest.CaptureFixture[str]], str]] = {
 
 @pytest.mark.parametrize("stem", sorted(SAMPLES))
 def test_o8_a_plant_under_an_excluded_ancestor_is_still_reported(tmp_path, capsys, stem):
-    """O8(b) through each sampled lint's own door: over a repo whose ANCESTOR directory is named
-    `.venv` (an excluded name of every one of them) it still reports a plant — excluded names
-    apply below the root only. Control: before the plant, nothing under that path is
-    reported."""
     run = SAMPLES[stem]
     repo = tmp_path / ".venv" / "repo"
     root = _ci_repo(repo, stem)
@@ -1005,9 +886,6 @@ def test_o8_a_plant_under_an_excluded_ancestor_is_still_reported(tmp_path, capsy
 
 @pytest.mark.parametrize("stem", sorted(SAMPLES))
 def test_o8_gitignored_content_is_not_scanned_but_untracked_content_is(tmp_path, capsys, stem):
-    """O8(b) through each sampled lint's own door, in a git-repo fixture ignoring
-    `zz_ign_1191/` and `*_ignored_1191.py` (its layout staged): an untracked, not-ignored plant
-    is reported, and the same plant where git ignores it is not."""
     run = SAMPLES[stem]
     repo = tmp_path / "repo"
     root = _ci_repo(repo, stem, ignores=IGNORES)

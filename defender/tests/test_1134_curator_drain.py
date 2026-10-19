@@ -1,9 +1,3 @@
-"""#1134 curator step through the drain entry point (`drain.run_batch(cfg=...)`): a planted entry at a lesson
-name (symlink, hard link, FIFO, folder) is never deleted, read through or written through by the
-tick. On the fault path a `NotPlainEntry` is logged and the original fault propagates unchanged (a
-`RETIRE_SET` member retires); any other OSError replaces it. The before-state is git's read of the
-tick-start commit, so names git does not report survive the fault undo. Each guard has a positive
-control on the same address."""
 from __future__ import annotations
 
 import dataclasses
@@ -86,24 +80,10 @@ def _plain_os_error(exc: BaseException | None, code: int) -> bool:
     return isinstance(exc, OSError) and type(exc) is not NotPlainEntry and exc.errno == code
 
 
-# ---------------------------------------------------------------------------------------
-# O5.1 + O5.2 at _restore_corpus: an unattributable link-lesson faults and is left
-# ---------------------------------------------------------------------------------------
-
-
-
 @pytest.mark.parametrize("channel", ["lessons", "questioner"])
 def test_a_link_lesson_citing_the_batch_is_unattributable_and_left_for_the_scrub(
     tmp_path, caplog, channel,
 ):
-    """The curator leaves `PLANTED` as a symlink to an outside lesson that cites the batch's row.
-    Read through the held corpus it cites nothing (O5.1), so the tick faults with `AuthorError`
-    (unattributable) and retires as ever: rc 2, the row bumped, nothing committed. The fault
-    sweep's unlink is refused (O5.2), logged by name (O5.3) and the link left; the target is
-    never opened or written. Both channels.
-
-    Catches: today's `_cited_ids(repo_root / rel)`, which follows the link, attributes it, hands
-    the outside text to the verifier and commits the link."""
     caplog.set_level(logging.WARNING)
     fid = "f1" if channel == "lessons" else "w1"
     target = _outside(tmp_path, text=lesson_text(fid, mark=OUT_MARK))
@@ -153,22 +133,10 @@ def test_control_an_unattributable_plain_lesson_is_swept_by_the_fault_restore(tm
     assert sc.head_files() == []
 
 
-# ---------------------------------------------------------------------------------------
-# O5.2 at _put_back via _revert_non_md_strays (settle; no O5.3 containment)
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
 def test_a_non_md_link_stray_in_the_corpus_is_refused_and_the_tick_is_stuck(
     tmp_path, caplog, kind,
 ):
-    """The curator writes an attributable lesson and leaves `notes.txt` as a symlink (or a hard
-    link) to an outside file. The settle step's `_put_back` refuses to unlink it; that refusal is
-    not on the fault path, so the `NotPlainEntry` propagates out of `run_batch`, the stuck record
-    names `NotPlainEntry`, nothing is committed, and the link is left. The undo that runs on the
-    way out removes the lesson and passes over the link it cannot remove.
-
-    Catches: today's `is_file()` + `unlink()`, which removes the link and commits the lesson."""
     caplog.set_level(logging.WARNING)
     target = _outside(tmp_path, "secret.txt", f"host notes {OUT_MARK}\n")
     holder: dict = {}
@@ -202,11 +170,6 @@ def test_control_a_non_md_plain_stray_is_reverted_and_the_tick_commits(tmp_path)
     assert sc.head_files() == [f"defender/lessons/{PLANTED}"]
 
 
-# ---------------------------------------------------------------------------------------
-# O5.2 at _put_back via _revert_strays, into the SIBLING corpus (fault path)
-# ---------------------------------------------------------------------------------------
-
-
 def _with_sibling(sc) -> Path:
     """Commit a `lessons-questioner/` corpus into the scene's repo (the second mount of the
     author label, already held by the scene's trees), and re-base the scene on that commit."""
@@ -220,14 +183,6 @@ def _with_sibling(sc) -> Path:
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link", "plain-control"])
 def test_a_stray_in_the_sibling_corpus_goes_through_the_sibling_mount(tmp_path, kind, caplog):
-    """H2: the lessons curator plants `lessons-questioner/PLANTED` (outside its own corpus,
-    inside the sibling mount) and faults with `AuthorError`. On the fault path `_revert_strays`
-    judges the name through the sibling's `Held`: a symlink or hard link is refused, logged by
-    name and left, and the fault still retires (rc 2). The positive control, a plain file at the
-    same name, is removed.
-
-    Catches: today's `is_file()` + `unlink()`, which follows and removes the link; and a
-    `_put_back` that falls back to the plain path for anything outside its own corpus."""
     caplog.set_level(logging.WARNING)
     target = _outside(tmp_path)
     holder: dict = {}
@@ -260,15 +215,6 @@ def test_a_stray_in_the_sibling_corpus_goes_through_the_sibling_mount(tmp_path, 
         assert warnings_naming(caplog, PLANTED), caplog.text
         assert target.read_bytes() == before["secret.md"][1]
 
-
-# ---------------------------------------------------------------------------------------
-# O5.2 at _restore_unapproved_files (non-fault; the refusal propagates)
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# O5.3: a leaf refusal on the fault path is logged; the original fault routes unchanged
-# ---------------------------------------------------------------------------------------
 
 PLANTS = ["symlink", "hard link", "fifo", "socket", "folder"]
 
@@ -320,16 +266,6 @@ def _plant_left(kind: str, at: Path, target: Path) -> bool:
 def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_snapshot_name(
     tmp_path, kind, caplog,
 ):
-    """(i) `AuthorError` (a `RETIRE_SET` member) with a symlink, hard link, FIFO, UNIX socket or
-    folder at snapshot name `SEEDED`: the restore's rewrite is refused (`NotPlainEntry`), logged
-    at WARNING by name, and the fault still routes as before — rc 2, `f1` bumped, no stuck record
-    for a class other than the fault's. The plant is left; the outside file is neither read nor
-    written. (FIFO, socket and folder are O5.3's settled widening: v1 let their refusal replace
-    the fault.)
-
-    Catches: today's restore, which reads a link's target and whose refusal replaces the
-    `AuthorError`; v1's alias-mark catch, which lets a FIFO's or folder's refusal through; and
-    (E09) a catch that passes over only the plants it can name, re-raising a socket's refusal."""
     caplog.set_level(logging.WARNING)
     target = _outside(tmp_path, text=lesson_text("f0", mark=OUT_MARK))
     sc = _scene(tmp_path, curator=S.FakeCurator(
@@ -346,9 +282,6 @@ def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_snapshot_name(
     assert _plant_left(kind, sc.corpus / SEEDED, target)
     assert warnings_naming(caplog, SEEDED), caplog.text
     if kind != "hard link":
-        # Addendum 3 (D1, declared): the restore asks git whether `SEEDED` still holds its
-        # before-state bytes, and git hashes a hard link's content (its own read, N-a). What
-        # still holds for it: nothing written through it, nothing copied into the corpus.
         assert seen == []
     assert _unwritten(census(target.parent)) == _unwritten(before)
     assert not [n for n, row in census(sc.corpus).items()
@@ -358,11 +291,6 @@ def test_o5_3_a_retire_member_still_retires_over_a_plant_at_a_snapshot_name(
 
 @pytest.mark.parametrize("kind", PLANTS)
 def test_o5_3_a_non_member_fault_propagates_unchanged_over_a_plant(tmp_path, kind, caplog):
-    """(ii) `RuntimeError` (not a member) with the same plant: that same `RuntimeError` object
-    propagates out of `run_batch`, the stuck record's `fault_class` is `RuntimeError`, the row
-    stays queued unbumped, and the plant is left, logged by name.
-
-    Catches: the restore's refusal replacing the fault (the stuck record would name it)."""
     caplog.set_level(logging.WARNING)
     target = _outside(tmp_path, text=lesson_text("f0", mark=OUT_MARK))
     fault = RuntimeError("injected after the plant")
@@ -382,9 +310,6 @@ def test_o5_3_a_non_member_fault_propagates_unchanged_over_a_plant(tmp_path, kin
 
 @pytest.mark.parametrize("fault", ["AuthorError", "RuntimeError"])
 def test_o5_3_control_with_nothing_planted_the_snapshot_file_is_restored(tmp_path, fault):
-    """The positive control for both routes: the agent rewrites `SEEDED` (no plant) and faults.
-    The restore puts the snapshot bytes back; `AuthorError` retires (rc 2), `RuntimeError`
-    propagates and is recorded stuck."""
     exc = drain.AuthorError("injected") if fault == "AuthorError" else RuntimeError("injected")
     sc = _scene(tmp_path, curator=S.FakeCurator(also=_plant_over_seeded("none", Path(), exc)))
 
@@ -400,13 +325,6 @@ def test_o5_3_control_with_nothing_planted_the_snapshot_file_is_restored(tmp_pat
 
 
 def test_a_fifo_at_a_new_name_is_left_and_the_fault_still_retires(tmp_path, caplog):
-    """v1's declared deviation, gone: a FIFO at a name the snapshot never held, then
-    `AuthorError`. `git status` does not report a FIFO, so the sweep (which asks git what the
-    agent made, C1) never meets it: the tick retires (rc 2, `f1` bumped), nothing is logged for
-    it (C2), and the FIFO is never opened and is left for the scrub.
-
-    Catches: v1's alias-mark catch, under which the FIFO's unmarked refusal replaced the fault,
-    and a sweep that opens what it finds."""
     caplog.set_level(logging.WARNING)
     holder: dict = {}
 
@@ -425,17 +343,7 @@ def test_a_fifo_at_a_new_name_is_left_and_the_fault_still_retires(tmp_path, capl
     assert warnings_naming(caplog, PLANTED) == [], caplog.text
 
 
-# ---------------------------------------------------------------------------------------
-# O5.3: anything but the leaf refusal still propagates and replaces the fault
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_linked_folder_holding_a_snapshot_name_replaces_the_fault(tmp_path):
-    """The agent moves folder `sub/` (holding snapshot name `sub/lesson.md`) outside, links it back
-    and rewrites the lesson there, then raises `AuthorError`. The rewrite of `sub/lesson.md` meets
-    the linked HOLDING folder: a plain `OSError(ELOOP)` — no leaf refusal — propagates in place of
-    the fault, recorded stuck as `OSError`, `f1` not bumped. Nothing is written into the moved
-    folder, and the link is left."""
     outside = tmp_path / "outside"
     moved = outside / "moved-sub"
 
@@ -459,14 +367,6 @@ def test_a_linked_folder_holding_a_snapshot_name_replaces_the_fault(tmp_path):
 
 @pytest.mark.parametrize("recreated", [False, True], ids=["removed", "removed-and-remade"])
 def test_a_corpus_mount_the_agent_removed_replaces_the_fault(tmp_path, recreated):
-    """The agent removes the whole corpus folder (and, in one case, makes an empty folder at its
-    spelling), then raises `AuthorError`. The fault undo writes `SEEDED` back through the held
-    mount, whose root is the removed folder: the write fails with `FileNotFoundError` — no leaf
-    refusal — which propagates in place of the fault, recorded stuck under its own class, `f1`
-    not bumped; nothing is written at the folder's spelling (declared: main's restore remade the
-    folder by its path and retired).
-
-    Catches: a restore that falls back to the corpus's spelling when the held root is gone."""
 
     def agent(rows, batch_id, cfg):
         shutil.rmtree(cfg.corpus_dir)
@@ -487,18 +387,6 @@ def test_a_corpus_mount_the_agent_removed_replaces_the_fault(tmp_path, recreated
 
 @pytest.mark.parametrize("kind", ["fifo", "hard link", "socket", "plain file"])
 def test_a_non_folder_at_a_holding_folders_name_replaces_the_fault(tmp_path, kind, caplog):
-    """E01: the agent replaces holding folder `sub/` (snapshot name `sub/lesson.md`) by a FIFO, a
-    hard link to an outside file, or a UNIX socket, then raises `AuthorError`. The sweep's unlink
-    of `sub` is the leaf refusal (logged, passed over), but the rewrite of `sub/lesson.md` then
-    meets a NON-DIRECTORY holding folder: `NotADirectoryError`, exactly — no leaf refusal, so
-    O5.3 does not contain it — propagates in place of the fault, recorded stuck under its own
-    class, `f1` not bumped; the plant is left.
-
-    The positive control is a plain file at `sub`: the sweep removes it like any stray, the
-    rewrite makes `sub/` again and restores `sub/lesson.md`, and the fault retires (rc 2, bumped).
-
-    Catches: an O5.3 catch widened to `NotADirectoryError`, under which the tick retires with
-    `sub/lesson.md` never restored."""
     caplog.set_level(logging.WARNING)
     target = _outside(tmp_path, text=lesson_text("f0", mark=OUT_MARK))
 
@@ -540,14 +428,6 @@ def test_a_non_folder_at_a_holding_folders_name_replaces_the_fault(tmp_path, kin
     ("rename", errno.ENOSPC), ("unlink", errno.EIO), ("unlink", errno.EACCES),
 ], ids=["rewrite-ENOSPC", "sweep-EIO", "sweep-EACCES"])
 def test_a_failing_disk_on_the_fault_restore_replaces_the_fault(tmp_path, verb, code):
-    """H6: the agent rewrites snapshot name `SEEDED` (or leaves a stray lesson) and raises
-    `AuthorError`; the restore's rename of `SEEDED` then fails on a full disk (`ENOSPC`), or the
-    sweep's unlink of the stray fails (`EIO`, `EACCES`), on `cfg.corpus`. That is no leaf
-    refusal, so it is not passed over: the `OSError` propagates out of `run_batch` in place of
-    the fault, recorded stuck under its own class, `f1` not bumped.
-
-    Catches: an O5.3 catch wider than `NotPlainEntry`, under which the tick retires (rc 2) over a
-    half-restored corpus. Control: `test_o5_3_control_with_nothing_planted_...`."""
 
     def agent(rows, batch_id, cfg):
         if verb == "rename":
@@ -570,21 +450,7 @@ def test_a_failing_disk_on_the_fault_restore_replaces_the_fault(tmp_path, verb, 
     assert seam.raised >= 1
 
 
-# ---------------------------------------------------------------------------------------
-# The before-state is git's: one git cannot read stops the tick before the agent (C1)
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_before_state_git_cannot_read_raises_out_of_run_batch_before_the_agent(tmp_path):
-    """The tick-start before-state cannot be read: `SEEDED`'s blob is missing from the object
-    store (the worktree and the index's stat cache still say clean, so the clean gate passes).
-    `_snapshot_corpus` raises from `_capture_pre_state`, before the agent, as the read-only
-    probe's `GitProbeError` (not a `RETIRE_SET` member): it comes out of `run_batch`, the stuck
-    record is written, no row is bumped, nothing is committed, the agent was never spawned, and
-    `SEEDED` is untouched.
-
-    Catches: a before-state that leaves the unreadable lesson out (after which the fault-path
-    restore would delete it), or a git failure that retires the batch."""
     sc = _scene(tmp_path, seed_corpus={SEEDED: lesson_text("f0"), "sub/x.md": lesson_text("f0")},
                 curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}))
     oid = S.git(sc.repo, "rev-parse", f"HEAD:defender/lessons/{SEEDED}").stdout.strip()
@@ -606,14 +472,6 @@ def test_a_before_state_git_cannot_read_raises_out_of_run_batch_before_the_agent
 
 @pytest.mark.parametrize("route", ["control", "step", "reopen", "scandir"])
 def test_a_corpus_the_held_mount_cannot_read_still_has_its_before_state(tmp_path, route):
-    """The positive control, and C1's point: the before-state is read from git, not through the
-    held mount. Over the real `os` (`control`), or over a mount that refuses (EACCES) `SEEDED`'s
-    open or the corpus folder's listing on one route, the tick-start before-state still holds
-    every tracked file (nested included) with its bytes, the agent is spawned, and the tick
-    commits.
-
-    Catches: a before-state read through the mount (v2's walk + `read_bytes`), which raises (or
-    leaves the file out) here."""
     sc = _scene(tmp_path, seed_corpus={SEEDED: lesson_text("f0"), "sub/x.md": lesson_text("f0")},
                 curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}))
     if route != "control":
@@ -630,13 +488,6 @@ def test_a_corpus_the_held_mount_cannot_read_still_has_its_before_state(tmp_path
 
 
 def test_a_nested_lesson_the_agent_rewrote_is_restored_on_the_fault_path(tmp_path):
-    """C1 through the drain: the agent rewrites the tracked nested lesson `nested/deep/l1.md`,
-    leaves a nested stray beside it, and raises `AuthorError`. The fault undo writes the lesson
-    back from the git before-state and sweeps the stray (both names git reports); the tick
-    retires (rc 2, `f1` bumped) and the corpus is clean again.
-
-    Catches: a before-state limited to the corpus's own entries, under which the rewrite stays
-    and the next tick's clean gate refuses."""
 
     def agent(rows, batch_id, cfg):
         put(cfg.corpus_dir / "nested" / "deep" / "l1.md", "the agent's edit\n")
@@ -655,10 +506,6 @@ def test_a_nested_lesson_the_agent_rewrote_is_restored_on_the_fault_path(tmp_pat
 
 
 def test_a_gitignored_name_the_agent_made_survives_a_faulted_tick(tmp_path):
-    """C2 (declared), through the drain: the corpus ignores `*.log`; the agent writes `x.log` and
-    a stray `y.md`, then raises `AuthorError`. The fault undo sweeps what git reports (`y.md`)
-    and leaves `x.log`, which git does not (main's recursive sweep deleted it); the tick retires
-    (rc 2)."""
 
     def agent(rows, batch_id, cfg):
         put(cfg.corpus_dir / "x.log", "ignored by git\n")
@@ -676,11 +523,6 @@ def test_a_gitignored_name_the_agent_made_survives_a_faulted_tick(tmp_path):
     assert not (sc.corpus / "y.md").exists()
 
 
-# ---------------------------------------------------------------------------------------
-# Every corpus touch of the tick is `cfg.corpus`'s: the `Held` the config carries (H5/H7)
-# ---------------------------------------------------------------------------------------
-
-
 def _journal(sc, log: list, **kw) -> None:
     """Swap the scene's held corpus for a `JournalHeld` on the same root, logging into `log`."""
     sc.cfg = dataclasses.replace(sc.cfg, corpus=JournalHeld(sc.corpus, log, **kw))
@@ -688,13 +530,6 @@ def _journal(sc, log: list, **kw) -> None:
 
 @pytest.mark.parametrize("refused", [True, False], ids=["refused", "control"])
 def test_attribution_asks_cfg_corpus_and_a_refused_read_cites_nothing(tmp_path, refused):
-    """The curator writes a plain `PLANTED` citing `f1`, but `cfg.corpus`'s view refuses to read
-    it (as it refuses a hard link). Attribution asks `cfg.corpus`, so the lesson cites nothing:
-    the tick faults unattributable and retires (rc 2, `f1` bumped), no verifier call, nothing
-    committed. The control, the same view refusing nothing: judged, approved, committed.
-
-    Catches: attribution and judging over a handle of their own, which reads the file the
-    config's view refused and commits it."""
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}))
     _journal(sc, [], refuse=(PLANTED,) if refused else ())
 

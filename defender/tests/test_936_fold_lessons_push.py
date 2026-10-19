@@ -186,9 +186,6 @@ def test_the_fold_block_is_the_shared_derivation_top_three_and_lead_included(
         tmp_path, monkeypatch, tree=tree, doc=doc,
         turns=lambda rd: _reads(rd, 2) + [Turn(text="done")])
     (_rid, _seq, text), = _frontier_rows(store)
-    # Each render mints its own frame salt (#1206); compared with the salts masked. The fold
-    # renders lesson paths in the model view (#1255 P1): the shared derivation's host corpus
-    # path is read as `/defender/lessons` (a no-op when `render` already speaks model paths).
     expected = expected.replace(str(corpus.resolve()), "/defender/lessons")
     text, expected = (re.sub(r"run-[0-9a-f]{16}-", "run-<SALT>-", t) for t in (text, expected))
     assert text.endswith("\n\n" + expected), (
@@ -224,11 +221,6 @@ def test_a_second_boundary_re_derives_its_own_block_and_records_again(tmp_path, 
     assert second.count(FOLD_HEADER) == 1
     assert (rd / "investigation.md").read_text(encoding="utf-8").endswith(SECOND_LOOP), (
         "control: the append that closes loop 2 was refused")
-    # fold 1 (class) + fold 2 (class, loginuid). NOT the write that closed loop 2 and opened
-    # loginuid: under compaction its return is displaced by fold 2 at the very next render,
-    # before MAIN reads it, so the lane withholds its block and records nothing — a row there
-    # would say loginuid was in front of MAIN one round before it was, off a return it never
-    # saw. Every push row here is one the model was actually shown.
     assert Counter(r["lesson_name"] for r in _rows(rd)) == Counter(
         {CLASS_LESSON: 2, LOGINUID_LESSON: 1}), _rows(rd)
     assert all(r["kind"] == "push" for r in _rows(rd))

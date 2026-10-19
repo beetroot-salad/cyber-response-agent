@@ -145,9 +145,6 @@ def _alert_model_path(run_dir: Path) -> str:
 
 
 def test_unframed_stdout_is_never_returned_as_program_output(tmp_path):
-    """unframed_stdout_is_never_returned_as_program_output — when the box's stdout carries NO
-    well-formed frame, the call raises `BoxFault`; the unframed bytes are never handed back as
-    a `BoxResult`, and never reach the model inside the bash tool's program-output envelope."""
     run_dir = _run_dir(tmp_path)
     t = RecordingTransport(DAEMON_START_FAILURE)
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
@@ -173,9 +170,6 @@ def test_unframed_stdout_is_never_returned_as_program_output(tmp_path):
 
 
 def test_program_rc_127_inside_the_frame_reaches_the_model(tmp_path):
-    """program_rc_127_inside_the_frame_reaches_the_model — a genuine in-pipeline `command not
-    found` (rc=127 INSIDE a well-formed frame) is returned as a normal `BoxResult` and reaches
-    the model as a real, actionable result."""
     run_dir = _run_dir(tmp_path)
     not_found = b"nosuchprog: command not found\n"
     t = RecordingTransport(framed(127, b"", not_found))
@@ -194,10 +188,6 @@ def test_program_rc_127_inside_the_frame_reaches_the_model(tmp_path):
 
 
 def test_program_output_bytes_cross_the_frame_untranscoded(tmp_path):
-    """program_output_bytes_cross_the_frame_untranscoded — arbitrary program bytes cross the wire
-    with ZERO transcoding: the `BoxResult.out`/`err` the caller receives are byte for byte the
-    bytes the program wrote, including sequences that are not valid UTF-8 and a payload
-    containing the frame's own MAGIC."""
     payload = b"\xff\xfe\x00\x80 \xc3(" + box.RESPONSE_MAGIC + b"\r\n\x00tail"
     errbytes = b"\x89PNG\r\n\x1a\n\xff"
     t = RecordingTransport(framed(3, payload, errbytes))
@@ -296,9 +286,6 @@ def test_no_pickle_on_the_box_boundary(tmp_path):
 
 
 def test_an_empty_pipeline_crosses_as_a_valid_zero_rc_frame(tmp_path):
-    """an_empty_pipeline_crosses_as_a_valid_zero_rc_frame — an EMPTY pipeline list (B12:
-    `parse("")` → `[]`) is a valid falsy domain member, not a fault and not a host-side
-    shortcut."""
     t = RecordingTransport(framed(0, b"", b""))
     executor = box.BoxExecutor(spec=box.BoxSpec(), transport=t)
 
@@ -393,10 +380,6 @@ def test_box_accepts_no_raw_command_string(tmp_path):
 
 
 def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
-    """relative_operand_names_the_same_file_at_all_three_sites — a RELATIVE operand names one and
-    the same absolute file at ALL THREE sites the cwd is coupled at: the gate's rebase
-    (`permission/bash.py:234`), `_resolve_operand`'s rebase (`tools.py:304-313`), and the
-    executor's `cwd=` (now the box's ..."""
     run_dir = _run_dir(tmp_path)
     lesson = sorted((DEFENDER / "lessons").glob("*.md"))[0]
     lesson_rel = lesson.relative_to(DEFENDER.parent)
@@ -422,9 +405,6 @@ def test_relative_operand_names_the_same_file_at_all_three_sites(tmp_path):
 
 
 def test_cwd_is_reapplied_per_call_and_does_not_persist(tmp_path):
-    """cwd_is_reapplied_per_call_and_does_not_persist — the cwd is carried caller-side and RE-
-    APPLIED on every box call: two successive bash tool calls each hand the executor the
-    anchor explicitly, and the second does not inherit it from the first."""
     run_dir = _run_dir(tmp_path)
     t = RecordingTransport(framed(0, b"", b""))
     deps = _main_deps(run_dir, t)
@@ -482,9 +462,6 @@ def test_tool_bash_executes_through_the_injected_box_seam(tmp_path):
 
 
 def test_infrastructure_fault_text_reaches_the_model_labelled(tmp_path):
-    """infrastructure_fault_text_reaches_the_model_labelled — a mid-run box failure degrades to a
-    TOOL ERROR the model sees, carrying the infrastructure detail, and labelled as
-    infrastructure rather than presented inside the program-output envelope."""
     run_dir = _run_dir(tmp_path)
     t = RecordingTransport(DAEMON_START_FAILURE)
     deps = _main_deps(run_dir, t)

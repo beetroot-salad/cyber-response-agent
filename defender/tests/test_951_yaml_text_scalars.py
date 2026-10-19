@@ -107,9 +107,6 @@ def test_mapping_keys_stay_typed_so_both_readings_keep_the_same_pairs():
 
 @pytest.mark.parametrize("text", ["null", "~", "22", "false", "2026-07-25"])
 def test_a_bare_scalar_document_is_typed_in_both_readings(text):
-    """Nobody's value. A caller asking "is this document a mapping" must get one answer for
-    both readings — the fourth cut's `readings.spelled or {}` guard let the truthy text
-    `"null"` through to `.get` (the review's finding)."""
     readings = safe_load_typed_and_spelled(text)
     assert readings.spelled == readings.typed == safe_load(text)
 
@@ -123,9 +120,6 @@ def test_a_bare_scalar_document_is_typed_in_both_readings(text):
     "",
 ])
 def test_the_typed_half_is_exactly_safe_load(text):
-    """The readers that never wanted a spelling — the integrity and grammar checks, the
-    judge's rendering — are handed `typed`, and it must be what they were handed before
-    #951 to the byte, or the judge's input moves under an unchanged prompt tag."""
     assert safe_load_typed_and_spelled(text).typed == safe_load(text)
 
 
@@ -154,9 +148,6 @@ def _shape(value, seen=None):
     "a: [1, [2, {3: 4}], {}, []]",
 ])
 def test_both_readings_have_exactly_one_shape(text):
-    """One parse: the two readings can differ only in what a VALUE scalar became — never in
-    which containers hold which keys or how many pairs survive. A repeated `events:` collapses
-    to the same LAST list in both, and an inline merge lands the same keys in both."""
     readings = safe_load_typed_and_spelled(text)
     assert _shape(readings.spelled) == _shape(readings.typed) == _shape(safe_load(text))
 
@@ -164,18 +155,12 @@ def test_both_readings_have_exactly_one_shape(text):
 # everything else in the spelled half is `safe_load`'s structure
 
 def test_a_repeated_key_collapses_to_its_last_value_as_safe_load_does():
-    """The point of ONE reading. A second walk of the node tree that took the FIRST
-    `events:` scanned a different list from the one the typed document (and the judge)
-    carried — a leak in the honoured list was missed."""
     text = "events: [{user.name: admin}]\nevents: [{user.name: root}]\n"
     assert spelled(text) == safe_load(text) == {
         "events": [{"user.name": "root"}]}
 
 
 def test_a_merge_key_merges_as_safe_load_does():
-    """Tag resolution is untouched, so `<<:` is still the merge tag and the merged mapping's
-    keys land in the row — the first cut dropped the resolvers and left a literal `<<` key;
-    the second cut's tree walk looked the key up by name and never saw merged events."""
     text = "projections:\n  - lead_id: l-001\n    <<: {events: [{user.name: root}]}\n"
     assert spelled(text)["projections"] == safe_load(text)["projections"] == [
         {"lead_id": "l-001", "events": [{"user.name": "root"}]}]
@@ -210,5 +195,3 @@ def test_a_document_too_deep_to_parse_is_a_yaml_error_not_a_recursion_error():
     catches `YAMLError` for malformed input must not get an interpreter error instead."""
     with pytest.raises(yaml.YAMLError, match="nested too deeply"):
         spelled("a: " + "[" * 20000)
-
-

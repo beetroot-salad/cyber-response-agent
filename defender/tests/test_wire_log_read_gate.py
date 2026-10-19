@@ -60,10 +60,6 @@ def _bash(env, cmd, which):
 
 
 def test_the_wire_log_lives_one_level_below_the_run_root(tmp_path):
-    """The location is the mechanism, so it is pinned as such: `<run>/wire_logs/` — a directory,
-    not a run-root name. `wire_log_path` creates the dir (the driver opens the logger on it
-    before anything else writes into the run), and agrees with the layout `run_repository._layout` declares
-    for every reader."""
     run = tmp_path / "run"
     run.mkdir()
     path = observe.wire_log_path(run)
@@ -78,25 +74,16 @@ def test_the_wire_log_lives_one_level_below_the_run_root(tmp_path):
 
 @pytest.mark.parametrize("which", READERS)
 def test_the_read_tool_denies_the_wire_log(env, which):
-    """MAIN and GATHER symmetrically. MAIN is the reported direction (gather's payload bytes
-    reaching the main loop around `RAW_DENY_REASON`); GATHER is the mirror the same shape opened
-    — an injected subagent reading MAIN's whole transcript back."""
     assert not _read(env, env.wire, which).allow
 
 
 @pytest.mark.parametrize("which", READERS)
 def test_the_bash_lane_denies_the_wire_log(env, which):
-    """The `cat` lane too, and for the same reason rather than by a second rule: the shape tuple
-    `decide_read` enforces IS the object the `cat` grant carries as its scope. `cat` was the
-    wider half of the leak — the read tool caps a payload read at 8,192 bytes, `cat` at nothing."""
     assert not _bash(env, f"cat {env.wire}", which).allow
 
 
 @pytest.mark.parametrize("which", READERS)
 def test_run_root_artifacts_still_read(env, which):
-    """The positive control. The subdirectory must move exactly one file out of scope: MAIN's
-    own work log still reads, and so does the summary lane gather is supposed to answer through.
-    A deny that swept these up would be a broken shape, not a closed hole."""
     assert _read(env, env.run / "investigation.md", which).allow
     assert _bash(env, f"cat {env.run}/investigation.md", which).allow
     assert _read(env, env.run / "gather_summaries" / "l-001.md", which).allow
@@ -104,10 +91,6 @@ def test_run_root_artifacts_still_read(env, which):
 
 @pytest.mark.parametrize("which", READERS)
 def test_the_subdirectory_is_what_denies(env, which):
-    """FALSIFICATION. Plant the same filename at the run ROOT: the gate ALLOWS it there, for both
-    readers, on both lanes. So the deny above is the directory doing the work and not a filename
-    the gate happens to know — which is also the standing warning to anyone moving this log back
-    up, or adding a second stream that carries wire bodies verbatim beside it."""
     planted = env.run / WIRE_LOG
     planted.write_text("{}\n", encoding="utf-8")
 
@@ -122,9 +105,6 @@ def _run_dir_section(out: str) -> str:
 
 
 def test_the_workspace_map_does_not_name_the_observe_dir(env):
-    """The map is inlined into MAIN's message 0 as "the canonical surfaces", and MAIN has no
-    `ls` — so the map is its whole directory view. Naming a dir the gate then refuses only
-    teaches the model to ask for it; `gather_raw/` is suppressed on the same ground (#264)."""
     listing = _run_dir_section(wsm.workspace_map(env.run, systems=()).replace(str(env.run), "RUNDIR"))
 
     assert WIRE_LOG_DIR not in listing
@@ -165,12 +145,7 @@ def lenv(tmp_path):
 LEARNING_READERS = ("curator",)
 
 
-
-
 def test_a_learning_stage_trace_lands_under_observe(lenv):
-    """One component for both lanes. `files.names_wire_log_dir` is a single path-component test, so
-    a stage trace written anywhere else is a stream the deny cannot see — which is the whole
-    reason the offline writer goes through `stage_trace_path` rather than joining a name."""
     for name, path in lenv.traces.items():
         assert path == lenv.run / WIRE_LOG_DIR / name
         assert path.parent.is_dir()
@@ -189,22 +164,11 @@ def test_a_learning_role_cannot_read_a_stage_trace_or_the_staged_payloads(lenv):
 
 @pytest.mark.parametrize("which", LEARNING_READERS)
 def test_no_learning_role_reads_a_trace(lenv, which):
-    """Denied OUTRIGHT on the read tool, unlike `gather_raw` — no role may opt in by declaring
-    a shape. Both roles, and `test_the_component_is_what_denies_in_the_learning_lane` below is
-    the falsification for both."""
     assert not _read(lenv, lenv.traces["judge_trace.jsonl"], which).allow
-
-
-
-
 
 
 @pytest.mark.parametrize("which", LEARNING_READERS)
 def test_the_component_is_what_denies_in_the_learning_lane(lenv, which):
-    """FALSIFICATION, the offline half. The same trace name at the learning run dir ROOT is
-    ALLOWED for both roles — which is the pre-fix behaviour, stated as a test so the denies
-    above cannot be passing for some unrelated reason, and so the claim "a subdirectory would
-    not have been enough here" is measured rather than asserted in a comment."""
     planted = lenv.run / "judge_trace.jsonl"
     planted.write_text("{}\n", encoding="utf-8")
 
@@ -212,10 +176,6 @@ def test_the_component_is_what_denies_in_the_learning_lane(lenv, which):
 
 
 def test_names_wire_log_dir_is_a_component_test_not_a_substring(tmp_path):
-    """The discipline `_names_raw` states, held for the new marker too: the test is over path
-    PARTS. A substring scan is decided by text the path's owner does not control — a checkout
-    under `~/observe-notes/`, a pytest tmp dir named `test_observe_0` — and would deny reads
-    across an unrelated tree while a file honestly named `observed.jsonl` slipped through."""
     assert permission.names_wire_log_dir(tmp_path / WIRE_LOG_DIR / "x.jsonl")
     assert permission.names_wire_log_dir(tmp_path / WIRE_LOG_DIR / "deep" / "x.jsonl")
     assert not permission.names_wire_log_dir(tmp_path / "observed" / "x.jsonl")

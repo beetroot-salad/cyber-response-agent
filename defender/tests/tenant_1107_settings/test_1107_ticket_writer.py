@@ -20,10 +20,6 @@ TW_LOGGER = ticket_writer.__name__
 MARKER = "tw1107"
 
 
-# ======================================================================================
-# Fixture plumbing — returns, never asserts.
-# ======================================================================================
-
 #: An `open.status` the loader refuses: a template, so alert text would pick the case's status.
 BAD_OPEN_STATUS = "{summary}"
 
@@ -75,8 +71,6 @@ def _host_paths(folder: Path, root: Path) -> set[str]:
 def _warnings(caplog, logger: str = TW_LOGGER) -> list[str]:
     return [r.getMessage() for r in caplog.records
             if r.levelno >= logging.WARNING and r.name == logger]
-
-
 
 
 def _ticket_line_near(page: str, reason: str, *others: str, window: int = 1500) -> bool:
@@ -137,20 +131,7 @@ def _calls_in(module_path: Path, names: set[str], *, env_reads: bool = False) ->
     return hits
 
 
-
-
-# ======================================================================================
-# The seam (D-writer, F6).
-# ======================================================================================
-
-
-
 def test_d_writer_context_from_run(tmp_path, monkeypatch):
-    """The ticket writer's transport context uses the defender dir and the run dir that run.py
-    passes. With DEFENDER_DIR exported to another tree and the process cwd elsewhere, the request's
-    verb context still names run.py's values. _verb_context calls neither process_defender_dir() nor
-    Path.cwd(). Its child environment is the run env run.py passes (F6 resolved, human round 4: the
-    provisional reading)."""
     root, folder, alert = _world(tmp_path)
     run_id = "r-ctx"
     shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
@@ -180,19 +161,7 @@ def test_d_writer_context_from_run(tmp_path, monkeypatch):
     assert not found, f"the ticket writer finds its own location: {found}"
 
 
-# ======================================================================================
-# O6 — every settings or transport failure on the record step writes an error receipt.
-# ======================================================================================
-
 def test_o6_missing_config_receipt(tmp_path, monkeypatch, caplog):
-    """run.py main runs with --update-ticket over a tenant whose case-history config.env is deleted.
-    It writes ticket_write.json with ok false, status 'error', url null and a non-empty reason that
-    names the settings through SETTINGS_POINTER. It logs a warning. The run page shows the receipt's
-    key, status and reason. The process exit code equals that of the same run with the config
-    present."""
-    # rejected: D5 reverses the issue body's 'fail loudly': a failed ticket write never changes the exit code
-    # rejected: C3/CX3: at base a missing config writes no receipt
-    # rejected: #1047's ticket_unconfigured_lane_stays_silent (spec_graph_1047; test_1047_ticket_lane.py:427, test_767_writer.py:861): reversed by MF-9 (A, human round 1); a tenant that has mapping.yaml but no case-history config.env gets the error receipt
     caplog.set_level(logging.INFO)
     root_ok, _folder_ok, alert_ok = _world(tmp_path, name="tenants-ok")
     _shim(tmp_path, monkeypatch, *S.store_answers_ok("r-present"))
@@ -226,11 +195,6 @@ def test_o6_missing_config_receipt(tmp_path, monkeypatch, caplog):
 
 
 def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
-    """When the case-history config.env is missing a required key, or has a non-integer
-    CASE_HISTORY_TIMEOUT_SEC, the record step writes ticket_write.json with ok false, status
-    'error', url null (F8 resolved auto: url is null for every config failure and stays the store's
-    url for mapping and transport faults) and a reason that names the bad key through
-    SETTINGS_POINTER. It logs a warning."""
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     arms = {
@@ -260,16 +224,9 @@ def test_o6_bad_config_receipt(tmp_path, monkeypatch, caplog):
 
 
 def test_o6_mapping_fault_receipt(tmp_path, monkeypatch, caplog):
-    """With a bad mapping (record.ticket_mapping a CaseTicketError), the record step makes no POST.
-    It writes ticket_write.json with ok false, status 'error', the store's url, and a reason that
-    names the mapping problem, and it logs a warning."""
     caplog.set_level(logging.INFO)
     run_id = "r-mapping"
     shim = _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
-    # The loader's own lifecycle refusal: a templated `open.status` ("case-history mapping's
-    # `open.status` must be a literal, not a template: …") — a real bad file, not a fake error.
-    # (Until #1221's amendment this arm was `open.status` equal to `released.status`, a rule the
-    # amendment dropped.) NF-23: the reason is that check's own text, so it names the mapping.
     root, _folder, alert = _world(tmp_path, open_status=BAD_OPEN_STATUS)
     rc, refused, run_dir, _rec = _run(tmp_path, root, alert, run_id=run_id)
     assert refused is None, f"rc={rc} refused={refused}"
@@ -287,9 +244,6 @@ def test_o6_mapping_fault_receipt(tmp_path, monkeypatch, caplog):
 
 
 def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
-    """A transport fault on the record step (the request returns no status) writes ticket_write.json
-    with ok false, status 'error', and a reason that names the transport failure, and logs a
-    warning."""
     caplog.set_level(logging.INFO)
     # G23/RG3 (executed): docker answers an unknown context with rc 1 and 'context not found' on
     # stderr, before any request — the request returns no status.
@@ -312,12 +266,7 @@ def test_o6_transport_fault_receipt(tmp_path, monkeypatch, caplog):
     assert _warnings(caplog), "a transport fault logged no warning"
 
 
-
-
 def test_o6_budget_cut_missing_config_no_receipt(tmp_path, monkeypatch):
-    """A run cut by budget, or by store, with no verdict (closed_before_cut false) writes no
-    ticket_write.json, even when the tenant's case-history config.env is missing: the #1047 check
-    runs ahead of the config load."""
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path)
     S.config_path(folder, "case-history").unlink()
@@ -339,9 +288,6 @@ def test_o6_budget_cut_missing_config_no_receipt(tmp_path, monkeypatch):
 
 
 def test_o6_aborted_missing_config_receipt(tmp_path, monkeypatch):
-    """An aborted run (no verdict, but not budget or store) with the case-history config.env
-    missing writes the error receipt with url null and a reason. The missing-config arm is reached
-    once the budget/store check has passed."""
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path)
     S.config_path(folder, "case-history").unlink()
@@ -429,9 +375,6 @@ def test_store_answers_the_record_step_with_an_http_error(tmp_path, monkeypatch,
 
 
 def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog):
-    """The receipt reason is the failing check's own fault text passed through the settings-path
-    redaction: the warning log line for the same failure carries the same redacted reason and no
-    host settings path. Assertions stay at a non-empty reason and no host path."""
     caplog.set_level(logging.INFO)
     _shim(tmp_path, monkeypatch)
     root, folder, alert = _world(tmp_path, name="tenants-bad")
@@ -471,9 +414,6 @@ def test_s7_nf23_reason_is_the_redacted_fault_text(tmp_path, monkeypatch, caplog
 
 
 def test_s7_nf24_receipt_write_failure_is_harmless(tmp_path, monkeypatch, caplog):
-    """A failure writing ticket_write.json itself (permission denied, a full disk) is caught and
-    logged as a warning, and the run's exit code is unchanged; a later record step in the same run
-    dir replaces an earlier receipt (the last attempt wins)."""
     caplog.set_level(logging.INFO)
     root, folder, alert = _world(tmp_path)
 
@@ -510,10 +450,6 @@ def test_s7_nf24_receipt_write_failure_is_harmless(tmp_path, monkeypatch, caplog
 
 
 def test_s7_mf12_no_receipt_branch_clears_stale_receipt(tmp_path, monkeypatch):
-    """Every record-step branch that writes no receipt first removes any existing ticket_write.json
-    (an unlink that never follows a link). A run cut by budget with no verdict, over a run dir
-    already holding a planted or earlier receipt (a forged {status: commented, ok: true}, or a
-    symlink at that name), leaves no ticket_write.json behind, and its page shows no ticket line."""
     _shim(tmp_path, monkeypatch)
     root, _folder, alert = _world(tmp_path)
     forged = {"key": "FORGED-KEY-1107", "status": "commented", "url": "http://forged.invalid/x",
@@ -577,14 +513,7 @@ def test_o1_ticket_writer_ignores_env(tmp_path, monkeypatch):
     assert str(got.get("url") or "").startswith(file_base), f"the receipt's url is not the tenant file's: {got}"
 
 
-# ======================================================================================
-# The receipt's file (PG-6, PG-12).
-# ======================================================================================
-
 def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
-    """ticket_write.json is written by a guarded replace: a reader never observes a
-    partially-written file, and an interrupted write leaves either the old content or the new
-    content, never a torn mix."""
     root, folder, alert = _world(tmp_path)
     run_id = "r-atomic"
     _shim(tmp_path, monkeypatch, *S.store_answers_ok(run_id))
@@ -611,20 +540,12 @@ def test_s60_ticket_write_fs_atomic_replace(tmp_path, monkeypatch):
     assert not leftovers, f"a staged receipt was left beside the real one: {leftovers}"
 
 
-
-
-
-
 def test_s7_f6_run_env_handed_to_the_correlation_lead(tmp_path, monkeypatch):
     """The driver hands the run's env to the correlation lead: with a marker variable in that
     env, the lead's backend child receives it."""
     marker_var, marker_value = "SPEC1107_RUN_ENV_MARKER", "run-env-marker-7c1"
     monkeypatch.setenv(marker_var, marker_value)
 
-    # The correlation lead's half (item 1 is gone, #1222): the lead's first backend call is the
-    # first call the harness makes; the verb it reaches is the replay's recorder, and what it
-    # records is the context the lead was built with — its env is what the child the real verb
-    # forks is handed.
     from defender.tests.alert_front_door_1222 import _spec1222 as FD
 
     lead = FD.run_alert(tmp_path / "lz-run", tenant=FD.plant_tenant(), run_id="lz1107-f6",
@@ -636,11 +557,7 @@ def test_s7_f6_run_env_handed_to_the_correlation_lead(tmp_path, monkeypatch):
         "the correlation lead's backend call was not handed the run env's marker")
 
 
-
 def test_s7_f6_run_env_handed_to_the_ticket_writer(tmp_path, monkeypatch):
-    """run.py hands its run env (run_common.run_env's copy) to the ticket writer: with a marker
-    variable in that env, the writer's docker child receives it, and neither lane (the writer, the
-    correlation lead) calls run_env() or reads os.environ itself."""
     marker_var, marker_value = "SPEC1107_RUN_ENV_MARKER", "run-env-marker-7c1"
     monkeypatch.setenv(marker_var, marker_value)
     root, _folder, alert = _world(tmp_path)

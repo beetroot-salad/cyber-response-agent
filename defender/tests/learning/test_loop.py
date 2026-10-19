@@ -19,13 +19,6 @@ from defender.learning.core import persist as persist  # type: ignore[import-not
 from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 
 
-# ---------------------------------------------------------------------------------------
-# `loop.reply_document_text` (#1018 M1/M5): the facade re-exports the one-bare-document
-# parser; the three lenient rules the old `strip_yaml_fence` carried (XML envelope, trailing
-# close tag, dangling closer) are gone. The full corpus is `tests/test_1018_reply_document.py`.
-# ---------------------------------------------------------------------------------------
-
-
 def test_reply_document_text_passes_through_plain_yaml():
     """Shape 1: a bare document comes back stripped and unchanged (#1018 M1 step 5)."""
     assert loop.reply_document_text("outcome: caught\nconfidence: high\n") == (
@@ -41,9 +34,6 @@ def test_reply_document_text_unwraps_a_whole_string_yaml_fence():
 
 
 def test_reply_document_text_leaves_a_trailing_close_tag_for_the_loader_to_refuse():
-    """#1018 M4: a bare `</content>` after the document is NOT unwrapped any more. It is not a
-    fence line and not a think tag, so the parser returns the text unchanged (M1 step 5) and
-    the consumer's own `safe_load` is what refuses it. Would fail: the tag is trimmed."""
     text = "outcome: caught\nconfidence: high\n</content>\n"
     assert loop.reply_document_text(text) == text.strip()
     with pytest.raises(yaml.YAMLError):
@@ -139,10 +129,6 @@ class _FakeBranch:
         self.branch_prefix = prefix
         self._pr_exists = pr_exists
         self._commits = commits
-        # A REAL tree to mint, for the tests that drive the production `_invoke_lead_author`:
-        # since #952 M5 the drain builds the curator's deps from the worktree it minted
-        # (`build_lead_author_deps(wt_paths)` resolves the declared systems there), so a
-        # path that does not exist is a systemic refusal before the patched `run` is reached.
         self._worktree = worktree
         self.events: list[str] = []
 
@@ -193,11 +179,6 @@ def test_author_drain_triggers_all_curators(tmp_path: Path):
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert triggered == [
-        # TWO CURATORS SINCE #1007 (was one, since #922 — the three observation channels
-        # lost their producer with the old pipeline's judge, and their curators went with
-        # them). `_drain_curators` names both unconditionally; per-curator thresholding is
-        # `trigger_author`'s own job (`_maybe_trigger_author` in production), and this
-        # stub always appends — an edit here, in a diff, per #922's own stated property.
         "author",
         "questioner_curator",
     ]
@@ -348,25 +329,6 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
     ids=["torn", "null", "list", "run_dir-null", "run_dir-number", "run_dir-absent"],
 )
 def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, body: str):
-    """A marker this pass cannot READ is dead-lettered, never left in the queue.
-
-    Four shapes are unservable. Bytes that do not parse, and bytes that parse to something
-    that is not a mapping (`null`, a list) — the second still answers `spec.get("run_dir")`
-    with an AttributeError that unwinds the whole drain. Then the two #852 F-18 halves, a
-    mapping whose `run_dir` is not a path: a non-string value raised a TypeError out of the
-    claim generator — past every dead-letter path below it, so the drain stayed wedged on the
-    file until a human removed it — and an ABSENT `run_dir` (the shape this module's own
-    `unreadable` dead letter writes) coerced to `Path("")`, i.e. the process CWD, and was
-    SERVED against whatever directory the drain happened to be started from.
-
-    Either way, leaving the marker where it was means the reclaim hands it straight back next
-    tick, it fails again, and `_has_lead_author_work` stays true on its presence forever, so
-    the drain wakes every tick to re-fail on the same file. The healthy sibling in the same
-    pass must still be served.
-
-    Since #1105 PR 2 a servable row is its run's address, `{case_id, tenant_id, run_id}`
-    (declared change 8): none of these bodies carries one, so the claim quarantines each as
-    `unreadable: …` on its shape alone — the `run_dir`-keyed ones included."""
     paths, _ = _isolate(tmp_path)
     run_dir = curation_run_dir("case-real")
     enqueue_run(state_for_paths(paths), run_dir)
@@ -524,11 +486,6 @@ def test_lead_author_drain_opens_distinct_lead_author_pr(tmp_path: Path):
 
 
 def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path: Path, capsys):
-    """#952 O7 through the REAL `AuthorBranch` over a real origin: the first tick's push
-    lands but the forge refuses the PR, so the tick records the batch for delivery; the next
-    tick — nothing queued — delivers it from the branch alone: the push is a no-op, the forge
-    sees ONE `open_pr` for that head, and the record is gone. No second batch is minted for
-    it and the lead-author agent is not run again."""
     paths, _ = _isolate(tmp_path)
     run_dir = curation_run_dir("case-pr")
     enqueue_run(state_for_paths(paths), run_dir)
@@ -905,5 +862,3 @@ def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     finally:
         _fcntl.flock(holder.fileno(), _fcntl.LOCK_UN)
         holder.close()
-
-

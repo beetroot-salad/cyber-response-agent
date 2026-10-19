@@ -14,20 +14,7 @@ def _committed_tenant_dirs() -> list[Path]:
     return [T.FIXTURE]
 
 
-# =============================================================================================
-# O9 — nothing under defender/ holds a settings kind, and defender/knowledge/ is gone.
-# =============================================================================================
-
-
-# =============================================================================================
-# M1 — the fixture tenant holds the four kinds, moved rather than rewritten.
-# =============================================================================================
-
-
 def test_the_playground_resolves_through_the_real_resolver():
-    """The committed fixture, placed under this test's data root as an operator places a
-    tenant, is accepted by the real `accept_tenant` — and its halves are the placed copies of
-    the committed ones, under `<root>/<id>/knowledge/`."""
     td = T.fixture_tenant()
     assert td.id == T.PLAYGROUND_ID
     assert td.settings == td.data_root / T.PLAYGROUND_ID / "knowledge" / "settings"
@@ -35,11 +22,6 @@ def test_the_playground_resolves_through_the_real_resolver():
     assert (td.settings / "verb-grants.yaml").read_bytes() == \
         (T.FIXTURE_SETTINGS / "verb-grants.yaml").read_bytes()
     assert td.agent.is_dir()
-
-
-# =============================================================================================
-# D1 / C9 — the template grants nothing, loads clean, and a tenant copied from it cannot run.
-# =============================================================================================
 
 
 def test_every_template_row_grants_nobody_and_says_why():
@@ -58,9 +40,6 @@ def test_every_template_row_grants_nobody_and_says_why():
 
 
 def test_the_template_table_is_total_over_the_real_adapters():
-    """O8 for the template: its table decides every (system, verb) the real tree declares —
-    grants describe SHARED code, so a template missing a row is a template whose copies are
-    missing it too."""
     from defender._paths import adapters_under
     from defender.learning.leads.declared_systems import declared_systems
     from defender.runtime.verbs import read_roster
@@ -85,10 +64,6 @@ def test_the_templates_lead_zero_names_an_established_template_in_the_catalog():
 
 
 def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tmp_path):
-    """C9's premise: a copy of the template is a COMPLETE tenant (`accept_tenant` takes it,
-    once placed as an operator places one: its `.tenant-id` written, its row beside it) whose
-    gather grant is empty — which the run then refuses at start (see
-    `e2e/test_1106_run_start.py`). The correlation lead is withheld, which is legal alone."""
     root = tmp_path / "tenants"
     shutil.copytree(T.TEMPLATE_DIR, root / "newco" / "knowledge")
     (root / "newco" / "knowledge" / "agent" / ".tenant-id").write_text("newco\n", encoding="utf-8")
@@ -98,10 +73,6 @@ def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tm
     assert grants.gather.entries == ()
     assert grants.correlation_system is None
 
-
-# =============================================================================================
-# O8 (the committed half) — every committed knowledge folder and the template load.
-# =============================================================================================
 
 def test_every_committed_tenant_and_the_template_loads_its_table_and_lead_zero():
     vd = T.mod("runtime.verb_dispositions")
@@ -135,10 +106,6 @@ def test_every_committed_tenant_passes_the_resolver(tmp_path):
             (folder / "settings" / "verb-grants.yaml").read_bytes()
 
 
-# =============================================================================================
-# O7 — the model cannot read any settings/ file through the host read gate.
-# =============================================================================================
-
 def _reader_policies(run_dir: Path):
     from defender.runtime.agent_definition import compile_policy_for
 
@@ -157,9 +124,6 @@ def _settings_files() -> list[Path]:
 
 
 def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_is_not(tmp_path):
-    """Each settings file of every committed tenant and of the template, through the read tool
-    (`decide_read`) and the bash operand lane (`read_allowed_path`), for both reader roles — and
-    the positive control, a corpus file under `defender/`, through the same gate calls."""
     from defender.runtime import permission
     from defender.runtime.permission.files import read_allowed_path
 
@@ -182,5 +146,3 @@ def test_every_settings_file_is_denied_by_both_read_surfaces_and_a_corpus_file_i
             control, run_dir=run_dir, defender_dir=T.DEFENDER, policy=policy).allow, role
         assert read_allowed_path(
             control, run_dir=run_dir, defender_dir=T.DEFENDER, policy=policy), role
-
-

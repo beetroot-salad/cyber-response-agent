@@ -10,10 +10,6 @@ from defender.tests._by_path import DEFENDER, load_module
 
 import pytest
 
-# `find_spec` LOCATES duckdb without executing it. The import costs 31 MB, every xdist
-# worker was paying it at COLLECTION time, and with `--dist loadfile` only the one worker
-# that actually runs this file ever needs it — the shim under test imports duckdb lazily
-# too. Same skip semantics as the `importorskip` this replaces.
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("duckdb") is None,
     reason="duckdb isn't installed (it lives in the `runtime` extra, not dev/CI)",
@@ -47,8 +43,6 @@ _PAYLOAD = json.dumps({
 })
 
 
-
-
 def test_aggregates_over_the_payload(monkeypatch, capsys):
     code, out = _run(
         monkeypatch, capsys, _PAYLOAD,
@@ -71,8 +65,6 @@ def test_aggregates_ndjson(monkeypatch, capsys):
     assert json.loads(out) == [{"u": "a", "c": 2}, {"u": "b", "c": 1}]
 
 
-
-
 _ECS_PAYLOAD = json.dumps({
     "index": "logs-*", "total": 1, "returned": 1, "truncated": False,
     "hits": [
@@ -86,10 +78,6 @@ _ECS_PAYLOAD = json.dumps({
 })
 
 
-# ECS nests the interesting fields, so an unaliased projection collides on the LEAF name.
-# Every colliding column must reach the row — zipping into a dict used to keep only the last,
-# and exit 0 said nothing about it (#854 F-13). The stderr note is the other half: a rename
-# the agent is not told about is a silently different answer.
 @pytest.mark.parametrize(("case", "sql", "rows", "notes", "absent"), [
     ("two-way-collision",
      "SELECT h.user.name, h.process.name FROM (SELECT unnest(hits) h FROM data)",
@@ -125,10 +113,6 @@ def test_colliding_output_columns_all_survive_and_are_reported(
 
 
 def test_rename_does_not_collide_with_a_literal_alias_of_the_same_name():
-    """The renamer must not manufacture a NEW collision when the projection already
-    contains the name it would generate — in EITHER order. The alias-last spelling is the
-    one that bites: a generated `name_1` that took the alias's key would hand the agent
-    `name_1` holding the other column's value, silently."""
     assert defender_sql._disambiguate_columns(["name", "name_1", "name"]) == (
         ["name", "name_1", "name_2"], ["name -> name_2"])
     assert defender_sql._disambiguate_columns(["name", "name", "name_1"]) == (
@@ -185,8 +169,6 @@ def test_tmpdir_with_quote_does_not_break_materialization(monkeypatch, capsys, t
                      "SELECT count(*) c FROM data")
     assert code == defender_sql.EXIT_OK
     assert json.loads(out) == [{"c": 2}]
-
-
 
 
 @pytest.mark.parametrize("hostile", [

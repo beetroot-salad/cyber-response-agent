@@ -14,9 +14,6 @@ from defender.tests._invlang_warn_836 import (
     seed_investigation,
 )
 
-#: A document whose ONLY defect is error-severity: two rows refining one slot to two different
-#: values inside a single block (#962). Error severity is the point — a WARN-family row is the
-#: repair window's business and is refused by a different gate one line up, so a warn document
 _ERROR_DOC = PROLOGUE + attr_block(
     "l-001|v-001|class|bastion",
     "l-001|v-001|class|workstation",
@@ -74,9 +71,6 @@ def test_a_close_over_an_error_severity_document_commits_nothing(tmp_path):
 
 
 def test_the_same_document_without_the_defect_closes(tmp_path):
-    """POSITIVE CONTROL, and the one that keeps the test above honest: the gate refuses the
-    defect rather than refusing everything. `inconclusive` bypasses the review gate, so what is
-    measured is the document check and nothing behind it."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, _CLEAN_DOC + CONCLUDE_BENIGN)
 
@@ -103,9 +97,6 @@ def test_the_close_refusal_names_the_rows_and_the_repair_verb(tmp_path):
 
 
 def test_the_frameworks_forced_close_is_exempt(tmp_path):
-    """The exemption the flagged-row gate already carries, for its own reason: retry
-    exhaustion has no model left to repair with, so gating the FORCED close would dead-letter
-    the run at persist for a MISSING report.md."""
     deps, run = main_deps(tmp_path)
     seed_investigation(run, _ERROR_DOC)
 
@@ -162,9 +153,6 @@ def test_an_unreadable_document_closes_unresolved_not_the_models_verdict(tmp_pat
 
 
 def test_an_io_fault_reading_the_companion_is_refused_not_overruled(tmp_path):
-    """The I/O fault is the ONE unreadable shape the model's close is refused on rather than
-    overruled: `investigation.md` is there, is a plain file, and cannot be opened (EACCES here;
-    EIO on a degraded mount is the live case). A terminal `unresolved` on it would let a"""
     from defender.runtime.tools import read_companion
     from defender.tests._roster1035 import EXIT_RAISED_EXPECTED, handed_to_nobody, run_as_nobody
     from defender.tests._spec992 import record_files, trace_files
@@ -205,9 +193,6 @@ def test_the_price_gate_still_answers_first_for_what_it_prices(tmp_path):
 
 
 def test_one_read_answers_every_gate(tmp_path):
-    """The close takes ONE reading of `investigation.md` and hands it to every gate, so the
-    gates cannot disagree about which bytes they judged — and the reading has exactly three
-    answers, of which only one reaches a gate as a document."""
     import os
     import signal
 
@@ -260,9 +245,6 @@ def test_one_read_answers_every_gate(tmp_path):
 
 
 def test_the_write_verbs_build_on_the_reading_they_judged(tmp_path):
-    """`append_block` and `fix_row` derive their window from ONE guarded reading and build the
-    bytes they write from that same reading — never from a second, unguarded `Path.read_text`
-    of the name. The second read used to follow a symlink the guarded read had refused, so the"""
     from defender._io import ALIAS_READ_REFUSAL
     from defender.runtime.tools import _tool_append_block, _tool_fix_row
     from pydantic_ai.exceptions import ModelRetry
@@ -274,10 +256,6 @@ def test_the_write_verbs_build_on_the_reading_they_judged(tmp_path):
 
     with pytest.raises(ModelRetry) as refused:
         _tool_append_block(deps, "+ a row the link's target must never receive\n")
-    # The symlink is refused at the `O_NOFOLLOW` open itself (the OS's ELOOP), ahead of the
-    # primitive's own alias screen — and spelled as the alias refusal, the same words the
-    # hard-link and directory arms use, so a log names an alias as an alias; the
-    # classification keys on the errno rather than on the message either way.
     assert "cannot be read" in str(refused.value), str(refused.value)
     assert ALIAS_READ_REFUSAL in str(refused.value), str(refused.value)
     assert "retry" not in str(refused.value).lower(), "a planted entry is not a passing fault"
@@ -422,9 +400,6 @@ def test_a_seed_that_would_not_validate_is_not_written(tmp_path, capsys):
 
 
 def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
-    """Best-effort is preserved in BOTH directions. This frame runs before MAIN's first turn
-    and its whole posture is that it cannot break a run — a refusal that raised would trade
-    one bug for a worse one."""
     from defender.runtime.lead_zero import _declare_l_finding
 
     run = tmp_path / "run"
@@ -435,9 +410,6 @@ def test_the_seed_never_raises_into_a_run_that_has_not_started(tmp_path):
 
 
 def test_a_skipped_seed_leaves_the_model_a_repair_it_is_not_forbidden_from_making():
-    """#964's decision is only safe if what the MODEL sees is actionable: a model that cites a
-    reserved id whose declaring row is missing is refused with `undeclared lead`, and that
-    refusal must say declaring the row is a repair, not a reuse of a claimed id. (The ORIENT"""
     from defender.runtime.lead_zero import L3
     from defender.skills.invlang.validate import diagnose
 

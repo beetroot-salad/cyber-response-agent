@@ -216,13 +216,6 @@ def _payloads(store: Any, session_id: str) -> list[str]:
 # correlation_outcome_reaches_main / slim heading / o3 opening prompt
 
 def test_opening_message_holds_one_correlation_section(tmp_path):
-    """MAIN's opening message holds exactly one correlation section: the lead's framed summary when
-    the lead produced a usable one, otherwise one fixed sentence naming its ending, outside the
-    lead's frame — never both, never neither — and nothing about correlation arrives later in
-    MAIN's session.
-
-    Two runs of one non-Kibana alert on one tenant differ only in how l-00c answers: a summary
-    (scripted marker) and a dispatch that raised (PR-12's provider refusal)."""
     marker = "CORR-SUMMARY-S04-ONE"
     planted = S.plant_tenant("acme")
     told = S.run_alert(tmp_path / "summary", tenant=planted, run_id="s04-one-summary",
@@ -258,12 +251,6 @@ def test_opening_message_holds_one_correlation_section(tmp_path):
 # O1, the timestamp gate, tenants without elastic, O2
 
 def test_o1_non_elastic_tenant_gets_correlation_without_kibana_fields(tmp_path):
-    """A tenant whose lead-zero.yaml and grants name a non-Elastic system, over an alert carrying
-    none of alert_id / signal_index / ancestor_events / alert_timestamp: l-00c's leads row exists,
-    its queries ran on that system, and MAIN's opening message carries the lead's summary.
-
-    The tenant's correlation template is the shipped, established `cmdb.list-all-hosts`, granted to
-    the correlation holder alone on cmdb; the tenant has no elastic system at all."""
     marker = "CORR-O1-CMDB-5a"
     alert = S.generic_alert()
     assert not set(S.KIBANA_KEYS) & set(alert), "the O1 alert must carry no Kibana field"
@@ -282,11 +269,6 @@ def test_o1_non_elastic_tenant_gets_correlation_without_kibana_fields(tmp_path):
 
 
 def test_correlation_dispatches_with_no_or_unparseable_timestamp(tmp_path):
-    """An alert with no alert_timestamp, and one whose alert_timestamp does not parse, both get l-00c
-    dispatched; neither the lead's dispatch nor its contract depends on a timestamp field.
-
-    A third alert with a parseable alert_timestamp is the control: the lead's stored goal, its
-    summary asks and its Dispatch block are the same text for all three."""
     planted = S.plant_tenant("acme")
     alerts = {
         "absent": S.generic_alert(),
@@ -317,12 +299,6 @@ def test_correlation_dispatches_with_no_or_unparseable_timestamp(tmp_path):
 # O3: nothing but l-00c before MAIN's first request
 
 def test_o3_only_l00c_backend_calls_precede_mains_first_request(tmp_path):
-    """Up to MAIN's first request the queries table and the verb registry record no backend call
-    under any lead id other than l-00c.
-
-    Snapshot inside MAIN's double on its first call, over the Kibana fixture alert (base's item 1
-    ran here). Channel controls in the same run: l-00c's scripted call IS recorded in both
-    channels by then, and MAIN's own lead's call is recorded afterwards under its own id."""
     planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
     backend = _resolving_backend()
     corr_q = "host.name:office-ws-1 AND NOT rule.id:x"
@@ -351,12 +327,6 @@ def test_o3_only_l00c_backend_calls_precede_mains_first_request(tmp_path):
 
 
 def test_p013_mains_first_turn_dispatches_leads_while_correlat(tmp_path):
-    """Before MAIN's first request, no queries row exists under any lead other than l-00c. l-00c's own
-    rows may be absent (the lead was withheld, or issued no call). Each row names its own lead, and
-    numbers are unique.
-
-    MAIN's first turn dispatches two leads at once. Three tenants/scripts: l-00c calling twice,
-    l-00c issuing no call, l-00c withheld by the table."""
     arms: list[tuple[str, str, str, list[S.Turn]]] = [
         ("calls", "elastic", "query",
          [S.query("elastic", "alerts", {"native_query": "lead:l-00c n:0"}),
@@ -407,11 +377,6 @@ def test_p013_mains_first_turn_dispatches_leads_while_correlat(tmp_path):
 
 
 def test_o4_agent_fetches_constituent_events_through_a_gather_lead(tmp_path):
-    """MAIN dispatching an ordinary gather lead that binds elastic.doc-fetch-by-id with the
-    data-stream pattern mapped from alert.json's ancestor_events gets the documents back.
-
-    The fetch is answered through the real `search_envelope` after the real `confine_index` admits
-    the bound index against the tenant's configured patterns."""
     alert = S.fixture_alert()
     ancestors = alert["ancestor_events"]
     pattern = _data_stream_pattern(ancestors[0]["index"])
@@ -478,22 +443,6 @@ def _main_tool_returns(d: S.Drive) -> str:
 
 
 def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
-    """A tenant whose SIEM config is faulted at run start starts with that system DOWN, and MAIN is
-    told so; MAIN's lead on it is refused naming the reason, without running the adapter, writing
-    a row or charging the breaker; correlation on another system still runs.
-
-    #1256 (O-1, O-2, O-3, O-4) supersedes #1222's p134, which pinned the opposite — "nothing at run
-    start names a faulted SIEM config", identical opening messages, and the first lead failing
-    with the adapter's call-time `ConfigFault`.
-
-    Two tenants differ only in their elastic config (one blanks ELASTICSEARCH_URL); correlation
-    runs on cmdb in both. The elastic verb is the REAL adapter's `query`, and the startup check
-    that judges elastic is the real adapter's own over the planted settings (K2: it is read from
-    the roster, not the injected registry). The healthy tenant is the control for every channel:
-    its opening names no down elastic, its same lead runs to a row through the real verb (the
-    docker shim answers it), and nothing on it says "not configured". Before #1256 the faulted
-    run's lead ran, wrote an exit-2 row naming ELASTICSEARCH_URL and charged elastic's breaker —
-    the channels below demonstrably see all three."""
     patterns = ("logs-*", ".internal.alerts-security.alerts-default-*")
     leads = {S.L3: [S.query("cmdb", "list-hosts", {}), S.text("CORR-P134: 2 hosts.")],
              "l-001": [S.query("elastic", "query", {"native_query": "host.name:office-ws-1"}),
@@ -528,9 +477,6 @@ def test_p134_tenants_siem_config_faulted_at_run_start(tmp_path, monkeypatch):
     assert "ELASTICSEARCH_URL" in opening, (
         "MAIN's opening message names elastic down without the check's reason (the blank key)")
 
-    # O-4 / O-1: the dispatch (or call) is refused naming the reason, and the adapter never ran.
-    # The dispatch gate answers MAIN (the lead never gets a conversation); an in-call refusal
-    # would answer the lead — either channel may carry it.
     lead_saw = (_lead_tool_returns(faulted, "l-001") if faulted.router.dispatched("l-001")
                 else "")
     refused = _main_tool_returns(faulted) + "\n" + lead_saw
@@ -581,14 +527,6 @@ def _canned_shim(argv: list[str], env: dict[str, str]) -> str | None:
 
 
 def test_r1_every_harness_slot_of_mains_opening_message_is_bound(tmp_path):
-    """On the opening message the model received (recorded by the replay fake, never read off
-    source): every harness-built part -- the header, the workspace section, the lessons section,
-    the vocabulary section, the l-00c heading and the one correlation section -- is present and
-    carries no unsubstituted {...} token; a brace sequence inside alert-derived text (the raw alert
-    block, a mapped summary, the lead's framed summary) is data and arrives as it was. With the
-    lead-zero section gone, orientation's own sections and the raw alert block are all still
-    present. Positive control: the same message with every slot filled shows each section's
-    content."""
     marker = "R1-CORR-MARK"
     alert = S.generic_alert(rule={"id": "R-1001", "name": "Beacon",
                                   "description": "Beacon every {interval}s to {dest}"})
@@ -649,12 +587,6 @@ def test_r1_every_harness_slot_of_mains_opening_message_is_bound(tmp_path):
 
 
 def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
-    """Driving one run end to end into one session store -- l-00c's correlation lead first, then MAIN
-    and two leads MAIN dispatches -- leaves one distinct session row per agent: the lead's session
-    holds only the lead's rounds and its ending, MAIN's holds MAIN's turns and no injected
-    correlation entry, and each MAIN lead's session reads back its own rounds. Bound at the run,
-    the frame that fans the writers. Positive control: every session reads back non-empty, and
-    MAIN's lead sessions are still written now that the injected entry is gone."""
     marks = {S.L3: "R2-CORR-MARK", "l-001": "R2-L1-MARK", "l-002": "R2-L2-MARK"}
     sink: list = []
     first = S.Turn(tool_calls=tuple(
@@ -706,9 +638,6 @@ def test_r2_the_lead_session_and_mains_sessions_land_as_distinct_rows(tmp_path):
 # p012, p033, p173 — the outcome is in the opening message, whenever the run ends
 
 def test_p012_run_ends_at_mains_first_answer_with_correlation(tmp_path):
-    """l-00c's row, queries and summary are complete before MAIN's first request. A run that ends at
-    MAIN's first answer still carries correlation's outcome in its opening message. The judge and
-    the visualizer load it."""
     marker = "CORR-P012-31"
     backend = S.Backend()
     main = _AtFirstRequest([S.text(S.DONE)], backend)
@@ -734,11 +663,6 @@ def test_p012_run_ends_at_mains_first_answer_with_correlation(tmp_path):
 
 
 def test_p033_mains_first_request_retried_before_correlation_i(tmp_path):
-    """Exactly one correlation section, in the opening message. A retried first request resends that
-    message.
-
-    MAIN's first answer calls `gather` with an invalid lead id, so the framework issues a retry
-    request (PR-15); on base the late entry was injected at exactly that retry."""
     marker = "CORR-P033-RETRY"
     d = S.run_alert(tmp_path, alert=S.fixture_alert(), backend=_resolving_backend(),
                     tenant=S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING),
@@ -819,11 +743,6 @@ CITE_L00C = (
 
 
 def test_p040_resumed_sibling_of_a_post_change_source_cites_l0(tmp_path):
-    """A resumed sibling dispatches no correlation. Its validator accepts a citation of l-00c exactly
-    when the inherited document declares it.
-
-    Two sources: one whose l-00c ran (the harness declares it), one whose table withholds it. Each
-    sibling appends the same block citing l-00c."""
     arms = {
         "declared": (S.plant_tenant("decl", alert_mapping=S.DEFAULT_MAPPING),
                      ("elastic", "query", {"native_query": "p040:capture"})),

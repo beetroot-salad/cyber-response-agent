@@ -1,63 +1,3 @@
-"""#1178/#1195: the lead-author drain lane starts its one box for each agent run and stops it
-after, and its gate admits only plain files, judged by a no-follow stat.
-
-The design (`gh issue view 1195`, "Design amendment 3 (2026-10-06): the stop fault wins, the box
-carries its docker, and lanes get a run handle", refining amendment 2) replaces #1178 amendment
-2's freeze (`pause_box`, `thawed`, `LeadAuthorDeps.thaw`, `run_pitfalls(thaw=)`). The drain
-creates and checks the batch's box at batch start, as on main, wraps it in a `runtime.box.BoxRuns`
-handle and stops it at once (`_run_worktree_batch`: `runs.stop()` first in the try whose
-`finally` removes the box), and hands the lanes the handle. Each spawn site runs its spawn
-inside `runtime.box.box_for_run(handle)`, handing the spawn the executor it yields:
-
-- the claim spawn, `lead_author._run_locked`: `with _box.box_for_run(box) as run_box: rc =
-  deps.invoke_agent(..., box=run_box)`;
-- the pitfalls spawn, `pitfalls_curator.run_pitfalls`: the same around its `invoke`.
-
-The box is a sandboxed executor carrying a fake daemon (`_box1195.FakeDaemon`) as its docker;
-every start, stop and removal reaches the daemon through the executor, and a `Tripwire` is the
-`docker` on `PATH` (one production row runs the default docker, the daemon installed there).
-The lane's host steps log into a `_box1195.Journal`, which marks each into the daemon's call
-log and notes what was running at that moment. A run window is a `docker start` to the next
-`docker stop`. Groups, each driven through a seam, never `monkeypatch.setattr`:
-
-- The lanes (O2'', E5', O6): one window per agent, holding the spawn alone, the spawn handed
-  the batch's executor (never the handle the lane was handed); the host's steps before the
-  agent and every read the gate makes after it (the lane's `tree_for`, logged) saw nothing
-  running; whatever the box writes during its run is what the gate judges (O1). A run whose
-  start fails (refused, not taking, or a box not `exited` beforehand: E3'), or whose stop fails
-  after a clean agent (refused, without effect, unproven, the seam raising), runs no gate and
-  commits nothing (O4). The baseline of strays and the minted drafts' identities are taken
-  before the run starts.
-- The drain (O2'', O4, O5, E3'): `_drain_lead_author(..., box=<the handle>)` hands each lane
-  the handle and runs one window per agent and none between; a claim's run start or stop fault
-  halts the lane rather than dead-lettering the claim; a pitfalls run's box fault halts it and
-  bumps no pitfalls row; a stop fault under a failing agent or curator wins (F1): it escapes at
-  once with the failure as its context, dead-letters no claim and bumps no row, whether a later
-  run follows or none does; a stop fault some layer swallows makes the pitfalls tick's run
-  refuse (E3'); so does a run start fault through the DEFAULT claim step and the DEFAULT
-  pitfalls step, and the batch box's docker calls there are exactly `X.REFUSED_FIRST_RUN` (no
-  call outside a run). Through the production `lead_author_drain` (only `start_box=` bringing
-  the docker): one create at batch start and its stop before the first claim; the F1 rows; a
-  claim's stop fault after a clean agent escapes; nothing is committed or delivered; the
-  batch-end `rm -f` removes the box before the scan. A fault creating or checking the box at
-  batch start claims no claim, bumps no attempt and dead-letters nothing. A claim a box fault
-  halted is charged its one serve's attempt and no more (N14), and the next tick, the daemon
-  healthy, serves it (`test_a_claim_a_box_fault_halted_is_served_on_the_next_tick`). The deps
-  the claim's spawn binds refuse the handle as its box
-  (`test_the_lead_authors_deps_refuse_the_handle_as_its_box`).
-- The plain-file rule (#1178 D4'', which stands, unchanged): every non-deletion record the gate
-  admits must be placed by a held mount and be a plain, single-name regular file there, by a
-  no-follow stat (it reads no content). A symlink, a hard link or a FIFO at an address no
-  content rule reads (a catalog draft, a system-skill draft, `queries/<sys>/README.md`, each
-  also one folder deeper; the pitfalls lane's `execution.md`) is refused with HEAD unchanged; a
-  plain file commits, an executable one at 100755, and so does a plain file that is not UTF-8
-  or is larger than any read takes. A `tree_for` that places no path refuses rather than
-  falling back on the plain path.
-
-`BoxRuns`/`box_for_run` themselves are in `test_1195_box_for_run.py`; the batch's start,
-post-create stop and removal in `test_1195_worktree_batch.py`; the real-box row in
-`test_1195_run_box_live.py`; the lessons lane in `test_1195_lessons_run_windows.py`.
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -139,11 +79,6 @@ def _head_bytes(repo: Path, rel: str) -> bytes:
 def _nothing_staged(repo: Path) -> bool:
     """The index equals HEAD: no refusal or fault left a half-made commit staged."""
     return _git.git(["diff", "--cached", "--name-only", "-z"], cwd=repo) == ""
-
-
-# ---------------------------------------------------------------------------------------
-# The fakes the lane rows inject
-# ---------------------------------------------------------------------------------------
 
 
 class BoxSeenLeadSpawn(LeadAuthorSpawn):
@@ -241,10 +176,6 @@ def _assert_one_run_holds_exactly_the_agent(  # noqa: PLR0913 — one run's whol
     assert spawn.boxes[0] is box, "the agent was not handed the batch's executor"
     assert daemon.status(NAME) == "exited", "the agent's box was left running"
 
-
-# ---------------------------------------------------------------------------------------
-# The lead-author lane's drive: `run(label=, deps=)`, the agent leaving one file
-# ---------------------------------------------------------------------------------------
 
 #: The agent's file in the wiring rows: a catalog draft whose `id:` the gate reads (the path
 #: rule's directory check), so the gate's verdict depends on the bytes it read.
@@ -358,10 +289,6 @@ def _run_lead(s: LeadScene, log: list, **kw: Any) -> tuple:
 
 
 def test_the_lead_author_runs_its_agent_in_a_run_window_of_its_own(tmp_path: Path, monkeypatch):
-    """`run(deps=..., box=<the batch's stopped box>)`: the agent leaves a valid draft. One run
-    window starts the box after the host's pre-agent steps, holds the agent alone (handed that
-    same box, and seeing it running), and stops it before the gate's first read and the commit.
-    HEAD holds the draft; the box is stopped."""
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     log = X.Journal(daemon)
@@ -376,10 +303,6 @@ def test_the_lead_author_runs_its_agent_in_a_run_window_of_its_own(tmp_path: Pat
 @pytest.mark.parametrize("at_stop", ["refused", "variant"])
 def test_the_lead_author_gate_judges_what_the_box_wrote_during_its_run(
         tmp_path: Path, monkeypatch, at_stop: str):
-    """The box rewrites the agent's file on its run's way out, while still up: with refused
-    bytes the gate refuses (`LeadAuthorError`, HEAD unchanged, nothing staged); with valid
-    different bytes (the control) those bytes are what HEAD holds. The gate runs after the stop,
-    so it sees everything the box did during its run."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     bytes_out = REFUSED if at_stop == "refused" else VARIANT
@@ -409,10 +332,6 @@ LEAD_RUN_WRITES = [
 @pytest.mark.parametrize(("name", "text", "says"), LEAD_RUN_WRITES)
 def test_a_lead_author_path_the_box_wrote_during_its_run_is_judged(
         tmp_path: Path, monkeypatch, name: str, text: str, says: str | None):
-    """The box writes a NEW path beside the agent's vetted draft on its run's way out: a draft
-    whose id disagrees with its folder, or a non-`.md` file under `skills/`, is refused (HEAD
-    unchanged, nothing staged); an admissible new draft (the control) is judged and committed
-    with the rest."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     daemon.on_stop(s.at(name), text, at=1)
@@ -429,9 +348,6 @@ def test_a_lead_author_path_the_box_wrote_during_its_run_is_judged(
     assert _nothing_staged(s.repo)
 
 
-#: A run whose start fails: `docker start` refused, a start that answers 0 and leaves the box
-#: stopped, or (E3') the box found running before the start, as a stop some layer swallowed
-#: leaves it (a start on a running box answers 0, so only the check before it can tell).
 START_FAULTS = ["refused", "takes-no-effect", "left-running"]
 
 
@@ -447,10 +363,6 @@ def _start_fault(daemon: X.FakeDaemon, fault: str, *, nth: int = 1) -> None:
 @pytest.mark.parametrize("fault", START_FAULTS)
 def test_a_lead_author_start_fault_runs_no_agent_and_commits_nothing(
         tmp_path: Path, monkeypatch, fault: str):
-    """The run's start fails: `run` raises `BoxFault`; the agent never ran, the gate read
-    nothing, HEAD is unchanged, nothing is staged, the run is not recorded done, and the box is
-    stopped again. A box found running gets no `docker start` at all. Control:
-    `test_the_lead_author_runs_its_agent_in_a_run_window_of_its_own` (a start that holds)."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _start_fault(daemon, fault)
     s = _lead_scene(tmp_path)
@@ -467,9 +379,6 @@ def test_a_lead_author_start_fault_runs_no_agent_and_commits_nothing(
         assert "start" not in daemon.steps(), "a box found running was started over"
 
 
-#: A run's stop that fails after a clean agent, with nothing in flight (`X.STOP_FAULTS`: refused,
-#: answering 0 with the box still running, its proof unanswered, the seam raising). `holds` is
-#: the control.
 STOP_FAULTS = [*X.STOP_FAULTS, "holds"]
 
 
@@ -488,11 +397,6 @@ def _reads_after_the_agent(log: list) -> list[tuple]:
 @pytest.mark.parametrize("stop", STOP_FAULTS)
 def test_a_lead_author_stop_fault_after_a_clean_agent_halts_before_the_gate(
         tmp_path: Path, monkeypatch, stop: str):
-    """The agent leaves a valid draft and returns 0; then its run's stop fails (nothing in
-    flight; refused, without effect, unproven, the seam raising). `run` raises `BoxFault`, never
-    the seam's own exception: the gate read nothing after the agent, HEAD is unchanged,
-    nothing is staged, and the run is not recorded done. Control (`holds`): the same agent, the
-    stop taking: the gate reads after the run and the draft is committed."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _stop_fault(daemon, stop)
     s = _lead_scene(tmp_path)
@@ -510,10 +414,6 @@ def test_a_lead_author_stop_fault_after_a_clean_agent_halts_before_the_gate(
     assert _nothing_staged(s.repo)
     assert not (RunPaths(s.run_dir).lead_author / "done").exists()
 
-
-# ---------------------------------------------------------------------------------------
-# The pitfalls lane's drive: `run_pitfalls(trees=, invoke=)`
-# ---------------------------------------------------------------------------------------
 
 #: The curator's edit in the wiring rows: one pitfall under the reducer's `## Common pitfalls`,
 #: a document the content rule reads and accepts (`_readable_pair` reads it through `tree_for`).
@@ -598,10 +498,6 @@ def _run_pitfalls(s: PitfallsScene, log: list, **kw: Any) -> tuple:
 
 def test_the_pitfalls_tick_runs_its_curator_in_a_run_window_of_its_own(
         tmp_path: Path, monkeypatch):
-    """`run_pitfalls(box=<the batch's stopped box>)`: the curator appends a pitfall to the
-    reducer surface. One run window starts the box after the tick's first host step, holds the
-    curator alone (handed that same box), and stops it before the gate's first read and the
-    commit."""
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     log = X.Journal(daemon)
@@ -616,9 +512,6 @@ def test_the_pitfalls_tick_runs_its_curator_in_a_run_window_of_its_own(
 @pytest.mark.parametrize("at_stop", ["refused", "variant"])
 def test_the_pitfalls_gate_judges_what_the_box_wrote_during_its_run(
         tmp_path: Path, monkeypatch, at_stop: str):
-    """The box rewrites the reducer surface on its run's way out: refused bytes (a rewritten
-    frontmatter block) are refused with HEAD unchanged and nothing staged; valid different bytes
-    (the control) are what HEAD holds."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     bytes_out = REDUCER_REFUSED if at_stop == "refused" else REDUCER_VARIANT
@@ -634,9 +527,6 @@ def test_the_pitfalls_gate_judges_what_the_box_wrote_during_its_run(
     assert _nothing_staged(s.repo)
 
 
-#: As `LEAD_RUN_WRITES`, for the pitfalls lane: a new draft is outside its scope, a new
-#: non-`.md` is a stray; a new `execution.md` for a declared system (`cmdb`, adapter only) is
-#: admitted.
 PITFALLS_RUN_WRITES = [
     pytest.param("defender/skills/gather/queries/wazuh/_draft/new1178.md",
                  query_template("wazuh.new1178", "draft"), "non-execution.md", id="new-md-refused"),
@@ -650,9 +540,6 @@ PITFALLS_RUN_WRITES = [
 @pytest.mark.parametrize(("rel", "text", "says"), PITFALLS_RUN_WRITES)
 def test_a_pitfalls_path_the_box_wrote_during_its_run_is_judged(
         tmp_path: Path, monkeypatch, rel: str, text: str, says: str | None):
-    """The box writes a NEW path beside the curator's vetted reducer edit on its run's way out:
-    a path outside the lane's scope or a non-`.md` stray is refused (HEAD unchanged, nothing
-    staged); an admissible new `execution.md` (the control) is judged and committed."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
     daemon.on_stop(s.at(rel), text, at=1)
@@ -672,9 +559,6 @@ def test_a_pitfalls_path_the_box_wrote_during_its_run_is_judged(
 @pytest.mark.parametrize("fault", START_FAULTS)
 def test_a_pitfalls_start_fault_runs_no_curator_and_commits_nothing(
         tmp_path: Path, monkeypatch, fault: str):
-    """The run's start fails: `run_pitfalls` raises `BoxFault`; the curator never ran, the gate
-    read nothing, HEAD is unchanged, nothing is staged, every queued row is still queued, and
-    the box is stopped again."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _start_fault(daemon, fault)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
@@ -693,10 +577,6 @@ def test_a_pitfalls_start_fault_runs_no_curator_and_commits_nothing(
 @pytest.mark.parametrize("stop", STOP_FAULTS)
 def test_a_pitfalls_stop_fault_after_a_clean_curator_halts_before_the_gate(
         tmp_path: Path, monkeypatch, stop: str):
-    """The curator appends its pitfall and returns 0; then its run's stop fails: `run_pitfalls`
-    raises `BoxFault`; the gate read nothing after the curator, HEAD is unchanged, nothing is
-    staged, and every queued row is still queued. Control (`holds`): the stop taking, the gate
-    reads after the run and the edit is committed."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _stop_fault(daemon, stop)
     s = _pitfalls_scene(tmp_path, monkeypatch, _reducer_rows())
@@ -715,10 +595,6 @@ def test_a_pitfalls_stop_fault_after_a_clean_curator_halts_before_the_gate(
     assert _nothing_staged(s.repo)
     assert _queued(s) == queued
 
-
-# ---------------------------------------------------------------------------------------
-# D4'': only a plain, single-name regular file is committed, judged by a no-follow stat
-# ---------------------------------------------------------------------------------------
 
 #: The lead lane's addresses no content rule reads, so a link there passes every other rule and
 #: is committed on main (#1178 C1), with the bytes a plain file there commits with.
@@ -769,10 +645,6 @@ def _assert_plain_file_rule(got: tuple, repo: Path, head: str, rel: str, text: s
 @pytest.mark.parametrize(("name", "text"), LEAD_ADDRESSES)
 def test_the_lead_author_gate_commits_only_a_plain_file(
         tmp_path: Path, name: str, text: str, kind: str):
-    """Through `run(label=, deps=)`: the agent leaves `name` as a symlink to an outside file, or
-    a hard link to one, holding bytes a plain file there commits with. The gate refuses it
-    (`LeadAuthorError` naming the path, "refusing to commit"), HEAD unchanged, nothing staged.
-    Controls on the same address: a plain file commits at 100644, an executable one at 100755."""
     s = _lead_scene(tmp_path)
     got = _run_lead(s, [], name=name, text=text, kind=kind)
     _assert_plain_file_rule(got, s.repo, s.head, s.rel(name), text, kind)
@@ -782,13 +654,6 @@ def test_the_lead_author_gate_commits_only_a_plain_file(
 @pytest.mark.parametrize(("name", "text"), LEAD_ADDRESSES)
 def test_a_fifo_at_a_committed_lead_author_name_is_refused(
         tmp_path: Path, name: str, text: str, kind: str):
-    """`name` is committed as a plain file; the agent replaces it with a FIFO (`git status`
-    lists a FIFO only where it stands at a tracked name). The gate refuses it as no plain file
-    (`LeadAuthorError`), HEAD unchanged, nothing staged. Control: the agent rewrites the same
-    committed name as a plain file, which commits.
-
-    A folder at a committed name is not pinned: git reports it as the name's deletion plus the
-    plain files below it, each judged by the rules for those records."""
     s = _lead_scene(tmp_path, committed={name: text})
     rewritten = text + "\n- rewritten by the agent\n"
     got = _run_lead(s, [], name=name, text=rewritten, kind=kind)
@@ -798,9 +663,6 @@ def test_a_fifo_at_a_committed_lead_author_name_is_refused(
 @pytest.mark.parametrize(("name", "_text"), LEAD_ADDRESSES)
 def test_a_plain_lead_author_file_that_is_not_utf8_commits(
         tmp_path: Path, name: str, _text: str):
-    """The agent leaves a plain file whose bytes are not UTF-8 at an address no content rule
-    reads: the plain-file rule stats the entry and reads none of it, so the file commits, those
-    exact bytes at 100644. A rule that read the file as text would refuse it as no plain file."""
     s = _lead_scene(tmp_path)
     got = _run_lead(s, [], name=name, text=NOT_UTF8)
     assert got == ("returned", 0), got
@@ -810,10 +672,6 @@ def test_a_plain_lead_author_file_that_is_not_utf8_commits(
 
 def test_every_lead_author_record_the_gate_admits_is_placed_through_the_held_mount(
         tmp_path: Path):
-    """The agent leaves a plain file at every address above in one batch: each is committed, and
-    each was asked of the lane's `tree_for` (the held mount) before the commit. Structural: on
-    this lane `_frontmatter_id` already asks every in-scope path, so this row does not tell the
-    plain-file rule apart from that read; the address rows above do."""
     names = {p.values[0]: p.values[1] for p in LEAD_ADDRESSES}
     first, *rest = names
     s = _lead_scene(tmp_path)
@@ -826,17 +684,11 @@ def test_every_lead_author_record_the_gate_admits_is_placed_through_the_held_mou
         assert str(s.repo / s.rel(name)) in asked, f"{name} was committed unread"
 
 
-#: A system-skill draft: the path rule admits it and no content rule reads it, so with every
-#: other rule falling back on the plain path, only the plain-file rule can tell a placed path
-#: from an unplaced one.
 UNPLACED_DRAFT = "defender/skills/elastic/_draft/u1178.md"
 
 
 @pytest.mark.parametrize("tree_for", ["lane", "places-nothing"])
 def test_a_lead_author_record_no_held_mount_places_is_refused(tmp_path: Path, tree_for: str):
-    """`_verify_skills_state` over a plain new system-skill draft, with a `tree_for` that places
-    no path: `LeadAuthorError` naming it ("refusing to commit"), never a fall-back to the plain
-    path. Control: the lane's own `tree_for` admits the same draft."""
     repo = seed_skills_repo(tmp_path / "repo")
     write(repo / UNPLACED_DRAFT, "# elastic draft\n\n- a lifted note\n")
     placed = lane_tree_for(repo) if tree_for == "lane" else (lambda _p: None)
@@ -854,11 +706,6 @@ def test_a_lead_author_record_no_held_mount_places_is_refused(tmp_path: Path, tr
 @pytest.mark.parametrize("kind", [*KINDS, "fifo"])
 def test_the_pitfalls_gate_commits_only_a_plain_execution_md(
         tmp_path: Path, monkeypatch, kind: str):
-    """Through `run_pitfalls(trees=, invoke=)`: the curator leaves `elastic/execution.md` (a
-    surface this lane commits with no content rule) as a symlink or a hard link to an outside
-    file holding a valid edit, or as a FIFO in place of the committed file: refused, HEAD
-    unchanged, nothing staged. Controls: the same bytes as a plain file commit at 100644, as an
-    executable one at 100755."""
     s = _pitfalls_scene(tmp_path, monkeypatch, _system_rows())
     got = _run_pitfalls(s, [], rel=EXECUTION_REL, text=EXECUTION_TEXT, kind=kind)
     _assert_plain_file_rule(got, s.repo, s.head, EXECUTION_REL, EXECUTION_TEXT, kind)
@@ -896,9 +743,6 @@ def test_a_pitfalls_record_no_held_mount_places_is_refused(
 
 def test_every_pitfalls_record_the_gate_admits_is_placed_through_the_held_mount(
         tmp_path: Path, monkeypatch):
-    """The curator edits `elastic/execution.md` and the reducer surface in one tick: both are
-    committed, and both were asked of the lane's `tree_for` before the commit (the
-    `execution.md` by the plain-file rule alone: no content rule reads it)."""
     s = _pitfalls_scene(tmp_path, monkeypatch, [*_system_rows(), *_reducer_rows()])
     log: list = []
     got = _run_pitfalls(s, log, rel=REDUCER_REL, text=REDUCER_VETTED,
@@ -909,10 +753,6 @@ def test_every_pitfalls_record_the_gate_admits_is_placed_through_the_held_mount(
         assert _git.git_show_file(s.repo, "HEAD", committed) == text, committed
         assert str(s.repo / committed) in asked, f"{committed} was committed unread"
 
-
-# ---------------------------------------------------------------------------------------
-# The host's steps before the agent run before its run starts: the baseline and the mint
-# ---------------------------------------------------------------------------------------
 
 #: A committed file outside `skills/`: the box's write there once started is a stray only if the
 #: lane took its baseline of strays before the start.
@@ -929,11 +769,6 @@ def _commit_stray(repo: Path) -> str:
 @pytest.mark.parametrize("when", ["once-started", "before-the-run"])
 def test_a_lead_author_stray_the_box_writes_once_started_is_refused(
         tmp_path: Path, monkeypatch, when: str):
-    """The box rewrites a committed file outside `skills/` as soon as its run starts: the gate
-    refuses the claim ("changed files outside", naming it), HEAD unchanged, nothing staged. The
-    lane's baseline of strays was taken before the start, so the rewrite is new. Control: the
-    same rewrite already standing before the run is in the baseline, and the claim commits
-    (without it)."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     s = dataclasses.replace(s, head=_commit_stray(s.repo))
@@ -984,11 +819,6 @@ def test_a_pitfalls_stray_the_box_writes_once_started_is_refused(
 @pytest.mark.parametrize("box_does", ["removes-it", "leaves-it"])
 def test_a_draft_minted_this_tick_that_the_box_removes_once_started_is_a_departure(
         tmp_path: Path, monkeypatch, box_does: str):
-    """The tick mints an untracked draft for the run's lead, then starts the box, which removes
-    that draft at once. The identities the draft recorded were captured before the start, so its
-    departure is seen and refused (`LeadAuthorError`, "without attributing it", naming the
-    draft), HEAD unchanged. Control: the box leaves the draft, and it is committed with the
-    agent's file."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     minted_name, _text = draft_of(ELASTIC_LEAD)
@@ -1006,11 +836,6 @@ def test_a_draft_minted_this_tick_that_the_box_removes_once_started_is_a_departu
     assert _nothing_staged(s.repo)
 
 
-# ---------------------------------------------------------------------------------------
-# D4'': the plain-file rule stats, it never reads (a plain file past any read limit commits)
-# ---------------------------------------------------------------------------------------
-
-
 def _head_size(repo: Path, rel: str) -> tuple[str, int]:
     """`(mode, size)` of the blob committed at `rel` in HEAD."""
     entry = _git.git(["ls-tree", "-l", "HEAD", "--", rel], cwd=repo)  # lint-oracle: ok — reads what was committed; the oracle is the planted size
@@ -1021,9 +846,6 @@ def _head_size(repo: Path, rel: str) -> tuple[str, int]:
 @pytest.mark.parametrize("name", ["elastic/_draft/b1178.md", "gather/queries/wazuh/README.md"],
                          ids=["system-skill-draft", "catalog-readme"])
 def test_a_plain_lead_author_file_larger_than_any_read_commits(tmp_path: Path, name: str):
-    """The agent leaves a plain (sparse) file larger than `_io.READ_LIMIT` at an address no
-    content rule reads: it commits at 100644, at its full size. A plain-file rule that read the
-    file would refuse it as too large."""
     s = _lead_scene(tmp_path)
     got = _run_lead(s, [], name=name, text=b"# a large note\n", kind="big")
     assert got == ("returned", 0), got
@@ -1035,11 +857,6 @@ def test_a_plain_execution_md_larger_than_any_read_commits(tmp_path: Path, monke
     got = _run_pitfalls(s, [], rel=EXECUTION_REL, text=EXECUTION_TEXT, kind="big")
     assert got == ("returned", 0), got
     assert _head_size(s.repo, EXECUTION_REL) == ("100644", BIG_SIZE)
-
-
-# ---------------------------------------------------------------------------------------
-# The drain: one run window per agent, none between; a run's box fault halts the lane
-# ---------------------------------------------------------------------------------------
 
 
 def _queue_claims(s: LeadScene, *run_names: str) -> list[Path]:
@@ -1080,9 +897,6 @@ class Lanes:
             if self.log is not None:
                 deps = _journaled_deps(deps, self.log)
             try:
-                # The drain holds the queue lock for the whole tick, so the lane runs under it,
-                # as the drain's own default seam does (`run(deps=)` would take it again and
-                # skip).
                 return lead_author._run_locked(run.run_dir, deps, box=box, on_done=on_done)
             except BoxFault as e:
                 if not self.swallow:
@@ -1143,12 +957,6 @@ def _claim_attempts(s: LeadScene) -> dict[str, Any]:
 
 
 def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Path, monkeypatch):
-    """`_drain_lead_author(..., box=<the batch's stopped box>)` serving one claim and one
-    pitfalls tick through the real lanes: each lane handed the handle (F3), and exactly two run
-    windows, the claim's agent and the pitfalls curator, each holding its spawn alone, each
-    spawn handed the batch's executor (O6); every host
-    step of either lane (the claim's pre-agent steps and gate, the pitfalls tick's mount and
-    gate) saw nothing running; the box is stopped at the end; both lanes committed."""
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
@@ -1183,11 +991,6 @@ def test_the_lead_drain_runs_one_window_per_agent_and_none_between(tmp_path: Pat
 @pytest.mark.parametrize("fault", START_FAULTS)
 def test_a_claims_run_start_fault_halts_the_lane_and_dead_letters_nothing(
         tmp_path: Path, monkeypatch, fault: str):
-    """Two claims queued; the first claim's run cannot start (refused, not taking, or the box
-    found running): a `BoxFault` escapes `_drain_lead_author`. The first claim's agent never
-    ran, the second claim is never claimed, the pitfalls tick never runs, nothing is committed,
-    no claim is dead-lettered, the first is charged its one serve's attempt and no more (N14),
-    and the box is stopped. Control: the next row."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _start_fault(daemon, fault)
     s = _lead_scene(tmp_path)
@@ -1210,9 +1013,6 @@ def test_a_claims_run_start_fault_halts_the_lane_and_dead_letters_nothing(
 
 def test_control_a_claims_agent_fault_dead_letters_that_claim_and_the_next_is_served(
         tmp_path: Path, monkeypatch):
-    """The first claim's agent fails (`LeadAuthorError`, not a box fault): its run's box is
-    stopped on that way out, that claim is dead-lettered, and the second is served in a run
-    window of its own and committed."""
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     _queue_claims(s, "run-0", "run-1")
@@ -1238,12 +1038,6 @@ def test_control_a_claims_agent_fault_dead_letters_that_claim_and_the_next_is_se
 @pytest.mark.parametrize("stop", X.STOP_FAULTS)
 def test_a_claims_stop_fault_after_a_clean_agent_halts_the_lane(
         tmp_path: Path, monkeypatch, stop: str):
-    """Two claims queued; the first claim's agent leaves a valid draft and returns 0, then its
-    run's stop fails: a `BoxFault` escapes `_drain_lead_author`. Nothing is committed, the second
-    claim is never claimed, the pitfalls tick never runs, no claim is dead-lettered, and the
-    first is charged its one serve's attempt and no more (N14).
-    Control: `test_the_lead_drain_runs_one_window_per_agent_and_none_between` (the stop
-    taking)."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     _stop_fault(daemon, stop)
     s = _lead_scene(tmp_path)
@@ -1271,15 +1065,6 @@ PITFALLS_BOX_FAULTS = ["start", "stop", "curator-fails"]
 @pytest.mark.parametrize("where", PITFALLS_BOX_FAULTS)
 def test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row(
         tmp_path: Path, monkeypatch, where: str):
-    """One claim and a pitfalls tick through `_drain_lead_author`; the claim's run holds and its
-    draft is committed. The pitfalls run's box will not start, or will not stop after a clean
-    curator: a `BoxFault` escapes `_drain_lead_author`, the pitfalls edit is not committed, and
-    no pitfalls row's attempts change (a box fault is no row's failure; the rows stay for the
-    next tick).
-
-    Control (`curator-fails`): the curator fails (rc 1, not a box fault): the tick is retired as
-    a batch error, nothing escapes, and every row's attempts is bumped to 1, so the attempts
-    read above is live."""
     daemon, _box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     if where == "start":
         daemon.refuse_start(at=[2])
@@ -1350,14 +1135,6 @@ PITFALLS_F1_FAILURES = [
 @pytest.mark.parametrize("failure", PITFALLS_F1_FAILURES)
 def test_a_stop_fault_under_a_failing_curator_halts_the_lane_and_bumps_no_pitfalls_row(
         tmp_path: Path, monkeypatch, failure: Any, stop: str):
-    """F1, with no later run: `_drain_lead_author` over one claim (whose run holds and commits)
-    and the pitfalls tick, the last run of the batch. The curator raises X inside its run (a
-    refusal, a crash, its CLI timing out, its pipe breaking) and the run's stop fails (refused,
-    without effect, unproven, the seam raising at the stop or at its proof): a `BoxFault`
-    escapes, never X, with X in its chain (its `__context__`, behind the seam's own exception
-    when the seam raised). No pitfalls row's attempts change, and the curator's edit is not
-    committed. Control (`holds`): X is handled as before: the drain retires the tick's batch as
-    a batch error and bumps every row, so the attempts read is live."""
     daemon, _box, runs, s, attempts_before, execution_before = _claim_then_pitfalls(
         tmp_path, monkeypatch)
     raised = failure()
@@ -1390,17 +1167,6 @@ def test_a_stop_fault_under_a_failing_curator_halts_the_lane_and_bumps_no_pitfal
 @pytest.mark.parametrize("stop", ["refused", "holds"])
 def test_a_swallowed_stop_fault_in_the_last_claim_makes_the_pitfalls_run_refuse(
         tmp_path: Path, monkeypatch, stop: str):
-    """E3' at the claim -> pitfalls boundary (N11''): `_drain_lead_author` over the real lanes,
-    one claim and three pitfalls rows at threshold, the claim lane swallowing its `BoxFault` as
-    a layer above a spawn may. With `refused`, the claim's agent leaves its draft and returns,
-    and its run's stop is refused: that `BoxFault` is swallowed and the box keeps running. The
-    pitfalls tick's run then finds it running and refuses before its curator, naming the
-    status, with a best-effort stop and no `docker start`: `BoxFault` escapes, the curator is
-    never called, `execution.md` is as committed, and no pitfalls row's attempts change.
-    Nothing touches the box between the claim's run and the tick's.
-
-    Control (`holds`): the claim's stop takes; the pitfalls run starts, the curator runs and its
-    edit is committed."""
     daemon, _box, runs, s, attempts_before, execution_before = _claim_then_pitfalls(
         tmp_path, monkeypatch)
     if stop == "refused":
@@ -1436,11 +1202,6 @@ def test_a_swallowed_stop_fault_in_the_last_claim_makes_the_pitfalls_run_refuse(
     assert daemon.status(NAME) == "exited"
 
 
-# ---------------------------------------------------------------------------------------
-# O4 through the DEFAULT work steps: a run start fault reached by the real claim and tick
-# ---------------------------------------------------------------------------------------
-
-
 def _held_lead_drain(s: LeadScene, monkeypatch: Any, **seams: Any
                      ) -> tuple[BaseException | None, list[str], list[str], X.ScanWatch]:
     """`lead_author_drain` with its DEFAULT work steps over the fake daemon, whose first run
@@ -1468,21 +1229,6 @@ def _held_lead_drain(s: LeadScene, monkeypatch: Any, **seams: Any
 @pytest.mark.parametrize("first", ["box-faults", "nothing-to-author"])
 def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
         tmp_path: Path, monkeypatch, first: str):
-    """`lead_author_drain` with its DEFAULT `run_lead_author` (`_invoke_lead_author` driving the
-    real `run_under_held_queue_lock` over the real deps and each claim's run dir). Two claims,
-    each with an executed lead to author: the first claim's run start is refused, and the
-    `BoxFault` escapes `lead_author_drain`. Only one start was ever asked for: the second claim
-    is not served (still queued, unclaimed), the first is not handed back to the queue as a
-    transient (it stays claimed for the next tick's reclaim), no claim is dead-lettered,
-    nothing is committed or delivered, and the box is removed before the scan.
-
-    Control (`nothing-to-author`): the first claim's run dir executed no lead, so its serve
-    returns without an agent; the second claim is then served, and its default step reaches its
-    run's start (the one start). So one start in the row above means the second claim never got
-    that far.
-
-    Either way the batch box's docker calls are exactly `X.REFUSED_FIRST_RUN`: no claim's
-    default step asks the daemon anything outside its run."""
     s = _lead_scene(tmp_path)
     leads = {"claim-0": WAZUH_LEAD if first == "box-faults" else None, "claim-1": ELASTIC_LEAD}
     for name, lead in leads.items():
@@ -1513,13 +1259,6 @@ def test_a_run_start_fault_through_the_default_claim_step_halts_the_lane(
 
 def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
         tmp_path: Path, monkeypatch):
-    """`lead_author_drain` with its DEFAULT `run_pitfalls` (`_invoke_pitfalls` driving the real
-    `run_pitfalls` and its default curator spawn), no claim queued and three pitfalls rows at
-    threshold: the tick's run start is refused before its curator, and the `BoxFault` escapes
-    `lead_author_drain`. No pitfalls row's attempts change, nothing is committed or delivered,
-    and the box is removed before the scan; the batch box's docker calls are exactly
-    `X.REFUSED_FIRST_RUN` (nothing outside the tick's run). Control for the attempts read:
-    `test_a_pitfalls_box_fault_halts_the_lane_and_bumps_no_pitfalls_row[curator-fails]`."""
     s = _lead_scene(tmp_path)
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))
@@ -1533,11 +1272,6 @@ def test_a_run_start_fault_through_the_default_pitfalls_step_halts_the_lane(
     assert _git.git_head_sha(s.repo) == s.head
     assert not any(e.startswith("finish_batch:") for e in events), events
     watch.assert_scanned_once_the_box_was_gone()
-
-
-# ---------------------------------------------------------------------------------------
-# The production drain: the real start, stop and removal over the fake daemon
-# ---------------------------------------------------------------------------------------
 
 
 def _production_lead_scene(tmp_path: Path, monkeypatch: Any, *claims: str,
@@ -1584,9 +1318,6 @@ def _kept(daemon: X.FakeDaemon) -> list[str]:
             if x in ("create", "start", "stop", "rm", "scan") or x.startswith("agent:")]
 
 
-#: What the first claim's agent raises inside its run: the gate's own refusal, which
-#: dead-letters the claim, and a crash and the agent's own process faults (its CLI timing out,
-#: its pipe breaking), dead-lettered the same way.
 LEAD_F1_FAILURES = [
     pytest.param(lambda: LeadAuthorError("the agent failed"), id="LeadAuthorError"),
     pytest.param(lambda: RuntimeError("the agent crashed"), id="RuntimeError"),
@@ -1599,21 +1330,6 @@ LEAD_F1_FAILURES = [
 @pytest.mark.parametrize("failure", LEAD_F1_FAILURES)
 def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failure_as_context(
         tmp_path: Path, monkeypatch, failure: Any, stop: str, follows: str):
-    """F1 through `lead_author_drain` as production wires it (only `start_box=` bringing the
-    docker; the lanes, the branch and the scan injected). The first claim's agent raises X
-    inside its run (a refusal, a crash, its CLI timing out, its pipe breaking), and its run's
-    stop fails (refused, without effect, unproven, the seam raising at the stop or at its
-    proof): a `BoxFault` escapes at once, never X, with X as its `__context__` (behind the
-    seam's own exception when the seam raised). So X is never handled as X: no claim is
-    dead-lettered (the first stays claimed for the next tick's reclaim, charged its one serve's
-    attempt and no more), nothing is committed or
-    delivered, the pitfalls tick never runs, and no later `docker start` is asked, whether a
-    second claim waits (`next-claim`, whose run would refuse beside the box) or nothing does
-    (`nothing-follows`, where no later run would catch a box left running). The batch-end
-    `rm -f` removes the box, and the tree is scanned only after.
-
-    Control (`holds`): the stop takes; X dead-letters the first claim, the second (if any) is
-    served in a run window of its own and committed, and the batch is delivered."""
     claims = ("run-0", "run-1") if follows == "next-claim" else ("run-0",)
     s, daemon = _production_lead_scene(tmp_path, monkeypatch, *claims)
     raised = failure()
@@ -1662,15 +1378,6 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
 @pytest.mark.parametrize("stop", ["refused", "holds"])
 def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
         tmp_path: Path, monkeypatch, stop: str, docker: str):
-    """`lead_author_drain` as production wires it, over the fake daemon, one claim queued. Its
-    agent leaves a valid draft and succeeds; with `refused`, its run's stop fails, with nothing
-    in flight. The claim's `BoxFault` escapes `lead_author_drain`: nothing is committed, nothing
-    is delivered, and the claim is not dead-lettered. The batch-end `rm -f` removes the box (no
-    container is left), and the tree is scanned only after.
-
-    Control (`holds`): the stop takes; the draft is committed and the batch delivered. `carried`:
-    the real `start_box` given the daemon as its docker, nothing reaching the `docker` on `PATH`;
-    `path-default`: production's own default docker, the daemon installed on `PATH`."""
     s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0",
                                        path_default=docker == "path-default")
 
@@ -1701,12 +1408,6 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
 
 
 def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(tmp_path: Path, monkeypatch):
-    """N14/O5: tick 1 (`lead_author_drain` as production wires it, one claim) halts on its run's
-    stop, refused after a clean agent: the claim stays claimed, charged its one serve's attempt.
-    Tick 2, the daemon healthy, reclaims and serves it: the agent runs again in a window of its
-    own, the draft is committed and the batch delivered, and the claim is never quarantined or
-    dead-lettered. A box fault that charged the claim every attempt it had left would have tick
-    2 quarantine it unserved."""
     s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0")
     served: list[str] = []
 
@@ -1737,10 +1438,6 @@ def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(tmp_path: Path, m
 @pytest.mark.parametrize("handed", ["handle", "executor"])
 def test_the_lead_authors_deps_refuse_the_handle_as_its_box(tmp_path: Path, monkeypatch,
                                                             handed: str):
-    """O6/F3: the deps the claim's spawn binds (`bind(LEAD_AUTHOR_DEF, ..., box=...)`, as
-    `lead_author_engine` does), handed the run handle where the executor belongs: refused
-    (`AgentDeps.box` validates `BoxLike`, which the handle is not), and nothing starts the box.
-    Control (`executor`): the deps bind, holding the executor."""
     daemon, box, runs = X.boxed(tmp_path, monkeypatch, NAME)
     s = _lead_scene(tmp_path)
     built: list[Any] = []
@@ -1760,12 +1457,6 @@ def test_the_lead_authors_deps_refuse_the_handle_as_its_box(tmp_path: Path, monk
 @pytest.mark.parametrize(("knob", "kind", "pointed"), X.BATCH_START_FAULTS)
 def test_a_batch_start_fault_claims_nothing_and_dead_letters_nothing(
         tmp_path: Path, monkeypatch, knob: str, kind: type, pointed: bool):
-    """`lead_author_drain` as production wires it, two claims and three pitfalls rows queued;
-    the batch's box cannot be created, or a check at its creation fails: the fault escapes before
-    any work (as on main: a `BoxFault` naming `origin/main @ <cut commit>`, a link ban as
-    `AliasBanNotInForce`). No claim is claimed or charged an attempt (both markers as they
-    were), none is dead-lettered, no agent runs, the pitfalls tick never runs and no row's
-    attempts change, and nothing is committed or delivered."""
     s, daemon = _production_lead_scene(tmp_path, monkeypatch, "run-0", "run-1")
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "1")
     persist.append_pitfalls(_system_rows(), state=_state1135.state_for_paths(s.paths))

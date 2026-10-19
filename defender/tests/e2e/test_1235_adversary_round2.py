@@ -22,11 +22,6 @@ pytestmark = pytest.mark.e2e
 LEAD = "l-001"
 
 
-# ======================================================================================
-# the correlation lead (item 3, l-00c) is a gather lead of THIS run: its calls ride the
-# run's one RunState, by reference.
-# ======================================================================================
-
 def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
     from defender.tests.alert_front_door_1222 import _spec1222 as S
 
@@ -43,10 +38,6 @@ def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
     assert list(busy.run_state.lead_rows(S.L3)) == busy.rows_for(S.L3)
     assert busy.budget["tool_calls"] - idle.budget["tool_calls"] == 2
 
-
-# ======================================================================================
-# an enforced role whose deps carry no state raises — it never reaches a live run's state.
-# ======================================================================================
 
 def test_a_deps_with_no_state_raises_and_never_reaches_a_live_runs_state(tmp_path):
     """Round 3 (O2, the review's finding 2):"""

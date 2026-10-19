@@ -117,9 +117,6 @@ def test_a_warned_or_landed_escape_is_not_a_drop(tmp_path):
 
 
 def test_both_verdicts_inside_one_function_family(tmp_path):
-    """The discrimination that makes the detector real, and the shape of the motivating
-    `_project_surviving_block` finding: warned and unwarned escapes side by side, one
-    flagged and one cleared."""
     assert _quals(_GATE._scan(_scope(tmp_path, _DROPS + _WARNS))) == {
         "_Projector.project_drop"
     }
@@ -204,14 +201,7 @@ _COMPANION_FILTER = (
 )
 
 
-# Each row plants one module beside `_types.py` and pins the gate's whole verdict as a set
-# of qualnames — empty means the shape is not this gate's business. The role anchor is the
-# only thing that varies; the identical read-side filter body appears in three of the four,
-# which is the point: the FILTER is never what decides.
 @pytest.mark.parametrize(("case", "filename", "source", "expected"), [
-    # `corpus.Companion`'s real shape: it DECLARES a `list[ParseWarning]` field but never
-    # raises one, so it owns no drop channel and its read-side filters are not drops. Both
-    # halves of the PROJECTOR test are required — this is the half a name list would miss.
     ("carrier-that-never-raises-is-not-a-projector", "corpus.py",
      _COMPANION_CARRIER + _COMPANION_FILTER, set()),
 
@@ -220,9 +210,6 @@ _COMPANION_FILTER = (
     ("carrier-that-also-raises-is-a-projector", "corpus.py",
      _COMPANION_CARRIER + _COMPANION_RAISES + _COMPANION_FILTER, {"Companion.matching"}),
 
-    # The TOKENIZER is resolved through `_astlib.origin`, so `from ._types import Block as B`
-    # is the same case as `Block` (#602) — a gate keyed on the SPELLING would go blind on the
-    # one-word rename.
     ("aliased-block-return-annotation-is-still-a-tokenizer", "tok.py",
      "from ._types import Block as B\n"
      "\n"
@@ -248,10 +235,6 @@ _COMPANION_FILTER = (
      "    return out\n", set()),
 ], ids=lambda v: v if isinstance(v, str) and "\n" not in v and len(v) < 60 else "")
 def test_only_a_role_anchor_arms_the_gate(tmp_path, case, filename, source, expected):
-    """The gate fires on a function in one of two ROLES — a projector that owns a drop
-    channel, or a tokenizer that returns blocks — and on nothing else. The same read-side
-    filter is a drop in one role and ordinary code in another, so the role is what the scan
-    has to resolve; a name list or a spelling match would get every one of these wrong."""
     tree = tmp_path / "scope"
     _pyfile(tree, "_types.py", _TYPES)
     _pyfile(tree, filename, source)
@@ -276,5 +259,3 @@ def test_scan_and_ratchet_contract(tmp_path):
     _write_baseline(bp, [f.fingerprint for f in findings])
     assert _GATE.main([], scope=tree, baseline_path=bp) == 0
     assert _GATE.main([], scope=tmp_path / "does-not-exist") == 2
-
-

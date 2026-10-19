@@ -1,7 +1,3 @@
-"""#1133 rev 3: reads belong to the view (a close landing mid-read never redirects it; delta_o and
-load_family read through one bind), the leaf refusal is its own class (NotPlainEntry), one primer
-one write (prime_base's already-primed check, allow_empty), durable-append cleanup, and the minting
-check judging the whole token. Plants are real filesystem entries; negatives have positive controls."""
 from __future__ import annotations
 
 from defender.run_repository import Run
@@ -98,17 +94,9 @@ def mod(dotted: str) -> Any:
     return T.mod(dotted)
 
 
-# =======================================================================================
-# R1 — the handle writes; the view reads
-# =======================================================================================
-
 @pytest.mark.parametrize("key", ["family", "review"])
 @pytest.mark.parametrize("kind", S.LEAF_PLANTS)
 def test_r1_a_record_is_read_through_the_view_present_absent_or_refused(tmp_path, key, kind):
-    """Records are write-only: `family` and `review` answer no `read`. A record is read with
-    `episode.view().read(LAYOUT.<record>)`: a plant at its name (a live or dangling link, a hard
-    link, a FIFO, a directory) is REFUSED — no text, not absent, a reason — promptly, and the
-    tree is unchanged. Control on the same address: absent, then a plain file's text."""
     ep = bare_episode(tmp_path)
     host = tmp_path / "host"
     host.mkdir()
@@ -142,11 +130,6 @@ def _view_matrix():
 @pytest.mark.parametrize(("kind", "site"), list(_view_matrix()))
 def test_r1_the_views_read_of_a_plant_is_refused_promptly_and_changes_nothing(
         tmp_path, kind, site):
-    """The read rows of the held-root matrix, moved to the view (rev 3 has no `Held.read`): a
-    link (live or dangling), hard link, FIFO or directory at the name, or a link, file or FIFO at
-    a holding folder, is a refused read — never text, never a wedge on the FIFO — and the tree is
-    unchanged. `read_jsonl` answers no rows over it. Control on the same address: the plant
-    removed, absent; then a plain file's text and rows."""
     root = tmp_path / "root"
     root.mkdir()
     host = tmp_path / "host"
@@ -229,15 +212,6 @@ def _refused_as_closed(op: str, got: Any) -> None:
 @pytest.mark.parametrize("op", _RACE_OPS)
 def test_r1_a_view_read_in_flight_when_close_lands_answers_the_root_never_the_reused_number(
         tmp_path, op):
-    """R1 (C24): the view read `_handle.fd` twice with no lock. Now every `Bound` read works off
-    a private dup taken under the handle's lock. `close()` lands mid-read — fired through the
-    `os_` seam just before the read's first relative operation — returns promptly, and releases
-    the root's descriptor; that number is then taken by a DECOY folder of the same shape
-    (`dup2`), as the next open in a live process would take it. The read still answers the
-    ROOT's bytes or names, never the decoy's; the reused number still names the decoy afterwards.
-
-    Then a read after `close()` answers refused (`Bad file descriptor`) — never the decoy that
-    now sits on the old number, never an exception."""
     root, decoy = _race_trees(tmp_path)
     spy = S.OsSpy()
     held = S.hold(root, os_=spy)
@@ -278,12 +252,6 @@ def test_r1_a_view_read_in_flight_when_close_lands_answers_the_root_never_the_re
 
 @pytest.mark.parametrize("op", _RACE_OPS)
 def test_r1_a_close_landing_as_the_view_takes_its_dup_never_redirects_the_read(tmp_path, op):
-    """The view's dup and the close are one critical section (`_Handle.dup()` and
-    `_Handle.close()` take one lock). Just as the read asks for its dup (the `os_` seam's `dup`,
-    handed the root's number), `close()` starts on another thread with a grace period. Had the
-    read taken the root's number outside `close`'s lock, that close would finish within the
-    grace period and free the number the read is about to dup — which a DECOY then takes. The
-    read must still answer the ROOT, and the close completes once the read holds its dup."""
     root, decoy = _race_trees(tmp_path)
     spy = S.OsSpy()
     held = S.hold(root, os_=spy)
@@ -344,9 +312,6 @@ def episode_mod() -> Any:
 @pytest.mark.parametrize("base", ["absent", "symlink", "fifo"])
 def test_r1_delta_o_with_no_archived_worlds_is_empty_before_the_base_is_read(tmp_path, host,
                                                                              base):
-    """No archived worlds is `{}`, answered before the base is read (as on main): with no
-    worlds, an absent or refused base — which is "no primed base" once there are worlds —
-    changes nothing. Pinned to keep holding."""
     ep = T.episode(tmp_path)
     J.outcome_record(ep)
     at = ep / LAYOUT.served_base
@@ -360,11 +325,6 @@ def test_r1_delta_o_with_no_archived_worlds_is_empty_before_the_base_is_read(tmp
 @pytest.mark.parametrize("kind", ["absent", "symlink", "dangling", "hardlink", "fifo",
                                   "directory"])
 def test_r1_delta_o_refuses_an_absent_or_refused_base_as_no_primed_base(tmp_path, host, kind):
-    """With archived worlds, the base is read through the pass's one bind
-    (`read_jsonl(LAYOUT.served_base)`): an absent base, or one the open refuses (a link, a hard
-    link, a FIFO, a directory), is `LedgerError` ("no primed base"), restoring main's refusal —
-    today it answers every world as if the base had captured nothing. Control on the same
-    address: a plain base classifies `b`'s keys."""
     ledger = mod("learning.branch.ledger")
     ep = _delta_episode(tmp_path)
     at = ep / LAYOUT.served_base
@@ -389,10 +349,6 @@ def test_r1_delta_o_refuses_an_absent_or_refused_base_as_no_primed_base(tmp_path
 
 @pytest.mark.parametrize("kind", ["symlink", "dangling", "hardlink", "fifo", "directory"])
 def test_r1_delta_o_refuses_a_refused_world_file_naming_it(tmp_path, host, kind):
-    """Each world's served file is read through the same bind
-    (`read_jsonl(LAYOUT.served_world(token))`): one the open refuses (a link, a hard link, a
-    FIFO, a directory) is `EpisodeError` naming it (declared: main read a link there as "served
-    nothing"). The control rows are the next test's."""
     ep = _delta_episode(tmp_path)
     at = _world_file(ep, "b")
     good = at.read_bytes()
@@ -407,9 +363,6 @@ def test_r1_delta_o_refuses_a_refused_world_file_naming_it(tmp_path, host, kind)
 
 @pytest.mark.parametrize("state", ["absent", "undecodable", "plain"])
 def test_r1_delta_o_reads_an_absent_world_file_as_serving_nothing(tmp_path, state):
-    """Controls for the refusal above, on the same address: an ABSENT world file is `{}` for that
-    world (it served nothing), and undecodable bytes are not a refusal on the JSONL lane (it
-    reads with replacement: the good row still classifies); a plain file classifies."""
     ep = _delta_episode(tmp_path)
     at = _world_file(ep, "b")
     if state == "absent":
@@ -426,10 +379,6 @@ def test_r1_delta_o_reads_an_absent_world_file_as_serving_nothing(tmp_path, stat
 
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo", "undecodable"])
 def test_r1_delta_os_outcome_gate_refuses_a_refused_outcome_record(tmp_path, host, kind):
-    """The outcome gate (`_recorded_outcome`, shared with `verdicts`) treats a REFUSED
-    `outcome.yaml` — a link, a hard link, a FIFO, undecodable bytes — as `EpisodeError`, never
-    as the record it may be hiding. Controls on the same address: a plain `accepted` record
-    classifies; an unparseable one and a recorded `unusable` refuse."""
     ep = _delta_episode(tmp_path)
     record = ep / LAYOUT.outcome
     good = record.read_bytes()
@@ -455,10 +404,6 @@ def test_r1_delta_os_outcome_gate_refuses_a_refused_outcome_record(tmp_path, hos
 @pytest.mark.parametrize("state", ["absent", "symlink", "undecodable"])
 def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, host, via,
                                                                       state):
-    """The manifest readers take a view: `load_family(view)` — the episode's own
-    `episode.view()`, or a reader's own `bind` (`delta_o`'s one bind among them). An absent or
-    refused manifest is `FamilyError`; a `Bound` holds no path, so the message names the record
-    (`family.yaml`) and no absolute path. Control on the same address: a plain manifest loads."""
     fam = mod("runtime.branch._family")
     ep = _delta_episode(tmp_path)
     manifest = ep / LAYOUT.family
@@ -490,19 +435,10 @@ def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, 
         assert got.episode_id == T.EPISODE_ID
 
 
-# =======================================================================================
-# R2 — the core's leaf refusal is its own exception class
-# =======================================================================================
-
 @pytest.mark.parametrize("lane", ["held", "rooted_write", "write_guarded"])
 @pytest.mark.parametrize("kind", S.LEAF_PLANTS)
 def test_r2_a_plant_at_the_name_is_not_plain_entry_keeping_its_errno_and_mark(
         tmp_path, lane, kind):
-    """The leaf refusal — `_refuse_unless_plain_stat` and `_open_refusal`'s link and non-plain
-    rows — is `NotPlainEntry`, with today's errno (ELOOP; EMLINK for a hard link) and
-    `write_guarded_alias` mark (so `hooks/budget_enforcer.py` keeps counting it): on the held
-    root, on `rooted_write` (the `Run` lane) and on the path seam `write_guarded`. Control on the
-    same address: the plant removed, the write lands."""
     root = tmp_path / "root"
     (root / "fa").mkdir(parents=True)
     host = tmp_path / "host"
@@ -530,9 +466,6 @@ def test_r2_a_plant_at_the_name_is_not_plain_entry_keeping_its_errno_and_mark(
 @pytest.mark.parametrize("kind", ["folder_link_outside", "folder_link_inside", "folder_file",
                                   "folder_fifo"])
 def test_r2_a_linked_or_non_directory_folder_on_the_way_is_not_the_leaf_class(tmp_path, kind):
-    """A linked or non-directory FOLDER on the way stays a plain `OSError(ELOOP)` /
-    `NotADirectoryError` from the walk — never `NotPlainEntry`, so containment keyed on the
-    class does not swallow it. Control on the same address: a real folder takes the write."""
     cls = S.not_plain_entry()
     root = tmp_path / "root"
     root.mkdir()
@@ -597,17 +530,6 @@ def _grade(tmp_path: Path, ep: Path, judge: Any) -> Any:
 @pytest.mark.parametrize("reach", ["outside", "inside"])
 def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_draw_removal(
         tmp_path, roots, host, reach):
-    """At the judge (S1), a `judge/` folder linked AFTER `draws.ensure()` — swapped in by the
-    judge seam's first call for world `b`, every ask of whose draw 0 is malformed — makes the
-    stale-draw
-    removal (`world.draw(0).delete()`) raise the walk's FOLDER refusal, a plain `OSError(ELOOP)`
-    that is not `NotPlainEntry`, which stops the pass: `JudgeRefused`, draw 1 never paid for,
-    the stale draw the link reaches not removed, the link left. Today the errno classifier
-    contains it as a planted leaf and the loop pays for draw 1 before the write refuses.
-
-    Control on the same address: the link removed, a regrade pays for both draws and writes
-    them into a real `judge/`. (A `judge/` linked BEFORE the pass is that world's setup fault at
-    `draws.ensure()`: `test_1133_entry_points`.)"""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     judge_dir = ep / "worlds" / "b" / "judge"
     stale = b"findings: [{bucket: stale}]\n"
@@ -657,16 +579,6 @@ def _swap_served_before(ep: Path, rel: PurePosixPath, *, reach: str, host: Path,
 @pytest.mark.parametrize("reach", ["outside", "inside"])
 def test_r2_a_served_folder_linked_after_its_ensure_is_the_folder_refusal_at_the_claim(
         tmp_path, host, reach):
-    """At priming, `served.ensure()` refuses a `served/` linked beforehand (plain ELOOP). One
-    swapped in AFTER it — here just before the claim's create is delegated, through a recording
-    `Held` behind the episode's `io=` seam (`prepare_episode` has none, so its claim body
-    `cli._prime_once` is driven on that episode) — is the core's FOLDER refusal at the claim,
-    raised as is: not "another launcher is priming" (today's errno classifier reads it as an
-    occupied claim). The primer never runs and the linked folder gains no claim.
-
-    Controls on the same address: a symlink planted at the claim's own name is the leaf class
-    and IS "another launcher is priming"; with nothing planted the primer runs and the claim is
-    released."""
     cli = mod("learning.branch.cli")
     ledger = mod("learning.branch.ledger")
     ep = bare_episode(tmp_path)
@@ -705,12 +617,6 @@ def test_r2_a_served_folder_linked_after_its_ensure_is_the_folder_refusal_at_the
 @pytest.mark.parametrize("reach", ["outside", "inside"])
 def test_r2_a_served_folder_linked_after_the_listing_is_the_folder_refusal_at_the_base(
         tmp_path, host, reach):
-    """At the primed base, a `served/` swapped for a link AFTER the listing found no base —
-    just before the base's create is delegated, through a recording `Held` — is the core's
-    FOLDER refusal, raised as is: not "already holds a primed base" (today's errno classifier
-    reads a linked folder as a planted base), and the linked folder gains no base.
-
-    Control on the same address: nothing swapped, the base is primed."""
     capture = mod("learning.branch.capture")
     ledger = mod("learning.branch.ledger")
     run_dir = _one_call_source(tmp_path)
@@ -733,10 +639,6 @@ def test_r2_a_served_folder_linked_after_the_listing_is_the_folder_refusal_at_th
     with S.open_episode(ep) as episode:
         assert capture.prime_base(run_dir, episode).primed == 1
 
-
-# =======================================================================================
-# R3 — one primer, one write
-# =======================================================================================
 
 def _one_call_source(tmp_path: Path) -> Path:
     run_dir = source_run(tmp_path)
@@ -815,15 +717,6 @@ def _plant_base(ep: Path, kind: str, host: Path) -> S.Planted:
 @pytest.mark.parametrize("kind", BASE_KINDS)
 def test_r3_anything_at_the_base_is_already_primed_before_the_capture_is_read(tmp_path, host,
                                                                               kind):
-    """`prime_base` lists `served/` through the view first: an entry named `base.jsonl` of any
-    kind — a plain file, an empty one, a link (live or dangling), a hard link, a FIFO, a
-    directory — is "already holds a primed base" `LedgerError` BEFORE the capture is read (a FIFO
-    at the capture's payload sidecar sees no reader), without the base being opened (no open of
-    `base.jsonl` reaches the `os_` seam) and with no write on the held root. The entry is left as
-    it was.
-
-    Control on the same address: the entry removed, the same capture IS read (the observation
-    works) and primed by one `create`."""
     capture = mod("learning.branch.capture")
     ledger = mod("learning.branch.ledger")
     run_dir = _one_call_source(tmp_path)
@@ -855,10 +748,6 @@ def test_r3_anything_at_the_base_is_already_primed_before_the_capture_is_read(tm
 
 
 def test_r3_zero_rows_are_refused_by_default_and_primed_empty_with_allow_empty(tmp_path):
-    """`prime_base(source_run_dir, episode, *, allow_empty=False)`: a capture that yields no row
-    is "primed no base rows" `LedgerError` by default (#947's pin), with no base made and no
-    write; with `allow_empty=True` it is primed — `primed == 0`, the base a plain, empty,
-    single-linked file — by ONE `create` of the (empty) joined lines."""
     capture = mod("learning.branch.capture")
     ledger = mod("learning.branch.ledger")
     run_dir = _empty_source(tmp_path)
@@ -893,10 +782,6 @@ def _launcher(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
 
 def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
         tmp_path, roots, caplog):
-    """The launcher's default primer is `prime_base(..., allow_empty=True)`: a source whose
-    capture yields no row gets an EMPTY base (a plain file), with a warning that every key
-    reaches the live estate; there is no message-matched downgrade left to create it a second
-    time (`_is_empty_capture` is removed)."""
     cli, src, tenant, ep = _launcher(tmp_path)
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     caplog.set_level(logging.WARNING)
@@ -914,19 +799,9 @@ def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
         "the message-matched downgrade `_is_empty_capture` is still there (R3: one primer)")
 
 
-# =======================================================================================
-# R4 — one leaf writer; a durable write never makes a folder
-# =======================================================================================
-
 @pytest.mark.parametrize("lane", ["held", "rooted_write"])
 def test_r4_a_durable_append_that_cannot_encode_its_text_leaves_no_descriptor_open(
         tmp_path, lane):
-    """One writer owns the leaf's descriptor: it is handed to `fdopen` before the text is
-    encoded, so a `str` that cannot be encoded (a lone surrogate) fails the durable append with
-    a `UnicodeError` and leaves NO descriptor of this process open on the leaf (today the
-    encode runs before `fdopen` and the fd leaks), and the leaf keeps its bytes. Through the held
-    root and `rooted_write` (the `Run` lane). Control on the same address: a
-    plain append of the same text leaks nothing either, and an encodable durable append lands."""
     root = tmp_path / "episodes" / EPISODE_ID
     root.mkdir(parents=True)
     rel = "rec.jsonl"
@@ -956,10 +831,6 @@ def test_r4_a_durable_append_that_cannot_encode_its_text_leaves_no_descriptor_op
 
 
 def test_r4_a_durable_append_into_a_missing_holding_folder_makes_nothing(tmp_path):
-    """`Held.write(..., durable=True)` walks WITHOUT creating: a missing holding folder is
-    `FileNotFoundError`, no folder is made and nothing is synced (a folder a durable walk made
-    would not be synced). Control on the same address: a plain append makes the folder and
-    lands; then the durable append lands in it."""
     root = tmp_path / "root"
     root.mkdir()
     spy = S.OsSpy()
@@ -977,10 +848,6 @@ def test_r4_a_durable_append_into_a_missing_holding_folder_makes_nothing(tmp_pat
     assert (root / "fa" / "rec.jsonl").read_text(encoding="utf-8") == "plain\ndurable\n"
 
 
-# =======================================================================================
-# Patches
-# =======================================================================================
-
 @pytest.mark.parametrize(("token", "minted"), [
     pytest.param("Control", False, id="dotless-not-case-stable"),
     pytest.param("E1133.b", False, id="head-not-case-stable"),
@@ -989,9 +856,6 @@ def test_r4_a_durable_append_into_a_missing_holding_folder_makes_nothing(tmp_pat
     pytest.param("e1133.b", True, id="a-world-token"),
 ])
 def test_patch_the_minting_check_judges_the_whole_token(token, minted):
-    """`check_minted_token` requires the WHOLE token to be case-stable, not only the text after
-    its last dot: a dot-less `Control` is refused (today it skips the check) and so is an
-    upper-case head. Every episode token is already casefolded, so a real token still mints."""
     from defender._episode_paths import check_minted_token
 
     if minted:
@@ -1002,11 +866,6 @@ def test_patch_the_minting_check_judges_the_whole_token(token, minted):
 
 
 def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_path):
-    """A sibling (`--episode`, #1105 PR 2's id edge for what was `--resume`) with no held
-    episode is refused (`SystemExit`), never an ordinary run: `main` always holds one for
-    `--episode`, so this guard is driven on `run._resume_target` directly. Controls: with no
-    `--episode` the answer is `None` (an ordinary run); with the episode held, it is the
-    manifest's world."""
     run = mod("run")
     _base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))

@@ -30,9 +30,6 @@ from defender.tests._session_store_705 import (  # noqa: E402
 
 def test_head_move_signal_contract(tmp_path):
     """The head-move surface is exactly this: `append` takes a keyword `reason` drawn from the"""
-    # provenance: demand #0, FK-A(a)-(d). PR-21/PR-19 (censuses): these readers have no
-    # consumer anywhere, on either side of this change, so the test drives them directly and
-    # asserts nothing about a consumer.
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -125,10 +122,6 @@ def test_path_row_ids_is_empty_when_head_is_null(tmp_path):
 
 def test_fold_moves_head_to_frontier_and_logs_fold(tmp_path):
     """A fold moves the session's head to the frontier row it mints and leaves exactly ONE"""
-    # provenance: issue obligation 2.
-    # rejected: the call site does not decide to log. `_fold_impl` issues no INSERT into
-    # session_head_log at all — the entry appears because `append` applied the rule to the
-    # parent and the reason it was handed (test_the_store_writes_the_log_not_its_call_sites).
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -175,9 +168,6 @@ def test_fold_reuse_leaves_head_and_the_log_untouched(tmp_path):
 
 def test_a_degenerate_fold_still_writes_its_log_entry(tmp_path):
     """Folding a session whose path is a single row — so the frontier's parent already IS the"""
-    # provenance: P94 (a one-row path folds with root == head) and P96 (the same shape by
-    # another route); P85 measured the cost of leaving it unlogged — a consumer walking the
-    # log to reconstruct the run's compaction history does not see the fold at all.
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)
@@ -275,15 +265,6 @@ def test_an_append_into_a_rows_but_null_head_session_raises(tmp_path):
 
 def test_an_unexplained_non_linear_append_raises_and_writes_nothing(tmp_path):
     """An append whose first row parents onto a row that is not the session's current head, with"""
-    # provenance: issue obligation 7.
-    # rejected: FK-K, accepted and DOCUMENTED rather than fixed — a retried IDENTICAL append
-    # genuinely IS non-linear the second time, because head has already advanced to the row
-    # the first call inserted, so its unchanged explicit parent_id no longer equals the new
-    # previous head. `ingest` threads each new id as the next parent, so a retried ingest
-    # append — the shape an at-least-once dispatch or a timeout produces — hits exactly this
-    # and gets StoreAppendError on a call the caller believes is a harmless retry. That is
-    # the rule working, not a bug: no dedup key is added, because the design deliberately
-    # does not have one, and the error is legible here so a caller that meets it can read it.
     ss = store_mod()
     store = make_store(tmp_path)
     session_id = store.new_session(agent_id="main")
@@ -355,9 +336,6 @@ def test_reason_membership_is_validated_before_linearity_classification(tmp_path
     assert head_of(store, session_id) == accepted, (
         "control: an exact member is accepted on the same channel")
     assert [e.reason for e in log_rows(store, session_id)] == ["fold"]
-    # `fork` is a member too, and is refused here for a DIFFERENT reason: it has no caller
-    # through `append` at all. That is why the membership control uses `fold` — this demand is
-    # about membership, not about who may write a fork entry.
     assert "fork" in ss.HEAD_MOVE_REASONS
 
 
@@ -473,9 +451,6 @@ def test_a_fold_refuses_to_parent_a_frontier_outside_the_folding_session(tmp_pat
 
 def test_a_fold_on_an_empty_path_is_refused(tmp_path):
     """Folding a session whose path is empty is refused: there is no row for the frontier to parent onto, and a frontier with no parent is not a fold."""
-    # provenance: PR-6 (executed) records today's behaviour — `root = ids[0] if ids else None`
-    # mints a parentless frontier and raises no IndexError — so this test is red against the
-    # base because the refusal is missing, not because the fold path is.
     sel = selection_mod()
     store = make_store(tmp_path)
     empty = store.new_session(agent_id="main")
@@ -501,9 +476,6 @@ def test_a_fold_on_an_empty_path_is_refused(tmp_path):
 
 def test_append_still_refuses_a_cyclic_parent_chain_at_write_time(tmp_path):
     """`append` still refuses a cyclic `parent_id` chain at WRITE time — before anything is"""
-    # provenance: corrections R3 (binding), P25/P26 (one demand, not two), P27, P35. COR-R3
-    # (executed) is today's behaviour that must not regress; the only shipped cycle test
-    # drives the read path, so the write-time guarantee would have vanished silently.
     ss = store_mod()
     store = make_store(tmp_path)
     implicit = store.new_session(agent_id="main")
@@ -538,9 +510,6 @@ def test_append_still_refuses_a_cyclic_parent_chain_at_write_time(tmp_path):
 
 def test_the_full_lifecycle_walk_new_session_two_folds_and_a_fork(tmp_path):
     """The seven-point walk, end to end in one store file: (1) a fresh session's head is NULL,"""
-    # provenance: P118, asserted point by point rather than re-derived. Point (7) is F4/B11
-    # (executed): under a recorded head a forked-but-unappended session's path is the
-    # inherited prefix, where today it reads empty.
     ss = store_mod()
     sel = selection_mod()
     store = make_store(tmp_path)

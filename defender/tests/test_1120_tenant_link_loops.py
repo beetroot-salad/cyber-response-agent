@@ -36,9 +36,6 @@ def test_a_data_root_linked_to_itself_is_refused_by_name(tmp_path: Path) -> None
 
 
 def test_check_folder_over_a_looped_folder_refuses_without_a_traceback(tmp_path: Path) -> None:
-    """`tenant.py check --folder <loop>` exits 1 naming the folder; the census lint's call,
-    `check_knowledge_folder(<loop>)`, raises the refusal the lint reports (exit 2), never a
-    `RuntimeError`."""
     loop = tmp_path / "loop"
     loop.symlink_to("loop")
     H.assert_refused(H.check(tenant_py, None, "--folder", str(loop)), "[tenant.py]", str(loop))
@@ -63,9 +60,6 @@ def test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree(tmp_path: Pa
 
 
 def test_a_linked_folder_above_a_required_setting_is_named_as_a_link(tmp_path: Path) -> None:
-    """`settings/systems` swapped for a link to a real copy: step 4 cannot reach
-    `systems/case-history/mapping.yaml` without following it, and says the file is reached
-    through a link rather than that it could not be read."""
     root = tmp_path / "data"
     H.adopted(root)
     systems = H.settings_dir(root) / "systems"
@@ -79,9 +73,6 @@ def test_a_linked_folder_above_a_required_setting_is_named_as_a_link(tmp_path: P
 
 def test_a_tenant_folder_linked_into_the_checkout_is_refused_before_acceptance(
         tmp_path: Path) -> None:
-    """`<root>/<T> -> <the checkout's defender/>`: the pre-acceptance layout (what
-    `create_tenant`, `require_tenant` and `tenant_of_run_dir` build) refuses it as inside the
-    checkout. Control: the same id under a real folder is built."""
     root = tmp_path / "data"
     root.mkdir()
     (root / H.TID).symlink_to(_paths.PATHS.defender_dir, target_is_directory=True)
@@ -105,10 +96,6 @@ def test_a_nul_in_a_mounted_tree_path_is_a_refusal(tmp_path: Path) -> None:
 @pytest.mark.parametrize("target", ["knowledge/agent", "knowledge/settings/systems",
                                     "knowledge/archive", "knowledge/.git"])
 def test_runs_linked_into_a_knowledge_half_is_refused(tmp_path: Path, target: str) -> None:
-    """`<T>/runs` linked INTO the knowledge folder — a half (code review max, finding 1), or
-    beside them in the tenant's repo (`archive/`, `.git/`; third pass): step 7 refuses it
-    naming the runs base, since every run dir would be a read-write mount inside the tenant's
-    repo. Another mounted tree beside the halves is still a near miss (the spec's s0 cell)."""
     root = tmp_path / "data"
     H.adopted(root)
     runs = H.tenant_folder(root) / "runs"

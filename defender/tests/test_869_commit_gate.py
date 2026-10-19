@@ -27,9 +27,6 @@ from defender.tests._declared869 import (
 )
 from defender.tests._lead_author_1134 import lane_tree_for
 
-#: The six directories under `defender/skills/` that no source declares — the ones FK-1
-#: refuses all writes to. `judge` carries no `SKILL.md` today; the rule is a path rule, so it
-#: answers about the path either way.
 NON_SYSTEMS = ("advisory", "connect", "gather", "handbook", "invlang", "judge")
 
 DECLARED = frozenset({"elastic", "cmdb"})
@@ -54,15 +51,6 @@ def _gate_repo(tmp_path: Path, name: str = "repo") -> Path:
 
 
 def test_skills_path_rule_refuses_an_undeclared_system_skill(tmp_path):
-    """The commit gate refuses a brand-new `defender/skills/<undeclared>/SKILL.md`, and the
-    tick therefore commits nothing.
-
-    G4, executed at this base: today this gate ACCEPTS AND COMMITS exactly that file. Site 2
-    mints phantom SYSTEM directories, not only catalog ones — a second, independent route the
-    design's U1/U2 sentences do not name. Driven through the whole composed gate, because the
-    per-file rule refusing while the walk that calls it commits anyway would be a green test
-    over a shipped hole.
-    """
     repo = _gate_repo(tmp_path)
     phantom = write(repo / SKILLS_REL / "fakesys2" / "SKILL.md",
                     "---\nname: defender-fakesys2\n---\n# fakesys2\n")
@@ -81,12 +69,6 @@ def test_skills_path_rule_refuses_an_undeclared_system_skill(tmp_path):
 
 
 def test_skills_path_rule_refuses_an_undeclared_catalog_system(tmp_path):
-    """The catalog form is keyed on the segment after `queries/`, and THAT segment must name
-    a declared system: `gather/queries/fakesys/hunt-creds.md` is refused.
-
-    This is the path the host mints from a model-supplied `query_id` (C12/G3), so it is the
-    last gate in front of the finding this issue exists to close.
-    """
     repo = _gate_repo(tmp_path)
     with pytest.raises(LeadAuthorError):
         lead_author._skills_path_rule(
@@ -99,16 +81,6 @@ def test_skills_path_rule_refuses_an_undeclared_catalog_system(tmp_path):
 
 
 def test_skills_path_rule_still_admits_the_real_catalog(tmp_path):
-    """Every real catalog path is still admitted — the key is the segment after `queries/`,
-    NOT the `skills/<x>` segment.
-
-    `skills_path_rule_refuses_undeclared_catalog`'s positive control, and the reason this is a
-    demand rather than an assumption: EVERY catalog path's `skills/<x>` segment is `gather`,
-    which no source declares (G7/R4), so M5 read literally refuses the entire committed
-    catalog. The consequence if that reading shipped is "the lead author commits nothing at
-    all", and this is the test that catches it — driven over the real committed corpus, whose
-    every catalog file has `gather` in that position.
-    """
     repo = _gate_repo(tmp_path)
     assert "gather" not in DECLARED
     assert lead_author._skills_path_rule(
@@ -132,21 +104,6 @@ def test_skills_path_rule_still_admits_the_real_catalog(tmp_path):
 
 
 def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
-    """The lead-author lane loses write access to all SIX non-system `SKILL.md` files
-    (FK-1, §7): M5 keys on membership with NO exception.
-
-    THIS IS A BEHAVIOUR CHANGE ON A PATH THAT IS LEGAL TODAY, and it is the point: C23 shows
-    `_is_system_skill_md` admits `defender/skills/gather/SKILL.md`, and G4 executed a real
-    commit of exactly that edit. N3 protected those directories' EXISTENCE, never this lane's
-    write access to them. Accepted cost, recorded rather than discovered: `gather/SKILL.md` is
-    the gather subagent's ENTIRE system prompt and becomes maintainer-written, with no
-    loop-side writer at all.
-
-    REJECTED: carving the six out with a literal exception list — the shape N4/N5 exist to
-    avoid, and the shape FK-10 separately declined. Which is why the refusal LIFTS the moment
-    a source declares one of them, and that is asserted here too: it is a live edge the design
-    states rather than discovers.
-    """
     repo = _gate_repo(tmp_path)
     for name in NON_SYSTEMS:
         path = f"defender/skills/{name}/SKILL.md"
@@ -169,38 +126,6 @@ def test_the_lane_cannot_commit_a_non_system_skill_md(tmp_path):
 
 
 def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
-    """`execution.md` is the ONE per-system file the lead-author lane cannot get committed —
-    AT ANY DEPTH under `defender/skills` — while `SKILL.md`, `_draft/` and every catalog path
-    for the same DECLARED system are admitted, at those same depths.
-
-    C32, executed over all seven candidate markers. That refusal — not the filesystem, and not
-    the write tool — is what stops an agent that mints a marker from minting a declared
-    system, and NF1 makes it MORE central rather than less: with the marker read from the
-    committed tree, the commit gate IS the marker's integrity, which is exactly why NF4 chose
-    marker existence over a content signature. If a later change admits `execution.md` here,
-    the union's whole marker half becomes forgeable by the lane whose gate reads it.
-
-    THE DEPTH HALF (phase F, F1 — human-resolved, BOTH halves). `_is_system_execution_md` is
-    an exact-two-segment test, and it is the only thing this rule ever asked about
-    `execution.md` — while `_is_in_scope` admits `<declared>/_draft/<anything>/…` and every
-    `gather/queries/…` path at any depth. So at this base the gate ADMITS
-    `defender/skills/elastic/_draft/mcpsys/execution.md` and
-    `defender/skills/gather/queries/elastic/mcpsys/execution.md`, whose parent directory names
-    are entirely model-chosen, and a recursive marker read then declares `mcpsys`. The rule
-    now keys on the BASENAME anywhere under the tree, so the refusal no longer depends on
-    which of the three in-scope forms owns the path.
-    `marker_source_is_exactly_depth_one` is the other end of the same composition — one closes
-    the read, this closes the write, and neither is asked to carry it alone.
-
-    THE CONTROL FOR THE DEPTH HALF, on the same addresses: a sibling `.md` in those same
-    nested directories, for the same declared system, is still ADMITTED — so what fired is the
-    basename rule and not a new blanket refusal of depth, which would be a different and
-    unresolved behaviour change.
-
-    Bound at every surface the write could reach: the rule refuses, the composed gate refuses,
-    and no commit carries the path. `skills_path_rule_admits_declared_catalog` is the paired
-    positive control; the sibling paths below are its shape on this address.
-    """
     repo = _gate_repo(tmp_path)
     for admitted in (
         "defender/skills/elastic/SKILL.md",
@@ -221,9 +146,6 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
         assert lead_author._skills_path_rule(repo, "A ", sibling, systems=DECLARED,
                                              tree_for=lane_tree_for(repo)) is None
 
-    # The base-state fact the depth half is about, re-measured rather than remembered: the
-    # two-segment form is refused today only as OUT OF SCOPE, while every nested form is IN
-    # scope — which is why nothing refuses those, and why the rule must key on the basename.
     assert not _is_in_scope("defender/skills/elastic/execution.md")
     nested_forms = (*NESTED_MARKER_RELS, "defender/skills/gather/queries/elastic/execution.md")
     for nested in nested_forms:
@@ -253,19 +175,6 @@ def test_the_marker_is_the_one_file_the_lane_cannot_commit(tmp_path):
 
 
 def test_the_commit_gate_refuses_an_id_that_disagrees_with_its_directory(tmp_path):
-    """The commit gate refuses a template whose frontmatter `id:` prefix disagrees with the
-    directory it sits in, so U1's DIRECTORY channel and its CONTENT channel close together
-    (RF2, human-resolved, in scope).
-
-    A file at `gather/queries/elastic/x.md` declaring `id: fakesys.x` is refused even though
-    its directory names a declared system — otherwise the phantom simply moves from the path
-    into the frontmatter, and `lead_neighbors._resolve_cli` reads it back out.
-
-    ORDERING, from the probe: the id check runs AFTER the delete-prohibition and AFTER the
-    protected-surface branch, both asserted here — a `D` record on an established template
-    still reports the deletion, and a protected surface still reports the protected surface,
-    rather than either being pre-empted by a content read of a file that may not be there.
-    """
     repo = _gate_repo(tmp_path)
     write_template(repo, "elastic", "x", tid="fakesys.x")
     with pytest.raises(LeadAuthorError):

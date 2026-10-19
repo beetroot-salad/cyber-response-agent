@@ -87,11 +87,6 @@ class _CountingFile:
 
 
 def test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart(tmp_path):
-    """_io.hold(root, follow=False) holds a real directory and a directory under a linked
-    ancestor; it raises OSError(ELOOP, 'refusing to create through a symlinked path component')
-    for a link at root, dangling or not, NotADirectoryError for a regular file or a FIFO, and
-    FileNotFoundError for an absent path, and it creates nothing. Positive control: hold(root)
-    with the default follow=True still follows a link root as today (R41-01)."""
     real = tmp_path / "real"
     real.mkdir()
     (real / "r1").mkdir()
@@ -136,10 +131,6 @@ def test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart(t
 
 
 def test_1105_bound_read_max_bytes_reads_no_more_than_it_is_asked(tmp_path):
-    """Bound.read(name, max_bytes=N) reads no more than N bytes of the file, so a caller can
-    tell a file longer than N - 1 bytes from one within it without reading it whole; without the
-    keyword Bound.read keeps today's whole-file read (R41-16). The bytes are counted through
-    _io's own os_= seam (an os proxy that only counts what each read hands back)."""
     n = 64
     folder = tmp_path / "records"
     folder.mkdir()

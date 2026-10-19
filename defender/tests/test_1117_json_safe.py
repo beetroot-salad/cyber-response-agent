@@ -94,9 +94,6 @@ def _sql(query: str, ndjson: list[dict]) -> list[dict]:
 
 
 def test_every_timestamp_in_one_sql_result_has_one_form():
-    """UTC, `Z`, six fraction digits, whatever the row's own precision or offset — so the model
-    reading one result knows what every timestamp in it looks like. The engine converts an
-    offset to UTC on load, so its zone-less timestamps are UTC and say so."""
     rows = _sql(
         'SELECT h."@timestamp" AS ts FROM (SELECT unnest(hits) h FROM data)',
         [{"hits": [{"@timestamp": "2026-01-01T10:00:00.000Z"},

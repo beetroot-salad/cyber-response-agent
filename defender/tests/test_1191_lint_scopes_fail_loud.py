@@ -1,69 +1,3 @@
-"""#1191 — a lint whose fixed scope entry no longer selects code fails loud instead of scanning less.
-
-O1  (as restated by design amendment 1) A lint run over THIS repo never passes while an entry of
-    a fixed scope list SELECTS NONE OF THE FILES THE LINT SCANS — a vanished path, an emptied
-    directory, a file entry now naming a directory: `lint_tree_read_follows_link`
-    `.LINT_TREE_READER_MODULES`, `lint_run_records.SWEEP_DIRS`,
-    `lint_unguarded_tree_write.LINT_HARD_GATED_MODULES`, `lint_tenant_env_reads.SWEPT` (an entry
-    ending `/` selects every file under it, any other entry only the file it equals) and
-    `lint_stage_prompt_frames`' default scope. Exit 2, naming the entry and no other.
-O2  The run-records lint never passes while a top-level `defender/` directory holding production
-    `.py` (any `.py` the lint's own `_in_scope` filter keeps) is neither in `SWEEP_DIRS` nor
-    spelled `defender/<name>` in `UNSCANNED_TREES` — exact spelling, so the bare repo-top-level
-    `scripts` / `experiments` entries admit nothing under `defender/`. Exit 2, naming the dir.
-O3  A run against a planted or partial root (`scope=` / `root=`) keeps today's tolerance.
-O4  The escapes O1/O2 surface are closed: `runtime/branch/` (D5: one package entry, so a future
-    module of the package is covered too) is back under the tree-read lint, `api/` is swept by the
-    run-records lint and holds no record name, and the real lints exit 0 over the real repo.
-O5  Which files a lint scans does not depend on where the checkout lives (a parent dir named
-    `tests` or `.venv`) or on gitignored local content; an untracked, not-ignored new file is
-    still scanned.
-O6  The run-records lint's written scope (`SCOPE_STATEMENT`) names exactly its swept dirs and its
-    declared-unscanned trees — derived from the two lists, not kept by hand.
-O7  A blind run-records scan (exit 2) writes nothing, `--render` included.
-D1' The shared helpers in `_astlib` (names fixed by the amendment): `source_files(root,
-    excluded)` -> the `.py` files under `root` as root-relative POSIX `str` paths, pruning
-    directory NAMES in `excluded` below `root` (never its ancestors) and dropping what git
-    ignores; `selects(entry, rel)`; `require_selected(root, real_root, entries, rels)`.
-Design amendment 2 adds: O9 an unreadable directory under the scanned root is blind; O10 a
-    source file whose name is not UTF-8 is blind (exit 2, the name escaped, no traceback) —
-    superseding amendment 1's "returns it"; O11 a planted tree inside a git-ignored directory of
-    the enclosing repo is listed in full; O12 the env-read lint names its dead entries; O13 a dead
-    `defender/...` entry of run-records' `UNSCANNED_TREES` is blind; O14 the scope statement
-    spells a repo-level unscanned entry "top-level <name>"; O15 tree-read parses only census
-    modules and tree-write never parses test modules; O16 stage-frames' real scope is blind when
-    it lists nothing, however its path is spelled; D8 `source_files(..., suffixes=(".py",))`.
-    O8 (every lint lists through `source_files`) is `test_1191_one_listing.py`.
-
-HOW O1 AND O2 ARE OBSERVED. "This repo" is the root a lint derives from its own file
-(`Path(__file__).resolve().parents[2]`, as 53b7efec defines it). Loading the real lint and handing
-it a scratch root takes the tolerant path, so it would mask the check. Each O1/O2 test instead
-builds a MINI REPO under tmp: a copy of `scripts/lint/` (the lint, its siblings `_astlib.py`,
-`_baseline.py`, `_gitscope.py`, its baseline) plus the data files the lint reads, and a
-`defender/` laid out from the lint's OWN list constant, read off a fresh load of the real lint so
-the test follows the list rather than today's entries. The copy's own file is then run as a child
-(`python <tmp>/scripts/lint/<lint>.py`), the way CI runs it, so for that child tmp IS this repo.
-Every negative is paired with a positive control on the same mini repo: untouched it exits 0, and a
-planted violation is reported (so the scan ran and the layout is faithful). A mini repo has no
-`.git`, takes no arguments and passes no `scope=`, so the same strictness is ALSO pinned over the
-real checkout (a fresh private load of the real lint with one phantom entry, its own `main`), and
-under `--update-baseline`.
-
-`lint_run_records` imports the owner modules (`defender.run_repository`, ...): the child gets
-`PYTHONPATH=<this checkout>`, and `defender` being a namespace package, the copy's own `defender/`
-(which holds no owner module) is searched first and the owners come from this checkout. Its mini
-repo therefore never holds a top-level `defender/*.py`.
-
-Written in three commits: the spec (a73867c5), the adversary's holes (5de3d6ff), and design
-amendment 1 (the D1' unit tests, O1's "selects nothing" cases, O5, O6, O7, D5, and the env-read
-lint as a fifth surface). The `require_paths` unit tests of the first commit pinned only the
-superseded existence check and are gone.
-Design amendment 3 (supersedes D1''s and D11's filter-after-walk): a lint scans what git would
-    put in the tree. Nothing inside a git-IGNORED dir can blind the listing or be listed (O9/O10
-    now apply to what is listed: in a git repo, tracked or untracked, they still blind); a
-    relative root lists what the absolute one does, anchored ignores included; a tracked module
-    deleted from the working tree is not listed (O17).
-"""
 from __future__ import annotations
 
 import ast
@@ -127,11 +61,6 @@ def record_name_probe() -> str:
     """A whole run-record name held as a literal: a run-records finding. Taken from the owner, not
     spelled here."""
     return f"NAME_1191 = {RUN_LAYOUT.report.name!r}\n"
-
-
-# ======================================================================================
-# Plumbing
-# ======================================================================================
 
 
 def _fresh(stem: str, suffix: str = "") -> ModuleType:
@@ -298,16 +227,7 @@ def _git_repo(root: Path, gitignore: str) -> None:
     _git.git(["add", "-A"], cwd=root)
 
 
-# ======================================================================================
-# D1' — the shared listing and selection helpers (names fixed by design amendment 1)
-# ======================================================================================
-
-
 def test_source_files_lists_py_root_relative_pruning_excluded_names_below_root(tmp_path):
-    """`_astlib.source_files(root, excluded)` lists the `.py` files under `root` as root-relative
-    POSIX `str` paths (the `rel`s `selects` matches with a prefix), pruning directories whose NAME
-    is in `excluded` — below `root` only: this root sits under ancestors named `tests` and `.venv`
-    and every file of it is still listed. `excluded` may be any iterable of names."""
     astlib = import_lint_lib("_astlib")
     root = tmp_path / "tests" / ".venv" / "repo"
     for rel in ("a.py", "pkg/b.py", "pkg/sub/c.py", "pkg/__pycache__/d.py", "tests/t.py",
@@ -320,9 +240,6 @@ def test_source_files_lists_py_root_relative_pruning_excluded_names_below_root(t
 
 
 def test_source_files_drops_what_git_ignores_and_keeps_untracked(tmp_path):
-    """In a git repo, `source_files` drops what git IGNORES and keeps what git merely does not
-    track: listed over a subdirectory of the repo (the way the lints list `defender/`), an ignored
-    `build/` at any depth is gone, an unstaged new module is there."""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     for rel in ("defender/kept.py", "defender/build/x.py", "defender/pkg/build/y.py",
@@ -356,9 +273,6 @@ def test_source_files_outside_a_git_repo_drops_nothing(tmp_path):
     ("runtime/observe.py", "runtime/observe.pyi.py", False),
 ])
 def test_selects(entry, rel, selected):
-    """`_astlib.selects(entry, rel)`: an entry selects the file it equals; an entry ending `/`
-    selects every file under it and nothing that merely shares its spelling as a prefix; a
-    directory named without the `/` selects nothing under it; there is no suffix match."""
     astlib = import_lint_lib("_astlib")
     assert bool(astlib.selects(entry, rel)) is selected, (entry, rel)
 
@@ -374,10 +288,6 @@ def test_require_selected_is_a_no_op_off_this_repo(tmp_path):
 
 
 def test_require_selected_names_every_entry_that_selects_nothing(tmp_path):
-    """Over the real root, `require_selected` raises the `ScanBlind` the gates turn into exit 2,
-    naming EVERY entry that selects no `rel` — a vanished file, an empty package entry, a
-    directory named without its `/` — and no entry that selects one. `root` is compared after
-    resolving (`<real>/sub/..` is the real root)."""
     astlib = import_lint_lib("_astlib")
     real = tmp_path / "real"
     (real / "sub").mkdir(parents=True)
@@ -394,20 +304,12 @@ def test_require_selected_names_every_entry_that_selects_nothing(tmp_path):
     astlib.require_selected(real, real, ("kept_module.py", "kept_pkg/"), rels)
 
 
-# ======================================================================================
-# O1 — over this repo, a missing scope entry is exit 2 naming it
-# ======================================================================================
-
-
 def _tree_read_mini(root: Path) -> tuple[Path, list[str]]:
     lint_file, modules, _base = _surface(root, TREE_READ)
     return lint_file, modules
 
 
 def test_o1_tree_read_missing_census_module_is_blind(tmp_path):
-    """Over this repo, each `LINT_TREE_READER_MODULES` entry whose module is gone makes the lint
-    exit 2 naming it (RED until O1: today the module silently leaves the scan, exit 0). Every entry
-    is removed in turn, so a check that looks at only some of the list fails here."""
     lint_file, modules = _tree_read_mini(tmp_path)
     _assert_clean(lint_file, TREE_READ)
     wrong = _not_blind_when_each_removed(lint_file, tmp_path / "defender", modules)
@@ -442,9 +344,6 @@ def _run_records_mini(root: Path) -> tuple[Path, tuple[str, ...]]:
 
 
 def test_o1_run_records_missing_sweep_dir_is_blind(tmp_path):
-    """Over this repo, each `SWEEP_DIRS` entry whose `defender/<d>` is gone makes the lint exit 2
-    naming it (RED until O1: today `sweep_files` returns nothing for a missing dir and `main` has
-    no exit-2 path at all, c10)."""
     lint_file, sweep = _run_records_mini(tmp_path)
     _assert_clean(lint_file, RUN_RECORDS)
     wrong = _not_blind_when_each_removed(lint_file, tmp_path / "defender", sweep)
@@ -460,16 +359,7 @@ def _stage_frames_mini(root: Path) -> tuple[Path, str]:
     return lint_file, scope
 
 
-# ======================================================================================
-# O2 — run-records closure over defender/'s top-level directories
-# ======================================================================================
-
-
 def test_o2_unlisted_package_is_blind(tmp_path):
-    """A top-level `defender/newpkg/` holding production `.py` that is neither swept nor declared
-    unscanned makes the run-records lint exit 2 naming it — directly under it or nested deeper
-    (RED until O2: today new code there is simply never scanned, the way `api/` escaped).
-    Control: the same mini repo without it exits 0."""
     lint_file, _sweep = _run_records_mini(tmp_path)
     _assert_clean(lint_file, RUN_RECORDS)
     planted = _write(tmp_path / "defender" / "newpkg" / "x.py")
@@ -483,26 +373,6 @@ def test_o2_unlisted_package_is_blind(tmp_path):
             why="an unlisted defender/otherpkg/ holding only nested .py did not blind the scan")
 
 
-# ======================================================================================
-# O3 — a planted or partial root keeps today's tolerance
-# ======================================================================================
-
-
-# ======================================================================================
-# O4 — the escapes are closed, in the real repo
-# ======================================================================================
-
-
-# ======================================================================================
-# O1/O2 over the REAL checkout — strictness must not hinge on anything a mini repo lacks
-# ======================================================================================
-#
-# The mini repos above have no `.git`, are run with no arguments, and never pass `scope=`. A check
-# keyed on any of those (strict only without a `.git`, only when `argv is None`, only when
-# `scope is None`) passes them all and is never strict where it matters. These tests load the
-# REAL lint fresh (a private module object), give it one entry that names nothing, and call its
-# own `main` over this checkout. Positive control in each: the unmodified fresh load exits 0.
-
 #: An entry no checkout holds.
 PHANTOM = "nope_1191"
 
@@ -515,10 +385,6 @@ def _main(lint: ModuleType, capsys: pytest.CaptureFixture[str], argv: list[str],
 
 @pytest.mark.parametrize("stem", [TREE_READ, TREE_WRITE])
 def test_o1_update_baseline_over_a_blind_scan_keeps_the_baseline(tmp_path, stem):
-    """In a mini repo, `--update-baseline` with a listed entry gone exits 2 naming it and leaves
-    the copy's baseline byte-identical. Control: with the entry back, the same command exits 0
-    and does rewrite that baseline (the mini repo has none of the real findings), so "identical"
-    above means the update was refused, not that it had nothing to write."""
     build = _tree_read_mini if stem == TREE_READ else _tree_write_mini
     lint_file, entries = build(tmp_path)
     baseline = lint_file.with_name(f"{stem}_baseline.json")
@@ -537,20 +403,6 @@ def test_o1_update_baseline_over_a_blind_scan_keeps_the_baseline(tmp_path, stem)
     assert control.returncode == 0, f"control: --update-baseline failed\n{_said(control)}"
     assert baseline.read_bytes() != before, "control: --update-baseline wrote nothing"
 
-
-# ======================================================================================
-# O2 — the closure is a rule over every name, matched exactly
-# ======================================================================================
-
-
-# ======================================================================================
-# O4 / D3 — the escape fixes, by mechanism
-# ======================================================================================
-
-
-# ======================================================================================
-# Design amendment 1 — O1 restated: an entry that EXISTS but selects nothing is blind
-# ======================================================================================
 
 #: Each lint's probe and the stream its finding lands on (tree-write's listed modules are
 #: hard-gated, reported on stderr).
@@ -594,15 +446,6 @@ REAL_IDLE: dict[str, tuple[str, str]] = {
 }
 
 
-# ======================================================================================
-# O5 — what a lint scans does not depend on where the checkout lives, or on ignored content
-# ======================================================================================
-
-
-# ======================================================================================
-# O6 — the written scope is derived from the two lists
-# ======================================================================================
-
 #: Prints the copied run-records lint's SCOPE_STATEMENT (argv[1]: the copy's directory).
 _READ_STATEMENT = ("import sys; sys.path.insert(0, sys.argv[1]); "
                    "import lint_run_records as m; print(m.SCOPE_STATEMENT)")
@@ -628,22 +471,7 @@ def _spelled(text: str, path: str) -> bool:
     return re.search(rf"(?<![\w./-]){re.escape(path)}(?![\w./-])", text) is not None
 
 
-# ======================================================================================
-# O7 — a blind run-records scan writes nothing
-# ======================================================================================
-
-
-# ======================================================================================
-# Holes the amendment adversary found in 0d415c26 (each passed by a cheating implementation)
-# ======================================================================================
-
-
 def test_source_files_follows_the_repos_own_ignore_rules(tmp_path, monkeypatch):
-    """`source_files` drops exactly what git ignores, by the repo's OWN rules — not a list of
-    usual names: here `.gitignore` ignores another directory name, a file glob, and re-includes
-    one file by negation, and does NOT ignore `build/` or `venv/`. (Git's global and system
-    config are switched off for this test so a developer's own excludes cannot change the
-    answer.)"""
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
@@ -684,11 +512,6 @@ def _undecodable_name() -> str:
 
 
 def test_source_files_refuses_an_undecodable_file_name(tmp_path):
-    """O10/D10 (supersedes amendment 1's "returns it"): a module whose name is not valid UTF-8 is
-    refused loudly — `source_files` raises `ScanBlind` naming it in escaped (`ascii()`) form —
-    outside a repo, and in a git repo whether the module is tracked or untracked (amendment 3:
-    the git path lists it, and a LISTED name is still refused). Skipped where the filesystem
-    refuses such a name."""
     astlib = import_lint_lib("_astlib")
     bad = _undecodable_name()
     for case in GIT_CASES:
@@ -702,10 +525,6 @@ def test_source_files_refuses_an_undecodable_file_name(tmp_path):
 
 
 def test_source_files_refuses_an_undecodable_directory_name(tmp_path):
-    """O10/D10 on a DIRECTORY component: a module whose root-relative name is not valid UTF-8
-    only because of the directory it sits in (`bad\\xffdir/m.py`, a valid basename) is refused
-    the same way — `ScanBlind` naming the directory in escaped form — outside a repo, and in a
-    git repo tracked or untracked."""
     astlib = import_lint_lib("_astlib")
     bad_dir = os.fsdecode(b"bad\xffdir")
     for case in GIT_CASES:
@@ -716,11 +535,6 @@ def test_source_files_refuses_an_undecodable_directory_name(tmp_path):
         message = str(caught.value)
         assert "bad\\udcffdir" in message, (
             f"{case}: the refusal does not name {ascii(bad_dir)}: {message!r}")
-
-
-# ======================================================================================
-# Design amendment 2 — the shared listing's edges (D8–D11) and the review's findings (O12–O16)
-# ======================================================================================
 
 
 def test_source_files_lists_the_suffixes_it_is_asked_for(tmp_path):
@@ -748,9 +562,6 @@ def _locked_dir(path: Path) -> Path:
 
 
 def test_source_files_is_blind_on_an_unreadable_directory(tmp_path):
-    """O9/D9: a directory under the root that the listing cannot read raises `ScanBlind` naming
-    it — never a silent skip of what it holds — outside a repo (the walk) and in a git repo,
-    the dir tracked or untracked (amendment 3: git lists past it with only a warning)."""
     astlib = import_lint_lib("_astlib")
     for case in GIT_CASES:
         repo = _git_case(tmp_path / case, case, before=lambda r: _write(r / "defender" / "kept.py"),
@@ -781,10 +592,6 @@ def test_o9_an_unreadable_directory_blinds_a_lint(tmp_path, capsys):
 
 
 def test_o10_an_undecodable_module_name_blinds_a_lint_without_a_traceback(tmp_path):
-    """O10 through a lint, on a strict-UTF-8 stdout/stderr: the tree-write lint over a mini repo
-    holding a module named by the bytes `bad\\xff.py` (and carrying a raw write, so a lint that
-    reported it would print the name) exits 2, shows the name escaped, and prints no traceback.
-    Control: the same mini repo without it exits 0."""
     lint_file, _entries = _tree_write_mini(tmp_path)
     strict = {"PYTHONIOENCODING": "utf-8:strict"}
     clean = _run(lint_file, env_extra=strict)
@@ -801,9 +608,6 @@ def test_o10_an_undecodable_module_name_blinds_a_lint_without_a_traceback(tmp_pa
 
 
 def test_source_files_lists_a_tree_inside_an_ignored_directory_in_full(tmp_path):
-    """O11/D11: a planted tree that sits inside a git-ignored directory of the enclosing repo
-    (`<repo>/build/planted`, `build/` ignored) is listed in full — the root being ignored does
-    not make everything under it vanish. (A dir ignored BELOW the root still is: amendment 1.)"""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     _write(repo / "kept.py")
@@ -815,10 +619,6 @@ def test_source_files_lists_a_tree_inside_an_ignored_directory_in_full(tmp_path)
 
 
 def test_source_files_drops_ignored_modules_under_a_root_git_does_not_ignore(tmp_path):
-    """D11's exception is for a ROOT git ignores, asked of git — not inferred from the files: a
-    root that is NOT ignored, every module of which happens to be ignored (generated modules,
-    `*_gen_1191.py`), lists nothing. Control: the same tree with one module that is not ignored
-    lists just that one."""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     _write(repo / "README.md", "x\n")
@@ -859,11 +659,6 @@ _STAGE_FRAMES_MAIN = ("import sys; from pathlib import Path; sys.path.insert(0, 
                       "sys.exit(m.main([], scope=Path(sys.argv[2]), baseline_path=Path(sys.argv[3])))")
 
 
-# ======================================================================================
-# Design amendment 3 — what git would put in the tree (O5 restated, O17)
-# ======================================================================================
-
-
 def _ignored_tree(repo: Path) -> Path:
     """A git repo ignoring IGNORES whose `defender/` holds a kept module, a module in a package,
     and nothing else that is source. Returns `defender/`."""
@@ -874,10 +669,6 @@ def _ignored_tree(repo: Path) -> Path:
 
 
 def test_source_files_never_enters_an_ignored_dir_holding_undecodable_names(tmp_path):
-    """O5 restated (a)/D17: in a git repo, non-UTF-8 names that git ignores — a module and a
-    directory inside an ignored `zz_ign_1191/` (top-level and nested), and a module whose ignored
-    file NAME is not UTF-8 — are not listed and do not make the listing blind: O10 applies only
-    to what is listed."""
     astlib = import_lint_lib("_astlib")
     root = _ignored_tree(tmp_path / "repo")
     bad_file, bad_dir = os.fsdecode(b"bad\xff_1191.py"), os.fsdecode(b"bad\xffdir_1191")
@@ -892,9 +683,6 @@ def test_source_files_never_enters_an_ignored_dir_holding_undecodable_names(tmp_
 
 
 def test_source_files_never_enters_an_ignored_unreadable_dir(tmp_path):
-    """O5 restated (a)/D17: in a git repo, a mode-000 directory inside an ignored `zz_ign_1191/`
-    is never entered: no `ScanBlind`, nothing from it listed. Skipped where the mode is not
-    enforced (root with the DAC capabilities)."""
     astlib = import_lint_lib("_astlib")
     root = _ignored_tree(tmp_path / "repo")
     locked = _locked_dir(root / "zz_ign_1191" / "locked_1191")
@@ -911,9 +699,6 @@ _LIST_FROM_CWD = ("import json, sys; from pathlib import Path; sys.path.insert(0
 
 @pytest.mark.parametrize("spelled", ["defender", "./defender", "defender/pkg/.."])
 def test_source_files_from_a_relative_root_keeps_anchored_ignores(tmp_path, spelled):
-    """O5 restated (c)/D17 (r2): `source_files` handed a RELATIVE root, from the repo's top as
-    cwd, lists what it lists from the absolute root — an anchored ignore (`/defender/runs/`)
-    still drops `runs/`. Run in a child process so the cwd is the fixture repo's."""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     _write(repo / "defender" / "kept.py")
@@ -959,9 +744,6 @@ def _git_tree(repo: Path) -> Path:
 
 
 def test_source_files_lists_tracked_modules_git_would_ignore(tmp_path):
-    """O5 restated ("tracked files plus untracked files that are not ignored"): a module
-    force-added (`git add -f`) under an ignored dir, and a tracked module whose own name is
-    ignored, are TRACKED — listed."""
     astlib = import_lint_lib("_astlib")
     root = _git_tree(tmp_path / "repo")
     _write(root / "zz_ign_1191" / "forced_1191.py")
@@ -995,9 +777,6 @@ def test_source_files_lists_names_git_would_quote(tmp_path, case):
 
 @pytest.mark.parametrize("case", ["tracked", "untracked"])
 def test_source_files_lists_a_dangling_symlink_module(tmp_path, case):
-    """D17 (as corrected): only a path that is GONE is dropped. A dangling symlink module is
-    there (`lstat` succeeds), so it is listed — tracked or untracked — and the gate that cannot
-    read it says so (see the all-lints test)."""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     _write(repo / "defender" / "kept.py")
@@ -1011,9 +790,6 @@ def test_source_files_lists_a_dangling_symlink_module(tmp_path, case):
 
 
 def test_source_files_drops_a_tracked_module_whose_dir_became_a_file(tmp_path):
-    """D17 (as corrected): `NotADirectoryError` is "gone" too — a tracked `pkg/nd_1191/m.py`
-    whose directory was replaced by a plain file is not listed, and does not blind the
-    listing."""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     root = _git_tree(repo)
@@ -1026,10 +802,6 @@ def test_source_files_drops_a_tracked_module_whose_dir_became_a_file(tmp_path):
 
 @pytest.mark.parametrize("case", ["tracked", "untracked"])
 def test_source_files_is_blind_on_a_listed_module_it_cannot_stat(tmp_path, case):
-    """O9 + the D17 correction: a mode-0644 directory (its names readable, its entries not
-    searchable) holding a tracked or untracked module — git lists the module with no warning,
-    `lstat` then fails with EACCES, which is NOT "gone": `ScanBlind` naming it, never a silent
-    drop. Skipped where the mode is not enforced (root with the DAC capabilities)."""
     astlib = import_lint_lib("_astlib")
     repo = tmp_path / "repo"
     _write(repo / "defender" / "kept.py")
@@ -1059,10 +831,6 @@ def _unsearchable_dir(path: Path) -> Path:
 
 
 def test_source_files_prunes_nested_dirs_on_the_git_path(tmp_path):
-    """D17 step 4 ("on either path ... drop any file under a directory `prune` rejects"): in a
-    git repo, a venv (`pyvenv.cfg`) and a hidden dir NESTED below the top level, untracked and
-    not ignored, are pruned as the walk prunes them. Control: their sibling module is kept, and
-    outside a repo the same `prune` gives the same listing."""
     astlib = import_lint_lib("_astlib")
 
     def lay_out(root: Path) -> None:
@@ -1086,9 +854,6 @@ def test_source_files_prunes_nested_dirs_on_the_git_path(tmp_path):
 
 
 def test_source_files_refuses_only_kept_undecodable_names(tmp_path):
-    """D17 step 4 (O10 limited to KEPT paths): in a git repo, an untracked, not-ignored non-`.py`
-    file with a bad name, and a bad `.py` name inside an excluded dir, are not kept — a `.py`
-    listing is not blind. Control: the same bad name kept (a `.md` listing) is refused."""
     astlib = import_lint_lib("_astlib")
     root = _git_tree(tmp_path / "repo")
     try:

@@ -1,10 +1,3 @@
-"""Tests for run's first-party API-key provisioning (the .env-leak fix).
-
-The PydanticAI engine bills the first-party REST API, so it must source a real
-key from `.env` rather than the ambient ANTHROPIC_API_KEY (which, inside a Claude
-Code session, is the subscription credential and 401s). Pins: a `.env` key wins
-over the ambient value, `$DEFENDER_ENV_FILE` overrides, and absence is reported.
-"""
 from __future__ import annotations
 
 import sys

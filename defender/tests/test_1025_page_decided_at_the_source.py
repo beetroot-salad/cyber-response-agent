@@ -38,11 +38,6 @@ def _world(page: E.Page, label: str) -> str:
     return page.text_of(f"world-{label}")
 
 
-# ---------------------------------------------------------------------------------------
-# The refusal scrub is anchored to a path boundary
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
     """Rendered from `re` — a directory named with a substring of `report.md` and `read` — the
     report slot's refusal still says `report.md` and `could not be read`, whole: no."""
@@ -61,11 +56,6 @@ def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
     # said bare — never as a quoted filename cut down from an absolute path
     assert f"'worlds/{E.GRADED_WORLD}/report.md'" not in world, world
     assert "re/worlds" not in page.raw
-
-
-# ---------------------------------------------------------------------------------------
-# One step wall, one role cost, one census — decided at load
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_the_runs_launcher_line_and_the_runs_row_show_one_wall(tmp_path):
@@ -133,11 +123,6 @@ def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_coun
     assert "1 draw documents unreadable" in findings, findings
 
 
-# ---------------------------------------------------------------------------------------
-# Guards applied at the seam, on every sibling
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_negative_duration_is_that_slots_own_absence(tmp_path):
     """A negative `duration_ms` off a box-writable trace is gated like a negative cost."""
     ep = E.sample_episode(tmp_path)
@@ -179,11 +164,6 @@ def test_1025_record_derived_refusals_take_the_untrusted_escape(tmp_path):
     assert "grade record unreadable" in page.text_of("sec-verdict")
     assert "onerror=" not in page.raw, "a record-derived sentence reached the page unsplit"
     assert hostile in page.text, page.text[:400]
-
-
-# ---------------------------------------------------------------------------------------
-# The shared reader owns the gather-summary read
-# ---------------------------------------------------------------------------------------
 
 
 @NOT_ROOT

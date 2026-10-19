@@ -27,9 +27,6 @@ VALID_RUN_IDS = (
     "a..b",
 )
 
-#: Grammar-valid but NOT case-stable (#1077 decision 20): the slug grammar admits them, and
-#: `materialize_run` refuses them like every other constructor of a run directory — two
-#: spellings of one id are one directory wherever the filesystem folds case.
 MIXED_CASE_RUN_IDS = ("A_1", "Run-123", "20260101T000000Z-solo")
 
 INVALID_RUN_IDS = (
@@ -107,9 +104,6 @@ def test_materialize_accepts_a_valid_run_id(tmp_path, monkeypatch, run_id):
     run_dir = run_common.materialize_run(alert, run_id, tenant=tenant).run_dir
 
     assert run_dir == runs_base / run_id
-    # THE ACCESSORS, not the filenames re-typed here: `_layout.PROVENANCE`'s own comment is
-    # that a second spelling of a run-dir name keeps agreeing with itself the day the writer
-    # renames the file, and this arm is exactly such a second spelling.
     rp = RunPaths(run_dir)
     assert sorted(path.name for path in run_dir.iterdir()) == sorted(
         p.name for p in (rp.alert_input_dir, rp.gather_raw, rp.provenance)

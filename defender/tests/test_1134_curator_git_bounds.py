@@ -1,9 +1,3 @@
-"""#1134 curator step: the curator's git calls cannot hang the tick. A FIFO the agent leaves at
-`.gitignore` / `.gitattributes` must never block git: every git call the tick and the fault undo make is
-bounded by `cfg.git_timeout` (a timeout is `GitProbeError`, fails closed, and never replaces the
-original fault), curator git calls run with `GIT_ATTR_SOURCE=HEAD`, the `_git` helpers take
-`timeout=` and ignore replace objects, and the commit itself is not bounded. Every FIFO scene and
-stalled git runs under `_within`'s deadline so a regression is one failed test, not a wedged worker."""
 from __future__ import annotations
 
 import contextlib
@@ -29,11 +23,6 @@ from defender.tests import _spec773 as S
 from defender.tests._curator1134 import lesson_text, plant_fifo, put, world
 from defender.tests.test_1134_curator_drain import PLANTED, SEEDED, _scene
 
-#: The bound a scene sets (`git_timeout`) or a `_git` call passes (`timeout=`) when a git call is
-#: meant to time out: small, so a scene with three or four timed-out reads stays a few seconds,
-#: and no shorter than `STALL_BOUND`, which the census scenes show every answering git call (shim
-#: included) meets eight scenes at a time. Not a whole number, so the message naming it (H2) is
-#: checked however a float is spelled.
 BOUND = 1.5
 #: How long a scene or a call may take before the test fails, generous for a loaded box: a
 #: scene here answers in a few seconds once nothing blocks.
@@ -41,20 +30,12 @@ DEADLINE = 40.0
 #: How long the shim git sleeps on its subcommand: past `DEADLINE`, so an unbounded call fails the
 #: test at the deadline rather than answering late.
 SHIM_SLEEP = 60
-#: How soon a `_git` call given `timeout=BOUND` must have raised: ten times the bound, far short
-#: of the shim's sleep, so a helper that bounds the process by anything but the caller's
-#: `timeout` (a fixed value of its own) fails here even when it does raise.
 PROMPTLY = 10 * BOUND
 #: The corpus folder's spelling, the pathspec the curator hands git.
 LESSONS = "defender/lessons"
 #: A second seeded lesson, which the agent leaves stat-dirty with its bytes unchanged, so the
 #: index cannot vouch for it and `git status` / `reset` must re-hash it (reading its attributes).
 TOUCHED = "touched-lesson.md"
-
-
-# ---------------------------------------------------------------------------------------
-# The deadline, the shim git, and small observers
-# ---------------------------------------------------------------------------------------
 
 
 def _release(fifo: Path) -> None:
@@ -230,11 +211,6 @@ def _stat_dirty(at: Path) -> None:
     os.utime(at, (st.st_atime, st.st_mtime + 100))
 
 
-# ---------------------------------------------------------------------------------------
-# A: a `.gitignore` FIFO makes the tick's git reads time out; the tick is a stuck probe
-# ---------------------------------------------------------------------------------------
-
-
 def _gitignore_scene(tmp_path: Path, plant: Callable[[Path], None]) -> Any:
     """The curator writes an attributable lesson `PLANTED`, rewrites seeded `SEEDED` (still
     citing the batch, so the compare has work and a normal tick would commit it), and leaves
@@ -250,21 +226,6 @@ def _gitignore_scene(tmp_path: Path, plant: Callable[[Path], None]) -> Any:
 def test_a_gitignore_fifo_the_agent_leaves_is_a_stuck_git_probe_not_a_hung_tick(
     tmp_path, monkeypatch, caplog,
 ):
-    """The agent leaves a FIFO at `<corpus>/.gitignore`. The settle's first `git status` would
-    block opening it; bounded, it does not answer within `BOUND`, which is the tick's
-    `GitProbeError` (exact type, its message naming the bound's value): recorded stuck under that
-    class, `f1` not bumped, nothing committed. The fault undo's own `git status` and its `git
-    ls-files` fallback (which a logging shim git shows did run) time out the same way (one WARNING
-    naming both: nothing swept), its compare (`git
-    diff`, which reads no `.gitignore`) answers, so `SEEDED` is written back to its committed
-    bytes; `_revert_strays`' status times out silently; the `GitProbeError` still comes out.
-
-    Declared outcome: `PLANTED` still stands (git cannot say what the agent made, so nothing is
-    swept), and so does the FIFO, both left for the scrub.
-
-    Catches: an unbounded status (the tick hangs, holding the repo lock); a `TimeoutExpired`
-    leaking out of the settle unrouted, or out of the undo in place of the probe error; an undo
-    that, its status timed out, never asks `git ls-files` (H6)."""
     caplog.set_level(logging.WARNING)
     sc = _gitignore_scene(tmp_path, plant_fifo)
     fifo = sc.corpus / ".gitignore"
@@ -293,9 +254,6 @@ def test_a_gitignore_fifo_the_agent_leaves_is_a_stuck_git_probe_not_a_hung_tick(
 
 
 def test_control_a_plain_gitignore_is_a_stray_and_the_tick_commits(tmp_path):
-    """The positive control at the same address under the same bound: a plain `.gitignore` is a
-    non-`.md` stray, reverted by the settle; the tick commits `PLANTED` and `SEEDED`'s rewrite
-    (rc 0), nothing stuck."""
     sc = _gitignore_scene(tmp_path, lambda at: put(at, "*.tmp\n"))
 
     got = _tick(sc)
@@ -307,10 +265,6 @@ def test_control_a_plain_gitignore_is_a_stray_and_the_tick_commits(tmp_path):
     assert sc.category_of("f1") == "consumed_committed"
     assert _stuck_classes(sc) == []
 
-
-# ---------------------------------------------------------------------------------------
-# B: a `.gitattributes` FIFO is never opened; the tick commits
-# ---------------------------------------------------------------------------------------
 
 _SEEDS = {SEEDED: lesson_text("f0"), TOUCHED: lesson_text("f0", mark="touched")}
 
@@ -344,16 +298,6 @@ def _assert_committed_cleanly(sc: Any) -> None:
 
 
 def test_a_gitattributes_fifo_the_agent_leaves_is_never_opened_and_the_tick_commits(tmp_path):
-    """The agent leaves a FIFO at `<corpus>/.gitattributes` and an index that cannot vouch for
-    `TOUCHED` (stat-dirty) or `SEEDED` (mode-only change). Every curator git call reads
-    attributes from HEAD's tree (`GIT_ATTR_SOURCE=HEAD`), so the settle's re-hashing `git status`,
-    its `git checkout` of `SEEDED`, and the commit's `git add` / `git commit -- <paths>` never
-    open the FIFO: the tick completes normally (rc 0), `PLANTED` committed, `SEEDED` back to
-    its committed bytes and mode, nothing stuck. The FIFO still stands (git lists no untracked
-    FIFO, so nothing removed it: the tick got through with it in place).
-
-    Catches: any of those git calls reading the worktree's attributes (the tick hangs; here, the
-    deadline), and a fix that gets through by removing the plant instead."""
     sc = _gitattributes_scene(tmp_path, plant_fifo, lesson=lesson_text("f1"))
     fifo = sc.corpus / ".gitattributes"
 
@@ -378,13 +322,6 @@ def test_control_a_plain_gitattributes_is_a_stray_reverted_before_the_commit(tmp
     _assert_committed_cleanly(sc)
 
 
-# ---------------------------------------------------------------------------------------
-# C: the same plant on the fault path; the undo asks git and the fault keeps its routing
-# ---------------------------------------------------------------------------------------
-
-#: The two fault routes into `_undo_agent_edits`: the agent raising right after its edits (so the
-#: undo is the first host code to meet the plant and the stat-dirty index), and an unattributable
-#: lesson the settle passes and the vouching gate refuses.
 _ROUTES = {
     "the agent raises": (lesson_text("f1"), True),
     "an unattributable lesson": (lesson_text("not-this-batch"), False),
@@ -419,14 +356,6 @@ def _assert_fault_undone(sc: Any, caplog: Any) -> None:
 def test_a_gitattributes_fifo_on_the_fault_path_is_never_opened_and_the_fault_retires(
     tmp_path, caplog, route,
 ):
-    """The `.gitattributes` FIFO and the stat-dirty index again, with `SEEDED` rewritten, on a
-    fault route (`AuthorError`). The undo's `git reset`, `git status` and compare read attributes
-    from HEAD's tree, so none opens the FIFO and each answers: the fault retires as ever (rc 2,
-    `f1` bumped, recorded stuck under `AuthorError`), `SEEDED` holds its committed bytes again,
-    the agent's lesson is swept, no restore fallback is logged, and the FIFO stands.
-
-    Catches: an undo whose reset or status reads the worktree's attributes (the deadline, under
-    the default bound), or one that times out and falls back (the WARNING)."""
     caplog.set_level(logging.WARNING)
     sc = _fault_scene(tmp_path, plant_fifo, route)
     fifo = sc.corpus / ".gitattributes"
@@ -455,23 +384,9 @@ def test_control_a_plain_gitattributes_on_the_fault_path_is_swept_and_the_fault_
     _assert_fault_undone(sc, caplog)
 
 
-# ---------------------------------------------------------------------------------------
-# A comparison that does not answer: the settle's probe error, the undo's write-back fallback
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_comparison_that_does_not_answer_is_the_ticks_probe_and_the_undo_writes_back(
     tmp_path, monkeypatch, caplog,
 ):
-    """Every `git diff` sleeps past the bound (a shim git). The curator chmods `SEEDED`, so the
-    settle compares it (`_byte_identical_to_head`); unanswered, that is the tick's
-    `GitProbeError` ("did not answer within"), recorded stuck, `f1` not bumped, nothing
-    committed. The undo's own compare times out too: it is handled like a failed one (a WARNING
-    naming `git diff`; every before-state file written back), so `SEEDED` holds its committed
-    bytes, the agent's lesson is swept (its status answered), and the probe error still comes out.
-
-    Catches: a comparison left unbounded, a timed-out one read as an answer, or a
-    `TimeoutExpired` from the undo's compare replacing the fault."""
     caplog.set_level(logging.WARNING)
 
     def chmod_seeded(rows, batch_id, cfg):
@@ -497,10 +412,6 @@ def test_a_comparison_that_does_not_answer_is_the_ticks_probe_and_the_undo_write
     assert len(written_back) == 1, _warnings(caplog)
     assert "git diff" in written_back[0], written_back[0]
 
-
-# ---------------------------------------------------------------------------------------
-# D: the `_git` helpers bound every git process they run
-# ---------------------------------------------------------------------------------------
 
 KEPT = lesson_text("f0", mark="kept")
 ORIGINAL = lesson_text("f0", mark="original")
@@ -570,12 +481,6 @@ def helper_stalls(dispatch_shim, tmp_path_factory):
 def test_each_git_process_a_helper_runs_is_bounded_by_its_timeout(
     helper_stalls, helper, subcommand,
 ):
-    """A shim git sleeps on one subcommand the helper runs and answers every other at once: the
-    helper, given `timeout=BOUND`, raises `subprocess.TimeoutExpired` (exact type, unconverted:
-    `scripts/tenant.py` catches that type) within `PROMPTLY`.
-
-    Catches: a helper that bounds some of its git processes but not this one, or bounds it by a
-    value of its own rather than the caller's `timeout`."""
     result, got, took, shim = helper_stalls[(helper, subcommand)]
 
     assert result == "raised", got
@@ -588,9 +493,6 @@ def test_each_git_process_a_helper_runs_is_bounded_by_its_timeout(
 def test_control_through_a_git_that_answers_each_helper_answers_under_its_timeout(
     tmp_path, monkeypatch, helper, subcommand,
 ):
-    """The positive control at the same address: the shim on `PATH` but sleeping on nothing.
-    The helper, given the same `timeout=`, answers what it always has, and the shim saw the
-    subcommand (the negative's sleep is what timed out, not the shim)."""
     w = _corpus_repo(tmp_path)
     with monkeypatch.context() as patch:
         shim = _shim_git(tmp_path / "git-shim", patch)
@@ -602,9 +504,6 @@ def test_control_through_a_git_that_answers_each_helper_answers_under_its_timeou
 
 
 def test_git_worktree_files_over_a_gitignore_fifo_times_out(tmp_path):
-    """No shim: a real FIFO at `<corpus>/.gitignore`. `git ls-files --exclude-standard` blocks
-    opening it; bounded, `git_worktree_files(..., timeout=BOUND)` raises
-    `subprocess.TimeoutExpired` within `PROMPTLY`, and the FIFO is left as it was."""
     w = _corpus_repo(tmp_path)
     fifo = w.corpus_dir / ".gitignore"
     plant_fifo(fifo)
@@ -621,9 +520,6 @@ def test_git_worktree_files_over_a_gitignore_fifo_times_out(tmp_path):
 
 
 def test_control_git_worktree_files_honours_a_plain_gitignore_under_its_timeout(tmp_path):
-    """The positive control at the same address: a plain `.gitignore` naming `ignored.md`. The
-    helper answers every other worktree file, `.gitignore` itself included, and not
-    `ignored.md`."""
     w = _corpus_repo(tmp_path)
     put(w.corpus_dir / ".gitignore", "ignored.md\n")
     put(w.corpus_dir / "ignored.md", NEW)
@@ -635,10 +531,6 @@ def test_control_git_worktree_files_honours_a_plain_gitignore_under_its_timeout(
     assert got == [f"{LESSONS}/{n}" for n in (".gitignore", ".gitkeep", "kept.md", "new.md",
                                                "rewritten.md")]
 
-
-# ---------------------------------------------------------------------------------------
-# E: replace objects never stand in for the commit's own blobs
-# ---------------------------------------------------------------------------------------
 
 REPLACEMENT = lesson_text("f0", mark="the replacement object's bytes")
 _REPLACED = f"{LESSONS}/replaced.md"
@@ -661,22 +553,12 @@ def _replaced_repo(tmp_path: Path) -> Any:
 
 
 def test_git_tree_blobs_reads_the_commits_own_blob_not_its_replacement(tmp_path):
-    """`git_tree_blobs` answers the bytes the commit stores (`ORIGINAL`), not the replace
-    object's: the before-state is the real commit's.
-
-    Catches: a `cat-file --batch` run with replace refs honoured (today's)."""
     w = _replaced_repo(tmp_path)
 
     assert _git.git_tree_blobs(w.repo, "HEAD", LESSONS)[_REPLACED] == ORIGINAL.encode()
 
 
 def test_git_unchanged_since_compares_with_the_commits_own_blob_not_its_replacement(tmp_path):
-    """`git_unchanged_since` compares against the blob the commit stores. The worktree holding
-    `ORIGINAL` (rewritten, stat-dirty, so git hashes it) is unchanged; holding the replacement's
-    bytes it is changed.
-
-    Catches: a `git diff` run with replace refs honoured (today's), which calls the
-    replacement's bytes unchanged."""
     w = _replaced_repo(tmp_path)
     at = w.corpus_dir / "replaced.md"
     put(at, ORIGINAL)
@@ -687,17 +569,7 @@ def test_git_unchanged_since_compares_with_the_commits_own_blob_not_its_replacem
     assert _REPLACED not in _git.git_unchanged_since(w.repo, "HEAD", LESSONS)
 
 
-# ---------------------------------------------------------------------------------------
-# F: the probe wrapper routes a timed-out read
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_git_read_that_does_not_answer_in_time_is_a_git_probe_error():
-    """`drain._git_read` turns a step's `subprocess.TimeoutExpired` into `GitProbeError` (exact
-    type), its message saying git did not answer within the bound, and naming its value (H2).
-
-    Catches: a timed-out read escaping the wrapper as `TimeoutExpired`, a class the tick neither
-    retires nor names as a git failure."""
     def unanswered():
         raise subprocess.TimeoutExpired(["git", "status"], BOUND)
 
@@ -707,10 +579,6 @@ def test_a_git_read_that_does_not_answer_in_time_is_a_git_probe_error():
     assert "did not answer within" in str(got), str(got)
     assert str(BOUND) in str(got), str(got)
 
-
-# ---------------------------------------------------------------------------------------
-# H1: every git call between the clean gate and the commit is bounded (an ordinal census)
-# ---------------------------------------------------------------------------------------
 
 #: The bound the census scenes and the other stall scenes set: short, since a census stalls each
 #: of its calls in turn. Not a whole number, so the message naming it is checked however spelled.
@@ -743,10 +611,6 @@ def _census_scene(at: Path, *, undo: bool) -> Any:
                   git_timeout=STALL_BOUND)
 
 
-#: The one `git` the census scenes share, found by the scene's own `git-shim-cfg` file in an
-#: ancestor of the directory git runs in (the repo root, under the scene's `at`). A scene with no
-#: such file gets the real git untouched, so scenes built or run side by side on threads each
-#: stall only their own calls.
 _DISPATCH_SHIM = """#!/bin/sh
 d=$(pwd -P); cfg=
 while :; do
@@ -883,17 +747,6 @@ def _stalled_calls(stalls: dict, subcommand: str, census_log: list) -> list:
 def test_every_git_call_the_tick_makes_before_its_commit_is_bounded(
     tick_census, tick_stalls, subcommand,
 ):
-    """H1. A census tick (nothing stalled: the positive control) commits `PLANTED` and the
-    rewritten `SEEDED`; its shim's log lists every git call it made. Every call running `subcommand` after the
-    tick-start clean gate (the first call, a `git status` deliberately unbounded) and before the
-    commit's first `git add` (the commit is unbounded by contract) is then stalled alone, in a
-    fresh scene: each is the tick's `GitProbeError` within the deadline, its message naming
-    `STALL_BOUND`, recorded stuck, `f1` not bumped, nothing committed; a call before the agent ran
-    (the HEAD read, the before-state's `ls-tree` / `cat-file`, the whole-worktree status) stops the
-    tick before the agent is spawned.
-
-    Catches: a path whose first read is bounded and whose later ones are not (x1), a pre-agent
-    read left unbounded, a settle restore or report cross-check left unbounded."""
     sc, got, shim = tick_census
     assert got == ("rc", 0), got
     assert sc.head_files() == sorted([f"{LESSONS}/{PLANTED}", f"{LESSONS}/{SEEDED}"])
@@ -919,14 +772,6 @@ def test_every_git_call_the_tick_makes_before_its_commit_is_bounded(
 def test_every_git_call_the_fault_undo_makes_is_bounded_and_the_fault_keeps_its_routing(
     undo_census, undo_stalls, subcommand,
 ):
-    """H1, the fault undo. A census tick whose agent raises `AuthorError` after its edits (the
-    positive control: it retires, rc 2, `f1` bumped, recorded stuck under `AuthorError`); every
-    git call after the agent ran is the undo's. Each running `subcommand` is then stalled alone,
-    in a fresh scene: the undo handles it as a failed step and the fault keeps its routing within
-    the deadline (rc 2, `f1` bumped once, stuck `AuthorError`, nothing committed).
-
-    Catches: an undo step left unbounded (the tick hangs) or one whose `TimeoutExpired` replaces
-    the fault being unwound (x3)."""
     sc, got, shim = undo_census
     assert got == ("rc", 2), got
     assert sc.pending_by_id()["f1"].get("attempts") == 1
@@ -938,11 +783,6 @@ def test_every_git_call_the_fault_undo_makes_is_bounded_and_the_fault_keeps_its_
         assert stalled.pending_by_id()["f1"].get("attempts") == 1, where
         assert _stuck_classes(stalled) == ["AuthorError"], where
         assert stalled.head_files() == [], where
-
-
-# ---------------------------------------------------------------------------------------
-# H3 / H6: the fault undo's rev-parse, reset and status, each not answering
-# ---------------------------------------------------------------------------------------
 
 
 def _undo_scene(tmp_path: Path) -> Any:
@@ -984,11 +824,6 @@ def _reached_after_agent(shim: _Shim, subcommand: str) -> bool:
 def test_a_fault_undo_whose_rev_parse_does_not_answer_keeps_the_fault_and_deletes_nothing(
     tmp_path, monkeypatch,
 ):
-    """H3. The undo's `git rev-parse HEAD` (`_commit_landed`) does not answer within the bound:
-    git cannot say whether the commit landed, which reads as "it did", so nothing is deleted
-    (`PLANTED` still stands), and the `AuthorError` keeps its routing (rc 2, bumped, stuck).
-
-    Catches: a `TimeoutExpired` out of `_commit_landed` replacing the fault (x3)."""
     sc, got, shim = _undo_run(tmp_path, monkeypatch, stall_after="rev-parse")
 
     assert _reached_after_agent(shim, "rev-parse")
@@ -999,11 +834,6 @@ def test_a_fault_undo_whose_rev_parse_does_not_answer_keeps_the_fault_and_delete
 def test_a_fault_undo_whose_reset_does_not_answer_keeps_the_fault_and_still_restores(
     tmp_path, monkeypatch,
 ):
-    """H3. The undo's `git reset` does not answer within the bound: it is passed over like its
-    unchecked exit, the restore still runs (`PLANTED` swept, `SEEDED` written back), and the
-    `AuthorError` keeps its routing.
-
-    Catches: a `TimeoutExpired` out of the reset replacing the fault (x3)."""
     sc, got, shim = _undo_run(tmp_path, monkeypatch, stall_after="reset")
 
     assert _reached_after_agent(shim, "reset")
@@ -1015,11 +845,6 @@ def test_a_fault_undo_whose_reset_does_not_answer_keeps_the_fault_and_still_rest
 def test_a_fault_undo_whose_status_does_not_answer_sweeps_what_git_ls_files_names(
     tmp_path, monkeypatch, caplog,
 ):
-    """H6. Every `git status` after the agent ran does not answer within the bound: the undo
-    falls back to `git ls-files --others` (which does run), sweeps the agent's lesson it names,
-    writes `SEEDED` back, logs the one fallback WARNING, and the `AuthorError` keeps its routing.
-
-    Catches: a timed-out status that skips the `git ls-files` fallback and sweeps nothing (x6)."""
     caplog.set_level(logging.WARNING)
     sc, got, shim = _undo_run(tmp_path, monkeypatch, stall_after="status")
 
@@ -1036,9 +861,6 @@ def test_a_fault_undo_whose_status_does_not_answer_sweeps_what_git_ls_files_name
 def test_control_a_fault_undo_whose_git_answers_sweeps_and_restores_without_a_fallback(
     tmp_path, monkeypatch, caplog,
 ):
-    """The positive control for H3 and H6, the same scene through the same shim stalling
-    nothing: the undo sweeps `PLANTED`, writes `SEEDED` back, asks no `git ls-files`, logs no
-    warning, and the fault retires."""
     caplog.set_level(logging.WARNING)
     sc, got, shim = _undo_run(tmp_path, monkeypatch)
 
@@ -1047,11 +869,6 @@ def test_control_a_fault_undo_whose_git_answers_sweeps_and_restores_without_a_fa
     assert not os.path.lexists(sc.corpus / PLANTED)
     assert (sc.corpus / SEEDED).read_text(encoding="utf-8") == lesson_text("f0")
     assert _warnings(caplog) == []
-
-
-# ---------------------------------------------------------------------------------------
-# H4: `_put_back`'s checkout reads attributes from HEAD
-# ---------------------------------------------------------------------------------------
 
 
 def _gitkeep_scene(tmp_path: Path, plant: Callable[[Path], None]) -> Any:
@@ -1068,11 +885,6 @@ def _gitkeep_scene(tmp_path: Path, plant: Callable[[Path], None]) -> Any:
 def test_a_gitattributes_fifo_beside_a_rewritten_gitkeep_is_never_opened_by_its_checkout(
     tmp_path,
 ):
-    """H4. `_put_back` checks the rewritten `.gitkeep` out with attributes from HEAD's tree, so
-    the `.gitattributes` FIFO is never opened: the tick commits `PLANTED` (rc 0), `.gitkeep` is
-    empty again, nothing stuck, and the FIFO stands.
-
-    Catches: a `_put_back` checkout run without `GIT_ATTR_SOURCE` (x4: it opens the FIFO)."""
     sc = _gitkeep_scene(tmp_path, plant_fifo)
     fifo = sc.corpus / ".gitattributes"
 
@@ -1099,10 +911,6 @@ def test_control_a_plain_gitattributes_beside_a_rewritten_gitkeep_is_reverted_wi
     assert (sc.corpus / ".gitkeep").read_text(encoding="utf-8") == ""
 
 
-# ---------------------------------------------------------------------------------------
-# H5: the bound is `cfg.git_timeout`, built from the 60-second constant
-# ---------------------------------------------------------------------------------------
-
 #: How long the shim holds the tick's first `git rev-parse` (the pre-agent HEAD read) before
 #: answering: past `STALL_BOUND` and past any bound under 3 s, well short of `_LONG_BOUND`.
 SLOW_READ = 4
@@ -1122,10 +930,6 @@ def _slow_head_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 
 
 def test_a_read_slower_than_a_short_git_timeout_is_a_probe_error_naming_it(tmp_path, monkeypatch):
-    """H5. Under `git_timeout=STALL_BOUND` the slow HEAD read does not answer in time: the tick's
-    `GitProbeError`, its message naming `STALL_BOUND`, before the agent is spawned.
-
-    Catches: a drain bound of its own in place of `cfg.git_timeout` (x2b)."""
     sc, got, _shim = _slow_head_run(tmp_path, monkeypatch, STALL_BOUND)
 
     result, exc = got
@@ -1137,20 +941,12 @@ def test_a_read_slower_than_a_short_git_timeout_is_a_probe_error_naming_it(tmp_p
 
 
 def test_control_the_same_slow_read_answers_under_a_long_git_timeout(tmp_path, monkeypatch):
-    """H5's pair: under `git_timeout=_LONG_BOUND` the same slow HEAD read answers and the tick
-    commits `PLANTED` (rc 0).
-
-    Catches: a drain bound of its own, shorter than the configured one (x2b)."""
     sc, got, shim = _slow_head_run(tmp_path, monkeypatch, _LONG_BOUND)
 
     assert got == ("rc", 0), got
     assert shim.ran("rev-parse")
     assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
 
-
-# ---------------------------------------------------------------------------------------
-# H7: the commit is not bounded
-# ---------------------------------------------------------------------------------------
 
 #: How long the scene's pre-commit hook takes: well past `STALL_BOUND`.
 SLOW_HOOK = 4
@@ -1159,11 +955,6 @@ SLOW_HOOK = 4
 def test_the_commit_is_not_bounded_a_pre_commit_hook_slower_than_git_timeout_still_commits(
     tmp_path,
 ):
-    """H7. The scene repo's pre-commit hook (`core.hooksPath`) takes `SLOW_HOOK` seconds, past
-    `git_timeout=STALL_BOUND`: the commit is not bounded (an operator's hooks may be slow), so the
-    hook runs to its end and the tick commits `PLANTED` (rc 0).
-
-    Catches: a `git commit` given the tick's bound (x7)."""
     sc = _scene(tmp_path, curator=S.FakeCurator(writes={PLANTED: lesson_text("f1")}),
                 git_timeout=STALL_BOUND)
     hooks = tmp_path / "hooks"
@@ -1181,10 +972,6 @@ def test_the_commit_is_not_bounded_a_pre_commit_hook_slower_than_git_timeout_sti
     assert sc.head_files() == [f"{LESSONS}/{PLANTED}"]
     assert _committed_blob(sc, PLANTED) == lesson_text("f1")
 
-
-# ---------------------------------------------------------------------------------------
-# H8: a replaced commit stands in for nothing
-# ---------------------------------------------------------------------------------------
 
 FORGED = lesson_text("f0", mark="the forged commit's bytes")
 
@@ -1211,10 +998,6 @@ def _forged_head_repo(tmp_path: Path) -> Any:
 
 
 def test_git_tree_blobs_reads_the_real_commits_tree_not_a_replacement_commit(tmp_path):
-    """H8. `git_tree_blobs` lists and reads the real commit's tree: `kept.md` included,
-    `replaced.md` holding `ORIGINAL`.
-
-    Catches: an `ls-tree` run with replace refs honoured (x5)."""
     w = _forged_head_repo(tmp_path)
 
     assert _git.git_tree_blobs(w.repo, "HEAD", LESSONS) == {
@@ -1225,11 +1008,6 @@ def test_git_tree_blobs_reads_the_real_commits_tree_not_a_replacement_commit(tmp
 def test_git_unchanged_since_compares_with_the_real_commits_tree_not_a_replacement_commit(
     tmp_path,
 ):
-    """H8. `git_unchanged_since` compares the worktree (the real commit's files) with the real
-    commit: all three are unchanged, `kept.md` included.
-
-    Catches: an `ls-tree` (or `diff`) run with replace refs honoured (x5), which carries only the
-    forged tree's paths."""
     w = _forged_head_repo(tmp_path)
 
     assert _git.git_unchanged_since(w.repo, "HEAD", LESSONS) == frozenset(

@@ -1,31 +1,3 @@
-"""#836 M6 — `ident` becomes a third legal refinement key.
-
-O6, and the operation the model keeps reaching for: every bad-refinement-key refusal measured
-across eight local runs is `key='ident'` — 7 of 7 under global-unique dedup (claim g7), 14 of
-14 under the doc's own per-occurrence unit (claim c1). M6 makes that spelling legal and lands
-the sharpened value in a DISTINCT top-level `identifier` slot beside `classification` and
-`attributes` (resolution R2), never in `attributes["ident"]`.
-
-The routing matters and is not cosmetic. `_check_benign_open_slots` is `_effective_vertex_
-state`'s SOLE consumer (claims p3/g9) and refuses a benign disposition on any `??`-valued
-ATTRIBUTE — so routing `ident` into attributes would make `ident=??` newly block a benign
-close, which N3 forbids.
-
-§7's decisions applied here:
-
-  H8  a refinement naming a vertex that was never declared is REFUSED, and the `identifier`
-      slot is carried at BOTH effective-state construction sites
-  A4  three explicit NON-obligations (N7-N9), so they cannot re-enter as assumptions: no
-      cross-vertex uniqueness check on the effective identifier; no precedence rule between
-      `key=ident` and `attrs.ident`; and an unresolved `??` in the `identifier` slot does NOT
-      block a benign close — R2's decision made visible, pinned below as a positive control
-
-The refusal-family census the design leans on was CORRECTED at extraction: claim c2 is
-refuted (its family counts sum to 33 against a stated total of 17, so they count per-refusal
-occurrences). The corrected census is 26 globally-unique diagnostic lines — attr-key 7, parse
-6, provenance 5, gating 5, undeclared-ref 3 (g8). The "dominant family is one missing
-capability" framing survives; the margin shrinks from 14-to-6 to 7-to-6.
-"""
 from __future__ import annotations
 
 import pytest

@@ -1,7 +1,3 @@
-"""One oracle turn at a time per sibling, intact ledgers/stores under concurrent leads, and the investigator clock excluding oracle-held time.
-
-Registry drive: `S.call` from threads released together. Whole-run drive (`_drive`): the real driver and budget enforcer.
-"""
 from __future__ import annotations
 
 import json
@@ -27,11 +23,6 @@ ALICE = S.query_params("user:alice")
 BASE_ROW = {"user": "alice", "event_id": "e-100", "action": "logon", "host": "web-1",
             "ts": "2026-07-28T15:00:00Z"}
 EDR_ROW = {"event_id": "x-7", "host": "db-1", "process": "sshd", "ts": "2026-07-28T15:10:00Z"}
-
-
-# --------------------------------------------------------------------------------------
-# Private helpers.
-# --------------------------------------------------------------------------------------
 
 
 def _episode(tmp_path: Path, calls: list[tuple[str, str, dict, Any]]) -> Path:
@@ -285,8 +276,6 @@ def _budget(summary: dict) -> dict:
     return summary["run_state"].budget_snapshot()
 
 
-
-
 def _slow_adapter(est: S.Estate, system: str, seconds: float) -> None:
     """Make the planted adapter for `system` slow: a REAL adapter module whose answer takes
     `seconds` (real-system latency, the investigator's own on a real run — GD-10)."""
@@ -298,20 +287,7 @@ def _slow_adapter(est: S.Estate, system: str, seconds: float) -> None:
                     encoding="utf-8")
 
 
-# --------------------------------------------------------------------------------------
-# The investigator's clock (S12-S15, M09 settled by Amendment 2).
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_oracle_latency_trips_no_investigator_time_limit(tmp_path, monkeypatch):
-    """d05f_oracle_time_counts_toward_no_time_limit — an oracle turn longer than the
-    investigator's wall-clock limit makes the enforcer refuse nothing and exhaust nothing.
-
-    RE-PINNED (S11-S15; Amendment 2 change 3). Every investigator limit reads elapsed time minus
-    oracle-held intervals. Driven through the real driver: the lead's first query takes a slow
-    oracle turn and a slow verifier pass (several seconds against a limit of a second and a
-    half), its second query is the next tool call. Positive control: the same lead whose OWN
-    model takes that long between the two queries is refused — the limit is live."""
     monkeypatch.setenv(ENFORCE, "true")
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
@@ -352,18 +328,7 @@ def test_1224_oracle_latency_trips_no_investigator_time_limit(tmp_path, monkeypa
         "above proves nothing")
 
 
-
-
-
-
 def test_conc_12_queue_wait_behind_another_leads_turn(tmp_path, monkeypatch):
-    """s_p151 — waiting behind another lead's turn, or on the rate limit inside a turn, counts
-    toward no investigator limit; the waiting call is one investigator tool call and no oracle
-    request is charged to the investigator.
-
-    (O4: oracle wall-clock never counts; S13, M11=A.) Lead one's turn explores twice through a
-    one-query-a-second slice (a limiter wait inside the turn); lead two's call queues behind it,
-    then lead two repeats its call past the limit in real time."""
     monkeypatch.setenv(ENFORCE, "true")
     est = S.estate(tmp_path)
     est.answer("idp", "query", None, EMPTY)
@@ -396,23 +361,8 @@ def test_conc_12_queue_wait_behind_another_leads_turn(tmp_path, monkeypatch):
 
 
 def test_slow_real_system_and_slow_oracle_in_one_call(tmp_path, monkeypatch):
-    """s_p152 — a slow live base read counts toward the investigator's clock as on a real run;
-    the oracle and verifier time of the same call does not.
-
-    Settled (S14): a call whose base read alone does not cross an investigator limit never
-    crosses one because of oracle time (O4). The edr adapter planted for the fixture tenant is
-    made slow (a real adapter module that takes over a second), and each uncached edr call also
-    takes a slow oracle turn. After one such call the next call is NOT refused; after a second
-    slow base read the real latency alone crosses the limit and the next call IS refused (the
-    positive control: real latency counts). The margins are explained at the adapter's set-up."""
     monkeypatch.setenv(ENFORCE, "true")
     est = S.estate(tmp_path)
-    # Margins on both sides of the 4 s limit, whatever the run's own start-up costs (about
-    # 1 s cold, 0.05 s in a warm worker): start-up + one 2.2 s read stays under it, start-up +
-    # two reads crosses it on real latency alone, and start-up + one read + the 2.5 s oracle
-    # turn would cross it too — so a refusal at the third call would be oracle time counted.
-    # (At 1.2 s reads against 2.5 s, two reads were 2.4 s: the positive control leaned on
-    # start-up overhead, and a warm runner counted 2.45 s and refused nothing.)
     _slow_adapter(est, "edr", 2.2)
     est.answer("edr", "query", None, {"events": [EDR_ROW]})
     ep = _episode(tmp_path, [])
@@ -439,21 +389,7 @@ def test_slow_real_system_and_slow_oracle_in_one_call(tmp_path, monkeypatch):
         "the refused call reached the tenant")
 
 
-# --------------------------------------------------------------------------------------
-# One turn at a time (S11, N12) through the registry.
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_two_identical_concurrent_calls_get_one_turn_and_identical_bytes(tmp_path):
-    """o07_identical_calls_share_one_turn — two identical concurrent calls in one world take at
-    most one oracle turn and get byte-identical answers; the ledger holds one row per call.
-
-    Positive control: two different calls get two turns; a real error is not cached, so a
-    repeat after an error reads live (M08=A, N08, N12, S11).
-    b_p141 — two leads issuing the identical uncached call at the same instant receive byte-identical answers; one served answer, one set of forged rows, two ledger rows (S11 with O2; the world ledger records both investigator calls, O9).
-    The identical calls are driven as two parallel gather leads through the real query tool;
-    what each lead received is its evidence payload on disk.
-    """
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
     oracle = S.oracle(*_forge_and_submit("fg-1", _forged(1), [BASE_ROW]),
@@ -504,18 +440,7 @@ def test_1224_two_identical_concurrent_calls_get_one_turn_and_identical_bytes(tm
         "a real error was cached as the world's answer")
 
 
-
-
 def test_conc_03_two_calls_forge_for_one_fact_concurrently(tmp_path):
-    """s_p143 — two concurrent calls on different systems that both need telemetry for one fact
-    end with one consistent set of forged rows for it.
-
-    The fact's event reads the same in both served answers across systems (O2). Host-observable
-    halves: the turns are sequential (S11), the second turn's attempt to re-forge the first
-    turn's frozen row with other values never lands (S4: a frozen row is reused, never
-    re-versioned), and the second call's verifier pass is handed the fact's frozen telemetry
-    from the first (design step 5) — the cross-system reading itself is the oracle's and
-    verifier's judgement."""
     est = S.estate(tmp_path)
     edr_params = S.query_params("host:db-1")
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]}),
@@ -551,12 +476,6 @@ def test_conc_03_two_calls_forge_for_one_fact_concurrently(tmp_path):
 
 
 def test_conc_04_record_fact_conflict_between_concurrent_calls(tmp_path):
-    """b_p144 — two concurrent calls that record different values for one entity's field leave
-    exactly one value, and no lead is served an answer contradicting it.
-
-    Settled (S11): record_fact runs only inside a turn, so two calls' records cannot be
-    concurrent; the later turn sees the committed value, and a record of a different value for
-    the same (entity, field) is refused (M13=A, host-exact check 4; O2)."""
     est = S.estate(tmp_path)
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001"}
     idp = {"entity": "alice", "risk": "low"}
@@ -590,12 +509,6 @@ def test_conc_04_record_fact_conflict_between_concurrent_calls(tmp_path):
 
 
 def test_conc_05_check_then_commit_window_on_frozen_rows(tmp_path):
-    """s_p145 — two concurrent answers that each pass alone but contradict each other's frozen
-    rows are never both stored and served.
-
-    (Or whose forged id-like values coincide; O2, O8.) Both calls' turns forge the same forged id
-    with different values: the first commits, the second is checked against what the first
-    committed (S11) and cannot land its version; it is served only by reusing the frozen row."""
     est = S.estate(tmp_path)
     later = S.query_params("user:alice", start="2026-07-28T15:00:00Z")
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]}),
@@ -624,16 +537,6 @@ def test_conc_05_check_then_commit_window_on_frozen_rows(tmp_path):
 
 def test_1224_two_concurrent_calls_take_sequential_oracle_turns_that_never_interleave(
         tmp_path, monkeypatch):
-    """o10_turns_never_interleave — two concurrent calls take sequential oracle turns: the
-    second's turn begins only after the first's ends, and nothing of one appears in the other.
-
-    The turn is the oracle, its verifier pass and retries; no call's params or failure
-    verdicts appear inside another call's turn (S11, O-10). The first call retries once on a
-    verifier failure, so its turn spans two attempts while the second waits.
-    b_p146 — two leads' calls entering the single oracle conversation are served one after the other; nothing but call fields and answer handles reaches either turn (O10), payloads stay framed (O7), and the wait counts toward no investigator limit (O4).
-    Driven as two parallel gather leads; the first lead's call is mid-retry (a verifier failure
-    is being appended) when the second lead's call arrives.
-    """
     monkeypatch.setenv(ENFORCE, "true")
     est = S.estate(tmp_path)
     first = S.query_params("user:alice-A-1224")
@@ -682,17 +585,7 @@ def test_1224_two_concurrent_calls_take_sequential_oracle_turns_that_never_inter
     assert [r["exit_code"] for r in _own_rows(run_dir) if r["lead_id"] == "l-002"] == [0, 0]
 
 
-
-
 def test_conc_09_conversation_restart_with_a_turn_in_flight(tmp_path):
-    """s_p148 — a restarted oracle conversation carries the same prefix, every recorded fact
-    and the recent failures, and the in-flight call keeps its failure history.
-
-    The restart comes while another lead's call is mid-retry and a recorded fact has been stored
-    (outside the conversation) but not yet appended; the in-flight call sees the stored fact
-    (O2). A third call records a fact; the next call fails its first attempt on the verifier;
-    the restart point is set as low as the knob goes, so the conversation restarts across these
-    turns."""
     est = S.estate(tmp_path)
     siem = {"entity": "alice", "risk": "low", "record_id": "r-0001"}
     ep = _episode(tmp_path, [("siem-x", "lookup", {"entity": "alice"}, siem),
@@ -725,29 +618,7 @@ def test_conc_09_conversation_restart_with_a_turn_in_flight(tmp_path):
         "the in-flight call's retry lost its failure history across the restart")
 
 
-
-
 def test_conc_18_lead_ended_mid_serve(tmp_path, monkeypatch):
-    """b_p161 — a call whose lead was ended while the call was inside `serve_one` still stores
-    its verified answer, with no ledger or evidence row for the undelivered call, and a later
-    identical call is served that answer.
-
-    N12 reading (auto): a queued call that finds the stored answer when the turn frees spends no
-    turn. Bound regardless: forged rows already frozen stay immutable (O2), and no extra or
-    missing ledger row results (O9).
-
-    How a lead ends mid-call is GPR-03 (executed): a sibling lead's `BudgetKill` at its budget
-    hook cancels this lead's `to_thread` await while the worker thread runs the call to its end,
-    and the run returns only once that worker exits. Under S12/S13 the investigator's clock is
-    paused while an oracle turn is open (queue time behind it never counts), so no time limit
-    fires while the call is queued for or inside the turn; the reachable cut inside `serve_one`
-    is the live base read of an uncaptured call (key flow step 2, before the turn), whose
-    real-system latency counts (S14). The planted idp adapter is made slow (a real adapter
-    module, real latency); lead l-001 issues the uncaptured call and is inside that read when
-    lead l-002, after its own model latency, meets its budget hook past wall clock plus grace.
-    The worker then runs the oracle turn (forge + submit) and the verifier pass. Positive
-    control: the same call under generous limits is delivered, with its evidence row and its
-    world-ledger row, so the absences above are read off live channels."""
     monkeypatch.setenv(ENFORCE, "true")
     late = S.query_params("user:alice host:db-1")
     served_answer = {"rows": [BASE_ROW, _forged(1)]}
@@ -824,15 +695,7 @@ def test_conc_18_lead_ended_mid_serve(tmp_path, monkeypatch):
                 if r["params"] == late]) == 1
 
 
-
-
 def test_conc_32_siblings_first_use_of_shared_state_together(tmp_path):
-    """s_p217 — siblings starting at the same instant each use only their own world's oracle
-    state and rate slice, read the base recording read-only, and stay within the episode rate.
-
-    RE-PINNED (S18, S19, S20). None fails and none writes a store another reads. Two worlds'
-    first calls start together, each turn exploring three times through a one-query-a-second
-    slice (R is two)."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", None, EMPTY)
     ep = _episode(tmp_path, [("idp", "query", ALICE, EMPTY)])
@@ -864,18 +727,7 @@ def test_conc_32_siblings_first_use_of_shared_state_together(tmp_path):
     assert _max_in_window(probes) <= 2, "the combined oracle-side rate exceeded R"
 
 
-# --------------------------------------------------------------------------------------
-# Rows, stores and traces under concurrency (O-04, O-08, O-09, O-12, O-52, s_p155).
-# --------------------------------------------------------------------------------------
-
-
 def test_1224_concurrent_leads_leave_one_intact_world_ledger_row_per_call(tmp_path):
-    """o04_world_ledger_rows_under_concurrent_leads — erroring, refused and served calls at once
-    leave exactly one intact world-ledger row each, with the right decision word.
-
-    None torn or lost, and every row lands as distinct content (positive control); `fault`
-    appears only for an adapter that cannot load (F-02=A, M16=A). The refused calls go through
-    the registry's grant decision, where a denied verb is filed."""
     est = S.estate(tmp_path)
     served = [S.query_params(f"user:served-{i}") for i in range(3)]
     broken = [S.query_params(f"user:broken-{i}") for i in range(3)]
@@ -909,13 +761,6 @@ def test_1224_concurrent_leads_leave_one_intact_world_ledger_row_per_call(tmp_pa
 
 
 def test_1224_forged_store_has_one_writer_and_commits_rows_with_the_verified_answer(tmp_path):
-    """o08_forged_store_handoff_and_commit — the forged store and recorded facts commit only
-    with a verified answer, ignore a torn trailing record, and are never written by the launcher
-    once the sibling starts.
-
-    One process writes at a time (the launcher during pre-flight, then the sibling); rows and
-    facts are staged per attempt and committed atomically with the verified, stored answer, so a
-    failed attempt leaves no row (M15=B, S19)."""
     est = S.estate(tmp_path)
     ep = _episode(tmp_path, [("idp", "query", ALICE, {"rows": [BASE_ROW]})])
     store = S.oracle_dir(ep, "b")
@@ -988,12 +833,6 @@ class _SnapshotSpawn(S.FakeSpawn):
 
 
 def test_1224_parallel_run_queries_in_one_turn_leave_one_intact_oracle_ledger_row_each(tmp_path):
-    """o09_oracle_ledger_one_row_per_query — parallel run_query calls in one turn, and
-    pre-flight's traffic followed by the sibling's, leave one intact oracle-side ledger row per
-    query.
-
-    None torn or lost; the world's oracle-side ledger is already non-empty (pre-flight's rows)
-    before the sibling's first call (FU03, N14, S19)."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", None, EMPTY)
     ep = _episode(tmp_path, [("idp", "query", ALICE, EMPTY)])
@@ -1028,21 +867,7 @@ def test_1224_parallel_run_queries_in_one_turn_leave_one_intact_oracle_ledger_ro
     assert all(json.loads(line) for line in after), "a row is torn"
 
 
-
-
-
-
-
-
 def test_oracle_trace_sink_is_already_open_when_a_second_oracle_turn_starts(tmp_path):
-    """s_p155 — oracle and verifier turns are each recorded without failing one another or the
-    investigator, and none of that traffic lands in the investigator's own records.
-
-    RE-PINNED: within one sibling, oracle and verifier turns never overlap (S11). Where turns do
-    run at once, as with two worlds' pre-flight in the launcher, each is traced without failing
-    the other. The investigator's records are its wire log, evidence, ledger and request count
-    (O9, O4). The sibling half: one gather lead issues two oracle-backed queries in one turn
-    (parallel tool calls). The launcher half: two worlds' pre-flight runs together."""
     est = S.estate(tmp_path)
     one, two = S.query_params("user:alice-1"), S.query_params("user:alice-2")
     ep = _episode(tmp_path, [("idp", "query", one, EMPTY), ("idp", "query", two, EMPTY)])
@@ -1086,12 +911,6 @@ def test_oracle_trace_sink_is_already_open_when_a_second_oracle_turn_starts(tmp_
 
 def test_1224_in_process_limiter_never_passes_two_queries_for_one_remaining_slot(tmp_path,
                                                                                   monkeypatch):
-    """o52_limiter_in_process_slots — one sibling's limiter under parallel run_query calls, and
-    the launcher's under concurrent pre-flight worlds, never pass two queries for one slot;
-    queries wait and are never refused.
-
-    No window exceeds the slot count (S16, S18, M11=A). The rate is two queries a second in
-    both halves; every exploration query is eventually answered by the tenant."""
     est = S.estate(tmp_path)
     est.answer("idp", "query", None, EMPTY)
     ep = _episode(tmp_path, [("idp", "query", ALICE, EMPTY)])

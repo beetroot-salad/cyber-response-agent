@@ -82,9 +82,6 @@ def test_renders_every_attempt_with_its_verdict(tmp_path):
 
 
 def test_role_traces_land_under_their_attempt_despite_the_round_offset(tmp_path):
-    """Attempt N is trace round N-1. Filtering on the record's own number would leave every
-    role card empty — and empty reads as "the reviewer did not run", which is a different
-    and much worse claim than the truth."""
     run = _challenged_then_stands(tmp_path)
     html, _ = render_review_gate(run, parse_report(run))
 
@@ -100,9 +97,6 @@ def test_role_traces_land_under_their_attempt_despite_the_round_offset(tmp_path)
 
 
 def test_prose_reply_survives_the_row_reader(tmp_path):
-    """A lens reply is framed prose written as its own physical line — one
-    `read_jsonl_rows` skips by design. The panel walks lines with the writer's own predicate
-    instead, so the model's words render rather than only its `ok` flag."""
     from defender._io import read_jsonl_rows
 
     run = _challenged_then_stands(tmp_path)
@@ -157,9 +151,6 @@ def test_failed_review_is_named_as_machinery_not_a_finding(tmp_path):
 
 
 def test_skipped_ablation_is_not_reported_as_ok(tmp_path):
-    """`ok: true` means a stage ANSWERED. An ablation with no load-bearing edge to withhold
-    was never dispatched and its row carries `skipped` and no `ok` — the panel must keep
-    those apart, exactly as the gate's own writer does."""
     run = tmp_path / "run"
     run.mkdir()
     _write_report(run, disposition="benign", outcome="stands",
@@ -214,10 +205,6 @@ def test_no_records_is_an_unfinished_run_not_a_clean_one(tmp_path):
 
 
 def test_the_gate_s_spend_renders_split_by_lens(tmp_path):
-    """#787. The gate's model calls cost real money and used to appear in no operator-facing
-    figure at all. They surface HERE, per lens, because the lens is the decomposition this
-    gate has actually made a decision on — the measurement that retired the DISCRIMINATION
-    role was one lens's share of the review's cost."""
     run = _challenged_then_stands(tmp_path)
     html, _ = render_review_gate(
         run, parse_report(run), {"support": 0.02, "ablation": 0.015, "composer": 0.065},
@@ -229,9 +216,6 @@ def test_the_gate_s_spend_renders_split_by_lens(tmp_path):
 
 
 def test_a_gate_that_called_no_model_shows_no_spend_line(tmp_path):
-    """Both callers that produce this: a replay, whose injected stages reach no provider, and
-    a run whose wire log predates the gate sharing it. `$0.0000` there would assert the gate
-    was free, which is a claim neither run supports."""
     run = _challenged_then_stands(tmp_path)
     report = parse_report(run)
 
@@ -241,10 +225,6 @@ def test_a_gate_that_called_no_model_shows_no_spend_line(tmp_path):
 
 
 def test_the_gate_is_not_a_phase(tmp_path):
-    """The framing, as a test rather than a comment. The five phases are prompt-level and
-    model-occupied; the gate is neither, and the moment it acquires a colour and a loop verb
-    it starts rendering as a sixth one — in the cost bar, the wall bar and the transcript's
-    phase groups, none of which it can honestly appear in."""
     assert "REVIEW" not in d._LOOP_VERBS
     # `phase_color` returns its own fallback grey for anything it does not know.
     assert d.phase_color("REVIEW") == d.phase_color("NOT-A-PHASE")

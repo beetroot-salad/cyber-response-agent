@@ -56,9 +56,6 @@ def _invlang_grammar_fences() -> str:
     """`skills/invlang/SKILL.md`'s ```invlang fences, concatenated in document order."""
     text = (_DEFENDER / "skills" / "invlang" / "SKILL.md").read_text(encoding="utf-8")
     fences = _FENCE_RE.findall(text)
-    # A renamed fence language or a moved file must fail LOUDLY, for the reason
-    # `_example_a_fences` gives: finding zero and passing is the shape of a guard that stopped
-    # guarding. Loose on purpose — it fires on the walk breaking, not on ordinary editing.
     assert len(fences) >= 10, "the invlang SKILL fence walk broke — re-anchor it"
     return "\n".join(fences)
 

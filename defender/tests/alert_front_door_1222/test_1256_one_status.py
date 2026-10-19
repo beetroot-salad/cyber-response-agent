@@ -1,29 +1,3 @@
-"""#1256 r4 — the clarifications of DP3/DP4 the amendment records (one live status, the down gate
-before the lead claim, one judgement per run), each held by what a run shows rather than by how
-an implementation is built.
-
-ONE LIVE STATUS. Every surface reads the run state's CURRENT status when it is rendered: a system
-an escaped `ConfigFault` downs during lead zero (O-5b) is shown as not configured, with its reason,
-in MAIN's opening view and in the system index of the first lead MAIN dispatches — not a copy of
-the statuses taken at start, which still said "up"; and a system a MAIN lead's call downs is shown
-so in the index of the next lead MAIN dispatches — not a copy taken when MAIN's opening was built.
-
-THE DOWN GATE BEFORE THE CLAIM. A dispatch to a down system — whatever its cause: not configured
-at start, downed mid-run, or its adapter broken — is refused before a lead id is claimed or a lead
-record (`gather_raw/<id>.lead.json`) written — as lead zero already does (O-6).
-Observed at the moment MAIN reads the refusal (a probe on MAIN's next request), not at the run's
-end, where a claim-then-release would look the same; and by the lead-claim contract (`claim_lead`:
-an id is claimed once): the same id dispatched next, on a usable system, is claimed and runs.
-
-ONE JUDGEMENT PER RUN. run.py judges the systems before the run folder exists (O-8) and hands the
-result to the run; the driver judges only when started without one. Driven through `run.main`
-and production's OWN lifecycle chain (`_run_investigation_lifecycle` → `_drive_investigation` →
-the real driver, `_replay_harness.investigate_as_handed`), so whatever form run.py's hand-off
-takes reaches the driver; `_spec1222.run_alert`'s replay lifecycle re-resolves the tenant and the
-run and would drop it. Planted adapters count their checks and answer differently the second
-time: exactly one check per granted system, and a second, disagreeing judgement never reaches the
-run.
-"""
 from __future__ import annotations
 
 import functools
@@ -88,10 +62,6 @@ def _outside_correlation(opening: str) -> str:
     assert opening.count(section) == 1, "the correlation section is not one contiguous span"
     return opening.replace(section, "")
 
-
-# =================================================================================================
-# One live status — a system downed during lead zero is down in MAIN's view and gather's index
-# =================================================================================================
 
 def test_a_system_downed_during_lead_zero_is_shown_down_to_main_and_to_the_first_lead(
         tmp_path: Path) -> None:
@@ -162,10 +132,6 @@ def test_a_system_downed_by_a_main_lead_is_shown_down_in_the_next_leads_index(
         f"not configured with its reason ({CMDB_LIVE_KEY}) (r4: every surface reads the current "
         f"status when it is rendered, not a copy taken earlier):\n{index}")
 
-
-# =================================================================================================
-# The down gate before the lead claim
-# =================================================================================================
 
 class _ProbingMain(S.MainScript):
     """MAIN's double, probing the run before it answers each request: `probed[i]` is what
@@ -293,10 +259,6 @@ def test_a_dispatch_to_a_system_whose_adapter_is_broken_claims_no_lead_id(tmp_pa
                              scene.tenant.root, S.DEFENDER, S.REPO_ROOT)
     assert not leaked, f"the refusal MAIN got for its dispatch to elastic carries {leaked}"
 
-
-# =================================================================================================
-# One judgement per run — through run.main and production's own lifecycle chain
-# =================================================================================================
 
 #: Where the planted checks log each call they answer: `<root>/checks.log`, beside the tree.
 CHECKS = "checks.log"

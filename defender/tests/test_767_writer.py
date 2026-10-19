@@ -69,11 +69,6 @@ def _render_comment(rec):
     return fn(rec, mapping=current_mapping())
 
 
-# =======================================================================================
-# Demand #0 — the return-value contract, the rendered comment, the receipt
-# =======================================================================================
-
-
 def test_767_record_case_ticket_returns_and_receipts(tmp_path, monkeypatch):
     """d0_record_return — `record_case_ticket(run_dir, deps)` returns nothing, makes exactly
     ONE call to the store — `POST /tickets/{case_id}/comments`."""
@@ -107,15 +102,6 @@ def test_767_record_case_ticket_returns_and_receipts(tmp_path, monkeypatch):
 
 
 def test_767_case_record_to_comment_shape(tmp_path, monkeypatch):
-    """d0_comment_render — the outbound comment is `{author, body}` and its body is the
-    mapping's own `"{disposition} — {cause}\\n\\n{narrative}"` rendering: the proposed
-    disposition and the host's cause sentence on the first line, a blank line, then the
-    report's notes. An EMPTY narrative renders `(no notes)` in the narrative segment alone —
-    the disposition line and the blank line survive (20-demands F2, settled with FK06's
-    split: an empty BODY under a parsable disposition is the ordinary branch).
-
-    Asserted against the fake's CAPTURED INBOUND PAYLOAD as well as the renderer's return, so
-    the outbound channel is pinned and not just the pure function."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     rendered = _render_comment(_case_record())
     assert set(rendered) == {"author", "body"}, (
@@ -137,11 +123,6 @@ def test_767_case_record_to_comment_shape(tmp_path, monkeypatch):
     assert store.comment_body() == rendered["body"], (
         "what crossed the wire is not what the renderer produced"
     )
-
-
-# =======================================================================================
-# O1 — the disposition and the case's lifecycle are a person's
-# =======================================================================================
 
 
 def test_767_open_payload_status_and_labels(tmp_path, monkeypatch):
@@ -349,11 +330,6 @@ def test_767_the_shipped_mapping_loads_and_a_broken_one_skips_the_write(
     assert "WARN" in capsys.readouterr().err, "the refusal was skipped silently"
 
 
-# =======================================================================================
-# O3 / S1 — attributable writes, and nothing else on the wire
-# =======================================================================================
-
-
 def test_767_comment_carries_mapping_author(tmp_path, monkeypatch, capsys):
     """o3_comment_author_identity — every comment the system writes carries the mapping's
     fixed author identity, and a mapping that cannot supply one produces NO write at all."""
@@ -404,16 +380,7 @@ def test_767_comment_payload_keys_are_author_and_body_only(tmp_path, monkeypatch
     assert store.comment_body().startswith("benign — ")
 
 
-# =======================================================================================
-# O4 — what a person needs to approve
-# =======================================================================================
-
-
 def test_767_comment_first_line_is_proposed_disposition(tmp_path, monkeypatch):
-    """o4_first_line_disposition — the comment's first line below the agent tag (#1221) is the
-    host-rendered `{disposition} — {cause}`, above a blank line, so a person opening the case
-    reads which run wrote it and then the proposed disposition, before anything the model
-    wrote."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     for disposition in ("benign", "malicious", "false-positive", "inconclusive"):
         run_dir = make_run(tmp_path, name=f"run-{disposition}", disposition=disposition,
@@ -501,11 +468,6 @@ def test_767_narrative_is_the_fence_stripped_report_body(tmp_path, monkeypatch):
     assert ELLIPSIS not in wire, "a body well under the bound was cut anyway"
 
 
-# =======================================================================================
-# O8 / S4 — the bounds, and the fence
-# =======================================================================================
-
-
 @pytest.mark.parametrize(
     ("why", "filler"),
     [
@@ -515,9 +477,6 @@ def test_767_narrative_is_the_fence_stripped_report_body(tmp_path, monkeypatch):
     ],
 )
 def test_767_comment_body_is_bounded_on_the_wire(tmp_path, monkeypatch, why, filler):
-    """o8_wire_bound — the comment body is at most 4096 UTF-8 BYTES on the wire, the agent tag
-    line (#1221) counted inside it, the cut rounds DOWN to the last whole character, and the
-    `…` sits INSIDE the bound (§7 R2)."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     narrative = filler * 20000
     run_dir = make_run(tmp_path, name=f"run-{why.replace(' ', '-')}", body=narrative)
@@ -586,9 +545,6 @@ def test_767_planted_frontmatter_fence_never_reaches_the_wire(tmp_path, monkeypa
 
 
 def test_767_the_first_fence_wins_over_every_later_one(tmp_path, monkeypatch):
-    """d_first_fence_wins — with two or more standalone fences in the narrative, everything
-    from the FIRST line-anchored `---` is gone, the second fence included: the rendered
-    narrative is deterministic in fence count (c10, executed, plus S4's ∀)."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     run_dir = make_run(tmp_path, body=(
         "keep this\n---\ndisposition: benign\n---\nFIRST-TAIL\n---\nSECOND-TAIL\n"
@@ -600,12 +556,6 @@ def test_767_the_first_fence_wins_over_every_later_one(tmp_path, monkeypatch):
 
 
 def test_767_a_fence_is_a_standalone_line_on_any_line_boundary(tmp_path, monkeypatch):
-    """S4 says STANDALONE `---` line, and the strip is exactly that in both directions. A
-    `----` horizontal rule and a `--- | ---` table row are ordinary markdown a ceiling note may
-    carry, and everything after them must survive — the alternative drops the rest of the
-    narrative with no `…` to say so. And a fence behind a bare `\r` or a Unicode line
-    separator IS standalone to any UI that breaks lines on those, so it is stripped exactly
-    as a `\n`-bounded one is."""
     use_mapping(monkeypatch, tmp_path / "dfn")
     for why, body, expect in (
         ("a `----` rule", "para one\n\n----\n\npara two", "para one\n\n----\n\npara two"),
@@ -671,11 +621,6 @@ def test_767_a_body_claiming_approval_does_not_approve(tmp_path, monkeypatch):
     )
     assert open_payload["summary"] == "{case_id}"
     assert open_payload["status"] == OPEN_STATUS
-
-
-# =======================================================================================
-# O7 / FAM-3 — the write never breaks the run
-# =======================================================================================
 
 
 @pytest.mark.parametrize(
@@ -823,17 +768,7 @@ def test_767_non_dict_mapping_is_refused_by_the_existing_check(tmp_path, monkeyp
     assert "systems/case-history/mapping.yaml must be a YAML mapping" in str(refused.value)
 
 
-# =======================================================================================
-# D1 / D2 / D3 — the mapping, the seam, the record
-# =======================================================================================
-
-
 def test_767_case_record_splits_cause_from_narrative(tmp_path, monkeypatch):
-    """d3_case_record_split — `CaseRecord.reason` splits into `cause` (the host sentence,
-    always present on a close-tool report — c3) and `narrative` (the report's body), derived
-    at write time from `report.md` + `alert.json` and never stored. The single reader
-    (`read_case_record`, through `_report.require_report`) is what produces both; its
-    `cause or body` fallback retires with the split."""
     root = tmp_path / "dfn"
     use_mapping(monkeypatch, root, mapping_doc(comment_body="{cause}//{narrative}"))
     run_dir = make_run(tmp_path, cause=HOST_CAUSE, body="the model's own notes")

@@ -1,28 +1,3 @@
-"""#1256 r4 — "one maker for a down cause": a single function judges an adapter and produces its
-path-hidden reason, used by the start check, the call-time escape path (O-5b) and the connect
-scaffold validator (whose arm is `e2e/test_620_consumers.py`'s).
-
-What a run shows of it here:
-
-* An escaped call-time `ConfigFault` whose text names the adapters roster the run reads — a
-  roster OUTSIDE the defender tree, reached through a link (#1172 moves the adapters to the lab
-  tenant's repository) — reaches the model with that path hidden in both spellings, as a
-  start-time reason naming the same roster is (A6's rule, here over a roster no defender-tree
-  redaction covers).
-* Hiding a path respects path boundaries: a fault text naming a path that merely SHARES A PREFIX
-  with the data root, the tenant's folder or its settings folder (`<root>base/…`, `<root>2/…`,
-  `<settings>-old/…`, `<settings>.bak/…`, `<settings>_x/…`) shows that path whole, or hides it
-  whole — never with the shared prefix rewritten and the rest left dangling (`<data root>base/…`).
-  Read as: every occurrence of the path's tail keeps the path's own last directory name and the
-  separator before it (`/<name><tail>`), which an intact path and a hidden ANCESTOR both keep and
-  a prefix rewrite loses.
-* An escaped call-time fault naming a host file under the data root that is neither settings nor
-  adapter code reaches the model with no host path: the start-time rule (#1106, O-5a), applied to
-  the escape's reason because one function makes both.
-
-Each drives the real driver through `_replay_harness.drive`; the model-visible text is every
-request the doubles received after the escaping call.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -65,10 +40,6 @@ def _after_escape(main: RH.ReplayFn, gather: RH.ReplayFn) -> str:
     and every MAIN request after its dispatch."""
     return "\n".join([*gather.seen[1:], *main.seen[1:]])
 
-
-# =================================================================================================
-# A roster outside the defender tree: its path is hidden at call time as at start
-# =================================================================================================
 
 def _roster_adapters(given: Path, resolved: Path) -> dict[str, str]:
     """cmdb, usable at start, whose `get-host` raises a ConfigFault naming its own file in the
@@ -163,10 +134,6 @@ def test_an_escaped_fault_naming_an_out_of_tree_roster_reaches_the_model_with_th
         assert not leaked, f"{where} names the adapters roster {leaked} (A6)"
 
 
-# =================================================================================================
-# Hiding a path respects path boundaries
-# =================================================================================================
-
 #: What a sibling's folder name adds to the name it shares a prefix with: a word character, a
 #: digit, a whole word, and the separators a boundary that stops only at a word character misses.
 SIBLING_SUFFIXES = ("-old", ".bak", "_x", "2", "base")
@@ -211,10 +178,6 @@ def test_hiding_a_path_never_rewrites_part_of_one_that_merely_shares_its_prefix(
             f"{[ln for ln in after.splitlines() if tail in ln][:3]}")
     assert shim.calls() == [], shim.calls()
 
-
-# =================================================================================================
-# A host path under the data root that is neither settings nor code: hidden at call time as at start
-# =================================================================================================
 
 def test_an_escaped_fault_naming_a_data_root_path_reaches_the_model_with_no_host_path(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,9 +1,3 @@
-"""#1134 curator step: every host touch of a curator corpus during the drain goes through that corpus's
-held mount. A symlink, hard link, FIFO or folder at a lesson name (or a link at a folder holding it)
-is never followed, read, written through or deleted. Covers the before-state snapshot, the fault
-restore, the settle's unapproved-file restore, git byte-identity comparison, put-back/revert-strays,
-the commit split, and the clean gate / idempotency read / manifest / prompt. Plants are real
-(`os.symlink`, `os.link`, `os.mkfifo`); link targets carry `OUT_MARK` so following one is visible."""
 from __future__ import annotations
 
 import dataclasses
@@ -96,20 +90,7 @@ def _plain_os_error(exc: BaseException | None, code: int) -> bool:
     return isinstance(exc, OSError) and type(exc) is not NotPlainEntry and exc.errno == code
 
 
-# ---------------------------------------------------------------------------------------
-# O3: a lesson name linked outside is neither snapshotted nor restored from
-# ---------------------------------------------------------------------------------------
-
-
 def test_o3_a_lesson_linked_outside_is_not_snapshotted_and_the_undo_leaves_it(tmp_path, caplog):
-    """O3 (D7's regression): with a lesson name linked to an outside file (the agent's: git
-    reports it untracked), the before-state (git's, at the tick-start commit) lacks the name, and
-    `_undo_agent_edits` then neither opens nor writes the target and leaves the link where it is
-    (same target) for the scrub, logged at WARNING by name (O5.3: the sweep's unlink is refused
-    and passed over).
-
-    Catches: today's `rglob` + `read_bytes`, which records the target's bytes under the lesson
-    name (C3) — the watch sees the open."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     cfg = w.cfg()
@@ -138,13 +119,6 @@ def test_o3_a_lesson_linked_outside_is_not_snapshotted_and_the_undo_leaves_it(tm
 
 @pytest.mark.parametrize("agent_did", ["replaced the link with a file", "deleted the link"])
 def test_o3_no_restore_writes_the_targets_bytes_back_into_the_corpus(tmp_path, agent_did):
-    """O3, the restore half: the snapshot was taken over the link; the agent then replaced it
-    with a plain file of its own, or removed it. The undo leaves no file in the corpus holding
-    the target's bytes, sweeps the name the snapshot never held, and the outside file is
-    untouched.
-
-    Catches: today's snapshot holding the target's bytes under the lesson name, which the
-    restore then writes into `lessons/<name>` — a host file's bytes copied into the corpus."""
     w = world(tmp_path)
     cfg = w.cfg()
     target = w.target("secret.md")
@@ -185,19 +159,7 @@ def test_o3_control_a_plain_lesson_is_snapshotted_and_restored_byte_identically(
     assert not at.is_symlink()
 
 
-# ---------------------------------------------------------------------------------------
-# _snapshot_corpus(repo_root, corpus_dir, head): the before-state, read from git
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_before_state_is_every_regular_blob_head_carries_nested_and_byte_exact(tmp_path):
-    """C1: the before-state is git's read of the tick-start commit under the corpus: every
-    regular file, nested folders included (#773's `nested/deep/l1.md` shape), with its exact
-    stored bytes (CRLF, NUL, non-UTF-8), an executable one too, keyed by its name under the
-    corpus mount — and nothing outside the corpus (the sibling corpus, the rest of the repo).
-
-    Catches: a before-state from a depth-limited listing (no nested name, so the settle restore
-    would delete a tracked nested lesson), or one decoded as text."""
     w = world(tmp_path)
     files = {"top.md": b"top\n", "nested/deep/l1.md": b"deep\r\n",
              "notes.txt": b"\xff\xfe raw\x00"}
@@ -213,13 +175,6 @@ def test_the_before_state_is_every_regular_blob_head_carries_nested_and_byte_exa
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link", "fifo", "plain rewrite", "removed"])
 def test_the_before_state_reads_no_worktree_entry(tmp_path, kind):
-    """The before-state never touches the worktree: tracked `a.md` replaced (uncommitted) by a
-    symlink to an outside file, a hard link to it, a FIFO, a plain rewrite, or removed — the
-    before-state still holds HEAD's bytes of `a.md`, the target is never read (kernel watch) and
-    the FIFO never opened (under the deadline).
-
-    Catches: a before-state read from the worktree (main's `rglob` + `read_bytes`, which follows
-    the link — O3 — or the view's `read_bytes`, which leaves the plant's name out)."""
     w = world(tmp_path)
     body = lesson_text("fa").encode()
     put(w.corpus_dir / "a.md", body)
@@ -249,14 +204,6 @@ def test_the_before_state_reads_no_worktree_entry(tmp_path, kind):
 def test_a_tracked_symlink_is_not_in_the_before_state_and_never_restored_as_a_file(
     tmp_path, agent_did,
 ):
-    """C1: a tracked symlink (mode 120000) at a lesson name, pointing outside, is not in the
-    before-state. The agent replaced it with a plain file of its own, or removed it; the fault
-    undo then leaves nothing at the name — the agent's file is swept (git reports the name, the
-    before-state lacks it), and no file is written there, neither the link's spelling nor the
-    target's bytes. The outside file is untouched.
-
-    Catches: a before-state that keeps git's blob for the link (its target spelling) and
-    restores it as a plain file, or one that reads the target's bytes through the link."""
     w = world(tmp_path)
     target = w.target("secret.md")
     link = w.corpus_dir / PLANTED
@@ -321,10 +268,6 @@ def test_a_corpus_the_commit_does_not_carry_is_an_empty_before_state(tmp_path):
 
 @pytest.mark.parametrize("fault", ["missing blob", "unknown commit"])
 def test_a_before_state_git_cannot_read_raises(tmp_path, fault):
-    """Git cannot read the before-state — a lesson's blob is missing from the object store, or
-    the commit is unknown: `_snapshot_corpus` raises `GitError` (the tick's `_capture_pre_state`
-    turns it into a stuck `GitProbeError` before the agent runs) rather than answer a partial
-    before-state, which would make the missing lesson look agent-made."""
     w = world(tmp_path)
     put(w.corpus_dir / "a.md", lesson_text("fa"))
     put(w.corpus_dir / "b.md", lesson_text("fb"))
@@ -337,11 +280,6 @@ def test_a_before_state_git_cannot_read_raises(tmp_path, fault):
 
     with pytest.raises(GitError):
         drain._snapshot_corpus(w.repo, w.corpus_dir, head)
-
-
-# ---------------------------------------------------------------------------------------
-# _restore_corpus(repo_root, corpus_dir, snapshot, *, corpus): the fault path's sweep + rewrite
-# ---------------------------------------------------------------------------------------
 
 
 def _baseline(w) -> dict[str, bytes]:
@@ -366,12 +304,6 @@ def _restore(w, snapshot, corpus=None, head_before=None) -> None:
 def test_the_restore_sweep_leaves_a_stray_alias_logs_it_and_removes_a_plain_stray(
     tmp_path, kind, caplog,
 ):
-    """O5.2 / O5.3 at `_restore_corpus`: an entry the snapshot never held is swept. A symlink or
-    hard link there is refused and left for the scrub, logged at WARNING by name, and the sweep
-    goes on: the plain stray beside it (the positive control, same call) is removed.
-
-    Catches: today's `is_file()` sweep, which follows the link and unlinks it; and a sweep that
-    asks the view's kind and plain-unlinks a `"file"` (a hard link's kind, H1)."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     snapshot = _baseline(w)
@@ -396,13 +328,6 @@ def test_the_restore_sweep_leaves_a_stray_alias_logs_it_and_removes_a_plain_stra
 def test_the_restore_leaves_an_alias_at_a_snapshot_name_and_restores_the_rest(
     tmp_path, kind, caplog,
 ):
-    """O5.3 at `_restore_corpus`: the agent replaced snapshot name `a.md` by a link (or a hard
-    link) to an outside file holding other bytes, and rewrote `b.md`. Git judges both changed;
-    the alias's rewrite is refused, logged by name and left; the loop carries on and `b.md` is
-    restored byte for byte (the positive control, same call); the outside file is never written
-    and its bytes are copied into no other corpus file. The symlink's target is never opened
-    (git compares the link itself); the hard link's content git reads to compare it (addendum 3,
-    declared, N-a), so for it the watch is not the witness."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     snapshot = _baseline(w)
@@ -426,9 +351,6 @@ def test_the_restore_leaves_an_alias_at_a_snapshot_name_and_restores_the_rest(
 
 
 def test_the_restore_control_rewrites_a_changed_and_a_deleted_snapshot_file(tmp_path):
-    """The positive control at the same names: `a.md` rewritten and `b.md` deleted by the agent,
-    a new plain `c.md` written; the restore puts `a.md` and `b.md` back byte for byte and
-    removes `c.md`."""
     w = world(tmp_path)
     snapshot = _baseline(w)
     put(w.corpus_dir / "a.md", b"rewritten\n")
@@ -444,15 +366,6 @@ def test_the_restore_control_rewrites_a_changed_and_a_deleted_snapshot_file(tmp_
 
 @pytest.mark.parametrize("at_snapshot_name", [True, False], ids=["snapshot-name", "stray-name"])
 def test_a_fifo_in_the_corpus_is_passed_over_on_the_fault_path(tmp_path, at_snapshot_name, caplog):
-    """O5.3 widened (settled): a FIFO is the core's leaf refusal (`NotPlainEntry`, unmarked), so
-    at a snapshot name the rewrite refuses it, and it is logged at WARNING by name and passed
-    over like a link. At a name the snapshot never held, `git status` does not report a FIFO
-    (C2: the sweep asks git which names the agent made), so the sweep never meets it: it is left,
-    and nothing is logged for it. Either way it is never opened, nothing is raised, and the rest
-    is restored.
-
-    Catches: v1's alias-mark catch (`write_guarded_alias`), under which the FIFO's unmarked
-    refusal replaced the fault being unwound."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     snapshot = _baseline(w)
@@ -470,10 +383,6 @@ def test_a_fifo_in_the_corpus_is_passed_over_on_the_fault_path(tmp_path, at_snap
 
 
 def test_a_folder_at_a_snapshot_name_is_passed_over_on_the_fault_path(tmp_path, caplog):
-    """O5.3 widened (pinned): the agent replaced snapshot name `a.md` by a folder. The rewrite of
-    `a.md` meets a folder AT the name — the core's leaf refusal (`NotPlainEntry`; today's
-    `write_guarded` raised it and replaced the fault) — so it is logged at WARNING by name and
-    passed over; `b.md` is still restored. The folder is left (its stray file swept)."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     snapshot = _baseline(w)
@@ -488,13 +397,6 @@ def test_a_folder_at_a_snapshot_name_is_passed_over_on_the_fault_path(tmp_path, 
 
 
 def test_a_linked_folder_holding_a_snapshot_name_replaces_the_fault(tmp_path, caplog):
-    """The agent moved folder `sub/` (holding snapshot name `sub/a.md`) outside and linked it
-    back. The sweep's unlink of `sub` (a symlink AT a name) is refused and passed over; the
-    rewrite of `sub/a.md` then meets the linked HOLDING folder on the descent: a plain
-    `OSError(ELOOP)`, no leaf refusal, so it propagates. Nothing is written into the outside
-    folder and the link is left.
-
-    Catches: an O5.3 catch widened to every `OSError` carrying `ELOOP`."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     put(w.corpus_dir / "sub" / "a.md", lesson_text("fa"))
@@ -516,13 +418,6 @@ def test_a_linked_folder_holding_a_snapshot_name_replaces_the_fault(tmp_path, ca
     ("rename", errno.ENOSPC), ("unlink", errno.EIO), ("unlink", errno.EACCES),
 ], ids=["rewrite-ENOSPC", "sweep-EIO", "sweep-EACCES"])
 def test_a_failing_disk_on_the_fault_path_restore_propagates(tmp_path, verb, code):
-    """H6: O5.3 passes over only the leaf refusal. The disk failing the restore — `ENOSPC` on the
-    rename that lands a snapshot file's bytes back, `EIO` / `EACCES` on the sweep's unlink of a
-    file the agent made — is no refusal of the tree's shape: that `OSError` propagates out of
-    `_undo_agent_edits` (reached through `cfg.corpus`), in place of the fault being unwound.
-
-    Catches: a catch wider than `NotPlainEntry` (every `OSError` but `ELOOP`/`ENOTDIR`), which
-    logs the failure and leaves the corpus half-restored under the original fault."""
     w = world(tmp_path)
     snapshot = _baseline(w)
     if verb == "rename":
@@ -553,12 +448,6 @@ def test_the_restore_sweep_empties_a_new_folder_and_leaves_it(tmp_path):
 
 
 def test_the_fault_restore_puts_back_nested_lessons_and_sweeps_nested_strays(tmp_path):
-    """C1 on the fault path: tracked nested lessons (#773's shape) the agent rewrote or removed
-    are written back byte for byte from the git before-state, and nested files it made (in a
-    tracked folder and in a new one) are swept; nothing at depth 1 is special.
-
-    Catches: a before-state or sweep limited to the corpus's own entries (a depth-1 listing),
-    which leaves the nested rewrite, the nested removal and the nested strays as they are."""
     w = world(tmp_path)
     put(w.corpus_dir / "nested" / "deep" / "l1.md", lesson_text("f0", mark="original"))
     put(w.corpus_dir / "nested" / "l2.md", b"second\r\n")
@@ -579,10 +468,6 @@ def test_the_fault_restore_puts_back_nested_lessons_and_sweeps_nested_strays(tmp
 
 
 def test_a_gitignored_name_the_agent_made_survives_the_fault_restore(tmp_path):
-    """C2 (declared): a name the corpus's `.gitignore` covers (`x.log`) is invisible to `git
-    status`, so the sweep — which asks git which names the agent made — leaves it (main's
-    recursive sweep deleted it). Positive control in the same call: the agent's `y.md`, which git
-    reports, is swept."""
     w = world(tmp_path)
     put(w.corpus_dir / ".gitignore", "*.log\n__pycache__/\n")
     snapshot = _baseline(w)
@@ -599,16 +484,6 @@ def test_a_gitignored_name_the_agent_made_survives_the_fault_restore(tmp_path):
 
 @pytest.mark.parametrize("broken", ["index is a folder", "index is garbage"])
 def test_a_broken_index_still_sweeps_through_gits_worktree_listing(tmp_path, broken, caplog):
-    """`git status` fails during the restore because the index is broken (the fault being
-    unwound is often git's own; #719's `test_a_git_failure_in_a_read_only_probe_...` breaks it
-    the first way). The sweep then asks git for every non-ignored worktree file under the corpus
-    against an empty index (`_git.git_worktree_files`): the agent's stray and nested stray are
-    swept, a gitignored file is left (C2), a tracked symlink is listed too and its unlink is
-    refused and logged (declared residue), every changed or removed snapshot file is written
-    back, one WARNING names `git status` (not the host path), and no index file is left behind.
-
-    Catches: a restore that sweeps nothing (or raises) when `git status` fails, leaving the
-    agent's files to wedge the next tick's clean gate."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     put(w.corpus_dir / ".gitignore", "*.log\n")
@@ -645,15 +520,6 @@ def test_a_broken_index_still_sweeps_through_gits_worktree_listing(tmp_path, bro
 
 
 def test_a_restore_git_cannot_answer_at_all_sweeps_nothing_but_still_rewrites(tmp_path, caplog):
-    """Git cannot answer at all during the restore (the working copy is no repository any more:
-    both `git status` and the worktree listing fail): one WARNING naming both (not the host
-    path), no sweep (a stray is left: nothing is deleted on an answer the restore never got),
-    and each changed or removed snapshot file is still written back through the held corpus —
-    git cannot compare either (addendum 3: the comparison is git's), so a second WARNING names
-    the failed `git diff` and every snapshot file is written back.
-
-    Catches: a restore that lets the git failure replace the fault, or one that skips the
-    rewrite with the sweep."""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     snapshot = _baseline(w)
@@ -684,11 +550,6 @@ def test_the_restore_does_nothing_without_a_snapshot(tmp_path):
     assert (w.corpus_dir / "stray.md").read_bytes() == b"new\n"
 
 
-# ---------------------------------------------------------------------------------------
-# _restore_unapproved_files: through cfg.corpus, refusals propagate
-# ---------------------------------------------------------------------------------------
-
-
 def _unapproved(w, cfg, snapshot, *rels: str) -> None:
     """The settle restore over `rels`, the before-state's commit being HEAD."""
     drain._restore_unapproved_files(cfg, snapshot, set(rels), head_before=w.head())
@@ -698,13 +559,6 @@ def _unapproved(w, cfg, snapshot, *rels: str) -> None:
 def test_an_unapproved_new_name_holding_a_link_is_refused_and_the_refusal_propagates(
     tmp_path, kind,
 ):
-    """O5.2 at `_restore_unapproved_files` (non-fault): a name the tick created, not approved,
-    holding a symlink or a hard link: `cfg.corpus.unlink` refuses (`NotPlainEntry`) and the
-    refusal propagates ("anything left must go" — never swallowed off the fault path); the link
-    stays.
-
-    Catches: today's `target.unlink()`, which deletes the link; and a delete that asks the
-    view only for the kind and unlinks a `"file"` by its plain path (H1: a hard link's kind)."""
     w = world(tmp_path)
     cfg = w.cfg()
     snapshot = _snap(w)
@@ -750,11 +604,6 @@ def test_an_unapproved_new_name_holding_a_folder_keeps_todays_is_a_directory_err
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
 def test_an_unapproved_changed_name_holding_a_link_is_refused_and_copied_nowhere(tmp_path, kind):
-    """A snapshot name the agent replaced by a link (or a hard link) to an outside file holding
-    other bytes: git judges it changed, the rewrite refuses (`NotPlainEntry`) and the refusal
-    propagates; the link and its target are left as they are, nothing is written through it and
-    its bytes are copied nowhere. The symlink's target is never opened; the hard link's content
-    is git's to read for the comparison (addendum 3, declared, N-a)."""
     w = world(tmp_path)
     cfg = w.cfg()
     put(w.corpus_dir / PLANTED, lesson_text("f0"))
@@ -808,13 +657,6 @@ def _settle(step: str, cfg, snapshot, rel: str) -> None:
 def test_a_settle_restore_below_a_linked_folder_is_refused_and_writes_nothing_outside(
     tmp_path, step, agent_left,
 ):
-    """The agent moved folder `sub/` (holding snapshot name `sub/a.md`) outside, linked it back,
-    and removed `a.md` there or rewrote it. The settle restore of `sub/a.md` meets the linked
-    folder on the held corpus's descent: a plain `OSError(ELOOP)` propagates (not the fault
-    path, so nothing is caught), the link is left, and nothing is written into the moved folder.
-
-    Catches: a restore that writes `cfg.corpus_dir / name` after `parent.mkdir(parents=True,
-    exist_ok=True)` — which accepts the linked folder — landing the snapshot bytes outside."""
     w = world(tmp_path)
     put(w.corpus_dir / "sub" / "a.md", lesson_text("fa"))
     w.commit()
@@ -835,18 +677,7 @@ def test_a_settle_restore_below_a_linked_folder_is_refused_and_writes_nothing_ou
     assert census(w.outside) == before
 
 
-# ---------------------------------------------------------------------------------------
-# _byte_identical_to_head: git compares (addendum 3, D1); a symlink is never "identical"
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_symlink_holding_head_identical_bytes_is_never_byte_identical(tmp_path):
-    """A tracked lesson replaced by a symlink to an outside file holding HEAD's exact bytes is
-    NOT byte-identical to HEAD: git sees a type change (a link where a file was), and compares
-    the link itself, so its target is never opened.
-
-    Catches: main's `(repo_root / rel).read_bytes()`, which follows the link and answers True —
-    and then `git checkout` papers over the plant."""
     w = world(tmp_path)
     body = lesson_text("f0", mark=OUT_MARK)
     put(w.corpus_dir / "t.md", body)
@@ -865,14 +696,6 @@ def test_a_symlink_holding_head_identical_bytes_is_never_byte_identical(tmp_path
 
 @pytest.mark.parametrize("bytes_held", ["head's", "other"])
 def test_a_hard_link_is_compared_by_its_content_as_git_hashes_it(tmp_path, bytes_held):
-    """Addendum 3, declared (N-a): git hashes a hard-linked file's content where the handle
-    refused it. A tracked lesson replaced by a hard link to an outside file holding HEAD's exact
-    bytes is judged byte-identical (it is: same bytes, still a regular file); one holding other
-    bytes is not. Either way the comparison changes nothing: the hard link stays, its target's
-    bytes, mode and link count are as they were.
-
-    Catches: a comparison still made through the held mount (which refuses the hard link, so
-    the identical one reads as changed) — the handle is not git."""
     w = world(tmp_path)
     body = lesson_text("f0")
     put(w.corpus_dir / "t.md", body)
@@ -889,9 +712,6 @@ def test_a_hard_link_is_compared_by_its_content_as_git_hashes_it(tmp_path, bytes
 
 
 def test_a_mode_only_change_is_byte_identical_and_a_content_change_is_not(tmp_path):
-    """The positive control at the same name: a chmod-only change is byte-identical (git is
-    asked to ignore the executable bit); a one-byte change is not; an untracked name has no
-    HEAD bytes, so it is never identical (git's diff alone would report nothing for it)."""
     w = world(tmp_path)
     put(w.corpus_dir / "t.md", lesson_text("f0"))
     w.commit()
@@ -908,12 +728,6 @@ def _crlf(text: str) -> bytes:
 
 
 def test_a_crlf_only_rewrite_of_a_tracked_lesson_is_not_byte_identical(tmp_path):
-    """E02: a tracked lesson INSIDE `lessons/` rewritten with CRLF line ends and nothing else is
-    not byte-identical to HEAD: git compares raw bytes (no newline translation — the docstring's
-    own reason: text decoding's universal newlines would call it equal).
-
-    Catches: a comparison that reads text (`read_at`) and re-encodes it, or a git comparison
-    that lets an end-of-line conversion apply."""
     w = world(tmp_path)
     put(w.corpus_dir / "t.md", lesson_text("f0"))
     w.commit()
@@ -926,13 +740,6 @@ def test_a_crlf_only_rewrite_of_a_tracked_lesson_is_not_byte_identical(tmp_path)
 def test_the_settle_keeps_a_crlf_only_rewrite_as_changed_and_puts_back_a_mode_only_one(
     tmp_path, change,
 ):
-    """E02 at the settle (`_settle_tree`, step 4): after the pre-state is taken, the agent
-    rewrites tracked `t.md` CRLF-only — the settle keeps it as CHANGED (content to judge) and
-    leaves its bytes as written. The control is a chmod-only change at the same name: identical
-    bytes, so it is put back (`git checkout`) and is not in `changed`.
-
-    Catches: a CRLF-only rewrite judged byte-identical and checked out, so a real change escapes
-    judgement."""
     w = world(tmp_path)
     put(w.corpus_dir / "t.md", lesson_text("f0"))
     w.commit()
@@ -956,23 +763,6 @@ def test_the_settle_keeps_a_crlf_only_rewrite_as_changed_and_puts_back_a_mode_on
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
 def test_the_settle_judges_a_link_at_a_modified_lesson_as_git_sees_it(tmp_path, kind):
-    """Step 4 of the settle (`_settle_tree`), at its own call site: after the pre-state is taken,
-    tracked `t.md` is replaced by a symlink (or a hard link) to an outside file holding HEAD's
-    exact bytes. Git reports it modified — a typechange; for the hard link the shared inode is
-    made executable, a mode change, since identical bytes alone report nothing.
-
-    - The symlink is never judged identical (git sees a type change): `t.md` stays CHANGED
-      (content to judge), the plant is left where it stands, its target is never opened.
-    - The hard link holds HEAD's exact bytes, so git judges it unchanged (addendum 3, declared,
-      N-a) and the settle puts it back with `git checkout` — from HEAD's blob, never from the
-      target: `t.md` is then a plain file of its own (not the target's inode) holding HEAD's
-      bytes, not in `changed` (so never judged, approved or committed), and the target keeps
-      its bytes and its mode.
-
-    Catches (#1134 v2 step 7 adversary, 02b, retargeted): a settle comparison that reads the
-    worktree by its plain path, which follows the symlink, answers True, and `git checkout`
-    papers over the plant; and one still asking the held mount, which refuses the hard link and
-    leaves an unchanged lesson to be judged."""
     w = world(tmp_path)
     body = lesson_text("f0", mark=OUT_MARK)
     put(w.corpus_dir / "t.md", body)
@@ -1017,17 +807,8 @@ def test_a_path_outside_the_lanes_mounts_is_compared_by_git_too(tmp_path):
     assert drain._byte_identical_to_head(w.repo, "f.txt") is False
 
 
-# ---------------------------------------------------------------------------------------
-# _cited_ids / _read_or_empty: on the VIEW; a refused read cites nothing and reads as ""
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
 def test_an_aliased_lesson_cites_nothing_and_reads_empty(tmp_path, kind):
-    """O5.1: a lesson name holding a link (or hard link) to an outside lesson citing `f1` cites
-    nothing (`_cited_ids(view, name, field)` -> `set()`) and reads as `""` (`_read_or_empty(view,
-    name)`), without the target being read. The positive control is the same bytes as a plain
-    file: it cites `f1` and reads as its text."""
     w = world(tmp_path)
     body = lesson_text("f1", mark=OUT_MARK)
     target = w.target("secret.md", body)
@@ -1057,22 +838,10 @@ def test_an_absent_or_undecodable_lesson_cites_nothing_and_reads_empty(tmp_path)
     assert drain._read_or_empty(w.view, "bad.md") == ""
 
 
-# ---------------------------------------------------------------------------------------
-# _put_back / _revert_strays: git-status names through tree_for
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("rel", [f"{LESSONS_REL}stray.txt", f"{SIBLING_REL}stray.md"],
                          ids=["own-corpus", "sibling-corpus"])
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
 def test_put_back_refuses_an_untracked_link_in_either_corpus(tmp_path, kind, rel):
-    """O5.2 at `_put_back`: an untracked name inside either author mount (its own corpus or the
-    sibling, both mounts of the label) holding a symlink or a hard link is judged through that
-    mount's `Held`: the unlink refuses (`NotPlainEntry`; no catch here: the caller decides), and
-    the link is left. The positive control is the same name as a plain untracked file: removed.
-
-    Catches: today's `is_file()` + `unlink()`, which follows the link and removes it; and a
-    `_put_back` that asks the view the kind and unlinks a `"file"` by its plain path (H1)."""
     w = world(tmp_path)
     target = w.target("secret.md")
     at = w.repo / rel
@@ -1103,9 +872,6 @@ def test_put_back_refuses_an_untracked_fifo(tmp_path):
 
 
 def test_put_back_checks_out_a_tracked_name_and_leaves_a_folder(tmp_path):
-    """Tracked: git puts the committed bytes back. An untracked folder (`"dir"`) and an absent
-    name are left alone. Outside the label's mounts (`defender/notes.txt`) the plain path is
-    kept (D3): an untracked plain file there is removed."""
     w = world(tmp_path)
     put(w.corpus_dir / "t.md", lesson_text("f0"))
     w.commit()
@@ -1125,11 +891,6 @@ def test_put_back_checks_out_a_tracked_name_and_leaves_a_folder(tmp_path):
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
 def test_revert_strays_logs_a_link_it_cannot_remove_and_goes_on(tmp_path, kind, caplog):
-    """O5.3 at `_revert_strays` (fault path only): a stray link (or hard link) in the sibling
-    corpus is refused through the sibling's `Held`, logged at WARNING by name and left; the loop
-    goes on and removes the plain stray beside it (named to sort AFTER the link, so a loop that
-    stopped at the refusal would leave it); a baseline stray (dirty before the tick) is kept.
-    (A FIFO never reaches this loop: `git status` does not list one.)"""
     w = world(tmp_path)
     caplog.set_level(logging.WARNING)
     target = w.target("secret.md")
@@ -1148,13 +909,6 @@ def test_revert_strays_logs_a_link_it_cannot_remove_and_goes_on(tmp_path, kind, 
 
 
 def test_put_back_below_a_linked_folder_is_refused_and_removes_nothing(tmp_path):
-    """H2: the sibling corpus's folder `sub/` is a link to an outside folder holding a plain
-    `x.md`, and `_put_back` is handed the untracked name `sub/x.md` (a name git status spelled
-    before the folder was swapped). The held mount's descent refuses the linked folder: a plain
-    `OSError(ELOOP)` propagates, and the outside `x.md` and the link are left.
-
-    Catches: a `_put_back` that judges the plain path itself — an `lstat` that follows the
-    linked folder, finds a plain file with one link, and unlinks the OUTSIDE file."""
     w = world(tmp_path)
     moved = w.outside / "moved-sub"
     put(moved / "x.md", lesson_text("f1", mark=OUT_MARK))
@@ -1172,10 +926,6 @@ def test_put_back_below_a_linked_folder_is_refused_and_removes_nothing(tmp_path)
 
 @pytest.mark.parametrize("code", [errno.EIO, errno.EACCES], ids=["EIO", "EACCES"])
 def test_revert_strays_lets_a_failing_disks_error_through(tmp_path, code):
-    """H6 at `_revert_strays`: only the leaf refusal is logged and passed over. The disk failing
-    the removal of a plain stray (`EIO` / `EACCES` on the sibling mount's `unlink`) propagates.
-
-    Catches: an O5.3 catch widened past `NotPlainEntry`."""
     w = world(tmp_path)
     put(w.sibling_dir / "stray.md", b"agent wrote this\n")
     seam = FailsOn("unlink", code)
@@ -1189,18 +939,7 @@ def test_revert_strays_lets_a_failing_disks_error_through(tmp_path, code):
     assert (w.sibling_dir / "stray.md").exists()
 
 
-# ---------------------------------------------------------------------------------------
-# commit_corpus_paths / _git.git_commit_paths: present vs absent by kind, never by exists()
-# ---------------------------------------------------------------------------------------
-
-
 def test_a_dangling_link_at_an_approved_path_counts_as_present(tmp_path):
-    """`commit_corpus_paths` splits present from absent with `kind_at` through `cfg.tree_for`: a
-    dangling link is `"other"`, so present, and is staged as what it is (a symlink blob); the
-    scrub then taints the batch on it.
-
-    Catches: today's `(cwd / p).exists()`, which follows the link, calls it absent, and commits
-    nothing."""
     w = world(tmp_path)
     cfg = w.cfg()
     plant_link(w.corpus_dir / PLANTED, w.outside / "does-not-exist.md")
@@ -1214,14 +953,6 @@ def test_a_dangling_link_at_an_approved_path_counts_as_present(tmp_path):
 
 @pytest.mark.parametrize("listed_as", ["approved", "deleted"])
 def test_a_member_below_a_linked_folder_counts_as_present_and_git_refuses_it(tmp_path, listed_as):
-    """H9: tracked `sub/x.md`; the agent moved `sub/` outside (without `x.md`) and linked it back.
-    The split asks the held mount, which answers `"other"` for a name below a linked folder, so
-    `sub/x.md` is present, and git refuses to stage a path beyond a symbolic link: a `GitError`
-    (a `RETIRE_SET` member), nothing committed, `sub/x.md` still in HEAD. Approved or listed as a
-    deletion, alike.
-
-    Catches: a split by `os.path.lexists(repo_root / p)`, which follows the linked folder, finds
-    no `x.md`, calls the path absent, and silently commits its deletion."""
     w = world(tmp_path)
     put(w.corpus_dir / "sub" / "x.md", lesson_text("f0"))
     w.commit()
@@ -1259,11 +990,6 @@ def test_the_commit_lands_an_approved_file_and_a_real_deletion(tmp_path):
 
 
 def test_git_commit_paths_obeys_its_two_lists_and_tests_nothing_on_disk(tmp_path):
-    """`_git.git_commit_paths(cwd, present, absent, message)`: `present` is `git add`ed and
-    `absent` is `git rm --cached`, with no existence test of its own: a dangling link named
-    present is committed as a symlink (the old `exists()` test called it absent). A tracked file
-    named absent is left on disk (what the pathspec commit then records for it is git's own
-    worktree read, N-a, so it is not pinned here)."""
     w = world(tmp_path)
     put(w.corpus_dir / "kept.md", lesson_text("f0"))
     w.commit()
@@ -1291,19 +1017,7 @@ def test_git_commit_paths_with_nothing_to_commit_never_calls_git(tmp_path):
     assert _git.git_commit_paths(not_a_repo, [], [], "msg") is None
 
 
-# ---------------------------------------------------------------------------------------
-# assert_clean_corpus_dir, existing_finding_ids, build_corpus_manifest, the curator prompt
-# ---------------------------------------------------------------------------------------
-
-
 def test_the_clean_gate_goes_through_the_held_corpus_and_passes_a_clean_tree(tmp_path):
-    """`assert_clean_corpus_dir(repo_root, corpus_dir, rel, *, corpus)` reaches the corpus with
-    the `Held`'s `mkdir(".")`, and a clean tree passes. What went through the held corpus's
-    `os_`: calls on the held root's own descriptor and nothing else — no folder made, no entry
-    opened by name (`mkdir(".")` makes nothing: a held root cannot be missing).
-
-    Catches: a gate that makes the folder at its spelling and touches the held corpus only to
-    look busy, and one that never reaches the held corpus at all."""
     w = world(tmp_path)
     seam = RecordingOs()
     trees = seamed_trees(w.paths, seam)
@@ -1317,12 +1031,6 @@ def test_the_clean_gate_goes_through_the_held_corpus_and_passes_a_clean_tree(tmp
 
 
 def test_the_clean_gate_makes_nothing_where_the_held_root_was(tmp_path):
-    """`corpus.mkdir(".")` makes nothing (a held root cannot be missing): with the held corpus
-    root removed since it was held, the gate makes no folder at its spelling, and the removal
-    shows as dirt (the tracked `.gitkeep` deleted), so it refuses (`AuthorError`).
-
-    Catches: today's `corpus_dir.mkdir(parents=True, exist_ok=True)`, kept beside the new
-    keyword, which makes a fresh folder at the spelling the held root no longer is."""
     w = world(tmp_path)
     held = w.corpus
     shutil.rmtree(w.corpus_dir)
@@ -1342,10 +1050,6 @@ def test_the_clean_gate_still_refuses_a_dirty_corpus(tmp_path):
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
 def test_the_idempotency_read_skips_an_aliased_lesson(tmp_path, kind):
-    """`existing_finding_ids(cfg)` reads through `cfg.corpus.view()`: a lesson name holding a
-    link (or hard link) to an outside lesson citing `f-out` contributes no id; a plain lesson's
-    ids are collected; the reads went through the config's held corpus. The positive control is
-    the same bytes as a plain file: `f-out` counted."""
     w = world(tmp_path)
     put(w.corpus_dir / "plain.md", lesson_text("f-plain"))
     body = lesson_text("f-out", mark=OUT_MARK)
@@ -1363,13 +1067,6 @@ def test_the_idempotency_read_skips_an_aliased_lesson(tmp_path, kind):
 
 
 def test_the_idempotency_read_leaves_out_a_lesson_cfg_corpus_refuses(tmp_path):
-    """E03: `existing_finding_ids(cfg)` collects ids from what `cfg.corpus`'s view reads. Over a
-    held corpus whose view refuses `b.md` (a plain file on disk, so only a read through THIS view
-    can miss it), `f-b` is not collected, `f-a` is, and the journal shows each lesson read
-    through it. Control: the same corpus held without the refusal collects both.
-
-    Catches: an idempotency read that asks `cfg.corpus` whether the folder is there and then
-    reads the corpus by its spelling (`iter_lessons(cfg.corpus_dir)`), which reads `b.md`."""
     w = world(tmp_path)
     put(w.corpus_dir / "a.md", lesson_text("f-a"))
     put(w.corpus_dir / "b.md", lesson_text("f-b"))
@@ -1385,9 +1082,6 @@ def test_the_idempotency_read_leaves_out_a_lesson_cfg_corpus_refuses(tmp_path):
 
 @pytest.mark.parametrize("kind", ["symlink", "hard link"])
 def test_the_manifest_shows_an_aliased_lesson_as_unavailable(tmp_path, kind):
-    """`build_corpus_manifest(view, where=corpus_dir)` (the drain's Bound form): an aliased
-    lesson keeps its stem with the "unavailable" placeholder and none of the target's bytes; the
-    plain control renders its frontmatter."""
     w = world(tmp_path)
     body = lesson_text("f1", mark=OUT_MARK, topic=OUT_MARK)
     target = w.target("secret.md", body)
@@ -1421,14 +1115,6 @@ def _channel_prompt(w, channel):
 
 @pytest.mark.parametrize("channel", ["lessons", "questioner"])
 def test_each_channel_prompt_shows_a_lesson_cfg_corpus_refuses_as_unavailable(tmp_path, channel):
-    """E07: each channel's prompt manifest is what `cfg.corpus`'s view reads. Over a held corpus
-    whose view refuses `b.md` (plain on disk), the manifest keeps `b`'s stem under the
-    "unavailable" placeholder with none of its frontmatter, renders `a`'s, and the journal shows
-    both read through that view. Control: held without the refusal, `b`'s topic is rendered and
-    nothing is unavailable.
-
-    Catches: a prompt builder that checks `cfg.corpus` and then reads the manifest from the
-    corpus's spelling (`_corpus._viewed(cfg.corpus_dir)`), which reads `b.md` in full."""
     w = world(tmp_path)
     root, prompt_of, cfg = _channel_prompt(w, channel)
     put(root / "a.md", lesson_text("f-a", topic="topic-of-a"))

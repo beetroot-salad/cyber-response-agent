@@ -36,8 +36,6 @@ PAYLOAD = [
 ]
 
 
-
-
 def build(tmp_path, monkeypatch, golden: Path = GOLDEN, run_id: str = "origin-647"):
     """Materialize a run dir with the REAL production builder.
 
@@ -105,7 +103,6 @@ def run_dir_listing(message_zero: str) -> list[str]:
     m = RUN_DIR_SECTION.search(message_zero)
     assert m, "message 0 carries no `## Run dir` section — the workspace map is missing"
     return [line[2:].split(" ")[0] for line in m.group(1).splitlines() if line.startswith("- ")]
-
 
 
 def test_every_frame_in_one_model_context_carries_its_own_salt(tmp_path, monkeypatch):
@@ -183,11 +180,6 @@ def test_message_zero_orientation_lists_exactly_the_materialized_run_dir_childre
     assert set(listed) <= on_disk, (
         f"message 0 lists names that do not exist in the run dir: {set(listed) - on_disk}"
     )
-    # `workspace_map._unlisted()` ITSELF, not a subset re-typed here: the suppression and the
-    # expectation must be one value, or a name added to (or dropped from) the real set leaves
-    # this arm asserting about a set nobody maintains. `provenance.json` joins `gather_raw` in
-    # it for the reason the comment there gives — the map IS the model's directory view, and
-    # the run's record of the commit it was built from is infrastructure the OPERATOR reads.
     assert (materialized - _unlisted()) <= set(listed), (
         f"a materialized artifact is missing from message 0: "
         f"{(materialized - _unlisted()) - set(listed)}"

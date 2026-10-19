@@ -1,7 +1,3 @@
-"""Holes in the lead author's handle reads: entry swapped for a link after the kind answer, catalogs behind a linked
-folder, composite gates handing parts a different `tree_for`, and refused or gone folders in discovery and the
-half-promote walk. Linux only (inotify read watch).
-"""
 from __future__ import annotations
 
 import dataclasses
@@ -91,11 +87,6 @@ PLAIN_QUERY = "```query\nverb: search\nparams:\n  index: ${index}\n```"
 
 def plain_template(tid: str, status: str = "established", *, covers=()) -> str:
     return query_template(tid, status, body=PLAIN_QUERY, covers=covers)
-
-
-# ---------------------------------------------------------------------------------------
-# H1b: the entry swapped for a link after `entry_kind` answered
-# ---------------------------------------------------------------------------------------
 
 
 class SwapsAfterKind(RealOs):
@@ -234,9 +225,6 @@ def test_the_race_control_reads_the_plain_entry(scene: Scene, race: Race):
 def test_an_entry_swapped_for_a_link_after_kind_answered_is_not_followed(
     scene: Scene, race: Race, caplog,
 ):
-    """The entry is a plain file when `entry_kind` answers and a symlink to an outside
-    file when it is read: the reader gives its "refused" answer (not the plain one, not the
-    target's), the kernel saw no open and no read of the target, and the link is left."""
     race.prepare(scene)
     place(scene, race.name, race.plain, "plain")
     target = write(scene.outside / "race-target", race.target)
@@ -256,10 +244,6 @@ def test_an_entry_swapped_for_a_link_after_kind_answered_is_not_followed(
     assert os.readlink(scene.at(race.name)) == str(target), "the link was not left in place"
 
 
-# ---------------------------------------------------------------------------------------
-# H2 and H6: the catalog is loaded through the held view, never by a `Path` inside the mount
-# ---------------------------------------------------------------------------------------
-
 #: The folders above the catalog below the mount: a `Path` rooted at `skills_dir / folder`
 #: opens both by their spelling.
 CATALOG_SITES = [None, "gather", "gather/queries"]
@@ -271,10 +255,6 @@ def _moved(moved: Path, name: str, site: str) -> Path:
 
 @pytest.mark.parametrize("site", CATALOG_SITES)
 def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, caplog):
-    """H2, through `lead_author.run(label=, deps=)`: an executed lead whose `query_id` only a
-    template behind a link at `skills/gather` or `skills/gather/queries` answers. The run's
-    catalog loads read nothing behind the link, so the lead resolves to no template, no handoff
-    is built from the outside template, and the agent is never spawned."""
     repo = _worktree(tmp_path)
     run_dir = _run_dir()
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
@@ -306,10 +286,6 @@ def test_run_resolves_no_lead_through_a_linked_catalog(tmp_path: Path, site, cap
 
 @pytest.mark.parametrize("site", CATALOG_SITES)
 def test_the_writer_loads_no_catalog_through_a_linked_folder(tmp_path: Path, site, caplog):
-    """H6, `synthesize_drafts(catalog=None)`: the catalog behind a link at `skills/gather` or
-    `skills/gather/queries` holds a template answering the wazuh lead. The writer's own load
-    reads nothing behind the link, so the wazuh lead is still a draft candidate: its write is
-    refused and logged, like the elastic one, and nothing outside the repo changes."""
     with scene_over(tmp_path, bare_skills(tmp_path)) as s:
         answering = "gather/queries/wazuh/hunt-creds.md"
         write(s.at(answering), query_template(WAZUH_LEAD.query_id, "established"))
@@ -339,10 +315,6 @@ def test_the_writer_loads_no_catalog_through_a_linked_folder(tmp_path: Path, sit
 
 @pytest.mark.parametrize("site", CATALOG_SITES)
 def test_build_handoff_loads_no_catalog_through_a_linked_folder(scene: Scene, site, caplog):
-    """H6, `build_handoff(catalog=None, skills=, where=)`: the only template answering the lead
-    lies behind a link at `skills/gather` or `skills/gather/queries`. It is not read, so the lead
-    resolves to nothing and no handoff is built. `site=None` is the control: the plain template
-    resolves the lead and is rendered."""
     place(scene, TEMPLATE_NAME, marked_template("wazuh.probe"), "plain")
     template = scene.at(TEMPLATE_NAME)
     if site is not None:
@@ -368,9 +340,6 @@ def test_build_handoff_loads_no_catalog_through_a_linked_folder(scene: Scene, si
 @pytest.mark.parametrize("site", CATALOG_SITES)
 def test_collect_general_failures_loads_no_catalog_through_a_linked_folder(
         scene: Scene, site, caplog):
-    """H6, `collect_general_failures(catalog=None, skills=, where=)`: the only template
-    answering an agent-fixable row lies behind a link: not read, so the row is pitfalls residue.
-    `site=None` is the control: the plain template answers it, so it is no pitfall."""
     place(scene, TEMPLATE_NAME, marked_template("wazuh.search"), "plain")
     template = scene.at(TEMPLATE_NAME)
     if site is not None:
@@ -389,13 +358,6 @@ def test_collect_general_failures_loads_no_catalog_through_a_linked_folder(
     assert [r["query_id"] for r in got] == ["wazuh.search"]
 
 
-# ---------------------------------------------------------------------------------------
-# H4: a planted folder above an entry gives one verdict, whatever it points at
-# ---------------------------------------------------------------------------------------
-
-#: The plants at a folder: (a) a link to the real folder, moved outside, holding the entry (a
-#: good one and a bad one where content decides), (b) a link to an empty outside folder, (c) a
-#: dangling link, (d) a plain file.
 PLANTS = ("a-good", "a-bad", "b-empty", "c-dangling", "d-file")
 
 BAD_TEMPLATE = CONTENT_CASES[1].bad
@@ -490,12 +452,6 @@ def _plant(s: Scene, site: str, plant: str) -> Path | None:
 def test_a_planted_folder_gives_one_verdict_whatever_it_points_at(
     tmp_path: Path, gate: FolderGate, caplog,
 ):
-    """The folder above the gate's entry replaced by a link to the real folder (holding a good
-    or a bad entry), to an empty folder, to nothing, or by a plain file: the verdict is the same
-    for all four links (whatever they point at), each of the five is the no-follow gate's,
-    nothing behind the plant is opened or read, and the plant is left. (The plain file may
-    differ from the links in the refusal's wording only: the SKILL.md gate's read says `Not a
-    directory` there.)"""
     verdicts: dict[str, str] = {}
     for plant in PLANTS:
         with scene_over(tmp_path / plant, seed_skills_repo(tmp_path / plant / "repo")) as s:
@@ -517,11 +473,6 @@ def test_a_planted_folder_gives_one_verdict_whatever_it_points_at(
 
     links = {plant: v for plant, v in verdicts.items() if plant != "d-file"}
     assert len(set(links.values())) == 1, verdicts
-
-
-# ---------------------------------------------------------------------------------------
-# H5: every check reads through the `tree_for` it is handed, never one of its own
-# ---------------------------------------------------------------------------------------
 
 
 @dataclasses.dataclass(frozen=True)
@@ -667,9 +618,6 @@ FOLLOWS = [
 
 @pytest.mark.parametrize("follow", FOLLOWS, ids=lambda f: f.id)
 def test_every_check_reads_through_the_tree_for_it_is_handed(scene: Scene, follow: Follow):
-    """The lane's tree and a copy of it that differs at one entry: through the lane's
-    `tree_for` the check gives the lane's answer; through a spy `tree_for` that places every
-    `skills/` path in the copy's held mount it gives the copy's, and it asked that spy."""
     follow.seed(scene)
     # Inside the repo, as every mount is: the refusals spell their paths repo-relative.
     copy = scene.repo / "defender" / "skills-copy"
@@ -694,37 +642,6 @@ def test_every_check_reads_through_the_tree_for_it_is_handed(scene: Scene, follo
     assert follow.copy(via_copy), via_copy
     assert asked, "the check never asked the tree_for it was handed"
 
-
-# ---------------------------------------------------------------------------------------
-# H7 and H8: the lane binds its own label into both default seams; the CLI runs under it
-# ---------------------------------------------------------------------------------------
-#
-# Source checks, because no hermetic drive tells these apart: the drain's pitfalls seam reads
-# its label only at its open (a wrong one fails the curation, logged), and the CLI takes the
-# checkout's own queue lock and resolves the real repo's systems. The honest drive of the
-# default seams is `test_the_drain_default_seams_carry_the_label_and_write_nothing_outside_skills`.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------------------
-# The listing consumers: refused and gone folders, a refused top, and links at a system,
-# `_draft` or draft
-# ---------------------------------------------------------------------------------------
 
 DENIED = os.strerror(errno.EACCES)
 SKILL_SYSTEMS = frozenset({"elastic", "wazuh"})
@@ -766,16 +683,10 @@ def test_discover_control_lists_every_declared_system(skills: Path, caplog):
 @pytest.mark.parametrize("route", REFUSAL_ROUTES)
 @pytest.mark.parametrize("deny", ["wazuh", "wazuh/_draft"])
 def test_discover_skips_only_the_unlistable_system(skills: Path, deny: str, route: str, caplog):
-    """A declared `<sys>` or `<sys>/_draft` whose own listing is refused (in `list_tree`'s
-    `refused`; EACCES on any of the three routes listing a folder takes): ONE
-    `warn: skipping <where>/<name> (Permission denied)`, the listing's reason verbatim, and every
-    other system is still read."""
     refuser = RefusesFolder(skills / deny, route, errno.EACCES)
     assert _discover(skills, refuser) == [skills / "elastic/_draft/a.md"]
     assert refuser.refused > 0
     assert _warnings(caplog) == [GHOST, f"warn: skipping {skills / deny} ({DENIED})"]
-
-
 
 
 @pytest.mark.parametrize("route", ["reopen", "scandir"])
@@ -797,9 +708,6 @@ def test_a_refused_listing_warns_once_and_discovers_nothing(skills: Path, route:
 @pytest.mark.parametrize("deny", ["elastic", "elastic/_draft"])
 def test_a_fault_below_the_mount_costs_only_that_system(
         skills: Path, deny: str, err: int, route: str, caplog):
-    """An EIO (or EACCES) listing a declared `<sys>` or its `_draft`: ONE
-    `warn: skipping <where>/<name> (<strerror>)` with the listing's reason verbatim, and every
-    other system is still discovered."""
     refuser = RefusesFolder(skills / deny, route, err)
     assert _discover(skills, refuser) == [skills / "wazuh/_draft/b.md"]
     assert refuser.refused > 0
@@ -810,9 +718,6 @@ def test_a_fault_below_the_mount_costs_only_that_system(
 @pytest.mark.parametrize("gone", ["wazuh", "wazuh/_draft", "ghost"])
 def test_a_folder_found_gone_by_its_own_listing_is_passed_over_silently(
         skills: Path, gone: str, route: str, caplog):
-    """A folder its parent listed as a directory and found missing by its own listing (ENOENT:
-    the listing's `gone`): passed over in silence, as a missing folder always was; every other
-    system is discovered, and an undeclared `ghost` keeps only its undeclared warning."""
     refuser = RefusesFolder(skills / gone, route, errno.ENOENT)
     a, b = skills / "elastic/_draft/a.md", skills / DRAFT_B
     assert _discover(skills, refuser) == ([a, b] if gone == "ghost" else [a])
@@ -830,11 +735,6 @@ SWAPPED_REASON = {"symlink": ALIAS_READ_REFUSAL, "file": os.strerror(errno.ENOTD
 @pytest.mark.parametrize("site", ["wazuh", "wazuh/_draft"])
 def test_a_folder_swapped_between_listings_is_refused_or_gone_and_never_listed_through(
         skills: Path, site: str, plant: str, caplog):
-    """`skills/`'s listing shows `site` as a real directory; the moment `site`'s own listing
-    steps into it, the folder is REALLY moved outside and a symlink to it, a file, a FIFO or
-    nothing is left at its name. Refused (link, file, FIFO): ONE `warn: skipping
-    <where>/<site> (<the listing's reason>)`; gone: silent. Either way its draft is not
-    discovered, the other system's is, and nothing in the moved folder is opened."""
     at = skills / site
     away = skills.parents[2] / f"away-{site.replace('/', '-')}"
     watched = [Path(d) for d, _dirs, _files in os.walk(at)]
@@ -869,11 +769,6 @@ DRAFT_B = "wazuh/_draft/b.md"
 @pytest.mark.parametrize("kind", ["link", "fifo", "file"])
 def test_discover_never_enters_or_returns_a_non_plain_entry(
         skills: Path, site: str, kind: str, caplog):
-    """A symlink (to where the real entry now lies, outside), a FIFO or a plain file at a
-    declared `<sys>`, its `_draft`, a draft's name, or the undeclared top-level folder: never
-    entered or returned, and nothing behind the link opened. Every other system is still read.
-    The undeclared warning is for a directory, so a non-directory at `ghost` earns none. A plain
-    file at the draft's own name is the plain draft: `file` at `b.md` is the control."""
     at = skills / site
     outside = skills.parents[2] / "outside"
     outside.mkdir(exist_ok=True)
@@ -918,9 +813,6 @@ def _half_promote_under(repo: Path, taken: set[str], os_: Any | None = None) -> 
 @pytest.mark.parametrize("route", REFUSAL_ROUTES)
 def test_half_promote_still_refuses_under_another_system_when_one_is_unlistable(
         tmp_path: Path, route: str, caplog):
-    """`_refuse_half_promote`'s catalog listing (the step-4 selection): an unlistable `wazuh` is
-    warned once and skipped; the stranded draft under `elastic` is still refused, named by its
-    repo-relative path."""
     repo = _catalog_repo(tmp_path)
     refuser = RefusesFolder(repo / CATALOG_REL / "wazuh", route, errno.EACCES)
     got = _half_promote_under(repo, {"elastic.taken"}, refuser)

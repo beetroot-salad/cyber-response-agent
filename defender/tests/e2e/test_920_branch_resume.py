@@ -1,43 +1,3 @@
-"""#920 PR 1 — a finished investigation resumes at one of its own messages.
-
-Driven end-to-end through the REAL `driver.run_investigation` with a `FunctionModel` replay
-(`override_allow_model_requests(False)` makes any provider call raise). Two properties:
-
-**O1 — the prefix is rendered exactly once.** A resumed run forks the source session, is
-handed the fork's own send-role hydration as `message_history`, and ingests only what the
-model newly produced. Observed failing by `IngestTailUnderflow` — which the driver CATCHES
-and reports as `truncated_by="store"` rather than as a crash, so the assertion is on the
-summary rather than on a raised exception — or by prefix rows appearing twice under the child.
-
-**A resumed run does not re-orient.** The correlation lead is turn-0 work: it reads the alert
-cold and reports before MAIN's first message, and a branch point is by construction past that.
-The discriminator is that the sibling IS handed a verb registry — the same `elastic_backend`
-whose recorder catches the call `l-00c` makes on the source run — and still issues nothing.
-Without that arm the property would be satisfied by a run with no backend to call.
-
-THE SOURCE RUN IS DRIVEN, NOT LOADED. `sessions/` is gitignored, so a store read off disk
-would be a store nobody built; and the branch-point checks read the source run's captured
-queries and its invlang document, which a hand-planted store would not have. Both come from a
-real run through the #808 scenario builder, whose correlation lead issues one real call
-against an injected elastic backend. The document is authored one `append_block` per fence,
-because that is the append-only authoring path and the only one under which the
-branch point's message index says anything about how much of the document had landed.
-
-Since #1222 the correlation summary rides MAIN's opening message instead of being injected as
-a synthesized row, so there is no longer a "prefix carrying a synthesized turn" scenario.
-
-#1255 (D1, P2, P4) moved the branch point and what an arm is handed. A branch is taken at a MAIN
-response that CALLED tools, before their answers: the arm resumes with no user message (there
-is no continuation prompt any more), runs those calls against its own world, and holds the
-source's files as they stood when that response arrived — the document by CONTENT, not cut at a
-fence boundary. So each arm below branches at the source's LAST `append_block` call (the tip, a
-text-only response, is no longer a branch point), re-runs that append itself, and is checked
-against the source's own end state.
-
-The unit-level halves — that `fork` and `hydrate(role="send")` truncate through one function,
-and which branch points are legal at all — live in `tests/test_920_branch_seam.py` and, since
-#1255, `tests/e2e/test_1255_snapshot_legality.py`.
-"""
 from __future__ import annotations
 
 import importlib
@@ -74,9 +34,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-#: The scaffold `_user_prompt` and `orient.orientation` put in front of MAIN's first message on
-#: the SOURCE run. Both strings are inherited by the sibling through `message_history`, so the
-#: observable is that each appears EXACTLY ONCE — a second copy is a second orientation.
 OPENING_LINE = "Begin the investigation."
 
 #: What the source run's backend returns for `l-00c`'s one call.
@@ -101,9 +58,6 @@ def _source_run(tmp_path, sink, *, docs):
     return run(
         tmp_path / "source", run_id="branch-920-source",
         answer=answer_hits(docs), stores=sink,
-        # `l-00c` is the only query a source run makes before MAIN: one real call, so the
-        # prefix has a query that reached a system (a branch needs one) and the lead's end
-        # is its own summary.
         gather_turns=[
             Turn(tool_calls=[("query", {"system": "elastic", "verb": "alerts",
                                         "params": {"native_query": "user.name:dev.dana"}})]),
@@ -151,24 +105,6 @@ def _resume(spec, sibling_dir, *, main, verbs=None):
 
 
 def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
-    """    A real run branches at a named message through `run_investigation(resume=…)`: the sibling
-    joins the source run's database, its session forks off the branch point (a tool-calling
-    response, D1), its first model request carries the inherited prefix and the answers to the
-    branch response's own calls, and everything it produces lands as NEW rows — the prefix is
-    not written a second time and no `IngestTailUnderflow` ends the run.
-
-    The row assertions are one property seen from three sides. The path check says the
-    inherited rows are inherited; the ownership check says the child wrote only its own; the
-    `truncated_by` check says the run reached its end rather than being stopped by the store.
-    A resume that duplicated the prefix passes the last of those alone, which is why all three
-    are here — and the final check refuses a vacuous pass where the sibling appended nothing
-    at all.
-
-    Regression over the new branch point (D1): it passes once D1 lands, fork snapshot or not,
-    so it is not evidence for the snapshot (P2)."""
-    # provenance: issue O1 and its done-when — "a real run branches at a named message from a
-    # supported entry point, in every sibling, with no IngestTailUnderflow and no duplicated
-    # prefix rows". Claims C4 (executed) and C5.
     ss = store_mod()
     sink: list = []
     source = _source_run(tmp_path, sink, docs=NO_DOCS)
@@ -208,49 +144,18 @@ def test_a_finished_run_resumes_at_one_of_its_own_messages(tmp_path):
 
 
 def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
-    """    The sibling's first `append_block` lands ON TOP of the source's document, in the
-    sibling's own run dir.
-
-    #1255 (D1; under P2 the fence-boundary seed gives way to a restore by CONTENT): the
-    document is what it was when the branch response arrived, and the branch response's own `append_block` is
-    then re-run by the arm. So the sibling's document opens on the source's FINISHED document
-    byte for byte (the re-run append re-lands the last fence), and its own fence follows. The
-    old rule — a fence-count prefix of the finished document — is what this rejects: the seed
-    no longer has to "end on a fence boundary", it has to be what the source held.
-
-    The session is inherited and the run dir is FRESH, so the document has to be carried across
-    or the two halves disagree from turn one: the model's own history says it authored seven
-    fences, `_opening_prompt` hands it coordinates into that document, and `_tool_append_block`
-    writes `deps.run_dir/"investigation.md"`. Un-seeded, that call reported `(1835 total)`
-    against a source document of 13564 bytes, and the model could not read the original back
-    either — `permission.decide_read` is rooted at the sibling's run dir, so the source's copy
-    is denied.
-
-    Driven end to end rather than asserted at the seam, because everything downstream reads
-    this file: `_check_append_only` has no blocks to conserve without it, `_frontier_recall`
-    sees a document that never moved, and the close gate's projection reads the sibling's
-    verdict against no belief history at all.
-
-    Regression over the new branch point (D1): it passes once D1 lands, fork snapshot or not,
-    so it is not evidence for the snapshot (P2)."""
     # provenance: `_opening_prompt`'s own docstring names the problem it cannot solve alone;
     # `ForkSnapshot.restore_files` is the other half.
     sink: list = []
     source = _source_run(tmp_path, sink, docs=NO_DOCS)
     spec, _prefix_ids = _spec(source, sink[0])
     inherited = RunPaths(source.run_dir).investigation.read_text(encoding="utf-8")
-    # `FENCES` counts the model's own `append_block` TURNS; the document also carries the
-    # harness-authored lead block in front of them, so the file's own count is the baseline
-    # to compare against rather than that constant.
     landed = inherited.count("```invlang")
     assert landed > FENCES, (
         f"the SOURCE run did not author its document ({source.summary_dict}); nothing below "
         "is about inheriting one")
 
     sibling_dir = materialize_alert(tmp_path / "sibling", alert_doc())
-    # A block the validator accepts ON TOP OF the inherited document — which is itself half
-    # the demand: a lead row citing `v-001`/`h-002` only resolves if the seed carried the
-    # blocks that declare them.
     own_fence = (
         "```invlang\n:L findings [id|loop|name|target|tests|system|window]\n"
         "l-007|3|sibling-probe|v-001|h-002|elastic|15:22-15:40Z\n```")
@@ -275,21 +180,6 @@ def test_a_resumed_run_appends_onto_the_document_it_inherited(tmp_path):
 
 
 def test_a_resumed_run_does_not_orient_again(tmp_path):
-    """A resumed run skips the correlation lead entirely: no new `l-00c` leads row, no new
-    query rows under the reserved id — even though the sibling is handed the same kind of verb
-    registry the source run dispatched `l-00c` through.
-
-    The source run is the control in the same test, deliberately: it claims `l-00c` and issues
-    a real backend call through its own recorder, so "the sibling issued none" is measured
-    against a demonstrated capability rather than against an assumption. The prompt half is
-    the mirror — the ORIENT scaffold and the correlation heading appear exactly ONCE in the
-    sibling's first request, inherited through `message_history`, not rebuilt in front of it.
-
-    Regression over the new branch point (D1): it passes once D1 lands, fork snapshot or not,
-    so it is not evidence for the snapshot (P2)."""
-    # provenance: the discussion's second corrected premise — "`_user_prompt` unconditionally
-    # builds a fresh orientation prompt". #1255 (D1, P4) went further: a resume carries NO new
-    # user message at all, so the only user prompt in its first request is the inherited one.
     sink: list = []
     source = _source_run(tmp_path, sink, docs=DOCS)
     assert source.rec.calls, (
@@ -310,10 +200,6 @@ def test_a_resumed_run_does_not_orient_again(tmp_path):
     assert rec.calls == [], (
         f"the resumed run reached the backend {len(rec.calls)} time(s) before its first model "
         f"turn ({rec.verbs}) — the correlation lead ran again over evidence the prefix holds")
-    # The l-00c sidecar is INHERITED, not claimed: a sibling gets the source's captured
-    # evidence in its own run dir, and `claim_lead` raises on id reuse — so the inherited
-    # claim is itself what stops a resumed run redoing turn-0 work. Byte-identical is the
-    # observable that separates the two; a re-claim would rewrite it.
     inherited = RunPaths(sibling_dir).lead_claim(L3)
     assert inherited.read_bytes() == RunPaths(source.run_dir).lead_claim(L3).read_bytes(), (
         "the resumed run rewrote the l-00c leads row; a branch point is past turn-0 work by "

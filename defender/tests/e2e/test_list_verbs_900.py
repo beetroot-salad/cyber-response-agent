@@ -46,10 +46,6 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
 
 if TYPE_CHECKING:
-    # Imported ONLY for the type checker, which is exactly how an unresolvable annotation
-    # reaches a shipped adapter: the name is never bound at runtime, so `typing.get_type_hints`
-    # raises NameError and `_resolved_hints` swallows it into `{}` (O3 / #900 B2). Nothing else
-    # in this module uses it — it annotates the synthetic verb below and nothing more.
     from collections.abc import Sequence as _WindowSpec
 
 pytestmark = pytest.mark.e2e
@@ -70,10 +66,6 @@ def _grant_systems() -> tuple[str, ...]:
     so a new system in the table is covered by this suite the day it lands."""
     return tuple(sorted(_shipped_gather_grant().systems))
 
-#: Verbs the adapters DECLARE and gather's grant WITHHOLDS (`driver.py:375-377` names the first
-#: two outright; the three `ticket` ones are the judge's closed-ticket surface). Each is checked
-#: to be really declared before it is asserted absent, so the test cannot pass by the verb
-#: having been deleted.
 _WITHHELD = (
     ("cmdb", "list-roles"),
     ("identity", "list-authorized-hosts"),
@@ -82,20 +74,12 @@ _WITHHELD = (
     ("ticket", "key-pattern"),
 )
 
-#: Words that make a degradation LOUD. A broad alternation rather than a sentence: O4 demands
-#: the failure be legible and NAMED, not that it be spelled one way. Deliberately generous —
-#: what discriminates is the company it keeps in each O4 test (the system is named, no verb is
-#: published, and the three conditions do not share one message).
 _LOUD = re.compile(
     r"unknown|unavailable|unresolvable|could not|cannot|can't|failed|no such|not registered|"
     r"no adapter|does not|doesn't|error|missing|no verb|none of",
     re.I,
 )
 
-#: One published verb, in the `query(...)` grammar `skills/*/execution.md` already uses. The
-#: params body is brace-free by construction (a type is `str`/`int`/`str | None`, never a
-#: literal dict), so the inner `[^{}]*` is exact rather than lazy. A trailing argument after
-#: `params={…}` — a `query_id=` the lead is meant to fill in — is allowed and ignored.
 _CALL_RE = re.compile(
     r"""query\(\s*system\s*=\s*["'](?P<system>[^"']*)["']\s*,\s*"""
     r"""verb\s*=\s*["'](?P<verb>[^"']*)["']\s*,\s*"""
@@ -104,16 +88,6 @@ _CALL_RE = re.compile(
 )
 _KEY_RE = re.compile(r"""["'](?P<name>[A-Za-z_][A-Za-z0-9_]*)["']\s*:""")
 
-#: A real system / verb name. A rendering may carry a `query(system="x", verb="<verb>",
-#: params={...})` TEMPLATE line alongside the per-verb ones; a placeholder is not a published
-#: verb, and this is what tells them apart.
-#:
-#: THE shared PREDICATE rather than a local copy of the pattern (#914): a verb name is held to
-#: the same alphabet as a system name — the tree has no separate verb pattern — so a copy here
-#: would be a second place to edit and a place for this suite to drift from what it is
-#: checking. The predicate rather than `verbs._SYSTEM_RE`, because the pattern alone does not
-#: carry `SYSTEM_MAX_LEN` and matching it while forgetting the bound is the exact defect #914
-#: closed.
 _is_name = is_system_name
 
 #: The type spellings a descriptor may claim, and a value of the WRONG type for each. A claim
@@ -306,10 +280,6 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
             seen_verbs += 1
             seen_params += len(params)
 
-    # Vacuity guard, derived rather than restated: every granted verb and every param those
-    # verbs declare had to be published for the loop above to have measured anything. (#900
-    # counted 28 granted verbs / 44 declared params at design time; the numbers are read off
-    # the registry so a new adapter verb is covered the day it lands.)
     expected_verbs = sum(len(_granted(registry, s)) for s in _grant_systems())
     expected_params = sum(
         len(model_facing_params(fn))
@@ -317,9 +287,6 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
     )
     assert (seen_verbs, seen_params) == (expected_verbs, expected_params)
 
-    # The wrapper-only arm above is only worth anything if it ran. `ticket.list-tickets` and
-    # `ticket.get-ticket` reserve `require_closed`, and gather's grant reaches the first — so a
-    # tree that stopped reserving anything would silently turn that arm into a no-op.
     assert seen_reserved >= 1, (
         "no granted verb reserves a wrapper-only param — the wrapper-only assertions above "
         "never executed and this test no longer pins them"
@@ -403,9 +370,6 @@ def test_o1_the_required_optional_split_and_the_defaults_round_trip(tmp_path):
 
 
 def test_o3_no_published_type_claims_more_than_validate_params_enforces(tmp_path):
-    """O3 over the SHIPPED surface — every type the tool claims is one the enforcer really
-    checks. For each published claim, a value of the wrong type must draw `validate_params`'
-    wrong-type refusal specifically (not its missing-param refusal, which is why the mismatch is"""
     registry = _registry()
     checked = 0
 
@@ -428,9 +392,6 @@ def test_o3_no_published_type_claims_more_than_validate_params_enforces(tmp_path
                 )
                 checked += 1
 
-    # Derived for the same reason as the positive control's floor above; this one stays a
-    # lower bound because a param whose annotation resolves to a type outside `_MISMATCH`
-    # (no wrong-typed sample exists for it) is legitimately skipped.
     reachable = sum(
         len(model_facing_params(fn))
         for s in _grant_systems() for fn in _granted(registry, s).values()
@@ -471,9 +432,6 @@ def test_o3_an_unresolvable_annotation_is_published_as_type_unenforced(tmp_path)
 
 
 def test_o5_a_withheld_but_declared_verb_is_never_published(tmp_path):
-    """O5 — the tool never names a `(system, verb)` gather's grant withholds, and the five real
-    ones are named here so the demand is measured against the shipped grant rather than a
-    fixture. Each is first asserted DECLARED by its adapter (cold, off the `VERBS` literal), so"""
     registry = _registry()
     answers = {s: _ask(registry, s, tmp_path) for s in {s for s, _ in _WITHHELD}}
 
@@ -502,9 +460,6 @@ def test_o5_a_withheld_but_declared_verb_is_never_published(tmp_path):
 
 
 def test_o5_the_published_set_is_exactly_what_decide_grants(tmp_path):
-    """O5, general form — for every system in the grant, what the tool publishes equals what
-    `registry.decide(...)` returns GRANTED for. The filter is the registry's decision, not a
-    second list that can drift from it: `decide` is where DENIED and UNDECLARED are separated"""
     registry = _registry()
     for system in _grant_systems():
         published = {v for _, v in _parse(_ask(registry, system, tmp_path))}
@@ -512,9 +467,6 @@ def test_o5_the_published_set_is_exactly_what_decide_grants(tmp_path):
 
 
 def test_o4_an_unknown_system_degrades_loudly_and_names_it(tmp_path):
-    """O4 — `registry.verbs("nope-not-a-system")` raises a BARE `KeyError` (#900 B3, asserted
-    here so the premise cannot rot). The tool must not let it out as a crash of the lead's turn,
-    and must not answer with silence: an empty answer reads as "this system has no verbs", which"""
     registry = _registry()
     with pytest.raises(KeyError):
         registry.verbs("nope-not-a-system")
@@ -555,9 +507,6 @@ def test_o4_a_failing_adapter_is_a_named_line_and_the_other_systems_still_answer
 
 
 def test_o4_a_system_whose_grant_admits_nothing_is_not_reported_as_a_broken_one(tmp_path):
-    """O4/O5 corner — a DECLARED, LOADABLE system whose grant admits no verb is the other
-    condition that empties the answer, and it wants the opposite thing said from a broken
-    adapter: "this role holds no verb here" is actionable (dispatch elsewhere), while "this"""
     def probe(ctx: VerbContext, *, host: str) -> list[dict]:
         return []
 
@@ -600,9 +549,6 @@ def test_gather_registers_list_verbs_and_main_does_not():
 
 
 def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_path):
-    """The queries table is "what the defender RAN" — the join the whole offline learning loop
-    rests on. `list_verbs` runs nothing: it inspects signatures and never calls an adapter, so a
-    row for it would put a query in the record that never reached a system, and a payload digest"""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='lv900')
 
     def probe(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:

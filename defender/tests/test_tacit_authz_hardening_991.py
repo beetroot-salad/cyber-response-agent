@@ -20,7 +20,6 @@ from defender.tests._spec791 import (  # noqa: F401 — session-scoped autouse g
 )
 
 
-
 def _errors(document: str) -> list[str]:
     """Every error-severity refusal the write gate files against `document`."""
     return validate_companion(document, None)
@@ -33,9 +32,6 @@ def _receipts(document: str):
     return conclude_runtime_evidence_rows(parse_dense_companion(document)[0])
 
 
-#: The document a real container-root benign close writes: the recorded registry hit, the
-#: `:R authz` row citing it, and the recurrence baseline beside them. THE CONTROL — every test
-#: below moves one cell of it, so a refusal any of them reports is about the cell that moved.
 GOOD = scene.benign_document(rows=scene.authorized_rows(baseline=True))
 
 
@@ -43,10 +39,6 @@ def test_the_control_document_still_closes() -> None:
     """Fixture control, and the half of every test below that a blanket refusal would fail."""
     assert _errors(GOOD) == [], "the shape mechanism B exists to admit is refused"
 
-
-# ---------------------------------------------------------------------------------------
-# A run the close can never finish.
-# ---------------------------------------------------------------------------------------
 
 def test_a_baseline_carrying_the_report_delimiter_is_refused_on_write() -> None:
     """`result` and `reasoning` ride verbatim into `report.md`'s body, so a literal `</report>`
@@ -61,11 +53,6 @@ def test_a_baseline_carrying_the_report_delimiter_is_refused_on_write() -> None:
             f"the refusal does not name `{cell}` — the model has to know which cell to rewrite"
         )
 
-    # And the report that WOULD have been committed is one the schema refuses, which is what
-    # makes the refusal above a repair path rather than tidiness. The receipt is built by hand
-    # precisely because the walk no longer produces one — that is the fix; the trap it now
-    # stands in front of is still real, and it is demonstrated against the live renderer and
-    # the live report schema.
     from defender.skills.invlang.validate import RuntimeEvidenceReceipt
 
     poisoned = close_tool.render_report(
@@ -168,10 +155,6 @@ def test_the_close_reads_and_parses_the_companion_once_inside_its_own_guard() ->
             f"the guard around that parse lost its {clause!r} — the parse is bare again"
         )
 
-
-# ---------------------------------------------------------------------------------------
-# The authorization receipt, priced at zero.
-# ---------------------------------------------------------------------------------------
 
 def test_an_authorized_tacit_row_owes_a_citation_even_by_omission() -> None:
     """Leaving `anchor_id` out is the receipt SKIPPED, not a receipt paid."""
@@ -298,10 +281,6 @@ def test_basis_is_refused_outside_the_verdict_it_qualifies() -> None:
     )
 
 
-# ---------------------------------------------------------------------------------------
-# A guard that was off.
-# ---------------------------------------------------------------------------------------
-
 def test_a_baseline_needs_a_placeable_alert_and_fails_closed_without_one() -> None:
     """The window guard fails CLOSED when the document cannot place its own alert."""
     after_the_alert = scene.consult_block(
@@ -318,10 +297,6 @@ def test_a_baseline_needs_a_placeable_alert_and_fails_closed_without_one() -> No
         "own timestamp became unreadable — the guard failed OPEN on a vaguer document"
     )
 
-
-# ---------------------------------------------------------------------------------------
-# The registry file's own rules.
-# ---------------------------------------------------------------------------------------
 
 def _entries(*entries: dict) -> list[dict[str, str]]:
     """Registry entries through the REAL loader, from a real file — the rules under test are
@@ -395,10 +370,6 @@ def test_a_repeated_registry_id_is_refused_at_load() -> None:
     assert len(distinct) == 2, "two entries with DIFFERENT ids were collapsed"
 
 
-# ---------------------------------------------------------------------------------------
-# Reported once.
-# ---------------------------------------------------------------------------------------
-
 def test_a_grounding_refusal_is_reported_once_on_a_benign_document() -> None:
     """The grounding check is COLLECTED at both boundaries and REPORTED once."""
     doc = scene.benign_document(rows=scene.authz_block(
@@ -411,9 +382,6 @@ def test_a_grounding_refusal_is_reported_once_on_a_benign_document() -> None:
 
 
 def test_a_repeated_baseline_row_does_not_render_twice() -> None:
-    """Identical baseline rows are deduplicated, the way `_walk_ceiling_rows` deduplicates its
-    receipts and for the same two reasons: a repeated row renders a repeated line in
-    `report.md`'s body, and it spends the body budget twice for one measurement."""
     doubled = scene.document(
         rows=scene.consult_block(scene.consultation_row(), scene.consultation_row()),
         settled=False,
@@ -433,11 +401,6 @@ def test_a_repeated_baseline_row_does_not_render_twice() -> None:
     assert _errors(distinct) == [], "two DIFFERENT baselines were read as a repeat"
     assert len(_receipts(distinct)) == 2, "the dedup swallowed a distinct measurement"
 
-    # THE NARROW-KEY REGRESSION, which the first cut of this dedup shipped. `anchor_id` is
-    # OPTIONAL on `:R consultations`, so keying the identity on the row's ADDRESSING cells alone
-    # collided two genuinely different measurements — one lead, one window, no ids — and refused
-    # the second with a message that was false about it and offered no repair but inventing an
-    # id. The identity is the whole rendered line, so a repeat still collides and this does not.
     two_measurements = scene.document(
         rows=scene.consult_block(
             scene.consultation_row(anchor_id="", result="1500 CA-bundle rewrites over 30d"),
@@ -452,10 +415,6 @@ def test_a_repeated_baseline_row_does_not_render_twice() -> None:
     )
     assert len(_receipts(two_measurements)) == 2, "the second measurement was dropped"
 
-
-# ---------------------------------------------------------------------------------------
-# The second review pass, on the fixes above.
-# ---------------------------------------------------------------------------------------
 
 def test_every_cell_the_renderer_copies_is_checked_for_the_delimiter() -> None:
     """The delimiter guard covers what the RENDERER writes, not the two cells that look like
@@ -575,8 +534,3 @@ def test_an_exhausted_contract_leaves_the_frontier_however_its_id_is_quoted() ->
                 f"as {spelling!r} — the run is pushed back to re-work the one question it has "
                 f"already proved unanswerable"
             )
-
-
-# ---------------------------------------------------------------------------------------
-# The published shape.
-# ---------------------------------------------------------------------------------------

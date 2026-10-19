@@ -1,19 +1,3 @@
-"""D7/O8: distinct code and knowledge geography, no forge exposure, read-only probes.
-
-D7 as amended (issue comments 6190547938 and 6195623857): every read-only `Mount` declares its
-kind (`code`, `data` or `staged`); startup applies that kind's check and never infers one from
-a name or path. A `code` mount is proven by reading back `<code_dir>/<box.CODE_CHECK_FILE>`,
-where `code_dir` is the request's explicit `defender_dir` or the legacy `<workdir>/defender`,
-inside the one mount declared `code`. A `staged` mount is a host-made copy's root: the host
-plants a fresh random token there before each start and the box reads it back; the root holds
-exactly `agent/` and that token. The `agent` kind is retired (amendment 2): tenant identity is
-checked once, at publish. Every rule holds on both request-lane entries (`_ENTRIES`).
-
-Amendment 3, C3: `box.start_box(request)` is the one entry for a `BoxRequest`; a request with
-`require_sandbox=True` (the tenant drain's, the #1224 oracle's) raises on a start fault, never
-runs unsandboxed, and writes no did-not-run marker; box start and teardown leave nothing under
-`<T>/drafts/` (R5).
-"""
 from __future__ import annotations
 
 import json
@@ -68,10 +52,6 @@ class _Boundary:
         self.before = _snapshot(*self.watched)
         self.replies = dict(replies or {})
         self.under = {Path(folder): reply for folder, reply in (under or {}).items()}
-        #: A staged copy's root: reads of an entry directly in it (not `agent`) are its token
-        #: reads; `root_reads` records the host's bytes at that path as each is asked for, and
-        #: `root_reply`, when set, answers them instead of the daemon: a `(rc, output)` reply,
-        #: or a function of the host's bytes there (`None` if unreadable) returning one.
         self.root = None if root is None else Path(root)
         self.root_reply = root_reply
         self.root_reads: list[tuple[str, bytes | None]] = []
@@ -166,9 +146,6 @@ def _batch(repo, batch_id="box"):
 
 
 def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(repo):
-    """Amendment 2: the drain box sees product code (`code`), the draft's root read-only
-    (`staged`, never the clone, an export, `settings/`, `.git` or `forge/`), and the declared
-    lanes writable inside it. `agent/` is `DEFENDER_AGENT_DIR` and the workdir."""
     d, batch = _batch(repo)
     tenant, draft = repo[0], batch.draft_root
     request = batch.box_request()
@@ -312,10 +289,6 @@ def test_the_oracle_start_requires_a_sandbox_and_leaves_no_stray_marker(tmp_path
     assert left == [], f"the oracle's refused start left a marker: {left}"
 
 
-#: How the box's reply differs from the host file. Read-backs cross Docker's text channel,
-#: which translates line endings, so the design compares line-ending-normalized text on both
-#: sides: a host file with CRLF endings read back as LF starts (orchestrator decision); any
-#: other difference refuses, a trailing newline lost or added or a space included.
 _TEXT_DIFFERENCES = ("newline-lost", "newline-added", "space-added")
 _PROBE_CASES = [
     *((kind, fault) for kind in ("code", "data") for fault in (None, "mismatch", "read-error")),
@@ -385,9 +358,6 @@ def test_code_probe_reads_the_check_file_and_no_longer_needs_skill_md(tmp_path, 
 @pytest.mark.parametrize("contents", ["every-probe-file", "empty"])
 @pytest.mark.parametrize("name", ["defender", "agent", "evidence"])
 def test_readonly_mount_without_a_declared_kind_is_refused_at_startup(tmp_path, start, name, contents):
-    """D7 amendment 1: no declared kind, no box, whatever the folder is called or holds, an
-    empty one included (A14). The writable lane needs no kind, and the same mount declared
-    `data` starts (controls)."""
     wt = tmp_path / "wt"
     source = wt / name  # `defender` here is also the legacy `<workdir>/defender`
     source.mkdir(parents=True)
@@ -414,9 +384,6 @@ def test_readonly_mount_without_a_declared_kind_is_refused_at_startup(tmp_path, 
     accepted.assert_never_written()
 
 
-#: Words that are not kinds: the design's own folder names, near-synonyms, case and
-#: whitespace variants of the three kinds (A08/A17), and the retired `agent` kind
-#: (amendment 2). Only `code`, `data` and `staged` are kinds.
 _NOT_KINDS = ["defender", "tenant", "", "product", "checkout", "repo", "source", "identity",
               "evidence", "runs", "ro", "readonly", "none", "None", "Code", "CODE", " code",
               "code ", "codes", "Agent", "DATA", "agent", "Staged", "STAGED", " staged",
@@ -518,10 +485,6 @@ def test_a_code_mount_needs_its_check_file_whatever_its_folder_is_called(tmp_pat
 
 
 _BOTH = ("checkout", "checkout/defender")
-#: layout -> (folders holding a check file, empty folders, explicit code root, workdir, the
-#: check file read on success). Every layout also has a check file in `lane/defender` (a
-#: writable lane of the request), `checkout-lane/defender` (a prefix sibling of the code
-#: mount) and `elsewhere/defender` (in no mount), where a wrong containment rule would look.
 _CODE_DIR_LAYOUTS = {
     "legacy-inside": (("checkout/defender",), (), None, "checkout", "checkout/defender"),
     "explicit-nested": (("checkout/nested-code",), ("checkout/defender",), "checkout/nested-code",
@@ -568,9 +531,6 @@ def test_code_dir_is_the_request_code_root_and_lies_inside_the_code_mount(tmp_pa
 
 @pytest.mark.parametrize("second", ["code", "data"])
 def test_a_request_declares_at_most_one_code_mount(tmp_path, start, second):
-    """D7 amendment 2 as clarified by the orchestrator (A18): one request, at most one `code`
-    mount; a second is refused at startup even when each holds a valid check file. The same
-    folder declared `data` starts (control)."""
     first, other = tmp_path / "checkout", tmp_path / "other-checkout"
     for root in (first, other):
         for folder in (root, root / "defender"):
@@ -592,9 +552,6 @@ def test_a_request_declares_at_most_one_code_mount(tmp_path, start, second):
 
 @pytest.mark.parametrize("kind", ["code"])
 def test_a_host_side_read_fault_is_a_box_fault(tmp_path, start, kind):
-    """A13: the host's own read of the probe file failing (here: a folder in its place) is a
-    `BoxFault` like every other startup fault, with no box left. The box's side answers, so
-    the refusal can only come from the host read or the comparison."""
     source = tmp_path / "product-tree"
     marker = source / _check_file()
     marker.mkdir(parents=True)
@@ -611,9 +568,6 @@ def test_a_host_side_read_fault_is_a_box_fault(tmp_path, start, kind):
 
 @pytest.mark.parametrize("fault", [False, True])
 def test_writable_mount_keeps_its_planted_sentinel_read_back(tmp_path, start, fault):
-    """D7 amendment 1 (A12): a writable mount is still proven by its planted sentinel. The
-    request's `code` mount is valid, so a wrong mapping of the lane alone must refuse; in the
-    control the lane is read back and left as it was."""
     root = tmp_path / "checkout"
     lane = tmp_path / "lane"
     (root / "defender").mkdir(parents=True)
@@ -670,7 +624,6 @@ def test_oracle_production_start_reads_the_runner_check_and_refuses_a_wrong_mapp
     assert not any(Path(source).exists() for source in sources), "a refused start left its folders"
 
 
-
 def test_oracle_runner_is_a_code_mount_holding_only_runner_files_and_starts_sandboxed(
         tmp_path, start):
     """Oracle runner is a code mount holding only runner files and starts sandboxed."""
@@ -716,9 +669,6 @@ def _token_half(held):
     return 0, text[:len(text) // 2]
 
 
-#: How a staged copy's token read-back can go wrong: another copy's token, nothing to read
-#: (an empty or stale folder with no token), an empty answer, or an answer that only begins
-#: with the planted token or is only its beginning (the read-back is exact equality).
 _TOKEN_FAULTS = {"another-copy": (0, "a token another copy holds\n"), "unreadable": (1, ""),
                  "empty": (0, ""), "token-then-more": _token_then("and another copy's\n"),
                  "token-half": _token_half}
@@ -747,9 +697,6 @@ def test_a_staged_copy_starts_only_on_the_token_the_host_planted_for_this_start(
 
 
 def test_a_staged_token_is_fresh_for_every_start(tmp_path, start):
-    """O-A: each start plants new bytes, so a box answering with an earlier start's token (a
-    stale bind) refuses, while a plain restart of the same copy starts (control). The root
-    keeps `agent/` and at most the current start's token: an earlier start's token is gone."""
     root = _copy(tmp_path / "copy")
     request = _request("defender-fresh-1108", root, box.Mount(source=root, target=root, kind="staged"))
     tokens = []
@@ -774,9 +721,6 @@ def test_a_staged_token_is_fresh_for_every_start(tmp_path, start):
 @pytest.mark.parametrize("extra", ["stray-file", "git-dir", "agent-missing", "agent-is-a-link",
                                    "agent-is-a-file"])
 def test_a_staged_root_holding_anything_but_agent_is_refused(tmp_path, start, extra):
-    """O-A: a staged root holds exactly `agent/` (a real folder) and the token; a leftover
-    file, a `.git`, a missing `agent/`, or one that is a link or a file refuses startup with
-    no container. A clean copy starts (control)."""
     root = tmp_path / "copy"
     if extra in {"stray-file", "git-dir"}:
         _copy(root)
@@ -808,9 +752,6 @@ def test_a_staged_root_holding_anything_but_agent_is_refused(tmp_path, start, ex
 
 @pytest.mark.parametrize("fault", [False, True])
 def test_a_lane_inside_a_staged_copy_keeps_its_planted_sentinel(tmp_path, start, fault):
-    """Amendment 2: the copy's root is read-only and its declared lanes are writable mounts
-    inside it, each still proven by its planted sentinel: a wrong mapping of the lane alone
-    refuses; in the control the lane is read back and left as it was."""
     root = _copy(tmp_path / "copy")
     lane = root / "agent" / "lessons"
     boundary = _Boundary(tmp_path, [], under={lane: (0, "a different tree\n")} if fault else {},
@@ -927,9 +868,6 @@ def test_drain_start_accepts_a_code_folder_holding_only_the_check_file(repo, tmp
 
 @pytest.mark.parametrize("which", ["code", "staged"])
 def test_tenant_drain_entry_refuses_a_readonly_mount_without_a_kind(repo, tmp_path, which):
-    """D7 amendment 1 on the tenant drain's own start (A24): its request with one read-only
-    mount's kind removed is refused, no box left; the unaltered request is the control in
-    `test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_a_box`."""
     from defender.tests._box1195 import FakeDaemon
     d, batch = _batch(repo, "kindless")
     request = replace(batch.box_request(), spec=_PINNED, mounts=tuple(

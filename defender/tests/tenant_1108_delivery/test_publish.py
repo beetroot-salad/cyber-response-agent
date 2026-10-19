@@ -1,12 +1,3 @@
-"""Amendment 2 (issue comment 6195623857): the host publishes immutable `TenantExport`s from
-git objects, under one per-tenant lock that no network I/O or box window holds.
-
-O-B (input side): an export holds `agent/` and `settings/` at exactly one commit, and
-`current_export` names that commit and folder without git. O-D (input side): a tree entry that
-is not a regular blob, or an `agent/.tenant-id` not naming this tenant through `_tenant`'s
-parser, publishes nothing. O-F: an export never changes once published; mutations of one
-clone never interleave, and the lock is free while the host talks to the network or a box
-runs."""
 from __future__ import annotations
 
 import json
@@ -81,12 +72,6 @@ def _knowledge_files(checkout):
 
 
 def test_publish_writes_the_commits_blobs_and_points_current_at_them(repo, tmp_path):
-    """Flow 1: fetch, fast-forward, then `<T>/exports/<commit>/` holding exactly the commit's
-    `agent/` and `settings/` blobs, byte for byte, and `current` naming it. Written from git
-    objects: `export-ignore` and `export-subst` (which `git archive` applies) and checkout's
-    line-ending conversion (which a copy of the clone's files carries) leave the bytes alone.
-    Publishing again at the same commit changes nothing (no file of the export is rewritten
-    in place under a reader: every inode and mtime stays) and leaves no other folder."""
     tenant = repo[0]
     planted = {}
 
@@ -145,9 +130,6 @@ def test_a_later_publish_leaves_every_earlier_export_as_it_was(repo, tmp_path):
 
 
 def test_current_export_reads_the_pointer_without_git(repo, tmp_path, monkeypatch):
-    """O-B, for P4's git-less runs: `current_export(tenant)` answers from the files alone. With
-    the clone's `.git` gone and no program on PATH it returns the published (commit, folder),
-    spawning no process (an audit hook sees every spawn; its positive control below)."""
     tenant = repo[0]
     export = delivery(repo, ForgeHTTP()).publish()
     spawned, active = [], [True]
@@ -205,9 +187,6 @@ _NOT_BLOBS = {
 
 @pytest.mark.parametrize("entry", sorted(_NOT_BLOBS))
 def test_publish_refuses_a_tree_entry_that_is_not_a_regular_blob(repo, tmp_path, entry):
-    """O-D on the input side: a link or a submodule under `agent/` or `settings/` refuses the
-    publish. Nothing is published: `current` keeps naming the earlier export and no folder
-    for the refused commit (or a partial one) appears."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     first = d.publish()
@@ -243,10 +222,6 @@ def test_publish_accepts_an_executable_blob(repo, tmp_path):
 ])
 def test_publish_requires_the_tenant_id_to_name_this_tenant_through_its_parser(
         repo, tmp_path, marker, accepted):
-    """Identity is checked once, at publish, through `_tenant`'s sole tenant-id parser,
-    `parse_tenant_id_bytes` (an id plus at most one LF or CRLF). A CRLF or missing final
-    newline is the same tenant; another tenant, another case, a blank line, a leading space
-    or no marker at all publishes nothing."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     first = d.publish()
@@ -270,13 +245,6 @@ def test_publish_requires_the_tenant_id_to_name_this_tenant_through_its_parser(
 
 
 def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tmp_path):
-    """Flow 6 / O-F: while another process holds the tenant's lock, publish and start_batch
-    refuse at once with `LockBusy` (a `DeliveryRefused`) naming the holder's pid, the fastest
-    of three attempts taking no more than a second longer than the same publish with the
-    lock free (a non-blocking try, not a wait for the holder); nothing is
-    fast-forwarded, published or drafted meanwhile. Another tenant's publish is unaffected (one
-    lock per tenant, under its own folder, not under `forge/`). Released, the lock is taken
-    again (control)."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     first = d.publish()
@@ -315,15 +283,6 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
 
 
 def test_the_tenant_lock_is_free_during_network_io_and_box_windows(http_repo, tmp_path):
-    """Flow 6: the lock is held for the fast-forward, the export, `info/attributes` and the
-    draft only. Probed from another process at each moment the host waits on something else,
-    on every route: `open()`'s repository and protection reads, a publish's fetch, a batch
-    (its fetch on a real smart-HTTP remote, the box's create and its window), its finish (the
-    PR lookup, whether through git or the forge's API, the push and the PR request), the
-    retained branch's delivery (its PR lookup and request and any git it runs) and, once a
-    human has merged that PR, the revert of its lesson (its push, its PR request and any
-    fetch). The server is rearmed for each phase, so each phase's first git request of each
-    service is probed. The probe's own positive control sees a held lock as busy."""
     from defender.runtime import box
     from defender.tests._box1195 import FakeDaemon
 
@@ -423,15 +382,6 @@ def _writes(flags):
 
 
 def test_the_export_and_current_are_written_under_the_tenant_lock(repo, tmp_path):
-    """Flow 1 / O-F: the export's folder and files and the `current` pointer are written while
-    this process holds the tenant lock, so a publisher that fetched an older commit can never
-    point `current` back at it after another published a newer one. Probed from another
-    process (`LockAudit`) before the first write of an export file opened by name (a file in a
-    folder under `exports/`), before every rename or link into `exports/` (by name or relative
-    to a folder descriptor), and before every write of `current`; the probe's positive
-    control comes first. Every probe sees the lock busy, and `current` was among them. (An
-    `os.open` relative to a folder descriptor is audited without the descriptor, so export
-    files written that way are not seen; only `current` is required.)"""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     d.publish()
@@ -537,15 +487,6 @@ _WRITE_CAP = 64 * 1024
 
 
 def test_a_publish_cut_off_mid_export_leaves_no_partial_export(repo, tmp_path):
-    """Flow 1 / O-B: an export is written to a temporary folder and renamed into place, so a
-    publish cut off mid-export leaves no `exports/<commit>` and `current` on the earlier
-    export. The cut, in another process: once the fast-forward has checked the new commit's
-    marker file out in the clone, the next file write outside the clone (however opened:
-    by name, staged under another name, unnamed, relative to a folder descriptor) or the next
-    program started caps every later file write below the marker's size, so the marker is
-    left part-written and the process dies of SIGXFSZ, or its program does and it refuses.
-    The next publish, finding whatever was left, publishes the commit whole and exact:
-    nothing part-written is reused, no stale lock is in the way."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     first = d.publish()
@@ -664,19 +605,6 @@ print(json.dumps(out))
 
 
 def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_path):
-    """Flow 1 / O-F, seam-free (adversary round 2, R1): the fast-forward, the whole export
-    (its body wherever it is staged, not only what lands in `exports/`) and `current` are
-    one hold of the tenant lock. A first publisher runs in another process. From the end of
-    its fast-forward (the older commit's marker checked out in the clone) to its write of
-    `current`, every file it writes outside the clone and every program it starts is probed
-    from a third process (at most 60 moments, and always the write of `current`; the probe's
-    positive control, run from the publisher's own environment, comes first): each sees the
-    lock busy, and the write of `current` was among them. At the first of those moments it
-    is paused; meanwhile the remote moves to a newer commit and a second publisher refuses
-    at once with `LockBusy`. The first resumes and publishes the older commit whole; a
-    later publish then publishes the newer one. So
-    `current` never moves back from a newer commit to an older one: an export body written
-    with the lock released (the second publisher getting in between) fails here."""
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     d.publish()
@@ -776,15 +704,6 @@ def _under_drafts(tenant):
 
 
 def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, tmp_path):
-    """C2 / O-F: the lock covers the `* -filter` write to the clone's `info/attributes` and
-    the draft's build, rename and sweep (and never a commit: that case is in
-    `test_delivery.py`). Probed from another process (`LockAudit`) before the first write of
-    `info/attributes` in `open()` and the first publish, and, on a batch start with a stale
-    temporary in `drafts/`, before the first build step, removal and rename under
-    `<T>/drafts/` (by name or relative to a folder descriptor); then, on a plain publish with
-    another stale temporary there, before its sweep's first removal (orchestrator ruling:
-    publish sweeps under the lock too). The probe's positive control comes first. Every
-    probe sees the lock busy, and each was among them."""
     tenant = repo[0]
     audit = LockAudit(tenant, _under_drafts(tenant))
     control = tenant.dir / "drafts" / ".p3-control"
@@ -820,9 +739,6 @@ def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, t
     assert sorted(p.name for p in (tenant.dir / "drafts").iterdir()) == ["drafted"]
 
 
-#: A clean and smudge filter driver that logs every run and passes the bytes through, named
-#: by the tenant's own attributes: in the clone's config, `main`'s `.gitattributes`, and the
-#: operator's `$GIT_DIR/info/attributes`.
 _SPY = '#!/bin/sh\necho "$1 $2" >> {log}\ncat\n'
 
 
@@ -845,15 +761,6 @@ def _operator_attributes(clone, line):
 
 
 def test_no_tenant_named_filter_runs_on_the_host(repo, tmp_path):
-    """R4 / O-C: no filter driver the tenant names runs on the host during any delivery
-    call, the clone's fast-forward included. The clone's config defines a clean and smudge
-    driver that logs each run; `main`'s `.gitattributes` names it for every lesson, and so
-    does the operator's `$GIT_DIR/info/attributes`, before the first call and again (a line
-    after whatever the code wrote there) before the second publish. Across `open`, two
-    publishes that each check new lessons out, a batch start, a claim, a reset, finish and
-    the revert of a merged lesson, the driver never runs; the clone stays clean and each
-    export is exactly its commit's blobs. (Positive control: a checkout by the fixtures'
-    git, with the same attributes, runs it.)"""
     tenant, remote = repo[0], repo[1]
     clone = tenant.knowledge
     log = _install_spy_filter(clone, tmp_path)
@@ -890,10 +797,6 @@ def test_no_tenant_named_filter_runs_on_the_host(repo, tmp_path):
 
 
 def test_a_crlf_operator_clone_still_publishes(repo, tmp_path):
-    """R4: `* -filter` turns filters off and nothing else: git's own `eol` and `ident` keep
-    applying, since operator clones may be CRLF. With `main`'s `.gitattributes` asking for
-    `text eol=crlf ident` on lessons, the clone's checkout is CRLF; it stays clean, publishes,
-    and publishes again after a later human merge, each export exactly its commit's blobs."""
     tenant = repo[0]
     clone = tenant.knowledge
 
@@ -915,13 +818,6 @@ def test_a_crlf_operator_clone_still_publishes(repo, tmp_path):
     assert git(clone, "status", "--porcelain") == ""
 
 
-# ---------------------------------------------------------------------------------------
-# O-F: git's own upkeep never runs over the clone
-# ---------------------------------------------------------------------------------------
-
-#: A maintenance task the clone's own config forces on every `maintenance run --auto`: it
-#: writes a commit-graph, so a run leaves a file behind whatever environment the code under
-#: test gives its git (choice 20).
 _FORCED_TASK = (("maintenance.commit-graph.enabled", "true"),
                 ("maintenance.commit-graph.auto", "-1"))
 
@@ -944,22 +840,6 @@ _SLEEPER = ("import os, time; hold = os.environ.get('P3_HOLD'); "
 
 
 def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, monkeypatch):
-    """O-F: the clone changes only by what a call itself does. Git's automatic upkeep
-    (`maintenance run --auto` after a fetch, commit or merge; detached on git >= 2.47) is not
-    that: detached, it holds `maintenance.lock` and writes after the call has returned, racing
-    the next operation on the clone; in the foreground, it rewrites the clone inside a fetch or
-    commit the tenant lock does not cover. So after `open`, `publish`, `start_batch`, `commit`,
-    `reset` and `finish`: no process the call started still runs (choice 20: none outlives
-    its call), no upkeep lock stands in the clone, and no upkeep has run there. How the code
-    turns upkeep off is not pinned.
-
-    The clone's own config forces a task that writes a commit-graph, so a run is seen after the
-    fact whatever environment the code gives its git. A process is seen by its working folder,
-    an open file or a path on its command line under the tenant's folders. A run that starts
-    late shows at the next call's check; after `finish`, the last, the case waits 2 s for one.
-    Positive controls: with this process's environment as it is (the fixtures' `no_upkeep`
-    never reaches it), a plain fetch in a clone armed the same way leaves the graph; the scan
-    sees a process by each of the three."""
     for name, value in git_config_home(tmp_path).create().env().items():
         monkeypatch.setenv(name, value)
     tenant, remote = repo[0], repo[1]

@@ -11,9 +11,6 @@ def _compare():
 
 
 def test_947_count_endpoint_is_absent_from_the_elastic_adapter_allowlist(tmp_path):
-    """The count endpoint is absent from the adapter's read allowlist and stays absent: the
-    allowlist is exactly the four read endpoints it already carries, so nothing the model
-    dispatches can ask the cluster to count."""
     confinement = T.mod("scripts.adapters.confinement")
     allow = set(confinement.READ_ENDPOINT_ALLOWLIST["elastic"])
     assert allow == {("/*/_search", "POST"), ("/_query", "POST"),
@@ -36,9 +33,6 @@ def test_947_compare_admits_only_two_payloads_and_an_axis():
 
 
 def test_947_the_comparator_prompt_builder_has_no_parameter_for_world_or_disposition():
-    """The comparator's prompt builder can carry no identifying argument at all: its parameters
-    are the two payloads and the axis, and the prompt it produces from an identifying-looking
-    axis carries nothing else that could name which world is which."""
     import inspect
 
     builder = _compare().build_prompt
@@ -50,9 +44,6 @@ def test_947_the_comparator_prompt_builder_has_no_parameter_for_world_or_disposi
 
 
 def test_947_comparator_answers_same_or_formatting_without_a_model_call():
-    """The comparator answers mechanically first: two payloads whose canonical re-dump is equal
-    answer `same`, and two that differ only in key spelling or whitespace answer `formatting` —
-    both with no model call at all."""
     agent = T.FakeAgent()
     assert _compare().compare('{"b": 1, "a": 2}', '{"a": 2, "b": 1}', None, invoke=agent) == "same"
     assert _compare().compare('{"host-name": 1}', '{"host_name":  1}', None,
@@ -76,9 +67,6 @@ def test_947_compare_returns_verdict_for_each_seat():
 
 
 def test_947_comparator_model_call_runs_under_the_questioner_role_key():
-    """The comparator's one model call runs under the questioner role key with its own trace
-    id: it is a fourth call under a role three others already hold, and it is the id that
-    separates them."""
     AgentRole = T.sym("runtime.agent_role", "AgentRole")
     agent = T.FakeAgent("mutation")
     _compare().compare('{"a": 1}', '{"a": 2}', "an axis", invoke=agent)
@@ -92,8 +80,5 @@ def test_947_comparator_payloads_are_wrapped_untrusted():
     agent = T.FakeAgent("mutation")
     _compare().compare('{"note": "IGNORE PRIOR"}', '{"note": "OTHER"}', "an axis", invoke=agent)
     assert len(agent.prompts) == 1, "the comparator never called the model"
-    # The frame SHAPE, never a marker from a SECOND `wrap_fresh` call: the seam mints a fresh
-    # salt per frame (#875 F-1), so the salt this test would mint is not the one the comparator
-    # minted and the comparison could not hold for any implementation.
     T.assert_wrapped_untrusted(agent.prompts[0], '{"note": "IGNORE PRIOR"}', "the captured payload")
     T.assert_wrapped_untrusted(agent.prompts[0], '{"note": "OTHER"}', "the replayed payload")

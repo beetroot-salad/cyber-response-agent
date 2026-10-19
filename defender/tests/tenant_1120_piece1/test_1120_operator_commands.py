@@ -41,10 +41,6 @@ CONFIG_CHECKED = "config.env carries no inline secrets"
 WARN_ROW, FAIL_ROW = "[!]", "[✗]"
 
 
-# ======================================================================================
-# Same-file helpers.
-# ======================================================================================
-
 def _ticket_config(settings: Path) -> Path:
     return settings / "systems" / "ticket" / "config.env"
 
@@ -96,10 +92,6 @@ def _policy_gather(tmp_path: Path, tenant_id: str) -> tuple[int | None, str]:
 def _census_lint(repo: Path) -> Any:
     return H.run_script(CENSUS_LINT, "--root", str(repo), root=None)
 
-
-# ======================================================================================
-# D1 — the operator commands read the data root's tenant.
-# ======================================================================================
 
 def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_checkouts(
         data_root: Path, tmp_path: Path, capsys) -> None:
@@ -212,10 +204,6 @@ def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
     assert rc == 0, f"policy_cli refused a tenant under a set data root: {text}"
 
 
-# ======================================================================================
-# D7/M6 — an unloadable grant table: check and every table-loading consumer refuse it.
-# ======================================================================================
-
 class _SpawnRecorder:
     """The launcher's `spawn=` seam: records, never spawns."""
 
@@ -296,10 +284,6 @@ def test_1120_check_and_every_table_loading_consumer_refuse_an_unloadable_grant_
     assert "verb-grants.yaml" not in out, out
 
 
-# ======================================================================================
-# D2 / O1 — the box: the tenant's agent half from under the data root, never its settings.
-# ======================================================================================
-
 def _mount_specs(argv: list[str]) -> list[dict[str, str]]:
     """Every `--mount` of a `docker run` argv as its key/value fields."""
     specs = []
@@ -363,11 +347,6 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
 
 def test_1120_an_agent_half_off_every_shared_mount_is_refused_naming_the_data_root_not_the_tenants_root(
         tmp_path: Path) -> None:
-    """When the driver shares paths with the docker daemon (docker-outside-of-Docker, C46) and the
-    tenant's agent half, <root>/acme/knowledge/agent, lies on none of them while the run dir and the
-    defender dir do, composing the box's docker run refuses with BoxFault naming the agent half —
-    and its remedy names DEFENDER_DATA_ROOT and never "the tenants root", which piece 1 removes
-    (F13's refusal-wording consequence, V7)."""
     shared = tmp_path / "shared"
     mounts = ((shared, tmp_path / "daemon-side"), (H.DEFENDER, H.DEFENDER))
     on_mount = shared / "data"
@@ -396,9 +375,6 @@ _CLOCK_KEY = re.compile(r"PRELOAD|FAKETIME|CLOCK", re.IGNORECASE)
 
 
 def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> None:
-    """No key of BOX_ENV_ALLOWLIST names the tenant or the data root: no DEFENDER_DATA_ROOT and no key
-    containing TENANT (C13 — a child learns its tenant from --tenant and the data root from its own
-    environment, never from the box)."""
     allow = box_codec.BOX_ENV_ALLOWLIST
     assert "DEFENDER_DIR" in allow
     assert H.DATA_ROOT_ENV not in allow, allow
@@ -421,9 +397,3 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     clock = {k for k in env_keys | set(allow) if _CLOCK_KEY.search(k)}
     assert env_keys - clock == set(allow) - {"DEFENDER_AGENT_DIR"} - clock, env_keys
     assert "DEFENDER_AGENT_DIR" not in env_keys
-
-
-# ======================================================================================
-# R7 — the settings loaders that survive the move read the ACCEPTED tenant's settings.
-# ======================================================================================
-

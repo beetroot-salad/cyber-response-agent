@@ -83,10 +83,6 @@ def test_in_context_cases_dedups_per_case_keeps_earliest(tmp_path):
 
 
 def test_earliest_load_is_chronological_not_lexicographic(tmp_path):
-    """The earliest qualifying load is picked by parsed instant, not string order: a
-    ``+09:00`` spelling of an earlier instant sorts lexicographically AFTER the canonical
-    ``+00:00`` row that is chronologically later. Latent while both production writers go
-    through ``now_iso()``'s canonical UTC; wrong the day a migration or hand-edit doesn't."""
     tl = _load()
     runs = _tenant_runs_dir(tmp_path)
     _mk_run(runs, "case-a", disposition="benign", loads=[
@@ -112,9 +108,6 @@ def test_all_flattens_tab_and_newline_in_description(tmp_path, capsys):
 
 
 def test_all_drops_terminal_controls_from_the_description(tmp_path, capsys):
-    """#1206: the row follows the lesson loader's one-line rule, so an escape sequence or a
-    U+001F in a lesson-written cell cannot redraw the operator's terminal. (A control in the
-    file name itself is refused by the loader: see test_1206_lesson_text.)"""
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter='name: L\ndescription: "a\\e[2Kb\\x1fc"\ncreated_at: 2026-06-04')
@@ -154,10 +147,6 @@ def _case_ids(out: str) -> list[str]:
     return [ln.split("\t")[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("#")]
 
 
-# #584 SUPERSEDES the ``lesson_meta()`` call site all three of these used to drive: the fold
-# deletes that helper (``--all`` walks ``iter_lessons``; the single-lesson path keeps its own
-# guarded read), so each property is re-pinned END TO END through ``main()`` — the seam a user
-# actually drives — via the new ``--lessons-dir``. The properties themselves are unchanged.
 @pytest.mark.parametrize(
     ("case", "stem", "frontmatter", "runs", "expected", "expect"), [
         # A tz-less created_at (LLM-authored, no offset → PyYAML naive datetime) must not raise
@@ -175,13 +164,6 @@ def _case_ids(out: str) -> list[str]:
           ("after", "benign", "2026-06-05T00:00:00+00:00")],
          ["after"], (None, None)),
 
-        # The hook records the FILE STEM, so matching must key on the stem even when the
-        # frontmatter name differs. The fold makes this more load-bearing, not less: a
-        # ``Lesson(path, fm, raw, body)`` carries no ``.name``, so the obvious reach at the new
-        # loop header is ``lesson.fm.get("name")`` — which returns ``foo_bar`` here, misses
-        # every recorded load, and silently reports zero cases forever. Pinned cross-module
-        # against ``record_lesson_load.lesson_name`` (the co-writer of the key) in
-        # ``test_corpus_fold_584.py::test_d23``.
         ("identity-is-the-stem-not-the-frontmatter-name",
          "foo-bar", "name: foo_bar\ndescription: d",
          [("case-a", "malicious", "2026-06-05T00:00:00+00:00")],
@@ -190,9 +172,6 @@ def _case_ids(out: str) -> list[str]:
 def test_trace_reports_the_cases_a_lesson_was_loaded_into(
     tmp_path, capsys, case, stem, frontmatter, runs, expected, expect
 ):
-    """``trace_lesson <name>`` resolves the lesson, windows the recorded loads against its
-    ``created_at``, and prints one TSV row per surviving case. Each row here is one way the
-    resolution or the windowing could silently report nothing."""
     tl = _load()
     _mk_lesson(tmp_path / "lessons", stem, body_frontmatter=frontmatter)
     runs_dir = _tenant_runs_dir(tmp_path)
@@ -212,13 +191,7 @@ def test_trace_reports_the_cases_a_lesson_was_loaded_into(
         assert expect_row in out
 
 
-
-
 def test_undecodable_report_degrades_to_unknown_disposition(tmp_path, capsys):
-    """``report.md`` is model-authored and read once per hit in the whole-runs-dir walk; an
-    undecodable byte in ONE historical report must degrade that row to ``"?"`` with a stderr
-    warning, not kill the walk with a UnicodeDecodeError traceback (#595 — the walk's last
-    unguarded read; UnicodeDecodeError is a ValueError, not an OSError)."""
     tl = _load()
     runs = _tenant_runs_dir(tmp_path)
     broken = _mk_run(runs, "case-a", disposition="benign",
@@ -249,13 +222,7 @@ def test_all_survives_undecodable_report(tmp_path, capsys):
     assert "L\td\t1\t0" in capsys.readouterr().out.splitlines()
 
 
-
-
 def test_all_marks_malformed_lesson_instead_of_dropping_it(tmp_path, capsys):
-    """A lesson the ``iter_lessons`` walk warn-skips (e.g. a curator edit broke its YAML) must
-    still get a row in the ``--all`` audit table — losing it silently hides exactly the lesson
-    a human is most likely investigating, while the named path still traces it (#590). The
-    marker's count is unwindowed (no parseable ``created_at``), and the row says so."""
     tl = _load()
     lessons = tmp_path / "lessons"
     _mk_lesson(lessons, "ok", body_frontmatter="name: ok\ndescription: fine\ncreated_at: 2026-06-04")
@@ -290,9 +257,6 @@ def test_all_marker_pass_inherits_the_discovery_rule(tmp_path, capsys):
 
 
 def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsys):
-    """Naming a malformed-but-readable lesson still traces it (an audit of a broken lesson is
-    the tool's most likely use), but warns that the trace is unwindowed — silently printing
-    ``since None`` hid that the window never engaged (#590's named-path half)."""
     tl = _load()
     lessons = tmp_path / "lessons"
     lessons.mkdir()
@@ -309,10 +273,6 @@ def test_named_path_traces_malformed_lesson_and_warns_unwindowed(tmp_path, capsy
 
 
 def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys):
-    """Valid frontmatter whose LLM-authored ``created_at`` doesn't parse (or is absent) is just
-    as unwindowed as malformed frontmatter — the warning keys on "no created_at to window on",
-    so ``since None`` never prints silently (#596's named-path half; the ``--all`` row shape and
-    the value echo are pinned by ``test_hardening_596_609.py``)."""
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L",
                body_frontmatter="name: L\ndescription: d\ncreated_at: not-a-date")
@@ -328,9 +288,6 @@ def test_named_path_warns_unwindowed_on_unparseable_created_at(tmp_path, capsys)
 
 
 def test_all_with_lesson_name_is_a_usage_error(tmp_path, capsys):
-    """``--all`` and a positional <lesson_name> answer different questions; silently preferring
-    one (the old behavior ran ``--all`` and dropped the name) hands the operator the wrong
-    report under a stray extra argument. Both together is a usage error."""
     tl = _load()
     _mk_lesson(tmp_path / "lessons", "L", body_frontmatter="name: L\ndescription: d")
     _tenant_runs_dir(tmp_path)
@@ -344,9 +301,6 @@ def test_all_with_lesson_name_is_a_usage_error(tmp_path, capsys):
 
 
 def test_named_path_unreadable_lesson_is_still_an_error(tmp_path, capsys):
-    """An UNREADABLE named lesson stays an ERROR (exit 1): printing "0 case(s)" for a file
-    that was never read is worse than failing. Pins the tri-state posture's hard edge so the
-    malformed-lesson tolerance above cannot creep into the unreadable case."""
     tl = _load()
     lessons = tmp_path / "lessons"
     lessons.mkdir()

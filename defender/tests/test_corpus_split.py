@@ -1,11 +1,3 @@
-"""Real-corpus invariant guarding the env-fact / tradecraft split (issue #298).
-
-After convergence, standing deployment facts live ONLY in lessons-environment/
-(shared, read by both actors) and lessons-actor/ is pattern/tradecraft-only.
-These checks run over the actual checked-in corpora so a regression — an
-env-fact authored back into lessons-actor, or an env lesson that is
-unretrievable / keyed on an identity selector — fails CI.
-"""
 from __future__ import annotations
 
 from pathlib import Path

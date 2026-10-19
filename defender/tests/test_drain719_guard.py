@@ -15,18 +15,6 @@ from defender.runtime.box import BoxFault  # type: ignore[import-not-found]
 from defender._git import GitError  # type: ignore[import-not-found]
 from defender.tests import _state1135
 
-#: Decision 8's retire set, spelled out here so a test can name a member and a non-member
-#: without reading them back off the implementation it is meant to constrain.
-#:
-#: SCOPE, because a reader meeting only this file would over-read it: the set governs the FOUR
-#: AUTHOR CHANNELS. The pitfalls and lead-author legs keep their own mechanism — the re-raise
-#: set inside `run_or_dead_letter`, which this change does not touch and which CONTAINS
-#: `GitError`. So a commit-time `GitError` retires here and kills the drain there: one class,
-#: two classifications, by channel. That asymmetry is deliberate, is carried as the waiver
-#: `retirement_classification_differs_across_the_pitfalls_boundary`, and both halves are
-#: asserted — the author half below, the pitfalls half in
-#: `test_systemic_faults_propagate_without_bumping_attempts`.
-
 
 # Decision 8 — the trigger is an enumerated set, and A12 is reversed
 
@@ -128,9 +116,6 @@ def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(t
             paths, name, max_attempts=1, invoke_agent=h.raising(ModelRetry("killed"))
         )
         assert drain.run_batch(cfg=member) == 2, f"{name}: a member did not fault the batch"
-        # `pending == []` rather than the pending list itself: the observable is "the queue
-        # was emptied", and a list of dicts cannot go in the set this compares across
-        # channels. As first written it raised TypeError before asserting anything.
         member_seen[name] = (h.pending(paths, ch) == [], tuple(r["attempts"] for r in h.graveyard(paths, ch)))
 
         rows = [h.row_for(name, rid)]
@@ -182,9 +167,6 @@ def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp
 
 
 def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path: Path):
-    """D5/P13, SIMPLIFIED by decision 8. §7's derivation — that "classify explicitly" meant the lock
-    layer must name its own fault type — was load-bearing only while a type-based re-raise set
-    could over-capture a missing-file `OSError`."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
@@ -197,9 +179,6 @@ def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path
         max_attempts=1,
         invoke_agent=h.raising(AssertionError("never reached")),
     )
-    # #1135: the handle refuses a folder where the lock file belongs as `StateRefused` (not an
-    # `OSError`, a `SYSTEMIC_FAULTS` member) instead of the primitive's `IsADirectoryError`; what
-    # is proved is unchanged: the acquisition failure escapes uncaught and uncounted.
     with pytest.raises(StateRefused):
         drain.run_batch(cfg=cfg)
     assert h.pending(paths, ch) == rows
@@ -233,9 +212,6 @@ def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path
 
 
 def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
-    """The marker-channel half keeps its own mechanism: the pitfalls and lead-author legs exempt by
-    RE-RAISING through `run_or_dead_letter`, where the author channels exempt by non-membership
-    (C32)."""
     from defender.learning.core import drains  # type: ignore[import-not-found]
 
     paths = h.make_paths(tmp_path)
@@ -269,5 +245,3 @@ def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
 
 
 # Decision 9 — the reconciling tick, which is what this test actually earns
-
-

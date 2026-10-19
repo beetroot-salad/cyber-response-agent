@@ -63,9 +63,6 @@ def test_a_nested_receipt_renders_unreadable_not_a_crash(tmp_path, bomb):
 
 
 def test_a_raising_record_step_writes_an_error_receipt(tmp_path, monkeypatch):
-    """An unexpected error in the record step replaces a stale success with an `error` receipt
-    naming only the exception's type (third review: clearing left the page silent, so the
-    operator could not tell "no ticket was attempted" from "the write crashed")."""
     def boom(*_a, **_k):
         raise PermissionError(13, "denied")
 

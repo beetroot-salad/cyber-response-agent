@@ -179,10 +179,6 @@ def test_d0_check_skill(tmp_path):
 
 
 def test_d_parity_grammar(tmp_path):
-    """Over a shared corpus, predicted_disposition is non-None exactly when
-    parse_frontmatter_or_none yields a mapping whose disposition is a str in the enum — so
-    primary + secondary (which now call this same function) accept and reject identical documents
-    by construction."""
     corpus = {
         "well-formed": b"---\ndisposition: benign\n---\nbody\n",
         "junk-opener": b"---disposition: benign\n...\n---\nbody\n",
@@ -235,9 +231,6 @@ def test_d_wellformed_report_unflipped(tmp_path):
 
 
 def test_d_unfenced_skill_none(tmp_path):
-    """NEGATIVE: an unfenced SKILL.md with interior '---' thematic breaks around
-    attacker text reaches neither read_description nor the descriptor_catalog.
-    Positive control (same tree/address): a well-fenced sibling DOES surface."""
     hook = _hook()
     skills = tmp_path / "skills"
     adapters = tmp_path / "adapters"
@@ -407,5 +400,3 @@ def test_d_unreadable_skill_fail_row(tmp_path):
     defroot = tmp_path / "missing"
     (defroot / "skills" / "gone").mkdir(parents=True)
     assert _name_status(scaffold, defroot, "gone") == "MISSING"
-
-

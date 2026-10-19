@@ -72,9 +72,6 @@ def test_a_params_entry_the_verb_does_not_declare_is_refused(tmp_path, resolver)
 
 
 def test_an_engine_verbs_body_placeholders_are_body_text_not_params(tmp_path, resolver):
-    """An engine verb's `## Query` IS the query language, so its `${…}` are body text. Keyed on
-    the VERB (`engine_of`), never the system — a system whose whole catalog is engine verbs had
-    every template skipped and every template claimed (#885)."""
     text = (
         "---\nid: elastic.probe\nstatus: established\nverb: esql\nparams: []\n---\n\n"
         "## Query\n\n```esql\nFROM logs-* | WHERE host == \"${anything}\"\n```\n"
@@ -156,9 +153,6 @@ def test_covers_reads_every_spelling_and_is_not_a_placeholder_declaration(tmp_pa
     assert _covers("covers: cmdb.a\n") == ("cmdb.a",)
     assert _covers("") == ()
 
-    # …and the half the docstring promises: covering an identity does not declare a name. The
-    # entry is well-formed (`cmdb.probe`), so the ONLY finding is the placeholder one — a bare
-    # `probe` would be refused by the shape rule and would not test this.
     smuggled = (
         "---\nid: cmdb.probe\nstatus: established\nverb: get-host\nparams: [host]\n"
         "covers: [cmdb.probe]\n---\n\n"
@@ -228,4 +222,3 @@ def test_an_unresolvable_system_raises_rather_than_reporting_a_clean_template(tm
     resolver = _scaffold_rules.VerbResolver(tmp_path)
     with pytest.raises(_scaffold_rules.ScaffoldRuleError):
         resolver.verbs("nosuchsystem")
-

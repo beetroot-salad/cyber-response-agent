@@ -95,17 +95,6 @@ def _recursive_marker_read_of(repo: Path) -> set[str]:
 
 
 def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
-    """`declared_systems(<tree root>)` returns a `frozenset[str]` that is the UNION of the
-    adapter glob and the committed `execution.md` marker, both rooted at the ONE tree-root
-    parameter it was handed.
-
-    Over a tree carrying an adapter-only system (`cmdb`), a marker-only system (`mcpsys`)
-    and one both sources name (`elastic`), all three are declared: either half alone is a
-    strict subset, so a resolver that read one source answers a strictly smaller set. The
-    return is a `frozenset`, deliberately NOT `ModuleVerbRegistry.systems()`'s sorted tuple.
-    And the tree root is a real coordinate, not plumbing: a second tree with different
-    sources answers differently through the same call.
-    """
     repo = seed_tree(
         tmp_path, adapters=("elastic", "cmdb"), markers=("elastic", "mcpsys"),
         skills=("elastic",), catalog=(),
@@ -114,11 +103,6 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
 
     assert got == frozenset({"elastic", "cmdb", "mcpsys"})
     assert type(got) is frozenset
-    # The answer is EXACTLY the two halves, and each half is a STRICT subset of it. The
-    # strictness alone says neither source could have produced the answer by itself; the
-    # EQUALITY is what says the resolver added nothing of its own — a strict-subset test is
-    # still satisfied by a resolver that returns MORE than either source names, which is
-    # precisely what a depth-unbounded marker read does (`marker_source_is_exactly_depth_one`).
     assert set(got) == _adapter_half_of(repo) | _marker_half_of(repo)
     assert _adapter_half_of(repo) < set(got)
     assert _marker_half_of(repo) < set(got)
@@ -131,19 +115,6 @@ def test_declared_systems_unions_the_adapter_glob_and_the_marker(tmp_path):
 
 
 def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(tmp_path):
-    """One tree, ONE drive, BOTH arms, because the asymmetry is the observable (NF1, §7).
-
-    In a tree where `defender/skills/mcpsys/execution.md` exists on disk but is NOT
-    committed, `mcpsys` is NOT declared — an uncommitted marker, however it got there,
-    declares nothing. In the SAME tree an uncommitted `scripts/adapters/newsys_adapter.py`
-    IS declared, because the adapter half reads the working tree. Commit the marker and
-    `mcpsys` joins the set.
-
-    A test that drove only the marker arm could not tell a committed-tree read from a
-    resolver that ignores markers altogether; a test that drove only the negative arm passes
-    against a resolver that returns `frozenset()`. This is what closes phase C's executed
-    planted-marker break structurally rather than by ordering discipline.
-    """
     repo = seed_tree(
         tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
         catalog=(),
@@ -162,33 +133,6 @@ def test_the_marker_half_reads_the_committed_tree_and_the_adapter_half_does_not(
 
 
 def test_the_marker_source_is_exactly_depth_one(tmp_path):
-    """The marker address is `<root>/defender/skills/<name>/execution.md` and NOTHING
-    deeper: a COMMITTED `execution.md` nested below that declares nothing, and in
-    particular does not declare its own parent directory's name.
-
-    THE COMPOSITION THIS CLOSES (phase F, F1). Two individually-pinned facts jointly admit a
-    forged marker: `marker_is_not_agent_committable` refuses the two-segment form at the
-    commit gate, while `_is_in_scope` admits `defender/skills/<declared>/_draft/<any>/…`
-    and every `gather/queries/…` path at ANY depth — so an agent can get
-    `defender/skills/elastic/_draft/mcpsys/execution.md` committed under a name it chose
-    itself. If the marker half is written as the obvious `git ls-tree -r … -- defender/skills`
-    filtered on the basename, `mcpsys` becomes declared on the next tick with every other
-    control in this spec holding, because the file really is committed and really does
-    predate the resolution. The spec must not depend on the implementer getting the recursion
-    right; the depth is a demand.
-    Its BELT is at the other end — `marker_is_not_agent_committable` now refuses
-    `execution.md` at any depth, so neither the read nor the write side stands alone.
-
-    Both nested paths are COMMITTED here, not merely written: an uncommitted one is refused
-    by `marker_read_is_from_the_committed_tree` for a different reason, and a fixture that
-    leaned on that would assert nothing about depth. The wrong answer is computed in-test
-    from the same committed tree, so the fixture is shown to separate the two readings rather
-    than the test asserting a difference no tree exhibits.
-
-    The positive control is on the same address and in the same drive: `cmdb`, a marker-only
-    system whose `execution.md` sits at depth 1, IS declared — so this is not a resolver that
-    has simply stopped reading markers.
-    """
     repo = seed_tree(
         tmp_path, adapters=("elastic",), markers=("elastic", "cmdb"), skills=("elastic",),
         catalog=("elastic",),
@@ -215,19 +159,6 @@ def test_the_marker_source_is_exactly_depth_one(tmp_path):
 
 
 def test_declared_systems_raises_when_either_source_is_unresolvable(tmp_path):
-    """Either source unresolvable RAISES `LeadAuthorError` — the DISJUNCTIVE reading O4
-    forces, over three states of the two sources.
-
-    * the adapters directory absent while the skills tree is fine — a conjunctive resolver
-      would hand back the marker half alone and silently retire every adapter-backed system,
-      which is precisely the failure O4 names;
-    * `defender/skills` absent at HEAD while the adapters directory is fine;
-    * the committed-tree read itself failing — here, a tree that is not a repository at all.
-
-    Rejected, and asserted as rejected: returning `frozenset()` and letting the caller not
-    know the difference. The fault class is pinned too, because the drain routes on the class
-    and not on the message.
-    """
     whole = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), catalog=())
     assert declared_systems(whole) == frozenset({"elastic"})   # the control on the same address
 
@@ -259,20 +190,6 @@ def test_declared_systems_raises_when_either_source_is_unresolvable(tmp_path):
 
 
 def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypatch):
-    """A resolver failure on the pitfalls leg is NOT a green tick with the queue rotated.
-
-    `drains._run_curator_module` catches `(SubprocessError, OSError)`, logs "(continuing)"
-    and returns `None`, which `_invoke_pitfalls` maps to rc 0 — so an `OSError` out of the
-    resolver would be a successful tick that rotated the whole batch out, which is O4's own
-    named failure. The resolver's fault must not present to that handler as one: driven
-    through the real drain seam over a tree with no adapters directory, `_invoke_pitfalls`
-    RAISES instead of returning 0, the queue is untouched, nothing is stamped consumed, and
-    the swallow's own log line never appears.
-
-    The queued rows name a system nothing declares so that this drive cannot reach the
-    curator spawn on ANY tree — the resolver's refusal is what the demand is about, and a
-    fixture that could reach a live agent would be measuring the environment.
-    """
     assert not issubclass(LeadAuthorError, OSError), (
         "an OSError subclass is swallowed by _run_curator_module and becomes rc 0"
     )
@@ -294,5 +211,3 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
     assert len(persist.read_pitfalls(_state1135.state_for_paths(paths))) == 2
     assert not (paths.state_root / PITFALLS.consumed).exists()
     assert "(continuing)" not in loop_log(capsys)
-
-

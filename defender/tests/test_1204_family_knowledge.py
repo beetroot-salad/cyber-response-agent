@@ -1,6 +1,3 @@
-"""#1204: a fork family is not certified comparable across two tenant knowledge commits.
-A differing commit is never waivable; unversioned/unavailable/absent knowledge is waivable with
-`--allow-dirty`. Covers preflight, `verify_family`, and the stamp-field comparison."""
 from __future__ import annotations
 
 import json
@@ -41,9 +38,6 @@ K3 = "1204" + "f" * 36
 UNAVAILABLE_REFTABLE = {"unavailable": "reftable refs: this reader reads files-backend refs only"}
 UNAVAILABLE_UNBORN = {"unavailable": "unborn branch: HEAD names refs/heads/main, which is nowhere"}
 
-#: A2's waivable shapes: nothing proves the same knowledge. `absent` is a stamp written before
-#: #1204 (no key); `null` is a record that does not say (what `as_json` writes for `None`, and
-#: what a malformed value read back folds to).
 UNPROVABLE: dict[str, Any] = {
     "absent": T.NO_KNOWLEDGE_KEY,
     "null": None,
@@ -94,11 +88,6 @@ def _incomplete(report: dict, *phrases: str, waivable: bool) -> str:
     assert ("allow-dirty" in reason) is waivable, reason
     _never_called_dirt(reason)
     return reason
-
-
-# ---------------------------------------------------------------------------------------
-# O2 — verify tier: the siblings' own stamps against the source, and against each other
-# ---------------------------------------------------------------------------------------
 
 
 def test_1204_a_family_on_the_sources_knowledge_commit_is_accepted_and_stamped_with_it(
@@ -211,15 +200,7 @@ def test_1204_two_unavailable_reasons_are_not_a_knowledge_disagreement(tmp_path)
         assert stamp is not None
 
 
-# ---------------------------------------------------------------------------------------
-# O2 — preflight tier: the live tenant clone against the source, before anything is spent
-# ---------------------------------------------------------------------------------------
-
-
 def test_1204_a_launch_whose_live_knowledge_matches_the_source_is_accepted(tmp_path):
-    """O2's positive control end to end: source, live capture and siblings all on knowledge K —
-    the launch exits 0, the live tree was captured once, the family is accepted and its stamp
-    carries K on both sides."""
     launch = A._prepare(tmp_path)
     stamp = A._accepted(launch)
     assert launch.live_tree.calls == 1
@@ -240,9 +221,6 @@ def test_1204_a_live_tenant_clone_on_another_knowledge_commit_is_refused_and_nev
 
 @pytest.mark.parametrize("shape", sorted(UNPROVABLE))
 def test_1204_a_live_capture_whose_knowledge_is_unprovable_is_waivable(tmp_path, shape):
-    """O2/A2 at preflight, the member side: the live capture cannot prove the clone's knowledge
-    commit (unversioned, unavailable, or no answer). Refused before spending without the flag —
-    naming the live tree and knowledge, offering the flag — and accepted end to end with it."""
     capture = {"knowledge": UNPROVABLE[shape]}
     launch = A._prepare(tmp_path, live_tree=T.source_capture(**capture))
     message = A._refused_before_spending(launch)
@@ -289,15 +267,6 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
     assert not (launch.episode_dir / "provenance.json").exists()
 
 
-# ---------------------------------------------------------------------------------------
-# The family stamp says WHAT the override waived, and `agreed` is what the check held
-# ---------------------------------------------------------------------------------------
-
-#: `(source, sibling overrides, --allow-dirty, the "waived" the family stamp must record)`.
-#: `"waived"` is the SORTED list of the fault kinds `--allow-dirty` actually waived for this
-#: family: `"dirt"` (a tree on the source or a sibling not certified clean) and `"knowledge"`
-#: (knowledge on the source or a sibling that no commit proves: unversioned, unavailable, or
-#: not recorded); `[]` when nothing was waived, with the flag or without it.
 WAIVED: dict[str, tuple[dict, dict[str, dict], bool, list[str]]] = {
     "clean-flag-off": (T.provenance_record(), {}, False, []),
     "clean-flag-on": (T.provenance_record(), {}, True, []),
@@ -382,11 +351,6 @@ def test_1204_agreed_knowledge_is_null_when_no_sibling_names_a_commit(tmp_path, 
     assert stamp["waived"] == ["knowledge"]
 
 
-# ---------------------------------------------------------------------------------------
-# D3 — production's default live capture reads the EPISODE TENANT's clone
-# ---------------------------------------------------------------------------------------
-
-
 def _versioned_tenant_knowledge() -> str:
     """Place the episode tenant's knowledge folder as a real git repo (the committed fixture,
     committed) BEFORE `A._prepare` sets the tenant up — the tenant set-up then keeps it and
@@ -426,10 +390,6 @@ def test_1204_the_default_live_capture_reads_the_episode_tenants_knowledge_clone
     assert "live tree is at commit" in message, message
     assert "knowledge" not in message, message
 
-
-# ---------------------------------------------------------------------------------------
-# O3 / D4 — every stamp field is classified, and the classification drives the comparison
-# ---------------------------------------------------------------------------------------
 
 #: D4's classification, as the design states it.
 D4 = {

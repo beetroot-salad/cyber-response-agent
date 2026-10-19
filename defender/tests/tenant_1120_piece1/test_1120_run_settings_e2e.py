@@ -70,9 +70,6 @@ def _under(path: Path, parent: Path) -> bool:
 
 def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_root_copy(
         data_root: Path, tmp_path: Path) -> None:
-    """This drives run.main over an alert with --tenant playground from this checkout, whose committed
-    fixture (knowledge/tenant-fixture/settings, the retired lab's frozen copy) grants gather change-
-    mgmt list-changes."""
     checkout_table = (H.FIXTURE / "settings" / "verb-grants.yaml").read_text(encoding="utf-8")
     assert "    list-changes: {roles: [gather]}" in checkout_table, (
         "precondition: the checkout's fixture no longer grants change-mgmt list-changes, so "
@@ -129,10 +126,6 @@ def test_1120_a_run_from_a_checkout_with_different_lab_settings_reads_the_data_r
 
 def test_1120_a_replay_without_a_named_tenant_runs_as_the_fixture_tenant_under_the_data_root(
         data_root: Path, tmp_path: Path) -> None:
-    """A replay driven through the harness with no tenant named completes, and the tenant it ran as is
-    the fixture tenant (knowledge/tenant-fixture) set up under the test's own DEFENDER_DATA_ROOT —
-    never the checkout's lab resolved through the removed tenant_dir (H2; the replay harness is the
-    tenant_dir's surviving dependent)."""
     rec = R.VerbRecorder()
 
     def get_host(ctx, *, host: str = "web-1") -> dict:

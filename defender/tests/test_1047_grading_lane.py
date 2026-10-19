@@ -20,11 +20,6 @@ def _forced_close(episode_dir, label="b"):
 
 
 def test_a_cut_short_world_files_the_third_row_shape(tmp_path):
-    """A world whose archived run_end.json says its run was truncated — and whose model had NOT
-    already closed — returns the third row shape: `ungradable: True`, `cut_short` carrying the
-    normalized exit value, `closed_before_cut` False on the record it was read from, and an
-    `ungradable_reason` naming the exit — with no `malformed` key, so tier 1 still means absent
-    and tier 2 still means malformed."""
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
     row = S.graded(ep)["b"]
     assert row.get("ungradable") is True, "a cut-short world was still graded as a verdict"
@@ -40,10 +35,6 @@ def test_a_cut_short_world_files_the_third_row_shape(tmp_path):
 
 
 def test_a_cut_short_world_does_not_reach_the_family_call_as_a_verdict(tmp_path):
-    """A cut-short world's host-forced `unresolved` report never reaches the family-scope call as
-    that world's verdict: where today a host-forced unresolved report on b flips caught to
-    survived (claim h2, executed), the family's word — decided by that call since #1224 — is
-    decided from a line saying b was NOT JUDGED, and b's own world call is never made."""
     control = S.family_view(S.cut_short_episode(tmp_path / "control"))
     assert "verdict='malicious'" in control["b"], control
 
@@ -70,9 +61,6 @@ def test_a_cut_short_world_does_not_reach_the_family_call_as_a_verdict(tmp_path)
 
 
 def test_the_third_row_shape_keeps_the_two_tiers_separable(tmp_path):
-    """The cut-short row carries no `malformed` key and an absent input still carries none either,
-    so `test_921_family_facts.py:631`'s absent-vs-malformed split reads the same after the
-    change as before it."""
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
     (ep / "worlds" / "c" / "report.md").unlink()
     graded = S.graded(ep)
@@ -86,10 +74,6 @@ def test_the_third_row_shape_keeps_the_two_tiers_separable(tmp_path):
 
 
 def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_report(tmp_path):
-    """A world whose run ended aborted, budget or store — none of which write a report.md — still
-    returns the third row shape naming that exit class, rather than the generic tier-1 reason
-    "missing its report.md"; the cut-short check runs first for all five exit classes, not only
-    the two that also produce a forced report."""
     for exit_class in S.NO_REPORT_EXITS:
         ep = S.cut_short_episode(tmp_path / exit_class, cut={"b": exit_class})
         (ep / "worlds" / "b" / "report.md").unlink()
@@ -109,9 +93,6 @@ def test_an_aborted_budget_or_store_world_names_its_exit_not_a_missing_report(tm
 
 
 def test_a_world_whose_model_closed_and_was_then_cut_short(tmp_path):
-    """A world whose model had ALREADY CLOSED when the exit class was stamped keeps its verdict:
-    the row is graded normally, carries no `cut_short` key, and still counts toward the family's
-    verdict word."""
     decided = S.cut_short_episode(tmp_path / "decided", cut={"b": "request-limit"},
                                   closed=("b",))
     row = S.graded(decided)["b"]
@@ -132,10 +113,6 @@ def test_a_world_whose_model_closed_and_was_then_cut_short(tmp_path):
 
 
 def test_the_record_must_distinguish_a_host_written_close_from_the_models_own(tmp_path):
-    """The run-end record carries a second field — `closed_before_cut` — and it is what separates a
-    host-written close from the model's own: two worlds carrying the SAME exit class and the
-    SAME report differ in their rows only because the record says whether the model had already
-    decided."""
     ep = S.cut_short_episode(tmp_path, cut={"b": "aborted", "c": "aborted"}, closed=("c",))
     for label in ("b", "c"):
         (ep / "worlds" / label / "report.md").write_text(
@@ -202,9 +179,6 @@ def test_read_world_facts_given_a_wrong_typed_truncated_by_value(tmp_path):
 
 
 def test_read_world_facts_given_truncated_json_or_a_json_list(tmp_path):
-    """Invalid JSON, truncated JSON and a JSON list where a mapping belongs each read as None and
-    the world grades as today (fork F-Y, §7 round 2, convergent on the demand's own pinned
-    language)."""
     ep = S.cut_short_episode(tmp_path)
     for raw in ('{"truncated_by": "abort', '[{"truncated_by": "aborted"}]', '"aborted"', "null"):
         S.plant_archived_record(ep, "b", raw=raw)

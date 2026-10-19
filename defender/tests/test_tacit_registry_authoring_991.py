@@ -35,10 +35,6 @@ def _run(*argv: str) -> tuple[int, str]:
     return rc, buf.getvalue()
 
 
-# ---------------------------------------------------------------------------------------
-# One walk, two readers.
-# ---------------------------------------------------------------------------------------
-
 def test_the_validator_and_the_verb_read_the_same_walk(tmp_path) -> None:
     """`read_registry` is what BOTH the CLI and a live `lookup` consume, so a human cannot be
     told an entry loads while every lookup misses it."""
@@ -80,10 +76,6 @@ def test_a_drop_names_the_field_and_the_rule(tmp_path) -> None:
             f"{read.refusals[0]!r}"
         )
 
-
-# ---------------------------------------------------------------------------------------
-# The reader.
-# ---------------------------------------------------------------------------------------
 
 def test_check_fails_on_a_drop_and_says_what_a_drop_costs(tmp_path) -> None:
     """`check` exits non-zero on any dropped entry, and explains the consequence."""
@@ -139,9 +131,6 @@ def test_a_precise_short_actor_is_not_reported_as_broad(tmp_path) -> None:
     _rc, out = _run("check", "--defender-dir", str(precise))
     assert "broad" not in out, f"a wildcard-free actor scope was called broad: {out}"
 
-    # `prod-*` is the SKILL's own stated limit — "mostly literal and still covers a fleet", the
-    # case a character count cannot judge and a human can. It clears the loader's minimum, so
-    # the note is the ONLY thing that will ever mention it.
     wide = _tree(tmp_path / "wide", scene.registry_entry(host_scope="prod-*"))
     rc, out = _run("check", "--defender-dir", str(wide))
     assert rc == 0, f"a legal fleet-wide scope was refused rather than noted: {out}"
@@ -171,15 +160,7 @@ def test_show_answers_what_is_in_force_rather_than_what_parses(tmp_path) -> None
     )
 
 
-# ---------------------------------------------------------------------------------------
-# The surfaces a human actually meets.
-# ---------------------------------------------------------------------------------------
-
 def test_the_shipped_registry_passes_its_own_gate() -> None:
-    """The file in this tree passes the command CI runs against it.
-
-    The gate is only a gate if the committed file clears it; a registry that ships red teaches
-    everyone to ignore the check."""
     rc, out = _run("check")
     assert rc == 0, f"the shipped registry fails its own CI gate: {out}"
 
@@ -209,4 +190,3 @@ def test_the_files_worked_example_actually_loads(tmp_path) -> None:
     ) is not None, (
         "the worked example loads and then does not answer the case it is an example OF"
     )
-

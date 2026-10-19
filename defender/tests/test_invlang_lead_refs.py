@@ -1,16 +1,3 @@
-"""`:L findings` is the sole site that declares a lead.
-
-The projector opens a bucket for any lead id it meets, so before this rule a
-typo, a forward reference, and a comma-joined pair of real ids all became leads
-of their own. That is how a lead named `l-004,l-005` — carrying a real authz
-verdict — reached the corpus without a single warning.
-
-Correlation is the legitimate need behind that comma: some verdicts only hold
-because two leads' results combine. It is expressed as grounding
-(`cites_leads`), not as ownership, because `resolved_by` is the projection
-target and a plural target files the row on two outcomes or none.
-"""
-
 from __future__ import annotations
 
 import pytest
@@ -63,9 +50,6 @@ def test_correlated_verdict_is_expressible_as_owner_plus_citation():
     )) == []
 
 
-# Every row plants ONE bad lead reference and asserts the same two things: exactly one error
-# (a single defect must not report as several), and that the error quotes the offending id —
-# an error that does not name the token is one the author cannot act on.
 @pytest.mark.parametrize(("case", "block", "fragment"), [
     # `cites_leads` must name leads the document DECLARED: l-004 exists, l-009 does not.
     ("cites-an-undeclared-lead",
@@ -94,9 +78,6 @@ def test_correlated_verdict_is_expressible_as_owner_plus_citation():
      "'l-007'"),
 ], ids=lambda v: v if isinstance(v, str) and len(v) < 50 and "|" not in v else "")
 def test_a_reference_to_an_undeclared_lead_is_caught_and_named(case, block, fragment):
-    """A lead id is only meaningful if the document declared it. Whatever the spelling —
-    a citation list, a self-reference, a typo, or the owner of a sub-block — an id with no
-    `:L` row behind it is one error that quotes the id it could not resolve."""
     errors = _lead_ref_errors(_doc(_two_leads() + "\n" + block))
     assert len(errors) == 1
     assert fragment in errors[0]

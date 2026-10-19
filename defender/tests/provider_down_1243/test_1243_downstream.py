@@ -1,13 +1,3 @@
-"""#1243 part 1 — provider-down is legible downstream (O4, O5).
-
-`provider-down` joins the run-end vocabulary (an unlisted value silently normalises to "clean
-run", C16), is NOT a forced-close exit (infrastructure ends write no report, C15), the ticket lane
-leaves the ticket open with no comment as for budget/store (C16), and curation refuses it (any
-truncation is refused today — this file pins that it stays so for the new value).
-
-Every reader is the production one; each negative is paired with a positive control on the same
-channel.
-"""
 from __future__ import annotations
 
 import json
@@ -52,9 +42,6 @@ def test_o4_provider_down_is_not_a_forced_close_exit() -> None:
 
 
 def test_o5_the_ticket_lane_leaves_a_provider_down_ticket_open_with_no_call(tmp_path: Path) -> None:
-    """O5: a run that ended provider-down with no verdict leaves its ticket open and makes no
-    call at all, writes no receipt — with or without a report.md on disk, as for budget/store
-    (C16)."""
     for report in (False, True):
         run_dir = T47.closed_run_dir(tmp_path / f"report-{report}", report=report)
         fake = T47.record_ticket(run_dir, truncated_by=P.PROVIDER_DOWN, closed_before_cut=False)
@@ -65,9 +52,6 @@ def test_o5_the_ticket_lane_leaves_a_provider_down_ticket_open_with_no_call(tmp_
 
 
 def test_o5_the_ticket_lane_records_a_provider_down_run_whose_model_had_closed(tmp_path: Path) -> None:
-    """O5 (R8): "as for budget/store" includes their deferral — a run whose model had already
-    closed with a verdict when the provider went down records off its own report: one comment,
-    no transition."""
     run_dir = T47.closed_run_dir(tmp_path, disposition="malicious")
     fake = T47.record_ticket(run_dir, truncated_by=P.PROVIDER_DOWN, closed_before_cut=True)
     assert len(fake.records) == 1, f"a closed-before-cut provider-down run recorded {fake.calls}"

@@ -16,10 +16,6 @@ def _owner():
 
 
 def test_session_store_owns_what_a_truncated_by_value_means():
-    """`session_store.normalized_truncated_by(value)` returns the member for every
-    TRUNCATED_BY_VALUES spelling and None for everything else — a non-str, an empty string, a
-    near-miss — never coercing a value into the member it resembles, the rule
-    `_vocab.normalized_disposition` states for its own vocabulary."""
     normalized = _owner()
     members = S.vocabulary()
     assert members, "TRUNCATED_BY_VALUES is empty; the vocabulary has no members to own"
@@ -93,9 +89,6 @@ def _three_sites(tmp_path, value):
 
 
 def test_every_reader_of_the_exit_class_takes_the_owners_answer(tmp_path):
-    """The archive writer, the judge's reader and the ticket lane give one answer to what an exit
-    value means: a value the owner refuses is refused identically at all three, and none of them
-    carries its own membership test."""
     refused_archived, refused_row, refused_ticket = _three_sites(tmp_path / "no", "REQUEST-LIMIT")
     assert refused_archived["truncated_by"] == "REQUEST-LIMIT", (
         "the archive rewrote the sidecar's value instead of copying it — a third interpreter")
@@ -113,5 +106,3 @@ def test_every_reader_of_the_exit_class_takes_the_owners_answer(tmp_path):
     assert gate(tmp_path, tmp_path / "alert.json", truncated_by="REQUEST-LIMIT") is not None, (
         "the corpus-refusal gate stopped refusing an unrecognized exit class; F-E's recorded "
         "divergence between the two lanes is intentional and this is its pin")
-
-

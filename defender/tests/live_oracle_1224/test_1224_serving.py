@@ -1,7 +1,3 @@
-"""#1224 — the sibling's serving path through the live oracle (`serve_one` / `WorldRegistry`), the query
-tool's handling of what the registry returns or raises, and the world ledger: served-answer contract,
-real-error passthrough, the per-world cache, unservable calls, hostile base answers, crash/resume.
-"""
 from __future__ import annotations
 
 import concurrent.futures
@@ -21,11 +17,6 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.scripts.adapters import faults  # noqa: E402
 from defender.tests.live_oracle_1224 import _spec1224 as S  # noqa: E402
 
-# --------------------------------------------------------------------------------------------
-# The fixture's answers. Every literal keeps its keys sorted, so a payload compares byte for
-# byte whether it came back from the stub adapter (whose table is dumped sorted) or from a
-# scripted submission.
-# --------------------------------------------------------------------------------------------
 
 ALICE = S.query_params("user:alice")
 BOB = S.query_params("user:bob")
@@ -288,11 +279,6 @@ def _ticket_drive(tmp_path: Path, est: S.Estate, verbs: Any) -> tuple[Path, Any]
                               S.query_turn("ticket", "list-tickets", TICKETS), S.done_turn()])
 
 
-# ============================================================================================
-# The served-answer contract.
-# ============================================================================================
-
-
 def test_1224_served_verb_returns_the_verified_answer_and_rows_it(tmp_path):
     """a verified oracle answer is returned to the caller and rowed `oracle`; a submission equal to the base returns the base's canonical bytes, rowed …"""
     est = S.estate(tmp_path)
@@ -524,11 +510,6 @@ def test_1224_served_answer_is_recorded_and_screened_as_real_data(tmp_path):
     assert _decisions(ep, "b") == [S.ORACLE_DECISION]
 
 
-# ============================================================================================
-# Worlds do not share served answers or live base reads (S20, S22).
-# ============================================================================================
-
-
 def test_1224_two_worlds_asking_one_call_get_their_own_served_answers(tmp_path):
     """worlds b and c asking one call each get their own oracle turn and their own cached served answer; neither cache returns the other's."""
     est = S.estate(tmp_path)
@@ -553,11 +534,6 @@ def test_1224_two_worlds_asking_one_call_get_their_own_served_answers(tmp_path):
     assert [json.loads(r["payload_text"]) for r in S.ledger_rows(ep, "c")] == [served_c] * 2
     assert not _mentions(_complete_rows(S.oracle_dir(ep, "b") / "answers.jsonl"), "e-9002")
     assert not _mentions(_complete_rows(S.oracle_dir(ep, "c") / "answers.jsonl"), "e-9001")
-
-
-# ============================================================================================
-# Premises (silent branches, forks, settled).
-# ============================================================================================
 
 
 def test_1224_fact_names_an_entity_no_real_answer_contains(tmp_path):

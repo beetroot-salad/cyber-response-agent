@@ -69,9 +69,6 @@ LEAD = "l-001"
 
 PARAMS = {"native_query": "FROM logs | WHERE user.name == \"dev.dana\""}
 
-#: The roster the production gather factory contributes, as the model is offered it. Restated
-#: rather than derived: the claim below is that the SUMMARY turn's roster is THIS one, and a
-#: roster derived from the first call would make "unchanged" unobservable.
 GATHER_ROSTER = ["bash", "list_verbs", "query", "read_file", "template_search"]
 
 
@@ -158,9 +155,6 @@ def run_lead(  # noqa: PLR0913 — one parameter per thing a scenario varies
     provider is replaced: `build_gather_agent`'s own `make_model` seam hands back a
     `FunctionModel`; the tools, capabilities, instructions and retry policy are the shipped"""
     run_dir = materialize(root, GOLDEN_AB3)
-    # The real `_run_gather` runs without the driver, so this starts the run's state the way
-    # the driver does at run start and hands it to MAIN's deps: the budget, the breaker and the
-    # queries rows the query tool's guards and row writer read are all on it (#1235).
     from defender.runtime.run_state import RunState
 
     # #1106: a run hands MAIN's deps its tenant's record, which every lead inherits.
@@ -230,15 +224,7 @@ def marked(messages: list) -> list[int]:
             if isinstance(m, ModelRequest) and FINAL_REQUEST in user_parts(m)]
 
 
-# =========================================================================================
-# The dead end — a guard's stop is a tool result, and the next turn is the summary.
-# =========================================================================================
-
-
 def test_the_tripping_call_is_answered_with_the_guards_reason_and_the_summary_follows(tmp_path):
-    """The defect, end to end. Three identical queries: the third trips the repeat guard.
-    The gather model's fourth turn is its summary, and main receives it under the dead-end
-    notice — the header `_run_gather` composed before #987, byte for byte, with the lead's own"""
     stamps: list = []
     lead = run_lead(tmp_path, [_query(), _query(), _query(), _text(SUMMARY)], stamps=stamps)
 
@@ -264,9 +250,6 @@ def test_the_tripping_call_is_answered_with_the_guards_reason_and_the_summary_fo
 
 
 def test_a_schema_refused_repeat_is_answered_from_the_validate_hook(tmp_path):
-    """The other placement. A `query` call the schema refuses never reaches the execute hook,
-    so its guard's dead end is raised from `wrap_tool_validate` — where a tool result cannot be
-    RETURNED. It is a `ToolFailed` there, which the framework turns into the same failed tool"""
     lead = run_lead(tmp_path, [_bad_args(), _bad_args(), _bad_args(), _text(SUMMARY)])
 
     assert lead.model.calls == 4
@@ -285,15 +268,7 @@ def test_a_schema_refused_repeat_is_answered_from_the_validate_hook(tmp_path):
     assert len(retry_prompts(last)) == 2, "the first two refusals are still corrections"
 
 
-# =========================================================================================
-# Siblings — a concurrent call is answered for what IT did, never with another call's reason.
-# =========================================================================================
-
-
 def test_a_sibling_of_the_tripping_call_is_never_told_it_was_a_repeat(tmp_path):
-    """One round carries two `query` calls: a NEW request and the third repeat. The repeat
-    trips. The sibling is answered for what happened to IT — either it ran (a row with exit 0,
-    and its own result in its tool return) or it was refused because the door had already"""
     lead = run_lead(tmp_path, [
         _query(), _query(), _two_queries(99, None), _text(SUMMARY),
     ])
@@ -323,15 +298,7 @@ def test_a_sibling_of_the_tripping_call_is_never_told_it_was_a_repeat(tmp_path):
             "a call answered 'not executed' reached the backend"
 
 
-# =========================================================================================
-# The ceiling — the final request is marked, whatever the round before it did.
-# =========================================================================================
-
-
 def test_the_final_request_is_marked_and_is_the_summary(tmp_path):
-    """Ceiling 3. Two distinct queries, then the summary. Both queries RUN and their results
-    are reported as results (not failures, nothing appended to them). The THIRD request — the
-    last the ceiling allows — carries the final-request sentence as a user part after the"""
     stamps: list = []
     lead = run_lead(tmp_path, [_query(0), _query(1), _text(SUMMARY)], ceiling=3, stamps=stamps)
 
@@ -355,18 +322,12 @@ def test_the_final_request_is_marked_and_is_the_summary(tmp_path):
 
 
 def test_the_final_request_withholds_the_tools_and_no_other_request_does(tmp_path):
-    """The tools are DEFINED on every request — the summary turn's roster is the production
-    roster — and the final request alone says none may be chosen. On a provider that honours
-    it, the model's only possible answer to its final request is text."""
     lead = run_lead(tmp_path, [_query(0), _query(1), _text(SUMMARY)], ceiling=3)
     assert lead.model.rosters == [GATHER_ROSTER] * 3
     assert lead.model.tool_choices == [None, None, "none"]
 
 
 def test_a_summary_written_beside_a_stray_query_on_the_final_request_is_kept(tmp_path):
-    """Ceiling 3: `list_verbs`, then a query, then — on the final request, from a provider
-    that ignored `tool_choice` — the summary AND one more query in one response. The call is
-    dropped before the framework sees it (no row, no backend call, no refusal to answer)."""
     stamps: list = []
     both = ModelResponse(parts=[TextPart(content=SUMMARY), _query(1).parts[0]])
     lead = run_lead(tmp_path, [_list_verbs(), _query(0), both], ceiling=3, stamps=stamps)
@@ -379,9 +340,6 @@ def test_a_summary_written_beside_a_stray_query_on_the_final_request_is_kept(tmp
 
 
 def test_a_final_request_answered_with_only_a_query_is_a_lead_with_no_summary(tmp_path):
-    """Ceiling 3: the model answers its marked final request with a tool call and NO text.
-    The call is dropped (no row, no backend call), what remains is an empty response, and
-    the gather agent's retry policy (no output retries) ends the run on it. Main receives the"""
     stamps: list = []
     lead = run_lead(tmp_path, [_list_verbs(), _query(0), _query(1), _text("too late")],
                     ceiling=3, stamps=stamps)
@@ -406,9 +364,6 @@ def _unknown_verb() -> ModelResponse:
 ])
 def test_a_rejection_before_the_final_request_is_a_correction_and_the_round_is_still_marked(
         tmp_path, placement, rejected):
-    """Ceiling 3; the second round's call is REJECTED. The rejection goes out as the retry
-    prompt it is at either placement — the tool's answer is about the call — and the request
-    that carries it is the final one, so it ALSO carries the final-request sentence, after the"""
     lead = run_lead(tmp_path, [_query(0), rejected, _text(SUMMARY)], ceiling=3)
     assert lead.model.calls == 3
     assert split(lead.out) == (HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=3), SUMMARY)
@@ -421,9 +376,6 @@ def test_a_rejection_before_the_final_request_is_a_correction_and_the_round_is_s
 
 
 def test_two_queries_on_the_last_permitted_round_both_run_though_one_is_refused(tmp_path):
-    """Ceiling 3. The second round — the last one whose calls run — lists a good query and a
-    schema-refused one. The schema refusal is a correction; the good query RUNS and its
-    result is shown — nothing in the ceiling closes a door on siblings, because the ceiling"""
     lead = run_lead(tmp_path, [
         _query(0), ModelResponse(parts=[_query(1).parts[0], _bad_args().parts[0]]),
         _text(SUMMARY),
@@ -440,9 +392,6 @@ def test_two_queries_on_the_last_permitted_round_both_run_though_one_is_refused(
 
 
 def test_a_dead_end_met_before_the_ceiling_is_what_main_is_told(tmp_path):
-    """Ceiling 4. Three identical queries: the third trips the guard on round 3 and the
-    fourth request is BOTH the closing tool result and the marked final request. The model
-    writes its summary there; main receives it under the DEAD-END notice — the guard's"""
     stamps: list = []
     lead = run_lead(tmp_path, [_query(), _query(), _query(), _text(SUMMARY)],
                     ceiling=4, stamps=stamps)
@@ -457,9 +406,6 @@ def test_a_dead_end_met_before_the_ceiling_is_what_main_is_told(tmp_path):
 
 
 def test_a_lead_that_finishes_inside_its_ceiling_is_not_relabelled(tmp_path):
-    """The positive control. Ceiling 6, one query, then the summary: no notice, no header,
-    no idiom, no stamp — the text main receives is the lead's own, alone, and the gather model
-    was never told to stop."""
     stamps: list = []
     lead = run_lead(tmp_path, [_query(0), _text(SUMMARY)], ceiling=6, stamps=stamps)
     assert lead.model.calls == 2
@@ -470,15 +416,7 @@ def test_a_lead_that_finishes_inside_its_ceiling_is_not_relabelled(tmp_path):
     assert QUERY_DOOR_CLOSED not in flat(lead.model.last_inbound)
 
 
-# =========================================================================================
-# After a dead end — the door stays closed, the model keeps its turns, the ceiling bounds it.
-# =========================================================================================
-
-
 def test_querying_again_after_a_dead_end_is_refused_and_the_summary_still_arrives(tmp_path):
-    """Three repeats trip the guard; the fourth turn is ANOTHER query. It is never executed
-    (no row, no backend call), answered `QUERY_NOT_RUN`, and the FIFTH turn's text is the
-    summary main receives under the dead-end notice. No grace turn is forfeited: the summary"""
     stamps: list = []
     lead = run_lead(tmp_path, [_query(), _query(), _query(), _query(7), _text(SUMMARY)],
                     stamps=stamps)
@@ -495,9 +433,6 @@ def test_querying_again_after_a_dead_end_is_refused_and_the_summary_still_arrive
 
 
 def test_a_model_that_never_stops_querying_after_a_dead_end_is_bounded_by_the_ceiling(tmp_path):
-    """Ceiling 5: the guard trips on round 3, the model queries on rounds 4 AND 5. Round 4's
-    call is refused at the door (three rows in the table, two backend calls); the fifth
-    request is the marked, tool-less final request; its query is dropped, no text remains."""
     stamps: list = []
     lead = run_lead(tmp_path, [_query(), _query(), _query(), _query(7), _query(8), _text("x")],
                     ceiling=5, stamps=stamps)
@@ -529,9 +464,6 @@ def _withheld_verb(rec: VerbRecorder) -> GrantScopedVerbs:
 
 
 def test_a_denied_verb_after_a_dead_end_still_leaves_its_denial_record(tmp_path):
-    """The grant check sits ABOVE the door: a call against a verb outside the lead's grant,
-    issued after the door closed, is answered as the DENIAL it is and writes its
-    policy-denial record — the invariant the grant check's own docstring states (§7 R3/R23."""
     rec = VerbRecorder()
     denied = ModelResponse(parts=[ToolCallPart(
         tool_name="query",
@@ -548,15 +480,7 @@ def test_a_denied_verb_after_a_dead_end_still_leaves_its_denial_record(tmp_path)
     assert str(answer.content) != QUERY_NOT_RUN, "the denial was answered as a closed door"
 
 
-# =========================================================================================
-# The store — the stopped lead's session records its summary round like any other.
-# =========================================================================================
-
-
 def test_the_stopped_leads_session_is_recorded_like_a_finished_ones(tmp_path):
-    """One run, one recorder, one ceiling: the session holds one request and one response
-    per round, plus the summary turn's own request — the closing tool result is IN that
-    request, recorded under the lead's own session — and ends on that request, the trailing"""
     base = runs_base(tmp_path / "db")
     store = session_store.open_store(case_id="case-987", sessions=SessionPaths(base))
     session_id = store.new_session(agent_id=f"gather:{LEAD}")
@@ -579,11 +503,6 @@ def test_the_stopped_leads_session_is_recorded_like_a_finished_ones(tmp_path):
     """, (f"gather:{LEAD}",))[0][0]
     assert QUERY_DOOR_CLOSED in str(last_payload), \
         "the summary turn's request — the one carrying the closing answer — was not recorded"
-
-
-# =========================================================================================
-# G19 — the gather model never sees main's idiom; main always does.
-# =========================================================================================
 
 
 @pytest.mark.parametrize("scenario", ["dead-end", "ceiling", "spent", "stray", "both"])

@@ -50,9 +50,6 @@ l-001|1|auth-history|v-001|h-001|elastic|10m
 
 
 def test_the_coverage_gate_still_bites_when_a_conclude_block_is_present() -> None:
-    """Rule #6 is described as the EARLY gate and #34 as the late one, which is a statement
-    about when it first fires, not about it standing down later. A document that writes the
-    `++` and then closes is the same defective `++`."""
     errors = _errors(_TWO_PREDS + """\
 :T resolutions
 h-001  null → ++   [l-001 p1 severe ⟂ e-001 :: bursty]
@@ -71,9 +68,6 @@ h-001|++
 
 
 def test_an_earlier_partial_move_counts_toward_the_double_plus() -> None:
-    """The union is taken across EVERY resolution on the hypothesis, not only the `++` row —
-    which is what makes the rule repairable on an append-only document. `p1` settled by a `+`
-    in loop 1 is settled when loop 2 cites `p2` and grades `++`."""
     assert _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 
@@ -114,9 +108,6 @@ h-001  ++ → ++     [l-002 p1 severe ⟂ e-001 :: bursty again]
 
 
 def test_a_hypothesis_born_inside_a_lead_is_gated_too() -> None:
-    """`_walkers.all_hypotheses` walks `:H l-NNN.new_hypotheses` as well as the opening block,
-    and a mid-run hypothesis is exactly the one whose prediction set a later loop is tempted to
-    part-answer."""
     errors = _errors(_PROLOGUE + """\
 :L findings [id|loop|name|target|tests|system|window]
 l-001|1|auth-history|v-001||elastic|10m
@@ -137,9 +128,6 @@ h-003  null → ++   [l-002 p1 severe ⟂ e-001 :: bursty]
 
 
 def test_a_siblings_citation_does_not_cover_this_hypothesis() -> None:
-    """The citation pool is per-hypothesis. `p2` is an id in BOTH hypotheses' namespaces, and
-    a pool keyed on the document rather than the hypothesis would let `h-002`'s `p2` discharge
-    `h-001`'s — the same-level sibling rollup rule #25 exists to block one level up."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -169,9 +157,6 @@ _SCREEN_HEADER = ":L findings [id|loop|name|target|mode|tests|system|window|scre
 
 
 def test_a_matched_screen_with_no_hypothesize_block_is_the_shape_the_rule_wants() -> None:
-    """Arm C's whole content is `match` AND hypotheses. The original file only ever writes
-    `match` beside a `hypothesize` block, so a check that refused every `match` — the fast-path
-    close the rule is written to PERMIT — reads identically to it."""
     assert _errors(_PROLOGUE + _SCREEN_HEADER + """\
 l-001|1|monitoring-probe-screen|v-001|screen||cmdb|n/a|match
 """) == []
@@ -204,9 +189,6 @@ p1|proposed_edge|"failures repeat on a fixed interval"
 
 
 def test_identical_claims_under_different_parents_are_not_a_fork() -> None:
-    """The sibling group is `(parent hypothesis, anchor)`, and the parent is read off the id
-    shape. Two children of DIFFERENT parents compete with their own siblings, not with each
-    other, so one repeated sentence across two forks is not a pair no lead can split."""
     assert _errors(_TWO_PARENTS.format(
         children=(
             "h-001-a|?burst-source-a|v-001|runs_on|process|??/??/??||null|active\n"
@@ -243,9 +225,6 @@ def test_identical_claims_under_the_SAME_parent_are_a_fork() -> None:
 
 
 def test_two_siblings_repeating_one_attribute_prediction_are_refused() -> None:
-    """`ap*` claims are in the signature — rule #35's signature is the union of both PREDICT
-    blocks and #23 implements it. Same `target`, same `attribute`, same predicted value in
-    different case and spacing: one observable written twice, and the pair no lead splits."""
     errors = _errors(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -291,9 +270,6 @@ p2|proposed_edge|"failures repeat on a fixed interval"
 
 
 def test_two_siblings_declaring_no_predictions_are_skipped() -> None:
-    """Empty signatures are skipped per rule #35 — a hypothesis with no fork axis has none to
-    compare, and leanness and the refutation-link rules own that shape. Without the skip both
-    hypotheses key on the empty set and the pair reads as identical."""
     joined = _joined(_PROLOGUE + _HYP_HEADER + """\
 h-001|?credential-guessing|v-001|runs_on|process|??/??/??||null|active
 h-002|?scheduled-service-retry|v-001|runs_on|process|??/??/??||null|active
@@ -359,9 +335,6 @@ p1|proposed_edge|"failures arrive in bursts"
     ("index-only", "1"),
 ])
 def test_every_id_outside_the_ap_namespace_is_refused(case: str, apid: str) -> None:
-    """`^ap\\d+$`, anchored at BOTH ends. `matched_prediction_ids` resolves ids by equality, so
-    `ap1x` is as uncitable as `a1` — a substring match on either end reads as live code while
-    admitting both."""
     errors = _errors(_with_attr_preds(f'{apid}|proposed_parent|signing|"unsigned"\n'))
     assert len(errors) == 1
     assert f"row {apid!r}: an attribute prediction is numbered `ap<n>`" in errors[0]

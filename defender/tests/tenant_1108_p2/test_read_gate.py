@@ -1,9 +1,3 @@
-"""O2 read-gate arm: run and gather wiring admit their tenant's narrow corpus shapes.
-
-P2 keeps checkout knowledge live until P4. These are literal, made-up files under an
-accepted fixture tenant, not moved product content. The real driver, gather dispatch,
-typed file tool, bash gate and host shell run through the existing replay seams.
-"""
 from __future__ import annotations
 
 import shlex
@@ -31,10 +25,6 @@ def _put(root: Path, relative: str, marker: str) -> Path:
     return path
 
 
-#: #1255 (design rev 4, P1): the model names every tree by its fixed model path — the run folder
-#: `/runs/current`, the checkout `/defender`, the tenant's agent half `/agent` — and a host path
-#: it guesses is outside the three trees. The table below is the design's, applied to this
-#: file's fixtures; a path under none of the three trees stays the host path it is (refused).
 def _model(path: Path, *, tenant=None, run_dir: Path | None = None) -> str:
     for host, model in ((getattr(tenant, 'agent', None), '/agent'), (T.DEFENDER, '/defender'),
                         (run_dir, '/runs/current')):

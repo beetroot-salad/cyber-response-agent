@@ -20,12 +20,6 @@ from defender.evals.oracle_golden import judge, score  # noqa: E402
 CASE_DIRS = sorted(p for p in CASES_DIR.iterdir() if p.is_dir())
 
 
-#: `expected.yaml` stopped being a per-case requirement when the judge redesign landed
-#: (#711 §9). It held HAND labels, which were the scoring contract; the contract is now
-#: the judge's own measurement of the telemetry, and the surviving hand labels are the
-#: label pass's calibration set — carried by the four seed cases and nothing else. A
-#: recruited case has no hand labels by design, so requiring them of every case would
-#: force someone to invent the answers the suite exists to measure.
 CALIBRATION_FILE = "expected.yaml"
 
 
@@ -60,9 +54,6 @@ def test_every_labelled_lead_has_an_oracle_visible_envelope(case_dir):
     assert {r["lead_id"] for r in rows} == set(expected["leads"])
 
 
-# Vocabulary that only an eval author writes — the scoring frame, not the
-# operation. A story mentioning any of it is telling the oracle what it is being
-# tested on, or what to answer.
 _EVAL_TELLS = ("oracle", "negative control", "golden", "projection", "every lead",
                "each lead", "expected result", "+event", "+noise", "-noise",
                "result class", "standard environment noise", "suppressed:")
@@ -126,9 +117,6 @@ def test_every_checked_in_score_carries_the_rows_the_reporter_reads(case_dir, sc
                           for p in sorted((d / "projections").glob("*.yaml"))],
                          ids=lambda p: p.name)
 def test_no_checked_in_projection_has_a_lead_set_mismatch(case_dir, proj_path):
-    """The mechanical half of scoring, swept over the tree. A missing lead is not an
-    empty one, and an all-quiet case is exactly where a truncated projection would pass
-    unnoticed."""
     leads = [row["lead_id"] for row in judge.load_case_leads(case_dir)]
     proj = yaml.safe_load(proj_path.read_text(encoding="utf-8")) or {}
     preds, duplicates = score.load_predictions(proj)
@@ -147,18 +135,6 @@ def test_every_checked_in_projection_has_a_score(case_dir, proj_path):
     assert proj_path.name in tags, (
         f"{case_dir.name}/{proj_path.name} has no scores/ artifact — run score.py")
 
-
-# no checked-in projection carries a YAML-typed instant (#951, O4)
-#
-# The containment checks read a projection's values as the text in the file, so what they
-# compare against the author's literal is whatever the PRODUCER wrote. `yaml.safe_dump` quotes
-# any string that would resolve as a timestamp, so in a dumped projection an unquoted
-# instant can only be a `datetime` the producer had already parsed the model's text into —
-# and re-spelled as `2026-07-25 07:48:37.065000+00:00`, which no author's `T…Z` literal will
-# ever match. This sweep catches that producer at commit time. (A producer that wrote the
-# model's raw text with an unquoted instant would trip it too; the checks read that correctly,
-# and the fix would be to narrow this sweep, not to edit the model's output.) The author's
-# side needs no sweep: `validate_cases.check_clause_text` refuses an unquoted clause entry.
 
 PROJECTION_FILES = sorted(CASES_DIR.glob("*/projections/*.yaml"))
 

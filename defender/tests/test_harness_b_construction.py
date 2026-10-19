@@ -180,9 +180,6 @@ def test_build_agent_core_registers_write_tools(logger):
 
 
 def test_build_agent_core_propagates_make_model_error(logger):
-    """make_model raising (unroutable name / missing key / bad effort) propagates —
-    build_agent_core adds no defensive catch, so a config fault surfaces at the build,
-    not as a half-built agent that 401s mid-run."""
     def boom(model, effort):
         raise RuntimeError("no key")
     defn = AgentDefinition(role=AgentRole.MAIN, model=lambda: "glm-5.3", effort="low")
@@ -223,10 +220,6 @@ def test_build_agent_main_has_gather_dispatch_and_writers(monkeypatch, logger):
             gather_grant=driver.GATHER_DEF.verb_grant,
         )
     tools = set(agent._function_toolset.tools)
-    # The authoring tool is `append_block` since #810 — MAIN's write grant is `append=True`,
-    # so the general write lane is not registered on it. The point of the assertion is that
-    # construction gives MAIN its authoring surface AND the layered gather dispatch, which
-    # holds unchanged; only the name of the authoring verb moved.
     assert {"bash", "read_file", "append_block"} <= tools
     assert not {"write_file", "edit_file"} & tools
     assert "gather" in tools
@@ -248,5 +241,3 @@ def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
     assert len(on) == 1, f"the flag must not add a SECOND capability; set gave {on}"
     assert isinstance(off[0], driver.ProcessHistory)
     assert isinstance(on[0], driver.ProcessHistory)
-
-

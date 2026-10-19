@@ -28,9 +28,6 @@ def test_a_stray_top_level_name_is_shown_escaped(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("half", ["settings", "agent"])
 def test_a_link_inside_a_half_is_named_escaped(tmp_path: Path, half: str) -> None:
-    """A link inside a half whose name holds the escape sequence: refused as a link, with no
-    control character in the message. A printable name is still shown as-is (the spec's
-    `str(planted) in text` cells)."""
     root = tmp_path / "data"
     H.adopted(root)
     (H.knowledge_dir(root) / half / _FORGED).symlink_to("/etc/hostname")

@@ -33,18 +33,6 @@ from defender.tests._lead_author_1134 import lane_tree_for  # noqa: E402
 _SYSTEMS = ("elastic", "cmdb")
 
 
-#: THE roster of directories under `defender/skills/` that are NOT systems of record — the one
-#: copy, after this list had four of them (two comments, the agent's deny reason and the agent
-#: prompt) and the copy at the concept's own definition point had already gone stale by a name.
-#: Those now state the RULE — "a directory the tree declares no adapter for" — which is what
-#: production must ask anyway, and this stays because a FIXTURE needs names to plant.
-#:
-#: `test_the_authored_surface_roster_is_the_shipped_one` is what keeps it honest: it asserts
-#: this set against the tree, so a seventh authored directory fails here rather than silently
-#: making every prose copy wrong. Two of these are agent system prompts (`gather/SKILL.md`,
-#: `invlang/SKILL.md`), which is the whole of #772.
-#: `judge` left in #922 with the role: its generated guidance advertised three ticket
-#: verbs to any reader, and nothing could dispatch them once the role was gone.
 _AUTHORED_SURFACES = ("advisory", "connect", "gather", "handbook", "invlang")
 
 
@@ -92,22 +80,22 @@ def test_the_lane_cannot_write_the_invlang_grammar_main_is_handed(tmp_path: Path
     assert admits("cmdb/SKILL.md")
 
 
-@pytest.mark.parametrize(
-    "rel",
-    [
-        "advisory/SKILL.md",
-        "handbook/SKILL.md",
-        "handbook/content/design.md",
-        "connect/adapter.md",
-        "connect/checklist.md",
-        "judge/synthetic-reference.md",
-        "gather/failure-modes.md",
-        "gather/synthetic-reference.md",
-        "gather/defender-sql.md",
-    ],
-)
-def test_the_other_authored_surfaces_are_not_this_lanes_to_write(tmp_path: Path, rel: str):
-    """The rest of `defender/skills/` — six directories that are not systems of record."""
+@pytest.mark.parametrize("rel", [
+    "advisory/SKILL.md",
+    "handbook/SKILL.md",
+    "handbook/content/design.md",
+    "connect/adapter.md",
+    "connect/checklist.md",
+    "judge/synthetic-reference.md",
+    "gather/failure-modes.md",
+    "gather/synthetic-reference.md",
+    "gather/defender-sql.md",
+    "gather/queries/elastic/a b.md",
+    "gather/queries/elastic/a\nb.md",
+    "gather/queries/elastic/say\"what.md",
+    "elastic/_draft/x y.md",
+])
+def test_non_lane_surfaces_and_malformed_filenames_are_not_writable(tmp_path: Path, rel: str):
     admits, _ = _gate(tmp_path)
     assert not admits(rel)
 
@@ -126,9 +114,6 @@ def test_the_other_authored_surfaces_are_not_this_lanes_to_write(tmp_path: Path,
     ],
 )
 def test_every_surface_the_two_roles_author_still_has_a_lane(tmp_path: Path, rel: str):
-    """The positive half. One write allow serves both roles — `_pydantic_stage.build_stage_agent`
-    re-derives the definition by ROLE, so the pitfalls curator spawns under this same policy —
-    which is why `execution.md` is here despite the lead author's own commit gate refusing it."""
     admits, _ = _gate(tmp_path)
     assert admits(rel)
 
@@ -186,20 +171,6 @@ def test_the_lanes_read_the_tree_that_was_bound_not_a_sibling_of_it(tmp_path: Pa
 
 # 3. The frame-injection channel, which was open — not "saved by accident".
 
-@pytest.mark.parametrize(
-    "rel",
-    [
-        "gather/queries/elastic/a b.md",
-        "gather/queries/elastic/a\nb.md",
-        "gather/queries/elastic/say\"what.md",
-        "elastic/_draft/x y.md",
-    ],
-)
-def test_a_write_only_filename_cannot_carry_a_space_or_a_newline(tmp_path: Path, rel: str):
-    """Every variable segment is `grant.SEG` (a word-char class) — the read side's own alphabet — so no lane admits a name that could break a frame the way `build_scoped_write_allow`'s docstring records for #691 MD-7."""
-    admits, _ = _gate(tmp_path)
-    assert not admits(rel)
-
 
 def test_the_porcelain_reader_does_not_quote_so_the_commit_gate_never_saw_this(tmp_path: Path):
     """#772 asserted this channel was "saved by accident:"""
@@ -216,18 +187,12 @@ def test_the_porcelain_reader_does_not_quote_so_the_commit_gate_never_saw_this(t
 
 # 4. The two gates stop disagreeing in the direction that discards a batch.
 
-#: Representative of every shape either gate has an opinion about — the five lanes, the
-#: protected surfaces at every depth they can appear, the authored surfaces, a phantom system,
-#: and a hostile name.
 _EVERY_SHAPE = (
     "gather/queries/elastic/auth-events.md",
     "gather/queries/elastic/README.md",
     "gather/queries/elastic/_draft/newthing.md",
     "gather/queries/elastic/_draft/README.md",
     "gather/queries/SCHEMA.md",
-    # `SCHEMA.md` and `execution.md` are refused by BASENAME, not by the one depth they are
-    # shipped at: `_is_schema_md` is any `SCHEMA.md` under the catalog and `_skills_path_rule`
-    # refuses `execution.md` at ANY depth. Each spelling below reached a lane once.
     "gather/queries/elastic/SCHEMA.md",
     "gather/queries/elastic/_draft/SCHEMA.md",
     "gather/queries/elastic/execution.md",

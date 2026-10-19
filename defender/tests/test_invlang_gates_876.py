@@ -1,42 +1,3 @@
-"""#876 — six more parser/validator gaps, five of which end at the same benign write gate.
-
-The direct successor to #853 and against the same gate, so this suite is shaped like its
-sibling: every fixture is a WHOLE document run through the real `parse_dense_companion` /
-`validate_companion`, because the defects are observable in what the gate CONCLUDES, not in
-what any unit returns. Each negative case is paired with the control that keeps the fix from
-being "deny everything".
-
-  F-2   `HEADER_RE` anchors `\\s*$` after the optional `[cols]`, so a trailing `# comment`
-        made the header a non-header — and `_tokenize_fence` then discarded it together with
-        every row beneath it, silently. A `:T conclude   # loop 2 wrap-up` fence parsed to an
-        EMPTY companion with no warnings, so the benign gate never ran at all.
-  F-3   `_check_authz_contract_ids` exempts a contract-id collision whose other side is
-        refuted, on the true premise that a refuted contract discharges nothing. The premise
-        is false of the ROW: `_check_benign_authz` resolves by bare id, so the refuted
-        declarer's `:R authz` row discharged the LIVE declarer's same-numbered contract. A
-        shared id is scoped by ANCHOR KIND now — the column that says which question a row
-        answers — which closes the gap and still leaves the author an append that repairs it.
-  F-12  Four `_extend_by_id` graph-row sites had no repeated-id check, and `_extend_by_id`
-        keeps the FIRST record per id — so a second row repeating `v-001` by an ordinal typo
-        was deleted before the companion existed, with the open slot it carried.
-  F-6   `_apply_attr_updates` assigned a refinement value unconditionally, and `""` is read
-        as neither open nor unresolved — so a present-but-blank value cell did not downgrade
-        the slot, it RESOLVED it.
-  F-26  `is_unresolved` required `{` AND `}`, so an unterminated candidate set in an
-        ATTRIBUTE value read as a settled fact. The class arm has carried a count guard for
-        the same one-character typo since #853/F-15.
-  F-27  The catch-all `:H l-NNN.<sub>` warning filled `dropped_ids` with every row's first
-        cell, asserting they are hypothesis ids. For any sub-name but the singular
-        `new_hypothesis` typo they are not, and `deferred_hypothesis_ids` then stood the
-        undeclared-hypothesis rule down for the whole document — costing a round trip, not a
-        write.
-
-The last section is not one of the six. `lint_silent_row_drop` (#886) shipped with three
-parser drops baselined as true positives it was forbidden to fix, annotated "filed as #876"
-— which #876's six findings never carried. They are fixed here, so the gate's baseline holds
-nothing but false positives; one of the three turned out not to be a drop at all.
-"""
-
 from __future__ import annotations
 
 from defender.skills.invlang.parser import (
@@ -91,9 +52,6 @@ _CLEAN_VERTEX = "v-001|compute|bastion/internal/known-corp|bastion-01.corp|"
 
 # F-2 — a header the regex rejects no longer vaporizes its block
 
-#: The two spellings that reach the tokenizer's silent path in the ordinary authoring loop.
-#: `append_block` sends ONE block per fence (`runtime/tools.py`), so the rejected header is
-#: the FIRST in its fence, which is exactly the case where no block is open to absorb it.
 _REJECTED_HEADERS = (
     ":T conclude   # loop 2 wrap-up",
     ":T conclude (loop 3)",
@@ -119,9 +77,6 @@ def test_a_trailing_comment_on_a_header_no_longer_deletes_the_whole_block():
 
 
 def test_a_rejected_prologue_header_is_refused_rather_than_returning_nothing():
-    """The other half of the same silence, on a fresh document: the whole prologue gone, with
-    zero diagnostics. `parse_dense_companion` used to return early on the empty block list —
-    which is the path a fence whose FIRST header was rejected always takes."""
     doc = _doc(_vertices(_CLEAN_VERTEX).replace(
         ":V prologue.vertices [id|type|class|ident|attrs?]",
         ":V prologue.vertices [id|type|class|ident|attrs?]   # loop 2",
@@ -194,9 +149,6 @@ def _shared_id_doc(second_id: str) -> str:
 
 
 def test_a_refuted_declarers_authz_row_no_longer_discharges_a_live_contract():
-    """The collision error's own remedy text says "or refute one of them, if the evidence
-    says so" — and taking it used to convert a refusal into a DISCHARGE. h-001's
-    change-management question was never asked, and an iam-policy answer closed it."""
     blocked = _blocked(validate_companion(_shared_id_doc("ac1")))
     assert len(blocked) == 1
     assert "ac1" in blocked[0]
@@ -283,9 +235,6 @@ def test_the_two_hypothesis_declaration_sites_warn_on_the_same_shape():
 
 
 def test_the_same_id_across_two_blocks_is_still_the_silent_legal_re_emission():
-    """The control the helper is bounded by, and the reason it compares only the rows of the
-    block in hand: append-only makes a SECOND `:V prologue.vertices` the sanctioned way to
-    add a vertex, and re-sending a committed row there is a re-emission, not a repeat."""
     doc = _benign_doc(_vertices(_CLEAN_VERTEX), _vertices(_CLEAN_VERTEX))
     assert parse_dense_companion(doc)[1] == []
     assert validate_companion(doc) == []
@@ -304,9 +253,6 @@ def _refined(*rows: str) -> str:
 
 
 def test_a_blank_refinement_value_is_refused_and_clears_nothing():
-    """Two present-but-empty value cells used to make both benign errors vanish and the
-    document accept. The row is refused now, and the guard on the fold means the open slots
-    are still open even on a document that never went through the gate."""
     doc = _refined("l-001|v-001|class|", "l-001|v-001|attrs.knowledge|")
     errors = validate_companion(doc)
     empty = [e for e in errors if "the `value` cell" in e]
@@ -332,9 +278,6 @@ def test_a_blank_value_cannot_erase_a_value_the_document_settled():
 
 
 def test_a_bad_key_with_a_blank_value_still_earns_only_the_key_warning():
-    """The bad-KEY family stays warn severity because that row is INERT — it changes no
-    effective state, so its empty value changes nothing either. Only a row that would have
-    been applied earns the refusal."""
     doc = _refined("l-001|v-001|knowledge|")
     assert [e for e in validate_companion(doc) if "the `value` cell" in e] == []
 
@@ -375,9 +318,6 @@ def test_a_stray_lead_sub_block_no_longer_hides_a_phantom_hypothesis():
 
 
 def test_the_singular_new_hypothesis_typo_still_defers_for_its_own_ids():
-    """The case the branch was written for, and the case the filter must not break: the
-    typo's dropped rows ARE hypothesis declarations, and their ids are the only channel by
-    which the rule can know to stay quiet about them."""
     typo = (
         ":H l-001.new_hypothesis "
         "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
@@ -405,9 +345,6 @@ def test_a_surviving_row_with_no_hypothesis_id_is_named_not_dropped():
 
 
 def test_an_empty_table_written_as_the_none_marker_stays_silent():
-    """The control that makes the guard above honest. `_row_cells` pads a lone `none` row to
-    the block's width, so the marker arrives as a real record with `hyp_id="none"` — a run
-    that carried nothing into the close must not be told it wrote a bad row."""
     for block in (
         ":T conclude.surviving [hyp_id|final_weight]\nnone",
         ":T conclude.surviving [hyp_id|final_weight]\nn/a",

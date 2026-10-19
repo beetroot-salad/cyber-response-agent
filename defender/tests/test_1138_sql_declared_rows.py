@@ -1,8 +1,3 @@
-"""`defender-sql --rows PATH --names PATH`: model-declared positional rows load as one row per row and one column per
-name, each column typed from its own JSON values; every declaration defect is refused with its exit code; hostile names
-load as literals and the sandbox is locked before the lead's query runs; the notes teach the flags on positional
-payloads. Drives the real `main()` in a warm child (`run_sql_warm`) and asserts stdout, exit code and stderr.
-"""
 from __future__ import annotations
 
 import json
@@ -22,9 +17,6 @@ from defender.tests._defender_sql import (
 from defender.tests._sql_warm import run_sql_warm
 
 
-#: Shaped by the REAL adapter step (`esql_payload`), so the envelope carries `query` and
-#: `row_count` beside `columns`/`values` exactly as a lead's gather_raw file does. The rows are
-#: chosen so a lexical `> 9` and a numeric one disagree: '412' and '10' sort BELOW '9' as text.
 _ESQL_QUERY = "FROM logs-* | STATS failed = COUNT(*) BY source.ip"
 _ESQL = esql_payload(_ESQL_QUERY, {
     "columns": [{"name": "failed", "type": "long"}, {"name": "source.ip", "type": "ip"}],
@@ -83,11 +75,6 @@ def _refused(proc: subprocess.CompletedProcess, code: int, *mentions: str | tupl
 
 
 def test_o1_a_flagged_esql_payload_is_filtered_by_name_and_compares_numbers_as_numbers():
-    """O1: the design's own witness — `"source.ip" = '…' AND failed > 9` over an ES|QL payload,
-    no position, no `->>`, no cast. `failed` must be a NUMBER: a text-typed column answers this
-    filter with a Binder Error (VARCHAR vs INTEGER), and a text column compared as text answers
-    it with nothing (`'412' > '9'` is false). Only the numeric typing returns 412 and 10, and
-    returns them as JSON numbers."""
     rows = _ok(_flag(_ESQL, 'SELECT failed FROM data WHERE "source.ip" = \'203.0.113.7\' '
                             "AND failed > 9 ORDER BY failed DESC"))
     assert rows == [{"failed": 412}, {"failed": 10}]
@@ -111,9 +98,6 @@ def test_o1_describe_lists_exactly_the_declared_names_in_order():
 
 
 def test_o1_names_as_plain_strings_and_as_name_objects_load_the_same_table():
-    """O1: names are a list of strings (Splunk `fields`) or of objects carrying a string `name`
-    (ES|QL `columns`, Azure `columns`; their other fields — `type` — ignored). Same rows, same
-    table, same answer; the keys under which they sit are the lead's to declare."""
     splunk = {"fields": ["failed", "source.ip"], "rows": _ESQL["values"], "count": 5}
     sql = 'SELECT "source.ip", failed FROM data ORDER BY failed'
     as_objects = _ok(_flag(_ESQL, sql))
@@ -140,9 +124,6 @@ _AZURE = {"tables": [
 
 @pytest.mark.parametrize("spelling", ["space", "equals"])
 def test_o1_a_nested_path_with_an_index_resolves(spelling):
-    """O1: PATH is `key('.'key)*`, each key optionally `[n]`, resolved from the top-level
-    object — `tables[0].rows` — in both argparse spellings, `--rows X` and `--rows=X`. The
-    second table is reached by ITS index, not by the first's."""
     def run(sql: str, n: int):
         rows, names = f"tables[{n}].rows", f"tables[{n}].columns"
         if spelling == "equals":
@@ -157,9 +138,6 @@ def test_o1_a_nested_path_with_an_index_resolves(spelling):
 
 
 def test_o1_an_empty_row_list_is_a_zero_row_table_of_varchar_columns():
-    """O1: an ES|QL query that matched nothing still declares its columns. The table exists,
-    has the declared names, holds zero rows, and — with no value to type from — every column is
-    VARCHAR (the all-null rule), so `count(*)` answers 0 rather than an error."""
     empty = esql_payload(_ESQL_QUERY, {"columns": _ESQL["columns"], "values": []})
     assert _schema(empty) == [("failed", "VARCHAR"), ("source.ip", "VARCHAR")]
     assert _ok(_flag(empty, "SELECT count(*) AS n FROM data")) == [{"n": 0}]
@@ -167,9 +145,6 @@ def test_o1_an_empty_row_list_is_a_zero_row_table_of_varchar_columns():
 
 
 def test_o1_a_declared_name_that_spells_a_synthetic_or_internal_name_keeps_its_own_values():
-    """O1: the tool may load under keys of its own, but a name the payload DECLARES is the
-    lead's — `c1` declared first and `c0` second must each hold their own cells, and names that
-    are SQL keywords or the tool's table names are columns like any other."""
     payload = {"hdr": ["c1", "c0", "select", "data", "_rows"], "recs": [[1, "a", "k", "d", "r"]]}
     assert _ok(_flag(payload, 'SELECT c0, c1, "select", "data", "_rows" FROM data',
                      rows="recs", names="hdr")) == [
@@ -180,9 +155,6 @@ def test_o1_a_declared_name_that_spells_a_synthetic_or_internal_name_keeps_its_o
 
 
 _ABSENT = object()
-#: The top-level `truncated` values that mean "the source stopped early", and those that do not.
-#: One table for BOTH paths: a source that writes `1` or `"true"` is truncated whichever way
-#: the lead reads its payload.
 _TRUNCATED = [(True, True), (1, True), ("true", True),
               (False, False), (0, False), ("false", False), (_ABSENT, False)]
 
@@ -191,11 +163,6 @@ _TRUNCATED = [(True, True), (1, True), ("true", True),
 @pytest.mark.parametrize(("value", "fires"), _TRUNCATED,
                          ids=["true", "1", "str-true", "false", "0", "str-false", "absent"])
 def test_m7_the_truncation_note_fires_on_the_same_values_on_both_paths(path, value, fires):
-    """M7 (O1): the truncation note is one rule. Unflagged it is read off `data` (a search-hits
-    envelope); flagged, `truncated` is no column of `data`, so it is read off the parsed
-    envelope — and both fire on `true`, `1` and `"true"`, and on nothing else. The flagged
-    wording is generic, never the search-hits prose about `hits`. Neither payload has a list,
-    JSON or positional column, so a silent run is an EMPTY stderr."""
     flagged = path == "flagged"
     payload: dict = (dict(_ESQL) if flagged
                      else {"total": 3, "returned": 2, "hits": [{"u": "a"}, {"u": "b"}]})
@@ -252,9 +219,6 @@ _TYPES = [
 @pytest.mark.parametrize(("cells", "expected"), [(c, t) for _, c, t in _TYPES],
                          ids=[i for i, _, _ in _TYPES])
 def test_o2_a_columns_type_follows_the_design_rule_over_its_own_cells(cells, expected):
-    """O2: the column-type rule, case by case — bool checked before int, `1.0` a float, int64
-    then int128 then JSON, all-null VARCHAR, any list cell a list column (element type by the
-    same rule; a nested list or object makes the column JSON), anything else JSON."""
     payload = {"hdr": ["x"], "recs": [[c] for c in cells]}
     assert _schema(payload, rows="recs", names="hdr") == [("x", expected)]
 
@@ -272,8 +236,6 @@ def test_o2_values_come_back_as_the_json_kind_they_were_sent_as():
                               "AND flag", rows="recs", names="hdr")) == [{"n": 1}]
 
 
-
-
 def test_o2_a_vendors_declared_type_decides_nothing():
     """O2: ES|QL's `type` is the vendor's word, not the payload's value. A `long` column whose
     cells are strings is VARCHAR; a `keyword` column whose cells are numbers is BIGINT."""
@@ -285,9 +247,6 @@ def test_o2_a_vendors_declared_type_decides_nothing():
     assert _ok(_flag(lying, "SELECT n FROM data WHERE code = '4625'")) == [{"n": 1}]
 
 
-#: Text that LOOKS like something else. Each must stay the source's text, byte for byte: a
-#: TIMESTAMP would drop the nanoseconds and rewrite the offset to UTC, a DATE or BIGINT or
-#: BOOLEAN would re-render the value.
 _LOOKALIKES = [
     "2026-08-07T11:32:52.123456789Z",
     "2026-08-07T13:32:52+02:00",
@@ -300,9 +259,6 @@ _LOOKALIKES = [
 
 
 def test_o2_text_that_looks_like_a_time_or_a_number_stays_varchar_byte_identical():
-    """O2: never what a string's text looks like. An ISO-time column (read_json_auto made it
-    TIMESTAMP[][]) stays VARCHAR and round-trips byte-identical — #1125 stays won't-fix, the
-    strings are the source's text — and so does every other lookalike."""
     payload = {"hdr": ["t"], "recs": [[s] for s in _LOOKALIKES]}
     assert _schema(payload, rows="recs", names="hdr") == [("t", "VARCHAR")]
     assert [r["t"] for r in _ok(_flag(payload, "SELECT t FROM data", rows="recs", names="hdr"))] \
@@ -313,9 +269,6 @@ def test_o2_text_that_looks_like_a_time_or_a_number_stays_varchar_byte_identical
 
 
 def test_o2_an_all_text_payload_filters_by_name_without_malformed_json():
-    """O2 / C2: the payload shape that CRASHED the taught recipe — every cell text, so
-    `read_json_auto` made `values` VARCHAR[][] and `(v[N]->>'$')` answered `Malformed JSON`.
-    Declared, it is two VARCHAR columns and a plain filter."""
     all_text = esql_payload("FROM logs-* | KEEP host.name, user.name", {
         "columns": [{"name": "host.name", "type": "keyword"}, {"name": "user.name", "type": "keyword"}],
         "values": [["web-1", "alice"], ["web-1", "bob"], ["db-1", "alice"]],
@@ -507,23 +460,12 @@ _DEFECTS: dict[str, _Defect] = {
 
 @pytest.mark.parametrize("case", list(_DEFECTS), ids=list(_DEFECTS))
 def test_o3_every_declaration_defect_is_refused_with_its_exit_and_the_fix_loads(case):
-    """O3: one row of the exit-code table per case. The defective call exits with the table's
-    code, prints nothing on stdout, and says what is wrong in the tool's own words — never a
-    traceback, never a silently wrong table. What the words must carry is the defect's locus: a
-    PATH that does not resolve is quoted as declared, a rows or names defect names its path or
-    its flag, a clash names the clashing names. The paired control is the same call with the
-    defect removed: it loads and answers the right count, so every refusal above is about the
-    defect and not about the payload, the query or the flags in general."""
     d = _DEFECTS[case]
     _refused(run_sql_warm(*d.argv, stdin=d.stdin), d.exit, *d.mentions)
     assert _ok(run_sql_warm(*d.fixed_argv, stdin=d.fixed_stdin)) == [{"n": d.n}]
 
 
 def test_o3_names_that_differ_only_by_non_ascii_case_are_distinct_columns():
-    """O3's positive side of the case rule: duckdb folds ASCII case only (C9), so the tool
-    refuses exactly that. `É`/`é`, `Straße`/`STRASSE` and `K`/KELVIN SIGN are distinct to
-    duckdb — and each pair is EQUAL under Python's `.lower()` or `.casefold()`, so a refusal
-    built on either of those would wrongly reject a payload duckdb loads."""
     names = ["É", "é", "Straße", "STRASSE", "K", "K"]
     payload = {"hdr": names, "recs": [[1, 2, 3, 4, 5, 6]]}
     assert [n for n, _ in _schema(payload, rows="recs", names="hdr")] == names
@@ -551,10 +493,6 @@ _MULTI = esql_payload("FROM logs-* | KEEP host.name, host.ip, user.name", {
 
 
 def test_o4_scalar_equals_on_a_list_column_fails_loudly_and_list_contains_answers():
-    """O4: `WHERE "host.ip" = 'x'` must not answer a silent count — it errors (a list is not a
-    string), and the error names the form that does answer. The same filter through
-    `list_contains` returns the two rows that carry the address, including the one whose cell
-    was a one-element list."""
     proc = _flag(_MULTI, 'SELECT count(*) AS n FROM data WHERE "host.ip" = \'10.0.0.5\'')
     assert_query_error(proc, "a scalar = on a list column answered")
     assert "list_contains" in proc.stderr, proc.stderr
@@ -564,10 +502,6 @@ def test_o4_scalar_equals_on_a_list_column_fails_loudly_and_list_contains_answer
 
 
 def test_o4_every_flagged_run_over_a_list_column_says_so_even_when_the_query_succeeds():
-    """O4: `GROUP BY` and `count(DISTINCT)` over a list column group WHOLE lists and answer
-    without an error, so the note is printed on every flagged run whose table has a list column
-    — a query that never names it included — naming the list column(s) and the two forms. The
-    scalar columns are not named as lists."""
     proc = _flag(_MULTI, "SELECT count(*) AS n FROM data")
     assert _ok(proc) == [{"n": 5}]
     assert "host.ip" in proc.stderr, proc.stderr
@@ -578,9 +512,6 @@ def test_o4_every_flagged_run_over_a_list_column_says_so_even_when_the_query_suc
 
 
 def test_o4_the_note_names_every_list_column_and_is_absent_without_one():
-    """O4, both directions on one shape: two list columns are both named; the same payload with
-    its list columns dropped prints nothing at all (this payload is not truncated, so an empty
-    stderr rules out every note)."""
     two = {"hdr": ["host.ip", "tags", "user"],
            "recs": [[["10.0.0.5"], ["a", "b"], "alice"], ["10.0.0.6", "c", "bob"]]}
     proc = _flag(two, "SELECT user FROM data ORDER BY user", rows="recs", names="hdr")
@@ -594,9 +525,6 @@ def test_o4_the_note_names_every_list_column_and_is_absent_without_one():
     assert control.stderr.strip() == "", control.stderr
 
 
-#: List columns whose element type is not VARCHAR: a note or hint keyed on the spelling
-#: `VARCHAR[]` misses every one of them. (id, cells, type, a lead's natural scalar `=`, the
-#: `list_contains` form of it, the rows that form selects.)
 _OTHER_LISTS = [
     ("bigint", [[22, 443], 80, [8080]], "BIGINT[]", "multi = 22", "list_contains(multi, 22)", 1),
     ("boolean", [[True], [False, True], False], "BOOLEAN[]", "multi = true",
@@ -609,10 +537,6 @@ _OTHER_LISTS = [
                          [c[1:] for c in _OTHER_LISTS], ids=[c[0] for c in _OTHER_LISTS])
 def test_o4_a_list_column_of_any_element_type_gets_the_note_and_the_list_clause(
         cells, typ, scalar_eq, contains, n):
-    """O4 for a list of numbers or booleans, not only of strings: the column is a list column
-    (a scalar cell wrapped), every flagged run over it names it with `list_contains` and
-    `unnest`, a scalar `=` on it fails loudly with the list clause in the hint, and the
-    `list_contains` form answers. The control is the same payload's scalar column alone: no note."""
     payload = {"hdr": ["host", "multi"], "recs": [[f"h{i}", c] for i, c in enumerate(cells)]}
     assert _schema(payload, rows="recs", names="hdr") == [("host", "VARCHAR"), ("multi", typ)]
 
@@ -664,9 +588,6 @@ def _hostile_payload() -> dict:
 
 
 def test_o5_a_hostile_name_loads_as_that_literal_name_and_creates_nothing():
-    """O5: a declared name holding `"`, `;` and DDL reaches the statement only as an escaped
-    identifier. It is ONE column with that exact name — in `DESCRIBE data` and as a result key —
-    and the catalog holds `data` and nothing else: no `pwned`, no staging table left behind."""
     payload = _hostile_payload()
     assert _schema(payload, rows="recs", names="hdr") == [(_HOSTILE, "VARCHAR"), ("ok", "BIGINT")]
     assert _ok(_flag(payload, "SELECT * FROM data ORDER BY ok", rows="recs", names="hdr")) == [
@@ -676,9 +597,6 @@ def test_o5_a_hostile_name_loads_as_that_literal_name_and_creates_nothing():
     assert _ok(_flag(payload, "SHOW TABLES", rows="recs", names="hdr")) == [{"name": "data"}]
 
 
-#: Names holding a single quote — the delimiter of every SQL string literal, e.g. a
-#: `columns={'<name>': '<type>'}` map — alone, beside a double quote, and shaped to close such
-#: a literal and run DDL after it.
 _SINGLE_QUOTED = [
     "o'brien",
     'x\'"); CREATE TABLE pwned(a INT); --',
@@ -692,10 +610,6 @@ def _ident(name: str) -> str:
 
 
 def test_o5_a_name_holding_a_single_quote_loads_as_that_literal_name_and_creates_nothing():
-    """O5 for the OTHER quote: a name holding `'` — alone, with `"`, and crafted to break out of
-    a single-quoted literal — reaches no statement as text. Each is one column with exactly that
-    name (in `DESCRIBE data` and as a result key), each can be selected and filtered on by its
-    quoted name, and the catalog holds `data` and nothing else."""
     payload = {"hdr": [*_SINGLE_QUOTED, "ok"],
                "recs": [["v0", "v1", "v2", 1], ["w0", "w1", "w2", 2]]}
     assert _schema(payload, rows="recs", names="hdr") == [
@@ -716,9 +630,6 @@ def test_o5_a_name_holding_a_single_quote_loads_as_that_literal_name_and_creates
     "SET enable_external_access=true",
 ])
 def test_o5_the_sandbox_is_locked_before_the_lead_s_query_runs(hostile):
-    """O5: the flagged load reads the payload itself, and the lock falls AFTER that load and
-    BEFORE the lead's SQL — a file read or an unlock attempt in the query is refused. The
-    paired control: the same flagged payload answers a plain query in the same process shape."""
     payload = _hostile_payload()
     assert_query_error(_flag(payload, hostile, rows="recs", names="hdr"),
                        "a flagged run let the query reach the filesystem or the configuration")
@@ -748,10 +659,6 @@ _TYPINGS = {
 
 @pytest.mark.parametrize("typing", list(_TYPINGS))
 def test_o6_an_unflagged_count_over_positional_rows_names_the_flags(typing):
-    """O6 / C4: unflagged, `SELECT count(*) FROM data` over an ES|QL payload answers 1 — one
-    object, one row — with exit 0 and no error. That answer stays (unflagged is unchanged), and
-    the run now says on stderr how to declare the rows. The first assertion pins the premise:
-    this payload really is loaded in the typing the case is named for."""
     payload = esql_payload(_ESQL_QUERY, _TYPINGS[typing])
     described = {r["column_name"]: r["column_type"] for r in _ok(_plain(payload, "DESCRIBE data"))}
     assert described["values"] == typing, f"premise: read_json_auto typed values {described}"
@@ -780,10 +687,6 @@ def test_o6_an_unflagged_error_over_positional_rows_names_the_flags_and_no_posit
      "--rows data_rows --names cols"),
 ], ids=["splunk", "bare-matrix", "renamed-esql"])
 def test_o6_the_note_detects_by_shape_and_names_this_payloads_own_keys(payload, note):
-    """O6: detection is by SHAPE — a top-level list of lists — never by the key names ES|QL
-    happens to use. Each payload names its own keys in the note, and the names key is the one
-    whose length matches the rows (a list of strings, or of `{name: …}` objects). None of them
-    is ES|QL's `values`/`columns`."""
     proc = _plain(payload, "SELECT 1 AS one")
     assert _ok(proc) == [{"one": 1}]
     assert note in proc.stderr, proc.stderr
@@ -794,12 +697,6 @@ def test_o6_the_note_detects_by_shape_and_names_this_payloads_own_keys(payload, 
 @pytest.mark.parametrize("slot", ["rows", "names"])
 @pytest.mark.parametrize("key", ["my rows", "$(id)", "a;b", "x.y", "r`id`", "my names", "-v"])
 def test_o6_a_key_outside_the_safe_set_is_not_echoed_into_the_command(key, slot):
-    """O6 (security): the note hands the lead a command to copy, so a payload key reaches it
-    only when it matches `[A-Za-z0-9_@][A-Za-z0-9_@-]*` — the rows key AND the names key. A key
-    with a space, `$(`, `;`, `.`, a backtick, or a LEADING dash (`-v` would read as a flag in the
-    copied command) is not echoed at all; the note still says to declare the rows,
-    and the SAFE key beside it is still echoed. The control is both keys safe on the same shape,
-    and both echoed."""
     payload = {key: [[1, 2]], "hdr": ["a", "b"]} if slot == "rows" else {"recs": [[1, 2]], key: ["a", "b"]}
     proc = _plain(payload, "SELECT 1 AS one")
     assert _ok(proc) == [{"one": 1}]
@@ -825,10 +722,6 @@ _NOTE_DECLARATION = re.compile(r"--rows (\S+) --names (\S+)")
      ("data_rows", "cols"), "SELECT host FROM data WHERE n = 1", [{"host": "web-1"}]),
 ], ids=["string-lists", "name-object-lists"])
 def test_o6_the_names_key_is_the_candidate_whose_length_matches_the_rows(payload, declared, sql, rows):
-    """O6: `<names-key>` is the top-level list of names whose LENGTH equals the rows' width — not
-    merely the first list of names in key order. Here a list of the wrong length comes first,
-    so a note naming the first candidate names the wrong key. The declaration taken out of
-    stderr, run as printed, answers."""
     proc = _plain(payload, "SELECT 1 AS one")
     assert _ok(proc) == [{"one": 1}]
     found = _NOTE_DECLARATION.search(proc.stderr)
@@ -854,15 +747,10 @@ def test_o6_a_payload_without_positional_rows_gets_no_note(payload, sql, rows):
     assert proc.stderr.strip() == "", proc.stderr
 
 
-
-
 # ============================================== M3: the flagged error hint is about THIS table
 
 
 def test_m3_a_flagged_query_error_lists_the_declared_columns_with_their_types():
-    """M3 (O1): under the flags the hits/flat idioms do not apply; the hint lists the declared
-    columns with their types — what the lead needs to fix a name or a comparison — and no
-    `unnest(hits)` skeleton."""
     payload = {"hdr": ["failed", "source.ip", "ok"], "recs": [[1, "a", True]]}
     proc = _flag(payload, "SELECT nope FROM data", rows="recs", names="hdr")
     assert_query_error(proc, "a missing column was not an error")
@@ -886,30 +774,10 @@ def test_m3_a_json_column_compared_as_text_gets_the_unpack_form_and_it_runs():
 # ============================ O8: every reduction example is correct for any payload shape
 
 
-
-
-
-
-
-
 # ================================ O9: every lead-facing text teaches the flagged form, and runs
 
 
-
-
-
-
-
-
-
-
-
-
 # ======================================== O10: the largest source payload loads well in time
-
-
-
-
 
 
 # ===================== R1: the declare note is decided from the PARSED payload, not duckdb's types
@@ -923,10 +791,6 @@ _EMPTY_ESQL = {"columns": [{"name": "failed", "type": "long"}], "values": [], "r
     ({"fields": ["host", "n"], "rows": [], "count": 0}, ("rows", "fields")),
 ], ids=["esql", "splunk"])
 def test_r1_an_empty_positional_result_gets_the_note_and_its_declaration_answers_zero(payload, declared):
-    """R1: an ES|QL query that matched nothing still hands back `values: []` beside its
-    `columns`. Unflagged, `count(*)` answers 1 — the one object — which reads as "one match", so
-    the note fires on an EMPTY list of rows too, when a sibling holds the names. The
-    declaration taken out of stderr, run as printed, answers the truth: 0."""
     proc = _plain(payload, _SQL)
     assert _ok(proc) == [{"n": 1}]
     found = _NOTE_DECLARATION.search(proc.stderr)
@@ -957,11 +821,6 @@ _ESQL_B = {"columns": [{"name": "a", "type": "long"}], "values": [[3]]}
 ], ids=["top-level-array", "ndjson", "empty-list-alone", "empty-names-beside",
         "numbers-beside", "not-every-element-a-list"])
 def test_r1_no_note_where_the_payload_is_not_one_object_holding_positional_rows(stdin, n):
-    """R1's controls. The note fires only for ONE JSON document whose top level is an object
-    with a key holding a list of lists. A top-level array or NDJSON of ES|QL-shaped objects is
-    one row PER object — `count(*)` answers 2 here, so "count(*) answers 1" would be a false
-    claim — and an empty list fires only beside a non-empty list of names. A list that is not
-    all lists is not rows. None of these prints anything on stderr."""
     proc = run_sql_warm(_SQL, stdin=stdin)
     assert _ok(proc) == [{"n": n}]
     assert "--rows" not in proc.stderr, proc.stderr
@@ -969,12 +828,7 @@ def test_r1_no_note_where_the_payload_is_not_one_object_holding_positional_rows(
     assert proc.stderr.strip() == "", proc.stderr
 
 
-
-
 def test_r1_an_unflagged_error_on_positional_rows_names_the_declaration_not_the_flat_idiom():
-    """R1: on a positional payload the flat/array idiom — "the keys ARE `data`'s columns;
-    `SELECT * FROM data`" — is the wrong advice (its only rows are the envelope); the error
-    names the declaration instead. The flat idiom still answers a genuinely flat payload."""
     proc = _plain(_ESQL, "SELECT nope FROM data")
     assert_query_error(proc, "a missing column was not an error")
     assert "--rows values --names columns" in proc.stderr, proc.stderr
@@ -997,10 +851,6 @@ def test_r1_an_unflagged_error_on_positional_rows_names_the_declaration_not_the_
     ("\udfff", 7),
 ], ids=["string-cell", "list-element", "object-value", "json-column"])
 def test_r2_a_lone_surrogate_in_a_cell_is_an_input_error_not_a_traceback(bad, good):
-    """R2: a lone UTF-16 surrogate (`"\\ud800"` as a JSON escape) parses in Python but cannot be
-    loaded as text. Under the flag that is the payload's defect, refused as input (exit 2) with
-    the tool's own message — never a traceback out of the load. The same payload with the cell
-    fixed loads."""
     def payload(cell) -> str:
         return json.dumps({"hdr": ["user", "x"], "recs": [["alice", 1], ["bob", cell]]})
     text = payload(bad)
@@ -1050,11 +900,6 @@ def _on_column(recipe: str, column: str) -> str:
 
 @pytest.mark.parametrize("sql", [_SQL, "SELECT nope FROM data"], ids=["success", "error"])
 def test_r3_every_flagged_run_over_a_json_column_says_it_holds_json_and_how_to_cast_it(sql):
-    """R3: a column mixing numbers and text is JSON, and `->>'$'` on it is TEXT — compared or
-    summed as text, `'412' < '9'`. Every flagged run over such a table, success or error, names
-    the JSON column(s) on stderr, says `->>'$'` gives text, and hands over a `TRY_CAST` recipe.
-    That recipe, bound to this column and run, orders the numbers AS numbers: max 412, and two
-    rows above 9 — the text `n/a` a NULL, not an error."""
     proc = run_sql_warm("--rows", "recs", "--names", "hdr", sql, stdin=json.dumps(_JSON_NUMBERS))
     assert proc.returncode in (EXIT_OK, EXIT_QUERY_ERROR), proc.stderr
     assert "Traceback" not in proc.stderr
@@ -1107,10 +952,6 @@ def _sql_literal(value) -> str:
 @pytest.mark.parametrize(("cells", "typ", "value", "n"), _LIST_TYPES,
                          ids=[t for _, t, _, _ in _LIST_TYPES])
 def test_r3_the_notes_list_contains_recipe_runs_on_every_list_type(cells, typ, value, n):
-    """R3: the O4 note's `list_contains` recipe is copied by the lead onto whatever list column
-    it has. Taken out of stderr, with a real value put in its placeholder (inside the recipe's
-    own quotes if it has them), it runs on every list type the rule produces and finds the
-    rows that hold the value."""
     payload = {"hdr": ["multi"], "recs": [[c] for c in cells]}
     assert _schema(payload, rows="recs", names="hdr") == [("multi", typ)]
     proc = _flag(payload, _SQL, rows="recs", names="hdr")
@@ -1124,6 +965,3 @@ def test_r3_the_notes_list_contains_recipe_runs_on_every_list_type(cells, typ, v
     bound = recipe.replace(text, literal, 1)
     assert _ok(_flag(payload, f"SELECT count(*) AS n FROM data WHERE {bound}",
                      rows="recs", names="hdr")) == [{"n": n}], bound
-
-
-

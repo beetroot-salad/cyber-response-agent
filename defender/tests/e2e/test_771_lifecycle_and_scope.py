@@ -61,9 +61,6 @@ class _Recorder:
 # §7 D2 — the scan that never ran
 @pytest.mark.parametrize("in_flight", [False, True], ids=["teardown-fault", "in-flight-failure"])
 def test_a_skipped_reap_scan_leaves_a_did_not_run_marker(in_flight, tmp_path):
-    """skipped_scan_leaves_a_did_not_run_marker — when teardown faults and the walk is skipped,
-    the tree carries a verdict recording that the scan DID NOT RUN, and the reason, on BOTH
-    teardown-fault arms."""
     tree = run_tree(tmp_path)
     before_tree = {str(p.relative_to(tree)) for p in tree.rglob("*")}
     rec = _Recorder(stop_fault=box_mod.BoxFault("teardown failed"))
@@ -80,9 +77,6 @@ def test_a_skipped_reap_scan_leaves_a_did_not_run_marker(in_flight, tmp_path):
     assert verdict, f"the skipped scan left no verdict at {verdict_sidecar(tree)}"
     assert verdict.get("ran") is False, f"the verdict does not record the skip: {verdict}"
     assert verdict.get("reason"), "the verdict names no reason, so an operator cannot act on it"
-    # §7 D8's siting, asserted on the arm that produces the marker rather than left to the
-    # siting demand alone: this is the crash path, so it is the path on which an in-tree write
-    # would be both most likely to matter and least likely to be noticed.
     new_in_tree = {str(p.relative_to(tree)) for p in tree.rglob("*")} - before_tree
     assert not new_in_tree, (
         f"recording the skipped scan created entries INSIDE the tree it judges "
@@ -92,9 +86,6 @@ def test_a_skipped_reap_scan_leaves_a_did_not_run_marker(in_flight, tmp_path):
 
 
 def test_consumers_treat_an_unmarked_tree_as_unverified(tmp_path):
-    """unmarked_tree_is_treated_as_unverified — a tree carrying NO scan verdict reads as
-    unverified, exactly like one whose verdict records a skip; only a tree whose verdict
-    records a completed clean walk reads as verified."""
     never_started = run_tree(tmp_path / "never-started")
     assert not tree_verified(never_started), (
         "a tree whose box never started read as verified — the crash path most likely to hold "
@@ -113,9 +104,6 @@ def test_consumers_treat_an_unmarked_tree_as_unverified(tmp_path):
 
 
 def test_the_scan_verdict_lands_outside_the_tree_it_judges(tmp_path):
-    """verdict_is_sited_outside_the_judged_tree — the scan's verdict lands BESIDE the tree, keyed
-    by that tree's own identity, and the tree it judges gains no entry at all: the same siting
-    the alias-refusal record has, for the same reason."""
     for build in (run_tree, worktree_tree):
         tree = build(tmp_path / build.__name__)
         before = {str(p.relative_to(tree)) for p in tree.rglob("*")}
@@ -138,9 +126,6 @@ def test_the_scan_verdict_lands_outside_the_tree_it_judges(tmp_path):
 
 
 def test_a_verdict_planted_inside_the_tree_is_never_read_as_one(tmp_path):
-    """in_tree_verdict_is_never_authoritative — a verdict artifact the BOX could have written —
-    one sitting inside the tree, claiming a completed clean walk — does not make the tree read
-    as verified; only the out-of-tree record does."""
     tree = run_tree(tmp_path)
     forged = tree / FORGED_IN_TREE_VERDICT_NAME
     forged.write_text(json.dumps({"ran": True, "reason": "clean"}), encoding="utf-8")
@@ -159,9 +144,6 @@ def test_a_verdict_planted_inside_the_tree_is_never_read_as_one(tmp_path):
 
 
 def test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive(tmp_path):
-    """quarantine_carries_the_verdict_out_of_band — when a tainted tree is preserved for a human,
-    the verdict travels with it: the quarantine manifest beside the archive records the scan's
-    verdict for that tree, and records its ABSENCE as unverified rather than omitting it."""
     qdir = tmp_path / "quarantine"
 
     judged = run_tree(tmp_path / "judged")
@@ -194,9 +176,6 @@ def test_a_quarantined_tainted_tree_carries_its_verdict_beside_the_archive(tmp_p
 
 
 def test_a_partial_reap_scan_failure_fails_closed_over_the_whole_tree(tmp_path):
-    """partial_scan_failure_fails_closed — when the walk reclassifies some entries and then hits
-    a fault, the whole tree is refused: a partially-walked tree is an unverified tree, and the
-    verdict does not record a clean run."""
     tree = run_tree(tmp_path)
 
     def half_walk(root, **_kw):
@@ -213,9 +192,6 @@ def test_a_partial_reap_scan_failure_fails_closed_over_the_whole_tree(tmp_path):
 
 
 def test_an_entry_that_changes_shape_between_listing_and_inspection_is_refused(tmp_path):
-    """entry_shape_change_mid_scan_refused — an entry that is an ordinary file when the walk
-    lists it and an alias when the walk inspects it is REFUSED: the scan judges what it
-    inspected, and any change between the two is itself a refusal."""
     tree = run_tree(tmp_path)
     victim = tree / "report.md"
     victim.write_text("ordinary\n", encoding="utf-8")
@@ -233,10 +209,6 @@ def test_an_entry_that_changes_shape_between_listing_and_inspection_is_refused(t
 
 
 def test_the_pre_first_turn_setup_writers_are_individually_guarded_in_any_order(tmp_path):
-    """setup_writer_order_is_not_load_bearing — the pre-first-turn setup writers (the startup
-    sentinel and the session pointer; #1235 retired the budget file, whose counters now live
-    in the run's process memory) each refuse a planted alias on their own, in whatever order
-    they run."""
     setup = [w for w in CENSUS if w.id in {"start_box", "write_case_pointer"}]
     assert len(setup) == 2, "the pre-first-turn setup writer set drifted from the pin's two"
 
@@ -250,9 +222,6 @@ def test_the_pre_first_turn_setup_writers_are_individually_guarded_in_any_order(
             plant_symlink(run / writer.artifact, target)
 
         for writer in order:
-            # `drive_writer` catches BaseException and RETURNS the exception: the sentinel row
-            # is driven at box startup, where its refusal is a startup fault rather than a
-            # plain OSError, and an `except OSError` here errored out on exactly that row.
             refused = isinstance(drive_writer(writer, run), BaseException)
             assert target.read_bytes() == original, (
                 f"{label}: {writer.id} redirected its setup write after "
@@ -271,10 +240,6 @@ def test_the_pre_first_turn_setup_writers_are_individually_guarded_in_any_order(
 
 
 def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_path, monkeypatch):
-    """live_run_dir_never_reused_and_stale_mount_never_follows — a run directory that still
-    exists is never materialized into a second time (the mint refuses and leaves the existing
-    tree byte-for-byte), and the box's one writable bind is sourced at that run directory
-    ITSELF, so a reference taken while it ..."""
     from defender import run_common
     from defender.tests._data_root_1078 import set_up_tenant
 
@@ -284,12 +249,6 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     alert = tmp_path / "alert.json"
     alert.write_text('{"id": "a-771"}\n', encoding="utf-8")
 
-    # ARM 1 — the mint refuses an id whose directory a RUN has been in, and touches nothing.
-    # "Has been in" is judged by contents: setup writes exactly the alert, `gather_raw/` and
-    # the stamp, so anything else under the id (here the model's own report) is a run's trace,
-    # and a container from that run may still be mounted on the tree. (#1077 decision 3 makes
-    # a directory holding NOTHING BUT setup's own writes resumable — an interrupted setup
-    # never started a box, so that premise does not reach it.)
     first = run_common.materialize_run(alert, "stale-771", tenant=tenant).run_dir
     (first / "report.md").write_text("FIRST RUN\n", encoding="utf-8")
     before = sorted(p.name for p in first.iterdir())
@@ -396,21 +355,10 @@ def test_the_box_start_fault_removes_the_container_it_created(tmp_path):
     with pytest.raises(ban_not_in_force_error()):
         box_mod.start_box(run_tree(tmp_path), DEFENDER, docker=rec)
 
-    # AFTER the create, and naming what create made — `_box665.reaped_after_create` carries
-    # why the two obvious spellings say nothing on the paths that DO pre-create reap, and it
-    # is shared rather than restated so a future weakening cannot land on one arm's copy
-    # alone. (Since #955 F-49 the pre-create reap is CONDITIONAL on a finished container, and
-    # this double reports the name as holding nothing, so no pre-create `rm -f` is issued here
-    # at all — the position check is a superset of what the weaker spellings would prove, not
-    # a workaround for them.) It is the assertion #884 F-29 slipped past on the sibling create
-    # arm.
     assert reaped_after_create(rec.calls), "the faulted start left its container running"
 
 
 def test_a_teardown_fault_under_an_in_flight_failure_still_reports_both(tmp_path):
-    """teardown_fault_reports_both_causes — when teardown faults while an exception is already in
-    flight, the in-flight failure still reaches the caller AND the teardown fault is recorded
-    rather than lost."""
     tree = run_tree(tmp_path)
     rec = _Recorder(stop_fault=box_mod.BoxFault("teardown failed while a run error was in flight"))
     in_flight_failure = RuntimeError("the investigation itself failed")
@@ -441,9 +389,6 @@ def test_a_teardown_fault_under_an_in_flight_failure_still_reports_both(tmp_path
 
 
 def test_a_faulted_box_create_leaves_a_verdict_on_the_tree_it_touched(tmp_path):
-    """faulted_create_marks_its_tree — a box whose creation faulted leaves a VERDICT ARTIFACT on
-    the tree it had already touched: the marker is present, records that the scan did not run,
-    and names the reason — and the tree therefore reads as unverified."""
     run = run_tree(tmp_path)
     rec = AliasProbeDocker(BAN_IN_FORCE,
                            create=DockerFault(rc=1, stderr="no such image\n", cite="R3"))

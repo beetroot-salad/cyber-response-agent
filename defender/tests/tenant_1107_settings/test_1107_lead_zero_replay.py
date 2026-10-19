@@ -31,8 +31,6 @@ from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 
-
-
 def _plant(tmp_path: Path, marker: str, **kw: Any) -> tuple[Path, Path, Any]:
     """A complete #1107 tenant `playground` under its own data root:
     (root, knowledge folder, accepted Tenant)."""
@@ -48,8 +46,6 @@ def _plant_at_data_root(marker: str, **kw: Any) -> tuple[Path, Path, Any]:
     root = current_data_root()
     folder = S.plant(root, marker=marker, **kw)
     return root, folder, S.tenant_folder_of(root)
-
-
 
 
 def _identity_worlds() -> list[dict]:
@@ -83,8 +79,6 @@ def _jsonl_text(run_dir: Path) -> str:
     return "\n".join(p.read_text(encoding="utf-8") for p in sorted(run_dir.rglob("*.jsonl")))
 
 
-
-
 class _QueryAnswers(ReplayFn):
     """`ReplayFn` that also keeps, per model request, the `query` tool's answers that arrived
     with it — the tool-return and retry-prompt parts of the request's last message, i.e. the
@@ -106,20 +100,9 @@ class _QueryAnswers(ReplayFn):
         return super().__call__(messages, info)
 
 
-# Lead-zero's item 1 — the ancestor fetch that read `record.elastic`'s alerts index and reported
-# "unavailable" for an unconfigured or bad Elastic part — was deleted by #1222 (D1), and with it
-# its three tests here (`c_lead_zero_reads_record`, `o9_lead_zero_unavailable_explicit`,
-# `s7_nf20_lead_zero_note_names_no_host_path`). The correlation lead reads no tenant file at
-# run start; its endings name no host path (`alert_front_door_1222/test_1222_correlation_endings`).
-
-
 # ---- both AgentDeps copies carry the record ------------------------------------------------------
 
 def test_d_agentdeps_record(tmp_path):
-    """AgentDeps carries the record instead of settings_dir, and both copies reach their leads.
-    A verb called from a MAIN-dispatched gather lead (tools_gather's replace) sees the run's own
-    record, and so does one called from lead-zero's L3 correlation lead (dispatch_correlation
-    and _items' replace)."""
     marker = "adeps1107"
     _root, _folder, tenant = _plant(tmp_path, marker)
     fields = {f.name for f in dataclasses.fields(S.mod("runtime.tools._deps").AgentDeps)}
@@ -168,13 +151,9 @@ def test_d_agentdeps_record(tmp_path):
 # ---- a run whose Elastic part is bad completes ---------------------------------------------------
 
 
-
 # ---- resumed runs re-resolve at their own start --------------------------------------------------
 
 def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch):
-    """A run or a sibling world resumed after its tenant's config.env and mapping.yaml were
-    edited re-resolves at the resume's own start and addresses the edited values (N7: no
-    snapshot file); within the resumed run the values then stay fixed (O2)."""
     marker = "mf16"
     _base, source = H.tenant_source(data_root, S.PLAYGROUND_ID)
     root, folder, _tenant = _plant_at_data_root(marker)
@@ -227,18 +206,10 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
         assert S.holders(where, edited) == [], (where, S.holders(where, edited))
 
 
-
-
 # ---- the replay helper chain builds through the resolver -----------------------------------------
 
 
-
 def test_d_grants_through_tenant_config(tmp_path):
-    """A scenario expresses its grants through its tenant folder's verb-grants.yaml. A replay
-    over a planted TABLE_B tenant, given no grants argument, runs with the RunGrants that
-    run_grants(tenant.settings) projects, and dispatches lead-zero under the correlation
-    identity resolve_run_tenant checks. The grants the eight former injection sites handed in
-    are exactly these (CX24)."""
     # rejected: a grants= override on the replay helper chain (_tenants1106.run_tenant, fixture_run_tenant, _replay_harness.drive, _lead_zero_808.run, test_1106_query_lane._run): fork F1, resolved by the human toward the design
     _root, _folder, tenant = _plant(tmp_path, "gb1107", table=T1106.TABLE_B)
     projected = T1106.run_grants(tenant.settings)
@@ -284,23 +255,9 @@ def test_d_grants_through_tenant_config(tmp_path):
 # ---- the three SOC_PLAYGROUND_DOCKER_CONTEXT tests, migrated -------------------------------------
 
 
-
-
-
 # ---- the settings-path redaction keys on the record ----------------------------------------------
 
 def test_d_record_settings_redacted(tmp_path, monkeypatch):
-    """record.settings is the tenant's settings folder path. A ConfigFault whose text names that
-    path, either as given or resolved, reaches the model with the path replaced by
-    SETTINGS_POINTER ("the tenant's settings/") (CX5).
-
-    #1256: cmdb is configured, so it passes its start check, and this call-time ConfigFault is
-    an escape (O-5b): cmdb goes down as not configured and the refusal the gather model gets
-    carries the escaped fault's reason — which reaches the model, so CX5 holds for it as for
-    any ConfigFault text. The lead calls cmdb twice: what the escaped call itself answers is not
-    pinned beyond CX5 (the design is silent on its content; like any ConfigFault text it shows
-    no host path), and the second call's own answer is the refusal of a down system: it says not
-    configured and names the reason by the settings pointer (O-4, O-5b)."""
     # CX8: the shim first on the PATH the run env inherits (no call here should reach docker).
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
@@ -313,9 +270,6 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
 
     raised: list[BaseException] = []
 
-    # CX5: an adapter's ConfigFault names the file under the settings folder, worded as
-    # load_config's own "config file not found: <path> — this tenant's settings do not configure
-    # this system"; here it names the path both as given and as resolved.
     def get_host(ctx: Any, *, host: str = "web-1") -> dict:
         fault = S.config_fault()(
             f"config file not found: {given}/systems/cmdb/config.env — this tenant's settings "

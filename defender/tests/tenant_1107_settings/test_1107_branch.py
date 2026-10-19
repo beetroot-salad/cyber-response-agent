@@ -94,22 +94,7 @@ def _episode_dir(episodes: Path) -> Path:
     return episodes / cli.episode_id_for(T.SOURCE_RUN_ID, T.BRANCH_MESSAGE_ID)
 
 
-# ---------------------------------------------------------------------------------------------
-# MF-13 — a box-mounted tenants root. (MF-7a, the Elastic part with no docker-exec transport,
-# went with the Elastic view and lead-zero's item 1: #1222 M1; the adapter judges its own keys.)
-# ---------------------------------------------------------------------------------------------
-
 def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, monkeypatch):
-    """The branch launcher passes its box-mounted trees (the episodes base, and the runs base it
-    resolves at cli.py:1374) to resolve_tenant as box_mounted: a tenants root inside either is
-    refused at launch with LauncherRefused naming the tenant, before any episode dir exists and
-    before any sibling starts."""
-    # #1120: the tenants root is the data root (`DEFENDER_DATA_ROOT`, no flag), so "a tenants
-    # root inside the episodes base" is a data root inside it — the tenant's settings half then
-    # lies inside a tree the box mounts, which acceptance's step 7 refuses for the launcher's
-    # `box_mounted`. The runs-base arm has no #1120 counterpart: the runs base is
-    # `<data root>/<T>/runs`, derived from the data root, so a data root inside it is circular,
-    # and acceptance itself (not the launcher) holds every tenant's own runs base.
     monkeypatch.setenv("PATH", S.DockerShim(tmp_path / "docker").path_value())
     src, outside, _folder, episodes = _layout(tmp_path, data_root, monkeypatch, marker="mf13")
 
@@ -145,24 +130,7 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
         assert not _episode_dir(episodes).exists(), f"{arm}: an episode dir exists"
 
 
-# ---------------------------------------------------------------------------------------------
-# NF-18 — the Elastic view's values are carried verbatim at resolve.
-# ---------------------------------------------------------------------------------------------
-
-
-
-
-
-# ---------------------------------------------------------------------------------------------
-# GR7 / N6 — siblings: the launcher's pass-through env, and a sibling's own record.
-# ---------------------------------------------------------------------------------------------
-
-
-
 def test_s7_mf17_sibling_resolves_its_own_record(tmp_path, data_root, monkeypatch):
-    """An elastic config.env edited between the launch and a sibling's start: the sibling builds
-    its own record at its own start (N6), so an edit that makes its Elastic part bad makes that
-    sibling's Elastic calls fault (O5) without refusing it."""
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     for name in _CONFIG_VARS:

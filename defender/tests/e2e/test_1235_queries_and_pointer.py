@@ -74,11 +74,6 @@ def _append_copies(run_dir: Path, row: dict, n: int) -> None:
             fh.write(json.dumps(row) + "\n")
 
 
-# ======================================================================================
-# O1 — the repeat guard. Three identical requests: the third is refused before it reaches the
-# backend (REPEAT_THRESHOLD = 3), so the verb is asked twice.
-# ======================================================================================
-
 _SAME = {"native_query": "FROM logs"}
 _THREE_SAME = [q("elastic", "query", _SAME), q("elastic", "query", _SAME),
                q("elastic", "query", _SAME), DONE]
@@ -136,13 +131,6 @@ def test_planted_rows_do_not_fire_the_repeat_guard(tmp_path):
         "planted rows moved the repeat guard: the second request was refused (or the third ran)"
 
 
-# ======================================================================================
-# O1 — the rejection budget. Schema-rejected calls (an extra argument), each naming a different
-# verb so the repeat-rejection guard stays silent: the lead is ended at its REJECTION_BUDGET-th
-# rejection, and a corrected call scripted after the rejections never runs. Scripted one short
-# of the budget, the corrected call does run.
-# ======================================================================================
-
 B = REJECTION_BUDGET
 
 
@@ -174,10 +162,6 @@ def test_an_emptied_queries_table_does_not_refund_the_rejection_budget(tmp_path)
     assert gather.planted
     assert rec.calls == [], "an emptied queries table refunded the rejection budget"
 
-
-# ======================================================================================
-# O3 — the case link is a sidecar beside the run folder.
-# ======================================================================================
 
 def _finished_run(root: Path, run_id: str) -> Path:
     """A real, finished run with its own case store:"""

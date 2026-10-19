@@ -113,10 +113,6 @@ class _SecondViewDiffers(Mapping):
 
 def test_1105_record_episode_runs_writes_exactly_the_four_field_record_beside_the_tenant_record(
         tmp_path):
-    """record_episode_runs(tenant, 'src-n1', RunId.parse('src'), {'a': RunId.parse('src-n1-a')})
-    returns None and writes tenant.runs/_episodes/src-n1.json, a regular file beside _tenant.json
-    (creating _episodes/ when it is absent), which episode_runs and sibling_run_ids then read
-    back; a second episode's record lands beside the first, which is unchanged."""
     from defender.run_repository import episode_runs, record_episode_runs, sibling_run_ids
 
     t, runs = _setup(tmp_path)
@@ -144,12 +140,6 @@ def test_1105_record_episode_runs_writes_exactly_the_four_field_record_beside_th
 
 def test_1105_the_writer_refuses_an_unchecked_runs_folder_and_creates_only_episodes_inside_a_checked_one(
         tmp_path):
-    """record_episode_runs raises TenantRefused and creates nothing when tenant.runs is absent and
-    when its _tenant.json names another tenant; it never creates the runs folder or _tenant.json
-    (ensure_runs_base_record stays that record's one writer). Positive control: over a checked
-    folder with no _episodes/ it creates _episodes/ inside the held folder and writes the record;
-    after run setup makes the folder and record for a tenant that had none, the same call
-    succeeds."""
     from defender.run_repository import record_episode_runs
 
     root = tmp_path / "data"
@@ -187,11 +177,6 @@ def test_1105_the_writer_refuses_an_unchecked_runs_folder_and_creates_only_episo
 
 
 def test_1105_a_bad_episode_id_is_refused_as_run_refused_before_any_name_is_built(tmp_path):
-    """record_episode_runs and episode_runs raise RunRefused, not FamilyError, for an episode id
-    refuse_bad_episode_id refuses ('../x', 'a/b', '', '_x', 'Ep1', 5), write nothing, and do so
-    even over an absent runs folder (the id is judged before any name is built or folder read);
-    episode_runs refuses an episode id whose record name would pass 255 bytes the same way,
-    without probing the disk (NM-02). Observed through the injected seam: no call reaches it."""
     from defender.run_repository import RunRefused, episode_runs, record_episode_runs
 
     root = tmp_path / "data"
@@ -220,24 +205,6 @@ def test_1105_a_bad_episode_id_is_refused_as_run_refused_before_any_name_is_buil
 
 
 def test_1105_the_writer_refuses_every_input_that_would_hide_a_run_or_claim_an_id_twice(tmp_path):
-    """record_episode_runs raises RunRefused and writes nothing for: an empty or non-mapping runs;
-    a label the family model refuses (base, family, family_1, an unnameable label, labels equal
-    under case folding); an arm id ending in a sidecar suffix or other than
-    f'{episode_id}-{label}'; two labels on one id; an arm equal to the source; an arm another
-    record already claims, or whose name in the held listing holds a run or a sidecar file; an
-    episode id whose record name would exceed 255 bytes; and content over 65536 bytes, at the
-    boundary: a record whose canonical bytes are exactly 65537 is refused and one of exactly
-    65536 is written (the reader's cap, D3.4). Each input
-    breaks only its own rule, except three that no input can isolate, because every arm must be
-    a RunId (casefold-stable, at most 206 bytes) equal to f'{episode_id}-{label}': labels equal
-    under case folding and two labels on one id each also break the arm-shape rule
-    (w_writer_label_rules_unreachable_for_exact_str), and so does an over-long record name
-    (w_writer_record_name_bound_unreachable); a label or episode id that is not exactly str is
-    refused outright (FR-12), so no lying input isolates them either; those three pin only that
-    the input is refused with nothing written. A runs mapping whose second view differs from its
-    first is snapshotted once: the record written is the first view's (NM-02). Positive control:
-    a valid mapping is written, and a source another record claims as an arm is admitted
-    (refusing a claimed source is PR 2's launcher's)."""
     from defender.run_repository import RunRefused, record_episode_runs
 
     t, runs = _setup(tmp_path)
@@ -338,13 +305,6 @@ def test_1105_the_writer_refuses_every_input_that_would_hide_a_run_or_claim_an_i
 
 def test_1105_the_writer_refuses_a_label_or_episode_id_that_is_not_exactly_str_before_any_write(
         tmp_path):
-    """record_episode_runs refuses, with RunRefused and before any write, a label or an episode
-    id whose type is not exactly str (FR-12, owner: subclasses are refused, as RunId refuses
-    subclassing): a plain subclass label, a label that formats unlike its text (x shown as a,
-    arm ep-a), a plain subclass episode id, and a 251-byte episode id that formats as 'ep'; and a
-    label or an episode id that is no str at all, an int, bytes or None (90 F3). Each leaves the
-    runs folder unchanged and _episodes not created. Positive control: the same episode id and
-    mapping as exact str are written."""
     from defender.run_repository import RunRefused, record_episode_runs
 
     t, runs = _setup(tmp_path)
@@ -377,11 +337,6 @@ def test_1105_the_writer_refuses_a_label_or_episode_id_that_is_not_exactly_str_b
 
 def test_1105_an_episode_record_is_written_once_an_identical_retry_is_a_no_op_and_a_different_one_refused(
         tmp_path):
-    """A second record_episode_runs call with byte-identical content returns without error and
-    leaves the record unchanged (today's create lane raises FileExistsError there); a call for
-    the same episode with different content raises RunRefused and leaves the first record
-    byte-identical; a call refused before writing leaves nothing, and the next valid call for
-    that episode writes (the writer's state is the file)."""
     from defender.run_repository import RunRefused, record_episode_runs
 
     t, runs = _setup(tmp_path)
@@ -405,9 +360,6 @@ def test_1105_an_episode_record_is_written_once_an_identical_retry_is_a_no_op_an
 
 
 def test_1105_the_writer_never_writes_through_a_link_at_episodes(tmp_path):
-    """With _episodes a link to an outside folder, record_episode_runs raises RunRefused naming
-    _episodes, never a raw OSError, and the outside folder is byte-unchanged (no record lands
-    there). Positive control: with _episodes absent the record lands inside tenant.runs."""
     from defender.run_repository import RunRefused, record_episode_runs
 
     t, runs = _setup(tmp_path)
@@ -430,10 +382,6 @@ def test_1105_the_writer_never_writes_through_a_link_at_episodes(tmp_path):
 
 
 def test_1105_the_writer_never_removes_a_file_it_did_not_create(tmp_path):
-    """When a regular file already stands at the record name with different bytes (another key
-    order included), record_episode_runs compares it, raises RunRefused naming the file, and
-    leaves it byte-identical: the writer removes only what its own create made. Positive control:
-    with byte-identical content the call is a no-op success."""
     from defender.run_repository import RunRefused, record_episode_runs
 
     t, runs = _setup(tmp_path)
@@ -457,11 +405,6 @@ def test_1105_the_writer_never_removes_a_file_it_did_not_create(tmp_path):
 
 
 def test_1105_a_record_over_64_kib_is_corrupt_and_read_no_further_than_the_cap_plus_one(tmp_path):
-    """A good record of exactly 65536 bytes claims its ids; one of 65537 bytes, and a sparse file
-    claiming 1 GiB, make sibling_run_ids raise RunRefused naming the file, having read it through
-    Bound.read(max_bytes=65537), so no more than the cap plus one byte is read and the call
-    returns promptly. (That no more than the cap plus one byte is read is pinned at the
-    mechanism by io_bound_read_max_bytes; here the observable is the refusal and its promptness.)"""
     from defender.run_repository import RunRefused, sibling_run_ids
 
     t, runs = _setup(tmp_path)
@@ -486,11 +429,7 @@ def test_1105_a_record_over_64_kib_is_corrupt_and_read_no_further_than_the_cap_p
     assert elapsed < 5.0, f"refusing a 1 GiB record took {elapsed:.1f}s — it was read whole"
 
 
-
 def test_1105_episode_runs_answers_from_that_episodes_own_record_only(tmp_path):
-    """episode_runs(tenant, ep) returns that record's {label: RunId}; it returns {} when ep has no
-    record (DV-7), answers unchanged when another episode's record is corrupt (it reads only ep's
-    record), and raises RunRefused when ep's own record is corrupt."""
     from defender.run_repository import RunRefused, episode_runs, record_episode_runs
 
     t, runs = _setup(tmp_path)
@@ -509,9 +448,6 @@ def test_1105_episode_runs_answers_from_that_episodes_own_record_only(tmp_path):
 
 
 def test_1105_sibling_run_ids_is_the_union_of_every_record_and_fails_closed(tmp_path):
-    """sibling_run_ids(tenant) returns the set of every RunId any good record claims (arms only,
-    not the source), the empty set with no _episodes/, and raises RunRefused when any one record
-    is corrupt."""
     from defender.run_repository import RunRefused, record_episode_runs, sibling_run_ids
 
     t, runs = _setup(tmp_path)
@@ -528,17 +464,8 @@ def test_1105_sibling_run_ids_is_the_union_of_every_record_and_fails_closed(tmp_
     assert str(bad) in H.message(err), f"the refusal names the record: {H.message(err)!r}"
 
 
-
 def test_1105_episode_sibling_ids_takes_only_a_bound_and_applies_the_file_rules_without_a_tenant_compare(
         tmp_path):
-    """episode_sibling_ids(runs) takes a Bound and raises TypeError before any read for a Path, a
-    str, a Held, a Tenant or None; over a Bound it reads runs.under('_episodes') with D3.4's file
-    rules and no tenant compare (a record naming another tenant still claims its ids, and
-    _tenant.json is never read), returns the empty set over a Bound of an absent runs folder and
-    for an absent _episodes, and does not close the Bound it is handed. A record whose tenant_id
-    is not text (7) is corrupt and refuses with RunRefused naming the file, and one whose
-    tenant_id is the empty string is good and claims its ids (no compare; NM-03 A as amended by
-    B)."""
     from defender.run_repository import RunRefused, episode_sibling_ids, record_episode_runs
 
     t, runs = _setup(tmp_path)
@@ -577,12 +504,7 @@ def test_1105_episode_sibling_ids_takes_only_a_bound_and_applies_the_file_rules_
     assert str(numeric) in H.message(err), f"the refusal names the file: {H.message(err)!r}"
 
 
-
 def test_1105_the_record_is_exactly_four_fields_in_one_canonical_sorted_key_serialisation(tmp_path):
-    """The stored record is exactly {episode_id, tenant_id, source_run_id, runs: {label: run_id}}
-    with tenant_id == tenant.id and every run id stored as its RunId text, in one canonical
-    serialisation with sorted keys: two calls with equal mappings given in different key orders
-    (dict, OrderedDict, MappingProxyType) store byte-identical files."""
     from defender.run_repository import record_episode_runs
 
     t, runs = _setup(tmp_path)
@@ -609,11 +531,6 @@ def test_1105_the_record_is_exactly_four_fields_in_one_canonical_sorted_key_seri
 
 
 def test_1105_a_records_episode_id_must_equal_its_file_name_minus_the_final_json(tmp_path):
-    """A record's stem is its file name minus the final '.json': _episodes/ep.json holding
-    episode_id 'ep' is good, and so is _episodes/ep.1.json holding 'ep.1' (refuse_bad_episode_id
-    admits it); a record whose episode_id differs from its stem in any way (ep-2, EP-1, 'ep-1 '
-    at ep-1.json) makes sibling_run_ids, runs.list (PR 1's list_run_ids) and
-    episode_runs(tenant, 'ep-1') raise RunRefused naming the file."""
     from defender.run_repository import RunRefused, episode_runs, sibling_run_ids
 
     t, runs = _setup(tmp_path)
@@ -631,11 +548,6 @@ def test_1105_a_records_episode_id_must_equal_its_file_name_minus_the_final_json
 
 
 def test_1105_the_reader_applies_only_its_closed_list_so_a_writer_rule_breaker_claims(tmp_path):
-    """The reader's rule is D3.4's closed list: a host-written record that breaks only writer rules
-    (two labels on one id, an arm equal to the source, an arm not shaped f'{episode_id}-{label}',
-    an arm another record claims) is good on read, so sibling_run_ids claims its ids and
-    runs.list (PR 1's list_run_ids) hides them; in PR 1 'a record never hides an ordinary run'
-    holds through the writer only (the owner accepts this, O4)."""
     from defender.run_repository import sibling_run_ids
 
     t, runs = _setup(tmp_path)
@@ -651,17 +563,6 @@ def test_1105_the_reader_applies_only_its_closed_list_so_a_writer_rule_breaker_c
 
 
 def test_1105_the_reader_refuses_each_content_rule_breaker_naming_the_file(tmp_path):
-    """D3.4's content rules, one breaker each, planted by hand at _episodes/ep.json: bytes that
-    are not strict UTF-8, a UTF-8 BOM before the JSON and text after it (neither is strict UTF-8
-    JSON), a duplicate key, an extra field, a missing field (no source_run_id), a JSON array at
-    the top level, runs that is not a map, an empty runs, an arm that is not text, a
-    source_run_id RunId.parse refuses ('Src'), and a record whose runs nests 32,000 arrays deep
-    yet fits under the 64 KiB cap (json.loads raises RecursionError on it; P2's one named error,
-    92 FR-22); and, by name, a record at Bad.json, whose stem is not a grammar-valid episode id.
-    Each makes sibling_run_ids raise RunRefused naming the file, never a raw RecursionError, on
-    one line with no raw control character, and each at ep.json makes episode_runs(tenant, 'ep')
-    refuse the same way. Positive control: the good twin claims its id and episode_runs answers
-    it."""
     from defender.run_repository import RunRefused, episode_runs, sibling_run_ids
 
     t, runs = _setup(tmp_path)
@@ -709,11 +610,6 @@ def test_1105_the_reader_refuses_each_content_rule_breaker_naming_the_file(tmp_p
 
 
 def test_1105_a_truncated_episode_record_refuses_naming_the_file(tmp_path):
-    """With _episodes/ep-1.json truncated (a good record cut short), sibling_run_ids,
-    runs.list (PR 1's list_run_ids), episode_runs(tenant, 'ep-1') and episode_sibling_ids raise
-    RunRefused naming that file, and it fails closed until an operator removes it; episode_runs
-    for another episode with a good record still answers. Positive control: the untruncated
-    record claims its ids."""
     from defender.run_repository import (
         RunRefused,
         episode_runs,
@@ -752,10 +648,6 @@ def test_1105_a_truncated_episode_record_refuses_naming_the_file(tmp_path):
 
 
 def test_1105_a_stray_name_in_episodes_refuses_naming_it(tmp_path):
-    """With a file named 'README' beside a good record in _episodes, sibling_run_ids, runs.list
-    (PR 1's list_run_ids) and episode_sibling_ids raise RunRefused naming
-    tenant.runs/_episodes/README.
-    Positive control: with it removed the good record's claims stand."""
     from defender.run_repository import (
         RunRefused,
         episode_sibling_ids,
@@ -787,10 +679,6 @@ def test_1105_a_stray_name_in_episodes_refuses_naming_it(tmp_path):
 
 
 def test_1105_an_absent_episodes_claims_nothing_and_the_writer_creates_it(tmp_path):
-    """With no _episodes in a good runs folder, sibling_run_ids is the empty set, episode_runs
-    returns {}, the listings exclude nothing, episode_sibling_ids returns the empty set, and a
-    first-ever pinned run setup proceeds and creates no _episodes; the first record_episode_runs
-    creates _episodes inside the held folder."""
     from defender.run_repository import (
         episode_runs,
         episode_sibling_ids,
@@ -817,13 +705,6 @@ def test_1105_an_absent_episodes_claims_nothing_and_the_writer_creates_it(tmp_pa
 
 def test_1105_the_record_key_is_tenant_and_episode_so_no_record_is_read_by_another_episode_or_tenant(
         tmp_path):
-    """the same episode_id recorded under tenants T and U (U hand-planted, F36) lands in two files;
-    T's episode_runs, sibling_run_ids and runs.list (PR 1's list_run_ids) see only T's record and
-    U's only U's; two
-    episodes of one tenant, and 'ep' beside the dotted 'ep.1', never read each other's record; two
-    writers racing one episode id with different content leave exactly one intact record and one
-    RunRefused (serial both orders where a genuine interleaving cannot be forced); positive
-    control: every read is non-empty"""
     from defender.run_repository import (
         RunRefused,
         episode_runs,
@@ -888,19 +769,6 @@ def test_1105_the_record_key_is_tenant_and_episode_so_no_record_is_read_by_anoth
 
 def test_1105_record_labels_are_returned_verbatim_as_untrusted_text_and_a_refusal_quoting_one_escapes_it(
         tmp_path):
-    """a host-written record whose labels carry a newline, an escaped NUL, a 4,000-character string
-    and non-ASCII text is good on read: episode_runs returns each label byte-for-byte as the key
-    and its RunId as the value, sibling_run_ids and runs.list are unaffected, and a refusal
-    that quotes such a label escapes it (a record at the cap with one such label still reads);
-    positive control: the same record with plain labels returns the same ids. Pins that the
-    repository does not sanitise labels, so PR 2 re-asks R6 at each renderer instead of assuming
-    they were validated. The writer's refusal of a label holding a newline, a tab or an ESC
-    quotes the label or the arm repr-escaped on one line; text read from disk is quoted the same
-    way: a host-written record whose label and arm carry a newline and an ESC is corrupt (the
-    reader judges no label, so it refuses on the arm RunId.parse refuses), and episode_runs and
-    sibling_run_ids raise RunRefused naming the file on one line and, where they quote the label
-    or the arm, quote it repr-escaped, never raw or stripped.
-    The hostile labels and arm include DEL, a C1 control (U+009B) and U+2028 (91 BF-09)."""
     from defender.run_repository import (
         RunRefused,
         episode_runs,

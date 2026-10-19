@@ -103,9 +103,6 @@ def test_a_family_with_the_stamp_is_graded(tmp_path):
 
 @pytest.mark.parametrize("torn", ["not json {", '{"agreed": "no", "allow_dirty": false}', "link"])
 def test_a_torn_family_stamp_counts_as_absent(tmp_path, torn):
-    """Seventh round (finding 3): an unreadable stamp certifies nothing — a torn file, the
-    wrong shape, or a link at its name is refused like an absent one (never graded, never a
-    refused pass), the reason naming the unreadable stamp."""
     ep = _stampless(tmp_path)
     _withhold(ep)
     stamp_path = ep / "provenance.json"
@@ -127,9 +124,6 @@ def test_a_torn_family_stamp_counts_as_absent(tmp_path, torn):
 
 
 def test_a_stampless_family_with_no_recorded_reason_still_is_not_comparable(tmp_path):
-    """Seventh round (finding 3): with no `not_comparable.yaml` (an episode archived before
-    the record existed) the family is still refused, and the reason says no record says
-    why."""
     ep = _stampless(tmp_path)
     judge = _judge()
     _grade(tmp_path, ep, judge)
@@ -141,9 +135,6 @@ def test_a_stampless_family_with_no_recorded_reason_still_is_not_comparable(tmp_
 
 
 def test_verify_family_records_why_it_withheld_the_stamp_and_the_judge_names_it(tmp_path):
-    """Seventh round (finding 3): `verify_family`'s reason was only logged. Now a family whose
-    sibling ran another commit has no stamp, its reason is in `not_comparable.yaml`, and the
-    judge's stamp names it."""
     T.runs_base(tmp_path)
     ep = S.judged_episode(tmp_path, outcome=None)
     S.outcome_record(ep, "accepted", family_stamp=False)
@@ -167,9 +158,6 @@ def test_verify_family_records_why_it_withheld_the_stamp_and_the_judge_names_it(
 
 
 def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
-    """Seventh round (finding 3): `verdicts` and `delta_o` compare worlds, so the same
-    comparability argument holds — an accepted family with no family stamp is refused, naming
-    `not comparable`; with the stamp both answer."""
     readers = T.mod("learning.branch.episode")
     ep = T.episode(tmp_path)
     with Episode.open(ep) as episode:

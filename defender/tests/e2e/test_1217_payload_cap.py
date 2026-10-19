@@ -1,13 +1,3 @@
-"""#1217 — a queries-table payload sidecar is never written past `_io.READ_LIMIT`.
-
-A host process writes `gather_raw/<lead>/<seq>.json`, so the box's `--ulimit fsize` (#1198) does
-not bound it, and every reader of a sidecar refuses a file over `READ_LIMIT`. The one writer,
-`record_query.persist_payload`, refuses instead: it writes nothing and returns `None`, the shape
-it already returns for any failed write, which every reader of `payload_path` handles.
-
-The bash tool is not a source: its only queries-row writer records an empty payload, so box
-stdout never reaches a sidecar and has no test here.
-"""
 from __future__ import annotations
 
 from defender.tests._spec1077 import fixture_run as _writer_run_1165

@@ -176,9 +176,6 @@ def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_pat
 
 
 def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
-    """demand (#588) — pinning the runtime's read is necessary but not sufficient: on a genuinely
-    undecodable file `read_text(encoding="utf-8")` still raises `UnicodeDecodeError`, and no gate
-    converts a `ValueError`, so it escapes the tool and takes the whole stage down."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime import tools
@@ -192,9 +189,6 @@ def test_an_undecodable_file_is_a_model_retry_not_a_stage_kill(tmp_path):
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses the mode bits this drives")
 def test_an_unreadable_file_is_a_model_retry_too_not_a_stage_kill(tmp_path):
-    """`read_text_utf8` is documented to raise TEXT_READ_ERRORS — BOTH halves. The decode half is
-    converted to a ModelRetry; the `OSError` half escaped, on the same argument that condemned
-    the decode half."""
     from pydantic_ai.exceptions import ModelRetry
 
     from defender.runtime import tools
@@ -209,10 +203,6 @@ def test_an_unreadable_file_is_a_model_retry_too_not_a_stage_kill(tmp_path):
 
 
 def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
-    """`reconfigure(encoding=…)` with no `errors=` silently RESETS the handler to `strict`, and the
-    defaults it clobbers are load-bearing: stderr is `backslashreplace` so an error path can
-    never itself raise, stdout is `surrogateescape` so a non-UTF-8 filename — what `Path.glob`
-    hands back as lone surrogates — prints instead of exploding."""
     proc = _c_locale_python(
         f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
         "from defender._io import use_utf8_stdio\n"

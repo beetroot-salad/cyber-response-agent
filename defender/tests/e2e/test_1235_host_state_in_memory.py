@@ -77,12 +77,6 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-# ======================================================================================
-# O1 — budget. MAIN's `bash` is core-tier, so each call below is metered and refusable. Four
-# calls against a cap of two: the first two run, the last two are refused. No `verbs=` is
-# injected, so no lead-0 call shares the pool and the counts are this script's alone.
-# ======================================================================================
-
 _FOUR_BASH = [
     Turn(tool_calls=[("bash", {"command": "echo ran-one"})]),
     Turn(tool_calls=[("bash", {"command": "echo ran-two"})]),
@@ -177,14 +171,6 @@ def test_a_planted_clock_origin_does_not_trip_the_wall_clock(tmp_path, enforced)
     assert _refusals(spent) == 4, "the wall-clock limb never refuses, so the arm above is vacuous"
 
 
-# ======================================================================================
-# O1 — breaker. One gather lead against an injected registry: `cmdb.probe` fails on transport
-# (exit 2, an infra failure the breaker counts) or answers, per scenario; `elastic` is never
-# asked, so lead-0's own item-1 call (elastic, a verb this registry does not hold) charges
-# nothing. Each call varies its `native_query`, so the repeat guard never answers in place of
-# the breaker.
-# ======================================================================================
-
 def _registry(rec: VerbRecorder, *, cmdb_fails: bool) -> FakeVerbs:
     def probe(ctx, *, native_query: str = "FROM logs") -> list[dict]:
         rec.record("probe", ctx, {"native_query": native_query})
@@ -263,8 +249,3 @@ def test_a_reset_breaker_file_does_not_untrip_a_system(tmp_path, plant):
     assert _down(gather)
     assert state["systems"]["cmdb"]["failures"] == 2
     assert state["total_failures"] == 2
-
-
-# ======================================================================================
-# O2 — the retired files are written nowhere.
-# ======================================================================================

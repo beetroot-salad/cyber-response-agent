@@ -32,10 +32,6 @@ NAMED_GATED = ("RunPaths", "RUN_LAYOUT", "SessionPaths", "WIRE_LOG_NAMES", "GATE
 _CLI = "learning/branch/cli.py"
 
 
-# ==========================================================================================
-# Same-file helpers: load, plant, read findings. None of them asserts on a demand's behalf.
-# ==========================================================================================
-
 def _lint() -> ModuleType:
     """The lint program, imported as CI runs it (its own directory on `sys.path`). Its absence
     — the state at base — is this test's failure, never a crash."""
@@ -52,9 +48,6 @@ def _lint() -> ModuleType:
                 "importable): D7's layout lint is not written yet")
 
 
-#: The modules a planted tree carries besides the package, so the lint's receiver typing reads
-#: the same owner sources it reads on the real tree (`Episode.open`'s return, `LAYOUT`'s class,
-#: `RunTenant.tenant`'s type).
 _CONTEXT = ("_episode_paths.py", "_episode_handle.py", "_tenant.py", "runtime/run_tenant.py")
 
 
@@ -79,7 +72,6 @@ def _plant(root: Path, rel: str, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
-
 
 
 def _production_files(defender: Path) -> list[Path]:
@@ -127,12 +119,7 @@ def _main(lint_run_layout_imports: Any, root: Path, capsys: Any) -> tuple[Any, s
     return code, capsys.readouterr().out
 
 
-
 def test_1105_layout_lint_fails_a_planted_new_gated_use(tmp_path, capsys):
-    """A gated use planted in a scratch copy of the sweep (a RunPaths import in a new module, a
-    second RunPaths import in a migrated caller's function, a Run.at call in a former names-only
-    user) makes the lint exit nonzero naming the module, function and name. Positive control: a
-    planted helper import (artifact_file) passes."""
     lint_run_layout_imports = _lint()
     root = _sweep_copy(tmp_path)
     _plant(root, "learning/planted_new.py",
@@ -166,9 +153,6 @@ def test_1105_layout_lint_fails_a_stale_allow_list_entry(tmp_path, capsys):
     lint_run_layout_imports = _lint()
     root = _sweep_copy(tmp_path)
     caller = _CLI
-    # #1105 PR 2 migrated this caller off RunPaths (the launcher keeps only the predicates,
-    # helpers-only) and emptied the allow-list (D7″), so the entry PR 1 listed for its import is
-    # now stale on the tree itself.
     entry = (caller, "<module>", "RunPaths", 1)
     found = lint_run_layout_imports.scan(root, allow_list=(entry,))
     stale = [f for f in found if "stale" in str(getattr(f, "display", ""))
@@ -197,18 +181,7 @@ def test_1105_layout_lint_fails_a_stale_allow_list_entry(tmp_path, capsys):
         f"an entry with no matching use is not reported stale: {_displays(found)}")
 
 
-
-# ==========================================================================================
-# What is gated.
-# ==========================================================================================
-
 def test_1105_layout_lint_gates_every_layout_name_but_the_eight_helpers_including_a_new_export(tmp_path):
-    """In a module with no layout exemption, importing any of the eight helpers (artifact_file,
-    artifact_dir, plain_file, contained_payload, LEAD_ID_RE, gather_summaries_shape,
-    is_case_answer_key, GATHER_RAW_SHAPE) passes, importing each other layout name (RunPaths,
-    RUN_LAYOUT, SessionPaths, WIRE_LOG_NAMES, GATE_METADATA_KEY, RunLayout, WireLogNames) is
-    flagged, and a name newly added to _layout is flagged until it is
-    listed."""
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
     layout = root / "run_repository" / "_layout.py"
@@ -225,7 +198,6 @@ def test_1105_layout_lint_gates_every_layout_name_but_the_eight_helpers_includin
         f"gated: expected the eight named layout names and the new export, got {sorted(flagged)}")
     assert frozenset(lint_run_layout_imports.HELPERS) == HELPERS, (
         "the helper list (what 'listed' means) is not exactly the eight helpers")
-
 
 
 def test_1105_layout_lint_flags_a_star_import_from_the_door_or_an_owner(tmp_path):
@@ -245,16 +217,7 @@ def test_1105_layout_lint_flags_a_star_import_from_the_door_or_an_owner(tmp_path
     assert not _in(found, "learning/star_control.py"), "a star import of a non-owner was flagged"
 
 
-
-# ==========================================================================================
-# The categories table and the sweep.
-# ==========================================================================================
-
-
 def test_1105_layout_lint_reports_an_unparseable_module(tmp_path, capsys):
-    """A module in the sweep that does not parse, or cannot be decoded as UTF-8, is reported as a
-    finding, the rest of the sweep still runs, and the lint exits nonzero; such a module is never
-    skipped."""
     lint_run_layout_imports = _lint()
     root = _planted(tmp_path)
     _plant(root, "learning/broken_syntax.py", "def broken(:\n")
@@ -269,11 +232,3 @@ def test_1105_layout_lint_reports_an_unparseable_module(tmp_path, capsys):
     code, out = _main(lint_run_layout_imports, root, capsys)
     assert code != 0, f"exit {code}:\n{out}"
     assert "broken_syntax.py" in out, f"exit {code}:\n{out}"
-
-
-
-
-# ==========================================================================================
-# The neighbouring gates under the fence (MF-19, MF-20).
-# ==========================================================================================
-

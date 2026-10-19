@@ -16,10 +16,6 @@ pytestmark = pytest.mark.e2e
 SALT = "s665mnt"
 
 def test_curator_relative_operand_rebased_at_cwd_anchor_escapes_corpus(tmp_path):
-    """test_curator_relative_operand_rebased_at_cwd_anchor_escapes_corpus (F9 → R4) — containment
-    of a curator `rm` operand that traverses `..` out of its corpus but stays in the worktree
-    is bound to BOTH layers: the gate's textual anti-traversal AND the mount as the
-    authoritative backstop (po63: a `..` ..."""
     from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF, SHIPPED_LESSON_CORPORA
 
     repo = tmp_path / "repo"
@@ -39,10 +35,6 @@ def test_curator_relative_operand_rebased_at_cwd_anchor_escapes_corpus(tmp_path)
 
 # N3 — the host-side write tools never cross the box; the scan (S7)
 def test_host_side_write_tools_write_live_tree_in_process(tmp_path):
-    """host_tools_do_not_cross_box (negative) — the write/edit tools mutate the live tree
-    IN-PROCESS host-side; they never cross the box transport (N3), so no in-box mount exists for
-    their output. Negative: the box transport records NO write from a host-side write tool;
-    positive control: the file lands on the host tree."""
     from defender.learning.author.curator_engine import CORPUS_AUTHOR_DEF, SHIPPED_LESSON_CORPORA
 
     dtree = tmp_path / "repo" / "defender"
@@ -57,4 +49,3 @@ def test_host_side_write_tools_write_live_tree_in_process(tmp_path):
     runtime_tools._tool_write_file(deps, str(target), "spec content")
     assert transport.calls == [], "a host-side write crossed the box transport"
     assert target.read_text(encoding="utf-8") == "spec content", "the write did not land on the live tree"
-

@@ -195,9 +195,6 @@ def test_the_unquoter_resolves_every_quoting_form_the_lexer_resolved():
 
 
 def test_a_trailing_backslash_still_continues_nothing():
-    """A command ending in a dangling backslash is still refused as untokenizable - the escape
-    the lexer raised on must still be a refusal once the unquoter is hand-rolled, or cause (2)
-    of the lexing reason becomes a sentence about nothing."""
     with pytest.raises(bash_exec.UntokenizableCommand):
         bash_exec.parse("cat " + REPORT + " \\")
     d = _bash("cat " + REPORT + " \\\n | wc -l")
@@ -219,22 +216,10 @@ def test_the_line_boundary_and_incomplete_connector_causes_still_name_what_they_
         assert not d.allow, f"{cmd!r}"
         assert d.reason == permission.UNTOKENIZABLE_REASON, f"{cmd!r}"
         assert phrase in d.reason, f"{cmd!r}: the reason no longer names this cause"
-    # The side that HOLDS: a carriage return glued to the word BEFORE the connector is neither
-    # a separator nor an operator character, so it neither starts nor extends the operator run,
-    # and `|` is still the line's last token - cause (3) still answers.
     d = _bash("cat " + REPORT + CR + "|\nwc -l")
     assert not d.allow
     assert d.reason == permission.UNTOKENIZABLE_REASON
 
-    # The side that DOES NOT, and is enumerated because of it (member 8): after the connector,
-    # the blank is the line's last token and this check is structurally out of reach. The
-    # command must still be refused - it is not a widening - and it must NOT be refused with
-    # the reason that tells the model to rewrite on one line, because that is no longer why.
-    # Over the alphabet, not over the carriage return: stating this member as a `\r` rule is
-    # exactly the error RC6 found, and the alphabet is read off the frozen tuple.
-    # The three DANGLING connectors only: they are the ones whose reach cause (3) loses. `;`
-    # never reached this check at all, so its own move (allow->deny) belongs to the corpus and
-    # to the invisible-character demand, not here.
     connector_cases = [
         "cat " + REPORT + " " + sep + blank
         for sep in ("|", "&&", "||")
@@ -248,5 +233,3 @@ def test_the_line_boundary_and_incomplete_connector_causes_still_name_what_they_
             "after the connector, so cause (3) is not what refuses this any more, and a reason "
             "that says 'rewrite as a SINGLE line' sends the model to fix the wrong thing"
         )
-
-

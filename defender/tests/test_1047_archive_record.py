@@ -32,10 +32,6 @@ def _record(episode_dir, label):
 
 
 def test_the_archive_writes_each_worlds_run_end_record_itself(tmp_path):
-    """archive_episode writes worlds/<label>/run_end.json for each archived world, carrying the
-    exit class the sibling's own host-side process recorded in its sidecar, copied in the same
-    screened way the scrub verdict already is — never read from anything the box wrote inside
-    the run dir."""
     ep, dirs, _base = _episode_with(tmp_path)
     S.plant_sidecar(dirs["b"], truncated_by="request-limit")
     S.plant_sidecar(dirs["c"], truncated_by="aborted", closed_before_cut=True)
@@ -46,9 +42,6 @@ def test_the_archive_writes_each_worlds_run_end_record_itself(tmp_path):
 
 
 def test_the_worlds_exit_class_is_read_from_a_source_no_box_can_write(tmp_path):
-    """The value the archive writes is taken from a host-owned sidecar beside the run dir, outside
-    every box's rw bind; with the run dir emptied of every file a box could have written, the
-    archived record still names the exit — and still says whether the model had already closed."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="store", closed_before_cut=True)
     for planted in S.salt_run_dir(dirs["b"], value="request-limit"):
@@ -107,10 +100,6 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
 
 
 def test_an_unreadable_sidecar_is_copied_verbatim_and_the_judge_reads_no_record(tmp_path):
-    """A sidecar that holds no record — zero bytes, truncated JSON, a JSON list — is archived BYTE
-    FOR BYTE, exactly as the scrub verdict is: the archive is a copy, not an interpreter, and
-    what the bytes MEAN is decided once, by the judge through `run_end.parse_record`, which
-    reads all three as "no record" and grades the world as today."""
     for name, raw in (("empty", ""), ("torn", '{"truncated_by": "abor'),
                       ("list", '[{"truncated_by": "aborted"}]')):
         ep, dirs, _base = _episode_with(tmp_path / name, worlds=("b",))
@@ -132,10 +121,6 @@ def test_an_unreadable_sidecar_is_copied_verbatim_and_the_judge_reads_no_record(
 
 def test_a_directory_squatting_the_sidecars_name_refuses_the_world_like_any_planted_entry(
         tmp_path):
-    """A DIRECTORY at the sidecar's own path is not an unreadable record but an entry that is not
-    the artifact — and the archive answers it the way it answers the scrub verdict's name being
-    squatted: the whole world is refused before anything is copied, never a half-world archived
-    without one role."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.sidecar_path(dirs["b"]).mkdir(parents=True, exist_ok=True)
     with pytest.raises(S.refusals()), Episode.open(ep) as episode:
@@ -149,9 +134,6 @@ def test_a_directory_squatting_the_sidecars_name_refuses_the_world_like_any_plan
 
 def test_a_destination_side_symlink_at_the_run_end_path_pointing_outside_the_archive_tree_is_never_followed_for_the_write(
         tmp_path):
-    """A destination-side symlink pointing OUTSIDE the archive tree is refused rather than
-    followed, so no host write for this feature lands outside the episode's own worlds/
-    directory."""
     outside = tmp_path / "outside" / "stolen.json"
     outside.parent.mkdir(parents=True, exist_ok=True)
     outside.write_text("OUTSIDE\n", encoding="utf-8")
@@ -169,9 +151,6 @@ def test_a_destination_side_symlink_at_the_run_end_path_pointing_outside_the_arc
 
 def test_a_symlink_planted_inside_the_run_dir_at_the_sidecars_basename_is_not_read_as_the_run_end_record(
         tmp_path):
-    """A symlink planted inside the run dir at the sidecar's basename is not read as the record:
-    the sidecar's path is a pure function of a host-held path, the `scrub.verdict_path`
-    precedent."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="budget")
     decoy = tmp_path / "decoy.json"
@@ -219,10 +198,6 @@ def test_the_host_side_record_source_is_not_reachable_from_inside_a_box(tmp_path
 
 def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_siblings_leaf_under_runs_base(
         tmp_path):
-    """For two siblings fanned by one `start_family` call, each sibling's run-end sidecar lands at
-    a path derived from its own run_id and collides with neither the other sibling's run dir nor
-    its sidecar — `sidecar_name`'s injective derivation from `run_id`, driven at the composition
-    frame that fans the writers."""
     ep = S.episode(tmp_path)
     cli = S.mod("learning.branch.cli")
     runs = ep / "runs"  # the siblings' container (#1105 PR 2: `cli.sibling_runs_base` is gone)
@@ -230,9 +205,6 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
     faults: list[BaseException] = []
 
     def spawn(argv, *, env=None, **_kw):
-        # `start_family` records a thread that died as a NON-ZERO exit rather than re-raising,
-        # so a fault in here would otherwise reach the assertions below as "the launcher fanned
-        # nothing" — a message about the wrong thing.
         try:
             label = next(argv[i + 1] for i, tok in enumerate(argv) if tok == "--world")
             run_dir = runs / f"{S.EPISODE_ID}-{label}"
@@ -282,10 +254,6 @@ def test_run_end_write_happens_even_for_a_run_that_ended_cleanly(tmp_path):
 
 def test_the_driver_records_whether_the_model_had_already_closed_when_the_exit_was_stamped(
         tmp_path):
-    """The run-end record's second field is written by the DRIVER, at the moment the exit class is
-    stamped and before the forced report: a run whose `ReviewState.of(deps).closed` is True when
-    the cut lands records `closed_before_cut: true`, and one whose model never closed records
-    `false`."""
     from defender.runtime import challenge_gate
     from defender.tests import _spec923
 
@@ -305,9 +273,6 @@ def test_the_driver_records_whether_the_model_had_already_closed_when_the_exit_w
 
 
 def test_a_failed_run_end_write_is_a_reason_not_to_write_the_forced_report(tmp_path):
-    """A run-end write that FAILS is swallowed — the run does not break over it — and it is also a
-    reason not to write the forced `unresolved` report: fork F-H's second clause, the half that
-    closes the window F-B was about."""
     from defender.tests import _spec923
 
     deps, run_dir = _deps(tmp_path / "blocked")
@@ -387,5 +352,3 @@ def test_a_path_traversal_style_value_written_by_the_box_anywhere_in_the_run_dir
     landed = sorted(p.relative_to(ep) for p in ep.rglob(S.run_end_name()))
     assert [str(p) for p in landed] == [f"worlds/b/{S.run_end_name()}"], (
         f"the feature's write landed at {landed} — a path derived from box-written content")
-
-

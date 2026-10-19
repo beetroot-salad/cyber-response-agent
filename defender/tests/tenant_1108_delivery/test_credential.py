@@ -1,8 +1,3 @@
-"""Bearer transport uses sealed memory, never ambient helpers, prompts or disk files.
-
-Real smart-HTTP git checks fetch/push, failures, URL rewrites, clone hooks and secret leakage.
-Legacy credential files are ignored sentinels: the only token source is explicit Vault HTTP.
-"""
 from __future__ import annotations
 
 import base64
@@ -349,13 +344,6 @@ def _secrets(token):
 
 
 def test_the_credential_never_rides_in_a_process_argument_or_environment(http_repo, tmp_path):
-    """Flow 5 (ruling: never in an environment, never in argv, never a second file, `open()`
-    the single reader): the token never appears in a spawned process's arguments (any local
-    user reads them in `/proc/<pid>/cmdline`), as a `-c http.extraHeader`, an inline helper or
-    a URL, nor in the environment any spawned process is given or inherits; plain, as
-    `bot:<token>` or base64; across publish, finish, a retained deliver and a revert. How the
-    helper does receive it is not pinned. An audit hook sees every spawn; its positive
-    control comes first."""
     spawns = _Spawns()
     with spawns:
         subprocess.run([sys.executable, "-c", "pass"], check=True,
@@ -380,15 +368,8 @@ def test_the_credential_never_rides_in_a_process_argument_or_environment(http_re
     assert spawns.carrying(_secrets(TOKEN)) == []
 
 
-
-
 def test_a_url_rewritten_to_another_server_gets_neither_the_token_nor_a_prompt(
         http_repo, spies, rewritten):
-    """Flow 5 (orchestrator ruling): the helper answers only for the protocol, host and port
-    of the parsed forge address, so git traffic rewritten to another server carries no
-    credential there; and with no answer, no prompt program runs (`GIT_ASKPASS` emptied,
-    which also silences `core.askPass` and `SSH_ASKPASS`). The publish succeeds (an
-    implementation that does not follow the rewrite) or refuses, never hangs."""
     log = _armed(http_repo, spies)
     d = delivery(http_repo, ForgeHTTP())
     _, error, hung = bounded(d.publish, seconds=60)
@@ -420,11 +401,6 @@ print(json.dumps(out))
 
 
 def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
-    """Flow 5, `GIT_TERMINAL_PROMPT=0`: run where a terminal exists. A process whose session
-    has a real pseudo-terminal as its controlling terminal publishes through the rewritten
-    URL (the helper has no answer, no prompt program is configured), so git's next step
-    would be its terminal prompt. Nothing is ever written to that terminal and the publish
-    ends (refused, or done without the rewrite) instead of waiting for input."""
     tenant = http_repo[0]
     # This process keeps the terminal's other end open throughout, so reading it never ends
     # early (a terminal nobody holds reads as closed before the child has opened it).
@@ -504,10 +480,6 @@ exit 0
 
 
 def test_network_git_runs_no_hook_of_the_clones(repo, tmp_path):
-    """C4 / O-E: network git runs with `core.hooksPath=/dev/null`, so no hook of the clone's
-    runs while the token is within reach: `pre-push` never runs, nor `reference-transaction`
-    under a fetch or a push, across publish, a batch, finish, a retained deliver and a
-    revert. Positive control: the clone's own fetch and push run both hooks."""
     tenant, remote = repo[0], repo[1]
     clone = tenant.knowledge
     log = tmp_path / "hooks.log"
@@ -545,10 +517,6 @@ def test_network_git_runs_no_hook_of_the_clones(repo, tmp_path):
 
 
 def test_delivery_needs_no_optional_python_linux_exports(http_repo):
-    """Standalone Python's build headers can omit memfd/seal exports even on a Linux host
-    that supports them. A later drain must still authenticate and deliver; no credential
-    channel is replaced with a disk file. Remove those optional names in the child only.
-    """
     remote = http_repo[1]
     writer = delivery(http_repo, ForgeHTTP())
     batch = writer.start_batch("portable", lanes=LANES)

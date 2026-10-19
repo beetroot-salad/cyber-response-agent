@@ -76,11 +76,6 @@ def _above_guard_row(seq: int, marker: str, **overrides) -> dict:
 
 
 def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
-    """O3/D1 — one lead with a real row and two sentinel rows (an above-guard rejection, and a
-    `∅.bash-shim` row written through the REAL writer `append_query_row` exactly as the gather
-    bash lane writes it, its model-authored shell text in `params.command`), each row carrying
-    its own ASCII marker: the real row's marker is in the section, neither sentinel's is, and
-    neither sentinel id's ASCII tail is."""
     _lead_file(tmp_path, "GOAL_MARKER")
     _lead_file(tmp_path, "GOAL_ONLY_TRIPS", lead_id="l-002")
     _table(tmp_path, [
@@ -89,9 +84,6 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         _above_guard_row(0, "ONLYTRIPS_PARAMS_MARKER", lead_id="l-002"),
     ])
     shell = "cat gather_raw/l-001/0.json | SHIM_SHELL_MARKER --unnest"
-    # The writer allocates its seq from the run's state (#1235). A run holds rows it did not
-    # write only as a branch sibling's inherited prefix, so the hand-written table is handed to
-    # the state the way seeding hands it (`inherit_rows`, round 2) — no file is read into it.
     from defender._io import read_jsonl_rows
     from defender.runtime.run_state import RunState
 
@@ -162,11 +154,6 @@ def _expected_query(seq: int, params: dict, **overrides) -> dict:
 
 
 def test_o2_every_joined_lead_reaches_the_questioner_in_joineds_order(tmp_path):
-    """O2 — five leads on one table, laid out so `joined()`'s order (ran leads by first-seen row,
-    then queryless lead files, then orphans) differs from BOTH the table's order and the lexical
-    one: `l-003` has rows but no lead file (an orphan, first in the file), `l-002` and `l-001`
-    ran, `l-000` has a lead file and no rows, `l-004` has no file and only a sentinel row (an
-    orphan the render must keep with no queries)."""
     _lead_file(tmp_path, "GOAL_A", lead_id="l-001")
     _lead_file(tmp_path, "GOAL_B", lead_id="l-002", provenance="PROVENANCE_MARKER")
     _lead_file(tmp_path, "GOAL_QUERYLESS", lead_id="l-000")
@@ -255,13 +242,6 @@ def _nested_bomb(run_dir: Path) -> Path:
 def test_o4a_the_surface_absorbs_a_run_dirs_content_and_the_shipped_path_shows_what_survived(
     tmp_path, capsys,
 ):
-    """O4a — `joined()` absorbs a missing run dir, a non-JSON table and a directory at the table's
-    path as `[]`, a row nested past `_io.JSON_NESTING_LIMIT` as one skipped row, and a numeric
-    column past an `int` (`1e400` decodes to `inf`; `int(inf)` is an `OverflowError`, which no
-    arm named) as the column's default — each silently, nothing on stderr — and the shipped path
-    over it (`_joined_leads` through `questioner_leads`) shows the questioner exactly what
-    survived: nothing for the first three, the bomb's lead with `queries: []`, the overflow's
-    row at `seq: 0`."""
     healthy = tmp_path / "healthy"
     _lead_file(healthy, "kept")
     _table(healthy, [_searchable_row(0)])
@@ -321,13 +301,6 @@ def launcher_roots(tmp_path, monkeypatch):
 
 
 def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, launcher_roots):
-    """M2, and O1/O3 at the shipped surface — the real launcher (`cli.main`, every seam from the
-    #1224 harness `_spec1224`, a recording `FakeAgent` as the questioner) over a source run
-    whose table holds the harness's primed capture, a real row with markers in `params`,
-    `raw_command` and `payload_path`, and an above-guard sentinel with its own `params` marker."""
-    # #1224: the launcher's pre-flight replays the source run's captured calls through each
-    # world's live oracle, over `_spec1224`'s fixture tenant and estate: one captured call,
-    # which the scripted oracle serves unchanged so every fact world calibrates.
     answer = {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]}
     est = S.estate(tmp_path)
     _base, src = S.source_run(
@@ -351,11 +324,6 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     assert rc == 0, "the episode did not complete cleanly"
     assert questioner.prompts, "the questioner was never called"
     prompt = questioner.prompts[0]
-    # Anchored on the title AND its FRAME: the host title line directly followed by a frame
-    # open tag is the one frame this section is (#1234 A10: the title is host text outside the
-    # frame, the body alone inside it), so host text that happened to mention the title, or a
-    # reordered frame, cannot move the slice onto another section and turn every negative
-    # vacuous. The slice runs to that frame's own close tag, on the message's salt.
     opened = re.compile(rf"\n## {re.escape(SECTION_TITLE)}\n<run-([^>\n]+)-{UNTRUSTED_TAG}>\n")
     found = list(opened.finditer(prompt))
     assert len(found) == 1, "the leads section does not open exactly one frame"
@@ -378,9 +346,6 @@ def test_m2_the_launcher_hands_the_questioner_the_named_projection(tmp_path, lau
     # rows, so their absence from the WHOLE prompt says no second path carried them either.
     for dropped in ("SENTINEL_PARAMS_MARKER", "RAWCMD_MARKER_1", "PAYLOADPATHMARKER1"):
         assert dropped not in prompt, f"{dropped!r} reached the prompt outside the leads section"
-    # And the section IS the named projection, not a re-rendering of it: the dicts the render
-    # returns for this source, rendered the way `_capture_sections` renders them, are the
-    # section byte for byte.
     rendered = titled_section(SECTION_TITLE, _questioner_leads(src), salt=salt, tag=UNTRUSTED_TAG)
     assert section == rendered, \
         "the launcher's section is not the render's own output"

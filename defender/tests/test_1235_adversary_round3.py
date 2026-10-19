@@ -39,15 +39,7 @@ from defender.tests.test_budget_seams_631 import ScriptedModel, _run_dir, drive_
 LEAD = "l-001"
 
 
-# ======================================================================================
-# O3: lead-0's gate and the hooks agree where the wall clock leads, and while an
-# oracle turn is open.
-# ======================================================================================
-
 @pytest.mark.parametrize(("wall_back", "mono_back", "credited", "open_for", "killed"), [
-    # #1255 ("Time") RETIRES `wall-clock-ahead-of-the-monotonic` (1000, 0, 0, None, True): it
-    # pinned `max(wall delta, monotonic delta)` — 1000 s on the wall clock and ~0 on the
-    # monotonic one counted as spent. The run clock is the only source now.
     pytest.param(1000, 1000, 0, 990, False, id="an-oracle-turn-open-now"),
 ])
 def test_lead_zeros_gate_agrees_with_the_hooks_on_the_rest_of_the_clock(
@@ -64,10 +56,6 @@ def test_lead_zeros_gate_agrees_with_the_hooks_on_the_rest_of_the_clock(
         "lead-0's budget gate disagrees with the budget hooks on the run's clock: "
         f"hooks kill={hook}, lead-0 kill={not hook}")
 
-
-# ======================================================================================
-# O2: GATHER is enforced too.
-# ======================================================================================
 
 _LIMITS = {**DEFAULT_LIMITS, "max_tool_calls": 50, "wall_clock_timeout": 3600,
            "grace_seconds": 600}
@@ -86,10 +74,6 @@ def test_an_enforced_gather_whose_deps_carry_no_state_raises(tmp_path):
                 agent_id="gather:l-001", state=carried)
     assert carried.budget_snapshot()["tool_calls"] == 1
 
-
-# ======================================================================================
-# O2: the raise precedes the call.
-# ======================================================================================
 
 def _drive_with_box(defn, run_dir: Path, turns, *, limits, enforce: bool, state, box):
     """`test_budget_seams_631.drive_agent`, with the box injected so the test sees whether the
@@ -128,10 +112,6 @@ def test_an_enforced_role_with_no_state_raises_before_its_first_call_runs(tmp_pa
     assert len(box.calls) == 1, "the control: the carried call never reached the box"
 
 
-# ======================================================================================
-# O7: lead_rows hands out the stored rows, no copy.
-# ======================================================================================
-
 def test_lead_rows_hands_out_the_stored_rows_not_copies(tmp_path):
     """O7."""
     _run, state = _bare_run(tmp_path)
@@ -141,10 +121,6 @@ def test_lead_rows_hands_out_the_stored_rows_not_copies(tmp_path):
     assert all(a is b for a, b in zip(first, second, strict=True)), \
         "lead_rows copied each row on every read"
 
-
-# ======================================================================================
-# O6: the boundary is the boundary, on both of its branches.
-# ======================================================================================
 
 def _store_down(case_id: str, run_dir: Path):  # noqa: ARG001
     raise OSError("adv3: no store")

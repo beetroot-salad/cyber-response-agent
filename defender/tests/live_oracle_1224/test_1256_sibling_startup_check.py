@@ -1,40 +1,3 @@
-"""#1256 O-9 — a branch sibling runs the same startup check over its OWN resolved settings.
-
-The design (#1256 r3, decided D2): a sibling resolves its tenant at its own start and runs the
-startup check there; a system its settings do not configure is down in that sibling even if the
-source run's capture holds answers for it — serving captured answers for a system the tenant
-cannot reach would make the world disagree with its own settings. (It arises only when settings
-changed between the source run and the branch.)
-
-THE PATH DRIVEN IS THE SIBLING'S OWN, minus the process and the box: `run._resolve_run_tenant`
-resolves the tenant at the sibling's start (`dispatches_lead_zero=False`, as `run.main` does for
-an `--episode` run); `run._world_seams` settles the world's oracle side; `run._drive_investigation`
-builds the `WorldRegistry` over the checkout's roster with that tenant and the source run's
-pre-branch keys, exactly as `run.main`'s lifecycle does, and hands it to its `investigate` seam,
-which here runs the REAL driver (`_replay_harness.drive`, `resume=` the `BranchSpec` the world's
-manifest names) with scripted models. The source run is `_branch_947.planted_source` — a snapshotted fixture
-run a branch may legally be taken from — and the world is the episode's control world (no facts),
-whose every call is answered from the family's base recording when the recording holds it
-(`passthrough`, no oracle turn, no provider call).
-
-THE CAPTURE holds an answer for `cmdb.get-host {host: web-1}` carrying `CAPTURE_MARK`. The control
-sibling (cmdb configured) is answered from it — the mark reaches the gather agent and the world
-ledger records the call — so the channel can show a served capture. The down sibling (cmdb's
-`config.env` loses `CMDB_URL_BASE` after the source run, before the sibling starts) must not be:
-the mark reaches no agent, the world ledger records no cmdb call, the run writes no cmdb row, the
-breaker is charged nothing, and the agent is told cmdb is not configured and why. The lead is
-dispatched on elastic (configured in both siblings), so the gather agent runs in the down sibling
-too and the resumed run's surfaces can be read: its system index and its `list_verbs(cmdb)`
-answer carry cmdb's down status (the design's resume non-obligation), and its cmdb call is
-refused.
-
-O-8 x O-9 — a sibling whose EVERY granted system is down at its own start is refused at that
-start like a fresh run (O-8), naming each system and its reason. That arm drives the sibling's
-whole entry (`run.main --episode E --world b --tenant T`, the #1107 resume path) with recording
-seams (`_spec1107.RunRecorder`): the refusal must come before the sibling's run is made and
-before its lifecycle (where the world that would answer from the capture is built), and the
-episode's recordings and run container are left as they were.
-"""
 from __future__ import annotations
 
 import re
@@ -179,9 +142,6 @@ def _cmdb_query_rows(sib: dict[str, Any]) -> list[dict]:
 
 
 def test_o9_a_sibling_judges_its_own_settings_not_the_captures(tmp_path: Path) -> None:
-    """A system configured when the source ran but not at the sibling's start is down in that sibling: its call is refused without being answered from the source run's capture, the agent is told 'not configured' and why, and nothing is charged. The same sibling with the system configured is answered from the capture.
-
-    The resumed sibling's surfaces carry the status (the design's resume non-obligation: "the rebuilt gather index, `list_verbs`, and dispatch refusals carry the down status"; adversary A3): the lead's first prompt — the system index the resumed run builds — and its `list_verbs(cmdb)` answer each name cmdb not configured with the dropped key. In the configured sibling neither does, and `list_verbs(cmdb)` lists cmdb's verbs."""
     knowledge, accepted = _plant_tenant()
     store, source_dir, _session, path_ids = planted_source(
         tmp_path / "source", investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"))

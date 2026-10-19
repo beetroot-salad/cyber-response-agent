@@ -32,11 +32,6 @@ pytestmark = pytest.mark.e2e
 
 MIRROR_ENV = "DEFENDER_RUN_VISUALIZATIONS_DIR"
 PAGE = "runtime.html"
-#: Trace rows the renderer is OBSERVED to crash on (probed against `render_runtime_page`), each
-#: with the exception class it raises there and a fragment of that exception's message: real bad
-#: inputs through the real renderer, not planted exceptions. TWO CLASSES on purpose — a step
-#: whose catch named only the class one planted row happens to raise (`except (AttributeError,
-#: OSError)`) passes a single-row suite while an other-shaped crash still escapes `run.py main`.
 CRASHING_TRACE_ROWS: dict[str, tuple[dict, str, str]] = {
     # `_stats`: `(e.get("message") or {}).get(...)` on a string.
     "message-not-an-object": (
@@ -69,11 +64,6 @@ def _renderer():
     from defender.scripts.visualize import visualize_run
 
     return visualize_run
-
-
-# ---------------------------------------------------------------------------------------
-# The handle's backend, observed: a pass-through recorder on the handle's own `io=` seam
-# ---------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -208,11 +198,6 @@ def _make_renderer_unimportable(monkeypatch) -> None:
         from defender.scripts.visualize import visualize_run  # noqa: F401
 
 
-# ---------------------------------------------------------------------------------------
-# O1 — the page is saved through the run's own handle
-# ---------------------------------------------------------------------------------------
-
-
 def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_handle(tmp_path):
     """O1 (and M1)."""
     vr = _renderer()
@@ -316,24 +301,11 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
     assert record.read_text(encoding="utf-8") == page
 
 
-# ---------------------------------------------------------------------------------------
-# O2 / S1 — production writes nothing outside the run's records; dev writes only the copy
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# O4 / O5 — VisualizeFailed means the record was not written; a copy failure is a warning
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("fault", ["unwritable-destination", "no-destination"])
 def test_1110_o4_o5_a_failed_copy_is_a_warning_not_a_failed_render(
         tmp_path, monkeypatch, caplog, run_visualizations_dir, fault):
     """O4/O5 under `dev`."""
     run_dir = driven_run(tmp_path)
-    # The drive that made the run takes production's unboxed mode (#1255 C6), whose opt-out
-    # logs a WARNING; it is the drive's, not the page step's. Counted from here, every
-    # logger's warnings are the page step's.
     caplog.clear()
     run = tenant_run(run_dir)
     monkeypatch.setenv(_env.DEPLOYMENT_ENV, "dev")
@@ -462,16 +434,6 @@ def test_1110_o4_a_record_write_the_handle_refuses_is_visualize_failed(tmp_path,
     _assert_record_written(run_dir)
 
 
-# ---------------------------------------------------------------------------------------
-# O6 — an unrecognised deployment: production, loudly, never fatal
-# ---------------------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------------------
-# O7 — the run's exit code survives a genuine renderer crash
-# ---------------------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize("crash", sorted(CRASHING_TRACE_ROWS))
 def test_1110_o7_run_main_exits_0_over_a_run_whose_renderer_crashes(
         tmp_path, entrypoint_env, caplog, crash):
@@ -504,11 +466,6 @@ def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
     _assert_a_load_failure(logged, run_dir)
     assert not RunPaths(run_dir).runtime_html.exists(), (
         "the page record exists — the renderer was importable after all, so the 0 proves nothing")
-
-
-# ---------------------------------------------------------------------------------------
-# O8 — the standalone re-render keeps working over a finished run
-# ---------------------------------------------------------------------------------------
 
 
 def _standalone(tenant: str, run_dir: Path, **env: str) -> subprocess.CompletedProcess:

@@ -142,10 +142,6 @@ def test_m6_underscore_and_malformed_skipped_not_raised(tmp_path, capsys):
 
 
 def test_m6b_undecodable_bytes_are_skipped_not_raised(tmp_path, capsys):
-    """demand: M6, decode half — "one bad file never aborts the manifest" has to cover UNDECODABLE
-    bytes too: ``read_text()`` raises ``UnicodeDecodeError``, which is a ``ValueError`` and NOT
-    an ``OSError``, so an except tuple naming only ``(FrontmatterError, OSError)`` lets it escape
-    and take the whole curator drain down with it."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     _findings_lesson(corpus, "good")
@@ -169,9 +165,6 @@ def test_m7_empty_missing_or_nondir_is_empty(tmp_path):
 
 
 def test_m8_adversarial_value_cannot_forge_a_section(tmp_path):
-    """demand: M8 — a frontmatter value carrying ``\\n## other`` / ``\\n---`` / YAML metachars is
-    re-emitted as an indented quoted scalar under its own slug; it cannot forge a sibling ``## ``
-    header or a ``---`` break. Positive control: a genuine slug IS a real top-level ``## `` header."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     (corpus / "adv-lesson.md").write_text(

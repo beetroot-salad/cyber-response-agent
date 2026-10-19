@@ -92,9 +92,6 @@ def _write_grade_over(copy: E.Episode) -> None:
                 for world in family.non_control_worlds(manifest)]
     doc = E.sample_grade()
     doc["worlds"] = rows
-    # #1105 PR 2 (declared change 4/J3): the page's roster is the manifest's and the record's
-    # labels, no longer a listing of `runs/`, so the two spare worlds (no manifest entry) are
-    # named by rows of their own to keep their sections.
     doc["worlds"] += [E.ungradable_row(label) for label in (LINKED_WORLD, DANGLING_WORLD)]
     E.write_judge(copy.dir, doc)
 
@@ -114,14 +111,6 @@ def _every_arm(tmp_path: Path) -> tuple[E.Episode, E.Episode, E.Episode]:
 
 
 def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identically_from_two_roots(tmp_path):
-    """The fixture plants, per copy after copy_episode: read/parse/shape per episode-root reader
-    (outcome.yaml undecodable, samples.yaml torn, provenance.json the wrong shape); an absent
-    ledger and an aliased ledger; a SYMLINKED worlds/<w> and a DANGLING worlds/<w'> (two spare
-    worlds rostered by their run dirs); an OSError-shaped arm (a link) at timing.json and a hard
-    link at the graded world's investigation (C-02, C-03: scratch target, RF-J5); a link at
-    another world's report; a symlinked gather_summaries/ in one world and a symlinked summary
-    in another; judge.yaml written from read_world's rows over that tree (each planted world's
-    reader sentence)."""
     built, one, two = _every_arm(tmp_path)
     E.render(one)
     E.render(two)
@@ -144,15 +133,6 @@ def test_1049_an_episode_with_every_arm_planted_renders_no_root_and_byte_identic
 
 
 def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
-    """For the tree d-25 plants, each slot says its refusal with the relative name: the three
-    records (outcome.yaml the "no record" state naming its refusal, samples.yaml /
-    provenance.json 'unreadable'), the timing stage (timing.json), the world report
-    (worlds/<w>/report.md), the investigation (worlds/<w>/investigation.md), the ledger note
-    ('absent' for the absent one, 'unreadable … served/<token>.<label>.jsonl …' for the aliased
-    one — and for a symlinked served/, rendered over a second tree), the chain summary
-    (gather_summaries/<lead>.md), the findings row's ungradable sentence, AND for the symlinked
-    and the dangling world dirs every archive/leads slot naming worlds/<w>/<leaf> — one slot's
-    refusal never aborting another's (the page renders whole)."""
     _built, one, _two = _every_arm(tmp_path)
     page = E.render(one)
     records = page.text_of("sec-records")
@@ -203,9 +183,6 @@ def test_1049_every_planted_refusal_is_said_in_its_own_slot(tmp_path):
         assert leads.count(R.ALIAS) == 1, (label, leads)
         assert "not archived" not in leads, (label, leads)
     linked_leads = _leads(page, LINKED_WORLD)
-    # NEVER FOLLOWED: the linked world's block names the directory's own refusal and rosters
-    # nothing beneath it — the target tree's leads (`l-001`, the control's) are not this
-    # world's, and the only way to name them was to have read through the link.
     assert f"worlds/{LINKED_WORLD}" in linked_leads, linked_leads
     assert "gather_summaries/l-001.md" not in linked_leads, "the leads under a symlinked world dir were read through the link"
     assert str(one.dir) not in page.raw
@@ -255,11 +232,6 @@ def _grade_record_unreadable(page: E.Page, episode_dir: Path) -> str:
 
 
 def test_1049_result_event_reads_the_tool_trace_through_the_jsonl_twin(tmp_path):
-    """_result_event walks runs/<id>-<w>/tool_trace.jsonl under the EPISODE bind through the twin
-    and answers 'absent' for no tool_trace.jsonl ('no cost recorded'), 'refused' for an alias or
-    a directory at its name ('no result event (refused)'), 'none' for rows without a result ('no
-    result event'), 'ok' otherwise (the cost) — with no entry_present ahead (state words, never
-    a sentence; an AST census of its body names no entry_present and it takes no Path root)."""
     page = _page()
     fn = R.function_def(R.parsed(page._result_event), "_result_event")
     assert "entry_present" not in R.called_names(fn), R.called_names(fn)
@@ -290,15 +262,6 @@ def test_1049_result_event_reads_the_tool_trace_through_the_jsonl_twin(tmp_path)
 
 
 def test_1049_investigation_present_and_archived_are_read_off_the_readers_states_not_a_stat(tmp_path):
-    """A world archived without investigation.md renders 'investigation.md: not archived' from the
-    investigation read's absent state, with no facts_error (the entry_present is gone); a world
-    with no worlds/<w> directory renders every archive leaf as its own 'not archived' arm
-    ('report.md: not archived' AND 'investigation.md: not archived') and its leads block from
-    the same absent states (the artifact_dir(world_dir) screens are gone; the whole-section word
-    is said only as a derivation of all leaves absent); a symlinked worlds/<w> renders every
-    archive leaf's refusal naming worlds/<w>/<leaf>, its leads block the directory's own refusal
-    once (nothing beneath a link is rostered), and no 'not archived' anywhere in its section or
-    block."""
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "investigation.md").unlink()
     shutil.rmtree(ep.world(E.PASSTHROUGH_WORLD))
@@ -334,16 +297,10 @@ def test_1049_investigation_present_and_archived_are_read_off_the_readers_states
 # D-V5 — the closed list of listing sites
 
 
-
 # s-66 — the timing slot tells absent from unreadable from no stages
 
 
 def test_timing_json_present_empty_versus_empty_steps_versus_absent(tmp_path):
-    """The page's _read_timing derives present from `rows is not None` (closing F8/g20: today
-    present=bool(rows) conflates {"steps": []} with absent): an absent timing.json is the absent
-    slot ('no timing record'), a zero-byte file the unreadable slot ('timing.json … not a JSON
-    document', root-free), and {"steps": []} a present record whose caption says no stages —
-    neither 'no timing record' nor 'unreadable'."""
     ep = E.sample_episode(tmp_path)
     absent = E.render(ep).text_of("sec-stages")
     assert 'no timing record' in absent, absent

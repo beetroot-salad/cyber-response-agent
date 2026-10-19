@@ -76,15 +76,7 @@ def test_releasing_a_claim_or_a_delivery_survives_an_ordinary_unlink_failure(tmp
     state.delivered(PendingDelivery("a-b1", "a/b1", "b1"))
 
 
-# ---------------------------------------------------------------------------------------------
-# #1199 review: dissolved, not patched
-# ---------------------------------------------------------------------------------------------
-
-
 def test_rotate_drops_a_keyless_row_that_already_carried_attempts(tmp_path):
-    """A keyless row is dropped by its content as the batch read it, never by guessing which of a
-    stamped copy's fields were stamps: a row that arrived carrying `attempts` (an operator
-    re-queuing a flat dead letter) leaves like any other."""
     paths = make_paths(tmp_path)
     state = LearningState.open(paths)
     read = [{"x": 1, "attempts": 2}, {"y": 1}]
@@ -95,8 +87,6 @@ def test_rotate_drops_a_keyless_row_that_already_carried_attempts(tmp_path):
 
     rows, _bad = state.rows_report(FINDINGS)
     assert rows == []
-
-
 
 
 def _curator_world(tmp_path):
@@ -154,5 +144,3 @@ def test_an_ordinary_failure_recording_a_contained_curator_fault_does_not_escape
     drains._drain_one_curator(paths, full, trigger_author, FINDINGS,
                               "LEARNING_AUTHOR_THRESHOLD", "author", "pending", box=None)
     assert any("NOT written" in r.getMessage() for r in caplog.records)
-
-

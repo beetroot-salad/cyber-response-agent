@@ -47,15 +47,6 @@ def _catalog(tmp_path: Path) -> Path:
 
 
 def test_synthesize_drafts_refuses_an_undeclared_system(tmp_path):
-    """`synthesize_drafts` writes NOTHING for a lead whose `query_id` names a system the
-    tree does not declare — no file, and no directory either.
-
-    The directory is half the finding: the write is `draft.parent.mkdir(parents=True)` plus
-    `draft.write_text`, so a phantom `<catalog>/fakesys/_draft/` exists on disk the moment the
-    call is made, and G4 then shows the commit gate committing it. Both surfaces are bound:
-    the returned list is empty AND nothing named `fakesys` exists anywhere under the catalog
-    afterwards.
-    """
     cat = _catalog(tmp_path)
     created = synthesize_drafts(
         [_lead("fakesys.hunt-creds", system="fakesys")],
@@ -64,27 +55,10 @@ def test_synthesize_drafts_refuses_an_undeclared_system(tmp_path):
     assert created == []
     assert not (cat / "fakesys").exists()
     assert list(cat.rglob("*fakesys*")) == []
-    # Nothing at ALL was written, rather than nothing under one expected name: since #917's
-    # review the basename is a digest, so an assertion spelling `hunt-creds.md` would pass
-    # against a draft that had been minted under its derived name and would be checking
-    # nothing. `rglob("*.md")` is what the catalog fixture seeded and no more.
     assert sorted(p.name for p in cat.rglob("*.md")) == ["proc-tree.md"]
 
 
 def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
-    """The screen refuses undeclared NAMES, not drafting.
-
-    `draft_synthesis_refuses_undeclared`'s positive control on the same address: a lead whose
-    coined id names a DECLARED system still mints its `_draft/` skeleton, with the id in its
-    frontmatter, so a screen that refused everything would satisfy the negative and silently
-    retire the whole draft lane.
-
-    THE TWO ASSERTIONS THIS RE-ENCODES (G9/R7, and phase C settles that they were WRONG under
-    U1 rather than merely flipped): `test_lead_author_synth.py`'s `stub-cmdb.network-map` and
-    `custom.tagged` positive controls both name prefixes no adapter and no marker declares, so
-    under U1 they must assert REFUSAL. Both are driven here beside the declared case, so the
-    corrected intent survives independently of what happens to that file.
-    """
     cat = _catalog(tmp_path)
     created = synthesize_drafts(
         [_lead("elastic.hunt-creds")], **drafts_under(cat), catalog=[], systems=DECLARED,
@@ -109,33 +83,6 @@ def test_synthesize_drafts_still_mints_for_a_declared_system(tmp_path):
 def test_discover_system_drafts_hands_out_no_undeclared_directory(
     tmp_path, monkeypatch, capsys,
 ):
-    """`discover_system_drafts` hands the agent no work under a directory the tree does not
-    declare — the FOURTH composition site (FK-4, §7).
-
-    Today it walks EVERY child of the skills tree and emits `{"system": <dirname>,
-    "skill_path": "defender/skills/<dirname>/SKILL.md"}` with no membership filter (C29,
-    executed), so a `_draft/` under an undeclared directory becomes work the agent is
-    INSTRUCTED to do and the commit gate then refuses — an instructed-then-rejected loop with
-    no retirement path. It is handed this lane's UNION (NF2) and skips undeclared directories.
-
-    VACUOUS ON TODAY'S TREE by construction (C22: only `elastic/_draft` and `cmdb/_draft`
-    exist, and both are declared), so the fixture is CONSTRUCTED — a `gather/_draft/` one
-    `mkdir` from live — which is what makes the demand real rather than green by accident. The
-    declared system's own draft in the same walk is the positive control: a filter that
-    returned nothing would satisfy the refusal and silently retire the lift lane.
-
-    AND THE REFUSAL IS VISIBLE HERE TOO (phase F, closing the blind reader's Q7 gap). FK-3
-    resolved that O3 reaches every composition site, and FK-4 then GREW that census from three
-    sites to four — this one. Nothing pinned a trace at it: a skipped directory left only "no
-    work was handed out", which from a queue's outside is indistinguishable from a tree that
-    had none. The skipped name is named on a line of its own, `repr`'d for the reason
-    `resolver_refuses_shape_anomalous_names` gives (a name may be the empty string), and the
-    control is the SAME walk over the SAME tree with the name declared: nothing is skipped and
-    no such line appears, so the channel is shown to distinguish rather than firing on every
-    walk. The commit gate's own raise is the other half of that gap, and it is pinned where
-    the raise happens — `undeclared_names_reported`'s site-2 arm asserts the message carries
-    the undeclared name rather than an unrelated reason.
-    """
     monkeypatch.setenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", "1")
     repo = seed_tree(tmp_path, adapters=("elastic",), markers=("elastic",), skills=("elastic",),
                      catalog=("elastic",), non_systems=("gather",))

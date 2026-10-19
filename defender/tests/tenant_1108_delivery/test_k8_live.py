@@ -1,22 +1,3 @@
-"""K8 (amendment 2's deferred claim, an executed check in P3's contract): a host-made copy
-under `<T>/` is a bind source the daemon resolves, under docker-outside-of-Docker included.
-
-Live only (`pytest.mark.live`; CI's `-m "not live"` never runs it). It needs a reachable
-daemon, `DEFENDER_K8_DATA_ROOT` naming the host's real data root (in the devcontainer,
-`/workspace/.defender-data`; the suite's autouse fixtures replace `DEFENDER_DATA_ROOT` itself
-with a temporary folder for every test, so it cannot carry this), this tree's box image and
-the box runtime registered; otherwise it skips, naming what is missing, as it does when this
-tree itself is not on a path the daemon shares (its `code` mount could not bind, whatever the
-copy's location). Unlike the other live box suites it does not skip under DooD: DooD is the
-topology K8 asks about. It writes only a fresh `k8-<random>` folder there, and removes it.
-Run it with:
-
-    DEFENDER_K8_DATA_ROOT=/workspace/.defender-data PYTHONPATH="$PWD" \\
-        defender/.venv/bin/python -m pytest -m live \\
-        defender/tests/tenant_1108_delivery/test_k8_live.py
-
-Completion: it passes (a box started on the copy, the copy's token read back from inside the
-box). A `BoxFault` naming the bind (C46/DooD) means the copy location must move before P4."""
 from __future__ import annotations
 
 import dataclasses
@@ -60,9 +41,6 @@ def _live_spec():
 
 
 def test_a_host_made_copy_under_the_tenant_folder_binds_into_a_real_box(monkeypatch):
-    """K8: a copy made under `<data root>/<T>/drafts/<batch>/`, mounted `staged`
-    beside the `code` tree, starts a real box: the token the start planted at the copy's
-    root is read back from inside, so the daemon bound this very folder. Nothing is left."""
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     data_root, spec = _live_spec()
     tenant_dir = data_root / f"k8-{uuid.uuid4().hex[:12]}"

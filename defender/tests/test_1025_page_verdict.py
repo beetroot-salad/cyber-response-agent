@@ -1,6 +1,3 @@
-"""#1025 — the verdict section and the findings section: the band, the lede, the four tiles, the per-
-sibling cards, the queue accounting, and every finding shown exactly once with the enqueue's own
-disposition."""
 from __future__ import annotations
 
 import re
@@ -126,11 +123,6 @@ def _live996(tmp_path: Path, **kw) -> E.Episode:
     return ep
 
 
-# ---------------------------------------------------------------------------------------
-# d16 / d17 / d18 / d19 / d20 / d21 — the band, the lede, the tiles
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_the_lede_lists_family_draw_findings_verbatim_grouped_by_draw_or_opens_with_the_templated_line_when_there_is_no_family_draw(
         tmp_path):
     """Sample: the lede's first line carries the three family findings as `topic: claim` escaped,
@@ -238,9 +230,6 @@ def test_1025_a_not_graded_page_below_the_band(tmp_path):
 def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_stages_and_worlds_and_says_which_world_is_in_progress(
         tmp_path):
     """A launcher-produced episode whose judge pass failed at the enqueue ."""
-    # The handle refuses a root that is not a folder up front (before any draw is paid for),
-    # so the post-draw refusal this scenario needs is the queue's holding folder being a
-    # regular file: the root opens, the draws run, and only the enqueue is refused.
     (tmp_path / "learning-state" / "_pending").write_text("not a directory", encoding="utf-8")
     # One investigator finding per world draw; the family scope refuses a world-scope reply,
     # so the family call completes no draw.
@@ -270,16 +259,8 @@ def test_1025_draw_documents_exist_but_judge_yaml_does_not(tmp_path):
     assert "defender claim" not in page.raw
 
 
-# ---------------------------------------------------------------------------------------
-# d12 / d13 / d14 / d15 / d39 — the findings walk
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_every_finding_across_per_draw_docs_and_family_draws_renders_exactly_once_keyed_world_draw_index(
         tmp_path):
-    """On the sample the page carries exactly 13 `f-<world>-<draw>-<index>` rows, each id once (8
-    defender enqueued, 5 world-author across `no_remote_session/0/4`,
-    `prior_fake_key_precedent/0/4`, `family/0/{0,1,2}`)."""
     ep = E.sample_episode(tmp_path)
     page = render(ep)
     rows = _rows(page)
@@ -395,11 +376,6 @@ def test_1025_a_world_drawn_twice_renders_both_draws_findings_once_each_in_numer
     assert "NON-CANONICAL STEM" not in page.raw
 
 
-# ---------------------------------------------------------------------------------------
-# d22 / d23 / d24 — queue accounting, cards, no synthesis
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_queue_accounting_lists_per_queue_rows_destination_as_recorded_unqueueable_malformed_and_dropped_counts(
         tmp_path):
     """The collapsed details carry "defender."""
@@ -440,11 +416,6 @@ def test_1025_one_card_per_graded_world_with_declared_to_verdict_bucket_and_syst
     live = render(_live996(tmp_path / "live"))
     assert len(_cards(live)) == 1
     assert E.GRADED_WORLD in _cards(live)[0].text()
-
-
-# ---------------------------------------------------------------------------------------
-# J9b–e — identity, stubs, counts, skips, the suffix join
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_a_finding_id_recorded_in_judge_yaml_names_a_world_draw_index_triple_absent_from_every_draw_document(
@@ -538,11 +509,6 @@ def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
     assert not [h for h in page.hrefs if "old-name-before-repair" in h]
 
 
-# ---------------------------------------------------------------------------------------
-# J9f — the unusual rows
-# ---------------------------------------------------------------------------------------
-
-
 def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path):
     """A world finding the pass refused for citing a samples section the record marks `unavailable`
     (pointer assessment."""
@@ -561,19 +527,9 @@ def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path)
     assert "world author" in heading, heading
 
 
-# ---------------------------------------------------------------------------------------
-# J10 / J11 — bound slots, per-draw words, open-vocabulary values
-# ---------------------------------------------------------------------------------------
-
-
 def _class_carries(page: E.Page, word: str) -> list[str]:
     return [n.attrs["class"] for n in page.root.descendants()
             if word.lower() in (n.attrs.get("class") or "").lower()]
-
-
-# ---------------------------------------------------------------------------------------
-# settled — record states the verdict / findings layer branches on
-# ---------------------------------------------------------------------------------------
 
 
 def test_1025_judge_yaml_is_a_symlink_whose_target_is_a_different_episodes_judge_yaml(tmp_path):
@@ -662,10 +618,3 @@ def test_1025_a_gradable_row_whose_draws_never_ran(tmp_path):
     assert any(E.GRADED_WORLD in c.text() for c in _cards(page))
     assert f"tx-judge_{E.GRADED_WORLD}_0_trace" not in page.by_id
     assert not [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]
-
-
-# ---------------------------------------------------------------------------------------
-# The review of PR #1042 — one normalizer on tile 1; the record's own family outcome
-# ---------------------------------------------------------------------------------------
-
-

@@ -67,9 +67,6 @@ def _launch(tmp_path, *, spawn=None, argv_extra=(), oracle=None, verifier=None, 
 
 
 def test_947_launcher_returns_episode_dir_and_status(tmp_path):
-    """The launcher returns a zero status with a fully archived episode dir, and a non-zero one
-    otherwise — leaving the manifest and pre-flight's outcome record on disk either way, so an
-    operator reading the exit status and the directory sees the same answer."""
     rc, _spawn, ep, _message = _launch(tmp_path)
     assert rc == 0
     assert (ep / "family.yaml").is_file()
@@ -113,9 +110,6 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
         agent = T.FakeAgent()
         prepare()
         with pytest.raises(SystemExit):
-            # The role-model preflight is neutralised: each arm has to refuse for the reason it
-            # names, and an uncredentialed host would otherwise satisfy every one of them with
-            # the preflight's own refusal before the check under test was ever reached.
             _cli().main(["--tenant", src.parent.parent.name, src.name, *argv_extra,
                          *T.retired_continuation_argv()],
                         spawn=T.FakeSpawn(), questioner=agent,
@@ -147,12 +141,6 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
 
 
 def test_947_the_step_one_command_line_needs_only_the_source_and_the_branch_point(tmp_path):
-    """#1255 P4 (D1) REVERSES the test that stood here, `..._requires_a_continuation_prompt`:
-    the operator's prompt was "part of the measured instrument" and the parser refused a launch
-    without one. An arm now resumes with no injected message, so a launch names the tenant, the
-    source run and the branch point and nothing else: that request parses, carries the branch
-    point it was given, and the episode id is still derived (not an operator argument). That the
-    prompt is no longer accepted is `test_947_branch_cli`'s demand, not repeated here."""
     base, src = T.runs_base(tmp_path)
     request = _cli().parse_branch_args(["--tenant", src.parent.parent.name, src.name,
                                         str(T.BRANCH_MESSAGE_ID)])
@@ -162,12 +150,6 @@ def test_947_the_step_one_command_line_needs_only_the_source_and_the_branch_poin
 
 
 def test_947_all_siblings_in_one_family_are_launched_from_one_manifest_and_no_prompt(tmp_path):
-    """#1255 P4 (D1) REVERSES `..._share_one_continuation_prompt`: there is no instrument string
-    for a family to share, because the arm is told nothing on arrival. The manifest carries no
-    continuation prompt and no child's command line names one, so a family can only differ in
-    its worlds' answers; the siblings still all name the one manifest (their episode).
-    Positive control: the same manifest carries the family's own fields, and the launch started
-    more than one sibling."""
     import yaml
 
     rc, spawn, ep, _message = _launch(tmp_path)
@@ -285,9 +267,6 @@ def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp
 
 
 def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_record(tmp_path):
-    """A sibling that exited cleanly but has no scrub verdict is never archived, so the judge
-    cannot see it — and it carries its own `not archived` record, the only way the judge
-    counts a world it cannot see toward O5. A verified sibling beside it gets none."""
     outcome = T.mod("learning.branch.outcome")
     T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
@@ -317,9 +296,6 @@ def test_947_agreeing_sibling_stamps_write_the_family_stamp(tmp_path):
 def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path):
     """The family stamp carries its three roles disjointly"""
     ep = T.episode(tmp_path)
-    # The siblings' OWN runs base (`<episode>/runs`, §7 FORK-13), and no container base world
-    # handed to verify (#1105 PR 2: `base_world_id=`), so the stamp carries exactly its three
-    # roles (one handed in adds `base_world_id`, #1106).
     _verify_family(ep, source=T.provenance_record())
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     # #1204: `waived` names the fault kinds the override waived — none, for a clean family.
@@ -332,9 +308,6 @@ def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path
 
 
 def test_947_disagreeing_sibling_stamps_mark_the_episode_incomplete_with_a_reason(tmp_path):
-    """Sibling stamps recording different commits withhold the family's comparability with the
-    reason, and no family stamp is written: the tree moved between the first and last sibling, which is
-    exactly the catch per-process stamps exist for."""
     T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
 
@@ -348,9 +321,6 @@ def test_947_disagreeing_sibling_stamps_mark_the_episode_incomplete_with_a_reaso
 
 
 def test_947_an_absent_or_unreadable_sibling_stamp_marks_the_episode_incomplete(tmp_path):
-    """A sibling stamp that is absent, or present but unreadable, is not an agreeing stamp: the
-    family's comparability is withheld with the reason exactly as for a disagreeing one, and no
-    family stamp is written."""
     T.runs_base(tmp_path)
     for mutate in ("absent", "truncated"):
         ep = T.episode(tmp_path)
@@ -367,9 +337,6 @@ def test_947_an_absent_or_unreadable_sibling_stamp_marks_the_episode_incomplete(
 
 
 def test_947_the_family_stamp_carries_the_resolved_model_per_sibling(tmp_path):
-    """The family stamp compares the resolved MODEL alongside the commit and the scope: each
-    sibling's stamp records the model its own process resolved, and the family stamp carries the
-    agreed value."""
     T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, model="m-1"),
@@ -379,9 +346,6 @@ def test_947_the_family_stamp_carries_the_resolved_model_per_sibling(tmp_path):
 
 
 def test_947_a_cross_model_family_refuses_rather_than_agreeing(tmp_path):
-    """A family whose siblings resolved DIFFERENT models refuses rather than passing with an
-    otherwise agreeing stamp: the model is held constant the way the commit is, so a comparison
-    across two models is never archived as comparable."""
     T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
 
@@ -513,9 +477,6 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
 
 
 def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
-    """Every concurrent sibling fork into the ONE source session store lands: N forks issued
-    together each produce their own session under the source's database, and none is lost to
-    the contention D1 newly manufactures."""
     store_mod = T.mod("runtime.session_store")
     import threading
 
@@ -527,9 +488,6 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
     # #1105 fork S(b): the layout owner hands the store its paths.
     handle = store_mod.open_store(case_id="case-947", sessions=SessionPaths(base))
     sid = handle.new_session(agent_id="main")
-    # A REAL BRANCH POINT. `fork` walks the prefix at `at_message_id` and refuses one holding an
-    # unresolved call, so a fork needs a session with a complete pair in it and the id of that
-    # pair's last row — which is exactly the boundary a sibling resumes from.
     at = handle.append(sid, [S.user_request("investigate the alert"), *S.complete_pair()],
                        agent_id="main")[-1]
     made: list[str] = []
@@ -559,4 +517,3 @@ def test_947_concurrent_siblings_take_distinct_container_names(tmp_path):
     names = {docker.container_name(f"{T.EPISODE_ID}-{w}") for w in T.WORLDS}
     assert len(names) == len(T.WORLDS)
     assert all(name.startswith("defender-run-") for name in names)
-

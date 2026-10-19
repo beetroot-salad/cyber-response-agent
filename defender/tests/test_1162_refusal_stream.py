@@ -1,12 +1,3 @@
-"""#1162 — a command's refusal, and a `check`'s findings, are a message to the person who ran
-it: plain text on stderr, the exit code carrying the verdict. Stdout stays for results a caller
-consumes (and, after #1114, for a service's logs), so nothing here may land on it.
-
-  * `tenant.py check` — a refusal and a finding — and `held_out`'s refusals print on stderr
-    with stdout empty.
-  * A refused path holding a byte that is not UTF-8 is still refused, not a traceback, under a
-    strict-UTF-8 stdout: stderr escapes such bytes on every host, stdout does not.
-"""
 from __future__ import annotations
 
 import shutil

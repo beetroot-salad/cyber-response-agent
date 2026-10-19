@@ -33,17 +33,11 @@ def _companion(disposition: str) -> str:
 # one definition, imported rather than restated
 
 def test_invlang_carries_the_project_vocabulary_not_a_copy():
-    """invlang defines its own schema — its entity types, its relations — but not this. The
-    disposition slot IS the project vocabulary object, so a fourth keyword added at the source
-    reaches the invlang grammar catalog with no second edit, and neither schema can drift."""
     assert vocab.get_enum("disposition") is DISPOSITION_VALUES
     assert set(DISPOSITION_VALUES) == DISPOSITION_ENUM
 
 
 def test_the_slot_order_is_stable():
-    """The slot list is inlined into the runtime's ORIENT prompt. A set's iteration order is
-    not stable across processes, and a prompt that reshuffles between runs is a diff that means
-    nothing to whoever reads it."""
     assert vocab.get_enum("disposition") == (
         "benign", "false-positive", "inconclusive", "malicious", "unresolved",
     )

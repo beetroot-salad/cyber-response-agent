@@ -37,23 +37,12 @@ from defender.tests import _review_bundle
 pytestmark = pytest.mark.e2e
 
 
-# The replays below draft `malicious` and the gate reviews it. They commit it again — the
-# harness binds a hermetic review bundle whose composer finds `holds` (see `_replay_harness`,
-# `review_stages`), so the reviewer runs end-to-end here rather than the replay asserting
-# whatever shape a live provider call happens to fail in.
-
-
 def test_replay_golden_v2sshd(tmp_path):
     run_id = "replay-v2sshd"
     run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
 
     inv_text = (GOLDEN / "investigation.md").read_text()
 
-    # #774/R1: report.md is no longer model-writable — re-recorded against the close tool
-    # (disposition inconclusive; since #992 that spends the review too, replayed here through
-    # the harness's fake review bundle).
-    # #810: investigation.md is landed by `append_block`, main's only writer. Onto an empty
-    # run dir the append IS the create, which is why the golden still reconstructs whole.
     replay = ReplayFn([
         Turn(tool_calls=[("append_block", {"text": inv_text})]),
         Turn(tool_calls=[("close_investigation", {"disposition": "inconclusive"})]),
@@ -91,18 +80,12 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
 
     async def _fake_run_gather(deps, gather_factory, request_limit, request, verb_grant=None,
                                stamp_terminator=None, *, catalog=None):
-        # `stamp_terminator` is the gather-session terminator seam (#826 item 1). This fake
-        # replaces the whole frame, so it stamps nothing — a replayed dispatch has no
-        # terminator to record, and every arm that would call it is one this fake skips.
         return f"[replayed gather summary: lead={request.lead_id} system={request.system}]"
 
     monkeypatch.setattr(  # lint-monkeypatch: ok — boundary fake (see comment above)
         runtime_tools, "_run_gather", _fake_run_gather,
     )
 
-    # #774/R1: the golden trace's report.md write is re-recorded as a close_investigation
-    # call. It reaches a confident (malicious) disposition, which the gate reviews — three
-    # lenses and a composer, all four bound to the harness's hermetic bundle.
     drive(run_dir, run_id=run_id, main=replay)
 
     assert replay.calls == len(turns), \
@@ -131,13 +114,6 @@ def test_replay_full_run_ab3(tmp_path, monkeypatch):
         rows = read_jsonl_rows(RunPaths(run_dir).review_trace(role))
         assert rows, f"the {role} stage left no trace row"
         assert rows[0].get("ok") is True, f"the {role} stage did not answer"
-    # WHICH bundle answered, asked POSITIVELY. A live stage no longer leaves a file of its
-    # own to look for (since #787 it writes through the run's logger under a `review:` agent
-    # id), and the wire log cannot stand in for that file: under
-    # `override_allow_model_requests(False)` a live stage raises INSIDE the model request, so
-    # `_log_request`'s `logger.log` never runs and no `review:` record is written whether or
-    # not the live path was taken. What only the injected bundle can produce is its own canned
-    # reading, on disk, in the lens traces — a live stage there would carry a provider error.
     for lens in ("support", "ablation"):
         trace = RunPaths(run_dir).review_trace(lens).read_text(encoding="utf-8")
         assert _review_bundle.LENS_READING in trace, (
@@ -194,13 +170,6 @@ def test_a_gap_the_review_cannot_measure_overrides_the_confident_close(tmp_path)
     )
 
 
-#: #810 retired the ("write-escape", "write_file", …) arm: main has no verb that takes a
-#: caller-supplied write path, so the escape it drove cannot be EXPRESSED any more, let alone
-#: denied. The property it pinned is stronger now and is asserted directly by
-#: `test_main_cannot_name_a_write_path_at_all` below — a deny bounce would be the wrong oracle
-#: for it, since there is no longer a call to bounce. That was also the only arm carrying an
-#: `escape_name`, so the column went with it rather than staying as a slot every arm passes
-#: `None` to and no assertion ever reads.
 @pytest.mark.parametrize(("label", "tool_name", "args_fn", "reason_substr"), [
     ("adapter-from-main", "bash",
      lambda rd: {"command": "defender-elastic query foo"},
@@ -228,24 +197,6 @@ def test_main_loop_deny_bounces(tmp_path, label, tool_name, args_fn, reason_subs
 
 
 def test_main_cannot_name_a_write_path_at_all(tmp_path):
-    """The successor to the retired `write-escape` deny bounce (#810).
-
-    That arm drove `write_file` at a path outside the run dir and asserted the allowlist
-    refused it. Main no longer HAS a verb that accepts a write path: `append_block` is bound
-    to `<run_dir>/investigation.md` in the handler, so a model that wants to write elsewhere
-    has nothing to say it with. Unreachable beats denied — but only if it is actually
-    unreachable, so this asserts both halves: no path-taking writer is registered, and the
-    one writer that is lands on the transcript and creates nothing else THE MODEL COULD HAVE
-    ASKED FOR — the HOST-WRITTEN exceptions are `run_end.sidecar_path`'s own record
-    (#1047), unconditional beside every run dir and on a path no tool call the model issues
-    can ever name, the run -> case session pointer (#1235 F2), and the scrub verdict
-    (`RunPaths.scrub_verdict`): the harness drives production's unboxed mode (#1255 C6), whose
-    startup fault writes the did-not-run marker beside the run dir before the opt-out takes
-    over.
-
-    Once #1255's staging tree for unboxed runs lands, it may sit beside the run folder too; it
-    then belongs in `host_sidecars` as well, named through `RunPaths` — where it sits is the
-    implementer's call."""
     run_id = "no-write-path"
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
 
@@ -327,9 +278,6 @@ def test_nested_gather_capture(tmp_path):
     assert lead_row.is_file()
     assert "check sshd auth history" in lead_row.read_text()
 
-    # lead-0 (#808) resolves against GOLDEN_AB3 ahead of MAIN's own turn and lands its
-    # own (l-000) row in this same table — scope to the model-driven lead this scenario
-    # is actually about.
     rows = [r for r in read_jsonl_rows(run_dir / "executed_queries.jsonl")
             if r["lead_id"] not in RESERVED_LEAD_IDS]
     assert len(rows) == 1

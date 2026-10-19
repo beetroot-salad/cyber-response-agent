@@ -1,7 +1,3 @@
-"""The model's file tools reach the host through the rooted core: a hard link, a link at the name, a FIFO, a symlinked
-holding folder or a `..` component is refused as a `ModelRetry` (never followed, never a hang), a refused write leaves
-the host file untouched, and plain trees, symlinked repo roots and run dirs behave as before. Real plants only.
-"""
 from __future__ import annotations
 
 import contextlib
@@ -116,9 +112,6 @@ def _refused(call: Callable[[], object]) -> str:
 
 
 def test_read_file_refuses_a_hard_link_to_a_host_file(tmp_path):
-    """The C1 leak: a hard link in the run dir to a file outside every read root. `resolve()`
-    does not see through a hard link, so the gate admits it; the read must refuse it, and the
-    retry must carry no host bytes. Same address, plain file first: it reads as today."""
     deps, run = _main(tmp_path)
     host = _host_file(tmp_path)
     notes = run / "notes.txt"
@@ -149,9 +142,6 @@ def test_lesson_read_refuses_a_hard_link_to_a_host_file(tmp_path):
 
 @pytest.mark.parametrize("tool", ["write_file", "edit_file"])
 def test_a_write_over_a_hard_link_is_a_retry_and_the_host_file_is_unchanged(tool, tmp_path):
-    """A writer over a hard link at the name: today the guarded write refuses it by raising an
-    `OSError` straight out of the tool. It must reach the model as a retry, and the host file
-    the link shares an inode with must be byte-for-byte unchanged."""
     deps, corpus = _curator(tmp_path)
     host = _host_file(tmp_path)
     lesson = corpus / "x.md"
@@ -190,9 +180,6 @@ def test_read_file_refuses_a_symlink_at_the_name(tmp_path):
 
 
 def test_write_file_over_a_symlink_at_the_name_is_a_retry_and_leaves_both(tmp_path):
-    """`lessons/link.md -> lessons/real.md`: a writable lesson name the gate admits. Today the
-    guarded write refuses the link by raising out of the tool. It must be a retry; the lesson
-    the link points at is unchanged and the link itself still stands."""
     deps, corpus = _curator(tmp_path)
     real = corpus / "real.md"
     real.write_text("ORIGINAL lesson\n", encoding="utf-8")
@@ -213,9 +200,6 @@ def test_write_file_over_a_symlink_at_the_name_is_a_retry_and_leaves_both(tmp_pa
 
 
 def test_read_file_refuses_a_symlinked_holding_folder_inside_the_run_dir(tmp_path):
-    """`run/alias -> run/gather_summaries`: the gate resolves `alias/l-001.md` to a gather
-    summary, a shape MAIN may read, and admits it. Only the read can refuse following the link.
-    The same file through the real folder reads as today."""
     deps, run = _main(tmp_path)
     (run / "gather_summaries").mkdir()
     (run / "gather_summaries" / "l-001.md").write_text("INSIDE\n", encoding="utf-8")
@@ -226,11 +210,6 @@ def test_read_file_refuses_a_symlinked_holding_folder_inside_the_run_dir(tmp_pat
 
 
 def test_a_curator_refuses_a_symlinked_holding_folder_inside_its_tree(tmp_path):
-    """`defender/lessons-alias -> defender/lessons`: the resolved path is a lesson inside the
-    confine and a name the curator's write allowlist admits, so the gate passes both the read
-    and the write. Both must be refused, and the lesson the link points at must be unchanged
-    (today the write's folder walk raises `OSError` out of the tool). The same lesson through the
-    real folder reads and writes as today."""
     deps, corpus = _curator(tmp_path)
     lesson = corpus / "a.md"
     lesson.write_text("ORIGINAL lesson\n", encoding="utf-8")
@@ -283,9 +262,6 @@ def test_a_fifo_at_the_name_never_blocks_a_read(arm, tmp_path):
 
 @pytest.mark.parametrize("tool", ["write_file", "edit_file-create"])
 def test_a_fifo_at_the_name_refuses_a_write_as_a_retry(tool, tmp_path):
-    """A writer over a FIFO at the name: today the guarded write raises `OSError` out of the
-    tool (`edit_file` with an empty `old_string` reads the FIFO as "no file" and tries to
-    create). It must be a retry, and the FIFO must still stand where it was."""
     deps, corpus = _curator(tmp_path)
     pipe = corpus / "pipe.md"
     os.mkfifo(pipe)
@@ -304,9 +280,6 @@ def test_a_fifo_at_the_name_refuses_a_write_as_a_retry(tool, tmp_path):
 
 
 def test_read_file_refuses_a_dotdot_component(tmp_path):
-    """`sub/../notes.txt` resolves to a file the gate admits; the path is refused anyway. `sub`
-    exists, so the refusal cannot be today's "file not found" for a missing folder. Without the
-    `..` the same file reads as today."""
     deps, run = _main(tmp_path)
     (run / "sub").mkdir()
     (run / "notes.txt").write_text("plain notes\n", encoding="utf-8")
@@ -341,11 +314,6 @@ def _spellings(link_root: Path, real_root: Path, rel: str) -> dict[str, str]:
 
 @pytest.mark.parametrize("spelling", ["relative", "absolute-through-link", "absolute-resolved"])
 def test_a_curator_on_a_symlinked_repo_root_reads_and_writes_as_today(spelling, tmp_path):
-    """The operator's repo root is a symlink. The curator's read confine is stored resolved
-    while its `cwd_anchor` and `defender_dir` keep the operator's spelling, so a plain relative
-    path never sits lexically under a confine member — turning the path into (root, name) must
-    still find its root. Every spelling the agent may use reads, writes and edits a plain
-    lesson exactly as today."""
     real = make_worktree(tmp_path)
     link = tmp_path / "wt-link"
     os.symlink(real, link, target_is_directory=True)
@@ -368,12 +336,6 @@ def test_a_curator_on_a_symlinked_repo_root_reads_and_writes_as_today(spelling, 
 def test_main_on_a_run_dir_under_a_symlinked_ancestor_reads_and_appends_as_today(
     spelling, tmp_path
 ):
-    """The run dir sits under a symlinked ancestor (the macOS `/tmp` shape): the root is the
-    host's spelling and is followed. Both spellings a model can hold — relative, and the model
-    path `/runs/current/notes.txt` (#1255 P1, C9: the host-side mapping lands it on the
-    link-spelled run folder) — read a plain file, and `append_block` lands in
-    `investigation.md`, exactly as today. The two HOST spellings (through the link, and
-    resolved) are refused: the model view holds neither (#1255 C11: host paths are refused)."""
     real_base = tmp_path / "real"
     real_base.mkdir()
     link_base = tmp_path / "linked"
@@ -399,9 +361,6 @@ def test_main_on_a_run_dir_under_a_symlinked_ancestor_reads_and_appends_as_today
 
 
 def test_the_companion_keeps_its_three_way_split_over_a_hard_link(tmp_path):
-    """`read_companion` through the move: never written is `""`; a plain document is its text;
-    a hard link at `investigation.md` is a planted entry — no text, and NOT retryable (no retry
-    changes the document's state; the host closes the case)."""
     deps, run = _main(tmp_path)
     inv = run / "investigation.md"
 
@@ -422,9 +381,6 @@ def test_the_companion_keeps_its_three_way_split_over_a_hard_link(tmp_path):
 
 @pytest.mark.parametrize("tool", ["append_block", "fix_row"])
 def test_main_writes_over_a_hard_link_are_retries_and_leave_the_host_file(tool, tmp_path):
-    """MAIN's two writes of `investigation.md` over a hard link to a host file: a retry, never an
-    `OSError`, and the host file is byte-for-byte unchanged. (Today the companion read refuses
-    the plant before the bare write is reached, so this holds already; it guards the move.)"""
     deps, run = _main(tmp_path)
     host = _host_file(tmp_path)
     os.link(host, run / "investigation.md")
@@ -439,10 +395,6 @@ def test_main_writes_over_a_hard_link_are_retries_and_leave_the_host_file(tool, 
 
 
 def test_the_write_gate_does_not_take_its_baseline_through_a_hard_link(tmp_path):
-    """The write gate reads `investigation.md`'s current text as the append-only baseline. Over
-    a hard link to a host file, that baseline is the host's bytes: today a proposal extending
-    them is ALLOWED. The baseline read goes through the core, so the plant is a read refusal and
-    the gate fails closed. The same bytes in a plain file are a baseline, and allow as today."""
     deps, run = _main(tmp_path)
     inv = run / "investigation.md"
     baseline = "+ first\n"
@@ -469,26 +421,7 @@ def test_the_write_gate_does_not_take_its_baseline_through_a_hard_link(tmp_path)
 # the static guard: the touched sites call no path seam
 
 
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------------------------
-# adversary round (#1136): plants deeper than the immediate parent, a link at the name for the
-# remaining tools, the gate's baseline over a FIFO, a census by object, and today's messages
-
-
 def test_a_folder_link_two_levels_above_the_name_is_refused_for_reads(tmp_path):
-    """`run/g -> run`: `g/gather_summaries/l-001.md` resolves to a summary MAIN may read, so the
-    gate admits it. A link anywhere on the path is refused, not only at the immediate parent.
-    The real path reads as today."""
     deps, run = _main(tmp_path)
     (run / "gather_summaries").mkdir()
     (run / "gather_summaries" / "l-001.md").write_text("INSIDE\n", encoding="utf-8")
@@ -499,12 +432,7 @@ def test_a_folder_link_two_levels_above_the_name_is_refused_for_reads(tmp_path):
     assert "INSIDE" not in message
 
 
-
-
 def test_lesson_read_and_edit_file_refuse_a_symlink_at_the_name(tmp_path):
-    """`lessons/b.md -> lessons/a.md`, a name the gate admits for both tools: `lesson_read`
-    returns none of `a.md`'s bytes, `edit_file` leaves `a.md` unchanged and the link standing.
-    `a.md` itself reads and edits as today."""
     deps, corpus = _curator(tmp_path)
     real = corpus / "a.md"
     real.write_text("ORIGINAL lesson\n", encoding="utf-8")
@@ -523,9 +451,6 @@ def test_lesson_read_and_edit_file_refuse_a_symlink_at_the_name(tmp_path):
 
 
 def test_the_write_gate_over_a_fifo_at_investigation_md_denies_without_blocking(tmp_path):
-    """The gate's append-only baseline over a reader-less FIFO at `investigation.md`: it answers
-    at once and denies (the baseline could not be read), never blocks the run. A plain file is
-    a baseline, and an extending append is allowed."""
     deps, run = _main(tmp_path)
     inv = run / "investigation.md"
     proposal = "+ first\n+ second\n"
@@ -544,14 +469,8 @@ def test_the_write_gate_over_a_fifo_at_investigation_md_denies_without_blocking(
         assert not decide().allow, "the gate took a FIFO as the baseline"
 
 
-
-
-
-
 # ---------------------------------------------------------------------------------------------
 # review round (#1208): a plain folder is "file not found", and no refusal names a host path
-
-
 
 
 @pytest.mark.parametrize("tool", ["read_file", "write_file"])
@@ -574,9 +493,3 @@ def test_a_refusal_names_no_host_path(tool, tmp_path):
 
 # ---------------------------------------------------------------------------------------------
 # second review round (#1208): a confine is never a trust root; `//`; the refusal kind
-
-
-
-
-
-

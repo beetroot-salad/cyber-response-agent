@@ -107,9 +107,6 @@ def refs():
 
 @pytest.mark.parametrize("finding", [*UNHASHABLE, "nonsense"], ids=["list", "dict", "near-miss"])
 def test_a_non_member_finding_is_unreadable_however_it_is_spelled(finding, refs):
-    """`Unreadable`, not `TypeError`. The crash escaped `challenge_gate` and
-    `run_investigation` both, so the run ended with no report.md, no review record, and this
-    stage's trace row still marked `ok: true`."""
     text = json.dumps({"finding": finding, "review": "the close holds", "ask": None})
     with pytest.raises(Unreadable):
         read_composer_reply(text, refs=refs)
@@ -119,5 +116,3 @@ def test_a_real_finding_still_reads(refs):
     """The positive control: the guard refuses precisely, it does not refuse everything."""
     text = json.dumps({"finding": HOLDS, "review": "the close holds", "ask": None})
     assert read_composer_reply(text, refs=refs).finding == HOLDS
-
-

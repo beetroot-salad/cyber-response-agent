@@ -2,14 +2,10 @@
 from __future__ import annotations
 
 
-
 import os
 
 
-
 import socket
-
-
 
 
 from types import SimpleNamespace
@@ -199,9 +195,6 @@ def test_a_claim_holding_anything_but_in_lane_regular_files_is_refused_whole(
 
 @pytest.mark.parametrize("plant", [_gitdir_file, _nested_repository], ids=["gitdir-file", "repository"])
 def test_git_metadata_in_a_lane_never_becomes_a_commit(repo, plant):
-    """O-C/O-D: a `.git` in a lane, as a `gitdir:` file naming the host's tenant clone or as
-    a nested repository's directory, is refused at derivation or at commit: no commit is made
-    (the batch's branch does not appear) and the tenant clone is untouched."""
     batch = delivery(repo, ForgeHTTP()).start_batch("nested", lanes=LANES)
     clone = repo[0].knowledge
     lane = batch.draft_root / "agent/lessons"
@@ -288,9 +281,6 @@ def test_no_change_set_commits_outside_the_lanes_or_touches_a_forbidden_name(rep
 
 
 def test_claims_commit_and_reset_one_after_another_within_one_batch(repo):
-    """Flow 3's per-claim loop: change set, commit, reset, several times in one batch, a
-    refused claim among them; each commit holds exactly its claim and builds on the last, and
-    finish pushes the last one as the batch branch and opens its PR against `main`."""
     http = ForgeHTTP()
     d = delivery(repo, http)
     batch = d.start_batch("loop", lanes=LANES)
@@ -396,5 +386,3 @@ def test_the_commit_maker_takes_no_lock_and_leaves_main_the_index_and_the_checko
     assert git(clone, "rev-parse", f"{tip}^^") == batch.export.commit
     assert agent_blobs(clone, tip)["lessons/seed.md"] == b"seed, claim 2\n"
     assert files_under(batch.draft_root / "agent") == agent_blobs(clone, tip)
-
-

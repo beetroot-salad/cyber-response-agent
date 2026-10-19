@@ -75,9 +75,6 @@ def _records(paths: LoopPaths) -> list[dict]:
 
 
 def test_one_looping_leads_eight_turns_become_one_record_carrying_its_count(paths):
-    """The motivating incident, through the REAL collector. Eight brute-forced reduces, each
-    with its own SQL and its own row, produce eight records — the collector stays per-row, as
-    #823 N3 requires — and land in the queue as ONE record whose `occurrences` is 8."""
     executed = [_lead(sql=f"SELECT unnest(data, {i})", query_index=i) for i in range(8)]
     collected = collect_general_failures(executed, Path("reviewer-measure-0807-b"), catalog=[])
     assert len(collected) == 8, "the collector is per-row and #823 N3 keeps it that way"
@@ -133,9 +130,6 @@ def test_the_reducer_owns_its_lesson_whatever_attributed_it(paths):
 
 
 def test_two_distinct_queries_earning_one_rejection_are_one_lesson(paths):
-    """The judgment `query_id` is out of the key encodes: what `execution.md` carries is the
-    mistake the adapter diagnosed, and two differently-phrased queries rejected identically
-    are one bullet. Pinned so widening the key is a decision rather than a drift."""
     rows = [_row("r:l-001:0", executed_query="FROM a | STATS x") | {"query_id": "elastic.a"},
             _row("r:l-002:0", executed_query="FROM b | STATS y") | {"query_id": "elastic.b"}]
     persist.append_pitfalls(rows, state=_state1135.state_for_paths(paths))

@@ -129,19 +129,12 @@ def _guarded_scripts() -> list[Path]:
 
 
 def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
-    """demand: c2, static half, as #1067 reshaped it — in EVERY script that calls
-    ``reexec_into_venv``, no ``defender.*`` module other than the one the guard lives in is
-    imported at module scope before the statement that calls it; and that module itself imports
-    only the stdlib."""
     venv_tree = ast.parse((DEFENDER / "_venv.py").read_text(encoding="utf-8"))
     non_stdlib = [m for stmt in venv_tree.body for m in _module_imports(stmt)
                   if m.split(".")[0] not in sys.stdlib_module_names]
     assert not non_stdlib, f"{_VENV_MODULE} must stay stdlib-only, imports {non_stdlib}"
 
     scripts = _guarded_scripts()
-    # Since #1080 the lesson CLIs no longer re-exec themselves: `bin/defender-lessons` picks the
-    # interpreter and runs the engine as a module, so the frontend build and serializer are the
-    # scripts left that start by path under whatever python3 is first.
     assert {p.name for p in scripts} >= {"build.py", "serialize.py"}, scripts
     early: dict[str, list[str]] = {}
     for script in scripts:
@@ -234,10 +227,6 @@ def test_s5_empty_string_seed_is_a_seed_not_a_none(tmp_path):
 
 
 def test_s6_build_curator_user_prompt_seeds_the_manifest_from_batch_id(tmp_path):
-    """demand: s6 (seam) — the wiring, pinned BEHAVIORALLY: the manifest
-    ``build_curator_user_prompt`` splices equals ``build_corpus_manifest(corpus_dir,
-    seed=batch_id)``, and a different ``batch_id`` over the same corpus reorders the spliced
-    manifest."""
     corpus = _corpus_of(tmp_path, *[f"lesson-{i}" for i in range(8)])
     rows = [{"id": "f/1", "text": "a finding"}]
     kw = dict(corpus=corpus_view(corpus), corpus_dir=corpus, corpus_dir_rel="defender/lessons",
@@ -270,9 +259,6 @@ def test_s7_forged_section_defenses_survive_the_shuffle(tmp_path):
 
 
 def test_m8c_a_list_valued_injection_payload_cannot_forge_a_section(tmp_path):
-    """demand: m8c (negative) — an injection payload carried inside a LIST-valued frontmatter field
-    cannot forge a section: ``yaml.safe_dump`` quotes AND indents the element, so the payload
-    never reaches column 0."""
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     (corpus / "list-payload.md").write_text(

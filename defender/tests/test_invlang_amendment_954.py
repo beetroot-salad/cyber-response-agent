@@ -248,16 +248,7 @@ PADDED_ROW = "l-001| v-001 |bogus|hello"
 #: An escaped pipe INSIDE the key cell, on a row that still splits to four. EXECUTED at base:
 #: `…|class|hello` splits to 4 and `…|attrs.a|b|hello` to 5 — exactly one candidate fails.
 ASYMMETRIC_ROW = r"l-001|v-001|a\|b|hello"
-#: An escaped pipe LEFT of the key cell — the one cell position where the shipped mechanism
-#: already corrupts the author's bytes. EXECUTED at base (J16): `locus.row_text` keeps the
-#: escape, both candidates come back `l-001|bastion|01|…` at FIVE cells under a four-column
-#: header. Needs `VERTICES_WITH_AN_ESCAPED_PIPE_ID`: `_row_dict` unescapes, so the refinement
-#: target reads as `bastion|01` and that vertex has to be declared or the warn assertion rides
-#: an error-severity refinement-target diagnostic.
 ESCAPED_PIPE_LEFT_ROW = r"l-001|bastion\|01|owner|svc.config-mgmt"
-#: A quote that opens mid-token once the `attrs.` prefix is spliced in front of it. EXECUTED at
-#: base: `attrs."class"` splits to 4, passes the width-only guard, is offered, pastes — and
-#: makes the NEXT parse of that row an error.
 MID_TOKEN_QUOTE_ROW = 'l-001|v-001|"class"|hello'
 
 
@@ -367,9 +358,6 @@ def test_an_empty_key_is_not_repaired_into_an_empty_attribute_name():
 
 def test_the_offered_unquoting_repair_actually_pastes(tmp_path):
     """The repair #963 offers is one `fix_row` accepts and one that clears the flag — the loop the withheld suggestion could not close."""
-    # FREEFORM-class prologue, for the reason the width round trip below records: the offer
-    # rewrites the KEY and keeps `hello`, which #986 refuses in a `compute` vertex's `class`
-    # cell — a second refusal about a value this test does not choose.
     doc = attr_doc(MID_TOKEN_QUOTE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     d = key_warning(doc)
     deps, run = main_deps(tmp_path)
@@ -432,10 +420,6 @@ def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(
     """`suggestion_row` meets the same `declared-width-equality` constraint on the paste via that it meets on the offer via:"""
     from pydantic_ai.exceptions import ModelRetry
 
-    # On the FREEFORM-class prologue: the offer rewrites the KEY and keeps the value, and this
-    # row's value is the subject — an escaped `|`. Since #986 a `class` cell on a `compute`
-    # vertex is judged against `compute.role`, so the offered candidate would be refused for
-    # the value on the default prologue and neither end of the parity could be observed.
     doc = attr_doc(ESCAPED_PIPE_ROW, prologue=VERTICES_FREEFORM_CLASS)
     candidate = key_warning(doc).fix[0]
 
@@ -512,24 +496,10 @@ def test_a_withheld_fix_row_keeps_its_locus_and_stays_deletable(tmp_path):
     assert validate_investigation(after, None) is None
 
 
-#: A five-column header whose LAST column is optional, so a four-cell row is legal short and
-#: the rebuild has to pad. Needed because `OPTIONAL_ATTR_HEADER` puts the optional column
-#: immediately right of `key`, which hides what padding does to the cell before it.
 PADDING_ATTR_HEADER = "[resolved_by|target|key|value|note?]"
 
-#: A legal short row whose LAST WRITTEN cell ends in a lone backslash. Padding it rejoins
-#: `…c:\path\` + `|`, and that pair is an ESCAPED delimiter — the candidate comes back one
-#: cell short of the declared five. EXECUTED against the shipped mechanism: both candidates
-#: were OFFERED and `fix_row` then refused the paste with "it has 4 cells but the block
-#: declares 5".
 PAD_EATS_DELIMITER_ROW = "l-001|v-001|bogus|c:\\path\\"
 
-#: A key cell carrying BOTH an escaped pipe and a trailing escape, on a row that splits to the
-#: declared width. `key` reaches the rebuild already unescaped (`a|a\\`), so the added `|`
-#: pairs with the trailing backslash and the two cancel: the candidate re-splits to four cells
-#: with the author's `value` absorbed into the key's cell. EXECUTED against the shipped
-#: mechanism: OFFERED, pasted clean, and the document then claimed key `attrs.a` / value
-#: `a|hello` where the author wrote value `hello` — a corruption with no diagnostic anywhere.
 BYTES_MOVE_ROW = r"l-001|v-001|a\|a\ |hello"
 
 
@@ -565,9 +535,6 @@ def test_a_candidate_carrying_a_fence_delimiter_is_withheld():
 
 # O3's payoff over the class of readers that parse without validating
 
-#: A three-row document whose fold boundary DIFFERS under the two readings: with the later row
-#: discarded the lead sits in the closed loop 1 and the fold advances; with it kept the lead
-#: moves to loop 2 and loop 1 has no lead at all. EXECUTED at base: `fold_boundary` is 0.
 FOLD_FIRST = "l-001|1|alpha|v-001||cmdb|24h|timeout"
 FOLD_LATER = "l-001|2|beta|v-002||edr|48h"
 FOLD_OTHER = "l-002|2|delta|v-002||edr|48h"
@@ -597,11 +564,6 @@ def test_a_precedent_case_carrying_the_repeated_id_warning_is_not_loaded_as_clea
     assert companions[0].leads[0]["name"] == "alpha"
 
 
-#: The false-positive entry price's discriminating trio. The rows disagree on `target`, and only
-#: the FIRST row's target is a vertex the prologue carries — so `_check_false_positive_gating`'s
-#: "targets X, which the prologue does not carry" arm fires under last-wins and is silent under
-#: first-wins. The refinement block gives the lead a committed result, so the gate's
-#: `_lead_returned_a_result` arm is quiet and the `target` arm is the only thing observed.
 FP_FIRST_ROW = "l-001|1|alpha|v-001||cmdb|24h"
 FP_LATER_ROW = "l-001|2|beta|v-999||edr|48h"
 FP_RESULT = attr_block("l-001|v-001|attrs.owner|svc-deploy")
@@ -611,11 +573,6 @@ def _fp_doc(*rows):
     return VERTICES + findings_block(*rows) + FP_RESULT + CONCLUDE_FALSE_POSITIVE
 
 
-#: The `:R attr_updates` block that OPENS the lead's bucket, standing BEFORE the repeating
-#: `:L findings` block. Every other fixture in this file puts the refinement block after the
-#: findings block — the ordering 20-demands' D12 note fixed at extraction and every later
-#: fixture inherited — so this is the only document here that can observe what the fold does to
-#: a bucket that already holds content.
 SEEDING_BLOCK = attr_block("l-001|v-001|attrs.owner|svc-deploy")
 SEEDED_UPDATES = [{"target": "v-001", "updates": {"attrs.owner": "svc-deploy"}}]
 
@@ -650,9 +607,6 @@ def test_a_lead_bucket_an_earlier_refinement_block_seeded_survives_the_fold():
 
 # F-L — the uniform formation gate
 
-#: A document whose committed `:L findings` block ALREADY holds a within-block repeat, and
-#: whose surviving lead is committed in loop 1 under BOTH readings — so a `:T close` for that
-#: loop is legal either way and the only thing that can refuse it is the repeat itself.
 LEGACY_DOC = VERTICES + findings_block(
     "l-001|1|alpha|v-001||cmdb|24h|timeout",
     "l-001|1|beta|v-002||edr|48h",
@@ -706,9 +660,6 @@ def test_a_legacy_document_holding_a_repeat_is_refused_at_every_write_verb(tmp_p
     deps2, run2 = main_deps(tmp_path / "co-resident")
     seed_investigation(run2, LEGACY_DOC + attr_block(warn_row))
     assert _flagged(LEGACY_DOC + attr_block(warn_row)) == [warn_row]
-    # The repair carries a legal `compute` class tuple in its VALUE cell: since #986 an
-    # off-vocabulary role is refused on its own, and the control below has to land so that the
-    # refusal above is about the repeat rather than about the value.
     repair_row = "l-001|v-001|class|file-server/internal/known-corp"
     with pytest.raises(ModelRetry) as repair_exc:
         _fix(deps2, warn_row, repair_row)
@@ -719,5 +670,3 @@ def test_a_legacy_document_holding_a_repeat_is_refused_at_every_write_verb(tmp_p
     seed_investigation(run3, REPAIRED_DOC + attr_block(warn_row))
     _fix(deps3, warn_row, repair_row)
     assert repair_row in _inv(run3)
-
-
