@@ -361,7 +361,16 @@ def build_page(episode_dir: Path, *, module: Any = None) -> str:
 def cli_on(episode_dir: Path, capsys, *, module: Any = None) -> tuple[int, str, str]:
     """`cli` for the episode at `episode_dir`, by id: `--tenant T <episode_id>`, T the tenant
     whose `<T>/episodes/` holds it (#1105 PR 2, declared change 4; #1187 Layout A)."""
-    return cli(cli_argv(Path(episode_dir)), capsys, module=module)
+    root, _tenant = J.episode_location(Path(episode_dir))
+    previous = os.environ.get("DEFENDER_DATA_ROOT")
+    os.environ["DEFENDER_DATA_ROOT"] = str(root)
+    try:
+        return cli(cli_argv(Path(episode_dir)), capsys, module=module)
+    finally:
+        if previous is None:
+            os.environ.pop("DEFENDER_DATA_ROOT", None)
+        else:
+            os.environ["DEFENDER_DATA_ROOT"] = previous
 
 
 def cli_argv(episode_dir: Path) -> list[str]:

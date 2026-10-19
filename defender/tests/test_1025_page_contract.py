@@ -529,8 +529,8 @@ def test_1025_both_archived_episodes_render_from_a_copied_dir_with_no_runs_base_
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    shapes = {"fresh": E.sample_episode(tmp_path, root=tmp_path / "build-a"),
-              "live996": _live996_shaped(tmp_path, tmp_path / "build-b")}
+    shapes = {"fresh": E.sample_episode(tmp_path, root=T.tenant_episodes(tmp_path / "build-a")),
+              "live996": _live996_shaped(tmp_path, T.tenant_episodes(tmp_path / "build-b"))}
     for name, built in shapes.items():
         one = E.copy_episode(built, tmp_path / "root-one" / name / built.dir.name)
         two = E.copy_episode(built, tmp_path / "root-two" / "nested" / name / built.dir.name)
@@ -999,7 +999,7 @@ def test_1025_an_unhealthy_episode_renders_no_absolute_path_and_byte_identically
     no page written. (Name kept.)"""
     for var in (T.RUNS_BASE_ENV, T.EPISODES_BASE_ENV):
         monkeypatch.delenv(var, raising=False)
-    built = E.sample_episode(tmp_path, root=tmp_path / "build")
+    built = E.sample_episode(tmp_path, root=T.tenant_episodes(tmp_path / "build"))
     _unhealthy(built)
     one = E.copy_episode(built, tmp_path / "root-one" / built.dir.name)
     two = E.copy_episode(built, tmp_path / "root-two" / "nested" / built.dir.name)

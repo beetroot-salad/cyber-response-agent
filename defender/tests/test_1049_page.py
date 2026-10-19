@@ -124,7 +124,7 @@ def _write_grade_over(copy: E.Episode) -> None:
 
 
 def _every_arm(tmp_path: Path) -> tuple[E.Episode, E.Episode, E.Episode]:
-    built = E.sample_episode(tmp_path, root=tmp_path / "build")
+    built = E.sample_episode(tmp_path, root=T.tenant_episodes(tmp_path / "build"))
     _plant_shared_arms(built)
     # #1187 declared change 10 (R5): a copy keeps the episode's folder name (its manifest's
     # episode id); the two copies differ only in where they sit.
