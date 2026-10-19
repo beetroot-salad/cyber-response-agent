@@ -633,7 +633,7 @@ def test_oracle_runner_is_a_code_mount_holding_only_runner_files_and_starts_sand
 
     check = f"defender/{_check_file()}"
     assert set(_oracle.RUNNER_FILES) == {
-        "defender/runtime/__init__.py", "defender/execution/bash_exec.py",
+        "defender/execution/__init__.py", "defender/execution/bash_exec.py",
         "defender/execution/box_codec.py", check}
     runner = _oracle._make_runner()
     try:

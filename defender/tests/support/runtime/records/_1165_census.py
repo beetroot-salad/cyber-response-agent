@@ -14,7 +14,9 @@ from pathlib import Path
 from defender.tests.storage import test_1133_census as vocabulary
 from defender.tests.support.shared.contracts._by_path import import_lint_lib
 
-ROOTS = ("runtime", "hooks", "runtime", "integrations")
+# Runtime includes the former gather_tools; only ticket_writer belonged to case_history.
+# Box I/O moved out of runtime and retains the same counted coverage.
+ROOTS = ("runtime", "hooks", "box", "integrations/ticket_writer.py")
 READERS = frozenset({
     "read_jsonl_rows", "read_jsonl_rows_report", "read_text_soft", "read_text_utf8",
     "locked_for_read", "locked_json_read", "read_bytes_capped", "iter_plain_jsonl_rows",
@@ -44,7 +46,7 @@ def _reader(node: ast.expr, scan) -> str | None:
     if origin is None:
         return None
     name = origin.rsplit(".", 1)[-1]
-    return name if origin.startswith("defender._io.") and name in READERS else None
+    return name if origin.rpartition(".")[0] in vocabulary._IO_MODULES and name in READERS else None
 
 
 def _typed(node: ast.expr, scan, wanted: str, seen: frozenset[str] = frozenset()) -> bool:
@@ -144,9 +146,9 @@ def collect(package: Path) -> list[Hit]:
     out = []
     for name in ROOTS:
         root = package / name
-        if not root.is_dir():
+        if not root.exists():
             raise ValueError(f"missing swept directory: {name}")
-        for path in sorted(root.rglob("*.py")):
+        for path in ([root] if root.is_file() else sorted(root.rglob("*.py"))):
             if "__pycache__" in path.parts:
                 continue
             out.extend(census_source(path.relative_to(package).as_posix(),

@@ -196,7 +196,7 @@ def _mutable_containers(root, depth=4):
 _BUILD = """
 import json, os, resource, signal, sys
 from pathlib import Path
-from defender.tests import _tenants1106 as tenants
+from defender.tests.support.tenancy import _tenants1106 as tenants
 from defender.tests.tenancy.tenant_1108_delivery._support import (
     DEFENDER, LANES, ForgeHTTP, configured_origin, target, fixture_identity)
 root, tenant_id, remote, batch_id, cap, mode = (Path(sys.argv[1]), sys.argv[2], sys.argv[3],

@@ -440,3 +440,17 @@ judge still refuses an incomplete or malformed archive rather than treating miss
 as a complete measurement. Alert attribution comes from #1222's copied source alert record:
 queue rows carry its signature verbatim (and the explicit unkeyed fallback when absent),
 independently of edited world alert copies.
+
+### Inspect or revert a lesson
+
+From the checkout root, inspect which tenant runs had a lesson in context:
+
+```bash
+python defender/cli/learning/trace_lesson.py --tenant <tenant-id> <lesson-name>
+```
+
+Open a revert PR for a merged lesson (uses the configured learning state and author lock):
+
+```bash
+python defender/cli/learning/revert_lesson.py <lesson-name>
+```

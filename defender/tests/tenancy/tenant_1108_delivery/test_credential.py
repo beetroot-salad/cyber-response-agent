@@ -384,7 +384,7 @@ import json, os, sys
 from pathlib import Path
 os.setsid()
 os.open(sys.argv[1], os.O_RDWR)  # the controlling terminal of this new session
-from defender.tests import _tenants1106 as tenants
+from defender.tests.support.tenancy import _tenants1106 as tenants
 from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, configured_origin, target, fixture_identity
 mod = target()
 out = {}

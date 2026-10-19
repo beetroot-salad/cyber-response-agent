@@ -432,7 +432,7 @@ def test_the_export_and_current_are_written_under_the_tenant_lock(repo, tmp_path
 _INTERRUPTED_PUBLISH = """
 import json, os, resource, signal, sys
 from pathlib import Path
-from defender.tests import _tenants1106 as tenants
+from defender.tests.support.tenancy import _tenants1106 as tenants
 from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, target, fixture_identity, configured_origin
 root, tenant_id, marker, size, limit = (Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4]),
                                         int(sys.argv[5]))
@@ -517,7 +517,7 @@ def test_a_publish_cut_off_mid_export_leaves_no_partial_export(repo, tmp_path):
 _PAUSED_PUBLISH = """
 import json, os, sys, time
 from pathlib import Path
-from defender.tests import _tenants1106 as tenants
+from defender.tests.support.tenancy import _tenants1106 as tenants
 from defender.tests.tenancy.tenant_1108_delivery._support import DEFENDER, ForgeHTTP, lock_probe, target, fixture_identity, configured_origin
 root, tenant_id, marker, ready, go, trace = (Path(sys.argv[1]), sys.argv[2], sys.argv[3],
                                              Path(sys.argv[4]), Path(sys.argv[5]), Path(sys.argv[6]))
@@ -616,7 +616,7 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
     # Positive control: the probe, run from the publisher's own environment, tells a held
     # lock from a free one.
     control = [sys.executable, "-c", "import json, sys; from pathlib import Path; "
-               "from defender.tests import _tenants1106 as t; "
+               "from defender.tests.support.tenancy import _tenants1106 as t; "
                "from defender.tests.tenancy.tenant_1108_delivery._support import lock_probe; "
                "print(json.dumps(lock_probe(t.accept(Path(sys.argv[1]), sys.argv[2]))))",
                str(tenant.data_root), str(tenant.id)]

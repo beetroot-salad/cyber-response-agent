@@ -411,7 +411,7 @@ def test_below_the_threshold_nothing_is_held(tmp_path, monkeypatch):
 
 
 def _harness() -> Path:
-    return Path(drains.__file__).resolve().parents[2] / "evals" / "harness.py"
+    return Path(drains.__file__).resolve().parents[3] / "evaluations" / "harness.py"
 
 
 #: Run in a fresh interpreter, as the harness runs: materialize the scenario into the scratch
@@ -439,7 +439,7 @@ def test_the_eval_harness_runs_an_empty_queue_scenario_in_its_scratch_repo(tmp_p
     scratch.mkdir()
     decoy = tmp_path / "decoy-state"
     decoy.mkdir()
-    env = {**os.environ, "PYTHONPATH": str(evals.parents[1]),
+    env = {**os.environ, "PYTHONPATH": str(evals.parent),
            "DEFENDER_LEARNING_STATE_DIR": str(decoy)}
 
     proc = subprocess.run(

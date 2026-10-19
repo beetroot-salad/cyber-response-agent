@@ -1251,7 +1251,7 @@ REL_IN_PACKAGE = textwrap.dedent(f"""\
 
     from defender.episodes._episode_paths import EpisodePaths
     from ..run_tenant import RunTenant, resolve_tenant
-    from ..._tenant import Tenant, accept_tenant
+    from ...tenancy._tenant import Tenant, accept_tenant
 
 
     def rel_control(ep: Path, x: str) -> Path:
@@ -1301,7 +1301,7 @@ REL_PLAIN = textwrap.dedent(f"""\
     from defender.episodes._episode_paths import EpisodePaths
     from . import run_tenant
     from .run_tenant import RunTenant, resolve_tenant
-    from .._tenant import Tenant
+    from ..tenancy._tenant import Tenant
 
 
     def rel_plain_control(ep: Path, x: str) -> Path:
@@ -1428,7 +1428,7 @@ from defender.runtime.run_tenant import RunTenant
 from defender.runtime.run_tenant import RunTenant as RT
 from . import run_tenant as rel_run_tenant
 from .run_tenant import RunTenant as RelRT
-from .._tenant import Tenant as RelT
+from ..tenancy._tenant import Tenant as RelT
 
 
 def annotation_control(ep: Path, x: str) -> Path:

@@ -262,7 +262,7 @@ def test_921_the_judge_appender_writes_through_the_guarded_path(tmp_path):
     assert "defender/learning/judge/guarded.py:enqueue" not in found, (
         "the gate flags the guarded spelling too, so passing it says nothing about the fix")
 
-    defender_dir = Path(J.__file__).resolve().parents[1]
+    defender_dir = Path(__file__).resolve().parents[3]
     assert (defender_dir / "learning" / "judge").is_dir(), (
         "the positive control failed: there is no learning/judge/ package on disk for the gate "
         "to scan, so a clean result below says nothing about the shipped appender")

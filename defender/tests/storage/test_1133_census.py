@@ -63,6 +63,9 @@ IO_WRITERS = frozenset({"move_at", "open_lock_at", "open_nofollow_fd", "open_unn
                         "open_unnamed_at", "sweep_staged",
                         *CORE})
 _IO = "defender._io"
+# The facade re-exports these owners; the resolver follows imports to their definitions.
+_IO_MODULES = frozenset({_IO, "defender._filesystem.write", "defender._filesystem.bound",
+                         "defender._filesystem.json"})
 RAW_OS = frozenset({
     "open", "makedirs", "mkdir", "write", "fdopen", "link", "symlink", "rename", "renames",
     "replace", "unlink", "remove", "removedirs", "rmdir", "truncate", "mkfifo", "mknod",
@@ -74,7 +77,7 @@ ATTR_CALLS = frozenset({"open", "mkdir", "write_text", "write_bytes", "unlink", 
                         "read_text", "read_bytes"})
 assert ATTR_CALLS <= C.ATTRS, sorted(ATTR_CALLS - C.ATTRS)
 #: The modules a `getattr(<module>, "...")` or `vars(<module>)` may not reach into.
-_GETATTR_MODULES = frozenset({_IO, "os", "shutil"})
+_GETATTR_MODULES = frozenset({*_IO_MODULES, "os", "shutil"})
 #: The modules a dynamic import may not bind.
 _DYNAMIC_MODULES = frozenset({*_GETATTR_MODULES, "io", "codecs"})
 _DYNAMIC_IMPORTS = frozenset({"importlib.import_module", "builtins.__import__"})
@@ -147,8 +150,8 @@ def _key_of_origin(origin: str | None) -> str | None:
     last = origin.rsplit(".", 1)[-1]
     if last in PATH_SEAMS:
         return last
-    if origin.startswith(_IO + "."):
-        name = origin[len(_IO) + 1:]
+    if origin.rpartition(".")[0] in _IO_MODULES:
+        name = last
         if name.startswith("rooted_") or name in IO_WRITERS:
             return name
         if name.startswith("_"):
@@ -341,7 +344,7 @@ def test_d6_the_migrated_modules_make_no_episode_io_but_the_declared_residue():
 def _io_functions() -> frozenset[str]:
     return frozenset(
         name for name, obj in vars(_io).items()
-        if inspect.isfunction(obj) and obj.__module__ == _io.__name__
+        if inspect.isfunction(obj) and obj.__module__ in _IO_MODULES
         and not name.startswith("_"))
 
 
@@ -372,7 +375,7 @@ def _raw_io(call: ast.Call, scan: Any, io_funcs: frozenset[str]) -> str | None:
             and not (origin.startswith("os.path.") or origin in _OS_PURE))):
         return origin
     if name in io_funcs and name not in _IO_PURE and name not in CORE and (
-            origin is None or origin.startswith(_io.__name__ + ".")):
+            origin is None or origin.rpartition(".")[0] in _IO_MODULES):
         return name
     return None
 

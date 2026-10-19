@@ -314,7 +314,7 @@ _ADAPTER_WITH_VERBS = (
 _TREE_PROBE = (
     "from pathlib import Path\n"
     "\n"
-    "TREE = Path(__file__).resolve().parents[2]\n"
+    "TREE = Path(__file__).resolve().parents[1]\n"
     "\n"
     "def whoami(ctx, *, unused: str = '') -> dict:\n"
     '    return {"tree": str(TREE)}\n'
