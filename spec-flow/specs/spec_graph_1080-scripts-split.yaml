@@ -53,7 +53,7 @@
 #
 schema_version: 2
 design: '1080'
-tests: defender/tests/scripts_1080_split
+tests: defender/tests/tooling/layout_contracts
 base: 80888efb
 
 # ==========================================================================================

@@ -14,20 +14,20 @@ import uuid
 from pathlib import Path
 
 import pytest
-from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
+from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 
 pytest.importorskip("pydantic_ai")
 
 from defender.run_common import run_env  # noqa: E402
 from defender.runtime import providers  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
-from defender.runtime.bash_exec import parse  # noqa: E402
+from defender.execution.bash_exec import parse  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.permission.bash import decide_bash  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER  # noqa: E402
 
-from defender.runtime import box as box_mod  # noqa: E402
-from defender.runtime.box import (  # noqa: E402
+from defender import box as box_mod  # noqa: E402
+from defender.box import (  # noqa: E402
     BOX_ENV_ALLOWLIST,
     BoxResult,
     BoxSpec,
@@ -83,7 +83,7 @@ def run_dir(runs_base: Path) -> Path:
     escape test try to reach — a live neighbour, not an imagined one)."""
     d = runs_base / "20260718T101500Z-boxspec"
     (d / "gather_raw").mkdir(parents=True)
-    from defender.tests._alert_plant import plant_alert
+    from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(d, {"id": "boxspec"})
     return d
 
@@ -244,7 +244,7 @@ print(json.dumps(dict(os.environ)))
 _IMPORT_DEFENDER = '''
 import json
 import defender.hooks._cmd_segments as seg
-import defender.runtime.bash_exec as be
+import defender.execution.bash_exec as be
 print(json.dumps({"seg": seg.__file__, "bash_exec": be.__file__}))
 '''
 
@@ -771,7 +771,7 @@ def test_defender_namespace_package_imports_in_the_box(box, run_dir):
 
     findspec = (
         "import importlib.util, json\n"
-        "spec = importlib.util.find_spec('defender.runtime.bash_exec')\n"
+        "spec = importlib.util.find_spec('defender.execution.bash_exec')\n"
         "print(json.dumps({'origin': None if spec is None else spec.origin}))\n"
     )
     entrypoint = _probe(box, run_dir, "entrypoint", findspec)

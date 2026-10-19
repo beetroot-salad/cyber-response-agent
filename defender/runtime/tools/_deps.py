@@ -17,19 +17,19 @@ from defender._paths import PATHS
 
 
 from defender.run_repository import Run
-from .. import box as box_mod
+from defender import box as box_mod
 from ..run_state import RunState, run_time_iso
 from .. import permission
 from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
 from ..model_view import ModelView
 
-from defender._env import env_int
-from defender._knowledge import KnowledgePaths
+from defender.configuration._env import env_int
+from defender.knowledge._knowledge import KnowledgePaths
 from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
-from defender._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
+from defender.knowledge._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import (
     LOAD_KINDS as _LOAD_KINDS,
     lesson_name as _lesson_name,
@@ -255,7 +255,7 @@ def _record_lesson_load(
     runtime pushed it. Keyword-only with no default, so a new call site must choose.
     @owns role — the calling deps' `AgentRole` value, so a row says which agent it reached.
 
-    Older rows carry neither key; `learning/ops/trace_lesson.py` reads them as `unknown`.
+    Older rows carry neither key; `cli/learning/trace_lesson.py` reads them as `unknown`.
     """
     if kind not in _LOAD_KINDS:
         raise ValueError(f"lessons_loaded row kind must be one of {sorted(_LOAD_KINDS)}: {kind!r}")

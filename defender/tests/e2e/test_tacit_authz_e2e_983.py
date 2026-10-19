@@ -12,7 +12,7 @@ import pytest
 from defender.skills.invlang.frontier import frontier_from_text
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import validate_companion
-from defender.tests import _tacit983 as scene
+from defender.tests.support.shared.contracts import _tacit983 as scene
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     FakeVerbs,
@@ -53,7 +53,7 @@ def _registry_verbs(root: Path, rec: VerbRecorder) -> FakeVerbs:
     """A gather registry whose `tacit-knowledge.lookup` IS the shipped adapter's, repointed at
     the fixture tree under `root` and at `AS_OF`."""
     from defender.runtime.verbs import VerbContext, declared_params
-    from defender.scripts.adapters import tacit_knowledge_adapter
+    from defender.integrations import tacit_knowledge_adapter
 
     def lookup(ctx: VerbContext, *, actor: str, host: str, pattern: str) -> dict:
         rec.record(LOOKUP, ctx, {"actor": actor, "host": host, "pattern": pattern})

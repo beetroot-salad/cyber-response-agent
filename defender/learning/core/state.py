@@ -5,7 +5,7 @@ pending deliveries, the three findings-shaped queues with their consumed ledgers
 and stuck reports, the gap ledger, the disposition reports, the lock files — is reached through
 `LearningState`, opened at an entry point on an EXISTING root (`LearningState.open(paths)`). No
 production module outside this one composes, opens, lists, locks or renames a path to one of
-those records (the census in `tests/learning_state_1135/test_1135_front_door.py` holds that).
+those records (the census in `tests/learning/state_contracts/test_1135_front_door.py` holds that).
 `runs/`, under the same root, is #1166's and is still reached by path, and the eval harness
 seeds its own scratch tree by path; neither is a record of this handle.
 
@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from defender import _flock
 from defender._clock import now_iso
-from defender._env import FatalConfigError
+from defender.configuration._env import FatalConfigError
 from defender._io import (
     ALIAS_READ_REFUSAL,
     Bound,
@@ -214,7 +214,7 @@ def _address_fault(spec: dict) -> str | None:
     """Why a curation row's `tenant_id` / `run_id` cannot be read as a run address — missing,
     not a string, or off its grammar — or `None` when they can. The shape alone: no tenant
     folder is read (#1105 D-stored)."""
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
     from defender.run_repository import RunAddress, RunRefused
 
     for key in ("tenant_id", "run_id"):

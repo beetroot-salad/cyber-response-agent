@@ -7,10 +7,10 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from defender import _alert_input
-from defender._alert_input import AlertFacts
+from defender.records import _alert_input
+from defender.records._alert_input import AlertFacts
 from defender._model import model
-from defender._report import ReportUnreadable, require_report
+from defender.records._report import ReportUnreadable, require_report
 from defender.run_repository import Run
 from defender.runtime.tenant_settings import pointer_to, read_regular_bytes
 

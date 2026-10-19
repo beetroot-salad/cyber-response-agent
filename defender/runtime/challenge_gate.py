@@ -28,7 +28,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import field
 from typing import Any
 
-from defender._env import env_int
+from defender.configuration._env import env_int
 from defender._model import model
 from defender.run_repository import Run
 from defender.runtime.providers import ProviderDown

@@ -3,7 +3,7 @@
 **Status:** design — implemented. Resolves #460 (the low-level git
 subprocess is reinvented ~8× and `evals/` carries a second worktree manager).
 Mirrors the namespace-root hoists `defender/_io.py` (#447) and
-`defender/_env.py` / `_clock.py` (#448); extends the author/curator git
+`defender/configuration/_env.py` / `_clock.py` (#448); extends the author/curator git
 consolidation of #330; adopts the inject→real-tmp-repo testing philosophy of
 #389. The failure disposition composes with `defender/docs/error-disposition-types-design.md`
 (#438 → #441 → #443, #468): a git failure is a `StageAbort`-class systemic fault.
@@ -165,7 +165,7 @@ re-grinding the queue every tick.
 `GhForge` adapter; migrating every raw `subprocess.run([...git...])` site —
 `author/shared.py`, `leads/path_validation.py`, `evals/_generation.py` +
 `evals/_harness_util.py` + `evals/harness*.py`, `core/drains.py`,
-`scripts/visualize/visualize_runtime.py`, `run.py` — onto the seam; collapsing
+`presentation/visualize_runtime.py`, `run.py` — onto the seam; collapsing
 the three porcelain parsers to one `-z` reader and the two worktree managers to
 one; dropping `AuthorBranch`'s git injection (keeping the forge injection);
 enrolling `GitError` as a systemic fault.
@@ -195,7 +195,7 @@ retry-cap / health signal for the transient lane.
   cannot disagree with the implementation, so a misread of git's output is green on both
   sides at once (`ls-tree --name-only` C-quoting, `.split()` tearing a spaced path — the
   latter the same class this seam's own `-z` porcelain reader was minted for in #460).
-  `scripts/lint/lint_shared_oracle.py` covers exactly that gap: shared *read* argv shapes
+  `tooling/lint/lint_shared_oracle.py` covers exactly that gap: shared *read* argv shapes
   only, so fixture setup stays exempt as intended. The two gates partition the tree
   rather than overlap — this one asks who runs git, that one asks who is allowed to
   believe its answer.

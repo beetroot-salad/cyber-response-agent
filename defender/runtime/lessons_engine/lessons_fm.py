@@ -42,9 +42,9 @@ from pathlib import Path
 
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._git import REPO_ROOT
-from defender._knowledge import CHECKOUT_KNOWLEDGE
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 from defender._untrusted import wrap_fresh
-from defender._corpus import Lesson
+from defender.knowledge._corpus import Lesson
 from defender.runtime.lessons_engine._lessons_common import iter_lessons, use_utf8_stdio
 from defender._io import read_text_utf8
 
@@ -116,7 +116,7 @@ def cmd_show(paths: list[str]) -> int:
             continue
         print(f"--- {lesson.resolve()}")
         # The frontmatter as written, for a model to read: framed, as all lesson text bound for
-        # a model is (`defender._corpus`), so a line of it cannot read as this output's own.
+        # a model is (`defender.knowledge._corpus`), so a line of it cannot read as this output's own.
         print(wrap_fresh(fm_raw, "untrusted"))
     return rc
 

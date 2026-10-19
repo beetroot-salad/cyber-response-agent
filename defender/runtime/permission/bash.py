@@ -7,7 +7,7 @@ from defender._model import model
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from defender.runtime import bash_exec
+from defender.execution import bash_exec
 
 from . import command_shape
 from .decision import Decision

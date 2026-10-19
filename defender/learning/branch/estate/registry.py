@@ -29,11 +29,11 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_paths import LAYOUT
 from defender.runtime.branch import source_alert
 from defender.run_repository import Run
 from defender._io import read_jsonl_rows, read_text_utf8
-from defender._query_rules import ParamsTooDeep, _json_safe_params
+from defender.knowledge._query_rules import ParamsTooDeep, _json_safe_params
 from defender.learning.core.config import OracleSettings
 from defender.hooks.budget_enforcer import oracle_turn_closed, oracle_turn_opened
 from defender.runtime.payload_view import payload_text_of

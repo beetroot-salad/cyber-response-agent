@@ -13,7 +13,7 @@ from typing import Any
 
 from .. import orient
 
-from defender._env import env_bool
+from defender.configuration._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_utf8
 from defender.runtime.model_view import ModelView

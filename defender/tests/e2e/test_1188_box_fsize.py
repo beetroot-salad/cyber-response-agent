@@ -14,16 +14,17 @@ from pathlib import Path
 import pytest
 
 from defender._io import READ_LIMIT
-from defender._tenant import TenantId, tenant_id_file_text
+from defender.tenancy._tenant import TenantId, tenant_id_file_text
 from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
-from defender.runtime import bash_exec, box as box_mod
-from defender.runtime.box._image import HASH_INPUTS
-from defender.tests._1255_view import MODEL_RUN
-from defender.tests._alert_plant import plant_alert
-from defender.tests._declared869 import commit_all, init_git
-from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
-from defender.tests._lead_author_1134 import write
+from defender.execution import bash_exec
+from defender import box as box_mod
+from defender.box._image import HASH_INPUTS
+from defender.tests.support.runtime.state._1255_view import MODEL_RUN
+from defender.tests.support.storage._alert_plant import plant_alert
+from defender.tests.support.runtime.engine._declared869 import commit_all, init_git
+from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
+from defender.tests.support.learning.curation._lead_author_1134 import write
 from defender.tests.e2e._spec771 import AliasProbeDocker
 
 pytestmark = pytest.mark.e2e

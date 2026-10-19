@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from defender._tenant import Tenant
-from defender.runtime import box
+from defender.tenancy._tenant import Tenant
+from defender import box
 
 from .commits import CommitMaker, _Line
 from .exports import TenantExport, agent_blobs

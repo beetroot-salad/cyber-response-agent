@@ -73,7 +73,7 @@ COPY defender/ defender/
 #       --build-arg DEFENDER_BUILD_COMMIT="$(git rev-parse HEAD)" -t defender-runtime .
 #
 # The recovered commit NEVER ships with a clean working-tree bit, however clean the build tree
-# was — see `defender/_provenance.py`. This image documents mounting a workspace over its baked
+# was — see `defender/records/_provenance.py`. This image documents mounting a workspace over its baked
 # code for live iteration, so at runtime nothing can confirm the bytes on disk are the bytes
 # that were built; the stamp says "this commit, tree state unknown", which is true either way.
 # An unset arg is not an error: the run stamps `unavailable` and says so, as it does today.

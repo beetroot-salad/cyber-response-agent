@@ -2,7 +2,7 @@
 
 Reads must resolve inside the run dir or the defender corpus (plus a secret/ground-truth
 denylist); writes must `fullmatch` one of `policy.write_allow`. The run's two model-authored
-artifacts additionally go through `defender._artifact_schema`. `is_untrusted_read` flags
+artifacts additionally go through `defender.records._artifact_schema`. `is_untrusted_read` flags
 attacker-influenced data the caller must tag-wrap."""
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from defender import _artifact_schema
+from defender.records import _artifact_schema
 from defender._io import bind
 from defender.run_repository import (
     RUN_LAYOUT,
@@ -336,7 +336,7 @@ def decide_write(
     The roots are required, not optional, because the artifact gate keys on
     `<run_dir>/<name>`; an omitted `run_dir` would silently skip it. Every allowed write is
     checked for UTF-8 encodability; the two model-authored artifacts are validated against
-    `defender._artifact_schema`, whose reason text is returned so the model can fix its output.
+    `defender.records._artifact_schema`, whose reason text is returned so the model can fix its output.
     `shown` names the operand in a refusal, as `decide_read`'s does."""
     path = Path(path)
     named = shown if shown is not None else str(path)

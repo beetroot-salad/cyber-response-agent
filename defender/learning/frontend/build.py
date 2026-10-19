@@ -12,18 +12,18 @@ REPO_ROOT = HERE.parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender._venv import reexec_into_venv  # noqa: E402
+from defender.execution._venv import reexec_into_venv  # noqa: E402
 
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
 from defender.learning.core.config import LoopPaths, loop_paths  # noqa: E402
 from defender.learning.frontend import serialize, serialize_queues  # noqa: E402
-from defender.scripts.visualize.visualize_primitives import (  # noqa: E402
+from defender.presentation.visualize_primitives import (  # noqa: E402
     esc_untrusted,
     pretty_json_html,
 )
-from defender.scripts.visualize.visualize_run import CSS as RUN_CSS  # noqa: E402
+from defender.presentation.visualize_run import CSS as RUN_CSS  # noqa: E402
 
 GROUP_STAGE = {"defender": "stage-defender", "actor": "stage-actor", "environment": "stage-oracle"}
 

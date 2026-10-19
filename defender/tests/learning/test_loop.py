@@ -14,7 +14,7 @@ LoopPaths = loop.LoopPaths
 
 from defender.learning.core import drains as drains  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, FINDINGS  # noqa: E402
-from defender.tests._state1135 import curation_run_dir, enqueue_run, state_for_paths  # noqa: E402
+from defender.tests.support.learning.core._state1135 import curation_run_dir, enqueue_run, state_for_paths  # noqa: E402
 from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
 from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 
@@ -155,7 +155,7 @@ class _FakeBranch:
 
 def _declarable_worktree(tmp_path: Path) -> Path:
     """A committed tree declaring one system, for `_FakeBranch(worktree=...)`."""
-    from defender.tests._declared869 import seed_tree
+    from defender.tests.support.runtime.engine._declared869 import seed_tree
 
     return seed_tree(tmp_path, name="wt", adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=("elastic",))
@@ -836,7 +836,7 @@ def test_author_branch_revert_idempotent_return_falls_back_to_head_without_url(t
 
 
 def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
-    from defender.learning.ops import revert_lesson as rl  # type: ignore[import-not-found]
+    from defender.cli.learning import revert_lesson as rl  # type: ignore[import-not-found]
     paths = LoopPaths(repo_root=tmp_path)
     _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
     forge = _FakeForge(create_ref="https://pr/7")
@@ -848,7 +848,7 @@ def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
 def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     import fcntl as _fcntl
 
-    from defender.learning.ops import revert_lesson as rl  # type: ignore[import-not-found]
+    from defender.cli.learning import revert_lesson as rl  # type: ignore[import-not-found]
     paths = LoopPaths(repo_root=tmp_path)
     lock = paths.state_root / AUTHOR_DRAIN_LOCK.file
     lock.parent.mkdir(parents=True, exist_ok=True)

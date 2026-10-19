@@ -40,9 +40,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender._io import Bound, entry_present, read_text_utf8
-from defender._episode_paths import LAYOUT, WorldPaths
+from defender.episodes._episode_paths import LAYOUT, WorldPaths
 from defender.run_repository import (
     RunPaths,
     artifact_dir,
@@ -56,7 +56,7 @@ from defender.learning.lead_repository import (
 )
 from defender.runtime.run_end import TRUNCATED_BY_EXECUTED_QUERIES, parse_record
 from defender.runtime.run_end import sidecar_path as run_end_sidecar_path
-from defender.runtime.scrub import verdict_path
+from defender.box._scrub import verdict_path
 
 _logger = logging.getLogger(__name__)
 

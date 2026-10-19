@@ -10,11 +10,11 @@ import pytest
 
 from defender.learning.author.lessons import run as lessons_run
 from defender.learning.core import drains
-from defender.tests import _drain719 as D
-from defender.tests import _judge_921 as J
-from defender.tests._curator1134 import author_trees
+from defender.tests.support.learning.curation import _drain719 as D
+from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.learning.curation._curator1134 import author_trees
 from defender.tests.e2e import _box665 as B
-from defender.tests import _state1135
+from defender.tests.support.learning.core import _state1135
 from defender.learning.core.state import FINDINGS
 
 pytestmark = pytest.mark.e2e

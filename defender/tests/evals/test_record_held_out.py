@@ -5,7 +5,7 @@ import json
 import pytest
 import yaml
 
-from defender.evals.oracle_golden import judge, record_held_out
+from evaluations.oracle_golden import judge, record_held_out
 
 MODEL, EFFORT = "claude-opus-5", "high"
 

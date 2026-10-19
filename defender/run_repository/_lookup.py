@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from defender import _io
 from defender._shown import escaped, quoted
-from defender._tenant import (
+from defender.tenancy._tenant import (
     Tenant, TenantId, TenantRecord, TenantRefused, ensure_runs_base_record,
 )
 from defender.run_repository import _record
@@ -62,7 +62,7 @@ from defender.run_repository._held import (
 from defender.run_repository._id import RunId
 
 if TYPE_CHECKING:
-    from defender._episode_handle import Episode
+    from defender.episodes._episode_handle import Episode
 
 # -- the rules, over one container (H1–H6) -------------------------------------------------------
 
@@ -272,7 +272,7 @@ class RunAddress:
     episode_id: str | None = None
 
     def __post_init__(self) -> None:
-        from defender._episode_handle import refuse_bad_episode_id
+        from defender.episodes._episode_handle import refuse_bad_episode_id
 
         object.__setattr__(self, "tenant_id", TenantId(self.tenant_id))
         run_id: object = self.run_id
@@ -418,8 +418,8 @@ class EpisodeRuns:
 
     def __init__(self, tenant: Tenant, episode_id: str, *, held: Episode | None,
                  container_required: bool, io: Any) -> None:
-        from defender._episode_handle import Episode, episode_dir, refuse_bad_episode_id
-        from defender._episode_paths import LAYOUT
+        from defender.episodes._episode_handle import Episode, episode_dir, refuse_bad_episode_id
+        from defender.episodes._episode_paths import LAYOUT
 
         self._tenant = tenant
         self._io = io
@@ -560,8 +560,8 @@ def open_requested_run(data_root: Path, raw_tenant: str, raw_run_id: str, *,
     `OSError` of an episode folder that is not there) — is RETURNED as one line of text naming
     the request, never raised or logged: the command line prints it on stderr and exits with its
     own status (defender/CLAUDE.md: a refusal is a value, not a diagnostic)."""
-    from defender._episode_handle import EpisodeRefused
-    from defender._tenant import requested_tenant
+    from defender.episodes._episode_handle import EpisodeRefused
+    from defender.tenancy._tenant import requested_tenant
 
     try:
         tenant = requested_tenant(data_root, raw_tenant)

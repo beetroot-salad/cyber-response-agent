@@ -8,7 +8,7 @@ Current source establishes existing behavior; the approved design establishes in
 | Term | Meaning / home |
 |---|---|
 | **the runtime** / **the driver** / **the main loop** | `runtime/driver/` — the main-agent loop (ORIENT → PLAN → GATHER → ANALYZE → REPORT), tools in `runtime/tools.py` |
-| **the gate** / **permissions** | `runtime/permission/` — the single in-process deny-by-default gate (bash + file reads/writes). Design notes: `docs/runtime-gates.md`. Audit CLI: `scripts/policy_cli.py` (`defender-policy show\|explain`, operator-only) |
+| **the gate** / **permissions** | `runtime/permission/` — the single in-process deny-by-default gate (bash + file reads/writes). Design notes: `docs/runtime-gates.md`. Audit CLI: `cli/policy_cli.py` (`defender-policy show\|explain`, operator-only) |
 | **the review gate** / **the reviewer** | `runtime/challenge_gate.py` (harness + routing) + `runtime/review/` (projections, role prompts, reply contract), dispatched from `runtime/close_tool.py`. **Not a loop phase** — a write-time gate every close but the host's own `unresolved` passes before it commits (#992): a confident close against its conclusion, `inconclusive` against its ceiling claim. Two blind lenses (`support`, `ablation`) + a `composer`, roster in `REVIEW_ROLES`. Fails closed |
 | **gather** | the per-lead data-access subagent — `skills/gather/` (prompt + query templates), dispatched from `runtime/tools.py`, calls the typed `query` tool (`runtime/query_tool.py`) |
 | **the branch** / **the episode** | `learning/branch/` — forks a finished run at a chosen message and runs a family of sibling worlds from it; `cli.py` is the composition root, `estate/` is what a sibling's queries are answered from |
@@ -18,10 +18,26 @@ Current source establishes existing behavior; the approved design establishes in
 | **the lead-author** | `learning/leads/` — offline curation of the gather query catalog + system skills |
 | **lessons** | `defender/lessons/` — authored by the loop, retrieved by three pushes — the PLAN-time `defender-lessons` shim keyed on the alert signature, the `append_block`/`fix_row` block keyed on the invlang frontier (`runtime/lessons_engine/lessons_frontier.py`, #919), and the same frontier block on the compaction fold's row (`runtime/lessons_push.py`, #936). Grep, no index |
 | **the agents / registry** | `defender/agents.py` — role → `AgentDefinition` (each brings its own grants + deps); `runtime/agent_definition.py` is the seam |
-| **the frontend** / **the visualizations** | rendered HTML, not a web app: `scripts/visualize/` emits `runtime.html` (the run's one page — alert, report card, phases, metrics, review gate, leads and transcript) per run and `learning.html` (the branch episode's one page — verdict, worlds, findings, stages and leads, rendered from the episode dir alone after `judge.yaml`); `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
-| **evals** | `defender/evals/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric (the frozen-actor replay and the judge A/B are retired); see `evals/README.md` |
+| **the frontend** / **the visualizations** | rendered HTML, not a web app: `presentation/` emits `runtime.html` (the run's one page — alert, report card, phases, metrics, review gate, leads and transcript) per run and `learning.html` (the branch episode's one page — verdict, worlds, findings, stages and leads, rendered from the episode dir alone after `judge.yaml`); `learning/frontend/build.py` emits the standalone `lessons.html` posture view |
+| **evals** | `evaluations/` — measurement layer (scores, not CI): `held_out.py` is the north-star metric (the frozen-actor replay and the judge A/B are retired); see root `evaluations/README.md` |
 
 ## Layout
+
+Repository maintenance commands live in root `tooling/`; product operator commands remain in
+`defender/cli/`. Playground Terraform and its local state belong in `playground-v2/infra/`.
+The shared sandbox is `defender/box/`, with its stdlib-only transport in `defender/execution/`.
+Measurement harnesses, golden cases, and judge-alignment research data live in root
+`evaluations/`; they consume product code through a one-way dependency.
+Sample playground alert inputs live in `playground-v2/examples/alerts/`; production accepts
+an explicit alert path and does not discover samples from the source tree.
+`runtime/` executes investigations and enforces permissions; `run_repository/` owns shared
+run identities and persistence for runtime, learning, and presentation. `records/` defines
+investigation inputs, artifact schemas, provenance, and report values; `episodes/` owns
+episode storage and addresses.
+The `_io` API delegates low-level JSON, guarded writes, and descriptor views to `_filesystem/`.
+
+Python modules and importable directories use snake_case. Documentation keeps kebab-case names;
+external command names, protocol values, and historical records retain their existing spelling.
 
 ```
 defender/
@@ -29,15 +45,27 @@ defender/
   run.py            # entrypoint: investigate one alert; post-steps render HTML + enqueue catalog curation
   agents.py         # agent registry
   run_common.py     # shared run-dir + post-step helpers
-  runtime/          # in-process PydanticAI engine: driver, tools, permission/, providers/, bash_exec, observe, orient, compaction
+  box/              # shared sandbox lifecycle, image naming, scrub, and seccomp policy
+  execution/        # stdlib-only command parser, executor, codec, and process helpers
+  runtime/          # in-process PydanticAI engine: driver, tools, permission/, providers/, observe, orient, compaction
                     #   branch.py — the turn-N resume (#920): which message may be branched from, and where the fork lands
                     #   close_tool.py + challenge_gate.py + review/ — the write-time review gate on every confident close
   hooks/            # gate LOGIC imported as libraries (lead claim, descriptors, budget, lesson-load) — no longer Claude Code hooks
   skills/           # invlang, gather, handbook, advisory + per-system references (elastic/ identity/ cmdb/ ticket/ change-mgmt/ threat-intel/ host-state/)
-  scripts/          # adapters/, gather_tools/ (record_query, the defender-sql wrapper), visualize/, lessons/ (the defender-lessons wrapper), case_history/, policy_cli.py, workspace_map.py
+  integrations/     # typed system adapters, transport, confinement, and ticket publication
+  presentation/     # workspace-map views, run and episode HTML rendering, and assets
+  cli/              # tenant, policy, tacit-knowledge, and workspace-map operator commands
+                    #   learning/ — lesson tracing and revert commands
+  bin/              # stable command wrappers used by permission checks
+  tenancy/          # tenant identity, registration, acceptance, and census
+  knowledge/        # tenant knowledge layout, corpora, query rules, and scaffolding
+  episodes/         # episode identities, layout, and storage handles
+  run_repository/   # shared run identities, layout, lookup, and records
+  records/          # investigation inputs, schemas, provenance, and report records
+  configuration/    # environment parsing and model pricing
   learning/         # offline loop: loop.py (the two authoring stages), lead_repository.py (THE read/join surface),
                     #   _prompt.py + _pydantic_stage.py (the shared stage-assembly pair, used by every engine),
-                    #   branch/, judge/, author/, core/, leads/, ops/, frontend/
+                    #   branch/, judge/, author/, core/, leads/, frontend/
                     #   branch/ forks a finished run at turn N and runs a family of worlds from it:
                     #   ledger.py records every response the estate served with the decision behind it;
                     #   estate/ is what a sibling world queries through. judge/ grades the archived episode.
@@ -45,16 +73,16 @@ defender/
   api/              # the platform HTTP API (#1131) — a STUB: routes + wire models + ports. The data rules are the
                     #   store's (#1082), stated on the ports; `fakes.py` enforces none of them. Never imports
                     #   runtime/ or learning/. `api/serve.py` runs it locally over the fakes (`--extra api`)
-  evals/            # metrics + harness-on-the-harness (scenarios/)
   lessons/          # checked-in lesson corpus (the defender's; read at PLAN time)
   lessons-questioner/ # the questioner's own corpus — lessons about authoring worlds, never read by the runtime agent
-  fixtures/         # alert.json (+ optional gather_raw payloads) used as runtime inputs
   run-transcripts/  # curated transcripts of past real-alert runs
-  tests/            # THE test tree — every collected suite lives here, none in the source dirs (#720).
-                    #   *.py       learning-loop invariants
-                    #   e2e/       hermetic replay (test_replay_*, run with -m e2e)
-                    #   learning/  the loop orchestrator (test_loop.py)
-                    #   evals/     the measurement tooling's unit tests
+  tests/            # single collected test tree, grouped by subsystem
+                    #   runtime/, sandbox/, storage/, tenancy/, invlang/, integrations/
+                    #   learning/, presentation/, shared/, api/, lint/, tooling/, evals/
+                    #   e2e/       hermetic runtime replay
+                    #   support/   shared helpers grouped by subsystem
+                    #   fixtures/  immutable replay and parser inputs
+                    #   docs/      test intent and coverage notes
   docs/             # design docs (learning-loop.md, runtime-gates.md, system-skill-shape.md, ...)
 ```
 
@@ -72,5 +100,5 @@ Runtime verification includes unit tests, hermetic e2e replay, and real-alert ev
 | Judge prompt + driver | `defender/learning/judge/` (`role.md` + `run.py`) |
 | Curator prompts + drivers | `defender/learning/author/<curator>/` |
 | Lessons corpus | `defender/lessons/*.md` (hand-edits fine if they match the schema) |
-| Eval metrics / scenarios | `defender/evals/` |
+| Eval metrics / scenarios | `evaluations/` |
 | Permission gate / grants | `runtime/permission/` + each agent's `bash_shapes` in `defender/agents.py`; secrets denylist in `runtime/bash_policy.json` |

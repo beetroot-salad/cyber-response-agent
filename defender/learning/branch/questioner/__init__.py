@@ -27,7 +27,7 @@ and is attacker-reachable, and a model restating it does not clean it.
 
 Messages go through `learning._prompt.stage_user_message` so they carry the reader contract, and
 each section is a literal `titled_section` call (its host title outside, its body in the frame)
-so `scripts/lint/lint_stage_prompt_frames.py` can inspect them.
+so `tooling/lint/lint_stage_prompt_frames.py` can inspect them.
 
 One salt per call (`_untrusted.message_salt`), not per family: Call 1's reply is framed into the
 later calls, so a salt Call 1's model had seen would be a delimiter the framed party holds. One
@@ -47,9 +47,9 @@ import logging
 import yaml
 
 from defender import _yaml
-from defender._env import env_str
+from defender.configuration._env import env_str
 from defender._io import read_guarded, read_text_utf8
-from defender._report import read_report
+from defender.records._report import read_report
 from defender.run_repository import RunPaths, artifact_file
 from defender._untrusted import message_salt
 from defender.learning._prompt import section_text, stage_user_message, titled_section

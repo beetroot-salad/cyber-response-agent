@@ -22,7 +22,7 @@ from _box665 import (  # noqa: E402
 pytest.importorskip("pydantic_ai")
 
 
-from defender.runtime import box as box_mod  # noqa: E402
+from defender import box as box_mod  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

@@ -1,7 +1,7 @@
 """#1015 e2e: a gather lead that spends its above-guard rejections is stopped by the host (budget), whatever the names, with the repeat guard's precedence, replay parity and no model-authored byte reaching main."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import pytest
 
@@ -10,11 +10,11 @@ pytest.importorskip("pydantic_ai")
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
-from defender.scripts.gather_tools import record_query as rq  # noqa: E402
+from defender.runtime import record_query as rq  # noqa: E402
 # `wrap_fresh`'s frame grammar and the real store's read channel, both spent from their one
 # home rather than re-spelled here — `_frames680` carries no optional dependency of its own.
-from defender.tests._frames680 import FRAME_RE  # noqa: E402
-from defender.tests._session_store_705 import sql  # noqa: E402
+from defender.tests.support.learning.curation._frames680 import FRAME_RE  # noqa: E402
+from defender.tests.support.storage._session_store_705 import sql  # noqa: E402
 from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _Res, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
@@ -30,7 +30,7 @@ from defender.tests.e2e.test_repeat_breaker_807 import (  # noqa: E402
     _replay_rejections,
 )
 
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
+from defender.runtime.record_query import (  # noqa: E402
     REJECTION_BUDGET,
     REJECTION_BUDGET_ESCAPE,
     RejectionBudgetTrip,

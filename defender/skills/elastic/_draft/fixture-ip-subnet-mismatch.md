@@ -52,7 +52,7 @@ For **real alerts** (non-fixture), map a WAZUH alert's `agent.ip` to an
 Elastic host using the established `host-agent-by-ip` template:
 
 ```bash
-defender/scripts/adapters/elastic_adapter.py query 'host.ip:"<agent.ip>"' \
+defender/integrations/elastic_adapter.py query 'host.ip:"<agent.ip>"' \
   --index 'logs-*' --limit 10
 ```
 

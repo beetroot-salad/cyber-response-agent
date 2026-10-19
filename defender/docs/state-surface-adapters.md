@@ -66,7 +66,7 @@ For the host-state adapter, the same primitive is the entire transport:
 
 ## Adapter shape — mirror `elastic_adapter.py`
 
-Each adapter is `defender/scripts/adapters/{system}_adapter.py`. Conventions
+Each adapter is `defender/integrations/{system}_adapter.py`. Conventions
 that need to match `elastic_adapter.py`:
 
 - A `VERBS` mapping keyed by verb name (plus `health-check`) — one plain
@@ -131,9 +131,9 @@ Since #611 a data-source adapter is not on any bash lane. The gather subagent
 calls the in-process typed `query` tool (`runtime/query_tool.py`), which
 dispatches `(system, verb, params)` against the verb registry
 (`runtime/verbs.py`'s `ModuleVerbRegistry`, discovered by glob over
-`scripts/adapters/*_adapter.py`). That registry IS the allowlist — a system or verb
+`integrations/*_adapter.py`). That registry IS the allowlist — a system or verb
 not in it is rejected — so a new adapter auto-gates by dropping its
-`{system}_adapter.py` (with a `VERBS` mapping) into `scripts/adapters/`, no per-CLI
+`{system}_adapter.py` (with a `VERBS` mapping) into `integrations/`, no per-CLI
 permission entry needed. The main loop is denied data-source access entirely
 (the gather subagent is the data-access layer); the per-agent grant model
 (`runtime/permission/`, #575) gates what remains on the read-only bash lanes.
@@ -155,7 +155,7 @@ SKILL handoff context). The audit surface is:
   payload shape for this to be useful — drift breaks replay.
 
 If we ever add per-call audit, the natural shape is a PreToolUse hook
-on `Bash` matching `*/defender/scripts/adapters/*` that appends to a
+on `Bash` matching `*/defender/integrations/*` that appends to a
 `tool_audit.jsonl`. Not in scope for this batch.
 
 ## Per-system SKILL `gaps` to declare upfront

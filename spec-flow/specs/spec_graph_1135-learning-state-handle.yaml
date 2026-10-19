@@ -125,7 +125,7 @@
 # ==========================================================================================
 schema_version: 2
 design: '1135'   # gh issue #1135; .spec-flow/inputs/design.md, revision 3 + 3.1 governing
-tests: defender/tests/learning_state_1135   # DERIVED (claim PD1): check_binds and the null stub scan
+tests: defender/tests/learning/state_contracts   # DERIVED (claim PD1): check_binds and the null stub scan
                  # the named directory FLAT, so every #1135 test file lives in this one directory
                  # (20-demands suggested defender/tests/test_1135_*.py, which would make the suite
                  # directory the whole of defender/tests — the null stub would then run the full

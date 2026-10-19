@@ -20,8 +20,8 @@ from _box665 import (  # noqa: E402
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import bash_exec  # noqa: E402
-from defender.runtime import box as box_mod  # noqa: E402
+from defender.execution import bash_exec  # noqa: E402
+from defender import box as box_mod  # noqa: E402
 
 pytestmark = [pytest.mark.e2e, pytest.mark.live, requires_live_box]
 
@@ -112,7 +112,7 @@ def test_tmpfs_contents_persist_across_execs_within_one_box_lifetime(tmp_path):
 @pytest.mark.parametrize(("case", "cmd", "rc_why", "contains", "contains_why"), [
     # the granted repertoire itself imports — a broken repertoire fails the box (c12)
     ("granted-repertoire-runs-clean",
-     "python3 -c 'import defender.runtime.bash_exec'",
+     "python3 -c 'import defender.execution.bash_exec'",
      "the granted interpreter/repertoire did not run clean at startup", None, None),
 
     # superseded by #1092: there is no `.venv` inside the box to resolve — `python3` IS the

@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._1255_view import model_path
+from defender.tests.support.runtime.state._1255_view import model_path
 
-from defender import _io, _tenant, run_common
+from defender import _io, run_common
+from defender.tenancy import _tenant
 from defender.run_repository import Run
 from defender.tests.e2e._replay_harness import GOLDEN, ReplayFn, Turn, drive, materialize
 

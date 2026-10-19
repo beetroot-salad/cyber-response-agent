@@ -19,7 +19,7 @@ from defender.learning.leads.draft_synthesis import (
     _executed_query,
     answered_identities,
 )
-from defender._query_rules import BASH_SHIM_QUERY_ID
+from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
 
 
 @model(frozen=True)

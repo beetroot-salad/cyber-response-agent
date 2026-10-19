@@ -45,7 +45,7 @@ episode dir alone.
 - **No ground-truth label is ever written into a run dir.** A labeled fixture's
   `disposition` is an answer key and the run dir is inside the agent's readable
   workspace, so labels stay beside their fixture
-  (`defender/fixtures/held-out/{slug}/ground_truth.yaml`) and are read there by
+  (`evaluations/fixtures/held_out/{slug}/ground_truth.yaml`) and are read there by
   `evals/held_out.py`. The eval walks fixtures and locates runs by run-id
   convention; the run dir carries no pointer back to a fixture and no label.
   Contamination is stopped upstream instead: the one automatic lane, the
@@ -95,12 +95,12 @@ episode dir alone.
   like a confident one, against its ceiling claim rather than a verdict.
 - **`executed_queries.jsonl`** (the queries table) + **`gather_raw/{lead_id}.lead.json`**
   (the leads table) — the two canonical tables, each written **live** during the
-  run by its own generator (`scripts/gather_tools/record_query.py` and
+  run by its own generator (`runtime/record_query.py` and
   `hooks/record_lead.py`). There is no post-run projection. The single
   read/join surface is `defender/learning/lead_repository.py`. A run that ran no
   queries has neither table — a monitor case, not a break.
 - **`gather_raw/{lead_id}/{seq}.json`** — raw query payload per executed query,
-  written by-ref by the capture wrapper (`scripts/gather_tools/record_query.py`). Each
+  written by-ref by the capture wrapper (`runtime/record_query.py`). Each
   queries-table row carries `payload_status` (`ok` | `empty` | `error`) and a
   ≤200-char `payload_digest` so loud failures reach the offline lead-author
   without forcing payload inspection. The agent works from gather's summary and
@@ -171,8 +171,8 @@ ANALYZE in `investigation.md`). The learning loop joins across cases on
 - `executed_queries.jsonl` flags whether each query came back `ok`, `empty`,
   `error`, etc. (the `payload_status` field) — the fastest read on "did the
   data actually arrive?"
-- `python3 scripts/analytics/run_stats.py` and the `visualize_*.py` scripts
-  under `defender/scripts/visualize/` render aggregate + per-run views.
+- `python3 tooling/analytics/run_stats.py` and the `visualize_*.py` scripts
+  under `defender/presentation/` render aggregate + per-run views.
 
 Sources: `defender/CLAUDE.md` §Run dir layout / §Two-table schema,
 `defender/learning/lead_repository.py`, `defender/run.py`.

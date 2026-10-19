@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._1255_view import model_path
+from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender._io import read_jsonl_rows
 from defender.run_repository import RunPaths
@@ -15,10 +15,10 @@ from defender.learning import lead_repository
 from defender.learning.leads import draft_synthesis, lead_extraction, lead_neighbors
 from defender.learning.leads.lead_author import build_handoff
 from defender.learning.leads.lead_extraction import collect_general_failures
-from defender.runtime.box_codec import BoxResult
+from defender.execution.box_codec import BoxResult
 from defender.runtime.query_tool import resolve_query_id
-from defender import _query_rules
-from defender.scripts.gather_tools import record_query
+from defender.knowledge import _query_rules
+from defender.runtime import record_query
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
     ReplayFn,
@@ -27,7 +27,7 @@ from defender.tests.e2e._replay_harness import (
     drive,
     materialize,
 )
-from defender.scripts.adapters.faults import UpstreamFault
+from defender.integrations.faults import UpstreamFault
 from defender.tests.e2e.test_query_tool_611 import (
     DONE,
     ROW_KEYS,
@@ -37,9 +37,9 @@ from defender.tests.e2e.test_query_tool_611 import (
 )
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
-from defender.scripts.gather_tools.record_query import SHIM_COMMAND_MAX_CHARS
-from defender._query_rules import BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
-from defender.tests._lead_author_1134 import repo_skills  # noqa: E402
+from defender.runtime.record_query import SHIM_COMMAND_MAX_CHARS
+from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
+from defender.tests.support.learning.curation._lead_author_1134 import repo_skills  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

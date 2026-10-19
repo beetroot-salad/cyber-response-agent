@@ -9,7 +9,7 @@ pytest.importorskip("pydantic_ai")
 
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
-from defender.scripts.adapters.faults import TransportFault  # noqa: E402
+from defender.integrations.faults import TransportFault  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,

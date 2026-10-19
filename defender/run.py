@@ -8,7 +8,7 @@ via `run_common.py`.
 
 Usage (every run names its tenant, and there is no default; on the host,
 clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then set it up once with
-    `python3 defender/scripts/tenant.py setup <tenant>`):
+    `python3 defender/cli/tenant.py setup <tenant>`):
     python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
 
 Billing / credentials: the engine calls the first-party Anthropic REST API and
@@ -45,14 +45,14 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _log  # noqa: E402
-from defender import _provenance  # noqa: E402
+from defender.records import _provenance  # noqa: E402
 from defender import run_common as _run  # noqa: E402
 from defender._paths import adapters_under  # noqa: E402
 from defender.run_repository import Run  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
-from defender import _tenant  # noqa: E402
-from defender._episode_handle import Episode  # noqa: E402
-from defender.runtime import box as box_mod  # noqa: E402
+from defender.tenancy import _tenant  # noqa: E402
+from defender.episodes._episode_handle import Episode  # noqa: E402
+from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
 from defender.runtime import run_end  # noqa: E402
@@ -68,7 +68,7 @@ from defender.runtime.verbs import (  # noqa: E402
     ServingAbort,
     read_roster,
 )
-from defender.scripts.case_history import ticket_writer as _default_ticket_writer  # noqa: E402
+from defender.integrations import ticket_writer as _default_ticket_writer  # noqa: E402
 
 DEFENDER_DIR = _DEFENDER_DIR
 
@@ -646,7 +646,7 @@ def _sibling_episode_dir(ns: argparse.Namespace, data_root: Path) -> Path | None
     ordinary run. A bad id or an unusable root is refused here, before anything is opened."""
     if ns.episode is None:
         return None
-    from defender._episode_handle import EpisodeRefused, episode_dir
+    from defender.episodes._episode_handle import EpisodeRefused, episode_dir
 
     try:
         return episode_dir(data_root, ns.episode)

@@ -5,7 +5,7 @@ import json
 import pytest
 import yaml
 
-from defender.evals.oracle_golden import validate_cases
+from evaluations.oracle_golden import validate_cases
 
 
 def _case(root, name, *, kind="observed", split="dev", story="An operation ran.",

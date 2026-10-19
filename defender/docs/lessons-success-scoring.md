@@ -7,7 +7,7 @@
 
 Companion to `defender/learning/actor_benign.md` / `actor.md`,
 `lessons_env_retrieve.py` / `lessons_actor_index.py`,
-and the task `docs/decisions/benign-actor-success-retrieval.md`. Captures the
+and the task `defender/docs/decisions/benign-actor-success-retrieval.md`. Captures the
 design discussion behind adding a success/usefulness signal to the
 actor-retrieved lesson corpora. The benign (FP) direction —
 `lessons-environment/` — is the worked case; §4 mirrors it to the
@@ -166,7 +166,7 @@ defender as discriminator, judge as reward) self-corrects *only* with a
 ground-truth anchor. Without one, actor and defender can co-evolve into a
 shared blind spot (GAN-style mode collapse / reward hacking) and call it
 convergence. The held-out `ground_truth.yaml` and the cross-case oracle
-(`docs/decisions/defender-learning-loop-cross-case-oracle.md`) are that anchor;
+(`defender/docs/decisions/defender-learning-loop-cross-case-oracle.md`) are that anchor;
 "the learning loop mitigates FN" and "gate promotion on confirmed-correct"
 are the same claim from two ends.
 
@@ -277,7 +277,7 @@ differ only in (a) what labels a win, (b) where the anchor comes from, and
 - **Held-out scarcity bounds the *full-trust* win signal.**
   A `ground_truth.yaml` label exists only for held-out fixtures, and is read from
   the fixture dir — never from a run dir (see
-  `defender/fixtures/held-out/README.md`). Under the strict
+  `evaluations/fixtures/held_out/README.md`). Under the strict
   reading that would starve promotion; the calibrated-judge tier
   (Principle 1) is what relieves it — held-out sizes the discount, the
   abundant judge supplies the volume. The residual bound is on calibration

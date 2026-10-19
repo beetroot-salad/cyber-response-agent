@@ -14,7 +14,7 @@ import urllib.request
 from typing import TYPE_CHECKING, Any
 
 from defender.runtime.verbs import VerbContext, verb
-from defender.scripts.adapters import _stub_transport, faults
+from defender.integrations import _stub_transport, faults
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.runtime.run_tenant import RunTenant

@@ -1,7 +1,7 @@
 """#540 — the reap-time run_dir scrub (symlink/hardlink/special-file taint), the box lifecycle and its fail-closed edges, gate survival, and hostile run-id / filename handling. `docker=` is the lifecycle seam; every fs fault is built with the real primitive."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run
+from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import ast
 import dataclasses
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._1255_view import model_path
+from defender.tests.support.runtime.state._1255_view import model_path
 
 pytest.importorskip("pydantic_ai")
 
@@ -26,7 +26,7 @@ from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
 from pydantic_ai.exceptions import ModelRetry  # noqa: E402
 
-from defender.runtime.box import (  # noqa: E402
+from defender.box import (  # noqa: E402
     BoxFault,
     BoxResult,
     Finding,
@@ -37,9 +37,9 @@ from defender.runtime.box import (  # noqa: E402
     stop_and_scrub,
     stop_box,
 )
-from defender.scripts import workspace_map as workspace_map_mod  # noqa: E402
-from defender.tests import _tenants1106  # noqa: E402
-from defender.tests._alert_plant import plant_alert  # noqa: E402
+from defender.presentation import workspace_map as workspace_map_mod  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106
+from defender.tests.support.storage._alert_plant import plant_alert  # noqa: E402
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
     RecordingDocker,
@@ -54,7 +54,7 @@ pytestmark = pytest.mark.e2e
 REPO_ROOT = DEFENDER.parent
 RUN_PY = DEFENDER / "run.py"
 BASH_PY = DEFENDER / "runtime" / "tools" / "_bash.py"
-GATHER_ONLY = REPO_ROOT / "scripts" / "testing" / "gather_only.py"
+GATHER_ONLY = REPO_ROOT / "tooling" / "testing" / "gather_only.py"
 
 
 def _clean_run_dir(tmp_path: Path) -> Path:
@@ -962,8 +962,8 @@ def test_a_box_authored_filename_cannot_forge_a_workspace_map_section(tmp_path):
 def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monkeypatch):
     """d_hostile_run_id_fails_loudly — a hostile run id fails LOUDLY rather than splitting the
     container-name grammar or the colon-separated bind spec."""
-    from defender import _tenant
-    from defender.tests._data_root_1078 import set_up_tenant
+    from defender.tenancy import _tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))

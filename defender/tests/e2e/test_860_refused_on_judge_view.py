@@ -1,7 +1,7 @@
 """#860 end to end — the family judge sees every refused attempt a lead made, by lead. A denied verb is a `∅.denied` sentinel row in the queries table; driven through the real gather entry, archive, join, VIEW 1 render and judge pass."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _writer_run_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
 
 from pathlib import Path
 
@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender._episode_handle import Episode  # noqa: E402
+from defender.episodes._episode_handle import Episode  # noqa: E402
 from defender.learning.lead_repository import joined  # noqa: E402
 from defender.runtime.circuit_breaker import (  # noqa: E402
     AGENT_FIXABLE_ERROR_CLASS,
@@ -17,17 +17,17 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
     DENIED_EXIT_CODE,
     INFRA_ERROR_CLASS,
 )
-from defender.scripts.gather_tools.record_query import REJECTION_BUDGET
-from defender._query_rules import (
+from defender.runtime.record_query import REJECTION_BUDGET
+from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     DENIED_QUERY_ID,
     REPEAT_TRIP_QUERY_ID,
     RESERVED_QUERY_ID_PREFIX,
 )
-from defender.tests import _judge_921 as J  # noqa: E402
-from defender.tests import _triplet_947 as T  # noqa: E402
-from defender.tests._verb_authorization_632 import (  # noqa: E402
+from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
     DONE,
     LEAD,
     q,
@@ -41,15 +41,15 @@ from defender.tests.e2e.test_1017_query_row_surface import (  # noqa: E402
     _leads_view,
     _world_row,
 )
-from defender.tests.test_1017_row_schema import (  # noqa: E402
+from defender.tests.learning.core.test_1017_row_schema import (  # noqa: E402
     KEY_MARKER,
     SHA_MARKER,
     _lead_file,
     _table,
 )
-from defender.tests.test_denial_gather_632 import DENIED_PAIR, _registry  # noqa: E402
-from defender.tests._lead_author_1134 import repo_skills  # noqa: E402
-from defender.tests import _state1135
+from defender.tests.runtime.engine.test_denial_gather_632 import DENIED_PAIR, _registry  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import repo_skills  # noqa: E402
+from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.e2e
 
@@ -449,7 +449,7 @@ def test_m1_a_real_denial_inside_a_dispatched_lead_is_that_leads_sentinel_row(tm
 def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     from defender._io import read_jsonl_rows
     from defender.run_repository import RunPaths
-    from defender.tests._fork_snapshot_plant import recorded_snapshot
+    from defender.tests.support.runtime.state._fork_snapshot_plant import recorded_snapshot
     from defender.runtime.run_state import RunState
 
     rec = VerbRecorder()
@@ -577,13 +577,13 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
 
 def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_path):
     from defender.learning.branch.ledger import REFUSED
-    from defender.tests.test_920_estate_seam import (
+    from defender.tests.learning.branch.test_920_estate_seam import (
         FAKE_GRANT, SERVED_FILE, World, fake_estate, served_rows, world_registry,
     )
 
     ledger_path = tmp_path / SERVED_FILE
     reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
-    from defender.tests.tenant_1107_settings import _spec1107 as S
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
     root = tmp_path / "tenant-data"
     S.plant(root, table="""dispositions:

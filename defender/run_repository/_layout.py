@@ -6,9 +6,9 @@ import re
 import stat
 from pathlib import Path, PurePosixPath
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
-from defender._run_id import refuse_bad_case_id
+from defender.records._run_id import refuse_bad_case_id
 
 # Stdlib `@dataclass`, not `defender._model.model`: the box entrypoint imports this module
 # with no third-party package installed.
@@ -33,7 +33,7 @@ from defender._run_id import refuse_bad_case_id
 WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 
-#: The run's provenance stamp. Shared with `scripts/workspace_map`, which hides it from the
+#: The run's provenance stamp. Shared with `presentation/workspace_map`, which hides it from the
 #: model-facing directory view; an independent spelling would stop hiding it after a rename.
 PROVENANCE = "provenance.json"
 
@@ -43,7 +43,7 @@ PROVENANCE = "provenance.json"
 GATE_METADATA_KEY = "json"
 
 # ======================================================================================
-# Every run-level record name, as a named constant. `scripts/lint/lint_run_records.py` reads
+# Every run-level record name, as a named constant. `tooling/lint/lint_run_records.py` reads
 # its protected names and composed parts off every module-level UPPERCASE string constant here.
 # ======================================================================================
 
@@ -84,7 +84,7 @@ JSONL_EXT = ".jsonl"
 AGENT_TRACE_SUFFIX = "_trace.jsonl"
 AGENT_FRAMED_TRACE_SUFFIX = "_framed_trace.jsonl"
 #: The episode layout's `served/` prefix — here because the lint gate's part set is read off
-#: this module; `_episode_paths.py` imports it.
+#: this module; `episodes/_episode_paths.py` imports it.
 SERVED_PREFIX = "served/"
 
 #: Generic suffixes, not discriminating parts; the gate catches hand-rolled compositions of

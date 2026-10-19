@@ -8,7 +8,7 @@
 > below describes how the committed cases were produced.
 
 How to measure whether the telemetry **oracle** is right, and what to do with the
-answer. Issue #693. The suite it produces lives at `defender/evals/oracle_golden/`;
+answer. Issue #693. The suite it produces lives at `evaluations/oracle_golden/`;
 that directory's README is the **format reference** (file layout, tools, current
 coverage). This document is the **procedure**: the steps, the checks each step
 must pass, and the failure each check exists to prevent.
@@ -147,7 +147,7 @@ estimate invites the point estimate to be read.
 > every observed payload is committed verbatim under `hidden/`. Correct for a
 > synthetic stack and only for one.
 
-1. **Lever up.** `infra/bin/up.sh` restores the latest lever-down snapshot. It
+1. **Lever up.** `playground-v2/infra/bin/up.sh` restores the latest lever-down snapshot. It
    needs local Terraform state and `terraform.tfvars`, both gitignored — a fresh
    workspace has neither, and the script will fail at `terraform apply`. The
    equivalent without state:
@@ -156,7 +156,7 @@ estimate invites the point estimate to be read.
    hcloud server create --name soc-playground --type ccx33 --location nbg1 \
        --image <latest lever-down snapshot id> --ssh-key <your key> \
        --firewall soc-playground-edge
-   infra/bin/update-ssh-config.sh <ip>          # docker context rides this alias
+   playground-v2/infra/bin/update-ssh-config.sh <ip>          # docker context rides this alias
    ```
 
    The firewall pins SSH to a `/32` allow-list; add yours and remove it after.
@@ -164,7 +164,7 @@ estimate invites the point estimate to be read.
 
    **That installer needs the CONTAINER's password, not `/workspace/.env`'s.** The two
    differ on a restored snapshot, and the installer talks to Kibana from outside, so it
-   fails every rule with HTTP 401 while `infra/bin/es.sh` keeps working — es.sh execs
+   fails every rule with HTTP 401 while `playground-v2/infra/bin/es.sh` keeps working — es.sh execs
    *inside* the container and reads `$ELASTIC_PASSWORD` there. Take the same value:
 
    ```bash
@@ -196,7 +196,7 @@ estimate invites the point estimate to be read.
    Every run names its tenant, and there is no default (#1078):
    clone the tenant repo into `$DEFENDER_DATA_ROOT/playground/knowledge` on the host, then,
    once the clone exits 0, run
-   `python3 defender/scripts/tenant.py setup playground` once, from the main checkout, with
+   `python3 defender/cli/tenant.py setup playground` once, from the main checkout, with
    `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
    the same user that runs defender; a destination already occupied makes setup refuse, naming
    it in the message. (Adopting an existing (B)/(C) installation whose old entries are
@@ -227,7 +227,7 @@ estimate invites the point estimate to be read.
    correctly refuses to conclude anything from one, but the evidence is still lost.
 
    ```bash
-   infra/bin/es.sh '/logs-*/_search' -H 'Content-Type: application/json' -d '{
+   playground-v2/infra/bin/es.sh '/logs-*/_search' -H 'Content-Type: application/json' -d '{
      "size":0, "query":{"range":{"@timestamp":{"gte":"now-32d"}}},
      "aggs":{"per_day":{"date_histogram":{"field":"@timestamp","calendar_interval":"day"}}}}'
    ```
@@ -240,7 +240,7 @@ estimate invites the point estimate to be read.
 6. **Assemble and label.**
 
    ```bash
-   python3 defender/evals/oracle_golden/build_case.py \
+   python3 evaluations/oracle_golden/build_case.py \
        <run_dir> <story.md> <controls.yaml> cases/<case-id>     # dir name IS the case id
    ```
 
@@ -294,8 +294,8 @@ disagreements and written off as model jitter.
 ## C. Replay and score
 
 ```bash
-python3 defender/evals/oracle_golden/replay.py cases/<case-id> [--tag <model>_effort-<e>]
-python3 defender/evals/oracle_golden/score.py  cases/<case-id> \
+python3 evaluations/oracle_golden/replay.py cases/<case-id> [--tag <model>_effort-<e>]
+python3 evaluations/oracle_golden/score.py  cases/<case-id> \
     cases/<case-id>/projections/<tag>.yaml --json cases/<case-id>/scores/<tag>.json
 ```
 
@@ -303,13 +303,13 @@ python3 defender/evals/oracle_golden/score.py  cases/<case-id> \
 `_run_oracle_pydantic`) and reads **only** `oracle_visible/`, so a projection is
 production-identical apart from where its inputs came from. `score.py` is pure —
 a function of (`expected.yaml`, `projection.yaml`), no clock, no network, no
-model — which is what lets `defender/tests/test_oracle_golden_693.py` assert that
+model — which is what lets `defender/tests/evals/test_oracle_golden_693.py` assert that
 every checked-in `scores/*.json` still reproduces from its projection. **Re-run
 the scorer over every case after changing `score.py`**, and run that test file
 before committing:
 
 ```bash
-defender/.venv/bin/python -m pytest defender/tests/test_oracle_golden_693.py -q
+defender/.venv/bin/python -m pytest defender/tests/evals/test_oracle_golden_693.py -q
 ```
 
 Read the dimensions, never one number:
@@ -629,7 +629,7 @@ Three things for whoever recruits next:
 
 ## Status
 
-`defender/evals/oracle_golden/README.md` carries the current coverage table and
+`evaluations/oracle_golden/README.md` carries the current coverage table and
 per-case results.
 
 **2026-07-28:** `nginx.access`, `keycloak.events` and `squid.access` are now each a scored

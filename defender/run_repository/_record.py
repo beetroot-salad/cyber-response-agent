@@ -26,11 +26,11 @@ from pathlib import Path
 from typing import Any
 
 from defender import _io
-from defender._run_id import (
+from defender.records._run_id import (
     CASE_STABLE_REQUIRED, RUN_ID_ALLOWED, is_case_stable_id, is_valid_run_id,
 )
-from defender._tenant import Tenant
-from defender._world_label import reserved_label_fault, world_view_fault
+from defender.tenancy._tenant import Tenant
+from defender.episodes._world_label import reserved_label_fault, world_view_fault
 from defender._shown import quoted, shown
 from defender.run_repository._errors import RunRefused
 from defender.run_repository._held import (

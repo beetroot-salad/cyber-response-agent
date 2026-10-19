@@ -32,7 +32,7 @@ runtime = [
     "httpx",
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.43",
     # toons — the TOON encoder behind the tool-boundary view gate (#872,
-    # scripts/gather_tools/): a foreign toolset's dict/list result is re-encoded
+    # runtime/): a foreign toolset's dict/list result is re-encoded
     # and substituted only when the re-encoding is measurably cheaper on the
     # wire. Pinned to the 0.7 minor because the whole gate rests on ONE probed
     # property of THIS encoder — it escapes per TOON SPEC §7.1, so no value
@@ -76,7 +76,7 @@ runtime = [
 box = [
     "duckdb>=1.5,<2",
     # The run clock inside the box (#1255 "Into the box"): the wheel vendors a prebuilt
-    # `libfaketime.so.1` that every box process preloads (`runtime/box/_clock.py`). Its library
+    # `libfaketime.so.1` that every box process preloads (`box/_clock.py`). Its library
     # is x86_64 ONLY — on an arm64 host the preload cannot load and the box refuses to start.
     # Pinned exactly: the library's path inside the wheel is part of the box's create command.
     "libfaketime==3.0.1",
@@ -100,7 +100,7 @@ dev = [
     # it was turned on — zero tests changed outcome versus a serial run.
     "pytest-xdist>=3.5",
     "pytest-cov",
-    # tests/test_sql_idioms.py reads the doc's fences with a CommonMark parse. The `runtime`
+    # tests/integrations/test_sql_idioms.py reads the doc's fences with a CommonMark parse. The `runtime`
     # extra happens to carry it (fastmcp -> rich -> markdown-it-py); a dev-only sync does not.
     "markdown-it-py",
     # tests/test_api_*.py drive the `api` extra's app through starlette's TestClient, which
@@ -151,13 +151,13 @@ py-modules = []
 # `|| true` — the tree is at zero errors under this config, so a new type error
 # fails CI. Config is still permissive (no disallow_untyped_defs); the next ramp
 # steps (pin cleared modules strict via [[tool.mypy.overrides]], fold in tests)
-# are documented in docs/decisions/defender-mypy-ramp.md.
+# are documented in defender/docs/decisions/defender-mypy-ramp.md.
 #
 # Invoked from the REPO ROOT (matching the other lint/code-smells steps) as
 #   defender/.venv/bin/mypy --config-file defender/pyproject.toml
 # so `files`/`mypy_path` below are relative to the repo root, not defender/.
 python_version = "3.11"
-files = ["defender"]
+files = ["defender", "evaluations"]
 # defender/ is a namespace tree: no top-level package, modules invoked by path,
 # tests sys.path.insert("..") (so imports resolve as `defender.*`). mypy_path +
 # explicit_package_bases + namespace_packages give every file a unique dotted
@@ -171,7 +171,7 @@ explicit_package_bases = true
 # test tree are excluded. Tests lean on duck-typed fakes (a bare object() passed
 # where a typed deps struct is expected) that mypy can't see through — high-noise,
 # low-value for the production-typing ramp. Folding tests in is a later ramp step
-# (see docs/decisions/defender-mypy-ramp.md), matching how the ruff families
+# (see defender/docs/decisions/defender-mypy-ramp.md), matching how the ruff families
 # graduated one group at a time.
 exclude = ['(^|/)\.venv/', '(^|/)tests/', '(^|/)test_[^/]*\.py$', '(^|/)conftest\.py$']
 ignore_missing_imports = true

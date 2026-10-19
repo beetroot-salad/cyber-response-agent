@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.evals.oracle_golden import story_from_run as STORY
+from evaluations.oracle_golden import story_from_run as STORY
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_RUNS_DIR = Path(__file__).resolve().parent / "_run_records"

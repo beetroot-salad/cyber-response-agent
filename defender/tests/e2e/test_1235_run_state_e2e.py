@@ -13,18 +13,18 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
+from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
-from defender.scripts.gather_tools.record_query import REJECTION_BUDGET  # noqa: E402
-from defender.tests._1255_view import model_path  # noqa: E402
-from defender.tests._branch_947 import (  # noqa: E402
+from defender.runtime.record_query import REJECTION_BUDGET  # noqa: E402
+from defender.tests.support.runtime.state._1255_view import model_path  # noqa: E402
+from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
     GOLDEN_INVESTIGATION,
     LEGACY_BRANCH_CALL,
     planted_source,
     spec_at,
 )
-from defender.tests._session_store_705 import runs_base  # noqa: E402
+from defender.tests.support.storage._session_store_705 import runs_base  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -126,7 +126,7 @@ class Branched:
         store.close()
         self.sibling = tmp_path / "defender-runs" / "run-sibling-1235"
         RunPaths(self.sibling).gather_raw.mkdir(parents=True)
-        from defender.tests._alert_plant import plant_alert
+        from defender.tests.support.storage._alert_plant import plant_alert
         plant_alert(self.sibling, RunPaths(source).alert.read_bytes())
 
     def resume(self, *, main: ReplayFn, gather: ReplayFn, verbs: FakeVerbs,

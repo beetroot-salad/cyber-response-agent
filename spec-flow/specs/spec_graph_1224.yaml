@@ -40,7 +40,7 @@ schema_version: 2
 design: '#1224 — branching through a live oracle: .spec-flow/design-doc.md (the intent+design doc, base 96e4cdb0) as amended by .spec-flow/design-amendments.md
   (human ruling 2026-10-08: obligations O1-O16 and the non-obligations stand; RF-1..RF-3 and the absent premises are facts about today''s code
   the implementation must handle)'
-tests: defender/tests/live_oracle_1224
+tests: defender/tests/learning/oracle/live_contracts
 base: 96e4cdb0
 demands:
 - id: d00a_served_answer_contract

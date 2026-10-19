@@ -1,7 +1,7 @@
 """#1110 e2e: the run page is saved as the run's record through the run's tenant-bound handle (post-run step and run.py main); a failed dev copy is only a warning, while an unrenderable/unimportable renderer or a refused record write is VisualizeFailed (run.py main still exits 0); the standalone re-render refuses a link planted at the record."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import errno
 import json
@@ -16,10 +16,11 @@ from typing import Any
 
 import pytest
 
-from defender import _env, _io, run_common
+from defender import _io, run_common
+from defender.configuration import _env
 from defender.run_repository import Run
 from defender.run_repository import RunPaths
-from defender.tests._spec1077 import bound_arguments
+from defender.tests.support.shared.contracts._spec1077 import bound_arguments
 from defender.tests.e2e._replay_harness import GOLDEN, drive
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, golden_replay, tenant_run
 from defender.tests.e2e.test_1084_mirror_e2e import (
@@ -41,13 +42,13 @@ CRASHING_TRACE_ROWS: dict[str, tuple[dict, str, str]] = {
         {"type": "assistant", "message": {"content": 5}}, "TypeError", "not iterable"),
 }
 #: The renderer's module, as `run_common.visualize` imports it.
-RENDERER_MODULE = "defender.scripts.visualize.visualize_run"
+RENDERER_MODULE = "defender.presentation.visualize_run"
 
 
 def _repository_run() -> tuple[str, Path]:
     """`(T, run_dir)`: a driven run where the run page's repository opens it, by id, under T."""
-    from defender import _tenant
-    from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
+    from defender.tenancy import _tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 
     tenant = ensure_d9_tenant()
     runs = current_data_root() / tenant / "runs"
@@ -61,7 +62,7 @@ def _run_page_argv(tenant: str, run_dir: Path) -> list[str]:
 
 
 def _renderer():
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     return visualize_run
 
@@ -191,11 +192,11 @@ def _make_renderer_unimportable(monkeypatch) -> None:
     """The renderer module cannot be imported — #922 C12's failure (a deleted symbol it imports breaks it AT..."""
     import importlib
 
-    package = importlib.import_module("defender.scripts.visualize")
+    package = importlib.import_module("defender.presentation")
     monkeypatch.setitem(sys.modules, RENDERER_MODULE, None)
     monkeypatch.delattr(package, "visualize_run", raising=False)
     with pytest.raises(ImportError):
-        from defender.scripts.visualize import visualize_run  # noqa: F401
+        from defender.presentation import visualize_run  # noqa: F401
 
 
 def test_1110_o1_the_post_run_step_saves_the_page_through_the_runs_tenant_bound_handle(tmp_path):
@@ -249,9 +250,9 @@ class _ReplayLifecycle:
 @pytest.fixture
 def entrypoint_env(tmp_path, monkeypatch) -> Path:
     """What the real `run.py main` needs to get past its startup and into its tail:"""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.runtime import providers
-    from defender.tests._data_root_1078 import current_data_root, set_up_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
     for var in providers.api_key_vars():
         monkeypatch.setenv(var, "spec1110-not-used")
@@ -262,7 +263,7 @@ def entrypoint_env(tmp_path, monkeypatch) -> Path:
 def _main(**seams: Callable[..., Any]) -> int:
     from defender import run as run_py
 
-    from defender.tests._data_root_1078 import D9_TENANT_ID
+    from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID
 
     return run_py.main([str(GOLDEN / "alert.json"), "--tenant", D9_TENANT_ID, "--no-learn"],
                        preflight=lambda _model: 0, **seams)
@@ -470,7 +471,7 @@ def test_1110_o7_run_main_exits_0_when_the_renderer_cannot_be_imported(
 
 def _standalone(tenant: str, run_dir: Path, **env: str) -> subprocess.CompletedProcess:
     """`python visualize_run.py --tenant T <run_id>` over a `_repository_run` (#1105 PR 2, declared change 7:"""
-    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
+    script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
     return subprocess.run(  # noqa: S603 — this interpreter, the renderer script, tenant, run id
         [sys.executable, str(script), *_run_page_argv(tenant, run_dir)[1:]],
         capture_output=True, text=True, encoding="utf-8", check=False,

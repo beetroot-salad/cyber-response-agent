@@ -41,7 +41,7 @@ CORRELATION_GRANT_HOLDER = "lead-zero-correlation"
 
 #: The `agent_id` namespaces of the run's wire log (`llm_requests.jsonl`): bare `main`,
 #: `gather:{lead_id}`, `review:{lens}`. Defined in this dependency-free leaf so the runtime
-#: writers and the cost readers in `scripts/visualize/` share one spelling; a drifted prefix
+#: writers and the cost readers in `presentation/` share one spelling; a drifted prefix
 #: would silently drop a namespace from the run's accounted cost.
 GATHER_AGENT_ID_PREFIX = "gather:"
 REVIEW_AGENT_ID_PREFIX = "review:"

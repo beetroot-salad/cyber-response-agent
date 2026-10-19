@@ -1,7 +1,7 @@
 """#1084/#1110 e2e: the dev-only run-page mirror copy. Replaced by stage+rename (never truncated in place), a planted link at the page name is refused and warned, a failed copy never fails the render, and (as root) pages are written as the checkout's owner and never through a link to a root-only target."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import logging
 import os
@@ -16,7 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from defender import _env, run_common
+from defender import run_common
+from defender.configuration import _env
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, tenant_run
 
 pytestmark = pytest.mark.e2e
@@ -32,7 +33,7 @@ def _dev_deployment(deployment_unset, monkeypatch):
 
 
 def _renderer():
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     return visualize_run
 
@@ -54,7 +55,7 @@ def _assert_warned(caplog, needle: str) -> None:
 
 def _warning_records(caplog) -> list[logging.LogRecord]:
     return [r for r in caplog.records if r.levelno == logging.WARNING
-            and r.name == "defender.scripts.visualize.visualize_run"]
+            and r.name == "defender.presentation.visualize_run"]
 
 
 def _assert_one_warning_naming_the_destination_once(caplog, dest: Path) -> str:

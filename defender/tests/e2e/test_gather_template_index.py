@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._1255_view import model_path
+from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
@@ -37,13 +37,13 @@ _CATALOG = _DEFENDER / "skills" / "gather" / "queries"
 
 
 def _established_ids() -> set[str]:
-    from defender._corpus import iter_query_templates
+    from defender.knowledge._corpus import iter_query_templates
 
     return {r.id for r in iter_query_templates(_CATALOG) if r.status == "established"}
 
 
 def _draft_ids() -> set[str]:
-    from defender._corpus import iter_query_templates
+    from defender.knowledge._corpus import iter_query_templates
 
     return {r.id for r in iter_query_templates(_CATALOG) if r.status == "draft"}
 
@@ -96,7 +96,7 @@ def test_d17_gather_dispatch_carries_the_template_index_end_to_end(tmp_path):
     assert "template_search" in dispatch
 
     # #835, on the wire: an off-target system reaches the model as id + path, without its Goal.
-    from defender._corpus import iter_query_templates
+    from defender.knowledge._corpus import iter_query_templates
 
     off = next(t for t in iter_query_templates(_CATALOG)
                if t.status == "established" and t.system == "cmdb")

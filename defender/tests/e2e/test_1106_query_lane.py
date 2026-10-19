@@ -8,8 +8,8 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.tests import _tenants1106 as T  # noqa: E402
-from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106 as T
+from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -85,7 +85,7 @@ def test_a_query_verb_is_handed_the_runs_tenant_record(tmp_path):
     assert Path(call.ctx.tenant.settings).resolve() == tenant.settings
     assert Path(call.ctx.tenant.settings).resolve() != T.FIXTURE_SETTINGS.resolve()
     # Read THROUGH what the verb was handed: the adapter's config is the run tenant's.
-    transport = T.mod("scripts.adapters._stub_transport")
+    transport = T.mod("integrations._stub_transport")
     assert transport.load_config(call.ctx, "cmdb", "CMDB")["URL_BASE"] == "http://cmdb-lane:8080"
 
 
@@ -94,7 +94,7 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     """The settings half is host-only (#1106):"""
     tenant = _tenant(tmp_path, T.TABLE_A, "fault")
     (tenant.settings / "systems" / "cmdb" / "config.env").unlink()
-    transport = T.mod("scripts.adapters._stub_transport")
+    transport = T.mod("integrations._stub_transport")
     rec = VerbRecorder()
 
     def get_host(ctx, *, host: str = "web-1") -> dict:

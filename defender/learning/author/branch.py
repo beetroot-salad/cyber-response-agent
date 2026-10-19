@@ -12,7 +12,7 @@ from defender._git import REPO_ROOT, GitError
 from defender._paths import DefenderPaths
 from defender.learning.author.forge import Forge, ForgeError, GhForge
 from defender.learning.core.config import QUARANTINE_DIRNAME
-from defender.runtime.scrub import verdict_path
+from defender.box._scrub import verdict_path
 
 _logger = logging.getLogger(__name__)
 

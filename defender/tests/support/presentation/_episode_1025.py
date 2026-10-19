@@ -1,0 +1,1173 @@
+"""Shared machinery for #1025's episode page spec (`learning.html`) — NO test scripts.
+
+The change: a page rendered from an episode directory alone —
+`presentation/visualize_episode.py::render_episode(episode_dir) -> Path`, written beside
+`judge.yaml` through `_io.write_guarded`'s replace lane, called by the launcher after the JUDGE
+clock frame closes (`cli._render_page`, under its own non-fatal boundary) and by
+the standalone CLI `main([episode_dir])`. NONE of it exists at base `e8d22ac0`; every import goes
+through `mod()` PER TEST (the `_triplet_947` / `_judge_921` idiom) so the missing target is one
+failure per test, never a collection error hiding the other assertions.
+
+THE ARCHIVES ARE NOT VISIBLE TO CI (F27: `/workspace/.defender-episodes/` is gitignored and
+outside the checkout), so the "sample" the design doc quotes off `fresh-authkeys-20260909-n124`
+is carried here by a SUITE-BUILT episode that reproduces an oracle-era archive's SHAPE with its
+own numbers: `sample_episode()` — three worlds (the control `a`, `no_remote_session` whose fact
+touched no served call, `prior_fake_key_precedent` whose oracle answered one), one draw each plus
+a family draw, three questioner traces, three judge traces with their framed twins, three
+sibling run dirs each ending in a result event, pre-flight's `outcome.yaml`, the samples and
+provenance records — and no `timing.json`, because both archives predate prep 1 (c25). Every
+fixture number is a module constant (`SAMPLE`), so a test asserts against the fixture's
+declared figure, never against a value its own body computed from the records.
+
+EVERY RECORD IS WRITTEN IN THE SHAPE ITS PRODUCTION WRITER LEAVES AND READ BACK THROUGH ITS
+PRODUCTION READER before a test sees it — `write_judge` round-trips through `judge.read_grade`,
+`draw_document` through `enqueue.draws_on_disk`, `outcome.yaml` and `world_records/` are
+written by `learning/branch/outcome.py` itself, the manifest by `_triplet_947.write_family`, the
+served ledgers by `_judge_921.write_ledger`, the run dirs by `_triplet_947.sibling_run_dir`. A
+fixture the real reader refuses is a fixture bug, and it fails HERE, loudly, rather than
+turning up as a page that rendered "unreadable" for a record the test believed intact. Where a
+scenario WANTS an unreadable record it writes raw bytes (`plant_raw`) and says so.
+
+Fault content cites the ledger claim that observed it on the real dependency
+(`spec-flow/specs/spec_graph_1025.yaml`, `claims:`): the trace row shape is c2, the result event
+c4, the framed row c8, the refusal classes F25/p6/x16, the replace lane's refusal p1, the NUL /
+lone-surrogate encode behaviour p4, the unscreened world leaves p2. Nothing here induces a fault
+by imagination; the only fakes are the launcher harness's own (`_judge_921.FakeSibling` /
+`FakeJudge`), reached through `cli.main`'s seams (never `monkeypatch.setattr`).
+
+Underscore-prefixed so pytest does not collect it; it defines no tests.
+"""
+from __future__ import annotations
+
+import contextlib
+import html
+import json
+import os
+import shutil
+import signal
+import threading
+import time
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Any
+
+
+from defender import _yaml
+
+from defender.episodes._episode_handle import Episode as _EpisodeHandle
+from defender.episodes._episode_paths import EpisodePaths
+from defender._io import bind, write_guarded
+from defender.tests.support.learning.judge import _judge_921 as J
+from defender.tests.support.learning.branch import _triplet_947 as T
+
+mod = T.mod
+sym = T.sym
+
+#: The page module and its two entry points — the design's names (20-demands.md §2, Q1).
+PAGE_MODULE = "presentation.visualize_episode"
+PAGE_NAME = "learning.html"
+
+#: The episode identity every fixture here carries — the harness's, so `episode_dir_for`,
+#: `world_token` and the served-ledger names all agree with the launcher's own.
+EPISODE_ID = T.EPISODE_ID
+EPISODE_TOKEN = T.EPISODE_TOKEN
+
+#: The sample's three worlds, in manifest order. Underscored labels ON PURPOSE (g2): the judge
+#: trace stem `judge_no_remote_session_0_trace` is ambiguous to a filename parser, which is what
+#: `s_judge_trace_stems_with_underscored_labels_and_two_digit_draws` is about.
+CONTROL = "a"
+#: A sibling whose fact touched no call the investigator made: its served ledger is all
+#: `passthrough`.
+PASSTHROUGH_WORLD = "no_remote_session"
+#: A sibling whose live oracle answered one of the investigator's calls (an `oracle` row).
+GRADED_WORLD = "prior_fake_key_precedent"
+FAMILY = "family"
+WORLDS = (CONTROL, PASSTHROUGH_WORLD, GRADED_WORLD)
+
+AXIS_PASSTHROUGH = "There is no accepted SSH login from the external address around the write."
+AXIS_GRADED = "Falco history holds two earlier fake-key writes shaped like this one."
+FACT_PASSTHROUGH = "No SSH session from 203.0.113.7 was accepted on soc-playground that hour."
+FACT_GRADED = "Falco logged two earlier fake-key writes to root's authorized_keys on soc-playground."
+BASE_STORY = "Host soc-playground fired the authorized_keys rule after a root one-liner."
+ALERT_RULE = "v2 Falco: authorized_keys modification"
+ALERT_ID = "99c120d90c1b134ffa0368cdb9f29e766aa0a275e8cd9471ff63ff98fd99a250"
+LESSONS_COMMIT = "68f0c7da909108e75ebe76980b8ad6a103eebb4a"
+MODEL = "accounts/fireworks/models/kimi-k3"   # prices through the table (c3): $3/M in, $15/M out
+ENQUEUED_TO = "/workspace/.claude/worktrees/episode-authkeys/defender/learning/_pending/findings.jsonl"
+WORLD_ENQUEUED_TO = ("/workspace/.claude/worktrees/episode-authkeys/defender/learning/_pending/"
+                     "questioner_findings.jsonl")
+#: Pre-flight's reason on the sample's `outcome.yaml` (`accepted`).
+OUTCOME_REASON = "pre-flight calibrated every world against the live estate"
+#: The system every sibling's served call and judge answer names — one of `T.SERVED_SYSTEMS`.
+SYSTEM = "elastic"
+#: #1234 A1: the default `contrast_evidence` of a sample defender finding — each sibling's report
+#: and the control's, so whichever sibling's draw files it, it rests on a two-run conduct pair
+#: (a pointer at the other sibling is merely one more resolving conduct pointer).
+SAMPLE_CONTRAST = (f"worlds/{GRADED_WORLD}/report.md", f"worlds/{PASSTHROUGH_WORLD}/report.md",
+                   f"worlds/{CONTROL}/report.md")
+
+
+@dataclass(frozen=True)
+class _Sample:
+    """The fixture's declared figures — the expected side of every count assertion."""
+    findings: int = 13            # 5 + 5 + 3
+    defender_enqueued: int = 8    # each sibling's four subject: defender rows
+    world_author: int = 5         # one per world draw + the family draw's three
+    queued: int = 13              # 8 + 5
+    graded: int = 2
+    # trace usage → cost through the pricing table (kimi-k3: $3/M in, $15/M out — exact sums)
+    questioner_usage: tuple[tuple[int, int], ...] = ((100_000, 10_000), (50_000, 10_000),
+                                                     (50_000, 10_000))
+    questioner_cost: str = "$1.0500"        # 0.45 + 0.30 + 0.30
+    questioner_ms: tuple[int, ...] = (60_000, 30_000, 30_000)
+    questioner_wall: str = "2m00s"
+    judge_usage: tuple[tuple[int, int], ...] = ((100_000, 20_000), (50_000, 20_000),
+                                                (50_000, 20_000))
+    judge_cost: str = "$1.5000"             # 0.60 + 0.45 + 0.45
+    judge_ms: tuple[int, ...] = (120_000, 60_000, 60_000)
+    judge_wall: str = "4m00s"
+    run_cost: dict[str, float] = field(default_factory=lambda: {
+        CONTROL: 0.40, PASSTHROUGH_WORLD: 0.25, GRADED_WORLD: 0.35})
+    run_ms: dict[str, int] = field(default_factory=lambda: {
+        CONTROL: 600_000, PASSTHROUGH_WORLD: 180_000, GRADED_WORLD: 300_000})
+    worlds_cost: str = "$1.0000"
+    total_cost: str = "$3.5500"             # 1.05 + 1.50 + 1.00
+    longest_world: str = "10m00s"
+    shortest_world: str = "3m00s"
+    lower_bound: str = "16m00s"             # 2m00s + 4m00s + 10m00s
+
+
+SAMPLE = _Sample()
+
+
+# --------------------------------------------------------------------------------------
+# Record writers — each in its production writer's shape, each read back through its reader.
+# --------------------------------------------------------------------------------------
+
+
+def write_judge(episode_dir: Path, doc: dict[str, Any], *, check: bool = True) -> Path:
+    """`judge.yaml` as `_write_judge_yaml` leaves it — the `EpisodeGrade` schema dumped with
+    `sort_keys=False` through the guarded replace lane — and read back through `read_grade`
+    so a document the reader refuses fails here, not in the page."""
+    path = Path(episode_dir) / "judge.yaml"
+    write_guarded(path, _yaml.safe_dump(doc, sort_keys=False), mode="replace")
+    if check:
+        record = J.sym("learning.judge", "read_grade")(episode_dir)
+        assert record is not None, "fixture bug: judge.yaml did not read back as a grade"
+    return path
+
+
+def plant_raw(path: Path, data: bytes | str) -> Path:
+    """Bytes at a record's name, VERBATIM — for the scenarios whose subject is an unreadable
+    record. Replaces whatever is there (a file, a link) so a scenario can turn an intact record
+    into a broken one in one line."""
+    path = Path(path)
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, str):
+        path.write_text(data, encoding="utf-8")
+    else:
+        path.write_bytes(data)
+    return path
+
+
+def finding(*, subject: str = "defender", bucket: str = "lead-set",  # noqa: PLR0913 — one keyword per finding field a scenario may state
+            claim: str = "the holding system was never re-queried",
+            root_cause: str = "the lead was set and never revisited", anchor: str = "l-001",
+            topic: str = "holding-system coverage", evidence: list[str] | None = None,
+            **over: Any) -> dict[str, Any]:
+    """One filed finding of a per-draw document, tagged with its `subject` for `draw_doc`
+    (`_judge_921.finding_doc`'s #1234 shape): a `defender` finding is an investigator finding
+    whose `contrast_evidence` defaults to `SAMPLE_CONTRAST`; any other subject is a world
+    finding whose `evidence` defaults to `_judge_921.DEFAULT_WORLD_EVIDENCE` and whose
+    `systems` default to `[SYSTEM]`. `over` adds or replaces any key."""
+    if evidence is None and subject == "defender":
+        evidence = list(SAMPLE_CONTRAST)
+    row = J.finding_doc(subject=subject, bucket=bucket, claim=claim, root_cause=root_cause,
+                        anchor=anchor, topic=topic, evidence=evidence,
+                        systems=None if subject == "defender" else [SYSTEM])
+    row.update(over)
+    return row
+
+
+def draw_document(episode_dir: Path, label: str, draw: int | str, doc: dict[str, Any], *,
+                  check: bool = True) -> Path:
+    """`worlds/<label>/judge/<draw>.yaml` — the per-draw document `_run_world_draws` writes —
+    read back through `enqueue.draws_on_disk` (the ONE reader, c27) unless the stem is one the
+    reader is meant to ignore (`check=False`: `01.yaml`, a non-ASCII digit)."""
+    draw_dir = Path(episode_dir) / "worlds" / label / "judge"
+    draw_dir.mkdir(parents=True, exist_ok=True)
+    path = draw_dir / f"{draw}.yaml"
+    path.write_text(_yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    if check:
+        # `draws_on_disk` now takes the episode-root view plus the label (#1133 rev 2), never a
+        # draw dir path directly.
+        with bind(Path(episode_dir)) as ep_view:
+            on_disk = J.sym("learning.judge.enqueue", "draws_on_disk")(ep_view, label)
+        assert int(draw) in on_disk, f"fixture bug: draw {draw} did not read back"
+    return path
+
+
+def draw_doc(*, findings: list[dict[str, Any]] | None = None, **over: Any) -> dict[str, Any]:
+    """A per-draw document in `run.draw_document`'s #1234 shape: the world's `bucket` and
+    `systems`, `noise_floor_note`, the three pass tables and the three filed lists, `findings`
+    (default one `finding()`) split into `investigator_findings` / `world_findings` by each
+    one's `subject` (`_judge_921.reply_doc`). `over` passes through to `reply_doc` (`bucket=`,
+    `systems=`, `gaps=`, …)."""
+    return J.reply_doc(findings=findings if findings is not None else [finding()], **over)
+
+
+def family_draw_doc(*, findings: list[dict[str, Any]] | None = None,
+                    **over: Any) -> dict[str, Any]:
+    """A family-call draw document (`run.draw_document(scope="family")`): `noise_floor_note`,
+    the three pass tables and `world_findings` only (default `family_findings()`)."""
+    return J.family_reply(findings=findings if findings is not None else family_findings(),
+                          **over)
+
+
+def trace_rows(agent_id: str, *, prompt: str = "the framed prompt", reply: str = "the reply",
+               usage: tuple[int, int] | None = (1_000, 100), duration_ms: float | None = 1_000.0,
+               model: str | None = MODEL, instructions: str = "You are the seat.",
+               response: bool = True) -> list[dict[str, Any]]:
+    """One call's rows in the run wire log's record shape (c2): a `request` row whose message
+    carries `instructions` and a `user-prompt` part, then a `response` row carrying top-level
+    `model`, `usage` and `duration_ms` plus its `thinking`/`text` parts. `usage=None`,
+    `duration_ms=None` and `model=None` DROP the field (the missing-usage arm); `response=False`
+    leaves the request alone (the faulted-call arm)."""
+    request = {
+        "event_type": "message", "agent_id": agent_id, "seq": 0, "id": f"{agent_id}#0",
+        "kind": "request",
+        "message": {"parts": [{"content": prompt, "timestamp": "2026-09-09T17:14:43Z",
+                               "part_kind": "user-prompt"}],
+                    "timestamp": "2026-09-09T17:14:43Z", "instructions": instructions,
+                    "kind": "request", "run_id": "r", "conversation_id": "c", "metadata": None},
+    }
+    if not response:
+        return [request]
+    reply_row: dict[str, Any] = {
+        "event_type": "message", "agent_id": agent_id, "seq": 1, "id": f"{agent_id}#1",
+        "kind": "response",
+        "message": {"parts": [{"content": "thinking…", "part_kind": "thinking"},
+                              {"content": reply, "part_kind": "text"}],
+                    "timestamp": "2026-09-09T17:16:11Z", "kind": "response",
+                    "model_name": model or "", "finish_reason": "stop"},
+    }
+    if model is not None:
+        reply_row["model"] = model
+    if usage is not None:
+        reply_row["usage"] = {"input_tokens": usage[0], "output_tokens": usage[1],
+                              "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+    if duration_ms is not None:
+        reply_row["duration_ms"] = duration_ms
+    return [request, reply_row]
+
+
+def trace_stem(agent_id: str) -> str:
+    """`<agent_id with ':'->'_'>_trace` — the writer's own rule (g2), spelled once."""
+    return f"{agent_id.replace(':', '_')}_trace"
+
+
+def write_trace(episode_dir: Path, agent_id: str, rows: list[dict[str, Any]] | None = None,
+                *, raw: str | None = None, **kw: Any) -> Path:
+    """`wire_logs/<stem>.jsonl` — what `run_stage`'s `RequestLogger` leaves for one call. `raw=`
+    writes the bytes verbatim (a torn tail, an empty file)."""
+    d = Path(episode_dir) / "wire_logs"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"{trace_stem(agent_id)}.jsonl"
+    if raw is not None:
+        path.write_text(raw, encoding="utf-8")
+        return path
+    if rows is None:
+        rows = trace_rows(agent_id, **kw)  # lint-default: ok — the default is a fresh per-call row set built from the other keywords, not a constant
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return path
+
+
+def write_framed(episode_dir: Path, agent_id: str, *, prompt: str = "the framed prompt",
+                 reply: str | None = "the reply", failure: str | None = None) -> Path:
+    """`wire_logs/<stem>_framed_trace.jsonl` — `_write_wire_log`'s one-row record (c8)."""
+    d = Path(episode_dir) / "wire_logs"
+    d.mkdir(parents=True, exist_ok=True)
+    name = f"{agent_id.replace(':', '_')}_framed_trace.jsonl"
+    path = d / name
+    row = {"agent_id": agent_id, "prompt": prompt, "reply": reply, "failure": failure,
+           "wire_log_written_at": name}
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    return path
+
+
+def result_event(*, cost: float | Any = 0.25, duration_ms: int | Any = 180_000,
+                 **over: Any) -> dict[str, Any]:
+    """The tail `result` event of a run's `tool_trace.jsonl` (c4)."""
+    row: dict[str, Any] = {"type": "result", "duration_ms": duration_ms,
+                           "duration_api_ms": duration_ms, "total_cost_usd": cost,
+                           "num_turns": 21,
+                           "usage": {"input_tokens": 80_029, "output_tokens": 21_304,
+                                     "cache_read_input_tokens": 0,
+                                     "cache_creation_input_tokens": 0}}
+    row.update(over)
+    return row
+
+
+def write_tool_trace(run_dir: Path, rows: list[dict[str, Any]]) -> Path:
+    """`<run_dir>/tool_trace.jsonl` as `observe.write_trace` leaves it: the events, then the
+    result event LAST (c4) — when the caller puts it there."""
+    path = Path(run_dir) / "tool_trace.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return path
+
+
+def page_tenant() -> Any:
+    """The tenant a page is rendered for (#1105 PR 2, declared change 4: `render_episode(runs,
+    episode_id)` renders an episode of `runs`' tenant): this test data root's one tenant
+    (`_triplet_947.current_tenant`), set up from the committed fixture when absent."""
+    return T.current_tenant()
+
+
+def plant_container_record(episode_dir: Path) -> None:
+    """`<episode>/runs/_tenant.json` naming the page's tenant, through the real writer — what
+    the launcher leaves when it makes the siblings' container (`EpisodeRuns.create_container`;
+    the page's view refuses a container without one, #1105 PR 2 declared change 4) — when
+    `runs/` is a real directory holding no record entry. Anything else is left as planted: no
+    `runs/` (an episode stopped before RUNS), a link or a file there, a container the scenario
+    made unlistable or unsearchable (nothing inside it is touched: the page reads such a
+    container as absent, rev 5.1 S1), or a record of any kind already present (a scenario's
+    own). The page helpers below call it before each render; `sample_episode` itself leaves the
+    container as the pre-#1078 shape it always was (`test_dc4_a_container_with_no_record_…`
+    builds on that)."""
+    from defender.tenancy import _tenant
+
+    runs = Path(episode_dir) / "runs"
+    if runs.is_symlink() or not runs.is_dir():
+        return
+    if not os.access(runs, os.R_OK | os.X_OK):
+        return
+    record = runs / _tenant.TENANT_RECORD_NAME
+    if record.is_symlink() or record.exists():
+        return
+    _tenant.ensure_runs_base_record(runs, page_tenant().id)
+
+
+def render_episode(episode_dir: Path, *, module: Any = None) -> Path:
+    """The page's in-process door, by id (#1105 PR 2): `render_episode(runs, episode_id)` for
+    the episode at `episode_dir`, with `runs` the page tenant's repository and the configured
+    episodes base pointed at `episode_dir.parent` for the call (the container's record ensured
+    first, `plant_container_record`). Returns what it returns."""
+    d = Path(episode_dir).absolute()
+    target = module if module is not None else page_module()
+    plant_container_record(d)
+    with J.episodes_base(d.parent):
+        return target.render_episode(page_tenant().runs_repository(), d.name)
+
+
+def load_episode(episode_dir: Path, *, module: Any = None) -> Any:
+    """The page's typed model of the episode at `episode_dir` (`load_episode(view)`), the view
+    opened by id the way `render_episode` opens it (#1105 PR 2)."""
+    d = Path(episode_dir).absolute()
+    target = module if module is not None else page_module()
+    plant_container_record(d)
+    with J.episodes_base(d.parent), \
+            target.open_episode_view(page_tenant().runs_repository(), d.name) as view:
+        return target.load_episode(view)
+
+
+def build_page(episode_dir: Path, *, module: Any = None) -> str:
+    """The page's HTML for the episode at `episode_dir` (`build_page(view)`), the view opened by
+    id the way `render_episode` opens it (#1105 PR 2); nothing is written."""
+    d = Path(episode_dir).absolute()
+    target = module if module is not None else page_module()
+    plant_container_record(d)
+    with J.episodes_base(d.parent), \
+            target.open_episode_view(page_tenant().runs_repository(), d.name) as view:
+        return target.build_page(view)
+
+
+def cli_on(episode_dir: Path, capsys, *, module: Any = None) -> tuple[int, str, str]:
+    """`cli` for the episode at `episode_dir`, by id: `--tenant T <episode_id>` under the
+    episodes base that holds it (#1105 PR 2, declared change 4)."""
+    d = Path(episode_dir)
+    plant_container_record(d)
+    return cli(cli_argv(d), capsys, module=module, episodes_base=d.parent)
+
+
+def cli_argv(episode_dir: Path) -> list[str]:
+    """The page CLI's arguments for the episode at `episode_dir` (#1105 PR 2, declared change 4
+    and J8): `--tenant T <episode_id>`; the caller points the episodes base at its parent."""
+    return ["--tenant", str(page_tenant().id), Path(episode_dir).name]
+
+
+def run_dir(episode_dir: Path, label: str, *, cost: float | Any = 0.25,
+            duration_ms: int | Any = 180_000, result: bool = True, runtime_html: bool = True,
+            events: list[dict[str, Any]] | None = None) -> Path:
+    """`runs/<episode_id>-<label>/` — the sibling's run dir plus its scrub sidecar
+    (`_triplet_947.sibling_run_dir`), with `tool_trace.jsonl` ending in a result event and the
+    `runtime.html` the run's own visualizer leaves (x11)."""
+    runs = Path(episode_dir) / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    rd = T.sibling_run_dir(runs, label)
+    rows = list(events or [{"type": "assistant", "message": {"content": [{"type": "text",
+                                                                         "text": "hello"}]}}])
+    if result:
+        rows.append(result_event(cost=cost, duration_ms=duration_ms))
+    write_tool_trace(rd, rows)
+    if runtime_html:
+        (rd / "runtime.html").write_text("<!doctype html><title>run</title>", encoding="utf-8")
+    return rd
+
+
+def write_timing(episode_dir: Path, steps: list[tuple[str, str, str]] | None = None, *,
+                 raw: str | None = None, check: bool = True) -> Path:
+    """`timing.json` in `StageClock`'s shape — `{"steps": [{step, started_at, ended_at}]}` —
+    through the guarded replace lane, read back through `read_stage_timings` unless the
+    scenario wants a record the reader refuses (`check=False`, or `raw=`)."""
+    timing = J.mod("learning.branch.timing")
+    path = EpisodePaths(Path(episode_dir)).timing
+    if raw is not None:
+        plant_raw(path, raw)
+        return path
+    rows = [{"step": s, "started_at": a, "ended_at": b} for s, a, b in (steps or [])]
+    write_guarded(path, json.dumps({"steps": rows}, indent=2) + "\n", mode="replace")
+    if check:
+        # the reader takes the BOUND primitive, never a root it could format (#1049 D-V2)
+        assert timing.read_stage_timings(J.mod("_io").bind(episode_dir)) == rows
+    return path
+
+
+def every_step(*, minute: int = 0) -> list[tuple[str, str, str]]:
+    """A complete record, one row per `STEPS` member in launch order, one minute per step from
+    `10:0<minute>`."""
+    out = []
+    for i, step in enumerate(J.mod("learning.branch.steps").STEPS):
+        m = minute + i * 2
+        out.append((str(step), f"2026-09-09T10:{m:02d}:00Z", f"2026-09-09T10:{m + 1:02d}:00Z"))
+    return out
+
+
+def write_stamp(episode_dir: Path, *, commit: str = LESSONS_COMMIT, dirty: bool = False,
+                dirty_paths: list[str] | None = None, allow_dirty: bool = False) -> Path:
+    """The episode-root family stamp `provenance.json` as `cli._write_family_stamp` leaves it:
+    `{agreed: {commit, dirty, dirty_path_count, dirty_paths, model, scope, unavailable},
+    allow_dirty}` — a DIFFERENT shape from the per-world run stamp (fk-8/J12)."""
+    paths = dirty_paths or []
+    doc = {"agreed": {"commit": commit, "dirty": dirty, "dirty_path_count": len(paths),
+                      "dirty_paths": paths, "model": "glm-5.2", "scope": "defender",
+                      "unavailable": None},
+           "allow_dirty": allow_dirty}
+    path = Path(episode_dir) / "provenance.json"
+    write_guarded(path, json.dumps(doc, indent=2, sort_keys=True) + "\n", mode="replace")
+    return path
+
+
+def write_samples(episode_dir: Path, doc: dict[str, Any] | None = None) -> Path:
+    """`samples.yaml` — the questioner's real example answers per served system (O16):
+    `{<system>: {verbs: {<verb>: [<answer>, ...]}}}` or `{<system>: {unavailable: <reason>}}`,
+    read back through `family.read_samples_record`."""
+    doc = doc if doc is not None else {
+        SYSTEM: {"verbs": {"esql": ['{"user.name": "root", "event.outcome": "success"}']}},
+        "identity": {"unavailable": "the adapter answered no example"},
+    }
+    path = Path(episode_dir) / "samples.yaml"
+    path.write_text(_yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
+    with bind(Path(episode_dir)) as bound:
+        assert J.sym("learning.judge.family", "read_samples_record")(bound) == doc, (
+            "fixture bug: samples.yaml did not read back")
+    return path
+
+
+def write_outcome(episode_dir: Path, outcome: str = "accepted", *,
+                  reason: str = OUTCOME_REASON, family_stamp: bool = True,
+                  **lists: Any) -> Path:
+    """Pre-flight's `outcome.yaml` through the production writer (`outcome.write_outcome`),
+    replacing any record already there (a fixture restating the outcome is not a second
+    pre-flight), read back through `outcome.read_outcome`. `lists` are the writer's
+    `unservable_worlds` / `not_replayable` / `drift`. An `accepted` record also gets the family
+    stamp (`J.comparable_family_stamp`) unless one is there or `family_stamp=False`."""
+    outcome_mod = J.mod("learning.branch.outcome")
+    path = Path(episode_dir) / "outcome.yaml"
+    path.unlink(missing_ok=True)
+    with _EpisodeHandle.open(Path(episode_dir)) as episode:
+        outcome_mod.write_outcome(episode, outcome, reason=reason, **lists)
+    with bind(Path(episode_dir)) as bound:
+        assert outcome_mod.read_outcome(bound)["outcome"] == outcome
+    if family_stamp and outcome == "accepted":
+        # PR #1232 round 7: only a stamped family is graded or compared.
+        J.comparable_family_stamp(Path(episode_dir), commit=LESSONS_COMMIT)
+    return path
+
+
+def write_world_record(episode_dir: Path, label: str, reason: str = "oracle unservable", *,
+                       call: dict[str, Any] | None = None, detail: str = "") -> Path:
+    """World `label`'s own record (`world_records/<label>.yaml`) through the production writer
+    (`outcome.write_world_record`)."""
+    with _EpisodeHandle.open(Path(episode_dir)) as episode:
+        assert J.mod("learning.branch.outcome").write_world_record(
+            episode, label, reason, call=call, detail=detail), "fixture bug: record exists"
+    return Path(episode_dir) / "world_records" / f"{label}.yaml"
+
+
+def served_row(label: str | None, source: str, *, system: str = SYSTEM, verb: str = "esql",
+               params: dict[str, Any] | None = None,
+               payload: str = '{"hits": []}', **extra: Any) -> dict[str, Any]:
+    """One served-ledger row in `ServedCall.row()`'s shape, its `source` one of the decision
+    words (`passthrough`, `oracle`, `real-error`, `refused`, `fault`). `extra` carries an
+    `oracle` row's own fields (`claim`, `verifier_verdict`, `attempts`)."""
+    row: dict[str, Any] = {
+        "system": system, "verb": verb,
+        "params": params if params is not None else {"query": "FROM logs-system.auth-* | LIMIT 5"},
+        "payload_text": payload, "source": source,
+        "world_id": None if label is None else T.world_token(label),
+    }
+    row.update(extra)
+    return row
+
+
+# --------------------------------------------------------------------------------------
+# The sample-shaped episode.
+# --------------------------------------------------------------------------------------
+
+
+#: The investigator buckets of each sibling's four defender findings. The passthrough world was
+#: never shown its facts (its ledger is all `passthrough`), so the discipline buckets are
+#: unavailable to it (A5) and a real pass would refuse them; the graded world's oracle answered
+#: a call, so it may carry them.
+SIBLING_BUCKETS = {
+    PASSTHROUGH_WORLD: ("lead-set", "lead-quality", "lead-set", "lead-quality"),
+    GRADED_WORLD: ("lead-set", "lead-quality", "decision-discipline", "analyze-discipline"),
+}
+#: Each sibling's world-level bucket (the reply's own, `run._world_verdict`).
+SIBLING_BUCKET = {PASSTHROUGH_WORLD: "lead-set", GRADED_WORLD: "decision-discipline"}
+#: The bucket of each sibling's one world finding: `mislabelled` marks the world's label doubted
+#: and leaves it measured (an `unreachable`/`incoherent` one would take it out of measurement
+#: and keep its defender findings off the queue, A7).
+SIBLING_WORLD_BUCKET = "mislabelled"
+#: The bucket of the family call's three world findings.
+FAMILY_WORLD_BUCKET = "incoherent"
+
+
+def _world_findings_rows(label: str = GRADED_WORLD) -> list[dict[str, Any]]:
+    """Five per-draw findings for sibling `label`, in filing order: four investigator findings
+    (`SIBLING_BUCKETS[label]`), each resting on `label`'s report against the control's, then
+    one design world finding citing `label`'s manifest entry (the sample's split)."""
+    rows = [finding(subject="defender", bucket=b, claim=f"defender claim {i}",
+                    root_cause=f"defender root cause {i}", topic=f"defender topic {i}",
+                    anchor=f"l-00{i + 1}",
+                    evidence=[f"worlds/{label}/report.md", f"worlds/{CONTROL}/report.md"])
+            for i, b in enumerate(SIBLING_BUCKETS[label])]
+    rows.append(finding(subject="world", bucket=SIBLING_WORLD_BUCKET,
+                        claim="the fact never reached the defender as a readable answer",
+                        root_cause="the oracle served the fact on a call the lead never made",
+                        topic="served fact never retrieved", anchor="l-002",
+                        evidence=[f"family.yaml#worlds/{label}"]))
+    return rows
+
+
+def family_findings() -> list[dict[str, Any]]:
+    """The family call's three world findings, each citing the passthrough world's entry."""
+    return [finding(subject="world", bucket=FAMILY_WORLD_BUCKET,
+                    claim=f"family claim {i}", root_cause=f"family root cause {i}",
+                    topic=f"family topic {i}", anchor=f"worlds.{PASSTHROUGH_WORLD}.facts",
+                    evidence=[f"family.yaml#worlds/{PASSTHROUGH_WORLD}"])
+            for i in range(3)]
+
+
+def world_row(label: str, *, declared: str, bucket: str | None = "decision-discipline",
+              systems: list[str] | None = None, verdict: str = "inconclusive",
+              resolution_moved: bool = True, draws: tuple[int, ...] = (0,),
+              **over: Any) -> dict[str, Any]:
+    """One `judge.yaml` world row in the shape the pass leaves for a judged, committed world:
+    `family.read_world`'s facts off the archive, the draw counts, the combined verdict
+    (`route.combine_draws`: `bucket`, `systems`, one `draws` entry per recorded draw,
+    `measured`, `draws_disagree`, `world_label_doubted` — set: every sibling files a
+    `mislabelled` finding) and the A6 `state: queued`."""
+    systems = list(systems) if systems is not None else [SYSTEM]
+    row: dict[str, Any] = {
+        "world": label, "declared": declared, "verdict": verdict,
+        "resolution_moved": resolution_moved, "malformed_rows": 0, "served_nothing": False,
+        "completed_draws": len(draws), "malformed_replies": 0, "bucket": bucket,
+        "systems": systems,
+        "draws": [{"draw": n, "bucket": bucket, "systems": list(systems)} for n in draws],
+        "measured": True, "not_measured_reason": None, "draws_disagree": False,
+        "world_label_doubted": True, "state": "queued",
+    }
+    row.update(over)
+    return row
+
+
+def family_row(*, draws: tuple[int, ...] = (0,), **over: Any) -> dict[str, Any]:
+    """`judge.yaml`'s `family` row for a family call that completed `draws` and committed."""
+    row: dict[str, Any] = {"completed_draws": len(draws), "malformed_replies": 0,
+                           "draws": [{"draw": n} for n in draws], "state": "queued"}
+    row.update(over)
+    return row
+
+
+def record_draws(doc: dict[str, Any], label: str, draws: tuple[int, ...]) -> dict[str, Any]:
+    """`doc` (a `sample_grade()`-shaped record) re-stated as recording `draws` for `label`'s
+    row — a world row's `draws` (each with the row's bucket and systems) and
+    `completed_draws`, or the family row's for `FAMILY` — the record a pass that completed
+    those draws writes. The page shows a draw document only when the record names its draw
+    (#1234 A6: `judge.recorded_draws`), so a scenario adding a draw on disk records it here."""
+    if label == FAMILY:
+        kept = {k: v for k, v in (doc.get("family") or {}).items()
+                if k not in ("draws", "completed_draws")}
+        doc["family"] = family_row(draws=draws, **kept)
+        return doc
+    row = next(r for r in doc["worlds"] if r["world"] == label)
+    row["draws"] = [{"draw": n, "bucket": row.get("bucket"),
+                     "systems": list(row.get("systems") or [])} for n in draws]
+    row["completed_draws"] = len(draws)
+    return doc
+
+
+def ungradable_row(label: str, *, declared: str = "malicious",
+                   reason: str = "oracle unservable — the oracle could not serve 'elastic' "
+                                 "esql for this world") -> dict[str, Any]:
+    """The world the judge never judged: `ungradable: True`, its reason, no bucket, no
+    findings — the row `family.read_world` or the pass's failed-world arm leaves."""
+    return {"world": label, "declared": declared, "ungradable": True,
+            "ungradable_reason": reason}
+
+
+def finding_id(label: str, draw: int | str, index: int) -> str:
+    """`build_finding_row`'s id spelling — the key every record list joins a finding on."""
+    return f"{EPISODE_ID}/{label}/{draw}/{index}"
+
+
+def disposition(label: str, draw: int | str, index: int, lane: str,
+                reason: str | None = None) -> dict[str, Any]:
+    """One `dispositions` ledger entry, in `enqueue.disposition_entry`'s shape."""
+    return {"finding_id": finding_id(label, draw, index), "lane": lane, "reason": reason}
+
+
+def sample_dispositions(*, family: bool = True) -> list[dict[str, Any]]:
+    """The ledger the real pass writes for the sample, IN ITS WALK ORDER: each sibling in
+    manifest order — its four investigator findings to the defender lane, its world finding to
+    the questioner lane (`world`) — then the family call's three world findings.
+    `test_1025_the_fixture_ledger_is_the_passes_own` holds this list to a real pass's."""
+    ledger: list[dict[str, Any]] = []
+    for label in (PASSTHROUGH_WORLD, GRADED_WORLD):
+        ledger += [disposition(label, 0, i, "defender") for i in range(4)]
+        ledger.append(disposition(label, 0, 4, "world"))
+    if family:
+        ledger += [disposition(FAMILY, 0, i, "world") for i in range(3)]
+    return ledger
+
+
+def set_lane(doc: dict[str, Any], label: str, draw: int | str, index: int, lane: str,
+             reason: str | None = None) -> dict[str, Any]:
+    """Re-file one coordinate on the fixture record's ledger the way the writer would have:
+    the entry replaced in place (appended when new)."""
+    entry = disposition(label, draw, index, lane, reason)
+    ledger = doc["dispositions"]
+    for n, existing in enumerate(ledger):
+        if existing["finding_id"] == entry["finding_id"]:
+            ledger[n] = entry
+            break
+    else:
+        ledger.append(entry)
+    return doc
+
+
+def drop_lanes(doc: dict[str, Any], label: str) -> dict[str, Any]:
+    """The record of a pass that never walked `label` (an ungradable row, no row at all, a
+    family call that never ran): its ledger entries gone, as the writer leaves them."""
+    doc["dispositions"] = [e for e in doc["dispositions"]
+                           if _coordinate(e["finding_id"])[0] != label]
+    return doc
+
+
+def _coordinate(finding_id: str) -> tuple[str, str, str]:
+    _prefix, label, draw, index = finding_id.rsplit("/", 3)
+    return label, draw, index
+
+
+def sample_grade(*, family: bool = True) -> dict[str, Any]:
+    """The sample-shaped `judge.yaml` document, in `EpisodeGrade`'s #1234 shape: two judged,
+    committed sibling rows (the control has no row), `validity: usable`, the family call's own
+    row (`None` when `family=False` — the record of an episode whose family call never ran), an
+    empty user record, eight defender rows and five questioner rows enqueued (two without the
+    family's three) — and the ledger (`dispositions`) that says so per finding."""
+    return {
+        "worlds": [
+            world_row(PASSTHROUGH_WORLD, declared="benign",
+                      bucket=SIBLING_BUCKET[PASSTHROUGH_WORLD], resolution_moved=False),
+            world_row(GRADED_WORLD, declared="malicious", bucket=SIBLING_BUCKET[GRADED_WORLD]),
+        ],
+        "validity": "usable",
+        "family": family_row() if family else None,
+        "user": {"named_gaps": [], "found_gaps": [], "serving_findings": [],
+                 "unkeyed_named_gaps": [], "gap_findings": []},
+        "dispositions": sample_dispositions(family=family),
+        "enqueued_rows": SAMPLE.defender_enqueued, "enqueued_to": ENQUEUED_TO,
+        "world_enqueued_rows": SAMPLE.world_author - (0 if family else 3),
+        "world_enqueued_to": WORLD_ENQUEUED_TO,
+        "draws": {"configured": 1, "completed": 1},
+        "knobs": {"draws": 1, "model": "kimi-k3", "effort": "medium", "payload_cap": 20000},
+        "lessons_commit": LESSONS_COMMIT,
+    }
+
+
+def sample_manifest_worlds() -> list[dict[str, Any]]:
+    return [
+        T.world_doc(CONTROL, role="A", axis=None, disposition_declared="malicious", facts=[]),
+        T.world_doc(PASSTHROUGH_WORLD, role="B", axis=AXIS_PASSTHROUGH,
+                    disposition_declared="benign",
+                    facts=[T.fact("f-quiet", FACT_PASSTHROUGH, ("soc-playground", "203.0.113.7"))]),
+        T.world_doc(GRADED_WORLD, role="C", axis=AXIS_GRADED, disposition_declared="malicious",
+                    facts=[T.fact("f-precedent", FACT_GRADED, ("soc-playground",))]),
+    ]
+
+
+def sample_manifest(**over: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = {"worlds": sample_manifest_worlds(), "base_story": BASE_STORY}
+    fields.update(over)
+    return T.family_doc(**fields)
+
+
+@dataclass
+class Episode:
+    """A built episode and the handles a scenario reaches for."""
+    dir: Path
+    tmp_path: Path
+
+    @property
+    def page(self) -> Path:
+        return self.dir / PAGE_NAME
+
+    def world(self, label: str) -> Path:
+        return self.dir / "worlds" / label
+
+    def run(self, label: str) -> Path:
+        return self.dir / "runs" / f"{EPISODE_ID}-{label}"
+
+    def record(self, name: str) -> Path:
+        return self.dir / name
+
+
+def sample_episode(tmp_path: Path, *, root: Path | None = None, judge: bool = True,  # noqa: PLR0913, C901 — one switch per record so a scenario about a record's absence names exactly that record
+                   family_draw: bool = True, traces: bool = True, runs: bool = True,
+                   timing: bool = False, stamp: bool = True, samples: bool = True) -> Episode:
+    """The fresh-authkeys-SHAPED episode, suite-built (F27), every record through its writer.
+
+    Switches turn a record off for the scenarios about its absence; `timing=True` adds the
+    every-step `timing.json` a post-prep launch leaves (the archives predate it, c25)."""
+    manifest = sample_manifest()
+    ep = J.accepted_episode(
+        tmp_path, root=root, worlds=manifest["worlds"], labels=WORLDS, family_stamp=False,
+        dispositions={CONTROL: "malicious", PASSTHROUGH_WORLD: "benign", GRADED_WORLD: "malicious"},
+        ledgers={CONTROL: [served_row(CONTROL, "passthrough")],
+                 PASSTHROUGH_WORLD: [served_row(PASSTHROUGH_WORLD, "passthrough")],
+                 GRADED_WORLD: [served_row(GRADED_WORLD, "oracle",
+                                           claim={"added": [{"forged_id": "fg-1",
+                                                             "fact_id": "f-precedent"}]},
+                                           verifier_verdict={"passed": True,
+                                                             "reason": "present"},
+                                           attempts=1)]})
+    # the manifest the sample carries: base story, a real axis per sibling, the control's null
+    T.write_family(ep, manifest)
+    # The family stamp is `stamp`'s alone (`write_stamp` below), so `stamp=False` means absent.
+    write_outcome(ep, family_stamp=False)
+    # the episode's copy of the source alert names the rule the header shows
+    from defender.tests.support.storage._alert_plant import plant_source_copy
+
+    plant_source_copy(ep, json.dumps(
+        {"alert_id": ALERT_ID, "rule": {"id": "v2-falco-authorized-keys-modification",
+                                        "name": ALERT_RULE}}).encode("utf-8"))
+    for label in WORLDS:
+        _leads(ep / "worlds" / label, label)
+    for label in (PASSTHROUGH_WORLD, GRADED_WORLD):
+        draw_document(ep, label, 0, draw_doc(findings=_world_findings_rows(label),
+                                             bucket=SIBLING_BUCKET[label], systems=[SYSTEM]))
+    if family_draw:
+        draw_document(ep, FAMILY, 0, family_draw_doc())
+    if judge:
+        write_judge(ep, sample_grade(family=family_draw))
+    if traces:
+        for agent_id, usage, ms in zip(("questioner", "questioner:b", "questioner:c"),
+                                       SAMPLE.questioner_usage, SAMPLE.questioner_ms, strict=True):
+            write_trace(ep, agent_id, usage=usage, duration_ms=float(ms),
+                        prompt=f"questioner prompt for {agent_id}", reply=f"reply of {agent_id}")
+        labels = ((FAMILY, 0), (PASSTHROUGH_WORLD, 0), (GRADED_WORLD, 0))
+        for (label, n), usage, ms in zip(labels, SAMPLE.judge_usage, SAMPLE.judge_ms, strict=True):
+            agent_id = f"judge:{label}:{n}"
+            write_trace(ep, agent_id, usage=usage, duration_ms=float(ms),
+                        prompt=f"judge prompt for {label}", reply=f"judge reply for {label}")
+            write_framed(ep, agent_id, prompt=f"framed prompt for {label}",
+                         reply=f"framed reply for {label}")
+    if runs:
+        for label in WORLDS:
+            run_dir(ep, label, cost=SAMPLE.run_cost[label], duration_ms=SAMPLE.run_ms[label])
+    if timing:
+        write_timing(ep, every_step())
+    if stamp:
+        write_stamp(ep)
+    if samples:
+        write_samples(ep)
+    return Episode(ep, tmp_path)
+
+
+def _leads(world_dir: Path, label: str) -> None:
+    """The world's leads in the surface's shape: `gather_raw/<lead>.lead.json` (the goal), the
+    queries table, and `gather_summaries/<lead>.md`. `l-000` is the PRE-BRANCH alert fetch —
+    present in the table and the lead files, never in a summary or a resolution row — so the
+    judge's leads-view set (`referenced_leads ∪ summary stems`, x12) excludes it."""
+    from defender.run_repository import RunPaths
+
+    leads = ["l-000", "l-001", "l-002", "l-00c"]
+    rows = []
+    for i, lid in enumerate(leads):
+        rows.append({"lead_id": lid, "seq": i, "system": "elastic", "verb": "esql",
+                     "query_id": f"q-{lid}", "params": {"index": "logs-*", "lead": lid},
+                     "raw_command": f"elastic esql lead={lid}",
+                     "payload_path": f"gather_raw/{lid}/0.json", "payload_digest": f"digest-{lid}",
+                     "exit_code": 0, "error_class": None})
+        (world_dir / "gather_raw" / f"{lid}.lead.json").write_text(
+            json.dumps({"lead_id": lid, "goal": f"goal of {lid} in {label}"}), encoding="utf-8")
+    RunPaths(world_dir).executed_queries.write_text(
+        "".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    summaries = world_dir / "gather_summaries"
+    summaries.mkdir(parents=True, exist_ok=True)
+    for lid in ("l-001", "l-002", "l-00c"):
+        (summaries / f"{lid}.md").write_text(f"summary of {lid} for {label}\n", encoding="utf-8")
+
+
+def copy_episode(ep: Episode, dest: Path) -> Episode:
+    """A whole-tree copy under another root AND another directory name — the O6 fixture
+    (correction 4: the page takes the episode id from the manifest, never the directory)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(ep.dir, dest, symlinks=True)
+    return Episode(dest, ep.tmp_path)
+
+
+# --------------------------------------------------------------------------------------
+# Driving the page.
+# --------------------------------------------------------------------------------------
+
+
+def page_module():
+    return mod(PAGE_MODULE)
+
+
+def render(ep: Episode | Path, *, module: Any = None) -> Page:
+    """`render_episode(runs, episode_id)` — the real entry point, by id (`render_episode` here)
+    — then the page it wrote, parsed. `module` is the page module a test file resolved through
+    its own `visualize_episode()` helper (so the static reach check sees the target from the
+    test); default: imported here."""
+    d = ep.dir if isinstance(ep, Episode) else Path(ep)
+    out = render_episode(d, module=module)
+    # The id door resolves the episode under the configured (absolute) episodes base, so a
+    # cwd-relative `ep` is compared by its absolute spelling.
+    assert Path(out) == d.absolute() / PAGE_NAME, f"render_episode returned {out!r}"
+    return read_page(d)
+
+
+def read_page(ep: Episode | Path) -> Page:
+    d = ep.dir if isinstance(ep, Episode) else Path(ep)
+    page = d / PAGE_NAME
+    assert page.is_file(), f"no {PAGE_NAME} under {d}"
+    return Page.parse(page.read_text(encoding="utf-8"))
+
+
+def cli(argv: list[str], capsys, *, module: Any = None,
+        episodes_base: Path | None = None) -> tuple[int, str, str]:
+    """`visualize_episode.main(argv)` with its stdout / stderr captured — under the episodes
+    base `episodes_base` when given (an id-taking argv names an episode under it)."""
+    target = module if module is not None else page_module()
+    with (J.episodes_base(episodes_base) if episodes_base is not None
+          else contextlib.nullcontext()):
+        rc = target.main(argv)
+    out = capsys.readouterr()
+    return rc, out.out, out.err
+
+
+def snapshot(tree: Path) -> dict[str, tuple[int, int]]:
+    """Every entry under `tree` with its (size, mtime_ns) — what a render may and may not touch."""
+    out = {}
+    for root, dirs, files in os.walk(tree):
+        for name in dirs + files:
+            p = Path(root) / name
+            st = p.lstat()
+            out[str(p.relative_to(tree))] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+class Rescue:
+    """Feed a planted FIFO from a background thread AFTER `after` seconds, so a reader that
+    follows it into a blocking `open` is released with a sentinel instead of hanging the suite
+    (p2: a FIFO at `investigation.md` blocks `read_world_facts` indefinitely today).
+
+    The two observables a test reads off this: whether the sentinel reached the page (the
+    target's content never appears) and whether the call took longer than `after` (the render
+    never blocks) — a screened reader returns in milliseconds and the writer thread finds no
+    reader to feed."""
+
+    SENTINEL = "FIFO-SENTINEL-CONTENT-NEVER-ON-THE-PAGE"
+
+    def __init__(self, fifo: Path, *, after: float = 2.0) -> None:
+        self.fifo = Path(fifo)
+        self.after = after
+        self.fed = False
+        self._cancel = threading.Event()
+        self._thread = threading.Thread(target=self._feed, daemon=True)
+
+    def _feed(self) -> None:
+        # Waited on the cancel event, not a bare `sleep`: `__exit__` sets it the moment the
+        # guarded call inside the `with` block has already RETURNED — and reaching `__exit__`
+        # at all already proves that call did not block, so there is nothing left to rescue.
+        # Without this, a correctly-screened reader still paid the full `after` seconds on
+        # every run (the wait was unconditional), which is the tax `_feed`'s own docstring says
+        # a screened reader should never owe.
+        if self._cancel.wait(self.after):
+            return
+        try:
+            fd = os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError:
+            return          # no reader blocked on it — the screened arm
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(self.SENTINEL + "\n")
+        self.fed = True
+
+    def __enter__(self) -> Rescue:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self._cancel.set()
+        self._thread.join(timeout=self.after + 5)
+
+
+#: The page module's file name — what `when_inside` looks for on the stack.
+PAGE_FILE = "visualize_episode.py"
+
+
+@contextlib.contextmanager
+def when_inside(act: Callable[[], Any], *, marker: str = PAGE_FILE, tick: float = 0.001,
+                budget: float = 60.0) -> Iterator[dict[str, Any]]:
+    """Run `act()` from a signal handler the first time a frame of `marker` is on the main
+    thread's stack — an interrupt, a rewrite or a raise landing INSIDE the render, with no seam
+    on the render itself (d40: the renderer is a plain call).
+
+    The interval timer re-arms every `tick` until the frame is seen or `budget` runs out, so
+    the observation is "what happened when the fault landed mid-render", not "what happened at
+    some unrelated moment". The dict yielded reports `hit` (the frame was seen) so a test can
+    fail for the right reason when the render never ran or finished under a tick."""
+    seen = {"hit": False, "count": 0}
+    started = time.monotonic()
+
+    def handler(_signum: int, frame: Any) -> None:
+        seen["count"] += 1
+        f = frame
+        while f is not None:
+            if f.f_code.co_filename.endswith(marker):
+                seen["hit"] = True
+                act()
+                return
+            f = f.f_back
+        if time.monotonic() - started < budget:
+            signal.setitimer(signal.ITIMER_REAL, tick)
+
+    previous = signal.signal(signal.SIGALRM, handler)
+    signal.setitimer(signal.ITIMER_REAL, tick)
+    try:
+        yield seen
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def raise_now(exc: BaseException) -> Callable[[], None]:
+    def _raise() -> None:
+        raise exc
+    return _raise
+
+
+def plant_fifo(path: Path) -> Path:
+    plant_raw(path, b"")
+    path.unlink()
+    os.mkfifo(path)
+    return path
+
+
+def plant_link(path: Path, target: Path) -> Path:
+    if path.is_symlink() or path.exists():
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(target)
+    return path
+
+
+# --------------------------------------------------------------------------------------
+# The page, parsed — assertions sit on observable surfaces (ids, hrefs, text), never internals.
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class Node:
+    tag: str
+    attrs: dict[str, str]
+    parent: Node | None
+    children: list[Node] = field(default_factory=list)
+    #: Text pieces and child nodes in document order — what `text()` walks.
+    order: list[Any] = field(default_factory=list)
+
+    @property
+    def id(self) -> str | None:
+        return self.attrs.get("id")
+
+    @property
+    def classes(self) -> set[str]:
+        return set((self.attrs.get("class") or "").split())
+
+    def text(self) -> str:
+        """The element's rendered text (descendants included, entities decoded), whitespace
+        collapsed to single spaces."""
+        parts: list[str] = []
+
+        def walk(n: Node) -> None:
+            for piece in n.order:
+                if isinstance(piece, str):
+                    parts.append(piece)
+                else:
+                    walk(piece)
+        walk(self)
+        return " ".join("".join(parts).split())
+
+    def descendants(self) -> list[Node]:
+        out: list[Node] = []
+        for c in self.children:
+            out.append(c)
+            out.extend(c.descendants())
+        return out
+
+    def find_all(self, tag: str | None = None, *, cls: str | None = None) -> list[Node]:
+        return [n for n in self.descendants()
+                if (tag is None or n.tag == tag) and (cls is None or cls in n.classes)]
+
+    def ancestor_with_id(self, prefix: str) -> Node | None:
+        n = self.parent
+        while n is not None:
+            if n.id and n.id.startswith(prefix):
+                return n
+            n = n.parent
+        return None
+
+
+_VOID = {"br", "hr", "img", "input", "meta", "link", "source", "wbr", "col", "area", "base"}
+
+
+class _Builder(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = Node("document", {}, None)
+        self.cur = self.root
+        self.raw_texts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        node = Node(tag, {k: (v if v is not None else "") for k, v in attrs}, self.cur)
+        self.cur.children.append(node)
+        self.cur.order.append(node)
+        if tag not in _VOID:
+            self.cur = node
+
+    def handle_endtag(self, tag: str) -> None:
+        n: Node | None = self.cur
+        while n is not None and n.tag != tag:
+            n = n.parent
+        if n is not None and n.parent is not None:
+            self.cur = n.parent
+
+    def handle_data(self, data: str) -> None:
+        self.cur.order.append(data)
+        if self.cur.tag not in ("style", "script"):
+            self.raw_texts.append(data)
+
+
+@dataclass
+class Page:
+    """`learning.html`, parsed: the bytes, the id map, the hrefs and the text."""
+    raw: str
+    root: Node
+    by_id: dict[str, Node]
+    ids: list[str]
+    #: Every `id` value, with duplicates kept — the uniqueness assertions read this.
+    all_ids: list[str]
+    hrefs: list[str]
+    #: The rendered TEXT (script/style excluded, entities decoded) — a planted `<script>` that
+    #: was escaped shows up here as text and in `raw` only as `&lt;script&gt;`.
+    text: str
+
+    @classmethod
+    def parse(cls, raw: str) -> Page:
+        b = _Builder()
+        b.feed(raw)
+        by_id: dict[str, Node] = {}
+        all_ids: list[str] = []
+        hrefs: list[str] = []
+        for n in b.root.descendants():
+            if n.id is not None:
+                all_ids.append(n.id)
+                by_id.setdefault(n.id, n)
+            if n.tag == "a" and "href" in n.attrs:
+                hrefs.append(n.attrs["href"])
+        text = " ".join("".join(b.raw_texts).split())
+        return cls(raw, b.root, by_id, list(by_id), all_ids, hrefs, text)
+
+    def __contains__(self, needle: str) -> bool:
+        return needle in self.text
+
+    def section(self, anchor: str) -> Node:
+        assert anchor in self.by_id, f"no element with id={anchor!r} on the page (ids: {self.ids[:40]}…)"
+        return self.by_id[anchor]
+
+    def text_of(self, anchor: str) -> str:
+        return self.section(anchor).text()
+
+    def ids_with(self, prefix: str) -> list[str]:
+        return [i for i in self.ids if i.startswith(prefix)]
+
+    def elements(self, tag: str | None = None, *, cls: str | None = None) -> list[Node]:
+        return self.root.find_all(tag, cls=cls)
+
+    def group_of(self, row_id: str) -> Node:
+        """The `fg-<n>` group a finding row sits in — a row in no group is the test's failure."""
+        group = self.section(row_id).ancestor_with_id("fg-")
+        assert group is not None, f"{row_id} sits in no fg-<n> group"
+        return group
+
+    def one(self, tag: str | None = None, *, cls: str | None = None) -> Node:
+        """Exactly one element of `tag` / class `cls` — a missing or repeated one is the
+        test's own failure, not an `IndexError`."""
+        found = self.elements(tag, cls=cls)
+        assert len(found) == 1, f"expected one <{tag or '*'} class={cls!r}>, found {len(found)}"
+        return found[0]
+
+    def anchors_in(self, anchor: str) -> list[str]:
+        return [n.attrs["href"] for n in self.section(anchor).find_all("a") if "href" in n.attrs]
+
+
+def escaped(s: str) -> str:
+    """What `esc` / `esc_untrusted` makes of `s` — the bytes an escaped occurrence carries."""
+    return html.escape(s)
+
+
+__all__ = [
+    "AXIS_GRADED", "AXIS_PASSTHROUGH", "ALERT_ID", "ALERT_RULE", "BASE_STORY", "CONTROL",
+    "ENQUEUED_TO", "EPISODE_ID", "EPISODE_TOKEN", "FACT_GRADED", "FACT_PASSTHROUGH", "FAMILY",
+    "GRADED_WORLD", "LESSONS_COMMIT", "MODEL", "OUTCOME_REASON", "PAGE_MODULE", "PAGE_NAME",
+    "PASSTHROUGH_WORLD", "SAMPLE", "SYSTEM", "WORLD_ENQUEUED_TO", "WORLDS",
+    "Episode", "Node", "Page", "Rescue", "PAGE_FILE", "raise_now", "when_inside",
+    "cli", "copy_episode", "draw_doc", "draw_document", "escaped", "every_step",
+    "family_draw_doc", "family_findings", "family_row", "finding", "mod", "record_draws", "page_module", "plant_fifo",
+    "plant_link", "plant_raw", "read_page", "render", "result_event", "run_dir",
+    "sample_episode", "sample_grade", "sample_manifest", "sample_manifest_worlds", "served_row",
+    "snapshot", "sym", "trace_rows", "trace_stem", "ungradable_row", "world_row", "write_framed", "write_judge", "write_outcome", "write_samples", "write_stamp",
+    "write_timing", "write_tool_trace", "write_trace", "write_world_record",
+]

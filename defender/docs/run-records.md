@@ -2,12 +2,12 @@
 
 The inventory issue #1076 asked for: one page naming every record kind a run has and where it
 lives. #1077 turns that inventory into the file-backed `Run` handle: `defender/run_repository/_layout.py`
-(`RunPaths`), `defender/_episode_paths.py` (`EpisodePaths`) and `defender/_tenant.py` own every
+(`RunPaths`), `defender/episodes/_episode_paths.py` (`EpisodePaths`) and `defender/tenancy/_tenant.py` own every
 name a run or episode record carries, and `defender/run_repository/_handle.py` (`Run`, `RunRecord`,
 `RecordHandle`, `ArchivedWorld`) wraps them into the handle application code addresses by
 `(tenant_id, run_id)`.
 
-**This page is generated.** `scripts/lint/lint_run_records.py` renders the table below from the
+**This page is generated.** `tooling/lint/lint_run_records.py` renders the table below from the
 one checked-in table of record kinds:
 
 - `run-records-kinds.tsv` — one row per record *kind*: its path template, which table it
@@ -24,7 +24,7 @@ census) and the page's former per-kind reader/writer tables retired with it.
 
 ## The model this page uses
 
-- **Tenant** owns worlds and runs (`defender/_tenant.py`). Every run names its tenant on the
+- **Tenant** owns worlds and runs (`defender/tenancy/_tenant.py`). Every run names its tenant on the
   request (#1078, no default); the tenant exists once its row `<data root>/<T>/tenant.json` does.
   Each runs base also records the tenant it serves at `<runs_base>/_tenant.json`, created once,
   and a run whose request names another tenant is refused rather than stamped.
@@ -68,7 +68,7 @@ means the read is admitted but goes through the payload read cap and untrusted f
 (`is_captured_payload`), which `decide_read` never consults. Sidecars outside the run dir are
 unreachable by root containment rather than by a named deny.
 
-<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->
+<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run tooling/lint/lint_run_records.py --render -->
 
 | kind | table | path | denied to | archived as | sub-collection | note |
 |---|---|---|---|---|---|---|

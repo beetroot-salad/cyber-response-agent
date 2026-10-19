@@ -65,6 +65,6 @@ shims resolve from any cwd.
   deny it with a reason that names the `query` tool. The classification outlived the route.
 
 To add a data source: do NOT drop a shim here — export a `VERBS` mapping from
-`scripts/adapters/{system}_adapter.py` (see `runtime/verbs.py`). To add a local tool: drop a shim
+`integrations/{system}_adapter.py` (see `runtime/verbs.py`). To add a local tool: drop a shim
 following the same pattern and add it to `NON_ADAPTER_SHIMS` *and* `grant._SHIM_FLAGS` (a shim
 in one but not the other degrades to a free-text shape that silently widens what it accepts).

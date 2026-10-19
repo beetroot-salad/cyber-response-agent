@@ -35,18 +35,14 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
-import contextvars
 import functools
-import json
-import logging
 import os
 import sqlite3
 import sys
 import threading
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 # Run by path, so Python puts only `learning/branch/` on `sys.path`: re-exec into the project
 # venv when it exists, then add the workspace root before any `defender` import.
@@ -58,9 +54,10 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _alert_input, _provenance
-from defender._episode_handle import Episode
-from defender._episodes_root import (
+from defender.records import _alert_input
+from defender.records import _provenance
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episodes_root import (
     EPISODES_BASE_ENV,
     EpisodeRefused,
     episode_dir,
@@ -69,20 +66,14 @@ from defender._episodes_root import (
 )
 from defender._io import (
     NotPlainEntry,
-    load_json_artifact,
-    read_text_soft,
-    read_text_utf8,
 )
 from defender._paths import PATHS
 from defender.run_repository import (
     EpisodeRuns,
     Run,
-    RunAbsent,
     RunId,
     RunRefused,
     RunsRepository,
-    artifact_dir,
-    artifact_file,
 )
 from defender.runtime.run_tenant import RunTenant
 from defender.learning.branch import outcome as outcome_mod
@@ -92,29 +83,72 @@ from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender.run_common import REPO_ROOT
 from defender.runtime import branch, session_store
-from defender.runtime.branch import _family
 from defender.runtime.branch._family import (
-    Family,
     FamilyError,
-    check_identities,
-    parse_family,
     runnable_worlds,
 )
 from defender.runtime.verb_grant import GrantError
-from defender import _yaml
 
-_logger = logging.getLogger(__name__)
+from defender.learning.branch.questioner_launch import (
+    _SAMPLES_PER_VERB as _SAMPLES_PER_VERB,
+    _SAMPLE_CAP as _SAMPLE_CAP,
+    _author as _author,
+    _fence_count as _fence_count,
+    _joined_leads as _joined_leads,
+    _logger as _logger,
+    _sample_text as _sample_text,
+    branch_point_clock as branch_point_clock,
+    served_systems as served_systems,
+    system_samples as system_samples,
+    write_questioner_samples as write_questioner_samples,
+)
 
-#: The words pre-flight's outcome record may hold (`outcome.OUTCOMES`); there is no fourth.
-ACCEPTED, UNUSABLE, REFUSED = outcome_mod.ACCEPTED, outcome_mod.UNUSABLE, outcome_mod.REFUSED
 
+from defender.learning.branch.preflight import (
+    ACCEPTED as ACCEPTED,
+    DIRT as DIRT,
+    LauncherRefused as LauncherRefused,
+    MAX_BRANCH_MESSAGE_ID as MAX_BRANCH_MESSAGE_ID,
+    REFUSED as REFUSED,
+    STAMP_FIELD_CLASSES as STAMP_FIELD_CLASSES,
+    UNPROVEN_KNOWLEDGE as UNPROVEN_KNOWLEDGE,
+    UNUSABLE as UNUSABLE,
+    _ANCHORED as _ANCHORED,
+    _Fault as _Fault,
+    _HELD as _HELD,
+    _HELD_RULES as _HELD_RULES,
+    _HeldRule as _HeldRule,
+    _Judgement as _Judgement,
+    _Original as _Original,
+    _as_recorded as _as_recorded,
+    _as_stamp as _as_stamp,
+    _check_branch_point as _check_branch_point,
+    _check_oracle_side as _check_oracle_side,
+    _clean_stamp as _clean_stamp,
+    _family_faults as _family_faults,
+    _family_refusal as _family_refusal,
+    _knowledge_commit as _knowledge_commit,
+    _member_faults as _member_faults,
+    _no_stamp as _no_stamp,
+    _not_admitted as _not_admitted,
+    _not_certified_clean as _not_certified_clean,
+    _off_commit as _off_commit,
+    _off_knowledge as _off_knowledge,
+    _off_scope as _off_scope,
+    _originals as _originals,
+    _preflight_context as _preflight_context,
+    _source_store as _source_store,
+    _stamp_of as _stamp_of,
+    _stamp_speaks as _stamp_speaks,
+    _unknown_faults as _unknown_faults,
+    _unprovable as _unprovable,
+    preflight_episode as preflight_episode,
+    preflight_replay as preflight_replay,
+)
 
-class LauncherRefused(SystemExit):
-    """An episode this launcher will not run, reported as an operator's exit with an
-    explanation rather than a traceback."""
 
 
 class SourceInputReplaced(LauncherRefused, Exception):
@@ -269,100 +303,6 @@ def _prime_once(
         "than replayed")
 
 
-def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a model call is asked in this one block
-    *, source: Run, branch_message_id: int,
-    preflight: Callable[..., int], model: str | None,
-    allow_dirty: bool,
-    live_tree: Callable[[], _provenance.RunProvenance],
-    oracle: Any = None, verifier: Any = None,
-) -> dict:
-    """Everything that can refuse before the questioner is paid for, in one block, so an
-    operator with several problems hears about them all before spending anything.
-
-    Returns the source's stamp, so later steps use exactly the value judged here: it is the
-    anchor `verify_family` compares siblings against; re-reading it from the prior box's rw
-    bind could see a changed file.
-
-    `live_tree` returns the checkout's stamp, called at most once; injectable so tests don't
-    compare against whatever HEAD the suite runs under. It is only an early exit (siblings stamp
-    themselves and `verify_family` compares those) — a launcher on the wrong commit would
-    otherwise spend N investigations on a family verify will refuse.
-
-    The role preflight is asked with `branching=True` (M25=A): a branch launch whose oracle or
-    oracle-check model cannot be used refuses here, as an operator's configuration error, before
-    pre-flight spends anything or charges any world.
-
-    The oracle's own configuration is judged here too, by the rules pre-flight applies when it
-    configures each world: its knobs (`config.oracle_settings` — rate, budget, retry cap, turn
-    deadline) and both roles' pricing rows (`oracle.price_row`), for `oracle` / `verifier` as
-    `main` was handed them (`None`: the knobs' models).
-    """
-    source_run_dir = source.run_dir
-    _check_oracle_side(oracle=oracle, verifier=verifier)
-    _check_branch_point(source, branch_message_id)
-    # The live tree is judged as a one-member family by `verify_family`'s own rules, before the
-    # paid role preflight.
-    source_stamp = _stamp_of(source)
-    if source_stamp is None:
-        raise _no_stamp(source_run_dir)
-    # Capturing the live tree runs git (up to 60 s per call); skip it when the source names no
-    # commit, since the refusal is then the source's own.
-    members: dict[str, dict | None] = (
-        {"the live tree": _as_stamp(live_tree())} if _stamp_speaks(source_stamp) else {})
-    refusal = _family_refusal(
-        source_stamp, members,
-        source_who=f"source run {source_run_dir}", allow_dirty=allow_dirty).refusal
-    if refusal is not None:
-        raise LauncherRefused(f"[branch] {refusal}")
-    rc = preflight(model, branching=True)
-    if rc:
-        raise LauncherRefused(
-            f"[branch] the role-model preflight refused (exit {rc}) — every role a branch uses, "
-            "the oracle and its verifier included, is checked at launch so a missing key or an "
-            "unroutable model surfaces before anything is spent, never as a world's failure")
-    return source_stamp
-
-
-def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
-    """Refuse a launch whose oracle `preflight_replay` could not configure: a bad oracle knob
-    (`FatalConfigError`) or a role with no pricing row (`OraclePricingError`). The same
-    functions pre-flight's `oracle_settings_with` and each world's `Oracle` call, so the rule
-    lives once; asked here only to refuse before the questioner is paid for."""
-    from defender._env import FatalConfigError
-    from defender.learning.branch.estate.oracle import OraclePricingError, price_row
-    from defender.learning.branch.estate.registry import oracle_serving
-    from defender.learning.core.config import oracle_settings_with
-
-    try:
-        serving = oracle_serving(oracle_settings_with(), oracle=oracle, verifier=verifier)
-        price_row("oracle", serving.oracle)
-        price_row("verifier", serving.verifier)
-    except (FatalConfigError, OraclePricingError) as bad:
-        raise LauncherRefused(
-            f"[branch] the oracle cannot be configured: {bad} — pre-flight would refuse it "
-            "after the question-writer was paid for") from bad
-
-
-def served_systems(grant: Any) -> list[str]:
-    """The systems a branch over this gather grant serves, sorted and once each.
-
-    @owns served_systems — the manifest's `served_systems`, written by `_author` from this and
-    nowhere else. M20: a system is served when the grant admits at least one read verb on it
-    other than `health-check` (which reaches no data). The live grant still decides every query
-    at query time (M21); this list governs the judge, lessons and the question-writer."""
-    from defender.runtime.verb_dispositions import HEALTH_CHECK
-
-    return sorted({system for system, verb, verb_class in grant.entries
-                   if verb_class == "r" and verb != HEALTH_CHECK})
-
-
-def _no_stamp(source_run_dir: Path) -> LauncherRefused:
-    return LauncherRefused(
-        f"[branch] source run {source_run_dir} carries no usable provenance stamp — a "
-        "family is anchored to the commit its source ran, and a source with no readable "
-        "stamp cannot anchor one")
-
-
 def _episode_tenant(tenant_id: _tenant.TenantId, data_root: Path) -> RunTenant:
     """The episode's tenant: the request's (`--tenant`), accepted under `data_root` — or the
     refusal, before anything is spent (S2: the tenant comes from the request, never from a
@@ -413,363 +353,6 @@ def _source_stamp_agrees(source: Run, tenant_id: _tenant.TenantId) -> None:
             f"{stamp.get('tenant_id')!r} but the request names {tenant_id!r}, whose runs "
             f"folder's record ({_tenant.TENANT_RECORD_NAME}) the source was opened under — the "
             "stamp is in the box's writable run dir, so a disagreement is refused, not settled")
-
-
-#: A generous ceiling on any session's message id, far beyond `DEFAULT_REQUEST_LIMIT` times the
-#: messages per request. Only a sanity bound: where a store exists, the session itself decides
-#: which messages may be branched from.
-MAX_BRANCH_MESSAGE_ID = 100 * 60
-
-
-def _check_branch_point(source: Run, branch_message_id: int) -> None:
-    """Refuse a branch point the source run could not have produced.
-
-    Where a session store exists, `branch.validate` is asked here — before the questioner is
-    paid — rather than only inside each sibling, where every child would refuse identically
-    after the whole episode was spent. Some of its preconditions also govern what the
-    questioner is shown. `as_of` comes from `branch_point_time`, which `validate`
-    cross-checks.
-
-    A source with no fork snapshot for the branch point — one recorded before #1255, or one with
-    no session store at all (imported, replayed, pruned) — is refused here (N4, rev 5 C2):
-    before the questioner, the role preflight or any episode spend.
-    """
-    source_run_dir = source.run_dir
-    if branch_message_id < 0:
-        raise LauncherRefused(
-            f"[branch] branch message id {branch_message_id} is negative — it names a message "
-            "in the source run's own session, and there is no message before the first")
-    if branch_message_id > MAX_BRANCH_MESSAGE_ID:
-        raise LauncherRefused(
-            f"[branch] branch message id {branch_message_id} is beyond {MAX_BRANCH_MESSAGE_ID}, "
-            "the most any one investigation's session could hold — no run produced a message "
-            "there, so this is a typo rather than a branch point")
-    store = _source_store(source)
-    if store is None:
-        raise LauncherRefused(
-            f"[branch] {source.id} carries no session store, so it recorded no fork snapshot "
-            f"for message {branch_message_id} — nothing says what it held when that response "
-            "arrived, and no arm can be restored from it")
-    try:
-        as_of = branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
-        # An empty capture is not refused here: pre-flight records it as a `refused` episode
-        # (M05=A), so the operator finds the reason in the outcome record.
-        branch.validate(store, branch.BranchSpec(
-            source_run_dir=Path(source_run_dir),
-            branch_message_id=branch_message_id,
-            as_of=as_of,
-        ), source_run=source, require_capture=False)
-    except branch.BranchError as bad:
-        raise LauncherRefused(f"[branch] {bad}") from bad
-    finally:
-        store.close()
-
-
-def _source_store(source: Run) -> Any:
-    """The source run's own session store, or `None` when it does not carry one
-    (`branch.source_store_if_any`: a pointer that does not reconcile still refuses)."""
-    return branch.source_store_if_any(source.run_dir, source_run=source)
-
-
-def branch_point_clock(source: Run, branch_message_id: int) -> Any:
-    """T0 — the moment every sibling resumes into — derived once for the whole family so the
-    siblings share one clock.
-
-    With a session store this is `branch_point_time`. Without one it falls back to the newest
-    mtime in the source run dir — the moment its evidence stopped, which is closer to a branch
-    point than the launch time.
-    """
-    import datetime as _dt
-
-    source_run_dir = source.run_dir
-    store = _source_store(source)
-    if store is not None:
-        try:
-            return branch.branch_point_time(store, Path(source_run_dir), branch_message_id, source_run=source)
-        finally:
-            store.close()
-    newest = max(
-        (p.stat().st_mtime for p in Path(source_run_dir).rglob("*") if artifact_file(p)),
-        default=Path(source_run_dir).stat().st_mtime)
-    return _dt.datetime.fromtimestamp(newest, tz=_dt.UTC).replace(microsecond=0)
-
-
-# ---------------------------------------------------------------------------------------
-# `Step.PREFLIGHT` — calibrating every world through its own oracle
-# ---------------------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _Original:
-    """One distinct call the source run made: replayed once per key (N15)."""
-
-    system: str
-    verb: str
-    params: dict
-    #: The capture recorded an error for it (no base answer was primed).
-    failed: bool
-
-    @property
-    def entry(self) -> dict[str, Any]:
-        return {"system": self.system, "verb": self.verb, "params": dict(self.params)}
-
-
-def _originals(source_run_dir: Path) -> list[_Original]:
-    """The source run's calls, first occurrence of each key, in capture order. Sentinels (a
-    `∅.` row never reached a system) are not calls (N15)."""
-    from defender.learning.branch.ledger import request_key
-    from defender.learning.lead_repository import load_queries_report
-
-    rows, _unreadable = load_queries_report(Path(source_run_dir))
-    seen: set[str] = set()
-    out: list[_Original] = []
-    for row in rows:
-        if row.is_sentinel or not row.system or not row.verb:
-            continue
-        key = request_key(row.system, row.verb, row.params)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(_Original(system=row.system, verb=row.verb, params=dict(row.params),
-                             failed=row.exit_code != 0))
-    return out
-
-
-def _not_admitted(reader: Any, call: _Original) -> str | None:
-    """Why the live gather grant does not admit `call` for replay, or `None` when it does
-    (M22=A: every replayed call goes through `decide`; only read verbs are replayed)."""
-    from defender.runtime.verbs import GRANTED, verb_class_of
-
-    try:
-        decision = reader.decide(call.system, call.verb)
-    except Exception as refused:  # noqa: BLE001 — a grant/declaration disagreement is a refusal
-        return f"the grant decision refused it: {refused}"
-    if decision.outcome != GRANTED:
-        return decision.refusal or f"{call.system}.{call.verb}: {decision.outcome}"
-    fn = reader.verbs(call.system).get(call.verb)
-    if fn is None or verb_class_of(fn) != "r":
-        return f"{call.system}.{call.verb} is not a read verb, and only reads are replayed"
-    return None
-
-
-def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) -> Any:
-    """The host-side context pre-flight's reads run in: the episode's tenant record, the
-    family's branch-point clock, and no capture (pre-flight is not a run and writes no query
-    row). `DEFENDER_RUNS_BASE` is the source run's container — the tenant's natural runs folder
-    — from the source `Run`'s own hand-out, not `run_env`'s `run_dir.parent`."""
-    from defender.run_common import DEFENDER_DIR, run_env
-    from defender.runtime.verbs import VerbContext
-
-    env = run_env(DEFENDER_DIR, Path(episode_dir))
-    env["DEFENDER_RUNS_BASE"] = source.runs_base_export()
-    return VerbContext(defender_dir=DEFENDER_DIR, run_dir=Path(episode_dir), env=env,
-                       capture=None, tenant=tenant, as_of=as_of)
-
-
-def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
-    episode: Episode | Path, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
-    verifier: Any = None, **knobs: Any,
-) -> dict[str, Any]:
-    """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
-    verifier, and write the episode's write-once outcome record (`outcome.write_outcome`).
-
-    Pre-flight only CALIBRATES (Amendment 2 change 1). For each world that carries a fact, every
-    replayable original call gets one oracle turn and verifier pass against its base answer
-    (`registry.calibrate_one`): the forged rows and recorded facts it verifies are frozen as the
-    world's store, so a sibling is later served the same telemetry (O2); no served answer is
-    cached and no world-ledger row written (S1). A world whose call cannot be served — retries
-    spent, budget spent, or a change to a call made before the branch point (M01=A) — failed
-    calibration; once two have failed the family is unusable and no further oracle turn is
-    spent on a world still replaying (N18). The control world (`facts: []`) spends nothing.
-
-    Every tenant read goes through `roster` under the live gather grant's decision (a call the
-    grant no longer admits is never sent, and is listed `not_replayable`), at the family's
-    branch-point clock, and under ONE limiter holding the episode rate for the whole pass
-    (S18). Each call is read live once, to compare against the recording (`drift`: `drifted`, or
-    `unknown` when the read fails; drift never changes the outcome, N16). A call the capture
-    recorded as an error is read live too: still failing, it is the world's own telemetry and
-    no oracle's to serve; answering now, it is calibrated against that answer and recorded as
-    drift (M22=A).
-
-    `refused` (no world carries a fact, the source made no call, or none is replayable) spends
-    no oracle turn. `knobs` are the oracle's (`retry_cap=`, `budget=`, `turn_deadline=`,
-    `rate=` — the episode rate R —, each defaulting to its environment knob) and its seams
-    (`box=`, `restart_after=`); this is where they are settled (`registry.oracle_serving`).
-    Returns the record as written.
-    """
-    from defender.learning.branch.estate.limiter import RateLimiter
-    from defender.learning.branch.estate.oracle import DEFAULT_RESTART_AFTER, OracleUnservable
-    from defender.learning.branch.estate.registry import (
-        PrebranchChanged,
-        WorldRegistry,
-        calibrate_one,
-        default_oracle_dir,
-        oracle_serving,
-        prebranch_calls,
-        read_family_answers,
-    )
-    from defender.learning.branch.estate.checks import canonical_json
-    from defender.learning.branch.ledger import payload_text, request_key
-    from defender.learning.core.config import oracle_settings_with
-    from defender.runtime.verbs import ModuleVerbRegistry
-
-    # The reader first, unguarded: a tenant with no gather grant refuses here (`GrantError`),
-    # before anything is read or sent (O-16).
-    reader = ModuleVerbRegistry(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
-    if not isinstance(episode, Episode):
-        with Episode.open(Path(episode)) as held:
-            return preflight_replay(held, source=source, roster=roster, tenant=tenant,
-                                    oracle=oracle, verifier=verifier, **knobs)
-    family = _family.load_family(episode.view())
-    originals = _originals(source.run_dir)
-    not_replayable: list[dict[str, Any]] = []
-    replayable: list[_Original] = []
-    for call in originals:
-        why = _not_admitted(reader, call)
-        if why is None:
-            replayable.append(call)
-        else:
-            not_replayable.append({**call.entry, "reason": why})
-    fact_worlds = [w for w in runnable_worlds(family) if w.facts]
-
-    def record(outcome: str, reason: str, *, unservable: Sequence[Mapping[str, Any]] = (),
-               drift: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
-        outcome_mod.write_outcome(episode, outcome, reason=reason, unservable_worlds=unservable,
-                                  not_replayable=not_replayable, drift=drift)
-        return {"outcome": outcome, "reason": reason,
-                "unservable_worlds": [dict(u) for u in unservable],
-                "not_replayable": list(not_replayable), "drift": [dict(d) for d in drift]}
-
-    # M05=A: nothing to calibrate, for a reason that belongs to no world — refused before any
-    # tenant read or oracle turn.
-    if not fact_worlds:
-        return record(REFUSED, "no world of the family carries a fact, so there is no world "
-                               "change to calibrate and nothing a sibling could measure")
-    if not originals:
-        return record(REFUSED, "the source run made no call that reached a system, so there "
-                               "is no original call to replay")
-    if not replayable:
-        return record(REFUSED, f"none of the source run's {len(originals)} call(s) can be "
-                               "replayed: the live gather grant admits none of them (see "
-                               "not_replayable)")
-
-    # The oracle's knobs, settled once for every world of the pass: `knobs` over the process's
-    # knobs. Each world's serving is built from them in its own thread (`calibrate`).
-    box = knobs.pop("box", None)
-    restart_after = knobs.pop("restart_after", DEFAULT_RESTART_AFTER)
-    settings = oracle_settings_with(**knobs)
-    limiter = RateLimiter(settings.rate)
-    ctx = _preflight_context(episode.dir, source, tenant, family.as_of)
-    resumed = {w.world_id: _family.resume_world_from(family, w.world_id, episode.dir)
-               for w in fact_worlds}
-    recording = Ledger.for_world(episode, resumed[fact_worlds[0].world_id].world_id)
-    # The family's base recording, parsed once for every world's registry.
-    family_answers = read_family_answers(recording.base_path)
-    # M01=A's fixed prefix, by the one rule the sibling's registry is handed too (`run.py`).
-    prebranch = prebranch_calls(source, family.branch_message_id)
-    # D6 (#1255): the calls the primer recorded unanswered are never fixed.
-    unrecorded = recording.unrecorded_keys()
-
-    drift: list[dict[str, Any]] = []
-    calibrated: list[tuple[_Original, Any, bool, bool]] = []
-    for call in replayable:
-        recorded = recording.base_payload(call.system, call.verb, call.params)
-        limiter.acquire()
-        try:
-            live_text = payload_text(reader.verbs(call.system)[call.verb](ctx, **call.params))
-        except Exception:  # noqa: BLE001 — a tenant error on a drift read is drift-unknown (N16)
-            if recorded is None:
-                # The capture's own failure, still failing: world telemetry, passed through as
-                # itself to any sibling that asks (`real-error`), never the oracle's to serve.
-                continue
-            drift.append({**call.entry, "status": "unknown"})
-            base_text = recorded
-        else:
-            if recorded is None:
-                drift.append({**call.entry, "status": "drifted" if call.failed else "unknown"})
-                base_text = live_text
-            else:
-                if canonical_json(json.loads(recorded)) != canonical_json(json.loads(live_text)):
-                    drift.append({**call.entry, "status": "drifted"})
-                base_text = recorded
-        # D6 (#1255): a pre-branch call the primer recorded unanswered is never fixed; a live
-        # base is the system now, which the oracle serves as it stood at the fork.
-        live = recorded is None
-        key = request_key(call.system, call.verb, call.params)
-        fixed = key in prebranch and key not in unrecorded
-        calibrated.append((call, json.loads(base_text), fixed, live))
-
-    stop = threading.Event()
-    failures: list[dict[str, Any]] = []
-    tally = threading.Lock()
-
-    def fail(label: str, call: _Original, reason: str) -> None:
-        with tally:
-            failures.append({"world": label, "reason": reason, "call": call.entry})
-            if len(failures) >= outcome_mod.UNUSABLE_AT:
-                stop.set()
-
-    def calibrate(label: str) -> None:
-        try:
-            calibrate_world(label)
-        except BaseException:
-            # Anything but the world's own failure is the launch's: the other worlds stop
-            # before their next paid turn, and `future.result()` re-raises it below.
-            stop.set()
-            raise
-
-    def calibrate_world(label: str) -> None:
-        world = resumed[label]
-        ledger = Ledger.for_world(episode, world.world_id)
-        # The world's own oracle side (`oracle_serving`), as a sibling builds its own in its own
-        # process: every world calibrates on its own thread, each attempt on that thread's own
-        # event loop, so the production models — each with its provider and HTTP client — are
-        # never shared across loops. Only the limiter is the pass's one (S18).
-        serving = oracle_serving(settings, oracle=oracle, verifier=verifier, box=box,
-                                 restart_after=restart_after)
-        registry = WorldRegistry(
-            roster, tenant.grants.gather, world=world, ledger=ledger, as_of=family.as_of,
-            serving=serving, oracle_dir=default_oracle_dir(world, ledger), limiter=limiter,
-            tenant=tenant, grant_home=tenant.table_pointer, family_answers=family_answers,
-            source_run=source)
-        try:
-            for call, base, fixed, live in calibrated:
-                if stop.is_set():
-                    return
-                try:
-                    calibrate_one(registry, ctx, call.system, call.verb, call.params, base,
-                                  fixed=fixed, live=live)
-                except OracleUnservable as unservable:
-                    fail(label, call, f"{unservable.reason}: {unservable.detail}")
-                    return
-                except PrebranchChanged as changed:
-                    fail(label, call, str(changed))
-                    return
-        finally:
-            registry.close()
-
-    # One thread per world: worlds calibrate side by side and finish in any order; the outcome
-    # is written once, from every world's result. Each runs in a copy of this context, so its
-    # log lines keep the run and tenant.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(fact_worlds)) as pool:
-        futures = [pool.submit(contextvars.copy_context().run, calibrate, w.world_id)
-                   for w in fact_worlds]
-    for future in futures:
-        # Anything but a world's own failure is the launch's (it stopped every other world's
-        # calibration), and leaves no outcome record: the outcome words are the family's
-        # (accepted, unusable, refused), and an episode with none is never graded.
-        future.result()
-
-    unservable = sorted(failures, key=lambda entry: entry["world"])
-    names = ", ".join(entry["world"] for entry in unservable)
-    if len(unservable) >= outcome_mod.UNUSABLE_AT:
-        return record(UNUSABLE, f"{len(unservable)} worlds failed calibration ({names}), so "
-                                "the family cannot be compared (O5)",
-                      unservable=unservable, drift=drift)
-    reason = ("every fact world calibrated" if not unservable else
-              f"world {names} failed calibration and runs no sibling; the family is graded "
-              "on the rest")
-    return record(ACCEPTED, reason, unservable=unservable, drift=drift)
 
 
 # ---------------------------------------------------------------------------------------
@@ -835,7 +418,7 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
     spawn terminates its child; an injected `spawn` seam has no handle on its child and is
     left to finish.
     """
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.learning.core.config import KNOB_RATE
 
     if tenant_id is None or not _tenant.is_valid_tenant_id(tenant_id):
@@ -922,494 +505,16 @@ def _default_spawn(argv: list[str], *, env: dict[str, str] | None = None,
             child.kill()
             return child.wait()
 
+from defender.learning.branch.verification import (
+    _archive_worlds as _archive_worlds,
+    _cross_tenant_fault as _cross_tenant_fault,
+    _scrub_ran as _scrub_ran,
+    _write_family_stamp as _write_family_stamp,
+    verify_family as verify_family,
+)
 
-# ---------------------------------------------------------------------------------------
-# `Step.VERIFY` — verification, the family stamp, and the archive
-# ---------------------------------------------------------------------------------------
-
-
-def _scrub_ran(run: Run) -> bool:
-    """Did the reap scan walk this sibling's tree and say so?
-
-    Read at the sidecar beside the run dir: the verdict lives outside the tree it judges, where
-    the box that is root on that mount cannot forge it.
-    """
-    verdict = run.facts.scrub_verdict.path
-    if not artifact_file(verdict):
-        return False
-    try:
-        record = json.loads(read_text_utf8(verdict))
-    except (OSError, ValueError):
-        return False
-    return isinstance(record, dict) and record.get("ran") is True
-
-
-def _stamp_of(run: Run) -> dict | None:
-    """A run's own provenance record, or `None` when it has none this reader can use.
-
-    Used for both the source and every sibling, so both ends of the comparison share one shape.
-    Absent and unreadable both answer `None`: neither is an agreeing stamp.
-
-    Read through `_provenance.read`, which refuses aliases and type-checks fields: the file is
-    in a box's rw bind, and a forged `"commit": ["x"]` would otherwise crash `verify_family`
-    before anything was archived. Returned as the record's wire-shape mapping, which
-    `_write_family_stamp` publishes verbatim.
-    """
-    record = _provenance.read(run.facts.provenance.path)
-    return None if record is None else _as_stamp(record)
-
-
-def _as_stamp(record: _provenance.RunProvenance) -> dict:
-    """A typed provenance record as the mapping every comparison below asks."""
-    # lint-parse: ok — a round-trip of a typed record through its own `as_json`, not untyped
-    # input.
-    return json.loads(record.as_json())
-
-
-#: The kinds of fault `--allow-dirty` waives: a tree git did not certify clean, and tenant
-#: knowledge no commit proves (unversioned, unavailable, or not recorded). The family stamp
-#: records which of them a waived family actually had (`waived`).
-DIRT = "dirt"
-UNPROVEN_KNOWLEDGE = "knowledge"
-
-
-#: One reason a family cannot be archived as a comparison against its source. `kind` is the
-#: waivable kind, or `None` for a fault `--allow-dirty` never reaches — so waivability is a
-#: property of the fault, not the site.
-class _Fault(NamedTuple):
-    kind: str | None
-    text: str
-
-    @property
-    def waivable(self) -> bool:
-        return self.kind is not None
-
-
-#: Every `RunProvenance` field, classed by how the fork check judges it (#1204 D4). The
-#: comparison below is driven by this table, and `test_1204` holds its keys to the record's
-#: fields, so a new stamp field cannot be silently left out of the check.
-#: - `anchored`: each member must match the source, when the source pins a value; siblings
-#:   must agree with each other when it does not;
-#: - `constant`: siblings must agree with each other;
-#: - `dedicated`: judged by its own rule (`_clean_stamp`, `_cross_tenant_fault`);
-#: - `informational`: recorded, never compared;
-#: - `expected_to_differ`: differs between siblings by design.
-STAMP_FIELD_CLASSES: dict[str, str] = {
-    "commit": "anchored", "scope": "anchored", "knowledge": "anchored",
-    "model": "constant",
-    "dirty": "dedicated", "tenant_id": "dedicated",
-    "dirty_paths": "informational", "dirty_path_count": "informational",
-    "unavailable": "informational",
-    "world_id": "expected_to_differ", "parent_run_id": "expected_to_differ",
-    "fork_turn": "expected_to_differ",
-}
-
-class _HeldRule(NamedTuple):
-    """How the fork check holds one `anchored` or `constant` field: the value compared, the
-    waivable kind a stamp with no such value is faulted as (`None`: an absent value is just a
-    value), and, for an anchored field, the refusal for a member off the source's value."""
-
-    compared: Callable[[dict], object]
-    unknown_kind: str | None = None
-    off_anchor: Callable[[str, object, object], str] | None = None
-
-
-def _knowledge_commit(stamp: dict) -> str | None:
-    """Knowledge is compared as its commit alone, so two unavailable reasons with different
-    text are not a disagreement."""
-    revision = _provenance.KnowledgeRevision.from_wire(stamp.get("knowledge"))
-    return None if revision is None else revision.commit
-
-
-def _off_commit(who: str, got: object, want: object) -> str:
-    return (f"{who} is at commit {got!r} while the source run it continues ran at {want!r} — a "
-            "family is anchored to its source's commit, and a comparison against other code is "
-            "never archived as comparable")
-
-
-def _off_scope(who: str, got: object, want: object) -> str:
-    return (f"the dirt of {who} was measured over scope {got!r} and the source's over {want!r} "
-            "— the two clean bits answer different questions, so agreeing on the commit does not "
-            "make them a match")
-
-
-def _off_knowledge(who: str, got: object, want: object) -> str:
-    return (f"{who} read tenant knowledge at commit {got!r} while the source run it continues "
-            f"read {want!r} — a family is anchored to the knowledge its source read, and a "
-            "comparison against other settings and lessons is never archived as comparable")
-
-
-#: The rule of every held field that is more than "compare the value as recorded". An anchored
-#: field must have one (its refusal text), which is held at import below, so no anchored field
-#: falls back to a vague message.
-_HELD_RULES: dict[str, _HeldRule] = {
-    "commit": _HeldRule(compared=lambda stamp: stamp.get("commit"), off_anchor=_off_commit),
-    "scope": _HeldRule(compared=lambda stamp: stamp.get("scope"), off_anchor=_off_scope),
-    "knowledge": _HeldRule(compared=_knowledge_commit, unknown_kind=UNPROVEN_KNOWLEDGE,
-                           off_anchor=_off_knowledge),
-}
-
-
-def _as_recorded(field: str) -> _HeldRule:
-    return _HeldRule(compared=lambda stamp: stamp.get(field))
-
-
-_ANCHORED = tuple(f for f, c in STAMP_FIELD_CLASSES.items() if c == "anchored")
-_HELD = {f: _HELD_RULES.get(f) or _as_recorded(f)
-         for f, c in STAMP_FIELD_CLASSES.items() if c in ("anchored", "constant")}
 if _missing := [f for f in _ANCHORED if _HELD[f].off_anchor is None]:
     raise RuntimeError(f"anchored stamp field(s) {_missing} have no refusal text in _HELD_RULES")
-
-
-def _unknown_faults(who: str, stamp: dict) -> list[_Fault]:
-    """The waivable faults of a stamp with no value on a field whose unknown is its own fault."""
-    return [_Fault(rule.unknown_kind, _unprovable(field, who, stamp))
-            for field, rule in _HELD.items()
-            if rule.unknown_kind is not None and rule.compared(stamp) is None]
-
-
-def _family_faults(
-    source: dict, members: dict[str, dict | None], *, source_who: str,
-) -> list[_Fault]:
-    """Every reason `members` are not provably one family continuing `source`.
-
-    One judgement for both tiers: at preflight the members are the live tree alone, at verify
-    the siblings' stamps. Verify re-judges the source rather than trusting that preflight ran.
-
-    The source is checked first; a source with no commit ends anchoring there, so the fault
-    names the source rather than the members. Each member must match the source on every
-    `anchored` field the source pins (`STAMP_FIELD_CLASSES`), and any non-clean tree on either
-    side is a fault — an unknown is not clean. Members must also agree with each other on every
-    `constant` field, and on each anchored field the source does not pin.
-
-    Waivable: dirt, and knowledge nothing proves (unversioned, unavailable, or not recorded —
-    a source stamped before #1204 must stay forkable). A wrong or missing commit, a different
-    scope or knowledge commit, or siblings disagreeing is a confound, and a silent member waived
-    would drop out of the agreement and let another arm's value stand as the family's.
-    """
-    faults: list[_Fault] = []
-    anchored = _stamp_speaks(source)
-    if not anchored:
-        faults.append(_Fault(None, (
-            f"{source_who} names no commit (unavailable={source.get('unavailable')!r}) — a "
-            "family is anchored to the commit its source ran, and there is none to anchor to")))
-    else:
-        if not _clean_stamp(source):
-            faults.append(_Fault(DIRT, _not_certified_clean(source_who, source)))
-        faults.extend(_unknown_faults(source_who, source))
-    for who, stamp in members.items():
-        faults.extend(_member_faults(who, stamp, anchor=source if anchored else None))
-    # Agreement is over every stamp that names a commit, dirty ones included: excluding dirty
-    # arms would let `--allow-dirty` waive the whole agreement, since siblings share one
-    # checkout and are all dirty together.
-    comparable = {who: stamp for who, stamp in members.items()
-                  if stamp is not None and _stamp_speaks(stamp)}
-    for field, rule in _HELD.items():
-        # A field the anchor pinned was compared member by member above.
-        if anchored and field in _ANCHORED and rule.compared(source) is not None:
-            continue
-        values = {who: rule.compared(stamp) for who, stamp in comparable.items()}
-        if rule.unknown_kind is not None:
-            # An unknown here is its own (waivable) fault, not a disagreeing value.
-            values = {who: value for who, value in values.items() if value is not None}
-        if len(set(values.values())) > 1:
-            faults.append(_Fault(None, (
-                f"siblings disagree on {field}: {values} — the family is held constant on it, "
-                "so a comparison across two values is never archived as comparable")))
-    return faults
-
-
-def _member_faults(who: str, stamp: dict | None, *, anchor: dict | None) -> list[_Fault]:
-    """One tree's faults against the anchor. `anchor` is `None` when the source could not
-    anchor (already reported); the tree is then judged on its own stamp alone."""
-    if stamp is None:
-        return [_Fault(None, (
-            f"{who} carries no readable provenance stamp — an absent or unreadable stamp is "
-            "not an agreeing one"))]
-    if not _stamp_speaks(stamp):
-        return [_Fault(None, (
-            f"{who} names no commit (unavailable={stamp.get('unavailable')!r}) — a silent "
-            "stamp cannot be held to anything"))]
-    faults: list[_Fault] = []
-    for field in _ANCHORED:
-        rule = _HELD[field]
-        want = None if anchor is None else rule.compared(anchor)
-        got = rule.compared(stamp)
-        # The source pins nothing here, or the member's unknown is its own fault (below).
-        if want is None or (got is None and rule.unknown_kind is not None):
-            continue
-        if got != want and rule.off_anchor is not None:
-            faults.append(_Fault(None, rule.off_anchor(who, got, want)))
-    faults.extend(_unknown_faults(who, stamp))
-    if not _clean_stamp(stamp):
-        faults.append(_Fault(DIRT, _not_certified_clean(who, stamp)))
-    return faults
-
-
-def _unprovable(field: str, who: str, stamp: dict) -> str:
-    """The waivable fault text for a stamp with no value on `field` (today only knowledge)."""
-    revision = _provenance.KnowledgeRevision.from_wire(stamp.get(field))
-    if revision is None:
-        what = f"records no tenant {field} revision (stamped before #1204, or it does not say)"
-    elif revision.unavailable is not None:
-        what = f"could not name its tenant {field} commit ({revision.unavailable})"
-    else:
-        what = f"read an unversioned tenant {field} folder"
-    return (f"{who} {what} — nothing proves it read the same {field} as the rest of the "
-            "family")
-
-
-def _not_certified_clean(who: str, stamp: dict) -> str:
-    return (f"{who} was not certified clean by git (dirty={stamp.get('dirty')!r}, "
-            f"commit={stamp.get('commit')!r}, unavailable={stamp.get('unavailable')!r}) — its "
-            "commit does not name the bytes that ran")
-
-
-class _Judgement(NamedTuple):
-    #: The faults `--allow-dirty` did not waive, as one refusal — or `None`.
-    refusal: str | None
-    #: The kinds of fault the flag waived, sorted; `[]` when nothing was waived.
-    waived: list[str]
-
-
-def _family_refusal(
-    source: dict, members: dict[str, dict | None], *, source_who: str, allow_dirty: bool,
-) -> _Judgement:
-    """The family's faults as one refusal, and the kinds the override waived.
-
-    Non-waivable faults are listed first, and `--allow-dirty` is suggested only when passing it
-    would let the family through; fault messages themselves never mention the flag.
-    """
-    found = _family_faults(source, members, source_who=source_who)
-    waived = sorted({f.kind for f in found if f.kind is not None}) if allow_dirty else []
-    faults = [fault for fault in found if not (fault.waivable and allow_dirty)]
-    if not faults:
-        return _Judgement(None, waived)
-    text = "; ".join(fault.text for fault in sorted(faults, key=lambda fault: fault.waivable))
-    if all(fault.waivable for fault in faults):
-        text += " — pass --allow-dirty to waive these faults, recorded in the family stamp as such"
-    return _Judgement(text, waived)
-
-
-def _clean_stamp(stamp: dict | None) -> bool:
-    """Did git answer for this sibling's tree, and say it was clean?
-
-    Only `dirty is False` with a commit counts; a dirty tree, an unreachable git, or a sha with
-    no answer for the tree are all unknowns, and an unknown is not clean.
-    """
-    if stamp is None:
-        return False
-    return stamp.get("dirty") is False and bool(stamp.get("commit"))
-
-
-def _stamp_speaks(stamp: dict | None) -> bool:
-    """Did git answer at all for this tree — whatever it said about dirt?
-
-    The agreement is taken over stamps that speak. A stamp with no commit is a silence, held to
-    nothing and never waived; a dirty stamp still speaks.
-    """
-    return stamp is not None and bool(stamp.get("commit"))
-
-
-def verify_family(
-    episode: Episode, arms: Mapping[str, Run | RunRefused], *, source: dict,
-    allow_dirty: bool = False, base_world_id: str | None = None,
-) -> dict:
-    """Check every sibling, archive each verified one, and write the family stamp unless a
-    comparability fault forbids it.
-
-    `arms` is every finished arm, keyed by its label (#1105 PR 2: nothing decodes a label from a
-    folder's name): the `Run` its episode view opened, or the refusal the open raised. A
-    `RunAbsent` is a missing arm folder, read as before: a world with no scrub verdict, so its
-    own `not archived` record. Any other refusal (an entry that is not a real directory,
-    declared change 5, or a container that cannot be reached, `RunUnreachable`) is likewise that
-    world's own `not archived` record, and nothing is read through it. `base_world_id` is the episode container's record's
-    (`EpisodeRuns.base_world_id`), carried into the family stamp when one is written.
-
-    `source` is the source run's stamp as judged by `preflight_episode`. Required with no
-    default, so siblings are always held to the source's commit rather than only to each other.
-
-    Runs only after an `accepted` pre-flight (no sibling starts otherwise), and never touches
-    the outcome record pre-flight wrote (S6). Only scrub-verified worlds are archived, each on
-    its own: a world whose tree the archive refuses, or that has no scrub verdict, is one the
-    judge cannot see, and gets its own `not archived` record (S10, counted by O5) while the
-    others are still archived.
-
-    Two kinds of fault (FORK-1 as amended 2026-10-10, PR #1232 round 7). A PER-WORLD fault (no
-    scrub verdict, an archive refusal, a refused arm entry) is that world's own record and does
-    not withhold the stamp, which records the agreement among the verified, archived siblings.
-    A COMPARABILITY fault — `_family_refusal`'s (commit/knowledge mismatch, dirt unless waived),
-    `_cross_tenant_fault`'s, or no sibling verified and archived at all — withholds the stamp,
-    and its reason is recorded (`outcome.write_not_comparable`) for the judge, which stamps such
-    a family `not comparable`.
-
-    Returns `comparable` (the stamp was written: no comparability fault), `reason` (every
-    fault of both kinds, `""` when none) and `not_comparable` (the comparability faults alone,
-    the recorded reason; `""` when the stamp was written).
-    """
-    runs = {label: arm for label, arm in arms.items() if isinstance(arm, Run)}
-    absent = [label for label, arm in arms.items() if isinstance(arm, RunAbsent)]
-    refused = {label: arm for label, arm in arms.items()
-               if isinstance(arm, RunRefused) and not isinstance(arm, RunAbsent)}
-    scrub_verified = [label for label in runs if _scrub_ran(runs[label])]
-    # An absent arm has no tree, so no scrub verdict records a walk of one.
-    unverified = sorted((set(runs) - set(scrub_verified)) | set(absent))
-    stamps = {label: _stamp_of(run) for label, run in runs.items()}
-
-    # `blocking`: the comparability faults, which withhold the stamp. `per_world`: faults that
-    # are one world's own record and leave the stamp to the rest.
-    blocking: list[str] = []
-    per_world: list[str] = []
-    if not arms:
-        blocking.append("the family has no sibling — a comparison over no arm is not one, so "
-                        "there is nothing to hold to the source's commit or to archive")
-    if unverified:
-        per_world.append(
-            f"sibling(s) {unverified} have no scrub verdict recording a completed walk — an "
-            "unwalked tree is one nothing has certified as free of what the box left behind")
-    judged = _family_refusal(
-        source, {f"sibling {label!r}": stamps[label] for label in scrub_verified},
-        source_who="the source run", allow_dirty=allow_dirty)
-    if judged.refusal is not None:
-        blocking.append(judged.refusal)
-    cross_tenant = _cross_tenant_fault(stamps, scrub_verified)
-    if cross_tenant is not None:
-        blocking.append(cross_tenant)
-
-    archived = _archive_worlds(episode, runs, refused=refused, unverified=unverified,
-                               per_world=per_world)
-    if arms and not archived:
-        blocking.append(
-            f"no sibling of {sorted(arms)} was verified and archived — there is no arm left to "
-            "compare")
-    not_comparable = "; ".join(blocking)
-    if not blocking:
-        # The agreement among the verified, archived siblings: a world with only its own
-        # `not archived` record is not a member of what the stamp certifies.
-        _write_family_stamp(
-            episode, {label: stamps[label] for label in archived}, source=source,
-            allow_dirty=allow_dirty, waived=judged.waived, base_world_id=base_world_id)
-    else:
-        # The judge names this reason when it stamps the family `not comparable`.
-        outcome_mod.write_not_comparable(episode, not_comparable)
-    return {"comparable": not blocking, "reason": "; ".join(blocking + per_world),
-            "not_comparable": not_comparable, "scrub_verified": scrub_verified,
-            "archived": archived, "worlds": sorted(arms)}
-
-
-def _archive_worlds(
-    episode: Episode, runs: Mapping[str, Run], *, refused: Mapping[str, RunRefused],
-    unverified: Sequence[str], per_world: list[str],
-) -> list[str]:
-    """`verify_family`'s per-world pass: archive every scrub-verified run, and give every other
-    finished world its own `not archived` record, appending each such fault to `per_world`.
-    Returns the labels archived.
-
-    `worlds/` exists whatever happens below; a world's own record says why one is missing.
-    Every finished world ends archived or with its own `not archived` record — never neither,
-    since the judge counts a world it cannot see only through that record (S10, O5). An absent
-    arm is among `unverified`."""
-    from defender.learning.branch import archive as archive_mod
-
-    episode.worlds.ensure()
-    archived: list[str] = []
-    for label in sorted(refused):
-        per_world.append(f"world {label}'s run folder was refused ({refused[label]})")
-        outcome_mod.write_world_record(
-            episode, label, outcome_mod.NOT_ARCHIVED,
-            detail=f"its run folder was refused, so nothing was read from it: {refused[label]}")
-    for label in sorted({*runs, *unverified}):
-        if label in unverified:
-            outcome_mod.write_world_record(
-                episode, label, outcome_mod.NOT_ARCHIVED,
-                detail="no scrub verdict records a completed walk of its tree, so it was not "
-                       "archived")
-            continue
-        try:
-            archive_mod.archive_episode(episode, {label: runs[label].run_dir})
-        except Exception as refusal:  # noqa: BLE001 — one world's archive, recorded; the rest go on
-            per_world.append(f"world {label}'s tree could not be archived ({refusal})")
-            outcome_mod.write_world_record(
-                episode, label, outcome_mod.NOT_ARCHIVED,
-                detail=f"the archive refused its finished tree: {refusal}")
-            continue
-        archived.append(label)
-    return archived
-
-
-def _cross_tenant_fault(stamps: dict[str, dict | None], labels: Sequence[str]) -> str | None:
-    """Siblings disagreeing on `tenant_id`, or a mix of stamps with and without the field.
-
-    A missing field is its own fault, never treated as agreeing. Siblings with no readable
-    stamp are skipped (`_member_faults` reports them) and the skip count is recorded."""
-    readable: dict[str, dict] = {
-        label: stamp for label in labels
-        if isinstance(stamp := stamps.get(label), dict)}
-    skipped = len(labels) - len(readable)
-    no_field = sorted(label for label, s in readable.items() if s.get("tenant_id") is None)
-    # All siblings silent on tenant (older stamps) is fine; only a mix is a fault.
-    if no_field and len(no_field) == len(readable):
-        no_field = []
-    parts: list[str] = []
-    if no_field:
-        parts.append(
-            f"sibling(s) {no_field} carry no tenant field at all — treated as its own named "
-            "fault, never as agreeing with the rest")
-    else:
-        values = {label: s.get("tenant_id") for label, s in readable.items()}
-        if len(set(values.values())) > 1:
-            parts.append(f"siblings disagree on tenant: {values}")
-    if skipped:
-        # Recorded so an unstamped sibling cannot silently shrink the comparison. Always
-        # accompanies `_member_faults`'s own fault for that sibling, so this note alone never
-        # makes a family incomplete.
-        parts.append(
-            f"the cross-tenant comparison ran over the {len(readable)} sibling(s) already "
-            f"stamped and skipped {skipped} unstamped one(s)")
-    return "; ".join(parts) if parts else None
-
-
-def _write_family_stamp(
-    episode: Episode, stamps: dict[str, dict | None], *, source: dict, allow_dirty: bool,
-    waived: list[str] | None = None, base_world_id: str | None = None,
-) -> None:
-    """The family's one stamp: what every sibling agreed on, what it was anchored to, and
-    whether it was waved through.
-
-    @owns source — the family stamp's `source` key, the source run's whole provenance record as
-    `_stamp_of` read it at preflight. Copied verbatim so a waived dirty source shows
-    `source.dirty` beside `allow_dirty`, and the archive never reads as anchored to a clean sha.
-
-    @owns waived — the family stamp's `waived` key: the kinds of fault (`DIRT`,
-    `UNPROVEN_KNOWLEDGE`) `--allow-dirty` actually waived for this family, from
-    `_family_refusal`'s judgement; `[]` when nothing was. `allow_dirty` alone cannot tell a
-    dirty-code family from one whose source merely predates the knowledge stamp.
-
-    The agreed record (about the siblings), the source (what they were held to) and the
-    override (the operator's flag, and what it waived) are kept separate so a clean family and
-    a waived one read differently.
-    """
-    present = [stamp for stamp in stamps.values() if stamp is not None]
-    # Every held field is the agreed record's, since `_family_refusal` passed: the first
-    # sibling's value, except where an unknown is its own waived fault — there the agreed value
-    # is one a sibling actually named, or `None` when none did. Dirt fields may differ under
-    # `--allow-dirty` and here are the first sibling's; each sibling's own is archived in
-    # `worlds/<label>/provenance.json`. `verify_family` guarantees at least one sibling.
-    agreed = {k: v for k, v in present[0].items() if k != "world_id"}
-    for field, rule in _HELD.items():
-        if rule.unknown_kind is not None:
-            agreed[field] = next(
-                (stamp.get(field) for stamp in present if rule.compared(stamp) is not None), None)
-    # The family's base world, from the tenant record at the siblings' container (handed in by
-    # the launcher from its episode view): no member stamps it, and lessons attribution keys on
-    # it.
-    doc: dict[str, object] = {
-        "agreed": agreed, "allow_dirty": bool(allow_dirty), "source": dict(source),
-        "waived": list(waived or [])}
-    if base_world_id is not None:
-        doc["base_world_id"] = base_world_id
-    episode.family_stamp.write(
-        json.dumps(doc, indent=2, sort_keys=True) + "\n")
 
 
 # ---------------------------------------------------------------------------------------
@@ -1672,7 +777,7 @@ def _render_page(runs: RunsRepository, *, episode_id: str) -> None:
     """Render the episode page, by id in the request's tenant's repository. Never fatal to the
     launch: a failure is logged, not raised."""
     try:
-        from defender.scripts.visualize import visualize_episode
+        from defender.presentation import visualize_episode
 
         page = visualize_episode.render_episode(runs, episode_id)
         _logger.info(f"episode {episode_id}: page {page}")
@@ -1704,183 +809,6 @@ def _grade(runs: RunsRepository, *, episode_id: str, judge: Any) -> None:
         # stays about the launch without hiding the failure.
         _logger.warning(f"episode {episode_id}: the judge pass failed ({judge_failed!r}); the "
                         "episode itself is otherwise unaffected", exc_info=True)
-
-
-def write_questioner_samples(episode: Episode, samples: Mapping[str, Any]) -> Path:
-    """Write `samples.yaml`, the per-system samples document (`system_samples`), into the
-    episode, so the judge is shown the same bytes the question-writer was even after the source
-    run is pruned. Normalised to one `dict` before dumping, so the file never relies on a YAML
-    loader's handling of repeated keys."""
-    record = episode.samples
-    record.write(_yaml.safe_dump(dict(samples), sort_keys=False, allow_unicode=True,
-                                default_flow_style=False))
-    return record.path
-
-
-#: How many example answers one verb of one system keeps.
-_SAMPLES_PER_VERB = 2
-#: The most characters one example answer keeps; a longer one is cut, with a marker saying so.
-_SAMPLE_CAP = 4000
-
-
-def system_samples(source_run_dir: Path, served_systems: Sequence[str]) -> dict[str, dict]:
-    """The samples document: real example answers from the source run's capture, keyed by
-    served system and grouped per verb (O16, N26).
-
-    @owns samples — the shipped `samples.yaml` shape: `{<system>: {verbs: {<verb>: [<answer
-    text>, ...]}}}`, or `{<system>: {unavailable: <reason>}}` when the system's captured answers
-    could not be read. Every served system has a section, one the capture never asked included
-    (an empty `verbs`); a captured system the tenant no longer serves has none. Which verbs
-    exist is whatever the capture called, never a verb-name heuristic.
-
-    Each example is the answer's canonical JSON, ASCII-escaped (no raw control or binary byte
-    survives), cut at `_SAMPLE_CAP` characters with a marker. The source run dir is a prior
-    box's rw bind, so every read is the screened surface (`lead_repository`), and a read fault
-    is an `unavailable` reason, never a crash.
-    """
-    from defender.learning.lead_repository import load_queries_report
-
-    served = list(dict.fromkeys(served_systems))
-    rows, unreadable = load_queries_report(Path(source_run_dir))
-    if unreadable and not rows:
-        reason = (f"the source run's queries table could not be read ({unreadable} unreadable "
-                  "record(s)), so no answer was captured to show")
-        return {system: {"unavailable": reason} for system in served}
-    verbs: dict[str, dict[str, list[str]]] = {system: {} for system in served}
-    lost: dict[str, int] = dict.fromkeys(served, 0)
-    for row in rows:
-        if row.system not in verbs or row.is_sentinel or row.exit_code != 0:
-            continue
-        kept = verbs[row.system].get(row.verb, [])
-        if len(kept) >= _SAMPLES_PER_VERB:
-            continue
-        text = _sample_text(row.raw_ref)
-        if text is None:
-            lost[row.system] += 1
-            continue
-        verbs[row.system][row.verb] = [*kept, text]
-    out: dict[str, dict] = {}
-    for system in served:
-        if not verbs[system] and lost[system]:
-            out[system] = {"unavailable": f"{lost[system]} captured {system} answer(s) could "
-                                          "not be read back from the source run"}
-        else:
-            out[system] = {"verbs": verbs[system]}
-    return out
-
-
-def _sample_text(source_answer: Path | None) -> str | None:
-    """One captured answer (a file in the source run) as sample text, or `None` when it cannot
-    be read as JSON."""
-    if source_answer is None:
-        return None
-    text = read_text_soft(source_answer)[0]
-    if text is None:
-        return None
-    payload, unreadable = load_json_artifact(text)
-    if unreadable is not None:
-        return None
-    shown = json.dumps(payload, sort_keys=True, ensure_ascii=True, default=str)
-    if len(shown) > _SAMPLE_CAP:
-        shown = (f"{shown[:_SAMPLE_CAP]} ... [cut: the answer is {len(shown)} characters, the "
-                 f"first {_SAMPLE_CAP} are shown]")
-    return shown
-
-
-def _author(  # noqa: PLR0913 — the step's inputs
-    ns: argparse.Namespace, *, source: Run, episode: Episode, questioner: Any,
-    lessons_dir: Path, served: Sequence[str],
-) -> Family:
-    """`Step.QUESTIONER`: the questioner authors the family, and it is validated before anything
-    reads it.
-
-    The launcher's derived fields (episode id, source run, branch point, T0, served
-    systems) overwrite whatever the model returned, so a family cannot name a different
-    source, or a different set of served systems, than it was authored from. One identity gate
-    runs over the whole manifest before it is written."""
-    from defender._corpus import iter_lesson_paths
-    from defender.learning.branch import questioner as questioner_mod
-    from defender.learning.lead_repository import joined, questioner_leads
-
-    source_run_dir = source.run_dir
-    as_of = branch_point_clock(source, ns.branch_message_id)
-    fences = _fence_count(source, ns.branch_message_id, as_of=as_of)
-    leads = _joined_leads(source_run_dir, joined)
-    samples = system_samples(source_run_dir, served)
-    # Archived before the model call, so the judge sees exactly what the questioner saw.
-    write_questioner_samples(episode, samples)
-    # Paths only; `author_family` opens and screens them. A missing corpus is not a refusal
-    # (N24): the launch goes on with no lessons, and says so.
-    if not artifact_dir(Path(lessons_dir)):
-        _logger.warning(f"the questioner lessons directory {lessons_dir} is not a directory; "
-                        "the question-writer is shown no lessons this launch")
-    lessons = iter_lesson_paths(lessons_dir)
-    document = questioner_mod.author_family(
-        source_run_dir=source_run_dir, episode_dir=episode.dir,
-        invoke=questioner,
-        leads=questioner_leads(leads),
-        alert=branch.source_alert(source) or {},  # lint-run-records: ok — the branch package's reader of the source run's alert, not the episode's copy accessor
-        frontier=questioner_mod.read_frontier(source_run_dir, fences_at=fences),
-        served_systems=tuple(served),
-        samples=samples,
-        lessons=lessons,
-    )
-    # The source is named by its id alone (O1(c), declared change 9): no run-folder path is
-    # written into the manifest.
-    document.update({
-        "episode_id": episode.dir.name,
-        "source_run_id": str(source.id),
-        "branch_message_id": ns.branch_message_id,
-        "fences_at": fences,
-        "as_of": as_of.isoformat().replace("+00:00", "Z"),
-        # The tenant's served systems as this launch's grant decided them (`served_systems`):
-        # the judge, lessons and question-writer read them from here (M21).
-        "served_systems": list(served),
-    })
-    family = parse_family(document)
-    check_identities(family)
-    _family.write_family(episode, document)
-    return family
-
-
-def _fence_count(source: Run, branch_message_id: int, *, as_of: Any) -> int:
-    """How many invlang fences the source run's document closed at the branch point.
-
-    Through `branch.fence_count_at`: the document says how many fences the run ever wrote,
-    and only the session says which had landed by the branch message. A source with no session
-    store falls back to the document's total, as `branch_point_clock` falls back to its last
-    mtime.
-    """
-    from defender.runtime.branch import BranchSpec, fence_count_at, source_session
-    from defender.skills.invlang.parser import scan_fences
-
-    path = source.documents.investigation.path
-    if not artifact_file(path):
-        return 0
-    document = read_text_utf8(path)
-    total = len(scan_fences(document).bodies)  # lint-row-drop: ok — a count of fences, not a read of their content; `fence_count_at` below answers whenever a session exists  # noqa: E501
-    store = _source_store(source)
-    if store is None:
-        return total
-    try:
-        spec = BranchSpec(source_run_dir=source.run_dir, branch_message_id=branch_message_id,
-                          as_of=as_of)
-        return fence_count_at(store, source_session(store, spec, source_run=source), branch_message_id, document)
-    finally:
-        store.close()
-
-
-def _joined_leads(source: Path, joined: Callable[[Path], list[Any]]) -> list[Any]:
-    """`lead_repository.joined` over the source: the launcher's one read of the two tables.
-
-    The surface already absorbs bad content; what can still raise is the host (a directory it
-    refuses to walk), which yields a thinner prompt rather than no episode."""
-    try:
-        return joined(source)
-    except Exception as unreadable:  # noqa: BLE001 — a fault at the read is a thinner prompt, not no episode
-        _logger.warning(f"could not join the source's leads ({unreadable!r}); the questioner is "
-                        "shown none")
-        return []
 
 
 __all__ = [

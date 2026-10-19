@@ -37,11 +37,11 @@ from pydantic_ai.usage import RunUsage, UsageLimits
 from defender.runtime.tools._deps import run_of
 from defender._io import write_guarded
 from defender import _git
-from defender._knowledge import KnowledgePaths
+from defender.knowledge._knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
 
-from .. import box as box_mod
+from defender import box as box_mod
 from .. import branch
 from .. import compaction
 from .. import observe
@@ -77,7 +77,7 @@ from defender.skills.invlang.validate import hold_capabilities
 from defender.hooks.inject_system_skill_description import SystemIndex, descriptor_index
 
 from defender import _clock
-from defender._env import env_bool
+from defender.configuration._env import env_bool
 from defender._frontmatter import strip_frontmatter
 from defender.run_repository import Run, RunPaths
 from ..run_tenant import RunTenant

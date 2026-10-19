@@ -7,7 +7,7 @@ from pathlib import Path
 
 from defender._frontmatter import parse_frontmatter_or_none
 from defender._io import read_text_soft
-from defender._knowledge import CHECKOUT_KNOWLEDGE
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 from defender._paths import adapters_under
 from defender.runtime.system_status import NONE_DOWN
 from defender.runtime.verb_grant import DENY_ALL, VerbGrant

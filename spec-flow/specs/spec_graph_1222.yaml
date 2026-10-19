@@ -74,7 +74,7 @@ schema_version: 2
 design: '#1222 — .spec-flow/design.md as amended by .spec-flow/design-amendments.md (A1-A8 and the smaller rulings
   win)'
 base: 301f196c
-tests: defender/tests/alert_front_door_1222
+tests: defender/tests/tenancy/alert_front_door_1222
 demands:
 - id: alert_facts_contract
   kind: behavior

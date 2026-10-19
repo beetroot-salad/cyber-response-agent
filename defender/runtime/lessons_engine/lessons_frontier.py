@@ -26,7 +26,7 @@ from collections.abc import Callable
 from dataclasses import field, replace
 from pathlib import Path
 
-from defender._corpus import PROVENANCE_KEYS
+from defender.knowledge._corpus import PROVENANCE_KEYS
 from defender._model import model
 from defender._untrusted import wrap_fresh
 from defender.runtime.lessons_engine._lessons_common import (
@@ -49,7 +49,7 @@ from defender.skills.invlang.validate import (
     is_open_slot,
 )
 from defender import _yaml
-from defender._knowledge import CHECKOUT_KNOWLEDGE
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 
 DEFAULT_CORPUS = CHECKOUT_KNOWLEDGE.lessons_dir
 CORPUS_NAME = DEFAULT_CORPUS.name
@@ -497,7 +497,7 @@ def render(
         if body := _render_frontmatter(hit.frontmatter):  # lint-lesson-text: ok — inside the untrusted frame below
             lines.append(body)
     # The lead is host text; the hits are lesson text a model wrote, framed as the alert is
-    # (`defender._corpus`'s rule), so a description cannot read as a section of this message.
+    # (`defender.knowledge._corpus`'s rule), so a description cannot read as a section of this message.
     return lead + "\n" + wrap_fresh("\n".join(lines), "untrusted")
 
 

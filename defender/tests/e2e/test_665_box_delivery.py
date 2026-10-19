@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import box as box_mod
+from defender import box as box_mod
 
 pytestmark = pytest.mark.e2e
 

@@ -1,6 +1,6 @@
 # playground-v2 operations runbook
 
-Per-service internals, one-time attach recipes, recovery procedures, and gotchas for the VPS-hosted stack. The map and conventions live in `playground-v2/CLAUDE.md`; design rationale in `/workspace/docs/playground-environment-v2.md`. Content here was moved out of CLAUDE.md verbatim (2026-07-20).
+Per-service internals, one-time attach recipes, recovery procedures, and gotchas for the VPS-hosted stack. The map and conventions live in `playground-v2/CLAUDE.md`; design rationale in `/workspace/playground-v2/docs/playground-environment-v2.md`. Content here was moved out of CLAUDE.md verbatim (2026-07-20).
 
 ## Env var namespacing (important)
 
@@ -169,7 +169,7 @@ To avoid that recovery path entirely: never wipe the `certs` volume alone. If yo
 
 ### Role-clustered host population (batch 7a)
 
-Eight role containers running on the compose network — the "population" half of v2 (docs/playground-environment-v2.md §Environment population). All 8 are built from a single multi-stage `hosts/Dockerfile` selected via compose `target:` + `BASE_OS` arg.
+Eight role containers running on the compose network — the "population" half of v2 (playground-v2/docs/playground-environment-v2.md §Environment population). All 8 are built from a single multi-stage `hosts/Dockerfile` selected via compose `target:` + `BASE_OS` arg.
 
 | Host | Role | OS | Service | Criticality |
 |---|---|---|---|---|
@@ -507,7 +507,7 @@ The image rebuild re-bakes the YAML files; the entrypoint re-runs `seed-users.py
 
 ### Baseline activity generators (batch 8)
 
-Each of the 8 role hosts runs a small Python scheduler (`/opt/soc-playground/baseline/scheduler.py`) that drives synthetic benign activity — web↔DB queries, scheduled service-account jobs, SRE multi-hop SSH sessions, office-user web fetches, occasional typo-failed logins. This is the layer that makes "is this unusual" a non-trivial question (docs/playground-environment-v2.md §Baseline activity generators).
+Each of the 8 role hosts runs a small Python scheduler (`/opt/soc-playground/baseline/scheduler.py`) that drives synthetic benign activity — web↔DB queries, scheduled service-account jobs, SRE multi-hop SSH sessions, office-user web fetches, occasional typo-failed logins. This is the layer that makes "is this unusual" a non-trivial question (playground-v2/docs/playground-environment-v2.md §Baseline activity generators).
 
 **Not cron.** The spec mandates Poisson-distributed arrivals with time-of-day shape, not fixed-period cron jobs. A single Python process per host binds `(action, identity)` pairs from the catalog, draws exponential inter-arrival times, and dispatches via `runuser -u <user>` so `/var/log/auth.log` and downstream integrations see the right identity.
 
@@ -549,7 +549,7 @@ docker --context soc-playground exec web-1 tail -30 /var/log/nginx/access.log
 
 ### Stub services (batch 9): CMDB, threat intel, change mgmt, ticketing, identity
 
-Five auth-less FastAPI stubs that round out the Tier 0/1 data layer defined in `docs/playground-environment-v2.md` §Data. Each runs in its own container on the compose network, listens on 8080 internally, and is published on VPS loopback at `127.0.0.1:8001-8005` for debugging. In-cluster consumers reach them via Docker DNS: `http://cmdb:8080`, `http://threat-intel:8080`, `http://change-mgmt:8080`, `http://ticket-server:8080`, `http://identity:8080`.
+Five auth-less FastAPI stubs that round out the Tier 0/1 data layer defined in `playground-v2/docs/playground-environment-v2.md` §Data. Each runs in its own container on the compose network, listens on 8080 internally, and is published on VPS loopback at `127.0.0.1:8001-8005` for debugging. In-cluster consumers reach them via Docker DNS: `http://cmdb:8080`, `http://threat-intel:8080`, `http://change-mgmt:8080`, `http://ticket-server:8080`, `http://identity:8080`.
 
 Footprint: 5 × 256 MB ≈ 1.25 GB — matches the v2 design allocation for "Ticket stub, CMDB stub, proxy, TI stub" plus the post-batch-9 identity stub.
 
@@ -626,7 +626,7 @@ docker --context soc-playground exec web-1 bash -c '
 
 ### Attack scenarios (batch 10)
 
-Parameterized attack scenarios that generate realistic telemetry across auth/metadata, execution, and data-access signal categories (docs/playground-environment-v2.md §Attack-simulation surface). Runner + catalog live in `playground-v2/attacks/`. Dispatches happen from the devcontainer against compose-network containers via `docker --context soc-playground exec`. Attacks fire into the live environment with baseline activity left on — signal-vs-noise discrimination is the agent's job. Each run writes `attacks/runs/<run_id>/meta.json` (start/end timestamps + per-step rc) as an investigation-context hint. Specific-run post-mortem reproduction comes from the soc-agent's `tool_audit.jsonl` (the PostToolUse `audit_tool_calls.py` hook records `tool_input` + `tool_response` per call) — that's what the agent actually saw. Historical query reproducibility for arbitrary later replays relies on Elastic ILM retention.
+Parameterized attack scenarios that generate realistic telemetry across auth/metadata, execution, and data-access signal categories (playground-v2/docs/playground-environment-v2.md §Attack-simulation surface). Runner + catalog live in `playground-v2/attacks/`. Dispatches happen from the devcontainer against compose-network containers via `docker --context soc-playground exec`. Attacks fire into the live environment with baseline activity left on — signal-vs-noise discrimination is the agent's job. Each run writes `attacks/runs/<run_id>/meta.json` (start/end timestamps + per-step rc) as an investigation-context hint. Specific-run post-mortem reproduction comes from the soc-agent's `tool_audit.jsonl` (the PostToolUse `audit_tool_calls.py` hook records `tool_input` + `tool_response` per call) — that's what the agent actually saw. Historical query reproducibility for arbitrary later replays relies on Elastic ILM retention.
 
 Catalog (4 starter scenarios):
 
@@ -661,7 +661,7 @@ cat runs/<run_id>/meta.json
 **Deferred to later batches:**
 
 - ILM retention pinning so the data streams the agent would query (`logs-system.*`, `logs-zeek.*`, `falco.alerts`, etc.) stay queryable for the fixture lifetime. Today the stack runs on default policies — replace with explicit retention before treating any run as a stable reference.
-- Toxiproxy-style service outages as a chaos mode (docs/playground-environment-v2.md §Phased build Phase 4). Stale CMDB, schema drift and data drops ship in the chaos control plane below.
+- Toxiproxy-style service outages as a chaos mode (playground-v2/docs/playground-environment-v2.md §Phased build Phase 4). Stale CMDB, schema drift and data drops ship in the chaos control plane below.
 - MinIO-dependent data-access archetypes (blob enumeration, staged exfil) — MinIO is a Tier-2 dependency.
 
 ### Chaos control plane (issue #401)
@@ -799,7 +799,7 @@ docker --context soc-playground compose up -d
 
 ## Gotchas
 
-- **VPS sysctl `vm.max_map_count=262144`** — required by ES. Set persistently via `/etc/sysctl.d/99-elasticsearch.conf` on the current VPS AND baked into `infra/cloud-init/bootstrap.yaml` for future servers.
+- **VPS sysctl `vm.max_map_count=262144`** — required by ES. Set persistently via `/etc/sysctl.d/99-elasticsearch.conf` on the current VPS AND baked into `playground-v2/infra/cloud-init/bootstrap.yaml` for future servers.
 - **The SOAR bridge must never be named `br-*`.** `soar/compose.yml`'s network pins `com.docker.network.bridge.name: soar0` so `zeek/entrypoint.sh`'s `awk '/^br-/ {print $1; exit}'` skips it. Drop that driver_opt and Zeek starts picking between two bridges at random, silently capturing the SOAR network instead of the playground — the healthcheck still passes, so nothing looks wrong.
 - **A service that grows a `networks:` key leaves the default network** unless `default` is listed explicitly. Kibana and the five stubs list both; getting this wrong cuts Kibana off from Elasticsearch and the stubs off from the role hosts.
 - **`include:`'s `env_file: .env` makes a missing `.env` fatal, deliberately.** With no `.env` in `playground-v2/`, *every* compose subcommand — including `down`, `ps` and `logs` — fails with `stat .../.env: no such file or directory` rather than the usual "variable is not set, defaulting to a blank string" warning. Copy `.env.example` first. The key does not affect interpolation (Compose v5.3.1 resolves the included file's `${...}` from the project `.env` regardless) — failing loudly is the entire reason it is there.
@@ -809,7 +809,7 @@ docker --context soc-playground compose up -d
 - **Fleet agentless sync error in Kibana logs** — Kibana's Fleet plugin tries to sync with Elastic's managed Agentless service and complains about missing client certs. Harmless for self-hosted; will be silenced when Fleet is properly configured in a later batch.
 - **Kibana `/internal/security/me` is unavailable in current Kibana config** — this is an internal-API restriction, not a bug. Use the UI login at `http://localhost:5601` or the basic-auth REST APIs for scripted access.
 - **`fleet-default-output` auto-defaults to `http://localhost:9200` — wrong for our setup.** `KIBANA_FLEET_SETUP=1` creates this output with a plaintext localhost URL; every enrolled agent ships monitoring data there. For us it must be `https://elasticsearch:9200` with `ca_trusted_fingerprint` set. Handled by the `fleet-outputs-reconciler` sidecar — it self-heals drift in either the URL or the fingerprint within 60s. Earlier deploys used a one-time manual `PUT /api/fleet/outputs/fleet-default-output`; that didn't survive cert regeneration when the `certs` volume was reset out-of-band.
-- **The VPS host needs `/etc/hosts` entries for Docker service names.** `127.0.0.1 elasticsearch` + `127.0.0.1 fleet-server` so host-based agents can resolve those names. **Persisted via `infra/cloud-init/bootstrap.yaml`** (runcmd with grep-gated append + `manage_etc_hosts: false` to stop cloud-init from clobbering it on lever-up).
+- **The VPS host needs `/etc/hosts` entries for Docker service names.** `127.0.0.1 elasticsearch` + `127.0.0.1 fleet-server` so host-based agents can resolve those names. **Persisted via `playground-v2/infra/cloud-init/bootstrap.yaml`** (runcmd with grep-gated append + `manage_etc_hosts: false` to stop cloud-init from clobbering it on lever-up).
 - **Fleet Server re-enrolls as a new agent on each container restart.** `KIBANA_FLEET_SETUP=1` on the fleet-server container requests a new service token + new enrollment on every start. Across a lever-down/up cycle the old record becomes an `offline` ghost in Kibana → Fleet → Agents. Cleanup: `POST /api/fleet/agents/<old-id>/unenroll -d '{"revoke":true}'` or via UI. The Fleet Server itself keeps working fine — this is a cosmetic bookkeeping issue.
 - **After lever-up, the host elastic-agent may need `systemctl restart elastic-agent`** to shake off cached DNS state and re-resolve `fleet-server` / `elasticsearch` through `/etc/hosts`. Symptom in `elastic-agent status`: fleet checkin `FAILED: lookup fleet-server on 127.0.0.53:53: server misbehaving`. Cure: restart the service. Could script this into the lever-up flow later if it proves recurring.
 - **`ca_trusted_fingerprint` needs the CA in the presented chain — `elasticsearch-certutil cert` doesn't emit one.** Without a fix, every bulk POST from elastic-agent drops with `x509: certificate signed by unknown authority` + `Exporting failed. Dropping data.`, and no `metrics-system.*` / `logs-system.*` / `logs-falco.alerts-default` data streams ever form (fleet-server's own telemetry still flows because it's not a client-of-ES). Fix baked into `setup`: after cert gen, append `ca/ca.crt` to both `elasticsearch/elasticsearch.crt` and `fleet-server/fleet-server.crt` so ES / fleet-server present a leaf+CA chain that agents can walk back to the fingerprint pin. Idempotent on existing volumes. ES hot-reloads the cert on the next TLS handshake — no restart needed.

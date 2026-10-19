@@ -6,7 +6,7 @@ creates use; it refuses a runs folder with no tenant record. `Run.at(directory)`
 eval/fixture/tooling escape hatch with no runs base. `Run.under` builds the handle with no I/O:
 `for_tenant` uses it after judging the record, and so does the repository's `open`, which
 judged the record through its own held runs folder. Outside the package every constructor is
-gated by `scripts/lint/lint_run_layout_imports.py`; application code gets a `Run` from its
+gated by `tooling/lint/lint_run_layout_imports.py`; application code gets a `Run` from its
 tenant's repository (`tenant.runs_repository().open(run_id)`, `.create`, or an episode view's).
 
 Every accessor answers a `RecordHandle` (`.path`, `.read`, and the record's own write verb),
@@ -29,9 +29,13 @@ from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from defender import _alert_input, _artifact_schema, _episode_paths, _provenance, _report
+from defender.records import _alert_input
+from defender.records import _artifact_schema
+from defender.episodes import _episode_paths
+from defender.records import _provenance
+from defender.records import _report
 from defender import _io as _real_io
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender.run_repository import _layout
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
@@ -39,7 +43,7 @@ from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
 #: The five groups, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
 
-#: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table, plus
+#: Must mirror `defender/tests/support/shared/contracts/_spec1077.py::GROUP_MEMBERS`, the spec for this table, plus
 #: #1255's two host-only sidecars: `call_join` (the query writer's, G4/G6) and
 #: `ticket_comments` (the ticket writer's record of its accepted comments, P5).
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {

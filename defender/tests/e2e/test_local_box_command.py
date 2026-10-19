@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._by_path import DEFENDER, WORKTREE
+from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE
 
 _START_WITHOUT_PYTHONPATH = """
 import json, os, sys
@@ -17,11 +17,11 @@ from pathlib import Path
 assert 'PYTHONPATH' not in os.environ
 # pytest makes the worktree importable in-process; that does not export child env.
 sys.path.insert(0, sys.argv[1])
-from defender._tenant import TenantId
-from defender.runtime import box
-from defender.tests._spec1092 import STOCK_ROOTFS, make_run_dir
+from defender.tenancy._tenant import TenantId
+from defender import box
+from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS, make_run_dir
 from defender.tests.e2e._box665 import RecordingDocker
-from defender.tests.tenant_1108_p2._support import AgentReadDocker
+from defender.tests.tenancy.tenant_1108_p2._support import AgentReadDocker
 root = Path(sys.argv[2])
 agent = root / 'agent'
 agent.mkdir()

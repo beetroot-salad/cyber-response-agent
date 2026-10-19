@@ -3,7 +3,7 @@ keeps pytest from collecting it). Imported by the `test_665_*` files.
 
 Every fake enters the target through a real injection seam (a `docker=` fn, a `box=`
 constructor/param, an injected `start_box`/`stop_box`/`agents`/`branch`) — never a
-monkeypatch (`scripts/lint/lint_monkeypatch.py` is a blocking ratcheted gate). No fake
+monkeypatch (`tooling/lint/lint_monkeypatch.py` is a blocking ratcheted gate). No fake
 classifies or decides policy: faults are declarative, requests are recorded, and startup
 readbacks use fixture files. Demands assert on the captured geography/argv/box.
 
@@ -28,10 +28,10 @@ from typing import Any
 import pytest
 
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-from defender.runtime import box as box_mod
-from defender.runtime.scrub import verdict_path
-from defender.tests._alert_plant import plant_alert
-from defender.tests._docker import daemon_reachable, is_dood
+from defender import box as box_mod
+from defender.box._scrub import verdict_path
+from defender.tests.support.storage._alert_plant import plant_alert
+from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.e2e._local_box_command import run_box_python_command
 
 DEFENDER = Path(__file__).resolve().parents[2]

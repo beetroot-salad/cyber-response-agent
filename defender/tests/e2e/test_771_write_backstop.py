@@ -1,7 +1,7 @@
 """#771 — write backstop: the alias-refusing guarded write primitive (symlink/hard-link/planted-directory refusal at every shared-tree writer, unpredictable staged names, ELOOP before lock), refusal postures preserved per call site, and the gated model writers."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run
+from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import contextlib
 import errno

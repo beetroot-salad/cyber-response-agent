@@ -12,8 +12,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from defender._clock import now_iso  # noqa: F401 — re-export: core.config stays the loop's import surface
-from defender._env import env_int, env_str
-from defender._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
+from defender.configuration._env import env_int, env_str
+from defender.configuration._env import FatalConfigError  # noqa: F401 — re-export; enrolled as stage-fatal in core/faults.py
 from defender.run_repository import WIRE_LOG_NAMES
 from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
 
@@ -200,7 +200,7 @@ KNOB_TURN_DEADLINE = "ORACLE_TURN_DEADLINE"
 DEFAULT_RETRY_CAP = 3
 #: Oracle-side queries per second, per episode (a sibling gets its slice R/k from the launcher).
 DEFAULT_RATE = 5.0
-#: The oracle's own spend bound per world, in USD (`defender._pricing` on each response's
+#: The oracle's own spend bound per world, in USD (`defender.configuration._pricing` on each response's
 #: usage, oracle and verifier together). Not the investigator's budget.
 DEFAULT_BUDGET = 20.0
 #: Seconds one attempt may take, rate-limiter waits excluded (M03=A, M11=A).
@@ -318,7 +318,7 @@ class StageContext:
     """What one spawn of a stage is about: the per-call transport `run_stage` consumes.
 
     Built per call, never a module constant, so the env-backed `wall_clock_timeout` and
-    `request_limit` aren't frozen at import (`tests/test_loop_config_env.py` enforces this).
+    `request_limit` aren't frozen at import (`tests/shared/process/test_loop_config_env.py` enforces this).
 
     `repo_root` is only needed by stages that bind a corpus or skills tree. `run_stage` reads
     the first four fields; `repo_root`/`box` are bind inputs, and every engine binds off this

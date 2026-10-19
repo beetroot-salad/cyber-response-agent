@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 
-from defender.tests._spec1077 import fixture_run
+from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import json
 
@@ -23,7 +23,7 @@ _SAME = {"native_query": "FROM logs"}
 # X5 — a planted row cannot re-attribute a reducer failure to another system.
 def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
     from defender.runtime.run_state import RunState
-    from defender.scripts.gather_tools import record_query as rq
+    from defender.runtime import record_query as rq
 
     run_dir = tmp_path / "run"
     RunPaths(run_dir).gather_raw.mkdir(parents=True)

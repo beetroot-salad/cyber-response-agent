@@ -36,12 +36,12 @@ from .tools import (
     LeadStop,
 )
 
-from defender._corpus import QueryTemplate, is_established, iter_query_templates
-from defender._knowledge import KnowledgePaths
+from defender.knowledge._corpus import QueryTemplate, is_established, iter_query_templates
+from defender.knowledge._knowledge import KnowledgePaths
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh
-from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
+from defender.runtime.record_query import LEAD_ID_RE as _LEAD_ID_RE
 from .verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.runtime.verb_grant import VerbGrant
 

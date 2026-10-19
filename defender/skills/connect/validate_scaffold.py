@@ -12,11 +12,11 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._corpus import iter_query_templates  # noqa: E402
-from defender._knowledge import KnowledgePaths  # noqa: E402
+from defender.knowledge._corpus import iter_query_templates  # noqa: E402
+from defender.knowledge._knowledge import KnowledgePaths  # noqa: E402
 from defender._io import TEXT_READ_ERRORS, read_plain, read_text_soft  # noqa: E402
 from defender._paths import adapters_under, process_defender_dir  # noqa: E402
-from defender._scaffold_rules import (  # noqa: E402
+from defender.knowledge._scaffold_rules import (  # noqa: E402
     ScaffoldRuleError,
     VerbResolver,
     check_system_skill,
@@ -84,7 +84,7 @@ def check_registry(report: Report, defender: Path, system: str):
     already tells an adapter's own import errors from a missing adapter and lets interrupts
     through).
     """
-    adapter = defender / "scripts" / "adapters" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
+    adapter = defender / "integrations" / f"{system.replace('-', '_')}{ADAPTER_SUFFIX}"
     try:
         verbs = VerbResolver(defender).verbs(system)
     except ScaffoldRuleError as exc:
@@ -288,8 +288,8 @@ def check_templates(report: Report, defender: Path, system: str, verbs) -> None:
 def main() -> None:
     import argparse
 
-    from defender import _tenant
-    from defender._tenants import add_tenant_arguments
+    from defender.tenancy import _tenant
+    from defender.tenancy._tenants import add_tenant_arguments
 
     ap = argparse.ArgumentParser(prog=Path(sys.argv[0]).name)
     ap.add_argument("system")

@@ -13,7 +13,7 @@ toons = pytest.importorskip("toons")  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
-from defender.tests._session_store_705 import sql, store_factory  # noqa: E402
+from defender.tests.support.storage._session_store_705 import sql, store_factory  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     ReplayFn,
@@ -284,10 +284,10 @@ def test_the_rendered_runtime_page_shows_the_original_json_of_a_substituted_call
 ) -> None:
     """The offline reader's rendered page shows the ORIGINAL JSON of a substituted call, beside
     the view — it does not merely survive the new field."""
-    import defender.scripts.visualize.visualize_data  # noqa: F401 — enter the cycle at the
+    import defender.presentation.visualize_data  # noqa: F401 — enter the cycle at the
     # other end first: importing `visualize_messages` (and therefore `visualize_run`, which
     # imports it) as the module head raises ImportError on this pre-existing cycle.
-    from defender.scripts.visualize.visualize_run import render_runtime_page
+    from defender.presentation.visualize_run import render_runtime_page
 
     value = _payload()
     run_dir, main = _substituting_run(tmp_path / "sub", turns=2, gather=True)

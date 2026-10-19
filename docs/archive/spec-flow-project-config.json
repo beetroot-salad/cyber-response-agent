@@ -38,7 +38,7 @@
         "grep": [
           "ticket_adapter.py"
         ],
-        "note": "#767 renamed the writer's second call from close_case_ticket (a POST /tickets/{key}/transitions close) to record_case_ticket (a POST /tickets/{key}/comments record) — the host now records its investigation as a comment and never transitions the case; a person CLOSES it, and that close is what releases the case's comments to a later run's gather (the read side keys on `status`, never on a label or a comment's author). The writer's egress still bypasses guard_outbound entirely (it calls transport.docker_exec_curl directly, never confine_read_endpoint), so it is staged nowhere a `staged`-style record would see it (F3). Three test implementors of the duck-typed `ticket_writer=` seam moved with the rename: defender/tests/_spec791.py::SpecTail, defender/tests/test_947_triplet_sibling.py's inline Writer, and the #767 spec's own defender/tests/test_767_run_tail.py::Tail (g10)."
+        "note": "#767 renamed the writer's second call from close_case_ticket (a POST /tickets/{key}/transitions close) to record_case_ticket (a POST /tickets/{key}/comments record) — the host now records its investigation as a comment and never transitions the case; a person CLOSES it, and that close is what releases the case's comments to a later run's gather (the read side keys on `status`, never on a label or a comment's author). The writer's egress still bypasses guard_outbound entirely (it calls transport.docker_exec_curl directly, never confine_read_endpoint), so it is staged nowhere a `staged`-style record would see it (F3). Three test implementors of the duck-typed `ticket_writer=` seam moved with the rename: defender/tests/support/sandbox/_spec791.py::SpecTail, defender/tests/learning/branch/test_947_triplet_sibling.py's inline Writer, and the #767 spec's own defender/tests/shared/contracts/test_767_run_tail.py::Tail (g10)."
       },
       "wire_log": {
         "writers": [
@@ -60,7 +60,7 @@
           "defender/learning/core/persist.py::append_pitfalls",
           "defender/learning/author/drain.py::retire",
           "defender/learning/author/drain.py::_record_stuck",
-          "defender/evals/harness.py::materialize"
+          "evaluations/harness.py::materialize"
         ],
         "readers": [
           "defender/learning/author/drain.py::_tick",
@@ -144,24 +144,24 @@
       },
       "session_store": {
         "writers": [
-          "defender/runtime/session_store.py::StoreHandle.new_session",
-          "defender/runtime/session_store.py::StoreHandle.fork",
-          "defender/runtime/session_store.py::StoreHandle.append",
-          "defender/runtime/session_store.py::StoreHandle.write_config",
-          "defender/runtime/session_store.py::StoreHandle.set_truncated_by",
-          "defender/runtime/session_store.py::StoreHandle.set_last_render_len",
-          "defender/runtime/session_store.py::open_store",
-          "defender/runtime/session_store.py::write_case_pointer",
+          "defender/runtime/session_store/_write.py::StoreHandle.new_session",
+          "defender/runtime/session_store/_write.py::StoreHandle.fork",
+          "defender/runtime/session_store/_write.py::StoreHandle.append",
+          "defender/runtime/session_store/_write.py::StoreHandle.write_config",
+          "defender/runtime/session_store/_write.py::StoreHandle.set_truncated_by",
+          "defender/runtime/session_store/_write.py::StoreHandle.set_last_render_len",
+          "defender/runtime/session_store/_write.py::open_store",
+          "defender/runtime/session_store/_pointers.py::write_case_pointer",
           "defender/runtime/lead_zero/_items.py::dispatch_correlation",
           "defender/runtime/driver/_build.py::_make_store_render_processor"
         ],
         "readers": [
-          "defender/runtime/session_store.py::hydrate",
-          "defender/runtime/session_store.py::synthesized_flags",
-          "defender/runtime/session_store.py::path_row_ids",
-          "defender/runtime/session_store.py::ends_on_complete_pair",
-          "defender/runtime/session_store.py::open_store_for_read",
-          "defender/runtime/session_store.py::resolve_store_path",
+          "defender/runtime/session_store/_read.py::hydrate",
+          "defender/runtime/session_store/_read.py::synthesized_flags",
+          "defender/runtime/session_store/_read.py::path_row_ids",
+          "defender/runtime/session_store/_read.py::ends_on_complete_pair",
+          "defender/runtime/session_store/_write.py::open_store_for_read",
+          "defender/runtime/session_store/_pointers.py::resolve_store_path",
           "defender/runtime/selection.py::render",
           "defender/runtime/selection.py::ingest",
           "defender/runtime/selection.py::fold",
@@ -191,7 +191,7 @@
         ],
         "readers": [
           "defender/_tenant.py::runs_base_for",
-          "defender/evals/held_out.py::index_runs",
+          "evaluations/held_out.py::index_runs",
           "defender/learning/ops/trace_lesson.py::in_context_cases"
         ],
         "grep": [
@@ -203,12 +203,12 @@
       },
       "run_dir": {
         "writers": [
-          "defender/runtime/box/_lifecycle.py::_plant",
+          "defender/box/_lifecycle.py::_plant",
           "defender/runtime/observe.py::write_trace",
           "defender/runtime/driver/__init__.py::run_investigation",
           "defender/runtime/observe.py::RequestLogger",
           "defender/runtime/observe.py::denial_logger",
-          "defender/runtime/session_store.py::write_case_pointer",
+          "defender/runtime/session_store/_pointers.py::write_case_pointer",
           "defender/runtime/query_tool.py::_persist_payload",
           "defender/runtime/query_tool.py::QueryCapture._record",
           "defender/hooks/record_lead.py::claim_lead",
@@ -231,7 +231,7 @@
           "defender/runtime/branch/_seed.py::_copy_artifact"
         ],
         "readers": [
-          "defender/runtime/scrub.py::scrub",
+          "defender/box/_scrub.py::scrub",
           "defender/run_common.py::cross_check_tables",
           "defender/learning/lead_repository.py::joined",
           "defender/run_repository/_layout.py::contained_payload",
@@ -260,17 +260,17 @@
       },
       "drain_worktree": {
         "writers": [
-          "defender/runtime/box/_lifecycle.py::_plant",
-          "defender/learning/author/drain.py::_restore_corpus",
-          "defender/learning/author/drain.py::_revert_strays",
+          "defender/box/_lifecycle.py::_plant",
+          "defender/learning/author/version_control/restore.py::_restore_corpus",
+          "defender/learning/author/version_control/restore.py::_revert_strays",
           "defender/runtime/tools/_files.py::_tool_write_file",
           "defender/runtime/tools/_files.py::_tool_edit_file",
           "defender/learning/leads/draft_synthesis.py::synthesize_drafts",
           "defender/learning/author/shared.py::commit_corpus"
         ],
         "readers": [
-          "defender/runtime/scrub.py::scrub",
-          "defender/learning/author/drain.py::_snapshot_corpus",
+          "defender/box/_scrub.py::scrub",
+          "defender/learning/author/version_control/restore.py::_snapshot_corpus",
           "defender/learning/author/branch.py::AuthorBranch",
           "defender/learning/leads/_lead_spine.py::_verify_corpus_scope",
           "defender/learning/leads/lead_author/_handoff.py::discover_system_drafts",
@@ -294,9 +294,9 @@
           "defender/runtime/branch/_family.py::write_family",
           "defender/learning/branch/archive.py::archive_episode",
           "defender/learning/branch/cli.py::_record_episode_outcome",
-          "defender/learning/branch/cli.py::_write_family_stamp",
+          "defender/learning/branch/verification.py::_write_family_stamp",
           "defender/runtime/observe.py::RequestLogger",
-          "defender/learning/judge/__init__.py::_write_judge_yaml",
+          "defender/learning/judge/_grade_record.py::_write_judge_yaml",
           "defender/learning/judge/__init__.py::_write_wire_log"
         ],
         "readers": [
@@ -318,18 +318,18 @@
           "defender/learning/judge/family.py::_missing_required_input",
           "defender/learning/judge/family.py::lead_chain",
           "defender/learning/judge/family.py::json_mapping",
-          "defender/learning/judge/__init__.py::_existing_grade",
-          "defender/learning/judge/__init__.py::read_grade",
+          "defender/learning/judge/_grade_record.py::_existing_grade",
+          "defender/learning/judge/_grade_record.py::read_grade",
           "defender/learning/branch/archive.py::read_family_stamp",
           "defender/learning/branch/timing.py::read_stage_timings",
           "defender/learning/branch/episode.py::_recorded_outcome",
           "defender/scripts/visualize/visualize_episode.py::load_episode",
           "defender/learning/judge/render.py::render_oracle_store",
-          "defender/_io.py::bind",
-          "defender/_io.py::Bound.read",
-          "defender/_io.py::Bound.read_jsonl",
-          "defender/_io.py::Bound.entries",
-          "defender/_io.py::Bound.under"
+          "defender/_filesystem/bound.py::bind",
+          "defender/_filesystem/bound.py::Bound.read",
+          "defender/_filesystem/bound.py::Bound.read_jsonl",
+          "defender/_filesystem/bound.py::Bound.entries",
+          "defender/_filesystem/bound.py::Bound.under"
         ],
         "grep": [
           "episodes/",
@@ -365,14 +365,14 @@
       },
       "box_env": {
         "writers": [
-          "defender/runtime/box/_lifecycle.py::_create_argv",
-          "defender/runtime/box/_docker.py::_render_env",
-          "defender/runtime/box/_docker.py::infra_env",
-          "defender/runtime/box/_lifecycle.py::_host_fallback_env",
+          "defender/box/_lifecycle.py::_create_argv",
+          "defender/box/_docker.py::_render_env",
+          "defender/box/_docker.py::infra_env",
+          "defender/box/_lifecycle.py::_host_fallback_env",
           "defender/run_common.py::run_env"
         ],
         "readers": [
-          "defender/runtime/bash_exec.py::_run_box_entrypoint"
+          "defender/execution/bash_exec.py::_run_box_entrypoint"
         ],
         "grep": [
           "BOX_ENV_ALLOWLIST",
@@ -511,22 +511,22 @@
       "run_sidecars": {
         "writers": [
           "defender/runtime/run_end.py::write_sidecar",
-          "defender/runtime/scrub.py::_write_verdict",
+          "defender/box/_scrub.py::_write_verdict",
           "defender/scripts/case_history/ticket_writer.py::_write_receipt",
-          "defender/runtime/session_store.py::write_case_pointer",
+          "defender/runtime/session_store/_pointers.py::write_case_pointer",
           "defender/run_common.py::_clear_stale_sidecars",
           "defender/scripts/case_history/ticket_writer.py::clear_receipt"
         ],
         "readers": [
           "defender/run_common.py::_setup_state",
           "defender/run_repository/_handle.py::Run._exit_class",
-          "defender/runtime/session_store.py::resolve_store_path",
-          "defender/runtime/session_store.py::resolve_session_id",
+          "defender/runtime/session_store/_pointers.py::resolve_store_path",
+          "defender/runtime/session_store/_pointers.py::resolve_session_id",
           "defender/runtime/branch/_spec.py::open_source_store",
           "defender/runtime/branch/_spec.py::source_store_if_any",
-          "defender/runtime/scrub.py::tree_verified",
+          "defender/box/_scrub.py::tree_verified",
           "defender/learning/branch/archive.py::_single_files",
-          "defender/learning/branch/cli.py::_scrub_ran",
+          "defender/learning/branch/verification.py::_scrub_ran",
           "defender/scripts/visualize/visualize_run.py::render_ticket_line"
         ],
         "grep": [
@@ -565,7 +565,7 @@
       "questioner_lessons": {
         "writers": [],
         "readers": [
-          "defender/learning/branch/cli.py::_author",
+          "defender/learning/branch/questioner_launch.py::_author",
           "defender/learning/branch/questioner/__init__.py::_questioner_lessons_section"
         ],
         "grep": [

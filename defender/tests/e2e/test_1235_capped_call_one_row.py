@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165
-from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
 
 import asyncio
 from dataclasses import replace
@@ -14,7 +14,7 @@ from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.query_tool import QueryCapture  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
-from defender.tests._tenants1106 import fixture_gather_def  # noqa: E402
+from defender.tests.support.tenancy._tenants1106 import fixture_gather_def  # noqa: E402
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 
 

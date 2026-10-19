@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._1255_view import model_path
+from defender.tests.support.runtime.state._1255_view import model_path
 from pydantic_ai import ModelRetry
 
 from defender.tests.e2e._replay_harness import (
@@ -26,7 +26,7 @@ from defender.agents import MAIN_DEF
 from defender.runtime import circuit_breaker, tools as runtime_tools
 from defender.runtime.agent_definition import bind
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
-from defender.scripts.adapters.faults import TransportFault
+from defender.integrations.faults import TransportFault
 from defender.skills.invlang.validate import validate_companion
 
 pytestmark = pytest.mark.e2e

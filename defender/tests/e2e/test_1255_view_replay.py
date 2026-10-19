@@ -11,17 +11,17 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RUN_LAYOUT  # noqa: E402
-from defender.runtime import box as box_mod  # noqa: E402
-from defender.runtime.box import BoxSpec  # noqa: E402
-from defender.tests import _1255_view as V  # noqa: E402
-from defender.tests._fold_936 import (  # noqa: E402
+from defender import box as box_mod  # noqa: E402
+from defender.box import BoxSpec  # noqa: E402
+from defender.tests.support.runtime.state import _1255_view as V
+from defender.tests.support.shared.contracts._fold_936 import (  # noqa: E402
     CLASS_LESSON,
     CLASS_SELECTOR,
     CLOSED_LOOP,
     OPEN_CLASS_BLOCK,
     WRITE_RETURN_HEADER,
 )
-from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
+from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
