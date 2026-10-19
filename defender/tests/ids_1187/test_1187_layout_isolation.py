@@ -935,26 +935,50 @@ def test_the_walk_owner_makes_no_folder_by_its_path(tmp_path):
 
 
 _CLAIM_CHILD = """
-import os, sys
+import os, sys, uuid
 from pathlib import Path
+from defender.run_repository import RunRefused
 from defender.tests.ids_1187 import _spec1187 as S
-root, tenant_id, raw = Path(sys.argv[1]), sys.argv[2], bytes.fromhex(sys.argv[3])
+root, tenant_id, collide = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "collision"
 runs = S.tenant(root, tenant_id).runs_repository()
-real, calls = os.urandom, []
-def urandom(n):
-    calls.append(n)
-    return raw if n == 16 else real(n)
-os.urandom = urandom
+real_mkdir, attempts = os.mkdir, []
+def claim_mkdir(path, *args, **kwargs):
+    name = os.path.basename(os.fsdecode(path))
+    try:
+        is_uuid = str(uuid.UUID(name)) == name
+    except ValueError:
+        is_uuid = False
+    if is_uuid:
+        attempts.append(name)
+        if len(attempts) > 1:
+            raise RuntimeError("episode claim retried")
+        if collide:
+            real_mkdir(path, *args, **kwargs)
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY, dir_fd=kwargs.get("dir_fd"))
+            try:
+                marker = os.open("PLANTED", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+                                 dir_fd=fd)
+                try:
+                    os.write(marker, b"someone else's episode\\n")
+                finally:
+                    os.close(marker)
+            finally:
+                os.close(fd)
+            print("PLANTED", name, flush=True)
+    return real_mkdir(path, *args, **kwargs)
+os.mkdir = claim_mkdir
 try:
     with runs.create_episode() as view:
         print("CLAIMED", view.episode_id)
+except RunRefused:
+    print("REFUSED")
 except BaseException as exc:
-    print("REFUSED", type(exc).__name__, type(exc).__mro__[1].__name__)
-print("URANDOM16", calls.count(16))
+    print("UNEXPECTED", type(exc).__name__)
+print("ATTEMPTS", len(attempts))
 """
 
 
-def _claim_in_a_child(data_root: Path, raw: bytes):
+def _claim_in_a_child(data_root: Path, *, collide: bool):
     import subprocess
     import sys
 
@@ -964,51 +988,43 @@ def _claim_in_a_child(data_root: Path, raw: bytes):
            "PYTHONPATH": os.pathsep.join(filter(None, [str(H5.WORKTREE),
                                                        os.environ.get("PYTHONPATH")]))}
     return subprocess.run(  # noqa: S603 — this interpreter, a fixed script
-        [sys.executable, "-c", _CLAIM_CHILD, str(data_root), A_ID, raw.hex()],
+        [sys.executable, "-c", _CLAIM_CHILD, str(data_root), A_ID,
+         "collision" if collide else "control"],
         capture_output=True, text=True, encoding="utf-8", check=False, env=env,
         cwd=str(H5.WORKTREE), timeout=300)
 
 
 def test_create_episode_refuses_a_folder_already_at_the_minted_name(data_root):
-    """Design `runs.create_episode`: "one exclusive create ... An entry already at the name
-    refuses. There is no retry: a collision means something is wrong" (adversary F7, which the
-    contract had no seam to reach). A CHILD process pins `os.urandom` to 16 fixed bytes (the
-    bytes `uuid.uuid4()` is made of; patched in the child so the suite's monkeypatch ratchet is
-    not touched), and the parent has planted a folder at the uuid those bytes make. The child's
-    `create_episode()` refuses (anything but a missing-name or machinery error), claims
-    nothing, the planted folder and `<T>/episodes` are byte-identical afterwards, and
-    `os.urandom(16)` was asked exactly once — no retry with a fresh id. Positive control, same
-    child and bytes with nothing planted: it claims exactly that uuid, also asking once.
-    COINED CONSTRAINT: the id is minted through `uuid.uuid4()`/`os.urandom(16)` (what
-    `RunId.mint()` is pinned to return), one call per claim. RED at base: no `create_episode`."""
-    import uuid
-
+    """The claim is one exclusive create, with no retry and no adoption of an existing entry.
+    In a child, intercept the OS mkdir of the freshly minted UUID and plant that very name
+    with a canary immediately before the actual claim. The same fault works for absolute
+    paths and relative dir_fd calls, independently of the random-id generator. A second
+    UUID mkdir attempt stops immediately and fails the count assertion. The success control
+    runs the same child without the collision; no private production seam is imposed.
+    """
     S.tenant(data_root, A_ID)
-    raw = bytes(range(16))
-    fixed = str(uuid.UUID(bytes=raw, version=4))
-    episodes = S.episodes_dir(data_root, A_ID)
-    planted = episodes / fixed
-    planted.mkdir(parents=True)
-    (planted / "PLANTED").write_text("someone else's episode\n", encoding="utf-8")
-    before = S.tree(S.tenant_dir(data_root, A_ID))
-
-    refused = _claim_in_a_child(data_root, raw)
+    refused = _claim_in_a_child(data_root, collide=True)
     out = refused.stdout.splitlines()
-    assert any(line.startswith("REFUSED ") for line in out), (
-        f"the claim over a taken name did not refuse: {refused.stdout!r} {refused.stderr[-800:]}")
-    kind = next(line for line in out if line.startswith("REFUSED ")).split()[1]
-    assert kind not in {"TypeError", "AttributeError", "NameError", "ModuleNotFoundError"}, (
-        f"machinery, not a refusal: {refused.stdout!r}")
-    assert "URANDOM16 1" in out, f"the claim retried or minted otherwise: {refused.stdout!r}"
-    assert S.tree(S.tenant_dir(data_root, A_ID)) == before, "the claim changed the tenant's tree"
+    assert refused.returncode == 0, refused.stderr[-1500:]
+    assert "REFUSED" in out, f"the collision was not refused: {refused.stdout!r}"
+    assert "ATTEMPTS 1" in out, f"the claim retried or never reached mkdir: {refused.stdout!r}"
+    planted = [line.split()[1] for line in out if line.startswith("PLANTED ")]
+    assert len(planted) == 1, refused.stdout
+    episodes = S.episodes_dir(data_root, A_ID)
+    folder = episodes / planted[0]
+    assert os.listdir(episodes) == planted, "the failed claim made another episode"
+    assert os.listdir(folder) == ["PLANTED"], "the claim adopted or changed the planted folder"
+    assert (folder / "PLANTED").read_text(encoding="utf-8") == "someone else's episode\n"
 
-    shutil.rmtree(planted)
-    claimed = _claim_in_a_child(data_root, raw)
-    assert f"CLAIMED {fixed}" in claimed.stdout.splitlines(), (
-        f"control: the claim did not take the minted uuid: {claimed.stdout!r} "
-        f"{claimed.stderr[-800:]}")
-    assert "URANDOM16 1" in claimed.stdout.splitlines()
-    assert _real_dir(episodes / fixed)
+    shutil.rmtree(folder)
+    claimed = _claim_in_a_child(data_root, collide=False)
+    out = claimed.stdout.splitlines()
+    assert claimed.returncode == 0, claimed.stderr[-1500:]
+    assert "ATTEMPTS 1" in out, claimed.stdout
+    made = [line.split()[1] for line in out if line.startswith("CLAIMED ")]
+    assert len(made) == 1, f"control: the claim failed: {claimed.stdout!r} {claimed.stderr[-800:]}"
+    assert os.listdir(episodes) == made
+    assert _real_dir(episodes / made[0])
 
 
 @pytest.mark.parametrize("variable", [
