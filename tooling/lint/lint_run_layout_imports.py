@@ -123,7 +123,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "learning/leads/lead_author/__init__.py",
         # F-09: the tracer walks the tenant's runs by id (J8), then reads each opened run's
         # report from the folder it was handed (`_report_disposition(run.run_dir)`).
-        "learning/ops/trace_lesson.py",
+        "cli/learning/trace_lesson.py",
     ),
     "not-a-run": (_VE,),
     "helpers-only": (

@@ -102,7 +102,7 @@ def load_module(
 
 
 def load_trace_lesson(name: str) -> ModuleType:
-    """``learning/ops/trace_lesson.py`` — one path, five suites, five module objects.
+    """``cli/learning/trace_lesson.py`` — one path, five suites, five module objects.
 
     ``name`` is required and deliberately not defaulted. The suites that load this CLI
     want *separate* module objects, because each rebinds or exercises module state the
@@ -110,7 +110,7 @@ def load_trace_lesson(name: str) -> ModuleType:
     (rebinding ``mod.LESSONS_DIR`` on a shared module) at length. What they did not want,
     and had, was three different derivations of where the file is.
     """
-    return load_module(DEFENDER / "learning" / "ops" / "trace_lesson.py", name=name)
+    return load_module(DEFENDER / "cli" / "learning" / "trace_lesson.py", name=name)
 
 
 def import_lint_lib(name: str) -> ModuleType:

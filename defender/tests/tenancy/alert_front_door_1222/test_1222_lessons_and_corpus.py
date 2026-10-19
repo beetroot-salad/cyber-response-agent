@@ -496,7 +496,7 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     S.plant_run(runs, "r7-traced", alert=alert, record=False,
                 files={"lessons_loaded.jsonl": _loaded_row(name)})
     recorded = _with_record(runs, "r7-traced", alert=alert, facts={"signature": "R-R7-TRACE"})
-    main = S.sym("learning.ops.trace_lesson", "main")
+    main = S.sym("cli.learning.trace_lesson", "main")
     traced: dict[str, list[str]] = {}
     for spelling, corpus in corpora.items():
         capsys.readouterr()

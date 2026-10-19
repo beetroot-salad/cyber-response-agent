@@ -39,7 +39,6 @@ from __future__ import annotations
 import argparse
 import functools
 import sys
-from defender._model import model
 from collections.abc import Iterable
 from datetime import date, datetime, UTC
 from pathlib import Path
@@ -47,6 +46,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
+from defender._model import model
 from defender.records import _alert_input
 from defender._clock import parse_iso_utc
 from defender.knowledge._corpus import iter_lessons

@@ -446,7 +446,7 @@ def _lesson(lessons: Path, stem: str) -> None:
 
 
 def test_dc10_the_tracer_walks_the_tenants_runs_and_refuses_a_stray(tmp_path, d9_tenant):
-    from defender.learning.ops import trace_lesson
+    from defender.cli.learning import trace_lesson
 
     lessons = tmp_path / "lessons"
     _lesson(lessons, "L")

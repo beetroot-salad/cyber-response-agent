@@ -836,7 +836,7 @@ def test_author_branch_revert_idempotent_return_falls_back_to_head_without_url(t
 
 
 def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
-    from defender.learning.ops import revert_lesson as rl  # type: ignore[import-not-found]
+    from defender.cli.learning import revert_lesson as rl  # type: ignore[import-not-found]
     paths = LoopPaths(repo_root=tmp_path)
     _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
     forge = _FakeForge(create_ref="https://pr/7")
@@ -848,7 +848,7 @@ def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
 def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     import fcntl as _fcntl
 
-    from defender.learning.ops import revert_lesson as rl  # type: ignore[import-not-found]
+    from defender.cli.learning import revert_lesson as rl  # type: ignore[import-not-found]
     paths = LoopPaths(repo_root=tmp_path)
     lock = paths.state_root / AUTHOR_DRAIN_LOCK.file
     lock.parent.mkdir(parents=True, exist_ok=True)

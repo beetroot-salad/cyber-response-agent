@@ -297,7 +297,7 @@ def test_947_the_held_out_index_never_selects_a_sibling_for_a_fixture_slug(tmp_p
 def test_947_the_lesson_tracer_counts_no_sibling_as_an_in_context_case(tmp_path, monkeypatch):
     """The lesson tracer counts no sibling as an in-context case"""
     base, src, root, ep = _relocated(tmp_path, monkeypatch)
-    trace = T.mod("learning.ops.trace_lesson")
+    trace = T.mod("cli.learning.trace_lesson")
     T.lesson_row(src)
     for w in T.WORLDS:
         T.lesson_row(ep / "runs" / f"{T.EPISODE_ID}-{w}")

@@ -60,7 +60,7 @@ def shape(hits: Iterable[Hit]) -> list[tuple[str, int]]:
 
 def record(deps: AgentDeps, hits: Iterable[Hit]) -> None:
     """One `push` row per hit, like a Read. `lessons_loaded.jsonl` is the only "was this
-    lesson in context" signal (e.g. for `learning/ops/trace_lesson.py`).
+    lesson in context" signal (e.g. for `cli/learning/trace_lesson.py`).
 
     Paths are resolved: `record_lesson_load.lesson_name` checks
     `p.parent.parent.name == "defender"`, so a symlink or `..` would drop the row.

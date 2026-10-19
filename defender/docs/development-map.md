@@ -55,6 +55,7 @@ defender/
   integrations/     # typed system adapters, transport, confinement, and ticket publication
   presentation/     # workspace-map views, run and episode HTML rendering, and assets
   cli/              # tenant, policy, tacit-knowledge, and workspace-map operator commands
+                    #   learning/ — lesson tracing and revert commands
   bin/              # stable command wrappers used by permission checks
   tenancy/          # tenant identity, registration, acceptance, and census
   knowledge/        # tenant knowledge layout, corpora, query rules, and scaffolding
@@ -64,7 +65,7 @@ defender/
   configuration/    # environment parsing and model pricing
   learning/         # offline loop: loop.py (the two authoring stages), lead_repository.py (THE read/join surface),
                     #   _prompt.py + _pydantic_stage.py (the shared stage-assembly pair, used by every engine),
-                    #   branch/, judge/, author/, core/, leads/, ops/, frontend/
+                    #   branch/, judge/, author/, core/, leads/, frontend/
                     #   branch/ forks a finished run at turn N and runs a family of worlds from it:
                     #   ledger.py records every response the estate served with the decision behind it;
                     #   estate/ is what a sibling world queries through. judge/ grades the archived episode.

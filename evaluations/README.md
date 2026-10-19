@@ -57,8 +57,7 @@ zero and it printed `n/a (0 executed)` while still paying for a full HEAD
 investigation, a pinned worktree and a replay per fixture. It has been retired,
 along with the judge A/B comparison harness (`judge_equivalence.py` /
 `run_judge_ab.py`), which could no longer reach any branch but "NOT MEASURED".
-`learning/ops/replay_actor.py` stays, but it lost its only automatic driver with
-that harness: nothing invokes it on a schedule now, and it is run by hand.
+The standalone actor replay command was also retired; no scheduled driver remains.
 
 ## The harness-on-the-harness
 

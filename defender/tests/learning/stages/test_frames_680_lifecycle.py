@@ -161,7 +161,7 @@ def test_revert_lesson_driver_holds_shared_author_lock_and_calls_through(
     """The operator driver still crosses the shared author lock before reverting."""
     from defender.learning.core.config import LoopPaths
     from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
-    from defender.learning.ops import revert_lesson
+    from defender.cli.learning import revert_lesson
 
     paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
     paths.state_root.mkdir(parents=True)

@@ -572,6 +572,7 @@ def current_path(path: str) -> str:
     if path in root_helpers:
         return root_helpers[path]
     prefixes = {
+        "defender/learning/ops/": "defender/cli/learning/",
         "defender/scripts/adapters/": "defender/integrations/",
         "defender/scripts/visualize/": "defender/presentation/",
         "defender/scripts/case_history/": "defender/integrations/",

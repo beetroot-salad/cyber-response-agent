@@ -382,7 +382,7 @@ defender/lessons/*.md         # committed lessons read at PLAN time
 ```
 
 **`learning/runs/` is an orphan.** It holds per-case directories the deleted
-pipeline's persist step wrote; nothing reads it. `ops/trace_lesson.py --tenant <T>`
+pipeline's persist step wrote; nothing reads it. `defender/cli/learning/trace_lesson.py --tenant <T>`
 answers "which cases was this lesson in context for" from that tenant's natural
 runs (`<T>/runs`, through the tenant's run repository; a stray entry there
 refuses the trace).

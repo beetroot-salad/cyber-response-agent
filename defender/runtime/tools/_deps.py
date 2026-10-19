@@ -255,7 +255,7 @@ def _record_lesson_load(
     runtime pushed it. Keyword-only with no default, so a new call site must choose.
     @owns role — the calling deps' `AgentRole` value, so a row says which agent it reached.
 
-    Older rows carry neither key; `learning/ops/trace_lesson.py` reads them as `unknown`.
+    Older rows carry neither key; `cli/learning/trace_lesson.py` reads them as `unknown`.
     """
     if kind not in _LOAD_KINDS:
         raise ValueError(f"lessons_loaded row kind must be one of {sorted(_LOAD_KINDS)}: {kind!r}")
