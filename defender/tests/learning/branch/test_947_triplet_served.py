@@ -36,7 +36,9 @@ ACTIONABLE = "Elasticsearch query failed (HTTP 404)"
 _UNTRUSTED_FRAME = re.compile(r"<(/?)(run-[0-9a-f]+-untrusted)>")
 
 
-def _faulting_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
+def _faulting_backend(
+    rec: VerbRecorder, detail: str, *, known_ids: frozenset[str] = frozenset(),
+) -> FakeVerbs:
     """One elastic verb that raises the executed refusal — the fake INJECTS the fault and
     classifies nothing; what the run does with the detail is the whole question."""
 
@@ -44,7 +46,11 @@ def _faulting_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
         rec.record("query", ctx, {"native_query": native_query, "limit": limit})
         raise UpstreamFault(detail)
 
-    return FakeVerbs({"elastic": {"query": query}})
+    class _FaultingVerbs(FakeVerbs):
+        def branch_identities(self) -> frozenset[str]:
+            return known_ids
+
+    return _FaultingVerbs({"elastic": {"query": query}})
 
 
 LEAD = "l-001"
@@ -105,7 +111,8 @@ def test_947_an_injected_document_read_back_is_wrapped_untrusted(tmp_path):
 
 def test_947_a_driven_faults_detail_reaches_the_model_with_no_world_token(tmp_path):
     rec = VerbRecorder()
-    gather, _run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, TOKEN_FAULT))
+    gather, _run_dir = _drive_one_query(tmp_path, _faulting_backend(
+        rec, TOKEN_FAULT, known_ids=frozenset({T.EPISODE_TOKEN, TOKEN_A})))
     assert rec.calls, "the query never reached the verb, so no fault was raised"
     seen = "\n".join(gather.seen)
     assert ACTIONABLE in seen, "the fault reached the model with its actionable half removed"
@@ -113,18 +120,25 @@ def test_947_a_driven_faults_detail_reaches_the_model_with_no_world_token(tmp_pa
         assert leak not in seen, f"{leak!r} reached the model on the fault channel"
 
 
-def test_947_a_driven_ordinary_fault_still_reaches_the_model_intact(tmp_path):
+@pytest.mark.parametrize("plain", [
+    "Elasticsearch query failed (HTTP 400): [logs-*] is not a valid index expression",
+    "archive 20260930t120000z-retention-check missing",
+])
+def test_947_a_driven_ordinary_fault_still_reaches_the_model_intact(tmp_path, plain):
     rec = VerbRecorder()
-    plain = "Elasticsearch query failed (HTTP 400): [logs-*] is not a valid index expression"
-    gather, _run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, plain))
+    gather, run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, plain))
     seen = "\n".join(gather.seen)
     assert plain in seen, "an ordinary refusal told the model nothing at all"
+    failures = _own_failure_rows(run_dir)
+    assert failures
+    assert all(plain in row["payload_digest"] for row in failures)
 
 
 def test_947_the_queries_table_digest_carries_no_world_token(tmp_path):
     """The failure digest persisted into the run's own queries table carries no world token either"""
     rec = VerbRecorder()
-    _gather, run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, TOKEN_FAULT))
+    _gather, run_dir = _drive_one_query(tmp_path, _faulting_backend(
+        rec, TOKEN_FAULT, known_ids=frozenset({T.EPISODE_TOKEN, TOKEN_A})))
     failures = _own_failure_rows(run_dir)
     assert failures, "the refusal wrote no row against this lead at all"
     for row in failures:
@@ -152,13 +166,7 @@ def _branched_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
     family = T.sym("runtime.branch._family", "parse_family")(
         T.family_doc(episode_id=PINNED_EPISODE, source_run_id="live-lever-up-20260930-sudo"))
     known = T.sym("runtime.branch._family", "family_identities")(family)
-    plain = _faulting_backend(rec, detail)
-
-    class _World(FakeVerbs):
-        def branch_identities(self) -> frozenset[str]:
-            return known
-
-    return _World(plain._table)
+    return _faulting_backend(rec, detail, known_ids=known)
 
 
 def test_947_a_driven_pinned_source_fault_reaches_neither_surface_with_a_known_id(tmp_path):

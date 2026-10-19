@@ -1,45 +1,18 @@
-"""What a fault may tell the model about a branched episode.
+"""Remove the host's known branch identities from model-visible text.
 
-A sibling's run, its episode and its world are named by tokens (`episode_token_for`): the
-episode's UTC stamp plus a label. The model driving a sibling must not learn it is one of
-several worlds, nor spell a sibling's token. A fault's text is the one channel no serving seam
-owns.
+Fault details reach the model inside the untrusted wrap and in the query table's failure
+digest; comparator payloads and axes can carry the same identities. Match only the identities
+supplied by the host: the episode id and token, world tokens, and arm run ids. Their spelling
+has no significance. A natural run supplies an empty set and its text passes unchanged.
 
-That channel is `AdapterFault.detail`. It reaches the model verbatim inside the untrusted wrap,
-and is also written into `executed_queries.jsonl`'s failure digest, within the gather agent's
-read scope.
-
-It is a filter over the detail, not per-site wording, because one of the sources on this
-channel is the system's own error relayed verbatim, which we do not author.
-
-It must stay actionable: an empty or truncated refusal makes the model repeat the call. So only
-tokens are removed; the sentence, configured patterns like `logs-*`, and every other name pass
-through unchanged.
-
-Two rules find a token. The primary one is the KNOWN set: the identities the caller's process
-actually holds (`runtime/branch/_family.family_identities` — the episode id and token, every
-world token, every arm's run id), passed on every call. It does not depend on what an id looks
-like, so an episode forked from an operator-pinned source run id, or a UUID (#1187), is found.
-The second is the stamp SHAPE `episode_token_for` derives from a minted id, kept as defense in
-depth for a token no caller declared. A natural run knows no identity and passes an empty set.
+Keep the surrounding error actionable: configured patterns, timestamps, and unrelated ids
+remain intact, while a known identity becomes the neutral marker `[a run id]`.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Collection
-
-#: An episode or world token, matched by shape: the defense-in-depth rule for a token no caller
-#: declared in the known set (faults also come from the launcher and the oracle). The shape is what
-#: `episode_token_for` derives: a casefolded UTC stamp, then dotted or hyphenated segments. A
-#: world token is the episode token plus a segment, and the greedy tail removes both.
-#:
-#: `_` is in the segment class because `episode_token_for` escapes `_` in the run id as `__`;
-#: without it only half the token would be removed.
-#:
-#: An ISO timestamp (`2026-07-28T16:18:45Z`) does not match, so time windows in system errors
-#: survive.
-_TOKEN = re.compile(r"(?<![A-Za-z0-9])\d{8}[tT]\d{6}[zZ](?:[.\-][A-Za-z0-9_]+)*")
 
 #: The replacement marker. Named rather than blank, so the model can tell "your run was
 #: refused" from a sentence missing a word (a blank invites a retry). Worded as a thing every
@@ -53,7 +26,7 @@ def redact_model_visible(detail: str, known_ids: Collection[str]) -> str:
     `known_ids` is every branch identity the caller's process knows (`family_identities`), or
     an empty set for a natural run. Required, so no caller can forget it silently. Matched as
     literal text, case-insensitively, longest first, so a world token is removed whole rather
-    than leaving its label behind its episode token's marker. The stamp-shaped rule runs after.
+    than leaving its label behind its episode token's marker. No shape-based matching is used.
 
     Called from `runtime/query_tool.py` at `_model_view` (the model's copy) and
     `QueryCapture._record` (the failure digest), and from the comparator's prompt; that wiring
@@ -67,4 +40,4 @@ def redact_model_visible(detail: str, known_ids: Collection[str]) -> str:
     if names:
         known = re.compile("|".join(map(re.escape, names)), re.IGNORECASE)
         text = known.sub(_TOKEN_MARK, text)
-    return _TOKEN.sub(_TOKEN_MARK, text)
+    return text

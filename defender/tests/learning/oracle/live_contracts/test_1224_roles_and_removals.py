@@ -192,11 +192,12 @@ def test_1224_run_record_label_check_still_refuses_a_reserved_label(tmp_path):
     assert R.episode_runs(t, "ep") == {"a": R.RunId.parse("ep-a")}
 
 
-def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_name_rule():
-    """with the staged-name rule gone, the redaction filter still masks run and world tokens and leaves a wv- string alone."""
+def test_1224_redaction_filter_masks_known_tokens_without_the_staged_name_rule():
+    """The redaction filter masks declared run and world tokens and leaves a wv- string alone."""
     redaction = S.mod("learning.branch.redaction")
     def redact(text):
-        return redaction.redact_model_visible(text, frozenset())
+        return redaction.redact_model_visible(
+            text, frozenset({S.EPISODE_TOKEN, f"{S.EPISODE_TOKEN}.b"}))
     token_text = f"refused: index for run {S.EPISODE_TOKEN}.b is unavailable after 2026-07-28"
     masked = redact(token_text)
     assert S.EPISODE_TOKEN not in masked, masked
