@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Primary-metric harness: score defender held-out runs against ground truth.
+
+Walks the FIXTURE set (``evaluations/fixtures/held_out/``), locates each fixture's run
+under the runs dir it is given by run-id convention, and reports defender disposition
+correctness.
+
+Ground truth never leaves the fixture dirs: the run dir is readable by the agent, so it
+carries no labels and no pointer back to its fixture.
+
+This is an evaluation tool, not part of the application: it takes no tenant and accepts
+none, and scores exactly the runs dir it is handed. The runs it scores are the playground
+tenant's. Every run names its tenant, and there is no default (#1078). On the host,
+clone the tenant's repo into ``$DEFENDER_DATA_ROOT/playground/knowledge``, then, once the
+clone exits 0, set it up once with ``python3 defender/scripts/tenant.py setup playground``.
+Launch the runs this scores with (see ``index_runs``)::
+
+    python3 defender/run.py evaluations/fixtures/held_out/<slug>/alert.json \\
+        --tenant playground --run-id <slug> --no-learn
+
+``--no-learn`` keeps a scored run out of the learning corpora.
+
+A run without a parseable ``report.md`` (missing, bad frontmatter, disposition outside
+the closed enum, or crashed) counts as **wrong**, so regressions cannot hide behind crashes.
+
+Usage (the runs dir is required):
+  python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/playground/runs"
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+import yaml
+
+if (_root := str(Path(__file__).resolve().parents[1])) not in sys.path:
+    sys.path.insert(0, _root)
+
+from defender import _alert_input
+from defender._yaml import safe_load
+from defender._model import model
+from defender._report import read_report
+from defender.run_repository import RUN_LAYOUT, RunPaths
+from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
+from defender._io import read_text_utf8
+
+
+def predicted_disposition(run_dir: Path) -> str | None:
+    """This run's predicted disposition, or `None` when the report yields no usable headline.
+    Degrades rather than raising so one broken report does not stop scoring the rest.
+    """
+    return read_report(RunPaths(run_dir).report).disposition
+
+
+@model
+class HeldOutAlert:
+    slug: str
+    alert_path: Path
+    ground_truth: dict
+
+
+def load_held_out_fixtures(fixtures_dir: Path) -> list[HeldOutAlert]:
+    out: list[HeldOutAlert] = []
+    for child in sorted(fixtures_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        # A fixture is a folder an operator keeps, not a run: its alert is the file by that name.
+        alert = child / RUN_LAYOUT.alert.name
+        gt = child / "ground_truth.yaml"
+        if not gt.is_file():
+            continue
+        if not alert.is_file():
+            print(f"warn: {child.name}: labeled held-out fixture has no {alert.name} "
+                  f"— excluded from the eval set", file=sys.stderr)
+            continue
+        try:
+            gt_doc = safe_load(read_text_utf8(gt)) or {}
+        except yaml.YAMLError as e:
+            print(f"warn: {child.name}: unparseable ground_truth.yaml ({e}) — fixture skipped",
+                  file=sys.stderr)
+            continue
+        if not isinstance(gt_doc, dict) or gt_doc.get("held_out") is not True:
+            continue
+        out.append(HeldOutAlert(child.name, alert, gt_doc))
+    return out
+
+
+def warn_if_outside_the_net(fixtures_dir: Path) -> bool:
+    if fixtures_dir.resolve() == FIXTURES_DIR.resolve():
+        return False
+    print(f"WARNING: scoring {fixtures_dir}, but the enqueue-time contamination net only "
+          f"refuses runs from {FIXTURES_DIR} — runs of these fixtures were NOT held out "
+          f"of learning unless they were launched with --no-learn", file=sys.stderr)
+    return True
+
+
+def _claimed_slug(name: str, slugs: list[str]) -> str | None:
+    claims = [s for s in slugs
+              if name == s or name.startswith(f"{s}-") or name.endswith(f"-{s}")]
+    return max(claims, key=len) if claims else None
+
+
+def index_runs(slugs: list[str], runs_dir: Path) -> dict[str, Path]:
+    best: dict[str, tuple[float, str, Path]] = {}
+    if not runs_dir.is_dir():
+        return {}
+    recordless: list[str] = []
+    for d in sorted(runs_dir.iterdir()):
+        try:
+            if not d.is_dir():
+                continue
+            slug = _claimed_slug(d.name, slugs)
+            if slug is None:
+                continue
+            # A folder with no readable record is not a run (A8): named, counted, never scored.
+            if _alert_input.read_record(RunPaths(d).alert_record) is None:
+                print(f"warn: {d.name}: no run record — skipped", file=sys.stderr)
+                recordless.append(d.name)
+                continue
+            key = (d.stat().st_mtime, d.name)
+        except OSError as e:
+            print(f"warn: {d.name}: unreadable run dir ({e}) — skipped", file=sys.stderr)
+            continue
+        prior = best.get(slug)
+        if prior is None or key > prior[:2]:
+            best[slug] = (*key, d)
+    if recordless:
+        print(f"warn: {len(recordless)} run folder(s) with no run record skipped: "
+              f"{', '.join(recordless)}", file=sys.stderr)
+    return {slug: v[2] for slug, v in best.items()}
+
+
+@model
+class Scored:
+
+    by_class: dict[str, list[tuple[str, str | None, str]]]
+    failures: list[tuple[str, str]]
+    not_run: list[str]
+
+    @property
+    def total(self) -> int:
+        return sum(len(v) for v in self.by_class.values())
+
+    @property
+    def correct(self) -> int:
+        return sum(1 for v in self.by_class.values() for _, _, vd in v if vd == "ok")
+
+
+def score(fixtures: list[HeldOutAlert], runs_dir: Path) -> Scored:
+    by_class: dict[str, list[tuple[str, str | None, str]]] = defaultdict(list)
+    failures: list[tuple[str, str]] = []
+    not_run: list[str] = []
+    runs = index_runs([fx.slug for fx in fixtures], runs_dir)
+    for fx in fixtures:
+        run_dir = runs.get(fx.slug)
+        if run_dir is None:
+            not_run.append(fx.slug)
+            continue
+        true_disp = str(fx.ground_truth.get("disposition") or "?")
+        pred = predicted_disposition(run_dir)
+        verdict = "ok" if pred == true_disp else "wrong"
+        if pred is None:
+            failures.append((fx.slug, "no parseable report.md"))  # lint-run-records: ok — an eval case's own file under the case tree, never a run record
+        by_class[true_disp].append((fx.slug, pred, verdict))
+    return Scored(by_class, failures, not_run)
+
+
+def report(runs_dir: Path, fixtures_dir: Path = FIXTURES_DIR) -> int:
+    fixtures = load_held_out_fixtures(fixtures_dir)
+    if not fixtures:
+        print(f"no held-out fixtures found under {fixtures_dir}", file=sys.stderr)
+        return 1
+    warn_if_outside_the_net(fixtures_dir)
+
+    scored = score(fixtures, runs_dir)
+    print(f"# Held-out eval — {scored.total}/{len(fixtures)} fixtures scored, "
+          f"{len(scored.failures)} failure(s)")
+    print()
+    if not scored.total:
+        print(f"no runs found under {runs_dir} for any held-out fixture", file=sys.stderr)
+        print("Aggregate accuracy: n/a — nothing scored")
+    else:
+        print(f"Aggregate accuracy: {scored.correct}/{scored.total} = "
+              f"{scored.correct / scored.total:.1%}")
+    print()
+    for cls in sorted(scored.by_class):
+        items = scored.by_class[cls]
+        cls_correct = sum(1 for _, _, vd in items if vd == "ok")
+        print(f"## class={cls}  recall={cls_correct}/{len(items)} = "
+              f"{cls_correct / len(items):.1%}")
+        for name, pred, vd in items:
+            tag = "OK   " if vd == "ok" else "WRONG"
+            print(f"  {tag}  {name}: predicted={pred!r}")
+        print()
+    if scored.failures:
+        print("## Failure bucket (counted wrong, surfaced separately)")
+        for name, reason in scored.failures:
+            print(f"  {name}: {reason}")
+        print()
+    if scored.not_run:
+        print("## Not run (no matching run dir — coverage gap, excluded from accuracy)")
+        for slug in scored.not_run:
+            print(f"  {slug}")
+    return 0 if scored.total else 1
+
+
+def main(argv: list[str]) -> int:
+    """Score the runs dir it is given — required, with no default and no tenant option: an
+    evaluation tool outside the application takes no tenant, so it never resolves
+    `DEFENDER_DATA_ROOT` or accepts one (§7 J50). `--help` resolves nothing."""
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("runs_dir", type=Path, help="directory of run dirs to score")
+    p.add_argument("--fixtures-dir", type=Path, default=FIXTURES_DIR,
+                   help=f"held-out fixtures dir (default: {FIXTURES_DIR})")
+    ns = p.parse_args(argv)
+    runs_dir = ns.runs_dir
+    if not runs_dir.is_dir():
+        print(f"runs dir does not exist: {runs_dir}", file=sys.stderr)
+        return 2
+    return report(runs_dir, ns.fixtures_dir)
+
+
+if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
+    sys.exit(main(sys.argv[1:]))

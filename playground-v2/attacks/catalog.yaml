@@ -46,7 +46,7 @@
 #     generators (V2_BASELINE_ENABLED=false + compose up -d --force-recreate
 #     <hosts>) keeps synthetic benign traffic out of the capture window. This is
 #     what the original note here meant, and it is still right for that job.
-#   - capturing for ORACLE CALIBRATION (defender/evals/oracle_golden/): leave the
+#   - capturing for ORACLE CALIBRATION (evaluations/oracle_golden/): leave the
 #     generators running. The oracle's answer is a signed diff over baseline, so
 #     with them off `+noise` cannot occur at all and `+event` is easier than
 #     production — the suite would be calibrating against an environment that

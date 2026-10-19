@@ -28,7 +28,7 @@ from defender.learning.core.config import (
 from defender import _git
 from defender._claim_git import ClaimGit
 from defender._paths import DefenderPaths
-from defender.runtime import box as box_mod
+from defender import box as box_mod
 from defender.learning.author import drain
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter

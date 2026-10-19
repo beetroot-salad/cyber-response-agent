@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._1255_view import model_path
+from defender.tests.support.runtime.state._1255_view import model_path
 
 pytest.importorskip("pydantic_ai")
 
@@ -24,15 +24,15 @@ from pydantic_ai.exceptions import (  # noqa: E402
 )
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.tests import _system_index_1256 as SI  # noqa: E402
+from defender.tests.support.shared.contracts import _system_index_1256 as SI
 from defender.learning import lead_repository  # noqa: E402
 from defender.runtime import permission, tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
 from defender.runtime.circuit_breaker import RunAborted, error_class_for_exit  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.permission.grant import Route  # noqa: E402
-from defender.tests import _tenants1106  # noqa: E402
-from defender.tests.tenant_1107_settings import _spec1107 as S1107  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106
+from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,

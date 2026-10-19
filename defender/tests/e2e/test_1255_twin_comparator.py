@@ -615,7 +615,7 @@ def test_1255_twin_read_scope_parity(tmp_path, rel, main, gather):
     from pathlib import Path
     from types import SimpleNamespace
 
-    from defender.tests import _tenants1106
+    from defender.tests.support.tenancy import _tenants1106
 
     run_dir = tmp_path / "runs" / "20261015t150031z-input"
     target = run_dir / rel

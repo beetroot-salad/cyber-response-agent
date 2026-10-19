@@ -41,7 +41,7 @@ from defender._knowledge import KnowledgePaths
 from defender._paths import DefenderPaths, adapters_under
 from defender._vocab import HOST_ONLY_DISPOSITION
 
-from .. import box as box_mod
+from defender import box as box_mod
 from .. import branch
 from .. import compaction
 from .. import observe

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests import _tenants1106 as T
-from defender.tests._spec1092 import STOCK_ROOTFS, make_run_dir, plant_tree
-from defender.tests.tenant_1108_p2._support import AgentReadDocker
+from defender.tests.support.tenancy import _tenants1106 as T
+from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS, make_run_dir, plant_tree
+from defender.tests.tenancy.tenant_1108_p2._support import AgentReadDocker
 
 pytestmark = pytest.mark.e2e
 
@@ -15,7 +15,7 @@ pytestmark = pytest.mark.e2e
 @pytest.fixture(autouse=True)
 def _boxed_only(monkeypatch):
     """Neither the unsandboxed opt-out nor a runtime override may turn a box fault into the host executor — that..."""
-    from defender.runtime import box as box_mod
+    from defender import box as box_mod
 
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
@@ -30,7 +30,7 @@ def two_tenants(tmp_path):
 
 
 def _start(tmp_path: Path, agent: Path) -> AgentReadDocker:
-    from defender.runtime import box as box_mod
+    from defender import box as box_mod
 
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
     run_dir = make_run_dir(tmp_path / "r")
@@ -77,7 +77,7 @@ def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
 def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path):
     """DooD translates the source while the target is the model view's `/agent` (#1255 P1; it
     used to remain this run process's agent path)."""
-    from defender.runtime import box as box_mod
+    from defender import box as box_mod
 
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
     run_dir = make_run_dir(tmp_path / "r")
@@ -93,8 +93,8 @@ def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path
 
 def test_an_agent_source_on_no_shared_mount_refuses_the_box_naming_it():
     """The negative on the same builder:"""
-    from defender.runtime import box as box_mod
-    from defender.runtime.box_codec import BoxFault
+    from defender import box as box_mod
+    from defender.execution.box_codec import BoxFault
 
     shared = ((Path("/workspace"), Path("/home/dev/projects/repo")),)
     with pytest.raises(BoxFault) as caught:

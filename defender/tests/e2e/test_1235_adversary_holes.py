@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 
-from defender.tests._spec1077 import fixture_run
+from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import json
 

@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime import box as box_mod
-from defender.runtime import scrub as scrub_mod
+from defender import box as box_mod
+from defender.box import _scrub as scrub_mod
 from defender.tests.e2e._box665 import reaped_after_create
 from defender.tests.e2e._spec771 import (
     BAN_ABSENT,
@@ -241,7 +241,7 @@ def test_the_pre_first_turn_setup_writers_are_individually_guarded_in_any_order(
 
 def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_path, monkeypatch):
     from defender import run_common
-    from defender.tests._data_root_1078 import set_up_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
@@ -277,7 +277,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
     # re-probes the kernel rule on every run rather than pinning a one-time observation of it.
     pinned = os.open(str(first), os.O_RDONLY | os.O_DIRECTORY)
     try:
-        from defender.tests._alert_plant import unseal_fixture_input
+        from defender.tests.support.storage._alert_plant import unseal_fixture_input
         unseal_fixture_input(first)
         shutil.rmtree(first)
         first.mkdir()

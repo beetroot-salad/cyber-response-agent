@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace as _with_fixture_run_1165
-from defender.tests._spec1077 import fixture_run as _fixture_run_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
 
 import asyncio
 from pathlib import Path
@@ -14,7 +14,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded  # noqa: E402
 
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
 from defender.runtime import circuit_breaker, session_store, tools_gather  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
@@ -22,7 +22,7 @@ from defender.runtime.tools_gather import GatherRequest  # noqa: E402
 from defender.scripts.adapters.faults import UpstreamFault  # noqa: E402
 from defender.runtime.tools import DeadEnd  # noqa: E402
 from defender.scripts.gather_tools.record_query import REPEAT_THRESHOLD  # noqa: E402
-from defender.tests._session_store_705 import sql, store_factory  # noqa: E402
+from defender.tests.support.storage._session_store_705 import sql, store_factory  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,

@@ -36,7 +36,7 @@ PROVENANCE_KEYS = frozenset(
 #: runs over, built from the same one-line values so a listed value is a findable one; and, for
 #: model context, that text inside a `defender._untrusted` frame, as the alert is. `fm`, `raw`
 #: and `body` stay for matching, authoring and the HTML views, which need the raw values;
-#: `scripts/lint/lint_lesson_text.py` asks each such use to say so.
+#: `tooling/lint/lint_lesson_text.py` asks each such use to say so.
 
 
 @model(frozen=True)

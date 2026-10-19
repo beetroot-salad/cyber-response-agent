@@ -109,7 +109,7 @@ asymmetry comment retargets: `run_one` raises no `StageAbort`, so no re-raise
 clause is needed there, and adding a `RunUnprocessable` re-raise would regress
 every corrupt-data run into a worker-killing exit 2.
 
-**Guard test** (`tests/test_orchestrate_thresholds.py`, the #443 regression pin):
+**Guard test** (`tests/learning/core/test_orchestrate_thresholds.py`, the #443 regression pin):
 `StageAbort → 2` on a drain; a `RunUnprocessable` raised inside a drain
 **propagates** (not a clean exit 2); the same `RunUnprocessable → 2` under
 `allow_run_error=True`; and the type contract `FatalConfigError` is a

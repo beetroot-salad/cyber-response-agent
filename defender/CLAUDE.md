@@ -1,6 +1,6 @@
 # defender/
 
-Experimental alert-triage product: an in-process PydanticAI investigation runtime plus an offline learning loop. Product agent prompts under `skills/` are distinct from Claude Code skills. The lab environment is maintained separately under `playground-v2/` and `infra/`. <!-- lint-shippable: ok — developer documentation identifies the separate lab, not a product assumption. -->
+Experimental alert-triage product: an in-process PydanticAI investigation runtime plus an offline learning loop. Product agent prompts under `skills/` are distinct from Claude Code skills. The lab environment is maintained separately under `playground-v2/` and `playground-v2/infra/`. <!-- lint-shippable: ok — developer documentation identifies the separate lab, not a product assumption. -->
 
 ## Design and authority
 
@@ -26,8 +26,8 @@ Experimental alert-triage product: an in-process PydanticAI investigation runtim
 | Platform API and tenant registration | `api/`; its scoped instructions |
 | Tests and fixtures | `tests/`; its scoped instructions |
 | Gather prompts and per-system knowledge | `skills/gather/`, `skills/<system>/` |
-| Evals | `evals/README.md` |
+| Evals | `../evaluations/README.md` |
 | Detailed vocabulary, layout, change locations | `docs/development-map.md` |
-| Lint seams and suppressions | Relevant `scripts/lint/lint_*.py` at the repo root; `docs/development-lints.md` as needed |
+| Lint seams and suppressions | Relevant `tooling/lint/lint_*.py` at the repo root; `docs/development-lints.md` as needed |
 
 Load only the references relevant to the task. Historical explanations live in `docs/archive/`.

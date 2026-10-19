@@ -160,7 +160,7 @@ learning_jobs(learning_job_id PK, tenant_id, alert_id FK, investigation_id FK, c
   view is heartbeat-based (§4.5).
 - `cost` — final cost at completion; live `cost_so_far` is updated on the same row by the heartbeat.
 - **Infra is on the row, fenced by `claim_epoch`.** The single `investigations` row carries both durable
-  data and the infra/liveness of its *current* run (`container_kind`, `container_handle`,
+  data and the playground-v2/infra/liveness of its *current* run (`container_kind`, `container_handle`,
   `claimed_by_worker`, lease, heartbeat, `cost_so_far`). There is **no attempts table and no queue table**;
   a recovery overwrites the infra columns in place. Mechanism — fencing, reconciler, recovery SQL — in
   §4.1. A `runs` history table graduates only for per-run forensics (§6).
@@ -185,7 +185,7 @@ owns, replacing the dev-era FS-presence heuristic). **`disposition`** is the out
 | `running`     | A container owns the investigation and should be heartbeating.                                               |
 | `completed`   | Terminal success: blobs uploaded, frontmatter parsed, metadata committed.                                    |
 | `unparseable` | Terminal: container exited cleanly but `report.md` frontmatter failed to parse — null disposition + note, artifacts kept. **Blocks learning**; recovery is a fresh investigation (§4.6). |
-| `failed`      | Terminal infra/runtime failure; retry is a new investigation.                                                |
+| `failed`      | Terminal playground-v2/infra/runtime failure; retry is a new investigation.                                                |
 | `aborted`     | Terminal intentional stop/cancel, timeout, or supersession.                                                  |
 
 **`disposition`** (`malicious` / `benign` / `inconclusive`) is the outcome. Defender's `report.md`

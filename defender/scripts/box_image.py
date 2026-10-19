@@ -3,7 +3,7 @@
 
 Stdlib-only, python3 >= 3.11 (`tomllib`): it runs on a bare CI runner `python3` with no uv or
 venv, and on a devcontainer `python3`. It never imports `defender...`; it loads
-`runtime/box/_image.py` by file path, since a package import would pull in pydantic.
+`box/_image.py` by file path, since a package import would pull in pydantic.
 
     python3 defender/scripts/box_image.py tag    # print the image name for THIS tree
     python3 defender/scripts/box_image.py build  # `docker build` it, tagged with that name
@@ -23,7 +23,7 @@ _DEFENDER_DIR = Path(__file__).resolve().parent.parent
 
 
 def _load_image_module() -> ModuleType:
-    path = _DEFENDER_DIR / "runtime" / "box" / "_image.py"
+    path = _DEFENDER_DIR / "box" / "_image.py"
     spec = importlib.util.spec_from_file_location("_box_image_recipe", path)
     if spec is None or spec.loader is None:  # pragma: no cover — importlib contract
         raise RuntimeError(f"could not load {path}")

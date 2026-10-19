@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Append a held-out result to the ledger.
+
+A held-out score is recorded once per (case, tag): this appends and never replaces, so a
+held-out case cannot be re-run under the same tag until the number improves. Record a new
+oracle version under a new tag instead.
+
+Usage: record_held_out.py <case_dir> <tag>
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from defender import _yaml  # noqa: E402
+from evaluations.oracle_golden import judge  # noqa: E402
+from defender._io import read_bytes_capped, read_text_utf8
+
+GOLDEN_DIR = Path(__file__).resolve().parent
+LEDGER = GOLDEN_DIR / "held_out_ledger.yaml"
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("case_dir", type=Path)
+    p.add_argument("tag")
+    p.add_argument("--recorded", default="", help="ISO date; free text, for the reader")
+    p.add_argument("--ledger", type=Path, default=None,
+                   help="ledger to append to (default: the suite's own)")
+    ns = p.parse_args(argv)
+    ledger_path = ns.ledger if ns.ledger is not None else LEDGER
+
+    manifest = _yaml.safe_load(read_text_utf8(ns.case_dir / "manifest.yaml")) or {}
+    if manifest.get("split") != "held-out":
+        print(f"!! {ns.case_dir.name} is split={manifest.get('split')!r}; only held-out "
+              f"results are ledgered", file=sys.stderr)
+        return 1
+
+    score_path = ns.case_dir / "scores" / f"{ns.tag}.json"
+    if not score_path.is_file():
+        print(f"!! no {score_path}", file=sys.stderr)
+        return 1
+
+    # Refuse a score whose recorded judge does not match its tag's judge suffix.
+    score = json.loads(read_bytes_capped(score_path))
+    recorded = score.get("judge") or {}
+    if not ns.tag.endswith(judge.tag_suffix(recorded.get("model", ""),
+                                            recorded.get("effort", ""))):
+        print(f"!! {score_path.name} was produced by "
+              f"{recorded.get('model')!r}/{recorded.get('effort')!r} at prompts "
+              f"{recorded.get('prompts_sha8')!r}, which is not the judge its tag names. "
+              f"Re-score under the correct tag; do not rename the file.", file=sys.stderr)
+        return 1
+
+    doc = _yaml.safe_load(read_text_utf8(ledger_path)) or {}
+    entries = doc.get("entries") or []
+    key = (ns.case_dir.name, ns.tag)
+    for entry in entries:
+        if (entry.get("case"), entry.get("tag")) == key:
+            print(f"!! {key[0]}/{key[1]} is already in the ledger. A held-out result is "
+                  f"recorded once per tag — to record a new oracle version, use a new "
+                  f"tag rather than re-running this one.", file=sys.stderr)
+            return 1
+
+    entries.append({
+        "case": ns.case_dir.name,
+        "tag": ns.tag,
+        "sha256": hashlib.sha256(read_bytes_capped(score_path)).hexdigest(),
+        "recorded": ns.recorded,
+    })
+    # Keep the file's explanatory header (everything before `entries:`).
+    head = read_text_utf8(ledger_path).split("entries:")[0]
+    ledger_path.write_text(
+        head + _yaml.safe_dump({"entries": entries}, sort_keys=False, width=100,
+                              allow_unicode=True),
+        encoding="utf-8")
+    print(f"recorded {key[0]}/{key[1]}")
+    return 0
+
+
+if __name__ == "__main__":
+    from defender._log import configure_from_env
+    configure_from_env()
+    sys.exit(main())

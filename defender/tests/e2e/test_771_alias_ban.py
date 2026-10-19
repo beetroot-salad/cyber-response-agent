@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.runtime import bash_exec, box as box_mod
-from defender.tests._docker import dood_anchor, is_dood
+from defender.execution import bash_exec
+from defender import box as box_mod
+from defender.tests.support.sandbox._docker import dood_anchor, is_dood
 from defender.tests.e2e._spec771 import (
     BAN_ABSENT,
     BAN_IN_FORCE,
@@ -118,7 +119,7 @@ def test_the_alias_profile_does_not_widen_the_platform_syscall_surface(tmp_path)
     assert shipped_text == gen.build(), (
         "the shipped profile is not what the generator derives from the vendored platform "
         "default — it has been hand-edited, or the vendored default moved under it. Run "
-        "`python3 scripts/gen_seccomp_profile.py` and review the diff; a hand-edit here is "
+        "`python3 tooling/gen_seccomp_profile.py` and review the diff; a hand-edit here is "
         "exactly the drift that reintroduces a profile nobody derived."
     )
 

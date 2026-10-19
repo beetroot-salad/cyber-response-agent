@@ -160,7 +160,7 @@ Overlap is a feature: an SSH login shows up across `auth.log` (PAM), auditd (ses
 
 ### Provisioning (meta)
 
-Not part of the playground's runtime surface, but recorded here for completeness. Managed from the devcontainer; see `infra/` for the actual configuration.
+Not part of the playground's runtime surface, but recorded here for completeness. Managed from the devcontainer; see `playground-v2/infra/` for the actual configuration.
 
 | Concern | Choice |
 |---|---|

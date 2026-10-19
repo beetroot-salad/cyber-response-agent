@@ -52,7 +52,7 @@ from defender.run_repository import Run  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender import _tenant  # noqa: E402
 from defender._episode_handle import Episode  # noqa: E402
-from defender.runtime import box as box_mod  # noqa: E402
+from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime import providers  # noqa: E402
 from defender.runtime import run_end  # noqa: E402

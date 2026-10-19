@@ -13,7 +13,7 @@ The idea is to give the agent a structured way to identify its runtime mistakes 
 - `defender/lessons/`: checked-in pitfall lessons authored by the loop, read by the agent at plan time
 - `defender/fixtures/`: alert inputs used to drive runs
 - `playground-v2/`: the SOC lab the defender runs against — a Docker Compose stack (Elastic/Fleet, Keycloak, Zeek, Falco, role hosts with baseline-activity generators, attack runner) on a Hetzner VPS
-- `infra/`: Terraform for that VPS, with snapshot lever-up/lever-down scripts for cost control
+- `playground-v2/infra/`: Terraform for that VPS, with snapshot lever-up/lever-down scripts for cost control
 - the v1 lab (Wazuh-era) has been retired and deleted; its `ticket-server/` lives on at `playground-v2/ticket-server/`
 - `spec-flow/`: meta-tooling, not part of the security agent — the Claude Code plugin whose skills drive the spec-first dev workflow used to build this repo
 
@@ -198,7 +198,7 @@ infrastructure; CI runs `-m "not llm and not live"`.
   records for in-flight or load-bearing decisions live under `docs/decisions/`.
 - **Per-area guidance** — `defender/CLAUDE.md` (agent runtime contracts + a
   "where to make changes" map), `playground-v2/CLAUDE.md` (the dev/eval stack),
-  `infra/CLAUDE.md`. There is no repo-root CLAUDE.md.
+  `playground-v2/infra/CLAUDE.md`. There is no repo-root CLAUDE.md.
 
 ## Where To Start Reading
 

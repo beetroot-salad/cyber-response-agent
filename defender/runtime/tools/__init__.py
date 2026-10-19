@@ -34,7 +34,7 @@ from defender._paths import PATHS
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from .. import box as box_mod
+from defender import box as box_mod
 from .. import permission
 from ..agent_definition import ResolvedRoots, ToolSet
 from ..agent_role import AgentRole

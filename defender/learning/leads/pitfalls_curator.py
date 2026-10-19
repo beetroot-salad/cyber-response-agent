@@ -37,7 +37,7 @@ from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
     adapter_declared_systems,
 )
-from defender.runtime import box as _box
+from defender import box as _box
 from defender.runtime.verbs import is_system_name
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning._prompt import stage_user_message, structured_json_body

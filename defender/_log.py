@@ -1,7 +1,7 @@
 """Structured logging for the defender — one JSON object per line on the error stream.
 
   * Only programs configure. Library code uses `logging.getLogger(__name__)`; a program's
-    `__main__` block calls `configure_from_env()` (enforced by `scripts/lint/lint_log_setup.py`).
+    `__main__` block calls `configure_from_env()` (enforced by `tooling/lint/lint_log_setup.py`).
   * A program's own lines carry its real module name: `configure` gives `__main__` the same
     level and the formatters print it as e.g. `defender.run`.
   * `run_id` / `tenant_id` live in a `ContextVar`, so concurrent tasks never stamp each other's

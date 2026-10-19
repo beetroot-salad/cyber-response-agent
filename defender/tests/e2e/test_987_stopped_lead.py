@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
-from defender.tests._spec1077 import fixture_run as _live_run_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
 
 import asyncio
 from dataclasses import replace
@@ -27,7 +27,7 @@ from pydantic_ai.models.function import FunctionModel  # noqa: E402
 # `driver` FIRST: entering the `tools_gather` <-> `tools` cycle at `tools_gather` raises on a
 # partially initialized module.
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
-from defender.tests import _tenants1106 as T1106  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import driver, observe, session_store, tools_gather  # noqa: E402
@@ -46,7 +46,7 @@ from defender.runtime.tools_gather import (  # noqa: E402
     NO_SUMMARY_FAILED,
     GatherRequest,
 )
-from defender.tests._session_store_705 import runs_base, sql  # noqa: E402
+from defender.tests.support.storage._session_store_705 import runs_base, sql  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,
@@ -54,7 +54,7 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
     materialize,
 )
 from defender.tests.e2e.test_query_tool_611 import elastic_ok  # noqa: E402
-from defender.tests.test_987_query_door import (  # noqa: E402
+from defender.tests.integrations.test_987_query_door import (  # noqa: E402
     HEADER_DEAD_END,
     HEADER_REQUEST_LIMIT,
     INCOMPLETE_IDIOM,

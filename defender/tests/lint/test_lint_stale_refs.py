@@ -1,0 +1,561 @@
+"""lint_stale_refs: stale-reference detection after removals; a gate that cannot run (shallow graft, git failure) must exit 2, never 0."""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from defender.tests.support.shared.contracts._by_path import load_lint_gate
+
+GATE = load_lint_gate("lint_stale_refs")
+
+
+def _env(repo: Path) -> dict[str, str]:
+    """A hermetic git env: `HOME` points into the throwaway repo, so no contributor's
+    ~/.gitconfig can reach these fixtures. `PATH` comes from the caller's — pinning a
+    literal would decide where git lives (it is not in /usr/bin everywhere)."""
+    return {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": str(repo),
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+    }
+
+
+def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args], cwd=repo, text=True, capture_output=True, check=check,
+        env=_env(repo),
+    )
+
+
+def _commit(repo: Path, message: str) -> None:
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", message)
+
+
+def _write(repo: Path, rel: str, body: str) -> None:
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+
+
+def _upstream(
+    tmp_path: Path,
+    *,
+    main_files: dict[str, str] | None = None,
+    pr_files: dict[str, str | None] | None = None,
+) -> Path:
+    """A repo whose `main` defines `some_removed_helper` in mod.py and calls it from
+    caller.py, and whose `pr` branch deletes the definition.
+
+    `main_files` are committed on `main`, so the PR does NOT touch them. That is where a
+    surviving reference must live to be *seen*: `_batch_grep` already skips hits inside
+    the diff's own changed files, so a reference planted in a `pr_files` entry is excluded
+    for that reason and never reaches the rule under test — a test that passes without
+    exercising anything. `pr_files` is therefore only for what the PR really does change
+    (pass None to delete).
+
+    Several commits deep on purpose: a depth-1 graft needs real history to be cut off from,
+    or the merge-base would be findable by accident.
+    """
+    up = tmp_path / "up"
+    up.mkdir()
+    _git(up, "init", "-q", "-b", "main")
+    _write(up, "mod.py", "def some_removed_helper():\n    return 1\n")
+    _write(up, "caller.py", "x = some_removed_helper()\n")
+    for rel, body in (main_files or {}).items():
+        _write(up, rel, body)
+    _commit(up, "seed")
+    _git(up, "commit", "-q", "--allow-empty", "-m", "c2")
+    _git(up, "commit", "-q", "--allow-empty", "-m", "c3")
+
+    _git(up, "checkout", "-q", "-b", "pr")
+    _git(up, "rm", "-q", "mod.py")
+    for rel, body in (pr_files or {}).items():
+        if body is None:
+            _git(up, "rm", "-q", rel)
+        else:
+            _write(up, rel, body)
+    _commit(up, "delete the helper (caller.py still references it)")
+    return up
+
+
+def _clone(tmp_path: Path, up: Path, *, depth: int | None = None) -> Path:
+    """Clone `up`'s `pr` branch and give it an `origin/main`.
+
+    depth=None  -> full clone: origin/main resolves AND shares an ancestor with HEAD.
+    depth=N     -> the CI shape: a shallow graft, plus the `--depth=50` base-ref fetch
+                   that ci.yml used to run. origin/main RESOLVES; the merge-base does not.
+
+    The `file://` URL is mandatory — git ignores `--depth` for a local-path clone.
+    """
+    work = tmp_path / "work"
+    args = ["clone", "-q", "--branch", "pr"]
+    if depth is not None:
+        args += [f"--depth={depth}"]
+    args += [f"file://{up}", str(work)]
+    _git(tmp_path, *args)
+    fetch = ["fetch", "-q", "origin", "main:refs/remotes/origin/main"]
+    if depth is not None:
+        fetch += ["--depth=50"]
+    _git(work, *fetch)
+    return work
+
+
+def _baseline(tmp_path: Path, entries: dict[str, str] | None = None) -> Path:
+    path = tmp_path / "baseline.json"
+    path.write_text(
+        json.dumps({"//": "test", "entries": entries or {}}), encoding="utf-8"
+    )
+    return path
+
+
+def _run_gate(work: Path, tmp_path: Path, *, argv: list[str] | None = None,
+              base_ref: str = "origin/main", entries: dict[str, str] | None = None) -> int:
+    return GATE.main(
+        argv or [],
+        repo_root=work,
+        base_ref=base_ref,
+        baseline_path=_baseline(tmp_path, entries),
+    )
+
+
+def test_unresolvable_base_ref_exits_2(tmp_path, capsys):
+    """No origin at all. The old gate printed a WARN and returned [] -> exit 0."""
+    repo = tmp_path / "solo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, "a.py", "x = 1\n")
+    _commit(repo, "seed")
+
+    assert _run_gate(repo, tmp_path, base_ref="origin/main") == 2
+    assert "cannot resolve base ref" in capsys.readouterr().err
+
+
+def test_shallow_graft_without_merge_base_exits_2(tmp_path, capsys):
+    work = _clone(tmp_path, _upstream(tmp_path), depth=1)
+
+    assert _run_gate(work, tmp_path) == 2
+    assert "merge-base" in capsys.readouterr().err
+
+
+def test_a_required_git_command_failing_raises_instead_of_returning_empty(tmp_path):
+    """The swallow itself. A git call the gate depends on can no longer degrade into `""`
+    — which is how a failed diff became "nothing was removed"."""
+    work = _clone(tmp_path, _upstream(tmp_path))
+
+    with pytest.raises(GATE.GitError) as exc:
+        GATE._changed_files(work, "no-such-ref")
+    assert "exited" in str(exc.value)
+
+
+def test_a_git_failure_inside_the_scan_exits_2(tmp_path, capsys):
+    """...and main() turns that into exit 2, never a clean report. Here the preflight
+    itself cannot run because the directory is not a repo at all."""
+    not_a_repo = tmp_path / "not-a-repo"
+    not_a_repo.mkdir()
+
+    assert _run_gate(not_a_repo, tmp_path) == 2
+    assert "cannot resolve base ref" in capsys.readouterr().err
+
+
+def test_stale_reference_is_flagged(tmp_path):
+    """The happy path — same repo and commits as the graft test, only fully cloned."""
+    work = _clone(tmp_path, _upstream(tmp_path))
+
+    assert _run_gate(work, tmp_path) == 1
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "caller.py:some_removed_helper" in fingerprints
+
+
+def test_deleted_cli_shim_named_in_a_prompt_is_flagged(tmp_path):
+    up = _upstream(tmp_path)
+    _git(up, "checkout", "-q", "main")
+    _write(up, "bin/defender-record-query", "#!/bin/sh\necho hi\n")
+    _write(up, "skills/gather/SKILL.md", "# Gather\n\nRun defender-record-query --id X.\n")
+    _commit(up, "add the shim and the prompt that calls it")
+    _git(up, "checkout", "-q", "pr")
+    _git(up, "merge", "-q", "main", "-m", "merge")
+    _git(up, "rm", "-q", "bin/defender-record-query")
+    _commit(up, "delete the shim (SKILL.md still tells the model to run it)")
+    work = _clone(tmp_path, up)
+
+    assert _run_gate(work, tmp_path) == 1
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "skills/gather/SKILL.md:defender-record-query" in fingerprints
+
+
+def test_deleted_markdown_matches_filename_not_ordinary_prose(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "phases/dissolve.md": "# Resolve findings\n",
+            "notes/prose.txt": "The findings dissolve by absence.\n",
+            "notes/links.txt": "Read phases/dissolve.md, or open `dissolve.md`.\n",
+        },
+        pr_files={"phases/dissolve.md": None},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert not any(f.startswith("notes/prose.txt:") for f in fingerprints)
+    assert "notes/links.txt:dissolve.md" in fingerprints
+
+
+def test_surviving_module_named_in_a_from_package_import_is_not_flagged(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "pkg/__init__.py": "",
+            "pkg/shared_taxonomy.py": "NAMES = {'a'}\n",
+            "other_importer.py": "from pkg import shared_taxonomy\n\ny = shared_taxonomy.NAMES\n",
+            "doomed_importer.py": "from pkg import shared_taxonomy\n\nz = shared_taxonomy.NAMES\n",
+        },
+    )
+    _git(up, "checkout", "-q", "pr")
+    _git(up, "rm", "-q", "doomed_importer.py")
+    _commit(up, "delete one importer; pkg/shared_taxonomy.py itself survives")
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "other_importer.py:shared_taxonomy" not in fingerprints, (
+        "a surviving importer of a LIVE module was flagged as a stale reference"
+    )
+
+
+def test_a_genuinely_deleted_module_is_still_flagged(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "pkg/__init__.py": "",
+            "pkg/doomed_mod.py": "NAMES = {'a'}\n",
+            "skills/guide.md": "# Guide\n\nThe roster lives in `pkg/doomed_mod.py`.\n",
+        },
+    )
+    _git(up, "checkout", "-q", "pr")
+    _git(up, "rm", "-q", "pkg/doomed_mod.py")
+    _commit(up, "delete the module itself (skills/guide.md still names it)")
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "skills/guide.md:doomed_mod" in fingerprints, (
+        "a reference to a genuinely DELETED module was not flagged"
+    )
+
+
+def test_moved_symbol_is_not_flagged(tmp_path):
+    """A symbol deleted HERE and defined THERE was moved, not removed."""
+    up = _upstream(tmp_path, pr_files={"moved.py": "def some_removed_helper():\n    return 1\n"})
+    work = _clone(tmp_path, up)
+
+    assert _run_gate(work, tmp_path) == 0
+    assert GATE._scan(work, "origin/main") == []
+
+
+def test_a_function_local_def_is_not_a_removed_identifier(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "test_thing.py": (
+                "def test_thing():\n"
+                "    def outbound_note(run_dir):\n"
+                "        return run_dir\n"
+                "    assert outbound_note(1) == 1\n"
+            ),
+            "docs.md": "The outbound_note channel is what a person reads.\n",
+        },
+        pr_files={"test_thing.py": "def test_thing():\n    assert True\n"},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "caller.py:some_removed_helper" in fingerprints, "the control failed: nothing scanned"
+    assert not any(f.endswith(":outbound_note") for f in fingerprints), fingerprints
+
+
+def test_a_method_with_the_same_indent_as_a_local_def_IS_a_removed_identifier(tmp_path):
+    """The complement: a METHOD is also indented four, but it is reachable from anywhere as
+    `.name`, so its removal is real signal. Only the AST can tell the two apart."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "thing.py": (
+                "class Thing:\n"
+                "    def outbound_note(self):\n"
+                "        return 1\n"
+            ),
+            "docs.md": "Call outbound_note on a Thing.\n",
+        },
+        pr_files={"thing.py": "class Thing:\n    pass\n"},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "docs.md:outbound_note" in fingerprints, fingerprints
+
+
+def test_an_override_of_an_outside_base_is_not_a_removed_identifier(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "double.py": (
+                "from pathlib import Path\n"
+                "class Base:\n"
+                "    pass\n"
+                "class Planted(type(Path())):\n"
+                "    def with_suffix(self, suffix):\n"
+                "        return self\n"
+                "class Local(Base):\n"
+                "    def outbound_note(self):\n"
+                "        return 1\n"
+            ),
+            "pkg/__init__.py": "",
+            "pkg/base.py": "class Shared:\n    pass\n",
+            "sub.py": (
+                "from pkg.base import Shared\n"
+                "class Paths(Shared):\n"
+                "    def pending_records(self):\n"
+                "        return 1\n"
+            ),
+            "reader.py": "def g(p):\n    return p.pending_records()\n",
+            "user.py": "def f(p):\n    q = p.with_suffix('.x')\n    return q.outbound_note()\n",
+        },
+        pr_files={"double.py": "class Base:\n    pass\n",
+                  "sub.py": "from pkg.base import Shared\nclass Paths(Shared):\n    pass\n"},
+    )
+    work = _clone(tmp_path, up)
+
+    fingerprints = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "user.py:outbound_note" in fingerprints, "the control failed: nothing scanned"
+    assert "reader.py:pending_records" in fingerprints, "a repo base's method went unscanned"
+    assert "user.py:with_suffix" not in fingerprints, fingerprints
+
+
+def test_a_dropped_import_line_does_not_condemn_the_MODULE_it_imported(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "pkg_helper_mod.py": "class Thing:\n    pass\n",
+            "notes_a.md": "See `pkg_helper_mod` for the payload shape.\n",
+            "importer.py": "from pkg_helper_mod import Thing\n\nx = Thing()\n",
+        },
+        pr_files={"importer.py": "x = 1\n", "caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    assert "pkg_helper_mod" not in GATE._collect_removed_idents(work, "origin/main"), (
+        "the module PATH of a dropped from-import was collected as a removed identifier"
+    )
+    assert GATE._scan(work, "origin/main") == []
+    assert _run_gate(work, tmp_path) == 0
+
+
+def test_a_DELETED_module_is_condemned_by_its_own_deletion(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "dead_helper_mod.py": "VALUE = 1\n",
+            "notes_b.md": "Run `dead_helper_mod.py` before the drain.\n",
+        },
+        pr_files={"dead_helper_mod.py": None, "caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    findings = GATE._scan(work, "origin/main")
+    assert [f.fingerprint for f in findings] == ["notes_b.md:dead_helper_mod"], (
+        f"the surviving reference to a DELETED module was not flagged: {findings}"
+    )
+    assert _run_gate(work, tmp_path) == 1
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "spec-flow/specs/archive/575-pre-graph/brief.md",
+        "defender/tests/fixtures/e2e/golden-x/investigation.md",
+        "defender/lessons-environment/l-01.md",
+        "spec-flow/specs/spec_graph_551.yaml",
+        "docs/design.md",
+    ],
+)
+def test_reference_in_an_excluded_path_is_not_flagged(tmp_path, rel):
+    up = _upstream(tmp_path, main_files={rel: "mentions some_removed_helper()\n"})
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "caller.py:some_removed_helper" in hits, "the scan found nothing at all"
+    assert not any(h.startswith(rel) for h in hits), f"{rel} should be excluded"
+
+
+def test_the_same_reference_at_a_non_excluded_path_IS_flagged(tmp_path):
+    """Control for the parametrized exclusion test above."""
+    up = _upstream(tmp_path, main_files={"src/notes.md": "mentions some_removed_helper()\n"})
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "src/notes.md:some_removed_helper" in hits
+
+
+_HELD_BACK_REF = "src/notes.md"
+_HELD_BACK_REF_BODY = "the harness walks the held-back set for members\n"
+
+
+def test_a_directory_keeping_one_tracked_file_is_not_read_as_removed(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "defender/fixtures/held-back/README.md": "the set lives here\n",
+            "defender/fixtures/held-back/m01.json": "{}\n",
+            _HELD_BACK_REF: _HELD_BACK_REF_BODY,
+        },
+        pr_files={"defender/fixtures/held-back/m01.json": None},
+    )
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert "caller.py:some_removed_helper" in hits, "the scan found nothing at all"
+    assert f"{_HELD_BACK_REF}:held-back" not in hits
+
+
+def test_a_directory_losing_every_tracked_file_IS_read_as_removed(tmp_path):
+    """Control for the test above — without it, that one could pass because `held-back` was
+    never collected as an ident at all rather than because a survivor vouched for it."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "defender/fixtures/held-back/m01.json": "{}\n",
+            _HELD_BACK_REF: _HELD_BACK_REF_BODY,
+        },
+        pr_files={"defender/fixtures/held-back/m01.json": None},
+    )
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert f"{_HELD_BACK_REF}:held-back" in hits
+
+
+def test_an_archival_copy_does_not_vouch_for_a_deleted_directory(tmp_path):
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "experiments/old-run/held-back/m01.json": "{}\n",
+            "defender/fixtures/held-back/m01.json": "{}\n",
+            _HELD_BACK_REF: _HELD_BACK_REF_BODY,
+        },
+        pr_files={"defender/fixtures/held-back/m01.json": None},
+    )
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert f"{_HELD_BACK_REF}:held-back" in hits
+
+
+def test_frontmatter_name_is_a_declaration_but_the_body_is_a_reference(tmp_path):
+    up = _upstream(tmp_path)
+    _git(up, "checkout", "-q", "main")
+    _write(up, "bin/defender-elastic", "#!/bin/sh\n")
+    _write(
+        up, "skills/elastic/SKILL.md",
+        "---\nname: defender-elastic\n---\n\nRun defender-elastic esql 'FROM x' to query.\n",
+    )
+    _commit(up, "add the shim and its skill")
+    _git(up, "checkout", "-q", "pr")
+    _git(up, "merge", "-q", "main", "-m", "merge")
+    _git(up, "rm", "-q", "bin/defender-elastic")
+    _commit(up, "delete the shim")
+    work = _clone(tmp_path, up)
+
+    displays = [f.display for f in GATE._scan(work, "origin/main")
+                if "defender-elastic" in f.fingerprint]
+    assert displays, "the body instruction must still be flagged"
+    assert all("name: defender-elastic" not in d for d in displays), \
+        "the frontmatter declaration must not be flagged"
+    assert any("esql" in d for d in displays)
+
+
+def test_a_parameter_named_like_the_removed_ident_is_a_declaration(tmp_path):
+    """`def cmd_health_check(config, _args: Any)` declares a local. Its collision with some
+    deleted module-level `_args` means nothing — the parameter is not a reference."""
+    up = _upstream(
+        tmp_path,
+        main_files={
+            "sig.py": "def cmd_health_check(cfg: dict, some_removed_helper: int) -> int:\n"
+                      "    return 0\n",
+        },
+        pr_files={"caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    assert _run_gate(work, tmp_path) == 0
+
+
+def test_inline_marker_suppresses_a_deliberate_dead_name_reference(tmp_path):
+    """A negative-assertion test names the dead command ON PURPOSE — to prove it is
+    denied. Deleting the name would delete the test's meaning, so it gets a marker."""
+    marked = (
+        "def test_the_dead_cli_is_denied():\n"
+        "    assert not decide_bash(\n"
+        "        'some_removed_helper x'  # lint-stale-ref: ok — negative assertion\n"
+        "    )\n"
+    )
+    unmarked = "def test_other():\n    assert not decide_bash('some_removed_helper x')\n"
+    up = _upstream(
+        tmp_path,
+        main_files={"t_deny.py": marked, "t_plain.py": unmarked},
+        pr_files={"caller.py": None},
+    )
+    work = _clone(tmp_path, up)
+
+    hits = {f.fingerprint for f in GATE._scan(work, "origin/main")}
+    assert hits == {"t_plain.py:some_removed_helper"}
+
+
+# --- the two halves must read the SAME tree ---------------------------------------------------
+
+
+def _pr_branch_with_nothing_removed(tmp_path: Path) -> Path:
+    """`main` defines a helper and a module, `pr` removes neither — so a committed-only scan of
+    the PR is legitimately clean and any finding below came from the working tree."""
+    up = tmp_path / "up"
+    up.mkdir()
+    _git(up, "init", "-q", "-b", "main")
+    _write(up, "mod.py", "def some_removed_helper():\n    return 1\n")
+    _write(up, "caller.py", "x = some_removed_helper()\n")
+    _write(up, "helper_module.py", "VALUE = 1\n")
+    _write(up, "notes.md", "The renderer reads `helper_module` for its defaults.\n")
+    _commit(up, "seed")
+    _git(up, "checkout", "-q", "-b", "pr")
+    _git(up, "commit", "-q", "--allow-empty", "-m", "a PR that has removed nothing yet")
+    return _clone(tmp_path, up)
+
+
+def test_a_deletion_living_only_in_the_working_tree_is_scanned(tmp_path):
+    work = _pr_branch_with_nothing_removed(tmp_path)
+
+    assert _run_gate(work, tmp_path) == 0, "the committed PR removes nothing — nothing to report"
+
+    (work / "mod.py").unlink()
+    GATE._tracked_paths.cache_clear()
+
+    assert _run_gate(work, tmp_path) == 1
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
+        "caller.py:some_removed_helper"
+    }
+
+
+def test_a_module_deleted_on_disk_no_longer_vouches_for_its_own_name(tmp_path):
+    work = _pr_branch_with_nothing_removed(tmp_path)
+
+    (work / "helper_module.py").unlink()
+    GATE._tracked_paths.cache_clear()
+
+    assert "helper_module.py" not in GATE._tracked_paths(work), (
+        "a path that is gone from the tree is still offered as evidence the name survives"
+    )
+    assert {f.fingerprint for f in GATE._scan(work, "origin/main")} == {
+        "notes.md:helper_module"
+    }

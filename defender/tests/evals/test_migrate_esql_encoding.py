@@ -11,10 +11,10 @@ from typing import Any
 
 import pytest
 
-from defender.evals.oracle_golden import migrate_esql_encoding as MIGRATE
+from evaluations.oracle_golden import migrate_esql_encoding as MIGRATE
 
 DEFENDER_DIR = Path(__file__).resolve().parents[2]
-GOLDEN_DIR = DEFENDER_DIR / "evals" / "oracle_golden"
+GOLDEN_DIR = DEFENDER_DIR.parent / "evaluations" / "oracle_golden"
 MIGRATION_SCRIPT = GOLDEN_DIR / "migrate_esql_encoding.py"
 
 

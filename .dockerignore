@@ -44,3 +44,6 @@ playground-v2/**/data
 .env
 *.env.bak
 .ssh
+
+# CI suites and replay fixtures are not product image contents.
+defender/tests/

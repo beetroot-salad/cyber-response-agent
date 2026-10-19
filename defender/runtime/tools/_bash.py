@@ -12,7 +12,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 
 from pydantic_ai.exceptions import ModelRetry
 
-from .. import box as box_mod
+from defender import box as box_mod
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 from ..agent_role import AgentRole

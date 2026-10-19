@@ -95,5 +95,5 @@ to both (so integration restrictions are actually exercised), protect blue's `ma
 create a bot integration restricted to blue with `tenant_id=blue` and the two scopes above.
 Set `FORGEJO_TEST_CONFIG` to a test-only JSON file containing `origin` (blue's clone URL),
 `issuer`, `audience`, `key_file` (fixture RSA private PEM), and `other_origin`. Then run
-`flock /tmp/defender-pytest.lock pytest defender/tests/tenant_1108_delivery/test_live_forgejo.py -m live`.
+`flock /tmp/defender-pytest.lock pytest defender/tests/tenancy/tenant_1108_delivery/test_live_forgejo.py -m live`.
 The issuer's JWKS key id must be `fixture`; these signing keys are fixture data only.

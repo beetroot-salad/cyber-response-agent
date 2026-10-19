@@ -1,0 +1,92 @@
+"""The shared stub transport's fault floor (#877): a curl-level failure (HTTP 000, rc != 0) is a transport fault, never an empty successful payload. Driven through real stub-adapter verbs."""
+from __future__ import annotations
+
+import pytest
+
+from defender.runtime.verbs import VerbContext
+from defender.scripts.adapters import _stub_transport as transport
+from defender.scripts.adapters import ticket_adapter
+from defender.scripts.adapters.faults import TransportFault
+from defender.tests.support.tenancy import _tenants1106
+
+CURL_FAULTS = [
+    (6, "curl: (6) Could not resolve host: ticket-store"),
+    (7, "curl: (7) Failed to connect to ticket-store port 8080: Connection refused"),
+    (28, "curl: (28) Operation timed out after 10001 milliseconds with 0 bytes received"),
+]
+
+
+@pytest.fixture
+def ctx(tmp_path):
+    return VerbContext(defender_dir=tmp_path / "defender", run_dir=tmp_path / "run", env={},
+                       tenant=_tenants1106.fixture_run_tenant())
+
+
+@pytest.fixture(autouse=True)
+def _stub_config(monkeypatch):
+    """The adapter's config, without a config file — the transport underneath is what these
+    tests drive, and it is stubbed per test."""
+    shaped = {"URL_BASE": "http://ticket-store:8080", "BASTION_HOST": "web-1",
+              "TIMEOUT_SEC": "10", "KEY_PATTERN": "^INC-[0-9]+$"}
+
+    def _fake(ctx, system, prefix, required=transport.REQUIRED_CONFIG_KEYS_TEMPLATE):
+        return {k: shaped.get(k, f"stub-{k}") for k in required}
+
+    monkeypatch.setattr(transport, "load_config", _fake)  # lint-monkeypatch: ok — the docker-exec-curl transport has no in-process DI seam (tests/integrations/test_ticket_adapter.py's established pattern)
+
+
+def _curl(monkeypatch, rc: int, stdout: str, stderr: str) -> None:
+    monkeypatch.setattr(  # lint-monkeypatch: ok — the transport's only seam is the subprocess it forks
+        transport, "docker_exec_curl",
+        lambda *a, **kw: (rc, stdout, stderr),
+    )
+
+
+@pytest.mark.parametrize(("rc", "stderr"), CURL_FAULTS)
+def test_a_curl_level_failure_is_a_transport_fault_not_an_empty_payload(
+    monkeypatch, ctx, rc, stderr,
+):
+    _curl(monkeypatch, rc, "\n000", stderr)
+    with pytest.raises(TransportFault) as exc:
+        ticket_adapter.health_check(ctx)
+    assert f"rc={rc}" in str(exc.value), str(exc.value)
+    assert stderr.split(":")[0] in str(exc.value), str(exc.value)
+
+    with pytest.raises(TransportFault):
+        ticket_adapter.list_tickets(ctx, status="closed")
+
+
+def test_http_000_raises_even_when_curl_reports_success(monkeypatch, ctx):
+    _curl(monkeypatch, 0, "\n000", "")
+    with pytest.raises(TransportFault) as exc:
+        ticket_adapter.health_check(ctx)
+    assert "000" in str(exc.value)
+
+
+def test_a_missing_bastion_still_names_the_container(monkeypatch, ctx):
+    """The case the guard was ORIGINALLY written for, unchanged: `docker exec` fails before curl
+    runs, stdout is genuinely empty, and the fault keeps its `docker ps` hint."""
+    _curl(monkeypatch, 125, "", 'Error: No such container: web-1')
+    with pytest.raises(TransportFault) as exc:
+        ticket_adapter.health_check(ctx)
+    assert "web-1" in str(exc.value)
+    assert "docker" in str(exc.value)
+
+
+def test_a_live_service_still_answers(monkeypatch, ctx):
+    """The negative control — the widened guard must not turn a working transport into an
+    outage. A clean curl with a 200 returns the payload it always did."""
+    _curl(monkeypatch, 0, '{"status": "ok", "tickets": 3}\n200', "")
+    assert ticket_adapter.health_check(ctx) == {
+        "system": "ticket", "connected": True, "status": "ok", "tickets": 3,
+    }
+
+
+def test_an_http_error_is_still_the_upstreams_own_verdict(monkeypatch, ctx):
+    """And a service that DID answer keeps its own status: a 5xx stays a `TransportFault`
+    carrying the body, not a `curl reported HTTP 000`."""
+    _curl(monkeypatch, 0, '{"detail": "index closed"}\n503', "")
+    with pytest.raises(TransportFault) as exc:
+        ticket_adapter.health_check(ctx)
+    assert "503" in str(exc.value)
+    assert "000" not in str(exc.value)

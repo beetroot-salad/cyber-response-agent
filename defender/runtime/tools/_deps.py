@@ -17,7 +17,7 @@ from defender._paths import PATHS
 
 
 from defender.run_repository import Run
-from .. import box as box_mod
+from defender import box as box_mod
 from ..run_state import RunState, run_time_iso
 from .. import permission
 from ..agent_definition import ResolvedRoots

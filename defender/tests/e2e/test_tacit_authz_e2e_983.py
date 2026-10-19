@@ -12,7 +12,7 @@ import pytest
 from defender.skills.invlang.frontier import frontier_from_text
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import validate_companion
-from defender.tests import _tacit983 as scene
+from defender.tests.support.shared.contracts import _tacit983 as scene
 from defender.tests.e2e._replay_harness import (
     GOLDEN,
     FakeVerbs,

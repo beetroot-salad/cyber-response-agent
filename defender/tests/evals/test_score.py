@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from defender._yaml import AliasRefused, safe_load_typed_and_spelled
-from defender.evals.oracle_golden import judge, score
+from evaluations.oracle_golden import judge, score
 
 # fixtures
 
@@ -645,7 +645,7 @@ def test_a_quoted_author_literal_matches_a_bare_projection_scalar_both_ways(tmp_
 @pytest.mark.parametrize("where", ["manifest expectation", "manifest top-level",
                                    "expected.yaml"])
 def test_an_unquoted_author_literal_is_refused_naming_the_clause(tmp_path, where):
-    from defender.evals.oracle_golden import validate_cases
+    from evaluations.oracle_golden import validate_cases
 
     d = _case(tmp_path, kind="mutation")
     if where == "manifest expectation":
@@ -703,7 +703,7 @@ def test_a_bare_scalar_clause_is_refused_rather_than_read_per_character(tmp_path
 
 
 def test_every_committed_case_passes_the_clause_rule():
-    from defender.evals.oracle_golden import validate_cases
+    from evaluations.oracle_golden import validate_cases
 
     cases_dir = Path(score.__file__).parent / "cases"
     case_dirs = sorted(p for p in cases_dir.iterdir() if (p / "manifest.yaml").is_file())

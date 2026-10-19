@@ -17,24 +17,17 @@ in the world's own oracle-side state directory (`oracle/<label>/`, one writer, S
 """
 from __future__ import annotations
 
-import contextlib
 import functools
 import hashlib
 import json
-import logging
 import subprocess
-import threading
-import time
-import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
 from defender._async import run_sync
-from defender._episode_paths import OracleStorePaths
-from defender._io import guarded_mkdir, read_bytes_capped, read_jsonl_rows, write_guarded
-from defender._pricing import billed_usage, usage_cost
+from defender._pricing import billed_usage
 from defender._untrusted import wrap, wrap_fresh
 from defender.learning.branch.ledger import request_key
 from defender.learning.core import config
@@ -44,12 +37,11 @@ from defender.learning.core.config import (
 )
 from defender.runtime.agent_definition import AgentDefinition
 from defender.runtime.agent_role import AgentRole
-from defender.runtime.bash_exec import Pipeline, Stage
-from defender.runtime.box._oracle import (
+from defender.execution.bash_exec import Pipeline, Stage
+from defender.box._oracle import (
     BoxStartRefused,
     start_oracle_box,
     start_process_oracle_box,
-    stop_oracle_box,
 )
 from defender.runtime.verbs import ServingAbort
 
@@ -67,9 +59,18 @@ from .checks import (
     run_checks,
     structured,
 )
-from .limiter import LimiterStateError, RateLimiter
 
-_logger = logging.getLogger(__name__)
+from defender.learning.branch.estate._oracle_store import (
+    LimiterWaits as LimiterWaits,
+    OracleStore as OracleStore,
+    QueryDoor as QueryDoor,
+    StoreFailure as StoreFailure,
+    _AttemptFailed as _AttemptFailed,
+    _ends_torn as _ends_torn,
+    _logger as _logger,
+    _trace_spent as _trace_spent,
+)
+
 
 __all__ = [
     "ORACLE_CHECK_DEF", "ORACLE_DEF", "OracleSandboxError", "OracleSettings", "OracleStore",
@@ -144,7 +145,7 @@ ORACLE_CHECK_DEF = AgentDefinition(
 # --------------------------------------------------------------------------------------------
 
 def start_box(*, env: Mapping[str, str]) -> Any:  # lint-dup: ok — the spec's coined name for the oracle's sandboxed box; box/_lifecycle.start_box starts the investigator's run box, a different box
-    """The production oracle box (`runtime.box.start_oracle_box`): sandboxed or refused with
+    """The production oracle box (`box.start_oracle_box`): sandboxed or refused with
     `OracleSandboxError`, never an unsandboxed executor (M18)."""
     try:
         return start_oracle_box(env=env)
@@ -159,266 +160,16 @@ def start_process_box() -> Any:
     except BoxStartRefused as exc:
         raise OracleSandboxError(str(exc)) from exc
 
+from defender.learning.branch.estate._oracle_attempt import (
+    OraclePricingError as OraclePricingError,
+    _Attempt as _Attempt,
+    _AttemptBox as _AttemptBox,
+    _Run as _Run,
+    _model_and_settings as _model_and_settings,
+    _stop_box as _stop_box,
+    price_row as price_row,
+)
 
-def _stop_box(box: Any) -> None:
-    if not getattr(box, "sandboxed", False):
-        return
-    # Teardown is best effort; the sibling is already ending.
-    with contextlib.suppress(Exception):
-        stop_oracle_box(box)
-
-
-# --------------------------------------------------------------------------------------------
-# The world's oracle-side store (one writer per world, S19).
-# --------------------------------------------------------------------------------------------
-
-
-
-def _ends_torn(path: Path) -> bool:
-    try:
-        data = read_bytes_capped(path)
-    except OSError:
-        return False
-    return bool(data) and not data.endswith(b"\n")
-
-
-def _trace_spent(rows: list[dict]) -> float:
-    """The spend the trace records, each row counted once by its `id` (a charge whose append
-    failed part-way is rewritten whole by the next one). A row without an id counts as it is."""
-    seen: set[str] = set()
-    total = 0.0
-    for row in rows:
-        rid = row.get("id")
-        if isinstance(rid, str):
-            if rid in seen:
-                continue
-            seen.add(rid)
-        total += float(row.get("cost_usd") or 0.0)
-    return total
-
-
-class OracleStore:
-    """`oracle/<label>/`: frozen forged rows, recorded facts, the served-answer cache, the
-    oracle-side ledger, this world's live base answers and the oracle's spend trace."""
-
-    def __init__(self, root: Path) -> None:
-        self.root = Path(root)
-        self._lock = threading.Lock()
-        #: Files whose last line is torn (a crash mid-append): the next append starts on a
-        #: line of its own, so the torn record stays unread rather than swallowing a new one.
-        self.paths = OracleStorePaths(self.root)
-        self._torn = {path for path in self.paths.all() if _ends_torn(path)}
-        self.frozen: dict[str, dict] = {}
-        for row in read_jsonl_rows(self.paths.forged):
-            if isinstance(row.get("forged_id"), str):
-                self.frozen.setdefault(row["forged_id"], row)
-        self.facts: dict[tuple[str, str], Any] = {}
-        for row in read_jsonl_rows(self.paths.facts):
-            if isinstance(row.get("entity"), str) and isinstance(row.get("field"), str):
-                self.facts.setdefault((row["entity"], row["field"]), row.get("value"))
-        self.answers: dict[str, dict] = {}
-        for row in read_jsonl_rows(self.paths.answers):
-            if isinstance(row.get("system"), str) and isinstance(row.get("verb"), str):
-                key = request_key(row["system"], row["verb"], row.get("params") or {})
-                self.answers.setdefault(key, row)
-        self.base: dict[str, str] = {}
-        #: The same answers as `(system, text)`, in the order they were read live.
-        self.base_answers: list[tuple[str, str]] = []
-        for row in read_jsonl_rows(self.paths.base):
-            text = row.get("payload_text")
-            if isinstance(text, str) and isinstance(row.get("system"), str):
-                key = request_key(row["system"], str(row.get("verb")), row.get("params") or {})
-                if key not in self.base:
-                    self.base[key] = text
-                    self.base_answers.append((row["system"], text))
-        self.spent = _trace_spent(read_jsonl_rows(self.paths.trace))
-        #: Trace rows charged to `spent` whose append failed; the next charge writes them first.
-        #: Each row carries its own `id`: a failed append may have landed some of them whole,
-        #: and the rewrite of those is counted once (`_trace_spent`).
-        self._unwritten: list[dict] = []
-        #: The `(forged_id, column, value)` of every collision already recorded.
-        self._collided = {(r.get("forged_id"), r.get("column"), r.get("value"))
-                          for r in read_jsonl_rows(self.paths.collisions)}
-
-    def _append(self, path: Path, rows: list[dict]) -> None:
-        guarded_mkdir(self.root, base=self.root.parent)
-        text = "".join(json.dumps(row) + "\n" for row in rows)  # lint-jsonl-io: ok — whole rows, one guarded append
-        if path in self._torn:
-            text = "\n" + text
-        write_guarded(path, text, mode="append")
-        self._torn.discard(path)
-
-    def log_query(self, actor: str, system: str, verb: str, params: Mapping[str, Any]) -> None:
-        with self._lock:
-            self._append(self.paths.ledger, [{"actor": actor, "system": system, "verb": verb,
-                                   "params": dict(params)}])
-
-    def keep_base(self, system: str, verb: str, params: Mapping[str, Any], text: str) -> None:
-        with self._lock:
-            key = request_key(system, verb, params)
-            if key in self.base:
-                return
-            self._append(self.paths.base, [{"system": system, "verb": verb, "params": dict(params),
-                                 "payload_text": text}])
-            self.base[key] = text
-            self.base_answers.append((system, text))
-
-    def charge(self, actor: str, model_name: str, usage: Mapping[str, Any], *,
-               priced_as: str) -> float:
-        """Record one response's spend: `model_name` as the provider reported it, its cost at
-        the `priced_as` pricing row. The cost counts toward `spent` whatever the trace write
-        does: a row whose append fails is kept and written ahead of the next one, and the
-        response it prices is used as it is (a paid answer is not a failed request)."""
-        cost = usage_cost(priced_as, dict(usage))
-        row = {"id": uuid.uuid4().hex, "actor": actor, "model": model_name,
-               "input_tokens": usage.get("input_tokens", 0),
-               "output_tokens": usage.get("output_tokens", 0), "cost_usd": cost, "at": time.time()}
-        with self._lock:
-            self.spent += cost
-            self._unwritten.append(row)
-            try:
-                self._append(self.paths.trace, self._unwritten)
-            except OSError as unwritable:
-                # A partial append may have left a torn line: the retry starts on its own. Rows
-                # it landed whole are written again, and read once (each by its `id`).
-                self._torn.add(self.paths.trace)
-                _logger.warning(f"the oracle's spend trace could not record "
-                                f"{len(self._unwritten)} row(s) ({unwritable!r}); they are "
-                                "counted and retried with the next charge")
-            else:
-                self._unwritten = []
-        return cost
-
-    def record_collisions(self, entries: list[dict]) -> None:
-        """Append each frozen-row collision not already recorded (M12=A), keyed on
-        `(forged_id, column, value)` — the judge reads them off `collisions.jsonl`.
-
-        @owns collisions — the shipped `oracle/<label>/collisions.jsonl` rows are produced here."""
-        with self._lock:
-            new = [e for e in entries
-                   if (e["forged_id"], e["column"], e["value"]) not in self._collided]
-            if new:
-                self._append(self.paths.collisions, new)
-                self._collided.update((e["forged_id"], e["column"], e["value"]) for e in new)
-
-    def commit(self, *, forged: list[dict], facts: list[dict], answer: dict | None) -> None:
-        """Freeze this attempt's forged rows and facts with the verified answer (M15=B): rows
-        and facts first, then the answer that cites them. `answer=None` is pre-flight's
-        calibration (Amendment 2, S1): the rows and facts are frozen, no served answer is
-        cached."""
-        with self._lock:
-            new_rows = [r for r in forged if r["forged_id"] not in self.frozen]
-            new_facts = [f for f in facts if (f["entity"], f["field"]) not in self.facts]
-            if new_rows:
-                self._append(self.paths.forged, new_rows)
-            if new_facts:
-                self._append(self.paths.facts, new_facts)
-            if answer is not None:
-                self._append(self.paths.answers, [answer])
-            for r in new_rows:
-                self.frozen[r["forged_id"]] = r
-            for f in new_facts:
-                self.facts[(f["entity"], f["field"])] = f["value"]
-            if answer is not None:
-                key = request_key(answer["system"], answer["verb"], answer["params"])
-                self.answers[key] = answer
-
-
-# --------------------------------------------------------------------------------------------
-# The run-query door: every query branching issues on its own behalf (M7, M13; O6, O9).
-# --------------------------------------------------------------------------------------------
-
-
-class LimiterWaits:
-    """One attempt's time waiting on the rate limiter, which its deadline excludes (M11=A).
-
-    Each attempt holds its own, and its tools (the verifier's and the host checks' queries
-    included) wait into it: a thread an earlier attempt abandoned still holds that attempt's
-    record, so it can neither end nor add to this one's. Overlapping waits count once."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._done = 0.0
-        self._open = 0
-        self._since = 0.0
-
-    @contextlib.contextmanager
-    def waiting(self) -> Any:
-        with self._lock:
-            if not self._open:
-                self._since = time.monotonic()
-            self._open += 1
-        try:
-            yield
-        finally:
-            with self._lock:
-                self._open -= 1
-                if not self._open:
-                    self._done += time.monotonic() - self._since
-
-    def excluded(self) -> float:
-        """Every second of limiter wait so far, a wait in progress included."""
-        with self._lock:
-            return self._done + (time.monotonic() - self._since if self._open else 0.0)
-
-
-@dataclass
-class QueryDoor:
-    """Grant-decided (read verbs only), at the branch-point clock, rate-limited, recorded in
-    the world's oracle-side ledger and nowhere else."""
-
-    decide: Callable[[str, str], Any]
-    real_verbs: Callable[[str], Mapping[str, Any]]
-    limiter: RateLimiter
-    store: OracleStore
-    context: Callable[[], Any]
-
-    def run(self, actor: str, system: Any, verb: Any, params: Any, *,
-            waits: LimiterWaits) -> Any:
-        """The real answer, or `Refused` naming why not. Time waiting on the limiter goes to
-        `waits`, the asking attempt's own record."""
-        if not isinstance(system, str) or not isinstance(verb, str):
-            raise Refused(f"run_query needs a system and a verb name; got {system!r}.{verb!r}")
-        if params is None:
-            params = {}
-        if not isinstance(params, Mapping):
-            raise Refused(f"run_query {system}.{verb}: params must be a mapping")
-        try:
-            decision = self.decide(system, verb)
-        except Exception as exc:  # noqa: BLE001 — a grant/declaration disagreement refuses
-            raise Refused(f"run_query {system}.{verb} was refused: {exc}") from None
-        if decision.outcome != "GRANTED":
-            raise Refused(f"run_query {system}.{verb} was refused: {decision.refusal}")
-        from defender.runtime.verbs import verb_class_of
-
-        fn = self.real_verbs(system).get(verb)
-        if fn is None or verb_class_of(fn) != "r":
-            raise Refused(f"run_query {system}.{verb} was refused: only read verbs are served "
-                          "to the oracle")
-        with waits.waiting():
-            try:
-                self.limiter.acquire()
-            except LimiterStateError:
-                # The limiter failed closed: the oracle's own machinery, not the tenant, so
-                # the attempt fails (M03=A) rather than handing the oracle feedback; the
-                # limiter's text (an OS error) is not shown.
-                raise _AttemptFailed("the rate limiter could not admit a query (it failed "
-                                     "closed)") from None
-        try:
-            answer = fn(self.context(), **dict(params))
-        except Exception as exc:  # noqa: BLE001 — a tenant error is the oracle's to see
-            self._log(actor, system, verb, params)
-            raise Refused(f"run_query {system}.{verb} failed at the tenant: "
-                          f"{type(exc).__name__}: {exc}") from None
-        self._log(actor, system, verb, params)
-        # One spelling, as every served payload: the adapter's own answer, round-tripped.
-        return json.loads(json.dumps(answer, sort_keys=True, default=str))
-
-    def _log(self, actor: str, system: str, verb: str, params: Mapping[str, Any]) -> None:
-        try:
-            self.store.log_query(actor, system, verb, params)
-        except OSError:
-            raise StoreFailure("the oracle-side ledger could not record a query") from None
 
 
 # --------------------------------------------------------------------------------------------
@@ -491,60 +242,36 @@ def _branch_point(family: Any) -> str:
         return ""
     return str(as_of.isoformat()).replace("+00:00", "Z")
 
-
-def _schema(properties: dict, required: list[str]) -> dict:
-    return {"type": "object", "properties": properties, "required": required,
-            "additionalProperties": False}
-
-
-_ANY: dict = {}
-_QUERY_SCHEMA = _schema({"system": {"type": "string"}, "verb": {"type": "string"},
-                         "params": {"type": "object"}}, ["system", "verb"])
-_SERVED_SCHEMA = _schema({"served": _ANY, "claim": {"type": "object"}}, ["served", "claim"])
-
-#: The oracle's function tools: name, description, argument schema. `submit` is its output.
-_ORACLE_TOOLS: tuple[tuple[str, str, dict], ...] = (
-    ("run_query", "Read a real system through the gather grant (read verbs only).",
-     _QUERY_SCHEMA),
-    ("forge", "Stage a forged row of the call's system for one of this world's facts.",
-     _schema({"forged_id": {"type": "string"}, "fact_id": {"type": "string"},
-              "row": {"type": ["object", "array"]}},
-             ["forged_id", "fact_id", "row"])),
-    ("record_fact", "Record the value a fact fixes for an entity's field.",
-     _schema({"entity": {"type": "string"}, "field": {"type": "string"}, "value": _ANY},
-             ["entity", "field", "value"])),
-    ("python", "Run Python in the oracle's sandboxed scratch box.",
-     _schema({"code": {"type": "string"}}, ["code"])),
-    ("check", "Run the host checks on a draft submission.", _SERVED_SCHEMA),
+from defender.learning.branch.estate._oracle_tools import (
+    _ANY as _ANY,
+    _NO_VERDICT as _NO_VERDICT,
+    _ORACLE_TOOLS as _ORACLE_TOOLS,
+    _Outcome as _Outcome,
+    _QUERY_SCHEMA as _QUERY_SCHEMA,
+    _SERVED_SCHEMA as _SERVED_SCHEMA,
+    _SUBMIT as _SUBMIT,
+    _Submitted as _Submitted,
+    _VERDICT as _VERDICT,
+    _no_submission as _no_submission,
+    _no_verdict as _no_verdict,
+    _schema as _schema,
+    _verdict_given as _verdict_given,
 )
-_SUBMIT = ("submit", "Submit the served answer and its claim; ends the turn.", _SERVED_SCHEMA)
-_VERDICT = ("verdict", "Pass or fail the served answer, with a reason.",
-            _schema({"passed": {"type": "boolean"}, "reason": {"type": "string"}},
-                    ["passed", "reason"]))
 
 
-def family_salt(bodies: list[str]) -> str:
-    """The family block's one frame salt: a digest of the block's own bodies, re-derived until
-    no body contains it.
+from defender.learning.branch.estate._oracle_prompt import (
+    BASE_HANDLE as BASE_HANDLE,
+    _CONTEXT_CAP as _CONTEXT_CAP,
+    _base_text as _base_text,
+    _fitted as _fitted,
+    _framed as _framed,
+    _headed as _headed,
+    _output_function as _output_function,
+    _shares as _shares,
+    _text_of as _text_of,
+    family_salt as family_salt,
+)
 
-    Every sibling of a family builds its block from the same manifest and base recording, so
-    the block is byte-identical across siblings, a shared prefix for prompt caching (the design's
-    "family block, shared by siblings"). A body's author cannot close a frame early: the salt is
-    a digest over that very body. Every other frame (world block, call turns, tool returns)
-    keeps `wrap_fresh`'s random salt."""
-    joined = "\x00".join(bodies)
-    n = 0
-    while True:
-        salt = hashlib.sha256(f"{n}\x00{joined}".encode()).hexdigest()[:16]
-        if salt not in joined:
-            return salt
-        n += 1
-
-
-#: The most text of one answer a request carries; a larger one is shown as its head (N10),
-#: and the oracle submits `BASE_HANDLE` as `served` to serve a large base unchanged.
-_CONTEXT_CAP = 200_000
-BASE_HANDLE = "$BASE"
 #: The one size budget, in characters, for what any request of the oracle or the verifier is
 #: started with: the oracle's conversation at the start of each call and of each attempt, and
 #: the verifier's cold context. Characters, not tokens: the host counts no tokens for a
@@ -561,121 +288,24 @@ _PROMPT_BUDGET = 2 * _CONTEXT_CAP
 _FAMILY_CAP = _PROMPT_BUDGET // 4
 
 
-def _shares(sizes: list[int], total: int, cap: int = _CONTEXT_CAP) -> list[int]:
-    """How much of each of `sizes` fits in `total` together: the smallest first, each up to an
-    equal share of what is left (and never past `cap`), so a small value is shown whole and
-    the large ones split what remains."""
-    caps = [0] * len(sizes)
-    remaining = max(total, 0)
-    for k, i in enumerate(sorted(range(len(sizes)), key=lambda n: sizes[n])):
-        caps[i] = min(sizes[i], remaining // (len(sizes) - k), cap)
-        remaining -= caps[i]
-    return caps
-
-
-def _headed(label: str, text: str, cap: int) -> tuple[str, str]:
-    """`label`'s heading and the body shown for `text` under `cap`: the whole text, or its
-    head, saying so (N10)."""
-    if len(text) <= cap:
-        return f"{label}:", text
-    return (f"{label} is {len(text)} characters, past what one request carries; its head "
-            "follows:", text[:cap])
-
-
-def _text_of(value: Any) -> str:
-    return value if isinstance(value, str) else canonical_json(value)
-
-
-def _framed(label: str, value: Any, cap: int = _CONTEXT_CAP) -> str:
-    """`value` framed as untrusted data for any model prompt — the oracle's and the
-    verifier's alike. Text past `cap` (`_CONTEXT_CAP` unless a budget gives it less) is shown
-    as its head, saying so (N10)."""
-    heading, body = _headed(label, _text_of(value), cap)
-    return f"{heading}\n{wrap_fresh(body, 'untrusted')}"
-
-
-def _fitted(items: list[tuple[str, Any]], budget: int) -> list[str]:
-    """Each `(label, value)` framed, together within `budget` (`_shares`)."""
-    texts = [_text_of(value) for _label, value in items]
-    caps = _shares([len(t) for t in texts], budget)
-    return [_framed(label, text, cap) for (label, _v), text, cap in zip(items, texts, caps,
-                                                                        strict=True)]
-
-
-def _base_text(base: Any, cap: int = _CONTEXT_CAP) -> str:
-    framed = _framed("The real base answer", base, cap)
-    if len(canonical_json(base)) <= cap:
-        return framed
-    return (f"To serve the base answer unchanged, submit served = {BASE_HANDLE!r} with an "
-            f"empty claim.\n{framed}")
-
-
 def _base_handle_resolved(served: Any, base: Any) -> Any:
     """`served`, with the `BASE_HANDLE` standing for the base answer resolved to it."""
     return base if served == BASE_HANDLE else served
 
 
-def _output_function(fn: Callable[..., Any], schema: dict) -> Callable[..., Any]:
-    """`fn(ctx, args)` / `fn(args)` as an agent output function whose arguments are exactly
-    `schema` (passed through as one mapping, unvalidated: the host's own checks refuse a
-    malformed submission or verdict, with a reason the model can act on)."""
-    import inspect
-
-    from pydantic_ai import RunContext, StructuredDict
-
-    # Annotations set as objects, not strings: the schema type is local to this call.
-    args_type = StructuredDict(dict(schema))
-    if "ctx" in inspect.signature(fn).parameters:
-        async def with_ctx(ctx, args):
-            return await fn(ctx, args)
-        with_ctx.__annotations__ = {"ctx": RunContext[_Run], "args": args_type, "return": Any}
-        return with_ctx
-
-    def plain(args):
-        return fn(args)
-    plain.__annotations__ = {"args": args_type, "return": Any}
-    return plain
-
-
 def _call_text(system: str, verb: str, params: Mapping[str, Any]) -> str:
     return _framed(f"The call ({system}.{verb}) params", dict(params))
 
+from defender.learning.branch.estate._oracle_dialogue import (
+    _AttemptOver as _AttemptOver,
+    _BudgetSpent as _BudgetSpent,
+    _VerifierGaveUp as _VerifierGaveUp,
+    _answered as _answered,
+    _conversation_size as _conversation_size,
+    _guard as _guard,
+    _settled as _settled,
+)
 
-@dataclass
-class _Attempt:
-    """One attempt's staged state, committed only with a verified answer."""
-
-    forged: dict[str, dict] = field(default_factory=dict)
-    facts: dict[tuple[str, str], Any] = field(default_factory=dict)
-
-
-@dataclass
-class _Submitted:
-    served: Any
-    claim: dict
-    verdict: dict
-    attempt: _Attempt
-    #: The frozen-row id collisions this answer serves (M12=A), recorded only once it commits.
-    collisions: list[dict] = field(default_factory=list)
-
-
-class _AttemptOver(Exception):
-    """An oracle attempt that ends before its next model request goes out: its deadline passed,
-    its request failed, or a tool already ended it. `told`: the oracle was handed `text` as that
-    tool's own result, so nothing more is appended to the conversation."""
-
-    def __init__(self, text: str, *, told: bool = False) -> None:
-        super().__init__(text)
-        self.text = text
-        self.told = told
-
-
-class _VerifierGaveUp(Exception):
-    """The verifier's pass ends without a verdict: its model failed on the re-ask too."""
-
-
-class _AttemptFailed(Exception):
-    """A tool that ends the attempt as failed (no sandboxed box for `python`)."""
 
 
 class _ArgumentRefused(Exception):
@@ -684,94 +314,6 @@ class _ArgumentRefused(Exception):
     place, the tool wrapper (`_oracle_tool`), so a bad argument to any tool is the oracle's
     feedback, never a fault of the world — while any other exception is still not caught there.
     Its text may reach the oracle, framed as untrusted."""
-
-
-class StoreFailure(Exception):
-    """A write to the world's oracle-side store failed; the attempt that needed it fails
-    (M03=A). Its text names no path or OS error: it may reach the oracle."""
-
-
-class _BudgetSpent(Exception):
-    """The world's oracle budget is spent; the call ends unservable (reason `budget`)."""
-
-
-class _AttemptBox:
-    """The python box of one attempt: started on the attempt's first `python` call, stopped
-    (its container and scratch removed) when the attempt ends, whatever the ending. Stopping it
-    also ends a frame the attempt's deadline abandoned. An attempt that runs no python starts
-    no box; a box started after the attempt ended (by its abandoned thread) is stopped at once."""
-
-    def __init__(self, factory: Callable[[], Any]) -> None:
-        self._factory = factory
-        self._lock = threading.Lock()
-        self._box: Any = None
-        self._ended = False
-
-    def get(self) -> Any:
-        with self._lock:
-            if self._ended:
-                raise _AttemptFailed("the attempt has already ended")
-            if self._box is not None:
-                return self._box
-        box = self._factory()  # outside the lock: a slow start never holds up `stop`
-        with self._lock:
-            keep = not self._ended and self._box is None
-            if keep:
-                self._box = box
-        if not keep:
-            _stop_box(box)
-            return self.get()
-        return box
-
-    def lost(self, box: Any) -> None:
-        """`box` died under a frame or cannot serve: the next `python` call starts a fresh one."""
-        with self._lock:
-            if self._box is box:
-                self._box = None
-        _stop_box(box)
-
-    def stop(self) -> None:
-        with self._lock:
-            self._ended = True
-            box, self._box = self._box, None
-        if box is not None:
-            _stop_box(box)
-
-
-@dataclass
-class _Run:
-    """One model run's state, which its tools and its request guard read: the run's clock (the
-    turn deadline, its own rate-limiter waits excluded) and, for an oracle attempt, the call it
-    serves, what the attempt staged, its python box, and the verdict a tool ended it with."""
-
-    door: QueryDoor
-    deadline: float
-    call: tuple[str, str, dict] = ("", "", {})
-    base: Any = None
-    real: Callable[[], RealData] = lambda: RealData(answers=[])
-    attempt: _Attempt = field(default_factory=_Attempt)
-    ended: str | None = None
-    reasked: bool = False
-    #: Side-query answers already read this attempt, so a re-checked draft re-reads nothing.
-    reruns: dict[str, Any] = field(default_factory=dict)
-    began: float = field(default_factory=time.monotonic)
-    #: This attempt's limiter waits; the verifier's run shares its attempt's.
-    waits: LimiterWaits = field(default_factory=LimiterWaits)
-    #: The oracle attempt's python box (`None` for the verifier, which runs no python).
-    box: _AttemptBox | None = None
-    #: Asked of a submission before its checks (`Oracle.serve`'s `gate`).
-    gate: Callable[[Any], str | None] | None = None
-
-    def remaining(self) -> float:
-        return self.deadline - (time.monotonic() - self.began - self.waits.excluded())
-
-    async def blocking(self, work: Callable[[], Any]) -> Any:
-        """`work` (a tenant read, a box run, the host checks) on a worker thread the attempt's
-        deadline can stop waiting on; the abandoned thread finishes on its own (a python frame
-        ends sooner: the attempt's box is stopped under it)."""
-        import anyio.to_thread
-
-        return await anyio.to_thread.run_sync(work, abandon_on_cancel=True)
 
 
 async def _within_deadline(run: _Run, work: Callable[[], Any]) -> tuple[bool, Any]:
@@ -804,152 +346,14 @@ async def _within_deadline(run: _Run, work: Callable[[], Any]) -> tuple[bool, An
     # A cancellation reaching `work()` raises out of it (`CancelledError`), so `outcome` holds a
     # value only if `work()` returned; `scope.cancelled_caught` alone may say the deadline fired.
     return (True, outcome[0]) if outcome else (False, None)
-
-
-@dataclass
-class _Outcome:
-    """How an oracle run ended: the `submit` call it ended on (`call_id`, and `answer`, that
-    call's result as the oracle reads it), and either the verified submission or the failure
-    verdict (`told`: already handed over as `answer`)."""
-
-    call_id: str | None
-    answer: str
-    submitted: _Submitted | None = None
-    failure: str = ""
-    told: bool = False
-
-
-def _no_submission(_text: str) -> _Outcome:
-    return _Outcome(None, "", failure="the turn ended without a submission: call "
-                                      "submit(served, claim) to end a turn")
-
-
-def _verdict_given(args: Any) -> dict:
-    passed = args.get("passed") if isinstance(args, Mapping) else None
-    if not isinstance(passed, bool):
-        return dict(_NO_VERDICT)
-    return {"passed": passed, "reason": str(args.get("reason") or "")}
-
-
-def _no_verdict(_text: str) -> dict:
-    return dict(_NO_VERDICT)
-
-
-_NO_VERDICT = {"passed": False, "reason": "the verifier produced no usable verdict"}
 #: A tool called after another tool of the same reply already ended the attempt.
 _NOT_RUN = "Not run: this attempt had already ended."
-
-
-def _settled(messages: list[Any]) -> list[Any]:
-    """The conversation as far as its last request. A run cut off after a model reply never
-    answered that reply's tool calls, and a provider refuses a conversation holding one."""
-    from pydantic_ai.messages import ModelResponse
-
-    out = list(messages)
-    while out and isinstance(out[-1], ModelResponse):
-        out.pop()
-    return out
-
-
-def _answered(messages: list[Any], call_id: str | None, answer: str) -> list[Any]:
-    """`messages` with the `submit` call's result reading `answer` (what became of the
-    submission) in place of the agent loop's stock acknowledgement."""
-    from dataclasses import replace
-
-    from pydantic_ai.messages import ModelRequest, ToolReturnPart
-
-    out = list(messages)
-    if call_id is None or not out or not isinstance(out[-1], ModelRequest):
-        return out
-    out[-1] = replace(out[-1], parts=[
-        replace(part, content=answer)
-        if isinstance(part, ToolReturnPart) and part.tool_call_id == call_id else part
-        for part in out[-1].parts])
-    return out
-
-
-def _conversation_size(parts: list[Any]) -> int:
-    """The characters `parts` carry, as `_PROMPT_BUDGET` counts them: every text a part holds
-    (a prompt, a tool's result, a reply's text) and every tool call's arguments, measured as
-    the text it is — the same count every cap here makes."""
-    size = 0
-    for part in parts:
-        for value in (getattr(part, "content", None), getattr(part, "args", None)):
-            if isinstance(value, str):
-                size += len(value)
-            elif value is not None:
-                size += len(json.dumps(value, sort_keys=True, default=str))
-    return size
 
 
 def _run_coroutine(factory: Callable[[], Any]) -> Any:
     """Run `factory()`'s coroutine to completion from sync code, through the shared helper
     (`_async.run_sync`: a thread with or without a loop, the caller's context carried)."""
     return run_sync(factory())
-
-
-def _model_and_settings(given: Any) -> tuple[Any, Any]:
-    """A pydantic-ai `Model`, or a `BuiltModel` carrying one with its settings."""
-    if hasattr(given, "request"):
-        return given, None
-    return given.model, getattr(given, "settings", None)
-
-
-class OraclePricingError(RuntimeError):
-    """A role's model has no pricing row: its spend would read as zero and the oracle's budget
-    could not bound it, so it is refused before any request goes out."""
-
-
-def price_row(actor: str, given: Any) -> str:
-    """`actor`'s pricing row, from the model's name alone: a `Model`, a `BuiltModel` carrying
-    one, or a model built lazily from its knob (whose name needs no provider key)."""
-    from defender._pricing import UnknownModel, model_key
-
-    name = getattr(given, "model_name", None)
-    if name is None:
-        name = getattr(_model_and_settings(given)[0], "model_name", "")
-    name = str(name or "")
-    try:
-        return model_key(name)
-    except UnknownModel:
-        raise OraclePricingError(
-            f"the {actor}'s model {name!r} has no row in defender/_pricing.py: its spend would "
-            "be charged as zero and the oracle's budget could not bound it") from None
-
-
-def _guard(oracle: Oracle, actor: str) -> Any:
-    """The one gate every model request of `actor`'s runs passes: the world's budget is checked
-    before it goes out, a provider failure ends the attempt (the verifier re-asks once), and its
-    spend is charged to the world. The deadline is the attempt's (`_within_deadline`)."""
-    from pydantic_ai.capabilities import AbstractCapability
-
-    class _Guard(AbstractCapability[_Run]):
-        async def wrap_model_request(self, ctx: Any, *, request_context: Any,
-                                     handler: Any) -> Any:
-            run: _Run = ctx.deps
-            if oracle.store.spent >= oracle.budget:
-                raise _BudgetSpent(f"the oracle spent its budget ({oracle.store.spent:.6f} of "
-                                   f"{oracle.budget} USD)")
-            if run.ended is not None:
-                raise _AttemptOver(run.ended, told=True)
-            try:
-                response = await handler(request_context)
-            except (_BudgetSpent, _AttemptOver):
-                raise
-            except Exception as exc:  # noqa: BLE001 — a provider failure ends the attempt
-                if actor == "verifier" and not run.reasked:  # the verifier re-asks once (M03=A)
-                    run.reasked = True
-                    return await self.wrap_model_request(
-                        ctx, request_context=request_context, handler=handler)
-                name = type(exc).__name__
-                if actor == "verifier":
-                    raise _VerifierGaveUp(f"the verifier's model request failed ({name})") from None
-                raise _AttemptOver(f"the model request failed ({name})") from None
-            # Outside the provider-failure handling: the request succeeded and was paid for.
-            oracle.charge(actor, response)
-            return response
-
-    return _Guard()
 
 
 #: How often one run's agent loop re-prompts a malformed reply (an unknown tool, unparsable
@@ -1413,7 +817,7 @@ class Oracle:
         return "Fact staged for this attempt."
 
     def _python(self, args: dict, run: _Run) -> str:
-        from defender.runtime.box_codec import BoxFault, encode_request
+        from defender.execution.box_codec import BoxFault, encode_request
 
         code = args.get("code")
         if not isinstance(code, str):

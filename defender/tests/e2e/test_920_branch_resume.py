@@ -9,10 +9,10 @@ pytest.importorskip("pydantic_ai")
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime.lead_zero import CORRELATION_HEADING  # noqa: E402
-from defender.tests import _1255_snapshot as S  # noqa: E402
-from defender.tests._branch_947 import spec_at  # noqa: E402
-from defender.tests._session_head_754 import message_ids  # noqa: E402
-from defender.tests._session_store_705 import sql, store_factory, store_mod  # noqa: E402
+from defender.tests.support.runtime.state import _1255_snapshot as S
+from defender.tests.support.learning.branch._branch_947 import spec_at  # noqa: E402
+from defender.tests.support.storage._session_head_754 import message_ids  # noqa: E402
+from defender.tests.support.storage._session_store_705 import sql, store_factory, store_mod  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     CORRELATION_SUMMARY,
     L3,

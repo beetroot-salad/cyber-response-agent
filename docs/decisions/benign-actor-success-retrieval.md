@@ -30,7 +30,7 @@ lessons that beat the judge rise to the top of the corpus.
    Promoting on survival injects false-negative risk into the actor's
    learning. Gate promotion on **confirmed-correct**: ground-truth-benign
    (held-out fixtures carry `ground_truth.yaml` — the label stays in
-   `defender/fixtures/held-out/`, read there by the eval and never copied
+   `evaluations/fixtures/held_out/`, read there by the eval and never copied
    into a run dir) or a defender FP-finding that
    survived author curation, treated as provisional otherwise.
 

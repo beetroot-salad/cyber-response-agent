@@ -14,7 +14,7 @@ LoopPaths = loop.LoopPaths
 
 from defender.learning.core import drains as drains  # type: ignore[import-not-found]  # noqa: E402
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, FINDINGS  # noqa: E402
-from defender.tests._state1135 import curation_run_dir, enqueue_run, state_for_paths  # noqa: E402
+from defender.tests.support.learning.core._state1135 import curation_run_dir, enqueue_run, state_for_paths  # noqa: E402
 from defender.learning.core import persist as persist  # type: ignore[import-not-found]  # noqa: E402
 from defender import _io as _io  # type: ignore[import-not-found]  # noqa: E402
 
@@ -155,7 +155,7 @@ class _FakeBranch:
 
 def _declarable_worktree(tmp_path: Path) -> Path:
     """A committed tree declaring one system, for `_FakeBranch(worktree=...)`."""
-    from defender.tests._declared869 import seed_tree
+    from defender.tests.support.runtime.engine._declared869 import seed_tree
 
     return seed_tree(tmp_path, name="wt", adapters=("elastic",), markers=("elastic",),
                      skills=("elastic",), catalog=("elastic",))

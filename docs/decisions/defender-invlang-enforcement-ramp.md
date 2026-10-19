@@ -527,7 +527,7 @@ error rather than letting the write through. Scope is anchored to
    Fixed here; the rule found it, which is the whole point of arming a
    closure gate over prompt surface.
 
-   The five minimal fixtures in `defender/tests/test_invlang_rules_933.py`
+   The five minimal fixtures in `defender/tests/invlang/validation/test_invlang_rules_933.py`
    and the one in `..._adversarial.py` that this rule caught — written
    for rules #23/#24, predating the deferral table — carry a
    `:T conclude.deferred_preds` block each and are green. To back the
@@ -626,8 +626,8 @@ not stragglers:
 
 | document | hypothesis | parent type | sibling written instead |
 |---|---|---|---|
-| `defender/fixtures-e2e/golden-sshpivot-ab3` | `h-001` | `session` | `?adversarial-cross-tier-pivot` |
-| `defender/fixtures-e2e/golden-v2sshd` | `h-002` | `process` | `?scanner-or-noise-probe` |
+| `defender/tests/fixtures/e2e/golden-sshpivot-ab3` | `h-001` | `session` | `?adversarial-cross-tier-pivot` |
+| `defender/tests/fixtures/e2e/golden-v2sshd` | `h-002` | `process` | `?scanner-or-noise-probe` |
 | `defender/examples/example-b-parallel-iam-cmdb.md` | `h-001` | `process` | `?adversary-on-monitoring-source` |
 | `defender/skills/invlang/SKILL.md` §Sibling-fork uniqueness, the **"Right"** block | `h-001` | `identity` | *(none — one hypothesis, two contracts, which is what the section teaches)* |
 | `experiments/actor-basin-276/…/falco-net-tool-live` | `h-001` | `process` | *(none)* |
@@ -932,11 +932,11 @@ the fact — a whole-document reading would deny every later write with no
 repair available, which is the wedge the v2.22 delta closed on rules #6
 and #17. A trailing unterminated ```invlang is exempt: that is a write
 cut off mid-block, the next append closes it, and
-`tests/test_frontier_recall_919.py` fixes that shape as accepted by
+`tests/invlang/validation/test_frontier_recall_919.py` fixes that shape as accepted by
 design. Measured before arming: across the 27 documents in the tree
 carrying invlang, one investigation fires — `live-867-old` itself — and
 nothing else does. `docs/investigation-language.md` §On-disk surface
-carries the rule; `tests/test_932_unfenced_surface.py` is the guard.
+carries the rule; `tests/invlang/parser/test_932_unfenced_surface.py` is the guard.
 
 The gate is the second half of the fix, not the whole of it. The first
 half is that the split itself was derived in three places — the
@@ -947,7 +947,7 @@ one reader of `INVLANG_FENCE_RE`, and it returns what the fences ORPHAN
 alongside what they hold, so the complement cannot be dropped without a
 caller choosing to. It REPORTS and does not refuse: the frontier and
 seed readers must never raise, and refusing on committed bytes is the
-wedge above. `scripts/lint/lint_unaccounted_fence_scan.py` keeps a
+wedge above. `tooling/lint/lint_unaccounted_fence_scan.py` keeps a
 fourth copy from growing back — baseline empty, because all five sites
 were folded in the same change.
 **(2) The `≥3 predictions` rate does climb — 22 of 36 hypotheses

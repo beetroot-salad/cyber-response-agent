@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from defender.evals.oracle_golden import audit_judge, judge, score
+from evaluations.oracle_golden import audit_judge, judge, score
 
 CASES = judge.GOLDEN_DIR / "cases"
 CASE = CASES / "case-003-suppression-devws"

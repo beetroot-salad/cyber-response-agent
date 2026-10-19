@@ -76,7 +76,7 @@ runtime = [
 box = [
     "duckdb>=1.5,<2",
     # The run clock inside the box (#1255 "Into the box"): the wheel vendors a prebuilt
-    # `libfaketime.so.1` that every box process preloads (`runtime/box/_clock.py`). Its library
+    # `libfaketime.so.1` that every box process preloads (`box/_clock.py`). Its library
     # is x86_64 ONLY — on an arm64 host the preload cannot load and the box refuses to start.
     # Pinned exactly: the library's path inside the wheel is part of the box's create command.
     "libfaketime==3.0.1",
@@ -100,7 +100,7 @@ dev = [
     # it was turned on — zero tests changed outcome versus a serial run.
     "pytest-xdist>=3.5",
     "pytest-cov",
-    # tests/test_sql_idioms.py reads the doc's fences with a CommonMark parse. The `runtime`
+    # tests/integrations/test_sql_idioms.py reads the doc's fences with a CommonMark parse. The `runtime`
     # extra happens to carry it (fastmcp -> rich -> markdown-it-py); a dev-only sync does not.
     "markdown-it-py",
     # tests/test_api_*.py drive the `api` extra's app through starlette's TestClient, which
@@ -157,7 +157,7 @@ py-modules = []
 #   defender/.venv/bin/mypy --config-file defender/pyproject.toml
 # so `files`/`mypy_path` below are relative to the repo root, not defender/.
 python_version = "3.11"
-files = ["defender"]
+files = ["defender", "evaluations"]
 # defender/ is a namespace tree: no top-level package, modules invoked by path,
 # tests sys.path.insert("..") (so imports resolve as `defender.*`). mypy_path +
 # explicit_package_bases + namespace_packages give every file a unique dotted

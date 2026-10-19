@@ -53,7 +53,7 @@ from defender.scripts.gather_tools.record_query import (
     repeat_trip,
 )
 from defender.runtime.verbs import read_roster  # noqa: E402
-from defender.tests._after_start_1256 import AfterStart, Relink  # noqa: E402
+from defender.tests.support.shared.contracts._after_start_1256 import AfterStart, Relink  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -61,7 +61,7 @@ SALT = "aabbccddeeff0011"
 LEAD = "l-001"
 SIBLING = "l-002"
 
-CORPUS = DEFENDER / "fixtures-e2e" / "repeat-corpus-807"
+CORPUS = DEFENDER / "tests" / "fixtures" / "e2e" / "repeat-corpus-807"
 
 # The idiom `_run_gather`'s three shipped terminal branches already use, and the ONLY
 # vocabulary any prompt in the corpus teaches main (defender/SKILL.md:394 — G19).
@@ -168,10 +168,10 @@ def _run_inherited(
     claim for its leads, so the sibling's MAIN can dispatch `lead` again; seeding copies the
     table's rows for the inherited leads, and each `rows` entry's sidecar, into the sibling and
     records them on the sibling's state (#1235 round 2) before its first turn."""
-    from defender.tests._branch_947 import (
+    from defender.tests.support.learning.branch._branch_947 import (
         GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
     )
-    from defender.tests._session_store_705 import runs_base
+    from defender.tests.support.storage._session_store_705 import runs_base
 
     source = runs_base(root) / SOURCE_RUN
     RunPaths(source).executed_queries.parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +191,7 @@ def _run_inherited(
     store.close()
     sibling = root / "defender-runs" / "run-sibling-807"
     RunPaths(sibling).gather_raw.mkdir(parents=True)
-    from defender.tests._alert_plant import plant_alert
+    from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(sibling, RunPaths(source).alert.read_bytes())
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
                      Turn(text="Investigation complete.")])
@@ -864,7 +864,7 @@ def test_tripping_call_carries_no_repeat_note(three_identical_requests):
 
 def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
     registry, relink = unloadable_adapter(tmp_path / "tree")
-    from defender.tests.tenant_1107_settings import _spec1107 as S
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
     root = tmp_path / "tenant-data"
     S.plant(root, table="dispositions:\n  elastic:\n    probe: {roles: [gather]}\n")
@@ -893,7 +893,7 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
 
 def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path):
     registry, relink = unloadable_adapter(tmp_path / "tree")
-    from defender.tests.tenant_1107_settings import _spec1107 as S
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
     root = tmp_path / "tenant-data"
     S.plant(root, table="dispositions:\n  elastic:\n    probe: {roles: [gather]}\n")

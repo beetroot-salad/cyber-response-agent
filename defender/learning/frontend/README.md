@@ -82,7 +82,7 @@ filesystem  ──►  serialize.py  ──►  lessons.json  ──►  build.p
 ## Tests
 
 ```bash
-defender/.venv/bin/python3 -m pytest defender/tests/test_lessons_frontend.py -v
+defender/.venv/bin/python3 -m pytest defender/tests/learning/retrieval/test_lessons_frontend.py -v
 ```
 
 ## Not yet built (future panels)

@@ -3,19 +3,14 @@ structure, and the severity ceiling. A conclusion that has not paid its price is
 """
 from __future__ import annotations
 
-import datetime as dt
-import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from typing import Any
 
 
-from defender import _yaml
 
-from defender import _clock
 from defender._model import model
 from defender._text import strip_zero_width
 from defender._vocab import DISPOSITION_ENUM
-from defender.runtime.verbs import RosterRead
 from .. import _walkers, vocab
 from ..parser import (
     is_conclude_empty_marker,
@@ -77,27 +72,41 @@ def _lead_returned_a_result(lead: FindingRecord) -> bool:
         return False
     return bool(set(outcome) - {"failure_reason"})
 
+from defender.skills.invlang.validate._ceiling import (
+    CEILING_NOTHING_TO_TRY as CEILING_NOTHING_TO_TRY,
+    CEILING_QUERY_EMPTY as CEILING_QUERY_EMPTY,
+    CEILING_QUERY_FAILED as CEILING_QUERY_FAILED,
+    CEILING_STATES as CEILING_STATES,
+    CapabilitiesNotRead as CapabilitiesNotRead,
+    CeilingReceipt as CeilingReceipt,
+    _CHECKOUT_ROSTER as _CHECKOUT_ROSTER,
+    _CeilingWalk as _CeilingWalk,
+    _LEAD_ANCHORED_STATES as _LEAD_ANCHORED_STATES,
+    _LEAD_REF_RE as _LEAD_REF_RE,
+    _MAX_CEILING_FRONTMATTER_BYTES as _MAX_CEILING_FRONTMATTER_BYTES,
+    _MAX_CEILING_NOTE_BYTES as _MAX_CEILING_NOTE_BYTES,
+    _RECEIPT_FIELD_NAMES as _RECEIPT_FIELD_NAMES,
+    _RECEIPT_FIELD_RE as _RECEIPT_FIELD_RE,
+    _RECEIPT_ROW_RE as _RECEIPT_ROW_RE,
+    _cap_is_identifier_shaped as _cap_is_identifier_shaped,
+    _capability_exists as _capability_exists,
+    _check_ceiling_receipt as _check_ceiling_receipt,
+    _check_inconclusive_gating as _check_inconclusive_gating,
+    _check_lead_anchored_receipt as _check_lead_anchored_receipt,
+    _check_nothing_to_try_receipt as _check_nothing_to_try_receipt,
+    _lead_by_id as _lead_by_id,
+    _lead_retrieval_came_back as _lead_retrieval_came_back,
+    _parse_ceiling_row as _parse_ceiling_row,
+    _row_renders_as_empty_marker as _row_renders_as_empty_marker,
+    _walk_ceiling_rows as _walk_ceiling_rows,
+    ceiling_note_block as ceiling_note_block,
+    ceiling_test_block as ceiling_test_block,
+    conclude_ceiling_test_rows as conclude_ceiling_test_rows,
+    hold_capabilities as hold_capabilities,
+    known_capabilities as known_capabilities,
+    release_capabilities as release_capabilities,
+)
 
-def _lead_retrieval_came_back(lead: FindingRecord) -> bool:
-    """Did this lead's own retrieval return anything — an observation or an `:R attr_updates`
-    row — as opposed to an analytical conclusion (`:R authz`/`anchor`/`impact`) about it.
-
-    Narrower than `_lead_returned_a_result`, which also counts `resolutions` and is right for
-    `entity_check`. A lead can resolve a contract `indeterminate` purely from absent telemetry
-    (golden-v2sshd's `l-004`); counting that resolution as a result would make the most common
-    real gap — a query that found nothing, with a conclusion drawn from the absence —
-    unanchorable by any `ceiling_test` receipt.
-    """
-    outcome = lead.get("outcome")
-    if not isinstance(outcome, dict):
-        return False
-    return bool(outcome.get("observations") or outcome.get("attribute_updates"))
-
-
-#: The one lookup a `:L findings` lead reference resolves against, shared by `entity_check` and
-#: a `ceiling_test` receipt's `ref`.
-def _lead_by_id(companion: CompanionBody, lead_id: str) -> FindingRecord | None:
-    return next((f for f in _leads(companion) if f.get("id") == lead_id), None)
 
 
 def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
@@ -183,9 +192,22 @@ def _check_benign_grounding(companion: CompanionBody) -> list[str]:
 #: The anchor kind an authored, human-committed registry entry is filed under.
 TACIT_KNOWLEDGE = "tacit-knowledge"
 
-#: The anchor kind a `:R consultations` baseline carries, and its grounding. Consultation-only:
-#: a statistical pattern is context about what the estate does, never a verdict on what it may do.
-RUNTIME_EVIDENCE = "runtime-evidence"
+from defender.skills.invlang.validate._runtime_evidence import (
+    RUNTIME_EVIDENCE as RUNTIME_EVIDENCE,
+    RuntimeEvidenceReceipt as RuntimeEvidenceReceipt,
+    _BaselineWalk as _BaselineWalk,
+    _MAX_RUNTIME_EVIDENCE_BODY_BYTES as _MAX_RUNTIME_EVIDENCE_BODY_BYTES,
+    _RENDERED_BASELINE_CELLS as _RENDERED_BASELINE_CELLS,
+    _REPORT_CLOSE_DELIMITER as _REPORT_CLOSE_DELIMITER,
+    _alerted_moment as _alerted_moment,
+    _check_runtime_evidence_windows as _check_runtime_evidence_windows,
+    _delimiter_bearing_cell as _delimiter_bearing_cell,
+    _parse_window as _parse_window,
+    _walk_runtime_evidence_rows as _walk_runtime_evidence_rows,
+    conclude_runtime_evidence_rows as conclude_runtime_evidence_rows,
+    runtime_evidence_block as runtime_evidence_block,
+)
+
 TELEMETRY_BASELINE = "telemetry-baseline"
 
 #: Checked against the vocabularies they spell members of: gates here compare cells against
@@ -554,402 +576,6 @@ _FALSE_POSITIVE_PRICE = _Price(
     ),
 )
 
-def _row_renders_as_empty_marker(value: object) -> bool:
-    """Does a `ceiling_test` row render as nothing or as the format's empty marker
-    (`none`/`n/a`)? Such a row is the format's "no gap" spelling and is skipped, not refused."""
-    return isinstance(value, str) and (not value.strip() or is_conclude_empty_marker(value))
-
-
-#: The closed states a `ceiling_test` receipt may claim. A receipt is a pointer into this run's
-#: own transcript, verified mechanically, never a judgment of prose.
-#:
-#: Three states because that is all current instrumentation distinguishes without reading the
-#: model's words: `_lead_retrieval_came_back` splits "came back with something" from "did not",
-#: and the presence (never content) of a lead's `fail_reason` splits "errored" from "empty".
-#: `access-denied` / `out-of-retention` need a host-side signal that tells them apart from
-#: `query-failed` mechanically (e.g. a distinct `error_class` for a permission refusal, or an
-#: adapter reporting before-retention) before they can be added.
-CEILING_QUERY_FAILED = "query-failed"
-CEILING_QUERY_EMPTY = "query-empty"
-CEILING_NOTHING_TO_TRY = "nothing-to-try"
-CEILING_STATES: tuple[str, ...] = (
-    CEILING_QUERY_FAILED, CEILING_QUERY_EMPTY, CEILING_NOTHING_TO_TRY,
-)
-
-#: The states that anchor to a lead this run dispatched. `nothing-to-try` has no call to point
-#: at: the capability does not exist.
-_LEAD_ANCHORED_STATES: tuple[str, ...] = (CEILING_QUERY_FAILED, CEILING_QUERY_EMPTY)
-
-#: The shape of a `:L findings` lead id (`l-<alphanumeric>`). A receipt's `ref` is checked
-#: against it before the lookup: `:L findings` ids are unconstrained free text, so exact
-#: membership alone would accept a delimiter-shaped id a model declared.
-_LEAD_REF_RE = re.compile(r"l-[A-Za-z0-9]+")
-
-
-@model(frozen=True)
-class CeilingReceipt:
-    """One parsed `ceiling_test` row.
-
-    `state`/`ref`/`cap` are the structured half, mechanically checked against this run's own
-    transcript, and the only part that goes into the report frontmatter (`ceiling_test_block`).
-    `note` is free text for the human analyst: checked only for the report delimiter and a total
-    size bound, rendered into the report body, and passed verbatim (inside the untrusted frame)
-    to the ceiling review composer."""
-
-    state: str
-    ref: str | None
-    cap: str | None
-    note: str
-    raw: str
-
-
-#: `state=... [ref=...] [cap=...] note=<free text>`. `note=` is always last and takes the rest
-#: of the line, so it needs no quoting. The other fields are `\S+` tokens compared by exact
-#: membership, so a homoglyph or zero-width variant simply fails to match.
-_RECEIPT_ROW_RE = re.compile(r"^(?P<fields>(?:\S+=\S+\s+)*)note=(?P<note>.*)$")
-_RECEIPT_FIELD_RE = re.compile(r"(\S+)=(\S+)")
-_RECEIPT_FIELD_NAMES = frozenset({"ref", "state", "cap"})
-
-
-def _parse_ceiling_row(row: str) -> CeilingReceipt | None:
-    """Parse one `ceiling_test` row, or `None` if it is not receipt-shaped at all. `None` is not
-    itself a refusal; the caller decides what it costs."""
-    m = _RECEIPT_ROW_RE.match(row.strip())
-    if not m:
-        return None
-    fields = dict(_RECEIPT_FIELD_RE.findall(m.group("fields")))
-    if not fields or set(fields) - _RECEIPT_FIELD_NAMES or "state" not in fields:
-        return None
-    return CeilingReceipt(
-        state=fields["state"], ref=fields.get("ref"), cap=fields.get("cap"),
-        note=m.group("note").strip(), raw=row,
-    )
-
-
-#: The closed universe of `(system, verb)` pairs this codebase's adapters declare
-#: (`defender/scripts/adapters/*_adapter.py`), which `nothing-to-try` is checked against. Closed
-#: by construction: code this repo owns, never a catalogue of real-world data sources.
-#:
-#: Held, never fetched: the process's composition root reads the roster once and hands it over
-#: through `hold_capabilities` before any validation. Reading lazily here would make whichever
-#: document-path guard asked first catch the host's fault and blame the document. Holds the
-#: `RosterRead` itself, the same object the run's registry holds.
-_CHECKOUT_ROSTER: RosterRead | None = None
-
-
-class CapabilitiesNotRead(RuntimeError):
-    """`known_capabilities` was called before `hold_capabilities`: a composition-root defect,
-    not a document diagnostic."""
-
-
-def hold_capabilities(roster: RosterRead) -> None:
-    """Hand the gate the checkout's roster (`read_roster(DefenderPaths(REPO_ROOT).adapters_dir)`,
-    or the run's own when its tree is the checkout). Called once at process start; a later call
-    replaces it, which only tests driving several checkouts rely on."""
-    if not isinstance(roster, RosterRead):
-        raise TypeError(
-            f"hold_capabilities takes the RosterRead `read_roster` produced, got "
-            f"{type(roster).__name__}"
-        )
-    global _CHECKOUT_ROSTER
-    _CHECKOUT_ROSTER = roster
-
-
-def release_capabilities() -> None:
-    """Forget the held roster, so a test can observe the unheld state or avoid leaking a
-    fixture roster to the next test."""
-    global _CHECKOUT_ROSTER
-    _CHECKOUT_ROSTER = None
-
-
-def known_capabilities() -> Mapping[str, frozenset[str]]:
-    """System -> the verb names its adapter declares, for this process's checkout. Raises
-    `CapabilitiesNotRead` if `hold_capabilities` was never called.
-
-    The checkout's tree (`REPO_ROOT`), not the run's `defender_dir`: the price is closed over what
-    this repository owns. A failed or absent roster read fails at the composition root as
-    `RegistryError`, never inside a guard on the document's path, which would blame the model for
-    the host's fault."""
-    if _CHECKOUT_ROSTER is None:
-        raise CapabilitiesNotRead(
-            "the checkout's adapters roster was never read: the process's composition root "
-            "must `read_roster` it once and `hold_capabilities` the value before any "
-            "document is validated"
-        )
-    return _CHECKOUT_ROSTER.verbs
-
-
-def _capability_exists(cap: str) -> bool:
-    """Does `cap` name a REAL `system` or `system.verb` this deployment's adapters declare?
-    `nothing-to-try` pays only when this is False."""
-    known = known_capabilities()
-    system, sep, verb = cap.partition(".")
-    if sep:
-        return verb in known.get(system, frozenset())
-    return cap in known
-
-
-def _cap_is_identifier_shaped(cap: str) -> bool:
-    """Is `cap` shaped like `<system>` or `<system.verb>`, rather than arbitrary text?
-
-    `cap` is the one receipt field checked by absence (`not _capability_exists`), which any
-    non-capability string satisfies, `</report>` included. `ref` and `state` are checked by exact
-    membership, which already refuses non-members. Uses `runtime.verbs`' system-name alphabet for
-    both halves, since verb names share it."""
-    from defender.runtime.verbs import SYSTEM_PATTERN, is_system_name
-
-    system, sep, verb = cap.partition(".")
-    if not is_system_name(system):
-        return False
-    return not sep or bool(re.fullmatch(SYSTEM_PATTERN, verb))
-
-
-#: `_artifact_schema.REPORT_CLOSE_DELIMITER`, duplicated because that module imports this
-#: package. Text carrying it would break the report block boundary once rendered into
-#: `report.md`'s body, so it is refused before the document lands.
-_REPORT_CLOSE_DELIMITER = "</report>"
-
-
-def _delimiter_bearing_cell(row: Any, keys: Sequence[str]) -> str | None:
-    """The first of `keys` whose cell carries the report's closing delimiter, or `None`, so the
-    refusal can name the cell to rewrite."""
-    return next((key for key in keys if _REPORT_CLOSE_DELIMITER in _cell(row, key)), None)
-
-
-def ceiling_test_block(receipts: Sequence[CeilingReceipt]) -> str:
-    """@owns ceiling_test
-
-    The `ceiling_test:` frontmatter block for `receipts` — `ref`/`state`/`cap` only, never the
-    `note`. The one renderer, so the gate that bounds it (`_check_inconclusive_gating`) and
-    `close_tool.render_report`, which emits it, measure the same bytes. Dumped through PyYAML
-    because `ref`/`cap` are model-cited tokens in a host-owned file."""
-    if not receipts:
-        return ""
-    rows: list[dict[str, str]] = []
-    for r in receipts:
-        row: dict[str, str] = {"state": r.state}
-        if r.ref is not None:
-            row["ref"] = r.ref
-        if r.cap is not None:
-            row["cap"] = r.cap
-        rows.append(row)
-    return _yaml.safe_dump(
-        {"ceiling_test": rows},
-        allow_unicode=True, default_flow_style=False, sort_keys=False, width=10**9,
-    )
-
-
-def _check_lead_anchored_receipt(companion: CompanionBody, receipt: CeilingReceipt) -> str | None:
-    """The `query-failed`/`query-empty` half of `_check_ceiling_receipt`: `ref` must name a lead
-    this run dispatched whose own retrieval came back with nothing, and the state must match
-    whether that lead recorded a `fail_reason`."""
-    if receipt.cap is not None:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `state={receipt.state}` takes `ref=`, "
-            f"not `cap=` — a call that was actually dispatched points at the lead that "
-            f"made it"
-        )
-    if not receipt.ref:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `state={receipt.state}` needs "
-            f"`ref=<lead-id>` naming the `:L findings` row that made the attempt"
-        )
-    if not _LEAD_REF_RE.fullmatch(receipt.ref):
-        # `:L findings` ids have no shape rule (a lead named `</report>` parses cleanly), so
-        # exact membership alone does not constrain shape. Checked before the lookup so a
-        # hostile id cannot be planted and then cited.
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `ref={receipt.ref}` is not shaped like a "
-            f"`:L findings` lead id (`l-<alphanumeric>`)"
-        )
-    lead = _lead_by_id(companion, receipt.ref)
-    if lead is None:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `ref={receipt.ref}` is not a lead in "
-            f"`:L findings`"
-        )
-    if _lead_retrieval_came_back(lead):
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: lead {receipt.ref} actually retrieved "
-            f"something (an observation, an updated attribute) — a receipt cannot claim a "
-            f"gap for a call that came back with data. An analytical CONCLUSION about the "
-            f"lead (an authz/anchor/impact resolution) does not by itself disqualify it — "
-            f"only retrieved data does; see `_lead_retrieval_came_back`"
-        )
-    outcome = lead.get("outcome")
-    errored = isinstance(outcome, dict) and bool(outcome.get("failure_reason"))
-    if receipt.state == CEILING_QUERY_FAILED and not errored:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `state=query-failed` but lead "
-            f"{receipt.ref} records no `fail_reason` in `:L findings` — write "
-            f"`state=query-empty` for a call that ran clean and came back with nothing, "
-            f"or add the lead's `fail_reason`"
-        )
-    if receipt.state == CEILING_QUERY_EMPTY and errored:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `state=query-empty` but lead "
-            f"{receipt.ref} records a `fail_reason` in `:L findings` — write "
-            f"`state=query-failed` for a call that errored"
-        )
-    return None
-
-
-def _check_nothing_to_try_receipt(receipt: CeilingReceipt) -> str | None:
-    """The `nothing-to-try` half of `_check_ceiling_receipt`: `cap` must name a capability the
-    closed verb roster does not declare."""
-    if receipt.ref is not None:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `state=nothing-to-try` takes `cap=`, not "
-            f"`ref=` — nothing was dispatched, so there is no lead to point at"
-        )
-    if not receipt.cap:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `state=nothing-to-try` needs "
-            f"`cap=<system>` or `cap=<system.verb>` naming the missing capability"
-        )
-    if not _cap_is_identifier_shaped(receipt.cap):
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `cap={receipt.cap}` is not shaped like "
-            f"`<system>` or `<system.verb>` — lowercase letters, digits and hyphens only, one "
-            f"optional `.verb` segment. `cap` is checked by ABSENCE from the closed roster, "
-            f"which cannot constrain an arbitrary string on its own; rewrite it as the "
-            f"capability's actual system[.verb] name"
-        )
-    if _capability_exists(receipt.cap):
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `cap={receipt.cap}` names a capability this "
-            f"deployment DOES provide — `nothing-to-try` is for a capability that does not "
-            f"exist at all. If the call was made and failed or came back empty, use "
-            f"`state=query-failed`/`state=query-empty` with `ref=<lead-id>` instead"
-        )
-    return None
-
-
-def _check_ceiling_receipt(companion: CompanionBody, receipt: CeilingReceipt) -> str | None:
-    """Is `receipt` consistent with this run's own transcript: a foreign-key and
-    closed-vocabulary check, never a judgment of the note. Returns the refusal, or `None` when
-    the receipt pays."""
-    if receipt.state not in CEILING_STATES:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: `state={receipt.state}` is not one of "
-            f"{CEILING_STATES}"
-        )
-    if _REPORT_CLOSE_DELIMITER in receipt.note:
-        return (
-            f"`ceiling_test` row {receipt.raw!r}: the `note` carries the literal "
-            f"{_REPORT_CLOSE_DELIMITER!r}, which the committed report may not carry — "
-            f"rewrite the note without it"
-        )
-    if receipt.state in _LEAD_ANCHORED_STATES:
-        return _check_lead_anchored_receipt(companion, receipt)
-    return _check_nothing_to_try_receipt(receipt)
-
-
-@model(frozen=True)
-class _CeilingWalk:
-    """One walk of a `:T conclude.ceiling_test` list: the paying rows (document order, deduped)
-    and every row-level complaint. Shared by the gate (`_check_inconclusive_gating`) and the
-    report reader (`conclude_ceiling_test_rows`), so a row the gate refused never reaches
-    `report.md` and one it accepted is never dropped."""
-
-    paying: tuple[CeilingReceipt, ...]
-    errors: tuple[str, ...]
-
-
-def _walk_ceiling_rows(companion: CompanionBody, rows: Any) -> _CeilingWalk:
-    paying: list[CeilingReceipt] = []
-    errors: list[str] = []
-    seen: set[tuple[str, str]] = set()
-    # `isinstance(list)`, not `rows or []`: iterating a string would walk its characters.
-    for row in rows if isinstance(rows, list) else []:
-        if not isinstance(row, str) or _row_renders_as_empty_marker(row):
-            continue
-        receipt = _parse_ceiling_row(row)
-        if receipt is None:
-            # Silent: a row not even shaped like a receipt states nothing to price. The
-            # aggregate "no receipt pays" message carries the guidance if nothing else pays.
-            continue
-        identity = (
-            receipt.state, receipt.ref if receipt.ref is not None else (receipt.cap or ""),
-        )
-        if identity in seen:
-            errors.append(
-                f"`ceiling_test` row {row!r} repeats an earlier gap — each row must name a "
-                f"DISTINCT gap; repetition does not pay for a second one"
-            )
-            continue
-        seen.add(identity)
-        problem = _check_ceiling_receipt(companion, receipt)
-        if problem is not None:
-            errors.append(problem)
-            continue
-        paying.append(receipt)
-    return _CeilingWalk(paying=tuple(paying), errors=tuple(errors))
-
-
-#: Bound on the frontmatter receipt block (`ref`/`state`/`cap` only). Charged on the rendered
-#: block (`ceiling_test_block`) because PyYAML quoting changes the size, and a measurement that
-#: disagrees with the renderer can pass here what the commit refuses. Well under
-#: `_artifact_schema.REPORT_FRONTMATTER_MAX` (512); it guards against an unreasonable number of
-#: receipts rather than any one receipt's size.
-_MAX_CEILING_FRONTMATTER_BYTES = 300
-
-#: Bound on the rendered `ceiling_test` note lines in the report body (`ceiling_note_block`).
-#: Without it a large note passes this gate and then strands the run at
-#: `_artifact_schema.validate_report`'s whole-file cap, after the review has been spent. Sized
-#: like `_MAX_RUNTIME_EVIDENCE_BODY_BYTES`: 300 + 2048 + 2048 stays well under
-#: `_artifact_schema.REPORT_FILE_MAX` (8192).
-_MAX_CEILING_NOTE_BYTES = 2048
-
-
-def ceiling_note_block(receipts: Sequence[CeilingReceipt]) -> str:
-    """The `report.md` body lines for the receipts' notes: one per receipt that has one, naming
-    its state and its `ref` or `cap`, then the free text. The one renderer, so the bounding gate
-    and `close_tool.render_report` measure the same bytes. Each line starts with a newline;
-    empty when no receipt has a note."""
-    return "".join(
-        f"\nceiling_test ({r.state}, {r.ref or r.cap}): {r.note}" for r in receipts if r.note
-    )
-
-
-def _check_inconclusive_gating(companion: CompanionBody) -> list[str]:
-    """`inconclusive` owes at least one `ceiling_test` row that is a valid receipt.
-
-    A `query-failed`/`query-empty` receipt must `ref` a lead this run dispatched whose own
-    retrieval is consistent with the state; a `nothing-to-try` receipt must `cap` a capability
-    absent from the closed verb roster. Rows must be distinct, and the rendered frontmatter and
-    note text are bounded. Collected at both the write gate and the close via
-    `_DISPOSITION_GATES`."""
-    conclude = companion.get("conclude") or {}
-    walk = _walk_ceiling_rows(companion, conclude.get("ceiling_test"))
-    errors = [f"disposition inconclusive blocked: {e}" for e in walk.errors]
-    total_bytes = len(ceiling_test_block(walk.paying).encode("utf-8"))
-    if total_bytes > _MAX_CEILING_FRONTMATTER_BYTES:
-        errors.append(
-            f"disposition inconclusive blocked: the accumulated `ceiling_test` receipts are "
-            f"{total_bytes} bytes, over the {_MAX_CEILING_FRONTMATTER_BYTES}-byte bound — "
-            f"name fewer, more specific gaps rather than every one in full"
-        )
-    note_bytes = len(ceiling_note_block(walk.paying).encode("utf-8"))
-    if note_bytes > _MAX_CEILING_NOTE_BYTES:
-        errors.append(
-            f"disposition inconclusive blocked: the accumulated `ceiling_test` notes render "
-            f"{note_bytes} bytes of `report.md` body, over the {_MAX_CEILING_NOTE_BYTES}-byte "
-            f"bound — shorten the "
-            f"notes; they are free text for the human analyst, never required to make a "
-            f"receipt pay"
-        )
-    if not walk.paying:
-        errors.append(
-            "disposition inconclusive blocked: no `ceiling_test` row is a receipt that pays "
-            "— write `state=query-failed ref=<lead-id> note=<text>` or "
-            "`state=query-empty ref=<lead-id> note=<text>` naming a `:L findings` lead this "
-            "run dispatched that failed or came back empty, or `state=nothing-to-try "
-            "cap=<system[.verb]> note=<text>` naming a capability this deployment does not "
-            "provide."
-        )
-    return errors
-
 
 _INCONCLUSIVE_PRICE = _Price(
     check=_check_inconclusive_gating,
@@ -987,249 +613,6 @@ class EntryPrice:
         """Truthy when something is owed; an unpriced keyword and a paid document are both
         falsy."""
         return bool(self.owed)
-
-
-def conclude_ceiling_test_rows(companion: CompanionBody) -> tuple[CeilingReceipt, ...]:
-    """The `:T conclude.ceiling_test` receipts that pay, in document order.
-
-    Public because `report.md` is written from the close's disposition argument and never
-    re-reads the companion, so the close carries these into the report itself. Uses the gate's
-    own walk so the rows that ship are exactly the rows the gate priced and bounded.
-
-    Takes the parsed companion: the close has already parsed it once, inside the guard that
-    turns a parse fault into a refusal (`_refuse_if_entry_price_is_owed`)."""
-    conclude = companion.get("conclude") or {}
-    return _walk_ceiling_rows(companion, conclude.get("ceiling_test")).paying
-
-
-@model(frozen=True)
-class RuntimeEvidenceReceipt:
-    """One parsed `:R consultations` baseline row.
-
-    Split like `CeilingReceipt`: the structured half (`resolved_by_lead`/`anchor_kind`/
-    `grounding_kind`/`anchor_id` and the window, verbatim and parsed) is checked mechanically;
-    `result` and `reasoning` are free text for the analyst and never mined for numbers.
-
-    @owns window_start
-
-    The window is parsed once, here: the guard compares `window_end` with the alerted event and
-    `close_tool.render_report` shows `window` as written. Frozen because it travels from the
-    projection through the close into `report.md`.
-    """
-
-    resolved_by_lead: str
-    anchor_kind: str
-    grounding_kind: str
-    anchor_id: str
-    result: str
-    reasoning: str
-    window: str
-    window_start: dt.datetime
-    window_end: dt.datetime
-
-
-def _parse_window(text: str) -> tuple[dt.datetime, dt.datetime] | None:
-    """An `<start>/<end>` window as two aware UTC datetimes, or `None` if either half fails.
-
-    A real parse, not a string comparison, since the guard must order instants. Through
-    `_clock.parse_iso_utc`, which owns the naive-is-UTC rule (a local reading would vary by host,
-    and comparing naive with aware raises). The caller fails closed on `None`.
-    """
-    start_text, sep, end_text = text.partition("/")
-    if not sep:
-        return None
-    start = _clock.parse_iso_utc(start_text.strip())
-    end = _clock.parse_iso_utc(end_text.strip())
-    if start is None or end is None:
-        return None
-    return start, end
-
-
-def _alerted_moment(companion: CompanionBody) -> dt.datetime | None:
-    """When the explained activity happened: the earliest parseable `when` on a
-    `:E prologue.edges` row (the validator never sees `alert.json`). Earliest, because with
-    several alerted edges a baseline ending after the first already contains the incident.
-    """
-    moments = [
-        moment
-        for edge in (companion.get("prologue") or {}).get("edges") or []
-        if isinstance(edge, dict)
-        # `when` projects as `{"timestamp": ...}`; `_cell` still unquotes the copied cell.
-        and (moment := _clock.parse_iso_utc(_cell(edge.get("when") or {}, "timestamp")))
-        is not None
-    ]
-    return min(moments) if moments else None
-
-
-#: Bound on the report-body text baseline consultations render, charged on the rendered block
-#: (as `_MAX_CEILING_FRONTMATTER_BYTES` is). `_artifact_schema.REPORT_FILE_MAX` caps the whole
-#: report at 8192 bytes while the invlang write gate allows 65536, so consultations the write
-#: gate accepted could otherwise render a report the close refuses permanently. Sized to leave
-#: room for the frontmatter, the ceiling notes and the close's own text.
-_MAX_RUNTIME_EVIDENCE_BODY_BYTES = 2048
-
-
-def runtime_evidence_block(receipts: Sequence[RuntimeEvidenceReceipt]) -> str:
-    """@owns runtime_evidence
-
-    The `report.md` body lines for `receipts`: one per baseline, naming the grounding, entry,
-    owning lead and window, then the model's free text. The one renderer, so the bounding gate
-    and `close_tool.render_report` measure the same bytes. Each line starts with a newline;
-    empty when there are no receipts.
-    """
-    out = ""
-    for r in receipts:
-        out += (
-            f"\n{r.anchor_kind} ({r.grounding_kind}, {r.anchor_id}, {r.resolved_by_lead}, "
-            f"{r.window}): {r.result}"
-        )
-        if r.reasoning:
-            out += f" — {r.reasoning}"
-    return out
-
-
-#: Every cell `runtime_evidence_block` copies into `report.md`'s body; keep the two in step.
-#: The delimiter guard covers all of them, not just the free-text ones: `anchor_id` is an open
-#: column, and a `</report>` in any rendered cell would make the close refuse a report whose
-#: append-only source row can never be withdrawn.
-_RENDERED_BASELINE_CELLS: tuple[str, ...] = (
-    "anchor_kind", "grounding_kind", "anchor_id", "resolved_by_lead",
-    "effective_window", "result", "reasoning",
-)
-
-
-@model(frozen=True)
-class _BaselineWalk:
-    """One walk of the `:R consultations` baseline rows: the accepted receipts in document
-    order and every row-level refusal. Shared by the guard and the report reader, as
-    `_CeilingWalk` is."""
-
-    receipts: tuple[RuntimeEvidenceReceipt, ...]
-    errors: tuple[str, ...]
-
-
-def _walk_runtime_evidence_rows(companion: CompanionBody) -> _BaselineWalk:
-    """Select the `runtime-evidence` consultations, parse each window, and hold it against the
-    alerted event.
-
-    Selected by anchor kind: the lead's `tacit-knowledge` lookup rows share the bucket and are
-    not baselines. The guard — the window must end strictly before the alerted event, because a
-    pattern that begins with the incident is the incident — applies only to `runtime-evidence`:
-    a `tacit-knowledge` row carries the registry entry's validity span, which brackets the alert
-    by design.
-    """
-    alerted = _alerted_moment(companion)
-    receipts: list[RuntimeEvidenceReceipt] = []
-    errors: list[str] = []
-    seen: set[tuple[str, ...]] = set()
-    for row in _walkers.iter_anchor_consultations(companion):
-        if _cell(row, "anchor_kind") != RUNTIME_EVIDENCE:
-            continue
-        lead_id = _cell(row, "resolved_by_lead")
-        window = _cell(row, "effective_window")
-        where = (
-            f"lead {lead_id or '?'}: `:R consultations` baseline "
-            f"{_cell(row, 'anchor_id') or '<no anchor_id>'}"
-        )
-        # Deduplicated as in `_walk_ceiling_rows`: a repeat renders twice and spends the body
-        # budget twice. The identity is the whole rendered line, not the addressing cells:
-        # `anchor_id` is optional, so two measurements by one lead over one window are legal.
-        identity = tuple(_cell(row, cell) for cell in _RENDERED_BASELINE_CELLS)
-        if identity in seen:
-            errors.append(
-                f"{where}: repeats an earlier baseline verbatim — a second copy measures "
-                f"nothing further and renders the same line into the committed report twice. "
-                f"Write one row per measurement"
-            )
-            continue
-        seen.add(identity)
-        # Every rendered cell is held to the `ceiling_test` note rule: a delimiter here would
-        # make the close refuse the report, and the append-only row cannot be withdrawn.
-        delimiter = _delimiter_bearing_cell(row, _RENDERED_BASELINE_CELLS)
-        if delimiter is not None:
-            errors.append(
-                f"{where}: `{delimiter}` carries the literal {_REPORT_CLOSE_DELIMITER!r}, which "
-                f"the committed report may not carry — this text rides into `report.md`'s body, "
-                f"and a close that renders it is refused with no way left to repair the row. "
-                f"Rewrite the cell without it"
-            )
-            continue
-        parsed = _parse_window(window)
-        if parsed is None:
-            errors.append(
-                f"{where}: `effective_window` {window!r} is not an "
-                f"`<start>/<end>` pair of ISO-8601 instants — a baseline that cannot be placed "
-                f"in time cannot be shown to PRECEDE the alerted event, which is the whole of "
-                f"what makes it context rather than the incident describing itself"
-            )
-            continue
-        start, end = parsed
-        # Built first and judged on its own parsed fields, so the guard and the report read one
-        # value.
-        receipt = RuntimeEvidenceReceipt(
-            resolved_by_lead=lead_id,
-            anchor_kind=_cell(row, "anchor_kind"),
-            grounding_kind=_cell(row, "grounding_kind"),
-            anchor_id=_cell(row, "anchor_id"),
-            result=_cell(row, "result"),
-            reasoning=_cell(row, "reasoning"),
-            window=window,
-            window_start=start,
-            window_end=end,
-        )
-        if receipt.window_end < receipt.window_start:
-            errors.append(
-                f"{where}: `effective_window` {window!r} ends before it begins — an inverted "
-                f"span measures nothing, and read either way round it would silently change "
-                f"which endpoint the guard below holds against the alert"
-            )
-            continue
-        # Fails closed when the document cannot place its alert (no prologue edge, or no
-        # parseable `when`); nothing requires a prologue edge, so this is not an exotic case.
-        if alerted is None:
-            errors.append(
-                f"{where}: this document records no parseable `when` on any "
-                f"`:E prologue.edges` row, so the baseline cannot be shown to PRECEDE the "
-                f"alerted event — which is the whole of what makes it context rather than the "
-                f"incident describing itself. Record the alerted edge's timestamp, or drop the "
-                f"`{RUNTIME_EVIDENCE}` consultation"
-            )
-            continue
-        if receipt.window_end >= alerted:
-            errors.append(
-                f"{where}: `effective_window` {window!r} does not end before the alerted event "
-                f"at {alerted.isoformat()} — a `{RUNTIME_EVIDENCE}` consultation is evidence "
-                f"about what PRECEDED the alert, and a window that reaches it (or past it) is "
-                f"partly made of the thing being explained. Re-measure over a window that "
-                f"closes before the alerted event"
-            )
-            continue
-        receipts.append(receipt)
-    body_bytes = len(runtime_evidence_block(tuple(receipts)).encode("utf-8"))
-    if body_bytes > _MAX_RUNTIME_EVIDENCE_BODY_BYTES:
-        errors.append(
-            f"the accumulated `{RUNTIME_EVIDENCE}` consultations render "
-            f"{body_bytes} bytes of `report.md` body, over the "
-            f"{_MAX_RUNTIME_EVIDENCE_BODY_BYTES}-byte bound — state the recurrence and its "
-            f"scope, not every occurrence in full"
-        )
-    return _BaselineWalk(receipts=tuple(receipts), errors=tuple(errors))
-
-
-def _check_runtime_evidence_windows(companion: CompanionBody) -> list[str]:
-    """The baseline-window guard at the write gate. The same walk's receipts are what
-    `conclude_runtime_evidence_rows` hands the close."""
-    return list(_walk_runtime_evidence_rows(companion).errors)
-
-
-def conclude_runtime_evidence_rows(companion: CompanionBody) -> tuple[RuntimeEvidenceReceipt, ...]:
-    """The `:R consultations` baseline receipts the guard accepted, in document order.
-
-    Public for the reason `conclude_ceiling_test_rows` is: the close carries them into
-    `report.md` itself. Uses the guard's own walk so only accepted rows ship, and takes the
-    parsed companion the close already has.
-    """
-    return _walk_runtime_evidence_rows(companion).receipts
 
 
 def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice:

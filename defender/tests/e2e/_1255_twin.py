@@ -53,7 +53,7 @@ def _golden_fences() -> list[str]:
     """The golden sshd investigation's fences, each as a block `append_block` lands."""
     from defender.skills.invlang.parser import scan_fences
 
-    golden = DEFENDER / "fixtures-e2e" / "golden-v2sshd" / "investigation.md"
+    golden = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd" / "investigation.md"
     return [f"```invlang\n{body}\n```" for body in
             scan_fences(golden.read_text(encoding="utf-8")).bodies]
 
@@ -326,7 +326,7 @@ class RoleModel:
 def recording_review_stages(recording: Recording) -> Any:
     """Record review prompts while the existing review bundle answers holds."""
     from defender.runtime.review_roles import ReviewStages
-    from defender.tests import _review_bundle
+    from defender.tests.support.runtime.permissions import _review_bundle
 
     def stage(name: str, reply: str) -> Any:
         async def call(request: Any) -> str:
@@ -399,7 +399,7 @@ def lifecycle(recording: Recording, *, main_turns: list[Any], clock: SteppingClo
               registry_cls: type | None = None) -> Callable[..., dict[str, Any]]:
     """The orchestrator's fixed arm composition (dossier "Arm composition"), for either run."""
     import defender.run as run_mod
-    from defender.runtime import box as box_mod
+    from defender import box as box_mod
     from defender.tests.e2e._replay_harness import _no_docker_daemon
 
     main = RoleModel(recording, "main", turns=main_turns)
@@ -494,7 +494,7 @@ REPLICATE = "r"
 
 def replicate_world() -> dict[str, Any]:
     """The replicate's manifest entry (slice A's `world_doc`, role null, no facts, no axis)."""
-    from defender.tests import _triplet_947 as T
+    from defender.tests.support.learning.branch import _triplet_947 as T
 
     return T.world_doc(REPLICATE, role=None, axis=None, facts=[], story="the captured story")
 
@@ -503,7 +503,7 @@ def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, in
     """Use launcher steps to prime the recording and create control and replicate arms."""
     from defender import _tenant
     from defender.learning.branch import cli
-    from defender.tests import _triplet_947 as T
+    from defender.tests.support.learning.branch import _triplet_947 as T
 
     tenant, source = _source_run(tenant_id, str(natural.run_id))
     k = branch_message_id(source)
@@ -1035,7 +1035,7 @@ def _unversioned(hex32: str) -> str:
 
 def _id_shaped_forms(token: str) -> dict[str, str]:
     """Return token-derived 32-hex forms, retaining their derivation labels."""
-    from defender.tests import _1255_identity as IDN
+    from defender.tests.support.runtime.state import _1255_identity as IDN
 
     out: dict[str, str] = {}
     for how, form in {"itself": token, **IDN.derived_forms(token)}.items():
@@ -1069,7 +1069,7 @@ def _as_fresh_id(forgiven: list[tuple[str, int]], id_shaped: Mapping[str, str],
 def scan(recording: Mapping[str, Any], tokens: Mapping[str, str], *,
          encoded: bool = False) -> list[Finding]:
     """Every request (as sent) and every read-scope file at it, and the corpus, searched for each token."""
-    from defender.tests import _1255_identity as IDN
+    from defender.tests.support.runtime.state import _1255_identity as IDN
 
     patterns = {label: (tok, _token_pattern(tok)) for label, tok in tokens.items() if tok}
     id_shaped = ({label: _id_shaped_forms(tok) for label, (tok, _) in patterns.items()}
@@ -1172,7 +1172,7 @@ def _child(config_path: str) -> int:
     """Set up the tenant and record both executions plus their actual host layout."""
     import defender.run as run_mod
     from defender import _log, run_common
-    from defender.tests._data_root_1078 import set_up_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     config = json.loads(Path(config_path).read_text(encoding="utf-8"))
     _log.configure(fmt="text", level="WARNING")

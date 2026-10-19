@@ -1,0 +1,250 @@
+"""Archived query records and their served-ledger joins."""
+from __future__ import annotations
+
+from collections.abc import Mapping
+
+
+
+
+from typing import Any
+
+
+from pathlib import PurePath
+
+from defender._io import Bound
+
+
+
+from defender._text import unwritable_value
+
+
+from defender._episode_paths import LAYOUT, WORLD_LEAVES
+
+from defender.learning.branch.ledger import (
+    normalized_source,
+    request_key,
+)
+
+from defender.learning.judge._errors import JudgeRefused
+
+from defender.learning.lead_repository import row_seq
+
+from defender.runtime.branch._family import (
+    world_token_for,
+)
+
+
+
+
+
+
+
+
+
+
+def mapping_key(mapping: Mapping[str, Any]) -> str:
+    """The canonical `(system, verb, params)` key of any mapping carrying those three.
+
+    Shared by every reader that dedups served ledger rows by call."""
+    params = mapping.get("params")
+    return request_key(str(mapping.get("system") or ""), str(mapping.get("verb") or ""),
+                       dict(params) if isinstance(params, Mapping) else {})
+
+
+
+
+def read_call_join(bound: Bound, label: str) -> dict[tuple[str, int], str]:
+    """World `label`'s archived call join (#1255 G4/G6): each row the run itself wrote, by its
+    `(lead_id, seq)`, mapped to the call's host-written id. An absent join is no rows of the
+    run's own (a world whose investigator asked nothing). `JudgeRefused` naming the file and
+    the refusal for a read the no-follow reader refuses, a torn line, a malformed line or two
+    lines for one `(lead_id, seq)`.
+
+    @owns call_join read — the one read of `worlds/<X>/call_join.jsonl`; its writer is
+    `record_query.append_query_row` (`CALL_JOIN_COLUMNS`)."""
+    name = LAYOUT.world(label).call_join
+    rows, torn, read = bound.read_jsonl(name)
+    if read.absent:
+        return {}
+    if read.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {read.refusal}")
+    if torn:
+        raise JudgeRefused(f"world {label!r}: {name} holds {torn} line(s) that do not parse "
+                           "as a row")
+    join: dict[tuple[str, int], str] = {}
+    for index, row in enumerate(rows):
+        lead, seq, call_id = row.get("lead_id"), row.get("seq"), row.get("call_id")
+        if (not isinstance(lead, str) or not isinstance(seq, int) or isinstance(seq, bool)
+                or not isinstance(call_id, str)):
+            raise JudgeRefused(f"world {label!r}: {name} row {index} is not a (lead_id, seq) "
+                               f"-> call id line ({row!r})")
+        if (lead, seq) in join:
+            raise JudgeRefused(f"world {label!r}: {name} joins ({lead!r}, {seq}) twice "
+                               f"(row {index})")
+        join[(lead, seq)] = call_id
+    return join
+
+
+
+
+def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
+    """World `label`'s archived query table, every line a row joined to its call id; `None`
+    when nothing is at the name (a world not archived); `JudgeRefused` naming the file and the
+    refusal (a link, a FIFO, a directory, an oversize file, a torn line, or malformed call
+    fields).
+
+    The table carries no call id (#1255 G4: the model reads it). Each row the run itself wrote
+    is handed back carrying the id its host-only call join (`read_call_join`) records for the
+    row's own `(lead_id, seq)`, its seq read as the surface reads it (`lead_repository.row_seq`)
+    — never by the row's place in the table — under `calls.CALL_ID`,
+    the one key every judge reader of a row's id reads. A row with no join line (a seeded,
+    pre-branch row) carries none. A table row that spells an id itself is refused: no writer
+    writes one since #1255, so it is an archive from before the join or a planted column.
+
+    Unlike the tolerant lead reader, grading must preserve the raw call identity rather than
+    coerce it. Validate the string fields used by the computed views before admitting any
+    rows, including unserved calls that have no ledger partner to check them against.
+    Params retain the shared reader's tolerant handling of non-mappings."""
+    table = _admitted_query_table(bound, label)
+    if table is None:
+        return None
+    join = read_call_join(bound, label)
+    return [_joined_row(row, join) for row in table]
+
+
+
+
+def _admitted_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
+    """World `label`'s archived query table read whole and admitted (`read_query_table`'s
+    refusals), unjoined; `None` when nothing is at the name."""
+    from defender.learning.judge.calls import CALL_ID
+
+    table_name = LAYOUT.world(label).executed_queries
+    table, torn_table, table_read = bound.read_jsonl(table_name)
+    if table_read.absent:
+        return None
+    if table_read.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {table_read.refusal}")
+    if torn_table:
+        raise JudgeRefused(f"world {label!r}: {table_name} holds {torn_table} line(s) that do "
+                           "not parse as a row")
+    _refuse_unwritable(table, label=label, name=table_name)
+    for index, row in enumerate(table):
+        for column in ("lead_id", "system", "verb", "query_id"):
+            if not isinstance(row.get(column), str):
+                raise JudgeRefused(
+                    f"world {label!r}: {table_name} row {index} has malformed {column} "
+                    f"({row.get(column)!r}); expected str")
+    for index, row in enumerate(table):
+        if CALL_ID in row:
+            raise JudgeRefused(
+                f"world {label!r}: {table_name} row {index} carries a {CALL_ID} column, which "
+                "no query-table writer writes since #1255 (the id lives in the host-only "
+                f"{WORLD_LEAVES.call_join}) — an archive from before #1255, or a planted column")
+    return table
+
+
+
+
+def _joined_row(row: dict[str, Any], join: Mapping[tuple[str, int], str]) -> dict[str, Any]:
+    """`row` carrying the call id `join` records for its `(lead_id, seq)`, if any."""
+    from defender.learning.judge.calls import CALL_ID
+
+    own = dict(row)
+    call_id = join.get((row["lead_id"], row_seq(row)))
+    if call_id is not None:
+        own[CALL_ID] = call_id
+    return own
+
+
+
+
+def read_served_ledger(bound: Bound, label: str, *, episode_token: str) -> list[dict[str, Any]]:
+    """World `label`'s served ledger read whole and required well-formed (A3, A12), or
+    `JudgeRefused` naming the file and the refusal: every line parses, every row carries a
+    decision word, names this run (`world_id`) and carries a call id of this run. An absent
+    ledger is no rows. The ledger half of `read_call_records`, and the found gaps' one read of
+    a run's ledger (A2), which reads it whatever that run's query table holds."""
+    from defender.learning.judge.calls import CALL_ID, call_id_names_run
+
+    token = world_token_for(episode_token, label)
+    ledger_name = world_ledger_name(label, episode_token=episode_token)
+    ledger, torn_ledger, ledger_read = bound.read_jsonl(ledger_name)
+    if ledger_read.refusal is not None:
+        raise JudgeRefused(f"world {label!r}: {ledger_read.refusal}")
+    if torn_ledger:
+        raise JudgeRefused(f"world {label!r}: {ledger_name} holds {torn_ledger} line(s) that "
+                           "do not parse as a row")
+    for i, row in enumerate(ledger):
+        if normalized_source(row.get("source")) is None:
+            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} carries no decision "
+                               f"word ({row.get('source')!r})")
+        if row.get("world_id") != token:
+            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} names another run "
+                               f"({row.get('world_id')!r}), not {token!r}")
+        if not call_id_names_run(row.get(CALL_ID), token):
+            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} carries no {CALL_ID} "
+                               f"of this run ({row.get(CALL_ID)!r})")
+    _refuse_unwritable(ledger, label=label, name=ledger_name)
+    return ledger
+
+
+
+
+def read_call_records(
+    bound: Bound, label: str, *, episode_token: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """One run's two call records — its query table and its served ledger — read whole through
+    the bounded no-follow reader and required well-formed (A3, A12), or `JudgeRefused` naming
+    the file and the refusal.
+
+    @owns call_records — the grading pass's one read of `executed_queries.jsonl` and
+    `served/<token>.<X>.jsonl`; the join (`calls.py`), the resolver and the found gaps read
+    these rows and nothing else.
+
+    Well-formed: every line parses; every ledger row names this run (`world_id`), carries a
+    decision word and the call id of this run; no two table rows of this run share an id; a
+    ledger row and the table row its id joins agree on `(system, verb, params)` (A21). An
+    absent table or ledger is no calls (a world whose investigator asked nothing)."""
+    from defender.learning.judge.calls import CALL_ID, call_id_names_run
+
+    token = world_token_for(episode_token, label)
+    table_name = LAYOUT.world(label).executed_queries
+    table = read_query_table(bound, label) or []
+    ledger = read_served_ledger(bound, label, episode_token=episode_token)
+    ledger_name = world_ledger_name(label, episode_token=episode_token)
+    own: dict[str, dict[str, Any]] = {}
+    for i, row in enumerate(table):
+        call_id = row.get(CALL_ID)
+        if not isinstance(call_id, str) or not call_id_names_run(call_id, token):
+            continue
+        if call_id in own:
+            raise JudgeRefused(f"world {label!r}: {table_name} rows share the call id "
+                               f"{call_id!r} (row {i})")
+        own[call_id] = row
+    for i, row in enumerate(ledger):
+        partner = own.get(row[CALL_ID])
+        if partner is not None and mapping_key(partner) != mapping_key(row):
+            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} and the {table_name} "
+                               f"row its {CALL_ID} {row[CALL_ID]!r} joins name different calls")
+    return table, ledger
+
+
+
+
+def world_ledger_name(label: str, *, episode_token: str) -> str:
+    """The relative name of a world's served ledger, shared by every reader and refusal."""
+    return str(LAYOUT.served_world(world_token_for(episode_token, label)))
+
+
+
+
+def _refuse_unwritable(rows: list[dict[str, Any]], *, label: str, name: str | PurePath) -> None:
+    """Refuse a record holding a value no record can carry (`_text.unwritable_value`: a lone
+    surrogate, a non-finite number), naming the file, the row and the cause (A3, well-formed):
+    such a row would fail the pass later, at a canonical key or a write, far from its file."""
+    for i, row in enumerate(rows):
+        bad = unwritable_value(row)
+        if bad is not None:
+            raise JudgeRefused(f"world {label!r}: {name} row {i} carries {bad}, which no "
+                               "record can carry")

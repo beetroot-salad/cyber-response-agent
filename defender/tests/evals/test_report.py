@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.evals.oracle_golden import report as REPORT
+from evaluations.oracle_golden import report as REPORT
 import yaml
 
 

@@ -10,7 +10,7 @@ from defender.run_repository import RunPaths
 
 import pytest
 
-from defender.tests._1255_view import MODEL_RUN, model_path
+from defender.tests.support.runtime.state._1255_view import MODEL_RUN, model_path
 
 from _replay_harness import DEFENDER, GOLDEN_AB3, materialize
 
@@ -18,7 +18,9 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai import ModelRetry  # noqa: E402
 
-from defender.runtime import bash_exec, box, permission  # noqa: E402
+from defender.execution import bash_exec
+from defender import box
+from defender.runtime import permission
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402

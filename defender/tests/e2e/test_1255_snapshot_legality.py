@@ -10,14 +10,14 @@ pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
-from defender.tests import _1255_snapshot as S  # noqa: E402
-from defender.tests._invlang_warn_836 import (  # noqa: E402
+from defender.tests.support.runtime.state import _1255_snapshot as S
+from defender.tests.support.invlang.validation._invlang_warn_836 import (  # noqa: E402
     PROLOGUE,
     REPAIRED_ROW_ATTRS,
     WARN_ROW,
     attr_block,
 )
-from defender.tests._session_store_705 import sql, store_mod  # noqa: E402
+from defender.tests.support.storage._session_store_705 import sql, store_mod  # noqa: E402
 from defender.tests.e2e._replay_harness import Turn  # noqa: E402
 
 pytestmark = pytest.mark.e2e
@@ -265,7 +265,7 @@ FOLD_SCRIPT = (S.echo("a"), S.echo("b"), S.echo("c"), S.done())
 
 def _plant_folding_document(run_dir) -> None:
     """Seed enough investigation content to force a fold before the branch point."""
-    from defender.tests._fold_936 import FOLDING_DOC
+    from defender.tests.support.shared.contracts._fold_936 import FOLDING_DOC
 
     RunPaths(run_dir).investigation.write_text(FOLDING_DOC, encoding="utf-8")
 

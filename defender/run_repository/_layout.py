@@ -43,7 +43,7 @@ PROVENANCE = "provenance.json"
 GATE_METADATA_KEY = "json"
 
 # ======================================================================================
-# Every run-level record name, as a named constant. `scripts/lint/lint_run_records.py` reads
+# Every run-level record name, as a named constant. `tooling/lint/lint_run_records.py` reads
 # its protected names and composed parts off every module-level UPPERCASE string constant here.
 # ======================================================================================
 

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from defender.tests import _tenants1106 as T
+from defender.tests.support.tenancy import _tenants1106 as T
 
 pytestmark = pytest.mark.e2e
 
@@ -28,7 +28,7 @@ class StartBoxRecorder:
         self.calls.append((args, kwargs))
         if self.stop:
             raise _StartBoxReached(repr((args, kwargs)))
-        from defender.runtime import box as box_mod
+        from defender import box as box_mod
 
         return box_mod.unboxed_executor()
 

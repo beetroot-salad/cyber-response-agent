@@ -141,7 +141,7 @@ def session_data_root(tmp_path_factory) -> Iterator[Path]:
     would see the variable the launching shell exported — in the devcontainer, the host's real
     data root — and set a tenant up inside it. A session tmp directory per xdist worker,
     replacing any inherited value; each test then gets its own over it."""
-    from defender.tests._data_root_1078 import DATA_ROOT_ENV
+    from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("session-data-root")
     with pytest.MonkeyPatch.context() as patch:
@@ -165,7 +165,7 @@ def data_root(tmp_path_factory, monkeypatch) -> Path:
     here. A test's own `monkeypatch.setenv`/`delenv` wins (same function-scoped instance,
     later).
     """
-    from defender.tests._data_root_1078 import DATA_ROOT_ENV
+    from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("data-root")
     monkeypatch.setenv(DATA_ROOT_ENV, str(root))
@@ -176,7 +176,7 @@ def data_root(tmp_path_factory, monkeypatch) -> Path:
 def d9_tenant(data_root) -> str:
     """D9's one tenant, created in this test's data root through the real `create_tenant`,
     and returned as the id a test hands to `--tenant`."""
-    from defender.tests._data_root_1078 import ensure_d9_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant
 
     return ensure_d9_tenant()
 
@@ -256,10 +256,10 @@ def tmp_repo(tmp_path: Path):
 
     from defender.learning.author.lessons import run as author_mod  # type: ignore[import-not-found]
     from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
-    from defender.tests._curator1134 import author_trees
+    from defender.tests.support.learning.curation._curator1134 import author_trees
 
     paths = LoopPaths(repo_root=repo)
-    from defender.tests._curator1134 import open_state
+    from defender.tests.support.learning.curation._curator1134 import open_state
     state = open_state(paths)
     cfg = author_mod.build_author_config(paths, state=state, trees=author_trees(paths))
 
@@ -367,7 +367,7 @@ def build_scene():
     """`_spec773.build_scene` as a factory — one lessons-channel tick, wired through the
     config's own injection seams, driving `drain` through `lessons_run.run_batch`."""
     from defender.learning.author import drain
-    from defender.tests import _spec773
+    from defender.tests.support.learning.curation import _spec773
 
     def _factory(tmp_path, **kwargs):
         scene = _spec773.build_scene(tmp_path, **kwargs)
@@ -384,7 +384,7 @@ def build_questioner_scene():
     """`_spec773.build_questioner_scene` as a factory — the SIBLING channel's tick, through
     the same `drain` front door."""
     from defender.learning.author import drain
-    from defender.tests import _spec773
+    from defender.tests.support.learning.curation import _spec773
 
     def _factory(tmp_path, **kwargs):
         scene = _spec773.build_questioner_scene(tmp_path, **kwargs)
@@ -398,7 +398,7 @@ def build_questioner_scene():
 def _records_planted(request):
     """The older suites build runs and episodes the way the front door leaves them (#1222: each
     carries its alert's record); #1222's own suite plants those itself, absence included."""
-    from defender.tests import _triplet_947
+    from defender.tests.support.learning.branch import _triplet_947
 
     own = "alert_front_door_1222" in request.node.nodeid
     _triplet_947.PLANT_RECORDS = not own

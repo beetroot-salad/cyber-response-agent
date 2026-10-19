@@ -81,7 +81,7 @@ class Admitted:
 
 def digest_of(raw: bytes) -> str:
     """@owns digest — the lowercase hex sha256 of an alert's admitted bytes: the alert's only
-    identity (held-out check, curation key, launch check, sibling union)."""
+    identity (evaluation exclusion, curation key, launch check, sibling union)."""
     return hashlib.sha256(raw).hexdigest()
 
 

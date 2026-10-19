@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender.evals.oracle_golden import stats as STATS
+from evaluations.oracle_golden import stats as STATS
 
 
 def _rounded(k: int, n: int) -> tuple[float, float]:

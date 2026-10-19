@@ -11,7 +11,7 @@ and each has ONE home: `docs/platform-design.md` — §4.1 for starting an inves
 request-id replay, §2.5 for re-learns. The methods here name the rule they answer to and state
 only the shape of the answer. The API maps that answer onto HTTP. The rules' own tests belong
 with the store's implementation (#1082), run against these ports; the API's tests
-(`tests/test_api_stub.py`) script the answers and check the mapping.
+(`tests/api/test_api_stub.py`) script the answers and check the mapping.
 
 What the API relies on is written here too, as the store's promise, never assumed — and where a
 check is cheap, the API checks it and answers a broken promise as a 500 (`StoreBrokePromise`)

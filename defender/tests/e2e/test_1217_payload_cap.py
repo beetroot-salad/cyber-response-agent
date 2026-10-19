@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _writer_run_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
 
 import pytest
 

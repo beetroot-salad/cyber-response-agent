@@ -15,7 +15,7 @@ from defender.hooks.budget_enforcer import DEFAULT_LIMITS  # noqa: E402
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
-from defender.tests.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
+from defender.tests.runtime.engine.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -23,7 +23,7 @@ LEAD = "l-001"
 
 
 def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
-    from defender.tests.alert_front_door_1222 import _spec1222 as S
+    from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
     busy = S.run_alert(tmp_path / "busy", run_id="k1-busy",
                        leads={S.L3: [S.query("elastic", "alerts", {"native_query": "k1:1"}),

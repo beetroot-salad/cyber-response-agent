@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from defender.learning.core.faults import SYSTEMIC_FAULTS, run_or_dead_letter  # noqa: E402
-from defender.runtime.box import RunTainted, scrub  # noqa: E402
+from defender.box import RunTainted, scrub  # noqa: E402
 from defender.tests.e2e._box665 import (  # noqa: E402
     BoxLifecycleRecorder,
     RecordingBranch,

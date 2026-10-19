@@ -45,7 +45,7 @@ episode dir alone.
 - **No ground-truth label is ever written into a run dir.** A labeled fixture's
   `disposition` is an answer key and the run dir is inside the agent's readable
   workspace, so labels stay beside their fixture
-  (`defender/fixtures/held-out/{slug}/ground_truth.yaml`) and are read there by
+  (`evaluations/fixtures/held_out/{slug}/ground_truth.yaml`) and are read there by
   `evals/held_out.py`. The eval walks fixtures and locates runs by run-id
   convention; the run dir carries no pointer back to a fixture and no label.
   Contamination is stopped upstream instead: the one automatic lane, the
@@ -171,7 +171,7 @@ ANALYZE in `investigation.md`). The learning loop joins across cases on
 - `executed_queries.jsonl` flags whether each query came back `ok`, `empty`,
   `error`, etc. (the `payload_status` field) — the fastest read on "did the
   data actually arrive?"
-- `python3 scripts/analytics/run_stats.py` and the `visualize_*.py` scripts
+- `python3 tooling/analytics/run_stats.py` and the `visualize_*.py` scripts
   under `defender/scripts/visualize/` render aggregate + per-run views.
 
 Sources: `defender/CLAUDE.md` §Run dir layout / §Two-table schema,

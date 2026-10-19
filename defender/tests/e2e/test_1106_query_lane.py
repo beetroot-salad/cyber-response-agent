@@ -8,8 +8,8 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.tests import _tenants1106 as T  # noqa: E402
-from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106 as T
+from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,

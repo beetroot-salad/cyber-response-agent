@@ -10,7 +10,7 @@
 ## Root-only permission-test caveat
 
 **Running the suite as root fails one test that is not broken:**
-`tests/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.
+`tests/learning/judge/test_921_launcher_frame.py::test_921_judge_yaml_is_written_last_and_carries_the_enqueued_and_completed_counts`.
 It simulates a failing write by chmod'ing a directory to `r-x`, and root ignores permission
 bits — so the write lands and the test asserts "the failed write landed anyway". CI runs
 non-root and it passes there. (The four accounting-failure tests that failed the same way

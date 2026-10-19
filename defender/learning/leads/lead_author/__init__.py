@@ -39,7 +39,7 @@ from defender.learning.leads import lead_neighbors
 from defender._claim_git import ClaimGit
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.leads import lead_render
-from defender.runtime import box as _box
+from defender import box as _box
 from defender.runtime.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)

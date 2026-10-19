@@ -20,17 +20,17 @@ from defender.runtime.close_tool import (  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import VerbRegistry  # noqa: E402
 from defender.scripts.adapters.faults import TransportFault  # noqa: E402
-from defender.tests import _1255_snapshot as S  # noqa: E402
-from defender.tests import _review_bundle  # noqa: E402
-from defender.tests import _tenants1106  # noqa: E402
-from defender.tests._branch_947 import (  # noqa: E402
+from defender.tests.support.runtime.state import _1255_snapshot as S
+from defender.tests.support.runtime.permissions import _review_bundle
+from defender.tests.support.tenancy import _tenants1106
+from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
     GOLDEN_INVESTIGATION,
     LEGACY_BRANCH_CALL,
     legal_source,
     spec_at,
 )
-from defender.tests._invlang_warn_836 import REPAIRED_ROW_ATTRS, WARN_ROW, attr_block  # noqa: E402
-from defender.tests._lessons_corpus import _write_lesson  # noqa: E402
+from defender.tests.support.invlang.validation._invlang_warn_836 import REPAIRED_ROW_ATTRS, WARN_ROW, attr_block  # noqa: E402
+from defender.tests.support.learning.retrieval._lessons_corpus import _write_lesson  # noqa: E402
 from defender.tests.e2e._lead_zero_808 import (  # noqa: E402
     VerbRecorder,
     answer_hits,

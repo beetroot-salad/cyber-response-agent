@@ -5,5 +5,5 @@ records behind them come from in-memory fakes (`fakes.py`) until the store (#108
 job model (#1081) land and implement the same ports (`ports.py`).
 
 The API is its own program: it never imports the investigation runtime or the learning loop,
-and never runs an investigation (`tests/test_api_stub.py` pins the import boundary).
+and never runs an investigation (`tests/api/test_api_stub.py` pins the import boundary).
 """

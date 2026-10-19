@@ -1,7 +1,7 @@
 """#1235, second half: the repeat guard and the rejection budget read the rows the host recorded in memory, so truncating, deleting or planting rows in executed_queries.jsonl moves neither; the run-to-case link is a sidecar beside the run folder, so a pointer planted inside the folder (or a hand-copied folder) is never followed."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import json
 import shutil

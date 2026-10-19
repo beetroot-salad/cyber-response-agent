@@ -1,0 +1,247 @@
+"""Drain retire set: only the enumerated failure classes bump attempts and retire; systemic faults propagate; stuck rows surface an operator signal."""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from pydantic_ai.exceptions import ModelRetry
+
+from defender.tests.support.learning.curation import _drain719 as h
+from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
+from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
+from defender.learning.core.config import FatalConfigError, StageAbort  # type: ignore[import-not-found]
+from defender.learning.core.state import FINDINGS, PITFALLS, StateRefused  # type: ignore[import-not-found]
+from defender.box import BoxFault  # type: ignore[import-not-found]
+from defender._git import GitError  # type: ignore[import-not-found]
+from defender.tests.support.learning.core import _state1135
+
+
+# Decision 8 — the trigger is an enumerated set, and A12 is reversed
+
+
+def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouched(
+    tmp_path: Path,
+):
+    """A12 REVERSED. The judge's recommendation was that anything not explicitly systemic retires —
+    "the ceiling is total"."""
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of("findings")
+    rows = [h.row_for("findings", "b/0", attempts=2)]
+    h.seed(paths, ch, rows)
+    before = (paths.state_root / ch.queue).read_bytes()
+    cfg = h.cfg_for(
+        paths,
+        "findings",
+        max_attempts=3,
+        invoke_agent=h.raising(FileNotFoundError("no such prompt file")),
+    )
+
+    for _ in range(3):
+        with pytest.raises(FileNotFoundError):
+            drain.run_batch(cfg=cfg)
+
+    assert (paths.state_root / ch.queue).read_bytes() == before, "an unnamed class must not touch the queue at all"
+    assert h.attempts_of(paths, ch, "b/0") == 2, "the count is untouched — not bumped, not reset"
+    assert h.graveyard(paths, ch) == []
+    assert h.consumed(paths, ch) == []
+
+
+def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_signal(
+    tmp_path: Path,
+):
+    """Decision 10 — the "loud" half of decision 8's trade. Reversing A12 was argued as "stuck but
+    recoverable AND LOUD"; the suite pins recoverable, and loud lived only in the rationale."""
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of("findings")
+    rows = [h.row_for("findings", "a/0"), h.row_for("findings", "a/1")]
+    h.seed(paths, ch, rows)
+    cfg = h.cfg_for(
+        paths,
+        "findings",
+        max_attempts=3,
+        invoke_agent=h.raising(FileNotFoundError("no such prompt file")),
+    )
+
+    for tick in (1, 2, 3):
+        with pytest.raises(FileNotFoundError):
+            drain.run_batch(cfg=cfg)
+        records = h.stuck_records(paths, ch)
+        assert len(records) == tick, f"tick {tick} produced no stuck-row record"
+
+        latest = records[-1]
+        assert latest["fault_class"] == "FileNotFoundError", (
+            "the record does not name the fault class, so an operator cannot tell this failure "
+            "from any other — a generic 'batch failed' line would satisfy a weaker assertion"
+        )
+        assert sorted(latest["row_ids"]) == ["a/0", "a/1"], "the stalled rows are not named"
+        assert latest["consecutive_ticks"] == tick, (
+            "the record carries no rising count, so a row stuck for three ticks is "
+            "indistinguishable from one that failed once"
+        )
+
+    assert h.pending_by_id(paths, ch).keys() == {"a/0", "a/1"}, "the rows are stuck, as decision 8 wants"
+    assert h.graveyard(paths, ch) == []
+    assert not ((paths.state_root / FINDINGS.queue).parent / "held_report.log").exists(), (
+        "the signal must exist on a channel that has no held_report — D7 keeps that one "
+        "lessons-local, so it cannot be the stuck-row surface"
+    )
+
+    member = h.cfg_for(
+        paths,
+        "findings",
+        max_attempts=1,
+        invoke_agent=h.raising(author_shared.AuthorError("a member — this one retires")),
+    )
+    before = len(h.stuck_records(paths, ch))
+    assert drain.run_batch(cfg=member) == 2
+    assert len(h.graveyard(paths, ch)) == 2, "the member fault retired the rows"
+    assert len(h.stuck_records(paths, ch)) == before, (
+        "a fault that RETIRED wrote a stuck-row record — the signal is firing on every failure "
+        "rather than on the non-retiring ones, which makes it noise"
+    )
+
+
+def test_the_retire_set_is_the_same_on_findings_as_on_the_observation_channels(tmp_path: Path):
+    """Decision 5 survives decision 8 unchanged in scope and changed in mechanism: the set is the
+    same on all four drained channels, so a channel naming fewer classes fails here."""
+    paths = h.make_paths(tmp_path)
+    member_seen, non_member_seen = {}, {}
+
+    for name in h.AUTHOR_CHANNELS:
+        ch = h.channel_of(name)
+        rid = "run-W/0" if name == "findings" else "w/0"
+
+        h.seed(paths, ch, [h.row_for(name, rid)])
+        member = h.cfg_for(
+            paths, name, max_attempts=1, invoke_agent=h.raising(ModelRetry("killed"))
+        )
+        assert drain.run_batch(cfg=member) == 2, f"{name}: a member did not fault the batch"
+        member_seen[name] = (h.pending(paths, ch) == [], tuple(r["attempts"] for r in h.graveyard(paths, ch)))
+
+        rows = [h.row_for(name, rid)]
+        h.seed(paths, ch, rows)
+        non_member = h.cfg_for(
+            paths, name, max_attempts=1, invoke_agent=h.raising(StageAbort("abort"))
+        )
+        with pytest.raises(StageAbort):
+            drain.run_batch(cfg=non_member)
+        non_member_seen[name] = h.pending(paths, ch) == rows
+
+    assert set(member_seen.values()) == {(True, (1,))}, member_seen
+    assert set(non_member_seen.values()) == {True}, non_member_seen
+
+
+# Decision 1's four paths — each is a named member, which is why each still retires
+
+
+def test_externally_killed_box_command_is_not_reported_as_a_successful_batch(tmp_path: Path):
+    """Decision 1 path 4, and the second member an `except AuthorError` spelling drops."""
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of("findings")
+
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
+    ok = h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=h.committing("live"))
+    assert drain.run_batch(cfg=ok) == 0
+    assert h.pending(paths, ch) == []
+    assert h.graveyard(paths, ch) == []
+
+    assert ModelRetry in tuple(drain.RETIRE_SET), "ModelRetry was dropped from the retire set"
+    h.seed(paths, ch, [h.row_for("findings", "a/1")])
+    # The control batch above authored a/0 and consumed it, so the ledger is not empty here
+    # and never was: what this asserts is that the KILLED batch adds nothing to it.
+    consumed_before = len(h.consumed(paths, ch))
+    killed = h.cfg_for(
+        paths,
+        "findings",
+        max_attempts=2,
+        invoke_agent=h.raising(ModelRetry("command timed out after 120s")),
+    )
+    assert drain.run_batch(cfg=killed) != 0, "an absorbed kill is not a successful batch"
+    assert h.attempts_of(paths, ch, "a/1") == 1
+    assert len(h.consumed(paths, ch)) == consumed_before, (
+        "nothing was consumed by a batch that did not author"
+    )
+
+
+# Non-membership carries what placement used to
+
+
+def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path: Path):
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of("findings")
+    rows = [h.row_for("findings", "a/0")]
+    h.seed(paths, ch, rows)
+
+    (paths.state_root / ch.drain_role.file).mkdir(parents=True)
+    cfg = h.cfg_for(
+        paths,
+        "findings",
+        max_attempts=1,
+        invoke_agent=h.raising(AssertionError("never reached")),
+    )
+    with pytest.raises(StateRefused):
+        drain.run_batch(cfg=cfg)
+    assert h.pending(paths, ch) == rows
+    assert h.graveyard(paths, ch) == []
+    assert h.attempts_of(paths, ch, "a/0") is None
+
+
+def test_mid_batch_author_timeout_bumps_the_row_and_is_ceiling_eligible(tmp_path: Path):
+    """PJ1b, executed: when the whole-batch wall-clock deadline finally fires it lands as a per-item
+    `AuthorError` through the `TimeoutError` -> `RunUnprocessable` -> `AuthorError` chain."""
+    paths = h.make_paths(tmp_path)
+    ch = h.channel_of("findings")
+    h.seed(paths, ch, [h.row_for("findings", "a/0")])
+    late = author_shared.AuthorError(
+        "curator (batch1) did not complete: curator (curator:batch1) did not complete: TimeoutError()"
+    )
+    cfg = h.cfg_for(paths, "findings", max_attempts=2, invoke_agent=h.raising(late))
+
+    assert drain.run_batch(cfg=cfg) == 2
+    assert h.attempts_of(paths, ch, "a/0") == 1
+    assert drain.run_batch(cfg=cfg) == 2
+    assert "TimeoutError" in h.graveyard(paths, ch)[0]["deadletter_reason"]
+
+    h.seed(paths, ch, [h.row_for("findings", "a/1")])
+    bare = h.cfg_for(
+        paths, "findings", max_attempts=2, invoke_agent=h.raising(TimeoutError("bare"))
+    )
+    with pytest.raises(TimeoutError):
+        drain.run_batch(cfg=bare)
+    assert h.attempts_of(paths, ch, "a/1") is None, "a bare TimeoutError is not a member"
+
+
+def test_systemic_faults_propagate_without_bumping_attempts(tmp_path: Path):
+    from defender.learning.core import drains  # type: ignore[import-not-found]
+
+    paths = h.make_paths(tmp_path)
+    rows = [h.row_for("pitfalls", f"r:l-{i:03d}:0") for i in range(2)]
+
+    for exc in (
+        StageAbort("abort"),
+        FatalConfigError("bad config"),
+        GitError(["git", "commit"], 1, "boom"),
+        BoxFault("box gone"),
+    ):
+        h.seed(paths, PITFALLS, rows)
+
+        def leg(_paths, _state, box=None, _exc=exc, **_kw):
+            raise _exc
+
+        with pytest.raises(type(exc)):
+            drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), leg)
+        assert h.pending(paths, PITFALLS) == rows, f"{type(exc).__name__}: no row was touched"
+        assert h.graveyard(paths, PITFALLS) == []
+
+    h.seed(paths, PITFALLS, rows)
+
+    def failing_author(_paths, _state, box=None, **_kw):
+        raise author_shared.AuthorError("converted pitfalls rc")
+
+    drains._drain_pitfalls(paths, _state1135.state_for_paths(paths), failing_author)
+    assert [r.get("attempts") for r in h.pending(paths, PITFALLS)] == [1, 1], (
+        "the non-exempt AuthorError did not bump both rows"
+    )
+
+
+# Decision 9 — the reconciling tick, which is what this test actually earns

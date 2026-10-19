@@ -27,7 +27,7 @@ and is attacker-reachable, and a model restating it does not clean it.
 
 Messages go through `learning._prompt.stage_user_message` so they carry the reader contract, and
 each section is a literal `titled_section` call (its host title outside, its body in the frame)
-so `scripts/lint/lint_stage_prompt_frames.py` can inspect them.
+so `tooling/lint/lint_stage_prompt_frames.py` can inspect them.
 
 One salt per call (`_untrusted.message_salt`), not per family: Call 1's reply is framed into the
 later calls, so a salt Call 1's model had seen would be a delimiter the framed party holds. One

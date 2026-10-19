@@ -21,7 +21,7 @@ from defender.run_repository._layout import (
 )
 
 #: The episode-layout names — the only place they are spelled. Other modules must not re-bind
-#: them under local aliases (`scripts/lint/lint_run_records.py` refuses that).
+#: them under local aliases (`tooling/lint/lint_run_records.py` refuses that).
 FAMILY_NAME = "family.yaml"
 REVIEW_NAME = "review.yaml"
 SAMPLES_NAME = "samples.yaml"

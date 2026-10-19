@@ -56,7 +56,7 @@ from defender.learning.lead_repository import (
 )
 from defender.runtime.run_end import TRUNCATED_BY_EXECUTED_QUERIES, parse_record
 from defender.runtime.run_end import sidecar_path as run_end_sidecar_path
-from defender.runtime.scrub import verdict_path
+from defender.box._scrub import verdict_path
 
 _logger = logging.getLogger(__name__)
 

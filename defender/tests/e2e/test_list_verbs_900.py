@@ -56,7 +56,7 @@ LEAD = "l-001"
 def _shipped_gather_grant():
     """The shipped gather grant — the committed playground tenant's (#1106 M4: `GATHER_DEF`
     carries none; a run's grant is projected from its tenant's table)."""
-    from defender.tests import _tenants1106 as T1106
+    from defender.tests.support.tenancy import _tenants1106 as T1106
 
     return T1106.fixture_grants().gather
 
@@ -214,7 +214,7 @@ def _agent(registry: VerbRegistry):
 def _deps(tmp_path: Path):
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    from defender.tests import _tenants1106 as T1106
+    from defender.tests.support.tenancy import _tenants1106 as T1106
 
     return bind(T1106.fixture_gather_def(), run_dir)
 

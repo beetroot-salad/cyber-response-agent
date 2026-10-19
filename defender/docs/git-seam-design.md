@@ -195,7 +195,7 @@ retry-cap / health signal for the transient lane.
   cannot disagree with the implementation, so a misread of git's output is green on both
   sides at once (`ls-tree --name-only` C-quoting, `.split()` tearing a spaced path — the
   latter the same class this seam's own `-z` porcelain reader was minted for in #460).
-  `scripts/lint/lint_shared_oracle.py` covers exactly that gap: shared *read* argv shapes
+  `tooling/lint/lint_shared_oracle.py` covers exactly that gap: shared *read* argv shapes
   only, so fixture setup stays exempt as intended. The two gates partition the tree
   rather than overlap — this one asks who runs git, that one asks who is allowed to
   believe its answer.

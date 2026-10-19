@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from defender.tests._1255_view import MODEL_DEFENDER, model_path
+from defender.tests.support.runtime.state._1255_view import MODEL_DEFENDER, model_path
 
 import shutil
 from pathlib import Path
@@ -113,8 +113,8 @@ def test_a_catalog_whose_template_disagrees_with_the_table_refuses_the_run_befor
 
 def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(tmp_path):
     """The check is gated on the SAME predicate as the dispatch."""
-    from defender.tests._branch_947 import spec_at
-    from defender.tests._session_store_705 import store_factory
+    from defender.tests.support.learning.branch._branch_947 import spec_at
+    from defender.tests.support.storage._session_store_705 import store_factory
     from defender.tests.e2e._replay_harness import GOLDEN, _split_at_fences
 
     # (a) no registry injected: the K12 state, 61 of 96 `drive()` sites.
@@ -144,7 +144,7 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
     )
     assert source.summary_dict.get("truncated_by") is None, source.summary_dict
     store = sink[0]
-    from defender.tests._1255_snapshot import tool_calling_responses
+    from defender.tests.support.runtime.state._1255_snapshot import tool_calling_responses
 
     spec = spec_at(store, source.run_dir, tool_calling_responses(store)[-1])
 
@@ -164,8 +164,8 @@ def test_a_run_that_will_not_dispatch_the_lead_is_not_refused_for_its_template(t
 def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     """The id comes from the RUN's `lead-zero.yaml` (its tenant's, #1106), not from a process-cached read of this..."""
     from defender.runtime.lead_zero_config import LeadZeroConfigError, lead_zero_config_path
-    from defender.tests import _tenants1106 as T1106
-    from defender.tests.tenant_1107_settings import _spec1107 as S1107
+    from defender.tests.support.tenancy import _tenants1106 as T1106
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
     tree = planted_defender(tmp_path / "second")
     shipped = tree / TEMPLATE_REL

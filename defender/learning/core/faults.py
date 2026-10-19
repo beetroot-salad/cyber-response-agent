@@ -5,7 +5,7 @@ from collections.abc import Callable
 from defender._git import GitError
 from defender.learning.core.config import FatalConfigError, StageAbort
 from defender.learning.core.state import StateRefused
-from defender.runtime import box as box_mod
+from defender import box as box_mod
 from defender.runtime.verbs import RegistryError
 
 

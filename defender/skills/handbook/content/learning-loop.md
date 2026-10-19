@@ -133,7 +133,7 @@ is the only review. That gap is deliberate for now and tracked in #397.
 
 ## Evaluating the loop itself
 
-`defender/evals/` is the eval home: the held-out metric driver
+`evaluations/` is the eval home: the held-out metric driver
 (`held_out.py`, the north-star) plus the harness-on-the-harness
 (`harness.py` + `scenarios/`). `defender/tests/` covers learning-loop
 invariants.

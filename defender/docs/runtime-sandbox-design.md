@@ -42,7 +42,7 @@ Builds on **#535** (the interim anchored read-confinement guard, which this
 replaces as the *boundary* and leaves as belt-and-suspenders). Related:
 `agent-definition-single-source.md` already names this as the eventual boundary
 ("The real read/write boundary is OS sandboxing (#540); this gate is
-defense-in-depth"), and `tests/test_read_confine_bash.py:494-499` defers the
+defense-in-depth"), and `tests/runtime/engine/test_read_confine_bash.py:494-499` defers the
 pre-existing-symlink residual to it.
 
 ## Prior art & the brain/hands/session decision

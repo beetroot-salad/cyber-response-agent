@@ -4,7 +4,7 @@
 > This designs a harness over the PREDECESSOR codebase, which the repo has since
 > replaced with `defender/`. The run-dir shape it assumes (including `meta.json`,
 > removed in #647) and the orchestrator it drives no longer exist; the live
-> measurement layer is `defender/evals/`. Kept for the chaos-regime and metric
+> measurement layer is `evaluations/`. Kept for the chaos-regime and metric
 > reasoning, which is architecture-independent.
 
 ## Purpose

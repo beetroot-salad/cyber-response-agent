@@ -1,6 +1,6 @@
 # playground-v2/ — VPS-hosted stack
 
-Docker Compose stack on the Hetzner VPS `soc-playground` (provisioned by `/workspace/infra/`): the real Elastic stack plus identity, network, host-population, and stub services that make up the v2 playground. Dev-only — not shipped with the soc-agent plugin.
+Docker Compose stack on the Hetzner VPS `soc-playground` (provisioned by `/workspace/playground-v2/infra/`): the real Elastic stack plus identity, network, host-population, and stub services that make up the v2 playground. Dev-only — not shipped with the soc-agent plugin.
 
 - Design rationale: `/workspace/docs/playground-environment-v2.md`
 - Per-service internals, attach recipes, recovery procedures, gotchas: `docs/runbook.md`

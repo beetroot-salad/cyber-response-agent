@@ -5,7 +5,7 @@ pending deliveries, the three findings-shaped queues with their consumed ledgers
 and stuck reports, the gap ledger, the disposition reports, the lock files — is reached through
 `LearningState`, opened at an entry point on an EXISTING root (`LearningState.open(paths)`). No
 production module outside this one composes, opens, lists, locks or renames a path to one of
-those records (the census in `tests/learning_state_1135/test_1135_front_door.py` holds that).
+those records (the census in `tests/learning/state_contracts/test_1135_front_door.py` holds that).
 `runs/`, under the same root, is #1166's and is still reached by path, and the eval harness
 seeds its own scratch tree by path; neither is a record of this handle.
 

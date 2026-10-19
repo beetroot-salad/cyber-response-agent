@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender.runtime import box as box_mod  # noqa: E402
+from defender import box as box_mod  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import RunScope, bind, compile_policy_for  # noqa: E402
 from defender.runtime.permission.bash import decide_bash  # noqa: E402

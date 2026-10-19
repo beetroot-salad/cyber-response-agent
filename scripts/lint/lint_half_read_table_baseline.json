@@ -1,4 +1,0 @@
-{
-  "//": "lint_half_read_table baseline — a boundary that branches on ONE key of another module's keyed gate table, spelled as a string literal, leaving that table's other keys with no reader there (#879: close_tool charges the `false-positive` entry price by literal while `benign` passes ungated). A table is watched only once something reads it generically, so the gate arms itself as tables land. Fingerprint is file:function:owner.TABLE:unread:KEY (no line number). CI fails on an entry absent here OR present with no reason. The gate covers only the one-key-branch shape: a boundary that enumerates EVERY key by literal is invisible to it, and key identity across modules is value-based, so short generic keys collide. Regenerate: python scripts/lint/lint_half_read_table.py --update-baseline.",
-  "entries": {}
-}

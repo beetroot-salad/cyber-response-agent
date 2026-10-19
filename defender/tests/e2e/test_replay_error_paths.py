@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests._1255_view import model_path
+from defender.tests.support.runtime.state._1255_view import model_path
 from pydantic_ai import ModelRetry
 
 from defender.tests.e2e._replay_harness import (

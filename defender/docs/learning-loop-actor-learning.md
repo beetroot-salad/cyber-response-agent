@@ -677,7 +677,7 @@ them.
    oracle's projected telemetry to grade the encounter (see
    `defender/learning/judge.md` §inputs). Calibration fixtures must
    include all four artifacts, snapshotted together. Equivalent to
-   the defender's `defender/learning/judge-alignment/` work, but for
+   the defender's `evaluations/judge_alignment/` work, but for
    actor-side outcomes plus observations.
 
    **Acceptance criteria — turning on actor learning is gated on:**
@@ -726,7 +726,7 @@ baseline is measured):
   alerts total. *The committed set is currently EMPTY — the Wazuh-format
   bootstrap set was retired and no v2 Elastic-shaped replacement has been
   authored, so the primary metric reports no denominator until one is (see
-  `defender/fixtures/held-out/README.md`). The floors below are the contract
+  `evaluations/fixtures/held_out/README.md`). The floors below are the contract
   that set must meet, not a description of one that exists.*
   Sizing rationale: with 8 per class and a 90% recall
   floor on malicious, the floor effectively requires **8/8 malicious
@@ -786,7 +786,7 @@ Land in this order, each as its own PR:
    primary-metric measurement against the current defender as a
    baseline.
 2. **Actor-side judge calibration set.** Highest leverage. Mirrors
-   `defender/learning/judge-alignment/`.
+   `evaluations/judge_alignment/`.
 3. **`lessons-actor/` directory + schema + scaffolding.** No code yet
    — just the corpus shape and a couple of hand-authored seed lessons
    to test grep retrieval.

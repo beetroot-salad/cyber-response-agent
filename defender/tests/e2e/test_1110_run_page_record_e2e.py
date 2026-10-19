@@ -1,7 +1,7 @@
 """#1110 e2e: the run page is saved as the run's record through the run's tenant-bound handle (post-run step and run.py main); a failed dev copy is only a warning, while an unrenderable/unimportable renderer or a refused record write is VisualizeFailed (run.py main still exits 0); the standalone re-render refuses a link planted at the record."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import errno
 import json
@@ -19,7 +19,7 @@ import pytest
 from defender import _env, _io, run_common
 from defender.run_repository import Run
 from defender.run_repository import RunPaths
-from defender.tests._spec1077 import bound_arguments
+from defender.tests.support.shared.contracts._spec1077 import bound_arguments
 from defender.tests.e2e._replay_harness import GOLDEN, drive
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, golden_replay, tenant_run
 from defender.tests.e2e.test_1084_mirror_e2e import (
@@ -47,7 +47,7 @@ RENDERER_MODULE = "defender.scripts.visualize.visualize_run"
 def _repository_run() -> tuple[str, Path]:
     """`(T, run_dir)`: a driven run where the run page's repository opens it, by id, under T."""
     from defender import _tenant
-    from defender.tests._data_root_1078 import current_data_root, ensure_d9_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 
     tenant = ensure_d9_tenant()
     runs = current_data_root() / tenant / "runs"
@@ -251,7 +251,7 @@ def entrypoint_env(tmp_path, monkeypatch) -> Path:
     """What the real `run.py main` needs to get past its startup and into its tail:"""
     from defender import _tenant
     from defender.runtime import providers
-    from defender.tests._data_root_1078 import current_data_root, set_up_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
     for var in providers.api_key_vars():
         monkeypatch.setenv(var, "spec1110-not-used")
@@ -262,7 +262,7 @@ def entrypoint_env(tmp_path, monkeypatch) -> Path:
 def _main(**seams: Callable[..., Any]) -> int:
     from defender import run as run_py
 
-    from defender.tests._data_root_1078 import D9_TENANT_ID
+    from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID
 
     return run_py.main([str(GOLDEN / "alert.json"), "--tenant", D9_TENANT_ID, "--no-learn"],
                        preflight=lambda _model: 0, **seams)

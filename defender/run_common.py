@@ -388,7 +388,7 @@ def cross_check_tables(run_dir: Path) -> None:
         _logger.info(f"note: leads with no queries (monitor): {xcheck['leads_without_queries']}")
 
 
-HELD_OUT_FIXTURES = DEFENDER_DIR / "fixtures" / "held-out"
+HELD_OUT_FIXTURES = REPO_ROOT / "evaluations" / "fixtures" / "held_out"
 
 
 def is_held_out_fixture(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) -> bool:
@@ -436,7 +436,7 @@ def learning_refusal_gate(
     if held_out_input or record.digest in held_out_alert_digests(fixtures_dir):
         return f"{run_dir.name} investigated a held-out eval fixture (or a copy of one) — its " \
             "findings must never feed a corpus it is scored against"
-    from defender.runtime import scrub as _scrub
+    import defender.box._scrub as _scrub
 
     if _scrub.tree_unsandboxed(run_dir):
         return f"{run_dir.name} ran without a sandbox, so its input directory was never bound " \

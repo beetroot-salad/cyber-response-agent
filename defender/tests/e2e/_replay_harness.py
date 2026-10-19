@@ -70,18 +70,18 @@ from defender import _provenance  # noqa: E402
 from defender import run_common  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import Run, RunPaths  # noqa: E402
-from defender.runtime import box as box_mod  # noqa: E402
+from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import RosterRead, VerbRegistry  # noqa: E402
-from defender.tests import _review_bundle  # noqa: E402
-from defender.tests import _tenants1106  # noqa: E402
+from defender.tests.support.runtime.permissions import _review_bundle
+from defender.tests.support.tenancy import _tenants1106
 
 DEFENDER = Path(__file__).resolve().parents[2]
-GOLDEN = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
-GOLDEN_AB3 = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3"
+GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+GOLDEN_AB3 = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
 AB3_ORIG_RUN_DIR = "/tmp/defender-runs/ab3-B"
 
 
@@ -184,7 +184,7 @@ class NeverEndsModel:
     def __init__(self, run_dir: Path):
         self.calls = 0
         # #1255 P1/C9: the model names the alert by its model path; a host path is refused.
-        from defender.tests._1255_view import model_path
+        from defender.tests.support.runtime.state._1255_view import model_path
 
         self._alert = model_path(RunPaths(run_dir).alert, run_dir=run_dir)
 
@@ -401,7 +401,7 @@ def materialize(tmp_path: Path, golden: Path, *, run_id: str = "run") -> Path:
 def plant_alert(run_dir: Path, raw: bytes) -> None:
     """The alert and its record in the run's input directory, as `materialize_run` leaves them
     (the committed tenants' mapping derives the facts)."""
-    from defender.tests import _alert_plant
+    from defender.tests.support.storage import _alert_plant
 
     _alert_plant.plant_alert(run_dir, raw)
 

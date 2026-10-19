@@ -61,7 +61,7 @@ from typing import Any
 
 import pytest
 
-from defender.tests._1255_view import model_path
+from defender.tests.support.runtime.state._1255_view import model_path
 
 pytest.importorskip("pydantic_ai")
 
@@ -69,7 +69,7 @@ from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.scripts.adapters.elastic_adapter import search_envelope  # noqa: E402
-from defender.tests._verb_authorization_632 import breaker_doc  # noqa: E402
+from defender.tests.support.learning.curation._verb_authorization_632 import breaker_doc  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     FakeVerbs,
@@ -464,7 +464,7 @@ def materialize_alert(root: Path, doc: dict) -> Path:
     """The on-disk run dir a driven run starts from — `_replay_harness.materialize`'s shape,
     but planting a SYNTHESIZED alert (and the record the front door settles beside it) rather
     than copying a golden."""
-    from defender.tests import _alert_plant
+    from defender.tests.support.storage import _alert_plant
 
     run_dir = root / "run"
     (run_dir / "gather_raw").mkdir(parents=True)

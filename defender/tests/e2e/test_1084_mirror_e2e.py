@@ -1,7 +1,7 @@
 """#1084/#1110 e2e: the dev-only run-page mirror copy. Replaced by stage+rename (never truncated in place), a planted link at the page name is refused and warned, a failed copy never fails the render, and (as root) pages are written as the checkout's owner and never through a link to a root-only target."""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _run_handle_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import logging
 import os

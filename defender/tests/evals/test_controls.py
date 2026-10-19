@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.evals.oracle_golden import controls as CONTROLS
+from evaluations.oracle_golden import controls as CONTROLS
 
 
 # Shaped like a real lead: full predicate, two bounds, an aggregation.

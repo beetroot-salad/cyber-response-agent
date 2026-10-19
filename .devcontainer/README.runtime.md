@@ -73,7 +73,7 @@ mounted data root, `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, and `.dockerignore`
 The untrusted **"hands"** — the per-run sandbox `start_box` creates (#1092) — is a THIRD
 image, `defender/box.Dockerfile`, distinct from both of the above: it is what `defender-sql`
 and the other granted shims actually run inside, and it is what the "hands" row used to
-describe. Its name is derived from the tree (`defender/runtime/box/_image.py::image_tag`), so
+describe. Its name is derived from the tree (`defender/box/_image.py::image_tag`), so
 there is nothing to tag by hand — only to build:
 
 ```bash

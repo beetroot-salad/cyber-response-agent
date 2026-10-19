@@ -48,7 +48,7 @@ from defender.runtime.verbs import (  # noqa: E402
     engine_of,
     verb,
 )
-from defender.tests._lead_author_1134 import held_skills, lead_trees, skills_view  # noqa: E402
+from defender.tests.support.learning.curation._lead_author_1134 import held_skills, lead_trees, skills_view  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

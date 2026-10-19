@@ -16,7 +16,7 @@ from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
 from defender.scripts.gather_tools.record_query import QUERY_ROW_COLUMNS
 from defender._query_rules import ABOVE_GUARD_QUERY_ID
-from defender.tests import _judge_921 as J  # noqa: E402
+from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     VerbRecorder,
@@ -25,14 +25,14 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 from defender.tests.e2e.test_855_model_named_systems import PARAMS, _bad_args  # noqa: E402
 from defender.tests.e2e.test_pitfalls_input_823 import LEAD, _reduce, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, elastic_ok, q  # noqa: E402
-from defender.tests.test_1017_row_schema import (  # noqa: E402
+from defender.tests.learning.core.test_1017_row_schema import (  # noqa: E402
     KEY_MARKER,
     SHA_MARKER,
     _lead_file,
     _row,
     _table,
 )
-from defender.tests import _state1135  # noqa: E402
+from defender.tests.support.learning.core import _state1135
 
 pytestmark = pytest.mark.e2e
 
@@ -136,7 +136,7 @@ def _leads_view(ep: Path, base: Path):
     """The per-lead chain and the rendered leads view — the address every O3 claim is made at, off the REAL..."""
     from defender._io import bind
     from defender.learning.judge import family, layout, run
-    from defender.tests.judge_contrast_1234 import _spec1234 as S34
+    from defender.tests.learning.judge.contrast_contracts import _spec1234 as S34
 
     ctx = S34.render_context(ep, "b")
     with bind(ep) as bound:

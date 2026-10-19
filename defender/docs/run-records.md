@@ -7,7 +7,7 @@ name a run or episode record carries, and `defender/run_repository/_handle.py` (
 `RecordHandle`, `ArchivedWorld`) wraps them into the handle application code addresses by
 `(tenant_id, run_id)`.
 
-**This page is generated.** `scripts/lint/lint_run_records.py` renders the table below from the
+**This page is generated.** `tooling/lint/lint_run_records.py` renders the table below from the
 one checked-in table of record kinds:
 
 - `run-records-kinds.tsv` — one row per record *kind*: its path template, which table it
@@ -68,7 +68,7 @@ means the read is admitted but goes through the payload read cap and untrusted f
 (`is_captured_payload`), which `decide_read` never consults. Sidecars outside the run dir are
 unreachable by root containment rather than by a named deny.
 
-<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->
+<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run tooling/lint/lint_run_records.py --render -->
 
 | kind | table | path | denied to | archived as | sub-collection | note |
 |---|---|---|---|---|---|---|

@@ -23,7 +23,7 @@ from defender.runtime import session_store  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender import _query_rules  # noqa: E402
 from defender.scripts.gather_tools import record_query as rq  # noqa: E402
-from defender.tests._verb_authorization_632 import (  # noqa: E402
+from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
     DONE,
     LEAD,
     ScopedFakeVerbs,

@@ -64,7 +64,7 @@ def _concept_root(bind: str) -> str:
 
 @functools.lru_cache(maxsize=None)  # several graphs share a suite dir
 def _test_functions(test_dir: Path) -> dict[str, ast.AST]:
-    """Map test-function name → its AST node, over the `*.py` files beside the graph.
+    """Map test-function name → its AST node, over the configured suite subtree.
 
     The prose⊄binds scan reads the docstrings, the unexercised scan the bodies.
 

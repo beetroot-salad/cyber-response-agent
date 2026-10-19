@@ -14,9 +14,9 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
 )
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
 from defender.scripts.gather_tools import record_query  # noqa: E402
-from defender.tests._declared869 import write  # noqa: E402
-from defender.tests._after_start_1256 import AfterStart  # noqa: E402
-from defender.tests._verb_authorization_632 import grant_of  # noqa: E402
+from defender.tests.support.runtime.engine._declared869 import write  # noqa: E402
+from defender.tests.support.shared.contracts._after_start_1256 import AfterStart  # noqa: E402
+from defender.tests.support.learning.curation._verb_authorization_632 import grant_of  # noqa: E402
 from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
     PARAMS,
     _above_guard,
@@ -25,7 +25,7 @@ from defender.tests.e2e.test_855_model_named_systems import (  # noqa: E402
 )
 from defender.tests.e2e.test_pitfalls_input_823 import _Res, _run  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, q  # noqa: E402
-from defender.tests.tenant_1107_settings import _spec1107 as S  # noqa: E402
+from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

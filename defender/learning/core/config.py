@@ -318,7 +318,7 @@ class StageContext:
     """What one spawn of a stage is about: the per-call transport `run_stage` consumes.
 
     Built per call, never a module constant, so the env-backed `wall_clock_timeout` and
-    `request_limit` aren't frozen at import (`tests/test_loop_config_env.py` enforces this).
+    `request_limit` aren't frozen at import (`tests/shared/process/test_loop_config_env.py` enforces this).
 
     `repo_root` is only needed by stages that bind a corpus or skills tree. `run_stage` reads
     the first four fields; `repo_root`/`box` are bind inputs, and every engine binds off this

@@ -277,7 +277,7 @@ differ only in (a) what labels a win, (b) where the anchor comes from, and
 - **Held-out scarcity bounds the *full-trust* win signal.**
   A `ground_truth.yaml` label exists only for held-out fixtures, and is read from
   the fixture dir — never from a run dir (see
-  `defender/fixtures/held-out/README.md`). Under the strict
+  `evaluations/fixtures/held_out/README.md`). Under the strict
   reading that would starve promotion; the calibrated-judge tier
   (Principle 1) is what relieves it — held-out sizes the discount, the
   abundant judge supplies the volume. The residual bound is on calibration
