@@ -537,6 +537,13 @@ def walked_view(episode_dir: Path) -> Any:
     return episode_runs_for(episode_dir).episode(episode_dir.name)
 
 
+def read_grade_at(episode_dir: Path) -> Any:
+    """Read the real grade through its tenant repository's walked episode handle (#1187)."""
+    episode_dir = Path(episode_dir)
+    with episode_runs_for(episode_dir).episode_files(episode_dir.name) as episode:
+        return mod("learning.judge").read_grade(episode)
+
+
 def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
     """`learning.judge.grade_episode(runs, episode_dir.name, **kw)` — the judge's one entry
     point, by id: `runs` (default: the repository of the tenant whose `<T>/episodes/` holds

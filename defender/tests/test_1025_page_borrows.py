@@ -295,7 +295,7 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
     judge = E.mod("learning.judge")
     enqueue = E.mod("learning.judge.enqueue")
     ep = E.sample_episode(tmp_path)
-    grade = judge.read_grade(ep.dir)
+    grade = E.J.read_grade_at(ep.dir)
     assert grade.dispositions == E.sample_dispositions()
     assert grade.dispositions[0] == enqueue.disposition_entry(
         E.finding_id(E.PASSTHROUGH_WORLD, 0, 0), enqueue.LANE_DEFENDER)
@@ -303,12 +303,12 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
     doc = E.sample_grade()
     del doc["dispositions"]
     E.write_judge(ep.dir, doc)
-    assert judge.read_grade(ep.dir).dispositions is None
+    assert E.J.read_grade_at(ep.dir).dispositions is None
 
     doc = E.sample_grade()
     doc["dispositions"] = []
     E.write_judge(ep.dir, doc)
-    assert judge.read_grade(ep.dir).dispositions == []
+    assert E.J.read_grade_at(ep.dir).dispositions == []
 
     for bad in ({"finding_id": E.finding_id(E.GRADED_WORLD, 0, 0), "lane": "teleported"},
                 {"lane": "defender", "reason": None}):
@@ -316,7 +316,7 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
         doc["dispositions"].append(bad)
         E.write_judge(ep.dir, doc, check=False)
         with pytest.raises(judge.JudgeRefused, match="ledger entry"):
-            judge.read_grade(ep.dir)
+            E.J.read_grade_at(ep.dir)
     render_text = render(ep).text_of("sec-verdict")
     assert "grade record unreadable" in render_text, render_text
 

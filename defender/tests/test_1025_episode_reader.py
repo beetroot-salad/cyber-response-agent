@@ -410,7 +410,9 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
     base, _src = J.runs_base(tmp_path)
 
-    shown = _render().render(ep, "b").focus.leads
+    from defender.tests.judge_contrast_1234 import _spec1234 as S34
+
+    shown = S34.render_context(ep, "b").focus.leads
     facts = family.read_world_facts(J.mod("_io").bind(ep), "b", episode_token=J.EPISODE_TOKEN)
     expected = family.lead_chain(_world(ep, "b"), "l-001", facts.resolutions_by_lead,
                                  leads=family.leads_by_id(world_dir))
@@ -668,19 +670,19 @@ def test_raw_manifest_reads_the_screened_manifest_and_refuses_a_link_or_a_non_ma
     ep = J.accepted_episode(tmp_path)
     manifest = ep / "family.yaml"
     with J.episode_runs_for(ep).episode_files(ep.name) as view:
-        assert family.read_manifest(view, expected_episode_id=ep.name)["episode_id"] == J.EPISODE_ID
+        assert family.read_manifest(view.view(), expected_episode_id=ep.name)["episode_id"] == J.EPISODE_ID
 
     outside = tmp_path / "planted-family.yaml"
     outside.write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
     manifest.unlink()
     manifest.symlink_to(outside)
     with pytest.raises(refused), J.episode_runs_for(ep).episode_files(ep.name) as view:
-        family.read_manifest(view, expected_episode_id=ep.name)
+        family.read_manifest(view.view(), expected_episode_id=ep.name)
 
     manifest.unlink()
     manifest.write_text("- not\n- a mapping\n", encoding="utf-8")
     with pytest.raises(refused), J.episode_runs_for(ep).episode_files(ep.name) as view:
-        family.read_manifest(view, expected_episode_id=ep.name)
+        family.read_manifest(view.view(), expected_episode_id=ep.name)
 
 
 # ---------------------------------------------------------------------------------------
@@ -703,7 +705,7 @@ def test_read_grade_is_none_before_a_grade_and_the_same_record_grade_episode_ret
     truncated or pre-#1007 record — two readers of one file (O8).
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
-    read_grade = J.sym("learning.judge", "read_grade")
+    read_grade = J.read_grade_at
     assert read_grade(ep) is None, "an ungraded episode read as a grade"
 
     live = _grade(ep, tmp_path)
@@ -735,7 +737,7 @@ def test_read_grade_refuses_a_planted_link_a_non_mapping_and_a_torn_record(tmp_p
     reader in this package converts at, so the page meets a traceback where the pass meets a
     refusal.
     """
-    read_grade, refused = J.sym("learning.judge", "read_grade"), _refused()
+    read_grade, refused = J.read_grade_at, _refused()
     ep = J.accepted_episode(tmp_path)
     record = ep / "judge.yaml"
     outside = tmp_path / "planted-judge.yaml"
@@ -776,7 +778,7 @@ def test_read_grade_reads_a_pre_oracle_record_with_defaults_and_invents_nothing(
     there is inventing an answer the judge model never gave. Positive control: the same
     record carrying the fields reads them back.
     """
-    read_grade = J.sym("learning.judge", "read_grade")
+    read_grade = J.read_grade_at
     ep = J.accepted_episode(tmp_path)
     old_row = {"world": "b", "bucket": "lead-quality", "holding_queried": True,
                "doctored_answer_served": False, "difference_shown": False,
@@ -831,7 +833,7 @@ def test_read_grade_reads_back_a_not_graded_stamp(tmp_path):
     `read_grade(ep).not_graded` is the `NotGradedStamp` the pass wrote, carrying that outcome
     word; positive control — a graded episode reads `not_graded is None`.
     """
-    read_grade = J.sym("learning.judge", "read_grade")
+    read_grade = J.read_grade_at
     skipped = J.accepted_episode(tmp_path, outcome="refused")
     graded = J.accepted_episode(tmp_path / "graded")
 
@@ -875,7 +877,7 @@ def test_a_record_of_the_wrong_shape_is_refused_not_defaulted_and_not_re_graded(
     damage) reads, the damaged record raises `JudgeRefused` from both entry points, and the
     file on disk is left exactly as planted.
     """
-    read_grade, refused = J.sym("learning.judge", "read_grade"), _refused()
+    read_grade, refused = J.read_grade_at, _refused()
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     sound = {"worlds": [{"world": "b", "bucket": None}], "validity": "usable"}
     record = ep / "judge.yaml"
@@ -893,19 +895,19 @@ def test_a_record_of_the_wrong_shape_is_refused_not_defaulted_and_not_re_graded(
         "the pass re-graded past a record it could not read, replacing the planted file")
 
 
-def test_read_grade_hands_back_the_same_record_for_a_str_episode_dir(tmp_path):
-    """`read_grade` coerces its argument as `grade_episode` does, so a caller holding the path
-    as text (a page reading it off YAML) gets a record whose `Path`-typed `episode_dir` IS a
-    `Path` — and equal to the one `grade_episode` returns for the same episode.
+def test_read_grade_hands_back_the_same_record_through_a_walked_episode_handle(tmp_path):
+    """#1187 declared change 8: grade readers take the repository's walked handle.
+
+    The grade still carries its episode directory as a Path, equal to the live pass's record.
     """
-    read_grade = J.sym("learning.judge", "read_grade")
+    read_grade = J.read_grade_at
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})
     live = _grade(ep, tmp_path)
 
-    stored = read_grade(str(ep))
+    stored = read_grade(ep)
 
     assert isinstance(stored.episode_dir, Path), type(stored.episode_dir)
-    assert stored == live, "read_grade(str) is not the record grade_episode returned"
+    assert stored == live, "the walked grade reader differs from grade_episode"
 
 
 def test_the_draws_directory_has_one_name_and_one_public_reader(tmp_path):

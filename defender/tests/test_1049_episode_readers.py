@@ -440,19 +440,18 @@ def test_1049_a_document_that_is_not_the_grade_record_is_refused_as_judge_yaml(t
     control: the sound record reads back with that field set to the episode dir.
     """
     ep = _episode(tmp_path)
-    judge = R.judge()
     refused = R.refused_class()
     sound = {"validity": "usable", "worlds": [{"world": "b", "verdict": "malicious"}]}
     for bad in ({**sound, "validity": 5}, {1: "x"}, {**sound, "worlds": [{"verdict": "x"}]},
                 {**sound, "not_graded": {"x": 1}}):
         R.write_bytes(ep / "judge.yaml", yaml.safe_dump(bad))
         with pytest.raises(refused) as caught:
-            judge.read_grade(ep)
+            J.read_grade_at(ep)
         sentence = str(caught.value)
         assert "judge.yaml is not a family grade record" in sentence, sentence
         _root_free(sentence, ep)
     R.write_bytes(ep / "judge.yaml", yaml.safe_dump(sound))
-    grade = judge.read_grade(ep)
+    grade = J.read_grade_at(ep)
     assert grade.validity == 'usable'
     assert grade.episode_dir == ep
 
