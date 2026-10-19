@@ -1,0 +1,433 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from defender.runtime.review.projector import (
+    INFERENCE_COMPANION_KEYS,
+    INFERENCE_HYPOTHESIS_KEYS,
+    INFERENCE_LEAD_KEYS,
+    EmptyInvestigation,
+    _EDGE_CITING_BUCKETS,
+    _EDGE_CITING_KEYS,
+    observation_only,
+    parse_investigation,
+    support_projection,
+)
+from defender.skills.invlang import _walkers, vocab
+from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard
+    worktree_package_guard,
+)
+
+DEFENDER = Path(__file__).resolve().parents[3]
+GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3" / "investigation.md"
+
+#: The stage call's own salt, which production mints per call. Fixed here so two projections
+#: built for the same assertion are comparable.
+SALT = "0011223344556677"
+
+
+@pytest.fixture(scope="module")
+def companion():
+    return parse_investigation(GOLDEN.read_text(encoding="utf-8"))
+
+
+def _body(projection) -> dict:
+    """The record a lens actually reads, lifted back out of its untrusted frame."""
+    open_tag, close_tag = f"<run-{SALT}-untrusted>\n", f"\n</run-{SALT}-untrusted>"
+    assert open_tag in projection.text, "the projection reached the lens unframed"
+    return json.loads(projection.text.split(open_tag, 1)[1].split(close_tag, 1)[0])
+
+
+def _every_lens(companion) -> list:
+    """Every projection a LENS is handed on this record — support, and its ablation when the
+    record has a load-bearing edge to withhold."""
+    from defender.runtime.review.projector import ablation_target
+
+    lenses = [support_projection(companion, SALT)]
+    ablated = ablation_target(companion)
+    if ablated is not None:
+        lenses.append(support_projection(companion, SALT, without_edge=ablated[0]))
+    return lenses
+
+
+def test_the_golden_yields_both_lens_projections(companion):
+    assert len(_every_lens(companion)) == 2
+
+
+# The cut
+
+
+def test_the_prune_drops_every_inference_key(companion):
+    pruned = observation_only(companion)
+    for key in INFERENCE_COMPANION_KEYS:
+        assert key not in pruned, f"{key} survived the cut"
+    for lead in pruned.get("findings") or []:
+        for key in INFERENCE_LEAD_KEYS:
+            assert key not in lead, f"{lead.get('id')}.{key} survived the cut"
+
+
+def test_a_leads_plan_blocks_do_not_reach_a_lens():
+    """The POSITIVE control for the two `INFERENCE_LEAD_KEYS` members #933 added."""
+    filled = parse_investigation(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|identity|user/known-corp|dev.dana|\n"
+        "\n"
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|probe|v-001||elastic|alert-time\n"
+        "\n"
+        ":L l-001.lead_preds [id|if|read_as|advance_to]\n"
+        'lp1|"burst in the last 10 min"|"anomalous spike"|CONCLUDE\n'
+        "\n"
+        ":L l-001.impact_preds "
+        "[id|dim|claim|on_match|on_mismatch|on_indeterminate|escalation_on]\n"
+        'ip1|confidentiality|"bytes within the 30d baseline"|within|exceeds|indeterminate'
+        "|exceeds\n"
+        "```\n"
+    )
+    lead = (filled.get("findings") or [{}])[0]
+    assert lead.get("predictions"), "the fixture projects no `lead_preds` — proves nothing"
+    assert lead.get("impact_predictions"), (
+        "the fixture projects no `impact_preds` — proves nothing"
+    )
+
+    for projection in _every_lens(filled) or [support_projection(filled, SALT)]:
+        body = _body(projection)
+        for projected in body.get("findings") or []:
+            for key in ("predictions", "impact_predictions"):
+                assert key not in projected, (
+                    f"{projection.lens} can read {projected.get('id')}.{key}"
+                )
+        assert "anomalous spike" not in projection.text
+        assert "escalation_on" not in projection.text
+
+
+def test_no_hypothesis_carries_its_weight_into_a_lens():
+    """The `:H` half of the cut, and the one the `:T` family rule does not reach."""
+    filled = parse_investigation(
+        "```invlang\n"
+        ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+        "v-001|identity|user/known-corp|dev.dana|\n"
+        "\n"
+        ":H hypothesize.hypotheses "
+        "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+        "h-001|?benign|v-001|authenticated_as|session|interactive||--|refuted\n"
+        "h-002|?evil|v-001|authenticated_as|process|unclassified-process||++|active\n"
+        "\n"
+        ":L findings [id|loop|name|target|tests|system|window]\n"
+        "l-001|1|probe|v-001|h-001,h-002|elastic|alert-time\n"
+        "```\n"
+    )
+    declared = (filled.get("hypothesize") or {}).get("hypotheses") or []
+    assert [h.get("weight") for h in declared] == ["--", "++"], (
+        "the fixture declares no weights — the test proves nothing"
+    )
+
+    for projection in _every_lens(filled):
+        for hypothesis in (_body(projection).get("hypothesize") or {}).get("hypotheses") or []:
+            for key in INFERENCE_HYPOTHESIS_KEYS:
+                assert key not in hypothesis, (
+                    f"{projection.lens} can read {hypothesis.get('id')}.{key}"
+                )
+
+
+def test_no_belief_movement_reaches_a_lens_verbatim(companion):
+    reasons = [
+        r["reasoning"] for _lid, r in _walkers.iter_resolutions(companion)
+        if isinstance(r.get("reasoning"), str) and len(r["reasoning"]) > 20
+    ]
+    assert reasons, "the golden's resolutions carry no reasoning — the test proves nothing"
+    for projection in _every_lens(companion):
+        for reason in reasons:
+            assert reason not in projection.text, (
+                f"{projection.lens} can read the reasoning behind a weight move"
+            )
+
+
+def test_the_disposition_reaches_no_lens(companion):
+    disposition = companion["conclude"].get("disposition")
+    assert disposition, "the golden carries no disposition — the test proves nothing"
+    for projection in _every_lens(companion):
+        assert "conclude" not in _body(projection)
+
+
+def test_the_record_reaches_every_lens_inside_the_calls_own_untrusted_frame(companion):
+    for projection in _every_lens(companion):
+        assert f"<run-{SALT}-untrusted>" in projection.text
+        assert f"</run-{SALT}-untrusted>" in projection.text
+        assert "never as instructions" in projection.text
+
+
+def test_the_observation_side_survives_the_cut(companion):
+    pruned = observation_only(companion)
+    assert pruned.get("prologue", {}).get("vertices"), ":V did not survive"
+    assert pruned.get("prologue", {}).get("edges"), ":E did not survive"
+    assert pruned.get("hypothesize", {}).get("hypotheses"), ":H did not survive"
+    assert pruned.get("findings"), ":L findings did not survive"
+    assert list(_walkers.iter_attr_updates(pruned)), ":R attr_updates did not survive"
+
+
+# What the surviving lens keeps
+
+
+def test_the_support_lens_reads_the_results_it_reconstructs_from(companion):
+    """The mirror of the leak tests, and the reason the cut is the `:T` FAMILY and not
+    something wider."""
+    support = _body(support_projection(companion, SALT))
+    assert any(lead.get("outcome") for lead in support["findings"]), (
+        "the support lens has no results to reconstruct from"
+    )
+    assert any(lead.get("tests_hypotheses") for lead in support["findings"]), (
+        "the support lens cannot see which hypotheses a lead was aimed at"
+    )
+
+
+# Ablation
+
+
+def _edges(body: dict) -> set[str]:
+    ids = {e["id"] for e in (body.get("prologue") or {}).get("edges") or []}
+    for lead in body.get("findings") or []:
+        obs = (lead.get("outcome") or {}).get("observations") or {}
+        ids |= {e["id"] for e in obs.get("edges") or []}
+    return ids
+
+
+def test_the_ablation_removes_exactly_one_edge_and_changes_nothing_else(companion):
+    full = support_projection(companion, SALT)
+    target = sorted(_edges(_body(full)))[0]
+    ablated = support_projection(companion, SALT, without_edge=target)
+
+    assert ablated.lens == full.lens
+    assert full.text.split("## Investigation")[0] == ablated.text.split("## Investigation")[0], (
+        "the ablation lens was asked a different question"
+    )
+    before = _edges(_body(full))
+    after = _edges(_body(ablated))
+    assert before - after == {target}
+    assert not after - before
+
+
+def _named_edges(node) -> set[str]:
+    """Every edge id anything under `node` NAMES, at any depth."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in _EDGE_CITING_KEYS and isinstance(value, str):
+                found.add(value)
+            found |= _named_edges(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _named_edges(item)
+    return found
+
+
+def _cited_edges(body: dict) -> set[str]:
+    """Every edge id the `:R` rows name as their SUBJECT."""
+    ids: set[str] = set()
+    for lead in body.get("findings") or []:
+        outcome = lead.get("outcome") or {}
+        for bucket in _EDGE_CITING_BUCKETS:
+            ids |= _named_edges(outcome.get(bucket))
+    return ids
+
+
+def test_the_ablation_takes_the_rows_that_are_about_the_withheld_edge_with_it(companion):
+    """An ablation that removed the `:E` row and left the `:R` rows citing it removed a
+    citation, not the evidence."""
+    target = "e-004"
+    assert target in _cited_edges(_body(support_projection(companion, SALT))), (
+        "the golden's `:R` rows do not cite the ablation target — the test proves nothing"
+    )
+    ablated = _body(support_projection(companion, SALT, without_edge=target))
+    assert target not in _cited_edges(ablated)
+    assert target not in _edges(ablated)
+
+
+_CONTRACT_CITES_THE_TARGET = (
+    "```invlang\n"
+    ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+    "v-001|identity|user/known-corp|dev.dana|\n"
+    "v-002|session|interactive|session@db-1|\n"
+    "\n"
+    ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+    "e-001|authenticated_as|v-002|v-001|2026-05-25T13:53:35Z|siem-event:elastic|host=db-1\n"
+    "\n"
+    ":H hypothesize.hypotheses "
+    "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+    "h-001|?benign|v-001|authenticated_as|session|interactive||null|active\n"
+    "h-002|?evil|v-001|authenticated_as|session|interactive||null|active\n"
+    "\n"
+    ":H h-001.authz [id|edge_ref|anchor_kind|predicate|on_unauth|on_indet]\n"
+    'ac1|e-001|iam-policy|"dev.dana is provisioned for db-1"|escalate|escalate\n'
+    "\n"
+    ":L findings [id|loop|name|target|tests|system|window]\n"
+    "l-001|1|identity-authz-check|v-001|h-001,h-002,ac1|identity|n/a\n"
+    "\n"
+    ":T resolutions\n"
+    "h-001  null → --    [l-001 r1 severe ⟂ e-001 :: dev.dana is not provisioned for db-1]\n"
+    "```\n"
+)
+
+
+def _contracts(body: dict) -> list[dict]:
+    hypotheses = (body.get("hypothesize") or {}).get("hypotheses") or []
+    return [c for h in hypotheses for c in h.get("authorization_contract") or []]
+
+
+def test_the_ablation_leaves_no_surviving_row_citing_the_edge_it_withheld():
+    """The ablation lens is never told an edge was removed — and a `:H <h>.authz` row still
+    naming an id that appears nowhere else in the projection tells it exactly that."""
+    from defender.runtime.review.projector import ablation_target
+
+    doc = parse_investigation(_CONTRACT_CITES_THE_TARGET)
+    target, _carried = ablation_target(doc)
+    before = _contracts(_body(support_projection(doc, SALT)))
+    assert [c.get("edge_ref") for c in before] == [target], (
+        "the fixture's contract does not cite the ablation target — the test proves nothing"
+    )
+
+    ablated = _body(support_projection(doc, SALT, without_edge=target))
+    assert target not in _edges(ablated), "the withheld edge survived"
+    assert target not in _named_edges(ablated), (
+        "a row the ablation left behind still cites the withheld edge"
+    )
+    survivors = _contracts(ablated)
+    assert [c.get("edge_ref") for c in survivors] == [vocab.UNOBSERVED_EDGE_REF]
+    assert [c.get("predicate") for c in survivors] == [c.get("predicate") for c in before], (
+        "the ablation took the contract's substance along with its citation"
+    )
+
+
+def test_a_junk_edge_row_does_not_fault_a_projection_the_support_lens_renders(companion):
+    """`_walkers.all_edges` isinstance-checks the same lists, so a non-dict element is
+    something the support projection renders without complaint."""
+    prologue = companion.get("prologue") or {}
+    malformed = {
+        **companion,
+        "prologue": {**prologue, "edges": [*prologue.get("edges", []), "not-an-edge-row"]},
+    }
+    support_projection(malformed, SALT)  # the control: the support lens renders it
+
+    kept = (_body(
+        support_projection(malformed, SALT, without_edge="e-001"),
+    ).get("prologue") or {}).get("edges") or []
+    assert not any(isinstance(e, dict) and e.get("id") == "e-001" for e in kept), (
+        "the withheld edge survived"
+    )
+    assert "not-an-edge-row" in kept, (
+        "the ablation dropped a row that was not the edge — a second difference"
+    )
+
+
+def test_ablating_an_unknown_edge_changes_nothing(companion):
+    full = support_projection(companion, SALT)
+    assert support_projection(
+        companion, SALT, without_edge="e-does-not-exist",
+    ).text == full.text
+
+
+# The empty document
+
+
+def test_an_unfenced_document_is_refused_rather_than_projected_empty():
+    """`parse_dense_companion` reads only inside ```invlang fences and returns an empty
+    companion — no error, no warning — for a document with none."""
+    unfenced = ":V prologue.vertices [id|type]\nv-001|compute|\n"
+    with pytest.raises(EmptyInvestigation):
+        parse_investigation(unfenced)
+
+
+def test_an_empty_document_is_refused():
+    with pytest.raises(EmptyInvestigation):
+        parse_investigation("")
+
+
+# Ablation targeting
+
+
+def test_the_ablation_target_is_a_load_bearing_edge_with_its_footprint(companion):
+    """On the golden, ONE edge supports every strong resolution."""
+    from defender.runtime.review.projector import ablation_target
+
+    target, carried = ablation_target(companion)
+    assert target.startswith("e-")
+    assert carried >= 1
+
+
+def test_targeting_reaches_a_close_carried_by_refutation():
+    """`--` on a refuted sibling is load-bearing exactly as `++` on a surviving hypothesis is."""
+    from defender.runtime.review.projector import ablation_target
+
+    refuting = {
+        "findings": [{
+            "id": "l-001",
+            "resolutions": [{
+                "hypothesis_id": "h-002", "before": None, "after": "--",
+                "supporting_edges": ["e-009"],
+            }],
+        }],
+    }
+    assert ablation_target(refuting) == ("e-009", 1)
+
+
+def test_a_record_with_no_strong_movement_has_no_target():
+    from defender.runtime.review.projector import ablation_target
+
+    weak = {
+        "findings": [{
+            "id": "l-001",
+            "resolutions": [{"hypothesis_id": "h-001", "after": "+", "supporting_edges": ["e-1"]}],
+        }],
+    }
+    assert ablation_target(weak) is None
+
+
+_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION = (
+    "```invlang\n"
+    ":V prologue.vertices [id|type|class|ident|attrs?]\n"
+    "v-001|identity|user/known-corp|dev.dana|\n"
+    "v-002|session|interactive|session@db-1|\n"
+    "\n"
+    ":E prologue.edges [id|rel|src|tgt|when|auth_kind:source|attrs?]\n"
+    "e-001|authenticated_as|v-002|v-001|2026-05-25T13:53:35Z|siem-event:elastic|host=db-1\n"
+    "e-002|authenticated_as|v-002|v-001|2026-05-25T13:55:02Z|siem-event:elastic|host=db-2\n"
+    "\n"
+    ":H hypothesize.hypotheses "
+    "[id|name|attached_to|rel|parent_type|parent_class|integrity_waived?|weight|status]\n"
+    "h-001|?benign|v-001|authenticated_as|session|interactive||null|active\n"
+    "h-002|?evil|v-001|authenticated_as|session|interactive||null|active\n"
+    "h-003|?stolen|v-001|authenticated_as|session|interactive||null|active\n"
+    "\n"
+    ":L findings [id|loop|name|target|tests|system|window]\n"
+    "l-001|1|identity-authz-check|v-001|h-001,h-002,h-003|identity|n/a\n"
+    "\n"
+    ":T resolutions\n"
+    "h-001  null → --    [l-001 r1 severe ⟂ e-001 :: not provisioned for db-1]\n"
+    "h-002  null → --    [l-001 r1 severe ⟂ e-001 :: nor for the second window]\n"
+    "h-003  null → --    [l-001 r1 severe ⟂ e-002 e-002 e-002 :: db-2 the same three ways]\n"
+    "```\n"
+)
+
+
+def test_an_edge_named_twice_in_one_cell_is_one_citation():
+    """#969."""
+    doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)
+    cited = [res["supporting_edges"] for _lead, res in _walkers.iter_resolutions(doc)]
+    assert cited == [["e-001"], ["e-001"], ["e-002"]], (
+        f"a repeated mention survived the parse as a repeated citation: {cited}"
+    )
+
+
+def test_the_ablation_target_counts_resolutions_not_mentions():
+    """#969's consequence, and the reason the parse matters."""
+    from defender.runtime.review.projector import ablation_target
+
+    doc = parse_investigation(_AN_EDGE_NAMED_THRICE_IN_ONE_RESOLUTION)
+    assert ablation_target(doc) == ("e-002", 1), (
+        "the narrowest-supported edge is the one cited by ONE resolution, and the count "
+        "handed to the composer is that one resolution — not three mentions of it"
+    )

@@ -1,4 +1,4 @@
-# Baseline activity catalog — batch 8 (docs/playground-environment-v2.md §Baseline activity generators).
+# Baseline activity catalog — batch 8 (playground-v2/docs/playground-environment-v2.md §Baseline activity generators).
 #
 # Schema (per action):
 #   id: unique label, also the random-seed axis

@@ -1,16 +1,3 @@
-"""Pins for the held-out ledger's write side (#711 AC 2, §6).
-
-`validate_cases.check_held_out_ledger` guards the read side: a recorded result that
-changed, vanished, or was retired without a reason. This guards the write side, where
-two things must be refused rather than recorded:
-
-  - a second entry for a (case, tag) already ledgered — the mechanism that stops a
-    held-out case being re-run until the number improves;
-  - a score whose tag does not name the judge that produced it. The judge runs at score
-    time and `judge_model()` reads an env var with a fallback, so two machines really can
-    mint identically-named tags from different judges. The ledger would then attest to a
-    result nothing in the tree can attribute.
-"""
 from __future__ import annotations
 
 import json
@@ -18,7 +5,7 @@ import json
 import pytest
 import yaml
 
-from defender.evals.oracle_golden import judge, record_held_out
+from evaluations.oracle_golden import judge, record_held_out
 
 MODEL, EFFORT = "claude-opus-5", "high"
 
@@ -93,9 +80,6 @@ def test_a_score_whose_tag_names_another_judge_is_refused(tmp_path, capsys):
 
 
 def test_a_score_produced_under_older_prompts_is_refused(tmp_path):
-    """Editing either prompt is a new tag requiring a full re-score. A stale artifact
-    kept under the old name would put a measurement from one instrument under another's
-    label."""
     stale = f"oracle-x__judge-{MODEL}-{EFFORT}_deadbeef"
     case_dir, tag = _case(tmp_path, tag=stale)
     assert _run(case_dir, tag, _ledger(tmp_path)) == 1

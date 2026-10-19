@@ -19,12 +19,12 @@ from pydantic_ai.messages import (
 )
 
 from defender._clock import now_iso
-from defender._env import env_int
+from defender.configuration._env import env_int
 from defender._io import JSON_NESTING_LIMIT, guarded_mkdir, json_safe, open_guarded, write_guarded
 from defender.run_repository import Run, RUN_LAYOUT, RunPaths
 from defender.runtime._wire import wire_digest
 
-from defender._pricing import billed_usage as _usage_dict, usage_cost
+from defender.configuration._pricing import billed_usage as _usage_dict, usage_cost
 
 _logger = logging.getLogger(__name__)
 
@@ -105,12 +105,16 @@ class RequestLogger:
         self._denial_seq = 0
 
     @classmethod
-    def from_record(cls, record: Any) -> RequestLogger:
+    def from_record(cls, record: Any, *, continuing: bool = False) -> RequestLogger:
+        """A logger writing to `record`. A stream is started empty the first time this process
+        opens its path, unless `continuing`: then it is appended to, and its policy-denial
+        numbering goes on from the denials it already holds (a branch arm's log, restored to
+        what its source held at the branch point, #1255 P2)."""
         path = record.path
         key = str(Path(path).resolve())
         if key in _ACTIVE_PATHS:
             raise FileExistsError(f"a RequestLogger has already opened {path}")
-        if key in _EVER_LOGGER_PATHS:
+        if continuing or key in _EVER_LOGGER_PATHS:
             record.append_text("")
         else:
             record.start_stream("")
@@ -121,6 +125,10 @@ class RequestLogger:
         logger.messages = []
         logger._seq = {}
         logger.n_requests = logger._denial_seq = 0
+        if continuing:
+            rows, _malformed, _read = record.read_rows()
+            logger._denial_seq = sum(
+                row.get("event_type") == POLICY_DENIAL_EVENT_TYPE for row in rows)
         _ACTIVE_PATHS.add(key)
         _EVER_LOGGER_PATHS.add(key)
         return logger
@@ -196,15 +204,19 @@ class RequestLogger:
 
     def log_policy_denial(
         self, *, role: str, system: str, verb: str, call_id: str, params: Any,
+        ts: str | None = None,
     ) -> dict:
         """Append one policy-denial record: role, system, verb, call id, and a digest of the
         param values (never the raw blob). A failed write propagates (unlike
-        `log_budget_refusal`), after the refusal it audits has already taken effect."""
+        `log_budget_refusal`), after the refusal it audits has already taken effect.
+
+        `ts` is the denied call's time: the run clock's reading when a run denied it (#1255 —
+        the log is model-readable), the wall clock when omitted (no run)."""
         seq = self._denial_seq
         self._denial_seq += 1
         rec = {
             "event_type": POLICY_DENIAL_EVENT_TYPE,
-            "ts": now_iso(),
+            "ts": ts if ts is not None else now_iso(),
             "seq": seq,
             "role": role,
             "system": system,
@@ -243,7 +255,9 @@ def _denial_logger_or_null(record: Any) -> RequestLogger:
     itself still takes effect; only the record is lost (logged), and the reap scan reports the
     plant."""
     try:
-        return RequestLogger.from_record(record)
+        # Continued, never started over: a branch arm's log already holds its source's denials
+        # through the branch point; a fresh run's does not exist yet.
+        return RequestLogger.from_record(record, continuing=True)
     except OSError as e:
         _logger.error(
             f"the policy-denial log at {record.path} could not be opened ({e!r}); denials "

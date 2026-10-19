@@ -11,15 +11,20 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from defender.runtime.verbs import VerbContext, verb
-from defender.scripts.adapters import _stub_transport, faults
+from defender.integrations import _stub_transport, faults
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.runtime.run_tenant import RunTenant
 
 SYSTEM = "example"
 #: The prefix this system's `config.env` keys carry: the folder name, upper-cased
 #: (`systems/example/config.env` holds `EXAMPLE_URL_BASE=...`).
 PREFIX = "EXAMPLE"
+#: The keys every verb here needs (`_config`); the settings check judges the same set.
+REQUIRED_KEYS = ("URL_BASE", "TIMEOUT_SEC")
 
 
 def _config(ctx: VerbContext) -> dict[str, str]:
@@ -27,9 +32,21 @@ def _config(ctx: VerbContext) -> dict[str, str]:
     the run began. Never the settings folder as it is now and never the process environment: an
     adapter reads its configuration from the record, so an exported variable changes nothing a
     run addresses. (A credentialed system has no secret delivery yet: #1163.)
-    `load_config` strips the prefix and raises `ConfigFault` (infra, exit 2) for a system with no
-    config, or a missing or blank required key."""
-    return _stub_transport.load_config(ctx, SYSTEM, PREFIX, ("URL_BASE", "TIMEOUT_SEC"))
+    `load_config` strips the prefix and raises `ConfigFault` for a system with no config, or a
+    missing or blank required key — which `check_settings` below raises first, at run start."""
+    return _stub_transport.load_config(ctx, SYSTEM, PREFIX, REQUIRED_KEYS)
+
+
+def check_settings(tenant: RunTenant) -> None:
+    """This system's settings check, which EVERY adapter declares (#1256): a pure function of
+    the run's tenant record that raises `ConfigFault` naming what is wrong — covering every
+    `ConfigFault` any verb here can raise — or returns None when the system is usable. The run
+    calls it once at start; a system whose check raises is down for the whole run (the agent is
+    told why, and no verb of it is called). An adapter declaring none, or whose check raises
+    anything else, is down as broken. A system needing no settings still declares one that never
+    raises. This system's verbs fault only in `_config`, so the check is `_config`'s, over the
+    record."""
+    _stub_transport.record_config(tenant, SYSTEM, PREFIX, REQUIRED_KEYS)
 
 
 def _request(ctx: VerbContext, path: str, params: dict[str, str] | None = None) -> Any:

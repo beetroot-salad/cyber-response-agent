@@ -1,0 +1,403 @@
+"""#987 — the STOPPED lead, at `_run_gather`'s own seam and at the stop record's."""
+from __future__ import annotations
+
+from dataclasses import replace as _with_live_run_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
+
+import asyncio
+import re
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+pytest.importorskip("pydantic_ai")
+
+from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded  # noqa: E402
+from pydantic_ai.messages import (  # noqa: E402
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
+
+# `driver` FIRST: entering the `tools_gather` <-> `tools` cycle at `tools_gather` raises on a
+# partially initialized module.
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106 as T1106
+from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
+from defender.runtime import (  # noqa: E402
+    circuit_breaker,
+    request_ceiling,
+    session_store,
+    tools_gather,
+)
+from defender.runtime.agent_definition import bind  # noqa: E402
+from defender.runtime.request_ceiling import FINAL_REQUEST, RequestCeiling  # noqa: E402
+from defender.runtime.tools import DeadEnd, LeadStop  # noqa: E402
+from defender.runtime.tools_gather import (  # noqa: E402
+    NO_SUMMARY_FAILED,
+    GatherRequest,
+)
+from defender.tests.e2e._replay_harness import DEFENDER, GOLDEN_AB3, materialize  # noqa: E402
+
+LEAD = "l-001"
+
+#: The tail sentence #807's G19/C5 pinned as MAIN's own vocabulary — the one sentence gather
+#: must never be shown, and the one main must always be.
+INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captured."
+
+HEADER_REQUEST_LIMIT = (
+    "gather for {lead} reached its request limit ({limit} requests) and was told to stop; "
+    "any queries it ran are in the queries table. " + INCOMPLETE_IDIOM
+)
+HEADER_DEAD_END = (
+    "gather for {lead} hit a dead end: {reason} {escape} " + INCOMPLETE_IDIOM
+)
+HEADER_RETRY_EXHAUSTED = (
+    "gather for {lead} ended abnormally ({detail}); any queries it ran are in "
+    "the queries table. " + INCOMPLETE_IDIOM
+)
+HEADER_STORE = (
+    "gather for {lead} could not be recorded ({detail}); any queries it ran are "
+    "in the queries table. " + INCOMPLETE_IDIOM
+)
+
+DEAD_END = DeadEnd(reason="the request (elastic query) repeats seq 0.", escape="Move on.")
+
+_FRAME = re.compile(r"\A<run-([0-9a-f]+)-untrusted>\n(?P<body>.*)\n</run-\1-untrusted>\Z",
+                    re.DOTALL)
+
+
+def frame_body(returned: str) -> str:
+    """The body inside the ONE `untrusted` frame `_run_gather` returns — a header emitted outside the frame, or a..."""
+    m = _FRAME.match(returned)
+    assert m, f"the return is not one whole `untrusted` frame: {returned!r}"
+    body = m.group("body")
+    assert "-untrusted>" not in body, \
+        "the header and the summary came back in two frames — main's parser sees two documents"
+    return body
+
+
+def split(returned: str) -> tuple[str, str]:
+    """`(header, summary)`: the arm's notice, a blank line, the lead's own text."""
+    body = frame_body(returned)
+    head, sep, tail = body.partition("\n\n")
+    assert sep, f"the return carries no header/summary split at all: {body!r}"
+    return head, tail
+
+
+class Agent:
+    """A gather agent that records its one `.run`, does `to_stop` to the deps' stop record (the query tool's or..."""
+
+    def __init__(self, output: str = "measured: two logins from dev.dana.",
+                 *, exc: BaseException | None = None, to_stop=None):
+        self._output, self._exc, self._to_stop = output, exc, to_stop
+        self.runs: list[dict] = []
+        self.deps: list = []
+
+    async def run(self, prompt=None, **kwargs):
+        self.runs.append({"prompt": prompt, **kwargs})
+        self.deps.append(kwargs["deps"])
+        if self._to_stop is not None:
+            self._to_stop(kwargs["deps"].stop)
+        if self._exc is not None:
+            raise self._exc
+        return SimpleNamespace(output=self._output)
+
+
+def dispatch(root: Path, agent, *, ceiling: int = 40, stamps: list | None = None,
+             handed: list | None = None) -> str:
+    from dataclasses import replace
+
+    from defender.runtime.run_state import RunState
+
+    run_dir = materialize(root, GOLDEN_AB3)
+    # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
+    # the dispatch's breaker screen reads it.
+    deps = replace(_with_live_run_1165(bind(MAIN_DEF, run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir)),
+                   run_state=RunState(run_dir, "r-987"))
+
+    def factory(agent_id: str, system: str, request_limit: int):
+        if handed is not None:
+            handed.append(request_limit)
+        return agent
+
+    return asyncio.run(tools_gather._run_gather(
+        deps, factory, ceiling, GatherRequest(LEAD, "elastic", "measure this lead", ("auth",)),
+        T1106.fixture_grants().gather,
+        (lambda agent_id, reason: stamps.append((agent_id, reason))) if stamps is not None
+        else None,
+        catalog=None,
+    ))
+
+
+def dead_end(stop: LeadStop) -> None:
+    stop.close_door(DEAD_END)
+
+
+def ceiling(stop: LeadStop) -> None:
+    stop.mark_ceiling(8)
+
+
+def both(stop: LeadStop) -> None:
+    dead_end(stop)
+    ceiling(stop)
+
+
+def test_the_door_closes_once_on_a_dead_end_and_the_ceiling_marks_once():
+    """Two siblings tripping in one round keep the FIRST's reason: the notice main reads names the request that..."""
+    stop = LeadStop()
+    assert (stop.dead_end, stop.ceiling, stop.door_closed) == (None, None, False)
+    stop.close_door(DEAD_END)
+    assert (stop.dead_end, stop.ceiling, stop.door_closed) == (DEAD_END, None, True)
+    stop.close_door(DeadEnd(reason="later", escape="x"))
+    assert stop.dead_end == DEAD_END, "a later close overwrote the first"
+
+    marked = LeadStop()
+    marked.mark_ceiling(8)
+    assert (marked.dead_end, marked.ceiling, marked.door_closed) == (None, 8, False), \
+        "the ceiling closed the query door — the door is the guard's"
+    marked.mark_ceiling(40)
+    assert marked.ceiling == 8
+
+
+def test_a_bound_gather_deps_carries_no_stop_record(tmp_path):
+    """Outside a dispatch nobody would read a record, so there is none: a guard's dead end on such deps unwinds..."""
+    run_dir = materialize(tmp_path, GOLDEN_AB3)
+    deps = _with_live_run_1165(bind(T1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER), run=_live_run_1165(run_dir))
+    assert deps.stop is None
+    assert not hasattr(deps, "request_limit")
+
+
+def _ctx(requests: int, request_limit: int | None = 8, stop: LeadStop | None = None,
+         ) -> SimpleNamespace:
+    return SimpleNamespace(
+        usage=SimpleNamespace(requests=requests),
+        usage_limits=SimpleNamespace(request_limit=request_limit) if request_limit is not None
+        else None,
+        deps=SimpleNamespace(stop=stop),
+    )
+
+
+def _request_context(settings: dict | None = None) -> SimpleNamespace:
+    req = ModelRequest(parts=[
+        ToolReturnPart(tool_name="query", content="exit=0", tool_call_id="c1")])
+    return SimpleNamespace(messages=[req], model_settings=settings)
+
+
+def _marked(requests: int, request_limit: int | None = 8) -> SimpleNamespace:
+    """The request context after the hook saw it at `requests`."""
+    rc = _request_context()
+    asyncio.run(RequestCeiling().before_model_request(_ctx(requests, request_limit), rc))
+    return rc
+
+
+def test_the_final_request_alone_is_marked_and_after_the_rounds_tool_results():
+    """`requests` reads N-1 while request N is prepared, so the request prepared at `ceiling - 1` is the last the..."""
+    assert [len(_marked(n).messages[-1].parts) for n in (5, 6, 7, 8)] == [1, 1, 2, 1]
+    parts = _marked(7).messages[-1].parts
+    assert isinstance(parts[0], ToolReturnPart)
+    assert isinstance(parts[1], UserPromptPart)
+    assert parts[1].content == FINAL_REQUEST
+    assert len(_marked(0, request_limit=1).messages[-1].parts) == 2, \
+        "a ceiling of one marks the very first request"
+    assert len(_marked(7, request_limit=None).messages[-1].parts) == 1, \
+        "a run with no ceiling was marked"
+
+
+def test_the_final_request_goes_out_with_tools_defined_but_none_callable():
+    """The tools stay on the wire (a history with tool blocks must define tools) and the request says no tool may..."""
+    rc = _marked(7)
+    assert rc.model_settings == {"tool_choice": "none"}
+    rc = _request_context({"temperature": 0.0})
+    asyncio.run(RequestCeiling().before_model_request(_ctx(7), rc))
+    assert rc.model_settings == {"temperature": 0.0, "tool_choice": "none"}
+    assert _marked(6).model_settings is None, "an earlier request had its tools withheld"
+
+
+def test_marking_the_final_request_records_the_ceiling_on_the_stop():
+    """The stop is WRITTEN where it happens: the hook that told the model marks the record with the run's own..."""
+    stop = LeadStop()
+    asyncio.run(RequestCeiling().before_model_request(_ctx(6, stop=stop), _request_context()))
+    assert stop.ceiling is None, "a request before the final one was recorded as the ceiling"
+    asyncio.run(RequestCeiling().before_model_request(_ctx(7, stop=stop), _request_context()))
+    assert stop.ceiling == 8
+    rc = _marked(7)
+    assert len(rc.messages[-1].parts) == 2
+
+
+def test_the_hook_leaves_a_history_that_does_not_end_on_a_request_to_the_framework():
+    """The framework raises its own `UserError` for a processed history that does not end on a `ModelRequest`;..."""
+    resp = ModelResponse(parts=[TextPart(content="x")])
+    rc = SimpleNamespace(messages=[resp], model_settings=None)
+    asyncio.run(RequestCeiling().before_model_request(_ctx(7), rc))
+    assert rc.messages[-1].parts == [TextPart(content="x")]
+
+
+def _after(requests: int, response: ModelResponse, request_limit: int | None = 8) -> ModelResponse:
+    return asyncio.run(RequestCeiling().after_model_request(
+        _ctx(requests, request_limit), request_context=_request_context(), response=response,
+    ))
+
+
+def test_tool_calls_on_the_final_response_are_dropped_and_the_text_kept():
+    """`requests` reads N once request N's response is in hand, so the final response is seen at `ceiling`. On it..."""
+    call = ToolCallPart(tool_name="query", args={"system": "elastic"}, tool_call_id="c9")
+    both = ModelResponse(parts=[ThinkingPart(content="hm"), TextPart(content="SUMMARY"), call],
+                         model_name="m")
+    out = _after(8, both)
+    assert out.parts == [ThinkingPart(content="hm"), TextPart(content="SUMMARY")]
+    assert out.model_name == "m"
+    only_calls = ModelResponse(parts=[call])
+    assert _after(8, only_calls).parts == [], "a calls-only final response kept its calls"
+    text = ModelResponse(parts=[TextPart(content="SUMMARY")])
+    assert _after(8, text) is text
+
+
+def test_responses_before_the_final_one_and_on_an_unbounded_run_keep_their_calls():
+    """The response to the second-to-last request — the one whose calls are the last to RUN — keeps them: the..."""
+    call = ToolCallPart(tool_name="query", args={}, tool_call_id="c9")
+    resp = ModelResponse(parts=[TextPart(content="x"), call])
+    assert _after(7, resp) is resp, "the last permitted round's tool calls were dropped"
+    assert _after(8, resp, request_limit=None) is resp, "a run with no ceiling lost its calls"
+
+
+def test_the_request_count_and_the_ceiling_read_off_a_bare_context():
+    assert request_ceiling.requests_so_far(SimpleNamespace()) == 0
+    assert request_ceiling.requests_so_far(SimpleNamespace(usage=None)) == 0
+    assert request_ceiling.requests_so_far(SimpleNamespace(usage=SimpleNamespace(requests=3))) == 3
+    assert request_ceiling.request_limit(SimpleNamespace()) is None
+    assert request_ceiling.request_limit(_ctx(0, request_limit=None)) is None
+    assert request_ceiling.request_limit(_ctx(0, request_limit=8)) == 8
+    bare = SimpleNamespace(deps=SimpleNamespace())
+    assert not request_ceiling.is_final_request(bare, answered=False)
+    assert not request_ceiling.is_final_request(bare, answered=True)
+    assert request_ceiling.is_final_request(_ctx(7), answered=False)
+    assert request_ceiling.is_final_request(_ctx(8), answered=True)
+    assert not request_ceiling.is_final_request(_ctx(8), answered=False)
+    assert not request_ceiling.is_final_request(_ctx(7), answered=True)
+
+
+def test_the_factory_and_the_usage_limit_are_handed_one_number(tmp_path):
+    """#880 F-19 and #808 d21/F6 in one assertion: the recorder the factory builds and the `UsageLimits` the run..."""
+    for i, ceiling_ in enumerate((40, 8)):
+        handed: list[int] = []
+        agent = Agent()
+        dispatch(tmp_path / f"c{i}", agent, ceiling=ceiling_, handed=handed)
+        assert len(agent.runs) == 1, "a lead makes ONE run"
+        assert handed == [ceiling_]
+        assert agent.runs[0]["usage_limits"].request_limit == ceiling_
+        assert agent.deps[0].stop == LeadStop()
+
+
+def test_a_lead_that_finished_is_untouched(tmp_path):
+    stamps: list = []
+    out = dispatch(tmp_path, Agent("measured: two logins."), ceiling=8, stamps=stamps)
+    assert frame_body(out) == "measured: two logins."
+    assert stamps == []
+    assert INCOMPLETE_IDIOM not in out
+
+
+def test_a_dead_end_on_the_record_puts_the_dead_end_notice_above_the_summary(tmp_path):
+    stamps: list = []
+    out = dispatch(tmp_path, Agent("what I had.", to_stop=dead_end), stamps=stamps)
+    header, body = split(out)
+    assert header == HEADER_DEAD_END.format(lead=LEAD, reason=DEAD_END.reason,
+                                            escape=DEAD_END.escape)
+    assert body == "what I had."
+    assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
+
+
+def test_a_ceiling_on_the_record_puts_the_request_limit_notice_above_the_summary(tmp_path):
+    """The run ended cleanly and the record says the ceiling hook marked it: the notice names the ceiling the..."""
+    stamps: list = []
+    out = dispatch(tmp_path, Agent("what I had.", to_stop=ceiling), ceiling=8, stamps=stamps)
+    header, body = split(out)
+    assert header == HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=8)
+    assert "request_limit of" not in header, \
+        "the notice quotes the framework's exception text rather than the lead's ceiling"
+    assert "before finishing" not in header, "a lead that wrote its summary did finish"
+    assert body == "what I had."
+    assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_REQUEST_LIMIT)]
+
+
+def test_a_dead_end_outranks_the_ceiling_when_the_lead_met_both(tmp_path):
+    stamps: list = []
+    out = dispatch(tmp_path, Agent("s.", to_stop=both), ceiling=8, stamps=stamps)
+    assert split(out)[0].startswith(f"gather for {LEAD} hit a dead end: ")
+    assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
+
+
+def test_a_fault_after_the_ceiling_was_marked_shows_main_the_ceiling(tmp_path):
+    """The model wrote no text on its marked, tool-less final request: whichever way the framework then ends the..."""
+    for i, exc in enumerate((
+        UnexpectedModelBehavior("Exceeded maximum output retries (0)"),
+        UsageLimitExceeded("The next request would exceed the request_limit of 8"),
+    )):
+        stamps: list = []
+        out = dispatch(tmp_path / str(i), Agent(exc=exc, to_stop=ceiling), ceiling=8,
+                       stamps=stamps)
+        assert split(out) == (HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=8), NO_SUMMARY_FAILED)
+        assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_REQUEST_LIMIT)]
+
+
+@pytest.mark.parametrize("arm", ["retry-exhausted", "store", "request-limit"])
+def test_a_fault_on_an_unstopped_lead_carries_its_notice_and_the_failed_sentence(tmp_path, arm):
+    """The FAULT arms, on a lead the harness never stopped: their own notice as the header, the same..."""
+    exc, header, terminator = {
+        "retry-exhausted": (
+            UnexpectedModelBehavior("Exceeded maximum output retries (0)"),
+            HEADER_RETRY_EXHAUSTED.format(
+                lead=LEAD, detail=str(UnexpectedModelBehavior("Exceeded maximum output retries (0)"))),
+            session_store.TRUNCATED_BY_RETRY_EXHAUSTED,
+        ),
+        "store": (
+            session_store.StoreError("the store cannot take this round"),
+            HEADER_STORE.format(lead=LEAD, detail="the store cannot take this round"),
+            session_store.TRUNCATED_BY_STORE,
+        ),
+        "request-limit": (
+            UsageLimitExceeded("limit"),
+            HEADER_REQUEST_LIMIT.format(lead=LEAD, limit=40),
+            session_store.TRUNCATED_BY_REQUEST_LIMIT,
+        ),
+    }[arm]
+    stamps: list = []
+    out = dispatch(tmp_path, Agent(exc=exc), stamps=stamps)
+    assert split(out) == (header, NO_SUMMARY_FAILED)
+    assert stamps == [(f"gather:{LEAD}", terminator)]
+
+
+@pytest.mark.parametrize("exc", [
+    UnexpectedModelBehavior("Exceeded maximum output retries (0)"),
+    session_store.StoreError("disk full"),
+    UsageLimitExceeded("limit"),
+], ids=["retry-exhausted", "store", "request-limit"])
+def test_a_fault_after_a_dead_end_still_shows_main_the_dead_end(tmp_path, exc):
+    """A guard stopped the lead, and the model then FAILED to summarize (an empty response, a store that refused..."""
+    stamps: list = []
+    out = dispatch(tmp_path, Agent(exc=exc, to_stop=both), ceiling=8, stamps=stamps)
+    header, got_body = split(out)
+    assert header == HEADER_DEAD_END.format(lead=LEAD, reason=DEAD_END.reason,
+                                            escape=DEAD_END.escape)
+    assert got_body == NO_SUMMARY_FAILED
+    assert stamps == [(f"gather:{LEAD}", session_store.TRUNCATED_BY_DEAD_END)]
+
+
+@pytest.mark.parametrize("arm", ["budget", "aborted"])
+def test_the_two_run_level_arms_still_pass_through(tmp_path, arm):
+    exc, terminator = {
+        "budget": (BudgetKill("tail exhausted"), session_store.TRUNCATED_BY_BUDGET),
+        "aborted": (circuit_breaker.RunAborted(5, ["elastic"]), session_store.TRUNCATED_BY_ABORTED),
+    }[arm]
+    stamps: list = []
+    with pytest.raises(type(exc)):
+        dispatch(tmp_path, Agent(exc=exc, to_stop=dead_end), stamps=stamps)
+    assert stamps == [(f"gather:{LEAD}", terminator)], \
+        "a run-level end was stamped with the lead's stop instead of what ended the run"
+
+

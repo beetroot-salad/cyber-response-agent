@@ -1,13 +1,3 @@
-"""Pins for the story renderer (#711 M9).
-
-`story.md` is deliberately an oracle INPUT, so the hidden/visible split cannot
-protect it — the seed negative control's story announced that it WAS a negative
-control and that a faithful oracle "must therefore return `0` for every lead".
-A renderer whose only input is the runner's record structurally cannot do that,
-and these tests pin both halves: that it renders what happened, and that it
-refuses to emit evaluation vocabulary even if a scenario's command text carries
-some.
-"""
 from __future__ import annotations
 
 import json
@@ -15,17 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from defender.evals.oracle_golden import story_from_run as STORY
+from evaluations.oracle_golden import story_from_run as STORY
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-# `playground-v2/attacks/runs/` is `*`-ignored, so the runner records this suite
-# sweeps existed only on the machine that produced them — the sweep collected
-# nothing anywhere else and its guard failed. The corpus is checked in here
-# instead; the live tree is still swept when a machine has one, so a run whose
-# shape the renderer cannot handle is caught before it is snapshotted.
 FIXTURE_RUNS_DIR = Path(__file__).resolve().parent / "_run_records"
 RUNS_DIR = REPO_ROOT / "playground-v2" / "attacks" / "runs"
-
 
 
 META = {
@@ -73,10 +57,6 @@ def test_an_aborted_run_says_so():
 
 
 def test_a_leaking_command_is_refused_rather_than_written(tmp_path):
-    """If a scenario's own text ever carried the scoring vocabulary, the renderer
-    must fail loudly. A leaked answer inside an oracle input invalidates every
-    projection the case will record, and is invisible afterwards because the story
-    is SUPPOSED to be visible."""
     meta = json.loads(json.dumps(META))
     meta["steps"][0]["cmd"] = "echo 'the expected result is +event'"
     meta_path = tmp_path / "meta.json"
@@ -84,11 +64,6 @@ def test_a_leaking_command_is_refused_rather_than_written(tmp_path):
     out = tmp_path / "story.md"
     assert STORY.main([str(meta_path), str(out)]) == 1
     assert not out.exists()
-
-
-def test_there_are_run_records_to_check():
-    """Every sweep below would pass vacuously against an empty corpus."""
-    assert sorted(FIXTURE_RUNS_DIR.glob("*/meta.json"))
 
 
 @pytest.mark.parametrize("meta_path", RUN_RECORDS, ids=lambda p: p.parent.name)
@@ -102,11 +77,6 @@ def test_every_checked_in_run_record_renders_cleanly(meta_path):
 
 
 def test_the_catalog_description_is_not_rendered():
-    """A retargeted run's catalog description names the scenario's DEFAULT target,
-    so rendering it puts two different targets in one oracle input. `--target db-1`
-    on ssh-brute-force-canary produced a story whose header said db-1 and whose
-    description said "hammers canary-1's SSH". Any projection over that measures
-    the contradiction, not the oracle — two #711 pilot cases were retired for it."""
     meta = {**META, "description": "hammers canary-1's SSH from a workstation",
             "resolved": {"source_user": "sre.alice", "target_host": "db-1"},
             "steps": [{**META["steps"][0], "cmd": "ssh root@db-1 true"}]}

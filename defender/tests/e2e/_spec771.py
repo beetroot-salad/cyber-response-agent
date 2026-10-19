@@ -31,7 +31,7 @@ test fails on its own missing symbol rather than taking the suite's collection d
 
 No `monkeypatch.setattr` anywhere: fakes enter through `docker=`, `store_factory=`, `box=`,
 `limits=`, `start_box=`/`stop_box=`/`scrub=` — the seams the code already carries — because
-`scripts/lint/lint_monkeypatch.py` is a blocking ratcheted gate. `monkeypatch.setenv` is used
+`tooling/lint/lint_monkeypatch.py` is a blocking ratcheted gate. `monkeypatch.setenv` is used
 for env knobs and is explicitly outside that gate.
 
 A note on ROOT: `defender/CLAUDE.md` records four #631 tests that invert under root because
@@ -49,7 +49,7 @@ this one did.
 """
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run
+from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import errno
 import json
@@ -65,16 +65,16 @@ from typing import Any
 
 import pytest
 
-from defender.runtime import box as box_mod
+from defender import box as box_mod
 
-from defender.tests._by_path import load_lint_gate, load_module
+from defender.tests.support.shared.contracts._by_path import load_lint_gate, load_module
 from defender.tests.e2e._box665 import (  # noqa: F401
     DockerFault,
     RecordingDocker,
     _cp,
     requires_live_box,
 )
-from defender.tests._docker import daemon_reachable, docker_runtimes, is_dood
+from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, is_dood
 from defender.run_repository import SessionPaths
 
 DEFENDER = Path(__file__).resolve().parents[2]
@@ -82,14 +82,14 @@ REPO_ROOT = DEFENDER.parent
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 #: The write lint's ratchet baseline. Named once and shared, because two demands read it and a
 #: second spelling of the same path is how one of them silently stops looking at anything.
-LINT_BASELINE = REPO_ROOT / "scripts" / "lint" / "lint_unguarded_tree_write_baseline.json"
-LINT_MODULE_PATH = REPO_ROOT / "scripts" / "lint" / "lint_unguarded_tree_write.py"
+LINT_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_unguarded_tree_write_baseline.json"
+LINT_MODULE_PATH = REPO_ROOT / "tooling" / "lint" / "lint_unguarded_tree_write.py"
 #: The generator that DERIVES the shipped profile from the vendored platform default, and the
 #: vendored default it derives from. Both are named here rather than inline because three
 #: demands read them (the profile's shape, the escape-surface non-regression, and the
 #: dependency sweep) and a second spelling of either path is how one demand ends up asserting
 #: about a file nothing produces.
-SECCOMP_GEN_PATH = REPO_ROOT / "scripts" / "gen_seccomp_profile.py"
+SECCOMP_GEN_PATH = REPO_ROOT / "tooling" / "gen_seccomp_profile.py"
 
 
 def load_seccomp_generator():
@@ -459,7 +459,7 @@ def run_tree(tmp_path: Path) -> Path:
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir(parents=True)
     (run / "wire_logs").mkdir(parents=True)
-    from defender.tests import _alert_plant
+    from defender.tests.support.storage import _alert_plant
 
     _alert_plant.plant_alert(run, {"id": "a-771"})  # the admitted alert and its record (#1222)
     return run
@@ -653,7 +653,7 @@ def ban_not_in_force_error() -> type[BaseException]:
 def tree_verified(tree: Path) -> bool:
     """`scrub.tree_verified` — §7 D2's consumer-side rule. A tree whose verdict marker is
     ABSENT reads as unverified, exactly like one marked `ran: false`."""
-    from defender.runtime import scrub as scrub_mod
+    from defender.box import _scrub as scrub_mod
 
     return scrub_mod.tree_verified(tree)  # type: ignore[attr-defined]
 
@@ -890,7 +890,7 @@ def _invoke_queries_table(run_dir: Path) -> Any:
 
     from defender.runtime.agent_definition import bind
     from defender.runtime.query_tool import QueryCapture
-    from defender.tests import _tenants1106
+    from defender.tests.support.tenancy import _tenants1106
 
     # #1106 M4: gather is bound with a RUN's grant (the playground tenant's), never a
     # process-level one carried by `GATHER_DEF`.
@@ -953,7 +953,7 @@ def _invoke_tenant_writer(run_dir: Path) -> None:
     the run dir — `Writer.artifact` names it `../_tenant.json`, which the generic
     `run / writer.artifact` harness resolves correctly since the OS collapses `..` at
     stat/open time."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     _tenant.ensure_runs_base_record(run_dir.parent, "census-tenant")
 
@@ -964,7 +964,7 @@ def _invoke_tenant_row_writer(run_dir: Path) -> None:
     because O10 refuses a data root holding anything beside the tenant it is creating — and
     `run_tree`'s own sibling (`run-771`) sits directly in `run_dir.parent`. `Writer.artifact`
     names it `tenant-root/census-tenant/tenant.json`."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     _tenant.create_tenant(run_dir / "tenant-root", "census-tenant")
 
@@ -1001,7 +1001,7 @@ CENSUS: tuple[Writer, ...] = (
     # the tenant record's row is (`run_tree`'s dir is `run-771`). Still a setup writer, still
     # required to refuse a planted alias at its own name.
     Writer("write_case_pointer", "../run-771.session-pointer.json", "write_text", "unmeasured",
-           _invoke_case_pointer, "runtime/session_store.py", cite="C1,R4"),
+           _invoke_case_pointer, "runtime/session_store/_write.py", cite="C1,R4"),
     # #1235: the `budget_enforcer` and `circuit_breaker` rows retired with their artifacts.
     # The budget counters and the breaker live in the run process's memory; nothing writes
     # `budget.json` or `circuit_breaker.json`, so neither module is a writer into the tree.
@@ -1024,7 +1024,7 @@ CENSUS: tuple[Writer, ...] = (
     Writer("record_lesson_load", "lessons_loaded.jsonl", "append_jsonl", "unmeasured",
            _invoke_lesson_load, "runtime/tools/", cite="G15"),
     Writer("start_box", ".box-sentinel", "write_text", "fault-startup",
-           _invoke_sentinel_plant, "runtime/box/", cite="X5,G10"),
+           _invoke_sentinel_plant, "box/", cite="X5,G10"),
     # (#1235 deleted `_io.write_atomic`, whose only writer, the budget record, retired with
     # it — the budget is the run's in-memory state — so its row "write_atomic", B4/C3-fix, left.)
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
@@ -1033,12 +1033,12 @@ CENSUS: tuple[Writer, ...] = (
     # than inside the run dir — the module joins the census-derived hard-gate set for exactly
     # that reason (its own artifact is outside every box mount, X6-shaped).
     Writer("tenant_writer", "../_tenant.json", "guarded", "unmeasured",
-           _invoke_tenant_writer, "_tenant.py", cite="§7 decision 16"),
-    # #1078 D1: create_tenant's own row, a second _tenant.py writer with its own artifact.
+           _invoke_tenant_writer, "tenancy/_tenant.py", cite="§7 decision 16"),
+    # #1078 D1: create_tenant's own row, a second tenancy/_tenant.py writer with its own artifact.
     # Still the guarded idiom since #1137: `Held.write`'s create lane off the held `<T>`, which
     # refuses an alias at the row as `write_guarded`'s did.
     Writer("tenant_row_writer", "tenant-root/census-tenant/tenant.json", "guarded", "unmeasured",
-           _invoke_tenant_row_writer, "_tenant.py", cite="#1078 D1"),
+           _invoke_tenant_row_writer, "tenancy/_tenant.py", cite="#1078 D1"),
 )
 
 #: The four posture CLASSES X5 measured — the reason F1's "every call site keeps the posture
@@ -1134,7 +1134,10 @@ X5_MEASURED_SITES: tuple[MeasuredSite, ...] = (
 #: gate while the demand still bound its edge, so the derivation is the repair.
 CENSUS_MODULES: frozenset[str] = frozenset(w.module for w in CENSUS)
 DRAIN_MODULES: frozenset[str] = frozenset({"learning/author/drain.py"})
-LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES
+LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES | {
+    "_filesystem/", "runtime/query_catalog.py", "runtime/session_store/_pointers.py",
+    "learning/author/version_control/restore.py",
+}
 
 
 def posture_class(outcome: object) -> str:
@@ -1258,7 +1261,7 @@ def quarantine_a_tainted_tree(
     writes that verdict where the scan would have. Neither touches what the manifest must say."""
     from defender.learning.core.config import AUTHOR_DRAIN_LABEL
     from defender.learning.core.quarantine import preserve_tainted_tree
-    from defender.runtime import scrub as scrub_mod
+    from defender.box import _scrub as scrub_mod
 
     os.symlink("/root/.ssh/id_rsa", tree / "stolen.json")
     try:

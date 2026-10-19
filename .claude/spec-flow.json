@@ -7,7 +7,7 @@
       "defender/.venv/bin/ruff check . --select E,F --ignore E402,E501",
       "defender/.venv/bin/ruff check defender",
       "defender/.venv/bin/mypy --config-file defender/pyproject.toml",
-      "the baseline-ratcheted custom lints under scripts/lint/lint_*.py (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, …) — each blocks only on a NEW finding, and each documents an inline-suppression escape hatch in its own module"
+      "the baseline-ratcheted custom lints under tooling/lint/lint_*.py (monkeypatch, unsafe-jsonl-io, raw-git-subprocess, unanchored-default, vulture, duplicate-helpers, …) — each blocks only on a NEW finding, and each documents an inline-suppression escape hatch in its own module"
     ],
     "notes": "`.github/workflows/ci.yml` is the source of truth — run what it runs; don't trust this list to stay current. Running in a git worktree? The shared `.venv` editable install points at the main checkout — prepend `PYTHONPATH=<worktree-root>` to the pytest call or you test the wrong tree. EVERY pytest invocation on this box goes through one lock — prefix it `flock /tmp/defender-pytest.lock`, ad-hoc subsets and adversary runs included, not just the command above. Two sessions launching fleets independently put 20 xdist workers on 12 cores and OOM-killed the container; the lock makes them take the box in turn instead of thrashing it. It costs nothing when nothing else is running. `test` above is CI's full-suite command, recorded so you can read what CI runs — a spec-flow leaf never runs it; it runs its own suite's files."
   },
@@ -15,7 +15,7 @@
     "language": "python",
     "dir": "defender/tests",
     "harness": "defender/tests/e2e/_replay_harness.py — a new scenario is a few lines of `Turn(...)`, not fresh plumbing. Build on it rather than inventing parallel machinery.",
-    "idioms": "Fakes enter through the entry point's injection seams (a `deps` parameter, a constructor argument), never `monkeypatch.setattr` — CI ratchets new setattr sites (`scripts/lint/lint_monkeypatch.py`)."
+    "idioms": "Fakes enter through the entry point's injection seams (a `deps` parameter, a constructor argument), never `monkeypatch.setattr` — CI ratchets new setattr sites (`tooling/lint/lint_monkeypatch.py`)."
   },
   "conventions": {
     "defaultBranch": "main",
@@ -32,13 +32,22 @@
     "notes": "defender is a namespace package (no defender/__init__.py; pyproject at defender/, not the repo root), so pyrefly's import root defaults to defender/ and `defender.x` imports silently resolve to Unknown. searchPath is relative to configDir: `..` = repo root (makes `defender` a top-level package, mirroring pytest's pythonpath=['..']), `.` = defender/. The pyrefly-refs helper writes a temp configDir/pyrefly.toml from these and removes it per run."
   },
   "sourceRoots": [
+    "defender/box",
+    "defender/execution",
     "defender/runtime",
     "defender/learning",
-    "defender/evals",
-    "defender/scripts",
+    "evaluations",
+    "defender/integrations",
+    "defender/presentation",
+    "defender/cli",
+    "defender/tenancy",
+    "defender/knowledge",
+    "defender/episodes",
+    "defender/records",
+    "defender/run_repository",
+    "defender/configuration",
     "defender/run.py",
-    "defender/_venv.py",
-    "defender/_query_rules.py",
-    "defender/_pricing.py"
+    "defender/_io.py",
+    "defender/_filesystem"
   ]
 }

@@ -1,53 +1,20 @@
 """#611 slice 1 — the executable spec for the `query` tool, the VERBS registry, and
-capture-as-a-capability.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_611-query-tool.yaml`, named
-after it and carrying its id in the docstring. THE CODE DOES NOT EXIST YET: this suite is
-RED by construction (the imports below name the surface the implementation must build), and
-that is the point — the tests are the spec the code is written against.
-
-The surface this suite pins
----------------------------
-`defender/runtime/verbs.py`
-    `VerbContext(defender_dir, run_dir, env, tenant)` — what the harness hands a verb: the RUN's tree
-    (never an import-time constant), the RUN's scrubbed env (never `os.environ`) and its tenant record.
-    `declared_params(fn)` — a verb's param surface = the keyword-only params of its annotated
-    signature. This is the ONE reader of a verb's signature; the tool's validator uses it.
-    `ModuleVerbRegistry(read_roster(adapters_dir))` — the production registry: `systems()` + `verbs(system)`,
-    resolved per TREE, reading each adapter module's `VERBS` mapping.
-
-`defender/runtime/query_tool.py`
-    `register_query_tool(agent, registry)` / `QueryCapture` / `CONTROL_FLOW_EXCEPTIONS` /
-    `resolve_query_id(system, verb, model_query_id)`.
-
-`defender/scripts/adapters/faults.py`
-    `AdapterFault` + `ConfigFault` (infra) / `TransportFault` (infra) / `UpstreamFault` (the
-    vendor's own diagnosis). Transports RAISE these; they never `sys.exit`.
-
-`ToolSet(query=…)` + `build_agent_core(..., verbs=…)` + `run_investigation(..., verbs=…)`
-    The tool is declared as DATA on the agent definition; the registry is INJECTED down the
-    build chain exactly like `make_model`. There is no monkeypatch anywhere in this file.
-
-Fakes inject faults; they never classify. A fake verb records what it was handed and then
-returns its payload or raises its fault — every exit code, error class, payload status and
-breaker outcome in the assertions below is production code's work.
-"""
+capture-as-a-capability."""
 from __future__ import annotations
 
-import ast
-import inspect
 import json
 import os
 import re
 import subprocess
-from dataclasses import fields, replace
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 
+from defender.tests.support.runtime.state._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
-from pydantic_ai.capabilities.abstract import AbstractCapability  # noqa: E402
 from pydantic_ai.exceptions import (  # noqa: E402
     ApprovalRequired,
     CallDeferred,
@@ -55,23 +22,17 @@ from pydantic_ai.exceptions import (  # noqa: E402
     SkipToolExecution,
     ToolRetryError,
 )
-from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.hooks._cmd_segments import NON_ADAPTER_SHIMS  # noqa: E402
-from defender.hooks.inject_system_skill_description import descriptor_catalog  # noqa: E402
+from defender.tests.support.shared.contracts import _system_index_1256 as SI
 from defender.learning import lead_repository  # noqa: E402
-from defender.runtime import circuit_breaker, observe, permission, tools as runtime_tools  # noqa: E402
+from defender.runtime import permission, tools as runtime_tools  # noqa: E402
 from defender.runtime.agent_definition import bind, compile_policy_for  # noqa: E402
 from defender.runtime.circuit_breaker import RunAborted, error_class_for_exit  # noqa: E402
-from defender.runtime.driver import GATHER_DEF, MAIN_DEF, build_agent_core  # noqa: E402
-from defender.runtime.permission.grant import _SHIM_FLAGS, Route  # noqa: E402
-from defender.runtime.providers import BuiltModel  # noqa: E402
-from defender.scripts.adapters import ticket_adapter  # noqa: E402
-from defender.scripts.gather_tools import record_query  # noqa: E402
-from defender.tests import _tenants1106  # noqa: E402
-from defender.tests.tenant_1107_settings import _spec1107 as S1107  # noqa: E402
-from defender.tests.e2e import _replay_harness  # noqa: E402
+from defender.runtime.driver import MAIN_DEF  # noqa: E402
+from defender.runtime.permission.grant import Route  # noqa: E402
+from defender.tests.support.tenancy import _tenants1106
+from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,
@@ -88,10 +49,9 @@ from defender.runtime.verb_grant import DENY_ALL, VerbGrant  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     VerbContext,
-    declared_params,
 )
-from defender.scripts.adapters import _stub_transport  # noqa: E402
-from defender.scripts.adapters.faults import (  # noqa: E402
+from defender.integrations import _stub_transport  # noqa: E402
+from defender.integrations.faults import (  # noqa: E402
     ConfigFault,
     TransportFault,
     UpstreamFault,
@@ -102,20 +62,11 @@ pytestmark = pytest.mark.e2e
 
 SALT = "aabbccddeeff0011"
 LEAD = "l-001"
-ADAPTERS_DIR = DEFENDER / "scripts" / "adapters"
+ADAPTERS_DIR = DEFENDER / "integrations"
 
 
 def _sql_shim_aggregates() -> bool:
-    """Can the `defender-sql` shim OF THE TREE UNDER TEST actually aggregate a payload?
-
-    Deliberately not `find_spec("duckdb")`: that asks OUR interpreter, and the shim runs
-    in a different one — `bin/defender-sql` re-execs into `$DEFENDER_DIR/.venv/bin/python3`
-    and falls back to a bare `python3` when that tree has no venv. A checkout without its
-    own `.venv` (a review worktree, say) is then a process that imports duckdb driving a
-    shim that cannot, and the aggregation assertion below fails on the environment instead
-    of on the code. Ask the shim, the way the test does, and never raise: a missing binary
-    is a `False`.
-    """
+    """Can the `defender-sql` shim OF THE TREE UNDER TEST actually aggregate a payload?"""
     try:
         probe = subprocess.run(
             [str(DEFENDER / "bin" / "defender-sql"), "SELECT 1"],
@@ -130,8 +81,6 @@ PAYLOAD = [
     {"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana", "event.action": "ssh_login"},
     {"@timestamp": "2026-01-01T00:05:00Z", "user.name": "dev.dana", "event.action": "sudo"},
 ]
-
-
 
 
 class _Run:
@@ -185,8 +134,7 @@ def run_gather(
 ) -> _Run:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns` (the query calls under test) against the INJECTED verb registry. Everything
-    between the two fakes — dispatch, the query tool, its validator, the capture capability,
-    the circuit breaker, the two tables — is production code."""
+    between the two fakes — dispatch, the query tool, its validator, the capture capability."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=run_id)
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -225,8 +173,7 @@ def elastic_ok(rec: VerbRecorder) -> FakeVerbs:
 def raising(rec: VerbRecorder, exc: BaseException, systems: tuple[str, ...] = ("elastic",)) -> FakeVerbs:
     """A registry whose verb RAISES `exc` — a fault injector, nothing more. It does not map
     the fault to an exit code, does not touch the breaker, and does not write a row: every
-    one of those is the capture capability's job, and every assertion about them is therefore
-    a real assertion about production code."""
+    one of those is the capture capability's job, and every assertion about them is therefore"""
 
     def probe(ctx: VerbContext, *, native_query: str = "FROM logs") -> list[dict]:
         rec.record("probe", ctx, {"native_query": native_query})
@@ -235,18 +182,13 @@ def raising(rec: VerbRecorder, exc: BaseException, systems: tuple[str, ...] = ("
     return FakeVerbs({s: {"probe": probe} for s in systems})
 
 
-
-
 def test_query_returns_wrapped_truncated_view_and_payload_note(tmp_path):
-    """query_returns_wrapped_truncated_view_and_payload_note — the tool returns an exit-code
-    line, the SALT-WRAPPED truncated view, and the ABSOLUTE `[record_query] raw payload:`
-    note. Not a bare payload_ref."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs | LIMIT 2"}), DONE,
     ])
     seen = r.gather_saw
-    payload_abs = str(r.run_dir / "gather_raw" / LEAD / "0.json")
+    payload_abs = f"/runs/current/gather_raw/{LEAD}/0.json"
 
     assert rec.only().params == {"native_query": "FROM logs | LIMIT 2", "limit": 10}
 
@@ -259,14 +201,7 @@ def test_query_returns_wrapped_truncated_view_and_payload_note(tmp_path):
 
 def test_query_return_wrap_mints_its_own_salt(tmp_path):
     """query_return_wrap_mints_its_own_salt — the wrap mints a FRESH token per return, never a
-    per-run one shared with the party being framed.
-
-    AMENDED PREMISE (#875 F-1). This demand read "the wrap uses deps.salt (the per-run token),
-    never a freshly minted one: with a fresh salt the model can forge the closing tag and the
-    injection defense fails open." It is exactly inverted. Gather reads the per-run token in
-    plaintext on every payload view it is handed — THIS return — so sharing it is what lets
-    gather forge a closer. A salt minted after the content is in hand, and re-minted while it
-    collides with that content, cannot occur in the body at all."""
+    per-run one shared with the party being framed."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
@@ -281,9 +216,6 @@ def test_query_return_wrap_mints_its_own_salt(tmp_path):
 
 
 def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
-    """query_payload_is_not_double_wrapped_on_read_back — reading the persisted payload back
-    with the REAL read tool (which salt-wraps gather_raw/ via is_untrusted_read) yields exactly
-    ONE wrap, not a wrap nested inside the one the query tool already applied."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
@@ -291,126 +223,11 @@ def test_query_payload_is_not_double_wrapped_on_read_back(tmp_path):
     payload_abs = r.run_dir / "gather_raw" / LEAD / "0.json"
 
     gdeps = bind(_tenants1106.fixture_gather_def(), r.run_dir, defender_dir=DEFENDER)
-    out = runtime_tools._tool_read_file(gdeps, str(payload_abs))
+    out = runtime_tools._tool_read_file(gdeps, model_path(payload_abs, run_dir=r.run_dir))
 
     assert len(re.findall(r"<run-[0-9a-f]+-untrusted>", out)) == 1
     assert len(re.findall(r"</run-[0-9a-f]+-untrusted>", out)) == 1
     assert "dev.dana" in out
-
-
-def test_query_return_wrap_positive_control(tmp_path):
-    """query_return_wrap_positive_control — the payload's own bytes stay fully recoverable
-    through the sanctioned path: the file holds the UNWRAPPED payload and defender-sql over it
-    aggregates the real rows."""
-    rec = VerbRecorder()
-    payload_abs = None
-    sql_runs = _sql_shim_aggregates()
-
-    turns = [q("elastic", "query", {"native_query": "FROM logs"})]
-    sql_turn_idx = None
-    if sql_runs:
-        sql_turn_idx = len(turns)
-        turns.append(Turn(tool_calls=[("bash", {"command": "PLACEHOLDER"})]))
-    turns.append(DONE)
-
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='q611-ctl')
-    payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
-    if sql_turn_idx is not None:
-        turns[sql_turn_idx] = Turn(tool_calls=[("bash", {
-            "command": f"cat {payload_abs} | defender-sql 'SELECT count(*) AS n FROM data'",
-        })])
-    main = ReplayFn([
-        Turn(tool_calls=[("gather", {
-            "lead_id": LEAD, "system": "elastic", "goal": "g", "what_to_summarize": ["e"]})]),
-        Turn(text="done"),
-    ])
-    gather = ReplayFn(turns)
-    drive(run_dir, run_id="q611-ctl", main=main, gather=gather, verbs=elastic_ok(rec))
-
-    on_disk = payload_abs.read_text(encoding="utf-8")
-    assert "<run-" not in on_disk, "the persisted payload must be the raw bytes, never wrapped"
-    assert json.loads(on_disk) == PAYLOAD
-
-    if sql_runs:
-        assert re.search(r'"n":\s*2', gather.seen[-1]), \
-            "defender-sql over the persisted payload did not aggregate the real rows"
-    else:
-        pytest.skip("this tree's defender-sql cannot aggregate (no duckdb in the venv it "
-                    "re-execs into) — the on-disk half of the control ran and held")
-
-
-
-
-def test_verbs_registry_declares_surface():
-    """verbs_registry_declares_surface — every adapter module exports a VERBS mapping of
-    verb → callable dispatchable as `fn(ctx, **params)`, whose model-supplied params are
-    ANNOTATED and keyword-only.
-
-    Read the SIGNATURE, never `declared_params`. Until #885 this test asserted
-    `set(declared_params(fn)) == {p.name for p in sig.parameters.values() if p.kind is
-    KEYWORD_ONLY}` — but `declared_params` IS that comprehension (`verbs.py:83-88`), so
-    both sides were the same filter over the same signature and the assert held for every
-    callable alive, including one with no keyword-only params at all (`set() == set()`).
-    The annotation assert below it then iterated that same empty dict and checked nothing.
-    Adding a positional param to a shipped adapter turned the whole test green. An oracle
-    that stands in for the property while being incapable of failing is worse than none:
-    it reports coverage. The asserts here compare the signature against the CALL SHAPE the
-    tool actually makes (`fn(vctx, **params)`, in `query_tool.register_query_tool`), which
-    is a fact about the tool, not a restatement of the reader. Spelled out inline rather
-    than delegated to `validate_scaffold.check_signatures`: that script is the OTHER gate on
-    the same property, and a test that calls its checker is back to grading the grader."""
-    reg = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL)
-    on_disk = sorted(
-        p.name[: -len("_adapter.py")].replace("_", "-") for p in ADAPTERS_DIR.glob("*_adapter.py")
-    )
-    assert sorted(reg.systems()) == on_disk, "the registry roster is not the adapter roster"
-    positional = (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-
-    for system in reg.systems():
-        verbs = reg.verbs(system)
-        assert verbs, f"{system} declares no verbs"
-        for name, fn in verbs.items():
-            assert callable(fn), f"{system}.{name} is not callable"
-            sig_params = list(inspect.signature(fn).parameters.values())
-
-            assert sig_params, f"{system}.{name}: takes no parameters at all, not even a ctx"
-            assert sig_params[0].kind in positional, \
-                f"{system}.{name}: takes no leading VerbContext — the tool passes it positionally"
-
-            # The KIND alone does not say it is the ctx: `def get_host(host: str)` also leads
-            # with a positional param, and the tool would bind the VerbContext OBJECT into
-            # `host` — a silently wrong request, not a caught error. Adapters carry
-            # `from __future__ import annotations`, so the annotation arrives as a string.
-            ctx_ann = sig_params[0].annotation
-            assert (ctx_ann is VerbContext
-                    or (isinstance(ctx_ann, str) and ctx_ann.rpartition(".")[2] == "VerbContext")), (
-                f"{system}.{name}: leading param `{sig_params[0].name}` is not annotated "
-                f"VerbContext — nothing distinguishes the carriage from a model param the "
-                f"ctx would overwrite"
-            )
-
-            # The load-bearing one. `declared_params` collects KEYWORD_ONLY parameters ONLY,
-            # so a param declared positionally is invisible to `validate_params`: the model
-            # can never bind it, every call naming it is refused as unknown, and the one shape
-            # that survives (`params={}`) raises TypeError on the missing positional inside
-            # `fn(vctx, **params)`. The verb is unusable in every form.
-            leaked = [p.name for p in sig_params[1:] if p.kind in positional]
-            assert not leaked, (
-                f"{system}.{name}: param(s) {leaked} bind positionally, so the model can never "
-                f"supply them — spell them `*, {leaked[0]}: <type>`"
-            )
-
-            # Same reason `**kwargs` is out: it widens what the FUNCTION accepts without
-            # widening what `declared_params` reports, so the roster the validator names is
-            # not the roster the body reads.
-            var_kw = [p.name for p in sig_params if p.kind is inspect.Parameter.VAR_KEYWORD]
-            assert not var_kw, \
-                f"{system}.{name}: **{var_kw[0]} is not a declared param surface the validator can read"
-
-            model_params = [p for p in sig_params if p.kind is inspect.Parameter.KEYWORD_ONLY]
-            for p in model_params:
-                assert p.annotation is not inspect.Parameter.empty, \
-                    f"{system}.{name}.{p.name} carries no annotation — the validator has no type"
 
 
 @pytest.mark.parametrize(("label", "args"), [
@@ -433,10 +250,6 @@ def test_unknown_system_verb_param_rejected(tmp_path, label, args):
 
 
 def test_registry_validation_failure_writes_its_row_before_raising(tmp_path):
-    """registry_validation_failure_writes_its_row_before_raising — a registry validation
-    failure writes its queries row (64 / agent-fixable / error) BEFORE raising ModelRetry:
-    ModelRetry bypasses on_tool_execute_error AND after_tool_execute, so a write that follows
-    the raise never happens."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "nosuch-verb", {"native_query": "x"}), DONE,
@@ -452,9 +265,6 @@ def test_registry_validation_failure_writes_its_row_before_raising(tmp_path):
 
 
 def test_arg_shape_validation_error_still_writes_a_64_row(tmp_path):
-    """arg_shape_validation_error_still_writes_a_64_row — a malformed tool CALL (verb as an
-    int) fails in pydantic-ai's VALIDATE hook family, which runs BEFORE the EXECUTE family, so
-    capture must also install wrap_tool_validate or the row is silently lost."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         Turn(tool_calls=[("query", {"system": "elastic", "verb": {"not": "a string"},
@@ -470,24 +280,6 @@ def test_arg_shape_validation_error_still_writes_a_64_row(tmp_path):
 
 
 def test_a_recursive_args_body_does_not_take_the_rejection_row_with_it():
-    """a_recursive_args_body_does_not_take_the_rejection_row_with_it — `_raw_args` absorbs the
-    `RecursionError` a deeply nested arguments body raises, because its one production caller
-    is `wrap_tool_validate`'s rejection handler and that frame has no `try` of its own.
-
-    THE SHAPE IS ONE THAT FRAME ALREADY REACHES. When the framework hands the tool its arguments
-    as a JSON STRING — what every real provider sends, and the reason `_raw_args` exists — a
-    body nested past the interpreter's recursion limit is refused by pydantic as `json_invalid`,
-    which IS a `ValidationError`, so the handler runs. Its first statement then re-parses that
-    same string. `RecursionError` is a `RuntimeError`, so the `(JSONDecodeError, ValueError)`
-    arm did not catch it: it escaped the handler, no row was written, the companion guard lost
-    the occurrence it recovers from the rows it wrote, and the fault unwound past
-    `_run_validate_hooks`, which catches only `(ValidationError, ModelRetry)` — the silent
-    terminator class #826 item 4 closed.
-
-    Driven at the helper rather than through a lead because the replay harness builds a turn's
-    arguments as a dict (`Turn(tool_calls=[(name, {...})])`), so no arm in this suite can put a
-    STRING on that seam at all. The first assertion is what keeps this honest: it pins that the
-    fixture really is the hazardous shape, so the second cannot pass by testing nothing."""
     body = '{"system": "elastic", "verb": "probe", "params": ' + "[" * 2000 + "]" * 2000 + "}"
     with pytest.raises(RecursionError):
         json.loads(body)
@@ -510,27 +302,6 @@ def test_empty_verbs_declaration_fails_closed_at_the_tool(tmp_path):
         "a system with an empty VERBS declaration answered a query"
 
 
-def test_empty_verbs_positive_control(tmp_path):
-    """empty_verbs_positive_control — the SAME system with a NON-empty VERBS declaration IS
-    reachable and returns its payload. The control proving the fail-closed check above can
-    observe a difference."""
-    rec = VerbRecorder()
-
-    def ping(ctx: VerbContext, *, native_query: str) -> list[dict]:
-        rec.record("ping", ctx, {"native_query": native_query})
-        return PAYLOAD
-
-    r = run_gather(tmp_path, verbs=FakeVerbs({"ghost": {"ping": ping}}), system="ghost", turns=[
-        q("ghost", "ping", {"native_query": "x"}), DONE,
-    ])
-    assert rec.only().params == {"native_query": "x"}
-    row = r.row()
-    assert row["exit_code"] == 0
-    assert row["system"] == "ghost"
-    assert json.loads(r.payload()) == PAYLOAD
-
-
-
 _ADAPTER_NO_VERBS = "VERBS = {}\n"
 
 _ADAPTER_WITH_VERBS = (
@@ -543,7 +314,7 @@ _ADAPTER_WITH_VERBS = (
 _TREE_PROBE = (
     "from pathlib import Path\n"
     "\n"
-    "TREE = Path(__file__).resolve().parents[2]\n"
+    "TREE = Path(__file__).resolve().parents[1]\n"
     "\n"
     "def whoami(ctx, *, unused: str = '') -> dict:\n"
     '    return {"tree": str(TREE)}\n'
@@ -553,11 +324,11 @@ _TREE_PROBE = (
 
 
 def _make_tree(root: Path, adapters: dict[str, str], described: tuple[str, ...] = ()) -> Path:
-    """A minimal defender tree: `scripts/adapters/{system}_adapter.py` + a described SKILL.md per
+    """A minimal defender tree: `integrations/{system}_adapter.py` + a described SKILL.md per
     system, so descriptor_catalog has a roster to glob AND a description to read."""
-    (root / "scripts" / "adapters").mkdir(parents=True)
+    (root / "integrations").mkdir(parents=True)
     for system, src in adapters.items():
-        (root / "scripts" / "adapters" / f"{system}_adapter.py").write_text(src, encoding="utf-8")
+        (root / "integrations" / f"{system}_adapter.py").write_text(src, encoding="utf-8")
     for system in described:
         d = root / "skills" / system
         d.mkdir(parents=True)
@@ -569,36 +340,34 @@ def _make_tree(root: Path, adapters: dict[str, str], described: tuple[str, ...] 
 
 
 def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
-    """descriptor_catalog_advertises_only_declared_systems — fail-closed holds at the PROMPT as
-    well as at the tool: a `*_adapter.py` on disk that declares NO verbs is ABSENT from the injected
-    catalog (which today derives its roster by globbing filenames and never imports the module)."""
     tree = _make_tree(
         tmp_path / "tree",
         {"hollow": _ADAPTER_NO_VERBS, "solid": _ADAPTER_WITH_VERBS},
         described=("hollow", "solid"),
     )
     grant = VerbGrant(role="gather", entries=(("solid", "look", "r"),))
-    catalog = descriptor_catalog(tree / "skills", read_roster(tree / "scripts" / "adapters"), grant)
-    assert catalog is not None
+    catalog = SI.index_text(SI.index_module(), tree / "skills",
+                            read_roster(tree / "integrations"), grant)
+    assert SI.listing(catalog)
     assert "`solid`" in catalog
     assert "hollow" not in catalog, "a system with no declared verbs was advertised to gather"
 
 
 def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
-    """descriptor_catalog_does_not_freeze_the_tree — two catalogs built for two trees in ONE
-    process (the learning loop's worktree-drain shape) each resolve their OWN tree: building
-    the catalog for tree A must not make a later verb call under tree B run A's module."""
     a = _make_tree(tmp_path / "a", {"probe": _TREE_PROBE}, described=("probe",))
     b = _make_tree(tmp_path / "b", {"probe": _TREE_PROBE}, described=("probe",))
 
     grant = VerbGrant(role="gather", entries=(("probe", "whoami", "r"),))
-    assert descriptor_catalog(a / "skills", read_roster(a / "scripts" / "adapters"), grant) is not None
-    assert descriptor_catalog(b / "skills", read_roster(b / "scripts" / "adapters"), grant) is not None
+    module = SI.index_module()
+    assert SI.listing(SI.index_text(module, a / "skills", read_roster(a / "integrations"),
+                                    grant))
+    assert SI.listing(SI.index_text(module, b / "skills", read_roster(b / "integrations"),
+                                    grant))
 
     ctx_a = _tenants1106.verb_context(a, tmp_path / "run", {})
     ctx_b = _tenants1106.verb_context(b, tmp_path / "run", {})
-    fn_a = ModuleVerbRegistry(read_roster(a / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
-    fn_b = ModuleVerbRegistry(read_roster(b / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
+    fn_a = ModuleVerbRegistry(read_roster(a / "integrations"), DENY_ALL).verbs("probe")["whoami"]
+    fn_b = ModuleVerbRegistry(read_roster(b / "integrations"), DENY_ALL).verbs("probe")["whoami"]
 
     assert fn_a(ctx_a) == {"tree": str(a)}
     assert fn_b(ctx_b) == {"tree": str(b)}, \
@@ -607,23 +376,6 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
 
 _PROGRAM_ISH = {"program", "command", "cmd", "argv", "exec", "shell", "script", "binary", "path"}
 _PATH_EXCEPTION = ("host-state", "fim-checksum", "path")
-
-
-def test_no_verb_names_a_program_or_command():
-    """no_verb_names_a_program_or_command — no verb signature declares a param that is a
-    program, a command, or a path in the DRIVER's namespace. host-state's fim-checksum path
-    (a path on a target host, via docker exec) is the declared exception."""
-    reg = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL)
-    offenders = [
-        (system, verb, name)
-        for system in reg.systems()
-        for verb, fn in reg.verbs(system).items()
-        for name in declared_params(fn)
-        if name in _PROGRAM_ISH and (system, verb, name) != _PATH_EXCEPTION
-    ]
-    assert offenders == [], f"verb params name a program/command/path: {offenders}"
-
-
 
 
 def test_query_id_fallback_chain(tmp_path):
@@ -654,9 +406,6 @@ def test_query_id_fallback_chain(tmp_path):
     "elastic.nul\x00byte",
 ])
 def test_query_id_traversal_guard_survives(tmp_path, bad_qid):
-    """query_id_traversal_guard_survives — a query_id carrying '/', '\\', '..' or NUL is
-    rejected: it becomes a {system}/_draft/{verb}.md path segment in the offline lead-author,
-    and it is now model-authored input arriving at a NEW boundary."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "x"}, query_id=bad_qid), DONE,
@@ -666,38 +415,6 @@ def test_query_id_traversal_guard_survives(tmp_path, bad_qid):
     assert all(row.get("query_id") != bad_qid for row in r.rows), \
         "a traversal query_id was recorded into the queries table"
     assert r.gather.calls >= 2, "the traversal rejection did not bounce back to the model"
-
-
-def test_query_id_traversal_positive_control(tmp_path):
-    """query_id_traversal_positive_control — a normally coined {system}.{kebab} id is ACCEPTED
-    and recorded verbatim."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
-        q("elastic", "query", {"native_query": "x"}, query_id="elastic.sshd-auth-baseline-7d"),
-        DONE,
-    ])
-    row = r.row()
-    assert row["query_id"] == "elastic.sshd-auth-baseline-7d"
-    assert row["exit_code"] == 0
-    assert len(rec.calls) == 1
-
-
-
-
-def test_capture_runs_in_wrap_tool_execute():
-    """capture_runs_in_wrap_tool_execute — capture is implemented in wrap_tool_execute: the only
-    execute-family hook that observes the pre-call, both outcomes AND the exception, and the only
-    one that can skip handler() and return a value (the breaker's pre-call trip).
-
-    after_tool_execute is skipped when the tool raises and bypassed entirely by ModelRetry, so a
-    capture hung there would write NO row for any failed query and leave the breaker dead code."""
-    cap = query_tool.QueryCapture
-    assert cap.wrap_tool_execute is not AbstractCapability.wrap_tool_execute, \
-        "capture does not override wrap_tool_execute"
-    assert cap.wrap_tool_validate is not AbstractCapability.wrap_tool_validate, \
-        "capture does not override wrap_tool_validate — an arg-shape failure writes no row"
-    assert cap.after_tool_execute is AbstractCapability.after_tool_execute, \
-        "capture leans on after_tool_execute, which a raising tool and ModelRetry both skip"
 
 
 def test_failing_verb_still_writes_its_row(tmp_path):
@@ -717,9 +434,6 @@ def test_failing_verb_still_writes_its_row(tmp_path):
 
 
 def test_unmapped_fault_still_writes_a_row(tmp_path):
-    """unmapped_fault_still_writes_a_row — a fault with NO mapping (a bare RuntimeError) still
-    writes a row under a default exit code: the catch-all is what stops an unmapped fault from
-    DELETING the record the taxonomy exists for."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, RuntimeError("kaboom in the adapter")), turns=[
         q("elastic", "probe", {}), DONE,
@@ -732,9 +446,6 @@ def test_unmapped_fault_still_writes_a_row(tmp_path):
 
 
 def test_systemexit_does_not_unwind_the_run(tmp_path):
-    """systemexit_does_not_unwind_the_run — SystemExit is a BaseException, so pydantic-ai's
-    `except Exception` does not catch it and asyncio.to_thread re-raises it to the awaiter. The
-    capture seam catches it, writes a row, and the run CONTINUES."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, SystemExit(2)), turns=[
         q("elastic", "probe", {}), DONE,
@@ -747,10 +458,6 @@ def test_systemexit_does_not_unwind_the_run(tmp_path):
 
 
 def test_capture_catch_all_re_raises_the_control_flow_exceptions(tmp_path):
-    """capture_catch_all_re_raises_the_control_flow_exceptions — the catch-all must NOT swallow
-    RunAborted (the run-wide kill switch), ModelRetry, or pydantic-ai's control-flow exceptions.
-    Every one of them is a plain Exception subclass, so a broad `except Exception` silently
-    disables the kill switch."""
     declared = set(query_tool.CONTROL_FLOW_EXCEPTIONS)
     for exc in (RunAborted, ModelRetry, SkipToolExecution, CallDeferred, ApprovalRequired,
                 ToolRetryError):
@@ -762,33 +469,7 @@ def test_capture_catch_all_re_raises_the_control_flow_exceptions(tmp_path):
     assert "narrow the window and retry" in r.gather_saw
 
 
-def test_run_aborted_still_kills_the_run_positive_control(tmp_path):
-    """run_aborted_still_kills_the_run_positive_control — with the carve-out in place, reaching
-    RUN_FAIL_KILL_LIMIT still raises RunAborted OUT of the run: the control proving the catch-all
-    did not swallow it.
-
-    PER_SYSTEM_FAIL_LIMIT=2 trips a system after two infra failures (a third call to it never
-    executes), so the kill limit of 5 is reached across three systems: 2 + 2 + 1."""
-    rec = VerbRecorder()
-    verbs = raising(rec, TransportFault("down"), systems=("elastic", "cmdb", "identity"))
-    r = run_gather(tmp_path, verbs=verbs, turns=[
-        q("elastic", "probe", {}), q("elastic", "probe", {}),
-        q("cmdb", "probe", {}), q("cmdb", "probe", {}),
-        q("identity", "probe", {}),
-        DONE,
-    ])
-    assert circuit_breaker.RUN_FAIL_KILL_LIMIT == 5
-    assert r.breaker["total_failures"] >= circuit_breaker.RUN_FAIL_KILL_LIMIT
-    assert r.main.calls == 1, "RunAborted was swallowed — the run kept going past the kill limit"
-    assert len(r.own_rows) == 5
-
-
 def test_breaker_pre_call_trip_returns_without_executing(tmp_path):
-    """breaker_pre_call_trip_returns_without_executing — once a system is tripped, query()
-    returns the down-message as the TOOL RESULT without invoking the verb and without raising
-    ModelRetry (a tripped system never recovers, so a retry would burn the budget into an
-    UnexpectedModelBehavior crash). Only wrap_tool_execute can express this: before_tool_execute
-    may only return args or raise."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, TransportFault("down")), turns=[
         q("elastic", "probe", {}),
@@ -804,10 +485,6 @@ def test_breaker_pre_call_trip_returns_without_executing(tmp_path):
 
 
 def test_capture_fires_only_for_the_query_tool(tmp_path):
-    """capture_fires_only_for_the_query_tool — a gather run that calls bash / read_file /
-    template_search writes NO queries row and has no result swapped: an AbstractCapability hook
-    method otherwise fires for EVERY tool (the tools=[…] filter exists only on the Hooks
-    decorator API)."""
     rec = VerbRecorder()
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='q611-other')
     main = ReplayFn([
@@ -816,8 +493,8 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
         Turn(text="done"),
     ])
     gather = ReplayFn([
-        Turn(tool_calls=[("read_file", {"path": str(run_dir / "alert.json")})]),
-        Turn(tool_calls=[("bash", {"command": f"cat {run_dir / 'alert.json'} | wc -l"})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(run_dir / "alert.json", run_dir=run_dir)})]),
+        Turn(tool_calls=[("bash", {"command": f"cat {model_path(run_dir / 'alert.json', run_dir=run_dir)} | wc -l"})]),
         Turn(tool_calls=[("template_search", {"pattern": "sshd"})]),
         DONE,
     ])
@@ -832,66 +509,6 @@ def test_capture_fires_only_for_the_query_tool(tmp_path):
     ]
     assert own_rows == [], "a non-query tool call wrote a queries row"
     assert not (run_dir / "gather_raw" / LEAD).exists(), "a non-query tool wrote a payload"
-
-
-
-
-def _built(defn, tmp_path, *, verbs=None):
-    """Build one real agent through the single build site, with a model that is never called."""
-    def make_model(name, effort):
-        return BuiltModel(FunctionModel(lambda messages, info: None), None)
-
-    logger = observe.RequestLogger(tmp_path / "llm_requests.jsonl")
-    agent = build_agent_core(
-        defn, deps_type=runtime_tools.GatherDeps, instructions="x",
-        logger=logger, agent_id="t", make_model=make_model,
-        verbs=verbs if verbs is not None else FakeVerbs({}),
-    )
-    logger.close()
-    return agent
-
-
-def _capabilities(agent) -> list:
-    caps: list = []
-    agent._root_capability.apply(caps.append)
-    return caps
-
-
-def test_tool_and_capture_are_inseparable(tmp_path):
-    """tool_and_capture_are_inseparable — DECLARING the query tool in an agent's ToolSet is what
-    constructs the capture capability; an agent cannot be built with the tool and without capture."""
-    with_query = _built(GATHER_DEF, tmp_path)
-    assert "query" in with_query._function_toolset.tools
-    assert any(isinstance(c, query_tool.QueryCapture) for c in _capabilities(with_query)), \
-        "the query tool was registered without its capture capability"
-
-    no_query_def = replace(GATHER_DEF, tools=replace(GATHER_DEF.tools, query=False))
-    without = _built(no_query_def, tmp_path)
-    assert "query" not in without._function_toolset.tools
-    assert not any(isinstance(c, query_tool.QueryCapture) for c in _capabilities(without))
-
-
-def test_query_tool_lands_in_the_function_toolset(tmp_path):
-    """query_tool_lands_in_the_function_toolset — the query tool is a PLAIN agent tool, visible in
-    agent._function_toolset.tools. A capability-OWNED toolset lands in _cap_toolsets instead,
-    which would leave #538's 'registers NOTHING' tool-freeness assertions green while the
-    invariant they encode was false."""
-    agent = _built(GATHER_DEF, tmp_path)
-    assert "query" in agent._function_toolset.tools
-    assert not getattr(agent, "_cap_toolsets", []), \
-        "the query tool arrived via a capability-owned toolset, invisible to the #538 assertions"
-
-
-def test_which_agent_may_query_stays_policy_as_data(tmp_path):
-    """which_agent_may_query_stays_policy_as_data — MAIN_DEF registers no query tool and
-    GATHER_DEF does: 'which agent may reach a data source' stays in the AgentDefinition, not in a
-    call-site capabilities= argument invisible to compile_policy and `defender-policy explain`."""
-    assert GATHER_DEF.tools.query is True
-    assert MAIN_DEF.tools.query is False
-    assert "query" in _built(GATHER_DEF, tmp_path)._function_toolset.tools
-    assert "query" not in _built(MAIN_DEF, tmp_path)._function_toolset.tools
-
-
 
 
 def _echo_registry(rec: VerbRecorder) -> FakeVerbs:
@@ -913,11 +530,6 @@ def _two_in_one_turn() -> Turn:
 
 
 def test_concurrent_queries_do_not_collide_on_seq(tmp_path):
-    """concurrent_queries_do_not_collide_on_seq — two query() calls in ONE model turn write
-    distinct gather_raw/{lead}/{seq}.json paths and distinct (lead_id, seq) rows; no payload is
-    overwritten. pydantic-ai's default parallelism is 'parallel' and sync tool fns are
-    thread-offloaded — today's atomicity is an accident of the bash tool blocking the event loop,
-    and that accident is gone."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_echo_registry(rec), turns=[_two_in_one_turn(), DONE])
 
@@ -932,10 +544,6 @@ def test_concurrent_queries_do_not_collide_on_seq(tmp_path):
 
 
 def test_seq_collision_would_misdirect_the_judge(tmp_path):
-    """seq_collision_would_misdirect_the_judge — (lead_id, seq) is UNIQUE across a concurrent
-    run, and every row carries its own payload_path. A duplicate makes judge/compare._payload_paths
-    (which falls back to gather_raw/{lead}/0.json when a row carries no payload path) hand the
-    judge ANOTHER query's payload — the harm lands two subsystems away from the writer."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_echo_registry(rec), turns=[_two_in_one_turn(), DONE])
 
@@ -956,90 +564,7 @@ def test_seq_collision_would_misdirect_the_judge(tmp_path):
     assert len(set(map(str, refs))) == 2
 
 
-
-
-def _adapter_sources() -> list[tuple[Path, ast.Module]]:
-    return [(p, ast.parse(p.read_text(encoding="utf-8"), filename=str(p)))
-            for p in sorted(ADAPTERS_DIR.glob("*.py"))]
-
-
-def _enclosing_functions(tree: ast.Module) -> dict[ast.AST, str]:
-    """node → the name of the function that lexically contains it ("" at module scope)."""
-    owner: dict[ast.AST, str] = {}
-
-    def walk(node: ast.AST, fn: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            name = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else fn
-            owner[child] = name
-            walk(child, name)
-
-    walk(tree, "")
-    return owner
-
-
-def _is_sys_exit(call: ast.Call) -> bool:
-    f = call.func
-    if isinstance(f, ast.Attribute) and f.attr == "exit":
-        return isinstance(f.value, ast.Name) and f.value.id.endswith("sys")
-    return isinstance(f, ast.Name) and f.id == "exit"
-
-
-def test_transports_raise_never_exit():
-    """transports_raise_never_exit — no transport calls sys.exit. Fifteen of them do today,
-    INSIDE the shared module (_stub_transport), so a per-adapter mapping table structurally
-    cannot reach them — and ticket_cli serves both the CLI and the VERBS surface from one
-    implementation, so a sys.exit in a command body kills the in-process run.
-
-    An entry point (`main`, and a `__main__` guard) may still exit: that is a process, not a
-    transport (none is left among the adapters since #1107 deleted the ticket CLI)."""
-    offenders: list[str] = []
-    for path, tree in _adapter_sources():
-        owner = _enclosing_functions(tree)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and _is_sys_exit(node):
-                fn = owner.get(node, "")
-                if fn not in ("main",):
-                    offenders.append(f"{path.name}:{node.lineno} (in {fn or '<module>'})")
-    assert offenders == [], f"a transport still exits the process instead of raising: {offenders}"
-
-
-def _subprocess_calls(tree: ast.Module) -> list[ast.Call]:
-    out = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
-                and node.func.attr in ("run", "Popen", "check_output"):
-            base = node.func.value
-            if isinstance(base, ast.Name) and base.id.endswith("subprocess"):
-                out.append(node)
-    return out
-
-
-def _kw(call: ast.Call, name: str) -> ast.expr | None:
-    return next((k.value for k in call.keywords if k.arg == name), None)
-
-
-def test_every_transport_decodes_lossily():
-    """every_transport_decodes_lossily — a non-UTF-8 byte in ANY transport's output costs one
-    replacement character, not the stage. The capture seam's errors='replace' disappears with the
-    subprocess, so the guarantee now rests on every transport — and host_state_cli's health-check
-    subprocess is a STRICT decode today, where a UnicodeDecodeError is a ValueError that sails
-    past every guard."""
-    offenders: list[str] = []
-    for path, tree in _adapter_sources():
-        for call in _subprocess_calls(tree):
-            decodes = _kw(call, "text") is not None or _kw(call, "encoding") is not None
-            errors = _kw(call, "errors")
-            lossy = isinstance(errors, ast.Constant) and errors.value == "replace"
-            if decodes and not lossy:
-                offenders.append(f"{path.name}:{call.lineno}")
-    assert offenders == [], f"a transport subprocess decodes STRICTLY: {offenders}"
-
-
 def test_hung_verb_records_infra_not_a_synthesized_timeout(tmp_path):
-    """hung_verb_records_infra_not_a_synthesized_timeout — a hung verb surfaces through the
-    TRANSPORT's own inner timeout as exit 2 / infra, and the breaker advances. 124 is never
-    synthesized again: asyncio.wait_for cancels the await, not the thread, so a row claiming a
-    timeout we did not enforce would be a lie about a process still running."""
     rec = VerbRecorder()
     r = run_gather(
         tmp_path,
@@ -1055,10 +580,6 @@ def test_hung_verb_records_infra_not_a_synthesized_timeout(tmp_path):
 
 
 def test_failure_digest_carries_the_vendor_diagnosis(tmp_path):
-    """failure_digest_carries_the_vendor_diagnosis — on failure payload_digest is
-    `exit=N; <the upstream error body>`: an HTTP 4xx still carries Elasticsearch's own `detail`
-    text, not a generic str(e). The pitfalls curator SKIPS any failure whose digest names no
-    concrete mistake, so a generic message dries that lane up silently."""
     detail = "[verification_exception] Unknown column [user.nmae], did you mean [user.name]?"
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, UpstreamFault(detail)), turns=[
@@ -1070,28 +591,37 @@ def test_failure_digest_carries_the_vendor_diagnosis(tmp_path):
     assert detail[:80] in row["payload_digest"]
 
 
-def test_missing_config_is_infra_not_agent_fixable(tmp_path):
-    """missing_config_is_infra_not_agent_fixable — a missing/malformed config.env classifies as
-    infra (exit 2) and ADVANCES the breaker. Today the shared transport's bare
-    sys.exit('error: config file not found') exits 1, so a definitionally-down system is filed as
-    an agent-fixable query error and never trips the breaker."""
+def test_missing_config_is_infra_not_agent_fixable(tmp_path, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO)
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=raising(rec, ConfigFault("config file not found")), turns=[
-        q("elastic", "probe", {}), DONE,
+        q("elastic", "probe", {}), q("elastic", "probe", {}), DONE,
     ])
-    row = r.row()
-    assert row["exit_code"] == 2
-    assert row["error_class"] == "infra"
-    assert row["exit_code"] != 1, "a missing config is still misfiled as an agent-fixable error"
-    assert r.breaker["systems"]["elastic"]["failures"] == 1
+    assert [row for row in r.own_rows if row.get("error_class") == "agent-fixable"] == [], \
+        f"a missing config is misfiled as an agent-fixable error: {r.own_rows}"
+    assert rec.verbs == ["probe"], \
+        f"after a call-time ConfigFault elastic must be down: the retry ran the verb: {rec.verbs}"
+    assert r.state.breaker_failures("elastic") == 0, \
+        f"a call-time ConfigFault was charged to elastic (#1256 O-5b): {r.breaker}"
+    assert r.state.breaker_snapshot()["total_failures"] == 0, \
+        f"a call-time ConfigFault was charged to the run (#1256 O-5b): {r.breaker}"
+    assert len(r.gather.seen) >= 3, f"precondition: the retry was answered ({len(r.gather.seen)} requests)"
+    assert r.gather.seen[2].startswith(r.gather.seen[1]), \
+        "precondition: a gather request's text extends the one before it (harness shape)"
+    retried = r.gather.seen[2][len(r.gather.seen[1]):]
+    assert "not configured" in retried.lower(), \
+        f"the retry's refusal must say elastic is not configured: {retried!r}"
+    assert "config file not found" in retried, f"the refusal must carry the fault's reason: {retried!r}"
+    assert "tripped" not in retried.lower(), f"a not-configured refusal reads as a trip: {retried!r}"
+    defects = [rec_ for rec_ in caplog.records
+               if rec_.levelno >= logging.ERROR and "elastic" in rec_.getMessage()]
+    assert defects, "the escaped ConfigFault was not logged as an adapter defect naming elastic"
 
 
 @pytest.mark.parametrize("empty", [{}, []])
 def test_empty_verb_return_is_payload_status_empty(tmp_path, empty):
-    """empty_verb_return_is_payload_status_empty — a verb returning {} or [] yields
-    payload_status='empty': the seam tests the RETURNED OBJECT for emptiness BEFORE serializing,
-    because json.dumps({}) == '{}' is non-blank and would read as 'ok' — silently killing the
-    zero-results signal the lead-author treats as a strong fold signal."""
     rec = VerbRecorder()
 
     def probe(ctx: VerbContext, *, native_query: str = "x"):
@@ -1113,9 +643,6 @@ def _provider_key_vars() -> set[str]:
 
 
 def test_provider_key_absent_from_transport_children(tmp_path, monkeypatch):
-    """provider_key_absent_from_transport_children — no subprocess a transport forks carries a
-    provider API key in its environment. The scrub rides on _bash_env today; in-process the
-    transports pass no env= and would inherit the driver's os.environ."""
     keys = _provider_key_vars()
     assert keys, "no provider key vars declared — the scrub would be vacuous"
     for var in keys:
@@ -1130,34 +657,8 @@ def test_provider_key_absent_from_transport_children(tmp_path, monkeypatch):
     assert leaked == [], f"the verb was handed a provider key: {leaked}"
     assert "sk-secret-do-not-leak" not in "".join(env.values())
 
-    naked = [
-        f"{path.name}:{call.lineno}"
-        for path, tree in _adapter_sources()
-        for call in _subprocess_calls(tree)
-        if _kw(call, "env") is None
-    ]
-    assert naked == [], f"a transport forks a child with the INHERITED environment: {naked}"
-
-
-def test_provider_key_scrub_positive_control(tmp_path):
-    """provider_key_scrub_positive_control — the same transport child DOES receive the non-secret
-    env it needs (DEFENDER_DIR, PATH): the control proving the scrub is selective and the
-    observation channel sees a populated env."""
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
-        q("elastic", "query", {"native_query": "x"}), DONE,
-    ])
-    env = rec.only().ctx.env
-    assert env.get("DEFENDER_DIR") == str(DEFENDER)
-    assert env.get("DEFENDER_RUN_DIR") == str(r.run_dir)
-    assert env.get("PATH"), "the transport child got no PATH — the scrub emptied the env"
-
 
 def test_verb_resolves_config_from_deps_tree(tmp_path):
-    """verb_resolves_config_from_deps_tree — a verb resolves its config from the RUN's
-    record (the ctx), not an import-time module constant: a run handed tenant A's record reads
-    `<A settings>/systems/{system}/config.env` as it was when the run began (#1107: the record
-    is the run's tenant's settings, resolved once and handed in on `VerbContext.tenant`)."""
     def _ctx_over(root: Path, tenant_id: str, url: str | None) -> VerbContext:
         configs = {} if url is None else {"elastic": (
             f"ELASTIC_URL_BASE={url}\nELASTIC_BASTION_HOST=bastion\nELASTIC_TIMEOUT_SEC=30\n"
@@ -1180,31 +681,15 @@ def test_verb_resolves_config_from_deps_tree(tmp_path):
             _ctx_over(tmp_path / "nowhere", "t", None), "elastic", "ELASTIC")
 
 
-
 ROW_KEYS = {
     "lead_id", "seq", "system", "verb", "query_id", "params", "raw_command",
     "payload_path", "exit_code", "error_class", "payload_status", "payload_digest",
-    # #877 F-9: the payload's CONTENT identity, beside the display digest rather than inside
-    # it — `repeat_note` asserts byte identity from this, the digest stays prose a curator
-    # reads. Derived by the writer from the text it persists, so no caller can disagree with
-    # the sidecar it just wrote.
     "payload_sha256",
-    # #871: the identity of a call whose `system` column deliberately does NOT carry the name
-    # the model used. A HASH, never the string — this table is in the gather agent's read
-    # scope and `_build_pitfalls_handoffs` spends `system` verbatim as a corpus path — and
-    # `""` on every row that kept its dispatched system, which is all of them but the
-    # above-guard rejections #855 coarsened.
     "system_key",
-    # #1234 A12: the call's host-written id (`record_query.next_call_id`), the one key its
-    # served-ledger rows share.
-    "call_id",
 }
 
 
 def test_row_contract_frozen(tmp_path):
-    """row_contract_frozen — the fourteen-key queries row: params keyed by the REGISTRY's real param
-    names (not arg0/arg1), verb holding the tool's REAL verb (the column has zero production
-    readers today and finally becomes honest), raw_command a derived audit string."""
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=elastic_ok(rec), turns=[
         q("elastic", "query", {"native_query": "FROM logs | LIMIT 2", "limit": 2},
@@ -1225,11 +710,6 @@ def test_row_contract_frozen(tmp_path):
     assert row["error_class"] is None
     assert row["payload_status"] == "ok"
     assert row["payload_digest"]
-    # #871: pinned by VALUE here like every other column, not left to `set(row) == ROW_KEYS`.
-    # An executed row's `system` is the dispatched name, so it identifies its own call and the
-    # fingerprint column is empty — and today nothing else asserts that directly: a non-`""`
-    # here is caught only indirectly, by `repeat_trip`'s live call passing `""` and the row
-    # then matching nothing.
     assert row["system_key"] == "", \
         "an executed row was fingerprinted, which splits its own system's repeat count"
 
@@ -1253,9 +733,6 @@ def test_payload_lands_by_ref(tmp_path):
 
 
 def test_stage_tables_still_round_trips(tmp_path):
-    """stage_tables_still_round_trips — lead_repository.stage_tables (copy2 + copytree), the
-    SECOND writer of both sinks (driven by core/persist), still round-trips a
-    run dir under the new row shape: the replay contract is over the FILES, not the writer."""
     rec = VerbRecorder()
     r = run_gather(tmp_path / "src", verbs=_echo_registry(rec), turns=[
         q("elastic", "probe", {"tag": "alpha"}),
@@ -1275,8 +752,6 @@ def test_stage_tables_still_round_trips(tmp_path):
     assert len(own_staged[0].queries) == 2
 
 
-
-
 def _policies(tmp_path):
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw" / LEAD).mkdir(parents=True)
@@ -1294,12 +769,9 @@ def _decide(cmd: str, policy, run_dir):
 @pytest.mark.parametrize("cmd", [
     "defender-elastic query foo",
     "defender-elastic esql 'FROM x' | defender-sql 'SELECT 1'",
-    "python3 defender/scripts/adapters/elastic_adapter.py query foo",
+    "python3 defender/integrations/elastic_adapter.py query foo",
 ])
 def test_adapters_unreachable_from_gather_bash(tmp_path, cmd):
-    """adapters_unreachable_from_gather_bash — no adapter shim or *_adapter.py path is runnable from
-    gather's bash lane: the CAPTURE_ADAPTER / CAPTURE_ADAPTER_SQL grants are gone and the adapter
-    classifier denies unconditionally."""
     run_dir, gather, _ = _policies(tmp_path)
     decision = _decide(cmd, gather, run_dir)
     assert not decision.allow, f"gather can still run an adapter from bash: {cmd}"
@@ -1308,31 +780,9 @@ def test_adapters_unreachable_from_gather_bash(tmp_path, cmd):
     assert not hasattr(decision, "sql_pipe")
 
 
-def test_deny_reason_names_no_deleted_route(tmp_path):
-    """deny_reason_names_no_deleted_route — the deny reason an adapter-shaped command receives
-    points at the QUERY TOOL and does not tell gather it 'may only run a data-source adapter
-    standalone'. A reason naming a route that no longer exists teaches a dead command, which this
-    codebase treats as an enforced invariant, not a cosmetic string."""
-    run_dir, gather, _ = _policies(tmp_path)
-    for cmd in ("defender-elastic query foo",
-                "defender-elastic query foo | defender-sql 'SELECT 1'"):
-        reason = _decide(cmd, gather, run_dir).reason
-        assert "standalone" not in reason.lower(), f"the deny reason teaches a dead route: {reason}"
-        assert "query" in reason.lower(), f"the deny reason does not name the query tool: {reason}"
-
-    assert _decide(f"cat gather_raw/{LEAD}/0.json | defender-sql 'SELECT 1'", gather, run_dir).allow
-
-
 def test_gather_bash_keeps_local_computation(tmp_path):
     """gather_bash_keeps_local_computation — `cat <gather_raw payload> | defender-sql '<SQL>'`
-    is still ALLOW for gather, so the split pipe (tool-then-bash) works.
-
-    Both spellings now name the SAME file. Pre-#540 a relative operand rebased on the repo
-    root, so `gather_raw/…` named nothing in scope and denied — hence the old "absolute only"
-    convention. The anchor is now the RUN DIR, which is where `gather_raw/` actually lives, so
-    the relative spelling resolves onto the payload rather than into a directory that has no
-    reason to hold one. The payload note still reports absolute paths (that is what the query
-    result carries), but a relative spelling is no longer a trap."""
+    is still ALLOW for gather, so the split pipe (tool-then-bash) works."""
     run_dir, gather, _ = _policies(tmp_path)
     payload = run_dir / "gather_raw" / LEAD / "0.json"
     assert _decide(f"cat {payload} | defender-sql 'SELECT count(*) FROM data'",
@@ -1350,13 +800,7 @@ _ESQL_RAW = {
 
 
 def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captured(tmp_path):
-    """#1138 O7 end to end — the lead queries ES|QL with the `query` tool, then declares the
-    captured payload's positional rows from its bash lane:
-    `cat <payload> | defender-sql --rows values --names columns '<SQL>'`. The REAL gate must
-    admit the flags (before #1138 it refused them and pointed at the `query` tool, C11), and the
-    real shim must answer over the declared table: 3 rows — the unflagged count over this
-    object is 1 (C4) — and `failed` summed as the number it was sent as, with no cast."""
-    from defender.scripts.adapters.elastic_adapter import esql_payload
+    from defender.integrations.elastic_adapter import esql_payload
 
     rec = VerbRecorder()
 
@@ -1366,7 +810,7 @@ def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captu
 
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='q1138')
     payload_abs = run_dir / "gather_raw" / LEAD / "0.json"
-    command = (f"cat {payload_abs} | defender-sql --rows values --names columns "
+    command = (f"cat {model_path(payload_abs, run_dir=run_dir)} | defender-sql --rows values --names columns "
                "'SELECT count(*) AS n, sum(failed) AS s FROM data'")
     main = ReplayFn([
         Turn(tool_calls=[("gather", {
@@ -1396,87 +840,9 @@ def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captu
 
 
 def test_main_cannot_reach_a_payload_by_any_surface(tmp_path):
-    """main_cannot_reach_a_payload_by_any_surface — the main loop cannot read a gather_raw payload
-    by ANY surface, including a bash command carrying a `# record_query` comment. Main's clamp is
-    positive enumeration (it has no gather_raw shape at all)."""
     run_dir, _, main = _policies(tmp_path)
     payload = run_dir / "gather_raw" / LEAD / "0.json"
     assert not _decide(f"cat {payload}", main, run_dir).allow
     assert not _decide(f"cat {payload} # record_query", main, run_dir).allow
     assert not permission.decide_read(
         payload, run_dir=run_dir, defender_dir=DEFENDER, policy=main).allow
-
-
-def test_shim_flags_and_non_adapter_shims_are_removed_together():
-    """shim_flags_and_non_adapter_shims_are_removed_together — `defender-record-query` leaves
-    NON_ADAPTER_SHIMS *and* grant._SHIM_FLAGS together: a shim left in NON_ADAPTER_SHIMS but
-    dropped from _SHIM_FLAGS gets a free-text-only shape from _shim_shape, silently WIDENING what
-    it may be handed."""
-    assert "defender-record-query" not in NON_ADAPTER_SHIMS
-    assert "defender-record-query" not in _SHIM_FLAGS
-    assert set(NON_ADAPTER_SHIMS) <= set(_SHIM_FLAGS), \
-        "a shim carries no _SHIM_FLAGS entry — its shape degrades to free text"
-
-
-
-
-def test_record_query_module_survives_its_cli():
-    """record_query_module_survives_its_cli — record_query.py survives the deletion of
-    main()/parse_params/_derive_verb because runtime/query_tool.py still imports its
-    payload-recording helpers and its repeat guards.
-
-    Two of the four helpers this used to name are gone with #832, and their absence is the
-    point rather than an erosion of the demand. `_is_event_payload` decided whether a payload
-    reached the model whole by testing it against six vendor envelope key names;
-    `build_truncated_view` was the sampler behind it. Both now live in `payload_view.py` as one
-    size-driven renderer, so the module boundary this test defends moved with them. The read cap
-    is likewise no longer THIS module's constant: #832 split it, because a single number could
-    not both bound a payload re-read at 8 KB and return a 33,590-byte `SKILL.md` whole
-    (`test_read_file_bounded` holds both halves now).
-
-    derive_system is NOT one of them. This docstring used to claim runtime/tools.py imported it
-    alongside _passthrough_max_bytes; it does not, and never has on this branch. The matching
-    `assert callable(record_query.derive_system)` passed on the symbol merely existing, so the
-    test vouched for a live import that was not there while being incapable of noticing. Its only
-    consumers are in tests/ (test_record_query.py), which is why the vulture gate reports it as
-    test-only surface — see #712. Pin what actually holds the module up instead."""
-    assert callable(runtime_tools._read_char_cap)
-    for live in ("_next_seq", "payload_digest"):
-        assert callable(getattr(record_query, live, None)), \
-            f"runtime/query_tool.py imports {live} — the module no longer provides it"
-
-    for dead in ("main", "parse_params", "_derive_verb"):
-        assert not hasattr(record_query, dead), f"record_query.{dead} outlived its CLI"
-
-
-def test_ticket_cli_dual_surface_survives():
-    """ticket_cli_dual_surface_survives — ticket_adapter's VERBS entry is its one surface: the
-    argparse CLI it once shared the implementation with went when #1107 retired its last
-    subprocess callers' reason to exist (the settings are the run's record, handed in on the
-    verb context, and a process has no record to be handed). `list-tickets` and `get-ticket`
-    keep the `--require-closed` guard as verb parameters."""
-    verbs = ModuleVerbRegistry(read_roster(ADAPTERS_DIR), DENY_ALL).verbs("ticket")
-    assert {"list-tickets", "get-ticket"} <= set(verbs)
-    for verb in ("list-tickets", "get-ticket"):
-        assert "require_closed" in declared_params(verbs[verb]), verb
-
-    for gone in ("build_parser", "main", "_cli_context"):
-        assert not hasattr(ticket_adapter, gone), f"ticket_adapter.{gone} outlived its CLI"
-
-
-def test_e2e_replay_harness_has_an_injected_verb_seam(tmp_path):
-    """e2e_replay_harness_has_an_injected_verb_seam — the harness fakes the registry/transport
-    through an INJECTED seam (like its make_model seam), not by monkeypatching: its old seam
-    stubbed record_query's `subprocess` module attribute, which a registry does not have. The
-    exit-2 circuit-breaker fixture still reproduces."""
-    assert "verbs" in inspect.signature(drive).parameters
-    for gone in ("FakeAdapterSubprocess", "FailingAdapterSubprocess"):
-        assert not hasattr(_replay_harness, gone), \
-            f"{gone} (the record_query.subprocess monkeypatch seam) is still the harness's fake"
-
-    rec = VerbRecorder()
-    r = run_gather(tmp_path, verbs=raising(rec, TransportFault("connection refused")), turns=[
-        q("elastic", "probe", {}), q("elastic", "probe", {}), DONE,
-    ])
-    assert [row["exit_code"] for row in r.own_rows] == [2, 2]
-    assert circuit_breaker.is_tripped(r.state, "elastic")

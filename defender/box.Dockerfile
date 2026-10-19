@@ -1,10 +1,10 @@
-# The owned box image (#1092). Build context is `defender/` — `scripts/box_image.py build`
+# The owned box image (#1092). Build context is `defender/` — `box/image_cli.py build`
 # invokes `docker build` that way — not the repo root, so the repo root's `.dockerignore` does
 # not apply and needs no entry for this build: the recipe COPYs only the two files it needs,
 # and nothing outside `defender/` is ever walked (#1098).
 #
 # BuildKit recipe: the sync step below LENDS itself uv with `RUN --mount` — the legacy builder
-# has no `--mount`, so `scripts/box_image.py build` sets DOCKER_BUILDKIT=1 for every build.
+# has no `--mount`, so `box/image_cli.py build` sets DOCKER_BUILDKIT=1 for every build.
 #
 # Base digest pin (O8): a base CVE update is this repo's to make, by hand, in this line —
 # recorded here rather than left to a floating tag that could change what "the same commit"

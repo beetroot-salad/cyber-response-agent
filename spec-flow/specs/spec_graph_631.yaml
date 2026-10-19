@@ -728,7 +728,7 @@ demands:
   - id: started_at_swallow_does_not_fail_open
     kind: negative
     form: test
-    discharged_by: test_unreadable_started_at_does_not_silently_drop_the_wall_clock_limb
+    discharged_by: test_an_origin_less_state_fails_closed_rather_than_reading_as_healthy  # re-pointed by #1255
     binds: ["check_budgets", "budget_json.domain.distinguished[started_at]",
             "interacts(check_budgets->budget_json)"]
     positive_control: elapsed_is_monotonic
@@ -911,7 +911,9 @@ demands:
     # executed by PB11, confirms the counter is live for "gather" only).
 
   - {id: elapsed_is_monotonic, kind: behavior, form: test,
-     discharged_by: test_elapsed_reads_a_monotonic_source_and_survives_a_backward_clock_step,
+     # RE-POINTED BY #1255 (C10): elapsed is measured on the run clock alone, which never runs backwards;
+     # the monotonic-source test retired with max(wall, monotonic) and this one carries the promise.
+     discharged_by: test_the_wall_clock_limb_never_shrinks_when_the_source_steps_back,
      binds: ["check_budgets", "budget_json.domain.distinguished[started_at]",
              "interacts(check_budgets->budget_json)",
              "DEFAULT_LIMITS.domain.distinguished[wall_clock_timeout]"]}
@@ -1153,8 +1155,10 @@ demands:
   # --- VR1: the cross-process origin, R27's first-raised correctness hole ----
   - id: budget_origin_is_cross_process_wall_clock
     kind: domain-outcome
-    form: test
-    discharged_by: test_budget_origin_is_a_wall_clock_the_elapsed_check_honours
+    form: clause
+    status: retired
+    outcome:
+      nl: "RETIRED by #1255 — the budget origin is the run clock's reading (an arm's is the source's, restored from the fork snapshot), not a cross-process wall clock; `test_budget_origin_is_a_wall_clock_the_elapsed_check_honours`, which discharged this demand, was retired with the behaviour it pinned."
     binds: ["budget_json.domain.distinguished[created_at]",
             "budget_json.domain.distinguished[started_at]",
             "interacts(check_budgets->budget_json)",

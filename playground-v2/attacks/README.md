@@ -2,7 +2,7 @@
 
 Parameterized attack scenarios that generate realistic threat telemetry
 across the three signal categories called out in
-`docs/playground-environment-v2.md §Attack-simulation surface`:
+`playground-v2/docs/playground-environment-v2.md §Attack-simulation surface`:
 auth/metadata, execution, and data access.
 
 Dispatches happen from the devcontainer against the remote compose stack

@@ -1,0 +1,197 @@
+"""Pins for `defender._yaml.safe_load_typed_and_spelled` (#951)."""
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+import yaml
+
+from defender._yaml import AliasRefused, safe_load, safe_load_typed_and_spelled
+
+
+def spelled(text: str):
+    return safe_load_typed_and_spelled(text).spelled
+
+
+# every scalar comes back as the text it was written as
+
+@pytest.mark.parametrize("spelling", [
+    "2026-07-25T07:48:37.065Z",     # probe-006's millisecond instant
+    "2026-07-24T07:45:35.000Z",     # `.000` — `isoformat()` would drop it
+    "2026-07-25T07:40:00Z",
+    "2026-07-25T07:48:37+00:00",
+    "2026-07-25 07:48:37",          # the space-separated form is a YAML timestamp too
+    "2026-07-25",                   # a bare date
+    "22",
+    "-3",
+    "0755",                         # YAML 1.1 octal
+    "0x1F",
+    "1_000",
+    "12:30",                        # sexagesimal
+    "1.5",
+    "1.50",
+    "1.0e+3",                       # `1e3` is a STRING to YAML 1.1 — no exponent sign
+    ".inf",
+    "true",
+    "false",
+    "yes",
+    "no",
+    "on",
+    "off",
+])
+def test_a_plain_scalar_is_the_exact_string_it_was_written_as(spelling):
+    """Equality with the `str` is the whole assertion — and the fixture self-check that
+    plain `safe_load` does NOT give the string is what makes it exercise anything."""
+    assert spelled(f"a: {spelling}") == {"a": spelling}
+    assert not isinstance(yaml.safe_load(f"a: {spelling}")["a"], str), spelling
+
+
+def test_a_shape_valid_but_calendar_invalid_instant_is_refused_as_safe_load_refuses_it():
+    """PyYAML's timestamp resolver matches on SHAPE and hands the fields to `datetime`, which raises a bare `ValueError` on `2001-02-30`."""
+    with pytest.raises(yaml.YAMLError, match="could not be constructed"):
+        safe_load_typed_and_spelled("a: 2001-02-30")
+    with pytest.raises(yaml.YAMLError, match="could not be constructed"):
+        safe_load("a: 2001-02-30")
+
+
+@pytest.mark.parametrize(("tagged", "literal"), [
+    ("!!timestamp 2026-07-25T07:48:37.065Z", "2026-07-25T07:48:37.065Z"),
+    ("!!int 0755", "0755"),
+    ("!!bool yes", "yes"),
+    ("!!float 1.50", "1.50"),
+    ("!!str 22", "22"),
+])
+def test_an_explicitly_tagged_scalar_is_its_text_too(tagged, literal):
+    """The other way YAML types a scalar."""
+    assert spelled(f"a: {tagged}") == {"a": literal}
+
+
+@pytest.mark.parametrize("text", [
+    "a: !!python/name:os.system",                       # a scalar
+    "a: !!python/object/apply:os.system ['echo pwned']\n",  # a sequence
+])
+def test_a_python_tag_is_refused_wherever_it_sits_as_safe_load_refuses_it(text):
+    """The typed half is the safe constructor, which has no constructor for a `!!python/…` tag on a scalar OR a collection, so the pair refuses the..."""
+    with pytest.raises(yaml.YAMLError):
+        safe_load_typed_and_spelled(text)
+    with pytest.raises(yaml.YAMLError):
+        safe_load(text)
+
+
+def test_quoted_scalars_come_back_unquoted_as_safe_load_gives_them():
+    assert spelled(
+        "a: '22'\nb: \"yes\"\nc: '2026-07-25T07:48:37.065Z'\nd: ''") == {
+        "a": "22", "b": "yes", "c": "2026-07-25T07:48:37.065Z", "d": ""}
+
+
+def test_block_scalars_are_their_folded_text():
+    assert spelled("d: >-\n  the leads investigate\n  the wrong host\n") == {
+        "d": "the leads investigate the wrong host"}
+    assert spelled("d: |\n  2026-07-25T07:48:37.065Z\n") == {
+        "d": "2026-07-25T07:48:37.065Z\n"}
+
+
+@pytest.mark.parametrize("text", ["a: ~", "a: null", "a:", "a: "])
+def test_a_null_is_whatever_was_written(text):
+    """No special case: `~` is the text `~` and an empty value is `""`. The scorer's index
+    drops `""`, and no author forbids `~`."""
+    assert spelled(text) == {"a": text.partition(":")[2].strip()}
+
+
+def test_mapping_keys_stay_typed_so_both_readings_keep_the_same_pairs():
+    """`1:` and `'1':` are two keys to `safe_load`, so they are two keys here."""
+    assert spelled("1: x\n'1': y") == {1: "x", "1": "y"} == safe_load("1: x\n'1': y")
+    # a typed key with a spelled value: the key is the `date` safe_load makes of it
+    assert spelled("2026-07-25: 22") == {date(2026, 7, 25): "22"}
+
+
+@pytest.mark.parametrize("text", ["null", "~", "22", "false", "2026-07-25"])
+def test_a_bare_scalar_document_is_typed_in_both_readings(text):
+    readings = safe_load_typed_and_spelled(text)
+    assert readings.spelled == readings.typed == safe_load(text)
+
+
+# the typed half is `safe_load`, and both halves come from one tree
+
+@pytest.mark.parametrize("text", [
+    "a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes\nd:\n",
+    "1: x\n'1': y",
+    "projections:\n  - lead_id: l-001\n    <<: {events: [{user.name: root}]}\n",
+    "",
+])
+def test_the_typed_half_is_exactly_safe_load(text):
+    assert safe_load_typed_and_spelled(text).typed == safe_load(text)
+
+
+def _shape(value, seen=None):
+    """A document's shape with the leaves erased: containers, keys, lengths, and any value
+    reached twice. Two readings of one tree must have the same one."""
+    seen = {} if seen is None else seen
+    if isinstance(value, dict):
+        if id(value) in seen:
+            return ("cycle", seen[id(value)])
+        seen[id(value)] = len(seen)
+        return ("map", tuple((k, _shape(v, seen)) for k, v in value.items()))
+    if isinstance(value, list):
+        if id(value) in seen:
+            return ("cycle", seen[id(value)])
+        seen[id(value)] = len(seen)
+        return ("seq", tuple(_shape(v, seen) for v in value))
+    return "leaf"
+
+
+@pytest.mark.parametrize("text", [
+    "a: 2026-07-25T07:48:37.065Z\nb: 22\nc: yes\nd:\n",
+    "1: x\n'1': y\n2026-07-25: z\ntrue: w",
+    "projections:\n  - lead_id: l-001\n    <<: {events: [{user.name: root}]}\n",
+    "projections:\n  - lead_id: l-001\n    events: [{n: 1}]\n    events: [{n: 2}]\n",
+    "a: [1, [2, {3: 4}], {}, []]",
+])
+def test_both_readings_have_exactly_one_shape(text):
+    readings = safe_load_typed_and_spelled(text)
+    assert _shape(readings.spelled) == _shape(readings.typed) == _shape(safe_load(text))
+
+
+# everything else in the spelled half is `safe_load`'s structure
+
+def test_a_repeated_key_collapses_to_its_last_value_as_safe_load_does():
+    text = "events: [{user.name: admin}]\nevents: [{user.name: root}]\n"
+    assert spelled(text) == safe_load(text) == {
+        "events": [{"user.name": "root"}]}
+
+
+def test_a_merge_key_merges_as_safe_load_does():
+    text = "projections:\n  - lead_id: l-001\n    <<: {events: [{user.name: root}]}\n"
+    assert spelled(text)["projections"] == safe_load(text)["projections"] == [
+        {"lead_id": "l-001", "events": [{"user.name": "root"}]}]
+
+
+@pytest.mark.parametrize("text", [
+    "a: &c [root]\nb: *c",
+    "a: &x {b: *x, c: leaf}",
+    "events: &e\n  - user.name: root\n    self: *e\n",
+    "_d: &d {events: [{user.name: root}]}\nprojections:\n  - lead_id: l-001\n    <<: *d\n",
+], ids=["reused", "self-containing", "self-containing-list", "merged-by-alias"])
+def test_an_alias_is_refused_by_both_readings_as_by_safe_load(text):
+    """#1127: no YAML the tree reads may share or contain itself — an alias of a few hundred bytes can stand for billions of values to whatever walks the..."""
+    with pytest.raises(AliasRefused):
+        safe_load(text)
+    with pytest.raises(AliasRefused):
+        safe_load_typed_and_spelled(text)
+
+
+def test_an_empty_document_is_none():
+    assert spelled("") is None
+    assert spelled("# nothing but a comment\n") is None
+
+
+def test_malformed_text_raises_a_yaml_error():
+    with pytest.raises(yaml.YAMLError):
+        spelled("a: [unclosed")
+
+
+def test_a_document_too_deep_to_parse_is_a_yaml_error_not_a_recursion_error():
+    """The same translation `safe_load` makes, from the same function: a caller that
+    catches `YAMLError` for malformed input must not get an interpreter error instead."""
+    with pytest.raises(yaml.YAMLError, match="nested too deeply"):
+        spelled("a: " + "[" * 20000)

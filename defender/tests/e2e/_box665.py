@@ -3,7 +3,7 @@ keeps pytest from collecting it). Imported by the `test_665_*` files.
 
 Every fake enters the target through a real injection seam (a `docker=` fn, a `box=`
 constructor/param, an injected `start_box`/`stop_box`/`agents`/`branch`) — never a
-monkeypatch (`scripts/lint/lint_monkeypatch.py` is a blocking ratcheted gate). No fake
+monkeypatch (`tooling/lint/lint_monkeypatch.py` is a blocking ratcheted gate). No fake
 classifies or decides policy: faults are declarative, requests are recorded, and startup
 readbacks use fixture files. Demands assert on the captured geography/argv/box.
 
@@ -28,10 +28,10 @@ from typing import Any
 import pytest
 
 from defender.learning.core.config import AUTHOR_DRAIN_LABEL
-from defender.runtime import box as box_mod
-from defender.runtime.scrub import verdict_path
-from defender.tests._alert_plant import plant_alert
-from defender.tests._docker import daemon_reachable, is_dood
+from defender import box as box_mod
+from defender.box._scrub import verdict_path
+from defender.tests.support.storage._alert_plant import plant_alert
+from defender.tests.support.sandbox._docker import daemon_reachable, is_dood
 from defender.tests.e2e._local_box_command import run_box_python_command
 
 DEFENDER = Path(__file__).resolve().parents[2]
@@ -179,6 +179,21 @@ class RecordingDocker:
         command = [*argv[-4:-1], str(source)]
         return run_box_python_command(command)
 
+    def _through_binds(self, inside: Path) -> Path:
+        """Where an in-box path lives on the host: through the captured bind table (nested
+        mounts winning), as a real daemon resolves it; unchanged when no bind covers it (or
+        before any create). A double modelling a bind mount, not a policy: since #1255 the box
+        mounts each tree at a fixed model path (`/runs/current`, …), so an in-box path is no
+        longer the host path it reads."""
+        if self.create_argv is None:
+            return inside
+        covering = [m for m in self.mounts()
+                    if m["source"] and m["target"] and inside.is_relative_to(Path(m["target"]))]
+        if not covering:
+            return inside
+        mount = max(covering, key=lambda item: len(Path(item["target"]).parts))
+        return Path(mount["source"]) / inside.relative_to(Path(mount["target"]))
+
     def _exec(self, argv: list[str]) -> subprocess.CompletedProcess:
         if argv[-4:-2] == ["python3", "-c"] and argv[-1].endswith("/.tenant-id"):
             return self._read_marker(argv)
@@ -198,7 +213,7 @@ class RecordingDocker:
             return _cp(self.sentinel.rc, self.sentinel.stdout, self.sentinel.stderr)
         if self._exec_replies:
             return self._exec_replies.pop(0)
-        path = Path(argv[-1])            # sentinel readback: `cat <sentinel>`
+        path = self._through_binds(Path(argv[-1]))   # sentinel readback: `cat <sentinel>`
         try:
             return _cp(0, path.read_text(encoding="utf-8"))
         except OSError:
@@ -307,17 +322,25 @@ def reaped_after_create(calls) -> bool:
 
 # The future box.py geography seam (O8/M2: callers own the geography, box.py
 # renders + validates the boundary). Referenced lazily so HEAD still collects.
-def Mount(source: Path, target: Path, writable: bool = False):
-    """box.Mount(source, target, writable) — future symbol; AttributeError at HEAD."""
-    return box_mod.Mount(source=source, target=target, writable=writable)  # type: ignore[attr-defined]
+def Mount(source: Path, target: Path, writable: bool = False, kind: str | None = None):
+    """box.Mount(source, target, writable[, kind]) — future symbol; AttributeError at HEAD.
+    `kind` (#1108 D7 amended: `code`, `agent` or `data`) is what a read-only mount declares;
+    it is passed only when given, so a writable mount names none."""
+    kw: dict[str, Any] = dict(source=source, target=target, writable=writable)
+    if kind is not None:
+        kw["kind"] = kind
+    return box_mod.Mount(**kw)  # type: ignore[attr-defined]
 
 
-def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None):
-    """box.BoxRequest(name, mounts, workdir, env, spec) — future symbol; the caller-owned
-    geography box.py renders. AttributeError/TypeError at HEAD (the boundary is unbuilt)."""
+def BoxRequest(*, name: str, mounts, workdir: Path, env, spec=None, defender_dir=None):
+    """box.BoxRequest(name, mounts, workdir, env, spec[, defender_dir]) — future symbol; the
+    caller-owned geography box.py renders. AttributeError/TypeError at HEAD (the boundary is
+    unbuilt). `defender_dir` (#1108 P3) is the explicit code root, passed only when given."""
     kw: dict[str, Any] = dict(name=name, mounts=tuple(mounts), workdir=workdir, env=dict(env))
     if spec is not None:
         kw["spec"] = spec
+    if defender_dir is not None:
+        kw["defender_dir"] = defender_dir
     return box_mod.BoxRequest(**kw)  # type: ignore[attr-defined]
 
 
@@ -446,11 +469,13 @@ def make_run_dir(tmp_path: Path, *, disposition: str = "inconclusive",
     """A finished defender run dir the run cycle accepted: alert.json + report.md (its
     disposition drives which direction legs dispatch) + investigation.md + gather_raw/.
     `gather_raw=False` omits the evidence dir (the legitimately-absent conditional-mount
-    case, decision 9)."""
+    case, decision 9). Present evidence holds one made-up result for read-only read-back;
+    the explicit present-empty test removes it."""
     run_dir = tmp_path / "inv-665"
     run_dir.mkdir(parents=True)
     if gather_raw:
         (run_dir / "gather_raw").mkdir()
+        (run_dir / "gather_raw" / "fixture.json").write_text("{}\n", encoding="utf-8")
     plant_alert(run_dir, {"rule": {"key": "spec.rule"}})
     (run_dir / "report.md").write_text(
         f"---\ndisposition: {disposition}\n---\n\nspec run\n", encoding="utf-8"

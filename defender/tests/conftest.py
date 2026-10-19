@@ -141,7 +141,7 @@ def session_data_root(tmp_path_factory) -> Iterator[Path]:
     would see the variable the launching shell exported — in the devcontainer, the host's real
     data root — and set a tenant up inside it. A session tmp directory per xdist worker,
     replacing any inherited value; each test then gets its own over it."""
-    from defender.tests._data_root_1078 import DATA_ROOT_ENV
+    from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("session-data-root")
     with pytest.MonkeyPatch.context() as patch:
@@ -165,7 +165,7 @@ def data_root(tmp_path_factory, monkeypatch) -> Path:
     here. A test's own `monkeypatch.setenv`/`delenv` wins (same function-scoped instance,
     later).
     """
-    from defender.tests._data_root_1078 import DATA_ROOT_ENV
+    from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("data-root")
     monkeypatch.setenv(DATA_ROOT_ENV, str(root))
@@ -176,7 +176,7 @@ def data_root(tmp_path_factory, monkeypatch) -> Path:
 def d9_tenant(data_root) -> str:
     """D9's one tenant, created in this test's data root through the real `create_tenant`,
     and returned as the id a test hands to `--tenant`."""
-    from defender.tests._data_root_1078 import ensure_d9_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant
 
     return ensure_d9_tenant()
 
@@ -228,8 +228,6 @@ def tmp_repo(tmp_path: Path):
         "author/lessons/run.py",
         "author/lessons/prompt.md",
         "author/shared.py",
-        "author/verify_forward/forward.py",
-        "author/verify_forward/forward.md",
     ):
         dst = repo / "defender" / "learning" / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -258,17 +256,12 @@ def tmp_repo(tmp_path: Path):
 
     from defender.learning.author.lessons import run as author_mod  # type: ignore[import-not-found]
     from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
-    from defender.tests._curator1134 import author_trees
+    from defender.tests.support.learning.curation._curator1134 import author_trees
 
     paths = LoopPaths(repo_root=repo)
-    # #773: the drain-run check is disarmed here — this fixture predates it and every test
-    # built against it fakes `invoke_agent` alone, never meaning to exercise a real
-    # verifier model call. A test that wants the check overrides `forward_check` itself.
-    import dataclasses as _dc
-    from defender.tests._curator1134 import open_state
+    from defender.tests.support.learning.curation._curator1134 import open_state
     state = open_state(paths)
-    cfg = _dc.replace(author_mod.build_author_config(paths, state=state, trees=author_trees(paths)),
-                      forward_check=None)
+    cfg = author_mod.build_author_config(paths, state=state, trees=author_trees(paths))
 
     class Ctx:
         def __init__(self) -> None:
@@ -290,7 +283,7 @@ def write_finding(
     type_: str = "lead-set",
     subject: str = "subj",
     finding: str = "narrative",
-    direction: str = "adversarial",
+    direction: str = "family",
 ) -> dict:
     pending_file.parent.mkdir(parents=True, exist_ok=True)
     import json
@@ -303,36 +296,22 @@ def write_finding(
         "type": type_,
         "subject": subject,
         "finding": finding,
-        "judge_outcome": "survived",
         "citations": [{"source": "investigation", "quote": "..."}],
-        "source_run_dir": f"defender/learning/runs/{run_id}/",
+        "source_run_dir": f"episodes/{run_id}",
+        # The three fields `_gate_family` reads as a family row's ground truth (#1234).
+        "contrast_evidence": ["worlds/b/report.md", "worlds/a/report.md"],
+        "on_verdict_path": True,
+        "world_label_doubted": False,
     }
     with pending_file.open("a") as fh:
         fh.write(json.dumps(entry) + "\n")
     return entry
 
 
-def write_source_refs(runs_dir: Path, run_id: str, disposition: str) -> None:
-    import yaml
-    rd = runs_dir / run_id
-    rd.mkdir(parents=True, exist_ok=True)
-    (rd / "investigation.md").write_text("transcript stub")
-    (rd / "source_refs.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "paths": {},
-                "normalized_disposition": disposition,
-                "alert_rule_key": "rule-5710",
-            }
-        )
-    )
-
-
 @pytest.fixture
 def helpers():
     class H:
         write_finding = staticmethod(write_finding)
-        write_source_refs = staticmethod(write_source_refs)
     return H()
 
 
@@ -388,7 +367,7 @@ def build_scene():
     """`_spec773.build_scene` as a factory — one lessons-channel tick, wired through the
     config's own injection seams, driving `drain` through `lessons_run.run_batch`."""
     from defender.learning.author import drain
-    from defender.tests import _spec773
+    from defender.tests.support.learning.curation import _spec773
 
     def _factory(tmp_path, **kwargs):
         scene = _spec773.build_scene(tmp_path, **kwargs)
@@ -402,10 +381,10 @@ def build_scene():
 
 @pytest.fixture
 def build_questioner_scene():
-    """`_spec773.build_questioner_scene` as a factory — the SIBLING channel's tick
-    (`forward_check=None`), O7's negative control, through the same `drain` front door."""
+    """`_spec773.build_questioner_scene` as a factory — the SIBLING channel's tick, through
+    the same `drain` front door."""
     from defender.learning.author import drain
-    from defender.tests import _spec773
+    from defender.tests.support.learning.curation import _spec773
 
     def _factory(tmp_path, **kwargs):
         scene = _spec773.build_questioner_scene(tmp_path, **kwargs)
@@ -419,7 +398,7 @@ def build_questioner_scene():
 def _records_planted(request):
     """The older suites build runs and episodes the way the front door leaves them (#1222: each
     carries its alert's record); #1222's own suite plants those itself, absence included."""
-    from defender.tests import _triplet_947
+    from defender.tests.support.learning.branch import _triplet_947
 
     own = "alert_front_door_1222" in request.node.nodeid
     _triplet_947.PLANT_RECORDS = not own

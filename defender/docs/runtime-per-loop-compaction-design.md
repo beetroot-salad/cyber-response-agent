@@ -291,7 +291,7 @@ same invocation.
    Validates the mechanism on real histories and yields a first *mechanical*
    savings number at zero cost. It cannot show trajectory divergence (the
    agent may behave differently with compacted context) — that's step 1.
-   Implemented: `scripts/testing/compaction_dryrun.py` over `runtime/compaction.py`.
+   Implemented: `tooling/testing/compaction_dryrun.py` over `runtime/compaction.py`.
 
    **Step-0 result (5 recorded Phase-A runs, each 1–2 loop boundaries):**
    message-history payload **−35% to −55%**; estimated total prompt tokens
@@ -581,19 +581,19 @@ Built and tested (branch `worktree-per-loop-compaction`):
 
 - **Pure core** — `runtime/compaction.py`: `detect_loop`, freeze-per-loop
   `compact()` (passthrough / froze / reused / fallback), size accounting,
-  `apply_writes`. Unit tests: `tests/test_compaction.py`.
+  `apply_writes`. Unit tests: `tests/runtime/engine/test_compaction.py`.
 - **Loop-completion marker (`:T close`)** — the fold trigger
   (§Loop-completion marker). Parser projects `companion["closed_loops"]`
   (`skills/invlang/parser.py`); validator rule 6 blocks closing an empty or
   already-closed loop (`skills/invlang/validate.py`); `fold_boundary` is
   marker-gated (`loop in closed`, with the data floor + `< active` retained);
   both SKILLs teach it (`SKILL.md` §ANALYZE, `skills/invlang/SKILL.md`
-  §`:T close`). Tests: `tests/test_compaction.py` (marker-gating, empty-close
+  §`:T close`). Tests: `tests/runtime/engine/test_compaction.py` (marker-gating, empty-close
   floor); the append-only rule (rule 6) lives in `skills/invlang/validate.py`. **Migration note:**
   detection is now dormant until the agent emits `:T close`, so pre-marker
   recorded runs no longer compact under the dry-run — correct, not a
   regression; the next live A/B exercises the marker path.
-- **Offline harness** — `scripts/testing/compaction_dryrun.py` (validation ladder
+- **Offline harness** — `tooling/testing/compaction_dryrun.py` (validation ladder
   step 0; results above).
 - **Persistent-context (handoff packet)** — `runtime/orient.py` inlines the
   raw alert (`_raw_alert`, salted untrusted wrap) and the invlang grammar
@@ -612,7 +612,7 @@ Built and tested (branch `worktree-per-loop-compaction`):
   processor dumps the canonical history, runs `compact`, and re-validates a
   rewrite back to message objects; failures fall back to the full history.
   `observe.py` self-rebaselines its streaming cursor when the history shrinks
-  at a freeze. Glue tests: `tests/test_compaction_driver.py`.
+  at a freeze. Glue tests: `tests/runtime/engine/test_compaction_driver.py`.
   - *Gotcha pinned in code:* the history-processor's first param must be
     annotated `RunContext[...]` — pydantic-ai detects the ctx-taking variant by
     annotation, not name; an unannotated `ctx` is silently called arg-short.

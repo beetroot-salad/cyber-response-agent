@@ -6,7 +6,7 @@
 #     would mean dropping an adapter file into the tree grants that adapter access.
 #   * It must be TOTAL over the systems that exist. Every (system, verb) an adapter declares
 #     needs a row here — including `health-check`. A verb with no row fails CI
-#     (scripts/lint/lint_verb_disposition_census.py), which is the whole point: before #995 a
+#     (tooling/lint/lint_verb_disposition_census.py), which is the whole point: before #995 a
 #     newly connected system was silently unreachable, and the refusal it produced looked
 #     like a typo rather than a missing permission.
 #   * `roles:` names GRANT HOLDERS: `gather` (the only role that holds one, since #922 retired

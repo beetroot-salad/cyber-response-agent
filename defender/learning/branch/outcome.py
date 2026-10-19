@@ -29,8 +29,8 @@ from typing import Any
 import yaml
 
 from defender import _yaml
-from defender._episode_handle import Episode
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episode_paths import LAYOUT
 from defender._io import Bound
 
 ACCEPTED, UNUSABLE, REFUSED = "accepted", "unusable", "refused"

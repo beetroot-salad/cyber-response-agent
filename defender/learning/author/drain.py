@@ -2,8 +2,8 @@
 
 Every corpus-author channel reaches its batch through `run_batch`. What varies per channel
 (pre-author gate, AUTHOR_RESULT buckets, row key, the queue's locks, commit trailers, the held
-report) is a field on the config; the batch body (read, partition, author, verify, commit,
-project, rotate, log) is this module.
+report) is a field on the config; the batch body (read, partition, author, commit, project,
+rotate, log) is this module.
 
 Retirement is reachable only from `RETIRE_SET`. A fault whose class is not in it leaves its row
 queued — stuck, recoverable, and recorded in the channel's stuck-row file — so a novel exception
@@ -24,20 +24,17 @@ contains `GitError`, so a commit-time `GitError` retires here but kills the drai
 from __future__ import annotations
 
 import hashlib
-import itertools
 import logging
 import uuid
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 import contextlib
-import dataclasses
 import errno
 import functools
 import os
 from dataclasses import replace
 from defender._model import model
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any, TypeVar
 
 from pydantic_ai.exceptions import ModelRetry
 
@@ -47,22 +44,11 @@ from defender._git import GitError, GitTimeout
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender._io import (
     ENTRY_DIR,
-    ENTRY_FILE,
-    ENTRY_OTHER,
     Bound,
-    Held,
-    NotPlainEntry,
 )
-from defender._untrusted import wrap
-from defender.learning._prompt import stage_user_message
 from defender.learning.author import shared as author_shared
 from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
-from defender.learning.author.verify_forward.checks import CheckContext
-from defender.learning.author.verify_forward.engine import _run_verify_pydantic
-from defender.learning.author.verify_forward.shared import VerdictError
-from defender.learning.core import config
 from defender.learning.core.config import (
-    FatalConfigError,
     provenance_field,
 )
 from defender.learning.core.state import (
@@ -75,22 +61,30 @@ from defender.learning.core.state import (
     retirement_stamp,
 )
 from defender._tree_listing import entry_kind
-from defender.learning.core.lane_trees import TreeFor, kind_at
-from defender.runtime import box as box_mod
+from defender import box as box_mod
 
 AuthorError = author_shared.AuthorError
 
-_logger = logging.getLogger(__name__)
+from defender.learning.author.version_control.restore import (
+    _commit_landed as _commit_landed,
+    _left_for_scrub as _left_for_scrub,
+    _logger as _logger,
+    _put_back as _put_back,
+    _restore_corpus as _restore_corpus,
+    _revert_strays as _revert_strays,
+    _snapshot_corpus as _snapshot_corpus,
+    _unanswered as _unanswered,
+    _unchanged_names as _unchanged_names,
+    _undo_agent_edits as _undo_agent_edits,
+    _worktree_files_instead as _worktree_files_instead,
+    _worktree_git as _worktree_git,
+)
 
-#: Reasoning prefix on the BAD recorded for a pair whose check failed twice.
-ERROR_PREFIX = "forward_check_error: "
-#: Header of the commit-message block naming terminal findings. Advisory; the gap ledger is
-#: the authoritative record.
-TERMINAL_BLOCK_HEADER = "Forward-check terminal:"
+
 #: Graveyard reason for a deferral that hit the ceiling, distinguishable from a fault's.
 DEFERRED_CEILING_REASON = "deferred_ceiling"
-#: git status codes for an unmerged path, refused before vouching rather than handed to the
-#: verifier as ordinary text.
+#: git status codes for an unmerged path, refused before vouching rather than committed as
+#: ordinary text.
 _UNMERGED_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
 
 #: Not `faults.SYSTEMIC_FAULTS`, which keeps `GitError` out of retirement — the opposite of what
@@ -124,37 +118,6 @@ def _git_read(what: str, fn: Callable[..., _T], *args: Any) -> _T:
             f"read-only git probe ({what}) failed: git did not answer within {e.timeout}s") from e
 
 
-def _worktree_git(timeout: float | None) -> dict[str, Any]:
-    """The keywords of a curator git call over the worktree: `timeout`, and an environment that
-    reads attributes from HEAD's tree and ignores replace objects (`_git.committed_view_env`), so
-    no `.gitattributes` the agent left is opened."""
-    return {"timeout": timeout, "env": _git.committed_view_env()}
-
-
-def _unanswered(e: GitError | GitTimeout) -> str:
-    """How a git call failed, for a warning: its exit code, or the bound it did not answer within."""
-    if isinstance(e, GitTimeout):
-        return f"no answer within {e.timeout}s"
-    return f"rc={e.returncode}"
-
-
-@model(frozen=True)
-class PairVerdict:
-    """One (changed corpus file, cited finding from this batch) pair's forward-check outcome.
-
-    `rel_path` is on every entry so a finding refused on differently-named files across the two
-    passes is recoverable from its one gap-ledger record. `lesson_text` lets the repair prompt
-    be rebuilt from the pair after the file itself has been restored."""
-
-    rel_path: str
-    finding_id: str
-    source_id: str
-    verdict: str  # GOOD | BAD | EXEMPT
-    reasoning: str
-    lesson_text: str
-    pass_no: int
-
-
 def _revert_non_md_strays(cfg: CorpusAuthorConfig) -> None:
     """Revert non-`.md` files under the corpus before vouching. They cite nothing by
     construction, so leaving them to the vouching gate would turn a cleanup into a tick-wide
@@ -165,39 +128,9 @@ def _revert_non_md_strays(cfg: CorpusAuthorConfig) -> None:
             _put_back(cfg.repo_root, rel, tree_for=cfg.tree_for, timeout=cfg.git_timeout)
 
 
-def _put_back(
-    repo_root: Path, rel: str, *, tree_for: TreeFor, timeout: float | None = None,
-) -> None:
-    """Return one path to what HEAD has: checked out if tracked, removed if not.
-
-    An untracked name is judged by `kind_at` (#1134, addendum 2 B3). Inside one of the lane's
-    mounts (this corpus or its sibling) it is judged by its folder's listing and removed through
-    that mount's held root: a plain file is unlinked; anything else that is not a folder (a link,
-    a hard link, a FIFO, or a name below a holding folder whose listing is refused) goes to the
-    same `unlink`, which refuses it — `NotPlainEntry` for an entry AT the name, left in place for
-    the scrub (O5.2), the core's plain `OSError` for a refused holding folder. A name outside the
-    lane's mounts lies in the box's read-only area and keeps its plain path (D3): `kind_at`
-    answers it from that path, and only a file there is unlinked."""
-    _git.git(["checkout", "-q", "--", rel], cwd=repo_root, check=False, **_worktree_git(timeout))
-    tracked = _git.git_ok(["ls-files", "--error-unmatch", "--", rel], cwd=repo_root,
-                          **_worktree_git(timeout))
-    if tracked:
-        return
-    target = repo_root / rel
-    kind = kind_at(repo_root, tree_for, rel)
-    hit = tree_for(target)
-    if hit is None:
-        if kind == ENTRY_FILE:
-            target.unlink()
-        return
-    held, name = hit
-    if kind in (ENTRY_FILE, ENTRY_OTHER):
-        held.unlink(name)
-
-
 def _assert_no_unmerged(cfg: CorpusAuthorConfig) -> None:
     """Refuse the tick on an unmerged path under the corpus, rather than handing conflict
-    markers to the verifier as ordinary text."""
+    markers as ordinary text."""
     for xy, rel in _git.git_status(cfg.repo_root, pathspec=cfg.corpus_dir, no_renames=True,
                                    **_worktree_git(cfg.git_timeout)):
         if xy in _UNMERGED_XY:
@@ -228,8 +161,8 @@ class DrainOutcome:
     batch_id: str
     commit_sha: str | None
     committed: list[dict]
-    #: @owns held["forward_bad_terminal"], held["deferred"] — the two keys beyond the
-    #: AUTHOR_RESULT bucket names, both assembled in `_author_and_rotate`.
+    #: @owns held["deferred"] — the one key beyond the AUTHOR_RESULT bucket names, assembled
+    #: in `_author_and_rotate`.
     held: dict[str, list[dict]]
     consumed: dict[str, list[dict]]
     #: The pre-author gate's holds. Kept out of `held` (the AUTHOR_RESULT buckets, rows the
@@ -337,7 +270,7 @@ def _bump_rows(
 
 def channel_logger(cfg: CorpusAuthorConfig) -> logging.Logger:
     """This curator channel's logger — one child of this module's per channel, since both
-    curators run this module's code; the repair pass logs under its `repair` child."""
+    curators run this module's code."""
     return logging.getLogger(f"{__name__}.{cfg.log_prefix}")
 
 def run_batch(
@@ -454,17 +387,6 @@ def _tick(*, cfg: CorpusAuthorConfig, hold_committed: bool, log) -> int:
         raise
 
 
-def _verifier_key_preflight(cfg: CorpusAuthorConfig) -> None:
-    # Source the verifier key before the first spawn, so a keyless host doesn't pay for a
-    # spawn it cannot check. Only channels with a forward check need it. Not gated on provider
-    # match: the curator spawn is `cfg.invoke_agent`, an injection seam whose internals the
-    # drain doesn't control, so this is the only place "checked before the first spawn" holds.
-    if cfg.forward_check is not None and cfg.forward_check.prompt_path is not None:
-        cfg.source_key(
-            config.verifier_model(), label=f"verify:{cfg.forward_check.error_prefix}"
-        )
-
-
 @model(frozen=True)
 class _PreState:
     """The worktree just before the agent runs, so a fault after it can restore it. Leftover
@@ -495,8 +417,8 @@ def _capture_pre_state(cfg: CorpusAuthorConfig) -> _PreState:
 
 
 # ---------------------------------------------------------------------------
-# The authoring region. One truth — the corpus tree after the last spawn — from which every
-# decision is computed once: changed files, citations, verdicts, approvals, the commit, and
+# The authoring region. One truth — the corpus tree after the spawn — from which every
+# decision is computed once: changed files, citations, approvals, the commit, and
 # each row's fate. A spawn's own report is read only for skip reasons and the commit message,
 # plus one cross-check: an id it claims committed that no file cites is deferred.
 # ---------------------------------------------------------------------------
@@ -511,21 +433,16 @@ class _Tree:
     deleted: tuple[str, ...]
 
 
-def _settle_tree(
-    cfg: CorpusAuthorConfig, state: _PreState, *, honoured_deletions: tuple[str, ...] | None,
-) -> _Tree:
-    """The post-spawn normaliser, shared by the curator and repair spawns so the repair is held
-    to the same rule. In order:
+def _settle_tree(cfg: CorpusAuthorConfig, state: _PreState) -> _Tree:
+    """The post-spawn normaliser. In order:
 
     1. non-`.md` files under the corpus are reverted — they cite nothing, so this is cleanup,
        and it must precede the stray check that would otherwise refuse the tick;
     2. a change outside the corpus (beyond tick-start dirt) raises `AuthorError`;
     3. an unmerged path under the corpus raises;
-    4. a mode-only change (bytes identical to HEAD) is put back — it isn't content to judge,
+    4. a mode-only change (bytes identical to HEAD) is put back — it isn't content to commit,
        and would stay dirty after the commit and wedge the next tick's cleanliness gate;
-    5. deletions: the curator spawn's are honoured (`honoured_deletions is None`) and
-       committed; the repair spawn cannot delete, so any deletion beyond the honoured set is
-       restored from the tick-start snapshot.
+    5. the curator spawn's deletions are honoured and committed.
 
     Git reads go through `_git_read`: a git failure here is the host's, not the batch's."""
 
@@ -545,192 +462,62 @@ def _settle_tree(
                          **_worktree_git(cfg.git_timeout))
             else:
                 changed.append(rel)
-        if honoured_deletions is not None:
-            unhonoured = sorted(set(deleted) - set(honoured_deletions))
-            _restore_from_snapshot(cfg, state.snapshot, unhonoured)
-            deleted = [rel for rel in deleted if rel in honoured_deletions]
         return _Tree(changed=tuple(sorted(changed)), deleted=tuple(sorted(deleted)))
 
     return _git_read("settle tree", settle)
 
 
-@model(frozen=True)
-class _Judged:
-    """One judgement of the tree: every (finding, file) verdict on the files' current bytes,
-    and what each file cites from this batch."""
-
-    #: (finding_id, rel_path) -> its verdict on the file's current bytes; after a repair, also
-    #: the BAD for a citation the repair dropped.
-    pairs: dict[tuple[str, str], PairVerdict]
-    #: rel_path -> the this-batch ids the file's current bytes cite.
-    cites: dict[str, frozenset[str]]
-
-
-#: How many times `_Judgement.judge` will re-read a tree that moved under it before giving
-#: up. Two is the honest need (judge, then confirm nothing moved); the rest is slack for a
+#: How many times `_read_citations` will re-read a tree that moved under it before giving up.
+#: Two is the honest need (read, then confirm nothing moved); the rest is slack for a
 #: concurrent editor that is still writing when the first confirmation runs.
-_JUDGE_ROUNDS = 4
+_CITE_ROUNDS = 4
 
 
-if TYPE_CHECKING:
-    #: `itertools.count[int]` raises `TypeError` at runtime, and a pydantic dataclass evaluates
-    #: its field annotations at decoration time despite `from __future__ import annotations`.
-    #: The alias gives mypy the `[int]` and pydantic the bare class (checked with `isinstance`).
-    CheckCounter = itertools.count[int]
-else:
-    CheckCounter = itertools.count
+def _read_citations(
+    cfg: CorpusAuthorConfig, files: tuple[str, ...], batch: set[str],
+) -> dict[str, frozenset[str]]:
+    """rel_path -> the this-batch ids each of `files` cites, on the bytes it holds now. Rounds
+    repeat until nothing moved during one, so the citations approval reads are those of the
+    bytes that land in HEAD."""
+    field_name = provenance_field(cfg.channel.id_key)
+    view = cfg.corpus.view()
 
+    def read(rel: str) -> str:
+        return _read_or_empty(view, _corpus_relative(cfg, rel))
 
-@model
-class _Judgement:
-    """The verdict memo for one tick.
-
-    @owns PairVerdict — the one constructor of `PairVerdict` instances (GOOD/BAD via
-    `_verdict_for_pair`, EXEMPT via `cfg.exempt` or a channel with no check, and the
-    dropped-citation BAD).
-
-    Memoised by (file, content digest, finding): re-judging after the repair re-submits only
-    pairs whose bytes moved, so an untouched file's verdict is never re-rolled, and a file
-    rewritten back to its pre-repair bytes keeps its verdict. `history` holds every verdict
-    minted this tick in order; a gap record carries the file's whole history, sibling findings
-    included."""
-
-    cfg: CorpusAuthorConfig
-    rows: dict[str, dict]
-    batch: set[str]
-    memo: dict[tuple[str, str, str], PairVerdict] = dataclasses.field(default_factory=dict)
-    history: list[PairVerdict] = dataclasses.field(default_factory=list)
-    #: the check index every `CheckContext` this tick carries is drawn from — one counter,
-    #: so two concurrently-minted checks never share one.
-    counter: CheckCounter = dataclasses.field(default_factory=itertools.count)
-
-    def judge(
-        self, files: tuple[str, ...], pass_no: int, *, before: _Judged | None = None,
-    ) -> _Judged:
-        """Judge every this-batch id each of `files` cites, on the bytes the file holds now.
-        Rounds repeat until nothing moved during one, so the bytes a verdict judged are the
-        bytes that land in HEAD.
-
-        `before` is the judgement the repair spawn answered. A finding it cited that no file
-        cites any more had its lesson dropped by the rewrite: terminal for that finding, and
-        recorded as a BAD on the file that dropped it. That pair goes in `pairs` (the
-        finding's fate reads it) but not `cites` (the file's approval doesn't)."""
-        field_name = provenance_field(self.cfg.channel.id_key)
-        texts: dict[str, str] = {}
-        for _ in range(_JUDGE_ROUNDS):
-            texts = {rel: self.read(rel) for rel in files}
-            jobs = [
-                (rel, fid, text)
-                for rel, text in texts.items()
-                for fid in sorted(_cited_ids_in(text, field_name) & self.batch)
-                if (rel, _digest(text), fid) not in self.memo
-            ]
-            self.mint(jobs, pass_no)
-            if all(self.read(rel) == text for rel, text in texts.items()):
-                break
-        else:
-            raise AuthorError(
-                f"{self.cfg.corpus_dir_rel} kept changing under the forward check for "
-                f"{_JUDGE_ROUNDS} rounds — refusing to commit bytes no verdict judged"
-            )
-        cites = {
-            rel: frozenset(_cited_ids_in(text, field_name) & self.batch)
-            for rel, text in texts.items()
-        }
-        pairs = {
-            (fid, rel): self.memo[(rel, _digest(texts[rel]), fid)]
-            for rel, ids in cites.items()
-            for fid in ids
-        }
-        if before is not None:
-            cited_now = {fid for ids in cites.values() for fid in ids}
-            for fid, rel in sorted(before.pairs):
-                if fid in cited_now:
-                    continue
-                row = self.rows[fid]
-                dropped = PairVerdict(
-                    rel_path=rel, finding_id=fid, source_id=str(row.get("run_id") or ""),
-                    verdict="BAD",
-                    reasoning="repair rewrite dropped this file's citation of this finding",
-                    lesson_text=texts.get(rel, self.read(rel)),
-                    pass_no=pass_no,
-                )
-                self.history.append(dropped)
-                pairs[(fid, rel)] = dropped
-        return _Judged(pairs=pairs, cites=cites)
-
-    def read(self, rel: str) -> str:
-        """The text the repo-relative corpus file `rel` holds now, read through the corpus
-        mount's view; `""` when it cannot be read."""
-        return _read_or_empty(self.cfg.corpus.view(), _corpus_relative(self.cfg, rel))
-
-    def mint(self, jobs: list[tuple[str, str, str]], pass_no: int) -> None:
-        """Judge the pairs concurrently, bounded by `verify_batch_workers()`."""
-        if not jobs:
-            return
-
-        def one(job: tuple[str, str, str]) -> PairVerdict:
-            rel, fid, text = job
-            row = self.rows[fid]
-            if self.cfg.exempt(row):
-                verdict, reasoning = "EXEMPT", "exempt: this finding's kind is out of the check's scope"
-            elif self.cfg.forward_check is None:
-                verdict, reasoning = "EXEMPT", "exempt: this channel runs no forward check"
-            else:
-                verdict, reasoning = _verdict_for_pair(
-                    self.cfg, self.counter, rel, row, self.cfg.repo_root / rel, text,
-                )
-            return PairVerdict(
-                rel_path=rel, finding_id=fid, source_id=str(row.get("run_id") or ""),
-                verdict=verdict, reasoning=reasoning, lesson_text=text, pass_no=pass_no,
-            )
-
-        workers = max(1, config.verify_batch_workers())
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            for pv in pool.map(one, jobs):
-                self.memo[(pv.rel_path, _digest(pv.lesson_text), pv.finding_id)] = pv
-                self.history.append(pv)
-
-
-def _digest(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    texts: dict[str, str] = {}
+    for _ in range(_CITE_ROUNDS):
+        texts = {rel: read(rel) for rel in files}
+        if all(read(rel) == text for rel, text in texts.items()):
+            break
+    else:
+        raise AuthorError(
+            f"{cfg.corpus_dir_rel} kept changing under the citation read for {_CITE_ROUNDS} "
+            "rounds — refusing to commit bytes no citation was read from"
+        )
+    return {rel: frozenset(_cited_ids_in(text, field_name) & batch) for rel, text in texts.items()}
 
 
 @model(frozen=True)
 class _Fates:
     """Every row the batch read, sorted into exactly one ending."""
 
-    #: ids an approved file cites, every citing file approved.
+    #: ids some approved file cites.
     committed: list[str]
-    #: id -> the files it cites, for an id whose every pair is BAD.
-    terminal: dict[str, list[str]]
     #: ids that could not land through no fault of their own.
     deferred: set[str]
 
 
 def _decide_fates(
-    batch_ids: set[str], judged: _Judged, approved: set[str], claimed_committed: set[str],
+    batch_ids: set[str], cites: dict[str, frozenset[str]], claimed_committed: set[str],
 ) -> _Fates:
-    """Each batch row's ending, read off the judged tree. An id some file cites takes its fate
-    from its pairs. For an id no file cites, the curator's word is only cross-checked: claimed
-    committed means deferred, never consumed; otherwise the row is left queued as it was."""
-    committed: list[str] = []
-    terminal: dict[str, list[str]] = {}
-    deferred: set[str] = set()
-    for fid in sorted(batch_ids):
-        own = [pv for (f, _rel), pv in judged.pairs.items() if f == fid]
-        if not own:
-            if fid in claimed_committed:
-                deferred.add(fid)
-            continue
-        if all(pv.verdict == "BAD" for pv in own):
-            terminal[fid] = sorted({pv.rel_path for pv in own})
-        elif all(pv.rel_path in approved for pv in own):
-            committed.append(fid)
-        else:
-            # Its citing files disagree on approval; the drain never guesses between the two.
-            deferred.add(fid)
-    return _Fates(committed=committed, terminal=terminal, deferred=deferred)
+    """Each batch row's ending, read off the tree's citations. An id some file cites is
+    committed: every citing file is approved. For an id no file cites, the curator's word is
+    only cross-checked: claimed committed means deferred, never consumed; otherwise the row is
+    left queued as it was."""
+    cited = {fid for ids in cites.values() for fid in ids}
+    return _Fates(committed=sorted(batch_ids & cited),
+                  deferred=(batch_ids - cited) & claimed_committed)
 
 
 @model(frozen=True)
@@ -739,7 +526,6 @@ class _BatchOutcome:
     committed: list[dict]
     bucket_held: dict[str, list[dict]]
     bucket_consumed: dict[str, list[dict]]
-    terminal_rows: list[dict]
     deferred_ids: set[str]
 
 
@@ -750,8 +536,8 @@ def _author_batch(
     state: _PreState,
     all_rows: dict[str, dict],
 ) -> _BatchOutcome:
-    """Spawn, settle, judge; if anything is BAD, spawn the repair, settle, judge again; then
-    read every fate off the last judgement and commit what it approved."""
+    """Spawn, settle, read citations; then read every fate off them and commit what they
+    approve."""
     key = cfg.channel.id_key
     batch_ids = {row[key] for row in to_author}
 
@@ -759,7 +545,7 @@ def _author_batch(
     # wrote (#1195).
     with box_mod.box_for_run(cfg.box) as box:
         result = cfg.invoke_agent(to_author, batch_id, replace(cfg, box=box))
-    tree = _settle_tree(cfg, state, honoured_deletions=None)
+    tree = _settle_tree(cfg, state)
     _git_read(
         "agent report",
         functools.partial(author_shared.verify_agent_report, timeout=cfg.git_timeout,
@@ -772,51 +558,25 @@ def _author_batch(
     )
     _assert_corpus_attributable(cfg, tree.changed, batch_ids)
 
-    judgement = _Judgement(cfg=cfg, rows=all_rows, batch=batch_ids)
-    judged = judgement.judge(tree.changed, pass_no=1)
-    #: every path either spawn left changed — the restore below covers a file the first
-    #: spawn wrote and the repair spawn then removed or replaced with something else.
-    touched = set(tree.changed)
-    bad = [pv for pv in judged.pairs.values() if pv.verdict == "BAD"]
-    if bad:
-        _spawn_repair(cfg, bad, batch_id)
-        tree = _settle_tree(cfg, state, honoured_deletions=tree.deleted)
-        touched |= set(tree.changed)
-        judged = judgement.judge(tree.changed, pass_no=2, before=judged)
-
-    # Approved: cites something from this batch and every citing pair is GOOD or EXEMPT. A
-    # changed file citing nothing is not approved.
-    approved = {
-        rel for rel, ids in judged.cites.items()
-        if ids and all(judged.pairs[(fid, rel)].verdict in ("GOOD", "EXEMPT") for fid in ids)
-    }
+    cites = _read_citations(cfg, tree.changed, batch_ids)
+    # Approved: cites something from this batch. A changed file citing nothing is not approved.
+    approved = {rel for rel, ids in cites.items() if ids}
     fates = _decide_fates(
-        batch_ids, judged, approved,
-        claimed_committed=set(author_shared.result_list(result, "committed")),
+        batch_ids, cites, claimed_committed=set(author_shared.result_list(result, "committed")),
     )
     # Before the commit, so a restore failure can never coexist with a commit.
-    _restore_unapproved_files(cfg, state.snapshot, touched - approved,
+    _restore_unapproved_files(cfg, state.snapshot, set(tree.changed) - approved,
                               head_before=state.head_before)
 
     message = (
         author_shared.commit_message(result, cfg.noun) if approved or tree.deleted else ""
     )
-    message = _append_terminal_block(message, sorted(fates.terminal))
     commit_sha = author_shared.commit_corpus_paths(
         message, cfg, sorted(approved), list(tree.deleted)
     )
 
-    terminal_rows: list[dict] = []
-    for fid, files in fates.terminal.items():
-        row = all_rows[fid]
-        _append_gap_record(
-            cfg, batch_id, row, key,
-            [pv for pv in judgement.history if pv.rel_path in files],
-        )
-        terminal_rows.append({**row, "consumed_category": "consumed_forward_bad"})
-
     # The curator's buckets, minus every id the tree already gave a fate.
-    fated = set(fates.committed) | set(fates.terminal) | fates.deferred
+    fated = set(fates.committed) | fates.deferred
     bucket_held, bucket_consumed = _project(result, all_rows, cfg, exclude=fated)
     return _BatchOutcome(
         commit_sha=commit_sha,
@@ -826,19 +586,8 @@ def _author_batch(
         ],
         bucket_held=bucket_held,
         bucket_consumed=bucket_consumed,
-        terminal_rows=terminal_rows,
         deferred_ids=fates.deferred,
     )
-
-
-def _spawn_repair(cfg: CorpusAuthorConfig, bad: list[PairVerdict], batch_id: str) -> None:
-    """The one bounded, write-only repair spawn, handed every BAD pair of this tick. A
-    configured but missing repair prompt is fatal config; `None` means the shipped default,
-    resolved inside `invoke_repair`."""
-    if cfg.repair_prompt is not None and not cfg.repair_prompt.is_file():
-        raise FatalConfigError(f"repair prompt {cfg.repair_prompt} is not a readable file")
-    with box_mod.box_for_run(cfg.box) as box:
-        cfg.invoke_repair(bad, batch_id, replace(cfg, box=box))
 
 
 def _handle_retire(
@@ -896,12 +645,10 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
     channel = cfg.channel
     key = channel.id_key
     outcome = _BatchOutcome(
-        commit_sha=None, committed=[], bucket_held={}, bucket_consumed={},
-        terminal_rows=[], deferred_ids=set(),
+        commit_sha=None, committed=[], bucket_held={}, bucket_consumed={}, deferred_ids=set(),
     )
 
     if to_author:
-        _verifier_key_preflight(cfg)
         state = _capture_pre_state(cfg)
         try:
             outcome = _author_batch(cfg, to_author, batch_id, state, all_rows)
@@ -926,7 +673,7 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
 
     committed = outcome.committed
     bucket_held, bucket_consumed = outcome.bucket_held, outcome.bucket_consumed
-    terminal_rows, deferred_ids = outcome.terminal_rows, outcome.deferred_ids
+    deferred_ids = outcome.deferred_ids
     commit_sha = outcome.commit_sha
 
     held_committed, rotated_committed = author_shared.partition_committed(
@@ -942,7 +689,6 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
             *consumed_pre,
             *rotated_committed,
             *_flatten(cfg.buckets, bucket_consumed),
-            *terminal_rows,
             *deferred_consumed,
         ],
         commit_sha,
@@ -952,15 +698,14 @@ def _author_and_rotate(  # noqa: PLR0913 — one tick's whole state, threaded ra
         cfg.post_rotate(
             DrainOutcome(
                 batch_id=batch_id, commit_sha=commit_sha, committed=committed,
-                held={**bucket_held, "forward_bad_terminal": terminal_rows,
-                      "deferred": deferred_held + deferred_consumed},
+                held={**bucket_held, "deferred": deferred_held + deferred_consumed},
                 consumed=bucket_consumed, gate_held=held,
             ),
             cfg,
         )
     log.info(
         f"done batch={batch_id} committed={len(committed)} held={len(held)} "
-        f"pre_consumed={len(consumed_pre)} terminal={len(terminal_rows)} "
+        f"pre_consumed={len(consumed_pre)} "
         f"deferred={len(deferred_ids)} commit_sha={commit_sha}"
     )
     return 0
@@ -1008,59 +753,6 @@ def _restore_unapproved_files(
             cfg.corpus.write(name, pre, mode="replace")
 
 
-def _restore_from_snapshot(
-    cfg: CorpusAuthorConfig, snapshot: dict[str, bytes] | None, rels: list[str],
-) -> None:
-    """Put each of `rels` back to its tick-start bytes, through the corpus mount (#1134). A
-    name the snapshot does not hold is skipped."""
-    if snapshot is None:
-        return
-    for rel in rels:
-        name = _corpus_relative(cfg, rel)
-        pre = snapshot.get(name)
-        if pre is None:
-            continue
-        cfg.corpus.write(name, pre, mode="replace")
-
-
-def _append_terminal_block(message: str, terminal_ids: list[str]) -> str:
-    """Append the block naming this tick's terminal findings to the commit message. Appended
-    last, so `message.split(TERMINAL_BLOCK_HEADER)[-1]` is always this block even if the
-    curator wrote a line shaped like the header."""
-    if not terminal_ids:
-        return message
-    block = TERMINAL_BLOCK_HEADER + " " + ", ".join(terminal_ids)
-    return message.rstrip("\n") + "\n\n" + block + "\n"
-
-
-def _append_gap_record(
-    cfg: CorpusAuthorConfig, batch_id: str, row: dict, key: str, pvs: list[PairVerdict],
-) -> None:
-    """Append one durable record per terminal finding, before the queue rotation — a crash in
-    between costs a duplicate record on replay, never a silent consumption.
-
-    @owns findings.forward_bad.jsonl row shape — the one producer of a gap-ledger record.
-    `verdicts` is the file's full `PairVerdict` history, not just the terminal finding's."""
-    last = pvs[-1]
-    record = {
-        "finding_id": row[key],
-        "run_id": row.get("run_id"),
-        "direction": row.get("direction"),
-        "batch_id": batch_id,
-        "lesson_path": last.rel_path,
-        "lesson_text": last.lesson_text,
-        "verdicts": [
-            {
-                "rel_path": pv.rel_path, "source_id": pv.source_id,
-                "verdict": pv.verdict, "reasoning": pv.reasoning, "pass": pv.pass_no,
-            }
-            for pv in pvs
-        ],
-        "recorded_at": now_iso(),
-    }
-    cfg.state.gap_record(record)
-
-
 def _flatten(buckets: tuple[BucketSpec, ...], rows: dict[str, list[dict]]) -> list[dict]:
     return [row for bucket in buckets for row in rows.get(bucket.name, [])]
 
@@ -1102,9 +794,8 @@ def _assert_corpus_attributable(
     """Every corpus file the curator spawn changed must cite, under the channel's provenance
     key, an id this batch read — whatever bucket the curator reported it under.
 
-    First spawn only: after the repair the drain knows which findings each file owned, so an
-    unvouched file is refused per file (no approval) rather than per tick. The `AuthorError`
-    unwinds the tick via `_undo_agent_edits`; the batch is bumped and stays queued."""
+    The `AuthorError` unwinds the tick via `_undo_agent_edits`; the batch is bumped and stays
+    queued."""
     field = provenance_field(cfg.channel.id_key)
     unattributed = [
         rel for rel in changed
@@ -1165,86 +856,6 @@ def _read_or_empty(corpus: Bound, name: str) -> str:
     absent, undecodable or refused (a link, hard link or FIFO at the name, O5.1)."""
     rec = corpus.read(name)
     return rec.text if rec.text is not None else ""
-
-
-def _resolves_inside_runs_dir(runs_dir: Path, source_id: str) -> bool:
-    """Whether `source_id` resolves inside `runs_dir`. The id comes from a queue row, not the
-    model, but rows are machine-written and unvalidated, so a traversal-shaped `run_id` is
-    possible."""
-    runs_root = runs_dir.resolve()
-    resolved = (runs_dir / source_id).resolve()
-    return resolved == runs_root or runs_root in resolved.parents
-
-
-def _attempt_pair(
-    cfg: CorpusAuthorConfig, counter: Any, rel: str, row: dict, path: Path, lesson_text: str,
-) -> tuple[str, str]:
-    """One attempt at one pair: build the `CheckContext` and call the check.
-
-    A missing, malformed or escaping `run_id` raises `VerdictError` — the class an unparseable
-    verifier reply raises — so a malformed row gets the same retry-once-then-BAD disposition.
-    Any other exception (a call that never completed) propagates unretried."""
-    try:
-        source_id = row["run_id"]
-    except KeyError as e:
-        raise VerdictError("forward_check: row carries no run_id") from e
-    if not isinstance(source_id, str) or not source_id:
-        raise VerdictError(f"forward_check: row's run_id is not a usable string: {source_id!r}")
-    if not _resolves_inside_runs_dir(cfg.runs_dir, source_id):
-        raise VerdictError(f"forward_check: run_id resolves outside runs_dir: {source_id!r}")
-    # `_Judgement.mint` only routes here when a check is configured; narrowed for mypy.
-    assert cfg.forward_check is not None
-    idx = next(counter)
-    ctx = CheckContext(
-        check=cfg.forward_check,
-        lesson_path=path,
-        lesson_text=lesson_text,
-        source_id=source_id,
-        direction=str(row.get("direction") or "adversarial"),
-        runs_dir=cfg.runs_dir,
-        corpus_dir=cfg.corpus_dir,
-        repo_root=cfg.repo_root,
-        check_index=idx,
-        run_verify=_run_verify_pydantic,
-    )
-    return cfg.forward_check.run(ctx)
-
-
-def _verdict_for_pair(
-    cfg: CorpusAuthorConfig, counter: Any, rel: str, row: dict, path: Path, lesson_text: str,
-) -> tuple[str, str]:
-    """Retry a `VerdictError` once; a second one records BAD with `ERROR_PREFIX` reasoning
-    carrying both attempts' text. Any other exception propagates on the first attempt and
-    mints no verdict."""
-    try:
-        return _attempt_pair(cfg, counter, rel, row, path, lesson_text)
-    except VerdictError as e1:
-        try:
-            return _attempt_pair(cfg, counter, rel, row, path, lesson_text)
-        except VerdictError as e2:
-            return "BAD", f"{ERROR_PREFIX}{e1}; {e2}"
-
-
-def build_repair_user_prompt(
-    pairs: list[PairVerdict], cfg: CorpusAuthorConfig, *, salt: str | None = None,
-) -> str:
-    """The repair spawn's user turn: per BAD pair, the finding's identity, the file's
-    pre-repair text and the verifier's reasoning, each in its own `wrap()` envelope since all
-    three are model-authored."""
-    from uuid import uuid4
-
-    stage_salt = salt if salt is not None else uuid4().hex
-    sections: list[str] = []
-    for pv in pairs:
-        header = (
-            f"finding_id: {pv.finding_id}\n"
-            f"source_id: {pv.source_id}\n"
-            f"lesson_path: {pv.rel_path}\n"
-        )
-        sections.append(wrap(header, "bad_pair", stage_salt))
-        sections.append(wrap(pv.lesson_text, "candidate_lesson", stage_salt))
-        sections.append(wrap(pv.reasoning, "verifier_reasoning", stage_salt))
-    return stage_user_message(stage_salt, *sections)
 
 
 def _retire_unkeyable(
@@ -1344,190 +955,3 @@ def _record_stuck(
         "reason": str(exc),
         "recorded_at": now_iso(),
     })
-
-
-def _snapshot_corpus(
-    repo_root: Path, corpus_dir: Path, head: str, *, timeout: float | None = None,
-) -> dict[str, bytes]:
-    """The corpus's before-state: every regular file the commit `head` carries under
-    `corpus_dir`, nested folders included, with its exact stored bytes, keyed by its name under
-    the corpus mount.
-
-    Read from git, not from the worktree (#1134 addendum 2 correction, C1): the clean gate
-    (`assert_clean_corpus_dir`) refused the tick unless the corpus equals the tick-start commit,
-    so `head` names exactly what stood there, and git's own read (`_git.git_tree_blobs`, N-a)
-    lists no folder and follows no worktree entry (O3, O5.1). A tracked symlink (mode 120000) is
-    left out, so no restore writes it back as a file. A git failure raises `GitError` before the
-    agent runs."""
-    rel = corpus_dir.relative_to(repo_root).as_posix()
-    prefix = "" if rel == "." else f"{rel}/"
-    return {path[len(prefix):]: blob
-            for path, blob in _git.git_tree_blobs(repo_root, head, rel, timeout=timeout).items()}
-
-
-def _undo_agent_edits(
-    cfg: CorpusAuthorConfig,
-    snapshot: dict[str, bytes] | None,
-    baseline_stray: list[str],
-    head_before: str,
-) -> None:
-    """Put the worktree back the way the agent found it after a faulted tick.
-
-    The corpus is restored only if the commit did not land: `git_commit` reads HEAD after
-    committing, so a git failure there arrives with the lessons already in history, and
-    restoring would delete them and wedge the channel. When git can't say whether HEAD moved,
-    nothing is deleted.
-
-    Strays outside the corpus are always reverted (the commit is pathspec-limited, so it
-    can't have captured them); otherwise they fold into the next tick's baseline and disarm
-    the out-of-scope-write guard.
-
-    Both run while a fault is propagating, and every host touch of the lane's trees goes through
-    its held mounts (#1134). An entry the core will not remove or write over because it is not a
-    plain file (`NotPlainEntry`: a link, hard link, FIFO or folder at the name) is logged and
-    passed over (`_left_for_scrub`), so the fault being unwound propagates unchanged and keeps
-    its routing; the entry stays for the scrub (O5.3). Any other `OSError` propagates."""
-    if not _commit_landed(cfg.repo_root, head_before, timeout=cfg.git_timeout):
-        _restore_corpus(cfg.repo_root, cfg.corpus_dir, snapshot, corpus=cfg.corpus,
-                        head_before=head_before, timeout=cfg.git_timeout)
-    _revert_strays(cfg.repo_root, cfg.corpus_dir_rel, baseline_stray, tree_for=cfg.tree_for,
-                   timeout=cfg.git_timeout)
-
-
-def _left_for_scrub(what: str, fn: Callable[..., Any], *args: Any) -> None:
-    """Run one fault-path restore step; the core's leaf refusal (`NotPlainEntry`: an entry at the
-    name that is not a plain file) is logged and passed over, the entry left in place. Any other
-    `OSError` (a linked or non-directory folder on the way, EACCES, EIO, ENOSPC) propagates
-    (#1134 O5.3)."""
-    try:
-        fn(*args)
-    except NotPlainEntry as e:
-        _logger.warning(f"warn: {what} left for the scrub: {e.strerror}")
-
-
-def _commit_landed(repo_root: Path, head_before: str, *, timeout: float | None = None) -> bool:
-    """Whether HEAD moved; True when git cannot say (or does not within `timeout`), so nothing
-    gets deleted."""
-    try:
-        return author_shared.git_head_sha(repo_root, timeout=timeout) != head_before
-    except (GitError, GitTimeout):
-        return True
-
-
-def _revert_strays(
-    repo_root: Path, corpus_dir_rel: str, baseline_stray: list[str], *, tree_for: TreeFor,
-    timeout: float | None = None,
-) -> None:
-    """Undo what the agent wrote outside the corpus this tick, leaving pre-existing dirt alone.
-
-    Best-effort: it runs while a fault is propagating, and a second failure would replace that
-    diagnosis — a git failure (or a git call not answering within `timeout`) listing the strays
-    or putting one back, or a non-plain entry at one."""
-    try:
-        strays = sorted(
-            set(author_shared.changes_outside(repo_root, corpus_dir_rel, **_worktree_git(timeout)))
-            - set(baseline_stray)
-        )
-    except (GitError, GitTimeout):
-        return
-    for rel in strays:
-        try:
-            _left_for_scrub(rel, functools.partial(_put_back, tree_for=tree_for, timeout=timeout),
-                            repo_root, rel)
-        except GitTimeout as e:
-            _logger.warning(f"warn: {rel} left for the scrub: git did not answer within "
-                            f"{e.timeout}s")
-
-
-def _unchanged_names(
-    repo_root: Path, corpus_dir: Path, rev: str, *, timeout: float | None = None,
-) -> frozenset[str]:
-    """The names under the corpus mount of the regular files `rev` carries there that git still
-    finds unchanged in the worktree (`_git.git_unchanged_since`, #1134 addendum 3 D1): the
-    before-state files a restore need not write back. A git failure raises `GitError`; one not
-    answering within `timeout`, `GitTimeout`."""
-    rel = corpus_dir.relative_to(repo_root).as_posix()
-    prefix = "" if rel == "." else f"{rel}/"
-    return frozenset(path[len(prefix):]
-                     for path in _git.git_unchanged_since(repo_root, rev, rel, timeout=timeout))
-
-
-def _worktree_files_instead(
-    repo_root: Path, corpus_dir: Path, status_fault: GitError | GitTimeout, *,
-    timeout: float | None,
-) -> list[str]:
-    """`_restore_corpus`'s answer when its `git status` failed or did not answer within
-    `timeout`: every non-ignored worktree file under the corpus that `git_worktree_files` names,
-    or none when that fails too (a warning names both failures)."""
-    try:
-        made = _git.git_worktree_files(repo_root, str(corpus_dir), timeout=timeout)
-    except (GitError, GitTimeout) as files_fault:
-        _logger.warning(
-            "warn: the corpus restore cannot ask git what changed (git status "
-            f"{_unanswered(status_fault)}, git ls-files {_unanswered(files_fault)}); "
-            "nothing swept")
-        return []
-    _logger.warning(
-        f"warn: the corpus restore's git status failed ({_unanswered(status_fault)}); "
-        "it swept the worktree files git ls-files names instead")
-    return made
-
-
-def _restore_corpus(
-    repo_root: Path, corpus_dir: Path, snapshot: dict[str, bytes] | None, *, corpus: Held,
-    head_before: str, timeout: float | None = None,
-) -> None:
-    """Put the corpus back to its pre-agent contents, through `corpus`, its held mount
-    (`corpus_dir` is that folder's spelling, the git pathspec only), as the before-state read at
-    `head_before` holds them.
-
-    The content restore is filesystem-only: the failure it handles is usually git's, and a git
-    restore would need the index lock that failed (`git status`, a read, needs none). The
-    unstage is best-effort, for a rejected commit where the add did land.
-
-    No folder is listed (#1134 addendum 2 correction, C1): which names the agent made comes from
-    git (`git status --untracked-files=all` over the corpus), and each one the snapshot (the
-    before-state) does not hold is removed through `corpus`: a plain file is unlinked; a link,
-    hard link or anything else at the name is the core's refusal, never followed (O5.2). A name
-    git does not report — a gitignored file, a FIFO or socket — is left (C2).
-
-    When `git status` fails (a broken index: the fault being unwound is often git's), git is
-    asked instead for every non-ignored worktree file under the corpus against an empty index
-    (`_git.git_worktree_files`, which never opens the real index), and each the snapshot lacks
-    is swept the same way; a tracked symlink is then among them, and its unlink is refused and
-    logged. If git cannot answer that either, nothing is swept (a warning).
-
-    Then each snapshot file git does not find unchanged since `head_before` — rewritten, gone,
-    replaced by a link or anything else — is written back through `corpus` (`_unchanged_names`,
-    addendum 3 D1: git compares, nothing here reads the worktree). A hard link holding the exact
-    before-state bytes is unchanged to git and left (declared, N-a). If git cannot compare, every
-    snapshot file is written back (a warning): an identical rewrite is harmless. Each git call is
-    bounded by `timeout` and reads attributes from HEAD's tree (`_worktree_git`); one that does not
-    answer in time is handled as one that failed, so the fault being unwound keeps propagating.
-    Fault path only: see `_undo_agent_edits`."""
-    if snapshot is None:
-        return
-    # Best-effort, like its unchecked exit: a reset that does not answer in time is passed over.
-    with contextlib.suppress(GitTimeout):
-        _git.git(["reset", "-q", "--", str(corpus_dir)], cwd=repo_root, check=False,
-                 **_worktree_git(timeout))
-    try:
-        made = [rel for xy, rel in _git.git_status(repo_root, pathspec=corpus_dir,
-                                                   no_renames=True, **_worktree_git(timeout))
-                if "D" not in xy]
-    except (GitError, GitTimeout) as status_fault:
-        made = _worktree_files_instead(repo_root, corpus_dir, status_fault, timeout=timeout)
-    for rel in made:
-        name = (repo_root / rel).relative_to(corpus_dir).as_posix()
-        if name not in snapshot:
-            _left_for_scrub(name, corpus.unlink, name)
-    unchanged: frozenset[str] = frozenset()
-    try:
-        unchanged = _unchanged_names(repo_root, corpus_dir, head_before, timeout=timeout)
-    except (GitError, GitTimeout) as compare_fault:
-        _logger.warning(
-            "warn: the corpus restore cannot ask git which files still hold their before-state "
-            f"bytes (git diff {_unanswered(compare_fault)}); it writes every one back")
-    for name, blob in snapshot.items():
-        if name not in unchanged:
-            _left_for_scrub(name, functools.partial(corpus.write, mode="replace"), name, blob)

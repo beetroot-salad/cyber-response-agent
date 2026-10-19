@@ -206,3 +206,23 @@ def test_a_body_is_still_checked_when_the_prose_is_absent(tmp_path, missing):
         assert "UNEXERCISED" in p.stdout
     else:
         assert "dangles" in p.stdout
+
+
+def test_nested_suite_keeps_its_binding_and_ignores_premise_copies(tmp_path):
+    """Clustering tests into a subdirectory preserves the discharge; stale premise copies
+    cannot shadow the real test's exercised seam."""
+    suite = _suite(tmp_path, '''
+        def test_seam(tmp_path):
+            """The tool executes through the injected box."""
+            box = BoxExecutor(transport=RecordingTransport())
+            shown = _tool_bash(box, "cat x")
+            assert shown == "out"
+    ''')
+    nested = suite / "runtime"
+    nested.mkdir()
+    (suite / "test_x.py").rename(nested / "test_x.py")
+    (nested / "test_x.copy1.py").write_text(
+        'def test_seam():\n    """The box is attached."""\n'
+        '    assert isinstance(deps.box, BoxExecutor)\n', encoding="utf-8")
+    result = _run(suite)
+    assert result.returncode == 0, result.stdout + result.stderr

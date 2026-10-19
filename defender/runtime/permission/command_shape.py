@@ -6,7 +6,7 @@ from defender.hooks._cmd_segments import (
     NON_ADAPTER_SHIMS,
     OPERATOR_TOOLS,
 )
-from defender.runtime.bash_exec import Pipeline
+from defender.execution.bash_exec import Pipeline
 
 SQL_SHIM = "defender-sql"
 

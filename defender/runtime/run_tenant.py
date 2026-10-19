@@ -15,9 +15,9 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from defender._corpus import QueryTemplate, iter_query_templates
-from defender._knowledge import KnowledgePaths
-from defender._tenant import Tenant, TenantId, TenantRefused, accept_tenant
+from defender.knowledge._corpus import QueryTemplate, iter_query_templates
+from defender.knowledge._knowledge import KnowledgePaths
+from defender.tenancy._tenant import Tenant, TenantId, TenantRefused, accept_tenant
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime import tenant_settings
@@ -25,7 +25,7 @@ from defender.runtime.case_ticket import CaseMapping, CaseTicketError, load_case
 from defender.runtime.tenant_settings import (
     SystemConfig,
 )
-from defender.scripts.adapters.faults import ConfigFault
+from defender.integrations.faults import ConfigFault
 
 if TYPE_CHECKING:
     from defender.runtime.lead_zero import CorrelationDispatch
@@ -33,11 +33,14 @@ if TYPE_CHECKING:
 
 def table_pointer(tenant_id: str) -> str:
     """The model-facing name of a tenant's verb-disposition table. Never the resolved host
-    path: the settings half is host-only and the prompt must not vary by machine. Operator
-    messages print `RunGrants.path` instead."""
+    path: the settings half is host-only and the prompt must not vary by machine. Nor the
+    tenant's name (#1255 O3: the tenant is host layout, and the model sees one view on every
+    host), so every tenant's pointer reads the same; `tenant_id` is the table whose pointer
+    this is, not text for the model. Operator messages print `RunGrants.path` instead."""
     from defender.runtime.verbs import TABLE_POINTER
 
-    return f"{TABLE_POINTER}, tenant {tenant_id!r}"
+    del tenant_id  # not rendered: see above
+    return TABLE_POINTER
 
 
 @dataclasses.dataclass(frozen=True)
@@ -63,8 +66,11 @@ class RunTenant:
     correlation: CorrelationDispatch | None
     #: One entry per folder under `settings/systems/`, each `config.env` parsed ONCE here,
     #: verbatim (keys as written, prefix included): a `SystemConfig`, or the `ConfigFault` for why
-    #: there is none. A fault is kept, never raised at resolve — that system is down, the run is
-    #: not refused (O5). Asking for a system with no folder gets the "not configured" fault.
+    #: there is none. A fault is kept, never raised at resolve: resolution is not refused for it
+    #: (O5). At run start each granted system's own settings check judges this record (#1256);
+    #: a system it faults is down for the run, and a start at which no granted system is usable
+    #: is refused by the run's start check (O-8), never here (D4). Asking for a system with no
+    #: folder gets the "not configured" fault.
     systems: Mapping[str, SystemConfig | ConfigFault]
     #: `systems/case-history/mapping.yaml`, loaded once; a bad file is kept as its error.
     ticket_mapping: CaseMapping | CaseTicketError

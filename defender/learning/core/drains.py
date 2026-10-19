@@ -28,7 +28,7 @@ from defender.learning.core.config import (
 from defender import _git
 from defender._claim_git import ClaimGit
 from defender._paths import DefenderPaths
-from defender.runtime import box as box_mod
+from defender import box as box_mod
 from defender.learning.author import drain
 from defender.learning.author.branch import AuthorBranch, BranchError
 from defender.learning.core.faults import run_or_dead_letter
@@ -59,7 +59,7 @@ from defender.learning.core.state import (
 )
 
 if TYPE_CHECKING:
-    from defender._tenant import Tenant
+    from defender.tenancy._tenant import Tenant
 
 _logger = logging.getLogger(__name__)
 
@@ -390,7 +390,7 @@ def _data_root() -> Path:
     that has a curation row queued when it starts. A missing or bad setting is the stage's
     configuration refusal (`FatalConfigError`, raised from `resolve_data_root`'s
     `TenantRefused`): `_run_stage` logs it on one line and exits 2."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     try:
         return _tenant.resolve_data_root()
@@ -498,7 +498,7 @@ def _rehydrate(
     per tenant per tick, a refusal included — then the run opened through that tenant's
     repository, which never follows a link at its name. Else the refusal, logged: the
     tenant's `TenantRefused`, or the open's `RunRefused` (`RunAbsent` when the run is gone)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.run_repository import RunRefused
 
     address = claim.address
@@ -617,15 +617,16 @@ def _validate_merge_mode() -> None:
 def _drain_box_request(
     wt: Path, batch_id: str, label: DrainLabel, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
-    """The drain box's mounts: ro over the whole worktree leaf (it carries `<wt>/defender` and
-    is both drain roles' cwd_anchor), rw over exactly `label.writable_trees` of the leaf's
-    paths, in its order, each at its own path. Nothing outside the leaf.
+    """The drain box's mounts: ro over the whole worktree leaf as its `code` mount (it carries
+    `<wt>/defender`, the request's code root, and is both drain roles' cwd_anchor), rw over
+    exactly `label.writable_trees` of the leaf's paths, in its order, each at its own path.
+    Nothing outside the leaf.
 
     The rw list is taken whole from its owner, never derived here, so the box's writable
     mounts and the roots `lane_trees.open_drain_trees` holds are one list (#1134 O4). A
     non-member raises here rather than getting a box."""
     wt_paths = paths.with_repo_root(wt)
-    mounts = [box_mod.Mount(source=wt, target=wt, writable=False)]
+    mounts = [box_mod.Mount(source=wt, target=wt, writable=False, kind="code")]
     for d in label.writable_trees(wt_paths):
         mounts.append(box_mod.Mount(source=d, target=d, writable=True))
     return box_mod.BoxRequest(

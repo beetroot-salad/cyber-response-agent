@@ -29,8 +29,8 @@ from collections.abc import Iterator
 from typing import Any
 
 from defender._clock import now_iso, parse_iso_utc
-from defender._episode_handle import Episode
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episode_paths import LAYOUT
 from defender._io import Bound
 from defender.learning.branch.steps import STEPS, Step
 

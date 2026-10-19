@@ -120,7 +120,7 @@ assert STRONG_AUTH_KINDS.issubset(AUTH_KINDS), (
 #: Registered is not armed: rules #29/#30 refuse on the `impact.*` vocabularies, but the two
 #: `conclude.impact_*` ones are taught only, since the runtime SKILL never stated them and
 #: recorded goldens already use other values (see `validate._check_impact_closure` and
-#: `docs/decisions/defender-invlang-enforcement-ramp.md`).
+#: `defender/docs/decisions/defender-invlang-enforcement-ramp.md`).
 IMPACT_DIMENSION: tuple[str, ...] = (
     "confidentiality", "integrity", "availability", "scope",
 )

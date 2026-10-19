@@ -1,20 +1,4 @@
-"""#665 — box.py geography + the return contract (part 2 of 3).
-
-box.py owns the boundary; callers own the geography (O8/M2). This file pins how box.py
-RENDERS a caller-composed request (mounts, env, workdir, name grammar, the baked network /
-read-only / tmpfs), its per-mount startup sentinel and startup-fault loudness, the unboxed
-opt-out, the derived `sandboxed`, and the boxed learning bash lane's RETURN contract
-(demand #0 / R9). The mount MODEL of the two new tiers and the gate↔mount reasoning are in
-`test_665_box_mount_model.py`; the live mechanism confirmations in `test_665_box_live.py`.
-
-RED AGAINST HEAD: box.py does not yet take a `BoxRequest` (it renders a fixed run_dir-rw +
-defender_dir-ro geography from positional args), has no shared env helper, does a
-single-mount sentinel, and the learning bash lane's faults still raise `ModelRetry` rather
-than returning the #0 envelope. The docker daemon is faked through the REAL `docker=` seam
-(`RecordingDocker`) with declarative faults that cite the ledger claim that observed them —
-box.py's own argv build and framing run unchanged, so the assertions are on the CAPTURED
-create argv / raised error / returned string.
-"""
+"""#665 — box.py renders a caller-composed BoxRequest (mounts, env allowlist, workdir, baked network/read-only/tmpfs), its per-mount startup sentinel, create-fault reaping, pre-create sweep and unsandboxed opt-out. The docker daemon is faked through the real docker= seam."""
 from __future__ import annotations
 
 import json
@@ -38,8 +22,7 @@ from _box665 import (  # noqa: E402
 pytest.importorskip("pydantic_ai")
 
 
-
-from defender.runtime import box as box_mod  # noqa: E402
+from defender import box as box_mod  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -48,25 +31,23 @@ SALT = "s665geo"
 
 def _run_cycle_mounts(run_dir: Path):
     """A minimal run-cycle geography a caller composes (M2): learning_run_dir + the ro
-    defender infra tree + the ro gather_raw evidence tree."""
+    defender infra tree + the ro gather_raw evidence tree, each read-only mount declaring
+    what it holds (#1108 D7 amended): the run's data, the product code, the evidence data."""
     return (
-        Mount(source=run_dir, target=run_dir, writable=False),
-        Mount(source=DEFENDER, target=DEFENDER, writable=False),
-        Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False),
+        Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
+        Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
+        Mount(source=run_dir / "gather_raw", target=run_dir / "gather_raw", writable=False,
+              kind="data"),
     )
 
 
 def _populate_mount_sources(mounts, tmp_path: Path) -> None:
-    """Make each mount source NON-EMPTY — the contrast case against the present-empty
-    gather_raw above — for the sources this test owns, i.e. those under `tmp_path`.
+    """Populate only test-owned sources with an existing read-back file.
 
-    The DEFENDER mount is deliberately skipped. `_run_cycle_mounts` sources it from the real
-    checked-out tree, so it is non-empty by construction and needs no marker; the inline loops
-    this replaces wrote their `entry.txt` into it anyway, leaving an untracked file in the repo
-    after every run of this suite — a suite about read-only mount discipline littering the
-    source tree it declares `writable=False`. The marker is setup, never read: `_probe_sentinel`
-    plants and cats back its own `.box-sentinel-<uuid>`, so only NON-EMPTINESS is being modeled
-    here, not this file's contents."""
+    D7 forbids planting during a read-only mount check. The checked-out DEFENDER already
+    has its committed code check file and is never edited by this fixture. The marker below is
+    deliberate setup in temporary sources, available before startup begins.
+    """
     for m in mounts:
         source = Path(m.source)
         if not source.is_relative_to(tmp_path):
@@ -76,22 +57,19 @@ def _populate_mount_sources(mounts, tmp_path: Path) -> None:
 
 
 def _request(run_dir: Path, *, name="defender-runcycle-abc", env=None, mounts=None, workdir=None,
-             spec=None):
+             spec=None, defender_dir=None):
     return BoxRequest(
         name=name,
         mounts=mounts if mounts is not None else _run_cycle_mounts(run_dir),
         workdir=workdir if workdir is not None else REPO_ROOT,
         env=env if env is not None else {},
         spec=spec,
+        defender_dir=defender_dir,
     )
 
 
 # box.py renders the caller-composed geography (O8/M2)
 def test_box_request_renders_mounts_and_no_tier_discriminator(tmp_path):
-    """box_request_geography — box.py renders exactly the mounts the caller's BoxRequest
-    carries onto the `docker run` argv (target ≡ source, readonly per the Mount flag), and
-    the container name is the caller's composed name — box.py bakes in no tier field of its
-    own (M2). Asserts every requested mount appears on the captured create argv."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     start_box_request(_request(run_dir), docker=rec)
@@ -101,39 +79,7 @@ def test_box_request_renders_mounts_and_no_tier_discriminator(tmp_path):
     assert box_mod.container_name.__name__  # box.py owns the grammar, not a tier discriminator
 
 
-def test_box_request_with_empty_mounts_list(tmp_path):
-    """test_box_request_with_empty_mounts_list — a request with an EMPTY mounts list renders
-    a box with no bind mounts (box.py renders geography, it does not inject a defender mount).
-    With no defender tree inside, no granted command's entrypoint resolves — the caller's
-    responsibility, not box.py's to backfill (c5)."""
-    run_dir = make_run_dir(tmp_path)
-    rec = RecordingDocker()
-    start_box_request(_request(run_dir, mounts=()), docker=rec)
-    assert rec.mounts() == [], "box.py injected a mount the caller's empty request never asked for"
-
-
-def test_box_request_workdir_not_among_its_own_mounts(tmp_path):
-    """test_box_request_workdir_not_among_its_own_mounts — box.py renders the request's
-    `--workdir` exactly as given even when it is covered by none of the request's own mounts
-    (M2: box.py renders geography, it does not validate it); the resulting `docker exec -w`
-    may then target a directory the container lacks — the caller's M3a obligation, not
-    box.py's to enforce at render."""
-    run_dir = make_run_dir(tmp_path)
-    rec = RecordingDocker()
-    uncovered = tmp_path / "nowhere"
-    # An explicit rootfs: with it unset the builder resolves the image from
-    # `workdir / "defender"`, which this deliberately uncovered workdir lacks (#1092) — the
-    # principle above is about geography, so the image is pinned out of the way.
-    pinned = box_mod.BoxSpec(rootfs="python:3.11-slim")
-    start_box_request(_request(run_dir, workdir=uncovered, spec=pinned), docker=rec)
-    assert rec.flag_value("--workdir") == str(uncovered)
-
-
 def test_box_request_caller_omits_network_isolation_and_gets_a_default_network(tmp_path):
-    """test_box_request_caller_omits_network_isolation_and_gets_a_default_network — network
-    isolation is BAKED INTO box.py (S2/N2 `--network=none`), not a caller-supplied field. A
-    request that says nothing about the network still renders `--network none`; the caller
-    cannot omit their way to egress."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     start_box_request(_request(run_dir), docker=rec)
@@ -142,10 +88,6 @@ def test_box_request_caller_omits_network_isolation_and_gets_a_default_network(t
 
 
 def test_composed_container_name_fails_the_naming_grammar(tmp_path):
-    """test_composed_container_name_fails_the_naming_grammar (F8 → R7) — a caller-composed
-    container name that fails the `is_valid_run_id` grammar (#698) is caught in box.py's
-    render/request path (the boundary concern, O8), raising a clear error BEFORE any container
-    is touched. Positive control: a grammar-valid name renders and reaches docker."""
     run_dir = make_run_dir(tmp_path)
     bad = RecordingDocker()
     with pytest.raises((ValueError, box_mod.BoxFault)):
@@ -159,11 +101,6 @@ def test_composed_container_name_fails_the_naming_grammar(tmp_path):
 
 # The box environment (S8/M2/RF1) — allowlist by key, one shared helper
 def test_box_env_filtered_by_key_no_host_credential(tmp_path):
-    """env_filtered_no_credential — box.py's env is a positive allowlist BY KEY
-    (BOX_ENV_ALLOWLIST); a host credential-shaped key in the caller's request env crosses to
-    NO surface of the rendered box (S8: no host credential rides an exec). Negative binds the
-    only outward surface — the `--env` argv. Positive control: an allowlisted key (LANG) is
-    rendered."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     secret = "sk-ant-SPEC-SECRET"
@@ -175,56 +112,7 @@ def test_box_env_filtered_by_key_no_host_credential(tmp_path):
     assert rec.env().get("LANG") == "C.UTF-8", "the allowlisted key was dropped (positive control)"
 
 
-def test_path_pythonpath_from_one_shared_helper(tmp_path):
-    """infra_env_from_shared_helper — PATH and PYTHONPATH ('the shims and the package live in
-    the infra mount', M2) are supplied by ONE shared helper on every tier, unconditionally,
-    before any granted command runs — including PYTHONPATH, which run_common.run_env does NOT
-    set today (brief RF1). Drives the future shared helper."""
-    run_dir = make_run_dir(tmp_path)
-    env = box_mod.infra_env(DEFENDER, run_dir)  # future shared helper — AttributeError at HEAD
-    assert env["PYTHONPATH"] == str(DEFENDER.parent), "the shared helper did not supply PYTHONPATH"
-    assert str(DEFENDER / "bin") in env["PATH"], "the shared helper did not supply the infra PATH"
-
-
-# What the RENDERED box env carries for one key, given what the caller's request env supplied.
-# The shared infra helper is unconditional (po10) and the allowlist is key-only (S8), so a
-# caller can neither omit an infra key nor be screened on an allowlisted key's value.
-@pytest.mark.parametrize(("case", "request_env", "key", "expected", "why"), [
-    # The module search path the in-box entrypoint imports through is present on EVERY tier,
-    # independent of what the caller supplies — here, a caller supplying no env at all.
-    ("infra-helper-supplies-pythonpath", {}, "PYTHONPATH", lambda: str(DEFENDER.parent),
-     "PYTHONPATH was not supplied by the infra helper on this tier"),
-
-    # po10: the helper unconditionally supplies the infra keys (DEFENDER_DIR / RUN_DIR / PATH /
-    # PYTHONPATH) regardless of what the caller's env OMITS.
-    ("infra-helper-supplies-a-key-the-caller-omitted", {"LANG": "C.UTF-8"},
-     "DEFENDER_DIR", lambda: str(DEFENDER),
-     "the helper did not supply DEFENDER_DIR the caller omitted"),
-
-    # S8: the allowlist filters by KEY only, so a credential-shaped or wrong VALUE on an
-    # allowlisted key rides through unexamined. A design-CONCEDED residual (RF-G) — the value
-    # channel is not inspected; the key filter is value-blind.
-    ("allowlisted-key-carries-a-credential-shaped-value", {"TZ": "sk-ant-shaped-value"},
-     "TZ", lambda: "sk-ant-shaped-value",
-     "the value-blind key filter unexpectedly inspected the value"),
-], ids=lambda v: v if isinstance(v, str) and len(v) < 60 and " " not in v else "")
-def test_the_rendered_box_env_carries_what_the_helper_and_allowlist_decide(
-    tmp_path, case, request_env, key, expected, why
-):
-    """The rendered create argv is the observable: the infra helper's keys are there whatever
-    the caller sent, and an allowlisted key's value arrives exactly as the caller wrote it."""
-    run_dir = make_run_dir(tmp_path)
-    rec = RecordingDocker()
-    start_box_request(_request(run_dir, env=request_env), docker=rec)
-    assert rec.env().get(key) == expected(), why
-
-
 def test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key(tmp_path):
-    """test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key
-    (po10 → R11) — on a collision on an INFRA key, the shared helper's value WINS over a
-    caller-supplied one (consistent with run_env's first three keys and S8): a caller cannot
-    widen or reorder PATH ahead of the infra defender-bin entry. Positive control: a non-infra
-    allowlisted key the caller sets survives."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     start_box_request(
@@ -236,45 +124,35 @@ def test_caller_env_dict_key_collides_with_the_shared_infra_helpers_derived_key(
     assert rec.env().get("TZ") == "Europe/Paris", "a non-infra allowlisted key was dropped"
 
 
-def test_env_reaching_the_program_differs_between_the_boxed_path_and_the_loud_fallback(tmp_path):
-    """test_env_reaching_the_program_differs_between_the_boxed_path_and_the_loud_fallback
-    (M9) — the env reaching the program keeps PARITY across the boxed path and the loud
-    unboxed fallback for the infra keys the entrypoint needs: BOTH carry PYTHONPATH (brief
-    RF1 — today the unboxed fallback's run_env sets PATH but not PYTHONPATH, so it diverges).
-    """
-    run_dir = make_run_dir(tmp_path)
-    boxed = box_mod.infra_env(DEFENDER, run_dir)  # future shared helper (AttributeError at HEAD)
-    from defender.run_common import run_env
-
-    fallback = run_env(DEFENDER, run_dir)
-    assert "PYTHONPATH" in boxed, "the boxed env has no PYTHONPATH from the shared helper"
-    assert "PYTHONPATH" in fallback, \
-        "the unboxed fallback env has no PYTHONPATH — it diverges from the boxed path (RF1)"
-
-
 # The startup sentinel (O2/M11) + startup-fault loudness (M4/decision 5)
-def test_sentinel_probes_every_mount_ro_readback(tmp_path):
-    """sentinel_probes_every_mount — under M2 the startup sentinel is a PER-MOUNT obligation
-    (M11): every mount the box carries (the rw tree AND each ro tree) is individually probed
-    by a read-back at start, not only the original single rw run_dir. DC1: the sentinel's
-    residual scope is a bind that SUCCEEDED but mapped the wrong/empty tree (an absent source
-    is refused loudly at create). Asserts one read-back exec per mount over a 3-mount box."""
+def test_sentinel_probes_every_mount_ro_readback_without_planting(tmp_path):
+    """D7/M11: nonempty read-only mounts are read back without even transient writes."""
     run_dir = make_run_dir(tmp_path)
-    for m in _run_cycle_mounts(run_dir):
-        Path(m.source).mkdir(parents=True, exist_ok=True)
+    evidence = tmp_path / "separate-evidence"
+    evidence.mkdir()
+    (evidence / "result.json").write_text("{}\n", encoding="utf-8")
+    # Disjoint roots give each mount its own observation: a repeated child read cannot
+    # masquerade as a separate read-back of an enclosing mount.
+    mounts = (Mount(source=run_dir, target=run_dir, writable=False, kind="data"),
+              Mount(source=DEFENDER, target=DEFENDER, writable=False, kind="code"),
+              Mount(source=evidence, target=evidence, writable=False, kind="data"))
+    before = {m.source: frozenset(m.source.iterdir()) for m in mounts}
     rec = RecordingDocker()
-    start_box_request(_request(run_dir), docker=rec)
-    readbacks = [c for c in rec.calls if len(c) > 1 and c[1] == "exec"]
-    assert len(readbacks) >= len(_run_cycle_mounts(run_dir)), \
-        "the sentinel probed fewer mounts than the box carries (single-mount sentinel survived)"
+    def boundary(argv, **kwargs):
+        assert {m.source: frozenset(m.source.iterdir()) for m in mounts} == before
+        return rec(argv, **kwargs)
+    start_box_request(_request(run_dir, mounts=mounts), docker=boundary)
+    readbacks = [Path(c[-1]) for c in rec.calls if len(c) > 1 and c[1] == "exec"
+                 and Path(c[-1]).is_absolute()
+                 and any(Path(c[-1]).is_relative_to(mount.source) for mount in mounts)]
+    assert len(readbacks) == len(mounts)
+    assert all(path.is_file() for path in readbacks)
+    for mount in mounts:
+        assert any(path.is_relative_to(mount.source) for path in readbacks)
+    assert {m.source: frozenset(m.source.iterdir()) for m in mounts} == before
 
 
 def test_mount_source_directory_absent_at_box_creation(tmp_path):
-    """test_mount_source_directory_absent_at_box_creation (DC1 / po1) — an absent
-    `--mount type=bind` source is a LOUD create-time BoxFault (rc=125, no container), NOT the
-    doc's silently-materialised empty dir (that belongs only to the `-v` auto-create path box
-    does not use). Pins the CORRECTED behavior; the fault content is po1 as observed live.
-    Positive control: a present source creates cleanly."""
     run_dir = make_run_dir(tmp_path)
     absent = RecordingDocker(create=DockerFault(
         rc=125, stderr="docker: Error response from daemon: bind source path does not exist",
@@ -289,31 +167,7 @@ def test_mount_source_directory_absent_at_box_creation(tmp_path):
     box_mod.start_box(run_dir, DEFENDER, docker=ok)  # present sources → clean create
 
 
-def test_gather_raw_mount_exists_but_has_no_entry_to_read_back_at_sentinel_time(tmp_path):
-    """test_gather_raw_mount_exists_but_has_no_entry_to_read_back_at_sentinel_time
-    (SB2 → R5) — a mounted-but-legitimately-EMPTY gather_raw is a FAITHFUL empty source
-    (po1), distinguishable from absent. Decision 9's third case: present-empty → mount, SKIP
-    the read-back, and record the host-side existence/inode check captured at mount-request
-    time as the non-absence proof. Asserts an empty-but-present mount does not fail the box on
-    a read-back it cannot satisfy."""
-    run_dir = make_run_dir(tmp_path)
-    (run_dir / "gather_raw").mkdir(exist_ok=True)  # present, but EMPTY
-    for m in _run_cycle_mounts(run_dir):
-        Path(m.source).mkdir(parents=True, exist_ok=True)
-    rec = RecordingDocker()
-    # the per-mount sentinel must not READ BACK an entry the empty gather_raw legitimately does
-    # not hold; a present-empty mount is proven non-absent by the host-side is_dir()/inode check
-    # captured at request time, not an in-box cat. The box starts.
-    box = start_box_request(_request(run_dir), docker=rec)
-    assert box.name, "a present-empty mount wrongly failed the per-mount startup sentinel"
-
-
 def test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state(tmp_path):
-    """test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state — with
-    several mounts each probed at start, one mount's read-back can fail after another's
-    passed; a partially-validated box is torn down AS A WHOLE (any sentinel fault is an M4
-    startup fault → decision 5 loud abort + unwind), never observed or used half-checked.
-    Asserts a sentinel fault raises and the box is reaped (docker rm -f)."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(sentinel=DockerFault(rc=1, stderr="mount 2 read-back failed", cite="po48"))
@@ -321,19 +175,6 @@ def test_partial_multi_mount_sentinel_validation_leaves_box_in_ambiguous_state(t
         start_box_request(_request(run_dir), docker=rec)
     assert reaped_after_create(rec.calls), \
         "a partially-validated box was not reaped after a sentinel fault"
-
-
-def test_docker_create_partially_applies_mounts_when_one_mount_spec_is_malformed(tmp_path):
-    """test_docker_create_partially_applies_mounts_when_one_mount_spec_is_malformed
-    (po48) — docker create is all-or-nothing on mount specs: a good mount + a malformed one
-    errors (rc=1) and leaves NO container; the M11 per-mount sentinel is a backstop atop an
-    already-atomic create. Asserts a create rc=1 raises BoxFault with no read-back attempted."""
-    run_dir = make_run_dir(tmp_path)
-    rec = RecordingDocker(create=DockerFault(rc=1, stderr="invalid mount spec", cite="po48"))
-    with pytest.raises(box_mod.BoxFault):
-        box_mod.start_box(run_dir, DEFENDER, docker=rec)
-    assert not any(len(c) > 1 and c[1] == "exec" for c in rec.calls), \
-        "a sentinel ran though create left no container (create was not treated as atomic)"
 
 
 _SHIM_FAULT = dict(
@@ -344,15 +185,8 @@ _SHIM_FAULT = dict(
 
 
 def test_create_fault_that_leaves_a_created_container_is_reaped_investigation_lane(tmp_path):
-    """#884 F-29 — `docker run --detach` is create-THEN-start, so a non-zero rc does not prove
-    no container exists. A failure at TASK START (a seccomp profile runc rejects, a missing
-    `runsc`, cgroup/pid exhaustion) leaves the container behind in `created`, and this arm used
-    to raise with no reap while the very next arm in the same function reaped.
-
-    Nothing else revisits the name — `defender-run-{run_id}`, and run ids are not reused — so
-    the leak accrues one per faulted start, against O11 ("no box outlives the run that created
-    it"). Contrast `test_docker_create_partially_applies_mounts_when_one_mount_spec_is_malformed`
-    above: an API-create failure leaves nothing, and the reap is a rc=0 no-op there."""
+    """#884 F-29 — `docker run --detach` is create-THEN-start, so a non-zero rc does not prove no
+    container exists."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
     with pytest.raises(box_mod.BoxFault):
@@ -362,10 +196,6 @@ def test_create_fault_that_leaves_a_created_container_is_reaped_investigation_la
 
 
 def test_create_fault_that_leaves_a_created_container_is_reaped_request_lane(tmp_path):
-    """The request lane repeats the investigation lane's arm verbatim, so it repeated the leak
-    verbatim. Its names are no more revisited: `defender-drain-{uuid4}` per invocation. (The
-    run-cycle lane self-heals only because it keys on a REUSED run id and so meets its own
-    pre-create reap on retry — a property of one caller, not of this arm.)"""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
@@ -388,20 +218,7 @@ def _dies_after_create(rec, *subcommands):
 
 @pytest.mark.parametrize("lane", ["investigation", "request"])
 def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane):
-    """#884 F-29's other half: reaping on the create-fault arm must not reap someone ELSE.
-
-    A non-zero `docker run --detach` means either "we created it and the task would not start"
-    (ours, the leak) or "the name was already taken" (another lane's box, still writing its
-    artifacts). Only the start-token label separates them. A liveness test was tried first and
-    cannot: a concurrent lane's container is itself in `created` for the whole window in which
-    the conflict happens, so it reads as not-running and would be reaped anyway.
-
-    Since #955 F-49 the pre-create sweep refuses any name it finds occupied, so the only way
-    this arm is still reached is the TOCTOU window it always described: the name held NOTHING
-    when the sweep looked, and the other lane won the race before our create. That is what the
-    double states — no `status`, so the state query answers "no such object", and a foreign
-    token on the label query one call later. It is the run-cycle lane that makes this reachable
-    at all, being the one caller that REUSES its container name."""
+    """#884 F-29's other half: reaping on the create-fault arm must not reap someone ELSE."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(
@@ -411,9 +228,6 @@ def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane)
             cite="C43a — the daemon's own name-conflict rc/text",
         ),
         existing_token="another-lane-holds-this-name",
-        # No `status`: the sweep found the name free, and the other lane took it in the window
-        # between that look and our create. Stating a status here would model a container the
-        # pre-create sweep refuses, and this arm would never run.
     )
     start = (
         (lambda: box_mod.start_box(run_dir, DEFENDER, docker=rec))
@@ -429,19 +243,7 @@ def test_a_create_that_lost_a_name_race_does_not_reap_the_winner(tmp_path, lane)
 @pytest.mark.parametrize("lane", ["investigation", "request"])
 @pytest.mark.parametrize("state", ["created", "running", "restarting", "paused", "removing"])
 def test_the_pre_create_sweep_refuses_a_container_that_is_not_finished(tmp_path, lane, state):
-    """#955 F-49 — the sibling of the arm above, on the path that runs FIRST.
-
-    The create-fault arm asks whose container this is before reaping. The pre-create sweep did
-    not: it was a bare `docker rm -f <name>`, guarded only by a test for the `running` state.
-    That guard cannot cover the case it exists for. `docker run --detach` is create-then-start,
-    so a concurrent lane's box is in `created` — not `running` — for the whole window in which
-    two lanes can hold one name, and the run-cycle lane REUSES its name across starts. The
-    loser of that race reaped the winner's live container mid-run, and the winner then reported
-    the loss as a mount error rather than as the collision it was.
-
-    Pre-create there is no token yet — none is minted until after this call — so ownership here
-    is decided by whether anyone can still be USING the container, not by whose it is. Every
-    state but the finished ones is refused, and the refusal must come BEFORE any create."""
+    """#955 F-49 — the sibling of the arm above, on the path that runs FIRST."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status=state)
@@ -460,12 +262,7 @@ def test_the_pre_create_sweep_refuses_a_container_that_is_not_finished(tmp_path,
 
 @pytest.mark.parametrize("lane", ["investigation", "request"])
 def test_the_pre_create_sweep_still_clears_a_finished_container(tmp_path, lane):
-    """The other half of F-49, and the half that keeps the fix from being a wedge.
-
-    A name the run-cycle lane reuses accumulates one `exited` container per pass, and refusing
-    ALL of them would deny every second start on that name — turning a leak into an outage, and
-    trading the fault this fix removes for a worse one. `exited`/`dead` mean nobody is using
-    it, so the sweep clears it and the start proceeds."""
+    """The other half of F-49, and the half that keeps the fix from being a wedge."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="exited")
@@ -480,16 +277,7 @@ def test_the_pre_create_sweep_still_clears_a_finished_container(tmp_path, lane):
 
 
 def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
-    """#955 F-49's own §7 D2 obligation, on the arm that now raises MOST often.
-
-    The sibling test one block up pins the rule for the STARTUP-fault arm. This arm is newer
-    and its trigger is wider — every state but exited/dead, i.e. every leaked container on a
-    REUSED name, repeatably — so a refusal that leaves no verdict makes the tree read "nobody
-    has judged this run yet", which is the one state `write_did_not_run` exists to prevent.
-
-    The INVESTIGATION lane only: the request lane's `_did_not_run_for_request` writes one
-    verdict per WRITABLE mount, and the run-cycle request composes none, so there is nothing
-    for it to write and nothing here to assert about it."""
+    """#955 F-49's own §7 D2 obligation, on the arm that now raises MOST often."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="running")
@@ -505,11 +293,7 @@ def test_the_pre_create_refusal_still_leaves_the_did_not_run_marker(tmp_path):
 
 
 def test_a_daemon_answer_the_sweep_cannot_read_is_not_taken_as_finished(tmp_path):
-    """`_FINISHED_STATES` membership is the test, so an unparseable answer fails CLOSED.
-
-    An `inspect` that succeeds while saying nothing intelligible is not evidence that the
-    container is done with, and reading it as one would restore exactly the reap this fix
-    removes — on the daemon least able to be trusted about it."""
+    """`_FINISHED_STATES` membership is the test, so an unparseable answer fails CLOSED."""
     run_dir = make_run_dir(tmp_path)
     _populate_mount_sources(_run_cycle_mounts(run_dir), tmp_path)
     rec = RecordingDocker(status="")
@@ -519,9 +303,6 @@ def test_a_daemon_answer_the_sweep_cannot_read_is_not_taken_as_finished(tmp_path
 
 
 def test_the_box_is_stamped_with_the_token_its_own_fault_arm_checks(tmp_path):
-    """The label and the check are one mechanism, so pin them together: a stamp the fault arm
-    does not read, or a read of a label nothing stamps, both leave the reap deciding on
-    nothing. Asserts the create argv carries a NON-EMPTY token under the key box.py inspects."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     box_mod.start_box(run_dir, DEFENDER, docker=rec)
@@ -534,12 +315,7 @@ def test_the_box_is_stamped_with_the_token_its_own_fault_arm_checks(tmp_path):
 
 
 def test_a_reap_that_cannot_reach_the_daemon_does_not_replace_the_create_fault(tmp_path):
-    """The create-fault arm's reap is best-effort on BOTH halves, `docker inspect` included.
-
-    Unsuppressed, either would raise `BoxFault("could not invoke docker …")` out of an arm that
-    was one line from raising the create's own stderr — the ONLY account of why this box never
-    started — so the cleanup would replace the signal it exists to clean up after. That is the
-    rule `scrub._write_verdict` already states for the marker written on this same arm."""
+    """The create-fault arm's reap is best-effort on BOTH halves, `docker inspect` included."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker(create=DockerFault(**_SHIM_FAULT), existing_token="self")
     with pytest.raises(box_mod.BoxFault) as excinfo:
@@ -549,9 +325,6 @@ def test_a_reap_that_cannot_reach_the_daemon_does_not_replace_the_create_fault(t
 
 
 def test_a_reap_that_cannot_reach_the_daemon_still_leaves_the_did_not_run_marker(tmp_path):
-    """The same rule on the STARTUP-fault arm, where the reap runs BEFORE the §7 D2 marker: a
-    reap that raised took the verdict down with it, leaving the tree indistinguishable from one
-    nobody has judged yet — which is exactly what `write_did_not_run` exists to prevent."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker(sentinel=DockerFault(rc=1, stderr="read-back failed", cite="po48"))
     with pytest.raises(box_mod.BoxFault):
@@ -561,13 +334,6 @@ def test_a_reap_that_cannot_reach_the_daemon_still_leaves_the_did_not_run_marker
 
 
 def test_container_exits_between_create_and_sentinel(tmp_path):
-    """test_container_exits_between_create_and_sentinel — the container reported created is
-    no longer running when the startup sentinel probes it: an M4 sentinel-mismatch startup
-    fault → decision 5 loud abort. Fault content is the read-back failing (the exited
-    container cannot echo the token). Discrimination: the fault fires at the per-mount sentinel
-    read-back (box.py's own 'read back the startup sentinel' message) AFTER a create succeeded
-    — distinct from the docker-binary-unavailable fault, which fails at the FIRST docker call
-    before any create is attempted."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker(sentinel=DockerFault(rc=137, stderr="container is not running", cite="po48"))
     with pytest.raises(box_mod.BoxFault, match="sentinel"):
@@ -577,12 +343,6 @@ def test_container_exits_between_create_and_sentinel(tmp_path):
 
 
 def test_docker_binary_unavailable_at_box_startup(tmp_path):
-    """test_docker_binary_unavailable_at_box_startup — the docker CLI is not present/executable
-    when box creation makes its FIRST call: an M4 startup-class fault → decision 5 loud abort,
-    surfaced as a BoxFault before any container exists (not a bare FileNotFoundError leaking
-    out of the loop). Discrimination: the failure lands at the first docker call and NO
-    `docker run` create is ever attempted — distinct from the sentinel-mismatch fault, which
-    fails only AFTER a successful create."""
     run_dir = make_run_dir(tmp_path)
     calls: list[list[str]] = []
 
@@ -598,10 +358,6 @@ def test_docker_binary_unavailable_at_box_startup(tmp_path):
 
 
 def test_no_box_has_network_egress(tmp_path):
-    """no_box_egress (negative) — no box on either tier has network egress: box.py bakes
-    `--network none` into every rendered box (S2/N2), so no outbound connection of any family
-    reaches any destination. Negative on the network surface; positive control: the box is
-    still created (the isolation does not break startup)."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     box = start_box_request(_request(run_dir), docker=rec)
@@ -610,10 +366,6 @@ def test_no_box_has_network_egress(tmp_path):
 
 
 def test_box_startup_failure_aborts_batch_loudly(tmp_path, monkeypatch):
-    """startup_fault_aborts_loud (negative) — a box startup failure aborts LOUDLY with NO
-    automatic degradation to host execution on any production path: without the loud
-    DEFENDER_ALLOW_UNSANDBOXED opt-out, a create fault raises BoxFault and NO host executor is
-    returned. The opt-out is the paired positive control — the ONE sanctioned host lane."""
     run_dir = make_run_dir(tmp_path)
     faulty = RecordingDocker(create=DockerFault(rc=125, stderr="bind source path does not exist", cite="po1"))
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
@@ -624,25 +376,7 @@ def test_box_startup_failure_aborts_batch_loudly(tmp_path, monkeypatch):
     assert box_mod.start_box(run_dir, DEFENDER, docker=faulty).sandboxed is False
 
 
-def test_per_mount_sentinel_coverage_across_a_box_with_three_or_more_mounts(tmp_path):
-    """test_per_mount_sentinel_coverage_across_a_box_with_three_or_more_mounts — with a box
-    carrying rw + two ro mounts (defender_dir, gather_raw) plus a tmpfs, every one of the bind
-    mounts is individually probed at start (M11 per-mount), not only the mounts the original
-    single-mount sentinel knew about. Asserts a read-back per bind mount over a 3-mount box."""
-    run_dir = make_run_dir(tmp_path)
-    mounts = _run_cycle_mounts(run_dir)
-    _populate_mount_sources(mounts, tmp_path)
-    rec = RecordingDocker()
-    start_box_request(_request(run_dir, mounts=mounts), docker=rec)
-    readbacks = [c for c in rec.calls if len(c) > 1 and c[1] == "exec"]
-    assert len(readbacks) >= len(mounts) >= 3, \
-        "the sentinel probed fewer than every mount across a 3+-mount box"
-
-
 def test_tmp_is_noexec_size_capped_tmpfs(tmp_path):
-    """tmpfs_noexec_capped — box.py renders `/tmp` as a noexec, nosuid, size-capped tmpfs
-    (S5), on every tier: no exec-staging in /tmp, and the tmpfs cannot grow without bound.
-    Asserts the rendered `--tmpfs` flag carries noexec and a size cap."""
     run_dir = make_run_dir(tmp_path)
     rec = RecordingDocker()
     box_mod.start_box(run_dir, DEFENDER, docker=rec)
@@ -654,11 +388,6 @@ def test_tmp_is_noexec_size_capped_tmpfs(tmp_path):
 
 # The unboxed opt-out (M9/S2/S8) + derived sandboxed (M5/O5)
 def test_unsandboxed_opt_out_uniform_across_tiers(tmp_path, monkeypatch):
-    """uniform_opt_out — the loud DEFENDER_ALLOW_UNSANDBOXED=1 opt-out is the ONE host lane,
-    reached uniformly from every creation site (both new sites call start_box, which carries
-    it): with the env set, a create failure degrades to the unboxed host executor; without it,
-    the same failure aborts (no automatic host fallback). Positive control paired with the
-    negative."""
     run_dir = make_run_dir(tmp_path)
     faulty = RecordingDocker(create=DockerFault(rc=125, stderr="bind source path does not exist", cite="po1"))
 
@@ -672,11 +401,6 @@ def test_unsandboxed_opt_out_uniform_across_tiers(tmp_path, monkeypatch):
 
 
 def test_unboxed_opt_out_env_receives_no_allowlist_filtering(tmp_path):
-    """test_unboxed_opt_out_env_receives_no_allowlist_filtering (F17 → R8) — the unboxed host
-    lane is an accepted no-confinement escape: S8's key allowlist does NOT bind it (a host
-    subprocess inherently has host env), BUT it still strips providers.api_key_vars() so an
-    accidental credential does not ride in. Asserts the unboxed env keeps a non-allowlisted
-    host key yet drops the provider key."""
     from defender.run_common import run_env
     from defender.runtime import providers
 
@@ -687,33 +411,7 @@ def test_unboxed_opt_out_env_receives_no_allowlist_filtering(tmp_path):
 
 
 def test_unsandboxed_opt_out_leg_runs_with_full_host_network_reachability(tmp_path):
-    """test_unsandboxed_opt_out_leg_runs_with_full_host_network_reachability (F18 → R8) — the
-    unboxed opt-out is a bare HOST subprocess, not a container, so S2's `--network=none` has no
-    lever there; full host network is the ACCEPTED cost of bypassing boxing (mitigated by
-    loud/greppable/operator-driven, M9). Asserts the opt-out executor is the host transport,
-    not sandboxed."""
     ex = box_mod.unboxed_executor(env={})
     assert ex.sandboxed is False
     assert isinstance(ex.transport, box_mod._HostTransport), \
         "the opt-out did not run as a bare host subprocess"
-
-
-def test_sandboxed_is_derived_not_settable(tmp_path):
-    """sandboxed_derived_from_transport — `sandboxed` is DERIVED from the transport (M5/O5),
-    not an independently-settable field that can claim a boundary the transport does not
-    provide: a BoxExecutor over the host transport is NOT sandboxed regardless of the
-    construction default. At HEAD `sandboxed` is a bare field defaulting True — the defect."""
-    host = box_mod.BoxExecutor(transport=box_mod._HostTransport(env={}))
-    assert host.sandboxed is False, "sandboxed did not derive from the host transport (settable field)"
-    unattached = box_mod.BoxExecutor()  # inert default transport = _unattached
-    assert unattached.sandboxed is False, "an unattached box claimed it was sandboxed"
-
-
-
-
-
-
-
-
-
-

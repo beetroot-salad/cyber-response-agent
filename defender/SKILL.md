@@ -631,7 +631,7 @@ belief. Real `investigation.md` files have more detail and more
 vertices; the goal here is to carry the *shape* — what each phase
 writes, what gather returns, how the sequence projects. The block
 schemas shown use the leaner column set from the spec's reference
-example (`docs/dense-investigation-format.md`); the longer form in
+example (`defender/docs/dense-investigation-format.md`); the longer form in
 `defender/skills/invlang/SKILL.md` is available when a case
 needs it.
 

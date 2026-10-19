@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from defender._clock import now_iso
-from defender._env import env_int
-from defender.runtime.scrub import RunTainted, verdict_path
+from defender.configuration._env import env_int
+from defender.box._scrub import RunTainted, verdict_path
 from defender._io import read_text_utf8
 
 if TYPE_CHECKING:

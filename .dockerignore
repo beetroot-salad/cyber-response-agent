@@ -28,6 +28,8 @@ knowledge/
 .defender-data
 
 # Transient / large local state — never needed to build the agent
+# The local research harness owns its Lean installation; neither is a product build input.
+seam-harness/
 defender/learning/runs
 defender/run-transcripts
 run-visualizations
@@ -44,3 +46,6 @@ playground-v2/**/data
 .env
 *.env.bak
 .ssh
+
+# CI suites and replay fixtures are not product image contents.
+defender/tests/

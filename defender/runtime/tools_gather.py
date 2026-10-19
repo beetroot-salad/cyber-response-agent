@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from defender.runtime.tools._deps import run_of
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
@@ -15,13 +15,20 @@ from defender._model import model
 from defender.hooks.budget_enforcer import BudgetKill
 from defender.run_repository import Run
 
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from defender.hooks.inject_system_skill_description import SystemIndex
+
 from . import circuit_breaker
+from . import system_status
+from .exception_groups import carried_unless_overridden
 from .run_state import run_state_of
 from . import permission
+from . import providers
 from . import run_end
 from . import session_store
 from . import tools
 from .agent_role import GATHER_AGENT_ID_PREFIX
+from .model_view import ModelView
 from .tools import (
     DeadEnd,
     GatherDeps,
@@ -29,12 +36,12 @@ from .tools import (
     LeadStop,
 )
 
-from defender._corpus import QueryTemplate, is_established, iter_query_templates
-from defender._knowledge import KnowledgePaths
+from defender.knowledge._corpus import QueryTemplate, is_established, iter_query_templates
+from defender.knowledge._knowledge import KnowledgePaths
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED
 from defender.hooks.record_lead import claim_lead as _claim_lead
 from defender._untrusted import wrap_fresh
-from defender.scripts.gather_tools.record_query import LEAD_ID_RE as _LEAD_ID_RE
+from defender.runtime.record_query import LEAD_ID_RE as _LEAD_ID_RE
 from .verbs import SYSTEM_MAX_LEN, is_system_name
 from defender.runtime.verb_grant import VerbGrant
 
@@ -58,23 +65,40 @@ class GatherRequest:
 GatherFactory = Callable[[str, str, int], Any]
 
 
-def _tripped_message(deps: GatherDeps, system: str | None) -> str | None:
+def _down_refusal(deps: GatherDeps, system: str | None) -> str | None:
+    """The query tool's in-call gate: the refusal of a call to a system that is down for this
+    run, rendered from its cause (`system_status`, DP4), or `None` when it is up."""
+    if not system:
+        return None
     state = run_state_of(deps)
-    if system and circuit_breaker.is_tripped(state, system):
-        # Remembered on the lead's stop, so the harness's correlation lead can name "a call was
-        # refused by the breaker" apart from "every call failed" (#1222 A2).
-        stop = getattr(deps, "stop", None)
-        if stop is not None:
-            stop.mark_breaker_refused(system)
-        return circuit_breaker.down_message(state, system)
-    return None
+    cause = system_status.down_cause(state, system)
+    if cause is None:
+        return None
+    if isinstance(cause, system_status.Tripped):
+        return _tripped_message(deps, system)
+    # Down for another cause: not the breaker's, so nothing is remembered on the lead's stop
+    # (lead zero asks the system's cause itself).
+    return system_status.message_for(state, system, cause)
+
+
+def _tripped_message(deps: GatherDeps, system: str) -> str:
+    """The breaker's refusal of a call to `system`, tripped during this run. Remembered on the
+    lead's stop, so the harness's correlation lead can name "a call was refused by the breaker"
+    apart from "every call failed" (#1222 A2)."""
+    stop = getattr(deps, "stop", None)
+    if stop is not None:
+        stop.mark_breaker_refused(system)
+    return circuit_breaker.down_message(run_state_of(deps), system)
 
 
 def _payload_note(deps: GatherDeps, record: dict) -> str:
-    return (
-        f"\n[record_query] raw payload: {deps.run_dir / record['payload_path']}"
-        if record.get("payload_path") else ""
-    )
+    """The `raw payload:` line naming where the query's payload landed, as the lead may name it
+    back: its model path in the run's view (#1255 P1), else the host path."""
+    if not record.get("payload_path"):
+        return ""
+    host = deps.run_dir / record["payload_path"]
+    view = deps.view
+    return f"\n[record_query] raw payload: {view.to_model(host) if view is not None else host}"
 
 
 def _repo_rel(defender_dir: Path, path: Path) -> str:
@@ -84,9 +108,11 @@ def _repo_rel(defender_dir: Path, path: Path) -> str:
         return str(path)
 
 
-def _locator(defender_dir: Path, t: QueryTemplate) -> str:
-    """The `id — path` line shared by the dispatch index and `template_search` hits."""
-    return f"- `{t.id}` — `{_repo_rel(defender_dir, t.path)}`"
+def _locator(defender_dir: Path, t: QueryTemplate, view: ModelView | None = None) -> str:
+    """The `id — path` line shared by the dispatch index and `template_search` hits. The path
+    is the template's model path for a role in the model view (#1255 P1), else repo-relative."""
+    shown = view.to_model(t.path) if view is not None else _repo_rel(defender_dir, t.path)
+    return f"- `{t.id}` — `{shown}`"
 
 
 @model(frozen=True)
@@ -102,6 +128,7 @@ class TemplateIndex:
 
 def _template_index(
     defender_dir: Path, dispatched: str, verb_grant: VerbGrant | None = None,
+    *, view: ModelView | None = None,
 ) -> TemplateIndex:
     """Two tiers: the dispatched system's templates with their `## Goal`; every other system's
     as id and path only.
@@ -119,7 +146,7 @@ def _template_index(
         established_seen += 1
         if verb_grant is not None and not verb_grant.allows(t.system, t.verb):
             continue
-        locator = _locator(defender_dir, t)
+        locator = _locator(defender_dir, t, view)
         if t.system == dispatched:
             on_target.append(f"{locator}\n  {' '.join(t.goal.split())}")
         else:
@@ -173,15 +200,16 @@ _INDEX_NONE_GRANTED = (
 )
 
 
-def _execution_surface(knowledge: KnowledgePaths, system: str) -> str:
-    """Which file carries `system`'s execution surface (verbs, params, exit codes, pitfalls).
+def _execution_surface(knowledge: KnowledgePaths, system: str, view: ModelView) -> str:
+    """Which file carries `system`'s execution surface (verbs, params, exit codes, pitfalls),
+    named by its model path (#1255 P1).
 
     A newly scaffolded system may have a `SKILL.md` but no `execution.md` yet; naming that
     saves gather a turn on a failing read.
     """
     execution = knowledge.system_skill_dir(system) / "execution.md"
     if execution.is_file():
-        return f"Its execution surface is the sibling `{execution}`."
+        return f"Its execution surface is the sibling `{view.to_model(execution)}`."
     return (
         f"`{system}` has NO `execution.md` — its execution surface is that SKILL.md's "
         "`## Execution` section; don't go looking for the sibling file."
@@ -214,6 +242,11 @@ def _gather_prompt(
     deps: AgentDeps, request: GatherRequest, catalog: str | None,
     verb_grant: VerbGrant | None = None,
 ) -> str:
+    # Every path the dispatch names is in the run's model view (#1255 P1): gather is handed
+    # the trees by the paths it will name them back by. Only a run's own role dispatches.
+    view = deps.view
+    if view is None:
+        raise TypeError(f"a gather dispatch comes from a run role; {deps.role} has no model view")
     # Section order is the cache prefix: the indexes vary only per system, the Dispatch block
     # per lead, so indexes go first to let same-system leads share a cached prefix.
     block = "Begin gathering this lead.\n\n"
@@ -223,15 +256,16 @@ def _gather_prompt(
             f"progressive disclosure). Your target is `system: {request.system}`, named in the "
             "Dispatch at the end of this message; confirm it here. These descriptions are "
             "usually enough to pick a template or name a measurement — Read the target's full "
-            f"`{deps.knowledge.system_skill_dir(request.system)}/SKILL.md` ONLY on demand, when you "
+            f"`{view.to_model(deps.knowledge.system_skill_dir(request.system))}/SKILL.md` ONLY on "
+            "demand, when you "
             "need field vocab the descriptor lacks; not on every dispatch. Which verbs you may "
             "run and what params each one binds come from `list_verbs`, not from either file — "
             "but the VALUES a param accepts (an enum, a clamp, a timestamp format) are still "
             "the execution surface's to state. "
-            f"{_execution_surface(deps.knowledge, request.system)}\n\n"
+            f"{_execution_surface(deps.knowledge, request.system, view)}\n\n"
             f"{catalog}\n"
         )
-    index = _template_index(deps.defender_dir, request.system, verb_grant)
+    index = _template_index(deps.defender_dir, request.system, verb_grant, view=view)
     if index.text:
         block += _INDEX_HEADER + index.text + "\n"
     else:
@@ -242,8 +276,8 @@ def _gather_prompt(
     ) or "  - (unspecified)"
     block += (
         "\n## Dispatch\n```yaml\n"
-        f"defender_dir: {deps.defender_dir}\n"
-        f"run_dir: {deps.run_dir}\n"
+        f"defender_dir: {view.to_model(deps.defender_dir)}\n"
+        f"run_dir: {view.to_model(deps.run_dir)}\n"
         f"lead_id: {request.lead_id}\n"
         f"system: {request.system}\n"
         f"goal: {_yaml_scalar(request.goal, '  ')}\n"
@@ -311,7 +345,7 @@ def _tool_template_search(deps: AgentDeps, pattern: str, system: str | None = No
         shown = matched[:_SEARCH_LINES_PER_TEMPLATE]
         dropped += len(matched) - len(shown)
         hit = "\n".join(
-            [_locator(deps.defender_dir, t), *(f"    {ln}" for ln in shown)]
+            [_locator(deps.defender_dir, t, deps.view), *(f"    {ln}" for ln in shown)]
         )
         (untrusted if permission.is_untrusted_read(t.path) else trusted).append(hit)
 
@@ -440,10 +474,10 @@ def _compose(
     return ending.terminator, f"{ending.notice}\n\n{body}"
 
 
-async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gather run can end
+async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except arm per way a gather run can end
     deps: AgentDeps, gather_factory: GatherFactory, request_limit: int, request: GatherRequest,
     verb_grant: VerbGrant, stamp_terminator: Callable[[str, str], None] | None = None,
-    *, catalog: str | None, pre_claimed: bool = False,
+    *, catalog: SystemIndex | None, pre_claimed: bool = False,
     on_end: Callable[[Any], None] | None = None,
 ) -> str:
     """Run one gather lead and return main's wrapped result.
@@ -457,7 +491,8 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
     supplies it because the session is opened inside the factory. `None` skips stamping.
 
     `catalog` is the descriptor index, built once at run start so an unreadable adapters tree
-    fails there rather than mid-tool. `None` means no index to show.
+    fails there rather than mid-tool, and rendered here with the systems down NOW marked
+    (#1256). `None` means no index to show.
 
     The `except` arms are one per way a gather run can end: three faults degrade the lead into
     a notice, two run-level ends pass through. A harness stop is not an exception: a guard's
@@ -488,6 +523,14 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
             "the leads-table row's own text and the whole of what gather is dispatched to "
             "measure. Re-dispatch this same lead_id with the goal spelled out."
         )
+    # The dispatch gate: a system down for this run — not configured or its adapter broken at
+    # start, an escaped config fault, or tripped since — is refused here, before its lead is
+    # claimed (#1256 O-1, O-4, O-6): a refused dispatch writes no lead record, consumes no id
+    # and starts no gather.
+    refused = system_status.refusal_if_down(run_state_of(deps), system)
+    if refused is not None:
+        return refused
+
     # Harness-reserved leads are claimed at run start; re-claiming would raise a `ModelRetry`
     # with no model in the loop to retry it.
     if not pre_claimed:
@@ -502,10 +545,6 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
             raise LeadRecordFault(
                 f"lead {lead_id!r} could not be claimed: the run's leads table could not be "
                 "written")
-
-    state = run_state_of(deps)
-    if circuit_breaker.is_tripped(state, system):
-        return circuit_breaker.down_message(state, system)
 
     from defender.runtime.agent_definition import RunScope, bind
     from defender.runtime.driver import gather_def_for
@@ -535,7 +574,11 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
         tenant=deps.tenant,
         harness_lead=getattr(deps, "harness_lead", False),
     )
-    prompt = _gather_prompt(deps, request, catalog, verb_grant)
+    # The index as it stands now: a system downed since the start (an escaped config fault, a
+    # trip) is marked in it (#1256).
+    index = None if catalog is None else catalog.render(
+        system_status.down_notes(run_state_of(deps), catalog.systems))
+    prompt = _gather_prompt(deps, request, index, verb_grant)
 
     def stamp(terminator: str | None) -> None:
         if terminator is not None and stamp_terminator is not None:
@@ -581,6 +624,14 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
         # Run-level abort: passes through; the driver stamps the main session likewise.
         stamp(session_store.TRUNCATED_BY_ABORTED)
         raise
+    except (providers.ProviderDown, BaseExceptionGroup) as ended:
+        # The provider stayed down (#1243), bare or inside an exception group: ends the run,
+        # this lead stamped so its session doesn't read as finished. Any other group
+        # propagates as it did.
+        if carried_unless_overridden(
+                ended, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
+            stamp(session_store.TRUNCATED_BY_PROVIDER_DOWN)
+        raise
     except run_end.CallRecordWriteFailed as failed:
         # A call record could not be written (A12): the run ends, this lead with it, stamped
         # with the record that failed; the driver stamps the main session likewise.
@@ -603,7 +654,7 @@ async def _run_gather(  # noqa: C901, PLR0913 — one except arm per way a gathe
 
 def register_gather_tool(
     main_agent, gather_factory: GatherFactory, request_limit: int, verb_grant: VerbGrant,
-    stamp_terminator: Callable[[str, str], None] | None = None, *, catalog: str | None,
+    stamp_terminator: Callable[[str, str], None] | None = None, *, catalog: SystemIndex | None,
 ) -> None:
 
     @main_agent.tool

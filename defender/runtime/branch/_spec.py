@@ -27,10 +27,10 @@ class BranchError(Exception):
 
 @model(frozen=True)
 class BranchSpec:
-    """One resume: which run, which message, and what to say on arrival.
+    """One resume: which run, and which of its MAIN responses to fork at.
 
-    `continuation_prompt` is a parameter because its wording biases the run (e.g. toward
-    closing over gathering); it is part of the measured instrument, owned by the caller.
+    It carries nothing to say on arrival (#1255 D1, P4): an arm resumes with no user message,
+    so the instrument adds nothing to the model's input that a natural run would not get.
 
     `as_of` is the branch point's own moment. Required, not defaulted to "now", which would
     stamp every sibling's payloads with execution time. `validate` refuses a value that
@@ -39,7 +39,6 @@ class BranchSpec:
 
     source_run_dir: Path
     branch_message_id: int
-    continuation_prompt: str
     as_of: datetime
 
     # Type-check every field before pydantic does and raise `BranchError`, the class callers
@@ -68,8 +67,6 @@ _WHY: dict[str, str] = {
     "source_run_dir": "a spelling of a path is not the path the store is opened from",
     "branch_message_id":
         "a branch point is a message id this run's own store holds, not a spelling of one",
-    "continuation_prompt":
-        "the prompt is part of the measured instrument and has to be the text that was sent",
     "as_of": "a branch point without a moment cannot pin the clock its siblings resume into",
 }
 

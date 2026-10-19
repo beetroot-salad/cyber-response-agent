@@ -13,7 +13,7 @@ from uuid import uuid4
 from defender._model import model
 from defender._text import is_content_less
 from defender._untrusted import wrap
-from defender._knowledge import CHECKOUT_KNOWLEDGE, LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
 from defender.learning.author import shared as _shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring
@@ -78,15 +78,6 @@ _CORPUS_AUTHOR_DENY_REASON = (
     "and rm's a single draft it promotes or discards — no WRITES outside the corpus, and no "
     "arbitrary shell."
 )
-
-_CORPUS_REPAIR_DENY_REASON = (
-    "Blocked: the repair spawn rewrites the lesson file(s) the forward check refused (one "
-    "spawn covers every BAD pair this tick, however many files that spans), keeping their "
-    "citations — write only, no bash, no rm. Its whole input is the BAD pair(s) it was "
-    "handed (each file's current text and the verifier's reasoning); the drain re-checks "
-    "whatever it writes."
-)
-
 
 # The shipped lesson corpora: the curator's read confine and, since `bind` refuses a corpus
 # name outside the confine, also its corpus-name membership set. Sorted from the author-side
@@ -160,35 +151,6 @@ class CuratorDeps(AgentDeps):
             box=box,
         )
         assert isinstance(deps, CuratorDeps)
-        return deps
-
-
-@model(frozen=True)
-class CorpusRepairDeps(AgentDeps):
-    """The repair spawn's deps — a separate type from `CuratorDeps` because `run_stage`
-    resolves the `AgentDefinition` by `deps_type.role`, not from the definition `bind` got, so
-    the restricted toolset only applies under a distinct role."""
-
-    role: ClassVar[AgentRole] = AgentRole.CORPUS_REPAIR
-
-    @property
-    def corpus_dir(self) -> Path:
-        assert self.roots is not None
-        assert self.roots.corpus_dir is not None
-        return self.roots.corpus_dir
-
-    @classmethod
-    def for_run(cls, run_dir: Path, repo_root: Path, corpus_dir: Path, *, box: Any) -> CorpusRepairDeps:
-        defender_dir = repo_root / "defender"
-        scope = RunScope(
-            corpus_name=corpus_dir.name,
-            read_confine=lesson_read_confine(defender_dir),
-        )
-        deps = bind(
-            CORPUS_REPAIR_DEF, run_dir, scope=scope, defender_dir=defender_dir,
-            box=box,
-        )
-        assert isinstance(deps, CorpusRepairDeps)
         return deps
 
 
@@ -290,72 +252,3 @@ def run_curator_stage(
         raise AuthorError(
             f"curator ({batch_id}) AUTHOR_RESULT JSON invalid: {e}\n{body}"
         ) from e
-
-
-CORPUS_REPAIR_DEF = AgentDefinition(
-    role=AgentRole.CORPUS_REPAIR,
-    model=config.author_model,
-    effort=config.author_effort(),
-    tools=ToolSet(write=True, lesson_read=True),
-    write_shapes=(_corpus_author_write_shapes,),
-    deps_cls=CorpusRepairDeps,
-    requires_confine=True,
-    requires_explicit_tree=True,
-    anchors_on_tree=True,
-    requires_corpus=True,
-    read_allow_override=PathShapes(),
-    deny_reason=_CORPUS_REPAIR_DENY_REASON,
-)
-
-
-def _run_repair_pydantic(
-    wiring: StageWiring,
-    ctx: StageContext,
-    *,
-    corpus_dir: Path,
-    make_model: MakeModel = providers.build_for_effort,
-) -> str:
-    repo_root = ctx.repo_root
-    if repo_root is None:
-        raise ValueError(
-            "repair stage needs ctx.repo_root: it binds a corpus off the repo tree"
-        )
-    deps = CorpusRepairDeps.for_run(ctx.learning_run_dir, repo_root, corpus_dir, box=ctx.box)
-    return run_stage(
-        stage="repair", wiring=wiring, ctx=ctx, deps=deps,
-        make_model=make_model, require_output=False,
-    )
-
-
-def run_repair_stage(
-    *,
-    wiring: StageWiring,
-    ctx: StageContext,
-    corpus_dir: Path,
-    log: logging.Logger,
-    run_repair: Callable[..., str] = _run_repair_pydantic,
-) -> dict:
-    """The one bounded repair spawn: like `run_curator_stage` minus AUTHOR_RESULT parsing —
-    the drain re-reads the tree rather than trusting the return value."""
-    batch_id = wiring.batch_id
-    if batch_id is None:
-        raise ValueError(
-            "repair stage needs a wiring built by StageWiring.for_batch"
-        )
-    log.info(
-        f"spawn repair {batch_id} in-process (model={wiring.model}, "
-        f"effort={wiring.effort}, timeout={ctx.wall_clock_timeout}s)"
-    )
-    stage_salt = ctx.salt if ctx.salt is not None else uuid4().hex
-    user_prompt = ctx.user
-    if f"<run-{stage_salt}-" not in user_prompt:
-        user_prompt = stage_user_message(
-            stage_salt, wrap(user_prompt, "repair_pairs", stage_salt)
-        )
-    try:
-        text = run_repair(
-            wiring, replace(ctx, user=user_prompt, salt=stage_salt), corpus_dir=corpus_dir,
-        )
-    except RunUnprocessable as e:
-        raise AuthorError(f"repair ({batch_id}) did not complete: {e}") from e
-    return {"text": text}

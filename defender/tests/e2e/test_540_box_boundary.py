@@ -1,83 +1,4 @@
-"""#540 — the isolation boundary, as an executable spec.
-
-The demands this file discharges (see `spec-flow/specs/spec_graph_540.yaml`):
-
-* **O1 / O5 / O6 — filesystem.** Every host path that is not `run_dir` or
-  `defender_dir` is *absent* from inside the box, not denied; `defender_dir` is
-  readable and importable but EROFS on write; `run_dir` is the one writable
-  directory and its bytes reach the host with no copy step.
-* **O2 — network.** No outbound connection of any family reaches any
-  destination, DNS does not resolve, and the failure is a *bare* `OSError`
-  asserted by errno. Loopback between two boxed processes stays permitted.
-* **O3 — secrets.** The box environment is a positive allowlist; no host secret
-  crosses. `run_common.run_env`'s provider-key strip still governs HOST-side
-  subprocesses — the two are different mechanisms and must not be conflated.
-* **O4 — structural, not the matcher.** The boundary holds for commands the
-  real `decide_bash` DENIES: the mount list and the network mode are the
-  enforcement, so a gate that approved everything would change nothing.
-* **O14 / F3 — the knob and the tmpfs.** `BoxSpec` carries runtime + rootfs +
-  lifecycle behind one env var; the boundary holds at the `runc` FLOOR as well
-  as under `runsc`; `/tmp` is noexec and size-capped; the rw bind stays
-  exec-able; the granted repertoire and the `defender` namespace package both
-  work inside the box.
-
-**This file is RED BY CONSTRUCTION.** `defender.runtime.box` does not exist —
-there is zero sandbox code in the tree at base. The failing import IS the
-expected red; do not add a skeleton module to make it resolve.
-
-**Seams this spec requires of the target** (fakes never enter by monkeypatch —
-`scripts/lint/lint_monkeypatch.py` is a blocking gate):
-
-* `start_box(run_dir, defender_dir, *, spec=BoxSpec()) -> BoxExecutor`
-* `BoxExecutor.run_parsed(pipelines, *, command, cwd, timeout) -> BoxResult`
-  — the same `Pipeline` list `bash_exec.parse` produces (M8: no second parse),
-  returning the `BoxResult(rc, out: bytes, err: bytes)` dataclass, never a tuple.
-* `stop_box(box)`
-* `BoxSpec.from_env(mapping)` — the ONE external lever (F1).
-* `BOX_ENV_ALLOWLIST` — the positive env allowlist (F7), owned by the target so
-  this file asserts against the shipped value rather than a copy of it.
-
-**Environment honesty.** Every test here drives a real Docker daemon and starts
-a real box. This file used to skip WHOLESALE under docker-outside-of-Docker:
-bind SOURCES resolve in the daemon's namespace, so `source=<a path this process
-can see>` named nothing there, F8's startup sentinel could not pass, and a bind
-assertion would have been asserting against a filesystem it could not see
-(ledger E2 / claim `C_dood`, corroborated by C46: an absent bind source is
-silently created EMPTY, with no error at any stage).
-
-`box.py` now translates the bind source through this container's own mount
-table, so the topology is testable and the blanket skip is retired — which
-matters, because DooD is the topology the C46 fix exists for and the one no test
-covered. Two conditions replace it:
-
-* the run dirs move off pytest's `tmp_path` (a private `/tmp` the daemon cannot
-  resolve) onto the repo's gitignored `.defender-runs/`. That tree is *provably*
-  shared with the daemon: `defender_dir` is bound out of it, so if it were not,
-  no box could start at all;
-* if even that is uncovered, the topology genuinely cannot be observed from here
-  and the file skips with that reason.
-
-Separately, the file skips when the daemon does not register the runtime the F1
-lever resolves to — every box below would fail at create on a missing runtime,
-which says nothing about the boundary. That is not a hole CI can fall into: the
-gVisor install step there hard-fails unless `runsc` is registered.
-
-On a native daemon (CI's `ubuntu-latest` included) nothing changes: the mount
-table is empty, the translation is the identity, and `tmp_path` is used as
-before.
-
-Not asserted here, deliberately:
-
-* **C41** (artifacts land root-owned on the host) — architecturally unprobeable
-  from a DooD sandbox and recorded `deferred`, not `holds`.
-* **The DNS errno value** — `C56_dns_eai_again` is `deferred`: this sandbox has
-  live egress and observed `-2`, not `-3`. Only the *shape* (`socket.gaierror`)
-  is asserted, and no errno name is ever looked up in `errno.errorcode`, which
-  contains neither `-2` nor `-3` (C56d).
-* **A positive control for `test_no_unix_socket_is_mounted_into_the_box`** —
-  waived in the graph (`w_no_socket_positive_control`): building one would mean
-  mounting a socket into the box, the exact thing the negative forbids.
-"""
+"""#540 — the box isolation boundary against a real Docker daemon: host paths absent, defender_dir read-only, no network, env allowlist, tmpfs noexec, boundary holds for commands the gate denies and under both runc and runsc."""
 from __future__ import annotations
 
 import contextlib
@@ -93,20 +14,20 @@ import uuid
 from pathlib import Path
 
 import pytest
-from defender.tests._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
+from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 
 pytest.importorskip("pydantic_ai")
 
 from defender.run_common import run_env  # noqa: E402
 from defender.runtime import providers  # noqa: E402
 from defender.runtime.agent_definition import compile_policy_for  # noqa: E402
-from defender.runtime.bash_exec import parse  # noqa: E402
+from defender.execution.bash_exec import parse  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.permission.bash import decide_bash  # noqa: E402
 from defender.tests.e2e._replay_harness import DEFENDER  # noqa: E402
 
-from defender.runtime import box as box_mod  # noqa: E402
-from defender.runtime.box import (  # noqa: E402
+from defender import box as box_mod  # noqa: E402
+from defender.box import (  # noqa: E402
     BOX_ENV_ALLOWLIST,
     BoxResult,
     BoxSpec,
@@ -117,7 +38,6 @@ from defender.runtime.box import (  # noqa: E402
 pytestmark = pytest.mark.e2e
 
 EXEC_TIMEOUT = 60.0
-
 
 
 _NO_DAEMON = not daemon_reachable()
@@ -133,11 +53,6 @@ requires_box = pytest.mark.skipif(
     _NO_DAEMON or (_DOOD and _DOOD_ANCHOR is None) or _RUNTIME_ABSENT,
     reason=(
         "no reachable Docker daemon" if _NO_DAEMON else
-        # Not a silent hole: `.github/workflows/ci.yml` hard-fails its gVisor step unless the
-        # daemon registers runsc, so CI cannot reach this branch by accident. It exists for a
-        # dev host whose daemon has only runc — where every box below would otherwise fail at
-        # create on a missing runtime, which says nothing about the boundary. Set
-        # DEFENDER_BOX_RUNTIME=runc to run the suite at the floor instead (F1).
         f"the {_LEVERED_RUNTIME!r} runtime is not registered with this daemon (`docker info` "
         "Runtimes), so no box here can start at all" if _RUNTIME_ABSENT else
         "docker-outside-of-Docker AND no path this container shares with the daemon covers "
@@ -147,17 +62,9 @@ requires_box = pytest.mark.skipif(
 )
 
 
-
 @pytest.fixture
 def runs_base(tmp_path: Path):
-    """The runs base every run dir in this file hangs off.
-
-    `tmp_path` on a native daemon — a private per-test tree, as before. Under DooD that tree
-    is invisible to the daemon, so the base moves under the repo's gitignored
-    `.defender-runs/` (see `_docker.dood_anchor`), still one fresh directory per test and still
-    removed afterwards. It is deliberately NOT the run dir's parent-as-mount: the runs base
-    stays unmounted either way, which is what `test_another_runs_run_dir_is_absent` and
-    `test_box_env_contains_exactly_the_allowlist` assert against."""
+    """The runs base every run dir in this file hangs off."""
     if _DOOD_ANCHOR is None:
         yield tmp_path / "defender-runs"
         return
@@ -166,9 +73,6 @@ def runs_base(tmp_path: Path):
     try:
         yield base
     finally:
-        # ignore_errors: the box writes through the rw bind as root (C41), so on a non-root
-        # host some artifacts are not ours to unlink. Residue is gitignored, and failing a
-        # passing boundary test on a cleanup permission bit would be the wrong signal.
         shutil.rmtree(base.parent, ignore_errors=True)
 
 
@@ -179,7 +83,7 @@ def run_dir(runs_base: Path) -> Path:
     escape test try to reach — a live neighbour, not an imagined one)."""
     d = runs_base / "20260718T101500Z-boxspec"
     (d / "gather_raw").mkdir(parents=True)
-    from defender.tests._alert_plant import plant_alert
+    from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(d, {"id": "boxspec"})
     return d
 
@@ -218,11 +122,13 @@ def _run(box, command: str, *, cwd: Path) -> BoxResult:
 
 
 def _write_probe(run_dir: Path, name: str, source: str) -> Path:
-    """Plant a probe script on the rw bind. The bytes are written HERE, by the
+    """Plant a probe script on the rw bind and return its model-visible path.
+
+    The bytes are written HERE, by the
     test, through the real filesystem — the fault (or the capability) is real."""
     script = run_dir / f"_probe_{name}.py"
     script.write_text(source, encoding="utf-8")
-    return script
+    return Path("/runs/current") / script.name
 
 
 def _probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
@@ -231,10 +137,9 @@ def _probe(box, run_dir: Path, name: str, source: str, *args: str) -> dict:
     the errno and the exact class — never on an exception subclass (C56)."""
     script = _write_probe(run_dir, name, source)
     argv = " ".join([f"python3 {script}", *args])
-    res = _run(box, argv, cwd=run_dir)
+    res = _run(box, argv, cwd=Path("/runs/current"))
     assert res.rc == 0, f"probe {name} did not complete: rc={res.rc} err={res.err!r}"
     return json.loads(res.out.decode("utf-8"))
-
 
 
 _TCP_CONNECT = '''
@@ -339,7 +244,7 @@ print(json.dumps(dict(os.environ)))
 _IMPORT_DEFENDER = '''
 import json
 import defender.hooks._cmd_segments as seg
-import defender.runtime.bash_exec as be
+import defender.execution.bash_exec as be
 print(json.dumps({"seg": seg.__file__, "bash_exec": be.__file__}))
 '''
 
@@ -378,7 +283,6 @@ try:
 except OSError as e:
     print(json.dumps({"written": written, "exc": type(e).__name__, "errno": e.errno}))
 '''
-
 
 
 def _host_ipv4() -> str:
@@ -420,14 +324,8 @@ def _echo_listener():
         t.join(timeout=5)
 
 
-
 @requires_box
 def test_host_path_outside_the_binds_is_absent(box, run_dir, tmp_path):
-    """A host path that is neither `run_dir` nor `defender_dir` is ABSENT from
-    inside the box, not denied: opening it fails ENOENT — the errno of a path
-    that does not exist — rather than EACCES/EPERM, because nothing mounted it.
-    The write set and the read set are the mount list, so a path outside both
-    has no name inside the box at all."""
     outside = tmp_path / "outside" / "host-only-secret.txt"
     outside.parent.mkdir()
     outside.write_text("HOST-ONLY-SECRET-99", encoding="utf-8")
@@ -440,7 +338,7 @@ def test_host_path_outside_the_binds_is_absent(box, run_dir, tmp_path):
         "path means something mounted it and a matcher refused, which is not the boundary"
     )
     assert "HOST-ONLY-SECRET-99" not in _run(
-        box, f"cat {outside}", cwd=run_dir).out.decode("utf-8", "replace")
+        box, f"cat {outside}", cwd=Path("/runs/current")).out.decode("utf-8", "replace")
 
 
 @pytest.mark.skipif(not _DOOD, reason="not docker-outside-of-Docker — there is no "
@@ -448,14 +346,6 @@ def test_host_path_outside_the_binds_is_absent(box, run_dir, tmp_path):
                                       "identity and this asserts nothing")
 @requires_box
 def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
-    """C46, on the topology it exists for. Under DooD `source=` and `target=` must DIVERGE:
-    the daemon resolves the source in its own namespace while every downstream reader
-    (artifacts, orient's workspace map, `raw_command`) keeps the target this process uses.
-
-    The `box` fixture already started, which means F8's startup sentinel round-tripped a
-    token through the real bind — the divergence below is therefore a working mapping, not
-    merely a different string. Both halves matter: the source alone could be right by
-    accident on a pass-through mount, and the target alone was never broken."""
     mounts = box_mod._shared_mounts(box_mod._docker)
     argv = box_mod._create_argv(box.name, run_dir, DEFENDER, box.spec, mounts).argv
     binds = [
@@ -463,9 +353,9 @@ def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
         for spec in argv if spec.startswith("type=bind,")
     ]
     by_target = {b["target"]: b["source"] for b in binds}
-    for target in (run_dir, DEFENDER):
+    for target, host in ((Path("/runs/current"), run_dir), (Path("/defender"), DEFENDER)):
         assert str(target) in by_target, f"{target} is not bound at all: {by_target}"
-        assert by_target[str(target)] != str(target), (
+        assert by_target[str(target)] != str(host), (
             f"the bind source for {target} was not translated: {by_target} — under DooD an "
             "untranslated source names nothing on the daemon and is silently created as an "
             "EMPTY dir (C46)"
@@ -473,24 +363,21 @@ def test_the_bind_source_is_translated_for_the_daemons_namespace(box, run_dir):
 
     host_bytes = b"C46-ROUND-TRIP-\xe2\x9c\x93\n"
     (run_dir / "c46.txt").write_bytes(host_bytes)
-    got = _probe(box, run_dir, "c46", _READ_PATH, str(run_dir / "c46.txt"))
+    got = _probe(box, run_dir, "c46", _READ_PATH, "/runs/current/c46.txt")
     assert got["read"] == host_bytes.decode("utf-8"), (
         f"the translated bind did not map the host tree: {got}")
 
 
 @requires_box
 def test_run_dir_and_defender_dir_are_readable_in_box(box, run_dir):
-    """Both binds ARE readable from inside the box: bytes the host wrote into
-    `run_dir` and a real file under `defender_dir` both read back byte-exact.
-    This is the positive control for the absence assertions — without it, every
-    'the box cannot see it' result is equally green on a box that can see
-    nothing at all, including its own mounts."""
+    """Both binds ARE readable from inside the box: bytes the host wrote into `run_dir` and a
+    real file under `defender_dir` both read back byte-exact."""
     host_bytes = b"RUN-DIR-SENTINEL-\xe2\x9c\x93\n"
     (run_dir / "sentinel.txt").write_bytes(host_bytes)
     skill = DEFENDER / "SKILL.md"
 
-    got_run = _probe(box, run_dir, "readrun", _READ_PATH, str(run_dir / "sentinel.txt"))
-    got_defender = _probe(box, run_dir, "readdef", _READ_PATH, str(skill))
+    got_run = _probe(box, run_dir, "readrun", _READ_PATH, "/runs/current/sentinel.txt")
+    got_defender = _probe(box, run_dir, "readdef", _READ_PATH, "/defender/SKILL.md")
 
     assert got_run["read"] == host_bytes.decode("utf-8")
     assert got_defender["read"] == skill.read_text(encoding="utf-8")
@@ -498,18 +385,15 @@ def test_run_dir_and_defender_dir_are_readable_in_box(box, run_dir):
 
 @requires_box
 def test_write_under_defender_dir_fails_erofs_by_errno(box, run_dir):
-    """A write to any path under `defender_dir` fails EROFS: the ro bind is the
-    enforcement, so a hijacked agent cannot poison its own corpus, skills, or
-    lessons. The fault is a BARE `OSError` — asserted by `errno`, and by
-    `type(e) is OSError` exactly, because EROFS has no `PermissionError`
-    subclass (C56a)."""
+    """A write to any path under `defender_dir` fails EROFS: the ro bind is the enforcement, so a
+    hijacked agent cannot poison its own corpus, skills, or lessons."""
     targets = [
         DEFENDER / "lessons" / "poisoned.md",
         DEFENDER / "SKILL.md",
         DEFENDER / "runtime" / "permission" / "bash.py",
     ]
     for i, target in enumerate(targets):
-        res = _probe(box, run_dir, f"erofs{i}", _WRITE_PATH, str(target))
+        res = _probe(box, run_dir, f"erofs{i}", _WRITE_PATH, str(Path("/defender") / target.relative_to(DEFENDER)))
         assert res["wrote"] is False, f"the box wrote into the ro bind at {target}"
         assert res["errno"] == errno_mod.EROFS, f"{target}: errno={res['errno']}"
         assert res["exc"] == "OSError", (
@@ -520,23 +404,15 @@ def test_write_under_defender_dir_fails_erofs_by_errno(box, run_dir):
 
 @requires_box
 def test_defender_dir_imports_from_the_ro_bind(box, run_dir):
-    """The ro bind is not merely present but USABLE: real defender modules import
-    from it inside the box and resolve to files under the mount. This is the
-    positive control for the EROFS assertion — read-only means read-ONLY, not
-    unreachable."""
     res = _probe(box, run_dir, "roimport", _IMPORT_DEFENDER)
 
     for key in ("seg", "bash_exec"):
-        assert res[key].startswith(str(DEFENDER)), (
+        assert res[key].startswith("/defender/"), (
             f"{key} imported from {res[key]!r}, not from the ro bind at {DEFENDER}")
 
 
 @requires_box
 def test_another_runs_run_dir_is_absent(box, run_dir, sibling_run):
-    """The write set is exactly one directory: a SECOND, live run dir sitting
-    beside this one on the host has no name inside the box. Reading it fails
-    ENOENT and writing into it fails, so one alert's box structurally cannot
-    see — or corrupt — another's scratch."""
     victim = sibling_run / "gather_raw" / "l-001.lead.json"
     assert victim.read_text(encoding="utf-8") == "SIBLING-RUN-SECRET-42"
 
@@ -554,16 +430,13 @@ def test_another_runs_run_dir_is_absent(box, run_dir, sibling_run):
 
 @requires_box
 def test_bytes_written_in_box_appear_on_the_host(box, run_dir):
-    """`run_dir` is the one writable directory and the writable mount IS the
-    exit: bytes a boxed process writes appear on the host as written, with no
-    copy step. Positive control for every filesystem negative above."""
-    written = _probe(box, run_dir, "hostwrite", _WRITE_PATH, str(run_dir / "artifact.bin"))
+    written = _probe(box, run_dir, "hostwrite", _WRITE_PATH, "/runs/current/artifact.bin")
     assert written["wrote"] is True, written
     assert (run_dir / "artifact.bin").read_bytes() == b"box-was-here"
 
     raw = (
         "import json, os\n"
-        f"d = {str(run_dir / 'gather_raw' / 'l-042')!r}\n"
+        "d = '/runs/current/gather_raw/l-042'\n"
         "os.makedirs(d, exist_ok=True)\n"
         "fd = os.open(os.path.join(d, '1.json'), os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o644)\n"
         "n = os.write(fd, b'{\"seq\": 1}')\n"
@@ -576,11 +449,6 @@ def test_bytes_written_in_box_appear_on_the_host(box, run_dir):
 
 @requires_box
 def test_dotdot_operand_cannot_name_a_sibling_run(box, run_dir, sibling_run):
-    """A `..` operand from the box's cwd cannot name a sibling run: `run_dir` is
-    the mount point, so its parent is not mounted and the escape resolves to a
-    path that is absent rather than to another run's artifacts. The same operand
-    is DENIED host-side by the real gate — the box makes the escape absent, the
-    gate makes it refused, and neither alone is the claim."""
     escape = f"../{sibling_run.name}/gather_raw/l-001.lead.json"
 
     policy = compile_policy_for(MAIN_DEF, run_dir, defender_dir=DEFENDER)
@@ -588,19 +456,14 @@ def test_dotdot_operand_cannot_name_a_sibling_run(box, run_dir, sibling_run):
                            defender_dir=DEFENDER)
     assert decision.allow is False, "the host-side gate should refuse the .. escape"
 
-    res = _run(box, f"cat {escape}", cwd=run_dir)
+    res = _run(box, f"cat {escape}", cwd=Path("/runs/current"))
     combined = (res.out + res.err).decode("utf-8", "replace")
     assert "SIBLING-RUN-SECRET-42" not in combined, combined
     assert res.rc != 0, "the .. escape resolved to something readable"
 
 
-
 @requires_box
 def test_no_outbound_tcp_connect_succeeds(box, run_dir):
-    """No outbound TCP connection reaches any destination: a connect to a REAL
-    listener that is up and accepting on this host fails from inside the box,
-    and the listener records no connection. There is no permitted peer, not a
-    restricted one."""
     with _echo_listener() as (host, port, accepted):
         res = _probe(box, run_dir, "tcp", _TCP_CONNECT, host, str(port))
 
@@ -612,9 +475,6 @@ def test_no_outbound_tcp_connect_succeeds(box, run_dir):
 
 @requires_box
 def test_no_outbound_ipv6_connect_succeeds(box, run_dir):
-    """The absent network is family-agnostic: an IPv6 connect fails from inside
-    the box exactly as the IPv4 one does — closing the other half of the address
-    space rather than only the one the tests happened to use first."""
     res = _probe(box, run_dir, "tcp6", _TCP6_CONNECT, "fc00::1", "80")
 
     assert res["connected"] is False, res
@@ -624,9 +484,6 @@ def test_no_outbound_ipv6_connect_succeeds(box, run_dir):
 
 @requires_box
 def test_no_udp_sendto_reaches_a_destination(box, run_dir):
-    """No datagram leaves the box either: a `sendto` at a REAL bound UDP socket
-    on this host does not arrive. The boundary is the absence of a route, not a
-    connection-oriented check that a connectionless protocol would slip past."""
     rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     rx.bind(("0.0.0.0", 0))
     rx.settimeout(3)
@@ -644,10 +501,6 @@ def test_no_udp_sendto_reaches_a_destination(box, run_dir):
 
 @requires_box
 def test_dns_resolution_fails_from_inside_the_box(box, run_dir):
-    """Name resolution does not work inside the box: a hostname that resolves on
-    this host raises `socket.gaierror` in the box. Only the shape is asserted —
-    the EAI_* value is `deferred` in the ledger, and no errno name is looked up,
-    because `errno.errorcode` contains neither -2 nor -3 (C56d)."""
     hostname = "example.com"
     try:
         socket.getaddrinfo(hostname, 80)
@@ -664,11 +517,8 @@ def test_dns_resolution_fails_from_inside_the_box(box, run_dir):
 
 @requires_box
 def test_the_same_egress_attempt_succeeds_outside_the_box(tmp_path):
-    """THE control for the whole network family: the exact same probe source,
-    aimed at the exact same address, connects and round-trips its bytes when run
-    OUTSIDE the box. Without it every 'no connection' assertion above is equally
-    green on a broken observation channel — a probe that never ran, a listener
-    that never listened, an errno nobody produced."""
+    """THE control for the whole network family: the exact same probe source, aimed at the exact
+    same address, connects and round-trips its bytes when run OUTSIDE the box."""
     script = tmp_path / "tcp_probe.py"
     script.write_text(_TCP_CONNECT, encoding="utf-8")
 
@@ -687,11 +537,6 @@ def test_the_same_egress_attempt_succeeds_outside_the_box(tmp_path):
 
 @requires_box
 def test_egress_failure_is_a_bare_oserror_asserted_by_errno(box, run_dir):
-    """The egress fault is a BARE `OSError` — `type(e) is OSError` exactly, with
-    no `ConnectionRefusedError`/`PermissionError` subclass to catch — so the only
-    honest assertion is on `e.errno` (C56c: ENETUNREACH surfaced as errno 101 on
-    a plain OSError). A suite that caught a subclass here would be pinning an
-    exception hierarchy the kernel never promised."""
     with _echo_listener() as (host, port, _accepted):
         res = _probe(box, run_dir, "bareerr", _TCP_CONNECT, host, str(port))
 
@@ -704,11 +549,8 @@ def test_egress_failure_is_a_bare_oserror_asserted_by_errno(box, run_dir):
 
 @requires_box
 def test_no_unix_socket_is_mounted_into_the_box(box, run_dir):
-    """No socket is mounted inward: a full walk of the box's filesystem finds no
-    unix socket anywhere outside the kernel pseudo-filesystems. The broker UDS
-    the older design mandated is dead — there is no off-box path at all, not a
-    single narrow one. (Waived without a positive control: building one would
-    mean mounting a socket in, the exact thing this forbids.)"""
+    """No socket is mounted inward: a full walk of the box's filesystem finds no unix socket
+    anywhere outside the kernel pseudo-filesystems."""
     res = _probe(box, run_dir, "socksweep", _SOCKET_SWEEP)
 
     assert res["sockets"] == [], f"a unix socket is reachable inside the box: {res}"
@@ -716,10 +558,6 @@ def test_no_unix_socket_is_mounted_into_the_box(box, run_dir):
 
 @requires_box
 def test_loopback_between_two_boxed_processes_is_permitted(box, run_dir):
-    """Loopback stays IN CONTRACT: two processes inside the box exchange bytes
-    over 127.0.0.1. `lo` is up under `--network=none` and there is no peer
-    outside the box for it to reach, so intra-box IPC survives without widening
-    the egress boundary by anything."""
     res = _probe(box, run_dir, "loopback", _LOOPBACK)
 
     assert res["exc"] is None, res
@@ -727,15 +565,9 @@ def test_loopback_between_two_boxed_processes_is_permitted(box, run_dir):
     assert res["child_rc"] == 0, res
 
 
-
 @requires_box
 def test_no_host_secret_is_present_in_the_box_env(run_dir, monkeypatch):
-    """No host secret crosses into the box. Real secret-shaped variables are set
-    in the host environment before the box is built — the provider keys the
-    driver really holds, plus the credentials the old strip-list inherited
-    (`GITHUB_TOKEN`, `SSH_AUTH_SOCK`, a SIEM password) — and none of their names
-    or VALUES appears anywhere in the box's environment. The env is built
-    positively, so a variable nobody enumerated is absent by construction."""
+    """No host secret crosses into the box."""
     planted = {
         "ANTHROPIC_API_KEY": "sk-ant-boxspec-must-not-cross",
         "FIREWORKS_API_KEY": "fw-boxspec-must-not-cross",
@@ -757,11 +589,6 @@ def test_no_host_secret_is_present_in_the_box_env(run_dir, monkeypatch):
 
 @requires_box
 def test_box_env_contains_exactly_the_allowlist(box, run_dir):
-    """The tenant-free fixture carries the required box allowlist keys plus what the
-    container runtime injects. The optional `DEFENDER_AGENT_DIR` is absent because
-    this box has no tenant agent mount. `DEFENDER_RUNS_BASE` names
-    `run_dir.parent`, which is NOT mounted — so the box is told where runs live
-    and still cannot reach them."""
     daemon_injected = {"HOSTNAME", "HOME", "PWD", "SHLVL", "_", "OLDPWD", "TERM"}
 
     box_env = _probe(box, run_dir, "envexact", _ENV_DUMP)
@@ -770,21 +597,17 @@ def test_box_env_contains_exactly_the_allowlist(box, run_dir):
     assert set(box_env) - daemon_injected == expected, (
         f"box env is {sorted(box_env)}; expected is {sorted(expected)}")
     assert "DEFENDER_AGENT_DIR" not in box_env
-    assert box_env["DEFENDER_RUN_DIR"] == str(run_dir)
-    assert box_env["DEFENDER_RUNS_BASE"] == str(run_dir.parent)
+    assert box_env["DEFENDER_RUN_DIR"] == "/runs/current"
+    assert box_env["DEFENDER_RUNS_BASE"] == "/runs"
 
-    unreachable = _probe(box, run_dir, "runsbase", _READ_PATH, box_env["DEFENDER_RUNS_BASE"])
-    assert unreachable["read"] is None, "DEFENDER_RUNS_BASE names a mounted path"
+    siblings = _probe(box, run_dir, "runsbase",
+                      'import json, os; print(json.dumps({"entries": os.listdir("/runs")}))')
+    assert siblings["entries"] == ["current"], "the model runs parent exposes sibling runs"
 
 
 def test_run_env_provider_key_strip_still_governs_host_subprocesses(
     tmp_path, monkeypatch,
 ):
-    """`run_env`'s provider-key strip is untouched by the box and still governs
-    HOST-side subprocesses: every billable key is removed from the environment a
-    host subprocess inherits, while unrelated variables still pass through. The
-    box's positive allowlist and this strip are two different mechanisms on two
-    different surfaces — this test fails if the box work collapses them."""
     keys = sorted(providers.api_key_vars())
     assert keys, "api_key_vars() is empty — nothing to strip, so this survival test is vacuous"
     for var in keys:
@@ -800,17 +623,9 @@ def test_run_env_provider_key_strip_still_governs_host_subprocesses(
     assert env["DEFENDER_RUN_DIR"] == str(tmp_path / "run")
 
 
-
 @requires_box
 def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibling_run,
                                                               tmp_path):
-    """O1-O3 hold regardless of what the model emits and regardless of what the
-    in-process gate decides: every command below is DENIED by the real
-    `decide_bash`, and is then executed through the box anyway — a gate that
-    approved all of them would change nothing, because the enforcement is the
-    mount list and the network mode, not a matcher. The host path stays absent,
-    the ro bind stays EROFS, the sibling run stays unreadable, and no connection
-    leaves."""
     outside = tmp_path / "outside-secret.txt"
     outside.write_text("O4-HOST-SECRET", encoding="utf-8")
     policy = compile_policy_for(MAIN_DEF, run_dir, defender_dir=DEFENDER)
@@ -826,7 +641,7 @@ def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibl
         decision = decide_bash(command, policy=policy, run_dir=run_dir,
                                defender_dir=DEFENDER)
         assert decision.allow is False, f"expected the gate to deny: {command!r}"
-        res = _run(box, command, cwd=run_dir)
+        res = _run(box, command, cwd=Path("/runs/current"))
         text = (res.out + res.err).decode("utf-8", "replace")
         assert "O4-HOST-SECRET" not in text, command
         assert "SIBLING-RUN-SECRET-42" not in text, command
@@ -837,18 +652,12 @@ def test_boundary_holds_with_decide_bash_approving_everything(box, run_dir, sibl
     assert accepted == []
 
     poison = _probe(box, run_dir, "o4erofs", _WRITE_PATH,
-                    str(DEFENDER / "lessons" / "o4.md"))
+                    "/defender/lessons/o4.md")
     assert poison["errno"] == errno_mod.EROFS, poison
     assert not (DEFENDER / "lessons" / "o4.md").exists()
 
 
-
 def test_boxspec_carries_runtime_rootfs_and_lifecycle():
-    """`BoxSpec` carries all three replaceables — runtime, rootfs and lifecycle
-    — as one dataclass whose default runtime is `runsc`, and ONE env var is the
-    sole external lever: it moves the runtime axis and nothing else, and no other
-    variable moves anything. The lifecycle sits behind the interface rather than
-    being hardcoded to a runtime's cost model."""
     fields = {f.name for f in dataclasses.fields(BoxSpec)}
     assert {"runtime", "rootfs", "lifecycle"} <= fields, fields
 
@@ -872,11 +681,6 @@ def test_boxspec_carries_runtime_rootfs_and_lifecycle():
 @requires_box
 @pytest.mark.parametrize("runtime", ["runc", "runsc"])
 def test_boundary_holds_under_both_runc_and_runsc(run_dir, sibling_run, tmp_path, runtime):
-    """The boundary holds at the `runc` FLOOR as well as under the `runsc`
-    default: outside host paths stay absent, the ro bind stays EROFS, and no
-    connection leaves, under either runtime. v1 is not gated on gVisor — the
-    mount list and `--network=none` are delivered by any Docker host — so
-    nothing here may depend on a runsc-only hardening (M15)."""
     if runtime not in docker_runtimes():
         pytest.skip(f"the {runtime!r} runtime is not registered with this daemon "
                     "(`docker info` Runtimes) — the parity claim is untestable here")
@@ -887,14 +691,14 @@ def test_boundary_holds_under_both_runc_and_runsc(run_dir, sibling_run, tmp_path
     with _box(run_dir, spec=BoxSpec.from_env({BoxSpec.ENV_VAR: runtime})) as b:
         absent = _probe(b, run_dir, f"floor-abs-{runtime}", _READ_PATH, str(outside))
         erofs = _probe(b, run_dir, f"floor-ro-{runtime}", _WRITE_PATH,
-                       str(DEFENDER / "lessons" / "floor.md"))
+                       "/defender/lessons/floor.md")
         sibling = _probe(b, run_dir, f"floor-sib-{runtime}", _READ_PATH,
                          str(sibling_run / "gather_raw" / "l-001.lead.json"))
         with _echo_listener() as (host, port, accepted):
             egress = _probe(b, run_dir, f"floor-net-{runtime}", _TCP_CONNECT, host, str(port))
         (run_dir / "alive.txt").write_text("alive", encoding="utf-8")
         alive = _probe(b, run_dir, f"floor-alive-{runtime}", _READ_PATH,
-                       str(run_dir / "alive.txt"))
+                       "/runs/current/alive.txt")
 
     assert alive["read"] == "alive", f"{runtime}: the box could not read its own rw bind"
     assert absent["read"] is None, absent
@@ -907,10 +711,6 @@ def test_boundary_holds_under_both_runc_and_runsc(run_dir, sibling_run, tmp_path
 
 @requires_box
 def test_a_script_on_the_tmpfs_cannot_execute(box, run_dir):
-    """`/tmp` is noexec: a real executable script written to the tmpfs inside the
-    box, with the execute bit really set, fails to run — model-written code
-    cannot stage an executable there. The failure is the exec permission one
-    (rc=126), not 'command not found'."""
     stage = (
         "import json, os, stat\n"
         "p = '/tmp/staged.sh'\n"
@@ -921,7 +721,7 @@ def test_a_script_on_the_tmpfs_cannot_execute(box, run_dir):
     staged = _probe(box, run_dir, "tmpfsstage", stage)
     assert staged["exists"] is True, "the tmpfs is not even writable — wrong failure"
 
-    res = _run(box, "/tmp/staged.sh", cwd=run_dir)
+    res = _run(box, "/tmp/staged.sh", cwd=Path("/runs/current"))
 
     text = (res.out + res.err).decode("utf-8", "replace")
     assert "staged-ran" not in text, "a script on the tmpfs executed"
@@ -930,15 +730,11 @@ def test_a_script_on_the_tmpfs_cannot_execute(box, run_dir):
 
 @requires_box
 def test_a_script_on_the_rw_bind_executes(box, run_dir):
-    """The rw bind stays exec-able — the positive control for the noexec tmpfs.
-    The identical script, with the identical mode bits, runs from `run_dir`,
-    which cannot be made noexec without breaking artifacts. So rc=126 above is
-    the tmpfs's mount option, not a broken script or a broken box."""
     script = run_dir / "staged.sh"
     script.write_text("#!/bin/sh\necho staged-ran\n", encoding="utf-8")
     script.chmod(0o755)
 
-    res = _run(box, str(script), cwd=run_dir)
+    res = _run(box, "/runs/current/staged.sh", cwd=Path("/runs/current"))
 
     assert res.rc == 0, (res.rc, res.err)
     assert res.out.decode() == "staged-ran\n"
@@ -946,13 +742,6 @@ def test_a_script_on_the_rw_bind_executes(box, run_dir):
 
 @requires_box
 def test_tmpfs_exhaustion_fails_the_run_loudly(run_dir):
-    """The tmpfs is size-capped and exhausting it fails LOUDLY: a boxed process
-    writing past the cap gets ENOSPC as a bare `OSError` (C56b) and a non-zero
-    result, never a silent short write. This is accounting, not a security
-    boundary (TM class 7) — the obligation is that it is loud."""
-    # Overridden off the LEVERED spec, not a bare `BoxSpec()`: the bare constructor pins
-    # runtime=runsc, so on a host whose daemon registers only runc this test failed at create
-    # while every neighbour that goes through `_box`'s env-resolved default passed.
     small = dataclasses.replace(BoxSpec.from_env(os.environ), tmpfs_size="4m")
 
     unguarded = (
@@ -965,7 +754,7 @@ def test_tmpfs_exhaustion_fails_the_run_loudly(run_dir):
     with _box(run_dir, spec=small) as b:
         res = _probe(b, run_dir, "fill", _FILL_TMPFS)
         script = _write_probe(run_dir, "unguarded", unguarded)
-        loud = _run(b, f"python3 {script}", cwd=run_dir)
+        loud = _run(b, f"python3 {script}", cwd=Path("/runs/current"))
 
     assert res["exc"] == "OSError", f"ENOSPC must be a bare OSError (C56b): {res}"
     assert res["errno"] == errno_mod.ENOSPC, res
@@ -976,34 +765,22 @@ def test_tmpfs_exhaustion_fails_the_run_loudly(run_dir):
 
 @requires_box
 def test_defender_namespace_package_imports_in_the_box(box, run_dir):
-    """`defender` is a PEP-420 namespace package, so the PARENT of the mount
-    point is on `sys.path` inside the box: sibling submodules from different
-    top-level dirs (`defender.runtime.*` and `defender.hooks.*`) both import, and
-    the in-box entrypoint `python3 -m defender.runtime.bash_exec` is reachable as
-    a module. A mount destination that broke this would make the entrypoint
-    unimportable rather than merely awkward."""
     res = _probe(box, run_dir, "nspkg", _IMPORT_DEFENDER)
-    assert res["seg"].startswith(str(DEFENDER))
-    assert res["bash_exec"].startswith(str(DEFENDER))
+    assert res["seg"].startswith("/defender/")
+    assert res["bash_exec"].startswith("/defender/")
 
     findspec = (
         "import importlib.util, json\n"
-        "spec = importlib.util.find_spec('defender.runtime.bash_exec')\n"
+        "spec = importlib.util.find_spec('defender.execution.bash_exec')\n"
         "print(json.dumps({'origin': None if spec is None else spec.origin}))\n"
     )
     entrypoint = _probe(box, run_dir, "entrypoint", findspec)
     assert entrypoint["origin"] is not None, "the box entrypoint module is not importable"
-    assert entrypoint["origin"].startswith(str(DEFENDER))
+    assert entrypoint["origin"].startswith("/defender/")
 
 
 @requires_box
 def test_the_granted_bash_repertoire_runs_inside_the_box(box, run_dir):
-    """Every program the REAL grant table lets an agent run is present and runs
-    inside the box, producing the same result it would outside: the repertoire
-    is a property of the rootfs, and a program the policy grants but the image
-    lacks is a silent capability loss, not a boundary. Read off the compiled
-    policy's own grants, so a new grant cannot ship without an image that
-    carries its program."""
     policy = compile_policy_for(MAIN_DEF, run_dir, defender_dir=DEFENDER)
     programs = sorted({g.program for g in policy.bash_allow})
     assert programs, "the compiled policy grants no program — nothing to check"
@@ -1013,6 +790,6 @@ def test_the_granted_bash_repertoire_runs_inside_the_box(box, run_dir):
     assert missing == [], f"granted but absent from the rootfs: {missing}"
 
     (run_dir / "corpus.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
-    res = _run(box, f"cat {run_dir / 'corpus.txt'} | grep -n beta", cwd=run_dir)
+    res = _run(box, "cat /runs/current/corpus.txt | grep -n beta", cwd=Path("/runs/current"))
     assert res.rc == 0, res.err
     assert res.out.decode() == "2:beta\n"

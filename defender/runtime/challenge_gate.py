@@ -24,13 +24,14 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import field
 from typing import Any
 
-from defender._env import env_int
+from defender.configuration._env import env_int
 from defender._model import model
 from defender.run_repository import Run
+from defender.runtime.providers import ProviderDown
 from defender.runtime.tools._deps import run_of
 from defender._untrusted import wrap_fresh
 from defender._vocab import CEILING_DISPOSITION, HOST_ONLY_DISPOSITION
@@ -117,6 +118,16 @@ class ReviewState:
     closed: bool = False
     disposition: str | None = None
 
+    def restore(self, *, turns: int, raised_asks: dict, closed: bool,
+                disposition: str | None) -> None:
+        """Resume a branch arm's gate where its source's stood at the branch point (#1255 D2):
+        the rounds already reviewed and the asks already raised, as the fork snapshot
+        recorded them. Before the arm's first turn, so no review of its own is lost."""
+        self.turns = turns
+        self.raised_asks = dict(raised_asks)
+        self.closed = closed
+        self.disposition = disposition
+
     @classmethod
     def of(cls, deps: Any) -> ReviewState:
         box = deps.review_state
@@ -163,6 +174,10 @@ async def _call_stage(role: str, stage_fn, request: StageRequest) -> StageOutcom
         return StageOutcome(text=text, failure_kind=None)
     except TimeoutError:
         return StageOutcome(text=None, failure_kind=TIMEOUT, detail=f"{role} timed out after {request.timeout}s")
+    except ProviderDown:
+        # Ends the run rather than failing the review (#1243, D5); the gate re-raises it once
+        # its concurrent stages have settled.
+        raise
     except Exception as e:  # noqa: BLE001 — any stage fault fails the whole review closed
         return StageOutcome(text=None, failure_kind=STAGE_ERROR, detail=f"{role} failed: {e!r}")
 
@@ -236,6 +251,57 @@ class GateVerdict:
     material: tuple[tuple[str, str], ...]  # (target, ask) pairs
     turns_used: int
     failure_kind: str | None
+
+
+async def _run_lenses(
+    deps: Any, round_no: int, lenses: dict[str, Callable[[str], str]], stages: Any, bounds: Bounds,
+) -> list[StageOutcome]:
+    """The lenses' outcomes, run concurrently. Errors are returned, not raised, so a lens whose
+    provider is down cannot leave its sibling running unobserved; every other stage fault is
+    already an outcome (`_call_stage`)."""
+    settled = await asyncio.gather(*(
+        _dispatch(lens, stages, render, bounds) for lens, render in lenses.items()
+    ), return_exceptions=True)
+    _end_run_if_provider_down(deps, round_no, settled)
+    for result in settled:
+        if isinstance(result, BaseException):
+            raise result  # an interrupt or an unforeseen error, not a provider outage
+    return [r for r in settled if isinstance(r, StageOutcome)]
+
+
+def _mark_round_for_provider_down(deps: Any, round_no: int, down: ProviderDown) -> None:
+    """Mark the round's traces incomplete before the run ends on `down`. The marker is
+    best-effort here: a trace file that cannot be written must not replace the `ProviderDown`
+    that ends the run (exit 4, no verdict) with an `OSError`."""
+    try:
+        _mark_traces_incomplete(deps, round_no, str(down))
+    except OSError as exc:
+        _logger.warning(f"the review round's incomplete marker could not be written ({exc!r})")
+
+
+async def _run_composer(
+    deps: Any, round_no: int, stages: Any, bounds: Bounds, render: Callable[[str], str],
+) -> StageOutcome:
+    """The composer's outcome; a down provider marks the round's traces incomplete and ends the
+    run (#1243, D5)."""
+    try:
+        return await _dispatch("composer", stages, render, bounds)
+    except ProviderDown as down:
+        _mark_round_for_provider_down(deps, round_no, down)
+        raise
+
+
+def _end_run_if_provider_down(
+    deps: Any, round_no: int, settled: Sequence[StageOutcome | BaseException],
+) -> None:
+    """Raise the first `ProviderDown` among settled stage results (#1243, D5): a review that
+    cannot run because the provider is down ends the run, like every other caller's. Called
+    only after the stages have settled, so no sibling is orphaned; the round's traces are
+    marked incomplete first."""
+    for result in settled:
+        if isinstance(result, ProviderDown):
+            _mark_round_for_provider_down(deps, round_no, result)
+            raise result
 
 
 def _fail(role: str, outcome: StageOutcome, *, turns_used: int) -> GateVerdict:
@@ -407,9 +473,7 @@ async def challenge_gate(
             run_of(deps), "ablation", round_no,
             {"skipped": "no strong belief movement cites an edge to withhold"},
         )
-    outcomes = await asyncio.gather(*(
-        _dispatch(lens, stages, render, bounds) for lens, render in lenses.items()
-    ))
+    outcomes = await _run_lenses(deps, round_no, lenses, stages, bounds)
 
     # Record every lens's reply before judging any, so a fault doesn't drop the others'.
     for lens, outcome in zip(lenses, outcomes, strict=True):
@@ -429,13 +493,9 @@ async def challenge_gate(
             _mark_traces_incomplete(deps, round_no, str(e))
             return _fail(lens, StageOutcome(None, UNREADABLE, str(e)), turns_used=state.turns)
 
-    composer = await _dispatch(
-        "composer", stages,
-        lambda salt: composer_projection(
-            companion, readings, salt, ablated=ablated, disposition=disposition,
-        ).text,
-        bounds,
-    )
+    composer = await _run_composer(deps, round_no, stages, bounds, lambda salt: composer_projection(
+        companion, readings, salt, ablated=ablated, disposition=disposition,
+    ).text)
     _write_trace_row(
         run_of(deps), "composer", round_no, {"ok": composer.ok},
         raw_reply=wrap_fresh(composer.text or composer.detail or "", "untrusted"),

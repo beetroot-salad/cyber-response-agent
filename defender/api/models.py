@@ -6,7 +6,7 @@ comes from the login alone (#1131 "Tenancy").
 
 Vocabulary follows #1131: "investigation" in the public API ("run" stays the internal name), and
 `status` is the execution lifecycle, distinct from `disposition`, the outcome
-(`docs/platform-design.md` §2.3).
+(`defender/docs/platform-design.md` §2.3).
 
 Two shapes are closed by one type each, used on EVERY way data crosses the boundary — a path,
 a query, a body, a cursor (`pages.py`), and a record the store answers — so nothing past it has

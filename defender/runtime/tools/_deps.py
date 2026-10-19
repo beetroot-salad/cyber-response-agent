@@ -13,28 +13,32 @@ if TYPE_CHECKING:  # pragma: no cover — typing only; the runtime import stays 
 else:
     _RunTenant = Any  # `run_tenant` sits above this module in the import graph
 
-from defender._clock import now_iso
 from defender._paths import PATHS
 
 
 from defender.run_repository import Run
-from .. import box as box_mod
-from ..run_state import RunState
+from defender import box as box_mod
+from ..run_state import RunState, run_time_iso
 from .. import permission
 from ..agent_definition import ResolvedRoots
 from ..agent_role import AgentRole
+from ..model_view import ModelView
 
-from defender._env import env_int
-from defender._knowledge import KnowledgePaths
+from defender.configuration._env import env_int
+from defender.knowledge._knowledge import KnowledgePaths
 from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
-from defender._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
+from defender.knowledge._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import (
     LOAD_KINDS as _LOAD_KINDS,
     lesson_name as _lesson_name,
 )
 
+
+#: The roles that see their workspace through the model view (#1255 C12): a run's own roles
+#: that hold path-taking tools.
+_VIEW_ROLES = frozenset({AgentRole.MAIN, AgentRole.GATHER})
 
 #: The queries table's infra exit code (a member of `circuit_breaker.INFRA_EXIT_CODES`).
 _INFRA_EXIT_CODE = 2
@@ -145,6 +149,21 @@ class AgentDeps:
     role: ClassVar[AgentRole] = AgentRole.MAIN
 
     @property
+    def view(self) -> ModelView | None:
+        """The run's model view (#1255 P1, C9): the one mapping every path the model hands
+        this role is read through, and every path it is told is rendered through. Derived from
+        the deps' own roots, so deps built by `bind`, by a `replace` copy or directly all map
+        the same way. `None` for a role outside a run's own roles (C12: the learning stages
+        keep host spelling; the review stages hold no tool)."""
+        if self.role not in _VIEW_ROLES:
+            return None
+        if self.roots is not None:
+            agent = self.roots.tenant_agent
+        else:
+            agent = self.tenant.agent if self.tenant is not None else None
+        return ModelView(Path(self.run_dir), Path(self.defender_dir), agent)
+
+    @property
     def knowledge(self) -> KnowledgePaths:
         """The agent knowledge this role reads (#1108): today the corpus inside `defender_dir`."""
         return KnowledgePaths.of_defender_dir(self.defender_dir)
@@ -236,7 +255,7 @@ def _record_lesson_load(
     runtime pushed it. Keyword-only with no default, so a new call site must choose.
     @owns role — the calling deps' `AgentRole` value, so a row says which agent it reached.
 
-    Older rows carry neither key; `learning/ops/trace_lesson.py` reads them as `unknown`.
+    Older rows carry neither key; `cli/learning/trace_lesson.py` reads them as `unknown`.
     """
     if kind not in _LOAD_KINDS:
         raise ValueError(f"lessons_loaded row kind must be one of {sorted(_LOAD_KINDS)}: {kind!r}")
@@ -245,7 +264,8 @@ def _record_lesson_load(
         return
     try:
         run: Run = run_of(deps)
-        row = {"lesson_name": name, "ts": now_iso(), "kind": kind, "role": deps.role.value}
+        row = {"lesson_name": name, "ts": run_time_iso(deps), "kind": kind,
+               "role": deps.role.value}
         run.observability.lessons_loaded.append([row])  # lint-run-records: ok — run_of requires the handed repository Run; the resolver does not trace its return type
     except Exception:  # noqa: BLE001 — best-effort observability
         pass

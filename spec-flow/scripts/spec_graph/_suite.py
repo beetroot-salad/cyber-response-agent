@@ -74,11 +74,11 @@ _DEF_TEST = re.compile(r"^(?:async\s+)?def\s+test_\w*\s*\(", re.MULTILINE)
 
 
 def has_tests(suite_dir: Path) -> bool:
-    """Whether `check_calls`' flat scan of this directory would find a test to reason about.
+    """Whether the suite subtree contains a test to reason about.
 
     Not "holds any Python": a directory of only `conftest.py` and helpers would otherwise
     report a false clean. Checks whether a file defines a test function rather than its
-    filename, since `python_files` patterns are configurable per project. Flat, matching
+    filename, since `python_files` patterns are configurable per project. Recursive, matching
     `suite_files`. (`check_stub` needs no such guard: pytest reports what it collected.)
     """
     for p in suite_files(suite_dir):
@@ -104,10 +104,10 @@ def no_tests_refusal(tool: str, dirs: list[Path]) -> str:
 
 
 def suite_files(suite_dir: Path) -> list[Path]:
-    """The suite's `*.py`, minus leftover premise copies (`*.copyN.py`, written by the retired
+    """The suite subtree's `*.py`, minus leftover premise copies (`*.copyN.py`, written by the retired
     answer-escalation step), which reuse test names with premise-only docstrings and would
     shadow the real file."""
-    return [p for p in sorted(suite_dir.glob("*.py")) if not _COPY.search(p.name)]
+    return [p for p in sorted(suite_dir.rglob("*.py"), key=lambda p: (p.name, p.as_posix())) if not _COPY.search(p.name)]
 
 
 def names_in(node: ast.AST) -> set[str]:

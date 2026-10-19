@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import SkipValidation
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender._shown import quoted
 from defender._io import read_text_soft
 from defender._model import model

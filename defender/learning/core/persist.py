@@ -7,7 +7,7 @@ from defender._text import is_content_less
 from defender.learning.core.state import PITFALLS, LearningState
 # The reducer lane's routing key, imported from its owner so every seam asking "is this the
 # reducer's row" compares the same literal.
-from defender._query_rules import BASH_SHIM_QUERY_ID
+from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
 
 
 

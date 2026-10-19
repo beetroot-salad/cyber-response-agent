@@ -20,7 +20,7 @@ import datetime as _dt
 from collections.abc import Callable
 from typing import Any, NoReturn
 
-from defender._run_id import RUN_ID_ALLOWED, _utc_now, mint_run_id, run_id_fault
+from defender.records._run_id import RUN_ID_ALLOWED, _utc_now, mint_run_id, run_id_fault
 from defender._shown import quoted
 from defender.run_repository._errors import RunRefused
 
@@ -101,7 +101,7 @@ class RunId:
     def __copy__(self) -> RunId:
         return _rebuild(self._text)
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> RunId:
+    def __deepcopy__(self, _memo: dict[int, Any]) -> RunId:
         return _rebuild(self._text)
 
     def __eq__(self, other: object) -> bool:

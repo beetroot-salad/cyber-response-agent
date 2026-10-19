@@ -39,7 +39,7 @@ schema_version: 2
 design: .spec-flow/design.md as amended by .spec-flow/design-amendments.md (A1-A15; an amendment wins); human rulings
   in .spec-flow/frontiers/70-resolutions.md
 base: 463833df
-tests: defender/tests/judge_contrast_1234
+tests: defender/tests/learning/judge/contrast_contracts
 demands:
 - id: d00a_episode_grade_contract
   kind: behavior

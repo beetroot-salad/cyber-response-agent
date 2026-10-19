@@ -40,9 +40,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender._io import Bound, entry_present, read_text_utf8
-from defender._episode_paths import LAYOUT, WorldPaths
+from defender.episodes._episode_paths import LAYOUT, WorldPaths
 from defender.run_repository import (
     RunPaths,
     artifact_dir,
@@ -56,7 +56,7 @@ from defender.learning.lead_repository import (
 )
 from defender.runtime.run_end import TRUNCATED_BY_EXECUTED_QUERIES, parse_record
 from defender.runtime.run_end import sidecar_path as run_end_sidecar_path
-from defender.runtime.scrub import verdict_path
+from defender.box._scrub import verdict_path
 
 _logger = logging.getLogger(__name__)
 
@@ -112,10 +112,12 @@ def _single_files(run_dir: Path, world: WorldPaths) -> tuple[tuple[Path, Path], 
         (paths.report, world.report),
         (paths.investigation, world.investigation),
         (paths.provenance, world.provenance),
-        # The two sidecars beside the run dir. Inside `worlds/<X>/` they take the episode
+        # The sidecars beside the run dir. Inside `worlds/<X>/` they take the episode
         # owner's names, dropping the run-id-keyed spelling nothing here may resolve.
         (verdict_path(run_dir), world.scrub_verdict),
         (run_end_sidecar_path(run_dir), world.run_end),
+        # #1255 G4/G6: the host-only join of the query table's rows to the served ledger.
+        (paths.call_join(), world.call_join),
         (paths.lessons_loaded, world.lessons_loaded),
         (paths.alert, world.alert),
         (paths.alert_record, world.alert_record),

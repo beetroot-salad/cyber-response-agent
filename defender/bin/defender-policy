@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stable invocation shim for the gate's audit CLI (scripts/policy_cli.py):
+# Stable invocation shim for the gate's audit CLI (cli/policy_cli.py):
 #   defender-policy show <agent> --run-dir <dir>
 #   defender-policy explain <agent> '<command>' --run-dir <dir> [--json]
 # An OPERATOR tool, NOT an agent one: it is listed in hooks/_cmd_segments.OPERATOR_TOOLS, so it
@@ -9,4 +9,4 @@ DEFENDER="${DEFENDER_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 PY="${DEFENDER}/.venv/bin/python3"
 [ -x "$PY" ] || PY=python3
 cd "${DEFENDER}/.." || exit 1
-exec "$PY" -m defender.scripts.policy_cli "$@"
+exec "$PY" -m defender.cli.policy_cli "$@"

@@ -5,7 +5,7 @@ in-process PydanticAI driver against `defender/SKILL.md`; the agent works throug
 the loop in a run dir and exits. `run.py` handles everything after (projection,
 transcript, learning loop). Every run names its tenant, and there is no default; on the host,
 clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then run
-`python3 defender/scripts/tenant.py setup <tenant>` once, from the main checkout, with
+`python3 defender/cli/tenant.py setup <tenant>` once, from the main checkout, with
 `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as the
 same user that runs defender; a destination already occupied makes setup refuse, naming it in
 the message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may
@@ -147,7 +147,7 @@ as Claude Code PreToolUse hooks):
 | Gate | Where | Purpose |
 |---|---|---|
 | `record_lead.claim_lead` | called in `runtime/tools_gather.py` (`_run_gather`) on gather dispatch, and in `runtime/lead_zero.py` for the harness's reserved ids | Writes the leads-table row `gather_raw/{lead_id}.lead.json` (goal + dimensions), claiming the `lead_id` with an atomic `O_CREAT|O_EXCL` create — a reused id raises (an integrity gate, not just a shim). Returns `CLAIMED` / `ALREADY_CLAIMED` / `NOT_CLAIMED`, and only `CLAIMED` dispatches: an unclaimed lead has no row for the reuse gate to refuse next time |
-| `inject_system_skill_description.descriptor_catalog` | read once by `runtime/driver` (`run_investigation`) at run start, handed to `runtime/tools_gather.py` as `catalog=` | Supplies the per-system SKILL `description:` catalog (progressive disclosure) so gather confirms relevance then reads the full SKILL |
+| `inject_system_skill_description.descriptor_index` | read once by `runtime/driver` (`run_investigation`) at run start, handed to `runtime/tools_gather.py` as `catalog=` and rendered on each dispatch with the systems down at that moment marked | Supplies the per-system SKILL `description:` catalog (progressive disclosure) so gather confirms relevance then reads the full SKILL |
 | `runtime/permission.py` | called before each tool | Blocks the main loop from running system CLIs directly or reading `gather_raw` to re-derive fields (positive grant enumeration — main carries no `gather_raw` shape); raises `ModelRetry` on a deny |
 | `challenge_gate.challenge_gate` | called inside `runtime/close_tool.py` on every **confident** close | The write-time review (§The close is gated). Fails closed: a stage that raises, times out or replies unreadably overrides the disposition to `unresolved` (the host's own verdict) rather than letting it commit silently |
 

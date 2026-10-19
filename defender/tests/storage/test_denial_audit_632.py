@@ -1,0 +1,165 @@
+"""Verb-denial audit record: durable stream append, timestamp/seq with loud write failures, bounded projection, rendered in run HTML."""
+from __future__ import annotations
+
+import json
+
+from defender.run_repository import RunPaths
+import re
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("pydantic_ai")
+
+from defender._io import read_jsonl_rows  # noqa: E402
+from defender.runtime import observe  # noqa: E402
+from defender.presentation.visualize_run import render_runtime_page  # noqa: E402
+from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
+    DONE,
+    ScopedFakeVerbs,
+    grant_of,
+    q,
+    recording_table,
+    run_gather,
+)
+from defender.tests.e2e._replay_harness import VerbRecorder  # noqa: E402
+
+pytestmark = pytest.mark.e2e
+
+GRANTED_PAIR = ("elastic", "query")
+DENIED_PAIR = ("elastic", "esql")
+
+# The judge's grant minus `get-ticket`: the one shape that makes a denial observable at the
+# second model-facing site, whose two tools otherwise hardcode their system and verb.
+
+
+def _gather_registry(rec: VerbRecorder) -> ScopedFakeVerbs:
+    return ScopedFakeVerbs(
+        recording_table(rec, {"elastic": ("query", "esql")}),
+        grant_of("gather", (GRANTED_PAIR,)),
+    )
+
+
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
+_SCRIPT = re.compile(r"<script\b.*?</script\s*>", re.S | re.I)
+_DOC = re.compile(r"<html\b.*?</html\s*>", re.S | re.I)
+
+
+def _visible_html(html: str) -> str:
+    """The part of a rendered page an analyst can actually see: inside the document element, with
+    comments and script bodies removed."""
+    found = _DOC.search(html)
+    if found is None:
+        return ""
+    return _SCRIPT.sub(" ", _COMMENT.sub(" ", found.group(0)))
+
+
+def test_a_denial_appends_a_policy_event_to_the_durable_request_stream(tmp_path: Path):
+    rec = VerbRecorder()
+    r = run_gather(tmp_path, verbs=_gather_registry(rec),
+                   turns=[q(*DENIED_PAIR), q(*GRANTED_PAIR), q(*DENIED_PAIR), DONE], run_id="d6")
+
+    stream = RunPaths(r.run_dir).policy_denials
+    assert stream.is_file(), "no durable policy-denial stream was written at all"
+    records = read_jsonl_rows(stream)
+    assert [rec_["event_type"] for rec_ in records] == [observe.POLICY_DENIAL_EVENT_TYPE] * 2
+    assert [rec_["seq"] for rec_ in records] == [0, 1], "the stream carries no append ordering"
+    assert records[0]["verb"] == "esql"
+
+
+def test_the_denial_record_carries_a_timestamp_and_a_seq_and_does_not_swallow_a_failed_write(
+    tmp_path: Path,
+):
+    """The denial record carries a timestamp and a sequence, and a failed write is NOT silently
+    swallowed — it propagates, after the refusal has already taken effect (§7 R2)."""
+    path = RunPaths(tmp_path).policy_denials
+    logger = observe.RequestLogger(path)
+    written = logger.log_policy_denial(
+        role="gather", system="elastic", verb="esql", call_id="elastic.ad-hoc", params={"q": "x"},
+    )
+    assert written["ts"], "the denial record carries no timestamp"
+    assert written["seq"] == 0
+    logger.close()
+
+    record = read_jsonl_rows(path)[0]
+    assert record["ts"] == written["ts"]
+    assert record["seq"] == 0
+
+    logger.log_budget_refusal(tool_name="query")  # the precedent: silent on a closed handle
+    with pytest.raises(Exception, match="closed"):
+        logger.log_policy_denial(
+            role="gather", system="elastic", verb="esql", call_id="elastic.ad-hoc", params={},
+        )
+
+
+def test_the_denial_record_is_a_bounded_normalized_projection_of_the_call(tmp_path: Path):
+    class Unserializable:
+        pass
+
+    hostile = {
+        "blob": "A" * 100_000,
+        "nested": {"a": {"b": {"c": {"d": {"e": list(range(1000))}}}}},
+        "nan": float("nan"),
+        "object": Unserializable(),
+    }
+    path = RunPaths(tmp_path).policy_denials
+    logger = observe.RequestLogger(path)
+    logger.log_policy_denial(role="gather", system="elastic", verb="esql",
+                             call_id="elastic.ad-hoc", params=hostile)
+    logger.log_policy_denial(role="gather", system="elastic", verb="esql",
+                             call_id="elastic.ad-hoc", params={"native_query": "FROM logs"})
+    # Same key, different value — the pair a name-only digest cannot separate.
+    logger.log_policy_denial(role="gather", system="elastic", verb="esql",
+                             call_id="elastic.ad-hoc", params={"native_query": "FROM secrets"})
+    # Same key, same value again — the digest must be a function of the call, not of a clock
+    # or a counter, or "these two differ" says nothing.
+    logger.log_policy_denial(role="gather", system="elastic", verb="esql",
+                             call_id="elastic.ad-hoc", params={"native_query": "FROM logs"})
+    logger.close()
+
+    line, control, other_value, repeat = path.read_text(encoding="utf-8").splitlines()
+    record = json.loads(line)
+
+    assert set(record) == {
+        "event_type", "ts", "seq", "role", "system", "verb", "call_id", "params_digest",
+    }, "the record's shape is not the bounded projection §7 R12 names"
+    assert record["role"] == "gather", "the record does not say which role was refused"
+    assert record["call_id"] == "elastic.ad-hoc", "the record does not identify the call"
+    assert (record["system"], record["verb"]) == ("elastic", "esql")
+    assert "params" not in record, "the raw model-controlled blob was written to the audit stream"
+    assert isinstance(record["params_digest"], str)
+    assert len(line) < 4096, "the record is unbounded — a caller sizes the audit stream"
+    for token in ("NaN", "Infinity"):
+        assert token not in line, \
+            f"a non-finite float survived as bare {token}, which no strict JSON parser reads"
+
+    assert json.loads(control)["params_digest"], \
+        "a well-formed call's digest is empty — the projection identifies nothing"
+    assert json.loads(control)["params_digest"] != json.loads(other_value)["params_digest"], (
+        "two denials differing only in their parameter VALUES carry the same digest — the "
+        "digest is over the parameter names, so the audit stream cannot tell one probe from "
+        "another and the non-finite guard above is dead code"
+    )
+    assert json.loads(control)["params_digest"] == json.loads(repeat)["params_digest"], \
+        "the same call digests differently twice — the digest is not a function of the call"
+
+
+def test_a_denial_is_visible_in_the_rendered_run_html(tmp_path: Path):
+    """A denial appears in the rendered run HTML, where an analyst opens it — its OWN CONTENT, the
+    system and the verb it refused, not merely a page that built without error."""
+    rec = VerbRecorder()
+    r = run_gather(tmp_path, verbs=_gather_registry(rec), turns=[q(*DENIED_PAIR), DONE],
+                   run_id="d9")
+    assert r.denials, "the drive produced no denial to render"
+
+    html = render_runtime_page(r.run_dir)
+    visible = _visible_html(html)
+
+    assert "esql" in visible, \
+        "the denied verb does not appear in the page's rendered body — it is commented out, " \
+        "or sits outside the document element, where an analyst never sees it"
+    assert "elastic" in visible
+    assert observe.POLICY_DENIAL_EVENT_TYPE in visible or "denied" in visible.lower(), \
+        "the page renders the call but never says it was refused by policy"
+    assert "esql" not in _visible_html("<html><body>ok</body></html>"), \
+        "the visibility filter is inert — it would pass a page with no denial in it"

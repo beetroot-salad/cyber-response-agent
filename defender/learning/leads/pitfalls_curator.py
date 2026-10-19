@@ -14,7 +14,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender import _git
-from defender._corpus import _FENCE_RE
+from defender.knowledge._corpus import _FENCE_RE
 from defender._frontmatter import FrontmatterError, split_frontmatter
 from defender.learning.author import drain as _author_drain
 from defender.learning.author import shared as _author_shared
@@ -37,7 +37,7 @@ from defender.learning.leads.declared_systems import (
     ADAPTERS_REL,
     adapter_declared_systems,
 )
-from defender.runtime import box as _box
+from defender import box as _box
 from defender.runtime.verbs import is_system_name
 from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender.learning._prompt import stage_user_message, structured_json_body

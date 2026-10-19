@@ -6,9 +6,9 @@ import re
 import stat
 from pathlib import Path, PurePosixPath
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender._io import ALIAS_READ_REFUSAL, _mark_alias, is_plain_entry
-from defender._run_id import refuse_bad_case_id
+from defender.records._run_id import refuse_bad_case_id
 
 # Stdlib `@dataclass`, not `defender._model.model`: the box entrypoint imports this module
 # with no third-party package installed.
@@ -33,7 +33,7 @@ from defender._run_id import refuse_bad_case_id
 WIRE_LOG_DIR = "wire_logs"
 WIRE_LOG = "llm_requests.jsonl"
 
-#: The run's provenance stamp. Shared with `scripts/workspace_map`, which hides it from the
+#: The run's provenance stamp. Shared with `presentation/workspace_map`, which hides it from the
 #: model-facing directory view; an independent spelling would stop hiding it after a rename.
 PROVENANCE = "provenance.json"
 
@@ -43,7 +43,7 @@ PROVENANCE = "provenance.json"
 GATE_METADATA_KEY = "json"
 
 # ======================================================================================
-# Every run-level record name, as a named constant. `scripts/lint/lint_run_records.py` reads
+# Every run-level record name, as a named constant. `tooling/lint/lint_run_records.py` reads
 # its protected names and composed parts off every module-level UPPERCASE string constant here.
 # ======================================================================================
 
@@ -84,7 +84,7 @@ JSONL_EXT = ".jsonl"
 AGENT_TRACE_SUFFIX = "_trace.jsonl"
 AGENT_FRAMED_TRACE_SUFFIX = "_framed_trace.jsonl"
 #: The episode layout's `served/` prefix — here because the lint gate's part set is read off
-#: this module; `_episode_paths.py` imports it.
+#: this module; `episodes/_episode_paths.py` imports it.
 SERVED_PREFIX = "served/"
 
 #: Generic suffixes, not discriminating parts; the gate catches hand-rolled compositions of
@@ -110,10 +110,21 @@ TICKET_WRITE_SUFFIX = ".ticket-write.json"
 #: The run -> case link (which case's session store the run belongs to): host state, so it
 #: lives beside the run dir, not in it (#1235).
 SESSION_POINTER_SUFFIX = ".session-pointer.json"
-#: The five host-only sidecar names, each `<run id><suffix>` beside the run folder in the runs
-#: base (the accounting-failures name reserved, see above).
+#: The call join (#1255 G4/G6): one line per query-table row this run wrote, keyed by the row's
+#: `(lead_id, seq)` and holding the call's host-written id. The query table is the model's to read
+#: (and the box's to write), so the id that joins a row to the served ledger lives here, beside
+#: the run folder, where no box mount reaches. Private: the door's public layout surface is
+#: pinned (#1105 D1.3); `RunPaths.call_join` hands the path out.
+_CALL_JOIN_SUFFIX = ".call-join.jsonl"
+#: Every comment the run's record step got the store to accept (#1255 P5): the run's own writes
+#: to the world, which a world branched from it serves as never having happened. Host-only; the
+#: receipt's shape is the page's and stays `{key, status, url, ok, reason}`.
+_TICKET_COMMENTS_SUFFIX = ".ticket-comments.jsonl"
+#: The host-only sidecar names, each `<run id><suffix>` beside the run folder in the runs base
+#: (the accounting-failures name reserved, see above).
 _SIDECAR_SUFFIXES = (RUN_END_SIDECAR_SUFFIX, SCRUB_VERDICT_SUFFIX, ACCOUNTING_FAILURES_SUFFIX,
-                     TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX)
+                     TICKET_WRITE_SUFFIX, SESSION_POINTER_SUFFIX, _CALL_JOIN_SUFFIX,
+                     _TICKET_COMMENTS_SUFFIX)
 #: The tail a sidecar write's staged file carries before its rename (`_io.staged_leaf`:
 #: `.staged-` and lowercase hex digits; one or more, #1105 DV-5).
 _STAGED_TAIL = re.compile(r"\.staged-[0-9a-f]+\Z")
@@ -158,10 +169,6 @@ class RunLayout:
     @property
     def executed_queries(self) -> PurePosixPath:
         return PurePosixPath(EXECUTED_QUERIES)
-
-    @property
-    def source_refs(self) -> PurePosixPath:
-        return PurePosixPath(SOURCE_REFS)
 
     @property
     def gather_raw(self) -> PurePosixPath:
@@ -235,13 +242,6 @@ class RunLayout:
         seq = _check_index(seq, what="seq")
         return self.ticket_reads / f"{seq}{PAYLOAD_SUFFIX}"
 
-    def forward_check_trace(self, prefix: str, stem: str, n: int) -> PurePosixPath:
-        """`wire_logs/<prefix>.<stem>.<n>.trace.jsonl`."""
-        prefix = _check_component(prefix, what="prefix")
-        stem = _check_component(stem, what="stem")
-        n = _check_index(n, what="n")
-        return self.wire_log_dir / f"{prefix}.{stem}.{n}{TRACE_SUFFIX}"
-
     def review_trace(self, role: str) -> PurePosixPath:
         """`wire_logs/review_<role>_trace.jsonl`."""
         role = _check_component(role, what="role")
@@ -291,12 +291,6 @@ class WireLogNames:
         """An unframed stage-seam trace — the half the page reads rows from."""
         return name.endswith(AGENT_TRACE_SUFFIX)
 
-    def forward_check(self, prefix: str, stem: str, n: int) -> str:
-        """`<prefix>.<stem>.<n>.trace.jsonl` — the forward-check verifier's own family."""
-        return f"{_check_component(prefix, what='prefix')}." \
-               f"{_check_component(stem, what='stem')}." \
-               f"{_check_index(n, what='n')}{TRACE_SUFFIX}"
-
     def curator_batch(self, batch_id: str, pid: int) -> str:
         """`<batch_id>.<pid>.trace.jsonl` — one curator spawn's own family."""
         return f"{batch_id}.{_check_index(pid, what='pid')}{TRACE_SUFFIX}"
@@ -315,7 +309,7 @@ WIRE_LOG_NAMES = WireLogNames()
 class RunPaths:
     """One run's directories and its accessors — every name a run reads or writes.
 
-    17 accessors (a census test checks this count against the set it pins).
+    16 accessors (a census test checks this count against the set it pins).
 
     Accessors resolve relative to ``run_dir``, except the four sidecars, `sessions_dir` and
     `session_db`, which take the runs base explicitly.
@@ -355,12 +349,6 @@ class RunPaths:
     @property
     def executed_queries(self) -> Path:
         return self.run_dir / RUN_LAYOUT.executed_queries
-
-    @property
-    def source_refs(self) -> Path:
-        """No production writer; the accessor exists because the case-answer-key deny keys on
-        this name."""
-        return self.run_dir / RUN_LAYOUT.source_refs
 
     @property
     def gather_raw(self) -> Path:
@@ -404,12 +392,6 @@ class RunPaths:
     @property
     def wire_log(self) -> Path:
         return self.run_dir / RUN_LAYOUT.wire_log
-
-    def forward_check_trace(self, prefix: str, stem: str, n: int) -> Path:
-        """`wire_logs/<prefix>.<stem>.<n>.trace.jsonl` — the learning forward-check verifier's
-        trace, written into the CITED run's own dir while reading it as evidence."""
-        target = self.run_dir / RUN_LAYOUT.forward_check_trace(prefix, stem, n)
-        return _confine(target, self.run_dir, what="forward_check_trace")
 
     def review_trace(self, role: str) -> Path:
         """`wire_logs/review_<role>_trace.jsonl` — one review stage's raw wrapped reply."""
@@ -462,6 +444,16 @@ class RunPaths:
 
     def ticket_write(self, runs_base: Path | None = None) -> Path:
         return self._container(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
+
+    def call_join(self, runs_base: Path | None = None) -> Path:
+        """The run's call join (#1255 G4/G6): `(lead_id, seq)` -> the call's host-written id,
+        one line per query-table row the run wrote. Beside the run folder, so the box can
+        neither read the ids nor forge a row's partner."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_CALL_JOIN_SUFFIX}"
+
+    def ticket_comments(self, runs_base: Path | None = None) -> Path:
+        """Every comment the run posted on its case ticket (#1255 P5), beside the run folder."""
+        return self._container(runs_base) / f"{self.run_dir.name}{_TICKET_COMMENTS_SUFFIX}"
 
     def session_pointer(self, runs_base: Path | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the

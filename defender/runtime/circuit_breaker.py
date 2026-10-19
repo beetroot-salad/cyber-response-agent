@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from defender._clock import now_iso
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from defender.runtime.run_state import RunState
@@ -26,6 +25,17 @@ INFRA_ERROR_CLASS = "infra"
 AGENT_FIXABLE_ERROR_CLASS = "agent-fixable"
 DENIED_ERROR_CLASS = "denied"
 
+#: What a breaker charge can mean, after its count in both messages that name a cause (the
+#: down message and the run kill). It sees exit codes alone, and one code covers many causes —
+#: exit 2 is a refused connection, a 5xx, a garbled reply, an adapter crash (#1246) — so the
+#: causes are examples, never a closed list. Whether a system is configured is not among them:
+#: that is decided at run start, and a system its settings do not make usable is down from the
+#: start and never charged (#1256, `system_status`). The breaker counts only what can change
+#: during a run (DP2).
+INFRA_CAUSES = (
+    f"infra failures (adapter exit {' / '.join(str(c) for c in sorted(INFRA_EXIT_CODES))}: "
+    f"the system could not answer, e.g. unreachable, erroring or timed out)")
+
 
 def is_infra_failure(exit_code: int) -> bool:
     return exit_code in INFRA_EXIT_CODES
@@ -45,9 +55,10 @@ class RunAborted(Exception):
         self.total_failures = total_failures
         self.systems = sorted(set(systems))
         super().__init__(
-            f"run aborted by circuit breaker: {total_failures} connectivity/auth "
-            f"failures across systems {self.systems} — the environment appears "
-            f"unreachable. Escalate with the visibility gap named."
+            f"run aborted by circuit breaker: {total_failures} {INFRA_CAUSES} across "
+            f"systems {self.systems} — "
+            f"the environment appears unreachable. Escalate with the "
+            f"visibility gap named."
         )
 
 
@@ -71,7 +82,8 @@ def record_outcome(
         if counts_toward_run:
             state.breaker["total_failures"] += 1
         if sysrec["failures"] >= PER_SYSTEM_FAIL_LIMIT and "tripped_at" not in sysrec:
-            sysrec["tripped_at"] = now_iso()
+            # The run clock's reading (#1255): the breaker is run state an arm inherits.
+            sysrec["tripped_at"] = state.now_iso()
         # Inside the charge's lock (it is reentrant), so the copy is the breaker this charge left.
         snapshot = state.breaker_snapshot()
     if snapshot["total_failures"] >= RUN_FAIL_KILL_LIMIT:
@@ -89,12 +101,12 @@ def down_message(state: RunState, system: str) -> str:
     # A system never charged has no count to name; the trip boundary stands in for it.
     n = state.breaker_failures(system) or PER_SYSTEM_FAIL_LIMIT
     return (
-        f"[circuit-breaker] System '{system}' is DOWN for this run: {n} "
-        f"connectivity/auth failures or timeouts (adapter exit 2 / 124) tripped the "
-        f"breaker, so this dispatch did not run and {system}'s reference skill was "
-        f"not loaded. This "
-        f"is a visibility gap, not a query result. Do NOT re-dispatch {system}; "
-        f"name the missing evidence in your analysis and in a `:T conclude` "
-        f"`ceiling_test` row (the entry price `inconclusive` owes), then escalate "
-        f"(inconclusive) if it blocks disposition."
+        f"[circuit-breaker] System '{system}' is DOWN for this run: "
+        f"{n} {INFRA_CAUSES} tripped the breaker, "
+        f"so this dispatch did not run and {system}'s reference skill was not loaded. "
+        f"This is a visibility gap, not a query result. "
+        f"Do NOT re-dispatch {system}; "
+        f"name the missing evidence in your analysis and in a `:T conclude` `ceiling_test` row "
+        f"(the entry price `inconclusive` owes), "
+        f"then escalate (inconclusive) if it blocks disposition."
     )
