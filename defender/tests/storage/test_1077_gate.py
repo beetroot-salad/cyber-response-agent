@@ -115,7 +115,7 @@ def from_a_data_file(run_dir: Path, names: list[str]) -> Path:
 def test_gate_flags_a_literal_free_join_onto_an_owner_derived_value(tmp_path: Path):
     """A join onto a value the accessor pass traced back to an owner —
     `RunPaths(run_dir).gather_raw / lead_id` — is reported even though it carries no literal."""
-    found = S.gate_findings(tmp_path, "scripts/gather_tools/record_query.py", '''
+    found = S.gate_findings(tmp_path, "runtime/record_query.py", '''
 from pathlib import Path
 
 from defender.run_repository import RunPaths

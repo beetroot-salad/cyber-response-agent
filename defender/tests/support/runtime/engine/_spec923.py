@@ -28,7 +28,7 @@ is a fork silently re-opened:
   that lead's own `fail_reason` presence for which of the two states is honest.
   `nothing-to-try` anchors to nothing (`cap=` instead of `ref=`): it is the one lane with no
   call to point at, checked NEGATIVELY against the closed verb roster this codebase's own
-  `scripts/adapters/` ships — a capability the roster DOES declare refuses the row (that names
+  `integrations/` ships — a capability the roster DOES declare refuses the row (that names
   a call that should have been made, or a lead it should point at). `note` is free text for the
   analyst; it gates NOTHING (only `state`/`ref`/`cap` are checked) and rides into the report
   BODY, never the frontmatter. `HOST_ONLY_ROW` (the retired free-text shape — does not even
@@ -145,7 +145,7 @@ PAYING_ROW = "state=query-failed ref=l-002 note=EDR execve logs for web-1 never 
 SECOND_PAYING_ROW = "state=query-empty ref=l-003 note=DNS query logs for web-1 came back with zero rows in the 30d window"
 
 #: PAYS as `nothing-to-try`: `cap=sandbox.detonate` names a capability that does not exist
-#: ANYWHERE in this codebase's closed verb roster (`defender/scripts/adapters/` declares no
+#: ANYWHERE in this codebase's closed verb roster (`defender/integrations/` declares no
 #: `sandbox` system) — checked negatively against that roster, never a judgment of prose. It is
 #: the row §7-round-4's widening exists for: the shipped escalation document's real gap is
 #: exactly this ("confirming C2 would require sandbox detonation or traffic-content inspection,
@@ -386,7 +386,7 @@ def real_targets(deps: Any) -> list[str]:
 def committed(run_dir: Path) -> dict:
     """The committed report's frontmatter, read as the analyst reads it — through the shared
     accessor, off `report.md` alone and with no access to the run's history."""
-    from defender._report import read_report
+    from defender.records._report import read_report
 
     return dict(read_report(run_dir / "report.md").frontmatter or {})
 

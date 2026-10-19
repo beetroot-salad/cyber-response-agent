@@ -124,7 +124,7 @@ FIXTURE_CORRELATION_TEMPLATE = "elastic.correlate-alerts-by-entity"
 RUN_READINESS = "defender.runtime.run_tenant.resolve_run_tenant"
 
 #: `tenant.py`'s setup subcommand's function (today's `setup(tenant_id)`) — the census's start.
-SETUP_FUNCTION = "defender.scripts.tenant.setup"
+SETUP_FUNCTION = "defender.cli.tenant.setup"
 
 #: V16 (human): what `check` says when its committed-`.tenant-id` git read cannot answer (git
 #: absent, git refusing the clone as dubious ownership, any git error) — beside git's reason.
@@ -145,7 +145,7 @@ def mod(dotted: str) -> Any:
     return importlib.import_module(f"defender.{dotted}")
 
 
-#: Every owner helper below takes the owner MODULE (`from defender import _tenant` in the test
+#: Every owner helper below takes the owner MODULE (`from defender.tenancy import _tenant` in the test
 #: file — it exists at base; only its new attributes do not), so the test visibly drives the
 #: target and a missing attribute is that one test's `AttributeError`.
 
@@ -425,7 +425,7 @@ def script_of(module: Any) -> Path:
 
 def tenant_py(module: Any, *args: str, root: Path | str | None, **kw: Any,
               ) -> subprocess.CompletedProcess:
-    """`python3 defender/scripts/tenant.py <args>` — `module` is the imported `tenant.py`."""
+    """`python3 defender/cli/tenant.py <args>` — `module` is the imported `tenant.py`."""
     return run_script(script_of(module), *args, root=root, **kw)
 
 
@@ -585,7 +585,7 @@ _CHECKOUT_IGNORE = shutil.ignore_patterns(
 
 
 def tmp_checkout(dest: Path) -> Path:
-    """A runnable copy of this checkout at `dest` (its `defender/scripts/tenant.py` imports its
+    """A runnable copy of this checkout at `dest` (its `defender/cli/tenant.py` imports its
     OWN `defender` package — the script puts its checkout first on `sys.path`). Returns the
     checkout root."""
     shutil.copytree(DEFENDER, dest / "defender", ignore=_CHECKOUT_IGNORE, symlinks=True)
@@ -604,7 +604,7 @@ def tmp_checkout(dest: Path) -> Path:
 def add_adapter(checkout: Path, system: str, source: str) -> Path:
     """Drop `<system>_adapter.py` holding `source` into a tmp checkout's adapters — one more
     system the running code declares (the census reads adapters COLD, never importing them)."""
-    path = checkout / "defender" / "scripts" / "adapters" / f"{system.replace('-', '_')}_adapter.py"
+    path = checkout / "defender" / "integrations" / f"{system.replace('-', '_')}_adapter.py"
     path.write_text(source, encoding="utf-8")
     return path
 

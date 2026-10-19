@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from defender import _git, _provenance  # type: ignore[import-not-found]
-from defender._provenance import RunProvenance  # type: ignore[import-not-found]
+from defender import _git
+from defender.records import _provenance  # type: ignore[import-not-found]
+from defender.records._provenance import RunProvenance  # type: ignore[import-not-found]
 from defender.run_repository import PROVENANCE, RunPaths  # type: ignore[import-not-found]
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant  # type: ignore[import-not-found]
 from defender.tests.support.shared.contracts._repo import seed_repo  # type: ignore[import-not-found]
@@ -225,7 +226,7 @@ def test_every_field_reaches_the_wire_and_comes_back(tmp_path):
     )
     # #1204: the tenant knowledge revision rides in the same record, so the rich record carries
     # one — imported HERE, not at module top, so a tree without it fails this arm alone.
-    from defender._provenance import KnowledgeRevision  # type: ignore[attr-defined]
+    from defender.records._provenance import KnowledgeRevision  # type: ignore[attr-defined]
 
     rich = RunProvenance(
         commit="a" * 40, dirty=True, dirty_paths=("x.md", "y.md"), dirty_path_count=2,

@@ -25,7 +25,7 @@ THE FAULT-INJECTION HIERARCHY, applied (phases/author.md):
   tier 3 — an author-imagined fault is banned; none is used here.
 
 RED AGAINST HEAD is the expected state of a spec. `box/_image.py`,
-`defender/scripts/box_image.py`, `defender/box.Dockerfile`, `_BOX_MARK_ENV`, the `box` extra,
+`defender/box/image_cli.py`, `defender/box.Dockerfile`, `_BOX_MARK_ENV`, the `box` extra,
 the missing-image preflight and the CI build step do not exist at b016749c. Every reference to a
 future symbol is LAZY — reached inside a call site a test invokes (`box_mod.image_tag`, a path
 that is stat'd in the body) — so every module still COLLECTS at HEAD and each test fails on
@@ -72,7 +72,7 @@ HASH_INPUTS: tuple[str, ...] = ("box.Dockerfile", "uv.lock", "pyproject.toml")
 
 #: The two new code files and the Dockerfile, where the amendment sites them (N10, F26).
 IMAGE_PY = DEFENDER / "box" / "_image.py"
-BOX_IMAGE_PY = DEFENDER / "scripts" / "box_image.py"
+BOX_IMAGE_PY = DEFENDER / "box" / "image_cli.py"
 DOCKERFILE = DEFENDER / "box.Dockerfile"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 README_RUNTIME = REPO_ROOT / ".devcontainer" / "README.runtime.md"
@@ -86,7 +86,7 @@ TAG_RE = re.compile(r"^defender-box:(?P<version>[A-Za-z0-9._]+)-(?P<digest>[0-9a
 
 #: The remedy's tail, relative to the tree — what the README documents and the fault names
 #: absolutely (d42/d45).
-BUILD_COMMAND_TAIL = "defender/scripts/box_image.py build"
+BUILD_COMMAND_TAIL = "defender/box/image_cli.py build"
 
 EXEC_TIMEOUT = 60.0
 
@@ -366,7 +366,7 @@ def plant_tree(root: Path, *, missing: tuple[str, ...] = (), copy_code: bool = T
             continue
         (defender_dir / name).write_bytes(PLANTED_INPUT_BYTES[name])
     if copy_code:
-        for src, rel in ((IMAGE_PY, Path("box")), (BOX_IMAGE_PY, Path("scripts"))):
+        for src, rel in ((IMAGE_PY, Path("box")), (BOX_IMAGE_PY, Path("box"))):
             if src.is_file():
                 dest = defender_dir / rel
                 dest.mkdir(parents=True, exist_ok=True)
@@ -482,7 +482,7 @@ def without_the_additions(argv: list[str]) -> list[str]:
 
 # ---- the build remedy, as the operator would read it --------------------------------------------
 def remedy_command(message: str) -> list[str] | None:
-    """The `python3 <tree>/defender/scripts/box_image.py build` command a fault message names,
+    """The `python3 <tree>/defender/box/image_cli.py build` command a fault message names,
     split as a shell would (the tree path is `shlex.quote`d — M5-TEXT #42), or None when the
     message names no build command. House style may wrap a command in backticks and end the
     sentence with `.` or `)`; neither is part of what an operator pastes."""

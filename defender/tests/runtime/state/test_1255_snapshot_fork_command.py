@@ -16,7 +16,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anything(
         tmp_path, capsys):
-    from defender._episode_handle import episode_dir
+    from defender.episodes._episode_handle import episode_dir
     from defender.learning.branch import cli as branch_cli
 
     _base, src = T.runs_base(tmp_path, pre_snapshot=True)

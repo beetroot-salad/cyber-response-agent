@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender._io import (
     load_json_artifact,
 )

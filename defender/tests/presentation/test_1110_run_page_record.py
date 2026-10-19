@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from defender import _env
+from defender.configuration import _env
 from defender import run as run_py
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
@@ -18,7 +18,7 @@ from defender.tests.support.sandbox._spec791 import (
 
 
 def _deployment() -> str:
-    from defender import _env
+    from defender.configuration import _env
 
     return _env.deployment()
 
@@ -98,7 +98,7 @@ class _FailingRender(SpecTail):
 
 def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materialized(
         tmp_path, state):
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
     from defender.tests.support.tenancy._tenants1106 import accept
 

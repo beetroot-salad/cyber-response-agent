@@ -35,7 +35,7 @@ repo into the data root, then set the tenant up once:
 ```bash
 git clone <tenant repo> "<HOST_DATA_ROOT>/playground/knowledge"
 docker run --rm --env-file .env -e DEFENDER_DATA_ROOT=/data -v "<HOST_DATA_ROOT>":/data \
-    defender-runtime python3 defender/scripts/tenant.py setup playground
+    defender-runtime python3 defender/cli/tenant.py setup playground
 ```
 
 Clone on the HOST with a credential helper or an ssh agent (never a credential in the URL);
@@ -45,7 +45,7 @@ folder as it is (it copies nothing and runs no git), checks it, and writes the r
 A data root made before #1120 (`<id>/tenant.json`, `runs/` and `sessions/`, no `knowledge/`) has
 no tenant repo to clone: on the host, build its knowledge folder once from this checkout's git
 history (a full clone, not a shallow one) with
-`python3 defender/scripts/tenant.py migrate playground "<HOST_DATA_ROOT>/playground/knowledge"`
+`python3 defender/cli/tenant.py migrate playground "<HOST_DATA_ROOT>/playground/knowledge"`
 (one-off), then run the setup step above.
 
 Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
@@ -79,7 +79,7 @@ there is nothing to tag by hand — only to build:
 ```bash
 # build (from the dev container, over the socket onto the HOST daemon — the daemon a box
 # actually starts on — with no pull: the image is built locally, never fetched)
-python3 defender/scripts/box_image.py build
+python3 defender/box/image_cli.py build
 ```
 
 Build it once; it persists on the host daemon until one of these changes (#1097):

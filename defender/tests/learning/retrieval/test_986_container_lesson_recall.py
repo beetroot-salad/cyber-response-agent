@@ -31,7 +31,7 @@ def _frontier(text: str):
 @lru_cache(maxsize=1)
 def _lessons() -> tuple:
     """The REAL shipped corpus, parsed ONCE for this module."""
-    from defender._corpus import iter_lessons
+    from defender.knowledge._corpus import iter_lessons
 
     return tuple(iter_lessons(CORPUS))
 

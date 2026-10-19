@@ -170,7 +170,7 @@ def test_1255_an_answer_the_source_received_is_served_with_the_sources_own_bytes
 
     ep = S24.episode_v2(tmp_path / "branch")
     (ep / "served" / "base.jsonl").unlink()  # the episode is primed from the source, once
-    episode_cls = S24.sym("_episode_handle", "Episode")
+    episode_cls = S24.sym("episodes._episode_handle", "Episode")
     with episode_cls.open(ep) as handle:
         S24.sym("learning.branch.capture", "prime_base")(source_dir, handle)
     reads_before = len(est.calls("idp", "query"))
@@ -325,7 +325,7 @@ def test_1255_a_pre_fork_question_with_no_recording_is_reconstructed_at_the_fork
 
     ep = S24.episode_v2(tmp_path / "branch")
     (ep / "served" / "base.jsonl").unlink()  # the episode is primed from the source, once
-    with S24.sym("_episode_handle", "Episode").open(ep) as handle:
+    with S24.sym("episodes._episode_handle", "Episode").open(ep) as handle:
         report = S24.sym("learning.branch.capture", "prime_base")(source_dir, handle)
     assert getattr(report, skip) == 1, f"fixture: the real primer did not skip it as {skip}"
     base = S24.read_jsonl(ep / "served" / "base.jsonl")

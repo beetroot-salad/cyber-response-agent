@@ -44,7 +44,7 @@ def _ctx(settings: Path, run_dir: Path, env: dict | None = None):
 # ---- the adapters' config.env ---------------------------------------------------------------------
 
 def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path):
-    transport = T.mod("scripts.adapters._stub_transport")
+    transport = T.mod("integrations._stub_transport")
     cfg = transport.load_config(_ctx(injected, tmp_path), "cmdb", "CMDB")
     assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"
     assert cfg["BASTION_HOST"] == f"bastion-{MARK}"
@@ -53,8 +53,8 @@ def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path
 
 
 def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
-    faults = T.mod("scripts.adapters.faults")
-    transport = T.mod("scripts.adapters._stub_transport")
+    faults = T.mod("integrations.faults")
+    transport = T.mod("integrations._stub_transport")
     root = tmp_path / "injected-root"
     T.place_tenant(root, T.PLAYGROUND_ID, configs={})
     settings = T.accept(root, T.PLAYGROUND_ID).settings
@@ -83,7 +83,7 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
 
 def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
         injected, tmp_path):
-    writer = T.mod("scripts.case_history.ticket_writer")
+    writer = T.mod("integrations.ticket_writer")
     run_dir = tmp_path / "run-1106"
     run_dir.mkdir()
     plant_alert(run_dir, {"rule": {"id": "r-1", "description": "d"},

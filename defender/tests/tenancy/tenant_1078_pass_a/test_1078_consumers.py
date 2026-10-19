@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import json
+import importlib
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ _AS_OF = datetime.fromisoformat(T.AS_OF)
 
 
 def _held_out():
-    return H.mod("evals.held_out")
+    return importlib.import_module("evaluations.held_out")
 
 
 def _fixtures(tmp_path: Path, slug: str = "slug-one", disposition: str = "benign") -> Path:

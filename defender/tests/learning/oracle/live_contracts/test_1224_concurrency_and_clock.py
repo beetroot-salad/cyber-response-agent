@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
+from defender.episodes import _episode_handle as EH
 from defender.hooks.budget_enforcer import BUDGET_REFUSAL_MESSAGE, DEFAULT_LIMITS
 from defender.run_repository import RunPaths
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
@@ -426,7 +426,7 @@ def test_1224_two_identical_concurrent_calls_get_one_turn_and_identical_bytes(tm
               lambda: S.call(reg2, "idp", "query", ctx2, **p2))
     assert oracle2.submissions() == 2, "two different calls did not get two turns"
 
-    faults = S.mod("scripts.adapters.faults")
+    faults = S.mod("integrations.faults")
     broken = S.query_params("user:erin")
     est2.fail("idp", "query", broken)
     for _ in range(2):

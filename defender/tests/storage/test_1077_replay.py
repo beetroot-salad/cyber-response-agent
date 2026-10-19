@@ -245,8 +245,8 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     # And this is the trade-off O3's second exemption pays for: the wire log's BYTES change.
     assert "writer_id" in S.RunPaths(run_dir).wire_log.read_text(encoding="utf-8")
 
-    import defender.scripts.visualize.visualize_data  # noqa: F401
-    from defender.scripts.visualize.visualize_messages import load_messages
+    import defender.presentation.visualize_data  # noqa: F401
+    from defender.presentation.visualize_messages import load_messages
     assert load_messages(run_dir) == rows, (
         "the shipped wire-log viewer no longer round-trips the records it is handed once every "
         "one carries decision 18's `writer_id`; the issue's Done-when says existing consumers "

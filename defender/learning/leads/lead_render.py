@@ -9,7 +9,7 @@ from typing import Any
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _corpus  # noqa: E402
+from defender.knowledge import _corpus  # noqa: E402
 from defender._io import Bound  # noqa: E402
 
 

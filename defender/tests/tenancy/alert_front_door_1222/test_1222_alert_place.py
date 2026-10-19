@@ -821,7 +821,7 @@ def test_p154_sibling_and_world_boxes_and_their_directory(tmp_path):
     # The launcher's copy in the episode (A1; launch itself is S11's), then a sibling resumed.
     ep = T.episode(tmp_path, root=Path(os.environ[T.EPISODES_BASE_ENV]),
                    doc=T.family_doc(source_run_dir=str(src), source_run_id=src.name))
-    from defender._episode_handle import Episode
+    from defender.episodes._episode_handle import Episode
     with Episode.open(ep) as episode:
         T.episode_view(episode, tenant=planted.accept()).close()
     copy = S.plant_episode_copy(ep, alert=fresh["alert"], record=S.read_record(src))
@@ -852,7 +852,7 @@ def test_p155_reap_scan_and_archive_walk_a_former_mountpoint(tmp_path):
     scrub = S.mod("box._scrub")
     scrub.scrub(d.run_dir)
     assert scrub.tree_verified(d.run_dir), "the reap scan did not verify the run folder"
-    episode_cls = S.sym("_episode_handle", "Episode")
+    episode_cls = S.sym("episodes._episode_handle", "Episode")
     ep = tmp_path / "s08-archive-ep"
     ep.mkdir()
     with episode_cls.open(ep) as episode:

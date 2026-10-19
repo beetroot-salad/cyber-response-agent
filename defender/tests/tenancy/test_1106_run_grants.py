@@ -102,7 +102,7 @@ def test_a_table_edited_between_two_runs_is_read_again(tmp_path):
 
 def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_tenant(
         tmp_path, capsys, monkeypatch):
-    policy_cli = T.mod("scripts.policy_cli")
+    policy_cli = T.mod("cli.policy_cli")
     root = tmp_path / "tenants"
     T.place_tenant(root, "acme")
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
@@ -130,7 +130,7 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
         tmp_path, capsys, monkeypatch):
     import pytest
 
-    policy_cli = T.mod("scripts.policy_cli")
+    policy_cli = T.mod("cli.policy_cli")
     root = tmp_path / "tenants"
     T.place_tenant(root, "newco", table=T.TABLE_BLANK)
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))

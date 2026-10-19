@@ -10,7 +10,7 @@ pytest.importorskip("pydantic_ai")
 from defender.runtime import session_store  # noqa: E402
 from defender.runtime.agent_role import GATHER_AGENT_ID_PREFIX  # noqa: E402
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS  # noqa: E402
-from defender.scripts.gather_tools import record_query as rq  # noqa: E402
+from defender.runtime import record_query as rq  # noqa: E402
 # `wrap_fresh`'s frame grammar and the real store's read channel, both spent from their one
 # home rather than re-spelled here — `_frames680` carries no optional dependency of its own.
 from defender.tests.support.learning.curation._frames680 import FRAME_RE  # noqa: E402
@@ -30,7 +30,7 @@ from defender.tests.e2e.test_repeat_breaker_807 import (  # noqa: E402
     _replay_rejections,
 )
 
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
+from defender.runtime.record_query import (  # noqa: E402
     REJECTION_BUDGET,
     REJECTION_BUDGET_ESCAPE,
     RejectionBudgetTrip,

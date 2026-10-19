@@ -4,9 +4,9 @@ from __future__ import annotations
 import pytest
 
 from defender.runtime.verbs import VerbContext
-from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters import ticket_adapter
-from defender.scripts.adapters.faults import TransportFault
+from defender.integrations import _stub_transport as transport
+from defender.integrations import ticket_adapter
+from defender.integrations.faults import TransportFault
 from defender.tests.support.tenancy import _tenants1106
 
 CURL_FAULTS = [

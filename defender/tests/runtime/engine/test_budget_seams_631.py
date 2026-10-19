@@ -24,7 +24,7 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 
-from defender._env import FatalConfigError  # noqa: E402
+from defender.configuration._env import FatalConfigError  # noqa: E402
 from defender.hooks.budget_enforcer import (  # noqa: E402
     DEFAULT_LIMITS,
     BudgetKill,
@@ -449,7 +449,7 @@ def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
     tmp_path, monkeypatch, d9_tenant, data_root,
 ):
     """The learning state root and the runs base cannot resolve to the same directory: pairing the two onto one..."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     def runs_base() -> Path:
         return _tenant.runs_base_for(T1106.accept(_tenant.resolve_data_root(), d9_tenant))

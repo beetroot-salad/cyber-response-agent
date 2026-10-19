@@ -78,7 +78,7 @@ _CODE_ROOTS = tuple(
     Path(root).relative_to("defender").as_posix()
     for root in json.loads(PROJECT_PROFILE.read_text(encoding="utf-8"))["sourceRoots"]
     if Path(root).is_relative_to("defender"))
-_OWNER_MODULE = "_episode_paths.py"
+_OWNER_MODULE = "episodes/_episode_paths.py"
 _LAYOUT_MODULE = "run_repository/_layout.py"
 _OWNER_MODULES = (_OWNER_MODULE, _LAYOUT_MODULE)
 _ARCHIVE_MODULE = "learning/branch/archive.py"
@@ -495,7 +495,7 @@ def test_draws_on_disk_skips_a_link_planted_at_a_draws_name(tmp_path):
     """The one reader of the draw files reads each leaf through the screened read, like every other
     reader of the episode tree."""
     enqueue = J.mod("learning.judge.enqueue")
-    owner = J.mod("_episode_paths")
+    owner = J.mod("episodes._episode_paths")
     episode_dir = tmp_path / "ep"
     label = "b"
     draw_dir = owner.EpisodePaths(episode_dir).world(label).draws

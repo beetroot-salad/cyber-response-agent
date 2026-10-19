@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender import _tenant
+from defender.tenancy import _tenant
 
 
 def test_a_forged_token_is_refused_by_the_guard(tmp_path: Path) -> None:

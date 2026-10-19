@@ -11,7 +11,7 @@ def _compare():
 
 
 def test_947_count_endpoint_is_absent_from_the_elastic_adapter_allowlist(tmp_path):
-    confinement = T.mod("scripts.adapters.confinement")
+    confinement = T.mod("integrations.confinement")
     allow = set(confinement.READ_ENDPOINT_ALLOWLIST["elastic"])
     assert allow == {("/*/_search", "POST"), ("/_query", "POST"),
                      ("/_cluster/health", "GET"), ("/api/status", "GET")}

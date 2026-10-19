@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.scripts import tenant as tenant_py
+from defender.cli import tenant as tenant_py
 from defender.tests.support.invlang.validation import _dispositions995 as D995
 from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.tenancy import _tenants1106 as T1106
@@ -65,8 +65,8 @@ KNOWLEDGE_JOINS = ("settings", "knowledge", "agent")
 #: The settings-half loaders that survive piece 1 unchanged (profile resource
 SETTINGS_LOADER_MODULES = (
     "runtime/verb_dispositions.py", "runtime/lead_zero_config.py", "runtime/run_tenant.py",
-    "runtime/case_ticket.py", "scripts/adapters/elastic_adapter.py",
-    "scripts/adapters/_stub_transport.py", "learning/branch/estate/stagers/elastic.py",
+    "runtime/case_ticket.py", "integrations/elastic_adapter.py",
+    "integrations/_stub_transport.py", "learning/branch/estate/stagers/elastic.py",
     "learning/branch/staging.py", "skills/connect/validate_scaffold.py",
 )
 
@@ -82,8 +82,8 @@ def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_se
         f"    return tenant.{prop} / name\n\n" for prop in KNOWLEDGE_JOINS)
     source = (
         "from pathlib import Path\n\n"
-        "from defender._episode_paths import EpisodePaths\n"
-        "from defender._tenant import Tenant\n\n\n"
+        "from defender.episodes._episode_paths import EpisodePaths\n"
+        "from defender.tenancy._tenant import Tenant\n\n\n"
         f"{joins}{clean}"
         f"def row_only(tenant: Tenant) -> Path:\n    return tenant.{H.ROW_PATH_PROPERTY}\n\n"
         "def control(ep: Path, run_id: str) -> Path:\n"
@@ -112,8 +112,8 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
     source = textwrap.dedent(f"""\
         from pathlib import Path
 
-        from defender._episode_paths import EpisodePaths
-        from defender._tenant import accept_tenant
+        from defender.episodes._episode_paths import EpisodePaths
+        from defender.tenancy._tenant import accept_tenant
         from defender.runtime.run_tenant import RunTenant
 
 

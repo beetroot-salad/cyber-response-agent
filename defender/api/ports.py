@@ -7,7 +7,7 @@ answers `None` or raises `NotFound`, exactly as a missing one does, so the API n
 caller that an id exists elsewhere.
 
 The data rules are the STORE's, enforced with constraints and transactions, not in the routes,
-and each has ONE home: `docs/platform-design.md` — §4.1 for starting an investigation and its
+and each has ONE home: `defender/docs/platform-design.md` — §4.1 for starting an investigation and its
 request-id replay, §2.5 for re-learns. The methods here name the rule they answer to and state
 only the shape of the answer. The API maps that answer onto HTTP. The rules' own tests belong
 with the store's implementation (#1082), run against these ports; the API's tests
@@ -42,7 +42,7 @@ from contextlib import AbstractContextManager
 from typing import Literal, Protocol
 
 from defender._model import model
-from defender._tenant import TenantId
+from defender.tenancy._tenant import TenantId
 
 from .models import (
     Alert,

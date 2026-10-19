@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
-from defender._episode_handle import Episode
+from defender.episodes import _episode_handle as EH
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T
 from defender.tests.support.learning.branch import _triplet_947 as P
 from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV, current_data_root
@@ -38,7 +38,7 @@ class SpawnRecorder:
         runs = (Path(env[P.EPISODES_BASE_ENV]).resolve() / argv[argv.index("--episode") + 1]
                 / "runs")
         try:
-            record = T.mod("_tenant").read_tenant(runs).tenant_id
+            record = T.mod("tenancy._tenant").read_tenant(runs).tenant_id
         except Exception as e:  # noqa: BLE001 — "no readable record at spawn" is the observation
             record = f"<unreadable: {e!r}>"
         self.launches.append({"argv": list(argv), "env": env, "tenant_at_spawn": record})
@@ -75,7 +75,7 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
         argv = launch["argv"]
         assert argv[argv.index("--tenant") + 1] == "acme", argv
         assert _child_data_root(launch).resolve() == root.resolve()
-    assert T.mod("_tenant").read_tenant(ep / "runs").tenant_id == "acme"
+    assert T.mod("tenancy._tenant").read_tenant(ep / "runs").tenant_id == "acme"
 
 
 @pytest.mark.parametrize("tenant_id", [None, "Not A Tenant"])

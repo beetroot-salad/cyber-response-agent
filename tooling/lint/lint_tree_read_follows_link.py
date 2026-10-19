@@ -72,7 +72,7 @@ _UNSAFE_METHODS = frozenset({"is_file", "is_dir"})
 #: corpus). An entry ending in `/` covers its whole package (`_astlib.selects`); a module outside
 #: every entry that grows such a read is not covered.
 LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
-    "_provenance.py",
+    "records/_provenance.py",
     "run_common.py",
     "learning/branch/cli.py",
     "learning/branch/capture.py",
@@ -95,7 +95,7 @@ LINT_TREE_READER_MODULES: frozenset[str] = frozenset({
     "learning/judge/family.py",
     "learning/judge/render.py",
     # The episode page, rendered from the episode tree through package readers.
-    "scripts/visualize/visualize_episode.py",
+    "presentation/visualize_episode.py",
     # The runs repository's own readers (#1105 D7): the lookups, the episode record and
     # `RunId`. Their reads must not follow a link. The moved layout and handle are not listed,
     # as neither was before the move (`Run.at`'s link-following `is_dir()` is today's).

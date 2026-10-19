@@ -15,7 +15,7 @@ from typing import NamedTuple
 import shlex
 
 from defender._io import read_text_soft
-from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
+from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
     _BOX_MARK_ENV,
@@ -36,7 +36,7 @@ from ._image import ImageInputError, image_tag
 _ALLOW_UNSANDBOXED = "DEFENDER_ALLOW_UNSANDBOXED"
 
 #: The build script every missing-image fault names, relative to the tree root.
-_BUILD_SCRIPT_TAIL = "defender/scripts/box_image.py"
+_BUILD_SCRIPT_TAIL = "defender/box/image_cli.py"
 
 
 class Rootfs(NamedTuple):

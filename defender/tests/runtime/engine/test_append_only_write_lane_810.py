@@ -10,7 +10,7 @@ DEFENDER = Path(__file__).resolve().parents[3]
 if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
     sys.path.insert(0, str(DEFENDER.parent))
 
-from defender._artifact_schema import (  # noqa: E402
+from defender.records._artifact_schema import (  # noqa: E402
     INVESTIGATION_FILE_MAX,
     UNCHANGED_NOTICE,
     validate_investigation,

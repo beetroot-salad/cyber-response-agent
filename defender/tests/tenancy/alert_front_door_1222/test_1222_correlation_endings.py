@@ -272,7 +272,7 @@ def _pre_trip(system: str = "elastic") -> Callable[[Path], None]:
 
 def _config_fault() -> BaseException:
     """A missing elastic config faults before reaching the backend."""
-    return S.sym("scripts.adapters.faults", "ConfigFault")(
+    return S.sym("integrations.faults", "ConfigFault")(
         "config file not found: the tenant's settings/systems/elastic/config.env - this "
         "tenant's settings do not configure this system")
 
@@ -606,7 +606,7 @@ def test_p029_l00c_claimed_but_its_declaring_row_refused(tmp_path: Path) -> None
     assert not d.rows_for(S.L3), "l-00c ran calls although its declaring row was refused"
     # The validator MAIN's writes meet: a citation of an undeclared l-00c is refused, and the
     # same citation under its declaring row is not (the positive control).
-    validate = S.sym("_artifact_schema", "validate_artifact")
+    validate = S.sym("records._artifact_schema", "validate_artifact")
     citing = W836.attr_block(f"{S.L3}|v-001|class|bastion")
     declaring = ("\n```invlang\n:L findings [id|loop|name|target|tests|system|window]\n"
                  f"{S.L3}|0|correlation lead|||elastic|n/a\n```\n")

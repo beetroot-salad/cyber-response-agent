@@ -25,11 +25,11 @@ from pathlib import Path
 from typing import Any
 
 
-from defender._episode_paths import OracleStorePaths
+from defender.episodes._episode_paths import OracleStorePaths
 
 from defender._io import guarded_mkdir, read_bytes_capped, read_jsonl_rows, write_guarded
 
-from defender._pricing import usage_cost
+from defender.configuration._pricing import usage_cost
 
 
 from defender.learning.branch.ledger import request_key

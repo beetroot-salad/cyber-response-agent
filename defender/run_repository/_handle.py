@@ -29,9 +29,13 @@ from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from defender import _alert_input, _artifact_schema, _episode_paths, _provenance, _report
+from defender.records import _alert_input
+from defender.records import _artifact_schema
+from defender.episodes import _episode_paths
+from defender.records import _provenance
+from defender.records import _report
 from defender import _io as _real_io
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender.run_repository import _layout
 from defender.run_repository._id import RunId
 from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths

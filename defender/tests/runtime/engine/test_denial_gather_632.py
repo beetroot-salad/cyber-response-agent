@@ -11,7 +11,7 @@ pytest.importorskip("pydantic_ai")
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
-from defender._query_rules import DENIED_QUERY_ID
+from defender.knowledge._query_rules import DENIED_QUERY_ID
 from defender.tests.support.learning.curation._verb_authorization_632 import (  # noqa: E402
     DENIED,
     DONE,
@@ -283,7 +283,7 @@ def test_a_denied_call_is_refused_before_its_query_id_meets_the_traversal_screen
 def test_a_denial_is_decided_before_the_availability_short_circuit(tmp_path: Path):
     """A denial against a system this run has already given up on is still DECIDED and AUDITED: the
     grant check runs before the availability short-circuit (§7 R3)."""
-    from defender.scripts.adapters.faults import TransportFault
+    from defender.integrations.faults import TransportFault
 
     rec = VerbRecorder()
     assert circuit_breaker.PER_SYSTEM_FAIL_LIMIT == 2, "the trip budget moved; the script below is stale"
@@ -319,12 +319,12 @@ def test_a_denial_does_not_move_the_circuit_breaker(tmp_path: Path):
 def test_a_denials_sentinel_row_is_a_sentinel_to_every_reader(tmp_path: Path):
     from defender.learning.lead_repository import joined
     from defender.runtime.query_tool import resolve_query_id
-    from defender.scripts.gather_tools.record_query import (
+    from defender.runtime.record_query import (
         in_rejection_domain,
         rejection_budget_trip,
         repeat_trip,
     )
-    from defender._query_rules import is_reserved_query_id
+    from defender.knowledge._query_rules import is_reserved_query_id
 
     rec = VerbRecorder()
     r = run_gather(tmp_path, verbs=_registry(rec),

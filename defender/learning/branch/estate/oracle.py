@@ -26,8 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender._async import run_sync
-from defender._pricing import billed_usage
+from defender.execution._async import run_sync
+from defender.configuration._pricing import billed_usage
 from defender._untrusted import wrap, wrap_fresh
 from defender.learning.branch.ledger import request_key
 from defender.learning.core import config

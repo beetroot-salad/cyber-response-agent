@@ -1,6 +1,6 @@
 # playground-v2/infra/ — playground IaC
 
-Terraform config for the Hetzner Cloud VPS (`soc-playground`) that hosts the v2 playground (`hetznercloud/hcloud` provider, CCX33 in `nbg1`, ~€74/mo gross). Cloud-init bootstrap installs Docker + Compose. Dev-only — not shipped with the soc-agent plugin. Design rationale: `/workspace/docs/playground-environment-v2.md`.
+Terraform config for the Hetzner Cloud VPS (`soc-playground`) that hosts the v2 playground (`hetznercloud/hcloud` provider, CCX33 in `nbg1`, ~€74/mo gross). Cloud-init bootstrap installs Docker + Compose. Dev-only — not shipped with the soc-agent plugin. Design rationale: `/workspace/playground-v2/docs/playground-environment-v2.md`.
 
 Auth: `HCLOUD_TOKEN` from `/workspace/.env` (project-scoped; rotate via Hetzner Console). State is local `terraform.tfstate` (gitignored, single-dev). Local overrides in `terraform.tfvars` (gitignored; see `.example` — SSH pubkey + `ssh_source_cidrs`).
 

@@ -46,7 +46,7 @@ EXCLUDED_PREFIXES = (
     "defender/skills/gather/queries/",
     # No settings carve-out: per-tenant settings live under the data root
     # (`$DEFENDER_DATA_ROOT/<id>/knowledge/settings/`), outside the repo.
-    "defender/fixtures/",
+    "playground-v2/examples/alerts/",
     # Vendored golden runs replayed by the e2e harness: env-specific test data by design.
     "defender/tests/fixtures/e2e/",
     "defender/tests/",
@@ -62,8 +62,8 @@ EXCLUDED_PREFIXES = (
     "defender/__pycache__/",
     # POC design notes — internal-facing, not agent runtime.
     "defender/docs/",
-    # Per-vendor adapters live under scripts/adapters/ — by design vendor-named.
-    "defender/scripts/adapters/",
+    # Per-vendor adapters live under integrations/ — by design vendor-named.
+    "defender/integrations/",
     # The record's settings parts (#1107): the ONE module that reads each system's `config.env`
     # into the run's record, so that no other platform module interprets them (the census test
     # `d4_elastic_keys_one_place` holds that for the corpus engine's keys). A file, not a directory: the carve-out is this module and nothing beside it.

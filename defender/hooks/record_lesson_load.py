@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from defender._clock import parse_iso_utc
-from defender._knowledge import LESSON_CORPORA
+from defender.knowledge._knowledge import LESSON_CORPORA
 from defender.runtime.agent_role import AgentRole
 
 

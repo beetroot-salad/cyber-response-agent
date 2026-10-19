@@ -34,7 +34,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from defender._io import is_plain_entry
-from defender.scripts.adapters.faults import ConfigFault
+from defender.integrations.faults import ConfigFault
 
 _log = logging.getLogger(__name__)
 

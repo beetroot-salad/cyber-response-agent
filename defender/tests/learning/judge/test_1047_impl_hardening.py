@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.shared.filesystem import _spec1047 as S
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,

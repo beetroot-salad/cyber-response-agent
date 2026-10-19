@@ -70,7 +70,7 @@ def world(tmp_path, monkeypatch):
     chosen: dict[str, str] = {}
 
     def runs_base(tenant_id: str) -> Path:
-        tenant = T.mod("_tenant")
+        tenant = T.mod("tenancy._tenant")
         layout = tenant._TenantPaths(root, tenant_id)
         if not layout.row.exists():
             # The row alone (no knowledge folder): a tenant set up in name only.
@@ -142,7 +142,7 @@ def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base_record(wor
     assert _names(
         text, world["root"] / T.PLAYGROUND_ID / "knowledge" / "settings" / "systems"
         / "case-history" / "mapping.yaml"), text
-    assert not T.mod("_tenant").record_path(base).exists(), "a refused run minted a record"
+    assert not T.mod("tenancy._tenant").record_path(base).exists(), "a refused run minted a record"
 
 
 @pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])

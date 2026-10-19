@@ -59,7 +59,7 @@ from defender.learning.core.state import (
 )
 
 if TYPE_CHECKING:
-    from defender._tenant import Tenant
+    from defender.tenancy._tenant import Tenant
 
 _logger = logging.getLogger(__name__)
 
@@ -390,7 +390,7 @@ def _data_root() -> Path:
     that has a curation row queued when it starts. A missing or bad setting is the stage's
     configuration refusal (`FatalConfigError`, raised from `resolve_data_root`'s
     `TenantRefused`): `_run_stage` logs it on one line and exits 2."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     try:
         return _tenant.resolve_data_root()
@@ -498,7 +498,7 @@ def _rehydrate(
     per tenant per tick, a refusal included — then the run opened through that tenant's
     repository, which never follows a link at its name. Else the refusal, logged: the
     tenant's `TenantRefused`, or the open's `RunRefused` (`RunAbsent` when the run is gone)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.run_repository import RunRefused
 
     address = claim.address

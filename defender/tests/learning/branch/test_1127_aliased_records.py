@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from defender._episode_handle import Episode
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episode_paths import LAYOUT
 from defender.learning.branch import episode as episode_mod
 from defender.learning.branch import outcome as outcome_mod
 

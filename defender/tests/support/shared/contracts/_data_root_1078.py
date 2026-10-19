@@ -45,8 +45,8 @@ DEFENDER = Path(__file__).resolve().parents[4]
 
 
 def _tenant_owner():
-    """`defender/_tenant.py`, imported at CALL time so a missing name is one test's failure."""
-    return importlib.import_module("defender._tenant")
+    """`defender/tenancy/_tenant.py`, imported at CALL time so a missing name is one test's failure."""
+    return importlib.import_module("defender.tenancy._tenant")
 
 
 def current_data_root() -> Path:

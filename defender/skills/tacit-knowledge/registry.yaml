@@ -35,7 +35,7 @@
 #
 # CHECK YOUR EDIT BEFORE YOU COMMIT IT:
 #
-#   defender/.venv/bin/python -m defender.scripts.tacit_cli check
+#   defender/.venv/bin/python -m defender.cli.tacit_cli check
 #
 # It prints every entry the runtime will DROP and why, and it is the same walk a live lookup
 # reads — so a clean run means the runtime reads what you wrote. Without it a mistake here is

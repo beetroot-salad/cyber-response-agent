@@ -26,9 +26,9 @@ from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.execution.box_codec import BoxResult  # noqa: E402
 from defender.runtime.tools import _tool_bash  # noqa: E402
-from defender.scripts import policy_cli  # noqa: E402
-from defender import _query_rules  # noqa: E402
-from defender.scripts.gather_tools import record_query  # noqa: E402
+from defender.cli import policy_cli  # noqa: E402
+from defender.knowledge import _query_rules  # noqa: E402
+from defender.runtime import record_query  # noqa: E402
 from defender.tests.support.sandbox import _baseline_959 as base
 from defender.tests.support.tenancy import _tenants1106 as T1106
 

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from defender.scripts.adapters.elastic_adapter import esql_payload
+from defender.integrations.elastic_adapter import esql_payload
 from defender.tests.support.integrations._defender_sql import (
     EXIT_INPUT_ERROR,
     EXIT_OK,

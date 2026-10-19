@@ -2,8 +2,8 @@
 
 The change (`spec-flow/specs/spec_graph_1077.yaml`, `70-resolutions.md`): no module outside
 the name owners spells a run or episode record's name. `defender/run_repository/_layout.py::RunPaths` grows
-from seven accessors to ~twenty, a new `defender/_episode_paths.py::EpisodePaths` owns the
-episode layout, a new `defender/_tenant.py` owns `<runs_base>/_tenant.json`, and a new handle
+from seven accessors to ~twenty, a new `defender/episodes/_episode_paths.py::EpisodePaths` owns the
+episode layout, a new `defender/tenancy/_tenant.py` owns `<runs_base>/_tenant.json`, and a new handle
 module wraps all three: `Run` with five sub-collections (`tables`, `facts`, `documents`,
 `observability`, `session`), a `RunRecord` value object at `run.record`, and a per-kind
 `RecordHandle` every record accessor answers.
@@ -73,12 +73,12 @@ NOT_ROOT = pytest.mark.skipif(
 # The coined module names. ONE place, so a rename is one edit.
 # ======================================================================================
 
-#: The handle module. D6(a)'s exempt owner set is `run_repository/_layout.py`, `_episode_paths.py`,
-#: `_tenant.py` and "the handle"; the other three are underscore-prefixed private modules
-#: beside `_io.py` and `_provenance.py`, so the handle follows the same convention.
+#: The handle module. D6(a)'s exempt owner set is `run_repository/_layout.py`, `episodes/_episode_paths.py`,
+#: `tenancy/_tenant.py` and "the handle"; the other three are underscore-prefixed private modules
+#: beside `_io.py` and `records/_provenance.py`, so the handle follows the same convention.
 HANDLE_MODULE = "run_repository._handle"
-TENANT_MODULE = "_tenant"
-EPISODE_MODULE = "_episode_paths"
+TENANT_MODULE = "tenancy._tenant"
+EPISODE_MODULE = "episodes._episode_paths"
 #: The owner modules by their path under `defender/` (#1105 D1.5): every file of the runs
 #: repository package — which absorbed the layout (`_layout.py`, formerly the flat-tier
 #: run-path module) and the handle (`_handle.py`, formerly the flat-tier run-handle module) —
@@ -86,7 +86,7 @@ EPISODE_MODULE = "_episode_paths"
 #: module it gains is an owner without a list edit.
 RUN_REPOSITORY_FILES = tuple(sorted(
     f"run_repository/{p.name}" for p in (DEFENDER / "run_repository").glob("*.py")))
-OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "_episode_paths.py", "_episode_handle.py", "_tenant.py")
+OWNER_MODULE_FILES = (*RUN_REPOSITORY_FILES, "episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py")
 
 
 def handle() -> Any:
@@ -95,12 +95,12 @@ def handle() -> Any:
 
 
 def tenant() -> Any:
-    """`defender/_tenant.py` — the tenant record's owner (D2)."""
+    """`defender/tenancy/_tenant.py` — the tenant record's owner (D2)."""
     return mod(TENANT_MODULE)
 
 
 def episode_paths() -> Any:
-    """`defender/_episode_paths.py::EpisodePaths` — the episode layout's owner (D1)."""
+    """`defender/episodes/_episode_paths.py::EpisodePaths` — the episode layout's owner (D1)."""
     return mod(EPISODE_MODULE)
 
 
@@ -137,7 +137,7 @@ def io() -> Any:
 
 
 def provenance_mod() -> Any:
-    return mod("_provenance")
+    return mod("records._provenance")
 
 
 def run_common() -> Any:

@@ -109,7 +109,7 @@ _astlib = import_lint_lib("_astlib")
 HELD = "defender._io.Held"
 BOUND = "defender._io.Bound"
 #: The shared readers' tree type (`Bound | Path`): a parameter annotated so is a tree slot.
-TREE_ALIAS = "defender._corpus.Tree"
+TREE_ALIAS = "defender.knowledge._corpus.Tree"
 DRAIN_TREES = "defender.learning.core.lane_trees.DrainTrees"
 TREE_FOR_TYPE = "defender.learning.core.lane_trees.TreeFor"
 #: The four handle kinds of the "provably a handle" rule, each with the class (or alias) an
@@ -128,7 +128,7 @@ VIEW_AT = "defender.learning.core.lane_trees.view_at"
 #: `_corpus._viewed` of a `Path`, a `Held` from `hold` / `hold_new`), or the drain's trees.
 CONSTRUCTORS = frozenset({
     "defender._io.hold", "defender._io.bind", "defender._io.hold_new", HELD, BOUND,
-    DRAIN_TREES, *TREES_OPENERS, "defender._corpus._viewed",
+    DRAIN_TREES, *TREES_OPENERS, "defender.knowledge._corpus._viewed",
 })
 #: The path owners: a fresh one (or `.with_repo_root(...)`, or `dataclasses.replace(...,
 #: repo_root=...)`) spells a mount list under a repo root of the caller's choosing, as step 6's
@@ -252,13 +252,13 @@ LIST_TREE = "defender._tree_listing.list_tree"
 #: listing helpers (`entry_kind`, `list_tree`: #1134 addendum 2) take a `Bound` — a `Held` there
 #: is a hit; `view_at` takes a `Held`. `where` is every reader's spelling keyword, never its tree.
 READERS: dict[str, tuple[int, str, str]] = {
-    "defender._corpus.iter_lesson_paths": (0, "corpus", "bound"),
-    "defender._corpus.iter_lessons": (0, "corpus", "bound"),
-    "defender._corpus.iter_query_templates": (0, "catalog", "bound"),
-    "defender._corpus.read_query_template": (0, "source", "bound"),
+    "defender.knowledge._corpus.iter_lesson_paths": (0, "corpus", "bound"),
+    "defender.knowledge._corpus.iter_lessons": (0, "corpus", "bound"),
+    "defender.knowledge._corpus.iter_query_templates": (0, "catalog", "bound"),
+    "defender.knowledge._corpus.read_query_template": (0, "source", "bound"),
     "defender.learning.leads.lead_neighbors.load_catalog": (0, "catalog", "bound"),
     "defender.learning.leads.lead_neighbors.load_lane_catalog": (0, "skills", "bound"),
-    "defender._scaffold_rules.check_system_skill": (0, "source", "bound"),
+    "defender.knowledge._scaffold_rules.check_system_skill": (0, "source", "bound"),
     "defender.learning.author.shared.build_corpus_manifest": (0, "corpus", "bound"),
     "defender.learning.author.shared.build_curator_user_prompt": (-1, "corpus", "bound"),
     ENTRY_KIND: (0, "view", "bound"),
@@ -300,8 +300,8 @@ D6_MODULES: tuple[str, ...] = (
     "learning/author/drain.py",
     "learning/author/version_control/restore.py",
     "learning/author/shared.py",
-    "_corpus.py",
-    "_scaffold_rules.py",
+    "knowledge/_corpus.py",
+    "knowledge/_scaffold_rules.py",
     "learning/leads/draft_synthesis.py",
     "learning/leads/lead_neighbors.py",
     "learning/leads/lead_render.py",

@@ -23,9 +23,9 @@ from pathlib import Path
 
 from typing import Any, NamedTuple
 
-from defender import _provenance
+from defender.records import _provenance
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 
 
 
@@ -133,7 +133,7 @@ def _check_oracle_side(*, oracle: Any, verifier: Any) -> None:
     (`FatalConfigError`) or a role with no pricing row (`OraclePricingError`). The same
     functions pre-flight's `oracle_settings_with` and each world's `Oracle` call, so the rule
     lives once; asked here only to refuse before the questioner is paid for."""
-    from defender._env import FatalConfigError
+    from defender.configuration._env import FatalConfigError
     from defender.learning.branch.estate.oracle import OraclePricingError, price_row
     from defender.learning.branch.estate.registry import oracle_serving
     from defender.learning.core.config import oracle_settings_with

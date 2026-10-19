@@ -27,7 +27,7 @@ from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 JUDGE = "learning.judge"
 CLI = "learning.branch.cli"
 ARCHIVE = "learning.branch.archive"
-EPISODE_HANDLE = "_episode_handle"
+EPISODE_HANDLE = "episodes._episode_handle"
 CORPUS = "skills.invlang.corpus"
 INVLANG_CLI = "skills.invlang.cli"
 RUN = "run"

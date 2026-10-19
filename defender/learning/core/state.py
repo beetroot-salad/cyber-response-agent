@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from defender import _flock
 from defender._clock import now_iso
-from defender._env import FatalConfigError
+from defender.configuration._env import FatalConfigError
 from defender._io import (
     ALIAS_READ_REFUSAL,
     Bound,
@@ -214,7 +214,7 @@ def _address_fault(spec: dict) -> str | None:
     """Why a curation row's `tenant_id` / `run_id` cannot be read as a run address — missing,
     not a string, or off its grammar — or `None` when they can. The shape alone: no tenant
     folder is read (#1105 D-stored)."""
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
     from defender.run_repository import RunAddress, RunRefused
 
     for key in ("tenant_id", "run_id"):

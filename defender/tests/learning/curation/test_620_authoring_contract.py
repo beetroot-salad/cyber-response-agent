@@ -8,7 +8,7 @@ from pathlib import Path
 
 from defender.tests.support.shared.contracts._by_path import load_module
 
-from defender import _corpus
+from defender.knowledge import _corpus
 from defender.learning.leads import lead_neighbors as ln
 
 _DEFENDER = Path(__file__).resolve().parents[3]
@@ -19,8 +19,8 @@ _EXAMPLES = _DEFENDER / "skills" / "connect" / "examples"
 
 def test_placeholder_is_a_declared_param_or_marked_body_substitution(tmp_path):
     """A `${placeholder}` must be a declared param of the template's verb; judged by `check_template`."""
-    from defender._corpus import read_query_template
-    from defender._scaffold_rules import VerbResolver, check_template
+    from defender.knowledge._corpus import read_query_template
+    from defender.knowledge._scaffold_rules import VerbResolver, check_template
 
     resolver = VerbResolver(_DEFENDER)
     probes = tmp_path / "cmdb"

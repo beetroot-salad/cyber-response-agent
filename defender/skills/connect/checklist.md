@@ -11,7 +11,7 @@ severity — a WARN is a judgment call left to you, not a cleared bar:
 
 **FAIL** (exit 1 — the merge bar):
 
-- adapter module at `scripts/adapters/{system}_adapter.py`, importable and
+- adapter module at `integrations/{system}_adapter.py`, importable and
   exposing a non-empty `VERBS` mapping;
 - `VERBS` includes `health-check`;
 - every verb is dispatchable as `fn(ctx, **params)`: a leading param

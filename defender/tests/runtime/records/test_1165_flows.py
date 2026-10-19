@@ -10,10 +10,10 @@ from pydantic_ai.toolsets import FunctionToolset
 
 from defender.runtime.tools import AgentDeps
 
-from defender._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
+from defender.knowledge._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
 from defender.runtime import run_end
 from defender.runtime.run_state import RunState
-from defender.scripts.gather_tools import record_query as rq
+from defender.runtime import record_query as rq
 from defender.tests.support.runtime.records._1165_flows import RecordIO, drive_run, run_handle
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, FakeVerbs, ReplayFn, Turn, materialize
 

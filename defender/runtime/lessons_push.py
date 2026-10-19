@@ -20,7 +20,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from defender._knowledge import KnowledgePaths
+from defender.knowledge._knowledge import KnowledgePaths
 from defender.hooks.record_lesson_load import LOAD_KIND_PUSH
 
 _logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def compose_fold(
     main's next request, and the row must mint regardless of the lessons lane.
     """
     try:
-        from defender._corpus import iter_lessons
+        from defender.knowledge._corpus import iter_lessons
         from defender.runtime.lessons_engine.lessons_frontier import FOLD_LEAD, match_loaded, render
         from defender.skills.invlang.frontier import frontier_from_text
 

@@ -24,7 +24,7 @@ from defender.tests.tenancy.tenant_1120_piece1.test_1120_lints_and_fixture impor
 )
 
 #: The class origins `_TENANT_FACTORIES` maps to.
-TENANT = "defender._tenant.Tenant"
+TENANT = "defender.tenancy._tenant.Tenant"
 RUN_TENANT = "defender.runtime.run_tenant.RunTenant"
 
 _ACCEPT = "accept_tenant(root, tid, defender_dir=root)"
@@ -61,11 +61,11 @@ def _assert_planted(fn: str, source: str) -> None:
 PLANTED = textwrap.dedent(f"""\
     from pathlib import Path
 
-    from defender import _tenant
-    from defender._episode_paths import EpisodePaths
+    from defender.tenancy import _tenant
+    from defender.episodes._episode_paths import EpisodePaths
     from defender.run_repository import RunPaths
-    from defender._tenant import Tenant, accept_tenant
-    from defender._tenant import Tenant as T
+    from defender.tenancy._tenant import Tenant, accept_tenant
+    from defender.tenancy._tenant import Tenant as T
     from defender.runtime import run_tenant as run_tenant_mod
     from defender.runtime.run_tenant import RunTenant, resolve_tenant, run_tenant_for
     from defender.runtime.run_tenant import RunTenant as RT
@@ -522,8 +522,8 @@ def test_an_unpacked_name_is_never_tagged(displays: list[str], cell: str) -> Non
 RUN_TENANT_OWN = textwrap.dedent("""\
     from pathlib import Path
 
-    from defender import _tenant
-    from defender._episode_paths import EpisodePaths
+    from defender.tenancy import _tenant
+    from defender.episodes._episode_paths import EpisodePaths
 
 
     class RunTenant:
@@ -611,9 +611,9 @@ def test_the_run_tenant_modules_knowledge_halves_stay_clean(
 OWN_CLASS = textwrap.dedent(f"""\
     from pathlib import Path
 
-    from defender import _tenant
-    from defender._episode_paths import EpisodePaths
-    from defender._tenant import accept_tenant
+    from defender.tenancy import _tenant
+    from defender.episodes._episode_paths import EpisodePaths
+    from defender.tenancy._tenant import accept_tenant
 
 
     class Tenant:
@@ -681,8 +681,8 @@ def test_a_modules_own_class_named_tenant_is_not_the_accepted_tenant(
 UNTRACED = textwrap.dedent(f"""\
     from pathlib import Path
 
-    from defender._episode_paths import EpisodePaths
-    from defender._tenant import Tenant, accept_tenant
+    from defender.episodes._episode_paths import EpisodePaths
+    from defender.tenancy._tenant import Tenant, accept_tenant
 
 
     def untraced_control(ep: Path, x: str) -> Path:
@@ -750,10 +750,10 @@ def test_an_untraceable_shape_scans_cleanly_and_tags_nothing(
 SAME_MODULE = textwrap.dedent("""\
     from pathlib import Path
 
-    from defender import _tenant
-    from defender._episode_paths import EpisodePaths
-    from defender._tenant import Tenant
-    from defender._tenant import Tenant as T
+    from defender.tenancy import _tenant
+    from defender.episodes._episode_paths import EpisodePaths
+    from defender.tenancy._tenant import Tenant
+    from defender.tenancy._tenant import Tenant as T
     from defender.runtime.run_tenant import RunTenant
 
 
@@ -943,8 +943,8 @@ REBINDINGS = {
 _REBOUND_DEFS = textwrap.dedent("""\
     from pathlib import Path
 
-    from defender._episode_paths import EpisodePaths
-    from defender._tenant import Tenant
+    from defender.episodes._episode_paths import EpisodePaths
+    from defender.tenancy._tenant import Tenant
     from defender.runtime.run_tenant import RunTenant
 
 
@@ -1001,8 +1001,8 @@ def _rebound_rel(shape: str) -> str:
 PKG_INIT = textwrap.dedent("""\
     from pathlib import Path
 
-    from defender._episode_paths import EpisodePaths
-    from defender._tenant import Tenant
+    from defender.episodes._episode_paths import EpisodePaths
+    from defender.tenancy._tenant import Tenant
 
 
     def _g(root: Path) -> Tenant:
@@ -1022,7 +1022,7 @@ PKG_INIT = textwrap.dedent("""\
 TABLE_ROUTE = textwrap.dedent("""\
     from pathlib import Path
 
-    from defender._episode_paths import EpisodePaths
+    from defender.episodes._episode_paths import EpisodePaths
     from defender.fake_factories_1160 import make_run_tenant, make_tenant
 
 
@@ -1249,7 +1249,7 @@ def test_a_factorys_origin_is_its_modules_path(tabled: list[str], cell: str) -> 
 REL_IN_PACKAGE = textwrap.dedent(f"""\
     from pathlib import Path
 
-    from defender._episode_paths import EpisodePaths
+    from defender.episodes._episode_paths import EpisodePaths
     from ..run_tenant import RunTenant, resolve_tenant
     from ..._tenant import Tenant, accept_tenant
 
@@ -1298,7 +1298,7 @@ REL_IN_PACKAGE = textwrap.dedent(f"""\
 REL_PLAIN = textwrap.dedent(f"""\
     from pathlib import Path
 
-    from defender._episode_paths import EpisodePaths
+    from defender.episodes._episode_paths import EpisodePaths
     from . import run_tenant
     from .run_tenant import RunTenant, resolve_tenant
     from .._tenant import Tenant
@@ -1419,10 +1419,10 @@ ANNOTATION_FORMS = (
 _ANNOTATION_HEADER = """\
 from pathlib import Path
 
-from defender import _tenant
-from defender._episode_paths import EpisodePaths
-from defender._tenant import Tenant
-from defender._tenant import Tenant as T
+from defender.tenancy import _tenant
+from defender.episodes._episode_paths import EpisodePaths
+from defender.tenancy._tenant import Tenant
+from defender.tenancy._tenant import Tenant as T
 from defender.runtime import run_tenant
 from defender.runtime.run_tenant import RunTenant
 from defender.runtime.run_tenant import RunTenant as RT

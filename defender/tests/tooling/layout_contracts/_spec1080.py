@@ -3,12 +3,14 @@
 The change (`spec-flow/specs/spec_graph_1080-scripts-split.yaml`; the §7 record is the
 frontier chain's `70-resolutions.md`, the round-2 record `75-resolutions-r2.md`): every library
 module under `defender/scripts/` moves to the home that owns its concern, and `scripts/` keeps
-entry points only.
+entry points only. The subsequent spring cleanup moves those entry points to `cli/`
+and Box image tooling to `box/`; shared helpers now live with their subsystem owners.
+Frozen golden records below remain unchanged; `current_path` translates their source addresses.
 
 SCOPE CUT (2026-10-04, human; `95-cut.md`). This suite pins the RESHAPING HALF only — the
 library code with a settled home that no other open issue is changing. It moves now, its
-behaviour and output unchanged: `_venv.py` into the flat `defender/_*.py` tier; `pricing.py`
-as `defender/_pricing.py` (first planned under `runtime/providers/`); `gather_tools/payload_view.py` under `runtime/`; the `sql` engine and
+behaviour and output unchanged: `execution/_venv.py` into the flat `defender/_*.py` tier; `pricing.py`
+as `defender/configuration/_pricing.py` (first planned under `runtime/providers/`); `gather_tools/payload_view.py` under `runtime/`; the `sql` engine and
 the lessons engine (`lessons_fm`, `lessons_frontier` with its `__main__` block, `_lessons_common`)
 into `runtime/` subpackages outside `defender/lessons/`, each with a thin wrapper left at its
 base path for its `bin/` shim (the one import-root bootstrap of M-H (a)); and `record_query`'s
@@ -16,7 +18,7 @@ query-id and request-key rules (under their BASE names `_json_safe_params` / `_r
 `QUERY_RULE_PUBLIC` below is the identity map) into a flat-tier module that `record_query`
 imports. Everything else stays where it is and is OWNED ELSEWHERE: `adapters/` (faults,
 confinement, esql_text, `_stub_transport`, the eight adapters) by #1172 (with #1121 for the
-Elastic grammar); `record_query`'s guards and writers and `case_history/ticket_writer.py` by
+Elastic grammar); `record_query`'s guards and writers and `integrations/ticket_writer.py` by
 #1165; `visualize/*` and `workspace_map.py` by #1105; `case_history/case_ticket.py` by the
 follow-up #1190, which moves it whole to `defender/runtime/case_ticket.py` (its adopted tests are
 `test_1190_case_mapping_home.py` here). The 33 imports into `scripts/` that remain are the O1
@@ -90,6 +92,8 @@ SUITE = Path(__file__).resolve().parent
 REPO_ROOT = SUITE.parents[3]
 DEFENDER = REPO_ROOT / "defender"
 SCRIPTS = DEFENDER / "scripts"
+CLI = DEFENDER / "cli"
+IMAGE_CLI = DEFENDER / "box" / "image_cli.py"
 BIN = DEFENDER / "bin"
 LESSONS_CONTENT = DEFENDER / "lessons"
 GOLDENS = SUITE / "goldens"
@@ -114,10 +118,11 @@ VERBS = "defender/runtime/verbs.py"
 EXIT_CODES = "defender/_exit_codes.py"
 #: The flat tier: a module directly under `defender/` whose name starts with `_`.
 FLAT_TIER = "defender/_*.py"
-#: Where `usage_cost` lives. The demand text pinned `runtime/providers/`; the post-review
-#: change (human, 2026-10-04) moved the price table to the flat tier, because the providers
-#: package initialiser builds the provider objects and loads pydantic on every import.
-PRICING = FLAT_TIER
+#: The price table and process bootstrap keep dependency-free package initializers; neither
+#: needs to import provider objects or load the LLM stack merely to read configuration.
+PRICING = "defender/configuration/_pricing.py"
+VENV = "defender/execution/_venv.py"
+QUERY_RULES = "defender/knowledge/_query_rules.py"
 
 #: The flat-tier query rules keep their BASE names (the 2026-10-04 cut: dF11's public rename is
 #: parked with #1165), their values byte-identical: this table is the IDENTITY map. It stays the
@@ -310,9 +315,9 @@ def query_rule(base_name: str) -> Any:
     definition answers, so a behavioural test proves its golden at the base."""
     public = QUERY_RULE_PUBLIC.get(base_name, base_name)
     if AT_BASE and public != base_name and not [
-            d for d in definitions(public) if under(d, FLAT_TIER)]:
+            d for d in definitions(public) if under(d, QUERY_RULES)]:
         return moved(base_name)
-    return moved(public, home=FLAT_TIER)
+    return moved(public, home=QUERY_RULES)
 
 
 def module_at(relpath: str) -> ModuleType:
@@ -333,7 +338,11 @@ def golden(name: str) -> Mapping[str, Any]:
     """`goldens/<name>.json`, parsed once. Its `_meta` says what was captured, where, and how."""
     path = GOLDENS / f"{name}.json"
     assert path.is_file(), f"golden {path.name} is missing from the suite"
-    data: Mapping[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    # Only the repair command's source address changes; all captured behavior stays pinned.
+    text = path.read_text(encoding="utf-8")
+    if name in {"runpage", "venv"}:
+        text = text.replace("defender/scripts/box_image.py", "defender/box/image_cli.py")
+    data: Mapping[str, Any] = json.loads(text)
     return data
 
 
@@ -531,3 +540,46 @@ def shim_exec_target(shim: str, root: Path | None = None) -> Path:
     """The engine's source file the module a `bin/` shim runs resolves to in the tree at `root`
     (default: this checkout)."""
     return (root or REPO_ROOT) / (shim_exec_module(shim, root).replace(".", "/") + ".py")
+
+
+def current_path(path: str) -> str:
+    """Translate source addresses while retaining the frozen baseline's contents."""
+    root_helpers = {
+        "defender/_tenant.py": "defender/tenancy/_tenant.py",
+        "defender/_tenants.py": "defender/tenancy/_tenants.py",
+        "defender/_tenant_census.py": "defender/tenancy/_tenant_census.py",
+        "defender/_knowledge.py": "defender/knowledge/_knowledge.py",
+        "defender/_corpus.py": "defender/knowledge/_corpus.py",
+        "defender/_query_rules.py": "defender/knowledge/_query_rules.py",
+        "defender/_scaffold_rules.py": "defender/knowledge/_scaffold_rules.py",
+        "defender/_episode_handle.py": "defender/episodes/_episode_handle.py",
+        "defender/_episode_paths.py": "defender/episodes/_episode_paths.py",
+        "defender/_episodes_root.py": "defender/episodes/_episodes_root.py",
+        "defender/_world_label.py": "defender/episodes/_world_label.py",
+        "defender/_alert_input.py": "defender/records/_alert_input.py",
+        "defender/_artifact_schema.py": "defender/records/_artifact_schema.py",
+        "defender/_provenance.py": "defender/records/_provenance.py",
+        "defender/_report.py": "defender/records/_report.py",
+        "defender/_run_id.py": "defender/records/_run_id.py",
+        "defender/_store_errors.py": "defender/records/_store_errors.py",
+        "defender/_async.py": "defender/execution/_async.py",
+        "defender/_process_group.py": "defender/execution/_process_group.py",
+        "defender/_command_line_run.py": "defender/execution/_command_line_run.py",
+        "defender/_venv.py": "defender/execution/_venv.py",
+        "defender/_env.py": "defender/configuration/_env.py",
+        "defender/_pricing.py": "defender/configuration/_pricing.py",
+    }
+    if path in root_helpers:
+        return root_helpers[path]
+    prefixes = {
+        "defender/scripts/adapters/": "defender/integrations/",
+        "defender/scripts/visualize/": "defender/presentation/",
+        "defender/scripts/case_history/": "defender/integrations/",
+        "defender/scripts/gather_tools/": "defender/runtime/",
+        "defender/scripts/box_image.py": "defender/box/image_cli.py",
+        "defender/scripts/": "defender/cli/",
+    }
+    for old, new in prefixes.items():
+        if path.startswith(old):
+            return new + path[len(old):]
+    return path

@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender.run_repository import RunPaths
 
 #: The mapping a hand-built folder's record is derived with: the committed tenants' mapping.
@@ -41,7 +41,7 @@ def plant_source_copy(episode_dir: Path, alert: bytes, *,
                       mapping: Mapping[str, str] = COMMITTED_MAPPING) -> None:
     """The copies a launch puts in an episode (#1222 A1): the source run's alert and its
     record, which the judge reads in place of the world's `alert.json`."""
-    from defender._episode_paths import EpisodePaths
+    from defender.episodes._episode_paths import EpisodePaths
 
     paths = EpisodePaths(Path(episode_dir))
     try:

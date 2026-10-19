@@ -13,7 +13,7 @@ from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-
 
 def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
     """Every consumer of a finished run's committed verdict, DRIVEN, with a refusal captured rather than raised"""
-    from defender._report import read_report
+    from defender.records._report import read_report
     from evaluations.held_out import predicted_disposition
     from defender.learning.core.validate import normalize_disposition
     from defender.learning.ops.trace_lesson import _report_disposition
@@ -38,7 +38,7 @@ def _reader_answers(run_dir: Path) -> dict[str, tuple[str, object]]:
 
 def test_a_malformed_committed_verdict_is_marked_not_coerced(tmp_path):
     """A committed verdict that is not a member of the vocabulary is never coerced into the member it resembles."""
-    from defender._report import read_report
+    from defender.records._report import read_report
     from defender.tests.support.runtime.engine._spec923 import MALFORMED_MEMBER_SPELLINGS, NOT_A_MEMBER
 
     unknown = _reader_answers(finished_run(tmp_path / "unknown", disposition=NOT_A_MEMBER))

@@ -42,7 +42,7 @@ LIVE_KEY = "ELASTIC_FD1256_LIVE_KEY"
 def _escape() -> BaseException:
     """A call-time `ConfigFault` elastic's start check did not raise (O-5b): its `config.env` is
     complete, and this call's adapter finds a key it needs unset."""
-    return S.sym("scripts.adapters.faults", "ConfigFault")(
+    return S.sym("integrations.faults", "ConfigFault")(
         f"{LIVE_KEY} is not set - this tenant's settings do not configure this system")
 
 
@@ -102,7 +102,7 @@ CMDB_LIVE_KEY = "FD1256_INVENTORY_LIVE_KEY"
 
 def _cmdb_escape() -> BaseException:
     """A call-time `ConfigFault` cmdb's start check did not raise (O-5b)."""
-    return S.sym("scripts.adapters.faults", "ConfigFault")(
+    return S.sym("integrations.faults", "ConfigFault")(
         f"{CMDB_LIVE_KEY} is not set - this tenant's settings do not configure this system")
 
 
@@ -269,12 +269,12 @@ SECOND = "FD1256-SECOND-JUDGEMENT"
 #: "not configured" every later time: a second judgement in the same run disagrees with the first.
 _COUNTED_CHECK = '''\
 def check_settings(*_a, **_k):
-    log = Path(__file__).parents[4] / "{checks}"
+    log = Path(__file__).parents[3] / "{checks}"
     seen = log.read_text(encoding="utf-8").split() if log.is_file() else []
     with open(log, "a", encoding="utf-8") as out:
         print("{system}", file=out)
     if "{system}" in seen:
-        from defender.scripts.adapters.faults import ConfigFault
+        from defender.integrations.faults import ConfigFault
         raise ConfigFault("{second}: {system} was judged a second time in one run")
     return None
 '''
@@ -296,7 +296,7 @@ from pathlib import Path
 
 
 def _record_planted_call(verb):
-    with open(Path(__file__).parents[4] / "{PLANTED_CALLS}", "a", encoding="utf-8") as log:
+    with open(Path(__file__).parents[3] / "{PLANTED_CALLS}", "a", encoding="utf-8") as log:
         print(f"elastic.{{verb}}", file=log)
 
 

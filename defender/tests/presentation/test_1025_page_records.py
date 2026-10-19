@@ -23,7 +23,7 @@ NOT_ROOT = pytest.mark.skipif(
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VULTURE_BASELINE = REPO_ROOT / "tooling" / "lint" / "lint_vulture_baseline.json"
-PAGE_PATH = "scripts/visualize/visualize_episode.py"
+PAGE_PATH = "presentation/visualize_episode.py"
 RECORD_NAMES = ("judge.yaml", "outcome.yaml", "samples.yaml", "family.yaml", "timing.json",
                 "provenance.json")
 PACKAGE_READERS = ("read_grade", "draws_on_disk_report", "read_stage_timings", "read_manifest",
@@ -41,7 +41,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def visualize_episode():
-    """The target module, `defender.scripts.visualize.visualize_episode`, imported at call time
+    """The target module, `defender.presentation.visualize_episode`, imported at call time
     (it does not exist at the spec's base — one failure per test, never a collection error)."""
     return E.page_module()
 

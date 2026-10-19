@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from defender import _episode_handle as EH
-from defender._episode_handle import Episode
+from defender.episodes import _episode_handle as EH
+from defender.episodes._episode_handle import Episode
 from defender._io import bind
 from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T

@@ -71,7 +71,7 @@ def test_every_role_in_the_registry_binds_through_the_one_seam(tmp_path):
 def test_policy_cli_prints_a_compiled_curator_policy(tmp_path):
     """M9: ``defender-policy show corpus_author --corpus-name lessons`` prints a COMPILED curator
     policy instead of the old ``SystemExit`` ('builds its policy per-spawn, bindable=False')."""
-    from defender.scripts import policy_cli
+    from defender.cli import policy_cli
     wt, rd = make_worktree(tmp_path), pending_run_dir(tmp_path)
     pol = policy_cli._policy(CORPUS_AUTHOR_DEF, rd, wt / "defender", "lessons")
     assert pol.write_allow

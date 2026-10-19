@@ -107,7 +107,7 @@ The surface this suite pins
          alternative was accepting that a file instructing the model to call a withheld verb
          is permanently out of the audit's reach.
 
-`defender/scripts/adapters/confinement.py` (new)
+`defender/integrations/confinement.py` (new)
     D4's two rule forms: the read-endpoint allowlist for the HTTP verbs, matched on the
     RESOLVED request target with the path normalized and the query string dropped
     (§7 R6); and the argv-head + container-target pair rule for host-state, which has no
@@ -191,7 +191,7 @@ pytestmark = pytest.mark.e2e
 
 SALT = "aabbccddeeff0011"
 LEAD = "l-001"
-ADAPTERS_DIR = DEFENDER / "scripts" / "adapters"
+ADAPTERS_DIR = DEFENDER / "integrations"
 
 PAYLOAD = [
     {"@timestamp": "2026-01-01T00:00:00Z", "user.name": "dev.dana", "event.action": "ssh_login"},
@@ -454,7 +454,7 @@ class _Run:
         which is what "no evidence row" means since #860 made a denial a `∅.denied` sentinel
         row of its own. The split is `lead_repository.joined`'s (`.queries` vs `.sentinels`),
         spelled with the writer's own predicate."""
-        from defender._query_rules import is_reserved_query_id
+        from defender.knowledge._query_rules import is_reserved_query_id
         return [r for r in self.own_rows if not is_reserved_query_id(str(r.get("query_id", "")))]
 
     @property
@@ -463,7 +463,7 @@ class _Run:
         refused, since #860. Exact-id, not `is_reserved_query_id`: the other sentinels are
         other refusals, and a test asserting "the denial left its row" must not be satisfied
         by a repeat trip's."""
-        from defender._query_rules import DENIED_QUERY_ID
+        from defender.knowledge._query_rules import DENIED_QUERY_ID
         return [r for r in self.own_rows if r.get("query_id") == DENIED_QUERY_ID]
 
     @property

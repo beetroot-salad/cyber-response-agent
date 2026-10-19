@@ -54,7 +54,7 @@ EXCLUDED_DIRS = (".venv", "tests", "runs")
 # Accepted-boilerplate excludes (by path substring):
 #   connect/examples/   — adapter scaffold templates, meant to be copied
 #
-# No filename-suffix exclusion: adapter duplication under `scripts/adapters/` gets fixed or
+# No filename-suffix exclusion: adapter duplication under `integrations/` gets fixed or
 # carries a written `# lint-dup: ok`.
 EXCLUDED_PATH_PARTS = ("skills/connect/examples/",)
 

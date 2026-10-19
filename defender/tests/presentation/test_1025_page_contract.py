@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from defender import _episode_handle as EH
+from defender.episodes import _episode_handle as EH
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -34,7 +34,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def visualize_episode():
-    """The target module, `defender.scripts.visualize.visualize_episode`, imported at call time
+    """The target module, `defender.presentation.visualize_episode`, imported at call time
     (it does not exist at the spec's base — one failure per test, never a collection error)."""
     return E.page_module()
 
@@ -435,7 +435,7 @@ def _page_classes(page: E.Page) -> set[str]:
 
 
 def test_1025_the_standalone_script_runs_with_no_pythonpath_from_any_cwd(tmp_path):
-    """The docstring's promise — `python defender/scripts/visualize/visualize_episode.py <dir>` —
+    """The docstring's promise — `python defender/presentation/visualize_episode.py <dir>` —
     with `PYTHONPATH` unset and the cwd elsewhere: the script puts its own package."""
     ep = E.sample_episode(tmp_path)
     script = Path(visualize_episode().__file__)

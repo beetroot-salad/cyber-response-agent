@@ -30,7 +30,7 @@ THREE STUBS, each a stronger lie than the last, selected by `GARBAGE_PAGE_1025=<
 arm, no stderr line, no `family.yaml` check.
 
 The stub is injected into `sys.modules` under the page module's name by a pytest plugin
-(`pytest_configure`), so no file is ever written into `defender/scripts/visualize/` and nothing
+(`pytest_configure`), so no file is ever written into `defender/presentation/` and nothing
 is left behind when the run dies. Its code object carries the page module's file name, so
 `_episode_1025.when_inside`'s frame marker sees it (the fault-injection tests then fail on
 their own `seen["hit"]` control, not on a timeout).
@@ -70,7 +70,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-PAGE_MODULE = "defender.scripts.visualize.visualize_episode"
+PAGE_MODULE = "defender.presentation.visualize_episode"
 PAGE_FILE = "visualize_episode.py"
 PAGE_NAME = "learning.html"
 MODES = ("empty", "garbage", "skeleton")
@@ -182,8 +182,8 @@ def main(argv=None):
     ids = [a for i, a in enumerate(argv) if a != "--tenant" and (i == 0 or argv[i - 1] != "--tenant")]
     if ids:
         try:
-            from defender._episodes_root import episode_dir
-            from defender._tenant import resolve_data_root
+            from defender.episodes._episodes_root import episode_dir
+            from defender.tenancy._tenant import resolve_data_root
             print(_write(episode_dir(resolve_data_root(), ids[0])))
         except Exception:
             pass          # a file, a missing dir: still "success" — the CLI tests must refuse this

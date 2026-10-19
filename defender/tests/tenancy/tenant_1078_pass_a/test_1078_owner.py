@@ -1,4 +1,4 @@
-"""The tenant owner (_tenant.py): id grammar, checkout/data-root placement refusals, row create/require, data-root and learning-state resolution."""
+"""The tenant owner (tenancy/_tenant.py): id grammar, checkout/data-root placement refusals, row create/require, data-root and learning-state resolution."""
 from __future__ import annotations
 
 import json

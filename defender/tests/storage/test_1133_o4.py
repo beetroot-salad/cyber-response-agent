@@ -13,9 +13,9 @@ from typing import Any
 import pytest
 import yaml
 
-from defender import _episode_handle as EH
+from defender.episodes import _episode_handle as EH
 from defender import _io
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_paths import LAYOUT
 from defender._io import read_jsonl_rows
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
@@ -587,7 +587,7 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
 @pytest.mark.parametrize("kind", ["missing", "missing-parent"])
 def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recreate_it(
         tmp_path, kind):
-    page = T.mod("scripts.visualize.visualize_episode")
+    page = T.mod("presentation.visualize_episode")
     runs = T.current_tenant().runs_repository()
     ep = tmp_path / "episodes" / EPISODE_ID
     if kind == "missing":
@@ -631,7 +631,7 @@ def _sibling_episode(tmp_path: Path, monkeypatch: Any, src: Path) -> Path:
     """The episode a sibling opens by id: under the configured episodes base (pointed here),
     its manifest naming `src`, its container made for the source's tenant as the launcher's
     `EpisodeRuns.create_container` leaves it before the first sibling (#1105 PR 2)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
                    root=tmp_path / "episodes-root")

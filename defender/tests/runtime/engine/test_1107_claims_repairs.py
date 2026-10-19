@@ -11,9 +11,9 @@ import pytest
 
 from defender.runtime import case_ticket
 from defender.runtime import tenant_settings as ts
-from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.case_history import ticket_writer
-from defender.scripts.visualize import visualize_run
+from defender.integrations import _stub_transport as transport
+from defender.integrations import ticket_writer
+from defender.presentation import visualize_run
 from defender.tests.support.shared.filesystem import _spec1047
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
@@ -97,7 +97,7 @@ def _lint():
     "def f(ctx):\n    return (e := ctx.env)['A']\n",
 ])
 def test_lint_follows_annotated_and_walrus_bindings(tmp_path, src):
-    tree = tmp_path / "defender/scripts/adapters"
+    tree = tmp_path / "defender/integrations"
     tree.mkdir(parents=True)
     (tree / "x.py").write_text(src, encoding="utf-8")
     assert _lint().main(["--root", str(tmp_path)]) == 1

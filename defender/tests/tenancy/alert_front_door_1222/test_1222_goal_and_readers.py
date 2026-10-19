@@ -404,7 +404,7 @@ class _Views:
             spawned["pitfalls"] = kw
             return 0
 
-        state = S.sym("tests._state1135", "env_state")()
+        state = S.sym("tests.support.learning.core._state1135", "env_state")()
         pitfalls._invoke_pitfalls_agent(rows, state=state, repo_root=self.lane.repo,
                                         spawn=spawn_pitfalls)
         return {"drafts": {Path(p): Path(p).read_text(encoding="utf-8") for p in created},
@@ -459,7 +459,7 @@ class _Views:
     # --- the run page ------------------------------------------------------------------------
     @functools.cached_property
     def run_page(self) -> str:
-        return S.sym("scripts.visualize.visualize_run", "render_page")(_run_handle_1165(self.run_dir))
+        return S.sym("presentation.visualize_run", "render_page")(_run_handle_1165(self.run_dir))
 
     @functools.cached_property
     def run_page_parsed(self) -> _Page:
@@ -532,7 +532,7 @@ class _Views:
     def episode_page(self) -> str:
         assert self.judge_prompts, "the episode was never graded"
         with J.episodes_base(self.episode.parent), J.judge_runs().episode(self.episode.name) as view:
-            return S.sym("scripts.visualize.visualize_episode", "build_page")(view)
+            return S.sym("presentation.visualize_episode", "build_page")(view)
 
     @functools.cached_property
     def episode_page_parsed(self) -> _Page:

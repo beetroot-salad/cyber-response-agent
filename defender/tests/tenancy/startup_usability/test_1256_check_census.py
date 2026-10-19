@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from defender.runtime.tenant_settings import SystemConfig
-from defender.scripts.adapters.faults import ConfigFault
+from defender.integrations.faults import ConfigFault
 from defender.tests.tenancy.startup_usability.test_1256_adapter_checks import (
     FAULTS,
     Family,

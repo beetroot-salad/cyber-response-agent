@@ -354,7 +354,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
 
 
 def test_921_self_contradicting_episode_is_discard_and_the_record_is_the_artifact(tmp_path):
-    from defender._episode_handle import Episode
+    from defender.episodes._episode_handle import Episode
     from defender.learning.branch.outcome import write_outcome
 
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.staged_row("b")], "c": []})

@@ -31,7 +31,7 @@ Four things live here and nothing else.
    (`spec-flow/specs/spec_graph_947.yaml`, `claims:`). No fault in this suite is imagined:
    * `malformed="no-status-line"` — PO-C3: `split_status` over stdout with no parseable
      trailing status line yields `("", <whole body>)`.
-   * `raise_after=n` with `TransportFault` — the real class at `scripts/adapters/faults.py`,
+   * `raise_after=n` with `TransportFault` — the real class at `integrations/faults.py`,
      exit_code 2, which `docker_exec_curl` raises when the docker exec itself fails (X9).
    * `fail_on=(<name>,)` — a per-name refusal from the far side.
    Anything else a test wants induced is a PROBE REQUEST, not a fake: see 80-author-digest.md.
@@ -243,12 +243,12 @@ CLEAN = Fault()
 
 def _transport_fault(detail: str) -> Exception:
     """The real `TransportFault` — what the transport raises when the docker exec itself fails."""
-    return sym("scripts.adapters.faults", "TransportFault")(detail)
+    return sym("integrations.faults", "TransportFault")(detail)
 
 
 def _upstream_fault(detail: str) -> Exception:
     """The real `UpstreamFault` — what an adapter raises when the far side refuses."""
-    return sym("scripts.adapters.faults", "UpstreamFault")(detail)
+    return sym("integrations.faults", "UpstreamFault")(detail)
 
 
 class FakeTransport:
@@ -547,7 +547,7 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
 def _plant_source_input(ep: Path, source_run_dir: str | None, source_run_id: str | None = None) -> None:
     """The source run's alert and record, as a launch copies them into the episode (#1222 A1):
     the source run's own when it holds them, else a plain one."""
-    from defender._episode_paths import EpisodePaths
+    from defender.episodes._episode_paths import EpisodePaths
     from defender.run_repository import RunPaths
     from defender.tests.support.storage._alert_plant import plant_alert
 
@@ -655,7 +655,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
     `investigation.md` — because both are model-writable (the run dir is a prior box's rw bind)
     and the containment demands drive exactly those reads.
     """
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
@@ -790,7 +790,7 @@ def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
     `error_class`, `payload_status` and `payload_sha256` come from the writer's own rules over
     the bytes the sidecar holds.
     """
-    rq = mod("scripts.gather_tools.record_query")
+    rq = mod("runtime.record_query")
     breaker = mod("runtime.circuit_breaker")
     p = dict(params or {"index": EVENTS_PATTERN})
     body = payload if payload is not None else {"hits": [{"_id": "d1"}]}
@@ -816,8 +816,8 @@ def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
 #: The three NON-CLEAN stamp shapes `_provenance.capture_tree` can actually return, spelled once
 #: because §7 round 2 settled that all three refuse absent `--allow-dirty` (FORK-10's answer, F4).
 #: A `dirty: None` record that KEEPS a commit is only producible on the git-status arm, and only
-#: with a reason beside it (`_provenance.py:338-345`); the git-could-not-be-asked arm is
-#: `commit: None` (`_from_build_stamp`, `_provenance.py:293`). A fixture spelling either without
+#: with a reason beside it (`records/_provenance.py:338-345`); the git-could-not-be-asked arm is
+#: `commit: None` (`_from_build_stamp`, `records/_provenance.py:293`). A fixture spelling either without
 #: its reason is a shape no capture produced, which is how the old one read `dirty: None` as
 #: covering "git could not be asked" while asserting over a record with a sha in it.
 GIT_STATUS_FAILED = "git status: GitError('git status --porcelain=v1 -z', 128)"
@@ -926,7 +926,7 @@ class FakeCapture:
         self.calls = 0
 
     def __call__(self):
-        from defender._provenance import RunProvenance
+        from defender.records._provenance import RunProvenance
 
         self.calls += 1
         built = RunProvenance.from_obj(self.record)
@@ -1085,7 +1085,7 @@ def open_source(src: Path) -> Any:
     `<data root>/<T>/runs/<run id>` — by its id, through tenant T's runs repository, T accepted
     under that data root. What `preflight_episode(source=)` / `preflight_replay(source=)` take
     where a test once handed the folder."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.run_repository import RunId
 
     src = Path(src)
@@ -1102,7 +1102,7 @@ def episode_view(episode: Any, *, tenant: Any = None) -> Any:
     planted as a plain folder without a record is given the tenant's, so a scene's hand-planted
     arms are reachable through the view. `start_family` callers make the container this way;
     `verify_family` callers open their arms through it (`family_arms`)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     owner = current_tenant() if tenant is None else tenant
     runs = Path(episode.dir) / "runs"
@@ -1248,8 +1248,8 @@ def refusals() -> tuple[type[BaseException], ...]:
     from defender.learning.branch.estate.registry import EstateError
     from defender.learning.branch.ledger import LedgerError
     from defender.runtime.branch import BranchError
-    from defender.scripts.adapters.confinement import ConfinementFault
-    from defender.scripts.adapters.faults import AdapterFault
+    from defender.integrations.confinement import ConfinementFault
+    from defender.integrations.faults import AdapterFault
     out: list[type[BaseException]] = [
         SystemExit, EstateError, LedgerError, BranchError, ConfinementFault,
         AdapterFault, ValueError,

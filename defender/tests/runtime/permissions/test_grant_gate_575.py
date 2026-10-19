@@ -492,7 +492,7 @@ def _cli(*args, cwd=None) -> subprocess.CompletedProcess:
 @pytest.mark.parametrize("which", ["main", "gather"])
 def test_i2_policy_explain_is_a_second_consumer_not_a_second_implementation(env, which, cmd, capsys):
     """i2 (differential): over a corpus of (agent, command), `defender-policy explain` reports the SAME verdict AND the same matched-grant / deny-reason as `decide_bash`."""
-    from defender.scripts import policy_cli
+    from defender.cli import policy_cli
 
     c = cmd.format(run=env.run, dfn=env.dfn)
     tenant = (("--tenant", T1106.fixture_tenant().id) if which == "gather" else ())

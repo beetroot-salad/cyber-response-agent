@@ -8,7 +8,7 @@ from pathlib import Path
 
 from defender import _io
 from defender import run_common
-from defender._tenant import TenantRecordMismatch, TenantRefused, read_tenant
+from defender.tenancy._tenant import TenantRecordMismatch, TenantRefused, read_tenant
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"

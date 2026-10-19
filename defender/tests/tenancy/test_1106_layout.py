@@ -54,7 +54,7 @@ def test_the_template_table_is_total_over_the_real_adapters():
 def test_the_templates_lead_zero_names_an_established_template_in_the_catalog():
     """M1: the template's `lead-zero.yaml` names a catalog template that EXISTS, so an operator
     who grants the lead its pair later has nothing else to fix."""
-    from defender._corpus import is_established, iter_query_templates
+    from defender.knowledge._corpus import is_established, iter_query_templates
 
     lz = T.mod("runtime.lead_zero_config")
     template_id = lz.load_correlation_template(lz.lead_zero_config_path(T.TEMPLATE_SETTINGS))
@@ -67,7 +67,7 @@ def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tm
     root = tmp_path / "tenants"
     shutil.copytree(T.TEMPLATE_DIR, root / "newco" / "knowledge")
     (root / "newco" / "knowledge" / "agent" / ".tenant-id").write_text("newco\n", encoding="utf-8")
-    T.mod("_tenant").create_tenant(root, "newco")
+    T.mod("tenancy._tenant").create_tenant(root, "newco")
     td = T.accept(root, "newco")
     grants = T.run_grants(td.settings)
     assert grants.gather.entries == ()

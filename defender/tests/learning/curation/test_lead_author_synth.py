@@ -202,7 +202,7 @@ def _stub_verbs():
 
 
 def _minted(cat, system: str, query_id: str):
-    from defender._corpus import read_query_template
+    from defender.knowledge._corpus import read_query_template
 
     template, reason = read_query_template(_draft_path(cat, system, query_id))
     assert template is not None, reason
@@ -210,7 +210,7 @@ def _minted(cat, system: str, query_id: str):
 
 
 def test_a_minted_draft_declares_the_verb_it_was_minted_from(tmp_path):
-    from defender import _scaffold_rules
+    from defender.knowledge import _scaffold_rules
 
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts(
@@ -290,7 +290,7 @@ def test_a_goal_carrying_a_line_separator_cannot_forge_a_section(tmp_path):
 
 
 def test_a_placeholder_inside_a_bound_value_is_not_declared_as_an_interface(tmp_path):
-    from defender import _scaffold_rules
+    from defender.knowledge import _scaffold_rules
 
     cat = _catalog(tmp_path)
     lead_author.synthesize_drafts(
@@ -359,7 +359,7 @@ def test_a_sentinel_row_mints_nothing(tmp_path):
 
 
 def test_a_minted_draft_leaves_no_partial_file_behind(tmp_path):
-    from defender._corpus import iter_query_templates
+    from defender.knowledge._corpus import iter_query_templates
 
     cat = _catalog(tmp_path)
     created = lead_author.synthesize_drafts(

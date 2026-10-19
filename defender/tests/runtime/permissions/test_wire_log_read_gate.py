@@ -16,7 +16,7 @@ from defender.runtime.agent_definition import (  # noqa: E402
     RunScope,
     compile_policy_for,
 )
-from defender.scripts import workspace_map as wsm  # noqa: E402
+from defender.presentation import workspace_map as wsm  # noqa: E402
 
 READERS = ("main", "gather")
 

@@ -14,15 +14,15 @@ DEFENDER = REPO_ROOT / "defender"
 if (_root := str(REPO_ROOT)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._venv import reexec_into_venv  # noqa: E402
+from defender.execution._venv import reexec_into_venv  # noqa: E402
 
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
 from defender._clock import z_seconds
-from defender._corpus import iter_lessons
+from defender.knowledge._corpus import iter_lessons
 from defender._io import json_safe, use_utf8_stdio
-from defender._knowledge import (
+from defender.knowledge._knowledge import (
     LESSONS, LESSONS_ACTOR, LESSONS_ENVIRONMENT, LESSONS_QUESTIONER, KnowledgePaths,
 )
 

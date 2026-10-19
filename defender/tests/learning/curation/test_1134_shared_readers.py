@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender._corpus import (
+from defender.knowledge._corpus import (
     Lesson,
     QueryTemplate,
     iter_lesson_paths,

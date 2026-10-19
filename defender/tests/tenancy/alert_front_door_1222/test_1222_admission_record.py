@@ -174,7 +174,7 @@ def _assert_refused_before_any_folder(d: S.Drive, what: str) -> None:
     assert d.lifecycle_calls == [], f"{what}: the run's lifecycle (its box) started for a refused alert"
     assert d.main.requests == 0, f"{what}: MAIN was asked for a turn on a refused alert"
     assert d.router.leads() == [], f"{what}: leads were dispatched for a refused alert: {d.router.leads()}"
-    record_name = S.sym("_tenant", "TENANT_RECORD_NAME")
+    record_name = S.sym("tenancy._tenant", "TENANT_RECORD_NAME")
     left = [e for e in d.runs_base_entries() if e != record_name]
     assert left == [], f"{what}: a refused alert left {left} under the runs base"
 

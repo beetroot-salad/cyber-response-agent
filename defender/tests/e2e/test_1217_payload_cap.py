@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import READ_LIMIT, read_bytes_capped  # noqa: E402
-from defender.scripts.gather_tools import record_query  # noqa: E402
+from defender.runtime import record_query  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, LEAD, q, run_gather  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402

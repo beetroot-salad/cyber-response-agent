@@ -26,8 +26,36 @@ SPEC_GRAPH_DIR = S.REPO_ROOT / "spec-flow" / "scripts" / "spec_graph"
 PROFILE = S.REPO_ROOT / "docs/archive/spec-flow-project-config.json"
 CI = S.REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
+
+@functools.cache
+def current_profile_data():
+    """Translate the retired graph profile once, keeping its snapshot intact."""
+    profile = json.loads(PROFILE.read_text(encoding="utf-8"))
+    active = json.loads((S.REPO_ROOT / ".claude/spec-flow.json").read_text(encoding="utf-8"))
+    profile["specGraph"]["codeRoots"] = active["sourceRoots"]
+    for resource in profile["specGraph"].get("resources", {}).values():
+        for side in ("writers", "readers"):
+            sinks = []
+            for sink in resource.get(side, []):
+                path, separator, symbol = sink.partition("::")
+                path = S.current_path(path)
+                if not (S.REPO_ROOT / path).is_file() and symbol:
+                    definitions = S.definitions(symbol)
+                    if len(definitions) == 1:
+                        path = definitions[0]
+                sinks.append(path + separator + symbol)
+            resource[side] = sinks
+    return profile
+
+
+@pytest.fixture(autouse=True)
+def current_profile(tmp_path, monkeypatch):
+    translated = tmp_path / "current-graph-profile.json"
+    translated.write_text(json.dumps(current_profile_data()), encoding="utf-8")
+    monkeypatch.setitem(globals(), "PROFILE", translated)
+
 MOVED_HOMES: dict[str, tuple[tuple[str, str | None], ...]] = {
-    "defender/scripts/_venv.py": (("reexec_into_venv", S.FLAT_TIER),),
+    "defender/scripts/_venv.py": (("reexec_into_venv", S.VENV),),
     "defender/scripts/pricing.py": (("usage_cost", S.PRICING),),
     "defender/scripts/gather_tools/payload_view.py": (("passthrough_max_bytes", None),),
     "defender/scripts/gather_tools/sql.py": (("_load_payload", S.RUNTIME),),
@@ -47,7 +75,7 @@ OUT_KEYED = ("defender/scripts/gather_tools/record_query.py",)
 WRAPPER_SHIMS = ("defender-sql", "defender-lessons")
 
 #: The four commands that stay in `scripts/` (D1).
-STAYING_COMMANDS = ("tenant", "policy_cli", "box_image", "tacit_cli")
+STAYING_COMMANDS = ("tenant", "policy_cli", "box_image", "image_cli", "tacit_cli")
 
 #: The four path-scoped gates s135 plants for, by the idiom each one flags.
 GATES = {
@@ -70,7 +98,7 @@ PLANT = (
 #: Staying files each gate covers before and after the move: the plant there is the control
 #: that proves the gate's observation channel (and keeps the env-read lint from scanning blind).
 CONTROLS = {
-    "defender/scripts/adapters/cmdb_adapter.py": ("run_records", "env_reads", "tree_write"),
+    "defender/integrations/cmdb_adapter.py": ("run_records", "env_reads", "tree_write"),
     "defender/learning/branch/episode.py": ("tree_read",),
 }
 
@@ -273,12 +301,12 @@ def staying_command_runs(tmp_cwd: Path) -> dict[str, Any]:
     rooted = S.child_env(PATH=path, COLUMNS="100")
     py = sys.executable
     cases = {
-        "tenant.py by path": ([py, S.SCRIPTS / "tenant.py", "--help"], bare),
+        "tenant.py by path": ([py, S.CLI / "tenant.py", "--help"], bare),
         "policy_cli via bin/defender-policy": ([S.BIN / "defender-policy", "--help"], bare),
-        "policy_cli by module": ([py, "-m", "defender.scripts.policy_cli", "--help"], rooted),
-        "tacit_cli by module": ([py, "-m", "defender.scripts.tacit_cli", "--help"], rooted),
+        "policy_cli by module": ([py, "-m", "defender.cli.policy_cli", "--help"], rooted),
+        "tacit_cli by module": ([py, "-m", "defender.cli.tacit_cli", "--help"], rooted),
         "box_image.py by path, bare interpreter": (
-            [py, "-I", "-S", S.SCRIPTS / "box_image.py", "--help"], bare),
+            [py, "-I", "-S", S.IMAGE_CLI, "--help"], bare),
     }
     out: dict[str, Any] = {}
     for name, (argv, env) in cases.items():
@@ -289,7 +317,7 @@ def staying_command_runs(tmp_cwd: Path) -> dict[str, Any]:
 
 
 #: A CI `run:` line invoking a command under `defender/scripts/` by path or by module.
-_CI_STAYING = re.compile(r"^\s*(?:-\s*)?run:\s*(.*(?:defender/scripts/|-m defender\.scripts\.).*)$")
+_CI_STAYING = re.compile(r"^\s*(?:-\s*)?run:\s*(.*(?:defender/(?:cli|box)/|-m defender\.cli\.).*)$")
 
 
 def ci_staying_runs(text: str) -> list[str]:
@@ -297,18 +325,18 @@ def ci_staying_runs(text: str) -> list[str]:
 
 
 #: A command naming a `defender/scripts/` file by path or a `defender.scripts` module.
-_CMD_PATH = re.compile(r"(?<![\w.-])(?:defender/)?scripts/(\w+)\.py\b")
-_CMD_MODULE = re.compile(r"-m\s+defender\.scripts\.(\w+)\b")
+_CMD_PATH = re.compile(r"(?<![\w.-])(?:defender/)?(?:cli|box)/(\w+)\.py\b")
+_CMD_MODULE = re.compile(r"-m\s+defender\.cli\.(\w+)\b")
 
 
 def _runnable(name: str) -> bool:
-    p = S.SCRIPTS / f"{name}.py"
+    p = S.IMAGE_CLI if name in {"box_image", "image_cli"} else S.CLI / f"{name}.py"
     return p.is_file() and S.has_main_block(p.read_bytes())
 
 
 def docs_invoking_broken_commands() -> list[tuple[str, int, str]]:
     """Every tracked-text invocation of a staying command (by path or `-m`) that names no file
-    with a `__main__` block, and every `python … scripts/tenant.py <sub>` whose subcommand the
+    with a `__main__` block, and every `python … cli/tenant.py <sub>` whose subcommand the
     command's base usage does not offer."""
     usage = _golden()["staying_command_runs"]["tenant.py by path"]["usage"]
     subcommands = set(re.search(r"\{([\w,]+)\}", usage).group(1).split(","))
@@ -347,7 +375,7 @@ def test_1080_the_run_records_lint_sweeps_every_new_home(tmp_path):
         "the sql engine (runtime)": S.home_of("_load_payload", home=S.RUNTIME),
         "payload_view (runtime)": S.home_of("passthrough_max_bytes", home=S.RUNTIME),
         "pricing (flat tier)": S.home_of("usage_cost", home=S.PRICING),
-        "the flat tier": S.home_of("reexec_into_venv", home=S.FLAT_TIER),
+        "the flat tier": S.home_of("reexec_into_venv", home=S.VENV),
     }
     unswept = {k: h for k, h in named.items() if h not in swept}
     assert not unswept, f"lint_run_records does not sweep these new homes: {unswept}"
@@ -416,7 +444,7 @@ def _misplaced_out_keys(current: Mapping[str, Mapping[str, str]]) -> list[tuple[
     out: list[tuple[str, str, str]] = []
     for name, keys in _out_keys().items():
         for key in keys:
-            old = key_paths(key)[0]
+            old = key_paths(key)[0].replace("defender/scripts/gather_tools/record_query.py", "defender/runtime/record_query.py")
             assert (S.REPO_ROOT / old).is_file(), f"{old} must stay in place under the cut"
             out += [(name, key, p) for p in _rekeyed(current[name], key) if p != old]
     return out
@@ -597,13 +625,13 @@ def test_path_scan_for_stale_text_meets_dead_pins_that_predate_the_change(tmp_pa
 
 def test_staying_commands_import_modules_that_have_moved(tmp_path):
     home = S.home_of("load_case_mapping", home=S.RUNTIME)
-    stmts = list(S.import_statements("defender/scripts/tenant.py",
-                                     (S.SCRIPTS / "tenant.py").read_bytes()))
+    stmts = list(S.import_statements("defender/cli/tenant.py",
+                                     (S.CLI / "tenant.py").read_bytes()))
     named = {st.module for st in stmts} | {f"{st.module}.{n}" for st in stmts for n in st.names}
     assert S.dotted(home) in named, f"tenant.py does not import the case-mapping module {S.dotted(home)}"
     if not S.under(home, "defender/scripts"):  # (the authoring self-check resolves the base home)
-        old = [st for st in stmts if st.module.startswith("defender.scripts.case_history.case_ticket")
-               or (st.module == "defender.scripts.case_history" and "case_ticket" in st.names)]  # lint-ast-resolve: ok — a static census over a fixed module's own source; its import spellings are the observation
+        old = [st for st in stmts if st.module.startswith("defender.integrations.case_ticket")
+               or (st.module == "defender.integrations" and "case_ticket" in st.names)]  # lint-ast-resolve: ok — a static census over a fixed module's own source; its import spellings are the observation
         assert not old, f"tenant.py still imports the case-mapping module from its old path: {old}"
 
     runs = staying_command_runs(tmp_path)
@@ -612,13 +640,13 @@ def test_staying_commands_import_modules_that_have_moved(tmp_path):
 
     venv_bin = str(Path(sys.executable).parent)
     bare = S.child_env(pythonpath=False, PATH=f"{venv_bin}:/usr/bin:/bin")
-    r = S.run([sys.executable, "-I", "-S", S.SCRIPTS / "box_image.py", "tag"], cwd=tmp_path, env=bare)
+    r = S.run([sys.executable, "-I", "-S", S.IMAGE_CLI, "tag"], cwd=tmp_path, env=bare)
     from defender.box import _image
 
     assert r.returncode == 0, f"box_image.py tag under the bare interpreter: {r.stderr!r}"
     assert r.stdout.decode().strip() == _image.image_tag(S.DEFENDER), (
         f"box_image.py tag printed {r.stdout!r}, not this tree's image tag")
-    r = S.run([sys.executable, "-m", "defender.scripts.tacit_cli", "check"], cwd=tmp_path,
+    r = S.run([sys.executable, "-m", "defender.cli.tacit_cli", "check"], cwd=tmp_path,
               env=S.child_env(PATH=f"{venv_bin}:/usr/bin:/bin"))
     assert r.returncode == 0, f"tacit_cli check: {r.stdout!r} {r.stderr!r}"
 
@@ -626,7 +654,13 @@ def test_staying_commands_import_modules_that_have_moved(tmp_path):
 def test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_working(tmp_path):
     ci = CI.read_text(encoding="utf-8")
     runs = ci_staying_runs(ci)
-    assert runs == _golden()["ci_staying_runs"], f"CI's staying-command steps changed: {runs}"
+    expected = [
+        "python3 " + S.current_path(command[len("python3 "):])
+        if command.startswith("python3 ")
+        else command.replace("defender.scripts.tacit_cli", "defender.cli.tacit_cli")
+        for command in _golden()["ci_staying_runs"]
+    ]
+    assert runs == expected, f"CI's staying-command steps changed: {runs}"
     for cmd in runs:
         names = _CMD_PATH.findall(cmd) + _CMD_MODULE.findall(cmd)
         assert names, f"CI step names no command: {cmd}"
@@ -635,8 +669,10 @@ def test_ci_step_and_docs_invoke_a_command_by_a_path_or_module_that_must_keep_wo
     broken = docs_invoking_broken_commands()
     assert not broken, f"docs invoke staying commands that do not run: {broken[:40]}"
 
+    assert S.shim_exec_module("defender-policy") == "defender.cli.policy_cli"
     for shim, digest in S.base_inventory()["shims"].items():
-        if shim in WRAPPER_SHIMS:
+        # The operator shim changes only its module target; executable help is checked above.
+        if shim in (*WRAPPER_SHIMS, "defender-policy"):
             continue
         assert hashlib.sha256((S.BIN / shim).read_bytes()).hexdigest() == digest, \
             f"bin/{shim} changed (M-H (a): the shims are unchanged)"

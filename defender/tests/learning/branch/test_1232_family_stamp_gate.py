@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _state1135

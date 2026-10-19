@@ -138,7 +138,7 @@ def test_a_tree_that_declares_no_system_is_refused_rather_than_bound_lane_less(t
     with pytest.raises(LeadAuthorError, match="not a directory this process can read"):
         bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir)
 
-    (defender_dir / "scripts" / "adapters").mkdir(parents=True)
+    (defender_dir / "integrations").mkdir(parents=True)
     with pytest.raises(ValueError, match="write scope is empty"):
         bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir)
 

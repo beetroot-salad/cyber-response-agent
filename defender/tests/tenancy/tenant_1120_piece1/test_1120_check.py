@@ -13,9 +13,9 @@ from typing import Any
 import pytest
 import yaml
 
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender.runtime import verb_dispositions
-from defender.scripts import tenant as tenant_py
+from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
 #: A system only a tmp checkout declares, and the one verb its adapter declares (A3).

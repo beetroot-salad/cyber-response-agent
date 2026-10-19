@@ -25,11 +25,11 @@ from pathlib import Path
 from typing import Any, Self
 
 from defender._io import read_jsonl_rows
-from defender._episode_handle import AppendRecord, Episode
+from defender.episodes._episode_handle import AppendRecord, Episode
 from defender.run_repository import artifact_file
 from pydantic import ValidationInfo, field_validator
 
-from defender._query_rules import _json_safe_params, _request_key
+from defender.knowledge._query_rules import _json_safe_params, _request_key
 
 #: What produced a served payload. Any other value is a writer inventing a decision class.
 BASE = "base"

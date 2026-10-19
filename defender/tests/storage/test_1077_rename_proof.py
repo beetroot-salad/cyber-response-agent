@@ -11,7 +11,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = REPO_ROOT / "defender"
 #: By path under `defender/`: #1105 moved the run-layout owner into the runs repository (D1.1).
-OWNER_MODULES = ("run_repository/_layout.py", "_episode_paths.py", "_tenant.py")
+OWNER_MODULES = ("run_repository/_layout.py", "episodes/_episode_paths.py", "tenancy/_tenant.py")
 
 #: The token every renamed record gains. Arbitrary — what matters is that no module anywhere
 #: could have guessed it.

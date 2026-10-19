@@ -52,7 +52,7 @@ def test_a_missing_pytz_is_a_missing_runtime_on_the_query_that_needs_it(tmp_path
     assert "query error" not in proc.stderr, "a missing runtime was reported as the lead's mistake"
     assert "pytz" in proc.stderr, proc.stderr
     if box:
-        assert "box_image.py build" in proc.stderr, proc.stderr
+        assert "defender/box/image_cli.py build" in proc.stderr, proc.stderr
         assert ".venv" not in proc.stderr, proc.stderr
     else:
         assert "uv pip install" in proc.stderr, proc.stderr

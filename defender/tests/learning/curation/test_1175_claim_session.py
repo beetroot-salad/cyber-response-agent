@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from defender._env import FatalConfigError
+from defender.configuration._env import FatalConfigError
 from defender._git import GitError
 from defender.tests.support.runtime.engine._declared869 import ADAPTERS_REL, GIT_IGNORE, git, write
 from defender.tests.support.learning.core._declared870 import consumed_by_id

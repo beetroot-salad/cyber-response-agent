@@ -24,7 +24,7 @@ def worktree(tmp_path: Path) -> Path:
     tree = tmp_path / "worktree" / "defender"
     (tree / "skills").mkdir(parents=True)
     from defender._paths import PATHS
-    shutil.copytree(PATHS.defender_dir / "scripts" / "adapters", tree / "scripts" / "adapters")
+    shutil.copytree(PATHS.defender_dir / "integrations", tree / "integrations")
     # The corpus-author role binds to a per-spawn corpus under the tree; give it one to name.
     (tree / "lessons").mkdir()
     return tree

@@ -74,7 +74,7 @@ def _anomaly_adapters(adapters: Path) -> Path:
 
 
 def _repo_adapters(root: Path) -> Path:
-    """`<root>/defender/scripts/adapters` — the address every consumer that starts from a
+    """`<root>/defender/integrations` — the address every consumer that starts from a
     repo root (`adapter_declared_systems`, `known_capabilities`) derives, and the one the
     audit derives from `<root>/defender`."""
     return root / ADAPTERS_REL
@@ -350,7 +350,7 @@ def _audit_tree(root: Path, *, skill_body: str) -> Path:
     """`<root>/defender` with one `cmdb` adapter declaring `query` and one `cmdb` SKILL.md —
     the minimal tree `audit_read_surfaces` scans."""
     tree = root / "defender"
-    write(tree / "scripts" / "adapters" / "cmdb_adapter.py", QUERY_ADAPTER)
+    write(tree / "integrations" / "cmdb_adapter.py", QUERY_ADAPTER)
     write(tree / "skills" / "cmdb" / "SKILL.md", f"---\nname: cmdb\n---\n\n{skill_body}\n")
     return tree
 
@@ -365,7 +365,7 @@ def test_the_read_surface_audit_never_reports_a_tree_it_could_not_read_as_clean(
     clean = _audit_tree(tmp_path / "clean", skill_body="nothing advertised here")
     assert audit_read_surfaces(clean, {}) == ()
 
-    adapters = clean / "scripts" / "adapters"
+    adapters = clean / "integrations"
 
     def probe():
         return audit_read_surfaces(clean, {})
@@ -391,7 +391,7 @@ def test_the_read_surface_audit_refuses_an_absent_adapters_directory(tmp_path):
     assert not nowhere.exists()
     with pytest.raises(RosterError) as exc:
         audit_read_surfaces(nowhere, {})
-    assert str(nowhere / "scripts" / "adapters") in str(exc.value), (
+    assert str(nowhere / "integrations") in str(exc.value), (
         f"does not name the missing adapters directory: {exc.value}"
     )
 

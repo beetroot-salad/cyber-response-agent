@@ -408,11 +408,11 @@ def test_a_directory_keeping_one_tracked_file_is_not_read_as_removed(tmp_path):
     up = _upstream(
         tmp_path,
         main_files={
-            "defender/fixtures/held-back/README.md": "the set lives here\n",
-            "defender/fixtures/held-back/m01.json": "{}\n",
+            "playground-v2/examples/alerts/held-back/README.md": "the set lives here\n",
+            "playground-v2/examples/alerts/held-back/m01.json": "{}\n",
             _HELD_BACK_REF: _HELD_BACK_REF_BODY,
         },
-        pr_files={"defender/fixtures/held-back/m01.json": None},
+        pr_files={"playground-v2/examples/alerts/held-back/m01.json": None},
     )
     work = _clone(tmp_path, up)
 
@@ -427,10 +427,10 @@ def test_a_directory_losing_every_tracked_file_IS_read_as_removed(tmp_path):
     up = _upstream(
         tmp_path,
         main_files={
-            "defender/fixtures/held-back/m01.json": "{}\n",
+            "playground-v2/examples/alerts/held-back/m01.json": "{}\n",
             _HELD_BACK_REF: _HELD_BACK_REF_BODY,
         },
-        pr_files={"defender/fixtures/held-back/m01.json": None},
+        pr_files={"playground-v2/examples/alerts/held-back/m01.json": None},
     )
     work = _clone(tmp_path, up)
 
@@ -443,10 +443,10 @@ def test_an_archival_copy_does_not_vouch_for_a_deleted_directory(tmp_path):
         tmp_path,
         main_files={
             "experiments/old-run/held-back/m01.json": "{}\n",
-            "defender/fixtures/held-back/m01.json": "{}\n",
+            "playground-v2/examples/alerts/held-back/m01.json": "{}\n",
             _HELD_BACK_REF: _HELD_BACK_REF_BODY,
         },
-        pr_files={"defender/fixtures/held-back/m01.json": None},
+        pr_files={"playground-v2/examples/alerts/held-back/m01.json": None},
     )
     work = _clone(tmp_path, up)
 

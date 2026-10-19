@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from defender._artifact_schema import REPORT_FILE_MAX, validate_report
+from defender.records._artifact_schema import REPORT_FILE_MAX, validate_report
 from defender.runtime import close_tool
-from defender.scripts.adapters import tacit_knowledge_adapter as tk
+from defender.integrations import tacit_knowledge_adapter as tk
 from defender.skills.invlang.parser import parse_dense_companion
 from defender.skills.invlang.validate import validate_companion
 

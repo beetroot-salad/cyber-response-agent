@@ -316,7 +316,8 @@ def project_record(reader: str, record: Any) -> Any:
 def _read_one(scenario: dict[str, Any]) -> list[Any]:
     """`read_query_template` in one call form: the bare `Path` `file`, or `bind(top)` with
     `name` and `where=top`. Answers `[the projected template or None, the reason]`."""
-    from defender import _corpus, _io
+    from defender import _io
+    from defender.knowledge import _corpus
 
     if scenario["form"] == "path":
         got = _corpus.read_query_template(Path(scenario["file"]))
@@ -331,7 +332,8 @@ def _run_one(scenario: dict[str, Any]) -> dict[str, Any]:
     """One reader in one call form over one tree (`path`: the bare `Path` of `top`; `bound`:
     `bind(top)`; `held-view-under`: `hold(mount).view().under(prefix)`), with `where=top`.
     `read_query_template` goes through `_read_one`."""
-    from defender import _corpus, _io
+    from defender import _io
+    from defender.knowledge import _corpus
     from defender.learning.leads import lead_neighbors
 
     readers: dict[str, Callable[..., Any]] = {
@@ -374,7 +376,7 @@ def run_readers(scenarios: list[dict[str, Any]], *, drop: bool) -> dict[str, Any
     root, every scenario first runs once as root (its answer discarded) so that every module the
     readers import lazily is loaded while the interpreter can still read its own files; then
     this process drops to `NOBODY` and runs them for real."""
-    import defender._corpus  # noqa: F401 — loaded before any privilege drop
+    import defender.knowledge._corpus  # noqa: F401 — loaded before any privilege drop
     import defender._frontmatter  # noqa: F401
     import defender.learning.leads.lead_neighbors  # noqa: F401
 
@@ -409,7 +411,7 @@ def audit_readers(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
     interpreter: the hook can never be removed."""
     audit = _OpenAudit()
     sys.addaudithook(audit)
-    import defender._corpus  # noqa: F401
+    import defender.knowledge._corpus  # noqa: F401
     import defender._frontmatter  # noqa: F401
     import defender.learning.leads.lead_neighbors  # noqa: F401
 

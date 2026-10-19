@@ -13,7 +13,7 @@ from uuid import uuid4
 from defender._model import model
 from defender._text import is_content_less
 from defender._untrusted import wrap
-from defender._knowledge import CHECKOUT_KNOWLEDGE, LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, LESSON_CORPORA as _LESSON_CORPORA, KnowledgePaths
 from defender.learning.author import shared as _shared
 from defender.learning.core import config
 from defender.learning.core.config import RunUnprocessable, StageContext, StageWiring

@@ -118,7 +118,7 @@ write-code-from-spec names anything differently it renames it HERE, never in a t
     no file holds it, so no credit outlives its run (S15; the retired sidecar was #1239).
 
 EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE, OR A FAKE CITING ITS CLAIM:
-  * adapter errors are the real `AdapterFault` subclasses (`scripts/adapters/faults.py`), raised
+  * adapter errors are the real `AdapterFault` subclasses (`integrations/faults.py`), raised
     by real adapter modules this file plants on disk (GA-40, GD-36: exit 2 for Config/Transport,
     exit 1 for Upstream);
   * the unsandboxed box is a real `BoxExecutor()` (GD-16: `sandboxed` is False for anything
@@ -196,7 +196,7 @@ RUN = "run"
 QUERY_TOOL = "runtime.query_tool"
 VERBS = "runtime.verbs"
 AGENT_ROLE = "runtime.agent_role"
-VISUALIZE = "scripts.visualize.visualize_episode"
+VISUALIZE = "presentation.visualize_episode"
 SERIALIZE = "learning.frontend.serialize"
 LESSONS_RUN = "learning.author.lessons.run"
 
@@ -341,7 +341,7 @@ archived_judge_world = J.archived_judge_world
 #: The model name GPR-01's probe saw on the provider error (Anthropic arm).
 OUTAGE_MODEL = "claude-sonnet-4-5"
 
-#: A model `defender._pricing` prices (R-08): every model double is named after it, so an oracle
+#: A model `defender.configuration._pricing` prices (R-08): every model double is named after it, so an oracle
 #: request accrues positive spend whatever unit the implementer picks (USD from pricing, request
 #: count, tokens). D1 dropped the unpriced-model fallback from the spec; no test may lean on it.
 PRICED_MODEL = "claude-sonnet-4-6"
@@ -398,7 +398,7 @@ import time
 from pathlib import Path
 
 from defender.runtime.verbs import VerbContext, verb
-from defender.scripts.adapters import faults
+from defender.integrations import faults
 
 _STATE = Path({state!r})
 SYSTEM = {system!r}
@@ -472,7 +472,7 @@ def query_params(q: str = "*", *, start: str = "", end: str = "", limit: int = 5
 
 @dataclass
 class Estate:
-    """The fixture tenant's estate: a fake `defender_dir` whose `scripts/adapters/` holds one
+    """The fixture tenant's estate: a fake `defender_dir` whose `integrations/` holds one
     stub adapter per system, its answers table and its call log.
 
     `withheld` names `(system, verb)` pairs the tenant's grant table gives no role (with a
@@ -502,7 +502,7 @@ class Estate:
 
     @property
     def adapters(self) -> Path:
-        return self.root / "scripts" / "adapters"
+        return self.root / "integrations"
 
     @property
     def state(self) -> Path:
@@ -1158,7 +1158,7 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     #1255 G4/G6: the table row carries no id. The world's host-only call-join record
     (`worlds/<X>/call_join.jsonl`, `J.write_call_join`) names each row's id by its
     `(lead_id, seq)` — written even when the ledger is empty."""
-    rq = mod("scripts.gather_tools.record_query")
+    rq = mod("runtime.record_query")
     breaker = mod("runtime.circuit_breaker")
     world = Path(ep) / "worlds" / label
     token = world_token(label)
@@ -1265,14 +1265,14 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
 def load_world(ep: Path, label: str) -> Any:
     """The sibling's `ResumeWorld` for `label`, through the REAL loader."""
     fam = mod(FAMILY)
-    with mod("_episode_handle").Episode.create(Path(ep)) as handle:
+    with mod("episodes._episode_handle").Episode.create(Path(ep)) as handle:
         family = fam.load_family(handle.view())
     return fam.resume_world_from(family, label, Path(ep))
 
 
 def world_ledger(ep: Path, label: str) -> Any:
     """`Ledger.for_world(...).declare()` over the primed base — as the sibling builds it."""
-    episode = mod("_episode_handle").Episode.create(Path(ep))
+    episode = mod("episodes._episode_handle").Episode.create(Path(ep))
     with contextlib.suppress(FileExistsError):
         episode.served_base.create("")
     return sym(LEDGER, "Ledger").for_world(episode, world_token(label)).declare()
@@ -1697,7 +1697,7 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
     if len(fresh) == 1:
         ep = fresh[0]
     else:
-        from defender._episode_handle import episode_dir
+        from defender.episodes._episode_handle import episode_dir
 
         ep = episode_dir(T.current_tenant().data_root, EPISODE_ID)
     return Launch(rc=rc, message=message, spawn=spawn, ep=ep)

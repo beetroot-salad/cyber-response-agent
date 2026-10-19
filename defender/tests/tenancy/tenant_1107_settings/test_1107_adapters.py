@@ -11,8 +11,8 @@ import pytest
 
 from defender.runtime import circuit_breaker
 from defender.runtime.circuit_breaker import RunAborted
-from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters import (
+from defender.integrations import _stub_transport as transport
+from defender.integrations import (
     change_mgmt_adapter,
     cmdb_adapter,
     elastic_adapter,
@@ -21,7 +21,7 @@ from defender.scripts.adapters import (
     threat_intel_adapter,
     ticket_adapter,
 )
-from defender.scripts.adapters.faults import AdapterFault, ConfigFault, TransportFault
+from defender.integrations.faults import AdapterFault, ConfigFault, TransportFault
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._by_path import load_module
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S

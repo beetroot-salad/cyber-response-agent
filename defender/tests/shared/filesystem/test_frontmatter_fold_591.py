@@ -8,7 +8,7 @@ from defender.tests.support.shared.contracts._by_path import DEFENDER, load_modu
 from evaluations.held_out import predicted_disposition
 from defender._vocab import DISPOSITION_ENUM
 from defender.runtime.verb_grant import VerbGrant
-from defender.scripts.visualize import visualize_primitives as vp
+from defender.presentation import visualize_primitives as vp
 from defender.runtime.verbs import read_roster
 from defender.tests.support.shared.contracts import _system_index_1256 as SI
 
@@ -325,7 +325,7 @@ def test_d_catalog_survival():
     out = SI.index_text(
         hook, hook.SKILLS_DIR, read_roster(hook.ADAPTERS_DIR), T1106.fixture_grants().gather)
     assert SI.listing(out)
-    adapters_dir = DEFENDER / "scripts" / "adapters"
+    adapters_dir = DEFENDER / "integrations"
     systems = sorted(
         p.name[: -len("_adapter.py")].replace("_", "-")
         for p in adapters_dir.glob("*_adapter.py")

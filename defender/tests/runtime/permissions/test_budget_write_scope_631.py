@@ -91,7 +91,7 @@ def test_model_cannot_disable_enforcement(tmp_path):
 
     for target in ("../.env", ".env", "/proc/self/environ",
                    str(DEFENDER / "runtime" / "driver.py"),
-                   str(DEFENDER / "_env.py")):
+                   str(DEFENDER / "configuration/_env.py")):
         decision = permission.decide_write(Path(run_dir / target), "x", run_dir=run_dir,
                                            defender_dir=DEFENDER, policy=policy)
         assert not decision.allow, f"the api lane admitted a write to {target!r}"

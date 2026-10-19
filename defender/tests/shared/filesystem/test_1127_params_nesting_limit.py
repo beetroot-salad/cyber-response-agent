@@ -14,9 +14,9 @@ import yaml
 
 from defender._io import parse_jsonl_row, read_jsonl_rows
 from defender.run_repository import RunPaths
-from defender import _query_rules
-from defender.scripts.gather_tools.record_query import append_query_row
-from defender._query_rules import params_too_deep
+from defender.knowledge import _query_rules
+from defender.runtime.record_query import append_query_row
+from defender.knowledge._query_rules import params_too_deep
 
 LEAD = "l-001"
 

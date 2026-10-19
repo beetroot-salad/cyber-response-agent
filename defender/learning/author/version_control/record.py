@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 
 from defender import _io
-from defender._tenant import Tenant
+from defender.tenancy._tenant import Tenant
 
 from .model import _OID, DeliveryRefused
 

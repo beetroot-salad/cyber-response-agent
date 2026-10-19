@@ -1,11 +1,11 @@
-"""scripts/workspace_map.py: the orchestrator-facing map carries no credential signal (#255) and does not name gather_raw (#264)."""
+"""presentation/workspace_map.py: the orchestrator-facing map carries no credential signal (#255) and does not name gather_raw (#264)."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from defender.tests.support.shared.contracts._by_path import DEFENDER, load_module
 
-wm = load_module(DEFENDER / "scripts" / "workspace_map.py")
+wm = load_module(DEFENDER / "presentation" / "workspace_map.py")
 
 
 def test_no_credential_signal(tmp_path: Path):

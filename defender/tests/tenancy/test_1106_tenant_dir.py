@@ -10,7 +10,7 @@ from defender.tests.support.tenancy import _tenants1106 as T
 
 
 def _refused():
-    return T.mod("_tenant").TenantRefused
+    return T.mod("tenancy._tenant").TenantRefused
 
 
 def _refusal(root: Path, tenant_id: str) -> str:

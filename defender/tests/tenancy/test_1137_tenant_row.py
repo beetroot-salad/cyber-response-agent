@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender import _tenant as owner
+from defender.tenancy import _tenant as owner
 from defender.tests.support.shared.contracts._create_lane import assert_single_plain
 from defender.tests.support.shared.filesystem._umask import umask
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H

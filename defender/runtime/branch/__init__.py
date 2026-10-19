@@ -40,7 +40,7 @@ from defender._io import (
     write_guarded,
 )
 from defender.run_repository import Run, RunPaths, artifact_dir, artifact_file
-from defender._query_rules import is_reserved_query_id
+from defender.knowledge._query_rules import is_reserved_query_id
 
 from .. import session_store
 from ..run_state import RunState

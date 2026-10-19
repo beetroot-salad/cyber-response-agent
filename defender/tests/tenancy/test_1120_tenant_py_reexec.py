@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from defender.scripts import tenant as tenant_py
+from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
 

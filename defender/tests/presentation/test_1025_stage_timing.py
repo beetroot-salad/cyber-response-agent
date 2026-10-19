@@ -11,9 +11,9 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
-from defender._episode_handle import Episode
-from defender._episode_paths import LAYOUT, EpisodePaths
+from defender.episodes import _episode_handle as EH
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episode_paths import LAYOUT, EpisodePaths
 
 from defender._clock import now_iso, parse_iso_utc
 from defender.tests.support.learning.judge import _judge_921 as J

@@ -16,7 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from defender import _env, run_common
+from defender import run_common
+from defender.configuration import _env
 from defender.tests.e2e.test_922_renderer import MARKER, driven_run, tenant_run
 
 pytestmark = pytest.mark.e2e
@@ -32,7 +33,7 @@ def _dev_deployment(deployment_unset, monkeypatch):
 
 
 def _renderer():
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     return visualize_run
 
@@ -54,7 +55,7 @@ def _assert_warned(caplog, needle: str) -> None:
 
 def _warning_records(caplog) -> list[logging.LogRecord]:
     return [r for r in caplog.records if r.levelno == logging.WARNING
-            and r.name == "defender.scripts.visualize.visualize_run"]
+            and r.name == "defender.presentation.visualize_run"]
 
 
 def _assert_one_warning_naming_the_destination_once(caplog, dest: Path) -> str:

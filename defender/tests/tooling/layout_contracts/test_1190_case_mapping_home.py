@@ -39,7 +39,7 @@ def _moved(name: str) -> Any:
 def _writer_home() -> str:
     """The write-back module's path, wherever it lives: `record_case_ticket`'s one home outside
     `defender/scripts/` once #1165 has moved it (the locator's one-home rule decides), else its
-    one definition under `scripts/` — `case_history/ticket_writer.py`, which #1190 leaves in
+    one definition under `scripts/` — `integrations/ticket_writer.py`, which #1190 leaves in
     place. Decided by the definitions, never by catching the locator's failure (that would also
     swallow a duplicate home)."""
     defs = S.definitions("record_case_ticket")

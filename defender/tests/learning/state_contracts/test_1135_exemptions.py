@@ -21,7 +21,7 @@ from defender.learning.frontend import build as frontend_build
 from defender.learning.frontend import serialize_queues
 from defender.learning.leads import _lead_spine, pitfalls_curator
 from defender.box import _scrub as scrub_mod
-from defender.scripts.visualize import visualize_episode
+from defender.presentation import visualize_episode
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.curation._lead_author_1134 import lead_trees
 from defender.tests.support.shared.contracts._repo import seed_skills_repo

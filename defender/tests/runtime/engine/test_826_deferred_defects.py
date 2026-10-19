@@ -13,10 +13,10 @@ from defender.runtime.circuit_breaker import (
     INFRA_ERROR_CLASS,
     error_class_for_exit,
 )
-from defender.scripts.adapters import elastic_adapter as ea
-from defender.scripts.adapters.faults import UpstreamFault
-from defender import _query_rules
-from defender.scripts.gather_tools import record_query as rq
+from defender.integrations import elastic_adapter as ea
+from defender.integrations.faults import UpstreamFault
+from defender.knowledge import _query_rules
+from defender.runtime import record_query as rq
 
 LEAD = "l-001"
 

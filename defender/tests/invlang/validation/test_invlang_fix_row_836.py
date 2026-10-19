@@ -275,7 +275,7 @@ def test_fix_row_old_row_is_empty(tmp_path):
 def test_fix_row_old_row_matches_no_line(tmp_path):
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender._artifact_schema import UNCHANGED_NOTICE
+    from defender.records._artifact_schema import UNCHANGED_NOTICE
 
     deps, run = main_deps(tmp_path)
     seed_investigation(run, WARN_DOC)
@@ -342,7 +342,7 @@ def test_fix_row_new_row_pushes_document_past_size_bound(tmp_path):
     """The repair faces the SAME 64 KiB bound every write faces (`INVESTIGATION_FILE_MAX`, claim p8) — a `new_row` that pushes the document over it is refused."""
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender._artifact_schema import INVESTIGATION_FILE_MAX
+    from defender.records._artifact_schema import INVESTIGATION_FILE_MAX
 
     deps, run = main_deps(tmp_path)
     padding = "\nfiller prose line that is not invlang at all\n" * 400

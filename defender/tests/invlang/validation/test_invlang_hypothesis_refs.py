@@ -140,7 +140,7 @@ def test_a_conclude_naming_a_hypothesis_nothing_declares_is_rejected():
 
 @pytest.mark.parametrize("marker", ["none", "n/a", "None"])
 def test_an_empty_surviving_table_is_not_read_as_a_hypothesis(marker: str):
-    """`none` is how the format writes an EMPTY array, not an id (`docs/dense-investigation-format.md`:"""
+    """`none` is how the format writes an EMPTY array, not an id (`defender/docs/dense-investigation-format.md`:"""
     companion = _parsed(
         _declaring("h-001") + "\n"
         + _lead("h-001") + "\n"

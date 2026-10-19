@@ -47,14 +47,14 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender._clock import parse_iso_utc
-from defender._corpus import iter_lessons
+from defender.knowledge._corpus import iter_lessons
 from defender.hooks.record_lesson_load import EVIDENCE_READ, exposures
 from defender._io import read_jsonl_rows, read_text_soft, use_utf8_stdio
 from defender._frontmatter import parse_frontmatter_or_none
-from defender._report import UNKNOWN_DISPOSITION, read_report
-from defender._knowledge import CHECKOUT_KNOWLEDGE
+from defender.records._report import UNKNOWN_DISPOSITION, read_report
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 from defender._text import one_line
 from defender.run_repository import Run, RunPaths
 
@@ -117,7 +117,7 @@ def tenant_runs(raw_tenant: str) -> list[Run]:
     refuses an entry that is not a run (`RunRefused`, naming it). An absent runs folder holds
     none. `TenantRefused` when the tenant cannot be accepted or its runs folder cannot be
     held."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     tenant = _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant)
     return tenant.runs_repository().all_runs()
@@ -175,7 +175,7 @@ def _print_index(lessons_dir: Path, runs: list[Run]) -> None:
 def _scanned_runs(raw_tenant: str) -> list[Run] | None:
     """`tenant_runs`, or `None` with the refusal on stderr (one line, naming a stray entry
     or the refused tenant)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.run_repository import RunRefused
 
     try:

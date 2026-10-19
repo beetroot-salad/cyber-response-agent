@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from defender._alert_input import AlertFacts
+from defender.records._alert_input import AlertFacts
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
@@ -411,7 +411,7 @@ class FakeStore:
                  body: Any = None, *, ctx: Any) -> tuple[str | None, str]:
         self.calls.append(OutboundCall(method=method, path=path, body=body))
         if self.transport_fault_on and path.endswith(self.transport_fault_on):
-            from defender.scripts.adapters.faults import TransportFault
+            from defender.integrations.faults import TransportFault
 
             fault = TransportFault("injected: the bastion is unreachable")
             return None, f"transport error: {fault.detail}"
@@ -494,7 +494,7 @@ class FakeStore:
 
 def writer_deps(store: FakeStore):
     """Bind the fake into the writer's real injection seam (g16)."""
-    from defender.scripts.case_history import ticket_writer
+    from defender.integrations import ticket_writer
 
     return ticket_writer.TicketWriterDeps(request=store)
 
@@ -510,7 +510,7 @@ def _handed(run_dir: Path, config: dict[str, str] | None | object) -> dict[str, 
 def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
            **kw: Any) -> Any:
     """Drive D2's writer over one run dir, through the real seam."""
-    from defender.scripts.case_history import ticket_writer
+    from defender.integrations import ticket_writer
 
     fn = require(
         ticket_writer, "record_case_ticket",
@@ -523,7 +523,7 @@ def record(run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | o
 def open_ticket(
     run_dir: Path, store: FakeStore, *, config: dict[str, str] | None | object = _CONFIG_UNSET,
 ) -> Any:
-    from defender.scripts.case_history import ticket_writer
+    from defender.integrations import ticket_writer
 
     return ticket_writer.open_case_ticket(_run_handle_1165(run_dir), writer_deps(store), **_handed(run_dir, config))
 

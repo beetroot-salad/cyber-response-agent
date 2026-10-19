@@ -100,7 +100,7 @@ _ALERT_ID_FIELD = "kibana.alert.uuid"
 
 def _answer(system: str, verb: str, params: Mapping[str, Any]) -> Any:
     """What the natural run's elastic answers."""
-    from defender.scripts.adapters.elastic_adapter import search_envelope
+    from defender.integrations.elastic_adapter import search_envelope
     from defender.tests.e2e._lead_zero_808 import ALERTS_INDEX, EVENTS_INDEX, shell_doc
 
     if system != "elastic":
@@ -449,7 +449,7 @@ _ENV_KEYS = ("DEFENDER_DATA_ROOT", "DEFENDER_EPISODES_BASE", "DEFENDER_LEARNING_
 
 def _source_run(tenant_id: str, run_id: str) -> Any:
     """The natural run, opened by id through its tenant's runs repository (as the launcher and the arm open a source)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.run_repository import RunId
 
     root = _tenant.resolve_data_root()
@@ -501,7 +501,7 @@ def replicate_world() -> dict[str, Any]:
 
 def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, int]:
     """Use launcher steps to prime the recording and create control and replicate arms."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.learning.branch import cli
     from defender.tests.support.learning.branch import _triplet_947 as T
 
@@ -1199,8 +1199,8 @@ def _child(config_path: str) -> int:
 def _world_token(episode_id: str, label: str) -> str | None:
     """A world's token as production composes it (its arm's resume target)."""
     import defender.run as run_mod
-    from defender import _tenant
-    from defender._episode_handle import Episode, episode_dir
+    from defender.tenancy import _tenant
+    from defender.episodes._episode_handle import Episode, episode_dir
 
     try:
         root = _tenant.resolve_data_root()

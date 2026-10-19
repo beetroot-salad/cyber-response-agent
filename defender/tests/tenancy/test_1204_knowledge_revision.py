@@ -11,16 +11,17 @@ from typing import Any
 
 import pytest
 
-from defender import _git, _provenance
-from defender._episode_handle import Episode
-from defender._provenance import RunProvenance
+from defender import _git
+from defender.records import _provenance
+from defender.episodes._episode_handle import Episode
+from defender.records._provenance import RunProvenance
 from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._data_root_1078 import FIXTURE, set_up_tenant
 
 
 def _capture(knowledge_dir: Path) -> Any:
-    return T.sym("_provenance", "capture_knowledge")(Path(knowledge_dir))
+    return T.sym("records._provenance", "capture_knowledge")(Path(knowledge_dir))
 
 
 def _wire(knowledge_dir: Path) -> Any:
@@ -29,7 +30,7 @@ def _wire(knowledge_dir: Path) -> Any:
 
 
 def _revision() -> Any:
-    return T.sym("_provenance", "KnowledgeRevision")
+    return T.sym("records._provenance", "KnowledgeRevision")
 
 
 def _git_env() -> dict[str, str]:
@@ -608,7 +609,7 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
     manifest = H.family_for(src, episode_dir)
     # tenant_source plants the source tenant's natural runs-container record. The fork
     # keeps that neutral world; its episode container must not become run-local lineage.
-    neutral_world = T.mod("_tenant").read_tenant(src.parent).base_world_id
+    neutral_world = T.mod("tenancy._tenant").read_tenant(src.parent).base_world_id
     with Episode.open(manifest.parent) as episode:
         world = H.run_py().resume_world(
             episode, "b", tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))

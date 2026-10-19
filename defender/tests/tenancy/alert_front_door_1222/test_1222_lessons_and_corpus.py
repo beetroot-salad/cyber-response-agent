@@ -12,7 +12,8 @@ from typing import Any
 
 import pytest
 
-from defender import _tenant, _yaml
+from defender import _yaml
+from defender.tenancy import _tenant
 from defender.tests.support.runtime.state import _1255_view as V
 from defender.tests.support.learning.curation import _drain719 as D
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -32,7 +33,7 @@ def _shipped_corpus() -> Path:
     first (`_knowledge.CHECKOUT_KNOWLEDGE.lessons_dir` until #1108 P4), then the committed
     tenants' agent corpora (where P4 may move it)."""
     candidates: list[Path] = []
-    knowledge = S.mod("_knowledge")
+    knowledge = S.mod("knowledge._knowledge")
     checkout = getattr(knowledge, "CHECKOUT_KNOWLEDGE", None)
     if checkout is not None:
         candidates.append(Path(checkout.lessons_dir))
@@ -270,7 +271,7 @@ def _drain(tmp_path: Path, curator: _Curator, *, extra_rows: Iterable[dict] = ()
 
 def _committed(paths: Any) -> dict[str, Any]:
     """The drain corpus as production's own reader yields it: stem -> Lesson."""
-    iter_lessons = S.sym("_corpus", "iter_lessons")
+    iter_lessons = S.sym("knowledge._corpus", "iter_lessons")
     return {lesson.path.stem: lesson for lesson in iter_lessons(Path(paths.lessons_dir))}
 
 
@@ -483,7 +484,7 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     assert hits["unquoted"][0].score == hits["quoted"][0].score
     assert hits["unquoted"][0].matched == hits["quoted"][0].matched
 
-    iter_lessons = S.sym("_corpus", "iter_lessons")
+    iter_lessons = S.sym("knowledge._corpus", "iter_lessons")
     for spelling, corpus in corpora.items():
         assert [lesson.path.stem for lesson in iter_lessons(corpus)] == [name], (
             f"iter_lessons skipped the {spelling} lesson")

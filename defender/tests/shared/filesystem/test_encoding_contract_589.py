@@ -158,7 +158,7 @@ def test_a_lesson_the_runtime_wrote_survives_the_walk_that_reads_it_back(tmp_pat
         "import locale\n"
         "from pathlib import Path\n"
         "from defender.runtime import tools\n"
-        "from defender._corpus import iter_lessons\n"
+        "from defender.knowledge._corpus import iter_lessons\n"
         "from defender.tests.shared.filesystem.test_encoding_contract_589 import _curator_deps\n"
         "print('enc=' + locale.getencoding())\n"
         f"deps, corpus = _curator_deps(Path({str(tmp_path)!r}))\n"
@@ -225,7 +225,7 @@ def test_use_utf8_stdio_moves_the_encoding_and_leaves_the_error_handler_alone():
 
 def test_a_vendor_byte_from_a_transport_is_replaced_not_raised(tmp_path):
     """The gather ingestion boundary, re-pointed at the TRANSPORT (#611)."""
-    from defender.scripts.adapters import _stub_transport as transport
+    from defender.integrations import _stub_transport as transport
     from defender.runtime.verbs import VerbContext
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 

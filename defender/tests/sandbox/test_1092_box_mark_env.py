@@ -98,7 +98,7 @@ def test_reexec_into_venv_does_not_exec_when_defender_box_is_set_and_does_otherw
     when `DEFENDER_BOX` is set and does exec into it when the variable is unset."""
     tree = tmp_path / "defender"
     tree.mkdir(parents=True)
-    shutil.copy(DEFENDER / "_venv.py", tree / "_venv.py")
+    shutil.copy(DEFENDER / "execution/_venv.py", tree / "execution/_venv.py")
     venv_bin = tree / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     stub = venv_bin / "python3"

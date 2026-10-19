@@ -11,8 +11,8 @@ import pytest
 
 from defender._paths import adapters_under
 from defender.runtime.verbs import read_roster
-from defender.scripts import policy_cli
-from defender.scripts import tenant as tenant_py
+from defender.cli import policy_cli
+from defender.cli import tenant as tenant_py
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
@@ -206,7 +206,7 @@ from pathlib import Path
 
 
 def _record_planted_call(verb):
-    with open(Path(__file__).parents[4] / "planted-calls.log", "a", encoding="utf-8") as log:
+    with open(Path(__file__).parents[3] / "planted-calls.log", "a", encoding="utf-8") as log:
         print(f"cmdb.{verb}", file=log)
 
 
@@ -245,23 +245,17 @@ def _planted_calls(root: Path) -> list[str]:
 
 def _planted_tree(root: Path, adapters: dict[str, str]) -> Path:
     """A defender tree a run is pointed at: every top-level entry of the checkout symlinked
-    except `scripts/`, whose entries are symlinked except `adapters/` — a real folder holding ONLY
+    except `integrations/` — a real folder holding ONLY
     the adapters written here (`adapters`: system -> source); no shipped adapter is copied (a copy
     that bootstraps `sys.path` would leak the planted tree into later imports).
     `<root>/repo/defender`, so `defender_dir.parent` is a repo root as the catalog expects."""
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
     for entry in S.DEFENDER.iterdir():
-        if entry.name in _NOT_MIRRORED or entry.name == "scripts":
+        if entry.name in _NOT_MIRRORED or entry.name == "integrations":
             continue
         (tree / entry.name).symlink_to(entry)
-    scripts = tree / "scripts"
-    scripts.mkdir()
-    for entry in (S.DEFENDER / "scripts").iterdir():
-        if entry.name in _NOT_MIRRORED or entry.name == "adapters":
-            continue
-        (scripts / entry.name).symlink_to(entry)
-    folder = scripts / "adapters"
+    folder = tree / "integrations"
     folder.mkdir()
     for system, source in adapters.items():
         (folder / f"{system.replace('-', '_')}_adapter.py").write_text(source, encoding="utf-8")
@@ -372,7 +366,7 @@ D5_SUMMARY = ("FD1256-D5-SUMMARY window 2026-05-25T13:00Z..17:00Z anchored on al
 def _escape() -> BaseException:
     """A call-time `ConfigFault` the start check did not raise (O-5b), worded as the adapters word
     one: the key it needs and that the tenant's settings do not configure the system."""
-    return S.sym("scripts.adapters.faults", "ConfigFault")(
+    return S.sym("integrations.faults", "ConfigFault")(
         f"{ESCAPE_TOKEN} is not set - this tenant's settings do not configure this system")
 
 
@@ -664,11 +658,11 @@ _NOT_CONFIGURED_ELASTIC = f'''\
 """#1256 planted: an elastic adapter whose settings check finds it not configured."""
 from pathlib import Path
 
-from defender.scripts.adapters.faults import ConfigFault
+from defender.integrations.faults import ConfigFault
 
 
 def _record_planted_call(verb):
-    with open(Path(__file__).parents[4] / "{PLANTED_CALLS}", "a", encoding="utf-8") as log:
+    with open(Path(__file__).parents[3] / "{PLANTED_CALLS}", "a", encoding="utf-8") as log:
         print(f"elastic.{{verb}}", file=log)
 
 

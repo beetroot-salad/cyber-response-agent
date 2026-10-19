@@ -22,7 +22,7 @@ from ..schema import (
 )
 from ._diag import REFUTED_WEIGHT
 from ._refs import _HYPOTHESIS_DECLARING_BLOCKS, _known_ids, _leads
-from defender._run_id import is_valid_run_id
+from defender.records._run_id import is_valid_run_id
 
 from ._structure import PAST_CASE, _cell, _check_vocab, _folded_grounding
 from ._state import (
@@ -807,7 +807,7 @@ def _check_ceiling_test_scope(companion: CompanionBody) -> list[str]:
         f"`state=query-empty`) row per gap to `:T conclude` (repeat the key; the SKILL's "
         f"§`:T conclude` has the shape). If you wrote a `:T conclude.ceiling_test "
         f"[kind|subject]` sub-table, that is the RETIRED spelling from "
-        f"`docs/dense-investigation-format.md` — the parser recognizes it and projects "
+        f"`defender/docs/dense-investigation-format.md` — the parser recognizes it and projects "
         f"nothing, so its rows never reach this rule; re-send them as flat rows. If nothing "
         f"was actually out of reach, this run did not hit a ceiling — terminate on the "
         f"category that describes what happened."

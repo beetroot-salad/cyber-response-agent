@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+import importlib
 
 import pytest
 
-from defender import _episode_handle as EH
-from defender._episode_handle import Episode
+from defender.episodes import _episode_handle as EH
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.run_repository import RunPaths
 from defender.tests.support.storage._alert_plant import plant_alert
@@ -221,8 +222,8 @@ def _clean_checkout(tmp_path):
     import subprocess
 
     checkout = tmp_path / "workspace"
-    (checkout / T.sym("_provenance", "CODE_SCOPE")).mkdir(parents=True)
-    (checkout / T.sym("_provenance", "CODE_SCOPE") / "run.py").write_text("x\n", encoding="utf-8")
+    (checkout / T.sym("records._provenance", "CODE_SCOPE")).mkdir(parents=True)
+    (checkout / T.sym("records._provenance", "CODE_SCOPE") / "run.py").write_text("x\n", encoding="utf-8")
     for argv in (["init", "-q", "-b", "main"], ["add", "-A"],
                  ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]):
         subprocess.run(["git", *argv], cwd=checkout, check=True, capture_output=True)
@@ -274,7 +275,7 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
     T.sibling_run_dir(ep / "runs", "b")
     assert ep != checkout
     assert checkout not in ep.parents
-    stamp = T.sym("_provenance", "capture_tree")(checkout)
+    stamp = T.sym("records._provenance", "capture_tree")(checkout)
     assert stamp.dirty is False, f"the episode dirtied the checkout: {stamp.dirty_paths}"
     assert stamp.unavailable is None
 
@@ -282,7 +283,7 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
 def test_947_the_held_out_index_never_selects_a_sibling_for_a_fixture_slug(tmp_path, monkeypatch):
     """The held-out index never selects a sibling for a fixture slug, whatever world label was chosen"""
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
-    held_out = T.mod("evals.held_out")
+    held_out = importlib.import_module("evaluations.held_out")
     slug = "web-1-suspicious-binary"
     (base / slug).mkdir(parents=True)
     plant_alert(base / slug, {"rule": {"id": slug}})

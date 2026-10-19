@@ -18,11 +18,11 @@ from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
-from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault
+from defender.integrations.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault
 from defender.runtime.payload_view import payload_text_of, render as _render_payload
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd
-from defender.scripts.gather_tools.record_query import (
+from defender.runtime.record_query import (
     REPEAT_ESCAPE,
     GatherDeadEnd,
     RejectionBudgetTrip,
@@ -45,7 +45,7 @@ from defender.scripts.gather_tools.record_query import (
     repeat_trip_detail,
     system_fingerprint,
 )
-from defender._query_rules import (
+from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     DENIED_QUERY_ID,
     REPEAT_TRIP_QUERY_ID,

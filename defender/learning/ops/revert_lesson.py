@@ -8,7 +8,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._knowledge import CHECKOUT_KNOWLEDGE, LESSONS
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, LESSONS
 from defender.learning.core.config import loop_paths
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
 from defender.learning.author.branch import AuthorBranch, BranchError

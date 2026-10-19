@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender import run as run_py
 from defender import run_common
 from defender.tests.support.learning.branch import _triplet_947 as T947
@@ -135,7 +135,7 @@ def test_1105_run_setup_refuses_a_sidecar_suffixed_pinned_or_minted_id(tmp_path,
 
 def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
         tmp_path, data_root):
-    from defender._episode_handle import Episode
+    from defender.episodes._episode_handle import Episode
 
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)

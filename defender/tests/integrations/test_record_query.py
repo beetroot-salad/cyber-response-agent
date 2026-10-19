@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-ge = load_module(DEFENDER / "scripts" / "gather_tools" / "record_query.py")
+ge = load_module(DEFENDER / "runtime" / "record_query.py")
 
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
@@ -190,7 +190,7 @@ def test_the_content_hash_never_folds_two_payloads_together(tmp_path):
 
 
 def _live():
-    from defender.scripts.gather_tools import record_query as rq
+    from defender.runtime import record_query as rq
 
     return rq
 
@@ -305,7 +305,7 @@ def _unplant(path, kind: str, saved: bytes) -> None:
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_a_row_whose_view_write_failed_is_in_the_state_with_its_seq_spent(tmp_path, kind):
     """R3, round 3 (#1235): the run's state is the record of what the run did, and `executed_queries.jsonl` is the model's view of it."""
-    from defender._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
+    from defender.knowledge._query_rules import PARAMS_NESTING_LIMIT, ParamsTooDeep
     from defender.run_repository import RunPaths
 
     rq = _live()

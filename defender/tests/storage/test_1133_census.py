@@ -35,12 +35,12 @@ MODULES = (
     "learning/judge/_records.py",
     "learning/judge/enqueue.py",
     "runtime/branch/_family.py",
-    "scripts/visualize/visualize_episode.py",
-    "scripts/visualize/episode_models.py",
-    "scripts/visualize/episode_transcript.py",
-    "scripts/visualize/episode_worlds.py",
-    "scripts/visualize/episode_verdict.py",
-    "scripts/visualize/episode_findings.py",
+    "presentation/visualize_episode.py",
+    "presentation/episode_models.py",
+    "presentation/episode_transcript.py",
+    "presentation/episode_worlds.py",
+    "presentation/episode_verdict.py",
+    "presentation/episode_findings.py",
     "run.py",
     "learning/branch/episode.py",
     "learning/judge/family.py",
@@ -382,7 +382,7 @@ def handle_scan(tree: ast.Module) -> tuple[list[tuple[str, str]], set[str]]:
 
     Returns `(violations, core)`: `violations` are `(scope, callee)` pairs, `core` the subset of
     `CORE` the module calls."""
-    scan = _scan("_episode_handle.py", tree)
+    scan = _scan("episodes/_episode_handle.py", tree)
     aliases = module_aliases(tree, scan, functools.partial(_ref_key, verbs=_PATH_IO))
     io_funcs = _io_functions()
     seen = _Scoped()
@@ -407,7 +407,7 @@ def handle_scan(tree: ast.Module) -> tuple[list[tuple[str, str]], set[str]]:
 
 
 def test_d6_the_episode_handle_does_io_only_through_hold_and_its_held():
-    violations, core = handle_scan(_parse(PACKAGE / "_episode_handle.py"))
+    violations, core = handle_scan(_parse(PACKAGE / "episodes/_episode_handle.py"))
     assert not violations, (
         f"the handle does I/O around its held root: {sorted(set(violations))}")
     assert core == set(CORE), (
@@ -470,13 +470,13 @@ NB_READERS = frozenset({
     ("learning.judge.family", "_repository_leads"),
     ("learning.judge.render", "render"),
     ("learning.judge.render", "_render_bound_world"),
-    ("scripts.visualize.visualize_episode", "load_episode"),
-    ("scripts.visualize.visualize_episode", "_read_grade"),
-    ("scripts.visualize.visualize_episode", "_Episode"),
+    ("presentation.visualize_episode", "load_episode"),
+    ("presentation.visualize_episode", "_read_grade"),
+    ("presentation.visualize_episode", "_Episode"),
     ("learning.branch.cli", "prepare_episode"),
     ("learning.branch.ledger", "Ledger._absorb"),
     ("learning.judge.family", "leads_by_id"),
-    ("scripts.visualize.visualize_episode", "_load_world_leads"),
+    ("presentation.visualize_episode", "_load_world_leads"),
 })
 _O5_CALLS = frozenset({"EpisodePaths", "base_file", "staged_path"})
 
@@ -485,11 +485,11 @@ DOORS = frozenset({
     ("run", "main"),
     ("learning.judge", "grade_episode"),
     ("learning.judge", "_grade_episode"),
-    ("scripts.visualize.visualize_episode", "render_episode"),
+    ("presentation.visualize_episode", "render_episode"),
     ("learning.branch.preflight", "preflight_replay"),
 })
 DOORS_TOLERATED = frozenset({
-    ("scripts.visualize.visualize_episode", "main"),
+    ("presentation.visualize_episode", "main"),
 })
 #: What the doors must call, so the scan is not vacuous: `(module, function-or-alternatives,
 #: verb)`.
@@ -736,7 +736,7 @@ def test_o5_only_the_doors_open_or_create_an_episode():
 
 
 def test_o5_the_episodes_only_constructors_are_its_two_doors():
-    handle_mod = importlib.import_module("defender._episode_handle")
+    handle_mod = importlib.import_module("defender.episodes._episode_handle")
     episode = handle_mod.Episode
     constructors = {
         n for n in dir(episode) if not n.startswith("_")

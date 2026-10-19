@@ -15,9 +15,9 @@ collection error that hides every other assertion in the file.
 COINED NAMES LIVE HERE AND NOWHERE ELSE. The design names every new owner function
 (`is_valid_tenant_id`, `TenantId`, `TenantPaths`, `create_tenant`, `require_tenant`,
 `ensure_runs_base_record`, `resolve_data_root`, `runs_base_for`), and §7
-J06 places them all in `defender/_tenant.py`. What it does NOT name is the setup command's
+J06 places them all in `defender/tenancy/_tenant.py`. What it does NOT name is the setup command's
 Python entry; the tests therefore drive it as the operator does, as a PROCESS
-(`python3 defender/scripts/tenant.py setup <id>`), and read its exit status and output. If
+(`python3 defender/cli/tenant.py setup <id>`), and read its exit status and output. If
 write-code-from-spec renames anything, it renames it HERE, never through a `conceptAliases`
 entry (which silently disables `check_binds`' prose-not-in-binds scan for the concept).
 
@@ -65,9 +65,9 @@ sym = T.sym
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFENDER = REPO_ROOT / "defender"
 
-#: `defender/scripts/tenant.py` — D10's setup command, the ONLY production caller of
+#: `defender/cli/tenant.py` — D10's setup command, the ONLY production caller of
 #: `create_tenant`. Driven as a process: its Python entry is not named by the design.
-TENANT_PY = DEFENDER / "scripts" / "tenant.py"
+TENANT_PY = DEFENDER / "cli" / "tenant.py"
 RUN_PY = DEFENDER / "run.py"
 
 # ======================================================================================
@@ -111,8 +111,8 @@ VALID_ID = D9_TENANT_ID
 # ======================================================================================
 
 def tenant() -> Any:
-    """`defender/_tenant.py` — the tenant owner (D1; J06 places every new name here)."""
-    return mod("_tenant")
+    """`defender/tenancy/_tenant.py` — the tenant owner (D1; J06 places every new name here)."""
+    return mod("tenancy._tenant")
 
 
 def TenantPaths(root: Path | str, tenant_id: str) -> Any:  # noqa: N802 — it is the class's own name
@@ -350,7 +350,7 @@ def setup_env(root: Path | str | None, **extra: str) -> dict[str, str]:
 
 def run_setup(root: Path | str | None, tenant_id: str, *, cwd: Path | None = None,
               **extra_env: str) -> subprocess.CompletedProcess:
-    """`python3 defender/scripts/tenant.py setup <tenant_id>` — the operator's own command —
+    """`python3 defender/cli/tenant.py setup <tenant_id>` — the operator's own command —
     against `root`. Never raises on a non-zero exit: the exit status IS the observable."""
     return subprocess.run(  # noqa: S603 — fixed argv, the test's own interpreter
         [sys.executable, str(TENANT_PY), "setup", tenant_id],
@@ -473,7 +473,7 @@ def family_for(source: Path, episode_dir: Path, *, monkeypatch: Any = None,
     source location's tenant by default; `None` leaves it absent). With `monkeypatch`, the
     episodes base a sibling opens its episode under (`DEFENDER_EPISODES_BASE`) is pointed at
     the episode's parent."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     source = Path(source)
     ep = T.episode(episode_dir.parent, doc=T.family_doc(source_run_dir=str(source),

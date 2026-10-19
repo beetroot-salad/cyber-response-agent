@@ -7,7 +7,7 @@ from defender.runtime import verb_roster
 def test_model_surface_enumeration_and_withheld_verb_audit_survive(tmp_path):
     """D6: deleting generator/loader cannot delete the functioning audit of instruction text."""
     tree = tmp_path / 'defender'
-    adapters = tree / 'scripts' / 'adapters'
+    adapters = tree / "integrations"
     adapters.mkdir(parents=True)
     (adapters / 'cmdb_adapter.py').write_text(
         "SYSTEM = 'cmdb'\ndef lookup(ctx): pass\nVERBS = {'lookup': lookup}\n", encoding='utf-8')

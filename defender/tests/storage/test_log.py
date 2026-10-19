@@ -113,7 +113,7 @@ def test_a_reused_pool_thread_does_not_carry_the_previous_jobs_run(emit):
 
 
 def test_the_sync_bridges_thread_hop_keeps_the_run_bound():
-    from defender._async import run_sync as _run_sync
+    from defender.execution._async import run_sync as _run_sync
 
     async def inner():
         return dict(_log.current_context())

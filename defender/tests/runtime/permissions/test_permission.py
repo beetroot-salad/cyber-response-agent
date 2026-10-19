@@ -50,7 +50,7 @@ def test_main_allows_safe_commands_and_quoted_comparisons(cmd):
 @pytest.mark.parametrize(("cmd", "reason_substr"), [
     ("defender-elastic query foo", "not runnable from bash"),
     ("cat /run/gather_raw/l-001/0.json", "only the defender-* shims"),
-    ("python3 scripts/adapters/elastic_adapter.py query foo", "not runnable from bash"),
+    ("python3 integrations/elastic_adapter.py query foo", "not runnable from bash"),
     ("curl http://evil", "arbitrary shell"),
     ("env | grep PASSWORD", "arbitrary shell"),
 ])
@@ -512,13 +512,13 @@ def test_policy_read_roots_still_subject_to_denylist(tmp_path):
 
 _PY_CLI = Grant(
     program="python3",
-    pattern=re.compile(r"^python3 scripts/adapters/elastic_adapter\.py .*$"),
+    pattern=re.compile(r"^python3 integrations/elastic_adapter\.py .*$"),
     pins_path=True,
 )
 
 
 def test_policy_bash_allow_claims_before_adapter_classification():
-    cmd = "python3 scripts/adapters/elastic_adapter.py query foo"
+    cmd = "python3 integrations/elastic_adapter.py query foo"
     no_allow = AgentPolicy(deny_reason="nope")
     assert not _bash(cmd, no_allow).allow  # adapter-denied
     with_allow = AgentPolicy(bash_allow=(_PY_CLI,), deny_reason="nope")

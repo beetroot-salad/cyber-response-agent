@@ -29,8 +29,8 @@ import yaml
 from defender._io import ENTRY_FILE, Bound
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
-from defender._episode_paths import LAYOUT
-from defender import _alert_input
+from defender.episodes._episode_paths import LAYOUT
+from defender.records import _alert_input
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
 from defender.learning.core.retired import retired_keys
 from defender.learning.core.state import (

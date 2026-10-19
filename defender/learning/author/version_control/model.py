@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from defender import _git
-from defender._tenant import TenantRefused
+from defender.tenancy._tenant import TenantRefused
 
 from .auth import ForgejoAuthError
 from .forgejo import ForgeError, PullRequest

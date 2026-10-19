@@ -100,7 +100,7 @@ def _observe_knobs(tmp: Path, monkeypatch, capsys) -> dict[str, Any]:
 
 
 #: s038's knobs the 2026-10-04 scope cut keeps (the moved modules'); the renderer's mirror
-#: override (`mirror_override` in the golden) stays in `scripts/visualize/`, parked with #1105.
+#: override (`mirror_override` in the golden) stays in `presentation/`, parked with #1105.
 S038_KEPT = ("payload_passthrough_cap", "sql_box_marker", "venv_box_marker")
 
 

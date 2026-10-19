@@ -4,7 +4,7 @@ Base: c0ceb90dccb1d87c8c4783000ffbe887d41e46c5. This is the implementation candi
 
 ## Intent
 
-- O1: Durable run-record reads and host writes within runtime/**, hooks/**, scripts/gather_tools/**, scripts/case_history/** use the Run handed down from the repository, except finite declared residue. The same handle reaches actual production entry points; ceremonial handle calls followed by path I/O do not satisfy this obligation.
+- O1: Durable run-record reads and host writes within runtime/**, hooks/**, runtime/**, integrations/** use the Run handed down from the repository, except finite declared residue. The same handle reaches actual production entry points; ceremonial handle calls followed by path I/O do not satisfy this obligation.
 - O2: Host writes of model-file views use Run operations. Local layout, bytes, ordering and presence remain compatible except the owner-approved exclusion of unexpected inherited entries.
 - O3: Run operations have store meanings, not held-open streams or whole-log rewrites. Extend existing generic handles; no new typed domain-model redesign.
 - O4: Preserve record-specific validation and effective failures, including logging/best-effort cases. Preserve logger lifecycle and encoding, source missing/refusal distinctions, and existing query parser tolerance. Scope is not new corruption/content policy.
@@ -89,7 +89,7 @@ claims:
   - id: A-C-stale-platform
     kind: referential
     claim: The checked-in platform document still contains older projection-at-completion prose.
-    probe: Read docs/platform-design.md sections 4.5 and 4.6 at the grounding base.
+    probe: Read defender/docs/platform-design.md sections 4.5 and 4.6 at the grounding base.
     probe_kind: read
     observed: Local tool trace upload once at completion and plain-file projection remain described, conflicting with newer live-audit and storage direction.
     verdict: holds

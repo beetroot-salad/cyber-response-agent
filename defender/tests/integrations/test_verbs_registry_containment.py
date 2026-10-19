@@ -10,7 +10,7 @@ from defender.runtime.verbs import ModuleVerbRegistry
 from defender.tests.e2e._replay_harness import DEFENDER
 from defender.runtime.verbs import read_roster
 
-ADAPTERS = DEFENDER / "scripts" / "adapters"
+ADAPTERS = DEFENDER / "integrations"
 
 
 def test_a_real_system_is_admitted():

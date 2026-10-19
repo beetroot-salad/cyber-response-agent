@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from defender import _io
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_paths import LAYOUT
 from defender.tests.support.storage import _spec1133 as S
 
 EPISODE_ID = "ep-1133"

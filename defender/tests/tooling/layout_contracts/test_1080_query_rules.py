@@ -39,10 +39,10 @@ def _flat_rule(base_name: str) -> tuple[str, str]:
     public = S.QUERY_RULE_PUBLIC.get(base_name, base_name)
     if S.AT_BASE and public != base_name:
         try:
-            return S.home_of(public, home=S.FLAT_TIER), public
+            return S.home_of(public, home=S.QUERY_RULES), public
         except AssertionError:
             return S.home_of(base_name), base_name
-    return S.home_of(public, home=S.FLAT_TIER), public
+    return S.home_of(public, home=S.QUERY_RULES), public
 
 
 def _flat(base_name: str) -> Any:
@@ -368,7 +368,7 @@ def test_params_values_of_every_awkward_kind():
 def test_same_call_live_and_after_the_row_is_read_back(tmp_path):
     g = _g()["roundtrip"]
     request_key = _flat(_RK)
-    rq = S.module_at("defender/scripts/gather_tools/record_query.py")
+    rq = S.module_at("defender/runtime/record_query.py")
     # Never driven: the writer takes the run's state, started as a run's start starts it (#1235).
     from defender.runtime.run_state import RunState
 

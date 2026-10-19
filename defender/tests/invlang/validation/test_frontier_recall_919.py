@@ -13,7 +13,7 @@ if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
 
 pytest.importorskip("pydantic_ai")
 
-from defender._artifact_schema import validate_investigation  # noqa: E402
+from defender.records._artifact_schema import validate_investigation  # noqa: E402
 from defender.skills.invlang.parser import parse_dense_companion  # noqa: E402
 from defender.skills.invlang.validate import diagnose  # noqa: E402
 from defender.tests.support.invlang.validation._invlang_warn_836 import (  # noqa: E402

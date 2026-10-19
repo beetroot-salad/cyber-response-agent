@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 
 from defender import _io, run_common
-from defender._tenant import TenantRefused
+from defender.tenancy._tenant import TenantRefused
 from defender.runtime.branch._family import FamilyError
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 

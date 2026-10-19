@@ -9,7 +9,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender._episode_handle import Episode  # noqa: E402
+from defender.episodes._episode_handle import Episode  # noqa: E402
 from defender.learning.lead_repository import joined  # noqa: E402
 from defender.runtime.circuit_breaker import (  # noqa: E402
     AGENT_FIXABLE_ERROR_CLASS,
@@ -17,8 +17,8 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
     DENIED_EXIT_CODE,
     INFRA_ERROR_CLASS,
 )
-from defender.scripts.gather_tools.record_query import REJECTION_BUDGET
-from defender._query_rules import (
+from defender.runtime.record_query import REJECTION_BUDGET
+from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     DENIED_QUERY_ID,

@@ -327,8 +327,8 @@ def comparable_family_stamp(episode_dir: Path, *, commit: str = "deadbee") -> Pa
     compare, only a family carrying this stamp, so every builder of a COMPARABLE accepted
     family plants it; a scenario modelling a non-comparable family passes `family_stamp=False`.
     """
-    from defender._episode_handle import Episode
-    from defender._episode_paths import LAYOUT
+    from defender.episodes._episode_handle import Episode
+    from defender.episodes._episode_paths import LAYOUT
     from defender._io import bind
     from defender.learning.branch.archive import read_family_stamp
 
@@ -358,7 +358,7 @@ def outcome_record(episode_dir: Path, outcome: str = "accepted", *, reason: str 
     An `accepted` record also gets `verify_family`'s family stamp (`comparable_family_stamp`)
     unless `family_stamp=False`: an accepted, comparable family is what this builder means.
     """
-    from defender._episode_handle import Episode
+    from defender.episodes._episode_handle import Episode
     from defender.learning.branch.outcome import OUTCOMES, write_outcome
 
     ep = Path(episode_dir)
@@ -944,7 +944,7 @@ def refusals() -> tuple[type[BaseException], ...]:
     this tuple instead, and because it is EVALUATED before the `raises` block opens, a missing
     target fails the test at the call rather than satisfying it.
     """
-    from defender._env import FatalConfigError
+    from defender.configuration._env import FatalConfigError
     from defender.learning.branch.episode import EpisodeError
     from defender.learning.branch.ledger import LedgerError
     from defender.learning.core.config import RunUnprocessable

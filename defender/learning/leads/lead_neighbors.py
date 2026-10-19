@@ -12,7 +12,7 @@ from pathlib import Path
 if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender._corpus import iter_query_templates
+from defender.knowledge._corpus import iter_query_templates
 from defender._io import Bound
 from defender._paths import PATHS
 from defender.learning.leads.path_validation import CATALOG_FOLDER

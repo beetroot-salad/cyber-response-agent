@@ -3,7 +3,7 @@
 model-authored artifacts (``investigation.md``, ``report.md``) without that artifact's content
 schema being applied anywhere in the same function.
 
-``defender/_artifact_schema.py`` owns what a well-formed artifact is, and the permission gate
+``defender/records/_artifact_schema.py`` owns what a well-formed artifact is, and the permission gate
 applies it to every write a model makes. That makes "a committed investigation parses" true
 only of the paths through the gate. A harness writer that calls ``write_guarded`` directly, or
 a verb that validates the report it writes but not the companion it publishes, reaches the same
@@ -65,8 +65,8 @@ EXCLUDED_DIRS = (".venv", "__pycache__")
 SUPPRESS_MARKERS = ("lint-artifact-gate: ok",)
 
 #: The module that owns the schema. Exempted by full relative path, not basename, so a new
-#: `_artifact_schema.py` elsewhere under the scope is not waved through.
-CANONICAL_MODULE = "_artifact_schema.py"
+#: `records/_artifact_schema.py` elsewhere under the scope is not waved through.
+CANONICAL_MODULE = "records/_artifact_schema.py"
 
 #: The two artifacts as spelled in code: bare filenames, and the constant spellings a writer
 #: might use instead. `_artifact_schema` does not export those constants (nothing outside the

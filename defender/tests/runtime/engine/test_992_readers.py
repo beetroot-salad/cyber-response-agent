@@ -13,8 +13,8 @@ from defender.runtime.close_tool import (
     CAUSE_TURN_BUDGET_SPENT,
     STANDS,
 )
-from defender.scripts.visualize.visualize_run import _gate_badge_html
-from defender.scripts.visualize.visualize_runtime import (
+from defender.presentation.visualize_run import _gate_badge_html
+from defender.presentation.visualize_runtime import (
     _BYPASS_NOTE, _PRE_RECORD_NOTE, render_review_gate,
 )
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard

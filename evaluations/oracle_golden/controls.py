@@ -31,10 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender.scripts.adapters.elastic_adapter import esql_payload  # noqa: E402
+from defender.integrations.elastic_adapter import esql_payload  # noqa: E402
 # `split_commands` is re-exported for `validate_cases` and tests. The F401 `noqa` must stay on
 # the name's own line: ruff ignores a `noqa` on a separate comment line.
-from defender.scripts.adapters.esql_text import (  # noqa: E402
+from defender.integrations.esql_text import (  # noqa: E402
     split_commands,  # noqa: F401
     split_first_command,
 )

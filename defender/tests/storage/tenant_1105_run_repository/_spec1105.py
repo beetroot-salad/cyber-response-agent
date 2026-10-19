@@ -98,7 +98,7 @@ def tenant(root: Path, tenant_id: str = T_ID) -> Any:
     `agent/.tenant-id`, and the row is written in `create_tenant`'s own shape. The first tenant
     of a root goes through the real `create_tenant`; any further one is planted by hand, since
     `create_tenant` admits one tenant per root (F36). Nothing under `<id>/runs` is made."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     root = Path(root)
     knowledge = root / tenant_id / "knowledge"

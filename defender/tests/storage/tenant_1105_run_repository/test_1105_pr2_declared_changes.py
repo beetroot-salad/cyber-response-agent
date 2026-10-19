@@ -433,7 +433,7 @@ def _lead_author_main():
 
 
 def _workspace_map_main():
-    from defender.scripts import workspace_map
+    from defender.cli import workspace_map
 
     return workspace_map.main
 

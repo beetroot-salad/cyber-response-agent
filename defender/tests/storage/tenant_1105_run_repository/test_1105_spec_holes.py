@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from defender import _io, _tenant
+from defender import _io
+from defender.tenancy import _tenant
 from defender import run as run_py
 from defender import run_common
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H

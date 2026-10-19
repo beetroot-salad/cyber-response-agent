@@ -27,7 +27,7 @@ from defender.runtime.verbs import read_roster  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-ADAPTERS_DIR = DEFENDER / "scripts" / "adapters"
+ADAPTERS_DIR = DEFENDER / "integrations"
 
 
 def clamping(rec: VerbRecorder) -> FakeVerbs:

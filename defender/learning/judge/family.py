@@ -35,10 +35,10 @@ from pydantic import SkipValidation
 from pathlib import Path, PurePath
 
 from defender._io import Bound, bind
-from defender._report import ReportRead, parse_report_text
-from defender._run_id import is_valid_run_id
+from defender.records._report import ReportRead, parse_report_text
+from defender.records._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
-from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
+from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
     normalized_source,
 )
@@ -60,7 +60,7 @@ from defender.runtime.run_end import (
     parse_record,
 )
 from defender.runtime.verbs import is_system_name
-from defender._query_rules import (
+from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     DENIED_QUERY_ID,

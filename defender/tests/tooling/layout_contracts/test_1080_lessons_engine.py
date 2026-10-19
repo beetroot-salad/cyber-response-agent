@@ -287,7 +287,7 @@ def shim_module() -> str:
 
 
 class WarningLog(logging.Handler):
-    """Collects the messages `defender._corpus` warns with while a block runs."""
+    """Collects the messages `defender.knowledge._corpus` warns with while a block runs."""
 
     def __init__(self) -> None:
         super().__init__(logging.WARNING)
@@ -297,11 +297,11 @@ class WarningLog(logging.Handler):
         self.messages.append(record.getMessage())
 
     def __enter__(self) -> WarningLog:
-        logging.getLogger("defender._corpus").addHandler(self)
+        logging.getLogger("defender.knowledge._corpus").addHandler(self)
         return self
 
     def __exit__(self, *exc: object) -> None:
-        logging.getLogger("defender._corpus").removeHandler(self)
+        logging.getLogger("defender.knowledge._corpus").removeHandler(self)
 
 
 # --- reading `--tags` output (layout-agnostic: never rebuilds the column layout) -------------

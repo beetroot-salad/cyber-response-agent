@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run-records name gate: no code outside the name-owner modules (every file of the runs
-repository package `defender/run_repository/`, `defender/_episode_paths.py`,
-`defender/_episode_handle.py`, `defender/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
+repository package `defender/run_repository/`, `defender/episodes/_episode_paths.py`,
+`defender/episodes/_episode_handle.py`, `defender/tenancy/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
 composed part, or join a name onto a run or episode root.
 
 Three checks:
@@ -60,10 +60,10 @@ END_MARK = "<!-- end generated -->"
 #: (#1105 D1.5, which absorbed the layout and the handle), read off disk, so a module the
 #: package gains is an owner the day it lands rather than when a list is edited.
 OWNER_PACKAGE = "run_repository"
-#: The owners outside the package. `_episode_handle.py` owns the episode folder with
-#: `_episode_paths.py` (#1105 rev 5.1's data model): its private `runs/` container, on which the
+#: The owners outside the package. `episodes/_episode_handle.py` owns the episode folder with
+#: `episodes/_episode_paths.py` (#1105 rev 5.1's data model): its private `runs/` container, on which the
 #: runs repository's episode view is built, is an owner read.
-_OWNER_FLAT_MODULES = ("_episode_paths.py", "_episode_handle.py", "_tenant.py")
+_OWNER_FLAT_MODULES = ("episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py")
 
 #: The owner modules by their path under `defender/`, the exempt set everything below is
 #: defined relative to. Matched by path, never by basename — a package submodule's basename
@@ -75,8 +75,8 @@ OWNER_MODULES: frozenset[str] = frozenset({
 })
 
 #: The sweep set. Never shrinks below this.
-SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "scripts", "hooks", "box", "execution", "_filesystem",
-                               "run_repository", "api")
+SWEEP_DIRS: tuple[str, ...] = ("runtime", "learning", "integrations", "presentation", "cli", "hooks", "box", "execution", "_filesystem",
+                               "run_repository", "api", "tenancy", "knowledge", "episodes", "configuration", "records")
 SWEEP_TOP_LEVEL = True
 EXCLUDED_DIRS: tuple[str, ...] = (".venv", "__pycache__", "tests")
 
@@ -194,7 +194,7 @@ def _accessor_names() -> frozenset[str]:
     `_astlib._OWNER_CLASS_ORIGINS`."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
-    from defender._episode_paths import EpisodePaths  # noqa: PLC0415
+    from defender.episodes._episode_paths import EpisodePaths  # noqa: PLC0415
     from defender.run_repository import RunPaths, SessionPaths  # noqa: PLC0415
 
     partial = (name for owned in PARTIAL_OWNER_ATTRS.values() for name in owned)
@@ -362,7 +362,7 @@ _OWNER_NON_RECORD_EXPORTS: frozenset[str] = frozenset({
     "TENANT_RECORD_NAME",
 })
 
-#: The owner modules' dotted names (`defender.run_repository`, `defender._tenant`, ...): arm
+#: The owner modules' dotted names (`defender.run_repository`, `defender.tenancy._tenant`, ...): arm
 #: (c) matches an import's fully resolved module against these, so an unrelated module that
 #: shares a last segment (`defender.learning._errors`) is not an owner.
 _OWNER_MODULE_NAMES: frozenset[str] = frozenset(
@@ -427,7 +427,7 @@ def _scan_import_pass(rel: str, tree: ast.Module, lines: list[str]) -> list[Find
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             module = import_source(node, package)
-            # `from defender import _episode_paths` binds the module, not a name in it; record
+            # `from defender.episodes import _episode_paths` binds the module, not a name in it; record
             # it as well as `import x.y`, or the attribute arm below never sees it.
             for alias in node.names:
                 if f"{module}.{alias.name}" in _OWNER_MODULE_NAMES:
@@ -538,8 +538,8 @@ def main(argv: list[str] | None = None) -> int:
         for f in found:
             print(f"  {f.display}")
         print(
-            "\nNo code outside defender/run_repository/, _episode_paths.py, _episode_handle.py "
-            "and _tenant.py "
+            "\nNo code outside defender/run_repository/, episodes/_episode_paths.py, episodes/_episode_handle.py "
+            "and tenancy/_tenant.py "
             "may spell a run or episode record's name — reach it through the "
             "owner, or mark a deliberate diagnostic with "
             "`# lint-run-records: ok — <reason>`."

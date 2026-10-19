@@ -185,7 +185,7 @@ def _registry_with_real_elastic(backend: S.Backend, *verbs: str) -> Any:
     """`backend`'s registry with the named elastic verbs replaced by the REAL adapter's."""
     reg = backend.registry()
     table = {system: dict(reg.verbs(system)) for system in reg.systems()}
-    real = S.sym("scripts.adapters.elastic_adapter", "VERBS")
+    real = S.sym("integrations.elastic_adapter", "VERBS")
     for verb in verbs:
         table["elastic"][verb] = real[verb]
     return H.FakeVerbs(table)
@@ -384,7 +384,7 @@ def test_o4_agent_fetches_constituent_events_through_a_gather_lead(tmp_path):
     planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING,
                              configs=_tenant_elastic_configs("acme", events=patterns[0],
                                                              alerts=patterns[1]))
-    confine = S.sym("scripts.adapters.confinement", "confine_index")
+    confine = S.sym("integrations.confinement", "confine_index")
     ids = [a["id"] for a in ancestors]
 
     def answer(system: str, verb: str, params: dict) -> Any:
@@ -658,7 +658,7 @@ def test_p012_run_ends_at_mains_first_answer_with_correlation(tmp_path):
     assert S.L3 in joined, "the judge's lead loader does not see l-00c"
     assert joined[S.L3].goal == d.sidecar(S.L3).get("goal")
     assert len(joined[S.L3].queries) == 1
-    page = S.sym("scripts.visualize.visualize_run", "render_page")(_run_handle_1165(d.run_dir))
+    page = S.sym("presentation.visualize_run", "render_page")(_run_handle_1165(d.run_dir))
     assert S.L3 in page, "the run page does not show l-00c"
 
 

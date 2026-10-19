@@ -45,10 +45,10 @@ from defender.learning.core.state import (  # noqa: E402
 )
 from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
-from defender._episode_handle import Episode  # noqa: E402
+from defender.episodes._episode_handle import Episode  # noqa: E402
 from defender._io import Bound, NotPlainEntry
 from defender.run_repository import WIRE_LOG_NAMES  # noqa: E402
-from defender._episode_paths import LAYOUT  # noqa: E402
+from defender.episodes._episode_paths import LAYOUT  # noqa: E402
 from defender.learning.branch import outcome as outcome_mod  # noqa: E402
 from defender.learning.judge import calls as calls_mod  # noqa: E402
 from defender.learning.judge import enqueue as enqueue_mod  # noqa: E402
@@ -130,13 +130,13 @@ def _judge_effort() -> str:
 
 
 def _judge_draws() -> int:
-    from defender._env import env_int
+    from defender.configuration._env import env_int
 
     return env_int(DRAWS_KNOB, 1)
 
 
 def _judge_cap() -> int:
-    from defender._env import env_int
+    from defender.configuration._env import env_int
 
     return env_int(CAP_KNOB, 20000)
 
@@ -364,7 +364,7 @@ def grade_episode(  # noqa: PLR0913 — the orchestration's whole configuration 
 def _open_episode(runs: RunsRepository, episode_id: str) -> Episode:
     """The pass's one handle, through the judge's door. A missing episode is refused, never
     recreated by the not-graded stamp."""
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
 
     try:
         return runs.episode_files(episode_id)

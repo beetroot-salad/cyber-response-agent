@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender.runtime import run_tenant  # noqa: E402
-from defender.scripts.adapters import (  # noqa: E402
+from defender.integrations import (  # noqa: E402
     _stub_transport,
 )
 from defender.tests.support.tenancy import _tenants1106 as T1106
@@ -66,7 +66,7 @@ def _sibling_episode(tmp_path: Path, doc: dict, *, root: Path, monkeypatch: Any)
     """The episode a sibling opens by id (#1105 PR 2): under `root`, the configured episodes
     base the sibling is pointed at, with its container made for the playground tenant as the
     launcher's `EpisodeRuns.create_container` leaves it before the first sibling."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     episode = T.episode(tmp_path, doc=doc, episode_id=T.EPISODE_ID, root=root)
     (episode / "runs").mkdir(exist_ok=True)

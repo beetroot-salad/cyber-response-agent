@@ -17,13 +17,13 @@ from defender._frontmatter import parse_frontmatter  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
-from defender.scripts.adapters import (  # noqa: E402
+from defender.integrations import (  # noqa: E402
     change_mgmt_adapter,
     cmdb_adapter,
     identity_adapter,
     threat_intel_adapter,
 )
-from defender.scripts.adapters.faults import ConfigFault, TransportFault  # noqa: E402
+from defender.integrations.faults import ConfigFault, TransportFault  # noqa: E402
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as R  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,

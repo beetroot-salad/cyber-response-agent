@@ -7,7 +7,7 @@ import re
 import pytest
 
 from defender._paths import PATHS
-from defender._run_id import is_valid_run_id
+from defender.records._run_id import is_valid_run_id
 from defender._vocab import DISPOSITION_VALUES
 from defender.skills.invlang.validate import diagnose, validate_companion
 

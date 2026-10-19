@@ -16,7 +16,7 @@ import pytest
 
 from defender.tests.support.runtime.state._1255_view import model_path
 
-from defender._pricing import usage_cost
+from defender.configuration._pricing import usage_cost
 from defender.run_repository import RunPaths
 from defender.tests.support.storage._session_store_705 import (
     crafted_html_payload,
@@ -41,7 +41,7 @@ SALT = "0011223344556677"
 def _load_run_stats():
     """`tooling/analytics/run_stats.py` — outside `defender/` AND outside
     `specGraph.codeRoots`, so nothing mechanical checks the demand bound to it."""
-    return load_module(WORKTREE / "scripts" / "analytics" / "run_stats.py", name="run_stats_705")
+    return load_module(WORKTREE / "tooling" / "analytics" / "run_stats.py", name="run_stats_705")
 
 
 def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
@@ -120,7 +120,7 @@ def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
 def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
     """`runtime.html`'s data layers render from the store-derived event stream with the same"""
     from defender import run_common
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
     session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
@@ -169,7 +169,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
 
 def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     """`(T, run_dir)` with the driven run moved to where the run page's repository opens it."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 
     tenant = ensure_d9_tenant()
@@ -186,7 +186,7 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
 def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
     """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two"""
     from defender import run_common
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     marker = "RENDERED-RUN-MARKER-705-b7c8d9"
     run_dir, store, _replay = _driven_run(tmp_path, run_id="two-drivers", text=marker)
@@ -254,7 +254,7 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
 
     # the standalone re-render really exits non-zero — the real script, the real argv
     # (`--tenant T <run_id>`, #1105 PR 2 declared change 7), the real broken input
-    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
+    script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
     child = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
         [sys.executable, str(script), "--tenant", tenant, run_dir.name],
         capture_output=True, text=True, encoding="utf-8", check=False)
@@ -315,7 +315,7 @@ def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
 @pytest.mark.parametrize("spelling", ["onerror", "ONERROR", "OnError", "oNeRrOr"])
 def test_the_event_handler_split_covers_every_casing_and_preserves_the_original(spelling):
     """#883 F-35 — HTML attribute names are case-insensitive, so `ONERROR=` IS the"""
-    from defender.scripts.visualize.visualize_primitives import esc_untrusted
+    from defender.presentation.visualize_primitives import esc_untrusted
 
     zwsp = "​"
     raw = f"<img src=x {spelling}=alert(1)>"

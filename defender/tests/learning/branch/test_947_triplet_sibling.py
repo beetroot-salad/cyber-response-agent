@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -47,7 +47,7 @@ def _sibling_argv(manifest, world="b", tenant=T.SOURCE_TENANT):
 
 def _episode(tmp_path, src, *, container=T.SOURCE_TENANT):
     """The episode a sibling opens by id"""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
                    root=tmp_path / "episodes-root")
@@ -129,7 +129,7 @@ def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_ma
 
 def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
     """The resume path refuses the ticket flag outright rather than accepting and ignoring it"""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     manifest = T.write_family(tmp_path / "episodes-root" / "ep")
     (manifest.parent / "runs").mkdir()
@@ -239,7 +239,7 @@ def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
 def test_a_sibling_whose_runs_base_names_another_tenant_than_the_episodes_is_refused(
         tmp_path):
     """A sibling runs on the EPISODE's tenant — the one its request names, which the source run's runs-base record agrees with."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     base, src = T.runs_base(tmp_path)
     assert _tenant.read_tenant(base).tenant_id == T1106.PLAYGROUND_ID
@@ -278,7 +278,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
     ep = _episode(tmp_path, src)
     order: list[str] = []
     rec = _Recorder(order)
-    tenant = T.mod("_tenant").read_tenant(base)
+    tenant = T.mod("tenancy._tenant").read_tenant(base)
 
     def materialize(*_a, **_kw):
         order.append("materialize")
@@ -335,7 +335,7 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=_no_preflight)
     assert rec.kwargs["run_dir"].name == f"{T.EPISODE_ID}-b"
-    assert T.sym("_run_id", "is_valid_run_id")(f"{T.EPISODE_ID}-b")
+    assert T.sym("records._run_id", "is_valid_run_id")(f"{T.EPISODE_ID}-b")
 
 
 def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):

@@ -12,7 +12,7 @@ from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import PITFALLS
 from defender.learning.leads import pitfalls_curator
 from defender.learning.leads.lead_extraction import ExecutedLead, collect_general_failures
-from defender._query_rules import BASH_SHIM_QUERY_ID
+from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.shared.contracts._repo import seed_skills_repo
 from defender.tests.support.learning.curation._lead_author_1134 import lead_trees

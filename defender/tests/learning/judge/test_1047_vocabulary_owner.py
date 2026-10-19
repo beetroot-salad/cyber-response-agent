@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.shared.filesystem import _spec1047 as S
 
 

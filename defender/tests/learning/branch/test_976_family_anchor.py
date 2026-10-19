@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
-from defender._episode_handle import Episode
+from defender.episodes import _episode_handle as EH
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
@@ -513,7 +513,7 @@ def test_976_the_accepted_family_stamp_carries_the_sources_whole_record(tmp_path
     assert stamp["allow_dirty"] is False
     assert set(stamp) == {"agreed", "allow_dirty", "source", "base_world_id", "waived"}
     assert stamp["waived"] == []
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     assert stamp["base_world_id"] == _tenant.read_tenant(
         launch.episode_dir / "runs").base_world_id

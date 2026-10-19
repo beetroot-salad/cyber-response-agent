@@ -54,9 +54,10 @@ if __name__ == "__main__" and _VENV_PY.is_file() and Path(sys.executable) != _VE
 if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _alert_input, _provenance
-from defender._episode_handle import Episode
-from defender._episodes_root import (
+from defender.records import _alert_input
+from defender.records import _provenance
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episodes_root import (
     EPISODES_BASE_ENV,
     EpisodeRefused,
     episode_dir,
@@ -82,7 +83,7 @@ from defender.learning.branch.steps import Step
 from defender.learning.branch.capture import PrimeReport, prime_base
 from defender.learning.branch.estate.registry import EstateError
 from defender.learning.branch.ledger import Ledger, LedgerError
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender.run_common import REPO_ROOT
 from defender.runtime import branch, session_store
 from defender.runtime.branch._family import (
@@ -417,7 +418,7 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
     spawn terminates its child; an injected `spawn` seam has no handle on its child and is
     left to finish.
     """
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.learning.core.config import KNOB_RATE
 
     if tenant_id is None or not _tenant.is_valid_tenant_id(tenant_id):
@@ -776,7 +777,7 @@ def _render_page(runs: RunsRepository, *, episode_id: str) -> None:
     """Render the episode page, by id in the request's tenant's repository. Never fatal to the
     launch: a failure is logged, not raised."""
     try:
-        from defender.scripts.visualize import visualize_episode
+        from defender.presentation import visualize_episode
 
         page = visualize_episode.render_episode(runs, episode_id)
         _logger.info(f"episode {episode_id}: page {page}")

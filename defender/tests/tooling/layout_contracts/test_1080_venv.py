@@ -54,7 +54,7 @@ LESSONS_SHIM = "defender/bin/defender-lessons"
 
 def helper_home() -> str:
     """The venv helper's flat-tier home (the one module defining `reexec_into_venv` there)."""
-    return S.home_of("reexec_into_venv", home=S.FLAT_TIER)
+    return S.home_of("reexec_into_venv", home=S.VENV)
 
 
 def code_tree(root: Path) -> Path:
@@ -480,7 +480,7 @@ def helper_importers(home: str) -> dict[str, set[str]]:
 
 def test_1080_reexec_into_venv_from_the_flat_tier_still_targets_defenders_own_venv(tmp_path):
     home = helper_home()
-    mod = S.moved_module("reexec_into_venv", home=S.FLAT_TIER)
+    mod = S.moved_module("reexec_into_venv", home=S.VENV)
     assert Path(mod._DEFENDER_DIR).resolve() == S.DEFENDER.resolve(), (
         f"{home} anchors defender/ at {mod._DEFENDER_DIR} — the K13 depth slip")
     assert observe_targets(tmp_path) == golden("targets")

@@ -19,7 +19,7 @@ from defender.tests.support.runtime.state._1255_view import model_path
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
+from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID  # noqa: E402
 from defender.hooks.budget_enforcer import DEFAULT_LIMITS, BudgetKill  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import circuit_breaker as cb  # noqa: E402
@@ -29,7 +29,7 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.runtime.query_tool import QueryCapture  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.tools import _tool_bash  # noqa: E402
-from defender.scripts.gather_tools import record_query as rq  # noqa: E402
+from defender.runtime import record_query as rq  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 from defender.tests.sandbox.test_959_downstream import Box, _gather_scene  # noqa: E402

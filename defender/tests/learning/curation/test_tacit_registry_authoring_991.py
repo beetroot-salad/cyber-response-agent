@@ -6,8 +6,8 @@ import io
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from defender.scripts import tacit_cli
-from defender.scripts.adapters import tacit_knowledge_adapter as tk
+from defender.cli import tacit_cli
+from defender.integrations import tacit_knowledge_adapter as tk
 
 from defender.tests.support.shared.contracts import _tacit983 as scene
 from defender.tests.support.sandbox._spec791 import (  # noqa: F401 — session-scoped autouse guard

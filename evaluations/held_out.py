@@ -12,7 +12,7 @@ This is an evaluation tool, not part of the application: it takes no tenant and 
 none, and scores exactly the runs dir it is handed. The runs it scores are the playground
 tenant's. Every run names its tenant, and there is no default (#1078). On the host,
 clone the tenant's repo into ``$DEFENDER_DATA_ROOT/playground/knowledge``, then, once the
-clone exits 0, set it up once with ``python3 defender/scripts/tenant.py setup playground``.
+clone exits 0, set it up once with ``python3 defender/cli/tenant.py setup playground``.
 Launch the runs this scores with (see ``index_runs``)::
 
     python3 defender/run.py evaluations/fixtures/held_out/<slug>/alert.json \\
@@ -38,10 +38,10 @@ import yaml
 if (_root := str(Path(__file__).resolve().parents[1])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender._yaml import safe_load
 from defender._model import model
-from defender._report import read_report
+from defender.records._report import read_report
 from defender.run_repository import RUN_LAYOUT, RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 from defender._io import read_text_utf8

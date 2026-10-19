@@ -9,9 +9,9 @@ import pytest
 from defender._io import read_jsonl_rows
 from defender.runtime import observe
 from defender.runtime.review_roles import REVIEW_AGENT_ID_PREFIX, live_review_stages
-from defender._pricing import usage_cost
+from defender.configuration._pricing import usage_cost
 
-from defender.scripts.visualize.visualize_data import (
+from defender.presentation.visualize_data import (
     deduped_main_records,
     gather_cost_by_model,
     review_cost_by_model,

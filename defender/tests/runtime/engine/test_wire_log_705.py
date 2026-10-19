@@ -44,7 +44,7 @@ def _load_dryrun():
 
     NOTE, carried from the demand: this script sits at the REPO ROOT, outside
     `specGraph.codeRoots`, so nothing mechanical checks the demands bound to it (G21/F13)."""
-    return load_module(WORKTREE / "scripts" / "testing" / "compaction_dryrun.py",
+    return load_module(WORKTREE / "tooling" / "testing" / "compaction_dryrun.py",
                        name="compaction_dryrun_705")
 
 

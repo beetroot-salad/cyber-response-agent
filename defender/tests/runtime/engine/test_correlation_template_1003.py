@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._corpus import iter_query_templates, read_query_template
+from defender.knowledge._corpus import iter_query_templates, read_query_template
 from defender.runtime.verb_grant import VerbGrant
 from defender.tests.support.invlang.validation._dispositions995 import grant_for, load_dispositions, write_table
 from defender.tests.support.tenancy import _tenants1106 as T1106
@@ -473,7 +473,7 @@ def test_a_draft_or_misfiled_copy_does_not_resolve(tmp_path):
 
 def test_a_template_declaring_no_verb_is_refused_as_malformed_not_as_a_mismatch(tmp_path):
     """Built through the REAL reader: a `.md` with no `verb:` line parses to `verb == ""`
-    (`_corpus.py`'s fallback, asserted as the precondition)."""
+    (`knowledge/_corpus.py`'s fallback, asserted as the precondition)."""
     from defender.runtime.lead_zero import CorrelationDispatchError, resolve_correlation_dispatch
 
     grant = _shipped_shaped_grant(tmp_path)

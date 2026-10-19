@@ -150,7 +150,7 @@ def test_validate_params_names_every_problem_once_in_one_refusal():
 def test_validate_report_names_every_problem_in_one_refusal():
     """A report wrong two ways — no disposition AND the judge's close delimiter in its body —
     comes back as one refusal naming both, not the first alone."""
-    from defender._artifact_schema import REPORT_CLOSE_DELIMITER, validate_report
+    from defender.records._artifact_schema import REPORT_CLOSE_DELIMITER, validate_report
 
     refusal = validate_report(f"---\ncase_id: c1\n---\nbody {REPORT_CLOSE_DELIMITER}\n")
     assert refusal is not None

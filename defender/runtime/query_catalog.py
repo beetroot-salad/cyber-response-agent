@@ -27,7 +27,7 @@ from pydantic_ai.exceptions import (
 )
 
 
-from defender._knowledge import CHECKOUT_KNOWLEDGE
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 
 from defender.hooks.budget_enforcer import BudgetKill
 
@@ -92,7 +92,7 @@ _LIST_VERBS_UNKNOWN_SYSTEM = (
 
 
 
-#: Where a system's skill sits, as the model-facing notes below name it (`defender._knowledge`).
+#: Where a system's skill sits, as the model-facing notes below name it (`defender.knowledge._knowledge`).
 _SKILLS_REL = CHECKOUT_KNOWLEDGE.skills_rel
 
 

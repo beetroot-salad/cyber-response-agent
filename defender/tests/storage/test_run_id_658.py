@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from defender import run_common
-from defender._run_id import is_valid_run_id
+from defender.records._run_id import is_valid_run_id
 from defender.run_repository import RunPaths
 from defender.box import container_name
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
@@ -87,7 +87,7 @@ def test_run_id_slug_accepts_mixed_case_and_materialize_refuses_it(tmp_path, mon
         run_common.materialize_run(alert, run_id, tenant=tenant)
     assert not runs_base.exists()
     # The host's own mint never produces what its admission refuses.
-    from defender._run_id import mint_run_id
+    from defender.records._run_id import mint_run_id
     minted = mint_run_id("Fixture-Alert")
     assert minted == minted.casefold()
     assert run_common.materialize_run(

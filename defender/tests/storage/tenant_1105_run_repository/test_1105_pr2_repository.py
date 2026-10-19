@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from defender import _tenant
-from defender._tenant import TenantRecordMismatch, TenantRefused
+from defender.tenancy import _tenant
+from defender.tenancy._tenant import TenantRecordMismatch, TenantRefused
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
 EP = "20260728t161845z-src-n59"
@@ -350,7 +350,7 @@ def test_an_unreadable_container_is_recorded_not_raised_and_never_written_throug
 
 
 def test_episode_files_is_the_owners_handle_alone_and_creates_nothing(tmp_path, episodes):
-    from defender._tenant import TenantRecordMismatch
+    from defender.tenancy._tenant import TenantRecordMismatch
 
     _root, t = _good(tmp_path)
     ep = _episode(episodes, container=H.U_ID)

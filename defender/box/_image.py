@@ -1,6 +1,6 @@
 """The owned box image's name, derived from the tree it is built from.
 
-Stdlib-only with no package-relative import: `defender/scripts/box_image.py` also loads this
+Stdlib-only with no package-relative import: `defender/box/image_cli.py` also loads this
 file by path on a bare CI `python3` with no venv.
 
 The name hashes only the parts of `box.Dockerfile`, `uv.lock` and `pyproject.toml` the image is

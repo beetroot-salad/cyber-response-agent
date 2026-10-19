@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 import yaml
 
-from defender import _episode_handle as EH
-from defender._episode_paths import LAYOUT
+from defender.episodes import _episode_handle as EH
+from defender.episodes._episode_paths import LAYOUT
 from defender.run_repository import WIRE_LOG_NAMES
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
@@ -195,7 +195,7 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.argvs) == 2
     assert_real_folder(ep / "runs")
-    assert T.mod("_tenant").read_tenant(ep / "runs").tenant_id == "acme"
+    assert T.mod("tenancy._tenant").read_tenant(ep / "runs").tenant_id == "acme"
 
 
 @pytest.mark.parametrize("reach", REACH)

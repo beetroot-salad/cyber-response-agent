@@ -6,8 +6,9 @@ import os
 
 import pytest
 
-from defender import _alert_input, _io
-from defender._episode_paths import LAYOUT
+from defender import _io
+from defender.records import _alert_input
+from defender.episodes._episode_paths import LAYOUT
 from defender.learning.judge.render import episode_alert
 
 

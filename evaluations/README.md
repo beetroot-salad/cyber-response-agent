@@ -27,7 +27,7 @@ tenant's knowledge repo into the data root and set the tenant up once:
 ```bash
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
 git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"
-python3 defender/scripts/tenant.py setup playground
+python3 defender/cli/tenant.py setup playground
 ```
 
 Clone with a credential helper or an ssh agent (never a credential in the URL), and run setup

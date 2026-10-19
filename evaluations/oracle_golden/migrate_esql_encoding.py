@@ -34,7 +34,7 @@ from typing import Any
 GOLDEN_DIR = Path(__file__).resolve().parent
 
 #: The four keys that make a dict an ES|QL payload (see `esql_payload` in
-#: `scripts/adapters/elastic_adapter.py`). No other shape under `hidden/` carries all four.
+#: `integrations/elastic_adapter.py`). No other shape under `hidden/` carries all four.
 ESQL_KEYS = ("query", "columns", "row_count", "values")
 
 #: The JSON serializations that exactly reproduce every file under `hidden/`. A rewritten

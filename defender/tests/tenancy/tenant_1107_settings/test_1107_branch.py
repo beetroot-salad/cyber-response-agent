@@ -8,7 +8,7 @@ import pytest
 
 from defender.learning.branch import cli
 from defender.runtime import run_tenant
-from defender.scripts.adapters import elastic_adapter
+from defender.integrations import elastic_adapter
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S

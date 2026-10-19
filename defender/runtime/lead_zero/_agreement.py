@@ -18,7 +18,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from defender._model import model
 
-from defender._corpus import QueryTemplate, is_established
+from defender.knowledge._corpus import QueryTemplate, is_established
 from defender.runtime.verb_dispositions import HEALTH_CHECK
 from defender.runtime.verb_grant import GrantError, VerbGrant
 
@@ -111,7 +111,7 @@ def resolve_correlation_dispatch(
         ))
     template = matches[0]
 
-    from defender._query_rules import resolve_query_id
+    from defender.knowledge._query_rules import resolve_query_id
 
     # The query tool's own bind-time rule. A refused id would be recorded under the untagged
     # fallback, losing the template identity the learning loop keys on.

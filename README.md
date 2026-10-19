@@ -11,7 +11,7 @@ The idea is to give the agent a structured way to identify its runtime mistakes 
 - `defender/`: the runtime triage agent, its skills/adapters, and the offline learning loop
 - `defender/learning/`: the branched-episode loop (questioner / staged estate / review by replay / family judge), the curators and their forward-check, and the read-only frontend
 - `defender/lessons/`: checked-in pitfall lessons authored by the loop, read by the agent at plan time
-- `defender/fixtures/`: alert inputs used to drive runs
+- `playground-v2/examples/alerts/`: alert inputs used to drive runs
 - `playground-v2/`: the SOC lab the defender runs against — a Docker Compose stack (Elastic/Fleet, Keycloak, Zeek, Falco, role hosts with baseline-activity generators, attack runner) on a Hetzner VPS
 - `playground-v2/infra/`: Terraform for that VPS, with snapshot lever-up/lever-down scripts for cost control
 - the v1 lab (Wazuh-era) has been retired and deleted; its `ticket-server/` lives on at `playground-v2/ticket-server/`
@@ -128,7 +128,7 @@ once —
 ```bash
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
 git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"
-python3 defender/scripts/tenant.py setup playground
+python3 defender/cli/tenant.py setup playground
 ```
 
 Before setup, clone the tenant's own repo into `<root>/<id>/knowledge` on the host, with a
@@ -143,8 +143,8 @@ there is no tenant repo to clone: build the folder once from their last copy in 
 history (a full clone, not a shallow one) with the one-off `migrate`, then run setup —
 
 ```bash
-python3 defender/scripts/tenant.py migrate playground "$DEFENDER_DATA_ROOT/playground/knowledge"
-python3 defender/scripts/tenant.py setup playground
+python3 defender/cli/tenant.py migrate playground "$DEFENDER_DATA_ROOT/playground/knowledge"
+python3 defender/cli/tenant.py setup playground
 ```
 
 Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
@@ -195,7 +195,7 @@ infrastructure; CI runs `-m "not llm and not live"`.
   `.claude/worktrees/{branch}/`, never new top-level scratch dirs; promote to
   `experiments/` only with a writeup, otherwise discard.
 - **Tasks** — open work is tracked as [GitHub issues](../../issues). Design
-  records for in-flight or load-bearing decisions live under `docs/decisions/`.
+  records for in-flight or load-bearing decisions live under `defender/docs/decisions/`.
 - **Per-area guidance** — `defender/CLAUDE.md` (agent runtime contracts + a
   "where to make changes" map), `playground-v2/CLAUDE.md` (the dev/eval stack),
   `playground-v2/infra/CLAUDE.md`. There is no repo-root CLAUDE.md.

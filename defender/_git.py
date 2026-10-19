@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from defender._process_group import kill_group
+from defender.execution._process_group import kill_group
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,7 +38,7 @@ def env_for_cwd() -> dict[str, str]:
 
 
 #: What a git call bounded by `timeout=` raises when git does not answer in time: subprocess's own
-#: class, unconverted (`scripts/tenant.py` catches it by that name), named here so a caller of this
+#: class, unconverted (`cli/tenant.py` catches it by that name), named here so a caller of this
 #: facade catches it beside `GitError` without importing subprocess.
 GitTimeout = subprocess.TimeoutExpired
 

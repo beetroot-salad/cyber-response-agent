@@ -8,9 +8,9 @@ from pathlib import Path
 
 from defender.run_repository import RunPaths
 from defender.runtime.challenge_gate import REVIEW_ROLES
-from defender.scripts.visualize import visualize_data as d
-from defender.scripts.visualize.visualize_primitives import parse_report
-from defender.scripts.visualize.visualize_runtime import render_review_gate
+from defender.presentation import visualize_data as d
+from defender.presentation.visualize_primitives import parse_report
+from defender.presentation.visualize_runtime import render_review_gate
 
 _SALT = "deadbeef"
 
@@ -169,7 +169,7 @@ def test_skipped_ablation_is_not_reported_as_ok(tmp_path):
 def test_the_headline_badge_does_not_claim_a_review_that_never_ran(tmp_path):
     """`_gate_badge_html` and § Review gate read the same run and must not disagree: an
     `inconclusive` close writes `outcome: stands` with the not-reviewed cause."""
-    from defender.scripts.visualize.visualize_run import _gate_badge_html
+    from defender.presentation.visualize_run import _gate_badge_html
 
     run = tmp_path / "run"
     run.mkdir()

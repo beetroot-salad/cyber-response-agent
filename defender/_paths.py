@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from defender._git import REPO_ROOT
-from defender._knowledge import (
+from defender.knowledge._knowledge import (
     CATALOG, CHECKOUT_KNOWLEDGE, LESSONS, LESSONS_QUESTIONER, SKILLS, KnowledgePaths,
 )
 from defender._model import model
@@ -23,10 +23,10 @@ def process_defender_dir() -> Path:
 
 
 def adapters_under(defender_dir: Path) -> Path:
-    """`<defender_dir>/scripts/adapters` for an arbitrary tree, e.g. a worktree handed to the
+    """`<defender_dir>/integrations` for an arbitrary tree, e.g. a worktree handed to the
     commit gate or the lead author's permission gate rather than the running process's tree.
     """
-    return defender_dir / "scripts" / "adapters"
+    return defender_dir / "integrations"
 
 
 def root_spellings(root: Path, name: str) -> dict[str, str]:
@@ -64,11 +64,11 @@ class DefenderPaths:
 
     repo_root: Path
 
-    # The corpus spellings and folders below are pass-throughs: `defender._knowledge` owns
+    # The corpus spellings and folders below are pass-throughs: `defender.knowledge._knowledge` owns
     # the knowledge layout (#1108), and the knowledge still sits inside the checkout.
     catalog_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(CATALOG)
     skills_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(SKILLS)
-    adapters_rel: ClassVar[str] = "defender/scripts/adapters/"
+    adapters_rel: ClassVar[str] = "defender/integrations/"
     lessons_dir_rel: ClassVar[str] = CHECKOUT_KNOWLEDGE.rel(LESSONS)
     #: The questioner's own corpus — findings about a world, never a lesson for the defender,
     #: so kept separate from `lessons_dir_rel`.

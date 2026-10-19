@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lesson text leaves the shared loader in the form its destination needs — or says why not.
 
-A lesson's frontmatter and body are corpus text a model wrote (#1206). `defender._corpus.Lesson`
+A lesson's frontmatter and body are corpus text a model wrote (#1206). `defender.knowledge._corpus.Lesson`
 hands it out as `line` / `lines` (one printed line: a line break or a terminal control in a
 value would forge rows) and `match_text` (what a search runs over, in the same spelling); text
 bound for model context goes inside a `defender._untrusted` frame. The raw fields — `fm`, and a
@@ -10,7 +10,7 @@ values as written.
 
 So every read of `<x>.fm`, of `.raw` / `.body` on a name spelled `lesson…`, and of
 `.frontmatter` on a name spelled `hit…` (a frontier `Hit` carries a lesson's frontmatter) outside
-`defender/_corpus.py` carries `# lint-lesson-text: ok — <reason>` on a line the read spans, the
+`defender/knowledge/_corpus.py` carries `# lint-lesson-text: ok — <reason>` on a line the read spans, the
 reason saying where the raw text goes and what protects it there.
 
 A HEURISTIC, not a proof: the shape is matched by attribute and receiver name, not type, so
@@ -38,7 +38,7 @@ BASELINE_PATH = Path(__file__).with_name("lint_lesson_text_baseline.json")
 
 EXCLUDED_DIRS = (".venv", "__pycache__", "tests")
 #: The loader itself: it builds the one-line and match forms from the raw fields.
-OWNER = "defender/_corpus.py"
+OWNER = "defender/knowledge/_corpus.py"
 #: The suppression, with its reason: a bare `ok` is not one.
 SUPPRESS = re.compile(r"#\s*lint-lesson-text: ok\s*(?:—|--|-)\s*\S")
 #: Raw fields read only on a receiver spelled with the prefix: common attribute names elsewhere.
@@ -95,7 +95,7 @@ def _scan() -> list[Finding]:
 HEADER = (
     "lint_lesson_text baseline — raw lesson-text reads (`.fm`, a lesson's `.raw` / `.body`, "
     "a hit's `.frontmatter`) "
-    "outside defender/_corpus.py without `# lint-lesson-text: ok — <reason>`. Ships EMPTY. "
+    "outside defender/knowledge/_corpus.py without `# lint-lesson-text: ok — <reason>`. Ships EMPTY. "
     "Regenerate: python tooling/lint/lint_lesson_text.py --update-baseline."
 )
 

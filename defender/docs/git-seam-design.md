@@ -3,7 +3,7 @@
 **Status:** design — implemented. Resolves #460 (the low-level git
 subprocess is reinvented ~8× and `evals/` carries a second worktree manager).
 Mirrors the namespace-root hoists `defender/_io.py` (#447) and
-`defender/_env.py` / `_clock.py` (#448); extends the author/curator git
+`defender/configuration/_env.py` / `_clock.py` (#448); extends the author/curator git
 consolidation of #330; adopts the inject→real-tmp-repo testing philosophy of
 #389. The failure disposition composes with `defender/docs/error-disposition-types-design.md`
 (#438 → #441 → #443, #468): a git failure is a `StageAbort`-class systemic fault.
@@ -165,7 +165,7 @@ re-grinding the queue every tick.
 `GhForge` adapter; migrating every raw `subprocess.run([...git...])` site —
 `author/shared.py`, `leads/path_validation.py`, `evals/_generation.py` +
 `evals/_harness_util.py` + `evals/harness*.py`, `core/drains.py`,
-`scripts/visualize/visualize_runtime.py`, `run.py` — onto the seam; collapsing
+`presentation/visualize_runtime.py`, `run.py` — onto the seam; collapsing
 the three porcelain parsers to one `-z` reader and the two worktree managers to
 one; dropping `AuthorBranch`'s git injection (keeping the forge injection);
 enrolling `GitError` as a systemic fault.

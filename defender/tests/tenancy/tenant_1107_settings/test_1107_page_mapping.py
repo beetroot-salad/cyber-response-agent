@@ -147,7 +147,7 @@ def _plain(value: Any) -> Any:
 
 
 def test_o6_run_page_renders_receipt(tmp_path):
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     run_dir = _seeded_run(tmp_path, "r-o6")
     # The page with no receipt and no flag — the standalone renderer, handed nothing.
@@ -246,7 +246,7 @@ def test_s7_nf26_page_tolerates_and_escapes_receipt(tmp_path):
 
 
 def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     root, alert, _shim = _run_world(tmp_path, monkeypatch, "pg")
     outside = tmp_path / "outside" / "left.json"
@@ -308,7 +308,7 @@ def test_s7pg_page_ticket_line_only_with_update_ticket(tmp_path, monkeypatch):
 
 
 def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monkeypatch):
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     root, alert, _shim = _run_world(tmp_path, monkeypatch, "box")
     forged = {"key": "SOC-FORGED-BOX-1107", "status": "commented",
@@ -440,7 +440,7 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
     ]))
     # #1105 PR 2: the sibling opens its episode by id under the configured episodes base, over
     # the container the launcher made for its tenant before the first sibling.
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     (ep / "runs").mkdir(exist_ok=True)
     _tenant.ensure_runs_base_record(ep / "runs", S.PLAYGROUND_ID)

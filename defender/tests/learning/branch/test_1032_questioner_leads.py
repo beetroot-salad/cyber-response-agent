@@ -14,8 +14,8 @@ from defender.learning._prompt import titled_section
 from defender.learning.branch.cli import _joined_leads
 from defender.learning.branch.questioner import UNTRUSTED_TAG
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
-from defender.scripts.gather_tools.record_query import append_query_row
-from defender._query_rules import (
+from defender.runtime.record_query import append_query_row
+from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     REPEAT_TRIP_QUERY_ID,

@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from evaluations import held_out
-from defender.scripts import tenant as tenant_py
+from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
 #: A path whose last byte is not UTF-8 (0xE9), as argv carries it on POSIX.

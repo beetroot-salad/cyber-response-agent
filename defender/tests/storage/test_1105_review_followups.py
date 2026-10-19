@@ -27,7 +27,7 @@ def test_the_repository_reads_and_writes_episode_records_without_the_model_stack
                 if name == "pydantic_ai" or name.startswith("pydantic_ai."):
                     raise ModuleNotFoundError(name)
         sys.meta_path.insert(0, _Block())
-        from defender import _tenant
+        from defender.tenancy import _tenant
         from defender import run_repository as R
         t = _tenant.accept_tenant({str(tmp_path / "data")!r}, {t.id!r},
                                   defender_dir={str(H.DEFENDER)!r})
@@ -107,7 +107,7 @@ def test_a_record_over_the_cap_cut_mid_character_is_refused_as_over(tmp_path):
 
 
 def test_another_tenants_record_is_a_record_mismatch_everywhere(tmp_path):
-    from defender._tenant import TenantRecordMismatch
+    from defender.tenancy._tenant import TenantRecordMismatch
     t = H.tenant(tmp_path / "data")
     runs = H.runs_folder(t)
     H.make_run(runs, "r0")
@@ -122,7 +122,7 @@ def test_another_tenants_record_is_a_record_mismatch_everywhere(tmp_path):
 
 
 def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
     t = H.tenant(tmp_path / "data")
     with pytest.raises(TenantRefused) as refused:
         t.runs_repository().base_world_id()
@@ -199,7 +199,7 @@ def test_a_sibling_id_over_the_bound_is_refused_before_anything_is_staged():
 def test_a_runs_folder_that_cannot_be_opened_is_not_called_a_link(tmp_path):
     """A hold failure other than a link says what the hold said (here: the name is too long),
     not 'it is a link … or not a directory'."""
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
     with pytest.raises(TenantRefused) as refused:
         R.hold_runs_folder(tmp_path / ("x" * 300), create=True)
     assert "link" not in str(refused.value), str(refused.value)
@@ -210,7 +210,7 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
     """Run setup holds its runs folder with the repository's own opener, so one state has one
     message wherever it is met."""
     from defender import run_common
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
     t = H.tenant(tmp_path / "data")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -248,7 +248,7 @@ def test_the_writer_refuses_an_arm_id_its_sidecar_files_hold(tmp_path):
 def test_a_runs_folder_fault_above_the_folder_is_not_blamed_on_the_folder(tmp_path):
     """An ancestor that is a symlink loop or a file is reported as the hold's own reason, not
     as 'the runs folder is a link' or 'is not a directory'."""
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
     loop = tmp_path / "loop"
     os.symlink(loop, loop)
     plain = tmp_path / "plain"
@@ -264,7 +264,7 @@ def test_a_runs_folder_fault_above_the_folder_is_not_blamed_on_the_folder(tmp_pa
 def test_creating_a_runs_folder_under_a_dangling_ancestor_is_a_refusal(tmp_path):
     """With `create`, nothing but a refusal leaves the hold: a dangling ancestor makes the
     create fail, which is `TenantRefused`, not a raw `FileNotFoundError` run.py cannot catch."""
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
     os.symlink(tmp_path / "nowhere", tmp_path / "dangling")
     with pytest.raises(TenantRefused):
         R.hold_runs_folder(tmp_path / "dangling" / "runs", create=True)

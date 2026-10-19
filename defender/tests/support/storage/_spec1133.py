@@ -38,7 +38,7 @@ Core, ``defender._io`` (D1'):
   ``write_guarded_alias`` mark. A linked or non-directory FOLDER on the way stays a plain
   ``OSError(ELOOP)`` / ``NotADirectoryError``. ``is_not_plain_refusal`` is gone.
 
-Handle, ``defender._episode_handle`` (D2'):
+Handle, ``defender.episodes._episode_handle`` (D2'):
 
 * ``Episode.open(episode_dir, *, io=_io)`` -> an ``Episode`` (one ``io.hold(episode_dir)``);
 * ``Episode.create(episode_dir, *, io=_io)`` -> an ``Episode`` (one
@@ -107,7 +107,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from defender import _io
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_paths import LAYOUT
 from defender.run_repository import WIRE_LOG_NAMES
 from defender.tests.shared.filesystem.test_1111_rooted_io import (  # noqa: F401 — re-exported for the #1133 suite
     DEADLINE,
@@ -119,7 +119,7 @@ from defender.tests.shared.filesystem.test_1111_rooted_io import (  # noqa: F401
     raised_by,
 )
 
-HANDLE_MODULE = "defender._episode_handle"
+HANDLE_MODULE = "defender.episodes._episode_handle"
 
 #: The world, token, wire-log name and draw index the composing records are addressed with.
 LABEL = "b"
@@ -185,7 +185,7 @@ RECORD_ARGS: dict[str, tuple[Any, ...]] = {
 # ---------------------------------------------------------------------------------------
 
 def handle() -> Any:
-    """`defender._episode_handle`, imported per call."""
+    """`defender.episodes._episode_handle`, imported per call."""
     return importlib.import_module(HANDLE_MODULE)
 
 

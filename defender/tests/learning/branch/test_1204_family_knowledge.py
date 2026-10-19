@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
-from defender import _provenance
-from defender._episode_handle import Episode
+from defender.episodes import _episode_handle as EH
+from defender.records import _provenance
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.branch import test_976_family_anchor as A

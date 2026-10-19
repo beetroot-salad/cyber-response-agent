@@ -30,14 +30,14 @@ include:
 #  unbound       — recursive DNS resolver with query logs to stdout (playground-internal resolver)
 #  squid         — forward HTTP(S) proxy with basic-auth attribution; access log to stdout
 #  zeek          — passive network monitor (host netns); JSON conn/dns/http/ssl/files logs to volume
-#  Role-clustered host population (8 containers — docs/playground-environment-v2.md §Environment population):
+#  Role-clustered host population (8 containers — playground-v2/docs/playground-environment-v2.md §Environment population):
 #    web-1, web-2     — nginx, ubuntu 22.04, prod
 #    db-1             — postgres, ubuntu 22.04, prod
 #    jump-box-1       — plain, ubuntu 24.04, prod (SSH hub)
 #    dev-ws-1         — plain, ubuntu 24.04, dev (developer workstation)
 #    office-ws-1, -2  — plain, ubuntu 22.04 / 24.04, preprod (office-user workstations)
 #    canary-1         — plain, ubuntu 22.04, sandbox (designated attack target)
-#  Stubs (batch 9 — docs/playground-environment-v2.md §Data):
+#  Stubs (batch 9 — playground-v2/docs/playground-environment-v2.md §Data):
 #    cmdb             — FastAPI over hosts/inventory.yaml + in-mem mutation overlay
 #    threat-intel     — FastAPI over offline VT/OTX-shaped indicator seed
 #    change-mgmt      — FastAPI over authorized-change seed tied to inventory change_windows

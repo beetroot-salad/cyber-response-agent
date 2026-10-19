@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -275,7 +275,7 @@ def test_the_loser_of_a_tenant_record_create_race_discards_its_value_and_rereads
 
 
 def test_run_creation_refuses_a_run_directory_named_like_the_tenant_record(tenant_root, tmp_path):
-    from defender._run_id import is_valid_run_id
+    from defender.records._run_id import is_valid_run_id
 
     alert = H.plant_alert(tmp_path / "in")
     with pytest.raises((SystemExit, Exception)):  # noqa: B017,PT011

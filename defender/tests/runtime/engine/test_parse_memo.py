@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._corpus import parse_query_template
+from defender.knowledge._corpus import parse_query_template
 from defender.runtime.verb_dispositions import (
     DispositionError,
     DispositionWarning,

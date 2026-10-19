@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender._corpus import iter_lessons
+from defender.knowledge._corpus import iter_lessons
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 LESSONS_ENV = REPO_ROOT / "defender" / "lessons-environment"

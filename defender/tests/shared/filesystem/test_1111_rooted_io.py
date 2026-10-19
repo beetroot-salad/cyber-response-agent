@@ -23,8 +23,8 @@ import pytest
 
 from defender import _io
 from defender.run_repository import _handle as H
-from defender._artifact_schema import INVESTIGATION_FILE_MAX
-from defender._provenance import RunProvenance
+from defender.records._artifact_schema import INVESTIGATION_FILE_MAX
+from defender.records._provenance import RunProvenance
 from defender.run_repository import RUN_LAYOUT, RunPaths, SessionPaths
 from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.storage._alert_plant import plant_alert

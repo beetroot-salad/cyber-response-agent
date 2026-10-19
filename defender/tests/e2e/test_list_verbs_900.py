@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.e2e
 
-_ADAPTERS = DEFENDER / "scripts" / "adapters"
+_ADAPTERS = DEFENDER / "integrations"
 LEAD = "l-001"
 
 def _shipped_gather_grant():

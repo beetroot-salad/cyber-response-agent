@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 
 
 from defender._io import (
@@ -211,7 +211,7 @@ def _author(  # noqa: PLR0913 — the step's inputs
     systems) overwrite whatever the model returned, so a family cannot name a different
     source, or a different set of served systems, than it was authored from. One identity gate
     runs over the whole manifest before it is written."""
-    from defender._corpus import iter_lesson_paths
+    from defender.knowledge._corpus import iter_lesson_paths
     from defender.learning.branch import questioner as questioner_mod
     from defender.learning.lead_repository import joined, questioner_leads
 

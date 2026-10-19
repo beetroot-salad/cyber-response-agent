@@ -37,16 +37,16 @@ _AUTHORING_SURFACES = {
 _VOCABULARY_READERS = {
     "_vocab.py",                                # the owner
     "skills/invlang/vocab.py",                  # invlang's re-export of the owner
-    "_artifact_schema.py",                      # the report.md frontmatter write gate (host-written)
-    "_report.py",                               # the shared report accessor
+    "records/_artifact_schema.py",                      # the report.md frontmatter write gate (host-written)
+    "records/_report.py",                               # the shared report accessor
     "skills/invlang/cli.py",                    # read-only query filters
     "skills/invlang/queries.py",                # corpus rendering
     "skills/invlang/validate/_gating.py",       # the entry-price dispatch
     "learning/judge/family.py",                 # the family judge's per-world row
     "learning/judge/runs.py",                   # a failed world's row
     "learning/branch/episode.py",               # the archived worlds' headlines
-    "scripts/visualize/visualize_runtime.py",   # the review-gate panel's pre-record fallback
-    "scripts/visualize/visualize_episode.py",   # the verdict tile's contrast/agree counts
+    "presentation/visualize_runtime.py",   # the review-gate panel's pre-record fallback
+    "presentation/visualize_episode.py",   # the verdict tile's contrast/agree counts
     "api/models.py",                            # the served investigation's disposition
 }
 _VOCABULARY_OWNER_NAMES = frozenset({
@@ -114,7 +114,7 @@ def test_an_unknown_disposition_is_refused_at_the_tool_boundary(tmp_path, value)
 
 
 def test_the_report_frontmatter_write_gate_also_refuses_an_unknown_disposition():
-    from defender._artifact_schema import validate_artifact
+    from defender.records._artifact_schema import validate_artifact
 
     def report(disposition: str) -> str:
         return f"---\ndisposition: {disposition}\noutcome: stands\n---\n\nbody\n"
@@ -131,7 +131,7 @@ def test_the_report_frontmatter_write_gate_also_refuses_an_unknown_disposition()
 def test_a_malformed_verdict_is_refused_at_both_write_gates(tmp_path):
     from pydantic_ai.exceptions import ModelRetry
 
-    from defender._artifact_schema import validate_artifact
+    from defender.records._artifact_schema import validate_artifact
     from defender.tests.support.runtime.engine._spec923 import MALFORMED_MEMBER_SPELLINGS
 
     def report(disposition: str) -> str:

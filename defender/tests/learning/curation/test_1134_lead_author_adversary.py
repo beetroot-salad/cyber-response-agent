@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from defender import _git
-from defender._env import FatalConfigError
+from defender.configuration._env import FatalConfigError
 from defender.learning.core import drains, persist
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees

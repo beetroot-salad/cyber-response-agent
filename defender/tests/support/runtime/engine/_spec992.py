@@ -471,7 +471,7 @@ def pre_change_inconclusive_dir(tmp_path: Path, *, name: str = "historical") -> 
 
 
 def parsed_report(run_dir: Path) -> Any:
-    from defender.scripts.visualize.visualize_primitives import parse_report
+    from defender.presentation.visualize_primitives import parse_report
 
     return parse_report(run_dir)
 

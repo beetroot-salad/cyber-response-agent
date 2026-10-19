@@ -12,11 +12,11 @@ from defender.runtime.circuit_breaker import (
     INFRA_ERROR_CLASS,
     error_class_for_exit,
 )
-from defender import _query_rules
-from defender.scripts.gather_tools import record_query as rq
+from defender.knowledge import _query_rules
+from defender.runtime import record_query as rq
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
-from defender.scripts.gather_tools.record_query import (  # noqa: E402
+from defender.runtime.record_query import (  # noqa: E402
     REJECTION_BUDGET,
     REJECTION_BUDGET_ESCAPE,
     RejectionBudgetTrip,

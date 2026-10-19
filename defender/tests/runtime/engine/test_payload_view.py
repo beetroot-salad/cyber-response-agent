@@ -240,7 +240,7 @@ def _esql_rows(n: int) -> list[list]:
 
 def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
     """THE regression, driven through the REAL adapter shape rather than a hand-built dict."""
-    from defender.scripts.adapters.elastic_adapter import esql_payload
+    from defender.integrations.elastic_adapter import esql_payload
 
     payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
         "columns": [{"name": "host", "type": "keyword"}, {"name": "c", "type": "long"}],
@@ -256,7 +256,7 @@ def test_an_esql_payload_at_the_row_cap_is_never_called_complete(tmp_path):
 
 def test_an_unknown_envelope_is_not_offered_as_a_full_payload_to_count(tmp_path):
     """THE SAME CLAIM, ONE LINE FURTHER DOWN."""
-    from defender.scripts.adapters.elastic_adapter import esql_payload
+    from defender.integrations.elastic_adapter import esql_payload
 
     payload = esql_payload("FROM logs-* | STATS c = COUNT(*) BY host", {
         "columns": [{"name": "host", "type": "keyword"}, {"name": "c", "type": "long"}],

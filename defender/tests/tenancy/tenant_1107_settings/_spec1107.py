@@ -130,7 +130,7 @@ def record_type(name: str) -> type:
 
 def config_fault() -> type:
     """`ConfigFault` — the adapters' own class, exit 2 (CX5)."""
-    return mod("scripts.adapters.faults").ConfigFault
+    return mod("integrations.faults").ConfigFault
 
 
 def case_ticket_error() -> type:
@@ -138,7 +138,7 @@ def case_ticket_error() -> type:
 
 
 def tenant_refused() -> type:
-    return mod("_tenant").TenantRefused
+    return mod("tenancy._tenant").TenantRefused
 
 
 def settings_pointer() -> str:
@@ -619,7 +619,7 @@ def drive_run(argv: list[str], rec: RunRecorder, **seams: Any) -> tuple[int | No
 # ======================================================================================
 
 def ticket_writer() -> Any:
-    return mod("scripts.case_history.ticket_writer")
+    return mod("integrations.ticket_writer")
 
 
 def record_step(run_dir: Path, record: Any, *, env: Mapping[str, str],

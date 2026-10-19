@@ -14,7 +14,7 @@ import pytest
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
-from defender._episode_handle import Episode  # noqa: E402
+from defender.episodes._episode_handle import Episode  # noqa: E402
 
 T_ID = H.VALID_ID
 
@@ -179,7 +179,7 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
 
     def hook(frame, event, _arg):
         if (event == "return" and not fired and frame.f_code.co_name == "accept_tenant"
-                and frame.f_globals.get("__name__") == "defender._tenant"):
+                and frame.f_globals.get("__name__") == "defender.tenancy._tenant"):
             row.unlink()
             fired.append("row removed")
 
@@ -190,7 +190,7 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
         run_dir = Path(_materialize(alert, "r1", T_ID))
     finally:
         sys.setprofile(previous)
-    assert fired, "the pipeline never ran defender._tenant.accept_tenant (D2 step 1)"
+    assert fired, "the pipeline never ran defender.tenancy._tenant.accept_tenant (D2 step 1)"
     assert not row.exists()
     assert run_dir == tenant_root / T_ID / "runs" / "r1"
     assert run_dir.is_dir()
@@ -217,7 +217,7 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
     assert rc == ep / "runs" / world_c.run_id
     assert minted["tenant_id"] == T_ID
     assert json.loads(record_path.read_text(encoding="utf-8")) == minted, "the record changed"
-    assert _stamp(rb)["world_id"] in (None, H.mod("_tenant").read_tenant(src.parent).base_world_id)
+    assert _stamp(rb)["world_id"] in (None, H.mod("tenancy._tenant").read_tenant(src.parent).base_world_id)
     # #1235 F2: the source run's case link is a host sidecar beside its run dir.
     assert H.entries(tenant_root / T_ID / "runs") == sorted(
         [H.RECORD_NAME, src.name, RunPaths(src).session_pointer().name])

@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from defender import _scaffold_rules
-from defender._corpus import iter_query_templates, read_query_template
+from defender.knowledge import _scaffold_rules
+from defender.knowledge._corpus import iter_query_templates, read_query_template
 
 _DEFENDER = Path(__file__).resolve().parents[2]
 _CATALOG = _DEFENDER / "skills" / "gather" / "queries"
-_ADAPTERS = _DEFENDER / "scripts" / "adapters"
+_ADAPTERS = _DEFENDER / "integrations"
 _ALL_SEVEN = (
     "elastic", "identity", "cmdb", "ticket", "change-mgmt", "threat-intel", "host-state",
 )
@@ -139,7 +139,7 @@ def test_a_bare_scalar_declaration_is_the_one_entry_spelling_not_nothing(tmp_pat
 
 def test_covers_reads_every_spelling_and_is_not_a_placeholder_declaration(tmp_path, resolver):
     """`covers:` rides `_declared_names` for its SHAPE tolerance, not its name semantics."""
-    from defender._corpus import parse_query_template
+    from defender.knowledge._corpus import parse_query_template
 
     def _covers(line: str):
         text = f"---\nid: cmdb.probe\nstatus: established\nverb: get-host\n{line}---\n"
@@ -199,7 +199,7 @@ def test_a_skill_md_whose_frontmatter_names_another_system_is_refused(tmp_path):
 
 def test_the_resolver_answers_about_the_tree_it_was_handed(tmp_path):
     """The property the loop's commit gate stands on: the drain runs it from the main checkout"""
-    adapters = tmp_path / "scripts" / "adapters"
+    adapters = tmp_path / "integrations"
     adapters.mkdir(parents=True)
     (adapters / "cmdb_adapter.py").write_text(
         "from __future__ import annotations\n"
@@ -218,7 +218,7 @@ def test_an_unresolvable_system_raises_rather_than_reporting_a_clean_template(tm
     with pytest.raises(_scaffold_rules.ScaffoldRuleError):
         _scaffold_rules.VerbResolver(tmp_path)
 
-    (tmp_path / "scripts" / "adapters").mkdir(parents=True)
+    (tmp_path / "integrations").mkdir(parents=True)
     resolver = _scaffold_rules.VerbResolver(tmp_path)
     with pytest.raises(_scaffold_rules.ScaffoldRuleError):
         resolver.verbs("nosuchsystem")

@@ -218,7 +218,7 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
     `<T>/runs` is removed): `grade_episode(runs, episode_id)`, `runs` the tenant's repository
     under the configured data root, the episode opened by id under the configured episodes
     base. A final `judge.yaml` short-circuits a second pass, so it is removed first."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.tests.support.learning.core._state1135 import env_state
     from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1
 
@@ -240,7 +240,7 @@ def sibling_scene(tmp_path: Path, *, container: str | None = None,
     `container`: `None` leaves `<episode>/runs` absent (a pre-RUNS episode); a tenant id makes
     it with a `_tenant.json` naming that tenant, through the real writer
     (`ensure_runs_base_record`), as the launcher's `start_family` does before the first arm."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     _base, src = T.runs_base(tmp_path, source_run_id=SOURCE_RUN_ID)
     episodes = Path(os.environ[EPISODES_BASE_ENV])
@@ -344,20 +344,20 @@ def drive_cli(main: Any, argv: list[str]) -> CliResult:
 
 
 def page_main() -> Any:
-    from defender.scripts.visualize import visualize_episode
+    from defender.presentation import visualize_episode
 
     return visualize_episode.main
 
 
 def run_page_main() -> Any:
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     return visualize_run.main
 
 
 def plant_record(runs: Path, tenant_id: str) -> Path:
     """`<runs>/_tenant.json` naming `tenant_id`, through the real writer."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     Path(runs).mkdir(parents=True, exist_ok=True)
     _tenant.ensure_runs_base_record(Path(runs), tenant_id)

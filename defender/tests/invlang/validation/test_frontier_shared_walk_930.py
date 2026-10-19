@@ -12,7 +12,7 @@ if str(DEFENDER.parent) not in sys.path:  # pragma: no cover - import bootstrap
 
 pytest.importorskip("pydantic_ai")
 
-from defender._artifact_schema import validate_investigation  # noqa: E402
+from defender.records._artifact_schema import validate_investigation  # noqa: E402
 from defender.skills.invlang.frontier import (  # noqa: E402
     derive_frontier,
     frontier_from_text,

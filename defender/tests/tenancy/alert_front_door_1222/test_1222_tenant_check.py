@@ -125,7 +125,7 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
         w.source_run = src
         w.episode = T.episode(w.tmp, root=Path(os.environ["DEFENDER_EPISODES_BASE"]),
                               doc=T.family_doc(source_run_dir=str(src)))
-        with S.sym("_episode_handle", "Episode").open(w.episode) as episode:
+        with S.sym("episodes._episode_handle", "Episode").open(w.episode) as episode:
             T.episode_view(episode, tenant=w.planted.accept())
     return w
 
@@ -163,7 +163,7 @@ def _exit_text(stop: SystemExit) -> str:
 
 
 def at_acceptance(w: World) -> Verdict:
-    refused_cls = S.sym("_tenant", "TenantRefused")
+    refused_cls = S.sym("tenancy._tenant", "TenantRefused")
     try:
         w.planted.accept()
     except refused_cls as refused:
@@ -172,10 +172,10 @@ def at_acceptance(w: World) -> Verdict:
 
 
 def tenant_py(capsys: Any, *argv: str) -> tuple[int, str]:
-    """`scripts/tenant.py`'s `main(argv)` in this process: its exit code and what it printed
+    """`cli/tenant.py`'s `main(argv)` in this process: its exit code and what it printed
     on stderr (its refusals and findings, `[tenant.py] <message>` each)."""
     capsys.readouterr()
-    rc = S.mod("scripts.tenant").main(list(argv))
+    rc = S.mod("cli.tenant").main(list(argv))
     return rc, capsys.readouterr().err
 
 
@@ -243,7 +243,7 @@ def at_sibling_resume(w: World) -> Verdict:
 def at_policy_cli(w: World) -> Verdict:
     w.capsys.readouterr()
     try:
-        rc = S.mod("scripts.policy_cli").main(
+        rc = S.mod("cli.policy_cli").main(
             ["show", "gather", "--run-dir", str(w.tmp / "policy-run"),
              "--tenant", w.planted.tenant_id])
     except SystemExit as stop:

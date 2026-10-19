@@ -652,7 +652,7 @@ def test_o1_the_wire_log_reader_reads_past_the_default_limit(tmp_path):
     sparse(wire, 64 * MiB + 1)
     # Through `visualize_data`, as every other visualizer test: the two modules import each
     # other, and naming the messages module first fails on a partially initialised module.
-    from defender.scripts.visualize.visualize_data import load_messages
+    from defender.presentation.visualize_data import load_messages
     assert load_messages(run_dir) == []
 
 
@@ -769,7 +769,7 @@ def test_h2_the_wire_log_streams_every_row_past_the_cap(tmp_path):
     run_dir = run_dir_at(tmp_path)
     wire = RunPaths(run_dir).wire_log
     _rows_around_a_hole(wire)
-    from defender.scripts.visualize.visualize_data import load_messages
+    from defender.presentation.visualize_data import load_messages
     assert load_messages(run_dir) == [{"n": 1}, {"n": 2}]
     assert list(_io.iter_plain_jsonl_rows(wire)) == [{"n": 1}, {"n": 2}]
     with pytest.raises(OSError, match="read limit"):
@@ -853,7 +853,7 @@ def test_h2_the_streaming_reader_skips_a_line_past_the_cap_without_holding_it(tm
 def test_h2_a_linked_wire_log_renders_no_messages(tmp_path):
     """The visualizer over a run copy whose wire log is a link: no messages (the streaming
     reader refuses the alias), not a crash of the whole page. Control: the plain log renders."""
-    from defender.scripts.visualize.visualize_data import load_messages
+    from defender.presentation.visualize_data import load_messages
     run_dir = run_dir_at(tmp_path)
     wire = RunPaths(run_dir).wire_log
     wire.parent.mkdir(parents=True, exist_ok=True)

@@ -164,7 +164,7 @@ class OraclePricingError(RuntimeError):
 def price_row(actor: str, given: Any) -> str:
     """`actor`'s pricing row, from the model's name alone: a `Model`, a `BuiltModel` carrying
     one, or a model built lazily from its knob (whose name needs no provider key)."""
-    from defender._pricing import UnknownModel, model_key
+    from defender.configuration._pricing import UnknownModel, model_key
 
     name = getattr(given, "model_name", None)
     if name is None:
@@ -174,5 +174,5 @@ def price_row(actor: str, given: Any) -> str:
         return model_key(name)
     except UnknownModel:
         raise OraclePricingError(
-            f"the {actor}'s model {name!r} has no row in defender/_pricing.py: its spend would "
+            f"the {actor}'s model {name!r} has no row in defender/configuration/_pricing.py: its spend would "
             "be charged as zero and the oracle's budget could not bound it") from None

@@ -1,4 +1,4 @@
-# Attack scenario catalog — batch 10 (docs/playground-environment-v2.md §Attack-simulation surface).
+# Attack scenario catalog — batch 10 (playground-v2/docs/playground-environment-v2.md §Attack-simulation surface).
 #
 # Each scenario is a parameterized command sequence dispatched from a source
 # host container against a target host. The runner (runner.py) executes

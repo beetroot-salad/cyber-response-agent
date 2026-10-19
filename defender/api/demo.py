@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from functools import partial
 
 from defender.run_repository import RUN_LAYOUT
-from defender._tenant import TenantId, is_valid_tenant_id
+from defender.tenancy._tenant import TenantId, is_valid_tenant_id
 
 from .fakes import (
     InMemorySecrets,

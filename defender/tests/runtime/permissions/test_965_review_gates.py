@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from defender._run_id import is_case_stable_id, is_valid_run_id
+from defender.records._run_id import is_case_stable_id, is_valid_run_id
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._by_path import load_lint_gate
 
@@ -104,7 +104,7 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
 
 def test_an_episode_id_carrying_upper_case_is_refused() -> None:
     """The same rule, because the two are joined into one run id and an episode id names the one directory holding the family's capture."""
-    from defender._episode_handle import EpisodeRefused, refuse_bad_episode_id
+    from defender.episodes._episode_handle import EpisodeRefused, refuse_bad_episode_id
 
     with pytest.raises(EpisodeRefused):
         refuse_bad_episode_id("Ep1")
@@ -115,7 +115,7 @@ def test_an_episode_id_carrying_upper_case_is_refused() -> None:
 def test_the_wire_takes_only_a_body_that_went_past_the_clock() -> None:
     import inspect
 
-    from defender.scripts.adapters import elastic_adapter as ea
+    from defender.integrations import elastic_adapter as ea
 
     assert "body: OutboundBody | None" in inspect.getsource(ea._http_json)
     for mint in (ea._search_body, ea._esql_body):
@@ -128,7 +128,7 @@ def test_the_wire_takes_only_a_body_that_went_past_the_clock() -> None:
 def test_the_esql_mint_carries_the_bound_and_the_payload_does_not() -> None:
     """The split the verb's own comment argues for: the bound rides the wire, the record keeps
     what the model asked. Pinned together because they are one decision."""
-    from defender.scripts.adapters import elastic_adapter as ea
+    from defender.integrations import elastic_adapter as ea
 
     class _Ctx:
         as_of = None

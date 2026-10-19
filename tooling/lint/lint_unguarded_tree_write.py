@@ -71,7 +71,7 @@ LINT_HARD_GATED_MODULES: frozenset[str] = frozenset({
     "box/",
     "learning/author/drain.py",
     "learning/author/version_control/restore.py",
-    "_tenant.py",
+    "tenancy/_tenant.py",
 })
 
 

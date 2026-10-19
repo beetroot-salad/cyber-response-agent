@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from defender import _provenance
+from defender.records import _provenance
 from defender.run_repository import RunPaths
 from defender.tests.support.learning.branch import _triplet_947 as T
 
@@ -58,7 +58,7 @@ class _Lifecycle:
 
 def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
     """`run.main --tenant T --episode <id> --world <world>` over the fixture episode, lifecycle recorded."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     base, src = T.runs_base(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
@@ -87,7 +87,7 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
 
     arm, ep, base = _launch_arm(tmp_path, world)
     token = T.world_token(world)
-    natural_world = T.mod("_tenant").read_tenant(base).base_world_id
+    natural_world = T.mod("tenancy._tenant").read_tenant(base).base_world_id
 
     stamp = _provenance.read(RunPaths(arm).provenance)
     if stamp is not None:

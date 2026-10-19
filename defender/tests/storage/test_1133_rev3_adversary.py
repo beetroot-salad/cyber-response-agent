@@ -9,7 +9,7 @@ import types
 
 import pytest
 
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_paths import LAYOUT
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -135,7 +135,7 @@ def test_a_failed_fdopen_leaves_no_descriptor_open_on_the_leaf(tmp_path, durable
 
 @pytest.mark.parametrize("token", ["e1133.straße", "straße", "e1133ß.b"])
 def test_a_token_lower_accepts_but_casefold_refuses_is_refused(token):
-    from defender._episode_paths import check_minted_token
+    from defender.episodes._episode_paths import check_minted_token
     assert token == token.lower()
     with pytest.raises(ValueError, match="not case-stable"):
         check_minted_token(token)

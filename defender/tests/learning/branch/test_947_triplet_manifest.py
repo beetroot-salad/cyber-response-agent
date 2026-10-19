@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 

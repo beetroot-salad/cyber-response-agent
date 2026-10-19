@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import httpx
 from defender import _io
-from defender._tenant import Tenant
+from defender.tenancy._tenant import Tenant
 from defender.learning.author.branch import LESSONS_BRANCH_PREFIX
 from defender import box
 from defender.box._docker import DockerFn, _docker

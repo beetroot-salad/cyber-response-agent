@@ -13,7 +13,7 @@ import pytest
 
 from defender._io import read_jsonl_rows
 from defender.runtime.tenant_settings import NOT_CONFIGURED, SystemConfig
-from defender.scripts.adapters.faults import ConfigFault
+from defender.integrations.faults import ConfigFault
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
@@ -89,7 +89,7 @@ def _adapter(roster: Any, system: str) -> Any:
     assert path is not None, (
         f"the checkout's roster has no adapter for {system!r} (it has {sorted(roster.accepted)}) — "
         "this contract's fault table names a system the tree no longer ships")
-    module = importlib.import_module(f"defender.scripts.adapters.{path.stem}")
+    module = importlib.import_module(f"defender.integrations.{path.stem}")
     assert Path(module.__file__).resolve() == Path(path).resolve(), (
         f"precondition: the imported module is the roster's file: {module.__file__} != {path}")
     return module
@@ -344,7 +344,7 @@ def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
     elif system == "host-state":
         # Another adapter fault, its text pointing under the data root outside the tenant's own
         # folder (`outside`): a host path no settings-path redaction rewrites.
-        head.append("from defender.scripts.adapters.faults import TransportFault")
+        head.append("from defender.integrations.faults import TransportFault")
         declared = ["def check_settings(*_a, **_k):",
                     f"    raise TransportFault({spec['token']!r} + ': see ' + {str(outside)!r})"]
     body = [
@@ -367,7 +367,7 @@ def _planted_source(system: str, probe: Path, *, outside: Path | None = None,
 def planted_tree(root: Path, probe: Path, sources: dict[str, str] | None = None, *,
                  outside: Path | None = None) -> Path:
     """A defender tree whose adapters are the planted ones (K2): every top-level entry of this
-    checkout symlinked except `scripts/`, which is a real folder of symlinks except `adapters/`,
+    checkout symlinked except `integrations/`,
     a real folder holding only the planted files — `sources` (system -> source), else every
     `_PLANTED` system's. `<root>/repo/defender`, as the catalog's repo-relative locators expect.
     (Adapter files must be real: the roster refuses a file that resolves outside the adapters
@@ -375,14 +375,9 @@ def planted_tree(root: Path, probe: Path, sources: dict[str, str] | None = None,
     tree = root / "repo" / "defender"
     tree.mkdir(parents=True)
     for entry in S.DEFENDER.iterdir():
-        if entry.name not in _NOT_MIRRORED and entry.name != "scripts":
+        if entry.name not in _NOT_MIRRORED and entry.name != "integrations":
             (tree / entry.name).symlink_to(entry)
-    scripts = tree / "scripts"
-    scripts.mkdir()
-    for entry in (S.DEFENDER / "scripts").iterdir():
-        if entry.name not in _NOT_MIRRORED and entry.name != "adapters":
-            (scripts / entry.name).symlink_to(entry)
-    adapters = scripts / "adapters"
+    adapters = tree / "integrations"
     adapters.mkdir()
     if sources is None:
         sources = {system: _planted_source(system, probe, outside=outside) for system in _PLANTED}

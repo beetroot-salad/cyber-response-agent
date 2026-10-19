@@ -25,7 +25,7 @@ from defender._model import model
 from pathlib import Path
 from typing import Any, ClassVar, TypeGuard
 
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_paths import LAYOUT
 from defender._text import unwritable_value
 from defender.learning.core.config import (
     QUEUEABLE_FINDING_TYPES,

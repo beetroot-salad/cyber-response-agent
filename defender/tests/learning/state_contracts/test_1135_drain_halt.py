@@ -641,7 +641,7 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
 
         run_dir = base / "acme" / "runs" / "case-a"
         run_dir.mkdir(parents=True)
-        from defender._tenant import ensure_runs_base_record
+        from defender.tenancy._tenant import ensure_runs_base_record
         ensure_runs_base_record(run_dir.parent, "acme")
         plant_alert(run_dir, {"rule": {"name": "everyday"}})
         from defender.box import _scrub as scrub_mod

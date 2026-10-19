@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import ClassVar, Protocol
 
 from defender._io import read_text_soft, sweep_staged, write_guarded
-from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
+from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
 from defender.execution import bash_exec
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,  # noqa: F401 — re-exported: tests read it as `box.BOX_ENV_ALLOWLIST`

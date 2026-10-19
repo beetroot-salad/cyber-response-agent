@@ -175,7 +175,7 @@ def test_a_query_with_an_odd_bound_count_is_refused_not_patched():
 # One producer of the ES|QL payload shape, not two (#834).
 
 def test_controls_emit_the_adapters_payload_shape_because_they_use_its_shaper():
-    from defender.scripts.adapters import elastic_adapter
+    from defender.integrations import elastic_adapter
 
     assert CONTROLS.esql_payload is elastic_adapter.esql_payload, (
         "controls.py has grown its own copy of the payload shaper again"

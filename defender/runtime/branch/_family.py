@@ -27,12 +27,12 @@ from typing import Any, cast
 import yaml
 
 from defender import _yaml
-from defender._episode_handle import Episode
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episode_paths import LAYOUT
 from defender._io import Bound
-from defender._run_id import episode_id_fault
+from defender.records._run_id import episode_id_fault
 from defender._shown import quoted
-from defender._world_label import (
+from defender.episodes._world_label import (
     RESERVED_WORLD_LABELS, is_reserved_world_label, reserved_label_fault, world_label_fault,
 )
 from defender.run_repository import run_name_fault

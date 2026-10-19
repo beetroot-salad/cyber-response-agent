@@ -15,7 +15,7 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 #: The layout's 10 public IMPORTED names, which the door does not serve (D1.3, R4-42).
 LAYOUT_IMPORTED = ("ALIAS_READ_REFUSAL", "Path", "PurePosixPath", "annotations", "dataclasses",
                    "errno", "is_plain_entry", "re", "refuse_bad_case_id", "stat")
-#: The private layout helpers `_episode_paths.py` imports from the submodule (R4-27).
+#: The private layout helpers `episodes/_episode_paths.py` imports from the submodule (R4-27).
 PRIVATE_HELPERS = ("_check_component", "_check_index", "_confine")
 
 
@@ -62,7 +62,7 @@ _DOOR = "defender.run_repository"
 
 
 def test_1105_run_refused_is_a_plain_exception_distinct_from_tenant_refused():
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
     from defender.run_repository import RunRefused
 
     assert isinstance(RunRefused, type), f"the door's RunRefused is not an Exception class: {RunRefused!r}"
@@ -124,7 +124,7 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
         "mods = sorted(sys.modules)\n"
         "print(json.dumps({'layout': 'defender.run_repository._layout' in mods,\n"
         "  'handle': 'defender.run_repository._handle' in mods,\n"
-        "  'tenant': 'defender._tenant' in mods,\n"
+        "  'tenant': 'defender.tenancy._tenant' in mods,\n"
         "  'pydantic': [m for m in mods if m.split('.')[0].startswith('pydantic')],\n"
         "  'alert': str(RUN_LAYOUT.alert), 'paths': RunPaths.__name__}))\n")
     proc = _child(probe, block=("pydantic*",))

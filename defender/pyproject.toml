@@ -32,7 +32,7 @@ runtime = [
     "httpx",
     "pydantic-ai-slim[anthropic,mcp,openai]>=2.43",
     # toons — the TOON encoder behind the tool-boundary view gate (#872,
-    # scripts/gather_tools/): a foreign toolset's dict/list result is re-encoded
+    # runtime/): a foreign toolset's dict/list result is re-encoded
     # and substituted only when the re-encoding is measurably cheaper on the
     # wire. Pinned to the 0.7 minor because the whole gate rests on ONE probed
     # property of THIS encoder — it escapes per TOON SPEC §7.1, so no value
@@ -151,7 +151,7 @@ py-modules = []
 # `|| true` — the tree is at zero errors under this config, so a new type error
 # fails CI. Config is still permissive (no disallow_untyped_defs); the next ramp
 # steps (pin cleared modules strict via [[tool.mypy.overrides]], fold in tests)
-# are documented in docs/decisions/defender-mypy-ramp.md.
+# are documented in defender/docs/decisions/defender-mypy-ramp.md.
 #
 # Invoked from the REPO ROOT (matching the other lint/code-smells steps) as
 #   defender/.venv/bin/mypy --config-file defender/pyproject.toml
@@ -171,7 +171,7 @@ explicit_package_bases = true
 # test tree are excluded. Tests lean on duck-typed fakes (a bare object() passed
 # where a typed deps struct is expected) that mypy can't see through — high-noise,
 # low-value for the production-typing ramp. Folding tests in is a later ramp step
-# (see docs/decisions/defender-mypy-ramp.md), matching how the ruff families
+# (see defender/docs/decisions/defender-mypy-ramp.md), matching how the ruff families
 # graduated one group at a time.
 exclude = ['(^|/)\.venv/', '(^|/)tests/', '(^|/)test_[^/]*\.py$', '(^|/)conftest\.py$']
 ignore_missing_imports = true

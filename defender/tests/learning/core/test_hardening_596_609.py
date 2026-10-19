@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from defender._corpus import iter_lessons
+from defender.knowledge._corpus import iter_lessons
 from defender._frontmatter import (
     parse_frontmatter_or_none,
 )
@@ -41,7 +41,7 @@ def _tenant_runs(_scenario: Path) -> Path:
     """A fresh tenant's natural runs folder (with its tenant record), one per scenario, so a
     test driving several scenarios keeps them apart as it kept their runs dirs apart. The
     tenant id is the folder's parent's name (`<data root>/<T>/runs`)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     tid = f"t{next(_TENANTS)}"

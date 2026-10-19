@@ -158,7 +158,7 @@ def run_end_name() -> str:
     archive.py now holds no record name, and both the writer and this helper reach the same
     accessor on `_episode_paths`.
     """
-    return str(sym("_episode_paths", "WORLD_LEAVES").run_end)
+    return str(sym("episodes._episode_paths", "WORLD_LEAVES").run_end)
 
 
 def sidecar_path(run_dir: Path) -> Path:
@@ -398,7 +398,7 @@ class FakeTicketSystem:
         return self.status, ""
 
     def deps(self) -> Any:
-        return sym("scripts.case_history.ticket_writer", "TicketWriterDeps")(
+        return sym("integrations.ticket_writer", "TicketWriterDeps")(
             request=self.request)
 
     @property
@@ -427,7 +427,7 @@ def record_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None,
     `closed_before_cut=`, passed in-process by `run.py` from the driver's own summary. Nothing
     here reads a store, a pointer file or anything else inside the run dir to get them."""
     fake = ticket or FakeTicketSystem()
-    mod("scripts.case_history.ticket_writer").record_case_ticket(
+    mod("integrations.ticket_writer").record_case_ticket(
         _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake), **kw)
     return fake
 
@@ -436,7 +436,7 @@ def open_ticket(run_dir: Path, *, ticket: FakeTicketSystem | None = None) -> Fak
     """Drive the REAL `open_case_ticket` — the leg that establishes the ticket key's namespace,
     with no `report.md` anywhere on disk (round-2 probe #30, EXECUTED)."""
     fake = ticket or FakeTicketSystem()
-    mod("scripts.case_history.ticket_writer").open_case_ticket(
+    mod("integrations.ticket_writer").open_case_ticket(
         _run_handle_1165(Path(run_dir)), fake.deps(), **_handed(run_dir, fake))
     return fake
 

@@ -14,8 +14,8 @@ def test_d1_tenantpaths_owner_class(tmp_path):
     """TenantPaths is a member of _OWNER_CLASS_ORIGINS, so the #1077 lint treats a join onto a
     TenantPaths accessor as owner-derived."""
     source = (
-        "from defender._tenant import accept_tenant\n"
-        "from defender._episode_paths import EpisodePaths\n\n"
+        "from defender.tenancy._tenant import accept_tenant\n"
+        "from defender.episodes._episode_paths import EpisodePaths\n\n"
         "def direct(root, t, d, run_id):\n"
         "    return accept_tenant(root, t, defender_dir=d).runs / run_id\n\n"
         "def through_a_local(root, t, d, run_id):\n"
@@ -23,7 +23,7 @@ def test_d1_tenantpaths_owner_class(tmp_path):
         "    return runs / run_id\n\n"
         "def control(ep, run_id):\n"
         "    return EpisodePaths(ep).runs / run_id\n")
-    found = S.gate_findings(tmp_path, "evals/joins.py", source)
+    found = S.gate_findings(tmp_path, "runtime/joins.py", source)
     joins = [f.display for f in found if JOIN_FINDING in f.display]
     assert any("control()" in d for d in joins), f"the join arm is not live: {joins}"
     for fn in ("direct()", "through_a_local()"):
@@ -54,26 +54,26 @@ def test_d1_row_constant_not_exempt(tmp_path):
                   if v == "tenant.json" and not n.startswith("_")]
     for name in public_row:
         imported = S.gate_findings(tmp_path / f"imp-{name}", "runtime/imports_it.py",
-                                   f"from defender._tenant import {name}\n")
+                                   f"from defender.tenancy._tenant import {name}\n")
         assert S.reports(imported, "imports_it.py"), (
             f"importing the row-name constant {name} outside the owner is not refused")
 
 
 def test_rename_proof_with_a_new_row_constant(tmp_path):
-    """The #1077 rename proof keeps passing with the new _tenant.py constants in its renamed
+    """The #1077 rename proof keeps passing with the new tenancy/_tenant.py constants in its renamed
     set; DEFAULT_TENANT_ID's _SKIP_NAMES entry goes with the constant."""
     proof = load_module(DEFENDER / "tests" / "storage" / "test_1077_rename_proof.py",
                         name=f"rename_proof_1078_{uuid.uuid4().hex}")
     assert "DEFAULT_TENANT_ID" not in proof._SKIP_NAMES, (
         "the rename proof still skips DEFAULT_TENANT_ID, which D2 deletes")
-    source = (DEFENDER / "_tenant.py").read_text(encoding="utf-8")
+    source = (DEFENDER / "tenancy/_tenant.py").read_text(encoding="utf-8")
     rewritten, _count = proof._rewrite_owner(source)
     before = _upper_str_constants(source)
     after = _upper_str_constants(rewritten)
     unrenamed = sorted(n for n, v in before.items()
                        if n not in proof._SKIP_NAMES and v not in proof._SKIP_VALUES
                        and after.get(n) == v)
-    assert unrenamed == [], f"the rewrite leaves _tenant.py's {unrenamed} unrenamed"
+    assert unrenamed == [], f"the rewrite leaves tenancy/_tenant.py's {unrenamed} unrenamed"
     result = proof._round_trip(proof._renamed_tree(tmp_path), tmp_path / "work")
     assert result.returncode == 0, (
         f"the renamed tree's round trip failed:\n{result.stdout[-2000:]}\n"

@@ -15,7 +15,7 @@ from pathlib import Path
 from _harness_util import init_git
 
 from defender import _git
-from defender._knowledge import KnowledgePaths
+from defender.knowledge._knowledge import KnowledgePaths
 from defender._model import model
 
 _logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 # playground-v2 operations runbook
 
-Per-service internals, one-time attach recipes, recovery procedures, and gotchas for the VPS-hosted stack. The map and conventions live in `playground-v2/CLAUDE.md`; design rationale in `/workspace/docs/playground-environment-v2.md`. Content here was moved out of CLAUDE.md verbatim (2026-07-20).
+Per-service internals, one-time attach recipes, recovery procedures, and gotchas for the VPS-hosted stack. The map and conventions live in `playground-v2/CLAUDE.md`; design rationale in `/workspace/playground-v2/docs/playground-environment-v2.md`. Content here was moved out of CLAUDE.md verbatim (2026-07-20).
 
 ## Env var namespacing (important)
 
@@ -169,7 +169,7 @@ To avoid that recovery path entirely: never wipe the `certs` volume alone. If yo
 
 ### Role-clustered host population (batch 7a)
 
-Eight role containers running on the compose network — the "population" half of v2 (docs/playground-environment-v2.md §Environment population). All 8 are built from a single multi-stage `hosts/Dockerfile` selected via compose `target:` + `BASE_OS` arg.
+Eight role containers running on the compose network — the "population" half of v2 (playground-v2/docs/playground-environment-v2.md §Environment population). All 8 are built from a single multi-stage `hosts/Dockerfile` selected via compose `target:` + `BASE_OS` arg.
 
 | Host | Role | OS | Service | Criticality |
 |---|---|---|---|---|
@@ -507,7 +507,7 @@ The image rebuild re-bakes the YAML files; the entrypoint re-runs `seed-users.py
 
 ### Baseline activity generators (batch 8)
 
-Each of the 8 role hosts runs a small Python scheduler (`/opt/soc-playground/baseline/scheduler.py`) that drives synthetic benign activity — web↔DB queries, scheduled service-account jobs, SRE multi-hop SSH sessions, office-user web fetches, occasional typo-failed logins. This is the layer that makes "is this unusual" a non-trivial question (docs/playground-environment-v2.md §Baseline activity generators).
+Each of the 8 role hosts runs a small Python scheduler (`/opt/soc-playground/baseline/scheduler.py`) that drives synthetic benign activity — web↔DB queries, scheduled service-account jobs, SRE multi-hop SSH sessions, office-user web fetches, occasional typo-failed logins. This is the layer that makes "is this unusual" a non-trivial question (playground-v2/docs/playground-environment-v2.md §Baseline activity generators).
 
 **Not cron.** The spec mandates Poisson-distributed arrivals with time-of-day shape, not fixed-period cron jobs. A single Python process per host binds `(action, identity)` pairs from the catalog, draws exponential inter-arrival times, and dispatches via `runuser -u <user>` so `/var/log/auth.log` and downstream integrations see the right identity.
 
@@ -549,7 +549,7 @@ docker --context soc-playground exec web-1 tail -30 /var/log/nginx/access.log
 
 ### Stub services (batch 9): CMDB, threat intel, change mgmt, ticketing, identity
 
-Five auth-less FastAPI stubs that round out the Tier 0/1 data layer defined in `docs/playground-environment-v2.md` §Data. Each runs in its own container on the compose network, listens on 8080 internally, and is published on VPS loopback at `127.0.0.1:8001-8005` for debugging. In-cluster consumers reach them via Docker DNS: `http://cmdb:8080`, `http://threat-intel:8080`, `http://change-mgmt:8080`, `http://ticket-server:8080`, `http://identity:8080`.
+Five auth-less FastAPI stubs that round out the Tier 0/1 data layer defined in `playground-v2/docs/playground-environment-v2.md` §Data. Each runs in its own container on the compose network, listens on 8080 internally, and is published on VPS loopback at `127.0.0.1:8001-8005` for debugging. In-cluster consumers reach them via Docker DNS: `http://cmdb:8080`, `http://threat-intel:8080`, `http://change-mgmt:8080`, `http://ticket-server:8080`, `http://identity:8080`.
 
 Footprint: 5 × 256 MB ≈ 1.25 GB — matches the v2 design allocation for "Ticket stub, CMDB stub, proxy, TI stub" plus the post-batch-9 identity stub.
 
@@ -626,7 +626,7 @@ docker --context soc-playground exec web-1 bash -c '
 
 ### Attack scenarios (batch 10)
 
-Parameterized attack scenarios that generate realistic telemetry across auth/metadata, execution, and data-access signal categories (docs/playground-environment-v2.md §Attack-simulation surface). Runner + catalog live in `playground-v2/attacks/`. Dispatches happen from the devcontainer against compose-network containers via `docker --context soc-playground exec`. Attacks fire into the live environment with baseline activity left on — signal-vs-noise discrimination is the agent's job. Each run writes `attacks/runs/<run_id>/meta.json` (start/end timestamps + per-step rc) as an investigation-context hint. Specific-run post-mortem reproduction comes from the soc-agent's `tool_audit.jsonl` (the PostToolUse `audit_tool_calls.py` hook records `tool_input` + `tool_response` per call) — that's what the agent actually saw. Historical query reproducibility for arbitrary later replays relies on Elastic ILM retention.
+Parameterized attack scenarios that generate realistic telemetry across auth/metadata, execution, and data-access signal categories (playground-v2/docs/playground-environment-v2.md §Attack-simulation surface). Runner + catalog live in `playground-v2/attacks/`. Dispatches happen from the devcontainer against compose-network containers via `docker --context soc-playground exec`. Attacks fire into the live environment with baseline activity left on — signal-vs-noise discrimination is the agent's job. Each run writes `attacks/runs/<run_id>/meta.json` (start/end timestamps + per-step rc) as an investigation-context hint. Specific-run post-mortem reproduction comes from the soc-agent's `tool_audit.jsonl` (the PostToolUse `audit_tool_calls.py` hook records `tool_input` + `tool_response` per call) — that's what the agent actually saw. Historical query reproducibility for arbitrary later replays relies on Elastic ILM retention.
 
 Catalog (4 starter scenarios):
 
@@ -661,7 +661,7 @@ cat runs/<run_id>/meta.json
 **Deferred to later batches:**
 
 - ILM retention pinning so the data streams the agent would query (`logs-system.*`, `logs-zeek.*`, `falco.alerts`, etc.) stay queryable for the fixture lifetime. Today the stack runs on default policies — replace with explicit retention before treating any run as a stable reference.
-- Toxiproxy-style service outages as a chaos mode (docs/playground-environment-v2.md §Phased build Phase 4). Stale CMDB, schema drift and data drops ship in the chaos control plane below.
+- Toxiproxy-style service outages as a chaos mode (playground-v2/docs/playground-environment-v2.md §Phased build Phase 4). Stale CMDB, schema drift and data drops ship in the chaos control plane below.
 - MinIO-dependent data-access archetypes (blob enumeration, staged exfil) — MinIO is a Tier-2 dependency.
 
 ### Chaos control plane (issue #401)

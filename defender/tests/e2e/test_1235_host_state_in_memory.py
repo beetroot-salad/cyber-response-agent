@@ -13,7 +13,7 @@ from defender.hooks.budget_enforcer import (  # noqa: E402
     BUDGET_REFUSAL_MESSAGE,
     DEFAULT_LIMITS,
 )
-from defender.scripts.adapters.faults import TransportFault  # noqa: E402
+from defender.integrations.faults import TransportFault  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN,
     GOLDEN_AB3,

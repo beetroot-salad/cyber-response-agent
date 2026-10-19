@@ -20,7 +20,7 @@ from defender.runtime import permission  # noqa: E402
 from defender.runtime.agent_definition import (  # noqa: E402
     compile_policy_for,
 )
-from defender.scripts.gather_tools.record_query import persist_payload  # noqa: E402
+from defender.runtime.record_query import persist_payload  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 
 LETTERED = "l-2b"

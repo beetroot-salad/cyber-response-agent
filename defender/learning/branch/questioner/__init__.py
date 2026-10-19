@@ -47,9 +47,9 @@ import logging
 import yaml
 
 from defender import _yaml
-from defender._env import env_str
+from defender.configuration._env import env_str
 from defender._io import read_guarded, read_text_utf8
-from defender._report import read_report
+from defender.records._report import read_report
 from defender.run_repository import RunPaths, artifact_file
 from defender._untrusted import message_salt
 from defender.learning._prompt import section_text, stage_user_message, titled_section

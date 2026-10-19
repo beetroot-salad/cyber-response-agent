@@ -56,7 +56,7 @@ def curation_run_dir(run_id: str, *, tenant_id: str | None = None) -> Path:
     """`<data root>/<T>/runs/<run_id>`, made, under the test's own data root (the autouse
     `data_root` fixture's): T (D9's tenant unless named) set up through the real `create_tenant`
     and its runs folder's tenant record ensured, as run setup leaves them."""
-    from defender._tenant import ensure_runs_base_record
+    from defender.tenancy._tenant import ensure_runs_base_record
     from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID, current_data_root, ensure_d9_tenant
 
     tenant_id = tenant_id or D9_TENANT_ID

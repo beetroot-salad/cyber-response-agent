@@ -17,7 +17,7 @@ from pathlib import Path
 assert 'PYTHONPATH' not in os.environ
 # pytest makes the worktree importable in-process; that does not export child env.
 sys.path.insert(0, sys.argv[1])
-from defender._tenant import TenantId
+from defender.tenancy._tenant import TenantId
 from defender import box
 from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS, make_run_dir
 from defender.tests.e2e._box665 import RecordingDocker

@@ -9,7 +9,7 @@ from defender.runtime import tools
 from defender.runtime.circuit_breaker import error_class_for_exit
 from defender.runtime.query_tool import resolve_query_id
 from defender.runtime.sql_engine import sql as defender_sql
-from defender._query_rules import ABOVE_GUARD_QUERY_ID, BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
+from defender.knowledge._query_rules import ABOVE_GUARD_QUERY_ID, BASH_SHIM_QUERY_ID, REPEAT_TRIP_QUERY_ID
 from defender.tests.support.learning.core._declared870 import (
     BINDER,
     by_surface,

@@ -647,7 +647,7 @@ CALL_RECORD_WRITERS: dict[str, dict[str, Any]] = {
         "writes_by": "append_query_row", "via": (), "failed_write": "best-effort view",
         "call_id": "none on the row (#1255 G4)",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},
-    "scripts/gather_tools/record_query.py::append_query_row": {
+    "runtime/record_query.py::append_query_row": {
         "writes_by": "append", "via": (), "failed_write": "records state, then raises OSError",
         "call_id": "none on the row (#1255 G4)",
         "driven_by": "test_1234_failed_query_table_view_does_not_stamp_a_recording_cut"},

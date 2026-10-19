@@ -126,7 +126,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
 
     # #1105 PR 2 (declared change 6): a sibling names its episode by id under the configured
     # episodes base, whose container the launcher made for its tenant before any sibling.
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     episodes = tmp_path / "episodes-root"
     (episodes / "ep-767" / "runs").mkdir(parents=True)

@@ -18,7 +18,7 @@ Each subdirectory contains:
 
 ```
 {slug}/
-  alert.json          # the alert input — same shape as defender/fixtures/*
+  alert.json          # the alert input — same shape as playground-v2/examples/alerts/*
   ground_truth.yaml   # disposition + class_axes + rationale, held_out: true
 ```
 
@@ -86,7 +86,7 @@ competent investigator with normal SIEM access could disposition each one
 correctly. Keep that property in a replacement set.
 
 Prefer real labeled production alerts; failing that, author v2 Elastic-shaped
-synthetic ones (see `defender/fixtures/v2-*/alert.json` for the schema). The
+synthetic ones (see `playground-v2/examples/alerts/v2-*/alert.json` for the schema). The
 file layout and `ground_truth.yaml` schema below are the contract downstream
 harnesses depend on.
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender._artifact_schema import validate_artifact, validate_report
+from defender.records._artifact_schema import validate_artifact, validate_report
 from defender._vocab import (
     DISPOSITION_ENUM,
     DISPOSITION_VALUES,

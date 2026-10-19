@@ -16,8 +16,8 @@ import json
 import sys
 from pathlib import Path
 
-from defender._episode_handle import Episode
-from defender._episode_paths import LAYOUT, EpisodePaths
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episode_paths import LAYOUT, EpisodePaths
 from defender._io import bind
 from defender.run_repository import RunPaths
 

@@ -11,7 +11,7 @@ did not name them would leave the seam unpinned:
 * `defender/learning/leads/declared_systems.py` — NEW, learning-side (FK-11), importing
   `ADAPTER_SUFFIX` / `_system_of` from `defender.runtime.verbs` at MODULE level (C27).
   - `declared_systems(repo_root: Path) -> frozenset[str]` — the ASYMMETRIC union (NF1):
-    the adapter glob `<repo_root>/defender/scripts/adapters/*_adapter.py` read from the
+    the adapter glob `<repo_root>/defender/integrations/*_adapter.py` read from the
     WORKING tree, unioned with the `<repo_root>/defender/skills/<name>/execution.md` marker
     read from the COMMITTED tree, at EXACTLY ONE directory of depth — `<name>` is the
     segment directly under `defender/skills/`, never a nested one. Either source
@@ -109,7 +109,7 @@ except ImportError as _err:  # pragma: no cover — the pre-implementation state
 
 #: The two source directories, spelled here once so a fixture cannot disagree with the
 #: resolver about where it reads.
-ADAPTERS_REL = "defender/scripts/adapters/"
+ADAPTERS_REL = "defender/integrations/"
 SKILLS_REL = "defender/skills/"
 CATALOG_REL = "defender/skills/gather/queries/"
 
@@ -324,7 +324,7 @@ def seed_executed_query(
     from defender._io import read_jsonl_rows
     from defender.run_repository import Run, RunPaths
     from defender.runtime.run_state import RunState
-    from defender.scripts.gather_tools.record_query import append_query_row
+    from defender.runtime.record_query import append_query_row
 
     gather = RunPaths(run_dir).gather_raw
     gather.mkdir(parents=True, exist_ok=True)

@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender._paths import PATHS
-from defender.scripts import tenant as tenant_py
+from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.tests.tenancy.tenant_1120_piece1 import test_1120_scaffold as S
 

@@ -7,7 +7,7 @@ D1/D2). A tenant is reached only through `_tenant.accept_tenant`; `accept` below
 
 THE SEAMS THIS MODULE REACHES — each imported at CALL time, never at collection:
 
-  * `defender._tenant.accept_tenant(root, id, *, defender_dir)` -> `Tenant`.
+  * `defender.tenancy._tenant.accept_tenant(root, id, *, defender_dir)` -> `Tenant`.
   * `defender.runtime.verb_dispositions.run_grants(settings_dir) -> RunGrants` — the per-run
     grants (`path`, `gather`, `correlation`, `correlation_system`); and
     `dispositions_path(settings_dir)`.
@@ -72,8 +72,8 @@ def mod(dotted: str) -> Any:
 
 
 def tenants() -> Any:
-    """`defender._tenants` — the resolver module #1106 adds."""
-    return mod("_tenants")
+    """`defender.tenancy._tenants` — the resolver module #1106 adds."""
+    return mod("tenancy._tenants")
 
 
 def run_grants(settings_dir: Path) -> Any:
@@ -113,7 +113,7 @@ def fixture_gather_def() -> Any:
 def accept(root: Path, tenant_id: str, **kw: Any) -> Any:
     """`tenant_id` under `root`, through the real `accept_tenant` (#1120 D1) against this
     checkout's `defender/`."""
-    return mod("_tenant").accept_tenant(Path(root), tenant_id, defender_dir=DEFENDER, **kw)
+    return mod("tenancy._tenant").accept_tenant(Path(root), tenant_id, defender_dir=DEFENDER, **kw)
 
 
 def run_tenant(tenant: Any, *, defender_dir: Path | None = None,

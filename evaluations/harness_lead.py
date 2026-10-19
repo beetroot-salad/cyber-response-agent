@@ -15,7 +15,7 @@ from pathlib import Path
 from _harness_util import find_venv_py, init_git, run as _run
 
 from defender import _git
-from defender._knowledge import KnowledgePaths
+from defender.knowledge._knowledge import KnowledgePaths
 from defender._io import read_text_utf8
 
 _logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ def materialize(scenario: Path, tmp: Path) -> Path:
     shutil.copytree(
         real.catalog_dir, scratch.catalog_dir,
     )
-    adapters_dst = tmp / "defender" / "scripts" / "adapters"
+    adapters_dst = tmp / "defender" / "integrations"
     adapters_dst.mkdir(parents=True)
     for skill in sorted(real.skills_dir.glob("*/SKILL.md")):
         dst = scratch.system_skill_dir(skill.parent.name) / "SKILL.md"

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from defender.scripts.adapters import faults
+from defender.integrations import faults
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.learning.core._state1135 import state_over

@@ -89,7 +89,7 @@ LINT_MODULE_PATH = REPO_ROOT / "tooling" / "lint" / "lint_unguarded_tree_write.p
 #: demands read them (the profile's shape, the escape-surface non-regression, and the
 #: dependency sweep) and a second spelling of either path is how one demand ends up asserting
 #: about a file nothing produces.
-SECCOMP_GEN_PATH = REPO_ROOT / "scripts" / "gen_seccomp_profile.py"
+SECCOMP_GEN_PATH = REPO_ROOT / "tooling" / "gen_seccomp_profile.py"
 
 
 def load_seccomp_generator():
@@ -953,7 +953,7 @@ def _invoke_tenant_writer(run_dir: Path) -> None:
     the run dir — `Writer.artifact` names it `../_tenant.json`, which the generic
     `run / writer.artifact` harness resolves correctly since the OS collapses `..` at
     stat/open time."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     _tenant.ensure_runs_base_record(run_dir.parent, "census-tenant")
 
@@ -964,7 +964,7 @@ def _invoke_tenant_row_writer(run_dir: Path) -> None:
     because O10 refuses a data root holding anything beside the tenant it is creating — and
     `run_tree`'s own sibling (`run-771`) sits directly in `run_dir.parent`. `Writer.artifact`
     names it `tenant-root/census-tenant/tenant.json`."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     _tenant.create_tenant(run_dir / "tenant-root", "census-tenant")
 
@@ -1033,12 +1033,12 @@ CENSUS: tuple[Writer, ...] = (
     # than inside the run dir — the module joins the census-derived hard-gate set for exactly
     # that reason (its own artifact is outside every box mount, X6-shaped).
     Writer("tenant_writer", "../_tenant.json", "guarded", "unmeasured",
-           _invoke_tenant_writer, "_tenant.py", cite="§7 decision 16"),
-    # #1078 D1: create_tenant's own row, a second _tenant.py writer with its own artifact.
+           _invoke_tenant_writer, "tenancy/_tenant.py", cite="§7 decision 16"),
+    # #1078 D1: create_tenant's own row, a second tenancy/_tenant.py writer with its own artifact.
     # Still the guarded idiom since #1137: `Held.write`'s create lane off the held `<T>`, which
     # refuses an alias at the row as `write_guarded`'s did.
     Writer("tenant_row_writer", "tenant-root/census-tenant/tenant.json", "guarded", "unmeasured",
-           _invoke_tenant_row_writer, "_tenant.py", cite="#1078 D1"),
+           _invoke_tenant_row_writer, "tenancy/_tenant.py", cite="#1078 D1"),
 )
 
 #: The four posture CLASSES X5 measured — the reason F1's "every call site keeps the posture

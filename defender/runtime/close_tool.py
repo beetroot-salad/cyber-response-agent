@@ -24,7 +24,7 @@ from pydantic import Field
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from defender._artifact_schema import validate_artifact
+from defender.records._artifact_schema import validate_artifact
 from defender._untrusted import wrap_fresh
 # The set is for the exact membership test, the ordered tuple for the argument schema.
 from defender._vocab import (

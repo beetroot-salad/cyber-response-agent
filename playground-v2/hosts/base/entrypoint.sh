@@ -22,7 +22,7 @@ python3 /opt/soc-playground/seed-users.py
 # cron is still started for any future per-host cron drops (e.g., logrotate),
 # but the batch-8 baseline generators run under a Python scheduler, not crontabs
 # — spec: "one shared scheduler process per identity/host pair, not a pile
-# of crontabs" (docs/playground-environment-v2.md §Baseline activity generators).
+# of crontabs" (playground-v2/docs/playground-environment-v2.md §Baseline activity generators).
 service cron start >/dev/null
 
 # Role hook is installed by the web/db stages; absent on plain hosts.

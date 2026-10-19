@@ -6,7 +6,8 @@ import os
 
 import pytest
 
-from defender import _artifact_schema, _io
+from defender import _io
+from defender.records import _artifact_schema
 from defender.runtime.branch import BranchError
 from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.runtime.records._1165_records import run_at, writes

@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from defender._env import FatalConfigError
+from defender.configuration._env import FatalConfigError
 from defender._git import GitError
 from defender.learning.author import _config
 from defender.learning.core import drains, persist

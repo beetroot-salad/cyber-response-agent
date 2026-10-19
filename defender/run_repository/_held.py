@@ -26,9 +26,9 @@ from pathlib import Path
 from typing import Any
 
 from defender import _io
-from defender._run_id import run_id_fault
+from defender.records._run_id import run_id_fault
 from defender._shown import quoted, shown
-from defender._tenant import (
+from defender.tenancy._tenant import (
     TENANT_RECORD_NAME, Tenant, TenantRecord, TenantRecordMismatch, TenantRefused, read_tenant,
     record_path,
 )

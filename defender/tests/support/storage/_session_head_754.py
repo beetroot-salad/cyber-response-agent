@@ -313,7 +313,7 @@ def fresh_process_readback(store_path: Path, *session_ids: str) -> dict:
     """Read head, path and log back out of the file in a REAL second interpreter.
 
     Not a second handle in this process: C11 established the store is reached from two
-    processes and that the visualizer — a separate `python scripts/visualize/...` run — is
+    processes and that the visualizer — a separate `python presentation/...` run — is
     the only cross-process reader, so "reads back identically from a second process" is
     tested as one.
     """

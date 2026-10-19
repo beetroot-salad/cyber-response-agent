@@ -458,7 +458,7 @@ def test_1234_planted_world_shown_as_designed_built_and_served(tmp_path: Path) -
         _altered("l-917", f"user:alice host:db-1 {S.marker(WB, 'altered')}",
                  ledger_extra={"claim": claim, "verifier_verdict": verdict})]}})
     built = _family(tmp_path, worlds)
-    collisions = S.sym("_episode_paths", "COLLISIONS_FILENAME")
+    collisions = S.sym("episodes._episode_paths", "COLLISIONS_FILENAME")
     built.oracle_path(WB, collisions).write_text(json.dumps(
         {"forged_id": "fg-wb-1", "column": "event_id", "value": S.marker(WB, "collision"),
          "real_rows": []}) + "\n", encoding="utf-8")

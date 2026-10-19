@@ -9,8 +9,8 @@ import pytest
 
 from defender._paths import PATHS
 from defender.runtime import verb_dispositions
-from defender.scripts.adapters import confinement
-from defender.scripts.adapters.confinement import ConfinementFault
+from defender.integrations import confinement
+from defender.integrations.confinement import ConfinementFault
 from defender.tests.support.runtime.engine._spec767 import (
     COMMENTS_SUFFIX,
     TICKETS_PATH,
@@ -178,7 +178,7 @@ def test_767_query_tool_is_only_ticket_reader(tmp_path):
 
     subprocess_readers = _shipped_hits(r"get-ticket")
     allowed = {
-        "defender/scripts/adapters/ticket_adapter.py",
+        "defender/integrations/ticket_adapter.py",
         "defender/runtime/query_tool.py",
         "defender/learning/judge/family.py",
     }

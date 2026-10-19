@@ -418,14 +418,14 @@ _OWNER_CLASS_ORIGINS = frozenset({
     # An owner the runs repository defines is spelled as its door serves it (#1105): every
     # origin is compared through `door_spelling`, so the submodule spelling needs no line.
     "defender.run_repository.RunPaths",
-    "defender._episode_paths.EpisodePaths",
+    "defender.episodes._episode_paths.EpisodePaths",
     # The file-backed handle: a value reached through `run.facts.<record>` /
     # `run.tables.<table>` is owner-derived like `RunPaths(x).<record>`.
     "defender.run_repository.Run",
     # The episode handle (#1133): `episode.served_base` / `episode.world(label).draw(n)` are
     # owner-derived like `EpisodePaths(ep).<record>`.
-    "defender._episode_handle.Episode",
-    "defender._episode_paths.WorldPaths",
+    "defender.episodes._episode_handle.Episode",
+    "defender.episodes._episode_paths.WorldPaths",
     # The session store's owner, built from the runs base since one store spans a run and
     # its resumes and forks.
     "defender.run_repository.SessionPaths",
@@ -436,7 +436,7 @@ _OWNER_CLASS_ORIGINS = frozenset({
 #: `tenant.runs` is owner-derived exactly as one onto `EpisodePaths(ep).runs` is — while its
 #: knowledge halves (`settings`, `knowledge`, `agent`) are not run records: the settings
 #: loaders join onto them by design, and must stay clean.
-_TENANT = "defender._tenant.Tenant"
+_TENANT = "defender.tenancy._tenant.Tenant"
 PARTIAL_OWNER_ATTRS: dict[str, frozenset[str]] = {
     _TENANT: frozenset({
         "dir", "row_path", "runs", "sessions", "episodes", "learning", "worktrees"}),
@@ -451,9 +451,9 @@ _RUN_TENANT = "defender.runtime.run_tenant.RunTenant"
 #: sweep's census of functions annotated `-> Tenant` / `-> RunTenant` (`annotated_class`), so a
 #: new factory, or a stale entry, fails it.
 _TENANT_FACTORIES: dict[str, str] = {
-    "defender._tenant.accept_tenant": _TENANT,
+    "defender.tenancy._tenant.accept_tenant": _TENANT,
     # #1105 PR 2 review: a request's tenant, accepted (the one step `accept_tenant` sits under).
-    "defender._tenant.requested_tenant": _TENANT,
+    "defender.tenancy._tenant.requested_tenant": _TENANT,
     "defender.runtime.run_tenant.resolve_tenant": _RUN_TENANT,
     "defender.runtime.run_tenant.run_tenant_for": _RUN_TENANT,
     "defender.run._resolve_run_tenant": _RUN_TENANT,
@@ -475,8 +475,8 @@ _PARTIAL_OWNER_CARRIERS: dict[str, dict[str, str]] = {
 _OWNER_VALUE_ORIGINS = frozenset({
     "defender.run_repository.RUN_LAYOUT",
     "defender.run_repository.WIRE_LOG_NAMES",
-    "defender._episode_paths.LAYOUT",
-    "defender._episode_paths.WORLD_LEAVES",
+    "defender.episodes._episode_paths.LAYOUT",
+    "defender.episodes._episode_paths.WORLD_LEAVES",
 })
 
 

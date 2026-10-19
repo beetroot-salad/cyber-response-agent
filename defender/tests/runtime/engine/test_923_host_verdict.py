@@ -205,7 +205,7 @@ def test_a_model_authored_new_state_close_is_refused_without_spending_a_review(t
 
 def test_no_host_terminated_run_appears_in_the_gap_set(tmp_path):
     """Partition committed reports on `disposition` ALONE"""
-    from defender._report import read_report
+    from defender.records._report import read_report
 
     host_deps, host_run = ab3_deps(tmp_path / "host-overruled")
     _overrule(host_deps)

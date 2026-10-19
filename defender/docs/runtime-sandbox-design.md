@@ -1,7 +1,7 @@
 # Runtime sandbox: gVisor isolate + host-side credential broker
 
 > **⚠️ SUPERSEDED IN PART — read
-> [`docs/decisions/runtime-isolation-executor-model.md`](../../docs/decisions/runtime-isolation-executor-model.md)
+> [`defender/docs/decisions/runtime-isolation-executor-model.md`](decisions/runtime-isolation-executor-model.md)
 > first.** Following #571's brain/hands split to its conclusion removes the
 > **entire broker** from v1: with the LLM, MCP, and adapter clients all host-side,
 > nothing credentialed runs inside the isolate, so there is nothing to inject and
@@ -22,7 +22,7 @@
 > smaller than this document implies: a per-run box, two binds, `--network=none`,
 > and an exec per bash call. It also removes the reason to invent a credential
 > plane: the box is safe because it holds nothing, not because the driver was
-> disarmed first. Risk register: [`threat-model.md`](../../docs/decisions/threat-model.md).
+> disarmed first. Risk register: [`threat-model.md`](decisions/threat-model.md).
 
 **Status:** design — not yet implemented. **Decision:** run each defender
 investigation inside a per-alert **gVisor (runsc) isolate** whose only route
@@ -525,7 +525,7 @@ nothing is shared across runs.
 The driver keeping the provider key is deliberate, not an oversight — #550 removes
 it by `base_url` origination and is **independent of this issue**, not a
 prerequisite. What that key buys an attacker who lands RCE *in the driver* is
-class 2 in [`threat-model.md`](../../docs/decisions/threat-model.md); its control is
+class 2 in [`threat-model.md`](decisions/threat-model.md); its control is
 dependency hygiene, not a box.
 
 The learning-loop entrypoint (`learning/loop.py`) that re-enters the runtime wraps
@@ -546,7 +546,7 @@ One knob-specific asymmetry: the OCI `linux.seccomp` profile (e.g. denying
 network is the enforcement.
 
 **v1 is not gated on runsc (resolved 2026-07-17).** #540's boundary claim —
-classes 1 and 8 in [`threat-model.md`](../../docs/decisions/threat-model.md),
+classes 1 and 8 in [`threat-model.md`](decisions/threat-model.md),
 *which paths are visible* and *no direct egress* — is delivered by the mount list +
 `--network=none`, and **`runc` provides both on any Docker host**. runsc's *added*
 value is exactly class 2: a parser-bug RCE *inside the box* (jq, coreutils,
@@ -593,7 +593,7 @@ stateless.
   VPS runs `runsc release-20260706.0` (systrap, no KVM) with all four knobs —
   ro bind, rw bind, `--host-uds=open`, `--network=none` loopback netstack — exit
   0; the non-privileged devcontainer stays a no-go (both privilege doors shut).
-  Evidence: `docs/decisions/runsc-spawner-host-go-no-go.md`. **runsc is deployable.**
+  Evidence: `defender/docs/decisions/runsc-spawner-host-go-no-go.md`. **runsc is deployable.**
 - **Which spawner path? — RESOLVED (2026-07-17): the daemon path, and it is a
   security fork, not a packaging detail.** "*privileged-container-on-VPS* **or**
   root-on-host" are not interchangeable, and #548 only proved the first. Both are
@@ -614,7 +614,7 @@ stateless.
   On the daemon path layer two is now **observed, not assumed**: the Sentry is
   parented by `containerd-shim` under PID 1 with `Seccomp: 2`, `NoNewPrivs: 1`, and
   `CapEff` = six caps with **no `CAP_SYS_ADMIN`**. Evidence:
-  `docs/decisions/runsc-spawner-host-go-no-go.md`.
+  `defender/docs/decisions/runsc-spawner-host-go-no-go.md`.
 
   Also **strike "the privilege is spent once"** — privilege is not spent. On the
   nested path it persists for the container's lifetime with the Sentry inside it.

@@ -19,9 +19,9 @@ from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
 from defender.runtime import circuit_breaker, session_store, tools_gather  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.tools_gather import GatherRequest  # noqa: E402
-from defender.scripts.adapters.faults import UpstreamFault  # noqa: E402
+from defender.integrations.faults import UpstreamFault  # noqa: E402
 from defender.runtime.tools import DeadEnd  # noqa: E402
-from defender.scripts.gather_tools.record_query import REPEAT_THRESHOLD  # noqa: E402
+from defender.runtime.record_query import REPEAT_THRESHOLD  # noqa: E402
 from defender.tests.support.storage._session_store_705 import sql, store_factory  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,

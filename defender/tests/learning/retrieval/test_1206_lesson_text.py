@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from defender._corpus import iter_lesson_paths, iter_lessons
+from defender.knowledge._corpus import iter_lesson_paths, iter_lessons
 from defender._text import one_line
 
 

@@ -210,8 +210,8 @@ def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_nam
 def _confinement_gate(elastic: Any, ctx: Any, index: str) -> str:
     """Did elastic's index confinement refuse `index` for `ctx`, or let the call through to
     the (deliberately unreachable) transport?"""
-    ConfinementFault = S.sym("scripts.adapters.confinement", "ConfinementFault")
-    TransportFault = S.sym("scripts.adapters.faults", "TransportFault")
+    ConfinementFault = S.sym("integrations.confinement", "ConfinementFault")
+    TransportFault = S.sym("integrations.faults", "TransportFault")
     try:
         elastic.VERBS["query"](ctx, native_query="FROM x", index=index)
     except ConfinementFault:
@@ -241,7 +241,7 @@ def test_1224_elastic_confine_index_admits_the_same_indices_for_a_run_and_a_sibl
     if "world_id" in {f.name for f in fields(VerbContext)}:
         sibling["world_id"] = S.world_token("b")
     sibling_ctx = replace(run_ctx, **sibling)
-    elastic = S.mod("scripts.adapters.elastic_adapter")
+    elastic = S.mod("integrations.elastic_adapter")
     assert _confinement_gate(elastic, run_ctx, "logs-*") == "passed"
     assert _confinement_gate(elastic, run_ctx, ".security-7") == "refused"
     for index in ("logs-*", "logs-system.auth-*", "security-audit-*", ".security-7",

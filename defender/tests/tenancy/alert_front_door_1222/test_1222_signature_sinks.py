@@ -514,8 +514,8 @@ SPACED_EVENT_TIME = "2026-09-30 08:15:00 UTC"
 
 def test_b1_a_refused_case_ticket_is_named_in_its_receipt_and_on_the_run_page(
         tmp_path: Path) -> None:
-    receipt_path = S.sym("scripts.case_history.ticket_writer", "receipt_path")
-    render_page = S.sym("scripts.visualize.visualize_run", "render_page")
+    receipt_path = S.sym("integrations.ticket_writer", "receipt_path")
+    render_page = S.sym("presentation.visualize_run", "render_page")
 
     accepting = S.HoldingTicketStore(refuse_label=S.LABEL_WITH_WHITESPACE)
     ok, _ = _ticketed(tmp_path / "accepted", alert=S.generic_alert(rule_id=RULE_ID),

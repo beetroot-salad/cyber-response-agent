@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from defender import _tenant
+from defender.tenancy import _tenant
 
 
 def test_an_absent_or_malformed_request_is_refused() -> None:

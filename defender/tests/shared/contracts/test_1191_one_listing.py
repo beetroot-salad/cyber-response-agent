@@ -452,7 +452,7 @@ PLANTS: dict[str, Plant] = {
     # its mini repo is a committed git repo.
     "lint_shippable_surface": Plant(
         'VENDOR_1191 = "wazuh"\n', committed=True,
-        support=lambda: {"defender/scripts/adapters/keep_1191.txt": "",
+        support=lambda: {"defender/integrations/keep_1191.txt": "",
                          "defender/skills/keep_1191.txt": ""}),
     "lint_unaccounted_selection": Plant("from parser_1191 import INVLANG_FENCE_RE\n"),
     "lint_hand_rolled_frontmatter": Plant(

@@ -114,7 +114,7 @@ _CRASH_CHILD = {
     "record": r"""
 import os, sys
 from pathlib import Path
-from defender import _tenant
+from defender.tenancy import _tenant
 root = Path(sys.argv[1])
 print("ready", flush=True)
 i = 0
@@ -127,7 +127,7 @@ while True:
     "row": r"""
 import sys
 from pathlib import Path
-from defender import _tenant
+from defender.tenancy import _tenant
 root = Path(sys.argv[1])
 print("ready", flush=True)
 i = 0

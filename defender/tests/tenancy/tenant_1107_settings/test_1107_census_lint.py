@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 
-from defender.scripts.adapters import cmdb_adapter
+from defender.integrations import cmdb_adapter
 from defender.tests.tenancy.tenant_1107_settings import _census_1107 as C
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
@@ -42,7 +42,7 @@ def _names(output: str, rel: str) -> bool:
 _EACH_FORM = """\
 import os
 
-from defender._env import env_bool, env_choice, env_int, env_str
+from defender.configuration._env import env_bool, env_choice, env_int, env_str
 
 
 def verb(ctx):
@@ -64,9 +64,9 @@ def verb(ctx):
 def test_o7_lint_flags_each_form(tmp_path):
     _skeleton(tmp_path)
     planted = [
-        "defender/scripts/adapters/planted_1107.py",
+        "defender/integrations/planted_1107.py",
         "defender/learning/branch/estate/planted_1107.py",
-        "defender/scripts/case_history/planted_1107.py",
+        "defender/integrations/planted_1107.py",
         "defender/runtime/lead_zero/planted_1107.py",
         "defender/runtime/lead_zero_config.py",
     ]
@@ -109,7 +109,7 @@ def test_o7_lint_allows_passthrough(tmp_path):
                "\n"
                "def verb(ctx):\n"
                "    return ctx.env.get('X_1107'), os.getenv('X_1107')\n")
-    in_tree = "defender/scripts/adapters/pass_1107.py"
+    in_tree = "defender/integrations/pass_1107.py"
     out_of_tree = ["defender/runtime/elsewhere_1107.py", "defender/learning/branch/cli_1107.py",
                    "defender/run_1107.py"]
     S.plant_module(tmp_path, in_tree, inside)
@@ -124,10 +124,10 @@ def test_o7_lint_allows_passthrough(tmp_path):
 
     # Positive control: the same tree with one flagged lookup added IS reported.
     flagged = "def verb(ctx):\n    return ctx.env.get('X_1107')  # @flagged\n"
-    S.plant_module(tmp_path, "defender/scripts/adapters/flagged_1107.py", flagged)
+    S.plant_module(tmp_path, "defender/integrations/flagged_1107.py", flagged)
     rc2, out2 = S.run_env_lint(tmp_path)
     assert rc2 != 0, f"the control lookup was not reported, so the clean result above proves nothing:\n{out2}"
-    assert (_reported(out2, "defender/scripts/adapters/flagged_1107.py",
+    assert (_reported(out2, "defender/integrations/flagged_1107.py",
                                   _lines(flagged)["flagged"])), f"the control lookup was not reported, so the clean result above proves nothing:\n{out2}"
 
 
@@ -186,7 +186,7 @@ def test_s7_nf7_lint_flags_indirect_and_module_scope_reads(tmp_path):
 
 def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, monkeypatch):
     lint_tree = _skeleton(tmp_path / "lint-tree")
-    adapter = ("from defender.scripts.adapters import helper_1107\n"
+    adapter = ("from defender.integrations import helper_1107\n"
                "\n"
                "\n"
                "def verb(ctx):\n"
@@ -199,8 +199,8 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
               "\n"
               "def url_base_kw(*, env):\n"
               "    return url_base(env)\n")
-    adapter_rel = "defender/scripts/adapters/hands_env_1107.py"
-    helper_rel = "defender/scripts/adapters/helper_1107.py"
+    adapter_rel = "defender/integrations/hands_env_1107.py"
+    helper_rel = "defender/integrations/helper_1107.py"
     S.plant_module(lint_tree, adapter_rel, adapter)
     S.plant_module(lint_tree, helper_rel, helper)
 
@@ -210,10 +210,10 @@ def test_whole_run_env_handed_to_an_in_tree_helper_that_looks_keys_up(tmp_path, 
     assert not _names(out, adapter_rel), out
     assert not _names(out, helper_rel), out
     flagged = "def verb(ctx):\n    return ctx.env.get('CMDB_URL_BASE')  # @flagged\n"
-    S.plant_module(lint_tree, "defender/scripts/adapters/flagged_1107.py", flagged)
+    S.plant_module(lint_tree, "defender/integrations/flagged_1107.py", flagged)
     rc2, out2 = S.run_env_lint(lint_tree)
     assert rc2 != 0, f"the control lookup was not reported, so the clean result above proves nothing:\n{out2}"
-    assert (_reported(out2, "defender/scripts/adapters/flagged_1107.py",
+    assert (_reported(out2, "defender/integrations/flagged_1107.py",
                                   _lines(flagged)["flagged"])), f"the control lookup was not reported, so the clean result above proves nothing:\n{out2}"
 
     # The net the lint is not: the run's cmdb call with CMDB_URL_BASE exported.

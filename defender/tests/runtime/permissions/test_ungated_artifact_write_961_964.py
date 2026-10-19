@@ -354,7 +354,7 @@ def test_a_row_naming_no_text_stays_out_of_the_repair_set(tmp_path):
 def test_a_validator_that_raises_does_not_make_the_run_unclosable(tmp_path, capsys):
     """The close's structure gate fails OPEN on a validator fault, like the gate one line above
     it (#836 H7) and unlike the WRITE gate it shares a schema with."""
-    import defender._artifact_schema as schema
+    import defender.records._artifact_schema as schema
 
     def _boom(_text, _current):
         raise RecursionError("validator blew up")

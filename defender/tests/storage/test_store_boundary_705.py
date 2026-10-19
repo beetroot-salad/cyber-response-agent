@@ -41,7 +41,7 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
     base = runs_base(tmp_path)
 
     # The run-id-shaped id is spelled the way the host mints run ids since #1077 — casefolded
-    # (`_run_id.py`); the store now refuses an id that is not case-stable (#1077, O2).
+    # (`records/_run_id.py`); the store now refuses an id that is not case-stable (#1077, O2).
     for case_id in ("case-alpha", "20260718t101500z-boxspec", "runs", "case.with.dots"):
         path = Path(ss.store_path_for(case_id, sessions=SessionPaths(base)))
         assert base.resolve() not in path.resolve().parents, (

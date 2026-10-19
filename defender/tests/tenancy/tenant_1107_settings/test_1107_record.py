@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from defender.runtime import run_tenant
-from defender.scripts.adapters import _stub_transport as transport
+from defender.integrations import _stub_transport as transport
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
@@ -358,7 +358,7 @@ def test_d2_shipped_tenants_complete():
 
 
 def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys):
-    policy_cli = S.mod("scripts.policy_cli")
+    policy_cli = S.mod("cli.policy_cli")
     # #1120: policy_cli reads its tenants from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
     S.plant(root, "healthy", marker="pol")

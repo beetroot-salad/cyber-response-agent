@@ -171,7 +171,7 @@ def seed_adapter_stubs(defender_dir: Path, systems: tuple[str, ...]) -> tuple[st
     """
     from defender.tests.support.runtime.engine._declared869 import ADAPTER_BODY, adapter_file
 
-    adapters = defender_dir / "scripts" / "adapters"
+    adapters = defender_dir / "integrations"
     adapters.mkdir(parents=True, exist_ok=True)
     for system in systems:
         (adapters / adapter_file(Path("."), system).name).write_text(
@@ -215,7 +215,7 @@ def _seed_skills_repo(repo: Path) -> Path:
     which is the one part that should differ: each names its own subject. Those stay with
     their fixtures.
     """
-    adapters = repo / "defender" / "scripts" / "adapters"
+    adapters = repo / "defender" / "integrations"
     adapters.mkdir(parents=True)
     # wazuh gets the real adapter shape (#901): it owns every seeded catalog template, so the
     # content gate resolves its verbs. elastic owns no template here and only has to EXIST, so

@@ -26,7 +26,7 @@ from defender.agents import MAIN_DEF
 from defender.runtime import circuit_breaker, tools as runtime_tools
 from defender.runtime.agent_definition import bind
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS
-from defender.scripts.adapters.faults import TransportFault
+from defender.integrations.faults import TransportFault
 from defender.skills.invlang.validate import validate_companion
 
 pytestmark = pytest.mark.e2e

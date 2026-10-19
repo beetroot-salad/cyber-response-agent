@@ -196,7 +196,7 @@ estimate invites the point estimate to be read.
    Every run names its tenant, and there is no default (#1078):
    clone the tenant repo into `$DEFENDER_DATA_ROOT/playground/knowledge` on the host, then,
    once the clone exits 0, run
-   `python3 defender/scripts/tenant.py setup playground` once, from the main checkout, with
+   `python3 defender/cli/tenant.py setup playground` once, from the main checkout, with
    `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
    the same user that runs defender; a destination already occupied makes setup refuse, naming
    it in the message. (Adopting an existing (B)/(C) installation whose old entries are

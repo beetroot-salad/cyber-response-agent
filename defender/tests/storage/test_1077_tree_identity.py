@@ -69,7 +69,7 @@ def test_a_replayed_fixture_run_tree_carries_the_same_set_of_names(tmp_path: Pat
 # g04 — the writers that share one run directory
 
 def test_every_run_dir_writer_stays_key_disjoint_at_the_composition_frame(tmp_path: Path):
-    from defender.scripts.gather_tools import record_query
+    from defender.runtime import record_query
     run_dir = S.seed_run_tree(S.make_run_dir(S.make_runs_base(tmp_path)))
     owner = S.RunPaths(run_dir)
 

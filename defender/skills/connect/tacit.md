@@ -74,7 +74,7 @@ across an edited `pattern` silently re-points every existing citation.
 1. **Check the current file first.**
 
    ```bash
-   defender/.venv/bin/python -m defender.scripts.tacit_cli check
+   defender/.venv/bin/python -m defender.cli.tacit_cli check
    ```
 
    If it is already failing, say so before you add anything — an entry
@@ -94,7 +94,7 @@ across an edited `pattern` silently re-points every existing citation.
 4. **Show what is now in force.**
 
    ```bash
-   defender/.venv/bin/python -m defender.scripts.tacit_cli show
+   defender/.venv/bin/python -m defender.cli.tacit_cli show
    ```
 
    Read the new entry back to them in their own terms — "uid-0 may

@@ -8,8 +8,8 @@ from pathlib import Path
 
 from defender._io import read_jsonl_rows
 from defender.run_repository import RunPaths
-from defender.scripts.visualize import visualize_data as d
-from defender.scripts.visualize.visualize_run import render_runtime_page
+from defender.presentation import visualize_data as d
+from defender.presentation.visualize_run import render_runtime_page
 from defender.run_repository import SessionPaths
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
@@ -330,7 +330,7 @@ def _append_review_calls(run: Path, n_per_lens: int = 1) -> float:
 
     Written as wire records under `review:{lens}` because that is where the gate's calls land
     since #787 — one shared `RequestLogger`, one `agent_id` namespace."""
-    from defender._pricing import usage_cost
+    from defender.configuration._pricing import usage_cost
 
     rows = []
     for lens in ("support", "ablation", "composer"):

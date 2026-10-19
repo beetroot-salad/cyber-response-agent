@@ -433,8 +433,8 @@ def test_record_numbering_contiguity_across_mixed_arms(tmp_path):
 
 def test_terminal_report_reflects_final_attempt_only(tmp_path):
     """After two challenges and a standing third attempt, report.md carries the final verdict only and no..."""
-    from defender.scripts.visualize.visualize_primitives import parse_report
-    from defender.scripts.visualize.visualize_runtime import render_review_gate
+    from defender.presentation.visualize_primitives import parse_report
+    from defender.presentation.visualize_runtime import render_review_gate
 
     _deps, run_dir = _three_attempts(tmp_path)
     fm = frontmatter(run_dir)

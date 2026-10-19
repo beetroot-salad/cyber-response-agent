@@ -16,10 +16,10 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
+from defender.episodes import _episode_handle as EH
 from defender import _yaml
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry
-from defender.scripts.adapters import faults
+from defender.integrations import faults
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as T1107
@@ -62,7 +62,7 @@ import time
 from pathlib import Path
 
 from defender.runtime.verbs import VerbContext, verb
-from defender.scripts.adapters.confinement import confine_index
+from defender.integrations.confinement import confine_index
 
 _STATE = Path({state!r})
 SYSTEM = "logsrc"
@@ -151,7 +151,7 @@ def _confined_estate(tmp_path: Path, **kw: Any) -> _Estate:
 def _tacit_estate(tmp_path: Path) -> _Estate:
     """The fixture estate plus the REAL tacit_knowledge adapter and a registry under the
     estate's defender tree (`tacit_knowledge_adapter.registry_path`)."""
-    source = (S.DEFENDER / "scripts" / "adapters" / "tacit_knowledge_adapter.py").read_text(
+    source = (S.DEFENDER / "integrations" / "tacit_knowledge_adapter.py").read_text(
         encoding="utf-8")
     # The checkout adapter puts its repo root on sys.path; a planted copy must not.
     source = source.replace("_sys.path.insert(0, _root)", "pass")
@@ -646,7 +646,7 @@ def test_p083_call_window_extends_past_the_branch_point(tmp_path):
     assert datetime.now(UTC) > _moment(LATE), "premise: the later row is already indexed"
     where = tmp_path / "elastic"
     ctx = _es_ctx(where)
-    elastic_adapter = S.mod("scripts.adapters.elastic_adapter")
+    elastic_adapter = S.mod("integrations.elastic_adapter")
     assert _elastic_read(elastic_adapter, ctx, "query", native_query="*") == [EARLY], (
         "an open window did not read the row before the branch point")
     spellings = [None, "", "2099-01-01T00:00:00Z", "now", "now+1d", "4102444800000",
@@ -685,7 +685,7 @@ def test_p083_call_window_extends_past_the_branch_point(tmp_path):
 def test_p084_native_query_form_that_escapes_the_time_bound(tmp_path):
     """an ES|QL query written to slip the time bound (a comment before FROM, a block comment, a lowercase source command with its own window reaching past …"""
     ctx = _es_ctx(tmp_path)
-    elastic_adapter = S.mod("scripts.adapters.elastic_adapter")
+    elastic_adapter = S.mod("integrations.elastic_adapter")
     plain = "FROM logs-* | KEEP @timestamp, user.name"
     assert _elastic_read(elastic_adapter, ctx, "esql", query=plain) == [EARLY], (
         "a plain ES|QL read did not return the row before the branch point")
@@ -736,7 +736,7 @@ def test_1224_elastic_run_query_returns_no_row_past_the_branch_point(tmp_path):
     assert datetime.now(UTC) > _moment(LATE), "premise: the later row is already indexed"
     ctx: VerbContext = _es_ctx(tmp_path)
     branch_point = ctx.as_of
-    elastic_adapter = S.mod("scripts.adapters.elastic_adapter")
+    elastic_adapter = S.mod("integrations.elastic_adapter")
     assert branch_point == S.AS_OF_DT
     assert _elastic_read(elastic_adapter, ctx, "query", native_query="*") == [EARLY]
     assert _elastic_read(elastic_adapter, ctx, "esql",
@@ -1037,7 +1037,7 @@ def test_1224_rate_zero_is_refused_and_a_positive_rate_gives_a_positive_slice(
         tmp_path, monkeypatch):
     """a rate of zero, a negative, a non-number or an unbounded value is refused at configuration naming the knob; a positive rate is read as given, each …"""
     oracle_settings = S.sym(S.ORACLE, S.COINED["fn.settings"])
-    fatal = importlib.import_module("defender._env").FatalConfigError
+    fatal = importlib.import_module("defender.configuration._env").FatalConfigError
     for bad in ("0", "0.0", "-1", "-0.5", "abc", "nan", "inf"):
         with pytest.raises(fatal, match=S.KNOB_RATE):
             oracle_settings({S.KNOB_RATE: bad})

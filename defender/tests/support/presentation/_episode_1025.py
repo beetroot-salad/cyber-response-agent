@@ -1,7 +1,7 @@
 """Shared machinery for #1025's episode page spec (`learning.html`) — NO test scripts.
 
 The change: a page rendered from an episode directory alone —
-`scripts/visualize/visualize_episode.py::render_episode(episode_dir) -> Path`, written beside
+`presentation/visualize_episode.py::render_episode(episode_dir) -> Path`, written beside
 `judge.yaml` through `_io.write_guarded`'s replace lane, called by the launcher after the JUDGE
 clock frame closes (`cli._render_page`, under its own non-fatal boundary) and by
 the standalone CLI `main([episode_dir])`. NONE of it exists at base `e8d22ac0`; every import goes
@@ -56,8 +56,8 @@ from typing import Any
 
 from defender import _yaml
 
-from defender._episode_handle import Episode as _EpisodeHandle
-from defender._episode_paths import EpisodePaths
+from defender.episodes._episode_handle import Episode as _EpisodeHandle
+from defender.episodes._episode_paths import EpisodePaths
 from defender._io import bind, write_guarded
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -66,7 +66,7 @@ mod = T.mod
 sym = T.sym
 
 #: The page module and its two entry points — the design's names (20-demands.md §2, Q1).
-PAGE_MODULE = "scripts.visualize.visualize_episode"
+PAGE_MODULE = "presentation.visualize_episode"
 PAGE_NAME = "learning.html"
 
 #: The episode identity every fixture here carries — the harness's, so `episode_dir_for`,
@@ -340,7 +340,7 @@ def plant_container_record(episode_dir: Path) -> None:
     own). The page helpers below call it before each render; `sample_episode` itself leaves the
     container as the pre-#1078 shape it always was (`test_dc4_a_container_with_no_record_…`
     builds on that)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     runs = Path(episode_dir) / "runs"
     if runs.is_symlink() or not runs.is_dir():

@@ -44,7 +44,7 @@ def _planted_script(tmp_path: Path, *, root_name: str = "tree") -> tuple[Path, P
     """A planted tree carrying copies of the two code files; returns (root, script)."""
     root = tmp_path / root_name
     defender_dir = plant_tree(root)
-    script = defender_dir / "scripts" / "box_image.py"
+    script = defender_dir / "box" / "image_cli.py"
     assert script.is_file(), f"{BOX_IMAGE_PY} does not exist to copy — the script is unbuilt"
     return root, script
 

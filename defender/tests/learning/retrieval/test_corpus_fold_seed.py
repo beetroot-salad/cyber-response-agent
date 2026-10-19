@@ -74,7 +74,7 @@ def test_d0_byte_shape_two_sections(tmp_path):
 def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(tmp_path):
     """``reexec_into_venv`` finds ``defender/.venv`` from ITS OWN path, so a caller may sit at any
     depth in the tree."""
-    venv = importlib.import_module("defender._venv")
+    venv = importlib.import_module("defender.execution._venv")
     assert venv._DEFENDER_DIR == DEFENDER, (
         "the anchor must be defender/ itself — the interpreter lives at defender/.venv")
     venv_py = DEFENDER / ".venv" / "bin" / "python3"
@@ -87,7 +87,7 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(t
     caller.write_text(textwrap.dedent(f"""
         import sys
         sys.path.insert(0, {str(REPO_ROOT)!r})
-        from defender._venv import reexec_into_venv
+        from defender.execution._venv import reexec_into_venv
         reexec_into_venv(__file__)
         sys.stdout.write(repr((sys.executable, sys.argv)))
     """), encoding="utf-8")
@@ -101,7 +101,7 @@ def test_c1b_the_venv_reexec_anchors_on_its_own_location_not_the_callers_depth(t
 
 
 #: The module the guard lives in — the ONE ``defender.*`` import a script may make before calling it.
-_VENV_MODULE = "defender._venv"
+_VENV_MODULE = "defender.execution._venv"
 
 
 def _module_imports(stmt: ast.stmt) -> list[str]:
@@ -124,12 +124,12 @@ def _calls_reexec(stmt: ast.stmt) -> bool:
 def _guarded_scripts() -> list[Path]:
     return sorted(p for p in DEFENDER.rglob("*.py")
                   if "tests" not in p.parts and ".venv" not in p.parts
-                  and p != DEFENDER / "_venv.py"
+                  and p != DEFENDER / "execution/_venv.py"
                   and "reexec_into_venv(" in p.read_text(encoding="utf-8"))
 
 
 def test_c2c_the_venv_guard_runs_before_any_other_defender_import():
-    venv_tree = ast.parse((DEFENDER / "_venv.py").read_text(encoding="utf-8"))
+    venv_tree = ast.parse((DEFENDER / "execution/_venv.py").read_text(encoding="utf-8"))
     non_stdlib = [m for stmt in venv_tree.body for m in _module_imports(stmt)
                   if m.split(".")[0] not in sys.stdlib_module_names]
     assert not non_stdlib, f"{_VENV_MODULE} must stay stdlib-only, imports {non_stdlib}"

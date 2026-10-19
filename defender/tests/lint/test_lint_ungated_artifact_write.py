@@ -20,7 +20,7 @@ _UNGATED_SEED = (
 )
 #: The same write with the schema applied and its verdict obeyed.
 _GATED_SEED = (
-    "from defender._artifact_schema import INVESTIGATION_NAME, validate_artifact\n"  # lint-stale-ref: ok — FIXTURE source this gate is run against, not a live import
+    "from defender.records._artifact_schema import INVESTIGATION_NAME, validate_artifact\n"  # lint-stale-ref: ok — FIXTURE source this gate is run against, not a live import
     "from defender._io import write_guarded\n"
     "from defender.run_repository import RunPaths\n"
     "\n"
@@ -132,7 +132,7 @@ def test_a_nested_function_gets_its_own_verdict(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(
         tree, "nested.py",
-        "from defender._artifact_schema import validate_artifact\n"
+        "from defender.records._artifact_schema import validate_artifact\n"
         "from defender._io import write_guarded\n"
         "\n"
         "def outer(run_dir, body):\n"
@@ -148,7 +148,7 @@ def test_a_nested_function_gets_its_own_verdict(tmp_path):
 
 def test_the_schema_owner_and_tests_are_exempt(tmp_path):
     tree = tmp_path / "scope"
-    _pyfile(tree, "_artifact_schema.py", _UNGATED_SEED)
+    _pyfile(tree, "records/_artifact_schema.py", _UNGATED_SEED)
     _pyfile(tree, "test_writer.py", _UNGATED_SEED)
     _pyfile(tree, "tests/helper.py", _UNGATED_SEED)
     assert _GATE._scan(tree) == []
@@ -167,7 +167,7 @@ def test_the_blind_spots_are_real_and_pinned(tmp_path):
     tree = tmp_path / "scope"
     _pyfile(
         tree, "wrong_text.py",
-        "from defender._artifact_schema import validate_artifact\n"
+        "from defender.records._artifact_schema import validate_artifact\n"
         "from defender._io import write_guarded\n"
         "\n"
         "def commit(run_dir, checked, actual):\n"

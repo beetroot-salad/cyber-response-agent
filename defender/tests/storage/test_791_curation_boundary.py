@@ -11,7 +11,8 @@ import pytest
 from defender.run_repository import RunPaths
 
 from defender import run as run_py  # noqa: E402
-from defender import _alert_input, run_common  # noqa: E402
+from defender import run_common
+from defender.records import _alert_input  # noqa: E402
 from defender.learning.core import drains  # noqa: E402
 from defender.box import _scrub as scrub_mod  # noqa: E402
 from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of, set_state_dir  # noqa: E402
@@ -57,7 +58,8 @@ def _certified_run(*, name="case-791", alert_bytes=None) -> Path:
 def _opened(body: dict) -> Path:
     """The run folder a curation row's address opens to, the way the drain rehydrates it: its
     tenant accepted under the data root, the run resolved through that tenant's repository."""
-    from defender import _paths, _tenant
+    from defender import _paths
+    from defender.tenancy import _tenant
     from defender.run_repository import RunAddress
 
     tenant = _tenant.accept_tenant(_tenant.resolve_data_root(), body["tenant_id"],

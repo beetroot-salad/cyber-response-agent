@@ -7,7 +7,7 @@ import json
 
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime.payload_view import render
-from defender.scripts.gather_tools.record_query import _next_seq
+from defender.runtime.record_query import _next_seq
 
 
 def test_next_seq_counts_rows_not_files(tmp_path):

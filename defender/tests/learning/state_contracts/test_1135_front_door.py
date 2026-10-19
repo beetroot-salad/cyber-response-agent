@@ -11,7 +11,7 @@ from defender.tests.learning.state_contracts import _spec1135 as S
 def test_the_kept_root_routes_still_resolve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.learning.core import config
 
     root = tmp_path / "learning-state"

@@ -50,8 +50,8 @@ from defender.runtime.verbs import (  # noqa: E402
     ModuleVerbRegistry,
     VerbContext,
 )
-from defender.scripts.adapters import _stub_transport  # noqa: E402
-from defender.scripts.adapters.faults import (  # noqa: E402
+from defender.integrations import _stub_transport  # noqa: E402
+from defender.integrations.faults import (  # noqa: E402
     ConfigFault,
     TransportFault,
     UpstreamFault,
@@ -62,7 +62,7 @@ pytestmark = pytest.mark.e2e
 
 SALT = "aabbccddeeff0011"
 LEAD = "l-001"
-ADAPTERS_DIR = DEFENDER / "scripts" / "adapters"
+ADAPTERS_DIR = DEFENDER / "integrations"
 
 
 def _sql_shim_aggregates() -> bool:
@@ -324,11 +324,11 @@ _TREE_PROBE = (
 
 
 def _make_tree(root: Path, adapters: dict[str, str], described: tuple[str, ...] = ()) -> Path:
-    """A minimal defender tree: `scripts/adapters/{system}_adapter.py` + a described SKILL.md per
+    """A minimal defender tree: `integrations/{system}_adapter.py` + a described SKILL.md per
     system, so descriptor_catalog has a roster to glob AND a description to read."""
-    (root / "scripts" / "adapters").mkdir(parents=True)
+    (root / "integrations").mkdir(parents=True)
     for system, src in adapters.items():
-        (root / "scripts" / "adapters" / f"{system}_adapter.py").write_text(src, encoding="utf-8")
+        (root / "integrations" / f"{system}_adapter.py").write_text(src, encoding="utf-8")
     for system in described:
         d = root / "skills" / system
         d.mkdir(parents=True)
@@ -347,7 +347,7 @@ def test_descriptor_catalog_advertises_only_declared_systems(tmp_path):
     )
     grant = VerbGrant(role="gather", entries=(("solid", "look", "r"),))
     catalog = SI.index_text(SI.index_module(), tree / "skills",
-                            read_roster(tree / "scripts" / "adapters"), grant)
+                            read_roster(tree / "integrations"), grant)
     assert SI.listing(catalog)
     assert "`solid`" in catalog
     assert "hollow" not in catalog, "a system with no declared verbs was advertised to gather"
@@ -359,15 +359,15 @@ def test_descriptor_catalog_does_not_freeze_the_tree(tmp_path):
 
     grant = VerbGrant(role="gather", entries=(("probe", "whoami", "r"),))
     module = SI.index_module()
-    assert SI.listing(SI.index_text(module, a / "skills", read_roster(a / "scripts" / "adapters"),
+    assert SI.listing(SI.index_text(module, a / "skills", read_roster(a / "integrations"),
                                     grant))
-    assert SI.listing(SI.index_text(module, b / "skills", read_roster(b / "scripts" / "adapters"),
+    assert SI.listing(SI.index_text(module, b / "skills", read_roster(b / "integrations"),
                                     grant))
 
     ctx_a = _tenants1106.verb_context(a, tmp_path / "run", {})
     ctx_b = _tenants1106.verb_context(b, tmp_path / "run", {})
-    fn_a = ModuleVerbRegistry(read_roster(a / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
-    fn_b = ModuleVerbRegistry(read_roster(b / "scripts" / "adapters"), DENY_ALL).verbs("probe")["whoami"]
+    fn_a = ModuleVerbRegistry(read_roster(a / "integrations"), DENY_ALL).verbs("probe")["whoami"]
+    fn_b = ModuleVerbRegistry(read_roster(b / "integrations"), DENY_ALL).verbs("probe")["whoami"]
 
     assert fn_a(ctx_a) == {"tree": str(a)}
     assert fn_b(ctx_b) == {"tree": str(b)}, \
@@ -769,7 +769,7 @@ def _decide(cmd: str, policy, run_dir):
 @pytest.mark.parametrize("cmd", [
     "defender-elastic query foo",
     "defender-elastic esql 'FROM x' | defender-sql 'SELECT 1'",
-    "python3 defender/scripts/adapters/elastic_adapter.py query foo",
+    "python3 defender/integrations/elastic_adapter.py query foo",
 ])
 def test_adapters_unreachable_from_gather_bash(tmp_path, cmd):
     run_dir, gather, _ = _policies(tmp_path)
@@ -800,7 +800,7 @@ _ESQL_RAW = {
 
 
 def test_gather_bash_runs_a_declared_defender_sql_over_the_esql_payload_it_captured(tmp_path):
-    from defender.scripts.adapters.elastic_adapter import esql_payload
+    from defender.integrations.elastic_adapter import esql_payload
 
     rec = VerbRecorder()
 

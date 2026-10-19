@@ -130,10 +130,10 @@ def test_1080_values_derived_from_a_moved_files_location_resolve_as_before():
     assert Path(S.moved_module("cmd_tags").REPO_ROOT).resolve() \
         == (S.REPO_ROOT / g["lessons_fm_REPO_ROOT"]).resolve()
     # `lessons_frontier` no longer derives a root from its own location: its default corpus
-    # comes from `defender._knowledge` (#1108), so the cell checks that corpus's checkout.
+    # comes from `defender.knowledge._knowledge` (#1108), so the cell checks that corpus's checkout.
     assert Path(S.moved_module("WRITE_RETURN_LEAD").DEFAULT_CORPUS).resolve().parents[1] \
         == (S.REPO_ROOT / g["lessons_frontier_REPO_ROOT"]).resolve()
-    assert Path(S.moved_module("reexec_into_venv", home=S.FLAT_TIER)._DEFENDER_DIR).resolve() \
+    assert Path(S.moved_module("reexec_into_venv", home=S.VENV)._DEFENDER_DIR).resolve() \
         == (S.REPO_ROOT / g["venv_DEFENDER_DIR"]).resolve()
 
 

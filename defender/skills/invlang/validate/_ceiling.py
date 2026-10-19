@@ -148,7 +148,7 @@ def _parse_ceiling_row(row: str) -> CeilingReceipt | None:
 
 
 #: The closed universe of `(system, verb)` pairs this codebase's adapters declare
-#: (`defender/scripts/adapters/*_adapter.py`), which `nothing-to-try` is checked against. Closed
+#: (`defender/integrations/*_adapter.py`), which `nothing-to-try` is checked against. Closed
 #: by construction: code this repo owns, never a catalogue of real-world data sources.
 #:
 #: Held, never fetched: the process's composition root reads the roster once and hands it over

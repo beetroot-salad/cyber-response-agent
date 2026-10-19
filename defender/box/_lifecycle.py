@@ -17,8 +17,8 @@ from typing import Any
 from pathlib import Path
 
 from defender._io import bind, read_text_utf8, READ_LIMIT, stat_entries, sweep_staged, write_guarded
-from defender._run_id import RUN_ID_ALLOWED, is_valid_run_id
-from defender._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
+from defender.records._run_id import RUN_ID_ALLOWED, is_valid_run_id
+from defender.tenancy._tenant import TenantId, TenantRefused, parse_tenant_id_bytes, read_tenant_id_file
 from defender.run_repository import RUN_LAYOUT
 from defender.execution.box_codec import (
     BOX_ENV_ALLOWLIST,
@@ -366,7 +366,7 @@ def _check_tenant_identity(path: Path, expected: TenantId, docker: DockerFn, nam
     """
     command = (
         "import base64, sys; from pathlib import Path; "
-        "from defender._tenant import read_tenant_id_bytes; "
+        "from defender.tenancy._tenant import read_tenant_id_bytes; "
         "print(base64.b64encode(read_tenant_id_bytes(Path(sys.argv[1]))).decode('ascii'))"
     )
     proc = _call(docker, ["docker", "exec", name, "python3", "-c", command, str(path)])

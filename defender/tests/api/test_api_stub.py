@@ -38,7 +38,7 @@ from defender.api.models import (  # noqa: E402
     SystemPut,
     SystemSettings,
 )
-from defender._tenant import TenantRefused  # noqa: E402
+from defender.tenancy._tenant import TenantRefused  # noqa: E402
 from defender.api.ports import (  # noqa: E402
     ApiDeps,
     Conflict,

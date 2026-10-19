@@ -33,9 +33,9 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_paths import LAYOUT
 from defender._io import Bound
-from defender._query_rules import DENIED_QUERY_ID
+from defender.knowledge._query_rules import DENIED_QUERY_ID
 from defender.learning.branch.ledger import FAULT, REFUSED
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import mapping_key

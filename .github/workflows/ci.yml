@@ -57,7 +57,7 @@ jobs:
       # build each time; bounded separately from the gVisor step below, which it precedes.
       - name: Build the box image
         timeout-minutes: 4
-        run: python3 defender/scripts/box_image.py build
+        run: python3 defender/box/image_cli.py build
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -229,7 +229,7 @@ jobs:
       # the owned image (O3).
       - name: Build the box image
         timeout-minutes: 4
-        run: python3 defender/scripts/box_image.py build
+        run: python3 defender/box/image_cli.py build
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -351,7 +351,7 @@ jobs:
       # RUNNER too, never inside `.dood-inner.sh`.
       - name: Build the box image
         timeout-minutes: 4
-        run: python3 defender/scripts/box_image.py build
+        run: python3 defender/box/image_cli.py build
 
       # Same install as the `test` job: the boxes are created by the HOST daemon, so the
       # runtime has to be registered out here, not in the container running pytest.
@@ -509,7 +509,7 @@ jobs:
       # modules (tests + .venv excluded), config in defender/pyproject.toml.
       # Promoted from a non-blocking code-smells signal to this blocking gate once
       # the tree reached zero errors — the ramp's "promote when clean" step (see
-      # docs/decisions/defender-mypy-ramp.md), the same graduation the extended
+      # defender/docs/decisions/defender-mypy-ramp.md), the same graduation the extended
       # ruff families went through (#400). Config pointed explicitly; there's no
       # root pyproject for mypy to discover. The lint venv is --extra dev (no
       # pydantic_ai), so mypy treats it as Any — runtime-only driver.py generic-
@@ -559,7 +559,7 @@ jobs:
       # walk, never a second implementation), so a green gate here means the runtime reads
       # every entry the author wrote.
       - name: Tacit-knowledge registry (hard gate — the commit is the sign-off)
-        run: defender/.venv/bin/python -m defender.scripts.tacit_cli check
+        run: defender/.venv/bin/python -m defender.cli.tacit_cli check
 
       # The other half of the `gate` marker (defender/pyproject.toml): the nine tests that
       # re-run a repo-wide lint gate over the real tree, which the `test` job deselects with
@@ -623,7 +623,7 @@ jobs:
       - name: Radon — raw size metrics
         run: defender/.venv/bin/radon raw defender -s || true
 
-      # The data-source adapters under scripts/adapters/ used to be excluded via
+      # The data-source adapters under integrations/ used to be excluded via
       # `**/*_cli.py`, on the rationale that they shared argparse scaffolding. That
       # stopped being true in #611 (no adapter but `ticket` has argparse), and the
       # exclusion was retired with the `_cli` name in #619. Measured with the
@@ -670,7 +670,7 @@ jobs:
       - name: Log-setup gate (every program configures logging)
         run: defender/.venv/bin/python tooling/lint/lint_log_setup.py
 
-      # Lesson text is corpus text a model wrote (#1206): it leaves defender/_corpus.py as
+      # Lesson text is corpus text a model wrote (#1206): it leaves defender/knowledge/_corpus.py as
       # Lesson.line / .lines / .match_text, or a raw read says on its line where it goes.
       - name: Lesson-text gate (raw lesson text is read only where a line says why)
         run: defender/.venv/bin/python tooling/lint/lint_lesson_text.py

@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from defender import _tenant
-from defender.scripts import tenant as tenant_py
+from defender.tenancy import _tenant
+from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
 #: The remedy every "no knowledge folder" refusal carries (DC2, N12 re-read): clone the tenant

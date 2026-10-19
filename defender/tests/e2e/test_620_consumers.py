@@ -16,7 +16,7 @@ pytest.importorskip("pydantic_ai")
 
 import yaml  # noqa: E402  (pyyaml is a runtime dep)
 
-from defender import _corpus  # noqa: E402
+from defender.knowledge import _corpus  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads.draft_synthesis import _draft_basename  # noqa: E402
@@ -30,8 +30,8 @@ from defender.learning.leads import (  # noqa: E402
     lead_neighbors,
     pitfalls_curator,
 )
-from defender.scripts.adapters import cmdb_adapter, elastic_adapter  # noqa: E402
-from defender.scripts.visualize import visualize_runtime  # noqa: E402
+from defender.integrations import cmdb_adapter, elastic_adapter  # noqa: E402
+from defender.presentation import visualize_runtime  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,
@@ -542,7 +542,7 @@ def _seed_repo_no_execution_md(tmp_path: Path) -> Path:
     hs.mkdir(parents=True)
     (hs / "SKILL.md").write_text("---\nname: defender-host-state\n---\n# host-state\n")
     (repo / "defender" / "skills" / "gather" / "queries").mkdir(parents=True)
-    adapters = repo / "defender" / "scripts" / "adapters"
+    adapters = repo / "defender" / "integrations"
     adapters.mkdir(parents=True)
     (adapters / "host_state_adapter.py").write_text("VERBS = {}\n")
     _git(repo, "init", "-q", "-b", "main")
@@ -626,11 +626,11 @@ def _scaffold_cmdb_tree(root: Path, template_body: str, *, verb: str = "get-host
                         params: tuple[str, ...] = ("host",)) -> Path:
     """A minimal defender tree that otherwise passes the registry probe: the REAL cmdb adapter +
     shared modules + skill + execution.md, plus one crafted cmdb query template."""
-    (root / "scripts" / "adapters").mkdir(parents=True)
+    (root / "integrations").mkdir(parents=True)
     for f in ("cmdb_adapter.py", "_stub_transport.py", "faults.py"):
-        src = DEFENDER / "scripts" / "adapters" / f
+        src = DEFENDER / "integrations" / f
         if src.exists():
-            (root / "scripts" / "adapters" / f).write_text(
+            (root / "integrations" / f).write_text(
                 src.read_text(encoding="utf-8"), encoding="utf-8")
     for rel in ("skills/cmdb/SKILL.md", "skills/cmdb/execution.md"):
         src = DEFENDER / rel
@@ -659,7 +659,7 @@ def test_validate_scaffold_fails_a_verb_that_is_not_dispatchable(tmp_path, label
     def tree(name: str, mutated_signature: str | None) -> Path:
         root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
         if mutated_signature is not None:
-            adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
+            adapter = root / "integrations" / "cmdb_adapter.py"
             src = adapter.read_text(encoding="utf-8")
             mutated = src.replace(_GET_HOST_SIG, mutated_signature)
             assert mutated != src, "the get_host signature moved — this mutation no longer applies"
@@ -761,7 +761,7 @@ def _strip_check(source: str) -> str:
 #: The name the `assigned` arm gives the adapter's own check before binding `check_settings` to it.
 _RENAMED_CHECK = "_fd1256_settings_check"
 #: The shipped adapter the `imported` arm binds `check_settings` from (the scaffold's copy is of it).
-_CHECKOUT_CMDB = "defender.scripts.adapters.cmdb_adapter"
+_CHECKOUT_CMDB = "defender.integrations.cmdb_adapter"
 _NOT_CALLABLE = f'\n\n{_CHECK} = "FD1256 a settings check that is not a function"\n'
 
 
@@ -809,7 +809,7 @@ def _with_settings_check(source: str, arm: str) -> str:
 def _settings_check_tree(tmp_path: Path, name: str, arm: str) -> Path:
     """A scaffold tree whose cmdb adapter is `_with_settings_check(<the real one>, arm)`."""
     root = _scaffold_cmdb_tree(tmp_path / name, "get-host host=${host}")
-    adapter = root / "scripts" / "adapters" / "cmdb_adapter.py"
+    adapter = root / "integrations" / "cmdb_adapter.py"
     adapter.write_text(_with_settings_check(adapter.read_text(encoding="utf-8"), arm),
                        encoding="utf-8")
     return root

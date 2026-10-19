@@ -72,7 +72,7 @@ gate?" is now an ordinary design question. What runs today, and why:
   and the learning loop's own signal is only as good as the dispositions it
   trains on. Scoped to the close, and fails closed. See
   `content/runtime-loop.md` §The close is gated.
-- **The artifact schema** (`_artifact_schema.py`, applied by
+- **The artifact schema** (`records/_artifact_schema.py`, applied by
   `permission.decide_write`) — every write a *model* makes to
   `investigation.md` / `report.md` has to meet the schema, which is what makes
   "a committed investigation parses" true. The learning loop cannot read an

@@ -11,7 +11,7 @@ explains how the defender works — it does not investigate alerts. Use
 `defender/SKILL.md` (via `python3 defender/run.py <alert.json> --tenant <tenant>`) for an
 actual run — every run names its tenant, and there is no default; on the host,
 clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then run
-`python3 defender/scripts/tenant.py setup <tenant>` once, from the main checkout, with
+`python3 defender/cli/tenant.py setup <tenant>` once, from the main checkout, with
 `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as the
 same user that runs defender; a destination already occupied makes setup refuse, naming it in
 the message (adopting an existing (B)/(C) installation whose old entries are root-owned may

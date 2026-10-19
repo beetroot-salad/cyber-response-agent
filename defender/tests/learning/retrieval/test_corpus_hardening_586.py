@@ -7,7 +7,7 @@ from pathlib import Path
 
 from defender.tests.support.shared.contracts._by_path import load_trace_lesson
 
-from defender._corpus import iter_lesson_paths, iter_lessons
+from defender.knowledge._corpus import iter_lesson_paths, iter_lessons
 from defender._frontmatter import parse_frontmatter, split_frontmatter
 from defender.learning.author.lessons.run import build_author_config, existing_finding_ids
 from defender.learning.core.config import LoopPaths
@@ -27,7 +27,7 @@ def _tenant_runs() -> Path:
     """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2
     (J8, declared change 10): the tracer takes a required `--tenant` and walks that tenant's runs
     (`--runs-dir` is gone)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
     root = current_data_root()
@@ -60,7 +60,7 @@ def test_the_utf8_pin_covers_the_write_not_only_the_read(tmp_path):
         f"import sys; sys.path.insert(0, {str(WORKSPACE_ROOT)!r})\n"
         "import locale\n"
         "from pathlib import Path\n"
-        "from defender._corpus import iter_lessons\n"
+        "from defender.knowledge._corpus import iter_lessons\n"
         "from defender._io import use_utf8_stdio\n"
         "use_utf8_stdio()\n"
         "print('enc=' + locale.getencoding())\n"

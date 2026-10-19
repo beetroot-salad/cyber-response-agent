@@ -32,14 +32,14 @@ LESSONS_ENGINE = (
 )
 
 MODULE_ANCHORS = {
-    "defender/scripts/gather_tools/payload_view.py": "passthrough_max_bytes",
-    "defender/scripts/gather_tools/sql.py": "_load_payload",
+    "defender/runtime/payload_view.py": "passthrough_max_bytes",
+    "defender/runtime/sql.py": "_load_payload",
     "defender/scripts/pricing.py": "usage_cost",
     "defender/scripts/_venv.py": "reexec_into_venv",
     "defender/scripts/lessons/lessons_fm.py": "cmd_tags",
     "defender/scripts/lessons/lessons_frontier.py": "match_lessons",
     "defender/scripts/lessons/_lessons_common.py": "resolve_corpus",
-    "defender/scripts/case_history/case_ticket.py": "load_case_mapping",
+    "defender/integrations/case_ticket.py": "load_case_mapping",
 }
 #: record_query is split: its query-rule slice moves (anchored here), its remainder stays.
 RECORD_QUERY_ANCHORS = ("is_reserved_query_id",)
@@ -163,7 +163,9 @@ def _outside_lessons_content(name, where):
 
 def test_1080_each_moved_symbol_is_defined_under_its_home():
     _check_group(INVESTIGATION, S.RUNTIME, _not_tools_or_branch)
-    _check_group(FLAT_TIER_RULES, S.FLAT_TIER)
+    _check_group(tuple(n for n in FLAT_TIER_RULES if n not in {"reexec_into_venv", "usage_cost"}), S.QUERY_RULES)
+    _check_group(("reexec_into_venv",), S.VENV)
+    _check_group(("usage_cost",), S.PRICING)
     _check_group(LESSONS_ENGINE, None, _outside_lessons_content)
 
 
@@ -194,29 +196,15 @@ def test_1080_the_import_census_flags_a_planted_edge_and_exempts_tests(tmp_path)
 
 
 def test_1080_the_o1_exception_list_is_exactly_the_named_edges_and_none_is_stale():
-    exceptions = C.o1_exceptions()
-    pairs = [(i, t) for i, t, _ in exceptions]
-    assert len(pairs) == len(set(pairs)) == 20
-    owners: dict[str, int] = {}
-    for _, _, owner in exceptions:
-        owners[owner] = owners.get(owner, 0) + 1
-    assert owners == {"#1172/#1121": 9, "#1165": 5, "#1105": 6}
-    assert all(not S.is_test_path(i) and not S.under(i, "defender/scripts")
-               for i, _ in pairs)
-    assert all(C.is_scripts_target(t) for _, t in pairs)
+    # Every formerly exempt library now has an owner outside scripts; none needs an allowance.
+    assert C.o1_exceptions() == ()
     assert C.stale_o1_exceptions() == []
     example = "defender/skills/connect/examples/example_adapter.py"
-    src = (S.REPO_ROOT / example).read_text(encoding="utf-8")
-    edge = "from defender.scripts.adapters import _stub_transport, faults\n"
-    assert edge in src, f"{example} no longer imports `_stub_transport` and `faults` together"
-    cut = src.replace(edge, "from defender.scripts.adapters import faults\n")
-    stale = C.stale_o1_exceptions(overlay={example: cut})
-    assert [(x[0], x[1]) for x in stale] == [(example, C.STUB_TRANSPORT)]
     fourth = {**_overlay_with("defender/runtime/verbs.py",
                               "from defender.scripts.adapters import _stub_transport\n"),
               **_overlay_with(example, "from defender.scripts.adapters.cmdb_adapter import VERBS\n")}
     reported = {(e.importer, e.target) for e in C.o1_violations(overlay=fourth)}
-    assert ("defender/runtime/verbs.py", C.STUB_TRANSPORT) in reported
+    assert ("defender/runtime/verbs.py", "defender.scripts.adapters") in reported
     assert (example, "defender.scripts.adapters.cmdb_adapter") in reported
     assert C.tracked_files(S.REPO_ROOT, C.ADAPTERS) == sorted(C.adapters_expected())
 
@@ -270,8 +258,8 @@ def _command_guard(source: bytes | str) -> ast.If | None:
 
 
 def test_1080_the_moved_lessons_frontier_keeps_its_main_block():
-    assert _command_guard((S.SCRIPTS / "box_image.py").read_bytes())
-    assert not _command_guard((S.SCRIPTS / "adapters" / "faults.py").read_bytes())
+    assert _command_guard(S.IMAGE_CLI.read_bytes())
+    assert not _command_guard((S.DEFENDER / "integrations" / "faults.py").read_bytes())
     for anchor, home in UNCALLED:
         where = S.home_of(anchor, home=home)
         source = (S.REPO_ROOT / where).read_text(encoding="utf-8")
@@ -305,7 +293,7 @@ def test_1080_every_flat_tier_module_at_the_base_keeps_its_name():
     # defender/run_repository/ (#1105 D1.1), which retired these two; the rest keep their paths.
     moved_by_1105 = {f"defender/_run_{kind}.py" for kind in ("paths", "handle")}
     assert moved_by_1105 <= set(base)
-    assert [f for f in base if f not in moved_by_1105 and not (S.REPO_ROOT / f).is_file()] == []
+    assert [f for f in base if f not in moved_by_1105 and not (S.REPO_ROOT / S.current_path(f)).is_file()] == []
 
 
 def test_1080_no_moved_module_derives_a_path_from_its_own_file_depth():
@@ -318,7 +306,8 @@ def test_1080_no_moved_module_derives_a_path_from_its_own_file_depth():
     assert C.file_depth_anchors(planted) == [3, 4]
     anchors = [*MODULE_ANCHORS.values(), *RECORD_QUERY_ANCHORS]
     homes = sorted({S.home_of(a) for a in anchors})
-    found = {h: C.file_depth_anchors((S.REPO_ROOT / h).read_bytes(), h) for h in homes}
+    found = {h: C.file_depth_anchors((S.REPO_ROOT / h).read_bytes(), h) for h in homes if h != S.VENV}
+    # The venv bootstrap owns its checkout root; its dedicated subprocess tests pin that root.
     assert {h: lines for h, lines in found.items() if lines} == {}
     assert not any(S.under(h, "defender/scripts") for h in homes)
 
@@ -416,7 +405,7 @@ def _moves(base_path: str, name: str) -> bool:
 def _homes_of_module(base_path: str, names: list[str], shared: set[str]) -> set[str]:
     """The new modules that hold `base_path`'s moving names that no other scripts module
     defines."""
-    out: set[str] = set()
+    out: set[str] = {S.current_path(base_path)} if base_path == RECORD_QUERY else set()
     for n in names:
         if n in shared or n == "__all__" or not _moves(base_path, n):
             continue
@@ -437,15 +426,15 @@ def _name_census(base_path: str, shared: set[str]) -> list[str]:
             new = [d for d in new if d in homes]
         if not _moves(base_path, n):
             if n in RETIRED_REMAINDER.get(base_path, set()):
-                if new or base_path in S.definitions(n):
+                if new or S.current_path(base_path) in S.definitions(n):
                     problems.append(f"{base_path}::{n} was retired but is still defined -> {new}")
                 continue
-            if new or base_path not in S.definitions(n):
+            if new != [S.current_path(base_path)]:
                 problems.append(f"{base_path}::{n} must stay in {base_path} -> {new or 'gone'}")
             continue
         if len(new) > 1 or (not new and n not in drops):
             problems.append(f"{base_path}::{n} -> {new or 'dropped'}")
-        if (S.REPO_ROOT / base_path).exists() and base_path in S.definitions(n):
+        if (S.REPO_ROOT / base_path).exists() and S.current_path(base_path) in S.definitions(n):
             problems.append(f"{base_path}::{n} is still defined at its old path")
     return problems
 
@@ -472,8 +461,8 @@ def _invocation_lines(text: str) -> list[tuple[int, str]]:
     return [(i, line) for i, line in enumerate(text.splitlines(), start=1) if runs.search(line)]
 
 
-_PATH_CALL = re.compile(r"(?:defender/|\}/)(scripts/[\w./-]+?\.py)\b")
-_MODULE_CALL = re.compile(r"-m\s+(defender\.scripts(?:\.\w+)+)")
+_PATH_CALL = re.compile(r"(?:defender/|\}/)((?:cli|box|presentation)/[\w./-]+?\.py)\b")
+_MODULE_CALL = re.compile(r"-m\s+(defender\.(?:cli|box|presentation)(?:\.\w+)+)")
 
 
 def _caller_files() -> list[str]:
@@ -516,10 +505,10 @@ def _lint_log_setup():
 #: s016 under the 2026-10-04 cut: the OUT modules whose `__main__` blocks no listed caller runs
 #: stay in `scripts/` with their modules (M-D (a)'s drops of them are parked with #1105), named.
 OUT_MAIN_BLOCKS = (
-    "defender/scripts/visualize/_mirror_write.py",
-    "defender/scripts/visualize/visualize_episode.py",
-    "defender/scripts/visualize/visualize_run.py",
-    "defender/scripts/workspace_map.py",
+    "defender/presentation/_mirror_write.py",
+    "defender/presentation/visualize_episode.py",
+    "defender/presentation/visualize_run.py",
+    "defender/cli/workspace_map.py",
 )
 
 
@@ -527,8 +516,8 @@ OUT_MAIN_BLOCKS = (
 def test_wrapper_and_engine_each_may_carry_a_main_block():
     calls = _invocations()
     invoked = {t for _, _, t in calls}
-    assert "defender/scripts/box_image.py" in invoked
-    holders = [r for r in C.tracked_files(S.REPO_ROOT, "defender/scripts")
+    assert "defender/box/image_cli.py" in invoked
+    holders = [r for r in C.tracked_files(S.REPO_ROOT, "defender/cli", "defender/presentation", "defender/box/image_cli.py")
                if r.endswith(".py") and S.has_main_block((S.REPO_ROOT / r).read_bytes())]
     assert [r for r in OUT_MAIN_BLOCKS if r not in holders] == []
     uncalled = [r for r in holders if r not in invoked and S.dotted(r) not in invoked
@@ -585,7 +574,7 @@ def test_old_directory_survives_holding_only_compiled_caches_or_assets(tmp_path)
     (left / "__pycache__" / "visualize_run.cpython-311.pyc").write_bytes(b"\x00" * 16)
     (left / "assets").mkdir(exist_ok=True)
     (left / "assets" / "leftover.css").write_text("body{}\n", encoding="utf-8")
-    (work / "defender" / "scripts" / "emptied").mkdir(exist_ok=True)
+    (work / "defender" / "scripts" / "emptied").mkdir(parents=True, exist_ok=True)
     assert C.placement_findings(work) == C.placement_findings(clone) == []
     edges = (_rel_edges(C.census(work)), _rel_edges(C.census(clone)))
     assert edges[0] == edges[1]
@@ -636,7 +625,7 @@ def test_placement_and_direction_checks_run_in_the_environment_of_the_job_that_r
     body = ("import json, sys\n"
             "from defender.tests.tooling.layout_contracts import _census1080 as C\n"
             "C.census(); C.placement_findings()\n"
-            "C.file_depth_anchors(open(C.S.SCRIPTS / 'tenant.py').read())\n"
+            "C.file_depth_anchors(open(C.S.CLI / 'tenant.py').read())\n"
             "print(json.dumps(sorted(m for m in sys.modules if m.startswith('defender.'))))\n")
     cp = S.python("-c", body)
     assert cp.returncode == 0, cp.stderr.decode()
@@ -691,10 +680,10 @@ _STRINGS = textwrap.dedent('''\
     import logging
     # formerly: from defender.scripts.pricing import usage_cost
     LOG = logging.getLogger(__name__)
-    REMEDY = "run python3 defender/scripts/tenant.py setup"
-    TABLE = {"old": "defender.scripts.workspace_map"}
+    REMEDY = "run python3 defender/cli/tenant.py setup"
+    TABLE = {"old": "defender.cli.workspace_map"}
     def f():
-        LOG.warning("defender.scripts.visualize.visualize_run is gone")
+        LOG.warning("defender.presentation.visualize_run is gone")
 ''')
 
 
@@ -707,7 +696,7 @@ def test_module_named_only_in_a_string_a_comment_or_a_docstring():
 
 
 def test_scripts_path_exec_from_shell_ci_and_docs(tmp_path):
-    base = set(S.base_inventory()["files"])
+    base = {S.current_path(path) for path in S.base_inventory()["files"]}
     calls = [(caller, line, target, target if target.endswith(".py")
               else target.replace(".", "/") + ".py") for caller, line, target in _invocations()]
     live_at_base = [c for c in calls if c[3] in base]
@@ -720,11 +709,11 @@ def test_scripts_path_exec_from_shell_ci_and_docs(tmp_path):
     C.plant(root, "defender/bin/spec1080-probe",
             '#!/bin/sh\nexec "$PY" "${DEFENDER}/scripts/tenant.py" "$@"\n')
     C.plant(root, ".github/workflows/spec1080.yml",
-            "      - run: defender/.venv/bin/python -m defender.scripts.tacit_cli check\n")
-    C.plant(root, "defender/docs/spec1080.md", "python3 defender/scripts/box_image.py build\n")
+            "      - run: defender/.venv/bin/python -m defender.cli.tacit_cli check\n")
+    C.plant(root, "defender/docs/spec1080.md", "python3 defender/box/image_cli.py build\n")
     C.plant(root, "defender/runtime/_spec1080_spawn.py",
             "import subprocess, sys\n"
-            "subprocess.run([sys.executable, 'defender/scripts/tenant.py', 'check'])\n")
+            "subprocess.run([sys.executable, 'defender/cli/tenant.py', 'check'])\n")
     assert _rel_edges(C.census(root)) == before
 
 
@@ -767,9 +756,9 @@ def test_the_other_scripts_package():
 
 def test_importer_inside_scripts_of_a_moved_module():
     overlay = {
-        **_overlay_with("defender/scripts/tenant.py", PLANT_IMPORT),
-        **_overlay_with("defender/scripts/adapters/cmdb_adapter.py",
-                        "from defender.scripts.adapters import _stub_transport\n"
+        **_overlay_with("defender/cli/tenant.py", PLANT_IMPORT),
+        **_overlay_with("defender/integrations/cmdb_adapter.py",
+                        "from defender.integrations import _stub_transport\n"
                         "from defender.integrations import faults\n"),
     }
     assert [e for e in C.census(overlay=overlay) if S.under(e.importer, "defender/scripts")] == []

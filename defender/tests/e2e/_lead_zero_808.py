@@ -42,7 +42,7 @@ first cut of this suite encoding arm (a) instead.
 A scenario therefore supplies the group id through `run(shell=shell_doc(group_id="grp-0"))` —
 the document the by-`alert_id` fetch RETURNS — and `alert_group_id.domain.distinguished[grp-0]`
 is where the graph pins that value. Every other field of `alert_doc()` is copied from
-`defender/fixtures/v2-sshd-success-after-failures/alert.json`'s real shape: brief R6 (the
+`playground-v2/examples/alerts/v2-sshd-success-after-failures/alert.json`'s real shape: brief R6 (the
 design's own key list matches none of the five checked-in fixtures) is why the base document is
 read off the tree rather than off the doc.
 
@@ -68,7 +68,7 @@ pytest.importorskip("pydantic_ai")
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
-from defender.scripts.adapters.elastic_adapter import search_envelope  # noqa: E402
+from defender.integrations.elastic_adapter import search_envelope  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import breaker_doc  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,

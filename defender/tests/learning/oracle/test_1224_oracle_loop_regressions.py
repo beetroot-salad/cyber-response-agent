@@ -1162,7 +1162,7 @@ def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_pa
 
 def test_cached_tokens_are_billed_once(tmp_path):
     """Sixth-round finding 4."""
-    from defender._pricing import usage_cost
+    from defender.configuration._pricing import usage_cost
 
     est = S.estate(tmp_path)
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=S.oracle(),
@@ -1329,7 +1329,7 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
 
     ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)))
     seen: dict = {}
-    from defender._episode_handle import Episode
+    from defender.episodes._episode_handle import Episode
     run._drive_investigation(
         alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / 'sib'),
         defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.storage._alert_plant import plant_alert
-from defender import _episode_handle as EH
+from defender.episodes import _episode_handle as EH
 
 
 def cli_mod():

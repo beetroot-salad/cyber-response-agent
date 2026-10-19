@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.scripts import tenant as tenant_py
+from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
 #: Every ambient git variable is dropped from the scaffold process's environment, so the test,

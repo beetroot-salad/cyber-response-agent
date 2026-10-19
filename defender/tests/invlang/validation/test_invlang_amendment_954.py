@@ -153,7 +153,7 @@ def test_relisting_a_lead_overwrites_a_conflicting_non_empty_cell():
 
 def test_a_block_without_a_repeated_id_gains_no_diagnostic():
     """A `:L findings` block whose ids are all distinct gains NO repeated-id diagnostic on any surface the finding could reach — `parse_warnings`, `diagnose`, or the write gate's refusal text — and both leads project (O5, D5)."""
-    from defender._artifact_schema import validate_investigation
+    from defender.records._artifact_schema import validate_investigation
 
     assert [w.reason for w in warnings_of(TWO_IDS_DOC) if REPEAT_PHRASE in w.reason] == []
     assert repeat_diagnostics(TWO_IDS_DOC) == []
@@ -266,7 +266,7 @@ def test_suggestion_splits_back_to_the_declared_column_count():
 
 def test_withheld_suggestion_is_an_empty_fix_tuple_on_a_still_flagged_row():
     """When a candidate cannot satisfy O6 the whole suggestion is withheld:"""
-    from defender._artifact_schema import render_diagnostic
+    from defender.records._artifact_schema import render_diagnostic
 
     doc = attr_doc(ASYMMETRIC_ROW)
     d = key_warning(doc)
@@ -372,7 +372,7 @@ def test_the_offered_unquoting_repair_actually_pastes(tmp_path):
 
 def test_an_invisible_character_the_strip_does_not_remove_reaches_model_context_raw():
     """A character the tokenizer's strip does not remove survives into `raw_row` / `locus.row_text` byte for byte, and `render_diagnostic` splices that text into `model_context` unchanged (D18)."""
-    from defender._artifact_schema import render_diagnostic
+    from defender.records._artifact_schema import render_diagnostic
 
     row = "l-001|v-001|bo​gus|hello"
     doc = attr_doc(row)
@@ -463,7 +463,7 @@ def test_paste_gate_enforces_the_same_declared_width_equality_as_the_offer_gate(
 
 def test_the_paste_gate_returns_a_reason_where_the_row_reader_would_raise(tmp_path):
     """The parser's row reader is WRAPPED, not substituted:"""
-    from defender._artifact_schema import validate_investigation
+    from defender.records._artifact_schema import validate_investigation
     from pydantic_ai.exceptions import ModelRetry
 
     doc = attr_doc(MID_TOKEN_QUOTE_ROW)
@@ -481,7 +481,7 @@ def test_the_paste_gate_returns_a_reason_where_the_row_reader_would_raise(tmp_pa
 
 def test_a_withheld_fix_row_keeps_its_locus_and_stays_deletable(tmp_path):
     """A row whose repairs were all withheld keeps its `locus`, so it stays in the repair window — and `fix_row(old_row, "")` still reaches it (F-M half two, D31)."""
-    from defender._artifact_schema import validate_investigation
+    from defender.records._artifact_schema import validate_investigation
 
     doc = attr_doc(MID_TOKEN_QUOTE_ROW)
     assert _flagged(doc) == [MID_TOKEN_QUOTE_ROW]

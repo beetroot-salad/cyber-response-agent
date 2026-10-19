@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
@@ -352,7 +352,7 @@ def _lead_author_main():
 
 
 def _workspace_map_main():
-    from defender.scripts import workspace_map
+    from defender.cli import workspace_map
 
     return workspace_map.main
 

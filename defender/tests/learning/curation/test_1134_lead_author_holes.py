@@ -13,7 +13,7 @@ import pytest
 
 from defender.tests.support.learning.curation._claim1175 import claim_git
 from defender._io import ALIAS_READ_REFUSAL
-from defender._scaffold_rules import check_system_skill
+from defender.knowledge._scaffold_rules import check_system_skill
 from defender.learning.author import shared as _author_shared
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender._tree_listing import list_tree

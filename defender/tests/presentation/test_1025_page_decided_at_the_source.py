@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import os
 from pathlib import Path
 
@@ -89,8 +90,7 @@ def test_1025_the_stage_table_reads_the_role_costs_the_model_decided(tmp_path):
     assert set(loaded.role_costs) == {"questioner", "judge"}
     assert f"${loaded.role_costs['questioner'].cost:.4f}" == S.questioner_cost
     assert f"${loaded.role_costs['judge'].cost:.4f}" == S.judge_cost
-    source = Path(module.__file__).read_text(encoding="utf-8")
-    render_src = source[source.index("def _render_stages("):source.index("def _role_cost_text(")]
+    render_src = inspect.getsource(module._render_stages)
     assert "role_cost(" not in render_src
     assert "comparator_cost(" not in render_src
 

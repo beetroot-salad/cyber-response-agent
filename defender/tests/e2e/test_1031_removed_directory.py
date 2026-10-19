@@ -13,7 +13,7 @@ from defender.runtime.circuit_breaker import (  # noqa: E402
     AGENT_FIXABLE_ERROR_CLASS,
 )
 from defender.runtime.verbs import ModuleVerbRegistry, read_roster  # noqa: E402
-from defender.scripts.gather_tools import record_query  # noqa: E402
+from defender.runtime import record_query  # noqa: E402
 from defender.tests.support.runtime.engine._declared869 import write  # noqa: E402
 from defender.tests.support.shared.contracts._after_start_1256 import AfterStart  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import grant_of  # noqa: E402

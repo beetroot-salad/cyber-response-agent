@@ -13,7 +13,7 @@ from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 from pydantic_ai.usage import UsageLimits  # noqa: E402
 
-from defender._env import FatalConfigError  # noqa: E402
+from defender.configuration._env import FatalConfigError  # noqa: E402
 from defender._paths import PATHS  # noqa: E402
 from defender.learning.core import config  # noqa: E402
 from defender.agents import QUESTIONER_DEF  # noqa: E402

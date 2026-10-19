@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from defender._io import READ_LIMIT
-from defender._tenant import TenantId, tenant_id_file_text
+from defender.tenancy._tenant import TenantId, tenant_id_file_text
 from defender.learning.core import drains
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.execution import bash_exec

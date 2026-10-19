@@ -87,7 +87,7 @@ def test_a_dirty_file_outside_the_corpus_never_enters_the_commit_773(tmp_path):
         rows=[S.finding_row("f1", run_id="f1")],
         curator=S.FakeCurator(writes={"l1.md": S.lesson("f1")}),
     )
-    stray = sc.repo / "defender" / "scripts" / "adapters" / "elastic_adapter.py"
+    stray = sc.repo / "defender" / "integrations" / "elastic_adapter.py"
     stray.write_text("VERBS = {'pre-existing': 'dirt'}\n", encoding="utf-8")
     assert sc.run() == 0
     assert sc.head_files() == [LESSON]

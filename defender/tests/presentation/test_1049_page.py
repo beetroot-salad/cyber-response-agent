@@ -1,4 +1,4 @@
-"""#1049 — the episode page (`scripts/visualize/visualize_episode.py`) over the bound readers."""
+"""#1049 — the episode page (`presentation/visualize_episode.py`) over the bound readers."""
 from __future__ import annotations
 
 import os

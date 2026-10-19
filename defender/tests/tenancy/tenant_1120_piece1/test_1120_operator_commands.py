@@ -11,13 +11,13 @@ from typing import Any
 
 import pytest
 
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
 from defender import box as box_mod
 from defender.execution import box_codec
-from defender.scripts import policy_cli
-from defender.scripts import tenant as tenant_py
+from defender.cli import policy_cli
+from defender.cli import tenant as tenant_py
 from defender.skills.connect import validate_scaffold
 from defender.tests.support.storage._alert_plant import plant_alert as plant_alert_with_record
 from defender.tests.support.learning.branch import _triplet_947 as T947

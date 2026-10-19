@@ -20,7 +20,7 @@ def _family_error() -> type[BaseException]:
 
 
 def _episode_cls() -> Any:
-    return S.sym("_episode_handle", "Episode")
+    return S.sym("episodes._episode_handle", "Episode")
 
 
 def _parse(doc: Any) -> Any:
@@ -69,7 +69,7 @@ def _page(ep: Path, capsys: Any) -> tuple[int, str]:
 
 
 def _page_file(ep: Path) -> Path:
-    return Path(ep) / str(S.sym("_episode_paths", "LAYOUT").learning_html)
+    return Path(ep) / str(S.sym("episodes._episode_paths", "LAYOUT").learning_html)
 
 
 def _grade(ep: Path, judge: Any, where: Path) -> Any:

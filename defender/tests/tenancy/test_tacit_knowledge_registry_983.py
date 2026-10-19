@@ -23,7 +23,7 @@ from defender.runtime.verbs import (
 from defender.tests.support.shared.contracts import _tacit983 as scene
 
 DEFENDER = REPO_ROOT / "defender"
-ADAPTERS = DEFENDER / "scripts" / "adapters"
+ADAPTERS = DEFENDER / "integrations"
 
 SYSTEM = scene.REGISTRY_SYSTEM
 LOOKUP = "lookup"
@@ -37,7 +37,7 @@ NOW = dt.date(2026, 5, 5)
 
 def registry():
     """The tacit-knowledge adapter module."""
-    from defender.scripts.adapters import tacit_knowledge_adapter
+    from defender.integrations import tacit_knowledge_adapter
 
     return tacit_knowledge_adapter
 

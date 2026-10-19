@@ -10,5 +10,5 @@ NON_ADAPTER_SHIMS = frozenset(
 
 OPERATOR_TOOLS = frozenset({"defender-policy"})
 
-ADAPTER_RE = re.compile(r"scripts/adapters/\w+_adapter\.py\b")
+ADAPTER_RE = re.compile(r"integrations/\w+_adapter\.py\b")
 

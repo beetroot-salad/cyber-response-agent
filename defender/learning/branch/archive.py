@@ -40,9 +40,9 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender._io import Bound, entry_present, read_text_utf8
-from defender._episode_paths import LAYOUT, WorldPaths
+from defender.episodes._episode_paths import LAYOUT, WorldPaths
 from defender.run_repository import (
     RunPaths,
     artifact_dir,

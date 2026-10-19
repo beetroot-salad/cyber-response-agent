@@ -57,7 +57,7 @@ def test_attr_update_key_unrecognized_value_other_than_ident(tmp_path):
 
 def test_attr_update_key_cell_is_empty(tmp_path):
     """A blank `key` cell is still REFUSED — asserted as the observable refusal, deliberately not as which internal check fired."""
-    from defender._artifact_schema import validate_investigation
+    from defender.records._artifact_schema import validate_investigation
 
     doc = PROLOGUE + attr_block("l-001|v-001||svc.config-mgmt")
     diags = _diagnose(doc, None)

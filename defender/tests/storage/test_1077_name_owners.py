@@ -85,7 +85,7 @@ def test_gathers_note_carries_the_owners_absolute_payload_path_and_the_gate_admi
     gate admits it under the raw-payload shape."""
     from defender.runtime import permission
     from defender.runtime.agent_definition import compile_policy_for
-    from defender.scripts.gather_tools import record_query
+    from defender.runtime import record_query
 
     rel = record_query.persist_payload(_writer_run_1165(run_dir), S.LEAD_ID, S.SEQ, '{"rows": []}')
     absolute = S.RunPaths(run_dir).payload(S.LEAD_ID, S.SEQ)
@@ -203,7 +203,7 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
     from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId, store_path_for
     for lineage in ("-leading-dash", "has space", "a/b", "héllo", "..", "_under"):
         assert not CASE_ID_RE.match(lineage), (
-            "the pattern is pinned BY REFERENCE at defender/_run_id.py (`CASE_ID_RE`) (RG-4); "
+            "the pattern is pinned BY REFERENCE at defender/records/_run_id.py (`CASE_ID_RE`) (RG-4); "
             "this test reads it, it does not re-spell it")
         _refuses(run_dir, base, lineage)
         with pytest.raises(InvalidCaseId):
@@ -240,7 +240,7 @@ def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_di
 
 def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stability_refusal(
         base, run_dir, episode_dir):
-    from defender._run_id import is_case_stable_id
+    from defender.records._run_id import is_case_stable_id
     owner = S.EpisodePaths(episode_dir)
     by_reference = "the rule is today's `_run_id.is_case_stable_id`, reached by reference"
     assert is_case_stable_id("plain"), by_reference

@@ -8,7 +8,7 @@ import subprocess
 import pytest
 
 from defender._io import read_text_utf8
-from defender.scripts.adapters.elastic_adapter import esql_payload
+from defender.integrations.elastic_adapter import esql_payload
 from defender.tests.support.shared.contracts._by_path import DEFENDER
 from defender.tests.support.integrations._defender_sql import (
     EXIT_INPUT_ERROR,

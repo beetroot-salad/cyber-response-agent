@@ -15,12 +15,12 @@ from defender.run_repository import RunPaths
 from defender.learning import lead_repository
 from defender.learning.lead_repository import QueryRow, load_queries
 from defender.runtime.circuit_breaker import AGENT_FIXABLE_ERROR_CLASS
-from defender.scripts.gather_tools.record_query import (
+from defender.runtime.record_query import (
     QUERY_ROW_COLUMNS,
     in_rejection_domain,
     rejection_trip,
 )
-from defender._query_rules import ABOVE_GUARD_QUERY_ID
+from defender.knowledge._query_rules import ABOVE_GUARD_QUERY_ID
 
 LEAD = "l-001"
 
@@ -326,7 +326,7 @@ def test_the_surface_refuses_a_link_at_the_tables_name_and_reads_an_absent_table
 
 
 _ROW_MODULES = (
-    "scripts/gather_tools/record_query.py",
+    "runtime/record_query.py",
     "runtime/lead_zero/_capture.py",
     "runtime/query_tool.py",
     "runtime/tools/_bash.py",

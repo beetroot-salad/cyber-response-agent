@@ -28,7 +28,7 @@ TID = H1105.T_ID
 
 def _tenant_runs() -> Path:
     """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2 (J8, declared..."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
     root = current_data_root()
@@ -107,7 +107,7 @@ def _records(view: dict) -> list[dict]:
 
 def test_d2_fm_and_raw_are_discriminable_by_value(tmp_path):
     """demand: d2 — the positional-swap fault stated on the VALUES, not on the shape."""
-    mod = importlib.import_module("defender._corpus")
+    mod = importlib.import_module("defender.knowledge._corpus")
     lesson = next(iter(mod.iter_lessons(_corpus_of(tmp_path, "good"))))
 
     assert isinstance(lesson.fm, dict)
@@ -119,7 +119,7 @@ def test_d2_fm_and_raw_are_discriminable_by_value(tmp_path):
 
 def test_d3_raw_is_the_slice_the_parser_consumed(tmp_path, capsys):
     """demand: d3 — ``Lesson.raw`` is EXACTLY the text between the fences that ``parse_frontmatter`` handed..."""
-    mod = importlib.import_module("defender._corpus")
+    mod = importlib.import_module("defender.knowledge._corpus")
     corpus = tmp_path / "lessons"
     corpus.mkdir()
     _crlf_lesson(corpus)
@@ -148,7 +148,7 @@ def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):
         import locale, sys
         sys.path.insert(0, {str(WORKSPACE_ROOT)!r})
         from pathlib import Path
-        from defender._corpus import iter_lessons
+        from defender.knowledge._corpus import iter_lessons
         print("enc=" + locale.getencoding())
         stems = sorted(lesson.path.stem for lesson in iter_lessons(Path({str(corpus)!r})))
         print("stems=" + ",".join(stems))
@@ -167,7 +167,7 @@ def test_d5_utf8_pin_saves_a_valid_lesson_under_a_c_locale(tmp_path):
 
 def test_d6_empty_frontmatter_mapping_is_yielded(tmp_path, capsys):
     """demand: d6 (domain-outcome, R4: the FALSY member of a falsy_valid domain) — a lesson whose frontmatter is..."""
-    mod = importlib.import_module("defender._corpus")
+    mod = importlib.import_module("defender.knowledge._corpus")
     corpus = _corpus_of(tmp_path, "normal")
     (corpus / "empty-fm.md").write_text("---\n{}\n---\nbody\n")
 
@@ -180,7 +180,7 @@ def test_d6_empty_frontmatter_mapping_is_yielded(tmp_path, capsys):
 
 def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, capsys):
     """demand: d7 (domain-outcome, R4) — every ``FrontmatterError`` member of the corpus domain is warn-skipped,..."""
-    mod = importlib.import_module("defender._corpus")
+    mod = importlib.import_module("defender.knowledge._corpus")
     corpus = _corpus_of(tmp_path, "good")
     members = _frontmatter_error_members(corpus)
 
@@ -195,7 +195,7 @@ def test_d7_frontmatter_error_members_are_warn_skipped_by_name(tmp_path, capsys)
 
 def test_d9_oserror_members_are_warn_skipped(tmp_path, capsys):
     """demand: d9 (domain-outcome, R4) — the OSError arm of the guard, exercised by the two members that reach it..."""
-    mod = importlib.import_module("defender._corpus")
+    mod = importlib.import_module("defender.knowledge._corpus")
     corpus = _corpus_of(tmp_path, "good")
     members = _oserror_members(corpus)
 

@@ -285,7 +285,7 @@ def run_main(  # noqa: PLR0913 — the composition's seams, one keyword each
 def quiet_registry() -> type:
     """Use real verb signatures with empty elastic answers instead of network calls."""
     from defender.runtime.verbs import ModuleVerbRegistry
-    from defender.scripts.adapters.elastic_adapter import search_envelope
+    from defender.integrations.elastic_adapter import search_envelope
 
     def canned(fn: Any) -> Any:
         @functools.wraps(fn)
@@ -374,7 +374,7 @@ def control_episode(tmp_path: Path, source_run_dir: Path, branch_message_id: int
     """Create a control-world episode and its tenant-owned run container."""
     import os
 
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.learning.branch import cli
     from defender.tests.support.learning.branch import _triplet_947 as T
 
@@ -389,7 +389,7 @@ def control_episode(tmp_path: Path, source_run_dir: Path, branch_message_id: int
     root = Path(os.environ[T.EPISODES_BASE_ENV])
     ep = T.episode(tmp_path, doc=doc, episode_id=episode_id, root=root)
     (ep / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(ep / "runs", T.mod("_tenant").read_tenant(
+    _tenant.ensure_runs_base_record(ep / "runs", T.mod("tenancy._tenant").read_tenant(
         source.run_dir.parent).tenant_id)
     return ep
 
@@ -403,7 +403,7 @@ def record_source(tmp_path: Path, *, limits: dict | None = None) -> tuple[str, P
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     base, seed = T.runs_base(tmp_path)
-    tenant_id = T.mod("_tenant").read_tenant(base).tenant_id
+    tenant_id = T.mod("tenancy._tenant").read_tenant(base).tenant_id
     clock = FakeClock(SOURCE_START)
     main = script(clock, (0, append_first_fence()), (5, gather_turn("l-001", "elastic")),
                   (5, read_lesson(LESSONS[0])), (600, read_lesson(LESSONS[1])), (5, DONE))

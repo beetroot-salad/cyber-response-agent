@@ -1,7 +1,7 @@
 """#1007 — M4: the questioner's own samples, the per-world judge prompt, and the evidence scope."""
 from __future__ import annotations
 
-from defender._episode_handle import Episode
+from defender.episodes._episode_handle import Episode
 from defender.tests.support.learning.branch import _world_1007 as W
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
 

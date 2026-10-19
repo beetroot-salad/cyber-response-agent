@@ -6,10 +6,10 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender._frontmatter import strip_frontmatter
 from defender._io import read_text_soft
-from defender._knowledge import KnowledgePaths
+from defender.knowledge._knowledge import KnowledgePaths
 from defender._untrusted import wrap_fresh
 from defender.runtime.model_view import ModelView
 from defender.runtime.system_status import NONE_DOWN
@@ -225,7 +225,7 @@ def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a
         sections.append(lead_zero_section)
 
     try:
-        from defender.scripts.workspace_map import workspace_map
+        from defender.presentation.workspace_map import workspace_map
         sections.append(
             "## Workspace\n" + workspace_map(run_dir, systems=systems, view=view, down=down).strip())
     except Exception as e:  # noqa: BLE001 — orientation must never break the run

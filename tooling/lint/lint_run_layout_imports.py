@@ -75,7 +75,7 @@ HELPERS: frozenset[str] = frozenset({
 })
 
 _CLI = "learning/branch/cli.py"
-_VE = "scripts/visualize/visualize_episode.py"
+_VE = "presentation/visualize_episode.py"
 
 #: D7's table: every production importer of the layout in exactly one row, by its path under
 #: `defender/`. `owners` are exempt; the layout-exempt rows below may take layout names; a
@@ -85,7 +85,7 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "run_repository/__init__.py", "run_repository/_layout.py", "run_repository/_handle.py",
         "run_repository/_lookup.py", "run_repository/_record.py", "run_repository/_held.py",
         "run_repository/_id.py",
-        "run_repository/_errors.py", "_episode_paths.py", "_episode_handle.py", "_tenant.py",
+        "run_repository/_errors.py", "episodes/_episode_paths.py", "episodes/_episode_handle.py", "tenancy/_tenant.py",
     ),
     # N-a: the running investigation does not migrate; its record writes are #1165.
     "running-investigation": (
@@ -99,24 +99,24 @@ CATEGORIES: Mapping[str, Sequence[str]] = {
         "runtime/toon_gate.py", "box/_lifecycle.py",
         "runtime/branch/__init__.py", "runtime/branch/_frontier.py", "runtime/branch/_seed.py",
         "runtime/branch/_spec.py",
-        "scripts/gather_tools/record_query.py", "skills/invlang/corpus.py",
+        "runtime/record_query.py", "skills/invlang/corpus.py",
         # #1105 PR 2 (row 26): `infra_env` takes `DEFENDER_RUNS_BASE` from the run folder's
         # own hand-out (`RunPaths.runs_base_export`).
         "box/_docker.py",
     ),
     # A `/` join onto a layout value here is `lint_run_records` arm (b)'s finding, not this one.
     "names-only": (
-        "_report.py", "_artifact_schema.py", "runtime/compaction.py", "learning/branch/seams.py",
+        "records/_report.py", "records/_artifact_schema.py", "runtime/compaction.py", "learning/branch/seams.py",
         # F-09 (#1105 PR 2): learning/judge/render.py left this row (J3 took its last name).
         "learning/judge/__init__.py",
         "learning/core/config.py",
-        "scripts/workspace_map.py", "api/demo.py",
+        "presentation/workspace_map.py", "api/demo.py",
     ),
-    "run-lifecycle": ("run.py", "run_common.py", "scripts/case_history/ticket_writer.py"),
+    "run-lifecycle": ("run.py", "run_common.py", "integrations/ticket_writer.py"),
     "path-taking-readers": (
-        "learning/lead_repository.py", "scripts/visualize/visualize_run.py",
-        "scripts/visualize/visualize_runtime.py", "scripts/visualize/visualize_messages.py",
-        "scripts/visualize/visualize_data.py", "scripts/visualize/visualize_primitives.py",
+        "learning/lead_repository.py", "presentation/visualize_run.py",
+        "presentation/visualize_runtime.py", "presentation/visualize_messages.py",
+        "presentation/visualize_data.py", "presentation/visualize_primitives.py",
         # F-09 (#1105 PR 2): D5's callers, migrated onto ids at their edges, keep reading the
         # run folder they were handed (`run.run_dir`) by its layout names.
         "learning/branch/archive.py", "learning/branch/questioner/__init__.py",
@@ -144,10 +144,10 @@ ALLOW_LIST: Sequence[tuple[str, str, str, int]] = ()
 
 
 #: Owner classes and their gated members, by canonical origin.
-_EPISODE = "defender._episode_handle.Episode"
-_EPISODE_PATHS = "defender._episode_paths.EpisodePaths"
-_EPISODE_LAYOUT = "defender._episode_paths.EpisodeLayout"
-_TENANT = "defender._tenant.Tenant"
+_EPISODE = "defender.episodes._episode_handle.Episode"
+_EPISODE_PATHS = "defender.episodes._episode_paths.EpisodePaths"
+_EPISODE_LAYOUT = "defender.episodes._episode_paths.EpisodeLayout"
+_TENANT = "defender.tenancy._tenant.Tenant"
 _RUN = f"{_DOOR}.Run"
 _ARCHIVED = f"{_DOOR}.ArchivedWorld"
 _REPOSITORY = f"{_DOOR}.RunsRepository"
@@ -165,8 +165,8 @@ _GATED_MEMBERS: dict[str, frozenset[str]] = {
 _CONSTRUCTORS = frozenset({_RUN, _ARCHIVED, _REPOSITORY, _EPISODE_VIEW})
 _RUNS_DIRNAME = "RUNS_DIRNAME"
 #: Star imports of these modules bind gated names wholesale.
-_STAR_SOURCES = frozenset({_DOOR, "defender._episode_paths", "defender._episode_handle",
-                           "defender._tenant"})
+_STAR_SOURCES = frozenset({_DOOR, "defender.episodes._episode_paths", "defender.episodes._episode_handle",
+                           "defender.tenancy._tenant"})
 
 _OPTIONAL = frozenset({"Optional"})
 _UNION = frozenset({"Union"})

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from defender._tenant import Tenant
+from defender.tenancy._tenant import Tenant
 
 from .model import AgentChange, ChangeSet, DeliveryRefused, _refusals, _require_in_lanes
 from .record import _BatchKey, _Made, _record_made

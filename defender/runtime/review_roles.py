@@ -17,7 +17,7 @@ from defender._model import model
 from pathlib import Path
 from typing import Any, ClassVar
 
-from defender._env import env_str
+from defender.configuration._env import env_str
 from defender.runtime import observe
 from defender.runtime.agent_definition import AgentDefinition, RunScope, ToolSet, bind
 from defender.runtime.agent_role import REVIEW_AGENT_ID_PREFIX, AgentRole
@@ -50,7 +50,7 @@ _DENY_REASON = (
 REVIEW_MODEL_ENV = "DEFENDER_REVIEW_MODEL"
 
 # `REVIEW_AGENT_ID_PREFIX` is defined in the dependency-free `agent_role` so the cost readers
-# in `scripts/visualize/` can import the exact same prefix.
+# in `presentation/` can import the exact same prefix.
 
 #: The review's default model, independent of the investigator's. On two frozen judge cases
 #: the investigator's default was self-inconsistent while this one held across four reps

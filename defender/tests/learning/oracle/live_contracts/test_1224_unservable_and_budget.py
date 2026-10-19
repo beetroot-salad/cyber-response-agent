@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from defender._env import FatalConfigError
+from defender.configuration._env import FatalConfigError
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
 
@@ -215,7 +215,7 @@ def _sibling_episode(tmp_path: Path, monkeypatch: Any, est: S.Estate) -> Path:
     #1105 PR 2: the sibling opens its episode by id under the configured episodes base, so the
     episode lives there, and its container `runs/` is present with the tenant's record — what
     the launcher makes before the first sibling (an absent container refuses the sibling)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     episodes = tmp_path / "episodes-root"
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))

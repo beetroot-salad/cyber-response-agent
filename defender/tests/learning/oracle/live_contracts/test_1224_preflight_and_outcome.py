@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
+from defender.episodes import _episode_handle as EH
 from defender import _yaml
 from defender.tests.support.presentation import _episode_1025 as E
 from defender.tests.support.runtime.state import _1255_world as W
@@ -310,7 +310,7 @@ def _capture_row(src: Path, *, system: str, verb: str, params: Mapping[str, Any]
     its sidecar persisted, `error_class` and `payload_status` from the writer's own rules: a
     sentinel (`query_id` under the reserved prefix — nothing was sent) or a captured failure
     (`exit_code` non-zero). `T.capture_call` writes only successful captures."""
-    rq = S.mod("scripts.gather_tools.record_query")
+    rq = S.mod("runtime.record_query")
     breaker = S.mod("runtime.circuit_breaker")
     body = payload if payload is not None else {"error": "never reached a system"}
     text = json.dumps(body, sort_keys=True)
@@ -784,7 +784,7 @@ def test_preflight_original_call_was_itself_an_error(tmp_path, live):
         assert _key("edr", "lookup", params) in _keys(outcome["drift"], status="drifted")
         return
     assert "svc-err" not in oracle.all_seen(), "an error is not the oracle's to serve"
-    faults = S.mod("scripts.adapters.faults")
+    faults = S.mod("integrations.faults")
     untouched = S.oracle()
     reg = S.world_registry(run.ep, "b", est, oracle=untouched, verifier=S.verifier())
     with pytest.raises(faults.UpstreamFault):

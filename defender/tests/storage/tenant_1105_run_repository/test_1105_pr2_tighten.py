@@ -216,7 +216,7 @@ def test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs(tmp_path):
 def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d9_tenant):
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
-    from defender.scripts import workspace_map as wm
+    from defender.cli import workspace_map as wm
 
     runs = P.data_root() / d9_tenant / "runs"
     P.plant_record(runs, d9_tenant)
@@ -306,14 +306,14 @@ def _script(*parts: str) -> str:
 def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
-    from defender.scripts import workspace_map as wm
+    from defender.presentation import workspace_map as wm
 
     runs = P.data_root() / d9_tenant / "runs"
     P.plant_record(runs, d9_tenant)
     run = H.make_run(runs, "20260605t000000z-case-a")
     expected = wm.workspace_map(
         run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
-    script = _script("scripts", "workspace_map.py")
+    script = _script("cli", "workspace_map.py")
     ok = _process(script, "--tenant", d9_tenant, run.name)
     assert ok.returncode == 0, ok.stderr[-600:]
     assert ok.stdout == expected

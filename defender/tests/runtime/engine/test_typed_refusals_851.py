@@ -200,7 +200,7 @@ def test_f26_an_undecodable_baseline_denies_rather_than_raising(tmp_path):
     assert "failing closed" in d.reason
 
 
-from defender import _alert_input  # noqa: E402
+from defender.records import _alert_input  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.tests.support.storage._alert_plant import plant_alert  # noqa: E402
 

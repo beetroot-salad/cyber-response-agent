@@ -109,7 +109,7 @@ what manufactures the read PR's fixtures.
   (`agent_comment_tag`, `posted_comment`), rendering from the mapping config.
 - `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/case-history/mapping.yaml` — the de-facto schema
   (field mapping + conventions), editable without touching code.
-- `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
+- `integrations/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
   `record_case_ticket` (at most one comment POST, a receipt on every
   branch that called out; no transition call exists), non-fatal.
 - The read side has no ticket screen (#1221): every ticket is served whole. Each

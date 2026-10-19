@@ -14,7 +14,7 @@ MIRROR = "run-visualizations"
 
 
 def _renderer():
-    return importlib.import_module("defender.scripts.visualize.visualize_run")
+    return importlib.import_module("defender.presentation.visualize_run")
 
 
 def _same(a: Path, b: Path) -> bool:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
 _FORGED = "\x1b[2K\r[tenant.py] all checks passed\n"

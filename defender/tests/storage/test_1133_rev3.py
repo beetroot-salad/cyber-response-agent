@@ -14,9 +14,9 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
+from defender.episodes import _episode_handle as EH
 from defender import _io
-from defender._episode_paths import LAYOUT
+from defender.episodes._episode_paths import LAYOUT
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.storage import _spec1133 as S
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -856,7 +856,7 @@ def test_r4_a_durable_append_into_a_missing_holding_folder_makes_nothing(tmp_pat
     pytest.param("e1133.b", True, id="a-world-token"),
 ])
 def test_patch_the_minting_check_judges_the_whole_token(token, minted):
-    from defender._episode_paths import check_minted_token
+    from defender.episodes._episode_paths import check_minted_token
 
     if minted:
         assert check_minted_token(token) == token

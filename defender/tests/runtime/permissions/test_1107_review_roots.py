@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from defender.scripts.adapters import _stub_transport as transport
-from defender.scripts.adapters import elastic_adapter
-from defender.scripts.adapters.faults import ConfigFault
+from defender.integrations import _stub_transport as transport
+from defender.integrations import elastic_adapter
+from defender.integrations.faults import ConfigFault
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 _ES_HEALTH = S.answer(json.dumps({"status": "green", "number_of_nodes": 1}))
@@ -62,7 +62,7 @@ def test_transport_lanes_require_a_named_system(tmp_path, call):
 
 
 def test_settings_faults_name_no_host_path(tmp_path):
-    from defender.scripts.adapters import cmdb_adapter
+    from defender.integrations import cmdb_adapter
 
     root, folder = _tenant(tmp_path, "pth")
     S.write_config(folder, "identity", b"IDENTITY_URL_BASE=\xff\n")
@@ -80,7 +80,7 @@ def test_settings_faults_name_no_host_path(tmp_path):
     }
     # The unreadable case-history mapping is no longer a stored fault: the one tenant check
     # refuses the folder (#1222 A5), naming the file by its settings-relative path.
-    from defender._tenant import TenantRefused
+    from defender.tenancy._tenant import TenantRefused
 
     bad_root, bad_folder = _tenant(tmp_path, "pth2")
     S.mapping_path(bad_folder).write_text("- not\n- a mapping\n", encoding="utf-8")
@@ -151,8 +151,8 @@ def test_an_opened_file_renamed_over_still_reads(tmp_path):
 
 
 def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_path):
-    from defender.scripts.case_history import ticket_writer
-    from defender.scripts.visualize import visualize_run
+    from defender.integrations import ticket_writer
+    from defender.presentation import visualize_run
 
     run_dir = tmp_path / "runs" / "run-1"
     run_dir.mkdir(parents=True)
@@ -174,7 +174,7 @@ def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_pat
 def test_deeply_nested_receipt_is_unreadable_at_any_depth(tmp_path):
     """The page decodes the receipt with the repo's bounded JSON loader: a receipt
     with valid fields and one field nested past the limit is unreadable, not a ticket line."""
-    from defender.scripts.visualize import visualize_run
+    from defender.presentation import visualize_run
 
     run_dir = tmp_path / "run"
     run_dir.mkdir()

@@ -15,9 +15,9 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from defender._corpus import QueryTemplate, iter_query_templates
-from defender._knowledge import KnowledgePaths
-from defender._tenant import Tenant, TenantId, TenantRefused, accept_tenant
+from defender.knowledge._corpus import QueryTemplate, iter_query_templates
+from defender.knowledge._knowledge import KnowledgePaths
+from defender.tenancy._tenant import Tenant, TenantId, TenantRefused, accept_tenant
 from defender.runtime.verb_dispositions import RunGrants, require_gather_query, run_grants
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from defender.runtime import tenant_settings
@@ -25,7 +25,7 @@ from defender.runtime.case_ticket import CaseMapping, CaseTicketError, load_case
 from defender.runtime.tenant_settings import (
     SystemConfig,
 )
-from defender.scripts.adapters.faults import ConfigFault
+from defender.integrations.faults import ConfigFault
 
 if TYPE_CHECKING:
     from defender.runtime.lead_zero import CorrelationDispatch

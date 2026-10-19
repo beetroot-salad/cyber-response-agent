@@ -4,7 +4,7 @@ from __future__ import annotations
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 
-from defender._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
+from defender.records._artifact_schema import REPORT_FRONTMATTER_MAX, validate_artifact
 from defender.runtime import case_ticket
 from defender.runtime.close_tool import (
     CAUSE_REVIEW_INCOMPLETE,

@@ -54,7 +54,7 @@ PATH_ALLOWLIST = {
 EXCLUDED_PREFIXES = (
     "defender/.venv/",
     "defender/__pycache__/",
-    "defender/fixtures/",
+    "playground-v2/examples/alerts/",
     "defender/tests/",
     "defender/lessons/",
     "defender/lessons-actor/",
@@ -68,7 +68,7 @@ EXCLUDED_PREFIXES = (
     "defender/skills/gather/queries/host-query/",
     "defender/skills/gather/queries/stub-cmdb/",
     "defender/skills/gather/queries/stub-iam/",
-    "defender/scripts/adapters/",                         # per-vendor adapters
+    "defender/integrations/",                         # per-vendor adapters
 )
 
 #: Directory names the listing never enters (a venv is huge, and never shipped source).

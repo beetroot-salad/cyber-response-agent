@@ -235,8 +235,8 @@ def _warning_messages(doc: str) -> list[str]:
     "'warning' is why: a locus-less warn is dropped by `runtime/tools._addressable`, and "
     "a warn WITH a locus lets `fix_row` rewrite the row — which would let a run edit its "
     "own pre-registration to match where it ended up. Recorded at rule #18 in "
-    "`docs/investigation-language.md` and as the third 'Open, from #933' item in "
-    "`docs/decisions/defender-invlang-enforcement-ramp.md`.",
+    "`defender/docs/investigation-language.md` and as the third 'Open, from #933' item in "
+    "`defender/docs/decisions/defender-invlang-enforcement-ramp.md`.",
 )
 def test_a_follower_matching_no_advance_to_warns_and_does_not_refuse_the_write() -> None:
     """The one clause of #18 the spec grades softly:"""
@@ -460,7 +460,7 @@ def test_an_impact_prediction_with_no_dimension_is_refused() -> None:
     "enforced: it is a judgment about what a sentence asserts, and a lexical AND/OR/`;` "
     "test would refuse 'session bytes and connection count stay within baseline' written "
     "about one measurement — the model-authored-prose test rule #32 was struck for. "
-    "Recorded at rules #29 and #33 in `docs/investigation-language.md`.",
+    "Recorded at rules #29 and #33 in `defender/docs/investigation-language.md`.",
 )
 def test_a_compound_impact_claim_is_refused(claim: str) -> None:
     """"`claim` names one observable per entry — compound `AND` / `OR` / semicolon predicates must be split across entries." Stated in the rule text, so pinned here;"""
@@ -686,7 +686,7 @@ def test_impact_verdict_none_is_legal_on_a_companion_that_declared_no_thresholds
     "outside it (`none-detected`, `attempted-lateral-movement`) in recorded runs replayed "
     "through this very gate — so arming it refuses the recorded write. Registered in "
     "`vocab.SLOTS` as the teaching step; recorded at rule #31 in "
-    "`docs/investigation-language.md` and as the second 'Open, from #933' item in the "
+    "`defender/docs/investigation-language.md` and as the second 'Open, from #933' item in the "
     "enforcement ramp.",
 )
 def test_an_off_enum_impact_verdict_is_refused(impact_verdict: str) -> None:
@@ -725,7 +725,7 @@ def test_a_severity_under_verdict_none_is_refused() -> None:
     "`conclude.impact_verdict` — the two are one decision (`vocab.IMPACT_SEVERITY`). It "
     "measures zero fires on the corpus, but a vocabulary the runtime prompt never stated "
     "is not one a run can be refused on. Same record: rule #31 in "
-    "`docs/investigation-language.md`, 'Open, from #933' in the enforcement ramp.",
+    "`defender/docs/investigation-language.md`, 'Open, from #933' in the enforcement ramp.",
 )
 def test_an_off_enum_impact_severity_is_refused(impact_severity: str) -> None:
     _one_error(_verdict_doc("exceeds", impact_severity), impact_severity)

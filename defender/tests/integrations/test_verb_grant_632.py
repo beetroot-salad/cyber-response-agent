@@ -122,7 +122,7 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
 
     roster = read_roster(ADAPTERS_DIR)
     for system in SYSTEMS:
-        module = importlib.import_module(f"defender.scripts.adapters.{system.replace('-', '_')}_adapter")
+        module = importlib.import_module(f"defender.integrations.{system.replace('-', '_')}_adapter")
         assert set(roster.declared_verbs(system)) == set(module.VERBS), (
             f"the cold reader and the real {system} adapter disagree on which verbs exist — "
             f"cold={sorted(roster.declared_verbs(system))} "

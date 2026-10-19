@@ -14,7 +14,7 @@ from pathlib import Path
 from defender.tests.storage import test_1133_census as vocabulary
 from defender.tests.support.shared.contracts._by_path import import_lint_lib
 
-ROOTS = ("runtime", "hooks", "scripts/gather_tools", "scripts/case_history")
+ROOTS = ("runtime", "hooks", "runtime", "integrations")
 READERS = frozenset({
     "read_jsonl_rows", "read_jsonl_rows_report", "read_text_soft", "read_text_utf8",
     "locked_for_read", "locked_json_read", "read_bytes_capped", "iter_plain_jsonl_rows",

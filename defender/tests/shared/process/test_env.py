@@ -1,4 +1,4 @@
-"""defender._env coercion (fail-loud int/bool/str/choice) and defender._clock ISO helpers."""
+"""defender.configuration._env coercion (fail-loud int/bool/str/choice) and defender._clock ISO helpers."""
 from __future__ import annotations
 
 import logging
@@ -6,7 +6,7 @@ import logging
 import pytest
 
 from defender import _clock  # type: ignore[import-not-found]
-from defender._env import (  # type: ignore[import-not-found]
+from defender.configuration._env import (  # type: ignore[import-not-found]
     FatalConfigError,
     env_bool,
     env_int,
@@ -64,7 +64,7 @@ _CHOICES = ("dev", "production")
 
 
 def _env_choice(default: str = "production") -> tuple[str, str | None]:
-    from defender import _env
+    from defender.configuration import _env
 
     return _env.env_choice(_NAME, default, _CHOICES)
 

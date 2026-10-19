@@ -44,7 +44,7 @@ def test_queries_to_a_startup_broken_adapter_never_import_it_again(tmp_path: Pat
     root = tmp_path / "data"
     S.plant(root, table=_TABLE)
     tenant = S.resolve(root)
-    roster = read_roster(tree / "scripts" / "adapters")
+    roster = read_roster(tree / "integrations")
     ledger = tmp_path / SERVED_FILE
     registry = (world_registry(roster.root, tenant.grants.gather, ledger,
                                **control_oracle({"system": "cmdb", "planted": True})) if replay else

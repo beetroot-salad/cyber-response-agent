@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from defender import _tenant
+from defender.tenancy import _tenant
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.tests.storage.tenant_1105_run_repository import test_1105_pr2_review_fixes as R1
@@ -140,7 +140,7 @@ def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d
 @pytest.mark.parametrize("cli", ["lead_author", "visualize_run", "workspace_map"])
 def test_2_each_run_id_command_prints_the_data_roots_refusal(tmp_path, d9_tenant, monkeypatch,
                                                               cli):
-    from defender._command_line_run import open_command_line_run
+    from defender.execution._command_line_run import open_command_line_run
     from defender.run_repository import Run
     from defender.tests.support.learning.core._state1135 import curation_run_dir
 

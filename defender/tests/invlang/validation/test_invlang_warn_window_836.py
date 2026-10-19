@@ -222,7 +222,7 @@ def test_a_warn_family_defect_lands_and_returns_a_warning(tmp_path):
 
 def test_the_accept_path_derives_its_warning_after_the_gate_returned_none(tmp_path):
     """F-E option (i), and the two-passes-per-accepted-append correction to the Scale note."""
-    from defender._artifact_schema import validate_investigation
+    from defender.records._artifact_schema import validate_investigation
     from defender.runtime.tools import _tool_append_block
 
     deps, _run = main_deps(tmp_path)

@@ -33,7 +33,7 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 
 def visualize_episode():
-    """The target module, `defender.scripts.visualize.visualize_episode`, imported at call time
+    """The target module, `defender.presentation.visualize_episode`, imported at call time
     (it does not exist at the spec's base — one failure per test, never a collection error)."""
     return E.page_module()
 

@@ -139,7 +139,7 @@ from typing import Any
 
 from defender.learning.core.state import PITFALLS
 from defender.learning.leads.lead_extraction import ExecutedLead
-from defender._query_rules import BASH_SHIM_QUERY_ID
+from defender.knowledge._query_rules import BASH_SHIM_QUERY_ID
 from defender.tests.support.runtime.engine._declared869 import (  # noqa: F401 — re-exported substrate
     ADAPTERS_REL,
     CATALOG_REL,

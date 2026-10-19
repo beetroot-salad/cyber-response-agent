@@ -21,7 +21,7 @@ from defender.hooks import budget_enforcer as be  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import circuit_breaker as cb  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
-from defender.scripts.gather_tools import record_query as rq  # noqa: E402
+from defender.runtime import record_query as rq  # noqa: E402
 
 LEAD = "l-001"
 _PAYLOAD = '{"total": 1, "hits": ["web-1"]}'

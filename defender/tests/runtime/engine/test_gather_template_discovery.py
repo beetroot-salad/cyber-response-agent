@@ -13,13 +13,13 @@ from defender.tests.support.learning.curation._frames680 import frame_salt_of
 
 pytest.importorskip("pydantic_ai")
 
-from defender import _corpus  # noqa: E402
+from defender.knowledge import _corpus  # noqa: E402
 from defender.runtime import permission, tools  # noqa: E402
 from defender.runtime import tools_gather  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
-from defender.scripts import workspace_map as wsm  # noqa: E402
+from defender.presentation import workspace_map as wsm  # noqa: E402
 from defender.tests.support.learning.curation._lead_author_1134 import skills_view  # noqa: E402
 
 _DEFENDER = Path(__file__).resolve().parents[3]
@@ -149,12 +149,12 @@ def test_d12_corpus_module_imports_with_no_yaml_available(tmp_path):
                 return None
         sys.meta_path.insert(0, _Mask())
         sys.path.insert(0, {str(_DEFENDER.parent)!r})
-        import defender._corpus            # must NOT raise
-        assert hasattr(defender._corpus, "iter_query_templates")
+        import defender.knowledge._corpus            # must NOT raise
+        assert hasattr(defender.knowledge._corpus, "iter_query_templates")
         print("OK")
     """))
     proc = subprocess.run([sys.executable, str(probe)], capture_output=True, text=True)
-    assert proc.returncode == 0, f"importing defender._corpus pulled yaml at module scope:\n{proc.stderr}"
+    assert proc.returncode == 0, f"importing defender.knowledge._corpus pulled yaml at module scope:\n{proc.stderr}"
     assert "OK" in proc.stdout
 
 

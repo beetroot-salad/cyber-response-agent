@@ -44,87 +44,17 @@ from defender import _git
 from defender.tests.tooling.layout_contracts import _spec1080 as S
 
 SCRIPTS_PKG = "defender.scripts"
-STUB_TRANSPORT = "defender.scripts.adapters._stub_transport"
-ADAPTERS = "defender/scripts/adapters"
+STUB_TRANSPORT = "defender.integrations._stub_transport"
+ADAPTERS = "defender/integrations"
 
-#: The four commands that stay in `scripts/` (D1, the 10-03 "stays" row).
-STAYING_COMMANDS = (
-    "defender/scripts/tenant.py",
-    "defender/scripts/policy_cli.py",
-    "defender/scripts/box_image.py",
-    "defender/scripts/tacit_cli.py",
-)
-
-#: The two shims whose exec targets are the wrappers that stay (M-H (a): shims unchanged).
+#: No production files remain at the historical scripts paths. The old import namespace
+#: remains the census target so a future import or compatibility shim is still rejected.
+STAYING_COMMANDS = ()
+OUT_STAYING = ()
 WRAPPER_SHIMS = ("defender-sql", "defender-lessons")
 
-#: E1 (the 2026-10-04 scope cut): the `scripts/` files outside `adapters/` that the cut leaves
-#: where they are, each OWNED by another issue — `visualize/` (eight modules and three assets)
-#: and `workspace_map.py` by #1105, `case_history/ticket_writer.py` and `record_query.py` (its
-#: guards and writers; its query rules move) by #1165. They are neither entry points nor moved:
-#: D1 reads "the IN files are gone". (`case_history/case_ticket.py` was the fourth owner's, the
-#: follow-up #1190, which moves it to `defender/runtime/case_ticket.py`: it is no longer listed,
-#: so the placement check and the moved-file tests hold it to "gone, no shim".)
-OUT_STAYING = (
-    "defender/scripts/case_history/ticket_writer.py",
-    "defender/scripts/gather_tools/record_query.py",
-    "defender/scripts/visualize/_mirror_write.py",
-    "defender/scripts/visualize/_page_failed.py",
-    "defender/scripts/visualize/assets/episode.css",
-    "defender/scripts/visualize/assets/runtime.js",
-    "defender/scripts/visualize/assets/styles.css",
-    "defender/scripts/visualize/visualize_data.py",
-    "defender/scripts/visualize/visualize_episode.py",
-    "defender/scripts/visualize/visualize_messages.py",
-    "defender/scripts/visualize/visualize_primitives.py",
-    "defender/scripts/visualize/visualize_run.py",
-    "defender/scripts/visualize/visualize_runtime.py",
-    "defender/scripts/workspace_map.py",
-)
-
-_S = "defender.scripts."
-_FAULTS = _S + "adapters.faults"
-_RECORD_QUERY = _S + "gather_tools.record_query"
-
-#: E1: O1's named exceptions — every (importer, target module) pair into `scripts/` the cut
-#: leaves standing, each with the owner that retires it: 20 pairs, 20 import statements. A pair
-#: covers every import statement between the two files. Derived from `census()` at the base
-#: (59 statements) minus the 22 edges the cut's IN moves retire (`_venv`, `pricing`,
-#: `payload_view`, `sql`, `lessons_frontier`, and the ten importers of `record_query`'s query
-#: rules) and the 4 the case_ticket follow-up #1190 retires (its 3 pairs: `run_tenant` (two
-#: statements), `query_tool`, `estate/applier`). H4 (i)'s `ticket_writer -> _stub_transport`
-#: edge is inside `scripts/`, not listed; neither is `tenant.py`'s or `ticket_writer`'s import of
-#: the moved `case_ticket` (an importer inside `scripts/` is free). The live oracle (#1224)
-#: retired 10 pairs (11 statements): cluster staging and its elastic stager went, and the
-#: estate registry, redaction and `_family` no longer import `confinement` / `faults`. The
-#: alert front door (#1222) retired 2 more (2 statements) when lead-zero's item 1 and its
-#: capture of ancestor documents went: `lead_zero/_capture.py` imports neither `faults` nor
-#: `record_query` any more.
-O1_EXCEPTIONS: tuple[tuple[str, str, str], ...] = (
-    # #1172 / #1121 (9)
-    ("defender/skills/connect/examples/example_adapter.py", STUB_TRANSPORT, "#1172/#1121"),
-    ("evaluations/oracle_golden/controls.py", _S + "adapters.elastic_adapter", "#1172/#1121"),
-    ("evaluations/oracle_golden/controls.py", _S + "adapters.esql_text", "#1172/#1121"),
-    ("defender/runtime/query_tool.py", _FAULTS, "#1172/#1121"),
-    ("defender/runtime/run_tenant.py", _FAULTS, "#1172/#1121"),
-    ("defender/runtime/tenant_settings.py", _FAULTS, "#1172/#1121"),
-    ("defender/runtime/tools/__init__.py", _FAULTS, "#1172/#1121"),
-    ("defender/runtime/tools/_bash.py", _FAULTS, "#1172/#1121"),
-    ("defender/skills/connect/examples/example_adapter.py", _FAULTS, "#1172/#1121"),
-    # #1165 (5)
-    ("defender/runtime/query_tool.py", _RECORD_QUERY, "#1165"),
-    ("defender/runtime/tools/__init__.py", _RECORD_QUERY, "#1165"),
-    ("defender/runtime/tools/_bash.py", _RECORD_QUERY, "#1165"),
-    ("defender/runtime/tools_gather.py", _RECORD_QUERY, "#1165"),
-    ("defender/run.py", _S + "case_history.ticket_writer", "#1165"),
-    # #1105 (6)
-    ("defender/run_common.py", _S + "visualize.visualize_run", "#1105"),
-    ("defender/learning/frontend/build.py", _S + "visualize.visualize_run", "#1105"),
-    ("defender/run_common.py", _S + "visualize._page_failed", "#1105"),
-    ("defender/learning/frontend/build.py", _S + "visualize.visualize_primitives", "#1105"),
-    ("defender/learning/branch/cli.py", _S + "visualize.visualize_episode", "#1105"),
-    ("defender/runtime/orient.py", _S + "workspace_map", "#1105"),
-)
+#: The spring cleanup retired all 20 formerly allowed imports into scripts.
+O1_EXCEPTIONS: tuple[tuple[str, str, str], ...] = ()
 
 
 # ======================================================================================
@@ -343,20 +273,21 @@ def wrappers(root: Path = S.REPO_ROOT) -> tuple[str, ...]:
 
 
 def adapters_expected() -> tuple[str, ...]:
-    """The files `scripts/adapters/` keeps until #1172: since the 2026-10-04 scope cut, ALL of
+    """The files `integrations/` keeps until #1172: since the 2026-10-04 scope cut, ALL of
     its base files (the eight `*_adapter.py`, `_stub_transport.py`, `README.md`, and `faults.py`,
     `confinement.py`, `esql_text.py`, whose moves are parked with #1172 / #1121) — named off the
     base inventory."""
     base = S.base_inventory()["files"]
-    files = [f for f in base if S.under(f, ADAPTERS)]
+    files = [f.replace("defender/scripts/adapters/", "defender/integrations/")
+             for f in base if S.under(f, "defender/scripts/adapters")]
     assert len([f for f in files if f.endswith("_adapter.py")]) == 8, files
     assert len(files) == 13, files
-    return tuple(sorted(files))
+    return tuple(sorted([*files, "defender/integrations/__init__.py", "defender/integrations/ticket_writer.py"]))
 
 
 def placement_findings(root: Path = S.REPO_ROOT) -> list[str]:
     """Every tracked file under `defender/scripts/` that is none of: a staying command, a
-    shim's wrapper, one of the files `scripts/adapters/` keeps, or one of the cut's named
+    shim's wrapper, one of the files `integrations/` keeps, or one of the cut's named
     `OUT_STAYING` files (any file type: [6])."""
     allowed = {*STAYING_COMMANDS, *wrappers(root), *adapters_expected(), *OUT_STAYING}
     return [r for r in tracked_files(root, "defender/scripts")

@@ -28,10 +28,10 @@ one — spelled
                   `scripts/<entry>…` not itself the tail of a longer path (`spec-flow/scripts/…`
                   is not one);
   * as a module:  `defender.scripts.<entry dotted>…` or `scripts.<entry dotted>…` (the
-                  `mod("scripts.case_history.ticket_writer")` helpers), and the module an
-                  import names: `from defender.scripts.adapters import faults` names
+                  `mod("integrations.ticket_writer")` helpers), and the module an
+                  import names: `from defender.integrations import faults` names
                   `adapters/faults.py`;
-  * as a join:    `"scripts" / "case_history" / "ticket_writer.py"`.
+  * as a join:    `"integrations" / "ticket_writer.py"`.
 
 A name that only LOOKS like an entry is never a pointer: the bare word `visualize` (a live
 identifier), `defender/lessons/` (the lesson content folder), a surviving file's stem, or the
@@ -72,9 +72,9 @@ from defender.tests.tooling.layout_contracts import _spec1080 as S
 #: Never scanned (module docstring), as repo-relative directory prefixes.
 EXCLUDED_DIRS: tuple[str, ...] = (
     # archival: frozen records of their moment
-    "experiments/", "docs/decisions/", "docs/archive/", "spec-flow/specs/", ".claude/worktrees/",
+    "experiments/", "docs/decisions/", "docs/archive/", "defender/docs/decisions/", "defender/docs/archive/", "playground-v2/docs/archive/", "spec-flow/specs/", ".claude/worktrees/",
     # recorded data that quotes the code of its moment (lint_stale_refs.EXCLUDED_GREP_DIRS)
-    "defender/fixtures/", "defender/tests/fixtures/e2e/", "defender/lessons/", "defender/lessons-actor/",
+    "playground-v2/examples/alerts/", "defender/tests/fixtures/e2e/", "defender/lessons/", "defender/lessons-actor/",
     "defender/lessons-environment/", "defender/lessons-questioner/",
     "evaluations/judge_alignment/", "evaluations/oracle_golden/cases/",
     # this suite: it records the base on purpose
@@ -88,7 +88,7 @@ _SCRIPTS = "defender/scripts/"
 _SLASH = re.compile(r"(?:(?<=defender/)|(?<=}/)|(?<![\w./-]))scripts/([\w./-]+)")
 #: A module spelling: `defender.scripts.x.y` or `scripts.x.y`, never `<other>.scripts.x`.
 _DOTTED = re.compile(r"(?<![\w.])(?:defender\.)?scripts\.([A-Za-z_][\w.]*)")
-#: An import spelling, whose imported names may be the modules: `from defender.scripts.adapters
+#: An import spelling, whose imported names may be the modules: `from defender.integrations
 #: import faults, confinement` names `adapters/faults.py` and `adapters/confinement.py`.
 _FROM_IMPORT = re.compile(
     r"(?<![\w.])from\s+((?:defender\.)?scripts(?:\.\w+)*)\s+import\s+\(?\s*(\w+(?:\s*,\s*\w+)*)")

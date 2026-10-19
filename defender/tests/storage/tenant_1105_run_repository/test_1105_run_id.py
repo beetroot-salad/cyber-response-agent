@@ -70,7 +70,7 @@ def test_1105_run_id_is_a_frozen_value_ordered_by_its_text_and_never_equal_to_a_
 
 
 def test_1105_run_id_parse_refuses_what_refuse_bad_run_id_refuses_and_any_non_str_as_run_refused():
-    from defender._run_id import refuse_bad_run_id
+    from defender.records._run_id import refuse_bad_run_id
     from defender.run_repository import RunId, RunRefused
 
     for good in ("r1", "2026-x.y_z", _ascii_id(H.RUN_ID_BOUND)):

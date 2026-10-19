@@ -56,9 +56,9 @@ _SKIP_PARTS = {".venv", "__pycache__", "node_modules", "tests"}
 #: `defender/runtime/case_ticket.py`; the write-back (`ticket_writer`) stays in the folder.
 #: `lint_tenant_env_reads.SWEPT` lists the same entries (#1190's env-read test holds them equal).
 SWEPT: tuple[str, ...] = (
-    "defender/scripts/adapters/",
+    "defender/integrations/",
     "defender/learning/branch/estate/",
-    "defender/scripts/case_history/",
+    "defender/integrations/",
     "defender/runtime/case_ticket.py",
     "defender/runtime/lead_zero/",
     "defender/runtime/lead_zero_config.py",
@@ -69,7 +69,7 @@ SWEPT: tuple[str, ...] = (
 #: allowed by function, below.
 SETTINGS_DIR_ALLOWED_FILES: frozenset[str] = frozenset({
     "defender/runtime/run_tenant.py",
-    "defender/_tenants.py",
+    "defender/tenancy/_tenants.py",
     "defender/runtime/verb_dispositions.py",
     "defender/runtime/lead_zero_config.py",
     "defender/skills/connect/validate_scaffold.py",
@@ -83,7 +83,7 @@ MODEL_DOCS: tuple[str, ...] = (
     "defender/skills/cmdb/execution.md",
     "defender/skills/identity/execution.md",
     "defender/skills/host-state/execution.md",
-    "defender/scripts/adapters/README.md",
+    "defender/integrations/README.md",
     "defender/skills/connect/SKILL.md",
     "defender/skills/connect/decisions.md",
     "defender/skills/connect/checklist.md",

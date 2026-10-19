@@ -11,13 +11,13 @@ from typing import Any
 
 import pytest
 
-from defender import _episode_handle as EH
-from defender import _tenant
-from defender._episode_handle import Episode
+from defender.episodes import _episode_handle as EH
+from defender.tenancy import _tenant
+from defender.episodes._episode_handle import Episode
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
-from defender.scripts import policy_cli
-from defender.scripts import tenant as tenant_py
+from defender.cli import policy_cli
+from defender.cli import tenant as tenant_py
 from defender.skills.connect import validate_scaffold
 from defender.tests.support.invlang.validation import _dispositions995 as D995
 from defender.tests.support.shared.contracts import _spec1077 as S1077
@@ -52,7 +52,7 @@ def _owner_in_checkout(checkout: Path, root: Path, tenant_id: str = H.TID) -> st
         "import sys\n"
         "from pathlib import Path\n"
         "sys.path.insert(0, sys.argv[1])\n"
-        "from defender import _tenant\n"
+        "from defender.tenancy import _tenant\n"
         "assert Path(_tenant.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()), "
         "_tenant.__file__\n"
         "try:\n"

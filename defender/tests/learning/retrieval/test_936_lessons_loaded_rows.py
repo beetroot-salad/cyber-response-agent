@@ -37,7 +37,7 @@ TID = H1105.T_ID
 
 def _tenant_runs() -> Path:
     """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2 (J8, declared change 10)"""
-    from defender import _tenant
+    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
     root = current_data_root()

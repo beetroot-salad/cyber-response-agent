@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import IO
 
 from defender import _flock, _io
-from defender._tenant import Tenant, parse_tenant_id_bytes
+from defender.tenancy._tenant import Tenant, parse_tenant_id_bytes
 
 from .files import _remove_entry, _rename_new, _sweep_temporaries
 from .model import (

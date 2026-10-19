@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from defender._env import FatalConfigError
+from defender.configuration._env import FatalConfigError
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
 from defender.learning.core.lane_trees import DrainTrees, kind_at
 from defender.learning.leads import lead_author

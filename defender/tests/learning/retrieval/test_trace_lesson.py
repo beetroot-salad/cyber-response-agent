@@ -31,7 +31,7 @@ def _load():
 
 def _tenant_runs_dir(tmp_path: Path) -> Path:
     """The tenant's natural runs folder, made with its tenant record (what run setup makes)."""
-    from defender import _tenant
+    from defender.tenancy import _tenant
 
     runs = tmp_path / "data" / TID / "runs"
     runs.mkdir(parents=True, exist_ok=True)

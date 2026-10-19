@@ -98,7 +98,7 @@ def test_append_block_mixes_warn_and_error_defects(tmp_path):
 
 def test_validate_investigation_returns_none_on_warn_only(tmp_path):
     """The gate ACCEPTS a document whose only defects are warn-severity — with the size bound, the encodability check and the append-only baseline all still applied."""
-    from defender._artifact_schema import (
+    from defender.records._artifact_schema import (
         INVESTIGATION_FILE_MAX,
         validate_artifact,
         validate_investigation,
@@ -118,7 +118,7 @@ def test_validate_investigation_returns_none_on_warn_only(tmp_path):
 
 def test_validate_artifact_still_returns_str_or_none():
     """`validate_artifact`'s `str | None` contract is UNCHANGED by M2 — the seam the close tool and the permission gate are both written against (claim g4)."""
-    from defender._artifact_schema import validate_artifact
+    from defender.records._artifact_schema import validate_artifact
 
     assert validate_artifact("investigation.md", WARN_DOC, None) is None
     assert isinstance(validate_artifact("investigation.md", _PARSE_ERROR, None), str)

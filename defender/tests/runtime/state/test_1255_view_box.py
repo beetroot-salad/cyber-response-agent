@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from defender._episode_handle import Episode
-from defender._episodes_root import episode_dir
+from defender.episodes._episode_handle import Episode
+from defender.episodes._episodes_root import episode_dir
 from defender.run_repository import RUN_LAYOUT
 from defender.execution import bash_exec
 from defender import box as box_mod

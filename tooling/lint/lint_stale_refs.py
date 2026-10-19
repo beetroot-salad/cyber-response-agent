@@ -99,7 +99,8 @@ GENERIC_NAMES = {
 # Trees holding frozen copies of things the live tree may have deleted: a name surviving only
 # here cannot vouch that it survives. Distinct from EXCLUDED_GREP_DIRS ("is this dir a
 # reference source"), which includes live dirs.
-_ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "spec-flow/specs/archive/")
+_ARCHIVAL_DIRS = ("experiments/", ".claude/worktrees/", "docs/archive/", "defender/docs/archive/", "playground-v2/docs/archive/", "spec-flow/specs/archive/",
+                  "defender/tests/tooling/layout_contracts/goldens/")
 
 # Trees whose removals are not code changes (local scratch: research runs, experiment
 # harnesses). Their throwaway definitions collide with ordinary English, so deleting one would
@@ -112,7 +113,7 @@ NON_SOURCE_DIRS = ("seam-harness", "experiments")
 
 EXCLUDED_GREP_DIRS = (
     ".git", ".venv", "__pycache__", "node_modules",
-    "defender/fixtures",
+    "playground-v2/examples/alerts",
     "defender/lessons", "defender/lessons-actor",
     ".claude/worktrees", "experiments",
     # Task files and design docs reference removed symbols historically;
@@ -133,6 +134,8 @@ EXCLUDED_GREP_DIRS = (
     # Golden case records: each names the code path that produced it, and rewriting that
     # would falsify what was run. The eval code beside it is still scanned.
     "evaluations/oracle_golden/cases",
+    # Frozen pre-refactor source inventories and captured diagnostics, not live references.
+    "defender/tests/tooling/layout_contracts/goldens",
 )
 
 # Globs for inert-by-construction artifacts that cannot live under one excluded root. Empty:
@@ -604,7 +607,7 @@ def _path_named(repo_root: Path, ident: str) -> bool:
 
     Only tracked paths count, so an untracked copy cannot mask a real deletion. Not filtered
     through `_is_excluded_path`: that list means "not a reference source", and includes live
-    dirs like `defender/fixtures`. Only `_ARCHIVAL_DIRS` are excluded, since their frozen
+    dirs like `playground-v2/examples/alerts`. Only `_ARCHIVAL_DIRS` are excluded, since their frozen
     copies cannot vouch for survival.
 
     Gives up the ambiguous case where a name survives only in an unrelated file, the same

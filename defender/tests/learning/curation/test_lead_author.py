@@ -26,7 +26,7 @@ def _ensure_declarable(repo_root: Path) -> None:
     every caller needs a real, committed adapter for that resolution to answer from rather
     than raise. Idempotent, so a caller that already seeded (or committed) its own tree is
     left alone; `elastic` is the name every other fixture in this file already assumes."""
-    adapters = repo_root / "defender" / "scripts" / "adapters"
+    adapters = repo_root / "defender" / "integrations"
     if not adapters.is_dir():
         adapters.mkdir(parents=True)
         (adapters / "elastic_adapter.py").write_text("VERBS = {}\n")
@@ -687,7 +687,7 @@ def test_verify_skills_state_rejects_a_promotion_under_a_system_with_no_adapter(
 
 
 def test_verify_skills_state_refuses_a_tree_whose_adapters_cannot_be_read(tmp_git_repo: Path):
-    adapters = tmp_git_repo / "defender" / "scripts" / "adapters"
+    adapters = tmp_git_repo / "defender" / "integrations"
     shutil.rmtree(adapters)
     with pytest.raises(lead_author.LeadAuthorError, match="could not be resolved") as exc:
         lead_author._verify_skills_state(tmp_git_repo, baseline_stray=[], systems=DECLARED,

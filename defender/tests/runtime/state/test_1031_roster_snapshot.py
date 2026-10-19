@@ -11,13 +11,13 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-from defender import _scaffold_rules  # noqa: E402
+from defender.knowledge import _scaffold_rules  # noqa: E402
 from defender.tests.learning.oracle.live_contracts._spec1224 import build_registry  # noqa: E402
 from defender.runtime import verbs  # noqa: E402
 from defender.runtime.query_tool import QueryCapture  # noqa: E402
 from defender.runtime.verb_grant import DENY_ALL  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry  # noqa: E402
-from defender.scripts.gather_tools.record_query import system_fingerprint  # noqa: E402
+from defender.runtime.record_query import system_fingerprint  # noqa: E402
 from defender.tests.support.runtime.engine._declared869 import ADAPTER_BODY, write  # noqa: E402
 from defender.tests.support.learning.curation._verb_authorization_632 import grant_of  # noqa: E402
 from defender.tests.learning.branch.test_920_estate_seam import AS_OF, SERVED_FILE, World, fresh_ledger  # noqa: E402
@@ -221,10 +221,10 @@ def test_the_world_registry_inherits_the_snapshot_and_the_construction_time_chec
 def test_the_scaffold_resolver_fails_at_construction_over_a_tree_with_no_adapters(tmp_path):
     with pytest.raises(_scaffold_rules.ScaffoldRuleError) as exc:
         _scaffold_rules.VerbResolver(tmp_path)
-    assert str(tmp_path / "scripts" / "adapters") in str(exc.value), \
+    assert str(tmp_path / "integrations") in str(exc.value), \
         f"the resolver's error does not name the directory: {exc.value}"
 
-    write(tmp_path / "scripts" / "adapters" / "elastic_adapter.py", ADAPTER_BODY)
+    write(tmp_path / "integrations" / "elastic_adapter.py", ADAPTER_BODY)
     resolver = _scaffold_rules.VerbResolver(tmp_path)
     assert resolver.is_system("elastic")
     assert not resolver.is_system("cmdb")

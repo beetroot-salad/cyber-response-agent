@@ -135,7 +135,7 @@ WHAT IS NOT HERE ON PURPOSE
   item-1-shaped and m5 reshapes them. Its item-agnostic pieces are re-spelled below over the real
   adapter (`envelope` over `search_envelope`).
 * The lessons corpus location: implementation is sequenced after #1108 P4 (C24), which moves the
-  defender corpus to `<data root>/<T>/knowledge/agent/lessons/` (`_knowledge.py`: "the same
+  defender corpus to `<data root>/<T>/knowledge/agent/lessons/` (`knowledge/_knowledge.py`: "the same
   relative shape under the agent root"). `plant_lesson` writes there. At base the shim reads the
   checkout's corpus instead, so a lookup test is red for that reason too (recorded in 80-survey).
 """
@@ -364,7 +364,7 @@ def plant_run(runs_base: Path, run_id: str, *, alert: Mapping[str, Any] | bytes 
 
 def _episode_path(episode_dir: Path, key: str) -> Path:
     attr = COINED[key]
-    paths = sym("_episode_paths", "EpisodePaths")(Path(episode_dir))
+    paths = sym("episodes._episode_paths", "EpisodePaths")(Path(episode_dir))
     value = getattr(paths, attr, None)
     assert value is not None, (
         f"EpisodePaths has no `{attr}` — the coined accessor for {key!r} (A1: launch copies the "
@@ -436,7 +436,7 @@ def record_rel() -> str:
 # 3. Alerts
 # =================================================================================================
 
-FIXTURES = DEFENDER / "fixtures"
+FIXTURES = REPO_ROOT / "playground-v2" / "examples" / "alerts"
 #: The committed Kibana-projected fixture alerts (read off the tree, never restated).
 FIXTURE_SLUGS = (
     "v2-sshd-success-after-failures",
@@ -842,7 +842,7 @@ def checkout_defender() -> Path:
 
 
 def checkout_lessons() -> Path:
-    return sym("_knowledge", "KnowledgePaths").of_defender_dir(checkout_defender()).lessons_dir
+    return sym("knowledge._knowledge", "KnowledgePaths").of_defender_dir(checkout_defender()).lessons_dir
 
 
 def prepare_checkout(defender_dir: Path) -> Path:
@@ -855,7 +855,7 @@ def prepare_checkout(defender_dir: Path) -> Path:
                     ignore=shutil.ignore_patterns(".venv", "tests", "evals", "fixtures-e2e",
                                                  "__pycache__", "*.pyc", "lessons"))
     (defender_dir / ".venv").symlink_to(DEFENDER / ".venv", target_is_directory=True)
-    corpus = sym("_knowledge", "KnowledgePaths").of_defender_dir(defender_dir).lessons_dir
+    corpus = sym("knowledge._knowledge", "KnowledgePaths").of_defender_dir(defender_dir).lessons_dir
     corpus.mkdir(exist_ok=True)
     return defender_dir
 
@@ -1270,23 +1270,23 @@ def envelope(docs: Sequence[Mapping[str, Any]], *, total: int | None = None,
     """The elastic `query` / `alerts` result, built by the REAL `elastic_adapter.search_envelope`
     so no scenario can mint a shape the adapter could not produce."""
     tot = len(docs) if total is None else total
-    return sym("scripts.adapters.elastic_adapter", "search_envelope")(
+    return sym("integrations.elastic_adapter", "search_envelope")(
         index, list(docs), tot, tot > len(docs), sort)
 
 
 def transport_fault(detail: str = "docker exec curl timed out after 40s") -> BaseException:
     """RJ-04 (executed): the transport's own `TransportFault`."""
-    return sym("scripts.adapters.faults", "TransportFault")(detail)
+    return sym("integrations.faults", "TransportFault")(detail)
 
 
 def upstream_fault(detail: str = "index_not_found_exception") -> BaseException:
     """RJ-06 (executed): a missing index answers `UpstreamFault`."""
-    return sym("scripts.adapters.faults", "UpstreamFault")(detail)
+    return sym("integrations.faults", "UpstreamFault")(detail)
 
 
 def confinement_fault(index: str = ".ds-logs-system.auth-default-2026.05.24-000002") -> BaseException:
     """LZ09 (executed): `confine_index` refuses an index outside the configured patterns."""
-    return sym("scripts.adapters.confinement", "ConfinementFault")(
+    return sym("integrations.confinement", "ConfinementFault")(
         f"index '{index}' falls outside the configured patterns")
 
 
@@ -1552,7 +1552,7 @@ class HoldingTicketStore(TicketStore):
 
 def ticket_writer(store: TicketStore) -> Any:
     """The REAL ticket writer's two legs bound to `store` — what `run.main(ticket_writer=…)` takes."""
-    tw = mod("scripts.case_history.ticket_writer")
+    tw = mod("integrations.ticket_writer")
     deps = tw.TicketWriterDeps(request=store.request)
     return SimpleNamespace(
         open_case_ticket=functools.partial(tw.open_case_ticket, deps=deps),
