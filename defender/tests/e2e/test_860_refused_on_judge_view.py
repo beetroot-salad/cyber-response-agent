@@ -57,6 +57,7 @@ from defender._query_rules import (
 )
 from defender.tests import _judge_921 as J  # noqa: E402
 from defender.tests import _triplet_947 as T  # noqa: E402
+from defender.tests.judge_contrast_1234 import _spec1234 as S34  # noqa: E402
 from defender.tests._verb_authorization_632 import (  # noqa: E402
     DONE,
     LEAD,
@@ -867,7 +868,9 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
     above-guard row not mapping to `rejected-before-dispatch`, a real denial not on the
     lead, or either missing from the prompt."""
     rec = VerbRecorder()
-    r = run_gather(tmp_path / "live", verbs=_registry(rec), turns=[
+    # A sibling's query-call identity is its world token; its run folder has a UUID id.
+    registry = _registry(rec, call_run=B_RUN)
+    r = run_gather(tmp_path / "live", verbs=registry, turns=[
         q("elastic", "nosuch-verb"), q(*DENIED_PAIR),
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
     ], run_id=B_RUN)
@@ -899,7 +902,7 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
 
     prompt = _prompt_for_world_b(ep, base)
     # #1234: `render` returns a `JudgeContext`; world b's per-lead chain is its focus view's.
-    chain = J.mod("learning.judge.render").render(ep, "b").focus.leads[LEAD]
+    chain = S34.render_context(ep, "b").focus.leads[LEAD]
     expected = [
         _entry("rejected-before-dispatch", "elastic", False),
         _entry("denied", "elastic", True, verb="esql"),

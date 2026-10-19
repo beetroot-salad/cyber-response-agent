@@ -58,11 +58,8 @@ def _lessons_view(ctx) -> str:
 def _world_prompt(ep, label: str = "b", **kw) -> str:
     """World `label`'s prompt from the real assembler over the real render
     (`run._build_prompt(ctx, manifest)`, #1234)."""
-    from defender._io import bind
-
-    with bind(ep) as bound:
-        manifest = J.mod("learning.judge.family").read_manifest(bound)
-    ctx = _render().render(ep, label, **kw)
+    manifest = J.read_manifest_at(ep)
+    ctx = J.render_at(ep, label, **kw)
     return J.mod("learning.judge.run")._build_prompt(ctx, manifest)[0]
 
 
@@ -101,7 +98,7 @@ def test_921_judge_input_carries_per_lead_chain_coverage_siblings_lessons_spread
     `tests/e2e/test_1017_query_row_surface.py` pins what the leads view may and may not carry.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    ctx = _render().render(ep, "b")
+    ctx = J.render_at(ep, "b")
     judge_input = ctx.focus
 
     chain = judge_input.leads["l-001"]
@@ -124,7 +121,7 @@ def test_921_call_rows_carry_window_and_scope_key_against_the_discriminator(tmp_
     read off the real prompt.
     """
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    ctx = _render().render(ep, "b")
+    ctx = J.render_at(ep, "b")
 
     assert ctx.focus_calls, "no call rows to check"
     for row in ctx.focus_calls:
@@ -262,7 +259,7 @@ def test_921_render_reads_no_sibling_run_dir(tmp_path):
     (runs / f"{J.EPISODE_ID}-b").mkdir(parents=True, exist_ok=True)
     shutil.rmtree(runs)
 
-    view = _render().render(ep, "b").focus
+    view = J.render_at(ep, "b").focus
     assert view.leads, "the per-lead chain was empty once the run dir was gone"
     assert view.lessons, "the lessons view needed the sibling's run dir"
 
@@ -285,9 +282,9 @@ def test_921_render_builds_the_input_from_the_archive_the_runs_base_and_the_comm
     J.sibling_run_dir(runs, "b")
     git_show = J.FakeGitShow(bodies={("deadbee", "defender/lessons/L1.md"): "# L1 body\n"})
 
-    with_dirs = _render().render(ep, "b", git_show=git_show)
+    with_dirs = J.render_at(ep, "b", git_show=git_show)
     shutil.rmtree(runs)
-    without = _render().render(ep, "b", git_show=git_show)
+    without = J.render_at(ep, "b", git_show=git_show)
 
     assert with_dirs == without, (
         "the rendered input changed when the sibling run dirs were removed")
@@ -417,7 +414,7 @@ def test_921_lesson_bodies_are_not_archived_and_are_read_at_the_recorded_commit(
     git_show = J.FakeGitShow(
         bodies={("deadbee", "defender/lessons/L1.md"): "# L1\n\nthe body\n"})
 
-    view = _render().render(ep, "b", git_show=git_show)
+    view = J.render_at(ep, "b", git_show=git_show)
     assert git_show.asked == [("deadbee", "defender/lessons/L1.md")], (
         "the lesson body was not read at the sibling's recorded commit")
     assert "the body" in _lessons_view(view)
@@ -448,7 +445,7 @@ def test_921_a_lesson_recorded_on_several_rows_renders_its_body_once_and_says_ho
         ("deadbee", "defender/lessons/L2.md"): "# L2\n\nthe second body\n",
     })
 
-    lessons = _lessons_view(_render().render(ep, "b", git_show=git_show))
+    lessons = _lessons_view(J.render_at(ep, "b", git_show=git_show))
     assert lessons.count("the first body") == 1, (
         f"a lesson on three rows rendered its body {lessons.count('the first body')} times")
     assert lessons.count("the second body") == 1, "control: the other lesson still renders"
@@ -484,7 +481,7 @@ def test_921_an_unavailable_lesson_body_is_marked_rather_than_rendered_as_nothin
         (ep / "worlds" / "b" / "provenance.json").write_text(
             json.dumps(J.provenance_record(commit=commit)), encoding="utf-8")
         git_show = J.FakeGitShow(bodies={})
-        lessons = _lessons_view(_render().render(ep, "b", git_show=git_show))
+        lessons = _lessons_view(J.render_at(ep, "b", git_show=git_show))
         assert git_show.asked, f"{note}: the render never asked for the body"
         assert "unavailable" in lessons.lower(), (
             f"{note}: the slot rendered as nothing, which the judge reads as a lesson with no "
@@ -519,6 +516,6 @@ def test_921_the_lesson_commit_is_pinned_once_per_pass_and_allow_dirty_is_a_cave
     # A dirty sibling tree is a caveat in the judge's own input, not a silent equivalence.
     dirty = J.accepted_episode(tmp_path / "dirty", ledgers={"b": [J.oracle_row("b")], "c": []},
                                dirty=True)
-    lessons = _lessons_view(_render().render(dirty, "b", git_show=J.FakeGitShow(bodies={})))
+    lessons = _lessons_view(J.render_at(dirty, "b", git_show=J.FakeGitShow(bodies={})))
     assert "dirty" in lessons.lower(), (
         "an allow_dirty family's lesson view claims a reproducibility it does not have")

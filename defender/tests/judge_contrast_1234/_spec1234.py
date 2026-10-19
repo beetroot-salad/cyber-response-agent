@@ -1477,13 +1477,13 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000,
     what render returns (#1234: a `JudgeContext`). If #1234 changes render's keyword tail,
     THIS is the one place to change."""
     ep = _ep(where)
-    io = mod("_io")
     fam = mod(JUDGE_FAMILY)
     rnd = mod(JUDGE_RENDER)
     outcome = mod(OUTCOME)
     token_for = sym(FAMILY_LOADER, "episode_token_for")
-    with io.bind(ep) as bound:
-        manifest = fam.read_manifest(bound)
+    with J.episode_runs_for(ep).episode_files(ep.name) as episode:
+        bound = episode.view()
+        manifest = fam.read_manifest(bound, expected_episode_id=ep.name)
         samples = fam.read_samples_record(bound)
         try:
             pre = outcome.read_outcome(bound)

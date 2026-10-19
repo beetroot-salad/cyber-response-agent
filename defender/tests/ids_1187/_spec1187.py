@@ -21,8 +21,10 @@ author it hands it to); slice authors ask for changes rather than edit it.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
+import sys
 import uuid
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -69,6 +71,25 @@ SIDECAR_SUFFIXES = H5.SIDECAR_SUFFIXES
 def new_id() -> str:
     """A fresh canonical lowercase uuid4, as the test's own fixture id (never production's)."""
     return str(uuid.uuid4())
+
+
+#: How many hex digits canonical UUID text carries (the `near_miss_id` positions).
+UUID_HEX_DIGITS = 32
+
+
+def near_miss_id(text: str, digit: int = -1) -> str:
+    """`text` (canonical UUID text) with ONE hex digit changed — its `digit`-th hex digit,
+    hyphens not counted (the last by default) — so the result is canonical UUID text too and
+    shares every other character. A mismatch only a whole-id comparison sees: a reader that
+    compares a prefix, one group or a suffix of two ids passes it whenever the changed digit is
+    one it skips (adversary F11)."""
+    chars = list(text)
+    at = [i for i, c in enumerate(chars) if c != "-"][digit]
+    chars[at] = "0" if chars[at] != "0" else "1"
+    out = "".join(chars)
+    if not is_canonical_uuid(out) or out == text:  # pragma: no cover — 32 hex digits round-trip
+        raise ValueError(f"{out!r} is not a canonical near miss of {text!r}")
+    return out
 
 
 def is_canonical_uuid(text: object) -> bool:
@@ -286,6 +307,248 @@ def tree(root: Path) -> dict[str, tuple[str, bytes | str | None]]:
     """Every entry under `root` (links not followed): relative path -> (kind, content or link
     target). For "nothing changed" and "these bytes moved intact" assertions."""
     return H5.tree_state(Path(root))
+
+
+def identities(root: Path, names: Iterable[str] | None = None) -> dict[str, tuple[int, int]]:
+    """`{relative path: (st_dev, st_ino)}` of every entry under `root` whose top-level name is
+    one of `names` (every entry, by default), the entries below them included, links not
+    followed. A rename keeps both numbers; a copy — even a byte-identical one — makes new
+    inodes. For "moved by rename, never copied" assertions (adversary F3), beside `tree`'s
+    bytes."""
+    root = Path(root)
+    wanted = None if names is None else frozenset(names)
+    out: dict[str, tuple[int, int]] = {}
+    if not root.is_dir():
+        return out
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in (*dirnames, *filenames):
+            path = Path(dirpath) / name
+            rel = path.relative_to(root)
+            if wanted is not None and rel.parts[0] not in wanted:
+                continue
+            st = os.lstat(path)
+            out[rel.as_posix()] = (st.st_dev, st.st_ino)
+    return out
+
+
+# ------------------------------------------------------------------------------------------
+# The censuses' local-value resolution (adversary F1, F2: a census matching a spelling is
+# defeated by binding the value to another name first — `ep = episode_id; f"{ep}-{label}"`)
+# ------------------------------------------------------------------------------------------
+
+def bound_values(scope: ast.AST) -> dict[str, list[ast.expr]]:
+    """`{name: [values]}`: every value `scope`'s OWN statements bind a plain name to — `x = v`
+    (each name of `a = b = v`), `x: T = v`, `(x := v)` — nested functions, lambdas and classes
+    excluded (their names are theirs). Unpacking and loop targets are not traced."""
+    out: dict[str, list[ast.expr]] = {}
+
+    def walk(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                                  ast.ClassDef)):
+                continue
+            if isinstance(child, ast.Assign):
+                for target in child.targets:
+                    if isinstance(target, ast.Name):
+                        out.setdefault(target.id, []).append(child.value)
+            elif (isinstance(child, ast.AnnAssign) and child.value is not None
+                  and isinstance(child.target, ast.Name)) or isinstance(child, ast.NamedExpr):
+                out.setdefault(child.target.id, []).append(child.value)
+            walk(child)
+
+    walk(scope)
+    return out
+
+
+def spells(node: ast.AST, needle: str, values: Mapping[str, list[ast.expr]],
+           _seen: frozenset[str] = frozenset()) -> bool:
+    """Does `node`'s source spell `needle`, directly or through a name a plain assignment in
+    the same scope bound to something that does (transitively: `a = episode_id; b = a`), or
+    through an attribute some assignment in the same file bound to something that does
+    (`self._eid = episode_id` anywhere, `self._eid` used elsewhere)? `values` is
+    `scoped_nodes`' map: plain names, and `".<attr>"` keys for attributes."""
+    if needle in ast.unparse(node):
+        return True
+    keys = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+    keys |= {"." + n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)}
+    return any(spells(value, needle, values, _seen | {key})
+               for key in sorted(keys - _seen) for value in values.get(key, ()))
+
+
+def attribute_values(tree: ast.AST) -> dict[str, list[ast.expr]]:
+    """`{".<attr>": [values]}` for every `<anything>.<attr> = value` (and annotated) assignment
+    in the whole file: what `spells` follows an attribute through (adversary F1: an id stored
+    on `self` in `__init__` and joined to a `-` in another method)."""
+    out: dict[str, list[ast.expr]] = {}
+    for node in ast.walk(tree):
+        targets = (node.targets if isinstance(node, ast.Assign)
+                   else [node.target] if isinstance(node, ast.AnnAssign) and node.value else [])
+        for target in targets:
+            if isinstance(target, ast.Attribute):
+                out.setdefault("." + target.attr, []).append(node.value)
+    return out
+
+
+def scoped_nodes(tree: ast.AST) -> list[tuple[ast.AST, dict[str, list[ast.expr]]]]:
+    """Every node of `tree` with the values map of the scope it sits in: the `bound_values` of
+    the module, or of its innermost enclosing function or lambda, plus the file's
+    `attribute_values`."""
+    out: list[tuple[ast.AST, dict[str, list[ast.expr]]]] = []
+    attrs = attribute_values(tree)
+
+    def walk(node: ast.AST, values: dict[str, list[ast.expr]]) -> None:
+        for child in ast.iter_child_nodes(node):
+            out.append((child, values))
+            inner = ({**bound_values(child), **attrs} if isinstance(
+                child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) else values)
+            walk(child, inner)
+
+    walk(tree, {**bound_values(tree), **attrs})
+    return out
+
+
+#: The walk's owner: the ONE definition both censuses use (the openers census and the
+#: made-by-path census) — the run repository and the episode handle (relative to `defender/`;
+#: a folder prefix ends in `/`). Round 2, R4: the whole folder, not a file list.
+WALK_OWNER = ("run_repository/", "_episode_handle.py")
+
+
+def owned(rel: str) -> bool:
+    """Is `rel` (relative to `defender/`) in the walk's owner?"""
+    return any(rel == own or (own.endswith("/") and rel.startswith(own)) for own in WALK_OWNER)
+
+
+# ------------------------------------------------------------------------------------------
+# Which paths production opens (adversary F10, review round 1: the seam sees only the calls
+# that go through it, so one recorded call silenced it; the kernel's view cannot be dodged)
+# ------------------------------------------------------------------------------------------
+
+_PATH_EVENTS = frozenset({"open", "os.mkdir"})
+_RECORDERS: list[PathOpens] = []
+_HOOKED: list[bool] = []
+
+
+def _audit(event: str, args: tuple) -> None:
+    if event in _PATH_EVENTS and _RECORDERS and args and isinstance(
+            args[0], (str, bytes, os.PathLike)):
+        path = os.fsdecode(args[0])
+        if os.path.isabs(path):
+            for recorder in _RECORDERS:
+                recorder.seen.append(path)
+
+
+class PathOpens:
+    """Every ABSOLUTE path the process opened (`open` audit event: `os.open`, `open`, `hold`,
+    `bind`, ...) or made (`os.mkdir`) while the block ran. A walk that steps from a held handle
+    opens its levels RELATIVE (`dir_fd=`), which this does not record; a walk that `lstat`s a
+    level and then opens it by path, or `hold`s/`bind`s a path below `<T>`, shows up here.
+    `below(folder, allow=)` is the absolute paths strictly below `folder`, minus any at or below
+    an `allow` path (a `Run` handle binds its own run folder by path, and is not constrained).
+    `sys.addaudithook` cannot be removed, so one hook is installed per process and only records
+    while a recorder is active."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def __enter__(self) -> PathOpens:
+        if not _HOOKED:
+            sys.addaudithook(_audit)
+            _HOOKED.append(True)
+        _RECORDERS.append(self)
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        _RECORDERS.remove(self)
+
+    def below(self, folder: Path, allow: Iterable[Path] = ()) -> list[str]:
+        prefix = os.fspath(folder).rstrip("/") + "/"
+        allowed = [os.fspath(a).rstrip("/") for a in allow]
+        return sorted({p for p in self.seen if p.startswith(prefix)
+                       and not any(p == a or p.startswith(a + "/") for a in allowed)})
+
+
+#: inotify's event bits this suite watches for (`<sys/inotify.h>`).
+IN_ACCESS = 0x00000001
+IN_OPEN = 0x00000020
+
+
+class FileReads:
+    """What the KERNEL saw happen to one file while the block ran: each `IN_OPEN` and
+    `IN_ACCESS` (a read that returned bytes) inotify reports on `path`, whoever made it —
+    production code reading through `_io`, a raw `open`, or any other route (adversary F9: a
+    sentinel that fires only through one parser misses a read through another). Linux only;
+    `available()` says whether this box has it.
+
+    Watch a file AFTER its last rewrite (the watch is on the inode a later replace would leave
+    behind), and drain `events()` before anything else reads it — the test's own reads count
+    too. A context manager: leaving it closes the inotify descriptor."""
+
+    def __init__(self, path: Path) -> None:
+        import ctypes
+
+        self.path = Path(path)
+        libc = ctypes.CDLL(None, use_errno=True)
+        self._fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        if self._fd < 0:
+            raise OSError(ctypes.get_errno(), "inotify_init1 failed")
+        wd = libc.inotify_add_watch(self._fd, os.fsencode(self.path), IN_ACCESS | IN_OPEN)
+        if wd < 0:
+            errno_ = ctypes.get_errno()
+            os.close(self._fd)
+            raise OSError(errno_, f"inotify_add_watch({self.path}) failed")
+        self._seen: list[str] = []
+
+    @staticmethod
+    def available() -> bool:
+        """Can this box watch a file (Linux, inotify present)?"""
+        import ctypes
+        import sys
+
+        if not sys.platform.startswith("linux"):
+            return False
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        except (OSError, AttributeError):
+            return False
+        if fd < 0:
+            return False
+        os.close(fd)
+        return True
+
+    def events(self) -> list[str]:
+        """Every event so far, oldest first, as `"open"` / `"read"`."""
+        import struct
+
+        while True:
+            try:
+                buf = os.read(self._fd, 65536)
+            except BlockingIOError:
+                break
+            at = 0
+            while at < len(buf):
+                _wd, mask, _cookie, length = struct.unpack_from("iIII", buf, at)
+                at += 16 + length
+                if mask & IN_OPEN:
+                    self._seen.append("open")
+                if mask & IN_ACCESS:
+                    self._seen.append("read")
+        return list(self._seen)
+
+    def reads(self) -> int:
+        """How many reads of the file returned bytes so far."""
+        return self.events().count("read")
+
+    def close(self) -> None:
+        if self._fd >= 0:
+            os.close(self._fd)
+            self._fd = -1
+
+    def __enter__(self) -> FileReads:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
 
 raised = H5.raised

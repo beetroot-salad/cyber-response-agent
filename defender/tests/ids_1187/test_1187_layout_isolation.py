@@ -596,6 +596,210 @@ def test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repos
     assert S.tree(b_dir) == b_before, "A's calls through its real folder changed B's tree"
 
 
+# ------------------------------------------------------------------------------------------
+# A level swapped AFTER the check (adversary F10: every link test above plants its link before
+# the call, so a walk that `lstat`s each level and then opens it by path passes them all).
+# ------------------------------------------------------------------------------------------
+
+def _decoy_episode(a: dict, root: Path, stranger: str) -> Path:
+    """A copy of A's episode folder at `<root>/<epA>`, standing for B's: its roster names
+    `stranger` for `a` and fresh ids for `b` and `c`, and its `runs/` holds an arm folder at
+    `stranger` (alert `decoy`) — so a view that reads through a link to it shows other ids, and
+    `open(stranger)` succeeds only there."""
+    decoy = root / a["episode_id"]
+    shutil.copytree(a["episode"], decoy, symlinks=True)
+    S.write_roster(decoy, {"a": stranger, "b": S.new_id(), "c": S.new_id()})
+    S.make_run(decoy / "runs", stranger, alert='{"alert": "decoy"}\n')
+    return decoy
+
+
+@pytest.mark.parametrize("level", ["episode", "arm_container"])
+def test_a_level_swapped_for_a_link_after_the_view_opened_is_never_followed(
+        tmp_path, data_root, level):
+    """A behavioural SPOT CHECK, not F10's proof (round 2: it plants one fixed link after the
+    open, which a walk that `lstat`s at call time also refuses; the proof that no level is
+    reached by its path is `test_no_episode_door_opens_a_level_below_the_tenant_by_its_path`).
+    O8 / S-iso step 2 ("opens `runs`, `episodes`, `<ep>`, `runs` and the run or arm entry,
+    each OFF ITS PARENT'S HANDLE, never following"), the time-of-check half (adversary F10): A's
+    view is opened while every level is real; THEN a level below it is swapped for a link to a
+    decoy episode (A's real folder renamed aside, so a held handle still reaches it) —
+    `<A>/episodes/<epA>` itself (`episode`) or its arm container `<epA>/runs`
+    (`arm_container`). The arm `stranger` is in A's roster but was never started in A: its
+    folder exists only in the decoy. The same view, asked afterwards, never answers from the
+    decoy: `open(stranger)` and `arms([stranger])` refuse (absent in A's own container, or a
+    link refused — either), and `arm_ids()` is A's roster or a refusal, never the decoy's. A view
+    that re-reaches a level by its path (`Path(episode.dir) / "runs"`, an `lstat` and then an
+    open by path) hands out the decoy's arm. Positive control, same calls: the swap undone and
+    `stranger` started in A's own container, a view opens it at A's path. RED at base: the view
+    is looked up under the episodes variable."""
+    a = _tenant_scene(data_root, A_ID)
+    stranger = a["roster"]["a"]
+    shutil.rmtree(a["episode"] / "runs" / stranger)
+    decoy = _decoy_episode(a, tmp_path / "decoy", stranger)
+    decoy_before = S.tree(decoy)
+    swapped = a["episode"] if level == "episode" else a["episode"] / "runs"
+    target = decoy if level == "episode" else decoy / "runs"
+    aside = data_root / f"aside-{level}"
+    runs = a["tenant"].runs_repository()
+
+    faults: list[str] = []
+    with runs.episode(a["episode_id"]) as view:
+        os.rename(swapped, aside)
+        os.symlink(target, swapped)
+        opened = S.raised(view.open, _rid(stranger))
+        if opened is None:
+            faults.append("open(stranger) after the swap handed out the decoy's arm")
+        elif not _is_refusal(opened):
+            faults.append(f"open(stranger) after the swap gave {opened!r}")
+        answers: list = []
+
+        def _arms() -> None:
+            with view.arms([_rid(stranger)]) as handout:
+                answers.append(handout[_rid(stranger)])
+
+        whole = S.raised(_arms)
+        answer = whole if whole is not None else answers[0]
+        if not _is_refusal(answer):
+            faults.append(f"arms([stranger]) after the swap handed out {answer!r}")
+        ids: list = []
+        read = S.raised(lambda: ids.append(view.arm_ids()))
+        if read is None:
+            got = {label: str(arm) for label, arm in (ids[0] or {}).items()}
+            if got != a["roster"]:
+                faults.append(f"arm_ids() after the swap answered {got}, not A's roster")
+        elif not _is_refusal(read):
+            faults.append(f"arm_ids() after the swap gave {read!r}")
+    assert faults == [], f"a level swapped for a link ({level}) was followed:\n  " + (
+        "\n  ".join(faults))
+    assert S.tree(decoy) == decoy_before, "A's view changed the decoy's tree"
+
+    os.unlink(swapped)
+    os.rename(aside, swapped)
+    S.make_run(a["episode"] / "runs", stranger)
+    with runs.episode(a["episode_id"]) as view:
+        assert Path(view.open(_rid(stranger)).run_dir) == a["episode"] / "runs" / stranger
+        assert {k: str(v) for k, v in view.arm_ids().items()} == a["roster"]
+
+
+def _episode_doors(a: dict, bare_id: str) -> dict:
+    """The episode doors, each a function of the repository, with the paths each may open by
+    name: a `Run` a door hands out binds ITS OWN folder by path (the base handle does; not
+    constrained here), so that arm folder, and what is below it, is allowed."""
+    arm = a["episode"] / "runs" / a["roster"]["b"]
+
+    def episode(runs) -> None:
+        with runs.episode(a["episode_id"]) as view:
+            view.arm_ids()
+            view.arm_id("b")
+            view.open(_rid(a["roster"]["b"]))
+
+    def arms(runs) -> None:
+        with runs.episode(a["episode_id"]) as view, view.arms(
+                [_rid(a["roster"]["b"])]) as handout:
+            handout[_rid(a["roster"]["b"])]
+
+    def sibling(runs) -> None:
+        with runs.episode(a["episode_id"], roster_label="b") as view:
+            view.arm_id("b")
+
+    def start_runs(runs) -> None:
+        with runs.episode(bare_id) as view:
+            view.start_runs(["a", "b", "c"])
+
+    def episode_files(runs) -> None:
+        runs.episode_files(a["episode_id"]).close()
+
+    def create_episode(runs) -> None:
+        with runs.create_episode():
+            pass
+
+    allow = {"episode": [arm], "arms": [arm]}
+    return {fn.__name__: (fn, allow.get(fn.__name__, ()))
+            for fn in (episode, arms, sibling, start_runs, episode_files, create_episode)}
+
+
+def test_no_episode_door_opens_a_level_below_the_tenant_by_its_path(data_root):
+    """O8 / S-iso step 2 ("opens `runs`, `episodes`, `<ep>`, `runs` and the run or arm entry,
+    each off its parent's handle, never following") — adversary F10, observed in the KERNEL's
+    terms, not the seam's (review round 1: a planted link is refused by any walk that `lstat`s
+    at call time, and `RecordingIO` sees only calls made through it, so one recorded `hold`
+    silenced it). An audit hook records every absolute path the process opens or makes while
+    each episode door runs — `episode(ep)` with `arm_ids` / `arm_id` / `open`, `arms`, the
+    sibling form `episode(ep, roster_label=)`, `start_runs`, `episode_files` and
+    `create_episode` — and none may be strictly below `<T>`. A walk stepping from a held
+    `<T>` (`hold(<T>, follow=False)`, then `openat` relative to it) opens nothing by an
+    absolute path below `<T>`; one that checks `<T>/episodes/<ep>` with `lstat` and then opens
+    it by path (`Episode.open(path)`, `hold(<ep>/runs)`, `bind(<ep>)`) does. Not constrained:
+    the arm folder a door hands out as a `Run` (the base handle binds its own folder by path).
+    Opening `<T>` itself, or the data root, is not below `<T>`. The checker is proven against
+    both walks by `test_the_path_open_recorder_*` below. RED at base: the doors read the
+    episodes variable or open `<ep>` by path."""
+    a = _tenant_scene(data_root, A_ID)
+    tenant_dir = S.tenant_dir(data_root, A_ID)
+    bare_id = S.new_id()
+    S.make_episode(data_root, A_ID, bare_id, manifest=_manifest(bare_id), roster=False)
+    runs = a["tenant"].runs_repository()
+
+    faults = []
+    for name, (door, allow) in _episode_doors(a, bare_id).items():
+        with S.PathOpens() as audit:
+            err = S.raised(door, runs)
+        if err is not None:
+            faults.append(f"{name}: raised {err!r}")
+            continue
+        faults.extend(f"{name}: opened {path} by its path"
+                      for path in audit.below(tenant_dir, allow))
+    assert faults == [], "an episode door reached a level below <T> by its path:\n  " + (
+        "\n  ".join(faults))
+
+
+def test_the_path_open_recorder_sees_a_path_walk_and_not_a_handle_walk(tmp_path):
+    """The positive control and the negative control of the recorder above, on a hand-built
+    tree: a walk that holds `<T>` no-follow and steps `episodes/<ep>` from the handle records no
+    absolute path below `<T>`; `hold(<ep>/runs)`, `bind(<ep>)`, and the mutation adversary F10
+    names — `lstat` each level by its path, then open it by path — each do. `<T>` itself is
+    not below `<T>`, and an allowed folder is skipped."""
+    from defender import _io
+
+    tenant_dir = tmp_path / "acme"
+    ep = tenant_dir / "episodes" / "ep"
+    (ep / "runs").mkdir(parents=True)
+    (ep / "family.yaml").write_text("episode_id: ep\n", encoding="utf-8")
+
+    def handle_walk() -> None:
+        with _io.hold(tenant_dir, follow=False) as held:
+            held.mkdir("episodes/ep2")
+            held.view().read("episodes/ep/family.yaml")
+
+    def by_hold() -> None:
+        with _io.hold(ep / "runs", follow=False):
+            pass
+
+    def by_bind() -> None:
+        with _io.bind(ep):
+            pass
+
+    def lstat_then_open() -> None:
+        for level in (tenant_dir / "episodes", ep):
+            os.lstat(level)
+        with _io.hold(ep, follow=False):
+            pass
+
+    with S.PathOpens() as clean:
+        handle_walk()
+    assert clean.below(tenant_dir) == [], f"a handle walk was reported: {clean.below(tenant_dir)}"
+    for name, walk in {"hold": by_hold, "bind": by_bind, "lstat-then-open": lstat_then_open}.items():
+        with S.PathOpens() as audit:
+            walk()
+        assert audit.below(tenant_dir), f"a {name} path walk was not reported: {audit.seen}"
+    with S.PathOpens() as audit:
+        by_hold()
+    assert audit.below(tenant_dir, allow=[ep / "runs"]) == [], "an allowed folder was reported"
+    with S.PathOpens() as audit, _io.hold(tenant_dir, follow=False):
+        pass
+    assert audit.below(tenant_dir) == [], "opening <T> itself was reported as below <T>"
+
+
 # ==========================================================================================
 # Episodes: claimed under <T>/episodes by one exclusive create; no environment (O9, dc 3, 5).
 # ==========================================================================================
@@ -661,6 +865,166 @@ def test_two_episodes_get_two_fresh_uuid_folders_and_never_a_retry_suffix(data_r
         assert S.is_canonical_uuid(episode_id), f"{episode_id!r} is not a canonical uuid"
         assert not episode_id.endswith("-r2"), f"{episode_id!r} is a retry name"
     assert sorted(os.listdir(S.episodes_dir(data_root, A_ID))) == sorted([one, two])
+
+
+def _folders_made_by_path(root: Path) -> list[str]:
+    """Every call in the walk owner's source under `root` that makes a folder by its PATH:
+    `os.makedirs(...)`, `os.mkdir(...)` with no `dir_fd=`, and `Path(...).mkdir(...)` — a
+    `.mkdir` whose receiver spells `Path(` (directly or through a local alias) or that passes
+    `parents=` / `exist_ok=`. A handle-relative maker (`Held.mkdir(<name>)`, `os.mkdir(name,
+    dir_fd=fd)`) is not one, and neither is an `exist_ok` anywhere else: a handle-relative
+    "if absent" for `<T>/episodes` legitimately adopts. Resolved through
+    `scripts/lint/_astlib.py`, so an alias or a local `import os as _os` is seen. The owner is
+    `_spec1187.WALK_OWNER`, the one definition."""
+    astlib = _by_path.import_lint_lib("_astlib")
+    found = []
+    for rel in astlib.source_files(root, (".venv", "__pycache__", "node_modules", "tests")):
+        if not S.owned(rel):
+            continue
+        _text, tree = astlib.read_and_parse(root / rel, rel)
+        module, package = astlib.module_and_package(rel, root="defender")
+        env = astlib.module_env(tree, module, package)
+        for node, values in S.scoped_nodes(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            called = astlib.callee(node, env)
+            path_maker = called == "os.makedirs" or (
+                called == "os.mkdir" and not astlib.has_kw(node, "dir_fd"))
+            if not path_maker and called is None and isinstance(
+                    node.func, ast.Attribute) and node.func.attr == "mkdir":
+                path_maker = (S.spells(node.func.value, "Path(", values)
+                              or astlib.has_kw(node, "parents") or astlib.has_kw(node, "exist_ok"))
+            if path_maker:
+                found.append(f"{rel}:{node.lineno} {ast.unparse(node)}")
+    return found
+
+
+def test_the_walk_owner_makes_no_folder_by_its_path(tmp_path):
+    """G15 / declared change 3 / S-iso ("`create_episode` ... steps `episodes` off the held
+    `<T>` and then makes the UUID folder exclusively"), the static half of adversary F7
+    (`os.makedirs(<T>/episodes/<uuid>, exist_ok=True)`); the behavioural half, which plants
+    the colliding folder, is `test_create_episode_refuses_a_folder_already_at_the_minted_name`.
+    The run repository and the episode handle make no folder by its path: no `os.makedirs`, no
+    `os.mkdir` without `dir_fd=`, no `Path(...).mkdir`. A handle-relative maker, including one
+    with an "if absent" for `<T>/episodes`, is not reported. GREEN at base (a guard): the
+    owner makes its folders off held handles today. Positive control: a planted owner tree
+    with each path-taking shape is reported, the handle-relative shapes are not."""
+    found = _folders_made_by_path(DEFENDER)
+    assert found == [], "the walk owner makes a folder by its path:\n  " + "\n  ".join(found)
+
+    planted = tmp_path / "planted"
+    (planted / "run_repository").mkdir(parents=True)
+    (planted / "run_repository" / "_lookup.py").write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "\n"
+        "\n"
+        "def claim(episodes, episode_id, fd, held):\n"
+        "    import os as _os\n"
+        "    _os.makedirs(episodes / episode_id, exist_ok=True)\n"
+        "    os.mkdir(episodes)\n"
+        "    Path(episodes).mkdir(parents=True, exist_ok=True)\n"
+        "    folder = Path(episodes)\n"
+        "    folder.mkdir()\n"
+        "    os.mkdir(episode_id, dir_fd=fd)\n"
+        "    held.mkdir(episode_id)\n",
+        encoding="utf-8")
+    reported = _folders_made_by_path(planted)
+    assert len(reported) == 4, reported
+    assert not any("dir_fd" in line or "held.mkdir" in line for line in reported), reported
+
+
+_CLAIM_CHILD = """
+import os, sys, uuid
+from pathlib import Path
+from defender.run_repository import RunRefused
+from defender.tests.ids_1187 import _spec1187 as S
+root, tenant_id, collide = Path(sys.argv[1]), sys.argv[2], sys.argv[3] == "collision"
+runs = S.tenant(root, tenant_id).runs_repository()
+real_mkdir, attempts = os.mkdir, []
+def claim_mkdir(path, *args, **kwargs):
+    name = os.path.basename(os.fsdecode(path))
+    try:
+        is_uuid = str(uuid.UUID(name)) == name
+    except ValueError:
+        is_uuid = False
+    if is_uuid:
+        attempts.append(name)
+        if len(attempts) > 1:
+            raise RuntimeError("episode claim retried")
+        if collide:
+            real_mkdir(path, *args, **kwargs)
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY, dir_fd=kwargs.get("dir_fd"))
+            try:
+                marker = os.open("PLANTED", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+                                 dir_fd=fd)
+                try:
+                    os.write(marker, b"someone else's episode\\n")
+                finally:
+                    os.close(marker)
+            finally:
+                os.close(fd)
+            print("PLANTED", name, flush=True)
+    return real_mkdir(path, *args, **kwargs)
+os.mkdir = claim_mkdir
+try:
+    with runs.create_episode() as view:
+        print("CLAIMED", view.episode_id)
+except RunRefused:
+    print("REFUSED")
+except BaseException as exc:
+    print("UNEXPECTED", type(exc).__name__)
+print("ATTEMPTS", len(attempts))
+"""
+
+
+def _claim_in_a_child(data_root: Path, *, collide: bool):
+    import subprocess
+    import sys
+
+    from defender.tests.tenant_1105_run_repository import _spec1105 as H5
+
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", S.DATA_ROOT_ENV: str(data_root),
+           "PYTHONPATH": os.pathsep.join(filter(None, [str(H5.WORKTREE),
+                                                       os.environ.get("PYTHONPATH")]))}
+    return subprocess.run(  # noqa: S603 — this interpreter, a fixed script
+        [sys.executable, "-c", _CLAIM_CHILD, str(data_root), A_ID,
+         "collision" if collide else "control"],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+        cwd=str(H5.WORKTREE), timeout=300)
+
+
+def test_create_episode_refuses_a_folder_already_at_the_minted_name(data_root):
+    """The claim is one exclusive create, with no retry and no adoption of an existing entry.
+    In a child, intercept the OS mkdir of the freshly minted UUID and plant that very name
+    with a canary immediately before the actual claim. The same fault works for absolute
+    paths and relative dir_fd calls, independently of the random-id generator. A second
+    UUID mkdir attempt stops immediately and fails the count assertion. The success control
+    runs the same child without the collision; no private production seam is imposed.
+    """
+    S.tenant(data_root, A_ID)
+    refused = _claim_in_a_child(data_root, collide=True)
+    out = refused.stdout.splitlines()
+    assert refused.returncode == 0, refused.stderr[-1500:]
+    assert "REFUSED" in out, f"the collision was not refused: {refused.stdout!r}"
+    assert "ATTEMPTS 1" in out, f"the claim retried or never reached mkdir: {refused.stdout!r}"
+    planted = [line.split()[1] for line in out if line.startswith("PLANTED ")]
+    assert len(planted) == 1, refused.stdout
+    episodes = S.episodes_dir(data_root, A_ID)
+    folder = episodes / planted[0]
+    assert os.listdir(episodes) == planted, "the failed claim made another episode"
+    assert os.listdir(folder) == ["PLANTED"], "the claim adopted or changed the planted folder"
+    assert (folder / "PLANTED").read_text(encoding="utf-8") == "someone else's episode\n"
+
+    shutil.rmtree(folder)
+    claimed = _claim_in_a_child(data_root, collide=False)
+    out = claimed.stdout.splitlines()
+    assert claimed.returncode == 0, claimed.stderr[-1500:]
+    assert "ATTEMPTS 1" in out, claimed.stdout
+    made = [line.split()[1] for line in out if line.startswith("CLAIMED ")]
+    assert len(made) == 1, f"control: the claim failed: {claimed.stdout!r} {claimed.stderr[-800:]}"
+    assert os.listdir(episodes) == made
+    assert _real_dir(episodes / made[0])
 
 
 @pytest.mark.parametrize("variable", [

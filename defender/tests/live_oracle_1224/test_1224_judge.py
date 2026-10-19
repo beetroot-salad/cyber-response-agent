@@ -302,7 +302,7 @@ def _world_prompt(ep: Path, label: str) -> str:
     """World `label`'s judge prompt as the pass builds it (#1234: `render.render` returns the
     computed `JudgeContext` and `run._build_prompt(ctx, manifest)` lays it out under the cap),
     with a recording `git show` and no model call."""
-    ctx = S.sym(S.JUDGE_RENDER, "render")(ep, label, git_show=J.FakeGitShow())
+    ctx = J.render_at(ep, label, git_show=J.FakeGitShow())
     manifest = _yaml.safe_load((Path(ep) / "family.yaml").read_text(encoding="utf-8"))
     return S.sym(S.JUDGE_RUN, "_build_prompt")(ctx, manifest)[0]
 

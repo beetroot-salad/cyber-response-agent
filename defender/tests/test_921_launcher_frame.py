@@ -378,12 +378,9 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
     # still gets each call with its decision word — so the bound is over every OTHER view.
     # #1234 (A9): the views are the M3 layout's blocks (`layout.world_layout`), measured the way
     # the cap measures them (host titles and labels outside every frame are not charged).
-    from defender._io import bind
-
     layout = J.mod("learning.judge.layout")
-    with bind(ep) as bound:
-        manifest = J.mod("learning.judge.family").read_manifest(bound)
-    ctx = J.mod("learning.judge.render").render(ep, "b", payload_cap=3000)
+    manifest = J.read_manifest_at(ep)
+    ctx = J.render_at(ep, "b", payload_cap=3000)
     blocks = [block for _title, section in layout.world_layout(ctx, manifest).sections
               for block in section]
     charged = sum(layout._block_cost(block) for block in blocks

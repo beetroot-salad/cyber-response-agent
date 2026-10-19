@@ -72,7 +72,7 @@ def o1_scope(repo: Path = REPO_ROOT) -> tuple[list[Path], list[Path]]:
 #: The owner calls whose tenant id sits at a known position (D1/D2's signatures, and #1120's:
 #: acceptance and the private layout take `(data_root, id)` too).
 _TENANT_ARG_POS = {"TenantPaths": 1, "create_tenant": 1, "require_tenant": 1,
-                   "ensure_runs_base_record": 1, "runs_base_for": 0, "for_tenant": 0,
+                   "runs_base_for": 0, "for_tenant": 0,
                    "_TenantPaths": 1, "accept_tenant": 1, "accept_placed_knowledge": 1,
                    "resolve_tenant": 1, "refuse_foreign_data_root": 1}
 _TENANT_KW = {"tenant", "tenant_id", "raw_id"}

@@ -245,7 +245,7 @@ def _world_row_of(doc: Mapping[str, Any], label: str) -> dict:
 
 def _read_grade_refusal(built: S.Built) -> BaseException:
     """`read_grade(episode_dir)` expected to refuse; the refusal."""
-    read_grade = S.sym(S.JUDGE, "read_grade")
+    read_grade = S.J.read_grade_at
     with pytest.raises(S.refusals()) as refused:
         read_grade(built.ep)
     return refused.value
@@ -905,7 +905,7 @@ def test_1234_am_legacy_withheld_lane_beside_the_new_fates(tmp_path):
         assert lanes.get(fid), f"the pass filed no ledger lane for {fid}: {lanes}"
         assert not set(lanes[fid]) & set(S.RETIRED_LANES), (
             f"{fid} is laned under a retired word: {lanes[fid]}")
-    assert S.sym(S.JUDGE, "read_grade")(built.ep) is not None
+    assert S.J.read_grade_at(built.ep) is not None
     S.grade(built, S.judge(), draws=2)
 
     def legacy_lane(doc: dict) -> None:
@@ -950,7 +950,7 @@ def test_1234_unknown_nonretired_key_in_a_persisted_record_is_dropped_not_refuse
         doc[unknown] = marks[1]
 
     _edit_record(built, add_unknown)
-    record = S.sym(S.JUDGE, "read_grade")(built.ep)
+    record = S.J.read_grade_at(built.ep)
     assert record is not None
     assert not hasattr(record, unknown), "the unknown top-level key was carried onto the record"
     S.grade(built, S.judge())

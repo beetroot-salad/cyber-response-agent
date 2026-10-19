@@ -1145,7 +1145,7 @@ def test_1234_am_readers_meet_a_queueing_row_or_unrecorded_draw_files(tmp_path):
     assert S.marker(D, "shown") in html, "the page does not show delta's recorded draws"
     assert S.marker(C, "stray") not in html, "the page shows a draw file judge.yaml does not record"
 
-    read_grade = S.sym(S.JUDGE, "read_grade")
+    read_grade = S.J.read_grade_at
     assert S.rows(read_grade(built.ep)) == S.rows(built), "read_grade did not return rows verbatim"
     assert S.rows(read_grade(built.ep))[B].get(S.STATE_KEY) == S.QUEUEING
     bad = S.record(built)

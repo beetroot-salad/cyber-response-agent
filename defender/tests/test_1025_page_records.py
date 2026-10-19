@@ -739,12 +739,11 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
     target's report into the judge's input — #1234 A3: the usability read sets that world
     aside, so it is no reference run of the world that IS judged.
     """
-    render_mod = E.mod("learning.judge.render")
     ep = J.accepted_episode(tmp_path, ledgers={"b": [E.served_row("b", "oracle")], "c": []})
     fifo = E.plant_fifo(ep / "worlds" / "b" / "investigation.md")
     started = time.monotonic()
     with E.Rescue(fifo, after=2.0) as rescue, pytest.raises(_refused()):
-        render_mod.render(ep, "b")
+        J.render_at(ep, "b")
     assert time.monotonic() - started < 2.0, "the input builder blocked on the FIFO"
     assert not rescue.fed, "the input builder blocked on the FIFO"
 
@@ -753,7 +752,7 @@ def test_1025_judge_render_reads_world_archive_through_the_same_screen_as_the_pa
     outside = tmp_path / "outside-report.md"
     outside.write_text(T.report_text("benign", body="OUTSIDE-REPORT-BODY"), encoding="utf-8")
     E.plant_link(ep / "worlds" / "c" / "report.md", outside)
-    rendered = render_mod.render(ep, "b")
+    rendered = J.render_at(ep, "b")
     assert "OUTSIDE-REPORT-BODY" not in repr(rendered.__dict__)
     assert "c" not in rendered.contrast_rows, "the linked world is a reference run"
 
@@ -770,7 +769,6 @@ def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malfor
     strictness lives in the reader the page passes through the `reader=` seam, not in the
     default.
     """
-    render_mod = E.mod("learning.judge.render")
     ep = E.sample_episode(tmp_path, judge=False)
     E.plant_raw(ep.dir / "samples.yaml", "logs-*: [\n  {")
     grade = J.grade_at(
@@ -783,7 +781,7 @@ def test_1025_grade_episode_still_grades_an_episode_whose_samples_yaml_is_malfor
     assert sorted(graded) == sorted([E.PASSTHROUGH_WORLD, E.GRADED_WORLD]), rows
     for label in graded:
         assert rows[label]["completed_draws"] == 1, (label, rows[label])
-    assert render_mod.render(ep.dir, graded[0]) is not None
+    assert J.render_at(ep.dir, graded[0]) is not None
 
     page = render(ep)
     records = _records(page)

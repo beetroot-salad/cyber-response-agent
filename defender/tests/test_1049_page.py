@@ -108,8 +108,9 @@ def _write_grade_over(copy: E.Episode) -> None:
     `_missing_required_input`'s "missing its report.md"; the pass no longer requires a served
     ledger, so the absent one is the leads block's note)."""
     family = R.family()
-    with R.bind(copy.dir) as bound:
-        manifest = family.read_manifest(bound)
+    with J.episode_runs_for(copy.dir).episode_files(copy.dir.name) as episode:
+        bound = episode.view()
+        manifest = family.read_manifest(bound, expected_episode_id=copy.dir.name)
         rows = [family.read_world(bound, world, episode_dir=copy.dir,
                                   episode_token=E.EPISODE_TOKEN)[0]
                 for world in family.non_control_worlds(manifest)]

@@ -31,6 +31,7 @@ from defender._episode_handle import Episode
 from defender._episode_paths import EpisodePaths
 from defender.tests import _episode_1025 as E
 from defender.tests import _judge_921 as J
+from defender.tests.judge_contrast_1234 import _spec1234 as S34
 from defender.tests import _record_1049 as R
 from defender.tests import _triplet_947 as T
 from defender.tests import _world_1007 as W
@@ -129,7 +130,7 @@ def test_1049_screened_yaml_mapping_says_the_name_on_all_three_arms_and_none_on_
     assert family.screened_yaml_mapping(bound, "judge.yaml", what="the family grade") == {
         "verdict_word": "caught"}
     # the manifest goes through the same reader and is still the one FATAL absence (d-33)
-    assert family.episode_id_of(family.raw_manifest(ep)) == T.EPISODE_ID
+    assert family.episode_id_of(J.read_manifest_at(ep)) == T.EPISODE_ID
 
 
 # ---------------------------------------------------------------------------------------
@@ -440,19 +441,18 @@ def test_1049_a_document_that_is_not_the_grade_record_is_refused_as_judge_yaml(t
     control: the sound record reads back with that field set to the episode dir.
     """
     ep = _episode(tmp_path)
-    judge = R.judge()
     refused = R.refused_class()
     sound = {"validity": "usable", "worlds": [{"world": "b", "verdict": "malicious"}]}
     for bad in ({**sound, "validity": 5}, {1: "x"}, {**sound, "worlds": [{"verdict": "x"}]},
                 {**sound, "not_graded": {"x": 1}}):
         R.write_bytes(ep / "judge.yaml", yaml.safe_dump(bad))
         with pytest.raises(refused) as caught:
-            judge.read_grade(ep)
+            J.read_grade_at(ep)
         sentence = str(caught.value)
         assert "judge.yaml is not a family grade record" in sentence, sentence
         _root_free(sentence, ep)
     R.write_bytes(ep / "judge.yaml", yaml.safe_dump(sound))
-    grade = judge.read_grade(ep)
+    grade = J.read_grade_at(ep)
     assert grade.validity == 'usable'
     assert grade.episode_dir == ep
 
@@ -612,7 +612,7 @@ def test_1049_every_caller_coalesces_none_at_the_read_site(tmp_path):
     assert not any(r.get('ungradable') for r in grade.worlds)
 
     base, _src = J.runs_base(tmp_path)
-    shown = R.mod("learning.judge.render").render(ep, "b")
+    shown = S34.render_context(ep, "b")
     assert shown.world_label == 'b'
     assert 'l-001' in shown.focus.leads
 
@@ -693,20 +693,19 @@ def test_1049_a_label_or_lead_id_that_names_no_path_inside_the_world_is_never_ec
 
     #1187 declared change 4: `world_label_names_directory` loses its run-id half (the
     `<episode_id>-<label>` spelling) and keeps the label's own rule; the two assertions on it
-    below are that rule's, unchanged (whether it still takes the episode id is the
-    implementer's).
+    below are that rule's, unchanged, through the label-only helper.
     """
     ep = _episode(tmp_path)
     family = R.family()
     refused = R.refused_class()
-    manifest = family.raw_manifest(ep)
+    manifest = J.read_manifest_at(ep)
     manifest["worlds"].append({**manifest["worlds"][1], "world_id": "../../elsewhere"})
     T.write_family(ep, manifest)
-    for read in (lambda: family.raw_manifest(ep), lambda: _grade(ep, tmp_path)):
+    for read in (lambda: J.read_manifest_at(ep), lambda: _grade(ep, tmp_path)):
         with pytest.raises(refused, match="outside the world-token alphabet"):
             read()
-    assert not family.world_label_names_directory(T.EPISODE_ID, "../../elsewhere")
-    assert family.world_label_names_directory(T.EPISODE_ID, "b")
+    assert not family.world_label_names_directory("../../elsewhere")
+    assert family.world_label_names_directory("b")
 
     world = R.bind(ep).under("worlds/b")
     by_id = family.leads_by_id(ep / "worlds" / "b")
@@ -1040,7 +1039,7 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     row = _rows(grade)["b"]
     assert not row.get("ungradable"), row
     base, _src = J.runs_base(tmp_path)
-    shown = R.mod("learning.judge.render").render(ep, "b").focus.leads
+    shown = S34.render_context(ep, "b").focus.leads
     assert "does not name a file inside this world" in shown[nul]["summary"], shown[nul]
 
     sample = E.sample_episode(tmp_path / "page")

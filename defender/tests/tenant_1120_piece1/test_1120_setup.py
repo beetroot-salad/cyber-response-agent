@@ -665,7 +665,7 @@ def _pass_a_tenant(root: Path) -> None:
     runs = H.tenant_folder(root) / "runs"
     (runs / "r1").mkdir(parents=True)
     (runs / "_tenant.json").write_text(json.dumps({
-        "tenant_id": H.TID, "base_world_id": "0" * 32,
+        "tenant_id": H.TID, "base_world_id": "0" * 32,  # lint-stale-ref: ok — deliberately planted pre-1187 tenant record
         "created_at": "2026-09-26T00:00:00+00:00"}) + "\n", encoding="utf-8")
     (runs / "r1" / "report.md").write_text("disposition: benign\n", encoding="utf-8")
 

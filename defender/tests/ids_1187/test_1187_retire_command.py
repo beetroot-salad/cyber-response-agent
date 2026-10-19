@@ -40,6 +40,7 @@ reasons each docstring states.
 """
 from __future__ import annotations
 
+import errno
 import importlib
 import json
 import os
@@ -194,6 +195,29 @@ def _full(sc: Scene) -> list[str]:
     return ["--tenant", T, "--old-episodes-root", str(sc.old_root)]
 
 
+def _inodes(sc: Scene) -> dict[str, dict[str, tuple[int, int]]]:
+    """The scene's entries' `(st_dev, st_ino)` before the command, by where each must END:
+    the old natural entries (bound for `runs-legacy/`), the old episodes (bound for
+    `episodes-legacy/`), and the UUID runs with their sidecars (staying in `<T>/runs`)."""
+    return {"runs_legacy": S.identities(sc.runs, sc.old),
+            "episodes_legacy": S.identities(sc.old_root, sc.old_episodes),
+            "runs": S.identities(sc.runs, sc.stay)}
+
+
+def _assert_renamed(sc: Scene, before: dict[str, dict[str, tuple[int, int]]]) -> None:
+    """Flow 6 step 4 / decision 7 / S-move (adversary F3): every planned entry was moved by
+    ONE rename — it, and every entry inside it, keeps its `(st_dev, st_ino)` in its
+    destination folder (a copy, even byte-identical, makes new inodes) — and nothing that
+    stays was rewritten in place."""
+    after = {"runs_legacy": S.identities(sc.runs_legacy),
+             "episodes_legacy": S.identities(sc.episodes_legacy),
+             "runs": S.identities(sc.runs)}
+    for where, was in before.items():
+        moved = {rel for rel in was if after[where].get(rel) != was[rel]}
+        assert not moved, (f"{len(moved)} entr(ies) bound for {where} are not the entries that "
+                           f"were planted (copied, not renamed): {sorted(moved)[:6]}")
+
+
 # ==========================================================================================
 # O6 / declared changes 6 and 7 — before the command, the listing refuses an old entry and
 # the refusal names the command.
@@ -341,6 +365,9 @@ def test_1187_o5_the_command_moves_every_old_entry_aside_intact_and_the_tracer_t
       `_tenant.json`, `_episodes`), byte for byte, under the same names;
     - `<T>/episodes-legacy/` holds exactly R's entries, byte for byte; R is left, emptied;
     - nothing is deleted (the union of the trees is the tree before);
+    - nothing is copied (adversary F3): every moved entry, and every entry inside it, keeps its
+      `(st_dev, st_ino)` — only a rename does; a copy-then-delete makes new inodes behind
+      identical bytes — and every entry that stays keeps its own;
     - stdout names each entry moved;
     - before it, the tracer refuses naming the command (O6); after it, it prints L's row.
     RED at base (a): `defender.ops` does not exist."""
@@ -348,6 +375,7 @@ def test_1187_o5_the_command_moves_every_old_entry_aside_intact_and_the_tracer_t
     sc = _scene(data_root, tmp_path)
     runs_before = S.tree(sc.runs)
     episodes_before = S.tree(sc.old_root)
+    inodes_before = _inodes(sc)
     assert sc.old, "the scene planted no old natural entry"
     assert sc.old_episodes, "the scene planted no old episode"
     assert sc.stay, "the scene planted no UUID run"
@@ -365,6 +393,7 @@ def test_1187_o5_the_command_moves_every_old_entry_aside_intact_and_the_tracer_t
     assert S.tree(sc.old_root) == {}, "the old episodes root was not emptied"
     for name in sorted(sc.old | sc.old_episodes):
         assert name in got.out, f"stdout does not report moving {name!r}: {got.out!r}"
+    _assert_renamed(sc, inodes_before)
 
     served = _trace(T, sc.lessons)
     assert _ok(served), _shown(served)
@@ -485,10 +514,12 @@ def test_1187_o5_a_rerun_finishes_a_move_a_crash_interrupted(crash, data_root, t
     """#1187 Flow 6 step 6: each rename is atomic, so a crash leaves some entries moved and the
     rest not; the re-run finishes the rest. An entry already in a legacy folder (absent from its
     source) is NOT a taken destination name. End state: exactly the clean run's (every entry
-    intact in its place). RED at base (a): `defender.ops` does not exist."""
+    intact in its place, each the very entry planted: renamed, never copied — F3). RED at base
+    (a): `defender.ops` does not exist."""
     sc = _scene(data_root, tmp_path)
     runs_before = S.tree(sc.runs)
     episodes_before = S.tree(sc.old_root)
+    inodes_before = _inodes(sc)
     crash(sc)
 
     got = _retire(*_full(sc))
@@ -497,6 +528,7 @@ def test_1187_o5_a_rerun_finishes_a_move_a_crash_interrupted(crash, data_root, t
     assert S.tree(sc.runs_legacy) == _under(runs_before, sc.old)
     assert S.tree(sc.episodes_legacy) == episodes_before
     assert S.tree(sc.old_root) == {}
+    _assert_renamed(sc, inodes_before)
 
 
 def test_1187_r3_a_queued_curation_row_naming_an_old_run_does_not_stop_the_command(
@@ -668,7 +700,7 @@ def test_1187_s_move_a_destination_that_is_not_a_real_folder_refuses_before_any_
     assert _names(sc.episodes_legacy) == sc.old_episodes
 
 
-def _taken_old_run_folder(sc: Scene) -> Path:
+def _taken_old_run_folder(sc: Scene, outside: Path) -> Path:
     """An EMPTY folder at an old run's name: a rename between handles would silently replace it
     (R2-22)."""
     taken = sc.runs_legacy / S.OLD_PINNED_ID
@@ -676,7 +708,7 @@ def _taken_old_run_folder(sc: Scene) -> Path:
     return taken
 
 
-def _taken_old_sidecar(sc: Scene) -> Path:
+def _taken_old_sidecar(sc: Scene, outside: Path) -> Path:
     """A regular file at an old sidecar's name, other bytes: a rename would replace it."""
     sc.runs_legacy.mkdir()
     taken = sc.runs_legacy / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}"
@@ -684,15 +716,59 @@ def _taken_old_sidecar(sc: Scene) -> Path:
     return taken
 
 
-def _taken_old_episode(sc: Scene) -> Path:
+def _taken_old_episode(sc: Scene, outside: Path) -> Path:
     """An EMPTY folder at the old episode's name that would move LAST."""
     taken = sc.episodes_legacy / sorted(sc.old_episodes)[-1]
     taken.mkdir(parents=True)
     return taken
 
 
+def _dangling_link_at_old_sidecar(sc: Scene, outside: Path) -> Path:
+    """A DANGLING link at an old sidecar's name, aimed at a file outside `<T>` that does not
+    exist (deck #1042 replay, adversary F4): the name is taken — a link is an entry — though
+    `os.path.exists` follows it and answers False. A copy writes the sidecar's bytes THROUGH it
+    to the outside path; a rename replaces the link. Either breaks "its name must be absent"."""
+    sc.runs_legacy.mkdir()
+    taken = sc.runs_legacy / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}"
+    os.symlink(outside / "written-through", taken)
+    return taken
+
+
+def _link_to_a_file_at_old_sidecar(sc: Scene, outside: Path) -> Path:
+    """A link at an old sidecar's name to a real file outside `<T>` (its bytes must survive)."""
+    sc.runs_legacy.mkdir()
+    (outside / "someone-elses.json").write_text('{"outside": true}\n', encoding="utf-8")
+    taken = sc.runs_legacy / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}"
+    os.symlink(outside / "someone-elses.json", taken)
+    return taken
+
+
+def _dangling_link_at_old_run_folder(sc: Scene, outside: Path) -> Path:
+    """A DANGLING link at an old run FOLDER's name (a folder copied through it would land
+    outside `<T>`)."""
+    sc.runs_legacy.mkdir()
+    taken = sc.runs_legacy / S.OLD_PINNED_ID
+    os.symlink(outside / "no-such-folder", taken)
+    return taken
+
+
+def _link_to_a_folder_at_old_episode(sc: Scene, outside: Path) -> Path:
+    """A link at the last old episode's name in `episodes-legacy/`, to a real folder outside
+    `<T>` (nothing may be written into it)."""
+    (outside / "real-folder").mkdir()
+    (outside / "real-folder" / "kept.txt").write_text("outside\n", encoding="utf-8")
+    sc.episodes_legacy.mkdir()
+    taken = sc.episodes_legacy / sorted(sc.old_episodes)[-1]
+    os.symlink(outside / "real-folder", taken)
+    return taken
+
+
 _TAKEN = {"old_run_folder": _taken_old_run_folder, "old_sidecar_file": _taken_old_sidecar,
-          "old_episode_folder": _taken_old_episode}
+          "old_episode_folder": _taken_old_episode,
+          "dangling_link_at_old_sidecar": _dangling_link_at_old_sidecar,
+          "link_to_a_file_at_old_sidecar": _link_to_a_file_at_old_sidecar,
+          "dangling_link_at_old_run_folder": _dangling_link_at_old_run_folder,
+          "link_to_a_folder_at_old_episode": _link_to_a_folder_at_old_episode}
 
 
 @pytest.mark.parametrize("taken", sorted(_TAKEN))
@@ -701,23 +777,30 @@ def test_1187_s_move_a_destination_name_already_taken_refuses_before_any_move(
     """#1187 S-move, Flow 6 step 2 (review D3): a planned entry whose name is already taken in
     its destination folder refuses the whole command before anything moves — the move is
     non-replacing only because of this plan-time check (R2-22: a rename replaces an existing
-    file or empty folder). Non-zero exit, every tree byte-identical (the planted entry keeps its
-    own bytes), the refusal naming the taken name. Positive control: the operator removes the
-    planted entry; the same command adopts the existing legacy folder and moves everything. RED
-    at base (a): `defender.ops` does not exist."""
+    file or empty folder). A link is an entry, so a link at the name — dangling, or aimed at a
+    file or folder outside `<T>` — takes it as much as a file does (adversary F4: a check that
+    follows the link, `os.path.exists`, calls a dangling one free). Non-zero exit, every tree
+    byte-identical — the planted entry keeps its own bytes, a planted link stays a link with its
+    own target, and nothing appears at, or is written into, the outside path it names — the
+    refusal naming the taken name. Positive control: the operator removes the planted entry;
+    the same command adopts the existing legacy folder and moves everything. RED at base (a):
+    `defender.ops` does not exist."""
     sc = _scene(data_root, tmp_path)
-    planted = _TAKEN[taken](sc)
-    before = _world(data_root, sc.old_root)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    planted = _TAKEN[taken](sc, outside)
+    before = _world(data_root, sc.old_root, outside)
 
     got = _retire(*_full(sc))
     assert _refused(got), f"the command ran over the taken {planted.name!r}: {_shown(got)}"
-    assert _world(data_root, sc.old_root) == before, "something moved or was replaced"
+    assert _world(data_root, sc.old_root, outside) == before, (
+        "something moved, was replaced, or was written through the planted link")
     assert planted.name in got.said, f"the refusal does not name {planted.name!r}: {got.said!r}"
 
-    if planted.is_dir():
-        planted.rmdir()
-    else:
+    if planted.is_symlink() or not planted.is_dir():
         planted.unlink()
+    else:
+        planted.rmdir()
     again = _retire(*_full(sc))
     assert _ok(again), _shown(again)
     assert _names(sc.runs_legacy) == sc.old
@@ -766,6 +849,129 @@ def test_1187_s_move_a_link_at_the_tenants_runs_folder_refuses_before_any_move(
     again = _retire(*_full(sc))
     assert _ok(again), _shown(again)
     assert _names(sc.runs_legacy) == sc.old
+
+
+@pytest.mark.parametrize("target", ["another_tenants_folder", "a_folder_outside_the_data_root"])
+def test_1187_s_move_a_link_at_the_tenant_folder_refuses_before_any_move(
+        target, data_root, tmp_path):
+    """#1187 S-move, Flow 6 step 1 ("Hold `<data root>/<T>` no-follow"): the command never
+    follows a link at `<T>` itself (adversary F5: reached as `<data root>/T` by path, a link
+    there makes the command move the entries of whatever folder it names). `<data root>/T` is a
+    link —
+    - `another_tenants_folder`: to U's real tenant folder, holding U's old entries — so a
+      followed link moves U's entries under T's name;
+    - `a_folder_outside_the_data_root`: to T's own real folder, set aside outside the data
+      root.
+    `--tenant T` exits non-zero and every tree — the data root, the link's target, the old
+    episodes root — is byte-identical, the link still a link. Positive control, same command:
+    the real folder in place (U asked for by its own name; T's own folder put back) moves its
+    old entries. RED at base (a): `defender.ops` does not exist."""
+    link = S.tenant_dir(data_root, T)
+    if target == "another_tenants_folder":
+        sc = _scene(data_root, tmp_path / "u", tenant_id=U, old_root=False)
+        os.symlink(sc.tenant_dir, link)
+        argv = ["--tenant", T]
+        watched = (data_root,)
+    else:
+        sc = _scene(data_root, tmp_path)
+        aside = tmp_path / "elsewhere" / T
+        aside.parent.mkdir()
+        os.rename(link, aside)
+        os.symlink(aside, link)
+        argv = _full(sc)
+        watched = (data_root, aside, sc.old_root)
+    before = _world(*watched)
+
+    got = _retire(*argv)
+    assert _refused(got), f"the command followed a linked <T> ({target}): {_shown(got)}"
+    assert _world(*watched) == before, f"something moved through the linked <T> ({target})"
+    assert link.is_symlink(), "the link at <T> was replaced"
+
+    if target == "another_tenants_folder":
+        again = _retire("--tenant", U)
+        assert _ok(again), _shown(again)
+        assert _names(sc.runs_legacy) == sc.old
+    else:
+        os.unlink(link)
+        os.rename(aside, link)
+        again = _retire(*_full(sc))
+        assert _ok(again), _shown(again)
+        assert _names(sc.runs_legacy) == sc.old
+        assert _names(sc.episodes_legacy) == sc.old_episodes
+
+
+#: The CI-provided folder for the rename-time EXDEV case (adversary F6): a folder on ANOTHER
+#: MOUNT of the data root's own filesystem (same `st_dev`, so the plan-time check passes; a
+#: rename across the two mounts still fails with EXDEV). Unset here: this container cannot
+#: mount (`mount --bind` and `unshare -m` are refused).
+OTHER_MOUNT_ENV = "DEFENDER_TEST_SAME_FS_OTHER_MOUNT"
+
+
+def _two_mounts_of_one_filesystem(data_root: Path) -> Path:
+    """The `OTHER_MOUNT_ENV` folder, proved fit or skipped: same `st_dev` as the data root, and
+    a rename from it into the data root fails with EXDEV (two mounts of one filesystem)."""
+    raw = os.environ.get(OTHER_MOUNT_ENV)
+    if not raw:
+        pytest.skip(f"{OTHER_MOUNT_ENV} unset: needs a folder on a second mount of the data "
+                    "root's filesystem — as root: `mount --bind <dir on that filesystem> <mnt>`, "
+                    f"then {OTHER_MOUNT_ENV}=<mnt>/<subdir>")
+    other = Path(raw)
+    if os.stat(other).st_dev != os.stat(data_root).st_dev:
+        pytest.skip(f"{OTHER_MOUNT_ENV}={other} is on another filesystem than the data root")
+    probe = Path(tempfile.mkdtemp(prefix="ids1187-probe-", dir=other))
+    try:
+        (probe / "f").write_text("probe\n", encoding="utf-8")
+        try:
+            os.rename(probe / "f", data_root / "ids1187-exdev-probe")
+        except OSError as e:
+            if e.errno != errno.EXDEV:
+                raise
+        else:
+            os.unlink(data_root / "ids1187-exdev-probe")
+            pytest.skip(f"a rename from {other} into the data root succeeds: not two mounts")
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+    return other
+
+
+def test_1187_s_move_an_exdev_at_rename_time_refuses_naming_both_paths_and_a_rerun_is_safe(
+        data_root):
+    """#1187 Flow 6 step 2, last clause (adversary F6; an unseamed rule the handoff left to the
+    implementation stage): "Two mount points of one filesystem can still give `EXDEV` at rename
+    time. That refuses with both paths named, and a re-run is safe." The old episodes root sits
+    on a second mount of the data root's filesystem, so the plan-time `st_dev` check passes and
+    the rename fails. The command exits non-zero, its refusal names the old episode's path and
+    its destination under `<T>`, and nothing is copied or lost: every old episode is in exactly
+    one place (its source or `episodes-legacy/`), every byte intact. A re-run under the same
+    mounts refuses again and changes nothing. RUNS ONLY where `DEFENDER_TEST_SAME_FS_OTHER_MOUNT`
+    names such a folder (CI must provide the bind mount; this container cannot mount); the
+    positive control (the same root on the data root's own mount moves) is
+    `test_1187_s_move_an_old_episodes_root_on_another_filesystem_refuses_before_any_move
+    [same_filesystem]`. RED at base (a): `defender.ops` does not exist."""
+    other = _two_mounts_of_one_filesystem(data_root)
+    parent = Path(tempfile.mkdtemp(prefix="ids1187-", dir=other))
+    try:
+        sc = _scene(data_root, parent)
+        episodes_before = S.tree(sc.old_root)
+
+        got = _retire(*_full(sc))
+        assert _refused(got), f"the command ran across two mounts: {_shown(got)}"
+        assert str(sc.old_root) in got.said, f"the refusal does not name the source: {got.said!r}"
+        assert str(sc.tenant_dir) in got.said, (
+            f"the refusal does not name the destination under <T>: {got.said!r}")
+        for name in sc.old_episodes:
+            places = [p for p in (sc.old_root / name, sc.episodes_legacy / name)
+                      if os.path.lexists(p)]
+            assert len(places) == 1, f"old episode {name!r} is in {len(places)} places: {places}"
+        merged = {**S.tree(sc.old_root), **S.tree(sc.episodes_legacy)}
+        assert merged == episodes_before, "an old episode's bytes changed or went missing"
+        after_first = _world(data_root, sc.old_root)
+
+        again = _retire(*_full(sc))
+        assert _refused(again), f"the re-run moved across two mounts: {_shown(again)}"
+        assert _world(data_root, sc.old_root) == after_first, "the re-run changed something"
+    finally:
+        shutil.rmtree(parent, ignore_errors=True)
 
 
 @pytest.mark.parametrize("where", ["same_filesystem", "other_filesystem"])
@@ -829,6 +1035,7 @@ def test_1187_o6_the_path_the_refusal_names_runs_as_the_operators_command(data_r
     refusal names — as a real process under the configured data root, exits 0 and moves the old
     entries (its `__main__` block wired to `main`). RED at base (a): no such file."""
     sc = _scene(data_root, tmp_path)
+    inodes_before = _inodes(sc)
     script = H.WORKTREE / S.COMMAND
     env = {**os.environ,
            "PYTHONPATH": os.pathsep.join(filter(None, [str(H.WORKTREE),
@@ -840,3 +1047,4 @@ def test_1187_o6_the_path_the_refusal_names_runs_as_the_operators_command(data_r
     assert _names(sc.runs_legacy) == sc.old
     assert _names(sc.episodes_legacy) == sc.old_episodes
     assert _names(sc.runs) == sc.stay
+    _assert_renamed(sc, inodes_before)

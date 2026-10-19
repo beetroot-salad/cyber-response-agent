@@ -396,6 +396,46 @@ def test_a_run_that_fails_crashes_or_is_interrupted_still_has_its_row(scene, die
         (SLUG, run_id)], "a run that died left no row in F"
 
 
+def test_launch_as_the_operator_runs_it_really_starts_run_py(scene):
+    """Flow 5 step 4 with the REAL spawn (adversary F13, deck #1042c replay: every launch test
+    hands its own `spawn=`, so a default that starts nothing — and returns 0 — passed them all,
+    and no test ran `held_out.py` as a process). `python <checkout>/defender/evals/held_out.py
+    launch <slug> --index F --fixtures-dir D` as a real process, no seam, under a data root that
+    holds NO `playground` tenant: launch appends the row, then really runs `run.py <fixture
+    alert> --tenant playground --run-id <uuid> --no-learn` — which refuses at acceptance,
+    before any model, box or run folder, naming `<data root>/playground`. Observed: F holds
+    exactly one row, for the slug, with a canonical UUID; the process's output carries run.py's
+    own refusal (`[run.py]`) naming the data root's `playground` folder, which a launch that
+    never started run.py cannot print; and nothing was made under the data root. What launch
+    itself exits with is not pinned (as above)."""
+    import subprocess
+    import sys
+
+    index = scene.ops / INDEX_NAME
+    worktree = S.H5.WORKTREE
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+           "PYTHONPATH": os.pathsep.join(filter(None, [str(worktree),
+                                                       os.environ.get("PYTHONPATH")]))}
+    before = S.tree(scene.data_root)
+    child = subprocess.run(  # noqa: S603 — this interpreter, the checkout's own CLI
+        [sys.executable, str(worktree / "defender" / "evals" / "held_out.py"), "launch", SLUG,
+         "--index", str(index), "--fixtures-dir", str(scene.fixtures)],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+        cwd=str(worktree), timeout=600)
+    said = f"{child.stdout}\n{child.stderr}"
+
+    rows = _rows(index.read_text(encoding="utf-8") if index.is_file() else None)
+    assert [slug for slug, _run_id in rows] == [SLUG], (
+        f"launch did not append one row for {SLUG}: {rows}\n{said[-1500:]}")
+    assert S.is_canonical_uuid(rows[0][1]), f"the row's run id is {rows[0][1]!r}"
+    playground = str(Path(scene.data_root) / LAUNCH_TENANT)
+    refusals = [line for line in said.splitlines() if "[run.py]" in line and playground in line]
+    assert refusals, (
+        "launch's real spawn never ran run.py --tenant playground under this data root: no "
+        f"refusal of its own naming {playground} in the output:\n{said[-1500:]}")
+    assert S.tree(scene.data_root) == before, "the refused run.py made something"
+
+
 # ==========================================================================================
 # Launch: where F may not be (S-roster, review U4, recheck X3)
 # ==========================================================================================
@@ -517,6 +557,148 @@ def test_launch_refuses_an_index_reached_through_a_link(scene, plant):
     assert spawn.calls == [], "run.py was started although the index was refused"
     assert real.read_bytes() == held, "a row was appended through the refused link"
     _assert_launch_accepted(scene, real)
+
+
+_INDEX_SWAP_CHILD = """
+import json, os, sys
+from pathlib import Path
+from defender.evals import held_out
+index, elsewhere, fixtures = map(Path, sys.argv[1:4])
+slug, mode = sys.argv[4:6]
+aside = index.parent.with_name(index.parent.name + '-held-original')
+active, swapped, calls = True, False, []
+def audit(event, args):
+    global swapped
+    if not active or swapped or mode == 'control' or event != 'open':
+        return
+    path = args[0]
+    if not isinstance(path, (str, bytes, os.PathLike)):
+        return
+    targets = {str(index), index.name}
+    if mode != 'held-control':
+        targets.update({str(index.parent), index.parent.name})
+    if os.fsdecode(path) in targets:
+        swapped = True
+        index.parent.rename(aside)
+        index.parent.symlink_to(elsewhere, target_is_directory=True)
+def spawn(argv, *, env=None):
+    calls.append(list(map(str, argv)))
+    return 0
+sys.addaudithook(audit)
+rc, crashed = None, None
+try:
+    if mode == 'unsafe-control':
+        # A check followed by an absolute-path open follows the link planted at open time.
+        index.lstat()
+        with index.open('a', encoding='utf-8') as stream:
+            stream.write('UNSAFE FOLLOW\\n')
+        rc = 0
+    elif mode == 'held-control':
+        # A held parent still names the original after its spelling is redirected.
+        fd = os.open(index.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            leaf = os.open(index.name, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW, dir_fd=fd)
+            os.write(leaf, b'HELD ORIGINAL\\n')
+            os.close(leaf)
+        finally:
+            os.close(fd)
+        rc = 0
+    else:
+        rc = held_out.main(['launch', slug, '--index', str(index),
+                            '--fixtures-dir', str(fixtures)], spawn=spawn)
+except SystemExit as exc:
+    rc = (1 if isinstance(exc.code, str) else exc.code or 0)
+except BaseException as exc:
+    crashed = type(exc).__name__ + ': ' + str(exc)
+finally:
+    active = False
+print('INDEX_SWAP_RESULT ' + json.dumps(dict(swapped=swapped, calls=calls, rc=rc,
+                                            crashed=crashed)))
+"""
+
+
+def _index_swap_child(scene: Scene, index: Path, elsewhere: Path, mode: str) -> dict:
+    """The audit hook runs only in a child; the launcher's only injected dependency is spawn."""
+    import subprocess
+    import sys
+
+    worktree = S.H5.WORKTREE
+    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1",
+           "PYTHONPATH": os.pathsep.join(filter(None, [str(worktree),
+                                                       os.environ.get("PYTHONPATH")]))}
+    child = subprocess.run(  # noqa: S603 — this interpreter, a fixed script
+        [sys.executable, "-c", _INDEX_SWAP_CHILD, str(index), str(elsewhere),
+         str(scene.fixtures), SLUG, mode],
+        capture_output=True, text=True, encoding="utf-8", check=False, env=env,
+        cwd=str(worktree), timeout=300)
+    rows = [line.removeprefix("INDEX_SWAP_RESULT ") for line in child.stdout.splitlines()
+            if line.startswith("INDEX_SWAP_RESULT ")]
+    assert child.returncode == 0, (
+        f"index-swap child failed: {child.stdout[-1500:]} {child.stderr[-1500:]}")
+    assert len(rows) == 1, f"missing index-swap result: {child.stdout[-1500:]}"
+    return json.loads(rows[0])
+
+
+def _index_swap_scene(scene: Scene, name: str) -> tuple[Path, Path, Path, bytes]:
+    """An operator index and a same-named canary in a simulated box-writable run folder."""
+    index = _index(scene.tmp / name / INDEX_NAME, (OTHER, S.new_id()))
+    elsewhere = scene.data_root / LAUNCH_TENANT / "runs" / S.new_id()
+    canary = _index(elsewhere / INDEX_NAME, (OTHER, S.new_id()))
+    return index, elsewhere, canary, canary.read_bytes()
+
+
+def test_launch_never_appends_through_an_index_parent_swapped_at_open_time(scene):
+    """S-roster / Flow 5: a path check before an absolute open cannot secure the index.
+    Immediately before launch opens the operator folder or its index, a child audit hook
+    redirects that folder's spelling into a simulated run folder. The run's canary index must
+    remain byte-identical. A no-follow walk may refuse; a parent already held before the swap
+    may append to its original folder safely. Neither may append through the new link.
+    The no-swap launch is the positive control, and the separate recorder controls below prove
+    the hook catches an unsafe open while allowing a held-parent append."""
+    control, other, canary, before = _index_swap_scene(scene, "index-control-ops")
+    outcome = _index_swap_child(scene, control, other, "control")
+    assert outcome["crashed"] is None, outcome
+    assert outcome["rc"] in (0, None), outcome
+    assert len(outcome["calls"]) == 1, outcome
+    assert not outcome["swapped"], outcome
+    run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert())
+    assert _rows(control.read_text(encoding="utf-8"))[-1] == (SLUG, run_id)
+    assert canary.read_bytes() == before
+
+    index, other, canary, before = _index_swap_scene(scene, "index-race-ops")
+    prefix = index.read_bytes()
+    outcome = _index_swap_child(scene, index, other, "swap")
+    assert outcome["swapped"], f"launch never reached the index's open: {outcome}"
+    assert outcome["crashed"] is None, f"launch crashed instead of refusing: {outcome}"
+    assert canary.read_bytes() == before, "launch appended through the swapped index parent"
+    original = index.parent.with_name(index.parent.name + "-held-original") / index.name
+    if outcome["rc"] in (0, None):
+        assert len(outcome["calls"]) == 1, outcome
+        run_id = _launched_run_id(SpawnCall(outcome["calls"][0], None), scene.alert())
+        assert original.read_bytes().startswith(prefix)
+        assert _rows(original.read_text(encoding="utf-8"))[-1] == (SLUG, run_id)
+    else:
+        assert outcome["calls"] == [], "a refused index still started run.py"
+        assert original.read_bytes() == prefix, "a refused index was changed"
+
+
+def test_the_index_swap_hook_distinguishes_a_path_append_from_a_held_parent(scene):
+    """Prove the attack fires during open, and observes the unsafe and safe destinations."""
+    index, other, canary, before = _index_swap_scene(scene, "unsafe-index-ops")
+    outcome = _index_swap_child(scene, index, other, "unsafe-control")
+    assert outcome["swapped"], outcome
+    assert outcome["crashed"] is None, outcome
+    assert canary.read_bytes() == before + b"UNSAFE FOLLOW\n"
+
+    index, other, canary, before = _index_swap_scene(scene, "held-index-ops")
+    # Open the original parent first, then redirect at the leaf open, like a secure walk.
+    # The parent-open event must not trigger this control's swap.
+    outcome = _index_swap_child(scene, index, other, "held-control")
+    assert outcome["swapped"], outcome
+    assert outcome["crashed"] is None, outcome
+    assert canary.read_bytes() == before
+    original = index.parent.with_name(index.parent.name + "-held-original") / index.name
+    assert original.read_bytes().endswith(b"HELD ORIGINAL\n")
 
 
 def test_launch_refuses_when_the_data_root_is_unset(scene, monkeypatch):
