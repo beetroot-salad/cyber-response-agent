@@ -537,6 +537,14 @@ def walked_view(episode_dir: Path) -> Any:
     return episode_runs_for(episode_dir).episode(episode_dir.name)
 
 
+def read_manifest_at(episode_dir: Path) -> dict:
+    """Read the manifest through its walked handle, held to that episode's id (#1187)."""
+    episode_dir = Path(episode_dir)
+    with episode_runs_for(episode_dir).episode_files(episode_dir.name) as episode:
+        return mod("learning.judge.family").read_manifest(
+            episode.view(), expected_episode_id=episode_dir.name)
+
+
 def read_grade_at(episode_dir: Path) -> Any:
     """Read the real grade through its tenant repository's walked episode handle (#1187)."""
     episode_dir = Path(episode_dir)

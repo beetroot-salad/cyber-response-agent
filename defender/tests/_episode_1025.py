@@ -154,7 +154,7 @@ def write_judge(episode_dir: Path, doc: dict[str, Any], *, check: bool = True) -
     path = Path(episode_dir) / "judge.yaml"
     write_guarded(path, _yaml.safe_dump(doc, sort_keys=False), mode="replace")
     if check:
-        record = J.sym("learning.judge", "read_grade")(episode_dir)
+        record = J.read_grade_at(episode_dir)
         assert record is not None, "fixture bug: judge.yaml did not read back as a grade"
     return path
 
