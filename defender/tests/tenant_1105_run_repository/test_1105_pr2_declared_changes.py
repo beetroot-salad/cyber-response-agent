@@ -456,6 +456,8 @@ def test_dc4_the_episode_page_takes_a_tenant_and_an_episode_id(tmp_path, d9_tena
 
     only_there = S.new_id()
     shutil.copytree(ep, elsewhere / only_there)
+    # The copied rendered page is fixture input, not evidence that the stray CLI wrote one.
+    (elsewhere / only_there / E.PAGE_NAME).unlink()
     T.write_family(elsewhere / only_there,
                    T.family_doc(episode_id=only_there, source_run_id=S.new_id()))
     stray = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, only_there))

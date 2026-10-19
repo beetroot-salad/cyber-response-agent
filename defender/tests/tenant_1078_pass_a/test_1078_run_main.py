@@ -401,8 +401,8 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     """After the data root moves: `--run-id X --tenant T` under the new root is refused by O2
     until setup has run there; setup into the new, empty root creates the row (O10); a fork of
     a run under the old root — requesting that same, now-existing T — is refused by location
-    (O5: #1105 PR 2, its source is opened by id through T's repository under the NEW root,
-    which holds no such run); the old root's runs are neither read, moved nor cleaned (N13: a
+    (#1187 Layout A: its episode is opened by id through T's repository under the NEW root,
+    which holds no such episode); the old root's runs are neither read, moved nor cleaned (N13: a
     second data root is unsupported)."""
     old, new = tmp_path / "old-root", tmp_path / "new-root"
     H.set_data_root(monkeypatch, old)

@@ -391,7 +391,8 @@ def test_947_the_episode_dir_is_outside_the_runs_base(tmp_path, monkeypatch):
     tenant = _tenant_paths()
     episodes = S.episodes_dir(tenant.data_root, str(tenant.id))
     repo_root = T.mod("run_common").REPO_ROOT
-    for bad in (root, base / "episodes", repo_root / "episodes"):
+    # configured_layout now returns the REAL tenant episodes root, so use a distinct decoy.
+    for bad in (tmp_path / "retired-episodes-root", base / "episodes", repo_root / "episodes"):
         existed = os.path.lexists(bad)
         monkeypatch.setenv(T.EPISODES_BASE_ENV, str(bad))
         with tenant.runs_repository().create_episode() as view:
@@ -416,7 +417,9 @@ def test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base(tmp_
     """
     from defender.tests.ids_1187 import _spec1187 as S
 
-    base, src, root = T.configured_layout(tmp_path, monkeypatch)
+    base, src, _actual_root = T.configured_layout(tmp_path, monkeypatch)
+    root = tmp_path / "retired-episodes-root"
+    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(root))
     tenant = _tenant_paths()
     episodes = S.episodes_dir(tenant.data_root, str(tenant.id))
     with tenant.runs_repository().create_episode() as view:
@@ -465,7 +468,8 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
     stamp = capture_tree(checkout)
     assert stamp.dirty is False, f"the episode dirtied the checkout: {stamp.dirty_paths}"
     assert stamp.unavailable is None
-    (checkout / "untracked.txt").write_text("x\n", encoding="utf-8")
+    (checkout / T.sym("_provenance", "CODE_SCOPE") / "untracked.txt").write_text(
+        "x\n", encoding="utf-8")
     assert capture_tree(checkout).dirty is True, (
         "positive control: an untracked file inside the checkout reads dirty")
 
