@@ -855,6 +855,7 @@ RICH: dict[str, Any] = {
     "unavailable": "git status: a note beside the dirt", "scope": "defender", "model": "m-1",
     "tenant_id": "acme", "world_id": "20260728t161845z-fresh-case-n59.b",
     "parent_run_id": "20260728T161845Z-fresh-case", "fork_turn": 59,
+    "started_at": "2026-07-28T16:18:45+00:00", "alert_label": "fresh-case",
 }
 
 SHA = "b" * 40

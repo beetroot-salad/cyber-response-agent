@@ -867,7 +867,11 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
     above-guard row not mapping to `rejected-before-dispatch`, a real denial not on the
     lead, or either missing from the prompt."""
     rec = VerbRecorder()
-    r = run_gather(tmp_path / "live", verbs=_registry(rec), turns=[
+    registry = _registry(rec)
+    # A sibling's query-call identity is its world token; its run folder has a UUID id.
+    # The real WorldRegistry exposes this same binding to the driver's call-id seam.
+    registry.call_run = B_RUN
+    r = run_gather(tmp_path / "live", verbs=registry, turns=[
         q("elastic", "nosuch-verb"), q(*DENIED_PAIR),
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
     ], run_id=B_RUN)

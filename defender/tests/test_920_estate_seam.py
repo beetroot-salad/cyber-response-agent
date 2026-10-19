@@ -216,6 +216,8 @@ class World:
 
     world_id: str
     facts: tuple[dict, ...] = ()
+    # This isolated world fake has no manifest or roster; no branch ids are bound.
+    arm_ids: None = None
 
 
 def fake_estate(tmp_path: Path) -> Path:

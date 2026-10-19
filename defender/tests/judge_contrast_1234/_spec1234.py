@@ -1483,7 +1483,7 @@ def render_context(where: Any, label: str, *, payload_cap: int = 20000,
     outcome = mod(OUTCOME)
     token_for = sym(FAMILY_LOADER, "episode_token_for")
     with io.bind(ep) as bound:
-        manifest = fam.read_manifest(bound)
+        manifest = fam.read_manifest(bound, expected_episode_id=ep.name)
         samples = fam.read_samples_record(bound)
         try:
             pre = outcome.read_outcome(bound)

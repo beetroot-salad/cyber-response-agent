@@ -142,7 +142,7 @@ def test_a_natural_run_keeps_todays_behaviour():
     """A natural run knows no branch identity: the pinned-source text passes unchanged (there is
     nothing to hide in a run that has no siblings), and the stamp-shaped token rule still runs."""
     assert _redact(PROBE, frozenset()) == PROBE
-    stamped = f"run {T.world_token('b')} refused"
+    stamped = "run 20260728t161845z-fresh-case-n59.b refused"
     assert _redact(stamped, frozenset()) == f"run {MARK} refused"
 
 

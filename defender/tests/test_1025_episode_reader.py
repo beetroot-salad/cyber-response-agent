@@ -17,7 +17,7 @@ input builder already computes. Three decisions are pinned here:
    cousins, and by CONTAINMENT, because the spellings that actually drift are embedded ones
    (`f"{ep}/review.yaml#..."`, "for example `review.yaml#worlds.b...`").
 2. **The derived accessors live in `learning/judge/family.py` under PUBLIC names** —
-   `raw_manifest` and, moved off `render.py`, `leads_by_id`, `lead_chain` and `json_mapping`
+   `read_manifest` and, moved off `render.py`, `leads_by_id`, `lead_chain` and `json_mapping`
    (the overlay, holding-system and review accessors retired with #1224). Those private
    spellings are gone, the input builder IMPORTS the lead-chain trio
    (its attributes are `family`'s objects, and no constant in `render.py` names the queries
@@ -326,7 +326,7 @@ def test_no_reader_of_a_record_name_holds_one_at_all():
 #: overlay and holding-system accessors (`staged_patterns`, `world_pattern`, `own_h_rows`) and
 #: the review join retired with #1224.
 _MOVED = (
-    ("_raw_manifest", "raw_manifest"),
+    ("_raw_manifest", "read_manifest"),  # lint-stale-ref: ok — assert the retired private spelling stays absent
     ("_leads_by_id", "leads_by_id"),
     ("_lead_chain", "lead_chain"),
 )
@@ -336,7 +336,7 @@ def test_family_is_the_one_home_for_the_derived_accessors_under_public_names():
     """The episode reader's derived accessors have ONE home, `judge/family.py`, and public
     names — nothing crosses a module line as a private any more.
 
-    Observably true: `family` exposes `raw_manifest`, `leads_by_id`, `lead_chain` and
+    Observably true: `family` exposes `read_manifest`, `leads_by_id`, `lead_chain` and
     `json_mapping` as callables; neither `family` nor `render` carries the underscore spelling of any of them;
     the input builder IMPORTS the lead-chain pair — `render.lead_chain` and
     `render.json_mapping` are `family`'s own objects (since #860's finalize the leads
@@ -654,7 +654,7 @@ def test_lead_chain_refuses_a_planted_link_at_the_gather_raw_directory(tmp_path)
 
 
 def test_raw_manifest_reads_the_screened_manifest_and_refuses_a_link_or_a_non_mapping(tmp_path):
-    """`raw_manifest(episode_dir)` is the judge's own screened read of `family.yaml`: the
+    """`read_manifest(view, expected_episode_id=...)` is the judge's own screened read of `family.yaml`: the
     document as a mapping, or this design's refusal.
 
     Observably true: the episode's real manifest reads back with its `episode_id`; a real
@@ -667,19 +667,20 @@ def test_raw_manifest_reads_the_screened_manifest_and_refuses_a_link_or_a_non_ma
     family, refused = _family(), _refused()
     ep = J.accepted_episode(tmp_path)
     manifest = ep / "family.yaml"
-    assert family.raw_manifest(ep)["episode_id"] == J.EPISODE_ID
+    with J.episode_runs_for(ep).episode_files(ep.name) as view:
+        assert family.read_manifest(view, expected_episode_id=ep.name)["episode_id"] == J.EPISODE_ID
 
     outside = tmp_path / "planted-family.yaml"
     outside.write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
     manifest.unlink()
     manifest.symlink_to(outside)
-    with pytest.raises(refused):
-        family.raw_manifest(ep)
+    with pytest.raises(refused), J.episode_runs_for(ep).episode_files(ep.name) as view:
+        family.read_manifest(view, expected_episode_id=ep.name)
 
     manifest.unlink()
     manifest.write_text("- not\n- a mapping\n", encoding="utf-8")
-    with pytest.raises(refused):
-        family.raw_manifest(ep)
+    with pytest.raises(refused), J.episode_runs_for(ep).episode_files(ep.name) as view:
+        family.read_manifest(view, expected_episode_id=ep.name)
 
 
 # ---------------------------------------------------------------------------------------
