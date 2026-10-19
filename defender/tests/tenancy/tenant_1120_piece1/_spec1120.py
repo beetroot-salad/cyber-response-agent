@@ -60,6 +60,8 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import hashlib
 import importlib
 import json
@@ -88,8 +90,8 @@ DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 #: The ids the design's own examples use.
-TID = "acme"
-OTHER = "beta"
+TID = fixture_uuid("tenant:acme")
+OTHER = fixture_uuid("tenant:beta")
 
 #: `<root>/<T>/tenant.json` — the row (unchanged from #1078).
 ROW_NAME = "tenant.json"

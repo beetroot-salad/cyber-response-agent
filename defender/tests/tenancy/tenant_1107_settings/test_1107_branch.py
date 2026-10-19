@@ -1,6 +1,8 @@
 """Branch launcher and tenant settings: box-mounted tenants-root refusal; a sibling resolves its own record."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,7 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
 #: A tenant id nothing else on this box spells, so "the message names the tenant" is a finding
 #: about the message and never about a default.
-TID = "acme-t1107"
+TID = fixture_uuid("tenant:acme-t1107")
 #: The config-shaped variables a developer's shell might carry. Cleared before every launch so a
 #: value either side of an assertion is the one the test put there.
 _CONFIG_VARS = ("ELASTIC_EVENTS_INDEX", "ELASTIC_ALERTS_INDEX", "ELASTICSEARCH_URL",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import json
 import os
 import re
@@ -105,7 +107,7 @@ def _at_root(operand: str, root: Path) -> bool:
 def _copy(root: Path) -> Path:
     """A host-made copy root, as the host makes one: `agent/` and nothing else."""
     (root / "agent" / "lessons").mkdir(parents=True)
-    (root / "agent" / ".tenant-id").write_text("blue\n", encoding="utf-8")
+    (root / "agent" / ".tenant-id").write_text(f"{fixture_uuid('tenant:blue')}\n", encoding="utf-8")
     (root / "agent" / "lessons" / "seed.md").write_text("seed\n", encoding="utf-8")
     return root
 
@@ -363,7 +365,7 @@ def test_readonly_mount_without_a_declared_kind_is_refused_at_startup(tmp_path, 
     source.mkdir(parents=True)
     if contents == "every-probe-file":
         (source / _check_file()).write_text(_check_bytes(), encoding="utf-8")
-        (source / ".tenant-id").write_text("blue\n", encoding="utf-8")
+        (source / ".tenant-id").write_text(f"{fixture_uuid('tenant:blue')}\n", encoding="utf-8")
     lane = tmp_path / "lane"
     lane.mkdir()
     declared = box.Mount(source=source, target=source, kind="data")
@@ -398,7 +400,7 @@ def test_a_word_that_is_not_a_kind_is_refused_not_mapped(tmp_path, start, kind):
     source = wt / "defender"
     source.mkdir(parents=True)
     (source / _check_file()).write_text(_check_bytes(), encoding="utf-8")
-    (source / ".tenant-id").write_text("blue\n", encoding="utf-8")
+    (source / ".tenant-id").write_text(f"{fixture_uuid('tenant:blue')}\n", encoding="utf-8")
     box.Mount(source=source, target=source, kind="code")  # prerequisite: declared kinds exist
     boundary = _Boundary(tmp_path, [source])
     with pytest.raises((box.BoxFault, ValueError, TypeError)):

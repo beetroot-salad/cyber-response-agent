@@ -1,0 +1,59 @@
+{
+  "issue": 1187,
+  "design_revision": 2,
+  "user_amendments": [
+    "Preserve main layout and consolidate tests and metadata.",
+    "Tenant IDs join run, arm and episode IDs as opaque UUIDs; require explicit migration, without aliases."
+  ],
+  "contract": {
+    "base": "d50c16ad",
+    "original": "3cce294e963665d98479a976189b10a890f584d4",
+    "reviewed": "6d2b34e909cbfb3641620f46bffeddb72a3fee36"
+  },
+  "history": {
+    "pre_cleanup": "b37b95044ae9b650502aa220f039eadca8f63d13",
+    "main": "55dd2bee8c4a4391d9c358493d63f371eea6de73",
+    "policy": "Preserve tests-first ancestry; merge main, no rebase.",
+    "detailed_records": [
+      "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-contract-review.json",
+      "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-implementation.json",
+      "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-main-integration.json"
+    ]
+  },
+  "verification": {
+    "before_cleanup": "Affected regressions, both Ruff checks, mypy and 34 custom linters passed; first full CI fixture drift repaired with focused reruns.",
+    "shared_fixture_consumers": "356 passed across 19 files before consolidation.",
+    "F6": "Rerun after consolidation and tenant UUID amendment: 1 passed in owned Docker image with same filesystem bound independently at /data and /other. Actual EXDEV, byte preservation and safe rerun asserted.",
+    "gvisor": "Both dedicated hosted box jobs and all4feature arm-boundary cases passed in run39277017581.",
+    "cleanup": "Consolidation baseline ownership batches passed: 234, 84 (3 skipped), and 148 cases. Original scenario-to-case maps independently inspected; exact duplicate witnesses retained in existing suites.",
+    "uuid_probe": "100 arbitrary canonical UUIDs admitted by tenant/row/run/episode owners; 900 noncanonical tenant variants refused.",
+    "previous_ci": "https://github.com/beetroot-salad/cyber-response-agent/actions/runs/39279519288",
+    "previous_ci_status": "Cancelled after partial success; not a full-suite pass. New hosted run required after publication.",
+    "hosted_after_publication": "Pending; see PR #1269 checks. No full-suite pass claimed.",
+    "local_gates": "Both CI Ruff commands, mypy (348 files), and all 34 custom CI linters pass without new baselines/suppressions.",
+    "affected_runs": {
+      "root": "819 cases covered by passing runs (817 initially, both failures repaired in 46-case rerun).",
+      "storage": "1604 passed/11 skipped initially; four fixtures repaired and all 33 cases in their three files passed.",
+      "runtime_replay": "176 passed initially; marker failures repaired in 9 passed/2 skipped rerun. Comparator 64 passed initially; control corrected and full comparator 60 passed.",
+      "learning_evaluation": "1337 passed/80 skipped initially; three held-out harness failures repaired and whole held-out file 38 passed.",
+      "tenancy_api": "1864 passed/14 skipped initially; all 26 fixture failures repaired: 286 passed in focused rerun, final repository-name decoupling verified by 2 delivery/second-tenant-lock controls. Six representative 1222 real-driver cases passed. Full expensive 1222 matrix and 2 unavailable runsc cases reserved for hosted CI."
+    },
+    "collection": "18241 tests collected without errors after final amendments."
+  },
+  "review": {
+    "adversary_dispositions": "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-contract-review.json",
+    "scope": "F1-F13 dispositions and sampled attack discrimination retained at immutable ref; bounded sampling is not proof.",
+    "next": "Independent review after updated tests, tenant amendment and CI pass. Do not merge.",
+    "tenant_amendment": "Independent source/migration review found no aliases, normalization or historical-ID mutation; retirement documentation ambiguity repaired. Tenant amendment tests were authored during implementation. Nonidentity adapter, repository and scenario names retained; migration uses chosen UUID without rewriting historical records."
+  },
+  "tenant_migration": "Offline: archive entire named tenant outside data root; copy knowledge only to chosen UUID folder, update and commit marker, run setup/check. Historical records retain old identity and bytes. See defender/docs/development-operations.md.",
+  "consolidation": {
+    "feature_lines": "6483 before; current 5572 (911 fewer).",
+    "method": "Shared existing fixture oracles/FakeSibling, explicit parameter matrices, common retirement probes and shared refusal scenarios; retain race, decoy, spend-order, actual-launch and byte/inode controls.",
+    "duplicate_witnesses": [
+      "test_1105_pr2_repository.py::test_episode_files_is_the_owners_handle_alone_and_creates_nothing",
+      "test_1105_run_lookup.py::test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidecar_files"
+    ],
+    "historical_graph": "Restored unchanged main graph; no generated historical metadata added."
+  }
+}

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.presentation import _episode_1025 as E
+from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
 
@@ -114,7 +115,7 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
     from defender.run_repository import RunPaths
 
     est, src = P.launch_source(tmp_path)
-    beta = P.second_tenant(P.data_root(), "beta")
+    beta = P.second_tenant(P.data_root(), H.U_ID)
     # #1235: the case pointer is the host-only sidecar beside the run folder.
     pointer = RunPaths(src).session_pointer()
     honest = pointer.read_text(encoding="utf-8")
@@ -197,15 +198,15 @@ def test_g19_a_sibling_for_another_tenant_is_refused_before_any_write_or_spend(t
     of the owning tenant's, so its refusal can no longer name that tenant (today it does, from
     the container record). (Name kept.)"""
     src, ep = P.sibling_scene(tmp_path)
-    P.second_tenant(P.data_root(), "acme")
+    P.second_tenant(P.data_root(), H.T_ID)
     episodes_before, data_before = P.tree(P.episodes(P.SIBLING_TENANT)), P.tree(P.data_root())
 
     rec = P.SiblingRecorder()
-    rc, refused, _err = P.drive_run_py(P.sibling_argv("acme", ep, "b"), rec)
+    rc, refused, _err = P.drive_run_py(P.sibling_argv(H.T_ID, ep, "b"), rec)
     assert refused is not None, "a sibling resumed another tenant's episode"
     assert rc is None, "a sibling resumed another tenant's episode"
     said = P.refusal_text(refused)
-    assert "acme" in said, f"the refusal does not name the requested tenant: {said!r}"
+    assert H.T_ID in said, f"the refusal does not name the requested tenant: {said!r}"
     assert P.SIBLING_TENANT not in said.replace(str(P.data_root()), "<data root>"), (
         f"the refusal names the episode's tenant, so something of it was read: {said!r}")
     assert rec.order == [], f"the sibling spent before refusing: {rec.order}"

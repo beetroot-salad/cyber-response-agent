@@ -521,3 +521,19 @@ def test_1120_every_run_tenant_reader_takes_the_accepted_tenant(
         argv = launch["argv"]
         assert argv[argv.index("--tenant") + 1] == branch_tenant.id, argv
         assert launch["env"].get(H.DATA_ROOT_ENV) == str(branch_root), launch["env"]
+
+
+@pytest.mark.parametrize("entry", list(CELLS_OF))
+@pytest.mark.parametrize("legacy", ["acme", "playground"])
+def test_legacy_names_are_refused_at_every_tenant_taking_entrypoint(
+        entry, legacy, tmp_path, monkeypatch, capsys):
+    base = tmp_path / "legacy"
+    cell = _build_cell(entry, "bad-id", base, monkeypatch)
+    cell.tenant_id = legacy
+    cell.expected = str(H.refusal(_tenant, _tenant.TenantId, legacy))
+    before = H.tree_census(cell.root)
+    refused, text, spent = _drive(entry, cell, base, monkeypatch, capsys)
+    monkeypatch.delenv(H.LEARNING_STATE_ENV, raising=False)
+    problems = _cell_problems(f"{entry} × {legacy}", entry, "bad-id", cell, base, before,
+                              refused=refused, text=text, spent=spent)
+    assert problems == [], "\n".join(problems)

@@ -13,9 +13,12 @@ import pytest
 from defender import _yaml
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.ids_1187 import _spec1187 as S
+from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
+from defender.run_repository import RunId, RunRefused
+from defender.tenancy._tenant import TenantRefused
 
-A_ID = "acme"
-B_ID = "beta"
+A_ID = S.H5.T_ID
+B_ID = S.H5.U_ID
 LABELS = ("a", "b", "c")
 #: The world every sibling scene starts.
 LABEL = "b"
@@ -34,28 +37,9 @@ def _roots(tmp_path, monkeypatch):
     _state1135.set_state_dir(monkeypatch, tmp_path / "learning-state")
 # Builders and observation helpers.
 
-def _p():
-    """`_spec1105_pr2` (the sibling driver and its recorder), imported where it is used."""
-    from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
-
-    return P
-
-
-def _rid(text: str):
-    from defender.run_repository import RunId
-
-    return RunId.parse(text)
-
-
-def _refusals():
-    from defender.tenancy._tenant import TenantRefused
-    from defender.run_repository import RunRefused
-
-    return (TenantRefused, RunRefused)
-
 
 def _is_refusal(err: BaseException | None) -> bool:
-    return err is not None and isinstance(err, _refusals())
+    return isinstance(err, (TenantRefused, RunRefused))
 
 
 def _real_dir(path: Path) -> bool:
@@ -151,6 +135,9 @@ from pathlib import Path
 from defender.tenancy._tenant import TenantRefused
 from defender.run_repository import RunRefused
 from defender.tests.storage.ids_1187 import _spec1187 as S
+from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
+from defender.run_repository import RunId, RunRefused
+from defender.tenancy._tenant import TenantRefused
 root, tenant_id, episode_id, limit = Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
 runs = S.tenant(root, tenant_id).runs_repository()
 with runs.episode(episode_id) as view:
@@ -192,57 +179,41 @@ def _start_runs_in_a_child(data_root: Path, episode_id: str, *, limit: int,
         cwd=str(H5.WORKTREE), timeout=300)
 
 
-def test_a_roster_write_killed_mid_write_leaves_no_roster(data_root):
+@pytest.mark.parametrize("failure", ["killed-mid-write", "atomic-lane-unavailable"])
+def test_a_failed_atomic_roster_write_leaves_no_named_fallback(data_root, failure):
     import errno
     import signal
 
-    from defender.tenancy._tenant import TenantRefused
-
-    t = S.tenant(data_root, A_ID)
-    runs = t.runs_repository()
+    runs = S.tenant(data_root, A_ID).runs_repository()
     episode_id, ep = _episode(data_root, A_ID)
-    try:
-        fd = os.open(ep, os.O_TMPFILE | os.O_WRONLY, 0o600)
-    except OSError as e:
-        if e.errno not in (errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL):
-            raise
-        pytest.skip(f"no O_TMPFILE on the episode's filesystem ({e}): the atomic lane is absent")
-    os.close(fd)
-
-    killed = _start_runs_in_a_child(data_root, episode_id, limit=_WRITE_LIMIT)
-    assert killed.returncode == -signal.SIGXFSZ, (
-        f"the child was not killed mid-write by the file-size limit (rc {killed.returncode}): "
-        f"{killed.stderr[-1500:]}")
-    torn = (ep / S.ROSTER_NAME).read_bytes()[:200] if os.path.lexists(
-        ep / S.ROSTER_NAME) else None
-    assert torn is None, f"a roster write killed mid-write left {S.ROSTER_NAME}: {torn!r}"
-    leftover = sorted(set(os.listdir(ep)) - {S.MANIFEST_NAME, "runs"})
-    assert leftover == [], f"a roster write killed mid-write left {leftover} in the episode"
-    with runs.episode(episode_id) as view:
-        assert view.arm_ids() is None, "a killed roster write reads as a roster"
-    gate = S.raised(_open_and_close, runs, episode_id, roster_label=LABEL)
-    assert isinstance(gate, TenantRefused), f"the gate after a killed roster write gave {gate!r}"
-
-    control_id, control = _episode(data_root, A_ID)
-    done = _start_runs_in_a_child(data_root, control_id, limit=0)
-    assert done.returncode == 0, f"control: the child failed: {done.stderr[-1500:]}"
-    assert sorted(S.read_roster(control)) == sorted(LABELS), "control: no roster was written"
-
-
-def test_an_unavailable_atomic_roster_lane_refuses_without_a_named_fallback(data_root):
-    S.tenant(data_root, A_ID)
-    episode_id, ep = _episode(data_root, A_ID)
-    failed = _start_runs_in_a_child(data_root, episode_id, limit=0, unavailable=True)
-    assert failed.returncode == 0, failed.stderr[-1500:]
-    assert "ATOMIC_UNAVAILABLE" in failed.stdout.splitlines(), failed.stdout
-    assert "REFUSED" in failed.stdout.splitlines(), failed.stdout
-    assert not os.path.lexists(ep / S.ROSTER_NAME), "unsupported lane left a named roster"
+    killed = failure == "killed-mid-write"
+    if killed:
+        try:
+            fd = os.open(ep, os.O_TMPFILE | os.O_WRONLY, 0o600)
+        except OSError as err:
+            if err.errno not in (errno.EOPNOTSUPP, errno.EISDIR, errno.EINVAL):
+                raise
+            pytest.skip(f"no O_TMPFILE on the episode's filesystem: {err}")
+        os.close(fd)
+    failed = _start_runs_in_a_child(data_root, episode_id,
+                                    limit=_WRITE_LIMIT if killed else 0, unavailable=not killed)
+    assert failed.returncode == (-signal.SIGXFSZ if killed else 0), failed.stderr[-1500:]
+    if not killed:
+        assert "ATOMIC_UNAVAILABLE" in failed.stdout.splitlines(), failed.stdout
+        assert "REFUSED" in failed.stdout.splitlines(), failed.stdout
+    assert not os.path.lexists(ep / S.ROSTER_NAME), "a failed write left a named roster"
     assert sorted(set(os.listdir(ep)) - {S.MANIFEST_NAME, "runs"}) == []
+    with runs.episode(episode_id) as view:
+        assert view.arm_ids() is None, "a failed write reads as a roster"
+    gate = S.raised(_open_and_close, runs, episode_id, roster_label=LABEL)
+    assert isinstance(gate, TenantRefused), gate
 
-    done = _start_runs_in_a_child(data_root, episode_id, limit=0)
+    # A killed writer is compared with a fresh episode; an unsupported lane must retry in place.
+    control_id, control = _episode(data_root, A_ID) if killed else (episode_id, ep)
+    done = _start_runs_in_a_child(data_root, control_id, limit=0)
     assert done.returncode == 0, done.stderr[-1500:]
     assert "STARTED" in done.stdout.splitlines(), done.stdout
-    assert sorted(S.read_roster(ep)) == sorted(LABELS)
+    assert sorted(S.read_roster(control)) == sorted(LABELS)
 
 
 @pytest.mark.parametrize("occupant", ["link-to-another-tenants-arms", "regular-file"])
@@ -294,7 +265,7 @@ def test_the_arm_ids_are_the_rosters_and_an_unknown_label_is_absent(data_root):
     with runs.episode(gap_id) as view:
         assert view.arm_ids() is None, "runs/ with no roster answered arm ids"
         assert _is_refusal(S.raised(view.arm_id, LABEL)), "an arm id was named with no roster"
-        made = S.raised(view.create, _rid(S.new_id()))
+        made = S.raised(view.create, RunId.parse(S.new_id()))
         assert _is_refusal(made), f"an arm was created in the crash window: {made!r}"
     assert os.listdir(gap / "runs") == [], "a refused create made something in runs/"
 
@@ -316,13 +287,13 @@ def test_an_arm_is_created_only_at_an_id_the_roster_holds(data_root):
     episode_id, ep = _episode(data_root, A_ID)
 
     with runs.episode(episode_id) as view:
-        early = S.raised(view.create, _rid(S.new_id()))
+        early = S.raised(view.create, RunId.parse(S.new_id()))
         assert _is_refusal(early), f"an arm was created before RUNS: {early!r}"
         ids = _texts(view.start_runs(list(LABELS)))
-        stranger = S.raised(view.create, _rid(S.new_id()))
+        stranger = S.raised(view.create, RunId.parse(S.new_id()))
         assert _is_refusal(stranger), f"an id outside the roster was created: {stranger!r}"
         assert os.listdir(ep / "runs") == [], "a refused create made something"
-        arm = view.create(_rid(ids[LABEL]))
+        arm = view.create(RunId.parse(ids[LABEL]))
     assert Path(arm.run_dir) == ep / "runs" / ids[LABEL]
     assert S.is_canonical_uuid(Path(arm.run_dir).name)
     assert episode_id not in Path(arm.run_dir).name
@@ -610,7 +581,6 @@ class _Scene:
 
 def _sibling(tenant_id: str, episode_id: str):
     """Drive the real `run.main` as a sibling: `(rc, SystemExit or None, said, recorder)`."""
-    P = _p()
     rec = P.SiblingRecorder()
     rc, refused, err = P.drive_run_py(P.new_sibling_argv(tenant_id, episode_id, LABEL), rec)
     return rc, refused, f"{P.refusal_text(refused)}\n{err}", rec
@@ -667,101 +637,66 @@ def test_the_sibling_is_refused_before_the_manifest_unless_its_roster_names_it(
     assert rec.order == [], f"the manifest refusal came after a spend: {rec.order}"
 
     scene.restore()
-    natural_before = sorted(os.listdir(S.natural_runs(data_root, B_ID)))
-    P = _p()
+    _run_control(scene, case)
+
+
+def _run_control(scene: _Scene, case: str):
+    """Exercise the real sibling with its valid manifest, checking arm placement and isolation."""
+    natural = S.natural_runs(scene.root, scene.owner)
+    before = sorted(os.listdir(natural))
     ok = P.SiblingRecorder()
-    rc, refused, err = P.drive_run_py(P.new_sibling_argv(B_ID, scene.episode_id, LABEL), ok)
-    assert refused is None, (
-        f"the control sibling was refused ({case}): {P.refusal_text(refused)} {err}")
-    assert rc == 0, f"the control sibling exited {rc} ({case}): {err}"
-    assert ok.run_dir == scene.ep / "runs" / scene.roster[LABEL], f"the arm is at {ok.run_dir}"
-    name = Path(ok.run_dir).name
-    assert S.is_canonical_uuid(name), f"the arm's folder name is not a uuid: {name!r}"
-    assert scene.episode_id not in name
-    assert sorted(os.listdir(S.natural_runs(data_root, B_ID))) == natural_before, (
-        "the arm (or a sidecar of it) landed in the natural container (O10)")
+    rc, refused, err = P.drive_run_py(P.new_sibling_argv(scene.owner, scene.episode_id, LABEL), ok)
+    assert refused is None, f"{case}: {P.refusal_text(refused)} {err}"
+    assert rc == 0, f"{case}: {rc}: {err}"
+    assert ok.run_dir == scene.ep / "runs" / scene.roster[LABEL], ok.run_dir
+    assert S.is_canonical_uuid(Path(ok.run_dir).name), ok.run_dir
+    assert scene.episode_id not in Path(ok.run_dir).name
+    assert sorted(os.listdir(natural)) == before, "an arm or sidecar landed in natural runs"
+    return ok
 
 
-def _run_control(scene: _Scene, case: str) -> None:
-    """Restore the valid manifest and roster, then verify the sibling reaches its drive seam."""
-    P = _p()
-    ok = P.SiblingRecorder()
-    rc, refused, err = P.drive_run_py(P.new_sibling_argv(B_ID, scene.episode_id, LABEL), ok)
-    assert refused is None, (
-        f"the control sibling was refused ({case}): {P.refusal_text(refused)} {err}")
-    assert rc == 0, f"the control sibling exited {rc} ({case}): {err}"
-    assert ok.run_dir == scene.ep / "runs" / scene.roster[LABEL], f"the arm is at {ok.run_dir}"
-
-
-def test_the_sibling_refuses_a_manifest_naming_another_episode_before_any_spend(
-        tmp_path, data_root):
+@pytest.mark.parametrize("case", ["mismatched-manifest", "settings-in-arms", "old-episode-id"])
+def test_the_sibling_refuses_invalid_identity_or_settings_before_spend(tmp_path, data_root, case):
     scene = _Scene(tmp_path, data_root, B_ID)
     scene.start_runs_by_hand()
-    other = S.near_miss_id(scene.episode_id)
-    T.write_family(scene.ep, {**scene.doc, "episode_id": other})
+    requested = scene.episode_id
+    if case == "mismatched-manifest":
+        other = S.near_miss_id(scene.episode_id)
+        T.write_family(scene.ep, {**scene.doc, "episode_id": other})
+    elif case == "settings-in-arms":
+        (scene.ep / "runs").rmdir()
+        os.symlink(S.tenant_dir(data_root, B_ID) / "knowledge", scene.ep / "runs",
+                   target_is_directory=True)
+        scene.poison()
+    else:
+        requested = S.OLD_MINTED_ID
+        scene.ep.rename(scene.ep.parent / requested)
+        T.write_family(scene.ep.parent / requested,
+                       {**scene.doc, "episode_id": requested, SENTINEL: "read"})
     before = S.tree(data_root)
-
-    rc, refused, said, rec = _sibling(B_ID, scene.episode_id)
-    assert refused is not None, f"the sibling ran over a mismatched manifest: rc {rc}"
-    assert rc is None, f"the sibling ran over a mismatched manifest: rc {rc}"
-    text = _p().refusal_text(refused)
-    assert other in text, f"the refusal does not name the manifest's id {other}: {text!r}"
-    assert scene.episode_id in text, f"the refusal does not name the folder's id: {text!r}"
-    assert rec.order == [], f"the sibling spent before refusing: {rec.order}"
-    assert os.listdir(scene.ep / "runs") == [], "an arm was made under a mismatched manifest"
-    assert S.tree(data_root) == before, "the refused sibling wrote under the data root"
-
+    rc, refused, said, rec = _sibling(B_ID, requested)
+    assert refused is not None, f"{case}: the sibling ran: {rc}"
+    assert rc is None, rc
+    assert rec.order == [], f"{case}: spent before refusal: {rec.order}"
+    assert S.tree(data_root) == before, f"{case}: refused sibling wrote under the data root"
+    text = P.refusal_text(refused)
+    if case == "mismatched-manifest":
+        assert other in text, text
+        assert scene.episode_id in text, text
+        assert os.listdir(scene.ep / "runs") == []
+    else:
+        assert SENTINEL not in said, "the manifest was read before admission refused"
+        assert S.EPISODES_BASE_ENV not in said
+        if case == "settings-in-arms":
+            assert "settings" in text, text
+            assert "a box mounts" in text, text
+            os.unlink(scene.ep / "runs")
+            (scene.ep / "runs").mkdir()
+        else:
+            assert requested in text, text
+            (scene.ep.parent / requested).rename(scene.ep)
     scene.restore()
-    _run_control(scene, "manifest-names-another-episode")
-
-
-def test_the_sibling_refuses_a_settings_half_inside_its_arm_container(tmp_path, data_root):
-    scene = _Scene(tmp_path, data_root, B_ID)
-    scene.start_runs_by_hand()
-    (scene.ep / "runs").rmdir()
-    os.symlink(S.tenant_dir(data_root, B_ID) / "knowledge", scene.ep / "runs",
-               target_is_directory=True)
-    scene.poison()
-    before = S.tree(data_root)
-
-    rc, refused, said, rec = _sibling(B_ID, scene.episode_id)
-    assert refused is not None, f"the sibling ran: rc {rc}"
-    assert rc is None, f"the sibling ran: rc {rc}"
-    text = _p().refusal_text(refused)
-    assert "settings" in text, f"not acceptance's settings refusal: {text!r}"
-    assert "a box mounts" in text, f"not acceptance's settings refusal: {text!r}"
-    assert SENTINEL not in said, f"the manifest was read before acceptance refused: {said!r}"
-    assert S.EPISODES_BASE_ENV not in said, f"refused for the retired variable: {said!r}"
-    assert rec.order == [], f"the sibling spent before refusing: {rec.order}"
-    assert S.tree(data_root) == before, "the refused sibling wrote under the data root"
-
-    os.unlink(scene.ep / "runs")
-    (scene.ep / "runs").mkdir()
-    scene.restore()
-    _run_control(scene, "settings-inside-arm-container")
-
-
-def test_the_sibling_refuses_an_old_episode_id_before_anything_is_read(tmp_path, data_root):
-    scene = _Scene(tmp_path, data_root, B_ID)
-    scene.start_runs_by_hand()
-    old = S.OLD_MINTED_ID
-    old_ep = scene.ep.parent / old
-    scene.ep.rename(old_ep)
-    T.write_family(old_ep, {**scene.doc, "episode_id": old, SENTINEL: "read"})
-    before = S.tree(data_root)
-
-    rc, refused, said, rec = _sibling(B_ID, old)
-    assert refused is not None, f"the sibling ran under an old id: rc {rc}"
-    assert rc is None, f"the sibling ran under an old id: rc {rc}"
-    assert old in _p().refusal_text(refused), f"the refusal does not name {old}: {said!r}"
-    assert SENTINEL not in said, f"the manifest was read under an old id: {said!r}"
-    assert S.EPISODES_BASE_ENV not in said, f"refused for the retired variable: {said!r}"
-    assert rec.order == [], f"the sibling spent before refusing: {rec.order}"
-    assert S.tree(data_root) == before, "the refused sibling wrote under the data root"
-
-    old_ep.rename(scene.ep)
-    scene.restore()
-    _run_control(scene, "old-episode-id")
+    _run_control(scene, case)
 
 
 def test_the_sibling_needs_no_episodes_variable_and_ignores_a_decoy(tmp_path, data_root,
@@ -774,12 +709,7 @@ def test_the_sibling_needs_no_episodes_variable_and_ignores_a_decoy(tmp_path, da
     decoy_before = S.tree(decoy_root)
     monkeypatch.setenv(S.EPISODES_BASE_ENV, str(decoy_root))
 
-    P = _p()
-    ok = P.SiblingRecorder()
-    rc, refused, err = P.drive_run_py(P.new_sibling_argv(B_ID, scene.episode_id, LABEL), ok)
-    assert refused is None, f"refused with a decoy set: {P.refusal_text(refused)} {err}"
-    assert rc == 0, f"exited {rc} with a decoy set: {err}"
-    assert ok.run_dir == scene.ep / "runs" / scene.roster[LABEL]
+    _run_control(scene, "decoy-variable")
     assert S.tree(decoy_root) == decoy_before, "the decoy episode was touched"
 
 
@@ -797,12 +727,7 @@ def test_natural_and_arm_stamps_carry_no_world_lineage(
         f"a natural run stamps no world id; it says {natural_stamp.get('world_id')!r}")
 
     scene.start_runs_by_hand()
-    P = _p()
-    ok = P.SiblingRecorder()
-    rc, refused, err = P.drive_run_py(P.new_sibling_argv(B_ID, scene.episode_id, LABEL), ok)
-    assert refused is None, f"the sibling was refused: {P.refusal_text(refused)} {err}"
-    assert rc == 0, f"the sibling exited {rc}: {err}"
-    assert ok.run_dir == scene.ep / "runs" / scene.roster[LABEL], f"the arm is at {ok.run_dir}"
+    ok = _run_control(scene, "arm-provenance")
     arm_stamp = json.loads((ok.run_dir / "provenance.json").read_text(encoding="utf-8"))
     # #1255 keeps natural and arm provenance alike; #1187 R1b removes the container's lineage.
     assert arm_stamp.get("world_id") is None, arm_stamp

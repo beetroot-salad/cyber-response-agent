@@ -32,11 +32,11 @@ copied there and no run records a pointer back to its fixture. Two consequences:
   folder's name, which is an opaque UUID (#1187). Launch a scored run as:
 
   ```bash
-  python3 evaluations/held_out.py launch <slug> --index <F>
+  python3 evaluations/held_out.py launch <slug> --tenant <tenant-uuid> --index <F>
   ```
 
   which appends the row first, then runs
-  `run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant playground --run-id <uuid> --no-learn`.
+  `run.py evaluations/fixtures/held_out/<slug>/alert.json --tenant <tenant-uuid> --run-id <uuid> --no-learn`.
 
 - **Contamination** is stopped at the two entrances to learning, and both checks
   are label-free:

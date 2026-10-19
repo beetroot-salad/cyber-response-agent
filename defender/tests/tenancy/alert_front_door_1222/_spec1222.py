@@ -141,6 +141,8 @@ WHAT IS NOT HERE ON PURPOSE
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import asyncio
 import contextlib
 import shutil
@@ -178,6 +180,8 @@ from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
 from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape  # noqa: E402
+
+_TENANT_ACME = fixture_uuid('tenant:acme')
 
 # =================================================================================================
 # 0. Late binding
@@ -685,7 +689,7 @@ class Planted:
 
 
 def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each part overridable
-    tenant_id: str = "acme", *,
+    tenant_id: str = _TENANT_ACME, *,
     root: Path | None = None,
     alert_mapping: Mapping[str, Any] | str | None = DEFAULT_MAPPING_GENERIC,
     case_mapping: str | None = None,

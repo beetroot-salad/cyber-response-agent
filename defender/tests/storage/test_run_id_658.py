@@ -8,8 +8,9 @@ from defender.run_repository import RunPaths
 from defender.box import container_name
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 from defender.tests.storage.ids_1187 import _spec1187 as S
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-TENANT_ID = "t658"
+TENANT_ID = fixture_uuid("tenant:t658")
 
 
 def _set_up_tenant(tmp_path, monkeypatch):

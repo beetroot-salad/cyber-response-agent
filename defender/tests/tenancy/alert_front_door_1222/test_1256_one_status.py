@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import functools
 import re
 from collections import Counter
@@ -109,7 +111,7 @@ def _cmdb_escape() -> BaseException:
 def test_a_system_downed_by_a_main_lead_is_shown_down_in_the_next_leads_index(
         tmp_path: Path) -> None:
     """r4: every surface reads the run state's current status when it is rendered — not a copy taken at start, nor one taken when MAIN's opening was built. Every system passes its start check and lead zero downs nothing. MAIN dispatches l-001 on cmdb, whose call raises a ConfigFault (O-5b): cmdb is Down(NotConfigured) from then on. MAIN then dispatches l-002 on elastic, and l-002's system index shows cmdb as not configured with the escaped fault's reason on its line. Non-vacuity: l-001's own index, rendered while cmdb was up, does not — so the index is read at each dispatch, not a list of every system ever down. Red at base, which has no statuses."""
-    scene = _Scene(tmp_path, tenant_id="acme-live-later")
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-live-later"))
     d = scene.run("live-later",
                   backend=_backend(fault=T.Fault(fail_on=("cmdb.get-host",)), exc=_cmdb_escape),
                   main=[S.gather("l-001", "cmdb", goal="FD1256 who is web-1"),
@@ -219,7 +221,7 @@ def _assert_gate_before_claim(d: S.Drive, main: _ProbingMain, system: str, what:
 
 def test_a_dispatch_to_a_system_down_at_start_claims_no_lead_id(tmp_path: Path) -> None:
     """r4: the down gate comes before the lead claim. Identity misses a key its adapter requires, so it is down at start; MAIN dispatches l-001 on it and is refused — and when MAIN reads that refusal no lead record for l-001 exists. The id is not consumed: MAIN's next dispatch of l-001, on cmdb, is claimed (its goal is the lead record's) and runs. Control, the same script with identity configured: the first dispatch's record is there when MAIN reads its answer, and the second dispatch of the claimed id is not (the lead record keeps the first goal) — so both channels can show a claim. Red at base, which has no down gate."""
-    configured = _Scene(tmp_path, tenant_id="acme-claim-up", table=TABLE_THREE)
+    configured = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-claim-up"), table=TABLE_THREE)
     control, control_main = _claim_scene(configured, "claim-up", "identity")
     assert len(control_main.probed) >= 2, (
         f"control: MAIN was never asked after its first dispatch ({control_main.probed})")
@@ -230,7 +232,7 @@ def test_a_dispatch_to_a_system_down_at_start_claims_no_lead_id(tmp_path: Path) 
     assert GOAL_FIRST in kept, (
         f"control: a claimed id was claimed again by the second dispatch: goal={kept!r}")
 
-    scene = _Scene(tmp_path, tenant_id="acme-claim-down", table=TABLE_THREE)
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-claim-down"), table=TABLE_THREE)
     _drop(scene, "identity", "IDENTITY_URL_BASE")
     d, main = _claim_scene(scene, "claim-down", "identity")
     _assert_gate_before_claim(d, main, "identity", "identity down at start")
@@ -238,7 +240,7 @@ def test_a_dispatch_to_a_system_down_at_start_claims_no_lead_id(tmp_path: Path) 
 
 def test_a_dispatch_to_a_system_downed_mid_run_claims_no_lead_id(tmp_path: Path) -> None:
     """r4: the same gate for a system that went down during the run. Elastic passes its start check; l-00c's call raises a ConfigFault (O-5b), so elastic is down before MAIN's first turn. MAIN dispatches l-001 on elastic and is refused with no lead record written by the time it reads the refusal, and the id stays free for its next dispatch, on cmdb. Red at base."""
-    scene = _Scene(tmp_path, tenant_id="acme-claim-mid")
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-claim-mid"))
     d, main = _claim_scene(scene, "claim-mid", "elastic", backend=_fail_alerts(_escape),
                            l00c=[_q(1), S.text("FD1256-MID-NARRATION")])
     assert d.router.dispatched(S.L3), (
@@ -249,7 +251,7 @@ def test_a_dispatch_to_a_system_downed_mid_run_claims_no_lead_id(tmp_path: Path)
 @pytest.mark.usefixtures("_import_state_restored")
 def test_a_dispatch_to_a_system_whose_adapter_is_broken_claims_no_lead_id(tmp_path: Path) -> None:
     """r4: the same gate for the other down cause. The run reads a planted tree whose elastic adapter cannot be imported (`roster=`, so run start judges the roster the run reads): elastic is Down(AdapterBroken) from the start. MAIN dispatches l-001 on elastic and is refused — naming elastic and the adapter's reason, neither 'not configured' nor 'tripped' (O-5a, DP4), and no host path — with no lead record written by the time it reads the refusal; the id stays free for its next dispatch, on cmdb (the planted, well-formed one). Red at base, which has no down gate."""
-    scene = _Scene(tmp_path, tenant_id="acme-claim-broken")
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-claim-broken"))
     tree = _tree_with_broken_elastic(tmp_path / "planted")
     d, main = _claim_scene(scene, "claim-broken", "elastic", defender_dir=tree,
                            backend=_backend(), roster=read_roster(adapters_under(tree)))
@@ -371,7 +373,7 @@ def test_each_granted_system_is_judged_once_per_run_and_that_verdict_is_the_runs
     assert _COUNTED_CMDB != _PLANTED_CMDB, "premise: the planted cmdb's check moved"
     root = tmp_path / "planted"
     tree = _planted_tree(root, {"cmdb": _COUNTED_CMDB, "elastic": _COUNTED_ELASTIC})
-    tenant = S.plant_tenant("acme-judged-once", alert_mapping=S.DEFAULT_MAPPING,
+    tenant = S.plant_tenant(fixture_uuid("tenant:acme-judged-once"), alert_mapping=S.DEFAULT_MAPPING,
                             table=S.TABLE_ELASTIC)
     main = S.MainScript([S.Turn(tool_calls=(_CMDB_LEAD,)), S.text(S.DONE)])
     router = S.LeadRouter({"l-001": [S.Turn(tool_calls=(_CMDB_QUERY,)),

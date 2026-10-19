@@ -124,7 +124,7 @@ root = Path(sys.argv[1])
 print("ready", flush=True)
 i = 0
 while True:
-    _tenant.create_tenant(root / f"d{i}", "playground")
+    _tenant.create_tenant(root / f"d{i}", sys.argv[2])
     i += 1
 """,
 }
@@ -210,7 +210,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
         root = crash_root / f"{lane}-{kill}"
         root.mkdir(parents=True)
         child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
-            [sys.executable, "-c", _CRASH_CHILD[lane], str(root)], env=env,
+            [sys.executable, "-c", _CRASH_CHILD[lane], str(root), T_ID], env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             ready = child.stdout.readline().strip()

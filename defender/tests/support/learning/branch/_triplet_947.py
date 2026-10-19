@@ -67,6 +67,8 @@ from typing import Any
 
 from defender import _yaml
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 DEFENDER = Path(__file__).resolve().parents[4]
 
 #: The fixture episode's id and its token (#1187, design rev 2: every run, arm and episode id is
@@ -488,7 +490,7 @@ def retired_continuation_argv() -> list[str]:
     parse = sym("learning.branch.cli", "parse_branch_args")
     with contextlib.redirect_stderr(io.StringIO()):
         try:
-            parse(["--tenant", "t", "run-x", "1"])
+            parse(["--tenant", SOURCE_TENANT, "run-x", "1"])
         except SystemExit:
             return ["--continuation-prompt", "go"]
     return []
@@ -630,7 +632,7 @@ def branchable_investigation() -> str:
 #: The tenant the fixture's SOURCE run was stamped with (#1077 stamps every run's tenant; #1106
 #: M2 seeds each sibling's runs base from it). Set up from the committed fixture under the test's
 #: data root (#1120 H2), so a launch that accepts it finds a complete tenant.
-SOURCE_TENANT = "playground"
+SOURCE_TENANT = fixture_uuid("tenant:playground")
 
 
 def current_tenant() -> Any:

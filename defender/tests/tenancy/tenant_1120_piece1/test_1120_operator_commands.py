@@ -1,6 +1,8 @@
 """D1/D2: the operator commands and the settings loaders read the DATA ROOT's copy."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
 
 import functools
@@ -97,7 +99,7 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
         data_root: Path, tmp_path: Path, capsys) -> None:
     """The lab is retired (human, PR #1157: #1158 folded in); the checkout's knowledge/ holds only the
     template and the fixture, a complete copy of the lab's settings."""
-    tid = "playground"
+    tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
     settings = H.settings_dir(data_root, tid)
     (settings / "verb-grants.yaml").write_text(HEALTH_CHECK_ONLY_TABLE, encoding="utf-8")
@@ -179,7 +181,7 @@ def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
     """With DEFENDER_DATA_ROOT unset, validate_scaffold --tenant and policy_cli gather --tenant each
     report resolve_data_root's refusal naming the variable."""
-    tid = "playground"
+    tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
 
     scaffold = _validate_scaffold(None, tid)

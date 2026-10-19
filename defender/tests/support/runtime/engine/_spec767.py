@@ -108,7 +108,7 @@ MAPPING_RELPATH = "systems/case-history/mapping.yaml"
 CONFIG_RELPATH = "systems/case-history/config.env"
 
 #: The tenant `use_mapping` plants under the test's root.
-TENANT_ID = "t767"
+TENANT_ID = fixture_uuid("tenant:t767")
 
 
 def require(obj: Any, name: str, why: str) -> Any:

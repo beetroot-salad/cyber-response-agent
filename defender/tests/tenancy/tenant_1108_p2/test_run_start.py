@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from pathlib import Path
 
 import pytest
@@ -86,7 +88,7 @@ def test_matching_identity_is_read_only_and_precedes_message_zero(scene, ending)
 
 
 @pytest.mark.parametrize('contents', [
-    'another-tenant\n', '', ' fixture\n', 'fixture \n', 'fixture\n\n',
+    (fixture_uuid("tenant:another-tenant") + "\n"), '', ' fixture\n', 'fixture \n', 'fixture\n\n',
     '\ufefffixture\n', 'fixture\r', 'fixture\nother\n', 'x' * 129,
     None, b'\xff', 'directory', 'symlink',
 ], ids=['wrong-id', 'empty', 'leading-space', 'trailing-space', 'second-newline',
@@ -112,8 +114,8 @@ def test_wrong_or_malformed_box_identity_refuses_before_message_zero(scene, tmp_
     assert main.calls == 0, 'identity refusal came after message zero'
     diagnostic = str(caught.value)
     assert '.tenant-id' in diagnostic, 'refusal must name the failing identity file'
-    if contents == 'another-tenant\n':
-        assert 'another-tenant' in diagnostic, 'mismatch must report the found tenant'
+    if contents == (fixture_uuid("tenant:another-tenant") + "\n"):
+        assert fixture_uuid("tenant:another-tenant") in diagnostic, 'mismatch must report the found tenant'
         assert str(tenant.id) in diagnostic, 'mismatch must report the expected tenant'
     elif contents is None:
         assert any(word in diagnostic.lower() for word in ('missing', 'no such', 'could not read'))
@@ -131,7 +133,7 @@ def test_wrong_or_malformed_box_identity_refuses_before_message_zero(scene, tmp_
     assert tree_bytes(tenant.agent) == before
 
 
-@pytest.mark.parametrize('contents', ['right', 'another-tenant\n', None, 'directory'])
+@pytest.mark.parametrize('contents', ['right', (fixture_uuid("tenant:another-tenant") + "\n"), None, 'directory'])
 def test_explicit_unsandboxed_lane_reads_the_accepted_path_before_message_zero(
         scene, monkeypatch, contents):
     """O3 opt-out: after acceptance, a host read of the same path proves the expected id."""
@@ -164,8 +166,8 @@ def test_explicit_unsandboxed_lane_reads_the_accepted_path_before_message_zero(
             _lifecycle(scene, docker, main)
         diagnostic = str(caught.value)
         assert '.tenant-id' in diagnostic
-        if contents == 'another-tenant\n':
-            assert 'another-tenant' in diagnostic
+        if contents == (fixture_uuid("tenant:another-tenant") + "\n"):
+            assert fixture_uuid("tenant:another-tenant") in diagnostic
             assert str(tenant.id) in diagnostic
         elif contents is None:
             assert any(word in diagnostic.lower() for word in ('missing', 'no such', 'could not read'))
@@ -218,7 +220,7 @@ def test_daemon_path_translation_preserves_the_run_process_agent_target(tmp_path
     (#1255 P1 — it used to keep Tenant.agent's spelling)."""
     defender_dir = plant_tree(tmp_path / 'tree', copy_code=False)
     run_dir = make_run_dir(tmp_path / 'runs')
-    agent = tmp_path / 'tenants' / 'acme' / 'knowledge' / 'agent'
+    agent = tmp_path / 'tenants' / fixture_uuid("tenant:acme") / 'knowledge' / 'agent'
     agent.mkdir(parents=True)
     shared = ((tmp_path, Path('/daemon/shared')),)
     create = box_mod._create_argv('defender-run-p2', run_dir, defender_dir,

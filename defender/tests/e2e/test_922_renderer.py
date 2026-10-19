@@ -1,6 +1,8 @@
 """#922 — D7: the production transcript renderer survives the cut of the direction table."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from pathlib import Path
 
 import pytest
@@ -43,7 +45,7 @@ def tenant_run(run_dir: Path, *, io=_io) -> Run:
     with no runs-base record — `ensure_runs_base_record` and `Run.for_tenant` are retired). The
     runs base is the run dir's parent, where the replay harness put it. `io` is the handle's own
     injection seam (a recorder, in #1110)."""
-    return Run.under(run_dir.parent, run_dir.name, tenant_id="playground", io=io)
+    return Run.under(run_dir.parent, run_dir.name, tenant_id=fixture_uuid("tenant:playground"), io=io)
 
 
 def test_the_two_column_wrapper_never_ships_without_the_sidebar_that_fills_it(tmp_path):

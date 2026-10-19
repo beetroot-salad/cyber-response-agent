@@ -269,7 +269,7 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     os.symlink(Path(t.runs) / r1, Path(t.runs) / linked)
     paths = P.loop_paths(tmp_path)
     transient = {
-        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": r1},
+        "ghost": {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": r1},
         "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": linked},
         "unreachable": {"case_id": "unreachable", "tenant_id": H.U_ID, "run_id": r1},
     }

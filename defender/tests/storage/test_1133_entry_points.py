@@ -156,9 +156,9 @@ def start_family(episode: Any, spawn: Any) -> dict[str, int]:
     arm roster), then the siblings started."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
-    acme = set_up_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), "acme")
+    acme = set_up_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), fixture_uuid("tenant:acme"))
     acme.runs_repository().episode(episode.dir.name, held=episode).start_runs(list(T.WORLDS))
-    return branch_cli().start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
+    return branch_cli().start_family(episode, ["b", "c"], spawn=spawn, tenant_id=acme.id)
 
 
 class Spawned:

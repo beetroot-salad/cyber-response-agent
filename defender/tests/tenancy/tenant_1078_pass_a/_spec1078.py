@@ -84,9 +84,8 @@ ROW_NAME = "tenant.json"
 #: and show nothing writes one.
 RECORD_NAME = S.TENANT_RECORD_NAME
 
-#: The grammar, verbatim from "Settled by the user": `^[a-z][a-z0-9-]{0,62}$`, matched with
-#: `re.fullmatch`.
-GRAMMAR = r"^[a-z][a-z0-9-]{0,62}$"
+#: Canonical lowercase UUID text: no legacy tenant names or alternate spellings.
+GRAMMAR = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 #: O3's seven refused ids (C19), with the gate's address tokens as pytest ids so a failure
 #: names the domain member it is about.

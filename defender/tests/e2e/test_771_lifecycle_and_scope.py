@@ -246,7 +246,7 @@ def test_a_live_run_dir_is_never_reused_and_a_stale_mount_never_follows_it(tmp_p
 
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
-    tenant = set_up_tenant(data_root, "t771")
+    tenant = set_up_tenant(data_root, fixture_uuid("tenant:t771"))
     alert = tmp_path / "alert.json"
     alert.write_text('{"id": "a-771"}\n', encoding="utf-8")
 

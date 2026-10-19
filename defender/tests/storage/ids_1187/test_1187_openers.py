@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from defender.tests.support.shared.contracts import _by_path
 from defender.tests.storage.ids_1187 import _spec1187 as R
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S
@@ -53,10 +55,6 @@ class Hit:
         return f"{self.rel}:{self.line} {self.kind} {self.what}"
 
 
-def _owned(rel: str) -> bool:
-    return R.owned(rel)
-
-
 def _parsed(root: Path) -> list[tuple[str, ast.Module, object]]:
     """Parse production files and resolve their module bindings for the opener census."""
     out = []
@@ -86,7 +84,7 @@ def _door_wrappers(parsed: list[tuple[str, ast.Module, object]]) -> tuple[frozen
     names: set[str] = set()
     methods: set[str] = set()
     defs = [(env, owner, node, is_method)
-            for rel, tree, env in parsed if _owned(rel)
+            for rel, tree, env in parsed if R.owned(rel)
             for owner, node, is_method in _functions(
                 tree, _astlib.module_and_package(rel, root="defender")[0])]
     grew = True
@@ -130,14 +128,6 @@ def _functions(tree: ast.Module, module: str) -> list[tuple[str, ast.FunctionDef
     return out
 
 
-def _is_path_call(node: ast.expr, env) -> bool:
-    """`Path(...)` / `pathlib.Path(...)`, the name resolved."""
-    if not isinstance(node, ast.Call):
-        return False
-    called = _astlib.callee(node, env)
-    return called is not None and called.endswith("pathlib.Path")
-
-
 def _kind(node: ast.Call, rel: str, env, values: dict,
           wrappers: tuple[frozenset[str], frozenset[str]]) -> tuple[str, str] | None:
     """`(kind, what)` of the opener `node` is, or `None` (see `census`)."""
@@ -166,7 +156,7 @@ def census(root: Path) -> list[Hit]:
     wrappers = _door_wrappers(parsed)
     hits: list[Hit] = []
     for rel, tree, env in parsed:
-        if _owned(rel):
+        if R.owned(rel):
             continue
         with _astlib.scan_guard(rel):
             for node, values in R.scoped_nodes(tree):
@@ -182,144 +172,99 @@ def test_no_production_code_opens_an_episode_by_path_outside_the_walk():
     assert hits == [], f"{len(hits)} production site(s) open an episode by path:\n  {listing}"
 
 
-def test_the_opener_census_finds_what_it_is_meant_to_find(tmp_path):
-    root = tmp_path / "planted"
-    files = {
-        "pkg/dirty.py": (
-            "from pathlib import Path\n"
-            "from defender._episode_handle import Episode\n"
-            "from defender import _episode_handle as EH\n"
-            "from defender._io import bind\n"
-            "from defender import _io\n"
-            "\n"
-            "\n"
-            "def a(episode_dir, view):\n"
-            "    held = Episode.open(Path(episode_dir))\n"
-            "    made = EH.Episode.create(episode_dir, exclusive=True)\n"
-            "    with bind(Path(episode_dir)) as one, bind(episode_dir) as two:\n"
-            "        pass\n"
-            "    return held, made, _io.bind(view.episode.dir), one, two\n"
-            "\n"
-            "\n"
-            "def b(folder):\n"
-            "    from defender._episode_handle import Episode as Door\n"
-            "    return Door.open(folder)\n"),
-        "pkg/laundry.py": (
-            "import importlib\n"
-            "from pathlib import Path\n"
-            "from defender import _io\n"
-            "from defender.run_repository._lookup import EpisodeRuns, Opener, helper, open_at\n"
-            "from defender.run_repository._compat import chained, derived\n"
-            "\n"
-            "\n"
-            "def c(episode_dir):\n"
-            "    d = Path(episode_dir)\n"
-            "    with _io.bind(d) as bound, _io.hold(episode_dir / 'runs', follow=False) as h:\n"
-            "        pass\n"
-            "    one = open_at(d)\n"
-            "    two = __import__('defender.run_repository._lookup', fromlist=['x'])\n"
-            "    three = importlib.import_module('defender.episodes._episode_handle')\n"
-            "    four = chained(d)\n"
-            "    five = Opener.make(d)\n"
-            "    six = Opener().take(d)\n"
-            "    seven = derived('some-id')\n"
-            "    return bound, h, one, two, three, helper(d), four, five, six, seven\n"),
-        "run_repository/_compat.py": (
-            "from pathlib import Path\n"
-            "from defender._episode_handle import Episode\n"
-            "from defender.run_repository._lookup import open_at\n"
-            "\n"
-            "\n"
-            "def create_at(path):\n"
-            "    return Episode.create(path, exclusive=True)\n"
-            "\n"
-            "\n"
-            "def chained(where):\n"
-            "    inner = Path(where)\n"
-            "    return open_at(inner)\n"
-            "\n"
-            "\n"
-            "def derived(episode_id):\n"
-            "    return Episode.open(Path('/base') / episode_id)\n"),
-        "learning/judge/family.py": (
-            "from pathlib import Path\n"
-            "from defender._io import bind, hold\n"
-            "\n"
-            "\n"
-            "def raw_manifest(folder):\n"
-            "    d = folder\n"
-            "    with bind(Path(folder)) as bound, bind(d) as again, hold(d) as held:\n"
-            "        return bound, again, held\n"),
-        "pkg/clean.py": (
-            "from pathlib import Path\n"
-            "from defender._io import bind\n"
-            "\n"
-            "\n"
-            "def settings(path, run_dir, episode):\n"
-            "    with bind(Path(path)) as bound:\n"
-            "        return bound, bind(run_dir), episode.view()\n"),
-        "cli/retire_legacy_runs.py": (
-            "from pathlib import Path\n"
-            "from defender._io import bind\n"
-            "from defender._episode_handle import Episode\n"
-            "\n"
-            "\n"
-            "def plan(old_episodes_root, folder):\n"
-            "    with bind(Path(old_episodes_root)) as held:\n"
-            "        return held, Episode.open(folder)\n"),
-        "run_repository/_lookup.py": (
-            "from pathlib import Path\n"
-            "from defender._io import bind\n"
-            "\n"
-            "\n"
-            "def walk(episode_dir):\n"
-            "    from defender._episode_handle import Episode\n"
-            "    return Episode.open(episode_dir), bind(Path(episode_dir))\n"
-            "\n"
-            "\n"
-            "def open_at(path):\n"
-            "    from defender._episode_handle import Episode\n"
-            "    return Episode.open(path)\n"
-            "\n"
-            "\n"
-            "def helper(path):\n"
-            "    return path\n"
-            "\n"
-            "\n"
-            "class Opener:\n"
-            "    @staticmethod\n"
-            "    def make(folder):\n"
-            "        from defender._episode_handle import Episode\n"
-            "        return Episode.create(folder)\n"
-            "\n"
-            "    def take(self, folder):\n"
-            "        from defender._episode_handle import Episode\n"
-            "        return Episode.open(folder)\n"
-            "\n"
-            "\n"
-            "class EpisodeRuns:\n"
-            "    def __init__(self, tenant, episode_id):\n"
-            "        from defender._episode_handle import Episode\n"
-            "        self.episode = Episode.open(tenant.dir / episode_id)\n"),
-    }
-    for rel, text in files.items():
-        (root / rel).parent.mkdir(parents=True, exist_ok=True)
-        (root / rel).write_text(text, encoding="utf-8")
+# Shared owner definitions make wrapper propagation observable in each independent caller.
+OWNER_PROGRAMS = {
+    "run_repository/_lookup.py": """from pathlib import Path
+from defender.episodes._episode_handle import Episode
+from defender._io import bind
+def walk(episode_dir):
+    return Episode.open(episode_dir), bind(Path(episode_dir))
+def open_at(path):
+    return Episode.open(path)
+def helper(path):
+    return path
+class Opener:
+    @staticmethod
+    def make(folder):
+        return Episode.create(folder)
+    def take(self, folder):
+        from defender.episodes._episode_handle import Episode as Door
+        return Door.open(folder)
+class EpisodeRuns:
+    def __init__(self, tenant, episode_id):
+        self.episode = Episode.open(tenant.dir / episode_id)
+""",
+    "run_repository/_compat.py": """from pathlib import Path
+from defender.episodes._episode_handle import Episode
+from defender.run_repository._lookup import open_at
+def create_at(path):
+    return Episode.create(path, exclusive=True)
+def chained(where):
+    inner = Path(where)
+    return open_at(inner)
+def derived(episode_id):
+    return Episode.open(Path('/base') / episode_id)
+""",
+}
+CALLER_IMPORTS = """import importlib
+from pathlib import Path
+from defender.episodes._episode_handle import Episode
+from defender.episodes import _episode_handle as EH
+from defender import _io
+from defender._io import bind, hold
+from defender.run_repository._lookup import EpisodeRuns, Opener, helper, open_at
+from defender.run_repository._compat import chained, derived
+"""
+OPENER_CASES = [
+    ("pkg/dirty.py", """def direct(episode_dir, view):
+    a = Episode.open(Path(episode_dir))
+    b = EH.Episode.create(episode_dir, exclusive=True)
+    with bind(Path(episode_dir)) as one, bind(episode_dir) as two:
+        return a, b, _io.bind(view.episode.dir), one, two
+def local(folder):
+    from defender.episodes._episode_handle import Episode as Door
+    return Door.open(folder)
+""", {"door": 3, "rebind": 3}),
+    ("pkg/laundry.py", """def launder(episode_dir):
+    d = Path(episode_dir)
+    with _io.bind(d) as bound, _io.hold(episode_dir / 'runs', follow=False) as h:
+        pass
+    a = open_at(d)
+    b = __import__('defender.run_repository._lookup', fromlist=['x'])
+    c = importlib.import_module('defender.episodes._episode_handle')
+    e = chained(d)
+    f = Opener.make(d)
+    g = Opener().take(d)
+    return bound, h, a, b, c, helper(d), e, f, g, derived('some-id')
+""", {"rebind": 2, "laundered": 4, "dynamic": 2}),
+    ("learning/judge/family.py", """def reader(folder):
+    d = folder
+    with bind(Path(folder)) as bound, bind(d) as again, hold(d) as held:
+        return bound, again, held
+""", {"rebind": 3}),
+    ("pkg/clean.py", """def settings(path, run_dir, episode):
+    with bind(Path(path)) as bound:
+        return bound, bind(run_dir), episode.view()
+""", {}),
+    ("cli/retire_legacy_runs.py", """def plan(old_episodes_root, folder):
+    with bind(Path(old_episodes_root)) as held:
+        return held, Episode.open(folder)
+""", {"door": 1}),
+]
 
-    found = [(h.rel, h.kind) for h in census(root)]
-    assert found.count(("pkg/dirty.py", "door")) == 3, found
-    assert found.count(("pkg/dirty.py", "rebind")) == 3, found
-    assert found.count(("learning/judge/family.py", "rebind")) == 3, found
-    assert found.count(("cli/retire_legacy_runs.py", "door")) == 1, found
-    assert ("cli/retire_legacy_runs.py", "rebind") not in found, found
-    assert not [f for f in found if f[0].startswith("run_repository/")], found
-    assert found.count(("pkg/laundry.py", "rebind")) == 2, found
-    # open_at, chained (a wrapper of the wrapper), Opener.make (static), Opener().take
-    # (instance); `derived` takes an id and `helper` opens nothing.
-    assert found.count(("pkg/laundry.py", "laundered")) == 4, found
-    assert found.count(("pkg/laundry.py", "dynamic")) == 2, found
-    assert len([f for f in found if f[0] == "pkg/laundry.py"]) == 8, found
-    assert not [f for f in found if f[0] in ("pkg/clean.py", "run_repository/_lookup.py")], found
+
+@pytest.mark.parametrize(("rel", "body", "expected"), OPENER_CASES, ids=[c[0] for c in OPENER_CASES])
+def test_opener_census_syntax_partitions(tmp_path, rel, body, expected):
+    from collections import Counter
+
+    files = {**OWNER_PROGRAMS, rel: CALLER_IMPORTS + body}
+    for name, source in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+    hits = census(tmp_path)
+    assert Counter(hit.kind for hit in hits if hit.rel == rel) == expected
+    assert not [hit for hit in hits if hit.rel in OWNER_PROGRAMS], hits
 
 
 def test_preflight_never_reads_an_episode_through_a_link(tmp_path, monkeypatch, data_root):

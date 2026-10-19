@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """defender/cli/tenant.py — the tenant lifecycle's operator command.
 
+    python3 defender/cli/tenant.py new-id
     python3 defender/cli/tenant.py scaffold <tenant-id> <empty dir>
     python3 defender/cli/tenant.py setup <tenant-id>
     python3 defender/cli/tenant.py check <tenant-id> | --folder <path>
@@ -505,6 +506,7 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
+    sub.add_parser("new-id", help="mint an opaque tenant UUID; creates no tenant")
     scaffold_p = sub.add_parser("scaffold", help="start a tenant repo from the template")
     scaffold_p.add_argument("tenant_id")
     scaffold_p.add_argument("target", type=Path)
@@ -520,6 +522,9 @@ def main(argv: list[str]) -> int:
     migrate_p.add_argument("tenant_id")
     migrate_p.add_argument("target", type=Path)
     ns = p.parse_args(argv)
+    if ns.command == "new-id":
+        print(_tenant.TenantId.mint())
+        return 0
     if ns.command == "scaffold":
         return scaffold(ns.tenant_id, ns.target)
     if ns.command == "setup":

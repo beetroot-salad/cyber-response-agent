@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import asyncio
 import time
 from pathlib import Path
@@ -312,7 +314,7 @@ def test_d4_exit_4_is_provider_downs_alone(tmp_path: Path, kill: Any, member: st
     assert d.rc == 0, f"a run ended {member} exited {d.rc}; only provider-down exits 4"
 
 
-SIBLING_TENANT = "acme"
+SIBLING_TENANT = fixture_uuid("tenant:acme")
 SIBLING_WORLD = "b"
 
 

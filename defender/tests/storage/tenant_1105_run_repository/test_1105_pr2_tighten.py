@@ -89,13 +89,13 @@ def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     (ep / "runs").mkdir(exist_ok=True)
     S.write_roster(ep, {w["world_id"]: S.new_id() for w in doc["worlds"]})
-    P.second_tenant(P.data_root(), "beta")
+    P.second_tenant(P.data_root(), H.U_ID)
     records = _episode_records(ep)
     assert {"family.yaml", S.ROSTER_NAME} <= records
 
     rec = P.SiblingRecorder()
     with _opens() as opened:
-        rc, refused, err = P.drive_run_py(P.sibling_argv("beta", ep, "b"), rec)
+        rc, refused, err = P.drive_run_py(P.sibling_argv(H.U_ID, ep, "b"), rec)
     assert refused is not None or rc not in (0, None), f"another tenant's episode was run: {err}"
     assert "lifecycle" not in rec.order
     read = sorted(set(opened) & records)
@@ -116,12 +116,12 @@ def test_f2_a_refused_page_reads_no_episode_record(tmp_path, d9_tenant):
     ep = S.make_episode(P.data_root(), d9_tenant, episode_id, labels=T.WORLDS, roster=True)
     T.write_family(ep, T.family_doc(episode_id=episode_id, source_run_id=S.new_id()))
     E.write_outcome(ep, "accepted", reason="F2 outcome", family_stamp=False)
-    P.second_tenant(P.data_root(), "beta")
+    P.second_tenant(P.data_root(), H.U_ID)
     records = _episode_records(ep)
     assert {"family.yaml", S.ROSTER_NAME, "outcome.yaml"} <= records
 
     with _opens() as opened:
-        got = P.drive_cli(P.page_main(), P.new_page_argv("beta", episode_id))
+        got = P.drive_cli(P.page_main(), P.new_page_argv(H.U_ID, episode_id))
     assert _refused(got), "another tenant's episode was rendered"
     assert not (ep / E.PAGE_NAME).exists()
     read = sorted(set(opened) & records)
@@ -320,9 +320,9 @@ def test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path(tmp_pa
     ok = P.drive_cli(lead_author.main, ["--tenant", d9_tenant, run.name])
     assert ok.rc == 0, f"--tenant T <run id> was not served: {ok.said}"
 
-    P.second_tenant(P.data_root(), "beta")
+    P.second_tenant(P.data_root(), H.U_ID)
     for argv in (["--tenant", d9_tenant, str(run)],
-                 ["--tenant", "beta", run.name],
+                 ["--tenant", H.U_ID, run.name],
                  ["--tenant", d9_tenant, _ABSENT]):
         got = P.drive_cli(lead_author.main, argv)
         assert _refused(got), f"the lead author served {argv}"

@@ -7,8 +7,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +15,7 @@ from typing import Any
 import pytest
 
 from defender.tests.storage.ids_1187 import _spec1187 as S
+from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as process
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
@@ -159,96 +158,60 @@ def _assert_renamed(sc: Scene, before: dict[str, dict[str, tuple[int, int]]]) ->
 # O6 / declared changes 6 and 7 — before the command, the listing refuses an old entry and
 # the refusal names the command.
 
-def _old_run_folder(runs: Path) -> str:
-    return S.make_run(runs, S.OLD_MINTED_ID).name
+_OLD_ENTRIES = ("old_minted_run", "old_pinned_run", "old_sidecar", "tenant_record", "episodes_record")
 
 
-def _old_pinned_folder(runs: Path) -> str:
-    return S.make_run(runs, S.OLD_PINNED_ID).name
-
-
-def _old_sidecar(runs: Path) -> str:
-    """An old run's sidecar alone (its folder already gone): a regular file `<old id><suffix>`."""
-    path = runs / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[1]}"
+def _old_entry(runs: Path, kind: str) -> str:
+    if kind in ("old_minted_run", "old_pinned_run"):
+        return S.make_run(runs, S.OLD_MINTED_ID if kind == "old_minted_run" else S.OLD_PINNED_ID).name
+    if kind == "tenant_record":
+        return H.plant_tenant_record(runs, T).name
+    if kind == "old_sidecar":
+        path = runs / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[1]}"
+    else:
+        path = runs / "_episodes" / "placeholder.json"
+        path.parent.mkdir()
     path.write_text("{}\n", encoding="utf-8")
-    return path.name
+    return path.name if kind == "old_sidecar" else path.parent.name
 
 
-def _tenant_record(runs: Path) -> str:
-    return H.plant_tenant_record(runs, T).name
-
-
-def _episodes_record(runs: Path) -> str:
-    folder = runs / "_episodes"
-    folder.mkdir()
-    (folder / "placeholder.json").write_text("{}\n", encoding="utf-8")
-    return folder.name
-
-
-#: Each pre-#1187 entry kind a natural container holds today, planted ALONE beside the UUID runs.
-_OLD_ENTRIES = {
-    "old_minted_run": _old_run_folder,
-    "old_pinned_run": _old_pinned_folder,
-    "old_sidecar": _old_sidecar,
-    "tenant_record": _tenant_record,
-    "episodes_record": _episodes_record,
-}
-
-
-def test_1187_o6_a_container_of_uuid_runs_and_their_sidecars_is_served_with_no_record(
-        data_root, tmp_path):
-    t = S.tenant(data_root, T)
-    uuids = _uuid_runs(S.natural_runs(data_root, T))
-    lessons = _lessons(tmp_path / "lessons")
-
-    err = H.raised(t.runs_repository().all_runs)
-    assert err is None, f"all_runs over UUID runs and their sidecars gave {err!r}"
-    assert sorted(str(r.id) for r in t.runs_repository().all_runs()) == sorted(uuids)
-    served = _trace(T, lessons)
-    assert _ok(served), _shown(served)
-    assert served.out.splitlines() == [LESSON_ROW], served.out
-
-
-@pytest.mark.parametrize("kind", sorted(_OLD_ENTRIES))
-def test_1187_o6_the_listing_refuses_an_old_entry_naming_it_and_the_command(
-        kind, data_root, tmp_path):
+@pytest.mark.parametrize("kind", _OLD_ENTRIES)
+@pytest.mark.parametrize("consumer", ["listing", "tracer"])
+def test_legacy_entry_refuses_before_serving_then_its_removal_restores_service(
+        kind, consumer, data_root, tmp_path):
     from defender.run_repository import RunRefused
 
-    t = S.tenant(data_root, T)
+    tenant = S.tenant(data_root, T)
     runs = S.natural_runs(data_root, T)
     uuids = _uuid_runs(runs)
-    name = _OLD_ENTRIES[kind](runs)
-
-    err = H.raised(t.runs_repository().all_runs)
-    assert H.is_a(err, RunRefused), f"all_runs beside {name!r} gave {err!r}"
-    text = H.message(err)
-    assert S.COMMAND in text, f"the refusal does not name the command: {text!r}"
-    assert name in text, f"the refusal does not name {name!r}: {text!r}"
-
-    shutil.move(str(runs / name), str(tmp_path / "moved-away"))
-    served = t.runs_repository().all_runs()
-    assert sorted(str(r.id) for r in served) == sorted(uuids)
-
-
-@pytest.mark.parametrize("kind", sorted(_OLD_ENTRIES))
-def test_1187_o6_the_tracer_stops_on_an_old_entry_naming_it_and_the_command(
-        kind, data_root, tmp_path):
-    S.tenant(data_root, T)
-    runs = S.natural_runs(data_root, T)
-    _uuid_runs(runs)
     lessons = _lessons(tmp_path / "lessons")
-    name = _OLD_ENTRIES[kind](runs)
-
-    got = _trace(T, lessons)
-    assert _refused(got), f"the tracer ran beside {name!r}: {_shown(got)}"
-    assert got.out == "", f"the tracer printed rows before stopping: {got.out!r}"
-    assert S.COMMAND in got.said, f"the refusal does not name the command: {got.said!r}"
-    assert name in got.said, f"the refusal does not name {name!r}: {got.said!r}"
-
+    name = _old_entry(runs, kind)
+    if consumer == "listing":
+        err = H.raised(tenant.runs_repository().all_runs)
+        assert H.is_a(err, RunRefused), err
+        text = H.message(err)
+    else:
+        got = _trace(T, lessons)
+        assert _refused(got), _shown(got)
+        assert got.out == "", "the tracer printed rows before refusing"
+        text = got.said
+    assert S.COMMAND in text, text
+    assert name in text, text
     shutil.move(str(runs / name), str(tmp_path / "moved-away"))
+    assert sorted(str(r.id) for r in tenant.runs_repository().all_runs()) == sorted(uuids)
     served = _trace(T, lessons)
     assert _ok(served), _shown(served)
-    assert served.out.splitlines() == [LESSON_ROW], served.out
+    assert served.out.splitlines() == [LESSON_ROW]
+
+
+def test_uuid_runs_and_sidecars_need_no_container_record(data_root, tmp_path):
+    tenant = S.tenant(data_root, T)
+    uuids = _uuid_runs(S.natural_runs(data_root, T))
+    assert H.raised(tenant.runs_repository().all_runs) is None
+    assert sorted(str(r.id) for r in tenant.runs_repository().all_runs()) == sorted(uuids)
+    served = _trace(T, _lessons(tmp_path / "lessons"))
+    assert _ok(served), _shown(served)
+    assert served.out.splitlines() == [LESSON_ROW]
 
 
 def test_1187_o6_the_tracer_stops_on_a_pre_1187_container_naming_the_command(
@@ -262,141 +225,80 @@ def test_1187_o6_the_tracer_stops_on_a_pre_1187_container_naming_the_command(
     assert S.COMMAND in got.said, f"the refusal does not name the command: {got.said!r}"
 # O5 / Flow 6 — the command moves old entries aside, intact, and the tenant is served after.
 
-def test_1187_o5_the_command_moves_every_old_entry_aside_intact_and_the_tracer_then_serves(
-        data_root, tmp_path):
-    command = importlib.import_module(S.COMMAND_MODULE)
-    sc = _scene(data_root, tmp_path)
-    runs_before = S.tree(sc.runs)
-    episodes_before = S.tree(sc.old_root)
-    inodes_before = _inodes(sc)
-    assert sc.old, "the scene planted no old natural entry"
-    assert sc.old_episodes, "the scene planted no old episode"
-    assert sc.stay, "the scene planted no UUID run"
+def _prepare_retirement(sc: Scene, phase: str, data_root: Path, tmp_path: Path, monkeypatch):
+    """Prepare the operator's argument variant or a partially completed move."""
+    after_first = None
+    argv = _full(sc)
+    if phase == "unnamed-root":
+        monkeypatch.setenv(S.EPISODES_BASE_ENV, str(sc.old_root))
+        argv = ["--tenant", T]
+    elif phase == "linked-root":
+        link = tmp_path / "episodes-link"
+        link.symlink_to(sc.old_root)
+        argv[-1] = str(link)
+    elif phase.startswith("mid-"):
+        sc.runs_legacy.mkdir()
+        names = sorted(sc.old)
+        for name in names if phase == "mid-episodes" else names[:len(names) // 2]:
+            os.rename(sc.runs / name, sc.runs_legacy / name)
+        if phase == "mid-episodes":
+            sc.episodes_legacy.mkdir()
+            name = sorted(sc.old_episodes)[0]
+            os.rename(sc.old_root / name, sc.episodes_legacy / name)
+    if phase == "fresh":
+        assert sc.old
+        assert sc.old_episodes
+        assert sc.stay
+        refused = _trace(T, sc.lessons)
+        assert _refused(refused), _shown(refused)
+        assert S.COMMAND in refused.said, _shown(refused)
+    if phase in ("rerun", "removed-root"):
+        first = _retire(*argv)
+        assert _ok(first), _shown(first)
+        if phase == "removed-root":
+            sc.old_root.rmdir()
+        after_first = _world(data_root, sc.old_root)
 
-    refused = _trace(T, sc.lessons)
-    assert _refused(refused), _shown(refused)
-    assert S.COMMAND in refused.said, _shown(refused)
+    return argv, after_first
 
-    got = P.drive_cli(command.main, _full(sc))
+
+@pytest.mark.parametrize("phase", [
+    "fresh", "unnamed-root", "absent-root", "linked-root", "rerun", "removed-root",
+    "mid-natural", "mid-episodes",
+])
+def test_retirement_moves_intact_entries_and_is_restartable(phase, data_root, tmp_path, monkeypatch):
+    sc = _scene(data_root, tmp_path, old_root=phase != "absent-root")
+    runs_before, episodes_before = S.tree(sc.runs), S.tree(sc.old_root)
+    inodes = _inodes(sc)
+    argv, after_first = _prepare_retirement(sc, phase, data_root, tmp_path, monkeypatch)
+
+    got = _retire(*argv)
     assert _ok(got), _shown(got)
-    assert S.tree(sc.runs) == _under(runs_before, sc.stay), "a UUID run or its sidecar moved"
-    assert S.tree(sc.runs_legacy) == _under(runs_before, sc.old), "an old entry is not intact"
-    assert S.tree(sc.episodes_legacy) == episodes_before, "an old episode is not intact"
-    assert sc.old_root.is_dir(), "the old episodes root itself was moved or deleted"
-    assert S.tree(sc.old_root) == {}, "the old episodes root was not emptied"
-    for name in sorted(sc.old | sc.old_episodes):
-        assert name in got.out, f"stdout does not report moving {name!r}: {got.out!r}"
-    _assert_renamed(sc, inodes_before)
-
+    assert S.tree(sc.runs) == _under(runs_before, sc.stay), "a UUID run or sidecar moved"
+    assert S.tree(sc.runs_legacy) == _under(runs_before, sc.old), "legacy bytes changed"
+    if phase == "unnamed-root":
+        assert S.tree(sc.old_root) == episodes_before, "the unnamed root moved"
+        assert S.tree(sc.episodes_legacy) == {}
+        inodes["episodes_legacy"] = {}
+    else:
+        assert S.tree(sc.episodes_legacy) == episodes_before, "episode bytes changed"
+        assert S.tree(sc.old_root) == {}
+    _assert_renamed(sc, inodes)
+    if phase == "fresh":
+        assert sc.old_root.is_dir(), "the source root itself moved"
+        for name in sc.old | sc.old_episodes:
+            assert name in got.out, got.out
+    if phase == "linked-root":
+        assert Path(argv[-1]).is_symlink(), "the operator's link was removed"
+    if phase == "absent-root":
+        assert not os.path.lexists(sc.old_root), "the absent root was created"
+    if phase in ("rerun", "removed-root"):
+        assert _world(data_root, sc.old_root) == after_first, "the rerun changed entries"
+    tenant = S.tenant(data_root, T)
+    assert sorted(str(r.id) for r in tenant.runs_repository().all_runs()) == sorted(sc.uuid_runs)
     served = _trace(T, sc.lessons)
     assert _ok(served), _shown(served)
-    assert served.out.splitlines() == [LESSON_ROW], served.out
-
-
-def test_1187_o5_the_listing_serves_the_uuid_runs_after_the_command(data_root, tmp_path):
-    sc = _scene(data_root, tmp_path)
-    got = _retire(*_full(sc))
-    assert _ok(got), _shown(got)
-    t = S.tenant(data_root, T)
-    assert sorted(str(r.id) for r in t.runs_repository().all_runs()) == sorted(sc.uuid_runs)
-
-
-def test_1187_o5_without_an_old_episodes_root_only_the_natural_entries_move(
-        data_root, tmp_path, monkeypatch):
-    sc = _scene(data_root, tmp_path)
-    monkeypatch.setenv(S.EPISODES_BASE_ENV, str(sc.old_root))
-    episodes_before = S.tree(sc.old_root)
-
-    got = _retire("--tenant", T)
-    assert _ok(got), _shown(got)
-    assert _names(sc.runs_legacy) == sc.old
-    assert _names(sc.runs) == sc.stay
-    assert S.tree(sc.old_root) == episodes_before, "an unnamed old episodes root was moved"
-    assert S.tree(sc.episodes_legacy) == {}, "episodes moved with no --old-episodes-root"
-
-
-def test_1187_o5_an_absent_old_episodes_root_is_a_noop_for_that_part(data_root, tmp_path):
-    sc = _scene(data_root, tmp_path, old_root=False)
-    gone = tmp_path / "no-such-episodes-root"
-
-    got = _retire("--tenant", T, "--old-episodes-root", str(gone))
-    assert _ok(got), _shown(got)
-    assert _names(sc.runs_legacy) == sc.old
-    assert not os.path.lexists(gone), "the absent old episodes root was created"
-    assert S.tree(sc.episodes_legacy) == {}
-
-
-def test_1187_o5_the_named_old_episodes_root_is_held_following_its_spelling(
-        data_root, tmp_path):
-    sc = _scene(data_root, tmp_path)
-    spelled = tmp_path / "episodes-base-link"
-    os.symlink(sc.old_root, spelled)
-    episodes_before = S.tree(sc.old_root)
-
-    got = _retire("--tenant", T, "--old-episodes-root", str(spelled))
-    assert _ok(got), _shown(got)
-    assert S.tree(sc.episodes_legacy) == episodes_before
-    assert S.tree(sc.old_root) == {}
-    assert os.path.islink(spelled), "the operator's link to the old root was moved or removed"
-
-
-def test_1187_o5_a_rerun_after_the_operator_removed_the_emptied_root_succeeds(
-        data_root, tmp_path):
-    sc = _scene(data_root, tmp_path)
-    first = _retire(*_full(sc))
-    assert _ok(first), _shown(first)
-    sc.old_root.rmdir()
-    after_first = _world(data_root)
-
-    again = _retire(*_full(sc))
-    assert _ok(again), _shown(again)
-    assert _world(data_root) == after_first, "the re-run changed something"
-
-
-def test_1187_o5_a_second_run_changes_nothing(data_root, tmp_path):
-    sc = _scene(data_root, tmp_path)
-    first = _retire(*_full(sc))
-    assert _ok(first), _shown(first)
-    after_first = _world(data_root, sc.old_root)
-
-    second = _retire(*_full(sc))
-    assert _ok(second), _shown(second)
-    assert _world(data_root, sc.old_root) == after_first, "the second run changed something"
-
-
-def _crash_mid_natural(sc: Scene) -> None:
-    """Some natural entries renamed, the rest not; no episode moved yet (natural ones go first)."""
-    sc.runs_legacy.mkdir()
-    for name in sorted(sc.old)[: len(sc.old) // 2]:
-        os.rename(sc.runs / name, sc.runs_legacy / name)
-
-
-def _crash_mid_episodes(sc: Scene) -> None:
-    """Every natural entry renamed, one old episode renamed, the other not."""
-    sc.runs_legacy.mkdir()
-    for name in sc.old:
-        os.rename(sc.runs / name, sc.runs_legacy / name)
-    sc.episodes_legacy.mkdir()
-    first = sorted(sc.old_episodes)[0]
-    os.rename(sc.old_root / first, sc.episodes_legacy / first)
-
-
-@pytest.mark.parametrize("crash", [_crash_mid_natural, _crash_mid_episodes],
-                         ids=["mid_natural", "mid_episodes"])
-def test_1187_o5_a_rerun_finishes_a_move_a_crash_interrupted(crash, data_root, tmp_path):
-    sc = _scene(data_root, tmp_path)
-    runs_before = S.tree(sc.runs)
-    episodes_before = S.tree(sc.old_root)
-    inodes_before = _inodes(sc)
-    crash(sc)
-
-    got = _retire(*_full(sc))
-    assert _ok(got), _shown(got)
-    assert S.tree(sc.runs) == _under(runs_before, sc.stay)
-    assert S.tree(sc.runs_legacy) == _under(runs_before, sc.old)
-    assert S.tree(sc.episodes_legacy) == episodes_before
-    assert S.tree(sc.old_root) == {}
-    _assert_renamed(sc, inodes_before)
+    assert served.out.splitlines() == [LESSON_ROW]
 
 
 def test_1187_r3_a_queued_curation_row_naming_an_old_run_does_not_stop_the_command(
@@ -433,195 +335,76 @@ def test_1187_n13_old_episodes_go_to_the_tenant_named_and_no_other_tenant_is_tou
 # the refusal names what it found. Positive control: the operator's fix, then the same command
 # moves.
 
-def _link_in_runs(sc: Scene, outside: Path) -> tuple[Path, str]:
-    """Plant an old-looking run symlink to an external directory."""
-    (outside / "target").mkdir()
-    (outside / "target" / "kept.txt").write_text("outside\n", encoding="utf-8")
-    link = sc.runs / "zz-old-link"
-    os.symlink(outside / "target", link)
-    return link, "link"
+# Every old source, destination root, and occupied destination name is checked before any move.
+_OBSTRUCTIONS = [
+    ("move", "old-link", "link-folder"),
+    ("move", "uuid-link", "link-run"),
+    ("move", "runs-fifo", "fifo"),
+    ("move", "latest", "relative-link"),
+    ("move", "episodes-fifo", "fifo"),
+    *[("root", root, shape) for root in (S.RUNS_LEGACY, S.EPISODES_LEGACY)
+      for shape in ("link-folder", "dangling-link", "file")],
+    ("taken", "old-run", "folder"),
+    ("taken", "old-sidecar", "file"),
+    ("taken", "old-episode", "folder"),
+    ("taken", "old-sidecar", "dangling-link"),
+    ("taken", "old-sidecar", "link-file"),
+    ("taken", "old-run", "dangling-link"),
+    ("taken", "old-episode", "link-folder"),
+]
 
 
-def _uuid_named_link_in_runs(sc: Scene, outside: Path) -> tuple[Path, str]:
-    """Plant a UUID-named symlink that must be classified from its own directory entry."""
-    target = S.make_run(outside / "elsewhere")
-    link = sc.runs / S.new_id()
-    os.symlink(target, link)
-    return link, "link"
-
-
-def _fifo_in_runs(sc: Scene, outside: Path) -> tuple[Path, str]:
-    return H.make_fifo(sc.runs / "zz-old-fifo"), "special"
-
-
-def _link_in_old_root(sc: Scene, outside: Path) -> tuple[Path, str]:
-    """Plant a legacy latest shortcut pointing to another episode directory."""
-    link = sc.old_root / "latest"
-    os.symlink(sorted(sc.old_episodes)[-1], link)
-    return link, "link"
-
-
-def _fifo_in_old_root(sc: Scene, outside: Path) -> tuple[Path, str]:
-    return H.make_fifo(sc.old_root / "zz-fifo"), "special"
-
-
-_MOVE_SET_FAULTS = {
-    "link_in_runs": _link_in_runs,
-    "uuid_named_link_in_runs": _uuid_named_link_in_runs,
-    "fifo_in_runs": _fifo_in_runs,
-    "link_in_old_episodes_root": _link_in_old_root,
-    "fifo_in_old_episodes_root": _fifo_in_old_root,
-}
-
-
-@pytest.mark.parametrize("fault", sorted(_MOVE_SET_FAULTS))
-def test_1187_s_move_a_link_or_special_file_in_the_move_set_refuses_before_any_move(
-        fault, data_root, tmp_path):
-    sc = _scene(data_root, tmp_path)
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    entry, kind = _MOVE_SET_FAULTS[fault](sc, outside)
-    before = _world(data_root, sc.old_root, outside)
-
-    got = _retire(*_full(sc))
-    assert _refused(got), f"the command ran over {entry.name!r}: {_shown(got)}"
-    assert _world(data_root, sc.old_root, outside) == before, "something moved before refusing"
-    assert entry.name in got.said, f"the refusal does not name {entry.name!r}: {got.said!r}"
-    if kind == "link":
-        assert re.search(r"\brm\b|\bremov", got.said, re.IGNORECASE), (
-            f"the refusal does not name removing the link by hand: {got.said!r}")
-
-    os.unlink(entry)
-    again = _retire(*_full(sc))
-    assert _ok(again), _shown(again)
-    assert _names(sc.runs_legacy) == sc.old
-    assert _names(sc.episodes_legacy) == sc.old_episodes
-
-
-def _link_to_folder(path: Path, outside: Path) -> None:
-    (outside / "real-folder").mkdir()
-    os.symlink(outside / "real-folder", path)
-
-
-def _dangling_link(path: Path, outside: Path) -> None:
-    os.symlink(outside / "nothing-here", path)
-
-
-def _regular_file(path: Path, outside: Path) -> None:
-    path.write_text("not a folder\n", encoding="utf-8")
-
-
-_NOT_A_FOLDER = {"link_to_a_folder": _link_to_folder, "dangling_link": _dangling_link,
-                 "regular_file": _regular_file}
-
-
-@pytest.mark.parametrize("shape", sorted(_NOT_A_FOLDER))
-@pytest.mark.parametrize("destination", [S.RUNS_LEGACY, S.EPISODES_LEGACY])
-def test_1187_s_move_a_destination_that_is_not_a_real_folder_refuses_before_any_move(
-        destination, shape, data_root, tmp_path):
-    sc = _scene(data_root, tmp_path)
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    path = sc.tenant_dir / destination
-    _NOT_A_FOLDER[shape](path, outside)
-    before = _world(data_root, sc.old_root, outside)
-
-    got = _retire(*_full(sc))
-    assert _refused(got), f"the command ran with {destination} a {shape}: {_shown(got)}"
-    assert _world(data_root, sc.old_root, outside) == before, "something moved before refusing"
-    assert destination in got.said, f"the refusal does not name {destination}: {got.said!r}"
-
-    os.unlink(path)
-    again = _retire(*_full(sc))
-    assert _ok(again), _shown(again)
-    assert _names(sc.runs_legacy) == sc.old
-    assert _names(sc.episodes_legacy) == sc.old_episodes
-
-
-def _taken_old_run_folder(sc: Scene, outside: Path) -> Path:
-    """An EMPTY folder at an old run's name: a rename between handles would silently replace it (R2-22)."""
-    taken = sc.runs_legacy / S.OLD_PINNED_ID
-    taken.mkdir(parents=True)
-    return taken
-
-
-def _taken_old_sidecar(sc: Scene, outside: Path) -> Path:
-    """A regular file at an old sidecar's name, other bytes: a rename would replace it."""
-    sc.runs_legacy.mkdir()
-    taken = sc.runs_legacy / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}"
-    taken.write_text('{"older": true}\n', encoding="utf-8")
-    return taken
-
-
-def _taken_old_episode(sc: Scene, outside: Path) -> Path:
-    """An EMPTY folder at the old episode's name that would move LAST."""
-    taken = sc.episodes_legacy / sorted(sc.old_episodes)[-1]
-    taken.mkdir(parents=True)
-    return taken
-
-
-def _dangling_link_at_old_sidecar(sc: Scene, outside: Path) -> Path:
-    """A DANGLING link at an old sidecar's name, aimed at a file outside `<T>` that does not."""
-    sc.runs_legacy.mkdir()
-    taken = sc.runs_legacy / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}"
-    os.symlink(outside / "written-through", taken)
-    return taken
-
-
-def _link_to_a_file_at_old_sidecar(sc: Scene, outside: Path) -> Path:
-    """A link at an old sidecar's name to a real file outside `<T>` (its bytes must survive)."""
-    sc.runs_legacy.mkdir()
-    (outside / "someone-elses.json").write_text('{"outside": true}\n', encoding="utf-8")
-    taken = sc.runs_legacy / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}"
-    os.symlink(outside / "someone-elses.json", taken)
-    return taken
-
-
-def _dangling_link_at_old_run_folder(sc: Scene, outside: Path) -> Path:
-    """A DANGLING link at an old run FOLDER's name (a folder copied through it would land outside `<T>`)."""
-    sc.runs_legacy.mkdir()
-    taken = sc.runs_legacy / S.OLD_PINNED_ID
-    os.symlink(outside / "no-such-folder", taken)
-    return taken
-
-
-def _link_to_a_folder_at_old_episode(sc: Scene, outside: Path) -> Path:
-    """A link at the last old episode's name in `episodes-legacy/`, to a real folder outside `<T>` (nothing may be written into it)."""
-    (outside / "real-folder").mkdir()
-    (outside / "real-folder" / "kept.txt").write_text("outside\n", encoding="utf-8")
-    sc.episodes_legacy.mkdir()
-    taken = sc.episodes_legacy / sorted(sc.old_episodes)[-1]
-    os.symlink(outside / "real-folder", taken)
-    return taken
-
-
-_TAKEN = {"old_run_folder": _taken_old_run_folder, "old_sidecar_file": _taken_old_sidecar,
-          "old_episode_folder": _taken_old_episode,
-          "dangling_link_at_old_sidecar": _dangling_link_at_old_sidecar,
-          "link_to_a_file_at_old_sidecar": _link_to_a_file_at_old_sidecar,
-          "dangling_link_at_old_run_folder": _dangling_link_at_old_run_folder,
-          "link_to_a_folder_at_old_episode": _link_to_a_folder_at_old_episode}
-
-
-@pytest.mark.parametrize("taken", sorted(_TAKEN))
-def test_1187_s_move_a_destination_name_already_taken_refuses_before_any_move(
-        taken, data_root, tmp_path):
-    sc = _scene(data_root, tmp_path)
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    planted = _TAKEN[taken](sc, outside)
-    before = _world(data_root, sc.old_root, outside)
-
-    got = _retire(*_full(sc))
-    assert _refused(got), f"the command ran over the taken {planted.name!r}: {_shown(got)}"
-    assert _world(data_root, sc.old_root, outside) == before, (
-        "something moved, was replaced, or was written through the planted link")
-    assert planted.name in got.said, f"the refusal does not name {planted.name!r}: {got.said!r}"
-
-    if planted.is_symlink() or not planted.is_dir():
-        planted.unlink()
+def _obstruction(sc: Scene, outside: Path, group: str, location: str, shape: str) -> Path:
+    locations = {
+        "old-link": sc.runs / "zz-old-link", "uuid-link": sc.runs / S.new_id(),
+        "runs-fifo": sc.runs / "zz-old-fifo", "latest": sc.old_root / "latest",
+        "episodes-fifo": sc.old_root / "zz-fifo",
+        "old-run": sc.runs_legacy / S.OLD_PINNED_ID,
+        "old-sidecar": sc.runs_legacy / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}",
+        "old-episode": sc.episodes_legacy / sorted(sc.old_episodes)[-1],
+    }
+    path = sc.tenant_dir / location if group == "root" else locations[location]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if shape == "folder":
+        path.mkdir()
+    elif shape == "file":
+        path.write_text('{"older": true}\n', encoding="utf-8")
+    elif shape == "fifo":
+        H.make_fifo(path)
     else:
-        planted.rmdir()
+        target = outside / "target"
+        if shape == "link-run":
+            target = S.make_run(outside / "elsewhere")
+        elif shape == "link-folder":
+            target.mkdir()
+            (target / "kept.txt").write_text("outside\n", encoding="utf-8")
+        elif shape == "link-file":
+            target.write_text('{"outside": true}\n', encoding="utf-8")
+        elif shape == "relative-link":
+            target = Path(sorted(sc.old_episodes)[-1])
+        path.symlink_to(target)
+    return path
+
+
+@pytest.mark.parametrize(("group", "location", "shape"), _OBSTRUCTIONS,
+                         ids=["-".join(case) for case in _OBSTRUCTIONS])
+def test_obstruction_refuses_before_any_move_and_removal_restores_service(
+        group, location, shape, data_root, tmp_path):
+    sc = _scene(data_root, tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    entry = _obstruction(sc, outside, group, location, shape)
+    before = _world(data_root, sc.old_root, outside)
+    got = _retire(*_full(sc))
+    assert _refused(got), _shown(got)
+    assert entry.name in got.said, got.said
+    assert _world(data_root, sc.old_root, outside) == before, "refusal moved or replaced entries"
+    if group == "move" and "link" in shape:
+        assert re.search(r"\brm\b|\bremov", got.said, re.IGNORECASE), got.said
+    if entry.is_dir() and not entry.is_symlink():
+        entry.rmdir()
+    else:
+        entry.unlink()
     again = _retire(*_full(sc))
     assert _ok(again), _shown(again)
     assert _names(sc.runs_legacy) == sc.old
@@ -806,12 +589,7 @@ def test_1187_o6_the_path_the_refusal_names_runs_as_the_operators_command(data_r
     sc = _scene(data_root, tmp_path)
     inodes_before = _inodes(sc)
     script = H.WORKTREE / S.COMMAND
-    env = {**os.environ,
-           "PYTHONPATH": os.pathsep.join(filter(None, [str(H.WORKTREE),
-                                                       os.environ.get("PYTHONPATH")]))}
-    child = subprocess.run(  # noqa: S603 — this interpreter, the checkout's own command
-        [sys.executable, str(script), *_full(sc)], capture_output=True, text=True,
-        encoding="utf-8", check=False, env=env, cwd=str(H.WORKTREE), timeout=300)
+    child = process.run_script(script, *_full(sc), root=data_root)
     assert child.returncode == 0, (child.stdout + child.stderr)[-1200:]
     assert _names(sc.runs_legacy) == sc.old
     assert _names(sc.episodes_legacy) == sc.old_episodes

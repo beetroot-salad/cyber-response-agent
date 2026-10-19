@@ -989,7 +989,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
 
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
-    tenant = set_up_tenant(data_root, "t540")
+    tenant = set_up_tenant(data_root, fixture_uuid("tenant:t540"))
     runs_base = _tenant.runs_base_for(tenant)
     runs_base.mkdir(parents=True)
     fixture = tmp_path / "fixtures"

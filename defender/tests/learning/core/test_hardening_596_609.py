@@ -40,7 +40,7 @@ _TENANTS = itertools.count(1)
 
 def _tenant_runs(_scenario: Path) -> Path:
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
-    tid = f"t{next(_TENANTS)}"
+    tid = C(f"tenant:t{next(_TENANTS)}")
     H1105.tenant(root, tid)
     runs = root / tid / "runs"
     runs.mkdir()

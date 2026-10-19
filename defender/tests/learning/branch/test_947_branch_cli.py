@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 
 
 def cli_mod():
@@ -25,7 +27,7 @@ def tenant_paths(tmp_path, monkeypatch):
 
     root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
-    return set_up_tenant(root, "acme")
+    return set_up_tenant(root, fixture_uuid("tenant:acme"))
 
 
 def _tree(root: Path) -> list[str]:
@@ -130,9 +132,9 @@ def test_the_launcher_bootstraps_the_package_when_invoked_by_path(tmp_path):
 def test_p4_a_branch_request_without_a_continuation_prompt_is_complete():
     """P4: a tenant, a source run and a branch point are the whole request — it parses, and the
     parsed request carries no prompt field. Today the parser refuses it for the missing flag."""
-    ns = cli_mod().parse_branch_args(["--tenant", "acme", "run-x", "59"])
+    ns = cli_mod().parse_branch_args(["--tenant", fixture_uuid("tenant:acme"), "run-x", "59"])
 
-    assert (ns.tenant, ns.source_run_id, ns.branch_message_id) == ("acme", "run-x", 59)
+    assert (ns.tenant, ns.source_run_id, ns.branch_message_id) == (fixture_uuid("tenant:acme"), "run-x", 59)
     assert not hasattr(ns, "continuation_prompt"), (
         "the parsed request still carries a continuation prompt")
 
@@ -140,7 +142,7 @@ def test_p4_a_branch_request_without_a_continuation_prompt_is_complete():
 def test_p4_the_branch_command_line_refuses_a_continuation_prompt(capsys):
     with pytest.raises(SystemExit) as exc:
         cli_mod().parse_branch_args(
-            ["--tenant", "acme", "run-x", "59", "--continuation-prompt", "go"])
+            ["--tenant", fixture_uuid("tenant:acme"), "run-x", "59", "--continuation-prompt", "go"])
 
     assert exc.value.code == 2, f"exit {exc.value.code}"
     assert "--continuation-prompt" in capsys.readouterr().err

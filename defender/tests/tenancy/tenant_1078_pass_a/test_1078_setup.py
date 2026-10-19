@@ -1,6 +1,8 @@
 """tenant.py setup: row step and refusals on a non-empty data root, re-runs, rowless own folder, alias refusal at the row."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import json
 import os
 from pathlib import Path
@@ -165,8 +167,8 @@ def test_s7_j08_setup_rerun_completes_rowless_own_folder(tmp_path):
     assert O10_TEXT in out, out
 
     other = tmp_path / "other-id"
-    H.tenant_dir(other, "other").mkdir(parents=True)
-    out = _refused_writing_nothing(other, names="other")
+    H.tenant_dir(other, fixture_uuid("tenant:other")).mkdir(parents=True)
+    out = _refused_writing_nothing(other, names=fixture_uuid("tenant:other"))
     assert O10_TEXT in out, out
 
 
@@ -202,3 +204,22 @@ def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
     H.tenant_dir(control, TID).mkdir(parents=True)
     assert H.create_tenant(control, TID).tenant_id == TID
     assert not H.row_path(control, TID).is_symlink()
+
+
+def test_new_id_mints_a_canonical_uuid4_without_a_data_root_or_writes(tmp_path):
+    import subprocess
+    import sys
+    import uuid
+
+    before = H.census(tmp_path)
+    proc = subprocess.run(  # noqa: S603 — fixed CLI and this interpreter
+        [sys.executable, str(H.TENANT_PY), "new-id"], env=H.setup_env(None), cwd=tmp_path,
+        capture_output=True, text=True, timeout=120, check=False)
+    assert proc.returncode == 0, H.setup_output(proc)
+    assert proc.stderr == ""
+    text = proc.stdout.strip()
+    parsed = uuid.UUID(text)
+    assert str(parsed) == text
+    assert parsed.version == 4
+    assert parsed.variant == uuid.RFC_4122
+    assert H.census(tmp_path) == before, "new-id wrote a tenant or data-root entry"

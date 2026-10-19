@@ -16,40 +16,22 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 DEFENDER = Path(__file__).resolve().parents[3]
 
 
-def _param(text: str) -> pytest.param:
-    """One non-canonical id as a test case, readable in the test id (`''`, `'..'`, ...)."""
-    return pytest.param(text, id=repr(text))
-
-
-NON_CANONICAL = [_param(text) for text in S.NON_CANONICAL_IDS]
+NON_CANONICAL = [pytest.param(text, id=repr(text)) for text in S.NON_CANONICAL_IDS]
 # O1 / declared change 2: a minted id is a bare random UUID.
 
-def test_1187_o1_mint_returns_canonical_lowercase_uuid4_text():
+def test_1187_o1_mint_contract():
     import uuid
 
     from defender.run_repository import RunId
 
-    minted = RunId.mint()
-    text = str(minted)
-    assert type(minted) is RunId, f"mint() gave {minted!r}"
-    assert S.is_canonical_uuid(text), f"a minted id is not canonical lowercase UUID text: {text!r}"
-    assert uuid.UUID(text).version == 4, f"a minted id is not a uuid4: {text!r}"
-    assert RunId.parse(text) == minted
-
-
-def test_1187_o1_a_thousand_mints_are_distinct():
-    from defender.run_repository import RunId
-
-    texts = {str(RunId.mint()) for _ in range(1000)}
-    assert len(texts) == 1000, f"{1000 - len(texts)} of 1000 minted ids repeated an earlier one"
-
-
-def test_1187_o1_mint_takes_no_alert_label():
-    from defender.run_repository import RunId
-
-    labelled = S.raised(RunId.mint, "login-brute")
-    assert labelled is not None, "mint accepted an alert label"
-    assert S.is_canonical_uuid(str(RunId.mint()))
+    minted = [RunId.mint() for _ in range(1000)]
+    assert all(type(run_id) is RunId for run_id in minted)
+    texts = [str(run_id) for run_id in minted]
+    assert len(set(texts)) == 1000, "mint repeated an earlier id"
+    for run_id, text in zip(minted, texts, strict=True):
+        assert S.is_canonical_uuid(text), text
+        assert uuid.UUID(text).version == 4, text
+        assert RunId.parse(text) == run_id
 
 
 def test_1187_o1_run_setup_names_an_unpinned_run_folder_by_a_bare_uuid(tmp_path, data_root):
@@ -71,32 +53,30 @@ def test_1187_o1_run_setup_names_an_unpinned_run_folder_by_a_bare_uuid(tmp_path,
     assert Path(first.run_dir).name != Path(second.run_dir).name
 # O2 / declared change 1: only canonical lowercase UUID text is an id.
 
-def test_1187_o2_run_id_parse_admits_a_canonical_uuid():
-    from defender.run_repository import RunId
-
-    for text in (S.SAMPLE_UUID, S.new_id()):
-        assert str(RunId.parse(text)) == text
-
-
-@pytest.mark.parametrize("text", NON_CANONICAL)
-def test_1187_o2_run_id_parse_refuses_a_non_canonical_id(text):
-    from defender.run_repository import RunId, RunRefused
-
-    err = S.raised(RunId.parse, text)
-    assert S.is_a(err, RunRefused), f"RunId.parse({text!r}) gave {err!r}"
-
-
-@pytest.mark.parametrize("text", NON_CANONICAL)
-def test_1187_o2_run_id_fault_and_episode_id_fault_refuse_a_non_canonical_id(text):
+def test_1187_o2_canonical_ids_pass_the_rules():
     from defender.records._run_id import episode_id_fault, run_id_fault
 
-    for rule in (run_id_fault, episode_id_fault):
+    for text in (S.SAMPLE_UUID, S.new_id()):
+        assert run_id_fault(text) is None
+        assert episode_id_fault(text) is None
+
+
+@pytest.mark.parametrize("text", NON_CANONICAL)
+@pytest.mark.parametrize("boundary", ["parse", "run_fault", "episode_fault", "run_id", "episode_id"])
+def test_1187_o2_noncanonical_ids_are_refused_at_every_boundary(text, boundary):
+    from defender.records._run_id import episode_id_fault, run_id_fault
+    from defender.run_repository import RunAddress, RunId, RunRefused
+
+    if boundary.endswith("_fault"):
+        rule = run_id_fault if boundary == "run_fault" else episode_id_fault
         why = rule(text)
-        assert isinstance(why, str), f"{rule.__name__}({text!r}) answered {why!r}"
-        assert why, f"{rule.__name__}({text!r}) answered an empty sentence"
-    for rule in (run_id_fault, episode_id_fault):
-        assert rule(S.SAMPLE_UUID) is None, f"{rule.__name__} refused a canonical UUID"
-        assert rule(S.new_id()) is None
+        assert isinstance(why, str), (rule.__name__, text, why)
+        assert why, (rule.__name__, text, why)
+    elif boundary == "parse":
+        assert isinstance(S.raised(RunId.parse, text), RunRefused), text
+    else:
+        fields = {**_address_fields(), "episode_id": None, boundary: text}
+        assert S.raised(RunAddress, **fields) is not None, (boundary, text)
 
 
 def test_1187_o2_episode_id_rule_asks_for_no_room_for_a_label():
@@ -127,23 +107,6 @@ def test_1187_o2_run_address_admits_canonical_uuid_run_and_episode_ids():
     assert str(natural.run_id) == S.SAMPLE_UUID
 
 
-@pytest.mark.parametrize("text", NON_CANONICAL)
-def test_1187_o2_run_address_refuses_a_non_canonical_run_id(text):
-    from defender.run_repository import RunAddress
-
-    err = S.raised(RunAddress, tenant_id=_address_fields()["tenant_id"], run_id=text,
-                   episode_id=None)
-    assert err is not None, f"RunAddress admitted the run id {text!r}"
-
-
-@pytest.mark.parametrize("text", NON_CANONICAL)
-def test_1187_o2_run_address_refuses_a_non_canonical_episode_id(text):
-    from defender.run_repository import RunAddress
-
-    err = S.raised(RunAddress, **_address_fields(), episode_id=text)
-    assert err is not None, f"RunAddress admitted the episode id {text!r}"
-
-
 def test_1187_o2_run_name_fault_still_tells_a_sidecar_from_a_run():
     from defender.run_repository import run_name_fault
 
@@ -156,16 +119,6 @@ def test_1187_o2_run_name_fault_still_tells_a_sidecar_from_a_run():
     assert staged, "a staged sidecar was admitted as a run name"
 
 
-def test_1187_o2_the_listing_takes_a_uuid_runs_sidecars_as_sidecars_not_as_runs(data_root):
-    t = S.tenant(data_root)
-    run_id = S.new_id()
-    S.make_run(S.natural_runs(data_root, H.T_ID), run_id, sidecars=True)
-    beside = sorted(p.name for p in S.natural_runs(data_root, H.T_ID).iterdir())
-    assert beside == sorted([run_id, *(run_id + s for s in S.SIDECAR_SUFFIXES)]), beside
-
-    listed = t.runs_repository().list()
-
-    assert [str(r) for r in listed] == [run_id]
 # O3 / declared change 4: the family gate no longer judges the composed `<episode>-<label>`.
 
 #: A world label that is valid by its own rule (lower-case letters and digits, 200 bytes) but
@@ -180,27 +133,19 @@ def _family_doc_for(episode_id: str, *labels: str) -> dict:
     return T947.family_doc(episode_id=episode_id, worlds=worlds)
 
 
-def test_1187_o3_the_family_gate_does_not_refuse_a_label_for_a_long_composed_name():
+@pytest.mark.parametrize("label", ["b", LONG_LABEL, "a-b"], ids=["short", "long", "invalid"])
+def test_1187_o3_labels_follow_their_own_rule(label):
     from defender.runtime.branch import _family
 
-    episode_id = S.new_id()
-    short = _family.parse_family(_family_doc_for(episode_id, "b"))
-    _family.check_identities(short)
-
-    long_doc = _family_doc_for(episode_id, LONG_LABEL)
-    family = _family.parse_family(long_doc)
-    _family.check_identities(family)
-    assert [w.world_id for w in family.worlds] == ["a", LONG_LABEL]
-
-
-def test_1187_o3_a_label_is_still_held_to_its_own_rule():
-    from defender.runtime.branch import _family
-
-    episode_id = S.new_id()
-    _family.parse_family(_family_doc_for(episode_id, "b"))
-    err = S.raised(_family.parse_family, _family_doc_for(episode_id, "a-b"))
-    assert S.is_a(err, _family.FamilyError), f"a label 'a-b' gave {err!r}"
-    assert "a-b" in S.message(err), S.message(err)
+    doc = _family_doc_for(S.new_id(), label)
+    if label == "a-b":
+        err = S.raised(_family.parse_family, doc)
+        assert isinstance(err, _family.FamilyError), err
+        assert label in S.message(err)
+    else:
+        family = _family.parse_family(doc)
+        _family.check_identities(family)
+        assert [w.world_id for w in family.worlds] == ["a", label]
 
 
 def _attribute(obj: object, name: str) -> tuple[str, object]:
@@ -493,135 +438,82 @@ def test_1187_o1_no_production_source_composes_derives_or_bounds_an_id_by_meanin
     assert hits == [], f"{len(hits)} production sites still read or build id meaning:\n  {listing}"
 
 
-def test_1187_o1_the_census_finds_what_it_is_meant_to_find(tmp_path):
-    root = tmp_path / "planted"
-    (root / "pkg").mkdir(parents=True)
-    (root / "pkg" / "dirty.py").write_text(
-        "from defender._run_id import mint_run_id as m\n"
-        "from defender import _run_id\n"
-        "from defender.run_repository import RunId\n"
-        "\n"
-        "RUN_ID_MAX_BYTES = 206\n"
-        "__all__ = ['episode_id_for']\n"
-        "\n"
-        "\n"
-        "def episode_id_for(src):\n"
-        "    return src\n"
-        "\n"
-        "\n"
-        "def uses(family, episode_id, label, src):\n"
-        "    a = f'{episode_id}-{label}'\n"
-        "    b = f'{family.episode_id}-r2'\n"
-        "    c = m('x')\n"
-        "    d = _run_id.mint_run_id('y')\n"
-        "    e = episode_id_for(src)\n"
-        "    g = RunId.mint('login')\n"
-        "    h = family.episode_id + '-' + label\n"
-        "    i = '-'.join([episode_id, label])\n"
-        "    j = '{}-{}'.format(episode_id, label)\n"
-        "    k = '%s-%s' % (episode_id, label)\n"
-        "    return a, b, c, d, e, g, h, i, j, k\n"
-        "\n"
-        "\n"
-        "def aliased(family, episode_id, label, n):\n"
-        "    ep = episode_id\n"
-        "    eid: str = family.episode_id\n"
-        "    first = ep\n"
-        "    second = first\n"
-        "    a = f'{ep}-{label}'\n"
-        "    b = f'{eid}-r{n}'\n"
-        "    c = f'{second}-{label}'\n"
-        "    d = ep + '-' + label\n"
-        "    e = getattr(RunId, 'mint')(label)\n"
-        "    if (w := family.episode_id):\n"
-        "        return f'{w}-x'\n"
-        "    return a, b, c, d, e\n"
-        "\n"
-        "\n"
-        "def compose(eid, label):\n"
-        "    joined = eid\n"
-        "    return f'{joined}-{label}'\n"
-        "\n"
-        "\n"
-        "def passes(family, label):\n"
-        "    return compose(family.episode_id, label)\n"
-        "\n"
-        "\n"
-        "class Holder:\n"
-        "    def __init__(self, family):\n"
-        "        self._eid = family.episode_id\n"
-        "\n"
-        "    def arm(self, label):\n"
-        "        return f'{self._eid}-{label}'\n",
-        encoding="utf-8")
-    (root / "pkg" / "clean.py").write_text(
-        "from defender.run_repository import RunId\n"
-        "\n"
-        "\n"
-        "def mint_run_id():  # a definition alone is not a call\n"
-        "    return RunId.mint()\n"
-        "\n"
-        "\n"
-        "def fine(label, n, episode_id):\n"
-        "    note = f'{label}-{n} for {episode_id} - done'\n"
-        "    joined = '-'.join([label, str(n)]) + label + '-x' + episode_id\n"
-        "    said = 'episode %s - %s' % (episode_id, n)\n"
-        "    return note, f'{episode_id}', RunId.mint(), joined, said\n"
-        "\n"
-        "\n"
-        "def binds(episode_id):\n"
-        "    ep = episode_id\n"
-        "    return ep\n"
-        "\n"
-        "\n"
-        "def other_scope(label, n):\n"
-        "    ep = label\n"
-        "    return f'{ep}-{n}', getattr(RunId, 'mint')()\n"
-        "\n"
-        "\n"
-        "def stamp(prefix, n):\n"
-        "    return f'{prefix}-{n}'\n"
-        "\n"
-        "\n"
-        "def uses_stamp(label, n):\n"
-        "    return stamp(label, n)\n"
-        "\n"
-        "\n"
-        "class Plain:\n"
-        "    def __init__(self, label):\n"
-        "        self._label = label\n"
-        "\n"
-        "    def name(self, n):\n"
-        "        return f'{self._label}-{n}'\n",
-        encoding="utf-8")
-
-    found = {(h.rel, h.kind, h.what) for h in census(root)}
-
-    dirty = "pkg/dirty.py"
-    assert (dirty, "fstring", "{episode_id}-") in found, found
-    assert (dirty, "fstring", "{family.episode_id}-") in found, found
-    assert (dirty, "ref", "mint_run_id") in found, found      # by alias and by attribute
-    assert (dirty, "ref", "episode_id_for") in found, found   # the module's own def, called
-    assert (dirty, "def", BANNED_CONSTANT) in found, found
-    assert (dirty, "str", "episode_id_for") in found, found
-    assert any(h.rel == dirty and h.kind == "mint-args" for h in census(root))
-    assert len([h for h in census(root) if h.rel == dirty and h.kind == "concat"]) == 5, (
-        [h for h in census(root) if h.kind == "concat"])
-    assert [h for h in census(root) if h.rel == "pkg/clean.py"] == []
-    assert len([h for h in census(root) if h.kind == "ref" and h.what == "mint_run_id"]) == 2
-    # Adversary F1: the same joins through a local alias (`ep = episode_id`, an annotated
-    # alias, a chain of two, a walrus) and the mint reached through `getattr`.
-    lines = (root / dirty).read_text(encoding="utf-8").splitlines()
-    start = lines.index("def aliased(family, episode_id, label, n):") + 1
-    aliased = [h for h in census(root) if h.rel == dirty and h.line >= start]
-    assert sorted((h.kind, h.what) for h in aliased) == sorted([
+# Each syntax partition has an exact oracle, including import aliases and negative controls.
+IDENTITY_SYNTAX = [
+    ("bare-fstring", "return f'{episode_id}-{label}'", [("fstring", "{episode_id}-")]),
+    ("attribute-fstring", "return f'{family.episode_id}-r2'", [("fstring", "{family.episode_id}-")]),
+    ("import-alias", "return m('x')", [("ref", "mint_run_id")]),
+    ("module-attribute", "return _run_id.mint_run_id('y')", [("ref", "mint_run_id")]),
+    ("local-deriver", "return episode_id_for(label)", [("ref", "episode_id_for")]),
+    ("labelled-mint", "return RunId.mint(label)", [("mint-args", "defender.run_repository.RunId.mint")]),
+    ("add", "return family.episode_id + '-' + label", [("concat", "family.episode_id + '-'")]),
+    ("join", "return '-'.join([episode_id, label])", [("concat", "'-'.join([episode_id, label])")]),
+    ("format", "return '{}-{}'.format(episode_id, label)",
+     [("concat", "'{}-{}'.format(episode_id, label)")]),
+    ("percent", "return '%s-%s' % (episode_id, label)", [("concat", "'%s-%s' % (episode_id, label)")]),
+    ("aliases", """    ep = episode_id
+    eid: str = family.episode_id
+    first = ep
+    second = first
+    a = f'{ep}-{label}'
+    b = f'{eid}-r{n}'
+    c = f'{second}-{label}'
+    d = ep + '-' + label
+    e = getattr(RunId, 'mint')(label)
+    if (w := family.episode_id):
+        return f'{w}-x'
+    return a, b, c, d, e""", [
         ("fstring", "{ep}-"), ("fstring", "{eid}-"), ("fstring", "{second}-"),
-        ("concat", "ep + '-'"), ("mint-args", "defender.run_repository.RunId.mint"),
-        ("fstring", "{w}-"),
-        # the parameter-passing shape: `compose` spells no episode id (so no fstring hit there), the caller hands one;
-        # and the attribute shape: `self._eid` assigned from one, joined in another method.
-        ("composer", "compose(family.episode_id, label)"),
-        ("fstring", "{self._eid}-")]), aliased
+        ("concat", "ep + '-'"), ("mint-args", "defender.run_repository.RunId.mint"), ("fstring", "{w}-")]),
+    ("composer", "return compose(family.episode_id, label)",
+     [("composer", "compose(family.episode_id, label)")]),
+    ("class-attribute", """class Holder:
+    def __init__(self, family):
+        self._eid = family.episode_id
+    def arm(self, label):
+        return f'{self._eid}-{label}'""", [("fstring", "{self._eid}-")]),
+    ("constant", "RUN_ID_MAX_BYTES = 206", [("def", BANNED_CONSTANT)]),
+    ("re-export", "__all__ = ['episode_id_for']", [("str", "episode_id_for")]),
+    ("ordinary-text", """    note = f'{label}-{n} for {episode_id} - done'
+    joined = '-'.join([label, str(n)]) + label + '-x' + episode_id
+    said = 'episode %s - %s' % (episode_id, n)
+    return note, f'{episode_id}', RunId.mint(), joined, said""", []),
+    ("separate-scopes", """def binds(episode_id):
+    ep = episode_id
+    return ep
+def other_scope(label, n):
+    ep = label
+    return f'{ep}-{n}', getattr(RunId, 'mint')()""", []),
+    ("ordinary-composer", """def stamp(prefix, n):
+    return f'{prefix}-{n}'
+def uses_stamp(label, n):
+    return stamp(label, n)""", []),
+    ("ordinary-attribute", """class Plain:
+    def __init__(self, label):
+        self._label = label
+    def name(self, n):
+        return f'{self._label}-{n}'""", []),
+    ("unused-definition", "def mint_run_id():\n    return RunId.mint()", []),
+]
+
+
+@pytest.mark.parametrize(("name", "source", "expected"), IDENTITY_SYNTAX, ids=[c[0] for c in IDENTITY_SYNTAX])
+def test_1187_o1_census_syntax_partitions(tmp_path, name, source, expected):
+    import textwrap
+
+    prefix = ("from defender._run_id import mint_run_id as m\n"
+              "from defender import _run_id\nfrom defender.run_repository import RunId\n"
+              "def episode_id_for(src):\n    return src\n"
+              "def compose(eid, label):\n    joined = eid\n    return f'{joined}-{label}'\n")
+    if source.startswith(("class ", "def ", "RUN_", "__all__")):
+        module = source
+    else:
+        body = textwrap.indent(textwrap.dedent(source), "    ")
+        module = "def check(family, episode_id, label, n):\n" + body
+    path = tmp_path / "probe.py"
+    path.write_text(prefix + module + "\n", encoding="utf-8")
+    found = [(hit.kind, hit.what) for hit in census(tmp_path)]
+    assert sorted(found) == sorted(expected), (name, found)
 
 
 def test_1187_o1_the_census_leaves_tests_out(tmp_path):

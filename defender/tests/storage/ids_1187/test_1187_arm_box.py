@@ -1,18 +1,17 @@
 """An arm box can write its own run folder without exposing sibling or episode records."""
 from __future__ import annotations
 
-import functools
 import json
 import os
 import shutil
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any
 
 import pytest
 
-from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, is_dood
+from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, dood_anchor, is_dood
 from defender.tests.storage.ids_1187 import _spec1187 as S
 from defender.runtime.model_view import MODEL_RUN
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
@@ -47,8 +46,8 @@ ATTEMPTS = (
     "runs_create_file", "runs_mkdir", "sibling_write", "sibling_symlink",
 )
 
-# argv: run_dir, episode_dir, sibling_dir. Paths are the host's own: the box binds the arm's
-# folder at the same path, so a path that names a host file names it (or nothing) in the box.
+# Pass host paths to the probe so it can confirm they expose no host records.
+# argv: run_dir, episode_dir, sibling_dir.
 _PROBE = r'''
 import json, os, sys
 
@@ -114,15 +113,18 @@ writes = [
             lambda: os.symlink(roster, os.path.join(run_dir, "roster-link"))),
     attempt("roster_hardlink_into_run_folder",
             lambda: os.link(roster, os.path.join(run_dir, "roster-hard"))),
-    attempt("episode_create_file", write(os.path.join(episode, "new.txt"), b"x")),
-    attempt("episode_mkdir", lambda: os.mkdir(os.path.join(episode, "newdir"))),
-    attempt("episode_symlink", lambda: os.symlink(run_dir, os.path.join(episode, "elsewhere"))),
-    attempt("runs_create_file", write(os.path.join(container, "planted.txt"), b"x")),
-    attempt("runs_mkdir", lambda: os.mkdir(os.path.join(container, "forged-arm"))),
-    attempt("sibling_write", write(os.path.join(sibling, "forged.txt"), b"forged")),
-    attempt("sibling_symlink",
-            lambda: os.symlink(run_dir, os.path.join(sibling, "elsewhere"))),
 ]
+for label, parent, kind in [
+    ("episode_create_file", episode, "file"), ("episode_mkdir", episode, "dir"),
+    ("episode_symlink", episode, "link"), ("runs_create_file", container, "file"),
+    ("runs_mkdir", container, "dir"), ("sibling_write", sibling, "file"),
+    ("sibling_symlink", sibling, "link"),
+]:
+    path = os.path.join(parent, "probe-" + label)
+    action = (write(path, b"forged") if kind == "file" else
+              (lambda: os.mkdir(path)) if kind == "dir" else
+              (lambda: os.symlink(run_dir, path)))
+    writes.append(attempt(label, action))
 print(json.dumps({
     "control": control,
     "writes": writes,
@@ -134,38 +136,6 @@ print(json.dumps({
 }))
 '''
 # Whether a box can start here, and what a parameter does when it cannot.
-
-@functools.cache
-def _daemon() -> tuple[bool, Path | None, frozenset[str]]:
-    """Return daemon availability, the shared data-root location, and registered runtimes."""
-    if not daemon_reachable():
-        return False, None, frozenset()
-    if is_dood():
-        from defender.tests.support.sandbox._docker import dood_anchor
-
-        anchor = dood_anchor()
-        if anchor is None:
-            return False, None, frozenset()
-    else:
-        anchor = H.WORKTREE / ".defender-runs"
-    return True, anchor, docker_runtimes()
-
-
-def _skip_reason(runtime: str, *, usable: bool, registered: frozenset[str]) -> str | None:
-    """Explain an unavailable daemon or runtime; otherwise return None."""
-    if not usable:
-        return NO_DAEMON
-    if runtime not in registered:
-        return RUNTIME_ABSENT.format(runtime=runtime)
-    return None
-
-
-def _skip_or_fail(reason: str, environ: Mapping[str, str]) -> NoReturn:
-    """Skip unavailable box infrastructure locally and fail when it is required in CI."""
-    if environ.get("CI"):
-        pytest.fail(f"the arm-box boundary cannot skip in CI: {reason}")
-    pytest.skip(reason)
-# The session: one real episode in the new layout, one real box for one arm, one probe.
 
 def _outside_arm(state: dict[str, Any], arm_id: str) -> dict[str, Any]:
     """Return the episode tree excluding the arm's writable run-folder contents."""
@@ -214,37 +184,32 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
 @pytest.fixture(scope="module", params=RUNTIMES)
 def arm_box_session(request: pytest.FixtureRequest) -> Iterator[dict[str, Any]]:
     runtime = request.param
-    usable, anchor, registered = _daemon()
-    reason = _skip_reason(runtime, usable=usable, registered=registered)
-    if reason is not None or anchor is None:
-        _skip_or_fail(reason or NO_DAEMON, os.environ)
+    anchor = dood_anchor() if is_dood() else H.WORKTREE / ".defender-runs"
+    reason = NO_DAEMON if not daemon_reachable() or anchor is None else None
+    if reason is None and runtime not in docker_runtimes():
+        reason = RUNTIME_ABSENT.format(runtime=runtime)
+    if reason is not None:
+        if os.environ.get("CI"):
+            pytest.fail(f"the arm-box boundary cannot skip in CI: {reason}")
+        pytest.skip(reason)
     base = anchor / uuid.uuid4().hex
     base.mkdir(parents=True)
     try:
-        yield _session(base / "data", runtime)
+        session = _session(base / "data", runtime)
+        assert session["sandboxed"] is True, session["name"]
+        assert session["probe"] is not None, (session["rc"], session["err"])
+        assert session["probe"]["control"]["ok"] is True, session["probe"]["control"]
+        assert session["control_on_host"] == CONTROL, "control bytes did not reach the host"
+        yield session
     finally:
         # The box writes through the rw bind as root (C41); residue is gitignored.
         shutil.rmtree(base, ignore_errors=True)
 
 
-def _writes(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    probe = session["probe"] or {}
-    return {w["label"]: w for w in probe.get("writes", [])}
-# The tests.
-
 def test_1187_an_arm_box_cannot_change_the_roster_the_episode_folder_the_arm_container_or_a_sibling(
         arm_box_session):
     s = arm_box_session
-    assert s["sandboxed"] is True, (
-        f"the box for an arm folder did not start sandboxed (name {s['name']!r})")
-    assert s["probe"] is not None, f"the probe did not complete in the box: rc={s['rc']} {s['err']}"
-    control = s["probe"]["control"]
-    assert control["ok"] is True, (
-        f"positive control: the write in the arm's own run folder must succeed in the box: {control}")
-    assert s["control_on_host"] == CONTROL, (
-        "positive control: the in-run-folder write must land on the host, byte for byte: "
-        f"{s['control_on_host']!r}")
-    writes = _writes(s)
+    writes = {row["label"]: row for row in s["probe"]["writes"]}
     assert set(writes) == set(ATTEMPTS), (
         f"the probe made exactly the planned attempts, none silently dropped: {sorted(writes)}")
     for label in ATTEMPTS:
@@ -261,12 +226,7 @@ def test_1187_an_arm_box_cannot_change_the_roster_the_episode_folder_the_arm_con
 
 def test_1187_an_arm_box_cannot_see_the_roster_the_manifest_or_a_sibling_arm(arm_box_session):
     s = arm_box_session
-    assert s["sandboxed"] is True, (
-        f"the box for an arm folder did not start sandboxed (name {s['name']!r})")
-    assert s["probe"] is not None, f"the probe did not complete in the box: rc={s['rc']} {s['err']}"
     probe = s["probe"]
-    assert probe["control"]["ok"] is True, "positive control: the control write succeeds in the box"
-    assert s["control_on_host"] == CONTROL, "positive control: the control write lands on the host"
     container = probe["container_listing"]
     assert isinstance(container, list), f"the arm container is not listable: {container!r}"
     assert MODEL_RUN.name in container, (

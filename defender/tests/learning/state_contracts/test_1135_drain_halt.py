@@ -641,13 +641,13 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
         # 1): the id is a canonical UUID and the container holds no `_tenant.json`.
         from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-        run_dir = base / "acme" / "runs" / fixture_uuid("1135-everyday-case-a")
+        run_dir = base / fixture_uuid("tenant:acme") / "runs" / fixture_uuid("1135-everyday-case-a")
         run_dir.mkdir(parents=True)
         plant_alert(run_dir, {"rule": {"name": "everyday"}})
         from defender.box import _scrub as scrub_mod
 
         scrub_mod.scrub(run_dir)  # a certified tree: the enqueue's refusal gate passes it
-        for p in (base / "acme", run_dir.parent, run_dir):
+        for p in (base / fixture_uuid("tenant:acme"), run_dir.parent, run_dir):
             os.chmod(p, 0o755)
         row = _defender_row("ep-1/b/0/9", "caught")
         names = ("e1", "append", "rotate", "move", "lock", "read", "rotate_unreadable")

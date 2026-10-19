@@ -1,6 +1,8 @@
 """resolve_tenant / resolve_run_tenant: systems, ticket mapping, faults kept per system, fresh read per resolve, read-only parts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import contextlib
 from datetime import UTC, datetime
 import json
@@ -87,19 +89,21 @@ def test_d_ticket_mapping_kept(tmp_path):
         "lifecycle": T1106.mapping_text(open_status="{summary}"),  # a templated open.status
     }
     got = {}
-    for tenant_id, text in cases.items():
-        folder = S.plant(root, tenant_id, marker=tenant_id)
+    for label, text in cases.items():
+        tenant_id = fixture_uuid(f"tenant:{label}")
+        folder = S.plant(root, tenant_id, marker=label)
         S.mapping_path(folder).write_text(text, encoding="utf-8")
-        got[tenant_id] = _resolve(root, tenant_id).ticket_mapping  # never raised
+        got[label] = _resolve(root, tenant_id).ticket_mapping  # never raised
 
     for good in ("valid", "open-is-released"):
         assert isinstance(got[good], S.record_type("CaseMapping")), (good, got[good])
     assert isinstance(got["lifecycle"], CaseTicketError), got["lifecycle"]
 
     TenantRefused = S.tenant_refused()
-    for tenant_id, text in {"not-yaml": "open: [unclosed\n  status: : :\n",
+    for label, text in {"not-yaml": "open: [unclosed\n  status: : :\n",
                             "not-a-mapping": "- open\n- released\n"}.items():
-        folder = S.plant(root, tenant_id, marker=tenant_id)
+        tenant_id = fixture_uuid(f"tenant:{label}")
+        folder = S.plant(root, tenant_id, marker=label)
         S.mapping_path(folder).write_text(text, encoding="utf-8")
         with pytest.raises(TenantRefused):
             _resolve(root, tenant_id)
@@ -120,20 +124,20 @@ def test_o5_resolve_keeps_system_faults(tmp_path):
 
     # TenantRefused keeps its tenant-acceptance reasons, each still refusing.
     TenantRefused = S.tenant_refused()
-    missing_mapping = S.plant(root, "no-mapping", marker="o5c")
+    missing_mapping = S.plant(root, fixture_uuid("tenant:no-mapping"), marker="o5c")
     S.mapping_path(missing_mapping).unlink()  # REQUIRED_SETTINGS (MF-10 A, human)
     with pytest.raises(TenantRefused) as refused:
-        _resolve(root, "no-mapping")
+        _resolve(root, fixture_uuid("tenant:no-mapping"))
     assert "mapping.yaml" in str(refused.value), str(refused.value)
-    linked = S.plant(root, "linked", marker="o5d")
+    linked = S.plant(root, fixture_uuid("tenant:linked"), marker="o5d")
     outside = tmp_path / "outside.env"
     outside.write_text('CMDB_URL_BASE="http://outside:1"\n', encoding="utf-8")
     S.config_path(linked, "cmdb").unlink()
     S.config_path(linked, "cmdb").symlink_to(outside)
     with pytest.raises(TenantRefused):
-        _resolve(root, "linked")
+        _resolve(root, fixture_uuid("tenant:linked"))
     with pytest.raises(TenantRefused):
-        _resolve(root, "absent")
+        _resolve(root, fixture_uuid("tenant:absent"))
 
 
 def test_s7_nf22_systems_keyed_by_exact_directory_name(tmp_path):
@@ -184,12 +188,12 @@ def test_s7_nf16_unreadable_config_env_kept_as_fault(tmp_path):
     assert isinstance(rec.systems["ticket"], S.record_type("SystemConfig"))
 
     # REQUIRED_SETTINGS keep #1106's TenantRefused (the control that refusal still bites).
-    required = S.plant(root, "required-dir", marker="nf16b")
+    required = S.plant(root, fixture_uuid("tenant:required-dir"), marker="nf16b")
     grants = S.settings_of(required) / "verb-grants.yaml"
     grants.unlink()
     grants.mkdir()
     with pytest.raises(S.tenant_refused()):
-        _resolve(root, "required-dir")
+        _resolve(root, fixture_uuid("tenant:required-dir"))
 
 
 def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
@@ -199,7 +203,7 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     # #1120: under this test's data root, the one `run.main` below reads its tenants from.
     root = current_data_root()
     folder = S.plant(root, marker="nf4")
-    S.plant(root, "other", marker="nf4o")
+    S.plant(root, fixture_uuid("tenant:other"), marker="nf4o")
 
     # resolve_tenant / resolve_run_tenant, twice around an edit (RG5, refuted: no cache).
     first = _resolve(root)
@@ -215,7 +219,7 @@ def test_s7_nf4_every_resolve_reads_the_folder_fresh(tmp_path, monkeypatch):
     assert S.open_reporter(second.ticket_mapping) == "done"
     assert S.open_reporter(first.ticket_mapping) == "defender"
     # ...and across tenants: resolving another tenant in between memoizes nothing.
-    assert _resolve(root, "other").systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4o:8080"
+    assert _resolve(root, fixture_uuid("tenant:other")).systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-nf4o:8080"
     assert _resolve(root).systems["cmdb"]["CMDB_URL_BASE"] == "http://cmdb-edited:1"
 
     # A second run.main in one process reflects an edit made between the two. (run.main takes
@@ -361,26 +365,26 @@ def test_defender_policy_over_a_tenant_whose_systems_are_broken(tmp_path, capsys
     policy_cli = S.mod("cli.policy_cli")
     # #1120: policy_cli reads its tenants from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
-    S.plant(root, "healthy", marker="pol")
-    broken = S.plant(root, "broken", marker="pol")
+    S.plant(root, fixture_uuid("tenant:healthy"), marker="pol")
+    broken = S.plant(root, fixture_uuid("tenant:broken"), marker="pol")
     S.config_path(broken, "cmdb").unlink()
     S.write_config(broken, "identity", b"IDENTITY_URL_BASE=\xff\n")
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     base = ["show", "gather", "--run-dir", str(run_dir)]
 
-    assert policy_cli.main([*base, "--tenant", "healthy"]) == 0
+    assert policy_cli.main([*base, "--tenant", fixture_uuid("tenant:healthy")]) == 0
     healthy_out = capsys.readouterr().out
-    assert policy_cli.main([*base, "--tenant", "broken"]) == 0  # resolves without raising
+    assert policy_cli.main([*base, "--tenant", fixture_uuid("tenant:broken")]) == 0  # resolves without raising
     broken_out = capsys.readouterr().out
     assert "agent: gather" in broken_out, broken_out
     assert broken_out == healthy_out, "the grants answer moved with a system's config"
 
-    rec = _resolve(root, "broken")  # the frame policy_cli resolves through
+    rec = _resolve(root, fixture_uuid("tenant:broken"))  # the frame policy_cli resolves through
     ConfigFault = S.config_fault()
     assert isinstance(rec.systems["cmdb"], ConfigFault), rec.systems["cmdb"]
     assert isinstance(rec.systems["identity"], ConfigFault), rec.systems["identity"]
-    assert rec.grants.gather == _resolve(root, "healthy").grants.gather
+    assert rec.grants.gather == _resolve(root, fixture_uuid("tenant:healthy")).grants.gather
 
 
 def test_s60_config_env_fs_confinement(tmp_path):
@@ -389,11 +393,11 @@ def test_s60_config_env_fs_confinement(tmp_path):
     outside.write_text('CMDB_URL_BASE="http://outside:1"\nCMDB_BASTION_HOST="b"\n'
                        'CMDB_TIMEOUT_SEC="10"\n', encoding="utf-8")
     # A config.env reached through a symlink outside the folder: the link walk refuses it (CX6).
-    linked = S.plant(root, "linked", marker="s60l")
+    linked = S.plant(root, fixture_uuid("tenant:linked"), marker="s60l")
     S.config_path(linked, "cmdb").unlink()
     S.config_path(linked, "cmdb").symlink_to(outside)
     with pytest.raises(S.tenant_refused()):
-        _resolve(root, "linked")
+        _resolve(root, fixture_uuid("tenant:linked"))
 
     folder = S.plant(root, marker="s60")
     rec = _resolve(root)

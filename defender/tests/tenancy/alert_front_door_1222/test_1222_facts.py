@@ -11,6 +11,8 @@ from typing import Any
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
+_REFERENCE_RUN_ID = fixture_uuid('s01-unmapped')
+
 # Inputs
 
 #: The alert carries no `rule.id` at all.
@@ -80,7 +82,7 @@ def _drive(tmp_path: Path, planted: S.Planted, alert: Mapping[str, Any] | bytes,
 
 
 def _reference(tmp_path: Path, planted: S.Planted,
-               run_id: str = fixture_uuid("s01-unmapped")) -> S.Drive:
+               run_id: str = _REFERENCE_RUN_ID) -> S.Drive:
     """The "no signature" reference: a mapping that names none, an alert with no `rule.id`."""
     return _drive(tmp_path, planted, _alert(ABSENT), run_id, mapping=UNMAPPED)
 
@@ -197,7 +199,7 @@ def _fail(problems: Sequence[str]) -> str:
 def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
     mapping = {"signature": "detection.key", "event_time": "detection.seen",
                "summary": "detection.title"}
-    planted = S.plant_tenant("acme", alert_mapping=mapping)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=mapping)
     detection = {"key": "DK-7731", "seen": "2026-09-30T08:20:00Z", "title": "Odd beacon cadence"}
     mapped = _drive(tmp_path, planted, _alert(detection=detection), fixture_uuid("s01-mapped"))
     absent = _drive(tmp_path, planted, _alert(), fixture_uuid("s01-absent"))
@@ -230,7 +232,7 @@ def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
 
 
 def test_alert_facts_value_domain(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
 
     # Real signatures, mapped through vendor.code beside a decoy rule.id.
@@ -293,7 +295,7 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
 def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
     mapping = {"signature": "vendor.rule.key", "event_time": "detected_at",
                "summary": "rule.description"}
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     shapes: list[tuple[str, Mapping[str, Any], Any]] = [
         ("list on the path", mapping, [{"rule": {"key": "LK-7731"}}]),
@@ -322,7 +324,7 @@ def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
 
 
 def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     valid = _drive(tmp_path, planted, _alert(VALID), fixture_uuid("s01-dash-control"), mapping=SHIPPED)
     cases = [("double dash", json.dumps("--Zq7731-high"), "--Zq7731-high"),
@@ -349,7 +351,7 @@ def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
 
 
 def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     controls = [("NUL", "Zq7731\u0000nul"), ("escape", "Zq7731\u001b[31mred"),
                 ("DEL", "Zq7731\u007fdel"), ("tab", "Zq7731\ttab"), ("bell", "Zq7731\u0007")]
@@ -387,7 +389,7 @@ def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
 
 
 def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     digits_128 = "9" * 128
     real = [("integer", "5710", "5710"), ("negative zero", "-0", "0"),
@@ -422,7 +424,7 @@ def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> N
 
 
 def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=VENDOR)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=VENDOR)
     inner = S.alert_bytes(_alert(vendor="@@")).replace(
         b'"code": "@@"', b'"code": "FIRST-7731",\n  "code": "LAST-7731"')
     outer_doc = _alert(vendor="OUTER-1")
@@ -451,7 +453,7 @@ def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
 
 
 def test_p083_event_time_mapped_to_a_number_zero_or_object(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=S.DEFAULT_MAPPING)
     fixtures = [(slug, S.fixture_alert(slug)["alert_timestamp"],
                  _drive(tmp_path, planted, S.fixture_alert_bytes(slug), fixture_uuid(f"s01-evt-fx-{i}")))
                 for i, slug in enumerate(S.FIXTURE_SLUGS)]
@@ -493,7 +495,7 @@ def test_p179_signature_at_and_one_past_the_length_bound(tmp_path: Path) -> None
     like unmapped."""
     assert len(AT_BOUND) == S.SIGNATURE_MAX
     assert len(OVER_BOUND) == S.SIGNATURE_MAX + 1
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     at = _drive(tmp_path, planted, _alert(vendor=AT_BOUND), fixture_uuid("s01-at-bound"), mapping=VENDOR)
     over = _drive(tmp_path, planted, _alert(OVER_BOUND), fixture_uuid("s01-over-bound"), mapping=SHIPPED)
@@ -508,7 +510,7 @@ def test_p179_signature_at_and_one_past_the_length_bound(tmp_path: Path) -> None
 
 
 def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     values = [("no-break space", "Zq7731\u00a0nb"), ("ideographic space", "Zq7731\u3000id"),
               ("em space", "Zq7731\u2003em"), ("zero-width space", "Zq7731\u200bzw"),
@@ -535,7 +537,7 @@ def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> 
 def test_p181_negative_zero_padded_and_string_versus_integer_i(tmp_path: Path) -> None:
     """A negative integer is no signature; the string '05710' is the signature '05710'; the string
     '5710' and the integer 5710 both give '5710', one key."""
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     negative = _drive(tmp_path, planted, _literal(_alert(_HOLE), "-5710"), fixture_uuid("s01-neg"),
                       mapping=SHIPPED)

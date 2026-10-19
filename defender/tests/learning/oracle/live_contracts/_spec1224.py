@@ -155,6 +155,8 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
+
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.tenancy import _tenants1106 as T6
@@ -386,7 +388,7 @@ def provider_outage(status: int | None = OUTAGE, *,
 SYSTEMS = ("edr", "idp", "siem-x")
 LAB_SYSTEMS = ("change-mgmt", "cmdb", "elastic", "host-state", "identity", "tacit-knowledge",
                "threat-intel", "ticket")
-FIXTURE_TENANT = "acme"
+FIXTURE_TENANT = fixture_uuid("tenant:acme")
 
 #: One stub adapter module, planted per system. It reads its answers from the estate's JSON
 #: file AT CALL TIME (so a scenario may change an answer mid-test) and appends every call it

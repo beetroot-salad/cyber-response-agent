@@ -1,6 +1,8 @@
 """tenant.py migrate gives a pre-knowledge-folder tenant the folder acceptance requires."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import shutil
 import subprocess
 from pathlib import Path
@@ -13,8 +15,8 @@ from defender.cli import tenant as tenant_py
 from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 from defender.tests.tenancy.tenant_1120_piece1 import test_1120_scaffold as S
 
-_LAB = "knowledge/tenants/playground"
-_TID = "playground"
+_TID = fixture_uuid("tenant:playground")
+_LAB = f"knowledge/tenants/{_TID}"
 
 
 def _migrate(tenant_id: str, target: Path, *, home: Path, script: Path | None = None,
@@ -134,3 +136,11 @@ def test_a_migrate_that_fails_after_creating_the_folder_removes_it(tmp_path: Pat
     H.assert_refused(_migrate(_TID, target, home=home, script=_script(checkout)), "undone")
     assert not target.exists()
     assert H.census_diff(before, H.tree_census(root)) == []
+
+
+@pytest.mark.parametrize("legacy", ["playground", "acme"])
+def test_migrate_refuses_legacy_tenant_names_without_creating_a_target(tmp_path, legacy):
+    target = tmp_path / "knowledge"
+    proc = _migrate(legacy, target, home=S._home(tmp_path / "cfg"))
+    H.assert_refused(proc, "not a valid tenant id", legacy)
+    assert not target.exists(), "migrate created a folder for a legacy name"

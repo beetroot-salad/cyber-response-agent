@@ -10,23 +10,20 @@ Ground truth never leaves the fixture dirs: the run dir is readable by the agent
 carries no labels and no pointer back to its fixture. The index is host-written and kept
 outside every runs and episodes tree, where no box can write it.
 
-Launch one held-out run (the playground tenant's: run.py requires a tenant, and every run names
-one — there is no default, #1078; set it up once with
-``python3 defender/cli/tenant.py setup playground`` after cloning its repo into
-``$DEFENDER_DATA_ROOT/playground/knowledge``)::
+Launch one held-out run for an explicitly named tenant UUID::
 
-    python3 evaluations/held_out.py launch <slug> --index F
+    python3 evaluations/held_out.py launch <slug> --tenant <tenant-uuid> --index F
 
 It refuses an F under the resolved data root or the learning state root, or reached through a
 link; mints a UUID; APPENDS ``{slug, run_id}`` to F; and only then runs
-``run.py <fixture alert> --tenant playground --run-id <uuid> --no-learn`` (``--no-learn`` keeps
+``run.py <fixture alert> --tenant <tenant-uuid> --run-id <uuid> --no-learn`` (``--no-learn`` keeps
 a scored run out of the learning corpora). A run that crashes, hangs or is killed still has
 its row.
 
 Score (an evaluation tool outside the application: it takes no tenant and never resolves
 ``DEFENDER_DATA_ROOT``; it scores exactly the runs dir it is handed)::
 
-    python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/playground/runs" --index F
+    python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/<tenant-uuid>/runs" --index F
 
 The newest row per slug names the run scored, opened by id under the runs dir. A slug whose
 newest row names a run that is absent, or has no alert record, counts as **wrong** ("launched,
@@ -59,14 +56,11 @@ from defender._yaml import safe_load
 from defender._model import model
 from defender.records._report import read_report
 from defender.records._run_id import run_id_fault
-from defender.tenancy._tenant import TenantRefused, resolve_data_root
+from defender.tenancy._tenant import TenantId, TenantRefused, resolve_data_root
 from defender.run_repository import RUN_LAYOUT, RunId, RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 from defender._io import read_text_utf8
 
-#: The tenant a launched run names. run.py requires one; the held-out set is the playground
-#: lab's (Flow 5). Scoring takes none.
-LAUNCH_TENANT = "playground"
 #: The investigation entry point a launch starts.
 RUN_PY = Path(__file__).resolve().parents[1] / "defender" / "run.py"
 #: The failure bucket of a slug whose newest row names a run that is absent or has no alert
@@ -181,11 +175,12 @@ def _fixture(fixtures_dir: Path, slug: str) -> HeldOutAlert | None:
     return next((fx for fx in load_held_out_fixtures(fixtures_dir) if fx.slug == slug), None)
 
 
-def launch(slug: str, index: Path, fixtures_dir: Path, *, spawn: Spawn) -> int:
+def launch(slug: str, index: Path, fixtures_dir: Path, *, tenant_id: str, spawn: Spawn) -> int:
     """Launch one held-out run of `slug` (Flow 5): refuse a bad F, mint a UUID, append
     `{slug, run_id}` to F — durably, through F's folder held with no link followed — and only
     then start run.py with that id. Returns run.py's exit code; a refusal is `IndexRefused`
     (or `TenantRefused` for the data root), raised before anything is appended or started."""
+    tenant_id = TenantId(tenant_id)
     data_root = resolve_data_root()
     fixture = _fixture(fixtures_dir, slug)
     if fixture is None:
@@ -205,7 +200,7 @@ def launch(slug: str, index: Path, fixtures_dir: Path, *, spawn: Spawn) -> int:
             raise IndexRefused(f"its row could not be appended: {exc.strerror or exc}") from None
     print(f"{slug} {run_id}")
     return spawn([sys.executable, str(RUN_PY), str(fixture.alert_path),
-                  "--tenant", LAUNCH_TENANT, "--run-id", run_id, "--no-learn"])
+                  "--tenant", tenant_id, "--run-id", run_id, "--no-learn"])
 
 
 def _spawn_run_py(argv: list[str], *, env: dict[str, str] | None = None) -> int:
@@ -340,6 +335,7 @@ def _launch_main(argv: list[str], spawn: Spawn) -> int:
     p = argparse.ArgumentParser(prog="held_out.py launch",
                                 description="Launch one held-out run, its index row first.")
     p.add_argument("slug", help="the held-out fixture to run")
+    p.add_argument("--tenant", required=True, help="the tenant UUID passed to run.py")
     p.add_argument("--index", type=Path, required=True,
                    help="the held-out index F, outside the data root, the learning state root "
                         "and every link")
@@ -347,7 +343,7 @@ def _launch_main(argv: list[str], spawn: Spawn) -> int:
                    help=f"held-out fixtures dir (default: {FIXTURES_DIR})")
     ns = p.parse_args(argv)
     try:
-        return launch(ns.slug, ns.index, ns.fixtures_dir, spawn=spawn)
+        return launch(ns.slug, ns.index, ns.fixtures_dir, tenant_id=ns.tenant, spawn=spawn)
     except IndexRefused as refused:
         print(f"held_out launch: the index {ns.index} is refused: {refused}", file=sys.stderr)
     except TenantRefused as refused:
@@ -357,7 +353,8 @@ def _launch_main(argv: list[str], spawn: Spawn) -> int:
 
 
 def main(argv: list[str], *, spawn: Spawn = _spawn_run_py) -> int:
-    """`launch <slug> --index F` starts one held-out run, its index row appended first (the
+    """`launch <slug> --tenant <tenant-uuid> --index F` starts one held-out run, its index
+    row appended first (the
     launch resolves the data root, because it runs run.py). Otherwise score the runs dir it is
     given against `--index F` — required, with no default and no tenant option: an evaluation
     tool outside the application takes no tenant, so scoring never resolves

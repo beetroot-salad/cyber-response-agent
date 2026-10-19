@@ -1,6 +1,8 @@
 """The correlation lead's template id is configured per deployment and must agree with the verb-grants table at run start."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import re
 import textwrap
 from pathlib import Path
@@ -196,9 +198,9 @@ def test_the_run_start_frame_reads_the_config_and_catalog_of_the_tree_it_is_hand
     tree = tmp_path / "repo" / "defender"
     _plant(tree / "skills" / "gather" / "queries", "elastic", "other-alerts", verb="alerts")
     # The run's tenant, planted outside the tree (its table grants the lead elastic.alerts).
-    T1106.place_tenant(tmp_path / "tenants", "acme",
+    T1106.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"),
                        lead_zero="correlation_template: elastic.other-alerts\n")
-    tenant = T1106.accept(tmp_path / "tenants", "acme")
+    tenant = T1106.accept(tmp_path / "tenants", fixture_uuid("tenant:acme"))
     grants = T1106.run_grants(tenant.settings)
     config = lead_zero_config_path(tenant.settings)
     assert config == tenant.settings / "lead-zero.yaml"

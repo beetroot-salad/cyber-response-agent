@@ -9,6 +9,7 @@ import pytest
 from defender import run as run_py
 from defender.tests.support.runtime.engine._spec767 import (
     COMMENTS_SUFFIX,
+    TENANT_ID,
     TICKETS_PATH,
     FakeStore,
     make_run,
@@ -112,7 +113,7 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
 
 def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
     """n7_writes_only_under_the_flag — `--update-ticket` remains the whole switch."""
-    assert run_py.parse_args(["/tmp/alert.json", "--tenant", "playground"]).update_ticket is False, (
+    assert run_py.parse_args(["/tmp/alert.json", "--tenant", TENANT_ID]).update_ticket is False, (
         "the ticket flag is no longer opt-in"
     )
 
@@ -138,7 +139,7 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
         T.episode_view(held).close()
     with pytest.raises(SystemExit) as refusal:
         run_py.main(["--episode", episode_id, "--world", "b",
-                     "--tenant", "playground", "--update-ticket"])
+                     "--tenant", ep.parent.parent.name, "--update-ticket"])
     assert "--update-ticket" in str(refusal.value), (
         "the resume path accepted the ticket flag: the two ticket calls are ordered around "
         "the curation marker, so accepting-and-ignoring breaks the pairing instead of the "

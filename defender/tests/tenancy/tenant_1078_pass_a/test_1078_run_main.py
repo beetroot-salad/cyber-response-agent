@@ -71,58 +71,58 @@ def test_o1_fresh_run_without_tenant_refused(tmp_path, data_root, capsys):
 def test_o2_unknown_tenant_refused_writes_nothing(tmp_path, data_root):
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(data_root)
-    said = _refused([str(alert), "--tenant", "acme"], H.Recorder(tmp_path / "run"))
+    said = _refused([str(alert), "--tenant", fixture_uuid("tenant:acme")], H.Recorder(tmp_path / "run"))
     assert H.census(data_root) == before, "the refused run wrote under the data root"
-    assert not (data_root / "acme").exists()
-    H.assert_verbatim(said, H.owner_refusal(H.require_tenant, H.resolve_data_root(), "acme"),
+    assert not (data_root / fixture_uuid("tenant:acme")).exists()
+    H.assert_verbatim(said, H.owner_refusal(H.require_tenant, H.resolve_data_root(), fixture_uuid("tenant:acme")),
                       entry="run.py main")
-    H.make_tenant(data_root, "acme")
-    assert _accepted([str(alert), "--tenant", "acme"],
-                     H.Recorder(tmp_path / "run2"))["tenant"].id == "acme"
+    H.make_tenant(data_root, fixture_uuid("tenant:acme"))
+    assert _accepted([str(alert), "--tenant", fixture_uuid("tenant:acme")],
+                     H.Recorder(tmp_path / "run2"))["tenant"].id == fixture_uuid("tenant:acme")
 
 
 def test_o2_existing_tenant_runs(tmp_path, data_root):
-    H.make_tenant(data_root, "acme")
+    H.make_tenant(data_root, fixture_uuid("tenant:acme"))
     alert = H.plant_alert(tmp_path / "in")
     rec = H.Recorder(tmp_path / "run")
-    got = _accepted([str(alert), "--tenant", "acme"], rec)
-    assert got["tenant"].id == "acme"
+    got = _accepted([str(alert), "--tenant", fixture_uuid("tenant:acme")], rec)
+    assert got["tenant"].id == fixture_uuid("tenant:acme")
     assert rec.order.index("preflight") < rec.order.index("materialize")
 
 
 def test_o5_sibling_tenant_from_record(tmp_path, data_root, monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
-    _stamp_tenant(src, "acme")
-    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", "acme"),
+    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+    _stamp_tenant(src, fixture_uuid("tenant:acme"))
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
                     H.Recorder(tmp_path / "sib"))
-    assert got["tenant"].id == "acme"
+    assert got["tenant"].id == fixture_uuid("tenant:acme")
 
 
 def test_o5_forged_stamp_ignored(tmp_path, data_root, monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
-    H.plant_row(data_root, "victim")
-    _stamp_tenant(src, "victim")
-    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", "acme"),
+    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+    H.plant_row(data_root, fixture_uuid("tenant:victim"))
+    _stamp_tenant(src, fixture_uuid("tenant:victim"))
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
                     H.Recorder(tmp_path / "sib"))
-    assert got["tenant"].id == "acme", f"the sibling took its tenant from the stamp: {got}"
-    _refused(H.sibling_argv(manifest, "b", "--tenant", "victim"), H.Recorder(tmp_path / "sib2"))
+    assert got["tenant"].id == fixture_uuid("tenant:acme"), f"the sibling took its tenant from the stamp: {got}"
+    _refused(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:victim")), H.Recorder(tmp_path / "sib2"))
 
 
 def test_o5_disagreeing_tenant_refused(tmp_path, data_root, monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
-    H.plant_row(data_root, "victim")
-    said = _refused(H.sibling_argv(manifest, "b", "--tenant", "victim"),
+    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+    H.plant_row(data_root, fixture_uuid("tenant:victim"))
+    said = _refused(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:victim")),
                     H.Recorder(tmp_path / "sib"))
     assert said.startswith("[run.py] "), f"not a '[run.py] ...' refusal: {said!r}"
-    assert "victim" in said, f"the refusal does not name the disagreeing --tenant: {said!r}"
-    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", "acme"),
+    assert fixture_uuid("tenant:victim") in said, f"the refusal does not name the disagreeing --tenant: {said!r}"
+    got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
                     H.Recorder(tmp_path / "sib2"))
-    assert got["tenant"].id == "acme"
+    assert got["tenant"].id == fixture_uuid("tenant:acme")
 
 
 def test_o5_resume_without_tenant_refused(tmp_path, data_root, monkeypatch, capsys):
-    src, manifest = _sibling(tmp_path, data_root, "acme-corp", monkeypatch=monkeypatch)
-    recorded = "acme-corp"
+    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme-corp"), monkeypatch=monkeypatch)
+    recorded = fixture_uuid("tenant:acme-corp")
     said = _refused(H.sibling_argv(manifest), H.Recorder(tmp_path / "sib"), capsys)
     assert "--tenant" in said, f"the refusal does not name the missing --tenant: {said!r}"
     got = _accepted(H.sibling_argv(manifest, "b", "--tenant", recorded),
@@ -132,21 +132,21 @@ def test_o5_resume_without_tenant_refused(tmp_path, data_root, monkeypatch, caps
 
 def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, data_root,
                                                                       monkeypatch):
-    src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
+    src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
     # #1105 PR 2: the launcher accepts the request's tenant (`tenant_of_run_dir` is gone, F-13).
-    assert H.require_tenant(data_root, "acme").tenant_id == "acme", (
+    assert H.require_tenant(data_root, fixture_uuid("tenant:acme")).tenant_id == fixture_uuid("tenant:acme"), (
         "the launcher's own acceptance must pass first")
-    H.row_path(data_root, "acme").write_text("{torn", encoding="utf-8")
-    owner = H.owner_refusal(H.require_tenant, H.resolve_data_root(), "acme")
+    H.row_path(data_root, fixture_uuid("tenant:acme")).write_text("{torn", encoding="utf-8")
+    owner = H.owner_refusal(H.require_tenant, H.resolve_data_root(), fixture_uuid("tenant:acme"))
     for world in ("a", "b", "c"):
-        said = _refused(H.sibling_argv(manifest, world, "--tenant", "acme"),
+        said = _refused(H.sibling_argv(manifest, world, "--tenant", fixture_uuid("tenant:acme")),
                         H.Recorder(tmp_path / f"sib-{world}"))
         H.assert_verbatim(said, owner, entry=f"sibling {world}")
     assert manifest.is_file(), "the prepared episode dir is not the sibling's to remove"
 
 
 def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root, monkeypatch):
-    _src, manifest = _sibling(tmp_path, data_root, "acme", monkeypatch=monkeypatch)
+    _src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
     episode = manifest.parent.resolve()
     expected_runs = H.S.EpisodePaths(episode).runs
     link = tmp_path / "episodes-link"
@@ -155,7 +155,7 @@ def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root, 
     for n, base in enumerate((Path("episodes"), link)):
         monkeypatch.setenv(T.EPISODES_BASE_ENV, str(base))
         # #1187 opens by id through the tenant; the external-root spelling is a decoy.
-        got = _accepted(H.sibling_argv(manifest, "b", "--tenant", "acme"),
+        got = _accepted(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
                         H.Recorder(tmp_path / "sib" / str(n)))
         world = got["world"]
         assert Path(world.episode_dir).is_absolute(), f"{base}: {world.episode_dir}"
@@ -167,15 +167,15 @@ def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root, 
 def test_setup_shell_and_run_shell_resolve_different_data_roots(tmp_path, monkeypatch):
     setup_root, run_root = tmp_path / "setup-root", tmp_path / "run-root"
     run_root.mkdir()
-    H.place_knowledge(setup_root, "acme")  # #1120 DC2: the operator's clone, before setup
-    done = H.run_setup(setup_root, "acme")
+    H.place_knowledge(setup_root, fixture_uuid("tenant:acme"))  # #1120 DC2: the operator's clone, before setup
+    done = H.run_setup(setup_root, fixture_uuid("tenant:acme"))
     H.assert_setup_ran(done)
     assert done.returncode == 0, H.setup_output(done)
     H.set_data_root(monkeypatch, run_root)
     before = (H.census(setup_root), H.census(run_root))
-    said = _refused([str(H.plant_alert(tmp_path / "in")), "--tenant", "acme"],
+    said = _refused([str(H.plant_alert(tmp_path / "in")), "--tenant", fixture_uuid("tenant:acme")],
                     H.Recorder(tmp_path / "run"))
-    H.assert_verbatim(said, H.owner_refusal(H.require_tenant, run_root.resolve(), "acme"),
+    H.assert_verbatim(said, H.owner_refusal(H.require_tenant, run_root.resolve(), fixture_uuid("tenant:acme")),
                       entry="run.py main")
     assert (H.census(setup_root), H.census(run_root)) == before
 
@@ -185,12 +185,12 @@ def test_data_root_is_a_regular_file(tmp_path, monkeypatch):
     root_file.write_text("not a directory\n", encoding="utf-8")
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(tmp_path)
-    proc = H.run_setup(root_file, "acme")
+    proc = H.run_setup(root_file, fixture_uuid("tenant:acme"))
     H.assert_setup_ran(proc)
     assert proc.returncode != 0, f"setup accepted a regular file as its data root: {proc}"
     assert H.census(tmp_path) == before, "the refused setup wrote something"
     H.set_data_root(monkeypatch, root_file)
-    _refused([str(alert), "--tenant", "acme"], H.Recorder(tmp_path / "run"))
+    _refused([str(alert), "--tenant", fixture_uuid("tenant:acme")], H.Recorder(tmp_path / "run"))
     assert H.census(tmp_path) == before, "the refused run wrote something"
 
 
@@ -202,12 +202,12 @@ def test_shell_that_never_received_the_compose_variable(tmp_path, monkeypatch):
     assert H.DATA_ROOT_ENV in str(owner)
     alert = H.plant_alert(tmp_path / "in")
     before = H.census(tmp_path)
-    proc = H.run_setup(None, "acme")
+    proc = H.run_setup(None, fixture_uuid("tenant:acme"))
     H.assert_setup_ran(proc)
     assert proc.returncode != 0, "setup ran with no data root at all"
     assert H.DATA_ROOT_ENV in H.setup_output(proc), H.setup_output(proc)
     rec = H.Recorder(tmp_path / "run")
-    said = _refused([str(alert), "--tenant", "acme"], rec)
+    said = _refused([str(alert), "--tenant", fixture_uuid("tenant:acme")], rec)
     H.assert_verbatim(said, owner, entry="run.py main")
     assert "lifecycle" not in rec.order, "a box was started"
     assert H.census(tmp_path) == before
@@ -218,31 +218,31 @@ def test_shell_that_never_received_the_compose_variable(tmp_path, monkeypatch):
 def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     old, new = tmp_path / "old-root", tmp_path / "new-root"
     H.set_data_root(monkeypatch, old)
-    src, manifest = _sibling(tmp_path, old, "acme", monkeypatch=monkeypatch)
-    (H.runs_dir(old, "acme") / CASE_X).mkdir()
+    src, manifest = _sibling(tmp_path, old, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
+    (H.runs_dir(old, fixture_uuid("tenant:acme")) / CASE_X).mkdir()
     old_census = H.census(old)
     H.set_data_root(monkeypatch, new)
 
     alert = H.plant_alert(tmp_path / "in")
-    argv = [str(alert), "--run-id", CASE_X, "--tenant", "acme"]
+    argv = [str(alert), "--run-id", CASE_X, "--tenant", fixture_uuid("tenant:acme")]
     _refused(argv, H.Recorder(tmp_path / "run"))
 
-    H.place_knowledge(new, "acme")  # #1120 DC2: the operator's clone, before setup
-    proc = H.run_setup(new, "acme")
+    H.place_knowledge(new, fixture_uuid("tenant:acme"))  # #1120 DC2: the operator's clone, before setup
+    proc = H.run_setup(new, fixture_uuid("tenant:acme"))
     H.assert_setup_ran(proc)
     assert proc.returncode == 0, H.setup_output(proc)
-    assert H.row_path(new, "acme").is_file()
+    assert H.row_path(new, fixture_uuid("tenant:acme")).is_file()
 
     # #1187 Layout A refuses at the absent episode under the NEW root before any source read.
     with pytest.raises(FileNotFoundError) as opened:
-        H.accept(new, "acme").runs_repository().episode(manifest.parent.name)
+        H.accept(new, fixture_uuid("tenant:acme")).runs_repository().episode(manifest.parent.name)
     location = opened.value
-    said = _refused(H.sibling_argv(manifest, "b", "--tenant", "acme"),
+    said = _refused(H.sibling_argv(manifest, "b", "--tenant", fixture_uuid("tenant:acme")),
                     H.Recorder(tmp_path / "sib"))
     H.assert_verbatim(said, location, entry="run.py --episode (old root)")
 
     got = _accepted(argv, H.Recorder(tmp_path / "run2"))
-    assert got["tenant"].id == "acme"
+    assert got["tenant"].id == fixture_uuid("tenant:acme")
     assert H.census(old) == old_census, "the old data root was touched"
 
 

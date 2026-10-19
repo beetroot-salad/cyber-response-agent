@@ -1,6 +1,8 @@
 """Compare natural continuations and control arms under distinct host layouts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +14,7 @@ from defender.tests.e2e import _1255_twin as W  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-LAYOUTS = {"alpha": "twinalpha", "beta": "twinbeta"}
+LAYOUTS = {"alpha": fixture_uuid("tenant:twinalpha"), "beta": fixture_uuid("tenant:twinbeta")}
 
 
 @pytest.fixture(scope="module")

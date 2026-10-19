@@ -132,8 +132,8 @@ def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
 
 
 def test_dc4_the_page_judges_the_container_record_first(tmp_path, d9_tenant):
-    P.second_tenant(P.data_root(), "beta")
-    ep, episode_id = _tenant_episode("beta")
+    P.second_tenant(P.data_root(), H.U_ID)
+    ep, episode_id = _tenant_episode(H.U_ID)
     page = ep / E.PAGE_NAME
     good_manifest = (ep / "family.yaml").read_bytes()
     before = P.tree(ep)
@@ -150,12 +150,12 @@ def test_dc4_the_page_judges_the_container_record_first(tmp_path, d9_tenant):
     assert "family.yaml" not in first.said, (
         f"T's request read beta's manifest before refusing: {first.said!r}")
 
-    own_corrupt = P.drive_cli(P.page_main(), P.new_page_argv("beta", episode_id))
+    own_corrupt = P.drive_cli(P.page_main(), P.new_page_argv(H.U_ID, episode_id))
     assert own_corrupt.rc not in (0, None) or own_corrupt.raised is not None
     assert "family.yaml" in own_corrupt.said, (
         f"control: beta's own request did not reach its manifest: {own_corrupt.said!r}")
     (ep / "family.yaml").write_bytes(good_manifest)
-    ok = P.drive_cli(P.page_main(), P.new_page_argv("beta", episode_id))
+    ok = P.drive_cli(P.page_main(), P.new_page_argv(H.U_ID, episode_id))
     assert ok.rc == 0, ok.said
     assert page.is_file(), ok.said
 
@@ -382,7 +382,7 @@ def test_dc8_a_row_that_cannot_be_reached_is_artifact_missing(tmp_path):
         "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": ONLY_IN_U},
     }
     not_now = {
-        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": RID_R1},
+        "ghost": {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": RID_R1},
         "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": LINKED},
     }
     for case_id, body in {**gone, **not_now}.items():

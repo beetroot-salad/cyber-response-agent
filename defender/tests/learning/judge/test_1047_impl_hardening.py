@@ -77,7 +77,7 @@ def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path,
     alert.write_text("{}\n", encoding="utf-8")
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
-    tenant_id = "t1047"
+    tenant_id = fixture_uuid("tenant:t1047")
     run_id = fixture_uuid("case-1047-retry")  # #1187: a run id is a uuid4
     tenant = set_up_tenant(data_root, tenant_id)
     run_common = S.mod("run_common")

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 pytest.importorskip("pydantic_ai")
 
@@ -329,7 +330,8 @@ def test_1255_twin_unclocked_natural_run_forgives_no_time():
         [str(d) for d in diffs])
 
 
-META = {"data_root": "/srv/data", "data_root_resolved": "/srv/data", "tenant": "acmecorp",
+HOST_TENANT = fixture_uuid("tenant:acmecorp")
+META = {"data_root": "/srv/data", "data_root_resolved": "/srv/data", "tenant": HOST_TENANT,
         "defender_dir": "/opt/ck/defender", "repo_root": "/opt/ck", "home": "/home/sam",
         "user": "sam"}
 
@@ -356,13 +358,13 @@ def test_1255_twin_scanner_reads_the_content_and_finds_nothing_in_a_clean_one():
 
 @pytest.mark.parametrize(("planted", "surface_kw", "what", "channel"), [
     ("a data-root path in a tool result",
-     {"tool_out": "raw payload: /srv/data/acmecorp/runs/x/gather_raw/l-001/0.json"},
+     {"tool_out": f"raw payload: /srv/data/{HOST_TENANT}/runs/x/gather_raw/l-001/0.json"},
      {"data root", "data root (resolved)", "tenant name"}, "main#0 request"),
     ("the checkout path in a tool definition",
      {"description": "Read skills under /opt/ck/defender/skills on demand."},
      {"checkout path", "checkout repo root"}, "main#0 request"),
     ("the tenant folder in a file",
-     {"files": {"report.md": "see acmecorp's table pointer\n"}},
+     {"files": {"report.md": f"see {HOST_TENANT}'s table pointer\n"}},
      {"tenant name"}, "main#0 files:report.md"),
     ("the host user's home in a refusal",
      {"tool_out": "could not read /home/sam/.cache/x: [Errno 2]"},
@@ -375,8 +377,8 @@ def test_1255_twin_scanner_flags_a_planted_host_value(planted, surface_kw, what,
 
 
 def test_1255_twin_scanner_matches_whole_names_only():
-    rec = _surface(tool_out="acmecorporate /srv/database /home/samuel /srv/data/")
-    found = W.scan(rec, W.host_tokens(META))
+    rec = _surface(tool_out=f"{HOST_TENANT}a acmecorporate /srv/database /home/samuel /srv/data/")
+    found = W.scan(rec, {**W.host_tokens(META), "ordinary name": "acmecorp"})
     assert {f.what for f in found} == {"data root", "data root (resolved)"}, \
         [str(f) for f in found]
 

@@ -13,11 +13,11 @@ remote Docker daemon can resolve bind sources. There is no default data root; na
 ```bash
 cd defender && uv venv .venv && uv pip install --python .venv/bin/python -e '.[dev]'   # bootstrap (entrypoints re-exec into .venv themselves)
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout   # every run names its tenant; there is no default (#1078)
-git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"   # the tenant's settings + agent knowledge, on the host
-python3 defender/cli/tenant.py migrate playground "$DEFENDER_DATA_ROOT/playground/knowledge"   # one-off, INSTEAD of the clone, for a data root made before #1120 (no knowledge/ yet); then setup
-python3 defender/cli/tenant.py setup playground    # once, after the clone exits 0, before the first run
-python3 defender/run.py <alert.json> --tenant playground   # one investigation → run dir under $DEFENDER_DATA_ROOT/playground/runs/; --no-learn skips curation enqueue
-python3 defender/learning/branch/cli.py --tenant playground <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
+export TENANT_ID=<uuid-committed-in-the-tenant-repo>  # new tenants: mint with tenant.py new-id before scaffold
+git clone <tenant repo> "$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge"   # the tenant's settings + agent knowledge, on the host
+python3 defender/cli/tenant.py setup "$TENANT_ID"    # once, after the clone exits 0, before the first run
+python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
+python3 defender/learning/branch/cli.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
 python3 defender/learning/loop.py --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
 python3 defender/api/serve.py --tenant <id>           # the stub platform API on 127.0.0.1:8000, seeded for the named tenant(s) (needs the `api` extra: `uv sync --extra dev --extra runtime --extra api`, as CI does — a bare `uv sync --extra api` uninstalls the others); tokens `<id>-analyst`
 ```
@@ -97,3 +97,32 @@ Set `FORGEJO_TEST_CONFIG` to a test-only JSON file containing `origin` (blue's c
 `issuer`, `audience`, `key_file` (fixture RSA private PEM), and `other_origin`. Then run
 `flock /tmp/defender-pytest.lock pytest defender/tests/tenancy/tenant_1108_delivery/test_live_forgejo.py -m live`.
 The issuer's JWKS key id must be `fixture`; these signing keys are fixture data only.
+
+## Migrating named tenants to UUIDs (#1187)
+
+Tenant IDs are canonical lowercase UUIDs. Names such as `acme` are refused by every normal
+admission path; there is no alias or automatic conversion. Choose and save the replacement
+with `python3 defender/cli/tenant.py new-id`. The command only prints a UUID.
+
+If a pre-#1120 installation has no knowledge repository, recover it with the old checkout
+before this migration. The current `migrate` command does not accept a legacy name.
+
+Before upgrading, stop every run, fork and drain, and drain or clear the curation queue using
+the old code. Upgrade every checkout using the data root together. With all writers stopped:
+
+1. Move the entire old named tenant directory to an archive **outside** `DEFENDER_DATA_ROOT`.
+   Preserve that archive, including its row, runs, episodes, sessions and learning state.
+   Do not change tenant IDs inside historical records or reuse their state for the new tenant.
+   A sibling archive inside the data root is refused by its single-tenant guard.
+2. Copy the archived `knowledge/` repository to
+   `$DEFENDER_DATA_ROOT/<new-uuid>/knowledge`. Change `agent/.tenant-id` to the chosen UUID
+   followed by one newline, and commit that change in the knowledge repository. Review and
+   update any external credentials or identity claims bound to the old tenant ID.
+3. Run `python3 defender/cli/tenant.py setup <new-uuid>`, then
+   `python3 defender/cli/tenant.py check <new-uuid>`. Setup creates a fresh UUID tenant row;
+   it never imports the archived runtime state. Use the UUID in every CLI, API token and
+   integration configuration thereafter.
+
+This is an explicit identity migration. The archive retains the old identity and bytes;
+normal UUID lookups cannot reach it. The older `tenant.py migrate` subcommand recovers
+pre-#1120 knowledge from checkout history and does not convert tenant IDs.

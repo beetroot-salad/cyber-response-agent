@@ -16,6 +16,8 @@ from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
     GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
 )
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root  # noqa: E402
+
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.e2e import _lead_zero_808 as LZ  # noqa: E402
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
 from defender.tests.learning.oracle.live_contracts import _spec1224 as S  # noqa: E402
@@ -30,7 +32,7 @@ from defender.tests.tenancy.tenant_1107_settings.test_1107_lead_zero_replay impo
 
 pytestmark = pytest.mark.e2e
 
-TENANT_ID = "acme-sibling"
+TENANT_ID = fixture_uuid("tenant:acme-sibling")
 HOST = "web-1"
 LEAD = "l-001"
 #: What the family's base recording answers for `cmdb.get-host {host: web-1}`.
@@ -228,7 +230,7 @@ def _resume(tmp_path: Path, label: str, source: Path, monkeypatch: Any,
     """Plant the playground tenant afresh with `down`'s keys dropped, open a family over the
     source run, and start sibling `b` through `run.main`. Returns (rc, refusal, recorder,
     episode, the episode's census before the sibling started)."""
-    _root, folder, _tenant = _plant_at_data_root(f"o8o9{label}")
+    _root, folder, _tenant = _plant_at_data_root(fixture_uuid(f"tenant:o8o9{label}"))
     for system, key in down:
         S7.drop_key(folder, system, key)
     doc = T947.family_doc(source_run_dir=str(source), worlds=_identity_worlds())

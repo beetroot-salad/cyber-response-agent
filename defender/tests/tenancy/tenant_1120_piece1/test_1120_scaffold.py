@@ -107,7 +107,7 @@ def test_1120_scaffold_copies_the_template_writes_the_tenant_id_and_commits(
         assert copied.is_file(), f"scaffold did not copy the template's {rel}"
         assert copied.read_bytes() == data, f"{rel} differs from knowledge/tenant-template's"
     assert not [p for p in target.rglob("examples")], "scaffold copied the template's examples/"
-    assert (target / H.TENANT_ID_FILE).read_bytes() == b"acme\n", (
+    assert (target / H.TENANT_ID_FILE).read_bytes() == f"{H.TID}\n".encode(), (
         "agent/.tenant-id must hold the id plus one newline (M8)")
 
     assert (target / ".git").is_dir(), "scaffold made no git repository"

@@ -10,6 +10,10 @@ RUN_ID_ALLOWED = "ASCII alphanumerics, '_', '.', '-', starting alphanumeric"
 
 
 def is_valid_run_id(run_id: str) -> bool:
+    """Legacy safe-component predicate for box, world and display labels.
+
+    Actual run admission uses `run_id_fault` / `RunId.parse`, which require UUIDs.
+    """
     return (
         bool(run_id)
         and run_id.isascii()
@@ -38,7 +42,7 @@ def is_case_stable_id(run_id: str) -> bool:
     return run_id == run_id.casefold()
 
 
-#: The one shape a run, arm or episode id has (#1187 O1/O2): canonical lowercase UUID text,
+#: The one shape a tenant, run, arm or episode id has (#1187 O1/O2): canonical lowercase UUID text,
 #: `8-4-4-4-12` hex digits. Nothing else is an id — no braces, no `urn:`, no upper case, no
 #: missing hyphens — so every id names exactly one folder and carries no meaning.
 _UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -46,22 +50,25 @@ _UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 UUID_REQUIRED = "canonical lowercase UUID text, e.g. af3ba774-355d-4dbc-b8b6-3becc9d3e7a1"
 
 
+def uuid_id_fault(text: object, domain: str) -> str | None:
+    """The shared canonical UUID rule for tenant, run and episode admission."""
+    if not isinstance(text, str) or not _UUID_TEXT.fullmatch(text):
+        return f"{quoted(text)} is not a valid {domain} id (allowed: {UUID_REQUIRED})"
+    return None
+
+
 def run_id_fault(text: str) -> str | None:
     """Why `text` cannot be a run id, or `None`: an id is canonical lowercase UUID text and
     nothing else (#1187 O2), the whole rule `RunId` admits by, as one sentence that quotes the
     text the bounded way. A UUID is 36 bytes, so no length bound is asked separately."""
-    if not _UUID_TEXT.fullmatch(text):
-        return f"{quoted(text)} is not a valid run id (allowed: {UUID_REQUIRED})"
-    return None
+    return uuid_id_fault(text, "run")
 
 
 def episode_id_fault(episode_id: str) -> str | None:
     """Why `episode_id` cannot name an episode, or `None`: the same UUID rule as a run id
     (#1187 O2). The one statement of the rule: the family model, the episode owner and the
     stored `RunAddress` all ask it."""
-    if not _UUID_TEXT.fullmatch(episode_id):
-        return f"{quoted(episode_id)} is not a valid episode id (allowed: {UUID_REQUIRED})"
-    return None
+    return uuid_id_fault(episode_id, "episode")
 
 
 def mint_uuid() -> str:

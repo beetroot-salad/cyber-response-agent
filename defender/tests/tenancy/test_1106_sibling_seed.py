@@ -1,6 +1,8 @@
 """A branched sibling runs on its episode's tenant, handed the data root by env; no stamped tenant refuses."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from defender.tests.storage.tenant_1105_run_repository._spec1105_pr2 import CountingQuestioner
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
@@ -78,19 +80,19 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
     cli = T.mod("learning.branch.cli")
     root = current_data_root()
     spawn = SpawnRecorder()
-    acme = H1105.tenant(root, "acme")
+    acme = H1105.tenant(root, fixture_uuid("tenant:acme"))
     runs = acme.runs_repository()
     with runs.create_episode() as view:
         roster = view.start_runs(["b", "c"])
-        ep = root / "acme" / "episodes" / view.episode_id
+        ep = root / fixture_uuid("tenant:acme") / "episodes" / view.episode_id
         with Episode.open(ep) as episode:
-            exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id="acme")
-    assert ep.parent == root / "acme" / "episodes", ep
+            exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=fixture_uuid("tenant:acme"))
+    assert ep.parent == root / fixture_uuid("tenant:acme") / "episodes", ep
     assert exits == {"b": 0, "c": 0}
     assert len(spawn.launches) == 2
     for launch in spawn.launches:
         argv = launch["argv"]
-        assert launch["tenant_at_spawn"] == "acme", launch
+        assert launch["tenant_at_spawn"] == fixture_uuid("tenant:acme"), launch
         assert launch["episode"] == ep.resolve(), launch
         label = _arg(argv, "--world")
         assert isinstance(launch["roster_at_spawn"], dict), launch
@@ -180,15 +182,15 @@ def _estate_launch(tmp_path: Path) -> tuple[Any, SpawnRecorder, Any]:
     _base, src = O.source_run(tmp_path, est, calls=[
         O.Call("idp", "query", O.query_params("user:alice"), _BASE),
         O.Call("edr", "query", O.query_params("host:web-1"), _BASE)])
-    outcome, spawn = _main(src, stamp_tenant="acme", roster=est.roster())
+    outcome, spawn = _main(src, stamp_tenant=fixture_uuid("tenant:acme"), roster=est.roster())
     return outcome, spawn, est
 
 
 def _episode_tenant(root: Path) -> Path:
     """A complete tenant `acme` (its elastic patterns the fixture's configured pair) — the
     episode tenant a refused launch is refused beside."""
-    return T.place_tenant(root, "acme", configs=S.config_texts(
-        "acme", events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
+    return T.place_tenant(root, fixture_uuid("tenant:acme"), configs=S.config_texts(
+        fixture_uuid("tenant:acme"), events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
 
 
 def _knowledgeless_source(tmp_path: Path, tenant_id: str) -> Path:
@@ -212,16 +214,16 @@ def test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant(tmp_path):
     outcome, spawn, _est = _estate_launch(tmp_path)
     assert spawn.launches, f"no sibling was started: {outcome!r}"
     for launch in spawn.launches:
-        assert launch["tenant_at_spawn"] == "acme", launch
+        assert launch["tenant_at_spawn"] == fixture_uuid("tenant:acme"), launch
         assert _child_data_root(launch).resolve() == root.resolve()
         assert isinstance(launch["roster_at_spawn"], dict), launch
         assert _arg(launch["argv"], "--world") in launch["roster_at_spawn"], launch
     made = _episodes_made()
     assert len(made) == 1, made
-    assert Path(made[0]).parent == root / "acme" / "episodes", made
+    assert Path(made[0]).parent == root / fixture_uuid("tenant:acme") / "episodes", made
 
 
-@pytest.mark.parametrize("stamp_tenant", [None, "default"])
+@pytest.mark.parametrize("stamp_tenant", [None, fixture_uuid("tenant:default")])
 def test_a_source_stamp_with_no_usable_tenant_refuses_the_episode_before_any_sibling(
         tmp_path, capsys, stamp_tenant):
     """The negative on the same launch: only the source stamp's tenant differs from the
@@ -272,15 +274,15 @@ def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any
         tmp_path, capsys):
     root = current_data_root()
     _episode_tenant(root)
-    T.place_tenant(root, "bravo", configs=S.config_texts(
-        "bravo", events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
+    T.place_tenant(root, fixture_uuid("tenant:bravo"), configs=S.config_texts(
+        fixture_uuid("tenant:bravo"), events_index=P.EVENTS_PATTERN, alerts_index=P.ALERTS_PATTERN))
     asked = CountingQuestioner(O.questioner_for())
-    outcome, spawn = _launch(tmp_path, stamp_tenant="bravo", location_tenant="acme",
+    outcome, spawn = _launch(tmp_path, stamp_tenant=fixture_uuid("tenant:bravo"), location_tenant=fixture_uuid("tenant:acme"),
                              questioner=asked)
     text = f"{outcome} {capsys.readouterr().err}"
     assert spawn.launches == [], spawn.launches
-    assert "'bravo'" in text, text
-    assert "'acme'" in text, text
+    assert repr(fixture_uuid("tenant:bravo")) in text, text
+    assert repr(fixture_uuid("tenant:acme")) in text, text
     assert asked.calls == 0, "the questioner was paid for before the stamp was compared"
     assert _episodes_made() == [], _episodes_made()
     assert sorted(p.name for p in root.rglob("_tenant.json")) == [], (
@@ -289,23 +291,23 @@ def test_a_source_stamp_disagreeing_with_its_runs_base_record_refuses_before_any
 
 def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_questioner(
         tmp_path, capsys):
-    T.place_tenant(current_data_root(), "acme", table=(
+    T.place_tenant(current_data_root(), fixture_uuid("tenant:acme"), table=(
         "dispositions:\n"
         "  cmdb:\n"
         "    get-host: {roles: [], reason: \"withheld in this fixture\"}\n"
         "    health-check: {roles: [gather]}\n"),
-        configs=S.config_texts("acme", events_index=P.EVENTS_PATTERN,
+        configs=S.config_texts(fixture_uuid("tenant:acme"), events_index=P.EVENTS_PATTERN,
                                alerts_index=P.ALERTS_PATTERN))
     questioner = O.questioner_for()
-    base, src = P.runs_base(tmp_path, tenant_id="acme")
-    P.source_stamp(src, tenant_id="acme")
+    base, src = P.runs_base(tmp_path, tenant_id=fixture_uuid("tenant:acme"))
+    P.source_stamp(src, tenant_id=fixture_uuid("tenant:acme"))
     spawn = SpawnRecorder()
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
         T.mod("learning.branch.cli").main(
-            ["--tenant", "acme", src.name, str(P.BRANCH_MESSAGE_ID),
+            ["--tenant", fixture_uuid("tenant:acme"), src.name, str(P.BRANCH_MESSAGE_ID),
              *P.retired_continuation_argv()],
             spawn=spawn, questioner=questioner,
-            preflight=O.no_preflight, live_tree=P.source_capture(tenant_id="acme"))
+            preflight=O.no_preflight, live_tree=P.source_capture(tenant_id=fixture_uuid("tenant:acme")))
     text = f"{refused.value} {capsys.readouterr().err}"
     assert "query" in text, text
     assert "verb-grants.yaml" in text, text
@@ -329,12 +331,12 @@ def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path)
     root = current_data_root()
     # Both tables reach elastic, the system the fixture source's one captured call read; they
     # still differ on cmdb and identity.
-    T.place_tenant(root, "acme", table=T.TABLE_A, configs=S.config_texts("acme"))
-    T.place_tenant(root, "bravo", table=T.TABLE_B + _ELASTIC_FOR_GATHER,
-                   configs=S.config_texts("bravo"))
+    T.place_tenant(root, fixture_uuid("tenant:acme"), table=T.TABLE_A, configs=S.config_texts(fixture_uuid("tenant:acme")))
+    T.place_tenant(root, fixture_uuid("tenant:bravo"), table=T.TABLE_B + _ELASTIC_FOR_GATHER,
+                   configs=S.config_texts(fixture_uuid("tenant:bravo")))
     elastic = {("elastic", "health-check"), ("elastic", "query")}
-    expected = {"acme": (T.GATHER_PAIRS_A, ("cmdb", "get-host"), ("identity", "get-user")),
-                "bravo": (T.GATHER_PAIRS_B | elastic, ("identity", "get-user"),
+    expected = {fixture_uuid("tenant:acme"): (T.GATHER_PAIRS_A, ("cmdb", "get-host"), ("identity", "get-user")),
+                fixture_uuid("tenant:bravo"): (T.GATHER_PAIRS_B | elastic, ("identity", "get-user"),
                           ("cmdb", "get-host"))}
     for tenant_id, (pairs, own_pair, other_pair) in expected.items():
         tenant = T.accept(root, tenant_id)

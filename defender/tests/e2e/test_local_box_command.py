@@ -10,6 +10,9 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.shared.contracts._by_path import DEFENDER, WORKTREE
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+TENANT = fixture_uuid("tenant:ci-marker")
 
 _START_WITHOUT_PYTHONPATH = """
 import json, os, sys
@@ -30,7 +33,7 @@ docker = RecordingDocker() if sys.argv[3] == 'recording' else AgentReadDocker(ag
 try:
     executor = box.start_box(make_run_dir(root / 'runs'), Path(sys.argv[1]) / 'defender',
                              spec=box.BoxSpec(rootfs=STOCK_ROOTFS), docker=docker,
-                             tenant_agent=agent, tenant_id=TenantId('ci-marker'))
+                             tenant_agent=agent, tenant_id=TenantId(sys.argv[5]))
 except box.BoxFault as error:
     result = {'sandboxed': False, 'error': str(error)}
 else:
@@ -43,7 +46,7 @@ print(json.dumps(result))
 
 
 @pytest.mark.parametrize("fake", ["recording", "agent"])
-@pytest.mark.parametrize("marker", [b"ci-marker\r\n", b"ci-marker\r"], ids=["accepted", "malformed"])
+@pytest.mark.parametrize("marker", [(TENANT + "\r\n").encode(), (TENANT + "\r").encode()], ids=["accepted", "malformed"])
 def test_marker_read_uses_the_test_runtime_without_inherited_pythonpath(
     tmp_path: Path, fake: str, marker: bytes,
 ) -> None:
@@ -51,14 +54,14 @@ def test_marker_read_uses_the_test_runtime_without_inherited_pythonpath(
     env.pop("PYTHONPATH", None)
     proc = subprocess.run(
         [sys.executable, "-c", _START_WITHOUT_PYTHONPATH, str(WORKTREE), str(tmp_path),
-         fake, marker.hex()],
+         fake, marker.hex(), TENANT],
         cwd=DEFENDER, env=env, capture_output=True, text=True,
         encoding="utf-8", errors="replace", check=False, timeout=30,
     )
     assert proc.returncode == 0, proc.stderr
     seen = json.loads(proc.stdout)
     assert seen["marker_reads"] == 1, seen
-    if marker == b"ci-marker\r\n":
+    if marker == (TENANT + "\r\n").encode():
         assert seen["sandboxed"] is True, seen
         assert seen["error"] == "", seen
     else:

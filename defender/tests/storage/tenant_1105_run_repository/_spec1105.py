@@ -10,6 +10,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 WORKTREE = Path(__file__).resolve().parents[4]
 DEFENDER = WORKTREE / "defender"
 #: The package this spec pins (D1.1), by path.
@@ -19,8 +21,8 @@ FIXTURE = WORKTREE / "knowledge" / "tenant-fixture"
 
 #: The two tenants a test may need. `create_tenant` admits ONE tenant per data root (F36), so
 #: the second one's row is planted by hand, in the row's own shape — `accept_tenant` accepts it.
-T_ID = "acme"
-U_ID = "beta"
+T_ID = fixture_uuid("tenant:acme")
+U_ID = fixture_uuid("tenant:beta")
 
 #: The five host-only sidecar suffixes (D2.1, R4-35; #1235 F2 added the run -> case pointer,
 #: moved out of the run folder, and retired #1224's oracle-held record, whose credit is now the

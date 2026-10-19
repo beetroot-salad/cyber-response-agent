@@ -73,15 +73,15 @@ def test_the_stamp_spells_tenant_id_and_world_id_on_the_wire():
     prov = S.provenance_mod()
     record = prov.RunProvenance(
         commit="c0ffee", dirty=False, scope="defender", model="m-1",
-        tenant_id="acme", world_id="ep.1.overlay_a")
+        tenant_id=fixture_uuid("tenant:acme"), world_id="ep.1.overlay_a")
     on_the_wire = json.loads(record.as_json())
-    assert on_the_wire["tenant_id"] == "acme"
+    assert on_the_wire["tenant_id"] == fixture_uuid("tenant:acme")
     assert on_the_wire["world_id"] == "ep.1.overlay_a", (
         f"`as_json` hand-spells its keys, so a new field is silent unless it is added there: "
         f"{sorted(on_the_wire)}")
     back = prov.RunProvenance.from_obj(on_the_wire)
     assert back is not None
-    assert back.tenant_id == "acme"
+    assert back.tenant_id == fixture_uuid("tenant:acme")
     assert back.world_id == "ep.1.overlay_a"
     folded = prov.RunProvenance.from_obj({**on_the_wire, "tenant_id": 17, "world_id": []})
     assert folded is not None
@@ -255,7 +255,7 @@ def test_a_resume_without_a_family_record_stamps_the_tenants_base_world(tenant_r
 
 # Decision 15 — the family's view of the two new fields (verify_family, real primitive)
 
-FAMILY_TENANT = "acme"
+FAMILY_TENANT = fixture_uuid("tenant:acme")
 
 
 def _family_dirs(tmp_path, tenant_id=FAMILY_TENANT, episode_id=None):
@@ -305,7 +305,7 @@ def test_a_family_spanning_two_tenants_is_a_member_fault(tmp_path):
     base, ep, dirs = _family_dirs(tmp_path, episode_id=fixture_uuid("1078-family-cross"))
     for i, d in enumerate(dirs):
         S.plant_stamp(d, **T.provenance_record(),
-                      tenant_id="tenant-one" if i == 0 else "tenant-two",
+                      tenant_id=fixture_uuid("tenant:tenant-one") if i == 0 else fixture_uuid("tenant:tenant-two"),
                       world_id=_world_id(ep, d))
 
     report = _verify_family(ep, dirs, source=T.provenance_record())

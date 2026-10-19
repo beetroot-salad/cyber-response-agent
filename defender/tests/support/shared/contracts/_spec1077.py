@@ -42,6 +42,8 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import dataclasses
 import hashlib
 import inspect
@@ -161,7 +163,7 @@ TENANT_RECORD_NAME = "_tenant.json"
 #: D2's creation-time bootstrap value. Settled premise s31: it is a bootstrap default, NOT an
 #: enforced constant — the record is the sole authority for the stamped tenant. `"playground"`
 #: since #1106 D4 (the committed tenant a fresh runs base belongs to); it was `"default"`.
-DEFAULT_TENANT_ID = "playground"
+DEFAULT_TENANT_ID = fixture_uuid("tenant:playground")
 
 TENANT_FIELDS = ("tenant_id", "base_world_id", "created_at")
 

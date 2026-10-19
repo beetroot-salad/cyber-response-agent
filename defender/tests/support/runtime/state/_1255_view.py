@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.run_repository import RUN_LAYOUT
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[4]
 REPO_ROOT = DEFENDER.parent
@@ -27,8 +28,8 @@ MODEL_ENV = {
     "DEFENDER_AGENT_DIR": MODEL_AGENT,
 }
 
-TENANT_A = "tnt-qzv7a"
-TENANT_B = "orgx-kw3b"
+TENANT_A = fixture_uuid("tenant:tnt-qzv7a")
+TENANT_B = fixture_uuid("tenant:orgx-kw3b")
 STATIC_ROOTFS = "python:3.11-slim"
 
 

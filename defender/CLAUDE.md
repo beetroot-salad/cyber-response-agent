@@ -34,11 +34,16 @@ Load only the references relevant to the task. Historical explanations live in `
 
 ## Upgrade from before #1187
 
-Run ids are opaque UUIDs and episodes live under each tenant's data root. Before upgrading a
+Tenant, run and episode ids are opaque UUIDs and episodes live under each tenant's data root. Before upgrading a
 shared data root, stop every run, fork, and drain, and drain or clear its curation queue with
 the old code. Upgrade every checkout using that root together; mixed versions are unsupported.
-Then run `python3 defender/cli/retire_legacy_runs.py --tenant <T>` once per tenant, adding
+For a tenant already identified by a UUID, run
+`python3 defender/cli/retire_legacy_runs.py --tenant <T>` once, adding
 `--old-episodes-root <old DEFENDER_EPISODES_BASE>` when retiring that tenant's old external
 episodes. The command renames old entries into `runs-legacy/` and `episodes-legacy/`; runs
 listing refuses until they have been retired. `DEFENDER_EPISODES_BASE` and `_tenant.json` are
 retired.
+
+Named tenants instead require the explicit offline UUID migration in
+`docs/development-operations.md` before UUID tenant setup; their old directories remain archived
+and are not passed to the retirement command. No legacy name is an alias.

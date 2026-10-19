@@ -1,6 +1,8 @@
 """#1106 e2e through run.py's real main: a run for a tenant that is missing, incomplete or inconsistent refuses before the box naming the path to fix; one process running tenant A then B hands each run only its own tenant's agent half, grant and settings."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import functools
 import json
 from pathlib import Path
@@ -127,10 +129,10 @@ def _refusal(world: dict, capsys, *extra: str) -> tuple[str, StartBoxRecorder]:
 
 
 def test_a_run_for_a_tenant_with_no_folder_refuses_before_the_box_naming_it(world, capsys):
-    T.place_tenant(world["root"], "acme")
-    world["runs_base"]("ghost")
+    T.place_tenant(world["root"], fixture_uuid("tenant:acme"))
+    world["runs_base"](fixture_uuid("tenant:ghost"))
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / "ghost"), text
+    assert _names(text, world["root"] / fixture_uuid("tenant:ghost")), text
 
 
 def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base(world, capsys):
@@ -147,18 +149,18 @@ def test_a_tenant_missing_its_mapping_refuses_and_leaves_no_runs_base(world, cap
 
 @pytest.mark.parametrize("missing", ["verb-grants.yaml", "lead-zero.yaml"])
 def test_a_tenant_missing_another_required_file_refuses_before_the_box(world, capsys, missing):
-    T.place_tenant(world["root"], "acme", omit=(missing,))
-    world["runs_base"]("acme")
+    T.place_tenant(world["root"], fixture_uuid("tenant:acme"), omit=(missing,))
+    world["runs_base"](fixture_uuid("tenant:acme"))
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / "acme" / "knowledge" / "settings" / missing), text
+    assert _names(text, world["root"] / fixture_uuid("tenant:acme") / "knowledge" / "settings" / missing), text
 
 
 def test_a_tenant_copied_from_the_template_refuses_at_start_naming_its_table(world, capsys):
     """C9:"""
-    T.place_tenant(world["root"], "newco", table=T.TABLE_BLANK)
-    world["runs_base"]("newco")
+    T.place_tenant(world["root"], fixture_uuid("tenant:newco"), table=T.TABLE_BLANK)
+    world["runs_base"](fixture_uuid("tenant:newco"))
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / "newco" / "knowledge" / "settings" / "verb-grants.yaml"), text
+    assert _names(text, world["root"] / fixture_uuid("tenant:newco") / "knowledge" / "settings" / "verb-grants.yaml"), text
 
 
 #: Gather is granted `health-check` and nothing else: the table loads, gather's grant is
@@ -173,20 +175,20 @@ dispositions:
 
 def test_a_tenant_whose_gather_grant_is_health_checks_alone_refuses_at_start(world, capsys):
     """The template refusal's sibling:"""
-    T.place_tenant(world["root"], "probe", table=TABLE_HEALTH_CHECK_ONLY)
-    grants = T.run_grants(world["root"] / "probe" / "knowledge" / "settings")
+    T.place_tenant(world["root"], fixture_uuid("tenant:probe"), table=TABLE_HEALTH_CHECK_ONLY)
+    grants = T.run_grants(world["root"] / fixture_uuid("tenant:probe") / "knowledge" / "settings")
     assert {(s, v) for s, v, _ in grants.gather.entries} == {("cmdb", "health-check")}, \
         "the fixture must grant gather a health check and nothing else"
-    world["runs_base"]("probe")
+    world["runs_base"](fixture_uuid("tenant:probe"))
     text, _ = _refusal(world, capsys)
-    assert _names(text, world["root"] / "probe" / "knowledge" / "settings" / "verb-grants.yaml"), text
+    assert _names(text, world["root"] / fixture_uuid("tenant:probe") / "knowledge" / "settings" / "verb-grants.yaml"), text
     assert "query" in text, text
 
 
 def test_a_lead_zero_template_the_catalog_lacks_refuses_before_the_box(world, capsys):
     """M5 runs the lead-zero agreement check at start:"""
-    T.place_tenant(world["root"], "drift", lead_zero=T.lead_zero_text("elastic.no-such-template"))
-    world["runs_base"]("drift")
+    T.place_tenant(world["root"], fixture_uuid("tenant:drift"), lead_zero=T.lead_zero_text("elastic.no-such-template"))
+    world["runs_base"](fixture_uuid("tenant:drift"))
     text, _ = _refusal(world, capsys)
     assert "elastic.no-such-template" in text, text
 
@@ -206,11 +208,11 @@ dispositions:
 def test_a_lead_zero_template_on_another_pair_than_the_table_grants_refuses_before_the_box(
         world, capsys):
     """M5's agreement half, not only its existence half:"""
-    T.place_tenant(world["root"], "drift", table=TABLE_LEAD_ON_QUERY)
-    grants = T.run_grants(world["root"] / "drift" / "knowledge" / "settings")
+    T.place_tenant(world["root"], fixture_uuid("tenant:drift"), table=TABLE_LEAD_ON_QUERY)
+    grants = T.run_grants(world["root"] / fixture_uuid("tenant:drift") / "knowledge" / "settings")
     assert {(s, v) for s, v, _ in grants.correlation.entries} == {
         ("elastic", "health-check"), ("elastic", "query")}, "the fixture's lead pair moved"
-    world["runs_base"]("drift")
+    world["runs_base"](fixture_uuid("tenant:drift"))
     text, _ = _refusal(world, capsys)
     assert T.SHIPPED_CORRELATION_TEMPLATE in text, text
     assert "elastic.query" in text, text
@@ -236,12 +238,13 @@ def _grant_of(call: tuple[tuple, dict]) -> Any:
 
 def test_one_process_runs_tenant_a_then_b_and_each_run_carries_only_its_own_tenant(world, capsys):
     root = world["root"]
-    T.place_tenant(root, "acme", table=T.TABLE_A, marker="acme")
-    T.place_tenant(root, "bravo", table=T.TABLE_B, marker="bravo")
-    expected = {"acme": T.GATHER_PAIRS_A, "bravo": T.GATHER_PAIRS_B}
+    T.place_tenant(root, fixture_uuid("tenant:acme"), table=T.TABLE_A, marker="acme")
+    T.place_tenant(root, fixture_uuid("tenant:bravo"), table=T.TABLE_B, marker="bravo")
+    expected = {fixture_uuid("tenant:acme"): T.GATHER_PAIRS_A, fixture_uuid("tenant:bravo"): T.GATHER_PAIRS_B}
     run = _run()
 
-    for tenant_id, other in (("acme", "bravo"), ("bravo", "acme")):
+    for tenant_id, other in ((fixture_uuid("tenant:acme"), fixture_uuid("tenant:bravo")),
+                             (fixture_uuid("tenant:bravo"), fixture_uuid("tenant:acme"))):
         world["runs_base"](tenant_id)
         _RegistryRecorder.built = []
         driven: list[dict] = []

@@ -502,7 +502,7 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
     traced: dict[str, list[str]] = {}
     for spelling, corpus in corpora.items():
         capsys.readouterr()
-        assert main(["--all", "--lessons-dir", str(corpus), "--tenant", "acme"]) == 0, capsys.readouterr().err
+        assert main(["--all", "--lessons-dir", str(corpus), "--tenant", fixture_uuid("tenant:acme")]) == 0, capsys.readouterr().err
         traced[spelling] = [ln for ln in capsys.readouterr().out.splitlines()
                             if ln.startswith(f"{name}\t")]
     assert len(traced["unquoted"]) == 1, f"the tracer did not index the unquoted lesson once: {traced}"
@@ -607,7 +607,7 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
 
 def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
     sig = "R-P065"
-    planted = S.plant_tenant("acme-a")
+    planted = S.plant_tenant(fixture_uuid("tenant:acme-a"))
     failed = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid("p065-failed"),
                          orient_shim=S.RecordingShim(fail=("defender-invlang",)))
     empty = S.run_alert(tmp_path, alert=_lesson_alert(sig), tenant=planted, run_id=fixture_uuid("p065-empty"),
@@ -618,7 +618,7 @@ def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
     assert _same_text(unavailable, failed) != _same_text(_vocab_section(empty), empty), (
         "the unavailable vocabulary reads exactly as a corpus with no past runs")
 
-    mapped = S.plant_tenant("acme-c", alert_mapping=_UUID_MAPPING)
+    mapped = S.plant_tenant(fixture_uuid("tenant:acme-c"), alert_mapping=_UUID_MAPPING)
     recorded = _past_run(mapped.runs, "past-pc", tag="pc", signature="SIG-P065",
                          alert=S.generic_alert(rule_id="R-9", rule={"id": "R-9", "uuid": "U-9",
                                                                      "description": "past"}))

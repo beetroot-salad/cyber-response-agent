@@ -14,8 +14,8 @@ from defender.tests.support.shared.contracts import _by_path
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.ids_1187 import _spec1187 as S
 
-A_ID = "acme"
-B_ID = "beta"
+A_ID = S.H5.T_ID
+B_ID = S.H5.U_ID
 DEFENDER = Path(__file__).resolve().parents[3]
 
 
@@ -200,159 +200,83 @@ def test_an_arm_id_is_absent_from_the_natural_container_and_opens_through_its_ep
 # O8 / S-iso: a link at every level below <T> refuses — with the link aimed at ANOTHER
 # tenant's real folder holding real entries — and the real folder opens.
 
-def test_a_link_at_the_natural_runs_folder_is_refused_and_the_real_folder_opens(
-        tmp_path, data_root):
-    a, b = _two_tenants(data_root)
-    link = S.natural_runs(data_root, A_ID)
-    target = S.natural_runs(data_root, B_ID)
-    aside = _aside(link, tmp_path / "aside" / "runs")
-    S.replace_with_link(link, target)
-    b_before = S.tree(S.tenant_dir(data_root, B_ID))
-    runs = a["tenant"].runs_repository()
-
-    probes = {
-        "list": lambda: runs.list(),
-        "all_runs": lambda: runs.all_runs(),
-        "open(B's run)": lambda: runs.open(_rid(b["run_id"])),
-        "create": lambda: runs.create(_rid(S.new_id())),
-    }
-    for what, probe in probes.items():
-        err = S.raised(probe)
-        assert _is_refusal(err), f"{what} through a linked <A>/runs gave {err!r}"
-    named = S.message(S.raised(runs.list))
-    assert str(link) in named, f"the refusal does not name the level {link}: {named!r}"
-    assert S.tree(S.tenant_dir(data_root, B_ID)) == b_before, "A's calls changed B's tree"
-    assert link.is_symlink(), "the link was replaced"
-
-    _restore(link, aside)
-    assert Path(runs.open(_rid(a["run_id"])).run_dir) == link / a["run_id"]
-    assert [str(i) for i in runs.list()] == [a["run_id"]]
+def _held_arm(view, arm, operation="open"):
+    if operation != "arms":
+        return getattr(view, operation)(_rid(arm))
+    with view.arms([_rid(arm)]) as handout:
+        answer = handout[_rid(arm)]
+    if isinstance(answer, BaseException):
+        raise answer
+    return answer
 
 
-def test_a_link_at_the_episodes_folder_is_refused_and_the_real_folder_opens(
-        tmp_path, data_root):
-    a, b = _two_tenants(data_root)
-    link = S.episodes_dir(data_root, A_ID)
-    target = S.episodes_dir(data_root, B_ID)
-    aside = _aside(link, tmp_path / "aside" / "episodes")
-    S.replace_with_link(link, target)
-    b_before = S.tree(S.tenant_dir(data_root, B_ID))
-    runs = a["tenant"].runs_repository()
-
-    probes = {
-        "episode(B's ep)": lambda: runs.episode(b["episode_id"]),
-        "episode_files(B's ep)": lambda: runs.episode_files(b["episode_id"]),
-        "create_episode": lambda: runs.create_episode(),
-    }
-    for what, probe in probes.items():
-        err = S.raised(probe)
-        assert _is_refusal(err), f"{what} through a linked <A>/episodes gave {err!r}"
-    named = S.message(S.raised(runs.episode, b["episode_id"]))
-    assert str(link) in named, f"the refusal does not name the level {link}: {named!r}"
-    assert S.tree(S.tenant_dir(data_root, B_ID)) == b_before, "A's calls changed B's tree"
-    assert link.is_symlink(), "the link was replaced"
-
-    _restore(link, aside)
-    with runs.episode(a["episode_id"]) as view:
-        arm = a["roster"]["a"]
-        assert Path(view.open(_rid(arm)).run_dir) == a["episode"] / "runs" / arm
+def _arm_door(runs, episode_id, arm, operation="open"):
+    with runs.episode(episode_id) as view:
+        return _held_arm(view, arm, operation)
 
 
-def test_a_link_at_an_episode_folder_is_refused_and_the_real_folder_opens(tmp_path, data_root):
-    a, b = _two_tenants(data_root)
-    link = a["episode"]
-    aside = _aside(link, tmp_path / "aside" / "episode")
-    S.replace_with_link(link, b["episode"])
-    b_before = S.tree(S.tenant_dir(data_root, B_ID))
-    runs = a["tenant"].runs_repository()
-
-    for what, probe in {"episode": runs.episode, "episode_files": runs.episode_files}.items():
-        err = S.raised(probe, a["episode_id"])
-        assert _is_refusal(err), f"{what}(<linked epA>) gave {err!r}"
-    named = S.message(S.raised(runs.episode, a["episode_id"]))
-    assert str(link) in named, f"the refusal does not name the level {link}: {named!r}"
-    assert S.tree(S.tenant_dir(data_root, B_ID)) == b_before, "A's calls changed B's tree"
-
-    _restore(link, aside)
-    with runs.episode(a["episode_id"]) as view:
-        arm = a["roster"]["c"]
-        assert Path(view.open(_rid(arm)).run_dir) == link / "runs" / arm
-    handle = runs.episode_files(a["episode_id"])
-    try:
-        assert Path(handle.dir) == link
-    finally:
-        handle.close()
+def _episode_door(runs, episode_id, door="episode"):
+    with getattr(runs, door)(episode_id):
+        pass
 
 
-def test_a_link_at_an_arm_container_is_refused_and_the_real_folder_opens(tmp_path, data_root):
-    a, b = _two_tenants(data_root)
-    link = a["episode"] / "runs"
-    aside = _aside(link, tmp_path / "aside" / "arm-container")
-    S.replace_with_link(link, b["episode"] / "runs")
-    b_before = S.tree(S.tenant_dir(data_root, B_ID))
-    runs = a["tenant"].runs_repository()
-    b_arm = _rid(b["roster"]["a"])
-
-    opened = S.raised(runs.episode, a["episode_id"])
-    if opened is not None:
-        assert _is_refusal(opened), f"episode(epA) over a linked runs/ gave {opened!r}"
-    else:
-        with runs.episode(a["episode_id"]) as view:
-            err = S.raised(view.open, b_arm)
-            assert _is_refusal(err), f"view.open(B's arm) through a linked runs/ gave {err!r}"
-            assert str(link) in S.message(err), (
-                f"the refusal does not name the level {link}: {S.message(err)!r}")
-            answers: list = []
-
-            def _arms() -> None:
-                with view.arms([b_arm]) as handout:
-                    answers.append(handout[b_arm])
-
-            whole = S.raised(_arms)
-            answer = whole if whole is not None else answers[0]
-            assert _is_refusal(answer), f"arms() handed out {answer!r} through the link"
-            made = S.raised(view.create, _rid(a["roster"]["a"]))
-            assert _is_refusal(made), f"view.create through a linked runs/ gave {made!r}"
-    assert S.tree(S.tenant_dir(data_root, B_ID)) == b_before, "A's calls changed B's tree"
-
-    _restore(link, aside)
-    with runs.episode(a["episode_id"]) as view:
-        arm = a["roster"]["a"]
-        assert Path(view.open(_rid(arm)).run_dir) == link / arm
+def _link_paths(root, scene):
+    natural = S.natural_runs(root, scene["tenant"].id)
+    episode = scene["episode"]
+    return {"runs": natural, "episodes": episode.parent, "episode": episode,
+            "arms": episode / "runs", "run": natural / scene["run_id"],
+            "arm": episode / "runs" / scene["roster"]["b"]}
 
 
-def test_a_link_at_a_runs_own_name_is_refused_and_the_real_folder_opens(tmp_path, data_root):
+@pytest.mark.parametrize("level", ["runs", "episodes", "episode", "arms", "run", "arm"])
+def test_linked_repository_levels_refuse_and_restore(tmp_path, data_root, level):
     from defender.run_repository import RunAbsent, RunRefused
 
     a, b = _two_tenants(data_root)
-    natural = S.natural_runs(data_root, A_ID) / a["run_id"]
-    arm = a["episode"] / "runs" / a["roster"]["b"]
-    natural_aside = _aside(natural, tmp_path / "aside" / "natural")
-    arm_aside = _aside(arm, tmp_path / "aside" / "arm")
-    S.replace_with_link(natural, S.natural_runs(data_root, B_ID) / b["run_id"])
-    S.replace_with_link(arm, b["episode"] / "runs" / b["roster"]["b"])
-    b_before = S.tree(S.tenant_dir(data_root, B_ID))
+    link, target = (_link_paths(data_root, scene)[level] for scene in (a, b))
+    aside = _aside(link, tmp_path / "aside" / level)
+    S.replace_with_link(link, target)
+    before = S.tree(S.tenant_dir(data_root, B_ID))
     runs = a["tenant"].runs_repository()
+    if level in ("runs", "run"):
+        opened_id = b["run_id"] if level == "runs" else a["run_id"]
+        probes = {"list": runs.list, "all_runs": runs.all_runs,
+                  "open": lambda: runs.open(_rid(opened_id))}
+        if level == "runs":
+            probes["create"] = lambda: runs.create(_rid(S.new_id()))
+    elif level in ("episodes", "episode"):
+        ep_id = b["episode_id"] if level == "episodes" else a["episode_id"]
+        probes = {door: lambda door=door: _episode_door(runs, ep_id, door)
+                  for door in ("episode", "episode_files")}
+        if level == "episodes":
+            probes["create_episode"] = runs.create_episode
+    else:
+        if level == "arm":
+            _episode_door(runs, a["episode_id"])  # A bad leaf must not refuse the episode.
+        arm = b["roster"]["a"] if level == "arms" else a["roster"]["b"]
+        probes = {operation: lambda operation=operation: _arm_door(
+            runs, a["episode_id"], a["roster"]["a"] if operation == "create" else arm, operation)
+            for operation in (("open", "arms", "create") if level == "arms" else ("open",))}
+    for name, probe in probes.items():
+        err = S.raised(probe)
+        assert _is_refusal(err), (level, name, err)
+        assert str(link) in S.message(err), (level, name, err)
+        if level in ("run", "arm") and name == "open":
+            assert isinstance(err, RunRefused)
+            assert not isinstance(err, RunAbsent), "a linked run must not read as absent"
+    assert link.is_symlink(), "the refused door replaced the link"
+    assert S.tree(S.tenant_dir(data_root, B_ID)) == before, "A's calls changed B's tree"
 
-    err = S.raised(runs.open, _rid(a["run_id"]))
-    assert isinstance(err, RunRefused), f"open(<linked run>) gave {err!r}"
-    assert not isinstance(err, RunAbsent), f"open(<linked run>) read as absent: {err!r}"
-    for call in (runs.list, runs.all_runs):
-        listed = S.raised(call)
-        assert isinstance(listed, RunRefused), f"{call.__name__}() over a linked run gave {listed!r}"
-    opened = S.raised(runs.episode, a["episode_id"])
-    assert opened is None, f"the episode itself was refused for a link inside it: {opened!r}"
-    with runs.episode(a["episode_id"]) as view:
-        arm_err = S.raised(view.open, _rid(a["roster"]["b"]))
-        assert isinstance(arm_err, RunRefused), f"view.open(<linked arm>) gave {arm_err!r}"
-        assert not isinstance(arm_err, RunAbsent), f"<linked arm> read as absent: {arm_err!r}"
-    assert S.tree(S.tenant_dir(data_root, B_ID)) == b_before, "A's calls changed B's tree"
+    _restore(link, aside)
+    if level in ("runs", "run"):
+        assert Path(runs.open(_rid(a["run_id"])).run_dir) == S.natural_runs(data_root, A_ID) / a["run_id"]
+        assert [str(rid) for rid in runs.list()] == [a["run_id"]]
+    else:
+        arm = a["roster"]["b"]
+        assert Path(_arm_door(runs, a["episode_id"], arm).run_dir) == a["episode"] / "runs" / arm
+        with runs.episode_files(a["episode_id"]) as handle:
+            assert Path(handle.dir) == a["episode"]
 
-    _restore(natural, natural_aside)
-    _restore(arm, arm_aside)
-    assert Path(runs.open(_rid(a["run_id"])).run_dir) == natural
-    with runs.episode(a["episode_id"]) as view:
-        assert Path(view.open(_rid(a["roster"]["b"])).run_dir) == arm
 # Refusals must not reveal another tenant's record identities.
 
 def _b_ids(b: dict) -> dict[str, str]:
@@ -491,14 +415,7 @@ def test_a_level_swapped_for_a_link_after_the_view_opened_is_never_followed(
             faults.append("open(stranger) after the swap handed out the decoy's arm")
         elif not _is_refusal(opened):
             faults.append(f"open(stranger) after the swap gave {opened!r}")
-        answers: list = []
-
-        def _arms() -> None:
-            with view.arms([_rid(stranger)]) as handout:
-                answers.append(handout[_rid(stranger)])
-
-        whole = S.raised(_arms)
-        answer = whole if whole is not None else answers[0]
+        answer = S.raised(_held_arm, view, stranger, "arms")
         if not _is_refusal(answer):
             faults.append(f"arms([stranger]) after the swap handed out {answer!r}")
         ids: list = []
@@ -579,7 +496,7 @@ def test_no_episode_door_opens_a_level_below_the_tenant_by_its_path(data_root):
 def test_the_path_open_recorder_sees_a_path_walk_and_not_a_handle_walk(tmp_path):
     from defender import _io
 
-    tenant_dir = tmp_path / "acme"
+    tenant_dir = tmp_path / A_ID
     ep = tenant_dir / "episodes" / "ep"
     (ep / "runs").mkdir(parents=True)
     (ep / "family.yaml").write_text("episode_id: ep\n", encoding="utf-8")

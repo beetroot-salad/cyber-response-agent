@@ -24,7 +24,6 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
-import re
 import stat
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -35,6 +34,7 @@ from pydantic import ValidationError
 from pydantic_core import core_schema
 
 from defender.records import _alert_input
+from defender.records._run_id import mint_uuid, uuid_id_fault
 from defender import _io as _real_io
 from defender import _paths
 from defender._model import model
@@ -65,10 +65,6 @@ _DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 #: The learning-state knob O13's widened refusal compares the data root against.
 _LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
-#: O3's grammar, matched with `re.fullmatch` (a `$`-anchored `re.match` would accept a trailing
-#: newline — settled by the user).
-_GRAMMAR = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
-
 class TenantRefused(Exception):
     """The one refusal shape (#0, F0/J29) for every tenant owner — this module (acceptance
     and its knowledge-folder rules included) and the run's grants (`run_tenant`): the
@@ -84,7 +80,7 @@ class TenantRefused(Exception):
 
 
 class TenantId(str):
-    """A tenant id that has passed O3's grammar — the ONE place it is checked. Constructing one
+    """An opaque tenant id in canonical lowercase UUID text — the ONE place it is checked. Constructing one
     is the check: `TenantId(raw)` returns the id or raises `TenantRefused` naming `raw`, and a
     `TenantId` handed back in is returned as-is. It IS a `str` (paths, JSON, argv and log lines
     take it unchanged, and its repr is the string's), but a function that declares `TenantId`
@@ -100,10 +96,16 @@ class TenantId(str):
     def __new__(cls, raw: object) -> TenantId:
         if isinstance(raw, TenantId):
             return raw
-        if not isinstance(raw, str) or not _GRAMMAR.fullmatch(raw):
-            raise TenantRefused(
-                f"{quoted(raw)} is not a valid tenant id (must match {_GRAMMAR.pattern!r})")
+        fault = uuid_id_fault(raw, "tenant")
+        if fault is not None:
+            raise TenantRefused(fault)
+        assert isinstance(raw, str)
         return super().__new__(cls, raw)
+
+    @classmethod
+    def mint(cls) -> TenantId:
+        """Mint a tenant UUID without creating a tenant or writing any state."""
+        return cls(mint_uuid())
 
     @classmethod
     def __get_pydantic_core_schema__(cls, _source: Any, _handler: Any) -> Any:

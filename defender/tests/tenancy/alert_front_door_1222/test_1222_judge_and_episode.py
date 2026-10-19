@@ -38,7 +38,7 @@ RUN = "run"
 SIBLINGS = "VIEW 4 — SIBLING TRIALS"
 SPREAD = "TRIAL SPREAD"
 #: The tenant every launcher scenario plants (`S.plant_tenant`'s default id).
-TENANT = "acme"
+TENANT = fixture_uuid("tenant:acme")
 #: How long a pass may take before "does not hang" fails. A real pass here takes well under a
 #: second; a blocked read never returns.
 HANG_BOUND_S = 60.0

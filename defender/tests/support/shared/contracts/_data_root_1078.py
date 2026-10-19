@@ -18,12 +18,14 @@ never needed before: a data root it owns, and a tenant created in it.
   and an autouse call to it would turn every test in the repo into one failure about it.
 
 `D9_TENANT_ID` is a TEST value. Production code holds no tenant literal (O1's census scans
-`defender/**/*.py` minus the tests); the docs name `playground` as the operator's first tenant,
-and the tests use the same id so a fixture tenant reads like the documented one.
+`defender/**/*.py` minus the tests); the fixture UUID is deterministic and carries no
+operator-facing name into production.
 
 Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
+
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import importlib
 import os
@@ -37,7 +39,7 @@ from typing import Any
 DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 
 #: The one tenant D9's helper creates (no test uses two tenants — D9, N12).
-D9_TENANT_ID = "playground"
+D9_TENANT_ID = fixture_uuid("tenant:playground")
 
 #: The committed fixture tenant (#1120 H2) — the knowledge every test tenant is set up from.
 FIXTURE = Path(__file__).resolve().parents[5] / "knowledge" / "tenant-fixture"

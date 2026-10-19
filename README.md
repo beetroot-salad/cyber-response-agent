@@ -127,25 +127,23 @@ once —
 
 ```bash
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
-git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"
-python3 defender/cli/tenant.py setup playground
+export TENANT_ID=<uuid-committed-in-the-tenant-repo>
+git clone <tenant repo> "$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge"
+python3 defender/cli/tenant.py setup "$TENANT_ID"
 ```
 
 Before setup, clone the tenant's own repo into `<root>/<id>/knowledge` on the host, with a
 credential helper or an ssh agent (never a credential in the URL), and run setup once the clone
 has exited 0: setup adopts the placed folder as it is — it copies nothing and runs no git — checks
 it, and writes the tenant's row last. A new tenant's repo starts from
-`tenant.py scaffold <id> <empty dir>`.
+`tenant.py scaffold <id> <empty dir>`; choose its UUID first with
+`python3 defender/cli/tenant.py new-id` and save it. Existing named tenants require the
+[explicit UUID migration](defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187).
 
-**A data root made before #1120** holds `<root>/<id>/{tenant.json,runs,sessions}` and no
-`knowledge/`, so every run refuses it. Its settings were committed in this repo until #1120 and
-there is no tenant repo to clone: build the folder once from their last copy in the repo's
-history (a full clone, not a shallow one) with the one-off `migrate`, then run setup —
-
-```bash
-python3 defender/cli/tenant.py migrate playground "$DEFENDER_DATA_ROOT/playground/knowledge"
-python3 defender/cli/tenant.py setup playground
-```
+**A data root made before #1120** has no `knowledge/` repository. Recover its knowledge
+using the old checkout's one-off `tenant.py migrate` command before upgrading, then follow
+the [named-tenant UUID migration](defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187).
+The current `migrate` subcommand recovers historical knowledge; it does not convert tenant IDs.
 
 Run that setup step once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
 default data root) and no run, fork or drain in flight on any checkout of the host, as the same
@@ -156,7 +154,7 @@ setup run as root — that adoption case only.)
 — then investigate one alert end-to-end (runtime loop + post-steps + learning loop):
 
 ```bash
-python3 defender/run.py <alert.json> --tenant playground
+python3 defender/run.py <alert.json> --tenant "$TENANT_ID"
 ```
 
 Notes:

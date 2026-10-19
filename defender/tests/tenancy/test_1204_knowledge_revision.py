@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import contextlib
 import json
 import os
@@ -501,7 +503,7 @@ def test_1204_only_a_40_or_64_lowercase_hex_sha_is_a_commit(tmp_path, site):
         _assert_unavailable(_wire(repo))
 
 
-TENANT_ID = "acme"
+TENANT_ID = fixture_uuid("tenant:acme")
 
 
 def _tenant_with_knowledge(tmp_path: Path, monkeypatch, *, versioned: bool) -> tuple[Any, str]:
@@ -639,7 +641,7 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
 RICH: dict[str, Any] = {
     "commit": "a" * 40, "dirty": True, "dirty_paths": ["x.md", "y.md"], "dirty_path_count": 3,
     "unavailable": "git status: a note beside the dirt", "scope": "defender", "model": "m-1",
-    "tenant_id": "acme", "world_id": "20260728t161845z-fresh-case-n59.b",
+    "tenant_id": fixture_uuid("tenant:acme"), "world_id": "20260728t161845z-fresh-case-n59.b",
     "parent_run_id": "20260728T161845Z-fresh-case", "fork_turn": 59,
     "started_at": "2026-07-28T16:18:45+00:00", "alert_label": "fresh-case",
 }

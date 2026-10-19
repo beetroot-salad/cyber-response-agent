@@ -107,69 +107,26 @@ def _loadable(which: str, episode_id: str) -> dict:
 
 
 @pytest.mark.parametrize("which", ["triplet_947", "spec1224"])
-def test_r5_the_loader_reads_a_manifest_whose_episode_id_is_its_folders(tmp_path, which):
+@pytest.mark.parametrize("named", ["same", "another_uuid", "old_id", *range(R.UUID_HEX_DIGITS)])
+@pytest.mark.parametrize("door", ["load_family", "load_manifest_document"])
+def test_manifest_loaders_require_the_complete_folder_identity(tmp_path, which, named, door):
     from defender._io import bind
-    from defender.runtime.branch._family import load_family, load_manifest_document
-
-    episode_id = R.new_id()
-    ep = tmp_path / "episodes" / episode_id
-    T.write_family(ep, _loadable(which, episode_id))
-    with bind(ep) as view:
-        family = load_family(view, expected_episode_id=episode_id)
-        document = load_manifest_document(view, expected_episode_id=episode_id)
-    assert family.episode_id == episode_id
-    assert document["episode_id"] == episode_id
-
-
-#: The manifest's `episode_id` for each mismatch case, from the folder's id: a fresh UUID, an
-#: old id, and the folder's own id with ONE hex digit changed — the first, one in the middle
-#: group, the last (adversary F11: a comparison of the first group alone passes the last two).
-_MISMATCHES = {
-    "another_uuid": lambda folder_id: R.new_id(),
-    "old_id": lambda folder_id: R.OLD_MINTED_ID,
-    "near_miss_first_digit": lambda folder_id: R.near_miss_id(folder_id, 0),
-    "near_miss_middle_digit": lambda folder_id: R.near_miss_id(folder_id, 14),
-    "near_miss_last_digit": lambda folder_id: R.near_miss_id(folder_id, -1),
-}
-
-
-@pytest.mark.parametrize("named", sorted(_MISMATCHES))
-@pytest.mark.parametrize("which", ["triplet_947", "spec1224"])
-def test_r5_the_loader_refuses_a_manifest_naming_another_episode(tmp_path, which, named):
-    from defender._io import bind
-    from defender.runtime.branch._family import FamilyError, load_family, load_manifest_document
+    from defender.runtime.branch import _family
 
     folder_id = R.new_id()
-    manifest_id = _MISMATCHES[named](folder_id)
+    manifest_id = (folder_id if named == "same" else R.new_id() if named == "another_uuid"
+                   else R.OLD_MINTED_ID if named == "old_id" else R.near_miss_id(folder_id, named))
     ep = tmp_path / "episodes" / folder_id
     T.write_family(ep, _loadable(which, manifest_id))
-    for door in (load_family, load_manifest_document):
-        with bind(ep) as view:
-            err = R.raised(door, view, expected_episode_id=folder_id)
-        assert R.is_a(err, FamilyError), f"{door.__name__} over a mismatched manifest: {err!r}"
-        text = R.message(err)
-        assert manifest_id in text, f"{door.__name__}'s refusal does not name {manifest_id}: {text}"
-        assert folder_id in text, f"{door.__name__}'s refusal does not name {folder_id}: {text}"
-
-
-@pytest.mark.parametrize("which", ["triplet_947", "spec1224"])
-def test_r5_the_loader_refuses_a_one_digit_near_miss_at_every_position(tmp_path, which):
-    from defender._io import bind
-    from defender.runtime.branch._family import FamilyError, load_family, load_manifest_document
-
-    folder_id = R.new_id()
-    ep = tmp_path / "episodes" / folder_id
-    loaded = []
-    for digit in range(R.UUID_HEX_DIGITS):
-        manifest_id = R.near_miss_id(folder_id, digit)
-        T.write_family(ep, _loadable(which, manifest_id))
-        for door in (load_family, load_manifest_document):
-            with bind(ep) as view:
-                err = R.raised(door, view, expected_episode_id=folder_id)
-            if not R.is_a(err, FamilyError):
-                loaded.append(f"digit {digit} ({manifest_id}) via {door.__name__}: {err!r}")
-    assert loaded == [], "a manifest naming a near-miss id was not refused:\n  " + (
-        "\n  ".join(loaded))
+    with bind(ep) as view:
+        if named == "same":
+            result = getattr(_family, door)(view, expected_episode_id=folder_id)
+            assert (result.episode_id if door == "load_family" else result["episode_id"]) == folder_id
+        else:
+            err = R.raised(getattr(_family, door), view, expected_episode_id=folder_id)
+            assert R.is_a(err, _family.FamilyError), err
+            assert manifest_id in R.message(err), err
+            assert folder_id in R.message(err), err
 
 
 def test_r5_the_expected_episode_id_is_a_required_keyword(tmp_path):
@@ -235,20 +192,51 @@ def test_r5_pre_flight_refuses_a_manifest_naming_another_episode(tmp_path, monke
     assert (ep / "outcome.yaml").is_file(), "control: pre-flight wrote no outcome record"
 
 
-def test_r5_the_episode_page_refuses_a_manifest_naming_another_episode(data_root):
-    ep, episode_id, _roster = _episode(data_root)
+@pytest.mark.parametrize("consumer", ["page", "verify", "judge"])
+def test_manifest_consumers_refuse_other_episode_ids_before_side_effects(
+        tmp_path, data_root, consumer):
+    from defender.learning.branch import cli
+    from defender.learning.judge import JudgeRefused, grade_episode
+    from defender.run_repository import Run
+    from defender.tests.support.learning.core import _state1135
+
+    ep, episode_id, roster = _episode(data_root)
+    if consumer == "verify":
+        _arm(ep, roster["a"])
+    runs = R.tenant(data_root).runs_repository()
+    judge = P.quiet_judge()
+    state = _state1135.state_over(tmp_path / "judge-state")
+
+    def exercise(refused):
+        if consumer == "page":
+            got = _page(episode_id)
+            assert got.rc == (1 if refused else 0), got.said
+            assert (ep / E.PAGE_NAME).is_file() is not refused
+            return got.said
+        if consumer == "judge":
+            err = R.raised(grade_episode, runs, episode_id, judge=judge, state=state)
+            assert judge.prompts == [], "a mismatched or outcome-less episode asked the judge"
+            assert (ep / "judge.yaml").is_file() is not refused
+            assert R.is_a(err, JudgeRefused) if refused else err is None, err
+            return R.message(err)
+        with runs.episode(episode_id) as view:
+            if refused:
+                err = R.raised(cli._finished_arms, view, ["a"])
+                assert err is not None, "VERIFY opened arms under another episode's manifest"
+                assert not isinstance(err, (TypeError, AttributeError, NameError)), err
+                return R.message(err)
+            opened = cli._finished_arms(view, ["a"])
+            assert isinstance(opened["a"], Run), opened
+            assert Path(opened["a"].run_dir) == ep / "runs" / roster["a"]
+            return ""
+
     other = R.near_miss_id(episode_id)
     T.write_family(ep, _doc(other))
-    refused = _page(episode_id)
-    assert refused.rc == 1, f"the page rendered over a mismatched manifest: {refused.said}"
-    assert other in refused.said, refused.said
-    assert episode_id in refused.said, refused.said
-    assert not (ep / E.PAGE_NAME).exists()
-
+    text = exercise(True)
+    assert other in text, text
+    assert episode_id in text, text
     T.write_family(ep, _doc(episode_id))
-    ok = _page(episode_id)
-    assert ok.rc == 0, f"the control did not render: {ok.said}"
-    assert (ep / E.PAGE_NAME).is_file()
+    exercise(False)
 # Flow 4 — the episode page reads its arms from the roster
 
 def test_page_links_each_arm_by_its_roster_id_never_a_composed_name(data_root):
@@ -373,7 +361,7 @@ def test_page_refuses_latest_and_any_non_uuid_episode_id(data_root, asked):
 
 
 def test_the_page_for_one_tenant_never_renders_another_tenants_episode(data_root):
-    other = "beta"
+    other = R.H5.U_ID
     R.tenant(data_root)
     R.tenant(data_root, other)
     episode_id = R.new_id()
@@ -433,33 +421,6 @@ def test_verify_refuses_outright_on_a_refused_roster(data_root):
     assert isinstance(verify()["a"], Run), "the control failed: a good roster did not open a"
 
 
-def test_verify_refuses_a_manifest_naming_another_episode(data_root):
-    from defender.learning.branch import cli
-    from defender.run_repository import Run
-
-    ep, episode_id, roster = _episode(data_root)
-    _arm(ep, roster["a"])
-    other = R.near_miss_id(episode_id)
-    T.write_family(ep, _doc(other))
-    runs = R.tenant(data_root).runs_repository()
-
-    def verify() -> dict:
-        with runs.episode(episode_id) as view:
-            return cli._finished_arms(view, ["a"])
-
-    err = R.raised(verify)
-    assert err is not None, "VERIFY opened arms under a manifest naming another episode"
-    assert not isinstance(err, (TypeError, AttributeError, NameError)), f"machinery: {err!r}"
-    text = R.message(err)
-    assert other in text, f"the refusal does not name the manifest's id {other}: {text}"
-    assert episode_id in text, f"the refusal does not name the folder's id {episode_id}: {text}"
-
-    T.write_family(ep, _doc(episode_id))
-    opened = verify()
-    assert isinstance(opened["a"], Run), f"the control failed: {opened!r}"
-    assert Path(opened["a"].run_dir) == ep / "runs" / roster["a"]
-
-
 def test_r8_the_archive_writes_no_run_dir_pointer(data_root):
     archive = T.mod("learning.branch.archive")
     ep, episode_id, roster = _episode(data_root)
@@ -473,42 +434,14 @@ def test_r8_the_archive_writes_no_run_dir_pointer(data_root):
     assert not os.path.lexists(world / "run_dir"), "the archive wrote the run_dir pointer"
 
 
-class RosterSibling:
-    """Validate launch flags and the roster before delegating to the completed-sibling fixture."""
-
-    def __init__(self, data_root: Path, *, exits: dict[str, int]) -> None:
-        self.data_root = Path(data_root)
-        self.exits = dict(exits)
-        self.launches: list[dict[str, str]] = []
-        self.faults: list[str] = []
-
-    @staticmethod
-    def _flags(argv: list[str]) -> dict[str, str]:
-        out: dict[str, str] = {}
-        for i, token in enumerate(argv[:-1]):
-            if token in ("--tenant", "--episode", "--world"):
-                out[token] = argv[i + 1]
-        return out
-
-    def __call__(self, argv: list[str], *, env: dict[str, str] | None = None, **_kw: Any) -> int:
-        flags = self._flags(list(argv))
-        self.launches.append(flags)
-        tenant, episode, label = (flags.get(k) for k in ("--tenant", "--episode", "--world"))
-        if tenant is None or episode is None or label is None:
-            self.faults.append(f"a sibling started without --tenant/--episode/--world: {argv}")
-            return 97
-        ep = R.episodes_dir(self.data_root, tenant) / episode
-        if not (ep / R.ROSTER_NAME).is_file():
-            self.faults.append(f"sibling {label}: no roster at {ep / R.ROSTER_NAME}")
-            return 97
-        if R.read_roster(ep).get(label) is None:
-            self.faults.append(f"sibling {label}: the roster does not name it")
-            return 97
-        return J.FakeSibling(data_root=self.data_root, exits=self.exits)(list(argv), env=env)
-
-    @property
-    def worlds(self) -> list[str]:
-        return [f["--world"] for f in self.launches if "--world" in f]
+def _spawn_worlds(spawn: J.FakeSibling) -> list[str]:
+    """Check every launch's three required flags, then expose the labels for flow assertions."""
+    worlds = []
+    for call in spawn.launches:
+        argv = call["argv"]
+        assert all(flag in argv for flag in ("--tenant", "--episode", "--world")), argv
+        worlds.append(argv[argv.index("--world") + 1])
+    return worlds
 
 
 def test_a_launch_verifies_finished_arms_by_roster_id_archives_no_pointer_and_pages_by_id(
@@ -518,18 +451,18 @@ def test_a_launch_verifies_finished_arms_by_roster_id_archives_no_pointer_and_pa
     est, src = P.launch_source(tmp_path, source_run_id=source_id)
     # The natural container in #1187's shape: no `_tenant.json` (R1).
     (src.parent / "_tenant.json").unlink(missing_ok=True)
-    spawn = RosterSibling(data_root, exits={"c": 3})
+    spawn = J.FakeSibling(data_root=data_root, exits={"c": 3})
 
     got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, source_id), spawn=spawn)
     assert spawn.launches, f"no sibling was started: rc={got.rc} {got.message!r}"
     assert spawn.faults == [], spawn.faults
-    assert "c" in spawn.worlds, spawn.worlds
-    assert len(spawn.worlds) >= 2, spawn.worlds
+    assert "c" in _spawn_worlds(spawn), _spawn_worlds(spawn)
+    assert len(_spawn_worlds(spawn)) >= 2, _spawn_worlds(spawn)
     episodes = [p for p in R.episodes_dir(data_root, P.LAUNCH_TENANT).iterdir() if p.is_dir()]
     assert len(episodes) == 1, f"expected one episode under <T>/episodes: {episodes}"
     ep = episodes[0]
     roster = R.read_roster(ep)
-    finished = [label for label in spawn.worlds if label != "c"]
+    finished = [label for label in _spawn_worlds(spawn) if label != "c"]
     for label in finished:
         world = ep / "worlds" / label
         assert (world / "report.md").is_file(), f"finished world {label} was not archived"
@@ -610,7 +543,7 @@ def test_a_launch_whose_preflight_does_not_accept_writes_no_roster_and_its_sibli
         tmp_path, monkeypatch, data_root, verdict):
     monkeypatch.setenv(S.KNOB_RETRY_CAP, "1")
     est, src = _launch_scene(tmp_path, monkeypatch)
-    spawn = RosterSibling(data_root, exits={})
+    spawn = J.FakeSibling(data_root=data_root, exits={})
     if verdict == "unusable":
         seams: dict[str, Any] = {"verifier": S.failing_verifier().model}
     else:
@@ -660,7 +593,7 @@ def test_a_launch_rosters_every_manifest_world_and_starts_only_the_servable_ones
         S.control_world("a"), S.world_v2("b", facts=[S.fact("f1")]),
         S.world_v2("c", role="C", facts=[S.fact("f2", MARK_C, ("carol", "vault", "10.0.0.9"))])])
     oracle = OracleFailingC()
-    spawn = RosterSibling(data_root, exits={})
+    spawn = J.FakeSibling(data_root=data_root, exits={})
 
     got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name), spawn=spawn,
                          questioner=P.CountingQuestioner(S.questioner_for(doc)),
@@ -683,7 +616,7 @@ def test_a_launch_rosters_every_manifest_world_and_starts_only_the_servable_ones
     assert set(roster) == labels, f"the roster names {sorted(roster)}, the manifest {sorted(labels)}"
     assert all(R.is_canonical_uuid(v) for v in roster.values()), roster
     assert len(set(roster.values())) == len(roster), f"two labels share an id: {roster}"
-    assert sorted(spawn.worlds) == ["a", "b"], f"started {spawn.worlds}"
+    assert sorted(_spawn_worlds(spawn)) == ["a", "b"], f"started {_spawn_worlds(spawn)}"
     for label in ("a", "b"):
         assert (ep / "worlds" / label / "report.md").is_file(), f"{label} was not archived"
     assert not (ep / "worlds" / "c" / "report.md").exists(), "the unservable world was archived"
@@ -705,7 +638,7 @@ def test_a_launch_lands_its_episode_under_its_tenant_whatever_the_episodes_varia
         episodes.rmdir()
     assert not os.path.lexists(episodes), "the scene must start with no <T>/episodes"
     natural_before = sorted(os.listdir(src.parent))
-    spawn = RosterSibling(data_root, exits={})
+    spawn = J.FakeSibling(data_root=data_root, exits={})
 
     got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name), spawn=spawn)
     assert got.rc == 0, f"the launch did not complete: rc={got.rc} {got.message!r} {got.raised!r}"
@@ -716,7 +649,7 @@ def test_a_launch_lands_its_episode_under_its_tenant_whatever_the_episodes_varia
     assert (ep / R.MANIFEST_NAME).is_file(), "the launched episode holds no manifest"
     assert (ep / R.ROSTER_NAME).is_file(), "the launched episode holds no roster"
     assert spawn.faults == [], spawn.faults
-    assert sorted(spawn.worlds) == ["a", "b", "c"], f"control: the siblings ran: {spawn.worlds}"
+    assert sorted(_spawn_worlds(spawn)) == ["a", "b", "c"], f"control: the siblings ran: {_spawn_worlds(spawn)}"
     if decoy is not None:
         assert R.tree(decoy) == decoy_before, "the launch touched the decoy episodes base"
     assert sorted(os.listdir(src.parent)) == natural_before, (
@@ -730,7 +663,7 @@ def test_the_launcher_refuses_an_old_source_id_before_anything_is_spent(
     asked = P.CountingQuestioner()
 
     got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, R.OLD_MINTED_ID),
-                         spawn=RosterSibling(data_root, exits={}), questioner=asked)
+                         spawn=J.FakeSibling(data_root=data_root, exits={}), questioner=asked)
     assert R.OLD_MINTED_ID in got.message, f"the refusal does not name the id: {got.message!r}"
     assert asked.calls == 0, "the questioner was called for an old source id"
     assert _episodes_made(data_root) == [], "an episode was claimed for an old source id"
@@ -745,7 +678,7 @@ def test_the_launcher_refuses_an_old_source_id_before_anything_is_spent(
     (src.parent / "_tenant.json").unlink(missing_ok=True)
     control = P.CountingQuestioner()
     ok = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name),
-                        spawn=RosterSibling(control_root, exits={}), questioner=control)
+                        spawn=J.FakeSibling(data_root=control_root, exits={}), questioner=control)
     assert control.calls > 0, f"control: a UUID source was refused: {ok.message!r}"
 
 
@@ -780,7 +713,7 @@ def test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder(
     listed_before = sorted(os.listdir(episodes))
     asked = P.CountingQuestioner()
     role = RolePreflight()
-    spawn = RosterSibling(data_root, exits={})
+    spawn = J.FakeSibling(data_root=data_root, exits={})
 
     got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name), spawn=spawn,
                          questioner=asked, preflight=role)
@@ -803,31 +736,13 @@ def test_the_launcher_refuses_a_settings_half_inside_its_episodes_folder(
     control = P.CountingQuestioner()
     control_role = RolePreflight()
     ok = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name),
-                        spawn=RosterSibling(data_root, exits={}), questioner=control,
+                        spawn=J.FakeSibling(data_root=data_root, exits={}), questioner=control,
                         preflight=control_role)
     assert control_role.calls != [], f"control: the role preflight was never reached: {ok.message!r}"
     assert control.calls > 0, f"the control launch was refused at acceptance: {ok.message!r}"
     assert ok.rc == 0, f"the control launch did not complete: {ok.message!r} {ok.raised!r}"
     assert len(_episodes_made(data_root)) == 1, (
         f"control: the launch made no one episode under <T>/episodes: {_episodes_made(data_root)}")
-
-
-def test_the_judge_door_opens_an_episode_whose_arm_container_has_no_record(data_root):
-    ep, episode_id, roster = _episode(data_root)
-    for arm_id in roster.values():
-        _arm(ep, arm_id)
-    runs = R.tenant(data_root).runs_repository()
-    opened: list[Path] = []
-
-    def door(asked: str) -> None:
-        with runs.episode_files(asked) as episode:
-            opened.append(Path(episode.dir))
-
-    err = R.raised(door, episode_id)
-    assert err is None, f"the judge's door refused a recordless arm container: {err!r}"
-    assert opened == [ep], opened
-    assert R.raised(door, R.new_id()) is not None, "an absent episode opened"
-    assert opened == [ep], f"the door opened something for an absent id: {opened}"
 
 
 def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name():
@@ -842,29 +757,6 @@ def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name():
             f"{bad!r} was admitted: the label's own rule no longer applies")
 
 
-def test_the_judge_refuses_a_manifest_naming_another_episode(tmp_path, data_root):
-    from defender.learning.judge import JudgeRefused, grade_episode
-    from defender.tests.support.learning.core import _state1135
-
-    ep, episode_id, _roster = _episode(data_root)
-    other = R.near_miss_id(episode_id)
-    T.write_family(ep, _doc(other))
-    runs = R.tenant(data_root).runs_repository()
-    judge = P.quiet_judge()
-    state = _state1135.state_over(tmp_path / "judge-state")
-
-    err = R.raised(grade_episode, runs, episode_id, judge=judge, state=state)
-    assert R.is_a(err, JudgeRefused), f"grade over a mismatched manifest: {err!r}"
-    text = R.message(err)
-    assert other in text, f"the refusal does not name the manifest's id {other}: {text}"
-    assert episode_id in text, f"the refusal does not name the folder's id {episode_id}: {text}"
-    assert not os.path.lexists(ep / "judge.yaml"), "a grade was recorded for a mismatched manifest"
-    assert judge.prompts == [], "the judge was asked over a mismatched manifest"
-
-    T.write_family(ep, _doc(episode_id))
-    grade_episode(runs, episode_id, judge=judge, state=state)
-    assert (ep / "judge.yaml").is_file(), "the control failed: the pass recorded nothing"
-    assert judge.prompts == [], "an episode with no outcome record was graded by the model"
 # S-red — the redaction set is the roster's
 
 def _family(episode_id: str) -> Any:

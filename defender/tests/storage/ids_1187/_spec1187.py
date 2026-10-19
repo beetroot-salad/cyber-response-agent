@@ -11,9 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape as is_canonical_uuid
+
+tree = H5.tree_state
 
 #: The arm roster's file name in the episode folder (pinned by the contract; the production
-#: owner is `defender._episode_paths.ARM_ROSTER_NAME`).
+#: owner is `defender.episodes._episode_paths.ARM_ROSTER_NAME`).
 ROSTER_NAME = "arms.json"
 #: The manifest's file name (`_episode_paths.FAMILY_NAME` today, unchanged).
 MANIFEST_NAME = "family.yaml"
@@ -68,14 +71,6 @@ def near_miss_id(text: str, digit: int = -1) -> str:
     return out
 
 
-def is_canonical_uuid(text: object) -> bool:
-    """Is `text` canonical lowercase UUID text?"""
-    if not isinstance(text, str):
-        return False
-    try:
-        return str(uuid.UUID(text)) == text
-    except ValueError:
-        return False
 # Tenants and folders
 
 def tenant(data_root: Path, tenant_id: str = H5.T_ID) -> Any:
@@ -236,9 +231,6 @@ def plant_old_episodes_root(root: Path, names: Iterable[str] = (
     return root
 # Observation
 
-def tree(root: Path) -> dict[str, tuple[str, bytes | str | None]]:
-    """Every entry under `root` (links not followed): relative path -> (kind, content or link target)."""
-    return H5.tree_state(Path(root))
 
 
 def identities(root: Path, names: Iterable[str] | None = None) -> dict[str, tuple[int, int]]:
@@ -324,7 +316,7 @@ def scoped_nodes(tree: ast.AST) -> list[tuple[ast.AST, dict[str, list[ast.expr]]
 #: The walk's owner: the ONE definition both censuses use (the openers census and the
 #: made-by-path census) — the run repository and the episode handle (relative to `defender/`;
 #: a folder prefix ends in `/`). Cover the whole owner package as it gains modules.
-WALK_OWNER = ("run_repository/", "_episode_handle.py")
+WALK_OWNER = ("run_repository/", "episodes/_episode_handle.py")
 
 
 def owned(rel: str) -> bool:
