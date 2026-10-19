@@ -83,11 +83,12 @@ DECLARED = ("query", "esql", "alerts", "health-check")
 
 
 def _registry(rec: VerbRecorder, *, granted=(GRANTED_PAIR,), declared=DECLARED,
-              systems=("elastic",), raises: BaseException | None = None) -> ScopedFakeVerbs:
+              systems=("elastic",), raises: BaseException | None = None,
+              call_run: str | None = None) -> ScopedFakeVerbs:
     """One system declaring `declared`, a grant naming only `granted` — so `elastic.esql` is
     DECLARED AND WITHHELD (a denial) while `elastic.nosuch` is undeclared (today's path)."""
     table = recording_table(rec, {s: declared for s in systems}, raises=raises)
-    return ScopedFakeVerbs(table, grant_of("gather", granted))
+    return ScopedFakeVerbs(table, grant_of("gather", granted), call_run=call_run)
 
 
 
