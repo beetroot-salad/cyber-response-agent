@@ -1,7 +1,7 @@
 {
   "issue": 1187,
   "pull_request": 1269,
-  "status": "LOCAL MERGE COMPLETE: main layout preserved and affected verification passed; external push approval and hosted CI pending.",
+  "status": "PUBLISHED: main layout preserved and affected local verification passed; hosted CI pending.",
   "main_ref": "55dd2bee8c4a4391d9c358493d63f371eea6de73",
   "pre_merge_ref": "f37eb3124e0983c43617c96ec8c23dc80d46819d",
   "history": "Merge main without rebasing the immutable contract ancestry recorded in 1187-implementation.json.",
@@ -83,13 +83,14 @@
       "Remove unused old1105record helpers and composite-bound case only after exact historical proof and current callsite census."
     ]
   },
-  "recorded_at_utc": "2026-10-19T13:27:18.670412+00:00",
+  "recorded_at_utc": "2026-10-19T15:19:35.136341+00:00",
   "publication": {
     "branch": "impl/1187",
     "remote": "origin (github.com/beetroot-salad/cyber-response-agent)",
     "pull_request": 1269,
-    "pushed": false,
-    "blocked_by": "Automatic approval review rejected git push because external publication requires explicit user authorization; no workaround or alternate publication attempted.",
-    "next_action": "Request permission for the concrete committed branch, then push, update PR1269description from prepared body, watch hosted CI and repair failures. Keep draft until verification/review obligations close."
+    "pushed": true,
+    "next_action": "Watch hosted CI and repair failures. Keep draft until verification and review obligations close.",
+    "verified_source_ref": "da714250",
+    "authorization": "User explicitly approved pushing the verified branch and updating PR1269."
   }
 }
