@@ -711,7 +711,7 @@ def world_token_for(episode_token: str, world_label: str) -> str:
 
 @model(frozen=True)
 class ResumeWorld:
-    """What a sibling process is, from the manifest alone.
+    """What a sibling process is, from its manifest and the episode's arm roster.
 
     `world_id` is the composed token, not the short label: it names the world's ledger file and
     row keys, which must carry the episode. `label` is what the manifest, the arm roster and the

@@ -19,8 +19,9 @@ those names are spelled. A record answers `.path` plus exactly the verbs its row
 the class; a folder answers `.path` and `.ensure()`. Each verb is one call on the held folder.
 
 `view()` is a `Bound` over the same held folder, for a pass that reads the tree it writes (the
-judge). Readers that bind the episode dir on their own keep their `_io.bind`. The archive's
-copy lane (`learning/branch/archive.py`) is the declared exception and does not go through here.
+judge). Episode readers use this view through the repository's walked handle, so no reader
+re-binds the episode directory by path. The archive's copy lane
+(`learning/branch/archive.py`) is the declared exception and does not go through here.
 
 `refuse_bad_episode_id` is the episode id's rule (`_run_id.episode_id_fault`: canonical
 lowercase UUID text), refused as `EpisodeRefused` before any path is built from the id; both
