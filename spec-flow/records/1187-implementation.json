@@ -522,5 +522,15 @@
     }
   ],
   "attack_scope_limit": "Python audit covers sampled absolute-path opens below tenant and known bypasses, not raw syscalls or every possible implementation. Run handles retain their own rooted reads after repository handoff; original review audit deliberately excludes these.",
-  "next_action": "Port implementation and contract to the refactored main while preserving the recorded refs, revalidate affected architecture/contract assumptions, execute mount and runsc checks, run full CI, then use the independent code-review workflow. Do not merge."
+  "next_action": "Port implementation and contract to the refactored main while preserving the recorded refs, revalidate affected architecture/contract assumptions, execute mount and runsc checks, run full CI, then use the independent code-review workflow. Do not merge.",
+  "pull_request": {
+    "number": 1269,
+    "url": "https://github.com/beetroot-salad/cyber-response-agent/pull/1269",
+    "draft": true,
+    "mergeable": "CONFLICTING",
+    "merge_state": "DIRTY",
+    "checks_command": "gh pr checks 1269 --watch",
+    "checks_result": "no checks reported on impl/1187; hosted CI not executed",
+    "observed_head_before_record_update": "d02ecf441d5bded49c0fc428913fcdba3c646e85"
+  }
 }
