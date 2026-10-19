@@ -1064,7 +1064,8 @@ def test_the_judge_gate_holds_a_label_to_its_own_rule_not_its_composed_name():
     independent of the label, so the gate needs only the label. NOT observable here: a
     refusal's wording. `is_valid_run_id` has no length bound
     and a UUID prefix is always a valid start, so the composed half never changed an answer;
-    only the census (`test_1187_ids`) sees a surviving composer. GREEN at base (a guard)."""
+    only the census (`test_1187_ids`) sees a surviving composer. The label validity guard
+    is unchanged; the label-only API is RED at base, which still requires the episode id."""
     from defender.learning.judge import family
 
     for long in ("w" * 200, "w" * 230):
