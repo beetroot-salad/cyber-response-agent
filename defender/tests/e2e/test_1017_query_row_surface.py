@@ -298,13 +298,11 @@ def _leads_view(ep: Path, base: Path):
     at, off the REAL `render` (#1234: a `JudgeContext`, its focus view's chain) and the REAL
     world prompt (`run._build_prompt`), cut to world b's per-lead view: from its host title
     to the next view's."""
-    from defender._io import bind
-    from defender.learning.judge import family, layout, run
+    from defender.learning.judge import layout, run
     from defender.tests.judge_contrast_1234 import _spec1234 as S34
 
     ctx = S34.render_context(ep, "b")
-    with bind(ep) as bound:
-        manifest = family.read_manifest(bound)
+    manifest = J.read_manifest_at(ep)
     prompt, _placed = run._build_prompt(ctx, manifest)
     title = f"world b — {layout.FOCUS_VIEW_TITLES['leads']}"
     start = prompt.index(title)

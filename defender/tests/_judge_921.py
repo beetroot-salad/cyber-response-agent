@@ -537,6 +537,14 @@ def walked_view(episode_dir: Path) -> Any:
     return episode_runs_for(episode_dir).episode(episode_dir.name)
 
 
+def render_at(episode_dir: Path, label: str, **kw: Any) -> Any:
+    """Call the real judge renderer through its repository's walked bound reader (#1187)."""
+    episode_dir = Path(episode_dir)
+    with episode_runs_for(episode_dir).episode_files(episode_dir.name) as episode:
+        return mod("learning.judge.render").render(
+            episode_dir, label, bound=episode.view(), **kw)
+
+
 def read_manifest_at(episode_dir: Path) -> dict:
     """Read the manifest through its walked handle, held to that episode's id (#1187)."""
     episode_dir = Path(episode_dir)

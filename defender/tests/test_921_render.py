@@ -58,11 +58,8 @@ def _lessons_view(ctx) -> str:
 def _world_prompt(ep, label: str = "b", **kw) -> str:
     """World `label`'s prompt from the real assembler over the real render
     (`run._build_prompt(ctx, manifest)`, #1234)."""
-    from defender._io import bind
-
-    with bind(ep) as bound:
-        manifest = J.mod("learning.judge.family").read_manifest(bound)
-    ctx = _render().render(ep, label, **kw)
+    manifest = J.read_manifest_at(ep)
+    ctx = J.render_at(ep, label, **kw)
     return J.mod("learning.judge.run")._build_prompt(ctx, manifest)[0]
 
 
