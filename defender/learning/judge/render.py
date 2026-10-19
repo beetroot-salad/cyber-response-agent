@@ -26,9 +26,9 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender import _alert_input
+from defender.records import _alert_input
 from defender._io import Bound
-from defender._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
+from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.hooks.record_lesson_load import (
     EVIDENCE_INDIRECT,
     EVIDENCE_PUSH,
@@ -463,7 +463,7 @@ def _lesson_paths_for(lesson_name: Any) -> list[str]:
     The inverse of `hooks.record_lesson_load.lesson_name` (which records the stem of
     `defender/<corpus>/<stem>.md`) over `RUNTIME_LESSON_CORPORA`. Empty for a name that is not
     a single path segment, which would build a path outside the corpus."""
-    from defender._knowledge import CHECKOUT_KNOWLEDGE, RUNTIME_LESSON_CORPORA
+    from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, RUNTIME_LESSON_CORPORA
 
     if (not isinstance(lesson_name, str) or not lesson_name
             or lesson_name != Path(lesson_name).name or lesson_name in (".", "..")):

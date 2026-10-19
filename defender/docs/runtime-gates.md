@@ -55,7 +55,7 @@ hooks). The gates:
   secret/ground-truth read denylist, applied at `resolve()` time on both surfaces; the
   deny *reasons* live with the policies (and are checked against the live grant list — a
   reason naming a program the agent cannot run teaches a dead command). `defender-policy
-  show|explain` (`scripts/policy_cli.py`) is the audit CLI: a second CONSUMER of the
+  show|explain` (`cli/policy_cli.py`) is the audit CLI: a second CONSUMER of the
   gate, never a second implementation — and an OPERATOR tool no agent may run.
   - **Main-loop raw-access + shim gating** — only the `defender-*` shims and
     read-only viewers run from the main loop; data-source adapters and
@@ -75,9 +75,7 @@ hooks). The gates:
     JUDGE binds on the same dir and must keep reading exactly those files. Not the
     basename anywhere (a confined agent's other root is a lesson corpus), and
     `alert.json` is deliberately not in the set — it is the case INPUT, handed to
-    the actor in its own user message. The layout is unchanged on purpose: the
-    staged copies are what `verify_forward` and `disposition_for` read when a
-    finding later becomes a lesson, so they are not archival and cannot simply move.
+    the actor in its own user message.
   - **One alphabet for a lead id** (#850 F-09) — the gather payload shape
     (`_run_paths.GATHER_RAW_SHAPE`) and the four lead-id validators compose off one
     constant (`_run_paths.LEAD_ID_BODY`). They are not independent facts: the
@@ -140,8 +138,9 @@ hooks). The gates:
   again (#855 F-12). The same module also imports `_untrusted.wrap` (salted
   untrusted-data tagging of adapter/alert reads + the gather return); the
   progressive-disclosure descriptor catalog it renders
-  (`inject_system_skill_description.descriptor_catalog`) is read once by
-  `run_investigation` at run start and handed down as `catalog=` (#1031); its parent
+  (`inject_system_skill_description.descriptor_index`) is read once by
+  `run_investigation` at run start and handed down as `catalog=` (#1031), each dispatch
+  rendering it with the systems down at that moment marked (#1256); its parent
   `runtime/tools.py` imports `record_lesson_load.lesson_name` (lesson→outcome
   traceability into `lessons_loaded.jsonl`). These anchor on the run dir from
   `AgentDeps`.
@@ -168,7 +167,7 @@ hooks). The gates:
 Still out of scope (port later if a case demands it): report-consistency
 judges, the phase state machine, and class-slot grammar vocab — the last
 because the spec's own examples contradict the per-type slot grammar. See
-`docs/decisions/defender-invlang-enforcement-ramp.md`.
+`defender/docs/decisions/defender-invlang-enforcement-ramp.md`.
 
 Sibling-fork uniqueness WAS on that list for the same reason and no longer
 is: #934 made the predicted observable the distinctness axis, and

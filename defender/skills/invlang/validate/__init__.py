@@ -255,7 +255,7 @@ def diagnose(
     current_companion: CompanionBody | None = None
     if current_text is not None:
         # The same text is the same parse. `committed_investigation_reason` and
-        # `seed_investigation` validate a committed document against itself as baseline, and
+        # `restore_run_folder` validate a committed document against itself as baseline, and
         # would otherwise re-parse identical bytes. Both texts are newline-normalized above.
         current_companion = (
             companion if current_text == proposed_text

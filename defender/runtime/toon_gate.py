@@ -23,7 +23,7 @@ from pydantic_ai.exceptions import ModelRetry, ToolRetryError
 from pydantic_ai.messages import ToolReturn, ToolReturnPart, is_multi_modal_content
 from pydantic_ai.toolsets import SetMetadataToolset, WrapperToolset
 
-from defender._env import env_int
+from defender.configuration._env import env_int
 from defender.run_repository import GATE_METADATA_KEY
 from defender._untrusted import wrap_fresh as _frame
 from defender.hooks.budget_enforcer import BudgetKill

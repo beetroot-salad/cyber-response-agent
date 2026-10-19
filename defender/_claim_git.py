@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from defender import _git
-from defender._env import FatalConfigError
+from defender.configuration._env import FatalConfigError
 
 _logger = logging.getLogger(__name__)
 

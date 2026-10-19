@@ -33,11 +33,11 @@ reach.
 
 ## The shape to copy
 
-**First, check what's already there.** If `scripts/adapters/` already holds
+**First, check what's already there.** If `integrations/` already holds
 sibling adapters, you are extending a populated deployment, not seeding a
 fresh one — **conform to the established pattern rather than introducing a
 second one.** If the tree documents its adapter conventions
-(`scripts/adapters/README.md`), read that first: it names the shared
+(`integrations/README.md`), read that first: it names the shared
 transport module and the recurring transport / config / auth choices you're
 conforming to. Then read the closest sibling adapter and the shared module
 it imports; reuse *that* module, its config-key scheme, and its transport
@@ -49,9 +49,9 @@ The reference to copy ships with this skill:
 - `examples/example_adapter.py` — one complete, environment-agnostic adapter:
   a `VERBS` mapping, verb functions that take a `VerbContext` and return a
   dict, and a transport that raises `faults`. It is the shape you copy into
-  `defender/scripts/adapters/{system}_adapter.py`.
+  `defender/integrations/{system}_adapter.py`.
 
-The live tree's own `scripts/adapters/<system>_adapter.py` modules are the same shape built
+The live tree's own `integrations/<system>_adapter.py` modules are the same shape built
 on the shared `_stub_transport.py`; read it and the closest sibling before
 you write anything. Then:
 
@@ -59,7 +59,7 @@ you write anything. Then:
    `_stub_transport.py`, or whatever they import) — import *that*. Only on a
    truly greenfield tree do you write your own transport, modelled on
    `example_adapter.py`'s `_request`. One shared transport per tree, never two.
-2. **Copy the closest example** to `defender/scripts/adapters/{system}_adapter.py`
+2. **Copy the closest example** to `defender/integrations/{system}_adapter.py`
    — a sibling adapter if one exists, else `examples/example_adapter.py` —
    change `SYSTEM`, and adapt the verbs and response parsing to the real
    API. Keep the contract below intact.
@@ -71,7 +71,7 @@ signature and its return:
 
 ```python
 from defender.runtime.verbs import VerbContext
-from defender.scripts.adapters import faults
+from defender.integrations import faults
 
 def get_host(ctx: VerbContext, *, host: str) -> dict:
     """One host's record. `host` is a declared param; a call that omits it,
@@ -111,20 +111,30 @@ def get_host(ctx: VerbContext, *, host: str) -> dict:
   captures the returned value by-ref under `gather_raw/`.
 - **`health-check` is required.** It returns a small status dict (e.g.
   `{"system": SYSTEM, "connected": True}`); a failed reach raises a fault.
+- **`check_settings(tenant)` is required.** A module-level function of the
+  run's tenant record (never a `VerbContext`, never a call) that raises
+  `ConfigFault` naming what is wrong, or returns None when the system is
+  usable. It must raise for EVERY settings fault any verb here can raise —
+  the keys `_config` reads and, for a docker-reached system, the access
+  method (`_stub_transport.check_docker_curl_settings`). The run calls it
+  once at start: a system whose check raises is down for the whole run, the
+  agent is told why, and no verb of it is called. A system needing no
+  settings declares one that never raises. An adapter that declares none, or
+  whose check raises anything but `ConfigFault`, is down as broken (#1256).
 
 Name verbs for what they measure (`query`, `lookup`, `get-host`), not why
 the defender asked.
 
 ## Faults, not exit codes
 
-Import the taxonomy from `scripts/adapters/faults.py` and **raise** the
+Import the taxonomy from `integrations/faults.py` and **raise** the
 member that matches the condition. The query tool turns the fault into the
 queries-table row and the exit code the circuit breaker keys on — you never
 write an exit code yourself:
 
 | Fault | Exit | Meaning |
 |---|---|---|
-| `ConfigFault` | 2 | `config.env` missing/incomplete — the system is down (infra). |
+| `ConfigFault` | 2 | `config.env` missing/incomplete — the system is not configured. `check_settings` raises it at run start, so a verb raising it means the check missed a key: the system is marked down then, uncharged, and the miss is logged as an adapter defect. |
 | `TransportFault` | 2 | the transport failed: unreachable, timed out, a 5xx (infra). |
 | `UpstreamFault` | 1 | the system was reached and rejected the query — a 4xx, a bad field. The agent's own to fix. |
 
@@ -275,7 +285,7 @@ Adapters run under `defender/.venv/bin/python3`; `uv.lock` is committed.
 
 There is no `bin/` shim and no allowlist edit — dropping the
 `{system}_adapter.py` module with its `VERBS` mapping under
-`scripts/adapters/` **is** the registration. The verb registry
+`integrations/` **is** the registration. The verb registry
 (`runtime/verbs.py`) discovers every `*_adapter.py` in that directory by glob and
 reads its `VERBS` at prompt-build time. A module that exposes no `VERBS`
 mapping is discovered but *unreachable* (its verb set is empty and the tool

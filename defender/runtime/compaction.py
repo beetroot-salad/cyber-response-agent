@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import SkipValidation
 
-from defender._env import env_bool
+from defender.configuration._env import env_bool
 
 if TYPE_CHECKING:
     from defender.skills.invlang.schema import FindingRecord

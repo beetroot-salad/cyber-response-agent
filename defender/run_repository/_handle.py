@@ -6,7 +6,7 @@ repository's opens and creates use it once they have walked the container from t
 folder without following a link (#1187 S-iso; the container holds no tenant record).
 `Run.at(directory)` is the eval/fixture/tooling escape hatch with no runs base. Outside the
 package every constructor is
-gated by `scripts/lint/lint_run_layout_imports.py`; application code gets a `Run` from its
+gated by `tooling/lint/lint_run_layout_imports.py`; application code gets a `Run` from its
 tenant's repository (`tenant.runs_repository().open(run_id)`, `.create`, or an episode view's).
 
 Every accessor answers a `RecordHandle` (`.path`, `.read`, and the record's own write verb),
@@ -29,7 +29,11 @@ from collections.abc import Callable, Iterator
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from defender import _alert_input, _artifact_schema, _episode_paths, _provenance, _report
+from defender.records import _alert_input
+from defender.records import _artifact_schema
+from defender.episodes import _episode_paths
+from defender.records import _provenance
+from defender.records import _report
 from defender import _io as _real_io
 from defender.run_repository import _layout
 from defender.run_repository._id import RunId
@@ -38,14 +42,17 @@ from defender.run_repository._layout import RUN_LAYOUT, RunPaths, SessionPaths
 #: The five groups, addressed group-then-kind.
 GROUPS = ("tables", "facts", "documents", "observability", "session")
 
-#: Must mirror `defender/tests/_spec1077.py::GROUP_MEMBERS`, the spec for this table.
+#: Must mirror `defender/tests/support/shared/contracts/_spec1077.py::GROUP_MEMBERS`, the spec for this table, plus
+#: #1255's two host-only sidecars: `call_join` (the query writer's, G4/G6) and
+#: `ticket_comments` (the ticket writer's record of its accepted comments, P5).
 GROUP_MEMBERS: dict[str, tuple[str, ...]] = {
-    "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads"),
+    "tables": ("queries", "policy_denials", "leads", "payloads", "ticket_reads", "call_join"),
     "facts": ("alert", "alert_record", "provenance", "run_end", "scrub_verdict"),
-    "documents": ("investigation", "report", "gather_summaries", "lead_author", "source_refs"),
+    "documents": ("investigation", "report", "gather_summaries", "lead_author"),
     "observability": (
-        "wire_log", "review_trace", "forward_check_trace", "tool_trace", "review_record",
-        "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer"),
+        "wire_log", "review_trace", "tool_trace", "review_record",
+        "lessons_loaded", "ticket_write", "runtime_html", "box_sentinel", "session_pointer",
+        "ticket_comments"),
     "session": ("session_db",),
 }
 MEMBER_ACCESSOR: dict[str, str] = {
@@ -55,13 +62,13 @@ MEMBER_ACCESSOR: dict[str, str] = {
     "scrub_verdict": "scrub_verdict",
     "investigation": "investigation", "report": "report",
     "gather_summaries": "gather_summary", "lead_author": "lead_author",
-    "source_refs": "source_refs",
     "wire_log": "wire_log", "review_trace": "review_trace",
-    "forward_check_trace": "forward_check_trace", "tool_trace": "tool_trace",
+    "tool_trace": "tool_trace",
     "review_record": "review_record", "lessons_loaded": "lessons_loaded",
     "ticket_write": "ticket_write", "runtime_html": "runtime_html",
     "box_sentinel": "box_sentinel", "session_pointer": "session_pointer",
-    "session_db": "session_db",
+    "session_db": "session_db", "call_join": "call_join",
+    "ticket_comments": "ticket_comments",
 }
 #: The one write verb per member — per record, not per group, since the group only says how a
 #: record is read. `append` (JSONL), `write` (whole document or write-once fact), `open`
@@ -72,12 +79,12 @@ MEMBER_VERB: dict[str, str | None] = {
     "ticket_reads": "write",
     "alert": "write", "alert_record": "write", "provenance": "write", "run_end": "write", "scrub_verdict": "write",
     "investigation": "write", "report": "write", "gather_summaries": "write",
-    "lead_author": None, "source_refs": "write",
-    "wire_log": "append", "review_trace": "append", "forward_check_trace": "append",
+    "lead_author": None,
+    "wire_log": "append", "review_trace": "append",
     "tool_trace": "append", "review_record": "write", "lessons_loaded": "append",
     "ticket_write": "write",
     "runtime_html": "write", "box_sentinel": "write", "session_pointer": "write",
-    "session_db": "open",
+    "session_db": "open", "call_join": "append", "ticket_comments": "append",
 }
 # The capability table is authoritative; MEMBER_VERB retains the primary-verb API.
 MEMBER_CAPABILITIES = {name: frozenset((verb,)) if verb else frozenset()
@@ -95,10 +102,11 @@ for _member in ("wire_log", "policy_denials", "review_trace"):
 
 UPWARD_ACCESSORS = (
     "run_end_sidecar", "scrub_verdict", "ticket_write", "session_pointer", "sessions_dir",
-    "session_db")
+    "session_db", "call_join", "ticket_comments")
 #: The sidecars sit directly in the runs base, so they are anchored there. (The session db's
 #: `open_store` anchors its own directory.)
-_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer")
+_SIDECAR_MEMBERS = ("run_end", "scrub_verdict", "ticket_write", "session_pointer", "call_join",
+                    "ticket_comments")
 #: Written once through the exclusive lane (a second lead claim must collide). The scrub
 #: verdict is a fact too but is rewritten, so it uses `replace` like every other `write`.
 _WRITE_ONCE_MEMBERS = frozenset({"alert", "alert_record", "provenance", "leads"})
@@ -110,7 +118,7 @@ _SCHEMA_GATED_MEMBERS = {"investigation": RUN_LAYOUT.investigation.name,
 #: a callable taking the same positional args and returning the `RecordHandle`.
 _COMPOSING_MEMBERS = frozenset({
     "leads", "payloads", "ticket_reads", "gather_summaries", "review_trace",
-    "review_record", "forward_check_trace", "session_db",
+    "review_record", "session_db",
 })
 
 
@@ -213,9 +221,12 @@ class RecordHandle:
     def _do_start_stream(self, text: str) -> None:
         self._mutate(text, "replace")
 
-    def _do_seed_queries(self, rows: list[dict]) -> None:
-        """Replace the selected snapshot; sibling freshness belongs to the caller."""
-        self._mutate(_jsonl_text(rows), "replace")
+    def _do_seed_queries(self, rows: list[dict] | bytes) -> None:
+        """Replace the selected snapshot; sibling freshness belongs to the caller. `bytes` is a
+        table recorded elsewhere, written as it is (a branch arm's restore copies its source's
+        table cut to the snapshot's length, damaged lines and all, #1255 P2); rows are encoded
+        as every table writer encodes them."""
+        self._mutate(rows if isinstance(rows, bytes) else _jsonl_text(rows), "replace")
 
     def _do_seed(self, text: str) -> None:
         from defender.runtime.branch._seed import refuse_seeded_run_dir

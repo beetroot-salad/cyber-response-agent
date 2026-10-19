@@ -532,5 +532,6 @@
     "checks_command": "gh pr checks 1269 --watch",
     "checks_result": "no checks reported on impl/1187; hosted CI not executed",
     "observed_head_before_record_update": "d02ecf441d5bded49c0fc428913fcdba3c646e85"
-  }
+  },
+  "superseded_by": "1187-main-integration.json (preserves the historical results and blockers below at their original revision)"
 }

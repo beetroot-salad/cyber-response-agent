@@ -1,0 +1,1068 @@
+from __future__ import annotations
+
+import errno
+import fcntl
+import json
+import os
+import stat
+import threading
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from defender import _io
+from defender.run_repository import RunPaths
+
+ITEM1_SYSTEM = "elastic"  # the breaker file's system key; the lead_zero constant went with item 1 (#1222)
+MiB = 1024 * 1024
+NAME = "rec.txt"
+ABSENT_TEXT = os.strerror(errno.ENOENT)
+
+
+class FaultOs:
+    """`os`, except: `read_fault(fd, n)` replaces `read`; `vanish_on_second_reg_fstat` makes the
+    second `fstat` that sees a regular file on the same descriptor raise ENOENT (the first is
+    the open's plainness judgement; a second would be a reader asking again); `calls` records
+    names."""
+
+    def __init__(self, *, read_fault: Callable[[int, int], bytes] | None = None,
+                 vanish_on_second_reg_fstat: bool = False) -> None:
+        self._read_fault = read_fault
+        self._vanish = vanish_on_second_reg_fstat
+        self._reg_seen: dict[int, int] = {}
+        self.calls: list[str] = []
+
+    def __getattr__(self, name: str) -> Any:
+        self.calls.append(name)
+        return getattr(os, name)
+
+    def read(self, fd: int, n: int) -> bytes:
+        self.calls.append("read")
+        if self._read_fault is not None:
+            return self._read_fault(fd, n)
+        return os.read(fd, n)
+
+    def fstat(self, fd: int) -> os.stat_result:
+        self.calls.append("fstat")
+        st = os.fstat(fd)
+        if self._vanish and stat.S_ISREG(st.st_mode):
+            self._reg_seen[fd] = self._reg_seen.get(fd, 0) + 1
+            if self._reg_seen[fd] >= 2:
+                raise FileNotFoundError(errno.ENOENT, ABSENT_TEXT)
+        return st
+
+
+def eagain(_fd: int, _n: int) -> bytes:
+    raise BlockingIOError(errno.EAGAIN, os.strerror(errno.EAGAIN))
+
+
+def vanishing_read(_fd: int, _n: int) -> bytes:
+    raise FileNotFoundError(errno.ENOENT, ABSENT_TEXT)
+
+
+class Endless:
+    """A file that never reaches EOF — one that keeps growing while it is read. `handed` counts
+    the bytes it gave out, so a bound looser than the limit shows."""
+
+    def __init__(self) -> None:
+        self.handed = 0
+
+    def __call__(self, _fd: int, n: int) -> bytes:
+        self.handed += n
+        return b"a" * n
+
+
+def _bound(root: Path, name: str, os_: Any, binary: bool) -> tuple[str, Any]:
+    with _io.bind(root, os_=os_) as b:
+        rec = b.read(name)
+    if rec.absent:
+        return "absent", None
+    if rec.text is None:
+        return "refused", rec.reason
+    return "ok", rec.text
+
+
+def _rooted(root: Path, name: str, os_: Any, binary: bool) -> tuple[str, Any]:
+    value, reason = _io.rooted_read(root, name, binary=binary, os_=os_)
+    if value is None:
+        return "refused", reason
+    return "ok", value
+
+
+def _plain(root: Path, name: str, os_: Any, binary: bool) -> tuple[str, Any]:
+    fn = _io.read_plain_bytes if binary else _io.read_plain
+    try:
+        return "ok", fn(root / name, os_=os_)
+    except FileNotFoundError:
+        return "absent", None
+    except _io.TEXT_READ_ERRORS as e:
+        return "refused", str(e)
+
+
+def _guarded(root: Path, name: str, os_: Any, binary: bool) -> tuple[str, Any]:
+    fn = _io.read_bytes_guarded if binary else _io.read_guarded
+    value, reason = fn(root / name, os_=os_)
+    if value is None:
+        return "refused", reason
+    return "ok", value
+
+
+READERS = {
+    "Bound.read": (_bound, False),
+    "rooted_read": (_rooted, False),
+    "rooted_read(binary)": (_rooted, True),
+    "read_plain": (_plain, False),
+    "read_plain_bytes": (_plain, True),
+    "read_guarded": (_guarded, False),
+    "read_bytes_guarded": (_guarded, True),
+}
+FOLDS_ABSENCE = {"rooted_read", "rooted_read(binary)", "read_guarded", "read_bytes_guarded"}
+
+
+def read(reader: str, root: Path, name: str = NAME, os_: Any = os) -> tuple[str, Any]:
+    fn, binary = READERS[reader]
+    return fn(root, name, os_, binary)
+
+
+def absent_reason(reader: str, root: Path, name: str = NAME) -> Any:
+    """What `reader` answers for a really missing `name` — the absent answer a read-phase
+    refusal must not be mistaken for."""
+    assert not (root / name).exists()
+    kind, payload = read(reader, root, name)
+    return payload if reader in FOLDS_ABSENCE else kind
+
+
+def open_fds() -> int:
+    return len(os.listdir("/proc/self/fd"))
+
+
+@pytest.fixture
+def root(tmp_path: Path) -> Path:
+    r = tmp_path / "root-SECRET-1174"
+    r.mkdir()
+    return r
+
+
+def sparse(path: Path, size: int) -> Path:
+    with open(path, "wb") as f:  # lint-text-io: ok — test plant of a sparse file
+        f.truncate(size)
+    return path
+
+
+def assert_path_free(reason: Any, root: Path) -> None:
+    assert reason, reason
+    assert "SECRET-1174" not in str(reason), f"the reason names the path: {reason!r}"
+
+
+def assert_refused_vanished(reader: str, root: Path, outcome: tuple[str, Any],
+                            missing: Any) -> None:
+    kind, payload = outcome
+    assert kind == "refused", f"{reader}: a read-phase ENOENT answered {outcome}, not a refusal"
+    assert "vanished" in str(payload), f"{reader}: the read-phase reason is not its own: {payload!r}"
+    assert ABSENT_TEXT not in str(payload), (
+        f"{reader}: the read-phase reason reuses the absent words: {payload!r}")
+    if reader in FOLDS_ABSENCE:
+        assert payload != missing, (
+            f"{reader}: the read-phase refusal reads exactly as absent: {payload!r}")
+    assert_path_free(payload, root)
+
+
+def test_the_read_limit_is_64_mib():
+    assert 64 * MiB == _io.READ_LIMIT
+
+
+@pytest.mark.parametrize("reader", READERS)
+@pytest.mark.parametrize("size", [64 * MiB + 1, 1 << 40], ids=["limit+1", "1TiB"])
+def test_o1_a_sparse_file_over_the_limit_is_refused_before_any_read(root, reader, size):
+    sparse(root / NAME, size)
+    rec = FaultOs()
+    before = open_fds()
+    outcome = read(reader, root, os_=rec)
+    assert open_fds() == before, f"{reader}: a descriptor leaked on the size refusal"
+    kind, reason = outcome
+    assert kind == "refused", f"{reader}: {outcome!r}"
+    assert_path_free(reason, root)
+    assert "read" not in rec.calls, f"{reader}: read before refusing on size: {rec.calls}"
+
+
+@pytest.mark.parametrize("reader", ["read_plain", "read_plain_bytes"])
+def test_o1_the_raising_readers_refuse_with_efbig(root, reader):
+    sparse(root / NAME, 64 * MiB + 1)
+    fn = _io.read_plain_bytes if reader == "read_plain_bytes" else _io.read_plain
+    with pytest.raises(OSError, match="read limit") as ei:
+        fn(root / NAME)
+    assert ei.value.errno == errno.EFBIG
+    assert not isinstance(ei.value, FileNotFoundError)
+    assert "SECRET-1174" not in str(ei.value)
+
+
+def test_o1_a_file_exactly_at_the_limit_is_read(root):
+    """Positive control on the bound: `> READ_LIMIT` is refused, `== READ_LIMIT` is read."""
+    sparse(root / NAME, 64 * MiB)
+    data = _io.read_plain_bytes(root / NAME)
+    assert len(data) == 64 * MiB
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_o1_a_file_growing_past_the_limit_while_read_is_refused(root, reader):
+    """`fstat` says small; the reads never reach EOF (the file grows). The running total past
+    the limit is the same refusal, not an unbounded buffer."""
+    (root / NAME).write_bytes(b"small\n")
+    before = open_fds()
+    endless = Endless()
+    kind, reason = read(reader, root, os_=FaultOs(read_fault=endless))
+    assert open_fds() == before, f"{reader}: a descriptor leaked"
+    assert kind == "refused", f"{reader}: {kind} {str(reason)[:80]!r}"
+    assert_path_free(reason, root)
+    assert endless.handed <= _io.READ_LIMIT + 1 * MiB, (
+        f"{reader}: took in {endless.handed} bytes before refusing — the running bound is "
+        "looser than the limit")
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_o2_a_read_with_no_data_yet_is_a_refusal(root, reader):
+    """FUSE/procfs can answer `EAGAIN` on the `O_NONBLOCK` descriptor. That is a refusal — not
+    a `TypeError` from a `None` read, not a silently empty answer."""
+    (root / NAME).write_text("payload\n")
+    before = open_fds()
+    outcome = read(reader, root, os_=FaultOs(read_fault=eagain))
+    assert open_fds() == before, f"{reader}: a descriptor leaked"
+    assert outcome[0] == "refused", f"{reader}: {outcome!r}"
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_o2_control_the_same_seam_without_the_fault_reads_the_file(root, reader):
+    (root / NAME).write_text("payload\n")
+    kind, value = read(reader, root, os_=FaultOs())
+    assert kind == "ok"
+    assert value in ("payload\n", b"payload\n")
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_o3_enoent_from_read_is_a_refusal_not_absent(root, reader):
+    missing = absent_reason(reader, root)
+    (root / NAME).write_text("payload\n")
+    before = open_fds()
+    outcome = read(reader, root, os_=FaultOs(read_fault=vanishing_read))
+    assert open_fds() == before, f"{reader}: a descriptor leaked"
+    assert_refused_vanished(reader, root, outcome, missing)
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_o3_enoent_from_an_fstat_after_the_plainness_judgement_never_answers_absent(root, reader):
+    missing = absent_reason(reader, root)
+    (root / NAME).write_text("payload\n")
+    kind, payload = read(reader, root, os_=FaultOs(vanish_on_second_reg_fstat=True))
+    if kind == "ok":
+        assert payload in ("payload\n", b"payload\n")
+    else:
+        assert_refused_vanished(reader, root, (kind, payload), missing)
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_o3_control_a_really_missing_file_is_still_absent(root, reader):
+    kind, payload = read(reader, root)
+    if reader in FOLDS_ABSENCE:
+        assert kind == "refused", (reader, payload)
+        assert ABSENT_TEXT in payload, (reader, payload)
+    else:
+        assert kind == "absent", (reader, kind, payload)
+
+
+@pytest.mark.parametrize("fn", [_io.read_plain, _io.read_plain_bytes])
+def test_o3_read_plain_raises_a_non_filenotfound_oserror_for_a_read_phase_enoent(root, fn):
+    """`read_plain`'s `FileNotFoundError` means absent to its caller (`_document.py` reads it as
+    an empty companion), so a read-phase ENOENT must raise some other `OSError`."""
+    (root / NAME).write_text("payload\n")
+    with pytest.raises(OSError, match="vanished") as ei:
+        fn(root / NAME, os_=FaultOs(read_fault=vanishing_read))
+    assert not isinstance(ei.value, FileNotFoundError), type(ei.value)
+
+
+#: Lone surrogates `os.fsencode` cannot encode: everything in U+D800..U+DFFF except the
+#: surrogateescape range U+DC80..U+DCFF, which spells an undecodable byte.
+UNENCODABLE = ["\ud800", "\udbff", "\udc00", "\udc7f", "\udd00", "\udfff"]
+SURROGATEESCAPE = ["\udc80", "\udcff"]
+
+
+def test_o4_the_samples_are_what_fsencode_says():
+    for ch in UNENCODABLE:
+        with pytest.raises(UnicodeEncodeError):
+            os.fsencode(ch)
+    for ch in SURROGATEESCAPE:
+        assert len(os.fsencode(ch)) == 1
+
+
+@pytest.mark.parametrize("name", [*UNENCODABLE, "a/\ud800", "\udfff.md", "x\udc00y"])
+def test_o4_parse_name_refuses_a_lone_surrogate(name):
+    with pytest.raises(ValueError, match="not a valid relative name"):
+        _io._parse_name(name)
+
+
+@pytest.mark.parametrize("name", [*UNENCODABLE, "dir/\ud800"])
+def test_o4_bound_and_rooted_refuse_an_unencodable_name_before_any_io(root, name):
+    rec = FaultOs()
+    with _io.bind(root, os_=rec) as b:
+        rec.calls.clear()
+        with pytest.raises(ValueError, match="not a valid relative name"):
+            b.read(name)
+        assert rec.calls == [], f"I/O before the name was refused: {rec.calls}"
+    rec2 = FaultOs()
+    with pytest.raises(ValueError, match="not a valid relative name"):
+        _io.rooted_read(root, name, os_=rec2)
+    assert rec2.calls == [], f"I/O before the name was refused: {rec2.calls}"
+
+
+@pytest.mark.parametrize("name", SURROGATEESCAPE)
+def test_o4_control_a_surrogateescape_name_is_still_a_name(root, name):
+    """`\\udc80`..`\\udcff` are undecodable bytes as `os.fsdecode` spells them — real names,
+    for the name readers and the path readers alike."""
+    _io._parse_name(name)
+    with _io.bind(root) as b:
+        assert b.read(name).absent
+    (root / name).write_text("x")
+    with _io.bind(root) as b:
+        assert b.read(name).text == "x"
+    assert _io.rooted_read(root, name) == ("x", None)
+    assert _io.read_plain(root / name) == "x"
+    assert _io.read_guarded(root / name) == ("x", None)
+    assert _io.read_plain_bytes(root / name) == b"x"
+
+
+PATH_READERS = ["read_plain", "read_plain_bytes", "read_guarded", "read_bytes_guarded"]
+
+
+@pytest.mark.parametrize("reader", PATH_READERS)
+@pytest.mark.parametrize("ch", UNENCODABLE)
+def test_o4_a_path_reader_refuses_an_unencodable_path_as_a_read_error(root, reader, ch):
+    rec = FaultOs()
+    kind, reason = read(reader, root, name=f"x{ch}", os_=rec)
+    assert kind == "refused", (reader, kind, reason)
+    assert "open" not in rec.calls, f"{reader}: opened before refusing: {rec.calls}"
+    assert_path_free(reason, root)
+
+
+@pytest.mark.parametrize("reader", PATH_READERS)
+def test_o4_control_a_path_reader_opens_through_its_seam(root, reader):
+    """The positive control for the row above: on a good path the same seam does see the
+    open, so "no open" there means refused first, not a seam the open never crosses."""
+    (root / NAME).write_text("payload\n")
+    rec = FaultOs()
+    kind, _value = read(reader, root, os_=rec)
+    assert kind == "ok"
+    assert "open" in rec.calls, f"{reader}: the open did not go through os_: {rec.calls}"
+
+
+def _mixed_content() -> bytes:
+    """~600 KiB: `\\r\\n`, lone `\\r` and `\\n`, with a `\\r\\n` and a two-byte UTF-8 character
+    straddling every 64 KiB boundary, so a chunked read must stitch both. The filler is ASCII,
+    so the planted sequences never split a character of their own; `é` also recurs elsewhere."""
+    out = bytearray()
+    line = 0
+    while len(out) < 600 * 1024:
+        out += f"line {line} ".encode() + (b"\r\n", b"\r", b"\n")[line % 3]
+        line += 1
+    e_acute = "é".encode()
+    for k in range(1, 9):
+        at = k * 64 * 1024
+        # Both shapes straddle 64, 128 and 256 KiB multiples alike: `\r\n` at 64k·{1,3,4,5,7},
+        # `é` at 64k·{2,6,8} — so 256 KiB carries `\r\n` and 512 KiB carries `é`.
+        out[at - 1:at + 1] = e_acute if k in (2, 6, 8) else b"\r\n"
+        out[at + 100:at + 102] = e_acute
+    out[1000:1002] = e_acute
+    data = bytes(out)
+    data.decode("utf-8")  # the fixture itself is valid UTF-8
+    return data
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_o5_a_multi_chunk_mixed_newline_file_reads_as_read_text_would(root, reader):
+    data = _mixed_content()
+    (root / NAME).write_bytes(data)
+    kind, value = read(reader, root)
+    assert kind == "ok", (reader, kind)
+    if READERS[reader][1]:
+        assert value == data
+    else:
+        assert value == (root / NAME).read_text(encoding="utf-8")
+
+
+def trickle(k: int) -> Callable[[int, int], bytes]:
+    """A descriptor that hands out at most `k` bytes per `read` — a short read is legal at any
+    size, so a reader must loop and stitch whatever the chunking."""
+    return lambda fd, n: os.read(fd, min(n, k))
+
+
+@pytest.mark.parametrize("reader", READERS)
+@pytest.mark.parametrize("k", [7, 4093])
+def test_o5_short_reads_of_any_size_stitch_to_the_same_answer(root, reader, k):
+    """Kills per-chunk decoding or newline translation (a `\\r\\n` or a two-byte character
+    split across two reads) and a single big `read` with no loop."""
+    data = _mixed_content()
+    (root / NAME).write_bytes(data)
+    kind, value = read(reader, root, os_=FaultOs(read_fault=trickle(k)))
+    assert kind == "ok", (reader, kind, str(value)[:80])
+    if READERS[reader][1]:
+        assert value == data
+    else:
+        assert value == (root / NAME).read_text(encoding="utf-8")
+
+
+def test_o5_errors_replace_and_strict_are_unchanged(root):
+    data = b"ok \xff\xfe bad\r\nmore \xc3"
+    (root / NAME).write_bytes(data)
+    expected = (root / NAME).read_text(encoding="utf-8", errors="replace")
+    assert _io.read_plain(root / NAME, errors="replace") == expected
+    assert _io.read_guarded(root / NAME, errors="replace") == (expected, None)
+    with _io.bind(root) as b:
+        assert b.read(NAME, errors="replace").text == expected
+        strict = b.read(NAME)
+    assert strict.text is None
+    assert not strict.absent
+    with pytest.raises(UnicodeDecodeError) as ei:
+        _io.read_plain(root / NAME)
+    with pytest.raises(UnicodeDecodeError) as want:
+        data.decode("utf-8")
+    assert (ei.value.start, ei.value.end, ei.value.reason) == (
+        want.value.start, want.value.end, want.value.reason)
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_o5_an_empty_file_is_an_empty_read(root, reader):
+    (root / NAME).write_bytes(b"")
+    assert read(reader, root) in (("ok", ""), ("ok", b""))
+
+
+def update_locked(path: Path, mutate: Callable[[dict], Any], **kw: Any) -> dict:
+    """The shared locked read-modify-write: `_io.locked_json_update` over `locked_for_rewrite`."""
+    return _io.locked_json_update(_io.locked_for_rewrite(path), mutate, **kw)
+
+
+def read_locked(path: Path) -> dict:
+    """The shared locked read: `_io.locked_json_read` over `locked_for_read`."""
+    return _io.locked_json_read(_io.locked_for_read(path))
+
+
+def _deep(depth: int) -> bytes:
+    return ('{"a": ' + "[" * depth + "]" * depth + "}").encode()
+
+
+#: Each unusable shape, planted by `plant_unusable`. The sparse one is above the limit; the
+#: real one is 65 MiB of bytes on disk.
+UNUSABLE = ("too_big_sparse", "too_big_real", "undecodable", "not_json", "too_deep",
+            "unclosed_deep", "not_object")
+
+
+def plant_unusable(path: Path, kind: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if kind == "too_big_sparse":
+        sparse(path, 64 * MiB + 1)
+    elif kind == "too_big_real":
+        path.write_bytes(b"x" * (65 * MiB))
+    else:
+        path.write_bytes({
+            "undecodable": b'{"a": "\xff\xfe"}',
+            "not_json": b"{nope",
+            "too_deep": _deep(_io.JSON_NESTING_LIMIT + 50),
+            "unclosed_deep": b"[" * 200_000,
+            "not_object": b"[1, 2]",
+        }[kind])
+
+
+def run_dir_at(tmp_path: Path) -> Path:
+    runs_base = tmp_path / "data" / "runs"
+    run_dir = runs_base / "run-1174"
+    run_dir.mkdir(parents=True)
+    return run_dir
+
+
+def load(path: Path) -> Any:
+    return json.loads(path.read_bytes())
+
+
+# -- O6: the update heals ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o6_the_locked_update_heals_unusable_content_to_the_default_with_the_change(
+        tmp_path, kind):
+    """The shared locked update on unusable content starts from the default, applies its
+    change and writes, rather than raising."""
+    p = tmp_path / "state.json"
+    plant_unusable(p, kind)
+    state = update_locked(p, lambda d: d.update(k=1), default=dict)
+    assert state == {"k": 1}
+    assert load(p) == state
+
+
+def test_o6_control_valid_documents_are_merged_not_reset(tmp_path):
+    p = tmp_path / "state.json"
+    update_locked(p, lambda d: d.update(a=1), default=dict)
+    update_locked(p, lambda d: d.update(b=2), default=dict)
+    assert load(p) == {"a": 1, "b": 2}
+
+
+def test_o6_the_rewrite_leaves_exactly_the_new_document(tmp_path):
+    """`lseek` 0, `ftruncate` 0, then the whole write: a long old document shrinking to a short
+    one leaves no tail and no leading NULs, byte for byte."""
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({"long": "x" * 5000}))
+    update_locked(p, lambda d: (d.clear(), d.update(k=1)))
+    assert load(p) == {"k": 1}
+    assert not p.read_bytes().startswith(b"\x00")
+    assert p.read_bytes() == json.dumps({"k": 1}, indent=2).encode()
+
+
+def test_o6_the_shared_update_heals_a_file_growing_past_the_limit(tmp_path):
+    """Too big while growing is too big: it heals too (the step's own size refusal, by type)."""
+    p = tmp_path / "state.json"
+    p.write_text('{"a": 1}')
+    f = FaultOs(read_fault=Endless())
+    state = _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: d.update(k=1),
+                                   default=dict, os_=f)
+    assert state == {"k": 1}
+    assert load(p) == {"k": 1}
+
+
+# -- O7: a read fault that is not about the content propagates ------------------------------
+
+
+def eio(_fd: int, _n: int) -> bytes:
+    raise OSError(errno.EIO, os.strerror(errno.EIO))
+
+
+def efbig_fault(_fd: int, _n: int) -> bytes:
+    raise OSError(errno.EFBIG, os.strerror(errno.EFBIG))
+
+
+@pytest.mark.parametrize("fault", [eio, eagain, vanishing_read, efbig_fault],
+                         ids=["EIO", "EAGAIN", "vanished", "EFBIG-from-a-fault"])
+def test_o7_a_read_fault_propagates_out_of_the_update_and_changes_nothing(tmp_path, fault):
+    p = tmp_path / "state.json"
+    p.write_text('{"keep": true}')
+    f = FaultOs(read_fault=fault)
+    cm = _io.locked_for_rewrite(p, os_=f)
+    with pytest.raises(OSError):  # noqa: PT011 — each fault keeps its own errno and words
+        _io.locked_json_update(cm, lambda d: d.update(k=1), default=dict, os_=f)
+    assert p.read_text() == '{"keep": true}'
+
+
+# -- O8: the locked read is bounded and creates nothing --------------------------------------
+
+
+@pytest.mark.parametrize("kind", UNUSABLE)
+def test_o8_the_locked_read_answers_empty_for_unusable_content(tmp_path, kind):
+    p = tmp_path / "state.json"
+    plant_unusable(p, kind)
+    assert read_locked(p) == {}
+
+
+@pytest.mark.parametrize("fault", [eio, eagain, vanishing_read], ids=["EIO", "EAGAIN", "vanished"])
+def test_o8_the_locked_read_answers_empty_for_any_read_error(tmp_path, fault):
+    p = tmp_path / "state.json"
+    p.write_text('{"a": 1}')
+    f = FaultOs(read_fault=fault)
+    assert _io.locked_json_read(_io.locked_for_read(p, os_=f), os_=f) == {}
+
+
+def test_o8_control_the_locked_read_answers_the_document(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text('{"a": 1}')
+    assert read_locked(p) == {"a": 1}
+
+
+def test_o8_the_locked_read_refuses_a_link_without_following_it(tmp_path):
+    target = tmp_path / "elsewhere.json"
+    target.write_text('{"secret": 1}')
+    p = tmp_path / "state.json"
+    p.symlink_to(target)
+    assert read_locked(p) == {}
+
+
+# -- O11: the path update judges plainness on the descriptor ---------------------------------
+
+
+class HardLinkBeforeOpen(FaultOs):
+    """Plants a hard link to `target` between the precheck and the open (the race window)."""
+
+    def __init__(self, target: Path, other: Path) -> None:
+        super().__init__()
+        self._target, self._other = target, other
+
+    def open(self, path: Any, *a: Any, **kw: Any) -> int:
+        self.calls.append("open")
+        if Path(path) == self._target and not self._other.exists():
+            os.link(self._target, self._other)
+        return os.open(path, *a, **kw)
+
+
+def test_o11_a_hard_link_planted_after_the_precheck_is_refused_on_the_descriptor(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text('{"keep": true}')
+    f = HardLinkBeforeOpen(p, tmp_path / "other")
+    with pytest.raises(OSError, match="non-plain") as ei:
+        _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: d.update(k=1),
+                               default=dict, os_=f)
+    assert ei.value.errno == errno.EMLINK
+    assert p.read_text() == '{"keep": true}'
+
+
+def test_o11_control_without_the_plant_the_update_lands(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text('{"keep": true}')
+    f = FaultOs()
+    _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: d.update(k=1),
+                           default=dict, os_=f)
+    assert load(p) == {"keep": True, "k": 1}
+
+
+# -- O1 widened, O9: the canonical wrappers ---------------------------------------------------
+
+
+def test_o1_the_wrappers_refuse_a_file_over_their_limit(tmp_path):
+    p = sparse(tmp_path / "big.txt", 64 * MiB + 1)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_text_utf8(p)
+    text, reason = _io.read_text_soft(p)
+    assert text is None
+    assert reason
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows_report(p)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows(p)
+
+
+def test_o1_the_wrappers_take_a_per_caller_limit(tmp_path):
+    p = tmp_path / "small.txt"
+    p.write_text("x" * 100)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_text_utf8(p, limit=10)
+    assert _io.read_text_soft(p, limit=10)[0] is None
+    assert _io.read_text_utf8(p, limit=100) == "x" * 100
+
+
+def test_o1_the_wire_log_reader_reads_past_the_default_limit(tmp_path):
+    """`visualize_messages.load_messages` reads the wire log (up to 115 MB seen) by streaming it
+    row by row (#1188 D2): an operator tool over a host-written log, never a whole read."""
+    run_dir = run_dir_at(tmp_path)
+    wire = RunPaths(run_dir).wire_log
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    sparse(wire, 64 * MiB + 1)
+    # Through `visualize_data`, as every other visualizer test: the two modules import each
+    # other, and naming the messages module first fails on a partially initialised module.
+    from defender.presentation.visualize_data import load_messages
+    assert load_messages(run_dir) == []
+
+
+def test_o9_the_wrappers_still_follow_links(tmp_path):
+    target = tmp_path / "real.jsonl"
+    target.write_text('{"a": 1}\n')
+    link = tmp_path / "link.jsonl"
+    link.symlink_to(target)
+    assert _io.read_text_soft(link) == ('{"a": 1}\n', None)
+    assert _io.read_text_utf8(link) == '{"a": 1}\n'
+    assert _io.read_jsonl_rows(link) == [{"a": 1}]
+
+
+def test_o5_the_wrappers_read_as_before(tmp_path):
+    p = tmp_path / "mixed.txt"
+    data = _mixed_content()
+    p.write_bytes(data)
+    want = p.read_text(encoding="utf-8")
+    assert _io.read_text_utf8(p) == want
+    assert _io.read_text_soft(p) == (want, None)
+    bad = tmp_path / "rows.jsonl"
+    bad.write_bytes(b'{"a": 1}\r\n\xff\xfe\n{"b": 2}\rnot json\n')
+    expected = _io._jsonl_rows_of(bad.read_text(encoding="utf-8", errors="replace"))
+    assert _io.read_jsonl_rows_report(bad) == expected
+    assert expected[0] == [{"a": 1}, {"b": 2}]
+
+
+def test_o5_a_procfs_file_reporting_size_zero_reads_in_full():
+    """`/proc/self/mountinfo` reports `st_size` 0; the step reads to EOF whatever `fstat` says
+    (`box/_docker.py` reads it through `read_text_soft`)."""
+    proc = Path("/proc/self/mountinfo")
+    assert os.stat(proc).st_size == 0
+    text, reason = _io.read_text_soft(proc)
+    assert reason is None
+    assert text
+    assert text.splitlines()[0] == proc.read_text().splitlines()[0]
+
+
+class OpenerFaultOs(FaultOs):
+    """`os`, except `open` or `fstat` (by `fail`) raises `EIO` — a fault inside the opener."""
+
+    def __init__(self, fail: str) -> None:
+        super().__init__()
+        self._fail = fail
+
+    def open(self, *a: Any, **kw: Any) -> int:
+        self.calls.append("open")
+        if self._fail == "open":
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        return os.open(*a, **kw)
+
+    def fstat(self, fd: int) -> os.stat_result:
+        self.calls.append("fstat")
+        if self._fail == "fstat":
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        return os.fstat(fd)
+
+
+class ShortWriteOs(FaultOs):
+    """`os`, except each `write` writes at most `k` bytes — a short write is legal."""
+
+    def __init__(self, k: int) -> None:
+        super().__init__()
+        self._k = k
+
+    def write(self, fd: int, data: Any) -> int:
+        self.calls.append("write")
+        return os.write(fd, bytes(data[:self._k]))
+
+
+def in_thread(fn: Callable[[], Any], *, deadline: float = 10.0) -> Any:
+    """`fn()` on a thread, or fail when it has not answered by `deadline` seconds."""
+    out: list[Any] = []
+    t = threading.Thread(target=lambda: out.append(fn()), daemon=True)
+    t.start()
+    t.join(deadline)
+    assert not t.is_alive(), f"no answer within {deadline}s: the call hangs"
+    return out[0]
+
+
+# -- H1: the read opener --------------------------------------------------------------------
+
+
+def test_h1_the_read_opener_takes_a_shared_lock(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text("{}")
+    with _io.locked_for_read(p):
+        other = os.open(p, os.O_RDONLY)
+        try:
+            fcntl.flock(other, fcntl.LOCK_SH | fcntl.LOCK_NB)  # shared: a second reader enters
+            fcntl.flock(other, fcntl.LOCK_UN)
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)  # a writer waits
+        finally:
+            os.close(other)
+
+
+# -- H2, H12 (amended by #1188 D1/D2): the cap only lowers; the wire log streams ------------
+
+
+def _rows_around_a_hole(path: Path) -> None:
+    """A row, a sparse hole past the limit, then another row on its own line."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"n": 1}\n')
+    with open(path, "r+b") as f:  # lint-text-io: ok — test plant of a sparse hole
+        f.truncate(64 * MiB + 1)
+        f.seek(0, os.SEEK_END)
+        f.write(b'\n{"n": 2}\n')
+
+
+def test_h2_the_wire_log_streams_every_row_past_the_cap(tmp_path):
+    """The wire log is past the cap, so a whole read refuses it; the streaming reader still
+    yields every row, and so does the visualizer that uses it."""
+    run_dir = run_dir_at(tmp_path)
+    wire = RunPaths(run_dir).wire_log
+    _rows_around_a_hole(wire)
+    from defender.presentation.visualize_data import load_messages
+    assert load_messages(run_dir) == [{"n": 1}, {"n": 2}]
+    assert list(_io.iter_plain_jsonl_rows(wire)) == [{"n": 1}, {"n": 2}]
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows(wire)
+
+
+def test_h2_the_streaming_reader_skips_non_rows_and_reads_nothing_when_absent(tmp_path):
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"a": 1}\nnot json\n\n[1, 2]\n{"b": 2}', encoding="utf-8")
+    assert list(_io.iter_plain_jsonl_rows(p)) == [{"a": 1}, {"b": 2}]
+    assert list(_io.iter_plain_jsonl_rows(tmp_path / "absent.jsonl")) == []
+
+
+def test_h2_the_streaming_reader_refuses_a_planted_link(tmp_path):
+    """Opened as `read_plain` opens: no-follow, plain regular file. Control: the link's
+    target, read by its own name, streams."""
+    target = tmp_path / "real.jsonl"
+    target.write_text('{"a": 1}\n', encoding="utf-8")
+    link = tmp_path / "link.jsonl"
+    link.symlink_to(target)
+    assert list(_io.iter_plain_jsonl_rows(target)) == [{"a": 1}]
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(link))
+
+
+def test_h2_the_streaming_reader_refuses_a_hard_link_and_a_fifo(tmp_path):
+    original = tmp_path / "original.jsonl"
+    original.write_text('{"a": 1}\n', encoding="utf-8")
+    hard = tmp_path / "hard.jsonl"
+    os.link(original, hard)
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(hard))
+    os.unlink(hard)
+    assert list(_io.iter_plain_jsonl_rows(original)) == [{"a": 1}]
+    fifo = tmp_path / "fifo.jsonl"
+    os.mkfifo(fifo)
+    with pytest.raises(OSError, match=_io.ALIAS_READ_REFUSAL):
+        list(_io.iter_plain_jsonl_rows(fifo))
+
+
+def test_h2_the_streaming_reader_is_lazy(tmp_path):
+    """The first row comes off a file with a 256 MiB tail without the tail being read: peak
+    allocation stays far under it. A whole read would allocate the file."""
+    import tracemalloc
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"n": 1}\n', encoding="utf-8")
+    with open(p, "r+b") as f:  # lint-text-io: ok — test plant of a sparse tail
+        f.truncate(256 * MiB)
+    rows = _io.iter_plain_jsonl_rows(p)
+    tracemalloc.start()
+    try:
+        first = next(rows)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+        rows.close()  # type: ignore[attr-defined]
+    assert first == {"n": 1}
+    assert peak < 4 * MiB, peak
+
+
+def test_h2_the_streaming_reader_skips_a_line_past_the_cap_without_holding_it(tmp_path):
+    """A newline-free stretch longer than READ_LIMIT is not a row and is never held whole:
+    peak allocation stays well under its size. The rows on either side still come out."""
+    import tracemalloc
+    p = tmp_path / "log.jsonl"
+    p.write_text('{"n": 1}\n', encoding="utf-8")
+    with open(p, "r+b") as f:  # lint-text-io: ok — test plant of a sparse newline-free stretch
+        f.truncate(200 * MiB)
+        f.seek(0, os.SEEK_END)
+        f.write(b'\n{"n": 2}\n')
+    tracemalloc.start()
+    try:
+        rows = list(_io.iter_plain_jsonl_rows(p))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert rows == [{"n": 1}, {"n": 2}]
+    assert peak < 160 * MiB, peak
+
+
+def test_h2_a_linked_wire_log_renders_no_messages(tmp_path):
+    """The visualizer over a run copy whose wire log is a link: no messages (the streaming
+    reader refuses the alias), not a crash of the whole page. Control: the plain log renders."""
+    from defender.presentation.visualize_data import load_messages
+    run_dir = run_dir_at(tmp_path)
+    wire = RunPaths(run_dir).wire_log
+    wire.parent.mkdir(parents=True, exist_ok=True)
+    wire.write_text('{"n": 1}\n', encoding="utf-8")
+    assert load_messages(run_dir) == [{"n": 1}]
+    elsewhere = tmp_path / "elsewhere.jsonl"
+    wire.rename(elsewhere)
+    wire.symlink_to(elsewhere)
+    assert load_messages(run_dir) == []
+
+
+def test_read_bytes_capped_reads_exact_bytes_and_follows_a_link(tmp_path):
+    """`Path.read_bytes` semantics (exact bytes, no newline translation, follows a link), capped.
+    Over the cap it refuses before reading."""
+    p = tmp_path / "a.bin"
+    p.write_bytes(b"x\r\ny\r")
+    link = tmp_path / "link.bin"
+    link.symlink_to(p)
+    assert _io.read_bytes_capped(p) == b"x\r\ny\r"
+    assert _io.read_bytes_capped(link) == b"x\r\ny\r"
+    assert _io.read_bytes_capped(p, limit=10 ** 12) == b"x\r\ny\r"
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_bytes_capped(p, limit=3)
+    big = sparse(tmp_path / "big.bin", 64 * MiB + 1)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_bytes_capped(big, limit=10 ** 12)
+    with pytest.raises(FileNotFoundError):
+        _io.read_bytes_capped(tmp_path / "absent.bin")
+
+
+@pytest.mark.parametrize("raised", [64 * MiB + 2, 128 * MiB, 10 ** 12])
+def test_h12_a_caller_cannot_raise_the_cap(tmp_path, raised):
+    """`limit` only lowers: a caller asking for more than READ_LIMIT still gets READ_LIMIT, so
+    a file one byte past it is refused by every wrapper, however the call is spelled."""
+    p = sparse(tmp_path / "big.txt", 64 * MiB + 1)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_text_utf8(p, limit=raised)
+    soft, reason = _io.read_text_soft(p, limit=raised)
+    assert soft is None
+    assert reason
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows_report(p, limit=raised)
+    with pytest.raises(OSError, match="read limit"):
+        _io.read_jsonl_rows(p, limit=raised)
+
+
+def test_h12_a_raised_limit_still_reads_a_file_under_the_cap(tmp_path):
+    """Clamped, not refused: asking for more than READ_LIMIT reads a small file as usual."""
+    p = tmp_path / "small.jsonl"
+    p.write_text('{"a": 1}\n', encoding="utf-8")
+    assert _io.read_text_utf8(p, limit=10 ** 12) == '{"a": 1}\n'
+    assert _io.read_text_soft(p, limit=10 ** 12) == ('{"a": 1}\n', None)
+    assert _io.read_jsonl_rows(p, limit=10 ** 12) == [{"a": 1}]
+    assert _io.read_jsonl_rows_report(p, limit=10 ** 12) == ([{"a": 1}], 0)
+
+
+_READERS = {
+    "read_text_utf8": lambda p, lim: _io.read_text_utf8(p, limit=lim),
+    "read_text_soft": lambda p, lim: _io.read_text_soft(p, limit=lim),
+    "read_jsonl_rows": lambda p, lim: _io.read_jsonl_rows(p, limit=lim),
+    "read_jsonl_rows_report": lambda p, lim: _io.read_jsonl_rows_report(p, limit=lim),
+    "read_bytes_capped": lambda p, lim: _io.read_bytes_capped(p, limit=lim),
+}
+
+
+@pytest.mark.parametrize("reader", sorted(_READERS))
+def test_h12_the_cap_has_no_off_switch(tmp_path, reader):
+    """`None` is not a limit any more (#1188 D1), on every reader that takes one: a TypeError,
+    not "no bound", and not swallowed into a soft "unreadable". Control: the default reads."""
+    p = tmp_path / "small.jsonl"
+    p.write_text('{"a": 1}\n', encoding="utf-8")
+    assert _READERS[reader](p, _io.READ_LIMIT)
+    with pytest.raises(TypeError):
+        _READERS[reader](p, None)
+    with pytest.raises(TypeError):
+        _READERS[reader](tmp_path / "absent.jsonl", None)
+
+
+def test_h12_the_one_read_step_clamps_whoever_calls_it(tmp_path):
+    """The clamp lives in the shared step, not in the wrappers: a direct call with a huge limit
+    still refuses a descriptor past READ_LIMIT. Control: the same call on a small file reads."""
+    big = sparse(tmp_path / "big.bin", 64 * MiB + 1)
+    small = tmp_path / "small.bin"
+    small.write_bytes(b"abc")
+    for path, expect_refusal in ((big, True), (small, False)):
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            size = os.fstat(fd).st_size
+            if expect_refusal:
+                with pytest.raises(OSError, match="read limit"):
+                    _io._read_plain_fd(os, fd, size, binary=True, limit=10 ** 12)
+            else:
+                assert _io._read_plain_fd(os, fd, size, binary=True, limit=10 ** 12) == b"abc"
+        finally:
+            os.close(fd)
+
+
+# -- H4, H5: a size-0 descriptor (a pipe) reads to EOF, bounded as it goes -------------------
+
+
+def _feed_fifo(path: Path, payload: bytes) -> threading.Thread:
+    def write() -> None:
+        try:
+            fd = os.open(path, os.O_WRONLY)
+            try:
+                view = memoryview(payload)
+                while view:
+                    view = view[os.write(fd, view):]
+            finally:
+                os.close(fd)
+        except BrokenPipeError:
+            pass  # the reader refused and closed — expected for the over-limit feed
+    t = threading.Thread(target=write, daemon=True)
+    t.start()
+    return t
+
+
+@pytest.mark.parametrize("wrapper", ["read_text_utf8", "read_text_soft"])
+def test_h4_a_pipe_fed_past_the_limit_is_refused_by_the_wrappers(tmp_path, wrapper):
+    """`fstat` says 0 for a pipe, so only a running bound can refuse it."""
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    feeder = _feed_fifo(fifo, b"x" * (1 * MiB))
+
+    def read() -> Any:
+        if wrapper == "read_text_utf8":
+            try:
+                return _io.read_text_utf8(fifo, limit=4096)
+            except OSError as e:
+                return e
+        return _io.read_text_soft(fifo, limit=4096)
+
+    got = in_thread(read)
+    feeder.join(10)
+    if wrapper == "read_text_utf8":
+        assert isinstance(got, OSError), f"read {len(got)} chars past a 4096-byte limit"
+        assert "read limit" in str(got)
+    else:
+        assert got[0] is None, f"read {len(got[0])} chars past a 4096-byte limit"
+
+
+def test_h5_a_pipe_with_a_multi_chunk_payload_reads_in_full(tmp_path):
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    data = _mixed_content()
+    feeder = _feed_fifo(fifo, data)
+    text = in_thread(lambda: _io.read_text_utf8(fifo))
+    feeder.join(10)
+    plain = tmp_path / "plain"
+    plain.write_bytes(data)
+    assert text == plain.read_text(encoding="utf-8")
+
+
+def test_h5_a_procfs_file_reads_to_the_same_full_content():
+    proc = Path("/proc/self/mountinfo")
+    with open(proc, encoding="utf-8") as f:  # lint-text-io: ok — the independent full read
+        want = f.read()
+    assert _io.read_text_soft(proc) == (want, None)
+
+
+# -- H7: a fault inside the read opener -------------------------------------------------------
+
+
+@pytest.mark.parametrize("fail", ["open", "fstat"])
+def test_h7_a_fault_in_the_read_opener_answers_empty(tmp_path, fail):
+    p = tmp_path / "state.json"
+    p.write_text('{"a": 1}')
+    f = OpenerFaultOs(fail)
+    assert _io.locked_json_read(_io.locked_for_read(p, os_=f), os_=f) == {}
+    assert fail in f.calls
+
+
+# -- H10: the rewrite goes through the seam, whole -------------------------------------------
+
+
+def test_h10_the_rewrite_goes_through_the_seam(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({"long": "x" * 5000}))
+    f = FaultOs()
+    _io.locked_json_update(_io.locked_for_rewrite(p, os_=f), lambda d: (d.clear(), d.update(k=1)),
+                           default=dict, os_=f)
+    for verb in ("lseek", "ftruncate", "write"):
+        assert verb in f.calls, f"the rewrite's {verb} did not go through os_: {f.calls}"
+
+
+@pytest.mark.parametrize("k", [1, 7])
+def test_h10_short_writes_still_leave_the_whole_document(tmp_path, k):
+    p = tmp_path / "state.json"
+    p.write_text(json.dumps({"long": "x" * 5000}))
+    f = ShortWriteOs(k)
+    state = _io.locked_json_update(_io.locked_for_rewrite(p, os_=f),
+                                   lambda d: d.update(k=list(range(50))), default=dict, os_=f)
+    assert p.read_bytes() == json.dumps(state, indent=2).encode()
+
+
+# -- H11: the nesting bound is exactly JSON_NESTING_LIMIT -------------------------------------
+
+
+def test_h11_a_document_at_exactly_the_nesting_limit_is_merged(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_bytes(_deep(_io.JSON_NESTING_LIMIT - 1))  # the outer object makes it LIMIT deep
+    assert _io.json_nesting_depth(p.read_text()) == _io.JSON_NESTING_LIMIT
+    state = update_locked(p, lambda d: d.update(k=1))
+    assert "a" in state
+    assert state["k"] == 1
+
+
+def test_h11_one_past_the_nesting_limit_heals(tmp_path):
+    p = tmp_path / "state.json"
+    p.write_bytes(_deep(_io.JSON_NESTING_LIMIT))
+    assert _io.json_nesting_depth(p.read_text()) == _io.JSON_NESTING_LIMIT + 1
+    assert update_locked(p, lambda d: d.update(k=1)) == {"k": 1}

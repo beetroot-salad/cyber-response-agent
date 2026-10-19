@@ -21,6 +21,7 @@ from pydantic import SkipValidation, field_validator
 from .run_state import RunState
 from .verb_grant import GrantError, VerbGrant
 from defender._io import read_bytes_capped
+from defender._paths import name_roots, root_spellings
 
 if TYPE_CHECKING:
     from defender.runtime.run_tenant import RunTenant as _RunTenant
@@ -106,11 +107,10 @@ def redact_settings_path(text: str, settings: Path) -> str:
     carry an adapter's or the resolver's fault text goes through (the query tool's two fault
     channels, lead-zero's "unavailable" note, the ticket writer's receipt reason): a fault worded
     with the path it read would otherwise put the host's layout in front of the model, and the run
-    dir is the box's writable mount. @owns settings redaction"""
-    for spelling in {str(Path(settings)), str(Path(settings).resolve())}:
-        text = text.replace(spelling.rstrip("/") + "/", SETTINGS_POINTER).replace(
-            spelling, SETTINGS_POINTER.rstrip("/"))
-    return text
+    dir is the box's writable mount. Only a whole path is named (`_paths.name_roots`): a sibling
+    that merely shares the folder's prefix (`settings2/`) is left as it is. @owns settings
+    redaction"""
+    return name_roots(text, root_spellings(Path(settings), SETTINGS_POINTER.rstrip("/")))
 
 
 @model(frozen=True)
@@ -130,13 +130,15 @@ class VerbContext:
     tenant: Annotated[_RunTenant, SkipValidation]
     capture: Any = None
     #: The run's one live state (#1235), set by the query tool and lead-0 from the deps they
-    #: run under. The world registry pauses its investigator clock for as long as an oracle
-    #: turn holds the call; a context with none (pre-flight's replay, the ticket writer) has no
-    #: clock to pause. `SkipValidation`: the run's object itself, never a copy.
+    #: run under. It carries the run clock (#1255): an adapter stamps a capture with its reading
+    #: (`RunState.now`), and the world registry pauses it for as long as an oracle turn holds
+    #: the call. A context with none (pre-flight's replay, the ticket writer) belongs to no run
+    #: and has no run clock: it stamps the wall clock. `SkipValidation`: the run's object itself, never a copy.
     run_state: Annotated[RunState | None, SkipValidation] = None
-    #: The moment a branched-world call is served as of; `None` for the ordinary run, which
-    #: uses the wall clock. Every world of a family, the base included, carries the branch
-    #: point's moment, so no branch arm reads the wall clock (that would make it unreplayable).
+    #: The moment a branched-world call is served as of — the world's CUT-OFF (an unbounded
+    #: window ends here); `None` for the ordinary run. Every world of a family, the base
+    #: included, carries the branch point's moment. It bounds what is read and never stamps a
+    #: capture (#1255: capture stamps are the run clock's, `run_state`).
     #:
     #: Set by the estate registry on every call. A `datetime` rather than a string
     #: because systems format timestamps differently; not a callable because a function as a
@@ -359,20 +361,38 @@ _MODULES: dict[str, Any] = {}
 _MODULES_LOCK = threading.RLock()
 
 
+def _exec_adapter_module(resolved: Path, name: str) -> Any:
+    """Execute the adapter file at `resolved` as a new module object named `name` (never put
+    in `sys.modules`)."""
+    spec = importlib.util.spec_from_file_location(name, resolved)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load adapter module {resolved}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_adapter_module(path: Path) -> Any:
     resolved = path.resolve()
     key = str(resolved)
     with _MODULES_LOCK:
         if key not in _MODULES:
-            spec = importlib.util.spec_from_file_location(
-                f"_defender_adapter_{abs(hash(key))}", resolved,
-            )
-            if spec is None or spec.loader is None:
-                raise ImportError(f"could not load adapter module {resolved}")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            _MODULES[key] = module
+            _MODULES[key] = _exec_adapter_module(resolved, f"_defender_adapter_{abs(hash(key))}")
         return _MODULES[key]
+
+
+def fresh_adapter_module(roster: RosterRead, system: str) -> Any:
+    """`system`'s adapter module imported afresh from the file `roster` accepted for it, for
+    its settings check at run start (`system_status.judge_run`, #1256). Never cached: the
+    call-time load (`ModuleVerbRegistry.verbs`) keeps its own semantics — imported once per
+    process on success, retried on every call after a failure — and this read neither primes
+    nor consults it. `KeyError` for a system the roster does not accept; an import that fails
+    raises its own exception."""
+    path = roster.accepted.get(system)
+    if path is None:
+        raise KeyError(system)
+    resolved = path.resolve()
+    return _exec_adapter_module(resolved, f"_defender_adapter_check_{abs(hash(str(resolved)))}")
 
 
 def _adapter_path_under(root: Path, system: str) -> Path | None:
@@ -559,16 +579,14 @@ class VerbRegistry:
         with what it wraps."""
         return frozenset()
 
-    def _cold_verb_names(self, system: str) -> frozenset[str] | None:
-        """Verb names `system` declares, without importing; `None` if there is no cold source,
-        in which case `decide` falls back to `self.verbs(system)`. Real-adapter subclasses
-        must override this so a refusal never imports an adapter."""
-        return None
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        """Declared names from data, without importing adapter callables."""
+        raise NotImplementedError
 
-    def decide(self, system: str, verb: str) -> VerbDecision:
+    def authorize(self, system: str, verb: str) -> VerbDecision:
         """The grant decision point.
 
-        Decided from the grant first; no adapter is imported unless the grant admits the call.
+        Decided from grants and cold declared names; no adapter callable is resolved.
         A verb the system does not declare (including near-misses) is UNDECLARED; DENIED is
         only for a real, withheld verb. A wholly ungranted system is also UNDECLARED, which
         carries agent-visible retry semantics (no denial record, agent-fixable).
@@ -579,14 +597,7 @@ class VerbRegistry:
         """
         if not self.grant.allows(system, verb):
             if system in self.grant.systems:
-                cold = self._cold_verb_names(system)
-                if cold is not None:
-                    real = verb in cold
-                else:
-                    try:
-                        real = verb in self.verbs(system)
-                    except KeyError:
-                        real = False
+                real = verb in self._cold_verb_names(system)
                 if real:
                     # A withheld verb is a table row without this role; point at the table.
                     withheld = (
@@ -605,7 +616,7 @@ class VerbRegistry:
             # The grant reaches this system nowhere. A cold read (never an import) tells a
             # typo from an ungranted real verb; an ungranted adapter must not be executed.
             cold = self._cold_verb_names(system)
-            declared_here = cold is not None and verb in cold
+            declared_here = verb in cold
             if not declared_here:
                 return VerbDecision(
                     UNDECLARED, None,
@@ -623,6 +634,10 @@ class VerbRegistry:
                 f"{self.grant.role!r} holds no grant reaching the {system!r} system at "
                 f"all.{fix}",
             )
+        return VerbDecision(GRANTED, None, None)
+
+    def resolve(self, system: str, verb: str) -> VerbDecision:
+        """Resolve an authorized call and validate its declared class; may import adapters."""
         try:
             verbs = self.verbs(system)
         except KeyError:
@@ -639,12 +654,18 @@ class VerbRegistry:
             )
         return VerbDecision(GRANTED, fn, None)
 
-    def decide_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
-        """`decide` for a call the model is actually making, as opposed to verb discovery.
+    def authorize_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """Cold authorization for an actual call, allowing registries to record refusals."""
+        return self.authorize(system, verb)
 
-        Separate so a registry that records served calls (`estate.registry.WorldRegistry`) does
-        not record listings. `params` is for that record; the decision is `decide`'s alone."""
-        return self.decide(system, verb)
+    def resolve_call(self, system: str, verb: str, params: Mapping[str, Any]) -> VerbDecision:
+        """Callable resolution for an authorized, runnable call."""
+        return self.resolve(system, verb)
+
+    def decide(self, system: str, verb: str) -> VerbDecision:
+        """Compatibility decision combining cold authorization and callable resolution."""
+        decision = self.authorize(system, verb)
+        return self.resolve(system, verb) if decision.outcome == GRANTED else decision
 
 
 class ModuleVerbRegistry(VerbRegistry):
@@ -700,6 +721,7 @@ class ModuleVerbRegistry(VerbRegistry):
 
 __all__ = [
     "ADAPTER_SUFFIX",
+    "fresh_adapter_module",
     "DENIED",
     "GRANTED",
     "SYSTEM_MAX_LEN",

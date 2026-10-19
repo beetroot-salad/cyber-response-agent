@@ -1,35 +1,28 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
-import logging
-from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, NoReturn
 
 from pydantic import ValidationError
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities.abstract import AbstractCapability
 from pydantic_ai.exceptions import (
-    ApprovalRequired,
-    CallDeferred,
     ModelRetry,
-    SkipToolExecution,
     ToolFailed,
-    ToolRetryError,
 )
 
 from defender.runtime.tools._deps import run_of
-from defender._knowledge import CHECKOUT_KNOWLEDGE
 from defender.hooks.budget_enforcer import BudgetKill
 from defender._text import as_str
 from defender._untrusted import wrap_fresh
 from defender.learning.branch.redaction import redact_model_visible
-from defender.scripts.adapters.faults import USAGE_EXIT_CODE, AdapterFault
-from defender.runtime.payload_view import render as _render_payload
+from defender.integrations.faults import USAGE_EXIT_CODE, AdapterFault, ConfigFault
+from defender.runtime.payload_view import payload_text_of, render as _render_payload
 from defender.runtime.request_ceiling import WRITE_SUMMARY_NOW
 from defender.runtime.tools import DeadEnd
-from defender.scripts.gather_tools.record_query import (
+from defender.runtime.record_query import (
     REPEAT_ESCAPE,
     GatherDeadEnd,
     RejectionBudgetTrip,
@@ -52,7 +45,7 @@ from defender.scripts.gather_tools.record_query import (
     repeat_trip_detail,
     system_fingerprint,
 )
-from defender._query_rules import (
+from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     DENIED_QUERY_ID,
     REPEAT_TRIP_QUERY_ID,
@@ -63,39 +56,47 @@ from defender._query_rules import (
 )
 
 from . import circuit_breaker
-from .run_state import run_state_of
-from .run_end import CallRecordWriteFailed
+from . import system_status
+from .run_state import run_state_of, run_time_iso
 from .verbs import (
     CALL_DELIVERY,
     CALL_ID,
     DENIED,
     GRANTED,
     CallDelivery,
-    ServingAbort,
     VerbContext,
-    _ann_name,
-    _resolved_hints,
-    SYSTEM_MAX_LEN,
-    is_system_name,
-    model_facing_params,
     validate_params,
 )
 
-_logger = logging.getLogger(__name__)
+from defender.runtime.query_catalog import (
+    CONTROL_FLOW_EXCEPTIONS as CONTROL_FLOW_EXCEPTIONS,
+    UNENFORCED_TYPE as UNENFORCED_TYPE,
+    _LIST_VERBS_DOWN as _LIST_VERBS_DOWN,
+    _LIST_VERBS_HEADER as _LIST_VERBS_HEADER,
+    _LIST_VERBS_LEGEND as _LIST_VERBS_LEGEND,
+    _LIST_VERBS_NONE_GRANTED as _LIST_VERBS_NONE_GRANTED,
+    _LIST_VERBS_NO_VERBS as _LIST_VERBS_NO_VERBS,
+    _LIST_VERBS_UNDERIVABLE as _LIST_VERBS_UNDERIVABLE,
+    _LIST_VERBS_UNENFORCED_NOTE as _LIST_VERBS_UNENFORCED_NOTE,
+    _LIST_VERBS_UNKNOWN_SYSTEM as _LIST_VERBS_UNKNOWN_SYSTEM,
+    _LIST_VERBS_UNLOADABLE as _LIST_VERBS_UNLOADABLE,
+    _LIST_VERBS_UNREACHABLE as _LIST_VERBS_UNREACHABLE,
+    _RERAISE as _RERAISE,
+    _SKILLS_REL as _SKILLS_REL,
+    _echoed_system as _echoed_system,
+    _granted_systems as _granted_systems,
+    _json_default as _json_default,
+    _list_verbs_declared as _list_verbs_declared,
+    _list_verbs_line as _list_verbs_line,
+    _logger as _logger,
+    _registry_declares as _registry_declares,
+    _rendered_param as _rendered_param,
+    _tool_list_verbs as _tool_list_verbs,
+    register_list_verbs_tool as register_list_verbs_tool,
+)
+
 
 TOOL_NAME = "query"
-
-CONTROL_FLOW_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    circuit_breaker.RunAborted,
-    ModelRetry,
-    SkipToolExecution,
-    CallDeferred,
-    ApprovalRequired,
-    ToolRetryError,
-    # A served verb that gave up on its world (#1224): the sibling ends, nothing is filed.
-    ServingAbort,
-    CallRecordWriteFailed,
-)
 
 DEFAULT_FAULT_EXIT = 2
 
@@ -192,13 +193,12 @@ class QueryCapture(AbstractCapability[Any]):
 
         return observe.denial_logger(run_dir)
 
-    def _decide_guarded(
+    def _resolve_guarded(
         self, system: str, verb: str, params: dict,
     ) -> tuple[Any, str | None]:
-        """The grant decision, guarded so a broken adapter import degrades instead of unwinding
-        the stage. Uses `decide_call` so a registry that records served calls records this one."""
+        """Resolve an admitted, runnable call, preserving registry fault accounting."""
         try:
-            return self._registry.decide_call(system, verb, params), None
+            return self._registry.resolve_call(system, verb, params), None
         except CONTROL_FLOW_EXCEPTIONS:
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
@@ -412,14 +412,14 @@ class QueryCapture(AbstractCapability[Any]):
         """The grant check, ahead of everything else: a denied call always produces its denial
         record (and a `∅.denied` sentinel row), never an evidence row. Returns
         `(decision, early_result)`; `early_result` is set when the caller must return early."""
-        decision, load_error = self._decide_guarded(system, verb, params)
-        if load_error is None and decision.outcome == DENIED:
+        decision = self._registry.authorize_call(system, verb, params)
+        if decision.outcome == DENIED:
             refusal = decision.refusal or f"denied: {system}.{verb}"
             # Audit record first, above the door: a stopped lead does not get a quieter audit
             # trail, and a failed row write below has already left it behind.
             self._denial_logger_for(run_of(deps)).log_policy_denial(
                 role=self._role, system=system, verb=verb,
-                call_id=f"{system}.{verb}", params=params,
+                call_id=f"{system}.{verb}", params=params, ts=run_time_iso(deps),
             )
             # A closed door withholds only the row; the denial is still answered as a denial,
             # not as `QUERY_NOT_RUN`.
@@ -437,14 +437,53 @@ class QueryCapture(AbstractCapability[Any]):
         if _door_closed(deps):
             raise ToolFailed(QUERY_NOT_RUN)
 
+        if decision.outcome != GRANTED:
+            await self._reject_unresolved(deps, decision, system, verb, params)
+
+        return decision, None
+
+    async def _reject_unresolved(self, deps, decision, system: str, verb: str, params: dict):
+        """Record and reject an undeclared call at either decision stage."""
+        # Unresolvable verb: same guard and coarsening as the schema placement. A declared
+        # system with an unknown verb still records its name.
+        refusal = decision.refusal or f"unresolvable: {system}.{verb}"
+        recorded_system, system_key = self._coarsen(system)
+        trip = self._rejection_guard(
+            deps, recorded_system, verb, params, system_key=system_key,
+        )
+        # The model gets the full refusal; a coarsened row gets a host literal instead, since
+        # the refusal names the model's system. A declared system keeps the refusal, which
+        # the pitfalls channel needs.
+        rejection = (
+            UNDECLARED_SYSTEM_DETAIL
+            if self._was_coarsened(recorded_system)
+            else (decision.refusal or "unresolvable")
+        )
+        # The trip phrase wraps the coarsened detail, as at the schema placement.
+        detail = rejection if trip is None else rejection_detail(trip, rejection)
+        await self._record(
+            deps, system=recorded_system, verb=verb, system_key=system_key,
+            query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
+            exit_code=USAGE_EXIT_CODE,
+            detail=detail,
+        )
+        if trip is not None:
+            raise rejection_dead_end(
+                trip,
+                target=self._undeclared_target(recorded=recorded_system, raw=system),
+                verb=verb,
+            )
+        raise ModelRetry(refusal)
+
+    async def _resolve_check(self, deps, system: str, verb: str, params: dict):
+        """Gate down systems before resolution, then file load faults or declaration failures."""
+        # A down system answers before callable resolution, parameter screens or adapter I/O.
+        refused = _down_refusal(deps, system)
+        if refused is not None:
+            return None, refused
+
+        decision, load_error = self._resolve_guarded(system, verb, params)
         if load_error is not None:
-            # Breaker check here too: these `infra` rows are outside `rejection_trip`, so the
-            # breaker must bound a failing import (retried every call, since only successes are
-            # cached). Before `_record`, so a down answer writes no row. Not hoisted above the
-            # DENIED branch, which always owes its denial record.
-            tripped = _tripped_message(deps, system)
-            if tripped is not None:
-                return None, tripped
             row, text = await self._record(
                 deps, system=system, verb=verb,
                 query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
@@ -456,36 +495,7 @@ class QueryCapture(AbstractCapability[Any]):
             return None, self._model_view(deps, row, text, DEFAULT_FAULT_EXIT, load_error)
 
         if decision.outcome != GRANTED:
-            # Unresolvable verb: same guard and coarsening as the schema placement. A declared
-            # system with an unknown verb still records its name.
-            refusal = decision.refusal or f"unresolvable: {system}.{verb}"
-            recorded_system, system_key = self._coarsen(system)
-            trip = self._rejection_guard(
-                deps, recorded_system, verb, params, system_key=system_key,
-            )
-            # The model gets the full refusal; a coarsened row gets a host literal instead, since
-            # the refusal names the model's system. A declared system keeps the refusal, which
-            # the pitfalls channel needs.
-            rejection = (
-                UNDECLARED_SYSTEM_DETAIL
-                if self._was_coarsened(recorded_system)
-                else (decision.refusal or "unresolvable")
-            )
-            # The trip phrase wraps the coarsened detail, as at the schema placement.
-            detail = rejection if trip is None else rejection_detail(trip, rejection)
-            await self._record(
-                deps, system=recorded_system, verb=verb, system_key=system_key,
-                query_id=ABOVE_GUARD_QUERY_ID, params=params, payload=None,
-                exit_code=USAGE_EXIT_CODE,
-                detail=detail,
-            )
-            if trip is not None:
-                raise rejection_dead_end(
-                    trip,
-                    target=self._undeclared_target(recorded=recorded_system, raw=system),
-                    verb=verb,
-                )
-            raise ModelRetry(refusal)
+            await self._reject_unresolved(deps, decision, system, verb, params)
 
         return decision, None
 
@@ -552,10 +562,9 @@ class QueryCapture(AbstractCapability[Any]):
         if early_result is not None:
             return early_result
 
-        # Breaker before the screens: a system known down answers "down", not a param complaint.
-        tripped = _tripped_message(deps, system)
-        if tripped is not None:
-            return tripped
+        decision, early_result = await self._resolve_check(deps, system, verb, params)
+        if early_result is not None:
+            return early_result
 
         # Repeat guard above `_screen`, so a repeated bad call trips instead of earning yet
         # another identical `ModelRetry`.
@@ -583,6 +592,7 @@ class QueryCapture(AbstractCapability[Any]):
         query_id = resolve_query_id(system, verb, as_str(model_query_id) or None)
 
         payload: Any = None
+        escaped = False
         try:
             payload = await handler(args)
             exit_code, detail = 0, ""
@@ -590,11 +600,33 @@ class QueryCapture(AbstractCapability[Any]):
             raise
         except (BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError):
             raise
+        except ConfigFault as e:
+            # A settings fault the system's start check did not catch (#1256 O-5b, DP3): the
+            # system is not configured for this run, from this call on.
+            exit_code, detail, escaped = e.exit_code, e.detail, True
         except AdapterFault as e:
             exit_code, detail = e.exit_code, e.detail
         except BaseException as e:  # noqa: BLE001 — the point: an unmapped fault still writes a row
             exit_code, detail = _fault_exit(e), str(e) or type(e).__name__
 
+        if escaped:
+            # Marked down before the row, so a sibling lead's call racing this one is refused;
+            # the row records the call that ran, uncharged (the breaker counts only what can
+            # change during a run, DP2), and the answer is the not-configured refusal every
+            # later call gets, naming the fault's reason.
+            defender_dir = getattr(deps, "defender_dir", None)
+            system_status.mark_escaped(
+                run_state_of(deps), system, detail, tenant=getattr(deps, "tenant", None),
+                defender_dir=Path(defender_dir) if defender_dir is not None else None,
+                known_ids=self._known_ids)
+            await self._record(
+                deps, system=system, verb=verb, query_id=query_id, params=params,
+                payload=payload, exit_code=exit_code, detail=detail, system_key="",
+                charged=False,
+            )
+            refused = _down_refusal(deps, system)
+            assert refused is not None, "a system just marked down is down"
+            return refused
         row, text = await self._record(
             deps, system=system, verb=verb, query_id=query_id, params=params,
             payload=payload, exit_code=exit_code, detail=detail, system_key="",
@@ -603,14 +635,16 @@ class QueryCapture(AbstractCapability[Any]):
 
     async def _record(  # noqa: PLR0913 — one per row column the CALLER decides, plus `deps`
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
-        payload: Any, exit_code: int, detail: str, system_key: str,
+        payload: Any, exit_code: int, detail: str, system_key: str, charged: bool = True,
     ) -> tuple[dict, str]:
         """Append the row and charge the circuit breaker to its `system`.
 
         The charge is the call's outcome, not the view's: it lands whether or not the row's
         view line could be written. A refused write (`append_query_row` has already recorded
         the row in the run's state) is charged first and then propagates; the run is not told
-        the call was viewed.
+        the call was viewed. `charged=False` writes the row only: a call whose `ConfigFault`
+        escaped the start check marks its system not configured, which the breaker never
+        counts (#1256 O-5b).
 
         A coarsened row charges `""`, which `record_outcome` skips; the rejection guards bound
         those instead. `system_key` has no default so every writer must state it explicitly.
@@ -620,7 +654,7 @@ class QueryCapture(AbstractCapability[Any]):
         lead_id = _dispatched_lead(deps)
         state = run_state_of(deps)
 
-        text = "" if exit_code != 0 else json.dumps(payload, default=str)
+        text = "" if exit_code != 0 else payload_text_of(payload)
 
         try:
             row = append_query_row(
@@ -648,9 +682,10 @@ class QueryCapture(AbstractCapability[Any]):
                 call_id=CALL_ID.get(),
             )
         finally:
-            circuit_breaker.record_outcome(
-                state, system, exit_code,
-                counts_toward_run=not getattr(deps, "harness_lead", False))
+            if charged:
+                circuit_breaker.record_outcome(
+                    state, system, exit_code,
+                    counts_toward_run=not getattr(deps, "harness_lead", False))
         return row, text
 
     def _model_view(self, deps, row: dict, text: str, exit_code: int, detail: str) -> str:
@@ -674,261 +709,6 @@ class QueryCapture(AbstractCapability[Any]):
         if repeat is not None:
             view = f"{repeat}\n{view}"
         return _format_bash_result(0, wrap_fresh(view, "untrusted"), "", note)
-
-
-#: What a param renders as when its annotation could not be resolved. `_resolved_hints` then
-#: returns `{}` for the whole verb and `validate_params` type-checks nothing, so printing the
-#: annotation would promise a check that is not made.
-UNENFORCED_TYPE = "type unenforced"
-
-#: The grant-first answer: absent and withheld systems read the same, so discovery neither
-#: imports an ungranted adapter nor becomes an oracle over the on-disk roster. Listing the
-#: reachable systems discloses nothing new (the dispatch prompt lists them) and fixes typos.
-_LIST_VERBS_UNREACHABLE = (
-    "`{system}` — your grant reaches no verb on any system by that name, so there is nothing "
-    "here you may run and no surface to show you.{roster} Measure this lead against a system "
-    "you do hold, or say so in your summary rather than reporting a measurement you could not "
-    "take."
-)
-
-_LIST_VERBS_UNKNOWN_SYSTEM = (
-    "`{system}` — no adapter is registered under that name, so no verb surface can be derived "
-    "for it. The Dispatch block at the end of your prompt names the system you were dispatched "
-    "to; confirm it there and call this again with that name."
-)
-
-#: Where a system's skill sits, as the model-facing notes below name it (`defender._knowledge`).
-_SKILLS_REL = CHECKOUT_KNOWLEDGE.skills_rel
-
-#: Reached only for a name that passed `_adapter_path_under`'s checks, so interpolating it into
-#: a path is safe. `execution.md` holds only value constraints and pitfalls, not verbs.
-_LIST_VERBS_UNLOADABLE = (
-    "`{system}` — UNAVAILABLE: its adapter could not be loaded ({err}). No verb surface can be "
-    "derived for it right now, and no file carries a copy — the verb roster and its params are "
-    "read from the live signatures and nowhere else. "
-    f"`{_SKILLS_REL}{{system}}/execution.md` still states this system's value constraints and "
-    "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
-    "param name."
-)
-
-#: The adapter loaded but its surface could not be derived (e.g. a grant/declaration class
-#: disagreement out of `decide`): a defender-side fault the lead cannot route around.
-_LIST_VERBS_UNDERIVABLE = (
-    "`{system}` — UNAVAILABLE: its verb surface could not be derived ({err}). That is a "
-    "defender-side fault, not something your call can fix, and no file carries a copy of the "
-    f"surface. `{_SKILLS_REL}{{system}}/execution.md` still states this system's value "
-    "constraints and recorded pitfalls; report the failure in your summary rather than guessing "
-    "a verb or a param name."
-)
-
-#: A missing or malformed `VERBS` table (read as `{}`): a broken adapter, not a withheld grant.
-_LIST_VERBS_NO_VERBS = (
-    "`{system}` — UNAVAILABLE: its adapter declares no verbs at all, so no verb surface can be "
-    "derived for it, and no file carries a copy. "
-    f"`{_SKILLS_REL}{{system}}/execution.md` still states this system's value constraints and "
-    "recorded pitfalls; report the failure in your summary rather than guessing a verb or a "
-    "param name."
-)
-
-#: Every declared verb is withheld from this role; distinct from a broken adapter, which calls
-#: for the opposite response.
-_LIST_VERBS_NONE_GRANTED = (
-    "`{system}` — its adapter declares verbs, but your grant admits none of them. This is not "
-    "an empty system and not a read failure: there is nothing here you may run. Measure this "
-    "lead against a system you do hold, or say so in your summary rather than reporting a "
-    "measurement you could not take."
-)
-
-_LIST_VERBS_HEADER = (
-    "`{system}` — the {count} verb(s) your grant admits, read from the adapter's live "
-    "signatures. Copy a line and bind the values in place of each `<…>`:\n"
-)
-
-_LIST_VERBS_LEGEND = (
-    "\nParams bind **by name**; there are no flags and no positional args. Types are literal "
-    "JSON: a number is a number (`20`, never `\"20\"`), a boolean is `true`/`false` (never "
-    "`\"false\"`, which is truthy and would have meant the opposite). A param whose descriptor "
-    "carries a `default` is OPTIONAL — drop it to take that default; every other param is "
-    "REQUIRED.\n"
-    "\nAdd `query_id=\"{system}.<id>\"` to the call — a catalog template's id when you reused "
-    "one, or a coined `{system}.<descriptive-kebab>` when none fit.\n"
-)
-
-#: Quotes the marker as a prefix: a param with a default renders `<type unenforced, default …>`.
-_LIST_VERBS_UNENFORCED_NOTE = (
-    "\nA descriptor opening `<{marker}` marks a param whose declared annotation could not be "
-    "resolved, so the boundary does NOT type-check it — a wrong-typed value there reaches the "
-    "adapter instead of being refused. Bind it to the value constraint this system's "
-    "`execution.md` states, and treat a surprising answer as suspect rather than as data.\n"
-)
-
-
-def _json_default(value: Any) -> str:
-    """A param default in JSON spelling (`null`/`true`), never `repr`'s, so a copied call is valid."""
-    try:
-        return json.dumps(value)
-    except (TypeError, ValueError):
-        return json.dumps(repr(value))
-
-
-def _rendered_param(param: inspect.Parameter, hints: Mapping[str, Any]) -> str:
-    """One declared param as a `"name": <descriptor>` entry of a `params={…}` body."""
-    inner = _ann_name(hints[param.name]) if param.name in hints else UNENFORCED_TYPE
-    if param.default is not inspect.Parameter.empty:
-        inner = f"{inner}, default {_json_default(param.default)}"
-    return f'"{param.name}": <{inner}>'
-
-
-def _echoed_system(system: str) -> str:
-    """The `system` string a degradation message may interpolate.
-
-    A well-formed name is echoed verbatim. Anything else is a bounded `repr` with backticks
-    removed, so it cannot forge markdown structure or close the backticked span early.
-    """
-    if is_system_name(system):
-        return system
-    return repr(system[:SYSTEM_MAX_LEN]).replace("`", "")
-
-
-#: What every guarded read below re-raises rather than degrading: framework control flow plus
-#: process kills.
-_RERAISE: tuple[type[BaseException], ...] = (
-    *CONTROL_FLOW_EXCEPTIONS,
-    BudgetKill, KeyboardInterrupt, GeneratorExit, asyncio.CancelledError,
-)
-
-
-def _registry_declares(registry: Any, system: str) -> bool:
-    """Does the registry list `system`? `systems()` never raises, so there is no "cannot say"."""
-    return system in registry.systems()
-
-
-def _granted_systems(registry: Any) -> tuple[str, ...]:
-    """The systems this role's grant reaches, or `()` when the registry cannot say."""
-    try:
-        return tuple(sorted(registry.grant.systems))
-    except _RERAISE:
-        raise
-    except BaseException as e:  # noqa: BLE001 — a registry that cannot name its grant reaches nothing
-        # Logged because the lead sees only an empty grant, indistinguishable from a real one.
-        _logger.warning(f"verb registry could not name its grant "
-                        f"({type(e).__name__}: {e}); list_verbs will answer 'no system reached'")
-        return ()
-
-
-def _list_verbs_declared(
-    registry: Any, system: str, shown: str,
-) -> tuple[Mapping[str, Any], str | None]:
-    """`(declared_verbs, degradation)`: the registry's table for `system`, or the message to
-    answer instead. Never both, and never an exception out of the tool."""
-    try:
-        declared = registry.verbs(system)
-    except KeyError as e:
-        # `KeyError` means either "no such adapter" or an import-time `KeyError` in the adapter
-        # (e.g. `os.environ[...]`); the system list tells them apart. The key is the diagnosis.
-        if _registry_declares(registry, system):
-            return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err=f"KeyError: {e}")
-        return {}, _LIST_VERBS_UNKNOWN_SYSTEM.format(system=shown)
-    except _RERAISE:
-        raise
-    except BaseException as e:  # noqa: BLE001 — an adapter that will not import is a degradation
-        return {}, _LIST_VERBS_UNLOADABLE.format(system=shown, err=f"{type(e).__name__}: {e}")
-    if not declared:
-        # `{}` here is a broken adapter (no usable `VERBS`), not a withheld grant.
-        return {}, _LIST_VERBS_NO_VERBS.format(system=shown)
-    return declared, None
-
-
-def _list_verbs_line(
-    registry: Any, system: str, verb: Any, shown: str,
-) -> tuple[tuple[str, bool] | None, str | None]:
-    """`((rendered_call, any_param_unenforced), degradation)` for one verb — `(None, None)`
-    when the grant withholds it.
-
-    Decision and render are guarded together: both can raise on a broken adapter, and an
-    exception out of a discovery tool would end the lead's turn.
-    """
-    try:
-        decision = registry.decide(system, verb)
-        if decision.outcome != GRANTED or decision.fn is None:
-            return None, None
-        # `model_facing_params`: wrapper-only params are refused, so they are not published.
-        params = model_facing_params(decision.fn)
-        hints = _resolved_hints(decision.fn)
-        rendered = ", ".join(_rendered_param(p, hints) for p in params.values())
-        # `shown`, not raw `system`: the line the lead copies must not carry an unescaped name.
-        line = f'query(system="{shown}", verb="{verb}", params={{{rendered}}})'
-        return (line, any(name not in hints for name in params)), None
-    except _RERAISE:
-        raise
-    except BaseException as e:  # noqa: BLE001 — a surface that cannot be derived degrades loud
-        return None, _LIST_VERBS_UNDERIVABLE.format(
-            system=shown, err=f"{shown}.{verb}: {type(e).__name__}: {e}",
-        )
-
-
-def _tool_list_verbs(registry: Any, system: str) -> str:
-    """`system`'s granted verbs and their declared params, derived at call time.
-
-    Uses the same readers `validate_params` enforces with, and filters through
-    `registry.decide`, so what is published is what `query` admits. The system-level grant
-    check runs first because `decide` would import the adapter.
-
-    Nothing is persisted (no row, breaker, or repeat guard): it reads our own adapter
-    signatures, so the output is first-party and carries no untrusted frame.
-    """
-    shown = _echoed_system(system)
-    # Grant first, before anything resolves an adapter.
-    reachable = _granted_systems(registry)
-    if system not in reachable:
-        roster = f" The systems your grant reaches: {', '.join(reachable)}." if reachable else ""
-        return _LIST_VERBS_UNREACHABLE.format(system=shown, roster=roster)
-
-    declared, degradation = _list_verbs_declared(registry, system, shown)
-    if degradation is not None:
-        return degradation
-
-    lines: list[str] = []
-    any_unenforced = False
-    # `key=str` so a broken adapter's mixed key types cannot raise here; non-string keys are
-    # then withheld by the grant filter.
-    for verb in sorted(declared, key=str):
-        rendered, failure = _list_verbs_line(registry, system, verb, shown)
-        if failure is not None:
-            return failure
-        if rendered is None:
-            continue
-        line, unenforced = rendered
-        any_unenforced = any_unenforced or unenforced
-        lines.append(line)
-
-    if not lines:
-        return _LIST_VERBS_NONE_GRANTED.format(system=shown)
-
-    out = (
-        _LIST_VERBS_HEADER.format(system=shown, count=len(lines))
-        + "\n" + "\n".join(f"    {line}" for line in lines) + "\n"
-        + _LIST_VERBS_LEGEND.format(system=shown)
-    )
-    if any_unenforced:
-        out += _LIST_VERBS_UNENFORCED_NOTE.format(marker=UNENFORCED_TYPE)
-    return out
-
-
-def register_list_verbs_tool(agent, registry) -> None:
-
-    @agent.tool
-    async def list_verbs(ctx: RunContext[Any], system: str) -> str:
-        """The verbs one system of record declares and the params each one binds — read from
-        the adapter's live signatures, filtered to what your grant admits. Call it before you
-        coin a query no template covers: it is the same surface the `query` tool enforces, so
-        a param it names is a param that will bind and one it omits will be refused. `system`
-        is the system you were dispatched to (the Dispatch block names it); call it again for
-        another system if this lead crosses one. It runs nothing against the system of record
-        and is not recorded as a query."""
-        # Off the event loop: the first call imports the adapter module, which would otherwise
-        # stall sibling leads.
-        return await asyncio.to_thread(_tool_list_verbs, registry, system)
 
 
 def register_query_tool(agent, registry) -> None:
@@ -982,7 +762,7 @@ def _as_dict(v: Any) -> dict:
 
 
 from .tools import _bash_env, _format_bash_result  # noqa: E402
-from .tools_gather import _payload_note, _tripped_message  # noqa: E402
+from .tools_gather import _down_refusal, _payload_note  # noqa: E402
 
 
 __all__ = [

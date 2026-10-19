@@ -48,4 +48,4 @@ Each finding has an ID, evidence or reproducer, affected design promise and test
 
 Return the input design and test revisions, checks actually run with outcomes, material findings first, and remaining verification obligations. A clean review means no findings within the stated review scope. Recheck affected revisions and shared consequences after repairs; do not let an old clean verdict certify changed assertions.
 
-Optional lenses and tests-only blind readers are additional instruments, not mandatory rounds. Specify the question they answer and reconcile their output into this record before calling review complete.
+The initial review panel consists of one whole-contract Opus reviewer at high effort and two or three Sonnet reviewers at high effort with distinct, design-relevant lenses. Specify each lens's question and reconcile every reviewer's output before calling review complete. Repairs need targeted rechecks by the affected reviewers, not a fresh full panel unless material revisions invalidate its scope. A tests-only blind reader remains optional.

@@ -16,13 +16,16 @@ REPO_ROOT = DEFENDER_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from defender import _alert_input, _io, _provenance, _tenant  # noqa: E402
+from defender import _io
+from defender.records import _alert_input
+from defender.records import _provenance
+from defender.tenancy import _tenant  # noqa: E402
 from defender._io import read_bytes_capped  # noqa: E402
 from defender.run_repository import (  # noqa: E402
     RUN_LAYOUT, Run, RunAddress, RunId, RunPaths, RunRefused, artifact_dir, artifact_file, case_ref_of_digest,
     run_name_fault,
 )
-from defender.scripts.visualize._page_failed import VisualizeFailed  # noqa: E402
+from defender.presentation._page_failed import VisualizeFailed  # noqa: E402
 
 _logger = logging.getLogger(__name__)
 
@@ -100,7 +103,7 @@ def materialize_run(
                                 "(`episode_runs=`): an arm is made only in its episode's "
                                 "container")
             run = episode_runs.create(admitted)
-            world_id: str | None = world.world_id
+            world_id: str | None = None
         else:
             run = tenant.runs_repository().create(admitted, pinned=pinned)
             world_id = None
@@ -131,8 +134,6 @@ def materialize_run(
     _stamp(
         run, knowledge_dir=tenant.knowledge, model=model, tenant_id=run.tenant_id,
         world_id=world_id,
-        parent_run_id=world.family.source_run_id if world is not None else None,
-        fork_turn=world.family.branch_message_id if world is not None else None,
         started_at=started_at, alert_label=_alert_label(alert),
     )
     return run
@@ -200,7 +201,7 @@ def _admit_input(alert: Path, *, tenant: _tenant.Tenant, world: ResumeWorld | No
     except OSError as e:
         sys.exit(f"[run.py] the alert {alert} could not be read: {e}")
     if world is not None:
-        from defender._episode_paths import EpisodePaths
+        from defender.episodes._episode_paths import EpisodePaths
 
         record_path = EpisodePaths(world.episode_dir).source_record
         text, reason = _io.read_guarded(record_path)
@@ -286,7 +287,6 @@ def _seal(input_dir: Path) -> None:
 def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
     run: Run, *, knowledge_dir: Path, model: str | None = None,
     tenant_id: str | None = None, world_id: str | None = None,
-    parent_run_id: str | None = None, fork_turn: int | None = None,
     started_at: str | None = None, alert_label: str | None = None,
 ) -> None:
     """Write the run's stamp, never taking the run down doing it (ENOSPC, read-only remount,
@@ -300,10 +300,9 @@ def _stamp(  # noqa: PLR0913 — one keyword per stamped fact
         # Set in the single pre-box write; a later write would land in the box's rw bind.
         if model is not None:
             record = _dataclasses.replace(record, model=model)
-        # The request's tenant and the world, a fork's lineage, and the display facts.
+        # Both run types expose the same stamp shape; lineage stays in host episode records.
         record = _dataclasses.replace(
             record, tenant_id=tenant_id, world_id=world_id,
-            parent_run_id=parent_run_id, fork_turn=fork_turn,
             started_at=started_at, alert_label=alert_label)
         run.facts.provenance.write(record.as_json())
     except OSError as e:
@@ -361,7 +360,7 @@ def visualize(run: Run, *, update_ticket: bool = False) -> None:
     run's exit code.
     """
     try:
-        from defender.scripts.visualize import visualize_run as vr
+        from defender.presentation import visualize_run as vr
     except Exception as e:
         raise VisualizeFailed("the renderer could not be loaded") from e
     vr.publish_page(run, update_ticket=update_ticket)
@@ -390,7 +389,7 @@ def cross_check_tables(run_dir: Path) -> None:
         _logger.info(f"note: leads with no queries (monitor): {xcheck['leads_without_queries']}")
 
 
-HELD_OUT_FIXTURES = DEFENDER_DIR / "fixtures" / "held-out"
+HELD_OUT_FIXTURES = REPO_ROOT / "evaluations" / "fixtures" / "held_out"
 
 
 def is_held_out_fixture(alert: Path, fixtures_dir: Path = HELD_OUT_FIXTURES) -> bool:
@@ -438,7 +437,7 @@ def learning_refusal_gate(
     if held_out_input or record.digest in held_out_alert_digests(fixtures_dir):
         return f"{run_dir.name} investigated a held-out eval fixture (or a copy of one) — its " \
             "findings must never feed a corpus it is scored against"
-    from defender.runtime import scrub as _scrub
+    import defender.box._scrub as _scrub
 
     if _scrub.tree_unsandboxed(run_dir):
         return f"{run_dir.name} ran without a sandbox, so its input directory was never bound " \
@@ -470,7 +469,7 @@ def enqueue_curation(
     if reason is not None:
         _logger.info(f"NOT enqueuing for curation: {reason}")
         return False
-    from defender._env import FatalConfigError
+    from defender.configuration._env import FatalConfigError
     from defender.learning.core.config import loop_paths
     from defender.learning.core.state import LearningState, StateRefused
 

@@ -61,7 +61,7 @@ Read the doc you need; don't duplicate it into what you scaffold.
 - `defender/docs/system-skill-shape.md` — the per-system `SKILL.md` /
   `execution.md` split and its fields.
 - `defender/skills/gather/queries/SCHEMA.md` — the query-template format.
-- `defender/scripts/adapters/faults.py` + `defender/runtime/verbs.py` — the
+- `defender/integrations/faults.py` + `defender/runtime/verbs.py` — the
   fault taxonomy and the `VerbContext` / `VERBS` contract an adapter implements.
 - `defender/skills/handbook/` — runtime loop and run-dir reference, on demand.
 
@@ -73,7 +73,7 @@ Sequential; if a step blocks, diagnose and fix before moving on.
 ### 1. Orient
 
 ```bash
-ls defender/scripts/adapters/ defender/skills/
+ls defender/integrations/ defender/skills/
 ```
 
 If the system already has a `{system}_adapter.py` adapter and a
@@ -88,10 +88,10 @@ you're extending a populated deployment: there's an established shared
 adapter module and house conventions (config keys, transport, auth
 posture, output shape) to **conform to**, not duplicate. Before the
 interview, read the deployment's adapter-conventions note if it has one
-(`scripts/adapters/README.md`) and the closest sibling adapter — between them
+(`integrations/README.md`) and the closest sibling adapter — between them
 they settle the recurring answers (which shared module, transport, auth
 posture, config scheme), so you **confirm** those instead of asking cold
-(see `adapter.md` → "The shape to copy"). If `scripts/adapters/` is empty,
+(see `adapter.md` → "The shape to copy"). If `integrations/` is empty,
 you're greenfield and the bundled example is your seed.
 
 ### 2. Interview
@@ -134,11 +134,11 @@ Pick the path with the maintainer and follow its doc end-to-end:
 
 - **MCP** → `mcp.md`.
 - **Generated adapter** → `adapter.md` (it writes
-  `scripts/adapters/{system}_adapter.py` — a `VERBS` mapping of
+  `integrations/{system}_adapter.py` — a `VERBS` mapping of
   `VerbContext`-taking functions that raise `faults` — on the shared
   transport module, runs the Haiku alignment loop, and **pauses at a human
   review checkpoint** before the live test — generated code is read by a
-  human before it runs). Dropping the module under `scripts/adapters/` is
+  human before it runs). Dropping the module under `integrations/` is
   the whole registration; there is no shim.
 
 Come back here for the common steps below once the integration exists.
@@ -255,7 +255,7 @@ the branch and just leave the files in place for review:
 
 ```bash
 git checkout -b connect/{system}
-git add defender/scripts/adapters/{system}_adapter.py \
+git add defender/integrations/{system}_adapter.py \
         defender/skills/{system}/ \
         knowledge/tenant-template/settings/systems/{system}/config.env \
         knowledge/tenant-template/settings/verb-grants.yaml \
@@ -265,7 +265,7 @@ git add defender/scripts/adapters/{system}_adapter.py \
 ```
 
 The connected tenant's `config.env` and table live in ITS repo, not this one: branch and
-stage them there the same way, and run `python3 defender/scripts/tenant.py check --folder
+stage them there the same way, and run `python3 defender/cli/tenant.py check --folder
 <that repo>` to see the census over them.
 
 **You do not merge or push.** Present a summary: files touched,

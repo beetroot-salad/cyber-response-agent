@@ -34,22 +34,22 @@ from defender._paths import PATHS
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
-from .. import box as box_mod
+from defender import box as box_mod
 from .. import permission
 from ..agent_definition import ResolvedRoots, ToolSet
 from ..agent_role import AgentRole
 from ..permission.files import RESOLVE_ERRORS
 
 from defender._untrusted import wrap_fresh
-from defender._artifact_schema import _utf8_len
-from defender._env import FatalConfigError, env_int
-from defender.scripts.adapters.faults import USAGE_EXIT_CODE
+from defender.records._artifact_schema import _utf8_len
+from defender.configuration._env import FatalConfigError, env_int
+from defender.integrations.faults import USAGE_EXIT_CODE
 from defender.runtime.sql_engine import sql as defender_sql
-from defender.scripts.gather_tools import record_query
+from defender.runtime import record_query
 from defender.runtime.payload_view import (
     passthrough_max_bytes as _capture_view_cap,
 )
-from defender._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
+from defender.knowledge._knowledge import RUNTIME_LESSON_CORPORA as _RUNTIME_LESSON_CORPORA
 from defender.hooks.record_lesson_load import lesson_name as _lesson_name
 from ._deps import (
     AgentDeps,

@@ -57,7 +57,7 @@ jobs:
       # build each time; bounded separately from the gVisor step below, which it precedes.
       - name: Build the box image
         timeout-minutes: 4
-        run: python3 defender/scripts/box_image.py build
+        run: python3 defender/box/image_cli.py build
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -229,7 +229,7 @@ jobs:
       # the owned image (O3).
       - name: Build the box image
         timeout-minutes: 4
-        run: python3 defender/scripts/box_image.py build
+        run: python3 defender/box/image_cli.py build
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -324,6 +324,14 @@ jobs:
         # nothing but flakier teardown.
         run: uv run pytest tests/e2e/test_540_box_boundary.py -v -rs
 
+      - name: Verify the model view and run clock under gVisor
+        working-directory: defender
+        env:
+          DEFENDER_BUDGET_ENFORCE: "1"
+        run: >-
+          uv run pytest tests/e2e/test_1255_view_live.py
+          tests/runtime/state/test_1255_clock_box.py -m live -v -rs
+
   # The #540 boundary suite under docker-outside-of-Docker — the topology C46 exists for, and
   # the one the `test` job structurally cannot reach. There the driver and the daemon share a
   # path namespace, so box.py's bind-source translation is the IDENTITY and every assertion
@@ -343,7 +351,7 @@ jobs:
       # RUNNER too, never inside `.dood-inner.sh`.
       - name: Build the box image
         timeout-minutes: 4
-        run: python3 defender/scripts/box_image.py build
+        run: python3 defender/box/image_cli.py build
 
       # Same install as the `test` job: the boxes are created by the HOST daemon, so the
       # runtime has to be registered out here, not in the container running pytest.
@@ -495,13 +503,13 @@ jobs:
       # above) because the extended config only governs the defender/ tree;
       # experiments/ + root scripts/ stay E,F-only by design.
       - name: Ruff (defender extended — full gate)
-        run: defender/.venv/bin/ruff check defender
+        run: defender/.venv/bin/ruff check defender evaluations --config defender/pyproject.toml
 
       # Type-check hard gate (issue #403). mypy over the shippable defender/
       # modules (tests + .venv excluded), config in defender/pyproject.toml.
       # Promoted from a non-blocking code-smells signal to this blocking gate once
       # the tree reached zero errors — the ramp's "promote when clean" step (see
-      # docs/decisions/defender-mypy-ramp.md), the same graduation the extended
+      # defender/docs/decisions/defender-mypy-ramp.md), the same graduation the extended
       # ruff families went through (#400). Config pointed explicitly; there's no
       # root pyproject for mypy to discover. The lint venv is --extra dev (no
       # pydantic_ai), so mypy treats it as Any — runtime-only driver.py generic-
@@ -531,7 +539,7 @@ jobs:
       # is the instrument's own limits, and a log that hides them invites a reader to
       # assume they are zero.
       - name: Golden case tree (hard gate — artifacts, not code)
-        run: defender/.venv/bin/python defender/evals/oracle_golden/validate_cases.py
+        run: defender/.venv/bin/python evaluations/oracle_golden/validate_cases.py
 
       # The tacit-knowledge registry, also artifacts and not code — and the gate is HERE
       # because for this system the commit IS the sign-off. It is the one system of record
@@ -551,7 +559,7 @@ jobs:
       # walk, never a second implementation), so a green gate here means the runtime reads
       # every entry the author wrote.
       - name: Tacit-knowledge registry (hard gate — the commit is the sign-off)
-        run: defender/.venv/bin/python -m defender.scripts.tacit_cli check
+        run: defender/.venv/bin/python -m defender.cli.tacit_cli check
 
       # The other half of the `gate` marker (defender/pyproject.toml): the nine tests that
       # re-run a repo-wide lint gate over the real tree, which the `test` job deselects with
@@ -615,7 +623,7 @@ jobs:
       - name: Radon — raw size metrics
         run: defender/.venv/bin/radon raw defender -s || true
 
-      # The data-source adapters under scripts/adapters/ used to be excluded via
+      # The data-source adapters under integrations/ used to be excluded via
       # `**/*_cli.py`, on the rationale that they shared argparse scaffolding. That
       # stopped being true in #611 (no adapter but `ticket` has argparse), and the
       # exclusion was retired with the `_cli` name in #619. Measured with the
@@ -625,7 +633,7 @@ jobs:
 
       # ---- Hard gates: each BLOCKS CI on a NEW smell only. ----
       # The custom lints below are ratcheted against a checked-in, reviewable
-      # baseline (scripts/lint/<lint>_baseline.json via scripts/lint/_baseline.py):
+      # baseline (tooling/lint/<lint>_baseline.json via tooling/lint/_baseline.py):
       # today's findings are recorded, so a gate fails only on a fingerprint not
       # in its baseline. Exclusions are explicit config, not `|| true`. Run after
       # the soft reports so those always emit first. Invoked with the synced
@@ -643,35 +651,35 @@ jobs:
       # Dead code. Wraps vulture (same invocation as the prior soft step) behind
       # the baseline ratchet so only NEW dead code blocks.
       - name: Vulture dead-code gate (baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_vulture.py
+        run: defender/.venv/bin/python tooling/lint/lint_vulture.py
 
       # monkeypatch.setattr in tests — the dependency-injection-avoidance smell;
       # new tests should inject a config/deps seam instead. Pre-existing sites
       # are baselined and paid down over time.
       - name: Monkeypatch-setattr gate (baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_monkeypatch.py
+        run: defender/.venv/bin/python tooling/lint/lint_monkeypatch.py
 
       # A tenant's settings are its settings/ folder, resolved once into the run's record; the
       # adapters, the estate, the case-history writer and lead-zero never read them (or a
       # secret) out of the process environment. Empty allow-list: no baseline.
       - name: Tenant-settings env-read gate (empty allow-list)
-        run: defender/.venv/bin/python scripts/lint/lint_tenant_env_reads.py
+        run: defender/.venv/bin/python tooling/lint/lint_tenant_env_reads.py
 
       # Every defender program sets up logging, or says on its __main__ line why not (a model
       # tool whose stderr the model reads). Without it INFO lines vanish and nothing is JSON.
       - name: Log-setup gate (every program configures logging)
-        run: defender/.venv/bin/python scripts/lint/lint_log_setup.py
+        run: defender/.venv/bin/python tooling/lint/lint_log_setup.py
 
-      # Lesson text is corpus text a model wrote (#1206): it leaves defender/_corpus.py as
+      # Lesson text is corpus text a model wrote (#1206): it leaves defender/knowledge/_corpus.py as
       # Lesson.line / .lines / .match_text, or a raw read says on its line where it goes.
       - name: Lesson-text gate (raw lesson text is read only where a line says why)
-        run: defender/.venv/bin/python scripts/lint/lint_lesson_text.py
+        run: defender/.venv/bin/python tooling/lint/lint_lesson_text.py
 
       # Small-helper complement to the jscpd gate: jscpd catches large copy-paste
       # blocks (>=60 tokens) but is blind to 1-5 line helpers copied across
       # modules and to divergent same-named copies (#357/#358/#359/#360).
       - name: Duplicate-helper gate (cross-module dup names — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_duplicate_helpers.py
+        run: defender/.venv/bin/python tooling/lint/lint_duplicate_helpers.py
 
       # Hand-rolled per-line json.loads readers + json.dumps+newline appends under
       # defender/ that bypass defender._io.read_jsonl_rows / append_jsonl — both a
@@ -680,14 +688,14 @@ jobs:
       # through the shared _io helpers; the canonical reader/appender are
       # suppressed inline.
       - name: Unsafe JSONL-io gate (tolerant-reader/appender dedup + #446 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unsafe_jsonl_io.py
+        run: defender/.venv/bin/python tooling/lint/lint_unsafe_jsonl_io.py
 
       # A shared-tree write (a run dir, the drain worktree's corpus) that bypasses #771 M3's
       # alias-refusing primitives (write_guarded/guarded_mkdir/open_guarded). Modules named in
       # the writer census are HARD-gated (never ratcheted, fails on any finding there); every
       # other site is baseline-ratcheted like the gates above.
       - name: Unguarded shared-tree-write gate (#771 M3 — hard-gated census modules + baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unguarded_tree_write.py
+        run: defender/.venv/bin/python tooling/lint/lint_unguarded_tree_write.py
 
       # The run-records inventory (#1076): defender/docs/run-records.md is RENDERED from
       # defender/docs/run-records.tsv (one row per file-access call site) and
@@ -697,14 +705,14 @@ jobs:
       # completeness, so an unattributed site gets a row, never a waiver. The seed of #1077's
       # file backend until the handle owns every path, at which point it retires with the page.
       - name: Run-records inventory gate (#1076 — hard, rendered page)
-        run: defender/.venv/bin/python scripts/lint/lint_run_records.py
+        run: defender/.venv/bin/python tooling/lint/lint_run_records.py
 
       # The run-layout fence (#1105 D7, interim until #1082): outside defender/run_repository/
       # and its owner modules, no run-layout name, episode-runs name, Tenant.runs or run-handle
       # constructor except where its category table exempts it or its allow-list (the only
       # hatch; a stale entry fails) names the use. PR 2 empties the allow-list.
       - name: Run-layout fence (#1105 D7 — hard, allow-list only)
-        run: defender/.venv/bin/python scripts/lint/lint_run_layout_imports.py
+        run: defender/.venv/bin/python tooling/lint/lint_run_layout_imports.py
 
       # The READ-side twin of the gate above. #771 M3 settled writing into a box-writable tree
       # and left reading alone, so the same directory this repo refuses to write through
@@ -713,7 +721,7 @@ jobs:
       # copied in under the artifact's name. defender.run_repository._layout.artifact_file / artifact_dir
       # are lstat and judge the entry itself. Scoped to the LINT_TREE_READER_MODULES census.
       - name: Link-following tree-read gate (lstat the entry, not its target — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_tree_read_follows_link.py
+        run: defender/.venv/bin/python tooling/lint/lint_tree_read_follows_link.py
 
       # __dataclass_fields__ where dataclasses.fields() is meant. The raw mapping also holds
       # ClassVar/InitVar pseudo-fields, which the generated __init__ does not accept — so
@@ -721,7 +729,7 @@ jobs:
       # asserted it could not, outside the handler that turns a fault into a ledger row.
       # Flat ban with an EMPTY baseline: fields() answers every use in this tree.
       - name: Dataclass pseudo-field gate (fields() over __dataclass_fields__ — empty baseline)
-        run: defender/.venv/bin/python scripts/lint/lint_dataclass_fields.py
+        run: defender/.venv/bin/python tooling/lint/lint_dataclass_fields.py
 
       # Text reads/writes under defender/ that decode or encode under the AMBIENT
       # LOCALE instead of pinning encoding="utf-8" (#588/#589). The corpora are UTF-8
@@ -730,18 +738,18 @@ jobs:
       # "malformed". Also flags a subprocess text=True pipe with no encoding=. The
       # baseline ships EMPTY: every defender/ site was pinned when the gate landed.
       # Since #602 all three AST gates resolve a callee to its ORIGIN MODULE via
-      # scripts/lint/_astlib.py rather than matching how it was spelled, so an alias
+      # tooling/lint/_astlib.py rather than matching how it was spelled, so an alias
       # or a from-import cannot walk past them — and the opener's mode slot/default
       # come from that resolved callee instead of being guessed from the call shape.
       - name: Unpinned text-io gate (utf-8 pin on every text read/write — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unpinned_text_io.py
+        run: defender/.venv/bin/python tooling/lint/lint_unpinned_text_io.py
 
       # Whole-file reads by path (read_text/read_bytes, called or referenced) outside
       # defender/_io (#1188). Every production read goes through _io.read_text_utf8 /
       # read_bytes_capped, capped at READ_LIMIT, which a caller can only lower. A rare
       # exception takes `# lint-whole-read: ok — <reason>`. The baseline ships EMPTY.
       - name: Unbounded whole-read gate (read through _io's capped readers — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unbounded_whole_read.py
+        run: defender/.venv/bin/python tooling/lint/lint_unbounded_whole_read.py
 
       # Hand-rolled git subprocess calls under defender/ that bypass the
       # defender._git facade (git / git_status / git_commit / git_worktree_* /
@@ -749,7 +757,7 @@ jobs:
       # shared -z reader fixes (#460). New sites must route through defender._git;
       # the facade itself is excluded and test fixtures are exempt.
       - name: Raw git-subprocess gate (defender._git facade dedup, #460 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_raw_git_subprocess.py
+        run: defender/.venv/bin/python tooling/lint/lint_raw_git_subprocess.py
 
       # A test computing its EXPECTED value with the same git QUERY the code under
       # test runs. Such an oracle cannot disagree with the implementation — both read
@@ -760,7 +768,7 @@ jobs:
       # on — the benign shared reads (a facade contract test, an identity read of a
       # sha) each cost one sentence, and a NEW shared query costs a fix.
       - name: Shared-oracle gate (a test may not re-run the code's own git query, #869 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_shared_oracle.py
+        run: defender/.venv/bin/python tooling/lint/lint_shared_oracle.py
 
       # Every verb an adapter declares must have a row in the verb-disposition table —
       # granted to a role, or granted to nobody WITH a written reason (#995). The grant is
@@ -770,7 +778,7 @@ jobs:
       # list of systems permitted to stay silently unreachable, which is the defect wearing
       # the fix's clothes.
       - name: Verb-disposition census (no system silently ungranted, #995 — not ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_verb_disposition_census.py
+        run: defender/.venv/bin/python tooling/lint/lint_verb_disposition_census.py
 
       # A parameter re-defaulted in-body via `x = x if x is not None else DEFAULT`
       # to a named/called fallback: an Optional immediately made non-None, with the
@@ -779,13 +787,13 @@ jobs:
       # boundary resolution. Literal fallbacks (`else []`) and new-name DI seams are
       # not flagged; suppress a deliberate site with `# lint-default: ok — <reason>`.
       - name: Unanchored-default gate (single-source param defaults — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unanchored_default.py
+        run: defender/.venv/bin/python tooling/lint/lint_unanchored_default.py
 
       # Learning-stage prompt sections must be rendered through the shared salted
       # frame primitive. The check is construction-based rather than a vocabulary
       # of known tags/headings, so a newly invented raw delimiter still fails.
       - name: Stage-prompt-frame gate (wrap-only boundaries — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_stage_prompt_frames.py
+        run: defender/.venv/bin/python tooling/lint/lint_stage_prompt_frames.py
 
       # Hand-rolled frontmatter fence arithmetic under defender/ that bypasses the
       # canonical grammar in defender/_frontmatter.py (#591): find/split/startswith/
@@ -794,7 +802,7 @@ jobs:
       # the primary-vs-frozen-actor divergence signal the evals existed to measure. The
       # baseline ships EMPTY: the five sites were folded when the gate landed.
       - name: Hand-rolled-frontmatter gate (one fence grammar, #591 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_hand_rolled_frontmatter.py
+        run: defender/.venv/bin/python tooling/lint/lint_hand_rolled_frontmatter.py
 
       # Every YAML read and write goes through defender/_yaml.py (#1127): its readers refuse
       # aliases (a few hundred bytes of them stand for billions of values to whatever walks the
@@ -802,7 +810,7 @@ jobs:
       # accepts aliases again; a raw dump writes the `&id001` the readers refuse. The baseline
       # ships EMPTY.
       - name: Raw-YAML gate (one YAML reader and writer, #1127 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_raw_yaml.py
+        run: defender/.venv/bin/python tooling/lint/lint_raw_yaml.py
 
       # A module importing another module's closed vocabulary and re-deriving the membership
       # test itself instead of calling the normalizer that ships beside it (#785). The six
@@ -814,7 +822,7 @@ jobs:
       # normalize) states its reason inline; the two baselined entries are older debt in other
       # vocabularies, each annotated with what has to be folded before it can go.
       - name: Borrowed-vocabulary gate (one owner per vocabulary, #785 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_borrowed_vocabulary.py
+        run: defender/.venv/bin/python tooling/lint/lint_borrowed_vocabulary.py
 
       # A data-source verb dispatch `registry.verbs(system)[verb]` resolved OUTSIDE its fault
       # `try` (#672/#678). The dispatch lazily imports the adapter and can raise, so out of the
@@ -823,26 +831,26 @@ jobs:
       # all resolve cleanly. Modules with a pydantic-ai capability catch-all (query_tool) are
       # exempt. The baseline ships EMPTY: both live dispatch sites are guarded.
       - name: Unguarded-verb-dispatch gate (fault seam encloses the dispatch — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unguarded_verb_dispatch.py
+        run: defender/.venv/bin/python tooling/lint/lint_unguarded_verb_dispatch.py
 
       # An AST check that decides WHICH function or class a piece of shipped source refers to
-      # by matching the SPELLING, in a module that never reaches `scripts/lint/_astlib.py` —
+      # by matching the SPELLING, in a module that never reaches `tooling/lint/_astlib.py` —
       # the declared owner of that question. An alias, the attribute form, or a function-local
       # import shadowing an honest one each make the name read right and the object be another
       # one. Three gates went blind to that in three different ways (#602/#594) and #1008's
       # suite re-derived the same resolution three times in three review rounds, shipping a
       # live policy hole on each. Baseline holds today's pre-existing sites, each annotated.
       - name: Hand-rolled AST name resolution (ask _astlib — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_hand_rolled_name_resolution.py
+        run: defender/.venv/bin/python tooling/lint/lint_hand_rolled_name_resolution.py
 
       # Defender hygiene + discipline gates. Each script is independently
-      # inspectable under scripts/lint/lint_*.py; source PRs that prompted each
+      # inspectable under tooling/lint/lint_*.py; source PRs that prompted each
       # check are cited in the module docstrings.
       - name: Hygiene gate (paths, interpreter, hook matchers — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_ci_hygiene.py
+        run: defender/.venv/bin/python tooling/lint/lint_ci_hygiene.py
 
       - name: Shippable-surface gate (env-agnostic discipline — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_shippable_surface.py
+        run: defender/.venv/bin/python tooling/lint/lint_shippable_surface.py
 
       # A function that DECLARES a shape but lets raw deserializer output reach its `return`
       # un-narrowed (#878). `json.loads` is typed `Any`, and `Any` satisfies every annotation,
@@ -859,7 +867,7 @@ jobs:
       # corpus, 8 are older first-party debt; each says what has to fold before it can go. A
       # clean run means no new SEAM — NOT that no deref is unguarded (see the module docstring).
       - name: Un-narrowed-parse gate (the parse and the shape check are one construction, #878 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unnarrowed_parse.py
+        run: defender/.venv/bin/python tooling/lint/lint_unnarrowed_parse.py
 
       # A boundary that branches on ONE key of another module's keyed gate table, spelled as a
       # string literal, so that table's other keys have no reader there. #879: close_tool
@@ -874,7 +882,7 @@ jobs:
       # `direction == "benign"` collision in persist.py). Suppress a deliberate site with
       # `# lint-half-table: ok — <reason>`.
       - name: Half-read-table gate (one reader per key, #879 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_half_read_table.py
+        run: defender/.venv/bin/python tooling/lint/lint_half_read_table.py
 
       # A fix-up pass that walks an ordered LIST to patch a table already KEYED by that same
       # list, so a repeated element patches one bucket twice (#956). `phase_order` is the
@@ -890,7 +898,7 @@ jobs:
       # third site drew one bar segment per appearance and overflowed 100%), and so is a fix-up
       # split across functions. Suppress a deliberate site with `# lint-keyset: ok — <reason>`.
       - name: List-as-key-set gate (a render list is not a key set, #956 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_list_as_key_set.py
+        run: defender/.venv/bin/python tooling/lint/lint_list_as_key_set.py
 
       # The `@owns <field>` docstring tags that declare a value's SOLE PRODUCER. This repo's
       # recurring bug is two pieces of code deriving one quantity by different means (#785's
@@ -906,7 +914,7 @@ jobs:
       # OTHER OWNER rather than assert the case is fine — a destination is checkable, a reason
       # is not. Discovery is the paired grep-before-you-derive rule in write-code-from-spec.
       - name: Sole-producer gate (`@owns` tags, #923 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unowned_field.py
+        run: defender/.venv/bin/python tooling/lint/lint_unowned_field.py
 
       # A row leaving a loop in the invlang row-carrying surface by continue/break/bare
       # return with neither a ParseWarning nor a landing unconditionally on that path
@@ -922,7 +930,7 @@ jobs:
       # proof the parser drops nothing. Eight sites are baselined, four of them the live
       # #876 drops and four annotated false positives; `require_reasons` refuses "".
       - name: Silent invlang row drop gate (warn or land before you drop, #876 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_silent_row_drop.py
+        run: defender/.venv/bin/python tooling/lint/lint_silent_row_drop.py
 
       # A reader that splits an investigation on its ```invlang fences must go through
       # `parser.scan_fences`, which hands back what the fences ORPHAN alongside what they
@@ -935,7 +943,7 @@ jobs:
       # folded when the gate landed. NOT mechanized: computed access, a `str.split` fence
       # walk, and whether a scan_fences caller reads `orphaned_headers` at all.
       - name: Unaccounted invlang selection gate (say where the rest went, #932 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_unaccounted_selection.py
+        run: defender/.venv/bin/python tooling/lint/lint_unaccounted_selection.py
 
       # An invariant enforced at a gate, and then believed of the ARTIFACT. `_artifact_schema`
       # owns what a well-formed investigation.md / report.md is, and the permission gate
@@ -949,9 +957,9 @@ jobs:
       # gated artifact name with no schema call in the same frame. Baseline ships EMPTY. NOT
       # mechanized: whether the validated text IS the written text, a write split across two
       # functions, and the consumer half of #961 (publishing is not a syntactic act) — those
-      # are tests/test_ungated_artifact_write_961_964.py's, not this gate's.
+      # are tests/runtime/permissions/test_ungated_artifact_write_961_964.py's, not this gate's.
       - name: Ungated artifact write gate (every writer meets the schema, #961/#964 — baseline-ratcheted)
-        run: defender/.venv/bin/python scripts/lint/lint_ungated_artifact_write.py
+        run: defender/.venv/bin/python tooling/lint/lint_ungated_artifact_write.py
 
       # For symbols this PR removed, the post-PR tree must hold no surviving reference.
       # Needs the merge-base with origin/main — hence `fetch-depth: 0` on the checkout
@@ -960,4 +968,4 @@ jobs:
       - name: Stale-reference gate (vs origin/main — baseline-ratcheted)
         env:
           STALE_REF_BASE: origin/main
-        run: defender/.venv/bin/python scripts/lint/lint_stale_refs.py
+        run: defender/.venv/bin/python tooling/lint/lint_stale_refs.py

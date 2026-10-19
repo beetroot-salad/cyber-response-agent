@@ -568,7 +568,7 @@ def _no_runtime(module: str) -> int:
         # remedy is rebuilding it.
         print(
             f"defender-sql: {module} is not installed in this box image "
-            "(run `python3 defender/scripts/box_image.py build` to rebuild it).",
+            "(run `python3 defender/box/image_cli.py build` to rebuild it).",
             file=sys.stderr,
         )
     else:

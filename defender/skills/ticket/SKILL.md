@@ -79,7 +79,7 @@ into this store.
 - **Not for ticket creation.** This adapter is read-only by design.
   Case-history tickets are written *outside* this read path — by the
   `run.py` `--update-ticket` post-step
-  (`scripts/case_history/ticket_writer.py`), which opens a ticket when the
+  (`integrations/ticket_writer.py`), which opens a ticket when the
   alert is raised and later records the investigation as a comment on it.
   That writer is a learning post-step, not an investigation surface; do
   not call it from a run, and it never sets `status` or `resolution`

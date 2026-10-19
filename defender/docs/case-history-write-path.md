@@ -41,10 +41,10 @@ what manufactures the read PR's fixtures.
 - **Cut-short runs record per exit class (#1047 O2), still as comments.** The exit
   class comes in-process from `run.py` off the driver's own summary, never off
   anything in the run dir. `aborted` → an escalation note (no verdict; "environment
-  appears unreachable, escalate"), ticket stays open. `request-limit` /
+  appears unreachable or unconfigured, escalate"), ticket stays open. `request-limit` /
   `retry-exhausted` → the record, proposing the host's forced `unresolved`; with no
   usable report (the forced close itself failed) → the escalation note.
-  `budget` / `store` → no call at all. Anything else → the record off the report.
+  `budget` / `store` / `provider-down` → no call at all. Anything else → the record off the report.
   A run whose model had already closed when the cut landed (`closed_before_cut`)
   records its own verdict instead. Before #767 the forced-close arms CLOSED the
   ticket; that is the one thing this design cannot allow, since a host-set `closed`
@@ -109,7 +109,7 @@ what manufactures the read PR's fixtures.
   (`agent_comment_tag`, `posted_comment`), rendering from the mapping config.
 - `$DEFENDER_DATA_ROOT/<tenant>/knowledge/settings/systems/case-history/mapping.yaml` — the de-facto schema
   (field mapping + conventions), editable without touching code.
-- `scripts/case_history/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
+- `integrations/ticket_writer.py` — I/O: `open_case_ticket` (bridge) /
   `record_case_ticket` (at most one comment POST, a receipt on every
   branch that called out; no transition call exists), non-fatal.
 - The read side has no ticket screen (#1221): every ticket is served whole. Each

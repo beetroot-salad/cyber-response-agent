@@ -46,8 +46,6 @@ against the moment the call is served as of, which the run supplies.
 - `1` — query error (the registry file is unreadable or malformed as a
   whole; individual malformed entries are skipped with a warning rather
   than failing the read)
-- `2` — connectivity / upstream. Not reachable for this system: there is
-  no transport to fail.
 - `64` — a usage mistake in YOUR call: an unknown verb, or an
   unknown/missing/mistyped param name (e.g. `user` where the verb declares
   `actor`). The one class you can fix yourself — the rejection names the

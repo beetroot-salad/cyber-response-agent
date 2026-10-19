@@ -18,7 +18,7 @@ def _declare_l_finding(run: Run, lead_id: str, name: str, system: str) -> bool:
     This write bypasses `permission.decide_write`, so the content schema is applied here via
     `validate_artifact`, keeping "a committed investigation parses" true. A seed that fails
     validation is not written. Never raises."""
-    from defender._artifact_schema import validate_artifact
+    from defender.records._artifact_schema import validate_artifact
     from defender.run_repository import RUN_LAYOUT
 
     block = (

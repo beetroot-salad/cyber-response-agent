@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from defender._report import ReportRead, read_report
+from defender.records._report import ReportRead, read_report
 from defender._yaml import safe_load
 from defender.learning.core.config import RunUnprocessable
 

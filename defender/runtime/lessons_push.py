@@ -20,7 +20,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from defender._knowledge import KnowledgePaths
+from defender.knowledge._knowledge import KnowledgePaths
 from defender.hooks.record_lesson_load import LOAD_KIND_PUSH
 
 _logger = logging.getLogger(__name__)
@@ -42,6 +42,15 @@ def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
     return corpus
 
 
+def shown_path(deps: AgentDeps) -> Callable[[Path], str]:
+    """How a pushed lesson's path is named to the role: its model path in the run's view
+    (#1255 P1); a role without one is shown the resolved host path."""
+    view = deps.view
+    if view is not None:
+        return view.to_model
+    return lambda p: str(p.resolve())
+
+
 def shape(hits: Iterable[Hit]) -> list[tuple[str, int]]:
     """Which lessons at what score: the identity a block is compared on. Sorted, because the
     ranking is reordered by which frontier item won, and that alone must not re-emit an
@@ -51,7 +60,7 @@ def shape(hits: Iterable[Hit]) -> list[tuple[str, int]]:
 
 def record(deps: AgentDeps, hits: Iterable[Hit]) -> None:
     """One `push` row per hit, like a Read. `lessons_loaded.jsonl` is the only "was this
-    lesson in context" signal (e.g. for `learning/ops/trace_lesson.py`).
+    lesson in context" signal (e.g. for `cli/learning/trace_lesson.py`).
 
     Paths are resolved: `record_lesson_load.lesson_name` checks
     `p.parent.parent.name == "defender"`, so a symlink or `..` would drop the row.
@@ -76,7 +85,7 @@ def compose_fold(
     main's next request, and the row must mint regardless of the lessons lane.
     """
     try:
-        from defender._corpus import iter_lessons
+        from defender.knowledge._corpus import iter_lessons
         from defender.runtime.lessons_engine.lessons_frontier import FOLD_LEAD, match_loaded, render
         from defender.skills.invlang.frontier import frontier_from_text
 
@@ -89,7 +98,7 @@ def compose_fold(
         hits = match_loaded(frontier, list(iter_lessons(corpus)))
         if not hits:
             return record_text, None
-        block = render(hits, lead=FOLD_LEAD)
+        block = render(hits, lead=FOLD_LEAD, show=shown_path(deps))
     except Exception as e:  # noqa: BLE001 — fail open; the frontier row mints regardless
         _logger.warning(f"{_FOLD_LANE} fold lessons push failed, omitting it: {e!r}")
         return record_text, None

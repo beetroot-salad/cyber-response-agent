@@ -48,10 +48,12 @@ on both sides.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import inspect
+import os
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,23 +66,23 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart  # noqa: 
 from pydantic_ai.models import override_allow_model_requests  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
-from defender import _provenance  # noqa: E402
+from defender.records import _provenance  # noqa: E402
 from defender import run_common  # noqa: E402
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import Run, RunPaths  # noqa: E402
-from defender.runtime import box as box_mod  # noqa: E402
+from defender import box as box_mod  # noqa: E402
 from defender.runtime import driver  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
-from defender.runtime.verbs import VerbRegistry  # noqa: E402
-from defender.tests import _review_bundle  # noqa: E402
-from defender.tests import _tenants1106  # noqa: E402
-from defender.tests._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
+from defender.runtime.verbs import RosterRead, VerbRegistry  # noqa: E402
+from defender.tests.support.runtime.permissions import _review_bundle
+from defender.tests.support.tenancy import _tenants1106
+from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
 
 DEFENDER = Path(__file__).resolve().parents[2]
-GOLDEN = DEFENDER / "fixtures-e2e" / "golden-v2sshd"
-GOLDEN_AB3 = DEFENDER / "fixtures-e2e" / "golden-sshpivot-ab3"
+GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
+GOLDEN_AB3 = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
 AB3_ORIG_RUN_DIR = "/tmp/defender-runs/ab3-B"
 
 
@@ -182,7 +184,10 @@ class NeverEndsModel:
 
     def __init__(self, run_dir: Path):
         self.calls = 0
-        self._alert = str(RunPaths(run_dir).alert)
+        # #1255 P1/C9: the model names the alert by its model path; a host path is refused.
+        from defender.tests.support.runtime.state._1255_view import model_path
+
+        self._alert = model_path(RunPaths(run_dir).alert, run_dir=run_dir)
 
     def __call__(self, messages, info) -> ModelResponse:
         self.calls += 1
@@ -247,6 +252,9 @@ class FakeVerbs(VerbRegistry):
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
+
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        return frozenset(self._table.get(system, {}))
 
     def verbs(self, system: str) -> Mapping[str, Callable[..., Any]]:
         return self._table[system]
@@ -412,7 +420,7 @@ def materialize(tmp_path: Path, golden: Path, *, run_id: str = REPLAY_RUN_ID) ->
 def plant_alert(run_dir: Path, raw: bytes) -> None:
     """The alert and its record in the run's input directory, as `materialize_run` leaves them
     (the committed tenants' mapping derives the facts)."""
-    from defender.tests import _alert_plant
+    from defender.tests.support.storage import _alert_plant
 
     _alert_plant.plant_alert(run_dir, raw)
 
@@ -491,6 +499,64 @@ def _with_default_correlation(gather, main):
     return fn
 
 
+def _fake_make_model(main, gather, *, dispatches_correlation: bool, wrap_model: Any = None):
+    """The driver's `make_model` seam over the replay doubles: the gather model NAME gets
+    `gather` (the correlation lead drawing its own default fake when the run dispatches it,
+    C01), every other name gets `main`. `wrap_model(kind, model)` (#1243), when given, wraps
+    each scripted model (`kind` "main" or "gather") before it is handed out."""
+    def wrap(kind: str, model: Any) -> Any:
+        return wrap_model(kind, model) if wrap_model is not None else model
+
+    main_built = BuiltModel(wrap("main", FunctionModel(_awaiting(main))), None)
+    gather_fn = (
+        _with_default_correlation(gather, main)
+        if dispatches_correlation and driver.resolve_main_model() != driver.gather_model()
+        else gather)
+    gather_built = (
+        BuiltModel(wrap("gather", FunctionModel(_awaiting(gather_fn))), None)
+        if gather_fn is not None else None)
+
+    if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
+        raise ValueError(
+            "replay harness can't inject distinct main/gather fakes when both resolve to "
+            f"the same model name ({driver.gather_model()!r}); the (name, effort) make_model "
+            "seam keys on the name — set DEFENDER_MODEL / DEFENDER_GATHER_MODEL to differ."
+        )
+
+    def make_model(name, effort):
+        if gather_built is not None and name == driver.gather_model():
+            return gather_built
+        return main_built
+
+    return make_model
+
+
+def investigate_as_handed(main, gather=None, *, review_stages=None, orient_shim=None):
+    """A production `investigate` for `run._drive_investigation(investigate=…)`: the REAL driver
+    run with EXACTLY the keywords production composed for it — the `run`, the `RunTenant`, the
+    roster, the verb registry, the box, and whatever else run.py hands its driver — plus only
+    what no hermetic run can build: the fake models (`main` / `gather`, wired as `drive` wires
+    them), the review bundle (`drive`'s `holds` default) and the ORIENT shims (none).
+
+    For a scenario about what run.py HANDS the run (#1256: its one judgement of the systems):
+    `drive` / `_spec1222.run_alert` re-resolve the tenant and build a fresh `Run`, so anything
+    run.py attached to either, or passed as a further lifecycle keyword, never reaches their
+    driver. Composed with production's own `_run_investigation_lifecycle` and
+    `_drive_investigation`, this keeps the whole chain production's."""
+    def investigate(**handed: Any) -> dict:
+        make_model = _fake_make_model(
+            main, gather,
+            dispatches_correlation=handed.get("resume") is None and handed.get("verbs") is not None)
+        with override_allow_model_requests(False):
+            return asyncio.run(driver.run_investigation(
+                **handed, make_model=make_model,
+                review_stages=review_stages if review_stages is not None else (
+                    _review_bundle.bundle(composer=_review_bundle.composer_reply("holds"))),
+                orient_shim=orient_shim if orient_shim is not None else no_orient_shims))
+
+    return investigate
+
+
 def _refuse_conflicting_store_seams(resume, store_factory) -> None:
     """`resume=` and `store_factory=` name the same thing and cannot both be honoured.
 
@@ -514,11 +580,45 @@ def _default_tenant() -> Any:
     return _tenants1106.fixture_tenant()
 
 
+def _no_docker_daemon(argv: list[str], **_kw: Any) -> Any:
+    """The docker a hermetic replay has: none. `start_box` turns the failed call into its
+    startup `BoxFault`, which the operator's opt-out turns into production's unboxed mode."""
+    raise FileNotFoundError("docker: a hermetic replay has no daemon")
+
+
+@contextlib.contextmanager
+def _unsandboxed_allowed() -> Iterator[None]:
+    """`DEFENDER_ALLOW_UNSANDBOXED=1` for the length of the block, the prior value (or its
+    absence) restored after — scoped to one `start_box` call, never left set for the test."""
+    prior = os.environ.get(box_mod._ALLOW_UNSANDBOXED)
+    os.environ[box_mod._ALLOW_UNSANDBOXED] = "1"
+    try:
+        yield
+    finally:
+        if prior is None:
+            os.environ.pop(box_mod._ALLOW_UNSANDBOXED, None)
+        else:
+            os.environ[box_mod._ALLOW_UNSANDBOXED] = prior
+
+
+def production_unboxed_box(run_dir: Path, defender_dir: Path, run_tenant: Any) -> Any:
+    """The box a hermetic replay runs its bash lane in: production's unboxed mode, reached the
+    way `run.py` reaches it (`start_box(run_dir, defender_dir, tenant_agent=…, tenant_id=…)`)
+    with no daemon and the opt-out set for this call alone (#1255 C6). Nothing it writes or logs
+    is hidden: the opt-out's "running UNSANDBOXED" warning and the startup fault's did-not-run
+    scrub marker beside the run folder (`RunPaths.scrub_verdict`) are production's, and land in
+    every replay that takes this default."""
+    with _unsandboxed_allowed():
+        return box_mod.start_box(run_dir, defender_dir, docker=_no_docker_daemon,
+                                 tenant_agent=run_tenant.agent, tenant_id=run_tenant.tenant_id)
+
+
 def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJECTION SEAM
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
-        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None) -> dict:
+        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
+        clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None) -> dict:
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
@@ -549,13 +649,16 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     every bash tool call in the replay executes through THAT executor. A scenario that wants
     to ASSERT on what crossed the boundary passes its own recording executor.
 
-    Omitted, it defaults to `box.unboxed_executor()` — host execution, no container. That is
-    the honest default for a HERMETIC replay: these runs have no daemon, and the alternative
-    (the inert production default) makes every bash turn fail closed on infrastructure rather
-    than exercising the lane the scenario is about. It does not weaken the boundary claim,
-    which is pinned directly in the #540 suite — `test_no_box_failure_path_executes_in_process`
-    and `test_tool_bash_executes_through_the_injected_box_seam` assert that production has no
-    unboxed path, and this default is reachable only from a test.
+    Omitted, it defaults to PRODUCTION'S unboxed mode (#1255 C6: "every mode includes the
+    hermetic harness"): `box.start_box` over a docker that has no daemon (`_no_docker_daemon`),
+    with `DEFENDER_ALLOW_UNSANDBOXED=1` set for that one call and restored after
+    (`_unsandboxed_allowed`) — the operator's opt-out, taken the way `run.py` takes it, with the
+    run's tenant half and identity. So whatever production builds for an unboxed run (the run's
+    environment today; the model view, once #1255 lands) is what every replay's bash lane runs
+    in, rather than a lane only tests take. These runs have no daemon, and the alternative (the
+    sandboxed default with no opt-out) makes every bash turn fail closed on infrastructure. It
+    does not weaken the boundary claim, which is pinned directly in the #540 suite: without the
+    opt-out a startup fault aborts the run.
 
     `review_stages` is the SIXTH injection seam (#774), demanded rather than described: the
     live write-time gate drives three lenses and a composer from inside the close tool, and
@@ -623,7 +726,26 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     injects it, and returns it in ITS OWN result under `"run_state"` — the one place a driven
     test reaches a run's state. A scenario whose run ends by RAISING (no result comes back)
     builds the state first and passes it here, so it still holds what the run decided on.
-    `driver_summary` is the same drive returning production's summary untouched."""
+    `roster` is the adapters roster the run reads (`run_investigation(roster=…)`): the adapter
+    modules whose declared settings checks judge each granted system at run start (#1256).
+    Omitted, an injected registry that carries its own roster (`ModuleVerbRegistry.roster`,
+    e.g. a planted estate's) hands the run that one, so the run judges the adapters it calls,
+    as production's one roster does; otherwise the run reads `defender_dir`'s.
+    `systems` is the run's judgement of its granted systems that run.py made before the run
+    folder existed and hands its lifecycle (#1256 r4: one judgement per run;
+    `run_investigation(systems=…)`). Passed through only when supplied: omitted, the driver
+    judges them itself, as it does when started without one.
+
+    `driver_summary` is the same drive returning production's summary untouched.
+
+    `clock` is the run clock's source (#1255: `run_investigation(clock=…)`, a zero-argument
+    callable returning an aware UTC datetime). Passed through only when supplied, so every
+    existing call is byte-identical; RED until `run_investigation` accepts it.
+
+    `wrap_model(kind, model)` (#1243) is applied to each scripted `FunctionModel` before it is
+    handed out as a `BuiltModel` — `kind` is `"main"` or `"gather"` — so a scenario can put a
+    production model wrapper (the provider retrier) between the run and its fake. Omitted, the
+    fakes are handed out bare, as before."""
     # Legacy replay labels are retained in this helper's call shape. The real run identity
     # comes from its directory: materialize(run_id=<label>) names it the label's fixture UUID.
     state = run_state if run_state is not None else RunState(run_dir, run_dir.name)
@@ -631,7 +753,8 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
         run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits, box=box,
         store_factory=store_factory, review_stages=review_stages, bounds=bounds,
         toolset=toolset, resume=resume, source_run=source_run, defender_dir=defender_dir, tenant=tenant,
-        orient_shim=orient_shim, run_state=state,
+        orient_shim=orient_shim, run_state=state, clock=clock, roster=roster, systems=systems,
+        wrap_model=wrap_model,
     )
     return {**summary, "run_state": state}
 
@@ -640,7 +763,8 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         run_dir: Path, *, run_id: str, main, gather=None, verbs=None,
         limits=None, box=None, store_factory=None, review_stages=None, bounds=None,
         toolset=None, resume=None, source_run: Run | None = None, defender_dir: Path | None = None,
-        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None) -> dict:
+        tenant: Any = None, orient_shim: Any = None, run_state: RunState | None = None,
+        clock: Callable[[], Any] | None = None, roster: Any = None, systems: Any = None, wrap_model: Any = None) -> dict:
     """`drive`'s run (every seam as `drive` documents it), returning `run_investigation`'s own
     summary exactly as production's caller gets it. `run_state` is what the run is handed
     (`run_investigation(run_state=…)`), the caller keeping its reference; omitted, it is not
@@ -648,27 +772,9 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     hands none)."""
     _refuse_conflicting_store_seams(resume, store_factory)
     tree = defender_dir if defender_dir is not None else DEFENDER
-    main_built = BuiltModel(FunctionModel(_awaiting(main)), None)
-    # The correlation lead draws its own default fake, never MAIN's leads' script (C01).
-    dispatches_correlation = resume is None and verbs is not None
-    gather_fn = (
-        _with_default_correlation(gather, main)
-        if dispatches_correlation and driver.resolve_main_model() != driver.gather_model()
-        else gather)
-    gather_built = (
-        BuiltModel(FunctionModel(_awaiting(gather_fn)), None) if gather_fn is not None else None)
-
-    if gather_built is not None and driver.resolve_main_model() == driver.gather_model():
-        raise ValueError(
-            "replay harness can't inject distinct main/gather fakes when both resolve to "
-            f"the same model name ({driver.gather_model()!r}); the (name, effort) make_model "
-            "seam keys on the name — set DEFENDER_MODEL / DEFENDER_GATHER_MODEL to differ."
-        )
-
-    def make_model(name, effort):
-        if gather_built is not None and name == driver.gather_model():
-            return gather_built
-        return main_built
+    make_model = _fake_make_model(main, gather,
+                                  dispatches_correlation=resume is None and verbs is not None,
+                                  wrap_model=wrap_model)
 
     seams: dict[str, Any] = {}
     if verbs is not None:
@@ -692,6 +798,14 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         seams["source_run"] = source_run
     if run_state is not None:
         seams["run_state"] = run_state
+    if clock is not None:
+        seams["clock"] = clock
+    if roster is None and isinstance(getattr(verbs, "roster", None), RosterRead):
+        roster = verbs.roster
+    if roster is not None:
+        seams["roster"] = roster
+    if systems is not None:
+        seams["systems"] = systems
     # #1106: the run's TENANT and its per-run GRANTS are two required inputs of the driver (no
     # grant is fixed per process, and no reader finds the settings folder itself). A scenario
     # names its own tenant when it is about one; every other replay runs as the committed
@@ -708,9 +822,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
         defender_dir=tree,
         dispatches_lead_zero=resume is None and verbs is not None,
     )
-    seams["box"] = box if box is not None else box_mod.unboxed_executor(
-        env=run_common.run_env(tree, run_dir),
-    )
+    seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
             alert_path=RunPaths(run_dir).alert, run=Run.under(run_dir.parent, run_dir.name),

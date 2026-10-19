@@ -42,7 +42,7 @@ first cut of this suite encoding arm (a) instead.
 A scenario therefore supplies the group id through `run(shell=shell_doc(group_id="grp-0"))` —
 the document the by-`alert_id` fetch RETURNS — and `alert_group_id.domain.distinguished[grp-0]`
 is where the graph pins that value. Every other field of `alert_doc()` is copied from
-`defender/fixtures/v2-sshd-success-after-failures/alert.json`'s real shape: brief R6 (the
+`playground-v2/examples/alerts/v2-sshd-success-after-failures/alert.json`'s real shape: brief R6 (the
 design's own key list matches none of the five checked-in fixtures) is why the base document is
 read off the tree rather than off the doc.
 
@@ -61,14 +61,16 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.runtime.state._1255_view import model_path
+
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
-from defender.scripts.adapters.elastic_adapter import search_envelope  # noqa: E402
-from defender.tests._verb_authorization_632 import breaker_doc  # noqa: E402
+from defender.integrations.elastic_adapter import search_envelope  # noqa: E402
+from defender.tests.support.learning.curation._verb_authorization_632 import breaker_doc  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     FakeVerbs,
@@ -463,7 +465,7 @@ def materialize_alert(root: Path, doc: dict) -> Path:
     """The on-disk run dir a driven run starts from — `_replay_harness.materialize`'s shape,
     but planting a SYNTHESIZED alert (and the record the front door settles beside it) rather
     than copying a golden."""
-    from defender.tests import _alert_plant
+    from defender.tests.support.storage import _alert_plant
 
     # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
     run_dir = root / fixture_uuid("run")
@@ -544,7 +546,7 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
         if verbs is ... else verbs
     )
     main = ReplayFn(main_turns if main_turns is not None else [
-        Turn(tool_calls=[("read_file", {"path": str(RunPaths(run_dir).alert)})]),
+        Turn(tool_calls=[("read_file", {"path": model_path(RunPaths(run_dir).alert, run_dir=run_dir)})]),
         Turn(text="Investigation complete."),
     ])
     gather = ReplayFn(gather_turns if gather_turns is not None

@@ -89,7 +89,7 @@
 # ==========================================================================================
 schema_version: 2
 design: '1078'
-tests: defender/tests/tenant_1078_pass_a
+tests: defender/tests/tenancy/tenant_1078_pass_a
 base: ed5386bc90ca4a8033c132a4879534aa703e9d54
 demands:
 - id: d0_return_contract

@@ -3,7 +3,7 @@
 
 Two sources, unioned:
 
-* the adapter roster (`defender/scripts/adapters/*_adapter.py`), read from the working tree
+* the adapter roster (`defender/integrations/*_adapter.py`), read from the working tree
   through `runtime.verbs.read_roster` — the same read `ModuleVerbRegistry.systems()` uses;
 * the `execution.md` marker, read from the committed tree, at exactly depth 1 under
   `defender/skills/`.

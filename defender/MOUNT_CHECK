@@ -1,0 +1,5 @@
+Box mount check file.
+
+When a box starts, the runtime reads this file back through the read-only code mount and
+compares it with the host's own copy, to confirm the box sees the same code. It carries no
+other content and the agent never reads it.

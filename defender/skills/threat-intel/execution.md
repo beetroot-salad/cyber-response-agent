@@ -34,7 +34,6 @@ declares `THREAT_INTEL_URL_BASE`, `THREAT_INTEL_BASTION_HOST`,
 
 - `0` — success (including `verdict: unknown`)
 - `1` — query error (bad arg)
-- `2` — connectivity / docker / upstream 5xx
 - `64` — a usage mistake in YOUR call: an unknown verb, or an
   unknown/missing/mistyped param name (e.g. `indicator` where the verb
   declares `value`). The one class you can fix yourself — the rejection

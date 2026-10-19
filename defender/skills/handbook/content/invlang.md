@@ -3,7 +3,7 @@
 The structured surface the agent writes into `investigation.md`. This file
 is a reference overview; the authoring spec is
 `defender/skills/invlang/SKILL.md`, and the dense block-tag grammar is
-`docs/dense-investigation-format.md`. The structural validator
+`defender/docs/dense-investigation-format.md`. The structural validator
 (`skills/invlang/validate.py`) runs on every `investigation.md` write, through
 `runtime/permission/files.py`.
 
@@ -108,4 +108,4 @@ as `obs_kind:source`). Only `siem-event`, `runtime-audit`, and
 `inferred-structural` are weaker and cannot ground a strong assessment.
 
 Sources: `defender/skills/invlang/SKILL.md`,
-`docs/dense-investigation-format.md`.
+`defender/docs/dense-investigation-format.md`.

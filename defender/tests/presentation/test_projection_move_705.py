@@ -1,0 +1,349 @@
+"""The trace/visualizer projections read from the session store: consumed-field equivalence, write-once, fail-closed, HTML escaping."""
+from __future__ import annotations
+
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _view_run_1165
+
+import html
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+from defender.tests.support.shared.contracts._by_path import WORKTREE, load_module
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+import pytest
+
+from defender.tests.support.runtime.state._1255_view import model_path
+
+from defender.configuration._pricing import usage_cost
+from defender.run_repository import RunPaths
+from defender.tests.support.storage._session_store_705 import (
+    crafted_html_payload,
+    jsonl,
+    sql,
+    store_factory,
+)
+from defender.tests.e2e._replay_harness import (
+    GOLDEN,
+    ReplayFn,
+    Turn,
+    drive,
+    load_turns_from_trace,
+    materialize,
+)
+
+pytestmark = pytest.mark.e2e
+
+SALT = "0011223344556677"
+
+
+def _load_run_stats():
+    """`tooling/analytics/run_stats.py` — outside `defender/` AND outside
+    `specGraph.codeRoots`, so nothing mechanical checks the demand bound to it."""
+    return load_module(WORKTREE / "tooling" / "analytics" / "run_stats.py", name="run_stats_705")
+
+
+def _driven_run(tmp_path: Path, *, run_id: str, turns=None, text: str = "done"):
+    """One real driven run with the store attached, returning (run_dir, store, replay)."""
+    run_dir = materialize(tmp_path, GOLDEN, run_id=run_id)
+    inv = (GOLDEN / "investigation.md").read_text()
+    rep = (GOLDEN / "report.md").read_text()
+    scripted = turns if turns is not None else [
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
+                                         "content": inv})]),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir),
+                                         "content": rep})]),
+        Turn(text=text),
+    ]
+    replay = ReplayFn(scripted)
+    opened: list = []
+    drive(run_dir, run_id=run_id, main=replay,
+          store_factory=store_factory(tmp_path, sink=opened))
+    return run_dir, opened[0], replay
+
+
+def _trace_events(run_dir: Path) -> list[dict]:
+    """The projection both render drivers read, straight off disk."""
+    return [json.loads(line) for line
+            in (run_dir / "tool_trace.jsonl").read_text().splitlines() if line.strip()]
+
+
+def _log_derived_reference(run_dir: Path) -> dict:
+    """The projection's expected consumed fields, computed IN THE TEST from the wire log."""
+    records = [r for r in jsonl(RunPaths(run_dir).wire_log)
+               if r.get("kind") == "response" and r.get("agent_id", "main") == "main"]
+    keys = ("input_tokens", "output_tokens", "cache_read_input_tokens",
+            "cache_creation_input_tokens")
+    totals = {k: sum(int((r.get("usage") or {}).get(k, 0) or 0) for r in records)
+              for k in keys}
+    cost = sum(usage_cost(r.get("model") or "", r.get("usage") or {}) for r in records)
+    return {"usage": totals, "total_cost_usd": round(cost, 6), "num_turns": len(records)}
+
+
+# the negative and its positive control
+
+# consumed-field equivalence, one demand per frozen reader
+
+def test_the_moved_projection_preserves_the_usage_transform_and_the_cost(tmp_path):
+    """The store-derived projection emits `input_tokens` NET of cache reads and writes,"""
+    run_dir, _store, _replay = _driven_run(tmp_path, run_id="usage")
+    expected = _log_derived_reference(run_dir)
+
+    events = [json.loads(line) for line in
+              (run_dir / "tool_trace.jsonl").read_text().splitlines() if line.strip()]
+    result = [e for e in events if e.get("type") == "result"][-1]
+
+    assert set(result["usage"]) == set(expected["usage"]), result["usage"]
+    assert result["usage"] == expected["usage"], (
+        f"usage transform lost: {result['usage']} != {expected['usage']}")
+    assert result["total_cost_usd"] == expected["total_cost_usd"]
+    assert any(v for v in expected["usage"].values()), (
+        "the fixture recorded no usage at all — the comparison above would be 0 == 0")
+
+
+def test_the_moved_projection_still_parses_as_replay_harness_turns(tmp_path):
+    """`load_turns_from_trace` parses the moved projection into the same scripted `Turn`s"""
+    run_dir, _store, replay = _driven_run(tmp_path, run_id="harness-turns")
+    turns = load_turns_from_trace(run_dir / "tool_trace.jsonl")
+
+    assert len(turns) == replay.calls, (
+        f"{len(turns)} parsed turns for {replay.calls} model turns")
+    scripted_names = [[name for name, _args in t.tool_calls] for t in turns]
+    assert scripted_names[0] == ["write_file"], scripted_names
+    assert scripted_names[1] == ["write_file"], scripted_names
+    assert scripted_names[2] == [], "the final text-only turn must parse as text-only"
+    assert turns[0].tool_calls[0][1]["path"].endswith("investigation.md"), (
+        "the tool_use INPUT must survive, not only the name")
+
+
+def test_the_moved_projection_preserves_the_runtime_html_event_stream(tmp_path):
+    """`runtime.html`'s data layers render from the store-derived event stream with the same"""
+    from defender import run_common
+    from defender.presentation import visualize_run
+
+    run_dir, store, replay = _driven_run(tmp_path, run_id="runtime-html")
+    session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
+
+    page = visualize_run.render_runtime_page(run_dir)
+    assert page.strip(), "runtime.html rendered empty"
+
+    events = [json.loads(line) for line in
+              (run_dir / "tool_trace.jsonl").read_text().splitlines() if line.strip()]
+    assistant = [e for e in events if e.get("type") == "assistant"]
+    assert len(assistant) == replay.calls
+
+    ids = [e["message"]["id"] for e in assistant]
+    assert all(i.startswith(f"{session_id}/") for i in ids), (
+        f"the re-minted coordinate must carry the session component; got {ids}")
+    assert all("#" in i for i in ids), ids
+
+    run_common.visualize(_view_run_1165(run_dir))
+    assert (run_dir / "runtime.html").is_file(), "the post-run step saved no page record"
+    footer_page = (run_dir / "runtime.html").read_text(encoding="utf-8")
+    assert "result" in footer_page or str(replay.calls) in footer_page, (
+        "visualize_runtime's footer check found no events in the moved projection")
+
+
+def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second_write(tmp_path):
+    """`tool_trace.jsonl` is written at most once per `run_id`: a second write under the"""
+    observe_mod = __import__("defender.runtime.observe", fromlist=["write_trace"])
+    run_dir, store, _replay = _driven_run(tmp_path, run_id="trace-once")
+    session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
+    first = (run_dir / "tool_trace.jsonl").read_text()
+    assert first.strip(), "the first projection wrote nothing"
+
+    def _events(text: str) -> int:
+        return len([line for line in text.splitlines() if line.strip()])
+
+    try:
+        observe_mod.write_trace(run_dir, store=store, session_id=session_id, wall_ms=1.0)
+    except FileExistsError:
+        return  # failing loud on a second write discharges the demand
+    second = (run_dir / "tool_trace.jsonl").read_text()
+    assert _events(second) >= _events(first), (
+        "the second write silently dropped events from the first")
+
+
+# gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
+
+def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
+    """`(T, run_dir)` with the driven run moved to where the run page's repository opens it.
+
+    #1105 PR 2 (declared change 7): the standalone re-render is `--tenant T <run_id>` and opens
+    the run by id through T's repository, so the run moves to `<data root>/<T>/runs/<run_id>`
+    (#1187 R1, declared change 6: the runs folder carries no `_tenant.json`; the tenant's folder
+    holding it is the owner). The store stays where the drive put it: the run's pointer names
+    it by its absolute path. (Not driven there in place: `_driven_run` puts the store under the
+    same folder it puts the run in.)"""
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
+
+    tenant = ensure_d9_tenant()
+    runs = current_data_root() / tenant / "runs"
+    runs.mkdir(exist_ok=True)
+    # #1235 F2: the run -> case link is a sidecar beside the run folder, so the move carries it.
+    from defender.run_repository import RunPaths
+    moved = runs / run_dir.name
+    shutil.move(RunPaths(run_dir).session_pointer(), RunPaths(moved).session_pointer())
+    return tenant, Path(shutil.move(run_dir, moved))
+
+
+def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path, capsys):
+    """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two"""
+    from defender import run_common
+    from defender.presentation import visualize_run
+
+    marker = "RENDERED-RUN-MARKER-705-b7c8d9"
+    run_dir, store, _replay = _driven_run(tmp_path, run_id="two-drivers", text=marker)
+    tenant, run_dir = _into_tenant_runs(run_dir)
+    session_id = sql(store, "SELECT session_id FROM session ORDER BY rowid")[0][0]
+    assistant_events = [e for e in _trace_events(run_dir) if e.get("type") == "assistant"]
+    assert assistant_events, "the run produced no projection for either driver to render from"
+
+    def pages() -> dict:
+        return {name: (run_dir / name).read_text()
+                for name in ("runtime.html",)}
+
+    # driver A — the standalone re-render, in-process
+    assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name]) == 0, (
+        capsys.readouterr().err)
+    after_a = pages()
+    for name, page in after_a.items():
+        assert marker in page, (
+            f"positive control: {name} must carry the run's own final turn, or the "
+            f"no-clobber assertions below are satisfied by two empty pages")
+    shown_a = after_a["runtime.html"].count('class="tx-entry tx-assistant"')
+    assert shown_a, (
+        "positive control: runtime.html must render the run's assistant entries, or the "
+        "count comparison below is between two zeroes")
+
+    # driver B — the post-run step `run.py main` takes, over the SAME run_id
+    run_common.visualize(_view_run_1165(run_dir))
+    after_b = pages()
+    for name, page in after_b.items():
+        assert marker in page, (
+            f"{name} was clobbered by the second driver under one run_id — a truncating "
+            f"write replaced the first driver's real content with a page that no longer "
+            f"carries the run")
+    assert after_b["runtime.html"].count('class="tx-entry tx-assistant"') == shown_a, (
+        "the second render shows fewer assistant entries than the first — a truncating "
+        "write replaced a full page with a partial one")
+
+    assert _trace_events(run_dir), "the second render dropped the projection it renders from"
+    assert sql(store, "SELECT COUNT(*) FROM message WHERE session_id = ?",
+               (session_id,))[0][0] > 0, "the store both drivers read is still populated"
+
+
+@pytest.mark.parametrize("breakage", ["missing-pointer", "stale-store-path"])
+def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, breakage):
+    """A visualizer that cannot resolve the store FAILS CLOSED: the standalone re-render"""
+    from defender import run_common
+
+    # #1187 declared change 1: the run id is a uuid, so the re-render's `--tenant T <run_id>`
+    # cannot be refused for the id's shape — that refusal is non-zero too, and would pass the
+    # negative below for the wrong reason (#1187 sweep: pass-by-accident).
+    run_dir, store, _replay = _driven_run(tmp_path, run_id=fixture_uuid(f"failclosed-{breakage}"))
+    tenant, run_dir = _into_tenant_runs(run_dir)
+    script = run_common.DEFENDER_DIR / "scripts" / "visualize" / "visualize_run.py"
+
+    # positive control — intact, the standalone re-render exits 0 on the same argv, and the
+    # post-run step renders the page and does not raise
+    healthy = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
+        [sys.executable, str(script), "--tenant", tenant, run_dir.name],
+        capture_output=True, text=True, encoding="utf-8", check=False)
+    assert healthy.returncode == 0, (
+        f"control: the re-render of the intact run exited {healthy.returncode}: "
+        f"{healthy.stderr!r}")
+    (run_dir / "runtime.html").unlink(missing_ok=True)
+    run_common.visualize(_view_run_1165(run_dir))
+    for name in ("runtime.html",):
+        assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"
+        (run_dir / name).unlink()
+
+    pointer = RunPaths(run_dir).session_pointer()
+    if breakage == "missing-pointer":
+        pointer.unlink()
+    else:
+        body = json.loads(pointer.read_text())
+        Path(body["store_path"]).unlink()
+        for suffix in ("-wal", "-shm"):
+            Path(str(body["store_path"]) + suffix).unlink(missing_ok=True)
+        store.close()
+
+    # the standalone re-render really exits non-zero — the real script, the real argv
+    # (`--tenant T <run_id>`, #1105 PR 2 declared change 7), the real broken input
+    script = run_common.DEFENDER_DIR / "presentation" / "visualize_run.py"
+    child = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
+        [sys.executable, str(script), "--tenant", tenant, run_dir.name],
+        capture_output=True, text=True, encoding="utf-8", check=False)
+    assert child.returncode != 0, (
+        f"the visualizer exited 0 with an unresolvable store ({breakage}); its stdout was "
+        f"{child.stdout!r}")
+    # 64 is the CLI's usage refusal: a non-zero exit for its argv, not for the broken store.
+    assert child.returncode != 64, f"the re-render refused its arguments: {child.stderr!r}"
+
+    # and the post-run step surfaces it rather than swallowing it to stderr
+    with pytest.raises(run_common.VisualizeFailed) as raised:
+        run_common.visualize(_view_run_1165(run_dir))
+    assert str(run_dir) in str(raised.value), (
+        "the surfaced failure must name the run dir it could not render")
+    assert not (run_dir / "runtime.html").is_file(), (
+        "a failed render must not leave a page behind that a reader would trust")
+
+
+# gl1 — the render path's escaping of model-authored payload text
+
+def test_the_rendered_page_escapes_model_authored_payload_content(tmp_path):
+    """Model-authored payload text that is HTML/script-shaped cannot break out of its"""
+    from defender import run_common
+
+    payload = crafted_html_payload()
+    run_dir = materialize(tmp_path, GOLDEN, run_id='escaping')
+    inv = (GOLDEN / "investigation.md").read_text()
+    rep = (GOLDEN / "report.md").read_text()
+    replay = ReplayFn([
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "investigation.md", run_dir=run_dir),
+                                         "content": inv})]),
+        Turn(tool_calls=[("write_file", {"path": model_path(run_dir / "report.md", run_dir=run_dir),
+                                         "content": rep})]),
+        Turn(text=payload),
+    ])
+    opened: list = []
+    drive(run_dir, run_id="escaping", main=replay,
+          store_factory=store_factory(tmp_path, sink=opened))
+
+    bodies = "".join(row[0] for row in
+                     sql(opened[0], "SELECT payload FROM message_payload"))
+    assert "window.__pwned" in bodies, (
+        "the crafted payload never reached the store — the fixture, not the renderer, "
+        "would be what this test measured")
+
+    run_common.visualize(_view_run_1165(run_dir))
+    for page_name in ("runtime.html",):
+        page = (run_dir / page_name).read_text(encoding="utf-8")
+        assert html.escape(payload) in page or "&lt;script&gt;" in page, (
+            f"{page_name}: positive control — the payload must be RENDERED, escaped, or "
+            f"the absence assertions below are vacuous")
+        assert "<script>window.__pwned=1</script>" not in page, (
+            f"{page_name}: the crafted script element broke out of its container")
+        assert "onerror=alert(1)" not in page, (
+            f"{page_name}: the crafted event-handler attribute survived unescaped")
+
+
+@pytest.mark.parametrize("spelling", ["onerror", "ONERROR", "OnError", "oNeRrOr"])
+def test_the_event_handler_split_covers_every_casing_and_preserves_the_original(spelling):
+    """#883 F-35 — HTML attribute names are case-insensitive, so `ONERROR=` IS the"""
+    from defender.presentation.visualize_primitives import esc_untrusted
+
+    zwsp = "​"
+    raw = f"<img src=x {spelling}=alert(1)>"
+    out = esc_untrusted(raw)
+
+    assert f"{spelling}=" not in out, (
+        f"{spelling}= passed through unsplit — the pattern is blind to this casing")
+    assert f"{spelling[:2]}{zwsp}{spelling[2:]}=" in out, (
+        f"expected the split after {spelling[:2]!r} with the casing intact, got {out!r}")
+    # The split is the ONLY edit the helper makes: strip it and what is left is exactly
+    # `esc()`'s output. This is what fails if the literal replacement case-folds the text.
+    assert out.replace(zwsp, "") == html.escape(raw)

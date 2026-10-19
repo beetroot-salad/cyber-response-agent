@@ -1,27 +1,17 @@
-"""#1217 — a queries-table payload sidecar is never written past `_io.READ_LIMIT`.
-
-A host process writes `gather_raw/<lead>/<seq>.json`, so the box's `--ulimit fsize` (#1198) does
-not bound it, and every reader of a sidecar refuses a file over `READ_LIMIT`. The one writer,
-`record_query.persist_payload`, refuses instead: it writes nothing and returns `None`, the shape
-it already returns for any failed write, which every reader of `payload_path` handles.
-
-The bash tool is not a source: its only queries-row writer records an empty payload, so box
-stdout never reaches a sidecar and has no test here.
-"""
 from __future__ import annotations
 
-from defender.tests._spec1077 import fixture_run as _writer_run_1165
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
 
 import pytest
 
 pytest.importorskip("pydantic_ai")
 
 from defender._io import READ_LIMIT, read_bytes_capped  # noqa: E402
-from defender.scripts.gather_tools import record_query  # noqa: E402
+from defender.runtime import record_query  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, LEAD, q, run_gather  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
-from defender.tests._fixture_uuid import fixture_uuid  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 

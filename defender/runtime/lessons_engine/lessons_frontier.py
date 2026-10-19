@@ -22,10 +22,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from dataclasses import field, replace
 from pathlib import Path
 
-from defender._corpus import PROVENANCE_KEYS
+from defender.knowledge._corpus import PROVENANCE_KEYS
 from defender._model import model
 from defender._untrusted import wrap_fresh
 from defender.runtime.lessons_engine._lessons_common import (
@@ -48,7 +49,7 @@ from defender.skills.invlang.validate import (
     is_open_slot,
 )
 from defender import _yaml
-from defender._knowledge import CHECKOUT_KNOWLEDGE
+from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE
 
 DEFAULT_CORPUS = CHECKOUT_KNOWLEDGE.lessons_dir
 CORPUS_NAME = DEFAULT_CORPUS.name
@@ -470,13 +471,21 @@ FOLD_LEAD = (
 )
 
 
-def render(hits: list[Hit], *, lead: str = WRITE_RETURN_LEAD) -> str:
+def _resolved_text(path: Path) -> str:
+    return str(path.resolve())
+
+
+def render(
+    hits: list[Hit], *, lead: str = WRITE_RETURN_LEAD,
+    show: Callable[[Path], str] = _resolved_text,
+) -> str:
     """The injected block, or `""` when nothing matched (the caller decides whether silence
     is right). `lead` is the first line: the write return's by default, `FOLD_LEAD` for the fold.
 
     Paths are absolute because MAIN's cwd anchor is the run dir: a relative
-    `defender/lessons/<name>.md` would be rebased and denied by `decide_read`. Absolute operands
-    bypass the anchor, as `lessons_fm._emit_match` also relies on.
+    `defender/lessons/<name>.md` would be rebased and denied by `decide_read`. `show` renders
+    each lesson's path: a run role passes its model view's (#1255 P1, `/defender/lessons/…`);
+    the default, the resolved host path, is this module's command line's.
     """
     if not hits:
         return ""
@@ -484,11 +493,11 @@ def render(hits: list[Hit], *, lead: str = WRITE_RETURN_LEAD) -> str:
     lines = []
     for hit in hits:
         # `matched` is the model's only account of why this lesson was pushed.
-        lines.append(f"- {hit.path.resolve()} — matched {hit.matched}")
+        lines.append(f"- {show(hit.path)} — matched {hit.matched}")
         if body := _render_frontmatter(hit.frontmatter):  # lint-lesson-text: ok — inside the untrusted frame below
             lines.append(body)
     # The lead is host text; the hits are lesson text a model wrote, framed as the alert is
-    # (`defender._corpus`'s rule), so a description cannot read as a section of this message.
+    # (`defender.knowledge._corpus`'s rule), so a description cannot read as a section of this message.
     return lead + "\n" + wrap_fresh("\n".join(lines), "untrusted")
 
 

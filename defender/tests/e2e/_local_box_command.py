@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 
-from defender.tests._by_path import WORKTREE
+from defender.tests.support.shared.contracts._by_path import WORKTREE
 
 
 def run_box_python_command(command: list[str]) -> subprocess.CompletedProcess[str]:

@@ -1,13 +1,5 @@
 """#872 — O7/M6's seam, the gate's reach, and provenance
-(`d19`, `d20`, `d21`, `d22`, `d23`, `d35`, `d40`, `d44`, `d59`, `d74`, `d75`).
-
-O1 is UNDRIVABLE on the shipped tree — all fourteen registered tools are annotated `-> str`
-except `query`, and `query`'s dict is discarded by `QueryCapture` at every candidate seam — so
-the seam is part of the contract rather than a test convenience. Every demand here is
-therefore an OUTCOME: install a foreign toolset through the declared seam and read the
-model-visible text. Signature inspection discharges nothing, and there is no
-`monkeypatch.setattr` anywhere in this suite.
-"""
+(`d19`, `d20`, `d21`, `d22`, `d23`, `d35`, `d40`, `d44`, `d59`, `d74`, `d75`)."""
 from __future__ import annotations
 
 import json
@@ -18,16 +10,11 @@ import pytest
 
 pytest.importorskip("pydantic_ai")
 
-# `toons` ships in the `runtime` EXTRA, so an install without it is a supported one —
-# and a bare module-scope import there is a COLLECTION error, which pytest answers by
-# interrupting the whole session. Guarded like `pydantic_ai` above it.
 toons = pytest.importorskip("toons")  # noqa: E402
 
-from pydantic_ai.capabilities import AbstractCapability  # noqa: E402
 
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
-    ToolRoster,
     Turn,
     VerbRecorder,
     drive,
@@ -56,13 +43,7 @@ def _payload() -> dict:
 
 
 def _desalt(text: str) -> str:
-    """One frame's salt replaced by a fixed marker, so two RUNS' texts can be compared.
-
-    #875 mints a salt per frame (`wrap_fresh`), so no two runs' framed spans are ever equal
-    byte for byte — and a demand about a tool's model-visible text being unchanged must not
-    turn into a demand that two CSPRNG draws collide. The width is pinned by the substitution
-    itself: only a 16-hex-char run tag matches, so a payload byte the gate changed cannot hide
-    in the normalization."""
+    """One frame's salt replaced by a fixed marker, so two RUNS' texts can be compared."""
     return re.sub(r"run-[0-9a-f]{16}-", "run-<salt>-", text)
 
 
@@ -76,20 +57,6 @@ def _gather_turn(lead: str = "l-001") -> Turn:
 def test_a_foreign_toolset_injected_at_the_entry_point_reaches_the_model_through_the_gate(
     tmp_path: Path,
 ) -> None:
-    """A foreign dict-returning toolset installed through the declared seam at
-    `run_investigation` is offered to the model, called, and its result reaches the model as
-    the framed TOON view.
-
-    DELIBERATELY NOT "run_investigation accepts a toolset= parameter". A dependency the design
-    gives no seam makes the seam part of the contract, and the contract is an OUTCOME:
-    signature inspection would certify that a field exists and say nothing about whether the
-    toolset is wired to the agent the model talks to, which is the escape the whole demand set
-    is written against.
-
-    TWO THREADING SITES, not one: `run.py`'s single production call and the replay harness's
-    `seams` dict, which already threads seven. This drives the second, which is the one a test
-    can reach without a provider.
-    """
     value = _payload()
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
     main = PartRecorder([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
@@ -101,202 +68,9 @@ def test_a_foreign_toolset_injected_at_the_entry_point_reaches_the_model_through
     )
 
 
-def test_the_gate_declares_its_encoder_and_toolset_seams_at_the_composition_root(
-    tmp_path: Path,
-) -> None:
-    """The gate's two dependencies enter through declared seams at the composition root: the
-    foreign TOOLSET threads from `run_investigation` into `build_agent_core`, and the ENCODER is
-    a constructor argument the same build site accepts.
-
-    A dependency the design gives no seam makes the seam part of the contract, and O9(b) is
-    what forces the second one: its oracle is stated as "for a payload the validator refuses,
-    the encoder is NEVER CALLED — observable on a spy encoder's call count, not inferred from
-    the return value", and a refusal and a fault are indistinguishable from outside the gate.
-    The project profile forbids `monkeypatch.setattr`, so a value the build is handed is the
-    only route the house allows.
-
-    Driven rather than inspected: the encoder seam is observed by handing one build a spy and
-    two payloads that must produce DIFFERENT call counts through it — a refused one (0) and a
-    substituting one (1) — which no signature check could establish; the toolset seam is
-    observed by threading a foreign toolset from the entry point and reading the model-visible
-    text at the far end.
-
-    IT IS ALSO THE SEGFAULT CONTAINMENT the rest of this suite rests on: `toons.dumps` SIGSEGVs
-    on a self-referential container and on a deep acyclic one, so a sealed encoder is what lets
-    a wrong implementation fail a test rather than end the process running it.
-    """
-    value = _payload()
-    from defender.tests.e2e._toon872 import EncoderFault, SpyEncoder
-
-    sealed = SpyEncoder(EncoderFault(dumps_returns="<the encoder must not have been called>"))
-    refused = agent_run(toolset=foreign_toolset({"rows": [{"a": "x" + chr(0)}]}), encoder=sealed)
-    assert refused.error is None
-    assert sealed.dumps_calls == 0, "the encoder seam is not the object the gate calls"
-
-    spy = SpyEncoder()
-    substituted = agent_run(toolset=foreign_toolset(value), encoder=spy)
-    assert spy.dumps_calls == 1, (
-        "the injected encoder is never reached, so every call count this suite reads through "
-        "it is measuring nothing"
-    )
-    assert framed_content(substituted.dispatched.text()) == toons.dumps(value)
-
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
-    main = PartRecorder([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
-    drive(run_dir, run_id=RUN_ID, main=main, toolset=foreign_toolset(value))
-    assert framed_content(main.dispatched.text("fetch_rows")) == toons.dumps(value), (
-        "the toolset seam does not thread from the entry point to the agent the model talks to"
-    )
-
-
-def test_the_shipped_tool_set_is_unchanged_when_the_seam_is_not_supplied(
-    tmp_path: Path,
-) -> None:
-    """A run that supplies nothing at the new seam offers the model an IDENTICAL tool set,
-    capability list and model-visible text to today's, and no foreign tool is callable.
-
-    A DI seam that defaults to something is how a test hook becomes a production hole. The
-    roster is read off `AgentInfo.function_tools` — the tool definitions as the MODEL is
-    offered them — which is the only honest place to read a registration from: a registry
-    entry, or an annotation re-inspected off the function object, would both pass while the
-    wire carried something else.
-
-    BOUND ON EVERY SURFACE THE ABSENCE COULD REACH: the roster the model is offered, and the
-    text of every part it receives. `d20` is the positive control and is driven here too, in
-    the same shape, so "no foreign tool" is not green merely because nothing was installed
-    anywhere.
-    """
-    bare_dir = materialize(tmp_path / "bare", GOLDEN_AB3, run_id=RUN_ID)
-    bare = ToolRoster([Turn(text="Complete.")])
-    drive(bare_dir, run_id=RUN_ID, main=bare)
-    bare_names = sorted(t.name for t in (bare.tool_defs or []))
-    assert bare_names, "the roster was never captured, so this negative reads an empty list"
-    assert "fetch_rows" not in bare_names
-    assert all("fetch_rows" not in seen for seen in bare.seen)
-
-    with_dir = materialize(tmp_path / "with", GOLDEN_AB3, run_id=RUN_ID)
-    supplied = ToolRoster([Turn(tool_calls=[("fetch_rows", {})]), Turn(text="Complete.")])
-    drive(with_dir, run_id=RUN_ID, main=supplied,
-          toolset=foreign_toolset(_payload()))
-    supplied_names = sorted(t.name for t in (supplied.tool_defs or []))
-    assert "fetch_rows" in supplied_names, (
-        "the seam installs nothing even when supplied, so the negative above is vacuous"
-    )
-    assert sorted(set(supplied_names) - {"fetch_rows"}) == bare_names, (
-        "supplying the seam changed the shipped tool set beyond adding the foreign tool"
-    )
-
-
-def test_the_seams_presence_or_absence_holds_for_every_call_across_the_whole_run(
-    tmp_path: Path,
-) -> None:
-    """A toolset supplied once at `run_investigation` holds for EVERY call across the whole
-    run — the way the nine existing optional seams do — and its absence holds for every call
-    too.
-
-    The failure this forbids is a seam wired per-turn or per-agent-build: a gate that covered
-    the first foreign call and not the third would satisfy every single-call demand in this
-    suite. Three calls are driven across three separate model turns, so each crosses a fresh
-    request/response round, and all three are asserted.
-    """
-    value = _payload()
-    run_dir = materialize(tmp_path, GOLDEN_AB3, run_id=RUN_ID)
-    main = PartRecorder([
-        Turn(tool_calls=[("fetch_rows", {})]),
-        Turn(tool_calls=[("fetch_rows", {})]),
-        Turn(tool_calls=[("fetch_rows", {})]),
-        Turn(text="Complete."),
-    ])
-    drive(run_dir, run_id=RUN_ID, main=main, toolset=foreign_toolset(value))
-
-    texts = main.dispatched.texts("fetch_rows")
-    assert len(texts) == 3, f"expected three foreign returns in the final history, got {len(texts)}"
-    for i, text in enumerate(texts):
-        assert framed_content(text) == toons.dumps(value), (
-            f"call {i + 1} of 3 was not gated — the seam did not hold for the whole run"
-        )
-
-
-def test_a_foreign_toolset_installed_but_never_called_leaves_the_run_identical() -> None:
-    """A foreign toolset installed at the seam but never CALLED leaves the run identical: no
-    encode, no decode, no substitution, nothing framed that was not framed before.
-
-    ALTITUDE NOTE, and it is why this test carries its control inline: the assertion is vacuous
-    on its own — it passes over a gate that was never installed at all — so `d20`'s outcome is
-    driven in the same test. What the pair establishes is that the gate acts on results and
-    not on installation.
-    """
-    idle = agent_run(toolset=foreign_toolset(_payload()), calls=[])
-    assert idle.encoder.dumps_calls == 0
-    assert idle.encoder.loads_calls == 0
-    assert idle.dispatched.parts == []
-
-    called = agent_run(toolset=foreign_toolset(_payload()))
-    assert called.encoder.dumps_calls == 1, (
-        "the installed toolset is never gated even when called, so the idle assertion above "
-        "is about a gate that does nothing"
-    )
-
-
-def test_call_tool_receives_the_tools_own_return_with_a_capture_shaped_capability_installed() -> None:
-    """`call_tool` receives the TOOL'S OWN return value in either capability order, including
-    with a capture-shaped capability that discards the wrapper's return.
-
-    The discriminator that decided f4, driven as a test. The wrapper's INPUT is the invariant,
-    not its return: `call_tool` is not the last word — the library applies the first capability
-    outermost, so an outer `wrap_tool_execute` overrides what the wrapper returns, and
-    `QueryCapture` does exactly that for `query` today. That cost is a CONTRACT, not a caveat
-    (`d69` is the examined no).
-
-    Both orders are driven, plus the order the composition root actually produces
-    (`[Hooks, *extra, QueryCapture]`, first outermost). Installing at `wrap_tool_execute` or
-    `after_tool_execute` instead was REJECTED: both are ordering-dependent against
-    `QueryCapture`, and `test_query_tool_611.py` already pins that capture must not take
-    `after_tool_execute`.
-    """
-    value = _payload()
-
-    class Capture(AbstractCapability):
-        """A capture-shaped capability: it awaits the handler, records what it got, and
-        returns its OWN string — `QueryCapture`'s shape, without its policy."""
-
-        def __init__(self) -> None:
-            self.seen: list = []
-
-        async def wrap_tool_execute(self, ctx, *, call, args, handler, **_):  # noqa: ANN001, ANN003
-            result = await handler(args)
-            self.seen.append(result)
-            return "capture's own rendering"
-
-    outer = Capture()
-    out = agent_run(toolset=foreign_toolset(value), extra=(outer,))
-    assert out.encoder.dumps_calls == 1, "the wrapper never saw the tool's value"
-    assert outer.seen, "the capture-shaped capability never ran"
-    assert out.dispatched.text() == "capture's own rendering", (
-        "the outer hook did not override the wrapper's return, so the ordering this demand "
-        "is about is not the ordering under test"
-    )
-    assert framed_content(str(outer.seen[0])) == toons.dumps(value), (
-        "the wrapper was handed something other than the tool's own value"
-    )
-
-
 def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     tmp_path: Path,
 ) -> None:
-    """With the gate installed the model still sees `QueryCapture`'s rendered salt-wrapped
-    string for `query`, the executed-queries row is still appended — and a foreign dict in the
-    SAME run is substituted.
-
-    The gate's inertness on the shipped tree is a CONTRACT, not an accident. `query` is the one
-    registered tool annotated `-> Any` and the only in-tree dict crossing the seam, and
-    `QueryCapture.wrap_tool_execute` discards `call_tool`'s return for it at every candidate
-    placement — so O1 is unreachable through defender's own tools and O2 must hold for them.
-
-    The foreign call in the same run is what makes this a survival demand rather than a
-    tautology: without it, "the query path is unchanged" is green over a gate that never fired.
-    It is also the positive control `d27` and `d29` name.
-    """
     from defender._io import read_jsonl_rows
     from defender.run_repository import RunPaths
 
@@ -319,11 +93,6 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
     assert read_jsonl_rows(RunPaths(live_dir).executed_queries), (
         "no executed-queries row was written, so the query path did not run"
     )
-    # COMPARED WITH THE SALT NORMALIZED, because #875 mints a fresh one per frame: `query`
-    # renders its own payload through `wrap_fresh`, so the two runs' delimiters differ by
-    # construction and a raw text comparison asserts only that two CSPRNG draws collided. Every
-    # other byte — the payload, the frame's shape, its position in the surrounding tool text —
-    # is still compared, and the frame's presence is asserted separately below.
     def _comparable(text: str, run_dir: Path) -> str:
         # ...and the run dir normalized with it, for the same reason: the two arms are two
         # RUNS, so `query` echoes each one's own `gather_raw` path back in its tool text.
@@ -344,31 +113,7 @@ def test_the_query_tool_path_is_byte_identical_with_the_gate_installed(
 
 def test_an_owned_agent_tool_result_is_untouched_while_a_foreign_one_is_gated() -> None:
     """An owned `@agent.tool` result and a foreign toolset's tool OF THE SAME NAME are driven
-    in ONE run, and only the foreign one is gated.
-
-    Provenance-gated, decided at §7 r2 (P1 = B). The gate reads the toolset's label at the
-    seam and substitutes only for results it marks foreign, which is what keeps O2 true for the
-    13 of 14 registered tools annotated `-> str` with NOTHING ENFORCING the annotation: under
-    the provenance-blind reading, any of them returning a dict would have had its model-visible
-    text silently changed.
-
-    THE SAME NAME IS THE POINT: a name list would pass a same-named foreign tool. It cannot be
-    driven in ONE run, and that is a library constraint rather than an omission — pydantic-ai
-    refuses the registration outright (`UserError: FunctionToolset defines a tool whose name
-    conflicts with existing tool from the agent: 'fetch_rows'`, executed against 1.107.0), so
-    two tools of one name never coexist on one agent. It IS drivable across two runs, and that
-    is the form the discriminator takes here: ONE tool name, ONE payload, TWO provenances,
-    OPPOSITE verdicts. Any implementation that is a function of the tool's NAME gives the same
-    answer twice and fails, whichever answer it gives; only something that reads the toolset's
-    own label can give two.
-
-    The one-run arm below is kept as well, at the two names the library permits, because it is
-    the only place the two verdicts are read out of a SINGLE dispatched history — a gate that
-    got provenance right per-build and wrong per-call would pass the two-run arm.
-
-    The library constraint is recorded in `handoff.deviations` beside the other five, so a
-    later reader does not read the two-run shape as a weakening someone chose.
-    """
+    in ONE run, and only the foreign one is gated."""
     value = _payload()
 
     # THE SAME-NAME DISCRIMINATOR, at the finest grain the library allows.
@@ -404,20 +149,7 @@ def test_an_owned_agent_tool_result_is_untouched_while_a_foreign_one_is_gated() 
 
 def test_an_unlabelled_toolset_is_treated_as_foreign_and_only_the_composition_root_marks_owned() -> None:
     """An UNLABELLED toolset is treated as foreign — gated and framed — and a toolset carrying
-    defender's owned label is not.
-
-    THE WHOLE COST OF P1 READING B, and the human took B knowing it. Three things the
-    resolution names, and a test pinning one goes green over an implementation that got the
-    other two wrong. WHAT THE LABEL IS: the gate reads the toolset's own metadata at the seam,
-    applied here through the production marker rather than by spelling a key in the test.
-    WHO MAY SET IT: `owned` is a property of the INSTALLATION SITE — defender's own composition
-    root marks the tools it registers, which is why an owned `@agent.tool` is untouched
-    (`d19`). WHAT AN UNLABELLED TOOLSET DEFAULTS TO: FOREIGN, the safe direction, because an
-    unlabelled foreign source is then gated and framed rather than silently exempt.
-
-    The mislabel hazard in the other direction — a foreign source installed with an owned label
-    — is the accepted limitation at `d60` and is deliberately not defended here.
-    """
+    defender's owned label is not."""
     value = _payload()
     unlabelled = agent_run(toolset=foreign_toolset(value, name="fetch_rows"))
     assert framed_content(unlabelled.dispatched.text()) == toons.dumps(value), (
@@ -431,31 +163,9 @@ def test_an_unlabelled_toolset_is_treated_as_foreign_and_only_the_composition_ro
     )
 
 
-
-
-
-
 def test_the_golden_case_generators_subprocess_child_carries_the_gate() -> None:
     """A re-executed `run.py` child reaches `build_agent_core`, so the gate is on that path
-    unconditionally.
-
-    The driver this was written for, `evals/oracle_golden/generate_case.py`, is removed (#1120,
-    PR #1157); the branch launcher still starts every sibling as a `run.py` SUBPROCESS, and the
-    property is the child's own: it reaches `build_agent_core` REGARDLESS of the ambient
-    environment, because `run.py` puts the real repo root on `sys.path` itself, so the install
-    site is on the child's path with `PYTHONPATH` set and with it unset alike (`cN13`, executed
-    both ways).
-
-    MODELLED, NOT WAIVED — for this half no waiver is available at all, because the reach is
-    unconditional and executed. The other subprocess driver context, `evals/harness_lead.py`,
-    IS waived (`d76`): the harness copies only `learning/`, `_untrusted.py` and `skills/` into
-    its temp tree, so in a clean environment `defender.runtime` does not resolve and the child
-    dies at import before any agent is built.
-
-    Driven, not read: the child is spawned with `PYTHONPATH` DELETED, which is the ambient
-    condition the reach must not depend on, and it reports whether the gate's install site
-    resolved and was exercised.
-    """
+    unconditionally."""
     child = '''
 import json, os, sys
 

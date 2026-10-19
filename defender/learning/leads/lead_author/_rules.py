@@ -16,9 +16,9 @@ from types import MappingProxyType
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _corpus
+from defender.knowledge import _corpus
 from defender import _git
-from defender import _scaffold_rules
+from defender.knowledge import _scaffold_rules
 from defender._io import ENTRY_DIR, ENTRY_FILE, Bound
 from defender.learning.core.lane_trees import KIND_ABSENT, TreeFor, kind_at, read_at, view_at
 from defender.learning.leads import lead_neighbors

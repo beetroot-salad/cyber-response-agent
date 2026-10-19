@@ -75,7 +75,6 @@ def build_questioner_config(
         corpus=_shared.lane_corpus(trees, paths.lessons_questioner_dir),
         tree_for=trees.tree_for,
         corpus_dir_rel=paths.lessons_questioner_dir_rel,
-        runs_dir=paths.runs_dir,
         state=state,
         channel=QUESTIONER_FINDINGS,
         repo_lock_wait_seconds=repo_lock_wait_seconds(),
@@ -90,9 +89,6 @@ def build_questioner_config(
         max_attempts=author_max_attempts(),
         manifest_seed=manifest_seed,
         box=box,
-        # No drain-run check (the base default): a world lesson has no defender behaviour to
-        # re-verify. `exempt` is unreachable while that holds, but every row is out of scope.
-        exempt=lambda row: True,
     )
 
 

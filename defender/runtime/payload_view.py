@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from defender._clock import parse_iso_utc
-from defender._env import env_int
+from defender.configuration._env import env_int
 from defender._model import model
 from defender._text import as_int
 
@@ -73,11 +73,16 @@ class Completeness:
 _SEP = 2
 
 
-def _dumps(value: Any) -> str:
-    """`ensure_ascii` must stay on: sizes are measured with `len()` (codepoints) but compared
-    as bytes, which agree only because escaping makes every string ASCII. Without it CJK text
-    would under-measure up to 3x and pass the ceiling whole."""
-    return json.dumps(value, default=str)
+def payload_text_of(payload: Any) -> str:
+    """@owns payload_text — the payload sidecar's spelling: an adapter's answer as the
+    text the query tool persists (`gather_raw/<lead>/<seq>.json`) and hands the model: the
+    answer's own key order, never re-sorted, `default=str` so a `datetime` or `Decimal` cannot
+    raise mid-call. `ensure_ascii` stays on: the view measures serialized text with
+    `len()`, which agrees with bytes only while escaping keeps every string ASCII.
+
+    A branched world serves an answer read live in exactly this spelling (#1255 G8), so the
+    investigator's file and tool result are the bytes a natural run over the same system gets."""
+    return json.dumps(payload, default=str)
 
 
 def _int(obj: dict, key: str) -> int | None:
@@ -187,7 +192,7 @@ class _Node:
 
     @property
     def size(self) -> int:
-        return len(_dumps(self.value))
+        return len(payload_text_of(self.value))
 
     @property
     def label(self) -> str:
@@ -249,14 +254,14 @@ def _clip_string(text: str, room: int) -> tuple[str, bool]:
 def _clip_serialized(text: str, room: int) -> tuple[str, bool]:
     """Clip so the string's JSON serialization fits `room` bytes. Unlike `_clip_string`'s
     character budget, escaping matters here (a newline costs 2 bytes, non-ASCII 6), so this
-    binary-searches the prefix length with `_dumps`."""
-    if len(_dumps(text)) <= room:
+    binary-searches the prefix length with `payload_text_of`."""
+    if len(payload_text_of(text)) <= room:
         return text, False
     probe = _string_marker(0, len(text))  # the widest the marker can get
     lo, hi = 0, len(text)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if len(_dumps(text[:mid] + probe)) <= room:
+        if len(payload_text_of(text[:mid] + probe)) <= room:
             lo = mid
         else:
             hi = mid - 1
@@ -295,7 +300,7 @@ def _fit_one(element: Any, room: int, path: str, out: list[Elision]) -> Any | No
     for cap in _SQUEEZE_CAPS:
         leaves: list[Elision] = []
         squeezed = _clip_leaves(element, path, leaves, cap)
-        if len(_dumps(squeezed)) <= room:
+        if len(payload_text_of(squeezed)) <= room:
             out.extend(leaves)
             return squeezed
     # `squeezed` is the tightest cap's candidate from the last pass.
@@ -308,14 +313,14 @@ def _fit_one(element: Any, room: int, path: str, out: list[Elision]) -> Any | No
 
 
 def _fit_list(node: _Node, share: int, out: list[Elision]) -> Any:
-    reserve = len(_dumps(_list_marker(0, len(node.value)))) + 2
+    reserve = len(payload_text_of(_list_marker(0, len(node.value)))) + 2
     kept: list[Any] = []
     used = 2
     for idx, element in enumerate(node.value):
         # Leaf elisions are committed only once their element is kept.
         leaves: list[Elision] = []
         clipped = _clip_leaves(element, f"{node.label}[{idx}]", leaves)
-        cost = len(_dumps(clipped)) + _SEP
+        cost = len(payload_text_of(clipped)) + _SEP
         if used + cost + reserve > share:
             break
         kept.append(clipped)
@@ -346,12 +351,12 @@ def _fit_fields(obj: dict, budget: int, out: list[Elision], *, path: str = "") -
     spent, then mark how many were dropped."""
     marker_key = f"{ELISION_PREFIX}>>"
     marker = _list_marker(0, len(obj), "fields")
-    reserve = len(_dumps({marker_key: marker})) + _SEP  # measured, not guessed
+    reserve = len(payload_text_of({marker_key: marker})) + _SEP  # measured, not guessed
     kept: dict[str, Any] = {}
     used = 2
     for key, value in obj.items():
         # `{` + pair + `}` costs the same as the pair plus its separator.
-        cost = len(_dumps({str(key): value}))
+        cost = len(payload_text_of({str(key): value}))
         if used + cost + reserve > budget:
             break
         kept[str(key)] = value
@@ -368,11 +373,11 @@ def _fit_cells(row: list, budget: int, out: list[Elision], *, path: str = "") ->
     `_fit_fields`. Cells are kept from the front, so `columns[:len(kept)]` names the survivors.
     """
     marker = _list_marker(0, len(row), "cells")
-    reserve = len(_dumps(marker)) + _SEP
+    reserve = len(payload_text_of(marker)) + _SEP
     kept: list[Any] = []
     used = 2
     for cell in row:
-        cost = len(_dumps(cell)) + _SEP
+        cost = len(payload_text_of(cell)) + _SEP
         if used + cost + reserve > budget:
             break
         kept.append(cell)
@@ -391,7 +396,7 @@ def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:
     a small `columns` survives beside an elided `values`, and the reverse case works too,
     without any per-key rule.
     """
-    if len(_dumps(obj)) <= budget:
+    if len(payload_text_of(obj)) <= budget:
         return obj, []
     elisions: list[Elision] = []
     nodes = sorted(_bulk_nodes(obj), key=lambda n: n.size)
@@ -402,7 +407,7 @@ def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:
     result = obj
     for node in nodes:
         result = _replace(result, node.path, [] if node.kind == "list" else "")
-    remaining = budget - len(_dumps(result))
+    remaining = budget - len(payload_text_of(result))
     if remaining <= 0:
         # The scalars alone overflow, so fall back to `_fit_fields` even though bulk nodes
         # exist. Mark each emptied region first — a bare `[]` would look like real data.
@@ -424,7 +429,7 @@ def walk(obj: Any, budget: int) -> tuple[Any, list[Elision]]:
             else _fit_string(node, share, elisions)
         )
         result = _replace(result, node.path, fitted)
-        remaining = max(remaining - len(_dumps(fitted)), 0)
+        remaining = max(remaining - len(payload_text_of(fitted)), 0)
         left -= 1
     return result, elisions
 
@@ -527,15 +532,15 @@ def render(
         comp, span = Completeness("unknown"), None
     else:
         walked, elisions = walk(obj, cap)
-        body = _dumps(walked)
+        body = payload_text_of(walked)
         comp = completeness(obj)
         span = returned_span(_returned_records(obj, comp)) if comp.state == "capped" else None
         if len(body) > cap:
             # Floor for shapes the walk cannot fit: emit the clipped document as a JSON string,
             # since a raw byte cut would not parse.
             clipped, _ = _clip_serialized(body, cap)
-            body = _dumps(clipped)
-            elisions = [*elisions, Elision("", "text", len(clipped), len(_dumps(obj)))]
+            body = payload_text_of(clipped)
+            elisions = [*elisions, Elision("", "text", len(clipped), len(payload_text_of(obj)))]
     return "\n".join(
         [*_prose(comp, elisions, len(text), span), body, *_footer(payload_rel, run_dir, comp)]
     )

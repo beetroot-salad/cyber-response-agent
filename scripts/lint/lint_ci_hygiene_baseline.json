@@ -1,4 +1,0 @@
-{
-  "//": "lint_ci_hygiene baseline — hardcoded-paths / bare-python3 / split hook-matcher smells in defender/. Fingerprint is check:file:token (no line number). CI fails on a fingerprint absent here. Regenerate: python scripts/lint/lint_ci_hygiene.py --update-baseline. Annotate intentional entries; \"\" means un-triaged debt to fix or annotate.",
-  "entries": {}
-}

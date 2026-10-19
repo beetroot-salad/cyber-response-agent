@@ -24,7 +24,7 @@ leads and queries come off `lead_repository.joined`.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 import json
 from dataclasses import field
 from defender._model import model
@@ -35,14 +35,12 @@ from pydantic import SkipValidation
 from pathlib import Path, PurePath
 
 from defender._io import Bound
-from defender._report import ReportRead, parse_report_text
-from defender._run_id import is_valid_run_id
-from defender._text import unwritable_value
+from defender.records._report import ReportRead, parse_report_text
+from defender.records._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
-from defender._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
+from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
     normalized_source,
-    request_key,
 )
 from defender.learning.judge._errors import JudgeRefused
 from defender.learning.lead_repository import JoinedLead, QueryRow, joined
@@ -62,7 +60,7 @@ from defender.runtime.run_end import (
     parse_record,
 )
 from defender.runtime.verbs import is_system_name
-from defender._query_rules import (
+from defender.knowledge._query_rules import (
     ABOVE_GUARD_QUERY_ID,
     BASH_SHIM_QUERY_ID,
     DENIED_QUERY_ID,
@@ -394,14 +392,18 @@ def _check_world_labels(worlds: list[dict[str, Any]]) -> None:
                 "joined straight into every per-world path this pass reads and writes, so a "
                 "label off that grammar reads and writes outside the world it names")
 
+from defender.learning.judge._records import (
+    _admitted_query_table as _admitted_query_table,
+    _joined_row as _joined_row,
+    _refuse_unwritable as _refuse_unwritable,
+    mapping_key as mapping_key,
+    read_call_join as read_call_join,
+    read_call_records as read_call_records,
+    read_query_table as read_query_table,
+    read_served_ledger as read_served_ledger,
+    world_ledger_name as world_ledger_name,
+)
 
-def mapping_key(mapping: Mapping[str, Any]) -> str:
-    """The canonical `(system, verb, params)` key of any mapping carrying those three.
-
-    Shared by every reader that dedups served ledger rows by call."""
-    params = mapping.get("params")
-    return request_key(str(mapping.get("system") or ""), str(mapping.get("verb") or ""),
-                       dict(params) if isinstance(params, Mapping) else {})
 
 
 def names_one_file(lead_id: object) -> bool:
@@ -453,103 +455,6 @@ def _read_world_ledger(
         if row.get("world_id") == world_token:
             kept.append(row)
     return kept, malformed, rec
-
-
-def read_query_table(bound: Bound, label: str) -> list[dict[str, Any]] | None:
-    """World `label`'s archived query table, every line a row; `None` when nothing is at the
-    name (a world not archived); `JudgeRefused` naming the file and the refusal (a link, a
-    FIFO, a directory, an oversize file, a torn line, or malformed call fields).
-
-    Unlike the tolerant lead reader, grading must preserve the raw call identity rather than
-    coerce it. Validate the string fields used by the computed views before admitting any
-    rows, including unserved calls that have no ledger partner to check them against.
-    Params retain the shared reader's tolerant handling of non-mappings."""
-    table_name = LAYOUT.world(label).executed_queries
-    table, torn_table, table_read = bound.read_jsonl(table_name)
-    if table_read.absent:
-        return None
-    if table_read.refusal is not None:
-        raise JudgeRefused(f"world {label!r}: {table_read.refusal}")
-    if torn_table:
-        raise JudgeRefused(f"world {label!r}: {table_name} holds {torn_table} line(s) that do "
-                           "not parse as a row")
-    _refuse_unwritable(table, label=label, name=table_name)
-    for index, row in enumerate(table):
-        for column in ("lead_id", "system", "verb", "query_id"):
-            if not isinstance(row.get(column), str):
-                raise JudgeRefused(
-                    f"world {label!r}: {table_name} row {index} has malformed {column} "
-                    f"({row.get(column)!r}); expected str")
-    return table
-
-
-def read_served_ledger(bound: Bound, label: str, *, episode_token: str) -> list[dict[str, Any]]:
-    """World `label`'s served ledger read whole and required well-formed (A3, A12), or
-    `JudgeRefused` naming the file and the refusal: every line parses, every row carries a
-    decision word, names this run (`world_id`) and carries a call id of this run. An absent
-    ledger is no rows. The ledger half of `read_call_records`, and the found gaps' one read of
-    a run's ledger (A2), which reads it whatever that run's query table holds."""
-    from defender.learning.judge.calls import CALL_ID, call_id_names_run
-
-    token = world_token_for(episode_token, label)
-    ledger_name = world_ledger_name(label, episode_token=episode_token)
-    ledger, torn_ledger, ledger_read = bound.read_jsonl(ledger_name)
-    if ledger_read.refusal is not None:
-        raise JudgeRefused(f"world {label!r}: {ledger_read.refusal}")
-    if torn_ledger:
-        raise JudgeRefused(f"world {label!r}: {ledger_name} holds {torn_ledger} line(s) that "
-                           "do not parse as a row")
-    for i, row in enumerate(ledger):
-        if normalized_source(row.get("source")) is None:
-            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} carries no decision "
-                               f"word ({row.get('source')!r})")
-        if row.get("world_id") != token:
-            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} names another run "
-                               f"({row.get('world_id')!r}), not {token!r}")
-        if not call_id_names_run(row.get(CALL_ID), token):
-            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} carries no {CALL_ID} "
-                               f"of this run ({row.get(CALL_ID)!r})")
-    _refuse_unwritable(ledger, label=label, name=ledger_name)
-    return ledger
-
-
-def read_call_records(
-    bound: Bound, label: str, *, episode_token: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """One run's two call records — its query table and its served ledger — read whole through
-    the bounded no-follow reader and required well-formed (A3, A12), or `JudgeRefused` naming
-    the file and the refusal.
-
-    @owns call_records — the grading pass's one read of `executed_queries.jsonl` and
-    `served/<token>.<X>.jsonl`; the join (`calls.py`), the resolver and the found gaps read
-    these rows and nothing else.
-
-    Well-formed: every line parses; every ledger row names this run (`world_id`), carries a
-    decision word and the call id of this run; no two table rows of this run share an id; a
-    ledger row and the table row its id joins agree on `(system, verb, params)` (A21). An
-    absent table or ledger is no calls (a world whose investigator asked nothing)."""
-    from defender.learning.judge.calls import CALL_ID, call_id_names_run
-
-    token = world_token_for(episode_token, label)
-    table_name = LAYOUT.world(label).executed_queries
-    table = read_query_table(bound, label) or []
-    ledger = read_served_ledger(bound, label, episode_token=episode_token)
-    ledger_name = world_ledger_name(label, episode_token=episode_token)
-    own: dict[str, dict[str, Any]] = {}
-    for i, row in enumerate(table):
-        call_id = row.get(CALL_ID)
-        if not isinstance(call_id, str) or not call_id_names_run(call_id, token):
-            continue
-        if call_id in own:
-            raise JudgeRefused(f"world {label!r}: {table_name} rows share the call id "
-                               f"{call_id!r} (row {i})")
-        own[call_id] = row
-    for i, row in enumerate(ledger):
-        partner = own.get(row[CALL_ID])
-        if partner is not None and mapping_key(partner) != mapping_key(row):
-            raise JudgeRefused(f"world {label!r}: {ledger_name} row {i} and the {table_name} "
-                               f"row its {CALL_ID} {row[CALL_ID]!r} joins name different calls")
-    return table, ledger
 
 
 def _resolution_facts(
@@ -670,11 +575,6 @@ class WorldFacts:
     def referenced_leads(self) -> frozenset[str]:
         """The lead ids this world's own `:T resolutions` rows name."""
         return frozenset(self.resolutions_by_lead)
-
-
-def world_ledger_name(label: str, *, episode_token: str) -> str:
-    """The relative name of a world's served ledger, shared by every reader and refusal."""
-    return str(LAYOUT.served_world(world_token_for(episode_token, label)))
 
 
 def _read_run_end_record(world: Bound) -> RunEnd | None:
@@ -967,17 +867,6 @@ def _read_run_records(world: Bound, *, label: str) -> None:
     _refuse_unwritable(rows, label=label, name=str(WORLD_LEAVES.lessons_loaded))
 
 
-def _refuse_unwritable(rows: list[dict[str, Any]], *, label: str, name: str | PurePath) -> None:
-    """Refuse a record holding a value no record can carry (`_text.unwritable_value`: a lone
-    surrogate, a non-finite number), naming the file, the row and the cause (A3, well-formed):
-    such a row would fail the pass later, at a canonical key or a write, far from its file."""
-    for i, row in enumerate(rows):
-        bad = unwritable_value(row)
-        if bad is not None:
-            raise JudgeRefused(f"world {label!r}: {name} row {i} carries {bad}, which no "
-                               "record can carry")
-
-
 def _read_summaries(world: Bound, *, label: str) -> frozenset[str]:
     """The lead ids whose `gather_summaries/<lead>.md` reads plain. A listing or a summary the
     no-follow reader refuses (a linked folder, a link, a FIFO) is a failed read (A3); an absent
@@ -1045,7 +934,7 @@ def is_gradable_row(row: Any) -> bool:
 
 __all__ = [
     "InvestigationFacts", "WorldFacts", "control_world", "read_call_records",
-    "read_query_table", "read_served_ledger",
+    "read_call_join", "read_query_table", "read_served_ledger",
     "discriminator_of", "episode_id_of",
     "is_gradable_row", "json_mapping", "json_mapping_of", "lead_chain", "leads_by_id", "mapping_key",
     "names_one_file", "non_control_worlds", "read_manifest",

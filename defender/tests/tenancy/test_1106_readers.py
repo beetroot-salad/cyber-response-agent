@@ -1,0 +1,123 @@
+"""Every host-side settings reader reads the injected tenant's folder, never the checkout's."""
+from __future__ import annotations
+
+from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+from pathlib import Path
+
+import pytest
+
+from defender.tests.support.tenancy import _tenants1106 as T
+from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
+from defender.tests.support.storage._alert_plant import plant_alert
+
+MARK = "injected"
+
+
+@pytest.fixture
+def injected(tmp_path) -> Path:
+    """The injected tenant's settings folder: `<tmp root>/playground/knowledge/settings`, every value
+    carrying `MARK`, the mapping's reporter distinct from the checkout's."""
+    root = tmp_path / "injected-root"
+    S.plant(
+        root, T.PLAYGROUND_ID, table=T.TABLE_B, marker=MARK,
+        lead_zero=T.lead_zero_text("elastic.injected-tenant-template"),
+        reporter="injected-reporter",
+    )
+    td = T.accept(root, T.PLAYGROUND_ID)
+    assert not td.settings.is_relative_to(T.REPO_ROOT), "the fixture root must be outside"
+    return td.settings
+
+
+def _record(settings: Path):
+    """The run record of the accepted tenant whose `settings/` is `settings`
+    (`<root>/<id>/knowledge/settings`, #1107/#1120), through the real `accept_tenant`."""
+    knowledge = settings.parent
+    return T.run_tenant(T.accept(knowledge.parent.parent, knowledge.parent.name))
+
+
+def _ctx(settings: Path, run_dir: Path, env: dict | None = None):
+    return T.verb_context(T.DEFENDER, run_dir, env if env is not None else {},
+                          settings_dir=settings)
+
+
+# ---- the adapters' config.env ---------------------------------------------------------------------
+
+def test_the_stub_transport_loads_the_injected_tenants_config(injected, tmp_path):
+    transport = T.mod("integrations._stub_transport")
+    cfg = transport.load_config(_ctx(injected, tmp_path), "cmdb", "CMDB")
+    assert cfg["URL_BASE"] == f"http://cmdb-{MARK}:8080"
+    assert cfg["BASTION_HOST"] == f"bastion-{MARK}"
+    checkout = transport.load_config(_ctx(T.FIXTURE_SETTINGS, tmp_path), "cmdb", "CMDB")
+    assert checkout["URL_BASE"] != cfg["URL_BASE"], "the fixture no longer discriminates"
+
+
+def test_a_system_with_no_config_in_the_injected_tenant_is_a_config_fault_naming_it(tmp_path):
+    faults = T.mod("integrations.faults")
+    transport = T.mod("integrations._stub_transport")
+    root = tmp_path / "injected-root"
+    T.place_tenant(root, T.PLAYGROUND_ID, configs={})
+    settings = T.accept(root, T.PLAYGROUND_ID).settings
+    with pytest.raises(faults.ConfigFault) as caught:
+        transport.load_config(_ctx(settings, tmp_path), "cmdb", "CMDB")
+    assert "the tenant's settings/systems/cmdb/config.env" in str(caught.value)
+    assert str(settings) not in str(caught.value)
+    # Control: the checkout's playground does carry a cmdb config, so the refusal above is
+    # the absence of a fallback, not the absence of a file anywhere.
+    assert (T.FIXTURE_SETTINGS / "systems" / "cmdb" / "config.env").is_file()
+
+
+# ---- the case-history mapping --------------------------------------------------------------
+
+
+def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
+    case_ticket = T.mod("runtime.case_ticket")
+    settings = tmp_path / "bare" / "settings"
+    settings.mkdir(parents=True)
+    with pytest.raises(case_ticket.CaseTicketError) as caught:
+        case_ticket.load_case_mapping(settings)
+    assert "the tenant's settings/systems/case-history/mapping.yaml" in str(caught.value)
+    assert str(settings) not in str(caught.value)
+    assert (T.FIXTURE_SETTINGS / "systems" / "case-history" / "mapping.yaml").is_file()
+
+
+def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
+        injected, tmp_path):
+    """The `--update-ticket` lane (O2 names the ticket writer): the REAL writer, over a
+    recording request seam, is handed the run's record — and both the store it
+    addresses (`case-history/config.env`) and the payload it renders (`mapping.yaml`) are the
+    injected tenant's."""
+    writer = T.mod("integrations.ticket_writer")
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run_dir = tmp_path / fixture_uuid("run-1106")
+    run_dir.mkdir()
+    plant_alert(run_dir, {"rule": {"id": "r-1", "description": "d"},
+                          "timestamp": "2026-09-26T00:00:00Z"})
+    sent: list[tuple] = []
+
+    def request(config, method, path, body=None, *, ctx):
+        sent.append((dict(config), method, path, body, ctx))
+        return "201", "{}"
+
+    writer.open_case_ticket(
+        _run_handle_1165(run_dir), deps=writer.TicketWriterDeps(request=request), tenant=_record(injected),
+        defender_dir=T.DEFENDER, env={})
+    assert len(sent) == 1, sent
+    config, method, path, body, ctx = sent[0]
+    assert (method, path) == ("POST", "/tickets")
+    # The transport's verb context carries the SAME tenant record the config came from,
+    # handed to the request as an argument rather than carried inside the config dict.
+    assert ctx.tenant.settings == injected
+    assert config["URL_BASE"] == f"http://case-history-{MARK}:8080"
+    assert body["reporter"] == "injected-reporter"
+
+
+# ---- lead-zero ---------------------------------------------------------------------------------
+
+def test_the_lead_zero_config_is_read_from_the_injected_tenant(injected):
+    lz = T.mod("runtime.lead_zero_config")
+    assert lz.load_correlation_template(lz.lead_zero_config_path(injected)) == \
+        "elastic.injected-tenant-template"
+    assert lz.load_correlation_template(lz.lead_zero_config_path(T.FIXTURE_SETTINGS)) != \
+        "elastic.injected-tenant-template"

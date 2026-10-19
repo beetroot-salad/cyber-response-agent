@@ -50,12 +50,12 @@ from pathlib import Path
 from typing import Any, cast
 
 from defender import _io
-from defender._episode_handle import Episode, EpisodeRefused, refuse_bad_episode_id
-from defender._episode_paths import LAYOUT
-from defender._run_id import mint_uuid
+from defender.episodes._episode_handle import Episode, EpisodeRefused, refuse_bad_episode_id
+from defender.episodes._episode_paths import LAYOUT
+from defender.records._run_id import mint_uuid
 from defender._shown import escaped, quoted
-from defender._tenant import Tenant, TenantId, TenantRefused
-from defender._world_label import world_label_fault
+from defender.tenancy._tenant import Tenant, TenantId, TenantRefused
+from defender.episodes._world_label import world_label_fault
 from defender.run_repository._errors import RunAbsent, RunRefused, RunUnreachable
 from defender.run_repository._handle import Run
 from defender.run_repository._held import (
@@ -737,7 +737,7 @@ def open_requested_run(data_root: Path, raw_tenant: str, raw_run_id: str, *,
     `OSError` of an episode folder that is not there) — is RETURNED as one line of text naming
     the request, never raised or logged: the command line prints it on stderr and exits with its
     own status (defender/CLAUDE.md: a refusal is a value, not a diagnostic)."""
-    from defender._tenant import requested_tenant
+    from defender.tenancy._tenant import requested_tenant
 
     try:
         tenant = requested_tenant(data_root, raw_tenant)

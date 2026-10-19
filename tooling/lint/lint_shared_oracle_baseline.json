@@ -1,0 +1,4 @@
+{
+  "//": "lint_shared_oracle baseline \u2014 git QUERY argv shapes run by both a production module and a test module under defender/: a test whose expected value comes from the code's own command cannot disagree with it, so the shared primitive's blind spots are invisible to the suite (#869/#908 \u2014 ls-tree C-quoting, .split() on spaced paths, and cwd-relative output, all asserted green by an oracle running the same argv). Fingerprint is file:argv-shape (no line number). CI fails on a fingerprint absent here AND on any entry left un-triaged. Regenerate: python tooling/lint/lint_shared_oracle.py --update-baseline. Say why the shared query is not an oracle (an identity read, a facade contract test) or fix it.",
+  "entries": {}
+}

@@ -64,7 +64,7 @@ filesystem  ──►  serialize.py  ──►  lessons.json  ──►  build.p
   there — retirement is a property of the *channel*, so it is declared per
   group rather than inferred from any lesson's own `status: stale`.
   `build_view()` is pure; the CLI stamps `generated_at`. Each corpus is enumerated through the shared corpus walk
-  (`defender._corpus.iter_lessons`, the same reader the lesson CLIs and the
+  (`defender.knowledge._corpus.iter_lessons`, the same reader the lesson CLIs and the
   curators go through): sorted `*.md`, underscore-skip, warn+skip on a
   malformed or unreadable lesson. Stale lessons are surfaced with a badge,
   not hidden — this is an author-facing view.
@@ -73,7 +73,7 @@ filesystem  ──►  serialize.py  ──►  lessons.json  ──►  build.p
   generically without knowing any corpus's schema. A real HTTP api could
   serve this same contract to the identical frontend.
 - **`build.py`** + its inline template is the view. It reuses the run
-  visualizer's visual language (`scripts/visualize/visualize_run.py` CSS tokens) so
+  visualizer's visual language (`presentation/visualize_run.py` CSS tokens) so
   the page matches the transcript/runtime views: defender=blue,
   actor=red, environment=amber. Group order/identity come from the
   contract, so adding a corpus — or retiring one — is a `serialize.GROUPS`
@@ -82,7 +82,7 @@ filesystem  ──►  serialize.py  ──►  lessons.json  ──►  build.p
 ## Tests
 
 ```bash
-defender/.venv/bin/python3 -m pytest defender/tests/test_lessons_frontend.py -v
+defender/.venv/bin/python3 -m pytest defender/tests/learning/retrieval/test_lessons_frontend.py -v
 ```
 
 ## Not yet built (future panels)

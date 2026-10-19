@@ -29,8 +29,8 @@ import yaml
 from defender._io import ENTRY_FILE, Bound
 from defender._yaml import safe_load as _yaml_safe_load
 from defender._text import is_content_less
-from defender._episode_paths import LAYOUT
-from defender import _alert_input
+from defender.episodes._episode_paths import LAYOUT
+from defender.records import _alert_input
 from defender.learning.core.config import QUEUEABLE_FINDING_TYPES
 from defender.learning.core.retired import retired_keys
 from defender.learning.core.state import (
@@ -50,6 +50,7 @@ from defender.learning.judge.route import (
 #: Imported, not re-spelled, so the appender's guard and the reply model cannot drift.
 from defender.learning.judge.run import (
     CONTRAST_EVIDENCE,
+    DIRECTION_FAMILY,
     ON_VERDICT_PATH,
     SUBJECT_DEFENDER,
     SUBJECT_WORLD,
@@ -109,10 +110,10 @@ def _validate_row(row: dict[str, Any], *, episode_dir: Path | None = None) -> No
     where = _refusal_prefix(episode_dir)
     _require_keys(row, where, "defender")
     # Exact match, no case-fold and no trim: this is the last screen before the curator.
-    if row.get("subject") != SUBJECT_DEFENDER or row.get("direction") == SUBJECT_WORLD:
+    if row.get("subject") != SUBJECT_DEFENDER or row.get("direction") != DIRECTION_FAMILY:
         raise JudgeRefused(
             f"{where}a row bound for the defender findings channel must carry "
-            f"subject={SUBJECT_DEFENDER!r} and a direction other than {SUBJECT_WORLD!r}, not "
+            f"subject={SUBJECT_DEFENDER!r} and direction={DIRECTION_FAMILY!r}, not "
             f"subject={row.get('subject')!r} direction={row.get('direction')!r}")
     row_type = row.get("type")
     # `isinstance` first: an unhashable value would raise `TypeError` from the set test.
@@ -279,7 +280,7 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     doubt mark); a world row carries `world` (the pass's stamp, `None` for the family call),
     the finding's own `systems` (A5) and `provenance`. `direction` is derived from `subject`
     so the two cannot disagree."""
-    direction = SUBJECT_WORLD if subject == SUBJECT_WORLD else "family"
+    direction = SUBJECT_WORLD if subject == SUBJECT_WORLD else DIRECTION_FAMILY
     row: dict[str, Any] = {
         "schema_version": 1,
         "finding_id": f"{run_id}/{label}/{draw}/{index}",

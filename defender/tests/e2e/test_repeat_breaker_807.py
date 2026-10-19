@@ -1,122 +1,10 @@
-"""#807 ask (1) — the executable spec for gather's REPEAT CIRCUIT BREAKER.
-
-Every test here is one demand of `spec-flow/specs/spec_graph_807.yaml`, named after its
-`discharged_by` pointer and carrying that demand's observable-outcome prose in its docstring
-(the demand itself is a pointer — `check_binds` scans the docstring in place of an `outcome`).
-
-THE CODE DOES NOT EXIST YET. This suite is RED by construction: the import block below names
-the surface the implementation must build, and that is the point — the tests are the spec the
-code is written against.
-
-The surface this suite pins (all of it new, all of it in
-`defender/scripts/gather_tools/record_query.py` beside `_request_key`/`repeat_note`, which is
-fork F3's provisional site; the NAME `repeat_trip` is the part §7 pinned, because an
-implementation that spells it otherwise makes `check_binds` skip the concept silently)
---------------------------------------------------------------------------------------------
-`REPEAT_THRESHOLD = 3`
-    A module constant, and the SAME N for every system: `test_repeat_trip_predicate_seam`
-    drives a second (system, verb) pair and it trips at the same occurrence, so no per-system
-    override survives this suite. C11's sweep fixes the value with evidence and N=2 is *proven*
-    to refuse correct work (it refuses pr815's l-008 and l-015, which both returned real
-    summaries). F-P's other half — "no env var" — is deliberately NOT claimed here: an
-    import-time `env_int(…, 3)` read defaults to 3 and passes every in-process assertion, so a
-    test at this address would certify nothing. That half lives in the graph's
-    `repeat_threshold` refinement and in `handoff.forks`, where the implementer meets it.
-
-The guard's ROWS (#1235)
-    The guard derives its count from the rows the HOST recorded for the run, held on the run's
-    one `RunState` (`state.lead_rows(lead)`, #1235 round 2): each row enters it as it is
-    appended (round 3: before its line is written), and a branch sibling's inherited rows enter
-    it as seeding writes them —
-    no file is ever read into it, so nothing written into the run folder moves the count. The
-    file reader `record_query.lead_rows` retired with round 2; this suite reads the FILE
-    post-run through `read_jsonl_rows` (`_file_rows`) where it means the record.
-
-`repeat_trip(rows, lead, *, system, verb, params, threshold=REPEAT_THRESHOLD, system_key="") -> RepeatTrip | None`
-    THE predicate, over queries-table ROWS, keyed `(lead_id, system, verb, canonical(params),
-    system_key)`. #871 added the fifth element: it is `""` on every row in THIS guard's domain
-    (an executed row's `system` is the dispatched name, which identifies it already), and it is
-    what tells two UNDECLARED systems apart in the COMPANION guard's, where the `system` column
-    deliberately holds `""` for both
-    — so O1/O3's replay oracle drives the production predicate over a recorded run with no
-    live agent (`repeat_trip_predicate_seam`). It normalises its incoming `params` to the
-    STORED form (`_json_safe_params`, then `_query_rules._request_key`) before keying, so the
-    live guard and the replay oracle are literally one function over one input shape (F-B,
-    §7 auto). It counts only rows THE GUARD COULD ITSELF HAVE REFUSED — rows written at or
-    below M2. A row written ABOVE M2 is never an occurrence, live or on replay, and there are
-    three such writers: `wrap_tool_validate`'s rejection row, and BOTH of `_grant_check`'s
-    row-writing branches — the adapter load error (`query_tool.py:219-226`, exit 2) and the
-    non-`GRANTED`/unresolvable branch (`:238-244`, exit 64 + `ModelRetry`). Any wider domain
-    lets the replay oracle report a trip no live run can produce, which is exactly what
-    `trip_row_is_itself_an_occurrence_on_replay`'s own justification forbids (F-A, §7 human:
-    option 1 in round 1, narrowed to this criterion in round 2).
-
-`RepeatTrip(first_seq, occurrence)`
-    `first_seq` — the EARLIEST matching row's seq (F-H(b): deterministic under duplicate or
-    non-monotonic seqs, and it names the occurrence that started the repetition; "earliest" is
-    read off the seq, not off file order, because the count itself is order-independent).
-    `occurrence` — this call's 1-based occurrence number, `== threshold` at a trip.
-
-`REPEAT_ESCAPE`
-    ONE fixed, system-agnostic sentence, identical on every trip (F-G, §7 auto). A per-system
-    escape table would make the guard a progress oracle, which N2 forbids by name, and would
-    have been *wrong* on `reviewer-measure-0807`, whose repeat lead was already on the escape
-    path the issue proposed (C9).
-
-`GatherDeadEnd(reason, escape)`
-    Raised out of `QueryCapture.wrap_tool_execute` at M2's placement and caught at
-    `_run_gather` beside `UsageLimitExceeded`. P-c walked 137 frames and found it arrives
-    UNWRAPPED (pydantic-ai's `_call_tools` uses `create_task` + `asyncio.wait`, never a
-    TaskGroup), so `except GatherDeadEnd` hits and the dead end stays lead-level; the paired
-    control shows the alternative costs the whole run.
-
-How faults are induced here
----------------------------
-Down the hierarchy, never off it. Almost everything below is *real input through the real
-primitive in the test itself*: real malformed tool arguments through the real pydantic arg
-schema, a real adapter module that raises at import through the real `ModuleVerbRegistry`, a
-real torn line and real invalid UTF-8 through the real branch seeding, real concurrency
-through the real two-calls-in-one-turn shape. Where a fake stands in for a dependency it is
-the harness's `verbs=` injection seam and it injects faults ONLY — never classifies, never
-decides policy — and its fault content cites the executed claim that observed it on the real
-dependency (`P-a` for the five validate-path rejection shapes, `P-b`/`P-b2` for
-`_persist_payload`'s swallow and `payload_digest`'s shape, `P-d` for `read_jsonl_rows`'
-exception surface, `P-c` for the unwrapped arrival at `_run_gather`). There is no
-`monkeypatch.setattr` in this file: every fake enters through an injection seam the entry
-point already declares.
-
-WHAT #987 REVISED, AND WHAT IT DID NOT
---------------------------------------
-F-C's pin read "the tripping call returns no tool result, and the gather model is never asked
-again". BOTH halves are revised, and one word of each survives. The tripping call IS answered
-now — with a FAILED tool result carrying the guard's own reason and the sentence that closes
-the lead's door (`query_tool.QUERY_DOOR_CLOSED`), never with a REPEAT annotation, which is
-what `test_tripping_call_carries_no_repeat_note` still drives. And the gather model IS asked
-again — not to query (a `query` call against the closed door is refused, `QUERY_NOT_RUN`)
-but to write the summary main receives under this arm's own notice. So every lead in this
-file that ends in a dead end and then writes its summary spends ONE MORE scripted turn
-than it used to — `SUMMARY_TURN` below is that turn, spelled wherever a script serves two
-leads and the shift would otherwise be silent.
-
-G19 is NOT revised and is asserted harder than before: the gather model is never shown main's
-idiom, and it now has a new surface it could arrive on (the closing tool result).
-`test_tripping_call_carries_no_repeat_note`'s `INCOMPLETE_IDIOM not in seen` reads the
-summary turn's own view here, and the whole-history sweep is
-`tests/e2e/test_987_stopped_lead.py`.
-
-RF-J2, carried from the seam and binding on this file
------------------------------------------------------
-The fitted corpus (three runs, 266 rows) holds ZERO rows written by `wrap_tool_validate` and
-ZERO repeat groups whose calls failed. F-A and F-E were decided in favour of readings the
-replay oracle CANNOT discriminate. `test_counted_domain_excludes_validate_path_rows` and
-`test_screen_refused_repeats_count_toward_the_trip` therefore drive the REAL path, live; a
-green `test_repeat_replay_*` does not discharge either of them.
-"""
+"""#807 ask (1) — the executable spec for gather's REPEAT CIRCUIT BREAKER."""
 from __future__ import annotations
 
 import re
 import unicodedata
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -128,12 +16,12 @@ from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
 from defender.runtime import circuit_breaker  # noqa: E402
 from defender.runtime.lead_zero import RESERVED_LEAD_IDS  # noqa: E402
-from defender._query_rules import _json_safe_params  # noqa: E402
+from defender.knowledge._query_rules import _json_safe_params  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import ModuleVerbRegistry, VerbContext, VerbRegistry  # noqa: E402
-from defender.scripts.adapters.faults import TransportFault, UpstreamFault  # noqa: E402
-from defender import _query_rules  # noqa: E402
-from defender.scripts.gather_tools import record_query  # noqa: E402
+from defender.integrations.faults import TransportFault, UpstreamFault  # noqa: E402
+from defender.knowledge import _query_rules  # noqa: E402
+from defender.runtime import record_query  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     DEFENDER,
     GOLDEN_AB3,
@@ -154,19 +42,18 @@ from defender.tests.e2e.test_query_tool_611 import (  # noqa: E402
 )
 
 # THE SURFACE UNDER TEST — none of it exists on this base (RED by construction)
-from defender.scripts.gather_tools.record_query import (
+from defender.runtime.record_query import (
     REJECTION_BUDGET,
     REPEAT_ESCAPE,
     REPEAT_THRESHOLD,
-    GatherDeadEnd,
     RepeatTrip,
     in_rejection_domain,
     rejection_budget_trip,
     rejection_trip,
     repeat_trip,
 )
-from defender._query_rules import ABOVE_GUARD_QUERY_ID, REPEAT_TRIP_QUERY_ID
 from defender.runtime.verbs import read_roster  # noqa: E402
+from defender.tests.support.shared.contracts._after_start_1256 import AfterStart, Relink  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -174,22 +61,12 @@ SALT = "aabbccddeeff0011"
 LEAD = "l-001"
 SIBLING = "l-002"
 
-CORPUS = DEFENDER / "fixtures-e2e" / "repeat-corpus-807"
+CORPUS = DEFENDER / "tests" / "fixtures" / "e2e" / "repeat-corpus-807"
 
 # The idiom `_run_gather`'s three shipped terminal branches already use, and the ONLY
 # vocabulary any prompt in the corpus teaches main (defender/SKILL.md:394 — G19).
 INCOMPLETE_IDIOM = "Treat this lead as incomplete and reason from what was captured."
 
-#: The scripted turn a stopped lead's SUMMARY consumes (#987). A lead whose door the query
-#: tool closed writes its summary on its next model request, and a `ReplayFn` script advances
-#: by one turn when it does. In a single-lead scenario that turn is whatever already followed
-#: the trip — usually `DONE`, whose text then becomes the summary body under the arm's notice.
-#: In a TWO-LEAD scenario it has to be spelled out, or the first lead eats the SIBLING's first
-#: query and the sibling silently measures nothing while every assertion about it still reads
-#: as if it had.
-#:
-#: Its text deliberately names no system and no verb: two scripts below assert that one lead's
-#: summary does not name the other lead's request.
 SUMMARY_TURN = Turn(text="Before the stop I ran what I could; the answers are above.")
 
 
@@ -260,25 +137,24 @@ def _dispatch(lead: str, system: str) -> tuple[str, dict]:
 
 def _run(
     root: Path, *, verbs, turns: list[Turn], run_id: str, system: str = "elastic",
-    lead: str = LEAD, planted: list[dict] | None = None,
+    lead: str = LEAD, planted: list[dict] | None = None, tenant: Any = None,
 ) -> _Res:
     """Drive a REAL run: main dispatches one gather lead, the nested gather agent replays
     `turns` against the INJECTED verb registry. Everything between the two fakes — dispatch,
-    the query tool, the repeat guard, the capture capability, the infra breaker, the two
-    tables — is production code.
-
-    `planted` writes a queries table (and its sidecars) into the fresh folder BEFORE the run
-    starts — rows no host recorded for this run, which since #1235 round 2 no run reads into
-    its state. Rows a run DOES start with are a branch sibling's inherited prefix
-    (`_run_inherited`)."""
+    the query tool, the repeat guard, the capture capability, the infra breaker, the two"""
     run_dir = materialize(root, GOLDEN_AB3, run_id=run_id)
     if planted:
         _seed(run_dir, planted)
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
                      Turn(text="Investigation complete.")])
     gather = ReplayFn(turns)
-    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs)
+    summary = drive(run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, tenant=tenant)
     return _Res(run_dir, main, gather, summary)
+
+
+#: The planted source's run folder name (`_branch_947.planted_source`'s `name=`), so the table
+#: can be written into it before the source is built.
+SOURCE_RUN = "run-source-001"
 
 
 def _run_inherited(
@@ -287,27 +163,37 @@ def _run_inherited(
 ) -> _Res:
     """Drive a REAL branch sibling (`drive(..., resume=spec)`) whose source's queries table is
     `table` — the shape a resumed lead's run starts from. The source is
-    `_branch_947.legal_source` (a store, a case link, the golden document), which carries no
+    `_branch_947.planted_source` (a store, a case link, the golden document; not the N4
+    fixture — the implementer's fixture-only snapshot planting may snapshot it), which carries no
     claim for its leads, so the sibling's MAIN can dispatch `lead` again; seeding copies the
     table's rows for the inherited leads, and each `rows` entry's sidecar, into the sibling and
     records them on the sibling's state (#1235 round 2) before its first turn."""
-    from defender.tests._branch_947 import GOLDEN_INVESTIGATION, legal_source, spec_at
-    from defender.tests._fixture_uuid import fixture_uuid
+    from defender.tests.support.learning.branch._branch_947 import (
+        GOLDEN_INVESTIGATION, LEGACY_BRANCH_CALL, planted_source, spec_at,
+    )
+    from defender.tests.support.storage._session_store_705 import runs_base
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-    store, source, _session, path_ids = legal_source(
-        root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None)
+    source = runs_base(root) / SOURCE_RUN
+    RunPaths(source).executed_queries.parent.mkdir(parents=True, exist_ok=True)
     RunPaths(source).executed_queries.write_bytes(table)
     for row in rows:
         rel = row.get("payload_path")
         if rel:
             (source / rel).parent.mkdir(parents=True, exist_ok=True)
             (source / rel).write_text("" if row.get("exit_code") else "[]", encoding="utf-8")
-    spec = spec_at(store, source, path_ids[-1])
+    store, planted, _session, path_ids = planted_source(
+        root, investigation=GOLDEN_INVESTIGATION.read_text(encoding="utf-8"), queries=None,
+        name=SOURCE_RUN)
+    assert planted == source, (planted, source)
+    # #1255 (D1): a tool-calling MAIN response after the document landed, not the RETURN the
+    # pre-#1255 shape branched at. The source is hand-planted (`planted_source`, not N4's).
+    spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
     store.close()
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     sibling = root / "defender-runs" / fixture_uuid("run-sibling-807")
     RunPaths(sibling).gather_raw.mkdir(parents=True)
-    from defender.tests._alert_plant import plant_alert
+    from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(sibling, RunPaths(source).alert.read_bytes())
     main = ReplayFn([Turn(tool_calls=[_dispatch(lead, system)]),
                      Turn(text="Investigation complete.")])
@@ -345,11 +231,7 @@ def _run_two_leads(
 def three_identical_requests(tmp_path_factory, checkout_roster):
     """ONE driven run of the canonical trip — one lead asking elastic the same query three
     times, then `DONE` — shared by the demands that only READ it: its run dir and tables, the
-    verb recorder, and the two replay scripts. A demand that seeds, plants or needs a second
-    starting state drives its own run.
-
-    Module-scoped, so it is built before the function-scoped conftest fixtures: it holds the
-    checkout's capabilities for the drive itself, as `_held_capabilities` does for a test."""
+    verb recorder, and the two replay scripts. A demand that seeds, plants or needs a second"""
     from defender.skills.invlang.validate import hold_capabilities, release_capabilities
 
     rec = VerbRecorder()
@@ -367,9 +249,6 @@ def three_identical_requests(tmp_path_factory, checkout_roster):
     return r, rec
 
 
-#: The payload text a seeded SUCCESS row stands for — one text, so two seeded successes are
-#: byte-identical the way two rows of one repeated request are, and the fixture's digest and
-#: content hash are both derived from it (#877 F-9).
 _SEEDED_PAYLOAD = "abcdefghijkl"
 
 
@@ -379,15 +258,7 @@ def _row(
 ) -> dict:
     """One queries-table row in the frozen key shape, with `error_class`, `payload_digest` and
     `payload_sha256` computed by the PRODUCTION helpers rather than restated — a seeded fixture
-    that disagrees with `error_class_for_exit`, or one whose recorded hash does not belong to
-    the payload it claims (#877 F-9), would be a fixture asserting its own arithmetic. A failed
-    row's payload text is `""`, as both writers persist it.
-
-    `system_key` is `""` and not omitted: every `system` this fixture seeds is a DISPATCHED
-    name, so the row identifies its own call and the #871 column has nothing to carry — and a
-    seed that silently dropped a frozen key would stop being "the shape a resumed lead leaves"
-    the day an arm here seeds an above-guard rejection of an UNDECLARED system, where the live
-    side keys on a digest and every seeded row would key on nothing."""
+    that disagrees with `error_class_for_exit`, or one whose recorded hash does not belong to"""
     payload_text = "" if exit_code != 0 else _SEEDED_PAYLOAD
     return {
         "lead_id": lead,
@@ -431,8 +302,7 @@ def _corpus(run_name: str) -> list[dict]:
 def _replay(rows: list[dict], *, threshold: int = REPEAT_THRESHOLD) -> list[tuple[str, int]]:
     """O1's stated oracle, driving the PRODUCTION predicate: accumulate each lead's rows in
     file order and STOP accumulating for a lead at its first trip, because M3's trip
-    terminates the lead ("must stop at seq 4 rather than 36" — the doc's own words). A replay
-    that counted every recorded row through to the end is not the oracle O1 names."""
+    terminates the lead ("must stop at seq 4 rather than 36" — the doc's own words). A replay"""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
     trips: list[tuple[str, int]] = []
@@ -458,43 +328,7 @@ def _replay_rejections(
 ) -> list[tuple[str, int, str]]:
     """The same oracle for the COMPANION guard (#826 item 4), differing from `_replay` only in
     the production predicate it drives — which is the claim under test: the two guards are one
-    counting rule over two disjoint domains, so one replay shape serves both.
-
-    The trip row is accumulated BEFORE the stop, unlike `_replay`: the companion guard's
-    rejection row is written for every call including its last, so the recorded table holds
-    exactly `threshold` matching rows at a trip, and an oracle that withheld the last one would
-    disagree with the table the live run actually left.
-
-    `system_key` (#871) is read off the row the same way `system` is, and for the same reason:
-    it is HALF the identity of an above-guard rejection — the half a coarsened `system=""` row
-    cannot carry — so an oracle that dropped it would fold two undeclared systems back into one
-    group and report a trip no live run since #871 can produce. `.get` is `None` on every row
-    recorded before the column existed, which is the archived-table shape this oracle is
-    pointed at, so the predicate has to read that as the `""` those rows mean.
-
-    THE GUARD IS ASKED ONLY WHERE THE LIVE RUN ASKS IT — at a row this guard could itself have
-    refused. `rejection_trip`'s domain filter screens the rows it COUNTS, not the row it is
-    asked ABOUT, so an oracle that asked at every row would answer for calls no placement
-    guards: `_grant_check`'s adapter-load rows (`infra`, the third above-guard writer, which
-    reaches no guard at all) and every below-guard row, each of which can inherit a count two
-    genuine rejections of the same request earned and report a trip the live run did not
-    take.
-
-    #1015 — THE STOP'S KIND IS PART OF THE ANSWER. Two guards now sit at these placements: the
-    identity one above, and the per-lead `rejection_budget_trip`, which counts the SAME rows
-    identity-blind and ends a lead that has spent `budget` of them however much its calls
-    differed. They are asked HERE in the order the live placement asks them — repeat FIRST,
-    because its sentence names the specific repeated request and a call that is both the 3rd
-    repeat and the B-th rejection gets the more specific one — so a replay of a recorded table
-    reports not only WHERE a lead stopped but WHICH guard stopped it. An oracle returning a
-    pair could report a stop at the right seq and be unable to say that, which is exactly the
-    audit O3 exists for: the trip row is an ordinary above-guard row (it must keep counting),
-    so the kind is not a column and only the two predicates can recover it.
-
-    SOUNDNESS PRECONDITION over ARCHIVED tables, named because it is not self-evident: the
-    budget ask is truthful there only while no archived lead carries `budget` or more
-    above-guard agent-fixable rows, which #1015's C7 establishes (42 runs, 320 leads, max 2). A
-    future arm pointed at an archived table must respect that or seed its own."""
+    counting rule over two disjoint domains, so one replay shape serves both."""
     seen: dict[str, list[dict]] = {}
     stopped: set[str] = set()
     trips: list[tuple[str, int, str]] = []
@@ -503,9 +337,6 @@ def _replay_rejections(
         if not isinstance(lead, str) or lead in stopped:
             continue
         prior = seen.setdefault(lead, [])
-        # The production domain predicate, spent rather than re-spelled: an oracle that carried
-        # its own copy of "which rows a placement guards" could disagree with the guard about
-        # the very population whose stop it exists to reproduce.
         guarded = in_rejection_domain(row)
         kind: str | None = None
         if guarded:
@@ -522,70 +353,6 @@ def _replay_rejections(
             trips.append((lead, row.get("seq"), kind))
             stopped.add(lead)
     return trips
-
-
-def test_the_rejection_oracle_answers_only_where_a_placement_guards():
-    """The oracle above is asked PER ROW, and `rejection_trip`'s domain filter screens the rows
-    it COUNTS, not the row it is asked ABOUT — so an oracle asked at every row answers for
-    calls no placement guards and reports trips no live run can produce.
-
-    Two such rows exist and both are reachable: `_grant_check`'s adapter-load row (`infra`, the
-    third above-guard writer, which never consults the guard) and any below-guard row, which
-    `wrap_tool_execute` puts to `repeat_trip` instead. Each can inherit the count two genuine
-    rejections of the same request earned.
-
-    Driven over hand-built tables rather than a live run because the shape needs an adapter
-    that fails to import mid-lead; the positive is the same three rows with a third GUARDED row
-    in place of the ungarded one, so this cannot pass on an oracle that reports nothing."""
-    p = {"native_query": "FROM logs"}
-    prior = [
-        _row(LEAD, 0, "elastic", "nosuch-verb", p, exit_code=64,
-             query_id=ABOVE_GUARD_QUERY_ID),
-        _row(LEAD, 1, "elastic", "nosuch-verb", p, exit_code=64,
-             query_id=ABOVE_GUARD_QUERY_ID),
-    ]
-    assert _replay_rejections(prior) == [], "two rejections are not yet a trip"
-
-    infra = _row(LEAD, 2, "elastic", "nosuch-verb", p, exit_code=2,
-                 query_id=ABOVE_GUARD_QUERY_ID)
-    assert _replay_rejections([*prior, infra]) == [], \
-        "the replay tripped at an adapter-load row, which reaches no guard in a live run"
-
-    below = _row(LEAD, 2, "elastic", "nosuch-verb", p, exit_code=0)
-    assert _replay_rejections([*prior, below]) == [], \
-        "the replay tripped at a below-guard row, which the COMPANION guard never sees"
-
-    third = _row(LEAD, 2, "elastic", "nosuch-verb", p, exit_code=64,
-                 query_id=ABOVE_GUARD_QUERY_ID)
-    assert _replay_rejections([*prior, third]) == [(LEAD, 2, "repeat")], \
-        "the oracle stopped tripping at all, so the two negatives above say nothing"
-
-    # #1015 — THE SAME CLAIM FOR THE SECOND GUARD, and it needs its own table: every row above
-    # repeats one before it, so the repeat ask answers first and the budget ask is never
-    # reached. Hoist the budget ask out of the `if guarded` gate and all four assertions above
-    # stay green; these do not. `B - 1` rows that share NO identity element leave the repeat
-    # guard silent and the budget one row short.
-    b_prior = [
-        _row(LEAD, i, f"ghost{i}", f"verb-{i}", {"native_query": f"FROM t{i}"},
-             exit_code=64, query_id=ABOVE_GUARD_QUERY_ID)
-        for i in range(REJECTION_BUDGET - 1)
-    ]
-    last = REJECTION_BUDGET - 1
-    assert _replay_rejections(b_prior) == [], "one short of the budget is not yet a trip"
-
-    b_infra = _row(LEAD, last, "elastic", "nosuch-verb", p, exit_code=2,
-                   query_id=ABOVE_GUARD_QUERY_ID)
-    assert _replay_rejections([*b_prior, b_infra]) == [], \
-        "the replay spent the BUDGET at an adapter-load row, which reaches no guard live"
-
-    b_below = _row(LEAD, last, "elastic", "query", p, exit_code=0)
-    assert _replay_rejections([*b_prior, b_below]) == [], \
-        "the replay spent the BUDGET at a successful below-guard row — a stop no run took"
-
-    b_guarded = _row(LEAD, last, "ghostlast", "verb-last", {"native_query": "FROM last"},
-                     exit_code=64, query_id=ABOVE_GUARD_QUERY_ID)
-    assert _replay_rejections([*b_prior, b_guarded]) == [(LEAD, last, "budget")], \
-        "the budget ask stopped tripping at all, so the two negatives above say nothing"
 
 
 def named_verbs(rec: VerbRecorder, *, system: str = "elastic", verb: str = "sshd-auth-window") -> FakeVerbs:
@@ -651,8 +418,7 @@ def parameterless(rec: VerbRecorder) -> FakeVerbs:
 class GrantScopedVerbs(VerbRegistry):
     """A real registry over a real `VerbGrant` that DECLARES a verb it does not GRANT — the
     only way to reach `decide`'s DENIED outcome (a withheld real verb) rather than its
-    UNDECLARED one. Dumb data: it injects no fault and makes no admission decision of its
-    own; `VerbRegistry.decide` and the grant do all the work."""
+    UNDECLARED one. Dumb data: it injects no fault and makes no admission decision of its"""
 
     def __init__(self, table: dict[str, dict], grant: VerbGrant):
         super().__init__(grant)
@@ -660,6 +426,9 @@ class GrantScopedVerbs(VerbRegistry):
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
+
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        return frozenset(self._table.get(system, {}))
 
     def verbs(self, system: str):
         return self._table[system]
@@ -690,43 +459,52 @@ _BROKEN_ADAPTER = (
 )
 
 
-def unloadable_adapter(root: Path) -> ModuleVerbRegistry:
-    """The REAL production registry over a REAL adapter module that raises at import — a
-    level-1 fault, not a stand-in for one. `decide` resolves the grant cold (an AST read of
-    the `VERBS = {...}` literal), then imports to bind the verb, and the import raises."""
+_LOADABLE_ADAPTER = (
+    "def check_settings(*_a, **_k):\n"
+    "    return None\n"
+    "\n"
+    "def probe(ctx, *, native_query: str) -> list:\n"
+    "    return [{'probed': native_query}]\n"
+    "\n"
+    'VERBS = {"probe": probe}\n'
+)
+
+
+def unloadable_adapter(root: Path) -> tuple[ModuleVerbRegistry, Relink]:
+    """The REAL production registry over a REAL adapter module, and the `Relink` that makes it
+    one that raises at import — a level-1 fault, not a stand-in for one.
+
+    Since #1256 the run imports every granted adapter at its start, so an adapter that cannot
+    be imported THEN is down for the whole run (O-5a) and no call of it ever loads it. A load
+    error at CALL time is what remains possible: the adapter changing after the start check.
+    So the file is importable when the run starts and `Relink.break_` (fired by `_after_start`
+    when the gather model asks for its first call) replaces it by a link to `_BROKEN_ADAPTER`:
+    `decide` resolves the grant cold (an AST read of the `VERBS = {...}` literal), then loads
+    the module to bind the verb, and that load raises — on every call, since a failed load is
+    never kept."""
     adapters = root / "adapters"
     adapters.mkdir(parents=True)
-    (adapters / "elastic_adapter.py").write_text(_BROKEN_ADAPTER, encoding="utf-8")
-    return ModuleVerbRegistry(read_roster(adapters), VerbGrant(role="gather", entries=(("elastic", "probe", "r"),)))
+    (adapters / "elastic_adapter.py").write_text(_LOADABLE_ADAPTER, encoding="utf-8")
+    registry = ModuleVerbRegistry(read_roster(adapters),
+                                  VerbGrant(role="gather", entries=(("elastic", "probe", "r"),)))
+    return registry, Relink(adapters / "elastic_adapter.py", _BROKEN_ADAPTER)
+
+
+def _after_start(relink: Relink, turns: list[Turn]) -> list:
+    """`turns`, its first one breaking the adapter when the gather model asks for it."""
+    return [AfterStart(turns[0], relink.break_), *turns[1:]]
 
 
 def _bad_args(params: dict) -> Turn:
     """A tool call the pydantic ARG SCHEMA turns back, so the row is written by
     `wrap_tool_validate` from the RAW pre-validation arguments. `bogus_extra_arg` is P-a's
-    executed `extra_argument` shape: the rejection row it leaves recovers a perfectly normal
-    `system='elastic'`, `verb='query'` and the model's own `params` — byte-identical in key to
-    the corrected retry's."""
+    executed `extra_argument` shape: the rejection row it leaves recovers a perfectly normal"""
     return Turn(tool_calls=[("query", {
         "system": "elastic", "verb": "query", "params": params, "bogus_extra_arg": "x",
     })])
 
 
 def test_repeat_trip_predicate_seam(tmp_path):
-    """repeat_trip_predicate_seam — an IMPORTABLE predicate `repeat_trip` over queries-table
-    ROWS, keyed (lead_id, system, verb, canonical(params)) with threshold N, so O1/O3's replay
-    oracle drives the production predicate over a recorded run with no live agent. It reuses
-    `_query_rules._request_key` (never a second canonicalizer), returns None below the
-    threshold and a `RepeatTrip` naming the earliest matching seq at it, and `REPEAT_THRESHOLD`
-    is the module constant N = 3 — one N for EVERY system, with no per-system override: a
-    second (system, verb) pair trips at the same occurrence as the first."""
-    # rejected: N2 — it is not a progress oracle; it answers only "have I sent this exact
-    #   request before", nothing more.
-    # rejected: keying on payload_digest instead of request identity — C10: pr815's l-015 seq
-    #   8/16/17 returned the same 745-byte empty payload for three genuinely different
-    #   questions, so a digest key refuses correct work.
-    # rejected: a separate persisted count — the count is DERIVED per call from the queries
-    #   rows the host recorded (its in-memory mirror of the table, #1235); the breaker keeps
-    #   its own state because it is run-scoped and cross-lead, this predicate is lead-scoped.
     assert REPEAT_THRESHOLD == 3, "C11's fitted floor did not ship as the module constant"
 
     key = {"system": "elastic", "verb": "query", "params": {"native_query": "FROM logs"}}
@@ -744,11 +522,6 @@ def test_repeat_trip_predicate_seam(tmp_path):
     assert repeat_trip(rows[:1], LEAD, threshold=2, **key) is not None, \
         "the threshold must be a parameter the replay oracle can sweep"
 
-    # NO PER-SYSTEM OVERRIDE: a different system with a differently-shaped verb pays the same
-    # N, so the constant is the only source of the value in effect. (F-P's other half, "no env
-    # var", is not asserted anywhere in this suite and the module docstring says why: an
-    # import-time env read defaulting to 3 passes any in-process check, so such a test would
-    # certify nothing.)
     other = {"system": "cmdb", "verb": "host-trust-edges", "params": {"host": "db-1"}}
     other_rows = [_row(LEAD, s, "cmdb", "host-trust-edges", {"host": "db-1"}) for s in (0, 1)]
     assert repeat_trip(other_rows[:1], LEAD, **other) is None, \
@@ -759,47 +532,13 @@ def test_repeat_trip_predicate_seam(tmp_path):
     # The seam's whole purpose: it eats rows read straight off a RECORDED table.
     recorded = [r for r in _corpus("reviewer-measure-0807-b") if r["lead_id"] == LEAD]
     assert recorded, "the recorded corpus fixture is missing its repeat lead"
-    # seq 4 is this fixture's actual trip point (test_repeat_replay_trips_the_two_recorded_leads
-    # pins it): rows 0-3 accumulated give two prior occurrences of seq4's request (seq2, seq3),
-    # so this is the third occurrence.
     assert repeat_trip(
         recorded[:4], LEAD, system=recorded[4]["system"], verb=recorded[4]["verb"],
         params=recorded[4]["params"],
     ) is not None, "the production predicate could not be driven over a recorded run"
 
 
-def test_gather_dead_end_type(three_identical_requests):
-    """gather_dead_end_type — `GatherDeadEnd(reason, escape)` exists, is raised out of
-    `QueryCapture.wrap_tool_execute` at M2's placement (so the tripping call never returns a
-    tool result to the gather model and gather is never asked again), and is catchable at
-    `gather_dispatch` — `_run_gather` returns a string instead of letting it unwind."""
-    # rejected: letting GatherDeadEnd escape `_run_gather` the way RunAborted does — refuted
-    #   by P1/P-c, executed in both directions: uncaught at that placement it kills the run.
-    # The type check runs LAST: a null-stub target answers `issubclass(<stub>, Exception)`
-    # with a TypeError (not a class), which would otherwise mask this test's own
-    # demand-specific assertions behind unrelated machinery.
-    made = GatherDeadEnd(reason="r", escape="e")
-    assert made.reason == "r", "GatherDeadEnd did not carry its reason through construction"
-    assert made.escape == "e", "GatherDeadEnd did not carry its escape through construction"
-
-    r, rec = three_identical_requests
-    assert r.gather.calls == 4, (
-        "three query turns plus ONE summary turn is four (#987). Fewer means the lead was cut "
-        "before its summary turn; more means the closed door did not end the lead and the "
-        "gather model went on querying. The idiom assertion below is what separates those two "
-        "readings of a count that is no longer 3."
-    )
-    assert r.main.calls == 2, "the raise was not caught at _run_gather"
-    assert INCOMPLETE_IDIOM in r.summary(), "the dead end did not land the idiom's incomplete message"
-    assert issubclass(GatherDeadEnd, Exception), "GatherDeadEnd must be an Exception subclass to be raised"
-
-
 def test_repeat_trips_on_third_identical_request(three_identical_requests):
-    """repeat_trips_on_third_identical_request — the positive control every negative in this
-    spec pairs with: with `repeat_threshold` N = 3, the first two identical requests in a lead
-    EXECUTE and the third is refused before the backend, ending the lead with a
-    `GatherDeadEnd`. N = 3 is C11's floor — at N = 2 the guard refuses a lead that went on to
-    succeed."""
     r, rec = three_identical_requests
     assert len(rec.calls) == 2, "calls 1 and 2 must execute; call 3 must not"
     rows = r.own_rows
@@ -808,41 +547,7 @@ def test_repeat_trips_on_third_identical_request(three_identical_requests):
     assert INCOMPLETE_IDIOM in r.summary()
 
 
-def test_repeat_replay_trips_the_two_recorded_leads(tmp_path):
-    """repeat_replay_trips_the_two_recorded_leads — O1's stated oracle, over the recorded
-    corpus: driving `repeat_trip` across `reviewer-measure-0807-b`'s
-    `executed_queries` trips exactly once, at l-001 seq 4 (not seq 36); across
-    `reviewer-measure-0807` exactly once, at l-001 seq 9. A conforming replay stops
-    accumulating for a lead at its first trip, and the predicate is a pure function of row
-    content — no path, inode or mtime enters the key or the count, so a staged copy agrees."""
-    assert _replay(_corpus("reviewer-measure-0807-b")) == [("l-001", 4)]
-    assert _replay(_corpus("reviewer-measure-0807")) == [("l-001", 9)]
-
-
-def test_repeat_replay_never_trips_the_drift_run(tmp_path):
-    """repeat_replay_never_trips_the_drift_run — O3, over `pr815-rerun-0808` (131 rows, 15
-    leads, including a 36-call and a 34-call lead): `repeat_trip` fires ZERO times. The guard
-    never refuses a call that differs from its predecessors. Positive control on the SAME
-    corpus, proving the observation channel can see a trip at all: at threshold 2 the same
-    replay trips l-008 at seq 1 and l-015 at seq 9 — and both of those leads returned real
-    summaries, which is exactly why N = 2 is rejected."""
-    # rejected: N1 — the guard deliberately does not detect semantic drift. pr815's l-012 (36
-    #   distinct calls) and l-015 (eight coined db-1-sshd-* ids for one question) walk past it;
-    #   request_limit stays the boundary for drift.
-    # rejected: N = 2 — C11/G4/P4, and the control below: it refuses correct work.
-    rows = _corpus("pr815-rerun-0808")
-    assert _replay(rows) == []
-    assert sorted(_replay(rows, threshold=2)) == [("l-008", 1), ("l-015", 9)]
-
-
 def test_repeat_key_is_lead_scoped(tmp_path):
-    """repeat_key_is_lead_scoped — `executed_queries` is ONE table for every lead in the run,
-    so `repeat_trip.identity` filters on `lead_id`: an identical request issued by a DIFFERENT
-    lead never counts toward this lead's trip, whatever the physical write order. Two sibling
-    leads each pay their own full N, and a re-dispatch to a new lead_id starts at zero
-    occurrences. Control on the same address: the SAME two rows carrying THIS lead's id do
-    count, and the very same call is refused. (The rows are a branch sibling's inherited
-    prefix — the one way a run starts holding rows, #1235 round 2.)"""
     rec = VerbRecorder()
     foreign = [
         _row(SIBLING, 0, "elastic", "query", {"native_query": "FROM logs"}),
@@ -871,12 +576,6 @@ def test_repeat_key_is_lead_scoped(tmp_path):
 
 
 def test_repeat_key_ignores_query_id(tmp_path):
-    """repeat_key_ignores_query_id — `query_id` is the axis `repeat_trip.identity` and
-    `request_key.identity` deliberately EXCLUDE: three calls with identical (system, verb,
-    params) under three DIFFERENT coined query_ids are one request, and the third is refused.
-    Design-derived, not census-observed, and that is the point — every repeated call in both
-    recorded repeat leads carried a CONSTANT query_id, so a predicate that wrongly includes it
-    replays identically to the correct one."""
     rec = VerbRecorder()
     r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-qid", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}, query_id="elastic.db-1-sshd-a"),
@@ -892,10 +591,6 @@ def test_repeat_key_ignores_query_id(tmp_path):
 
 
 def test_repeat_trip_never_reaches_the_backend(three_identical_requests):
-    """repeat_trip_never_reaches_the_backend — M2: the refused call is refused WITHOUT
-    executing. `interacts(query_tool->verbs_registry)` is never driven for it — the verb
-    function is entered twice and never a third time, and the third call's params never reach
-    a transport."""
     r, rec = three_identical_requests
     assert len(rec.calls) == 2, "the refused call reached the backend"
     assert rec.verbs == ["query", "query"]
@@ -906,13 +601,6 @@ def test_repeat_trip_never_reaches_the_backend(three_identical_requests):
 
 
 def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
-    """repeat_trip_sits_after_grant_and_infra_breaker — M2's placement, stated as its two
-    observable consequences. (a) A DENIED repeat still produces its record in `denial_log` and
-    never an evidence row in `executed_queries` — since #860 a `∅.denied` sentinel row, which
-    sits outside the guard's counted domain — so the guard never sees it and it never trips.
-    (b) A repeat on an already-tripped system still answers the `circuit_breaker`'s
-    down-message: the key-flow ordering `_grant_check -> _tripped_message -> repeat check` is
-    checked on every call regardless of what the repeat count would also conclude."""
     denied_rec = VerbRecorder()
     denied = _run(
         tmp_path / "denied", verbs=granted_and_withheld(denied_rec), run_id="d807-denied", turns=[
@@ -941,16 +629,6 @@ def test_repeat_trip_sits_after_grant_and_infra_breaker(tmp_path):
 
 
 def test_repeat_trip_row_is_agent_fixable(three_identical_requests):
-    """repeat_trip_row_is_agent_fixable — O4: the refused call appends a row to
-    `executed_queries` with a NON-ZERO exit and `error_class == "agent-fixable"` — not absent,
-    not null. The exit code is `USAGE_EXIT_CODE` (64), the code the tool already uses for a
-    call that never executed: it yields "agent-fixable" for free and leaves
-    `circuit_breaker.record_outcome` a no-op. Today 37/37 of one repeat lead's rows carry
-    `error_class: null`, so to every existing guard all 37 repeats are successful queries."""
-    # rejected: N5 — whether the offline pitfalls curator consumes the row is out of scope
-    #   (#823); O4 stops at "the trip is recorded".
-    # rejected: exit 2 (the module's own DEFAULT_FAULT_EXIT) — it yields error_class "infra",
-    #   failing O4 outright, AND marks the system DOWN after two trips (G12, executed).
     r, rec = three_identical_requests
     trip = r.own_rows[2]
     assert trip["exit_code"] != 0, "no trip happened, so the negative is vacuous"
@@ -962,14 +640,6 @@ def test_repeat_trip_row_is_agent_fixable(three_identical_requests):
 
 
 def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path, three_identical_requests):
-    """repeat_trip_leaves_the_infra_breaker_untouched — a repeat is an AGENT dead end, not an
-    unreachable system: the trip must NOT increment `circuit_breaker` and must not mark the
-    system DOWN for the rest of the run. Driven in both starting states — from a fresh run
-    (no breaker failure is recorded at all, and no breaker file is written) and from a run whose
-    breaker an EARLIER, UNRELATED infra failure already tripped, where that earlier trip must
-    survive the repeat trip unchanged. Positive control on the same address under the
-    complementary condition: an exit-2 adapter fault DOES record breaker state, so the
-    observation channel (the run's own state, #1235) can see the difference."""
     r, rec = three_identical_requests
     assert r.own_rows[2]["exit_code"] == 64, "no trip happened, so the negative is vacuous"
     assert r.breaker == _BLANK_BREAKER, "the repeat trip recorded infra-breaker state"
@@ -977,10 +647,6 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path, three_identica
         "a breaker file was written into the run dir (#1235: the breaker is in memory only)"
     assert circuit_breaker.is_tripped(r.state, "elastic") is False
 
-    # The SAME trip, in a run that already carries an unrelated system's infra trip: an earlier
-    # lead's two real transport faults on `cmdb` (exit 2, through the real capture and the
-    # production `record_outcome`) put it at PER_SYSTEM_FAIL_LIMIT = 2 (G12, executed), i.e.
-    # DOWN, before this lead's first call.
     prior_rec = VerbRecorder()
 
     def cmdb_probe(ctx: VerbContext, *, native_query: str = "FROM hosts") -> list[dict]:
@@ -1025,17 +691,6 @@ def test_repeat_trip_leaves_the_infra_breaker_untouched(tmp_path, three_identica
 
 
 def test_trip_row_conforms_to_the_frozen_row_contract(three_identical_requests):
-    """trip_row_conforms_to_the_frozen_row_contract — the trip row's payload carries the SAME
-    frozen keys as any other queries row: no key of its own, no amendment to
-    `test_row_contract_frozen`. Every downstream reader written against the frozen set still
-    reads it, and the key set is imported from the existing contract rather than restated, so
-    the two cannot drift. (The set is fourteen keys: #877 F-9 added `payload_sha256` and #871
-    added `system_key`, both for every writer alike; the argument below is about a key only ONE
-    writer would fill.)"""
-    # rejected: a key of the trip row's own (e.g. `refusal_kind`) — typed and unambiguous, but
-    #   it breaks `test_row_contract_frozen` and every reader written against the frozen set;
-    #   that is a deliberate contract amendment this issue did not propose. F-I option 2 puts the
-    #   repetition in the existing detail field instead (see trip_row_detail_names_the_repetition).
     r, rec = three_identical_requests
     trip = r.own_rows[2]
     assert trip["exit_code"] == 64, "row 2 must be the trip itself, not an ordinary third success"
@@ -1046,47 +701,7 @@ def test_trip_row_conforms_to_the_frozen_row_contract(three_identical_requests):
     assert trip["payload_path"] == f"gather_raw/{LEAD}/2.json"
 
 
-def test_trip_row_is_distinguishable_from_a_finished_leads_rows(tmp_path):
-    """trip_row_is_distinguishable_from_a_finished_leads_rows — O4's contrast, and what is
-    absent today: a stopped lead's record in `executed_queries` carries a non-zero exit and a
-    non-null `error_class`, while a lead that finished has rows that are ALL exit 0 with
-    `error_class` null and no `circuit_breaker` failure. Both leads are in one run, so the
-    difference is a property of the rows and not of the fixture."""
-    rec = VerbRecorder()
-    r = _run_two_leads(tmp_path, verbs=elastic_ok(rec), run_id="d807-contrast", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        SUMMARY_TURN,                                       # the stopped lead's summary (#987)
-        q("elastic", "query", {"native_query": "FROM other"}),
-        DONE,
-    ])
-    stopped = r.rows_for(LEAD)
-    finished = r.rows_for(SIBLING)
-    assert len(stopped) == 3
-    assert len(finished) == 1
-
-    assert any(row["exit_code"] != 0 for row in stopped)
-    assert any(row["error_class"] is not None for row in stopped)
-    assert [row["exit_code"] for row in finished] == [0]
-    assert [row["error_class"] for row in finished] == [None]
-    assert r.breaker == _BLANK_BREAKER
-
-
 def test_dead_end_return_contract(tmp_path):
-    """dead_end_return_contract — `gather_dispatch` catches `GatherDeadEnd` in the same except
-    chain as UsageLimitExceeded and returns ONE string that (a) opens with the terminal idiom
-    its three sibling branches already use — "gather for {lead_id} … Treat this lead as
-    incomplete and reason from what was captured" — so main's established handling still
-    fires and the message arrives into the one vocabulary any prompt in the corpus teaches;
-    (b) names the repeated request, the structural cause and the escape; and (c) is
-    `_wrap(…, "untrusted", deps.salt)`-wrapped into `model_context` and written verbatim to
-    `gather_summaries/{lead_id}.md`, exactly like the three branches beside it — so it is the
-    lead's surviving account after main's context is folded."""
-    # rejected: returning the structural reason ALONE, dropping the idiom — C5's evidence that
-    #   main re-dispatches is evidence about its response to the INCOMPLETE framing, and no
-    #   prompt in the corpus teaches dead-end or refusal vocabulary (G19). O2's own sentence
-    #   is "hands back a reason main can act on, NOT JUST 'incomplete'".
     rec = VerbRecorder()
     r = _run(tmp_path, verbs=named_verbs(rec), run_id="d807-return", turns=[
         q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
@@ -1108,11 +723,6 @@ def test_dead_end_return_contract(tmp_path):
 
 
 def test_dead_end_is_contained_to_the_lead(tmp_path):
-    """dead_end_is_contained_to_the_lead — `GatherDeadEnd` must NOT unwind the run the way
-    RunAborted does: it crosses the budget-enforcement capability's `tool_execute` wrapper
-    unaltered, `run_investigation` completes, main receives the string as the gather tool's
-    result and keeps going, and a SIBLING lead dispatched afterwards runs normally. Scope
-    stated: lead-level containment only — the in-flight sibling CALL's fate stays unpinned."""
     rec = VerbRecorder()
     r = _run_two_leads(tmp_path, verbs=elastic_ok(rec), run_id="d807-contained", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
@@ -1128,34 +738,7 @@ def test_dead_end_is_contained_to_the_lead(tmp_path):
     assert len(rec.calls) == 3, "the sibling lead's own query never ran"
 
 
-def test_dead_end_message_names_repeat_and_structural_cause(tmp_path):
-    """dead_end_message_names_repeat_and_structural_cause — the string `gather_dispatch`
-    writes into `model_context` names the repeated request (its `system`, its `verb`, and the
-    earlier seq it repeats) and states the cause is STRUCTURAL rather than a transient to
-    retry through. ORACLE LIMIT, carried verbatim from the doc: a test can assert the
-    message's content and that `_run_gather` returns it — NOT that main does something better
-    with it. Nothing here pretends to observe an improved re-dispatch."""
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=named_verbs(rec), run_id="d807-msg", turns=[
-        q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-        q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-        q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-        DONE,
-    ])
-    summary = r.summary()
-    assert "elastic" in summary
-    assert "sshd-auth-window" in summary
-    assert "seq 0" in summary, "the message does not name the earlier occurrence it repeats"
-    assert "structural" in summary, "the message does not state the cause is structural"
-
-
 def test_repeat_key_normalizes_param_key_order(tmp_path):
-    """repeat_key_normalizes_param_key_order — `json.dumps(sort_keys=True)` inside
-    `request_key.identity` normalises key order away at EVERY nesting level, so two calls
-    whose params differ only in key order — top level or nested — are ONE request under
-    `repeat_trip.identity`, and the second is an occurrence of the first. Any variation that
-    does not survive that canonicalization collapses to one key regardless of what the lead
-    intended."""
     rec = VerbRecorder()
     r = _run(tmp_path, verbs=nested_params(rec), run_id="d807-order", turns=[
         Turn(tool_calls=[("query", {"system": "elastic", "verb": "probe", "params": {
@@ -1172,15 +755,6 @@ def test_repeat_key_normalizes_param_key_order(tmp_path):
 
 
 def test_repeat_key_separates_requests_that_differ_by_a_byte(tmp_path):
-    """repeat_key_separates_requests_that_differ_by_a_byte — the canonicalizer behind
-    `repeat_trip.identity` and `request_key.identity` is STRUCTURAL and carries no per-verb,
-    locale or numeric knowledge: no case folding, no Unicode normalization, no int/float
-    folding, no per-verb defaults, and no length or charset constraint on `system`/`verb` (a
-    kilobyte-long name is one more distinct key). Two renderings that differ as byte strings
-    are two keys and must not count toward one another — the O3 direction of the same
-    predicate. A kilobyte-long system name is exercised at the predicate only: such a call is
-    answered by `_grant_check` ABOVE M2, so it can leave rows but can never itself be refused
-    by the guard."""
     base = {"native_query": unicodedata.normalize("NFC", "FROM café"), "threshold": 1.0}
     variants = [
         ("case", {**base, "native_query": "from café"}),
@@ -1218,18 +792,6 @@ def test_repeat_key_separates_requests_that_differ_by_a_byte(tmp_path):
 
 
 def test_repeat_count_is_derived_from_the_table(tmp_path):
-    """repeat_count_is_derived_from_the_table — M1's one deliberate choice, "no new persisted
-    state, no new file": the count `repeat_trip` reads is derived from the run's queries table
-    as the HOST holds it (#1235) — the rows the host recorded for the run, on the run's one
-    `RunState`, which for a resumed run (a branch sibling) include the rows seeding inherited
-    before its first turn. A lead that accumulated its occurrences organically and a resumed
-    lead whose inherited prefix holds them trip at the same occurrence — in the resumed run the
-    session never executed the request even once, and the guard still refuses it.
-
-    #1235 round 2: rows PLANTED in a fresh run's folder before it starts are not rows the host
-    recorded, and no file is read into a run's state — they count nothing, and the same call
-    runs (the inherited arm is its positive control). (That a row written into the folder
-    MID-run moves nothing is pinned in `e2e/test_1235_queries_and_pointer.py`.)"""
     organic_rec = VerbRecorder()
     organic = _run(tmp_path / "organic", verbs=elastic_ok(organic_rec), run_id="d807-derive-a", turns=[
         q("elastic", "query", {"native_query": "FROM logs"}),
@@ -1263,43 +825,7 @@ def test_repeat_count_is_derived_from_the_table(tmp_path):
     assert INCOMPLETE_IDIOM not in planted.summary()
 
 
-def test_repeat_count_is_zero_before_the_lead_has_rows(tmp_path):
-    """repeat_count_is_zero_before_the_lead_has_rows — the first call of a lead reads ZERO
-    prior occurrences from the queries table: never an error, never a trip. This covers both
-    the absent file (a fresh run: no table yet, and the run's state starts with no rows) and
-    the table that exists with no rows for THIS lead (a branch sibling whose inherited prefix
-    holds only another lead's rows)."""
-    from defender.runtime.run_state import RunState
-
-    missing = tmp_path / "missing" / "run"
-    missing.mkdir(parents=True)
-    fresh = RunState(missing, "d807-zero-fresh")
-    assert list(fresh.lead_rows(LEAD)) == [], "a lead with no table rows must read as zero occurrences"
-    assert repeat_trip(fresh.lead_rows(LEAD), LEAD, system="elastic", verb="query",
-                       params={"native_query": "FROM logs"}) is None
-
-    rec = VerbRecorder()
-    foreign = [_row(SIBLING, s, "elastic", "query", {"native_query": "FROM logs"})
-               for s in (0, 1, 2)]
-    r = _run_inherited(
-        tmp_path / "foreign", table=_jsonl(foreign), rows=foreign, verbs=elastic_ok(rec),
-        run_id="d807-zero", turns=[q("elastic", "query", {"native_query": "FROM logs"}), DONE],
-    )
-    assert len(rec.calls) == 1, "the lead's first call was refused against another lead's rows"
-    assert _file_rows(r.run_dir, LEAD)[0]["seq"] == 0
-    assert INCOMPLETE_IDIOM not in r.summary()
-
-
 def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
-    """repeat_predicate_fails_open_on_a_damaged_table — the guard never reads
-    `executed_queries.jsonl` per call (#1235): it counts the rows on the run's state. The one
-    read of a table INTO a run is a branch sibling's seeding, which reads the source's table and
-    records what it inherits — so that is where a damaged table is met now. A torn trailing
-    line, a foreign row carrying no `lead_id` and a stored `params` that is not a dict degrade
-    the inherited count and crash nothing: the sibling's state holds the lead's three real rows
-    (seqs 0, 2, 3), and the lead's two real occurrences still count, so its next identical
-    request is refused before the backend. Invalid UTF-8 in a row survives as that row. (The
-    chmod-000 and directory-at-the-name arms retired with the per-call read in round 1.)"""
     torn = b'{"lead_id": "l-001", "seq": 4, "sys'
     damaged = [
         _row(LEAD, 0, "elastic", "query", {"native_query": "FROM logs"}),
@@ -1325,12 +851,6 @@ def test_repeat_predicate_fails_open_on_a_damaged_table(tmp_path):
 
 
 def test_tripping_call_carries_no_repeat_note(three_identical_requests):
-    """tripping_call_carries_no_repeat_note — the regression witness for M2's ordering: the
-    tripping call never reaches `_model_view`, so `gather_model_context` never carries a
-    `REPEAT` annotation AND a dead end for the same call. Any placement after `handler(args)`
-    breaks this. Positive control on the same address under the complementary condition: the
-    shipped `repeat_note` DOES fire on the second, non-tripping occurrence, so exactly one
-    REPEAT annotation reaches the gather model across the whole lead."""
     r, rec = three_identical_requests
     seen = r.gather_saw
     assert seen.count("[record_query] REPEAT") == 1, \
@@ -1344,72 +864,21 @@ def test_tripping_call_carries_no_repeat_note(three_identical_requests):
     assert INCOMPLETE_IDIOM in r.summary()
 
 
-def test_repeat_key_is_the_shipped_request_key(tmp_path):
-    """repeat_key_is_the_shipped_request_key — `record_query`'s shipped `repeat_note` and the
-    new guard are TWO READERS of one `request_key` over one table, bound per reader edge. The
-    note fires when one prior row shares the key (the second occurrence); the guard trips on
-    the third. One call can be both, and the two can never disagree about WHAT "the same
-    request" IS, because they call the SAME `_request_key` over the SAME rows — the key, and
-    therefore the set of rows each counts, is one answer. A second canonicalizer is also a
-    `lint_duplicate_helpers` finding.
-
-    SCOPE, stated: the KEY is what this demand pins, not the seq. The two readers select
-    DIFFERENT rows from the matching set on purpose — the shipped `repeat_note` names the first
-    match in file order among rows with `seq <` the current call, while F-H(b) makes the guard
-    name the earliest match by seq over all of them (`dead_end_message_names_the_earliest
-    _matching_seq` drives the shape where those differ). This run's three calls are in seq
-    order, so here they land on the same row; nothing in this suite asserts they agree in
-    general, and they do not."""
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=named_verbs(rec), run_id="d807-coherence", turns=[
-        q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}, query_id="elastic.a"),
-        q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}, query_id="elastic.b"),
-        q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}, query_id="elastic.c"),
-        DONE,
-    ])
-    assert "[record_query] REPEAT — this is the same request you ran at seq 0" in r.gather_saw, \
-        "the shipped note did not recognise the second occurrence the guard counted"
-    assert "seq 0" in r.summary(), \
-        "seq 0 is the earliest matching row in this in-order run — the guard named another"
-
-    # The guard's own rows: the run's state, read post-run in this process (#1235).
-    rows = r.state.lead_rows(LEAD)
-    key = _query_rules._request_key("elastic", "sshd-auth-window", {"native_query": "FROM logs"})
-    counted = [
-        row for row in rows
-        if _query_rules._request_key(row["system"], row["verb"], row["params"]) == key
-    ]
-    assert len(counted) == 3, "the guard and the shipped key disagree about the counted rows"
-
-
 def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
-    """repeat_guard_never_fires_above_its_own_placement — three identical calls to a system
-    whose ADAPTER FAILS TO LOAD produce NO `GatherDeadEnd` and no trip row: the load-error
-    branch records its row from `_grant_check`, ABOVE M2, so no such call ever reaches the
-    repeat check, and two exit-2 rows mark the system DOWN so the third IS answered by the
-    infra breaker's down-message. The `circuit_breaker` owns this shape end to end. Because no
-    such call can reach the guard, its rows are outside the counted domain
-    (`counted_domain_excludes_validate_path_rows`) and a REPLAY over this run's own table must
-    reach the same verdict the live run did — at any threshold, including the N = 2 the two
-    recorded rows would otherwise satisfy. Positive control:
-    `repeat_trips_on_third_identical_request`, the same three identical calls against a
-    loadable adapter, which DOES trip.
+    registry, relink = unloadable_adapter(tmp_path / "tree")
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-    AMENDED at #878 F-07. The count assertion was `>= 2`, which passed at 3 — the shape where
-    the third call is recorded and answered by the load error again, never by the breaker. That
-    is what the code did, and it contradicted this docstring, the demand in
-    `spec_graph_807.yaml:450-461` and `rejection_trip`'s own justification for excluding these
-    rows. It is now `== 2`, and the down-message is asserted positively rather than inferred
-    from `is_tripped`. `load_error_repeat_is_answered_by_the_breaker_not_the_run_kill` drives
-    the same shape past the fifth call, where the old behaviour cost the run."""
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    probe: {roles: [gather]}\n")
     r = _run(
-        tmp_path / "run", verbs=unloadable_adapter(tmp_path / "tree"), run_id="d807-loaderr",
-        turns=[
+        tmp_path / "run", verbs=registry, run_id="d807-loaderr", tenant=S.tenant_folder_of(root),
+        turns=_after_start(relink, [
             q("elastic", "probe", {"native_query": "FROM logs"}),
             q("elastic", "probe", {"native_query": "FROM logs"}),
             q("elastic", "probe", {"native_query": "FROM logs"}),
             DONE,
-        ])
+        ]))
+    assert relink.broken == 1, "premise: the adapter was never broken after the run's start"
     rows = r.own_rows
     assert len(rows) == 2, \
         "the third load-error call was recorded — the breaker that owns this repeat never answered it"
@@ -1425,24 +894,16 @@ def test_repeat_guard_never_fires_above_its_own_placement(tmp_path):
 
 
 def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path):
-    """#878 F-07 — FIVE identical calls to a system whose adapter fails to load leave exactly
-    TWO rows and three down-messages, and the run survives.
+    registry, relink = unloadable_adapter(tmp_path / "tree")
+    from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
-    `verbs._load_adapter_module` caches only on success, so every call in this class re-runs
-    the failing import and `_record`'s tail hands every one of them to
-    `circuit_breaker.record_outcome`. With the breaker consulted only BELOW `_grant_check`'s
-    return, all five were recorded: the second marked the system down with nothing reading it,
-    and the fifth crossed `RUN_FAIL_KILL_LIMIT = 5` and raised `RunAborted` — which
-    `_run_gather` does not catch and `_drive_agent`'s `RunAborted` arm does not force a close
-    for, so the run ended with no gather summary, no resumed MAIN and no `report.md`.
-
-    The three assertions that separate the fix from the defect: `total_failures` stays at
-    `PER_SYSTEM_FAIL_LIMIT` rather than reaching the kill limit (a tripped breaker means the
-    call did not happen, so it counts no failure), the lead still produces its summary, and
-    MAIN still reaches its own final turn."""
+    root = tmp_path / "tenant-data"
+    S.plant(root, table="dispositions:\n  elastic:\n    probe: {roles: [gather]}\n")
     r = _run(
-        tmp_path / "run", verbs=unloadable_adapter(tmp_path / "tree"), run_id="d878-loaderr",
-        turns=[q("elastic", "probe", {"native_query": "FROM logs"})] * 5 + [DONE])
+        tmp_path / "run", verbs=registry, run_id="d878-loaderr", tenant=S.tenant_folder_of(root),
+        turns=_after_start(relink, [q("elastic", "probe", {"native_query": "FROM logs"})] * 5
+                           + [DONE]))
+    assert relink.broken == 1, "premise: the adapter was never broken after the run's start"
     rows = r.own_rows
     assert len(rows) == 2, "a call answered by the down-message still recorded an evidence row"
     assert {row["exit_code"] for row in rows} == {2}
@@ -1458,17 +919,6 @@ def test_load_error_repeat_is_answered_by_the_breaker_not_the_run_kill(tmp_path)
 
 
 def test_repeat_trip_empty_params_is_its_own_domain_member(tmp_path):
-    """repeat_trip_empty_params_is_its_own_domain_member — `{}` is a real, frequent call, not
-    a coercion fallback: 8 of GATHER_DEF's 28 granted (system, verb) pairs declare a literally
-    EMPTY parameter set (all seven health-checks plus identity.list-roles, P-e executed), so
-    for them `{}` is the only call there is. `repeat_trip.domain.distinguished[{}]` is
-    exercised as its own domain member — an empty-params request counts and trips like any
-    other, with no carve-out, so N = 3 is a permanent two-call-per-lead ceiling for such a
-    verb. The risk is accepted and named: a health-check reads as a plausibly legitimate
-    re-poll of changed system state."""
-    # rejected: exempting parameterless verbs — a per-verb exception the doc never proposes,
-    #   a hole a repeating lead can sit in indefinitely, and verb knowledge the guard
-    #   otherwise has none of (N2: "have I sent this exact request before, nothing more").
     rec = VerbRecorder()
     r = _run(tmp_path, verbs=parameterless(rec), run_id="d807-empty", turns=[
         q("elastic", "health-check", {}),
@@ -1483,84 +933,7 @@ def test_repeat_trip_empty_params_is_its_own_domain_member(tmp_path):
     assert INCOMPLETE_IDIOM in r.summary()
 
 
-def test_lead_repository_reads_the_trip_row_unchanged(tmp_path, three_identical_requests):
-    """lead_repository_reads_the_trip_row_unchanged — `lead_repository.load_queries` is a
-    reader of `executed_queries` this change does not move, and it must keep reading: after a
-    trip, `joined` returns the lead with all three rows in seq order, the trip row's
-    `raw_ref` resolves to a real on-disk payload, `stage_tables` copies it into the learning
-    corpus unfiltered, and `repeat_trip` over the STAGED copy reaches the identical verdict —
-    no path, inode or mtime enters the key or the count.
-
-    #841 moved WHICH LIST the trip row joins into, and nothing else: it is a refusal record,
-    not a query the defender ran, so `JoinedLead.queries` no longer holds it and
-    `JoinedLead.sentinels` does. Every fact this test was written to protect is asserted
-    below through `.rows`, which is the seq-ordered remerge — the row is not dropped, its
-    payload is still reachable to the join surface, staging is still byte-unfiltered, and the
-    replay verdict is still identical."""
-    r, rec = three_identical_requests
-    leads = [
-        lead for lead in lead_repository.joined(r.run_dir)
-        if lead.lead_id not in RESERVED_LEAD_IDS
-    ]
-    assert [lead.lead_id for lead in leads] == [LEAD]
-    rows = leads[0].rows
-    assert [qr.seq for qr in rows] == [0, 1, 2]
-    # #841's split, on the one lead that has both populations: the two calls that reached
-    # elastic are the queries, the refusal is the observation.
-    assert [qr.seq for qr in leads[0].queries] == [0, 1]
-    assert [qr.seq for qr in leads[0].sentinels] == [2]
-    trip = rows[2]
-    assert trip.query_id == REPEAT_TRIP_QUERY_ID
-    assert trip.is_sentinel
-    assert trip.exit_code == 64
-    assert trip.error_class == "agent-fixable"
-    assert trip.raw_ref is not None, "the trip row's payload is unreachable to the join surface"
-    assert trip.raw_ref.is_file()
-
-    dst = tmp_path / "staged"
-    lead_repository.stage_tables(r.run_dir, dst)
-    assert read_jsonl_rows(dst / "executed_queries.jsonl") == r.rows
-    assert _replay(read_jsonl_rows(dst / "executed_queries.jsonl")) == _replay(r.rows)
-
-
 def test_counted_domain_excludes_validate_path_rows(tmp_path):
-    """counted_domain_excludes_validate_path_rows — the counted domain is EXACTLY the rows THE
-    GUARD COULD ITSELF HAVE REFUSED: rows written at or below M2. A row written ABOVE M2 is
-    never an occurrence of the request it was trying to be, live or on replay, and three
-    writers sit up there. (i) `wrap_tool_validate` — the fifth `_record` site, which fires
-    precisely when one of the identity fields is unreadable and builds identity from the RAW
-    pre-validation arguments. (ii) `_grant_check`'s non-`GRANTED`/unresolvable branch, which
-    records an exit-64 row and raises `ModelRetry` before the guard is reached. (iii)
-    `_grant_check`'s adapter-load-error branch, which records an exit-2 row (driven by
-    `repeat_guard_never_fires_above_its_own_placement`, which pins the replay verdict over its
-    own table). Two calls the argument schema turned back under a key byte-identical to a
-    genuine one do NOT refuse the genuine third call, so O3 ("the guard never refuses a call
-    that differs from its predecessors") holds by construction. THE REASON THE DOMAIN IS THIS
-    NARROW: `repeat_guard_never_fires_above_its_own_placement` pins that no such call can ever
-    reach the guard, so counting its rows would let the replay oracle report a trip no live run
-    can produce — the divergence `trip_row_is_itself_an_occurrence_on_replay`'s own
-    justification forbids, and the only argument the artifact gives for why the trip row itself
-    counts. Every arm therefore asserts the LIVE verdict and the REPLAY verdict over the same
-    table. P-a, an executed break-attempt over all five rejection shapes, found NO discriminator
-    among the frozen row keys, so an above-M2 row must carry a sentinel identity the guard
-    skips: that sentinel is production work this test only observes, and it must live INSIDE
-    the frozen set (`set(row) == ROW_KEYS` is asserted on every such row here, so a key of the
-    sentinel's own is not an available implementation).
-
-    WHAT THIS TEST NO LONGER SAYS (#826 item 4). Its second arm used to pin that three
-    identical UNRESOLVABLE-verb calls end the lead nowhere — `gather.calls == 4`, no incomplete
-    idiom — under `unresolvable_verb_repeat_loops_are_out_of_scope`, the non-obligation #807
-    recorded rather than leaving the gap silent. That non-obligation was discharged by the
-    follow-up it was filed against: those loops are now owned by the COMPANION guard, at their
-    own placement, over their own domain. The narrowing this test exists to pin is UNCHANGED
-    and is the whole point of the arm as rewritten — M2's guard still refuses none of them,
-    and `_replay` over their table still reports no trip. What changed is only that "M2 does
-    not own this" stopped meaning "nobody does". The first arm is untouched: two rejections
-    are below threshold, so the corrected third call still executes.
-
-    Positive control on the same address under the complementary condition: replace the two
-    rejections with two genuine executions of the same request and the very same third call IS
-    refused — by M2, whose own domain those rows are in."""
     params = {"native_query": "FROM logs"}
 
     rejected_rec = VerbRecorder()
@@ -1581,13 +954,6 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert _replay(rows) == [], \
         "the replay oracle counted validate-path rows the live guard skipped — they disagree"
 
-    # `_grant_check`'s unresolvable branch: an UNDECLARED verb records its own exit-64 row and
-    # raises ModelRetry, all strictly above M2. Three identical such calls are a repeat group
-    # under (lead_id, system, verb, canonical(params)) and M2 can refuse none of them — so
-    # `_replay`, M2's own oracle, must report no trip over their table either, or the oracle
-    # overstates M2's reach. This is the shape the fitted corpus cannot expose: its 6 exit-64
-    # rows sit under distinct keys, so no group of >= 3 at one key exists in any recorded run
-    # (RF-J2's blind quadrant).
     grant_rec = VerbRecorder()
     unresolvable = _run(
         tmp_path / "unresolvable", verbs=elastic_ok(grant_rec), run_id="d807-fa-grant", turns=[
@@ -1603,9 +969,6 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert grant_rec.calls == [], "an unresolvable verb reached the backend"
     assert _replay(grant_rows) == [], \
         "M2's oracle trips on a repeat M2 can never refuse — live and replay disagree"
-    # The narrowing above is what this test pins; the stop below belongs to the OTHER guard,
-    # and is asserted here so the two verdicts stay recorded against the same table rather
-    # than in two suites that could drift into contradicting each other.
     assert unresolvable.gather.calls == 4, (
         "the third identical rejection did not end the lead — the companion guard is silent "
         "(5+), or the lead ended but #987's summary turn did not follow (3)"
@@ -1625,36 +988,7 @@ def test_counted_domain_excludes_validate_path_rows(tmp_path):
     assert INCOMPLETE_IDIOM in genuine.summary()
 
 
-def test_trip_row_is_itself_an_occurrence_on_replay(three_identical_requests):
-    """trip_row_is_itself_an_occurrence_on_replay — the trip row is written from inside
-    `wrap_tool_execute`, so it is one row like any other and DOES count toward a later check
-    of the same key in the same lead. Live this is unreachable (M3 terminates the lead), so it
-    bites only on replay — and it has to, or a replay of a recorded table stops matching the
-    live run it replays. Driven over a REAL trip row produced by a real run, not a
-    hand-written one."""
-    r, rec = three_identical_requests
-    rows = r.own_rows
-    trip = rows[2]
-    assert trip["exit_code"] == 64, "no trip row was produced, so the premise is vacuous"
-
-    key = {"system": "elastic", "verb": "query", "params": {"native_query": "FROM logs"}}
-    assert repeat_trip([rows[0]], LEAD, **key) is None
-    with_trip = repeat_trip([rows[0], trip], LEAD, **key)
-    assert with_trip is not None, "the trip row was skipped, so a replay drifts from the live run"
-    assert with_trip.occurrence == REPEAT_THRESHOLD
-
-    assert _replay(rows) == [(LEAD, 2)], "the replay of this run's own table misses its own trip"
-
-
 def test_repeat_key_normalizes_the_live_call_to_its_stored_form(tmp_path):
-    """repeat_key_normalizes_the_live_call_to_its_stored_form — the guard converts the LIVE
-    call to its stored form (`_json_safe_params`, then `request_key`) before keying, so
-    `repeat_trip` is literally one function over one input shape and the predicate O1's
-    obligations are measured with is the predicate that runs. Probed disagreement this
-    closes: a live `{"threshold": nan}` keys as the bare token `NaN` while the row the same call
-    wrote holds the string `"NaN"`, so without the normalisation a repeated non-finite param never recognises its own
-    prior rows and never trips. The stored form here is produced by the PRODUCTION transform,
-    not restated, so the test re-probes the real round trip on every run."""
     live = {"native_query": "FROM logs", "threshold": float("nan")}
     stored = _json_safe_params(dict(live))
     assert stored != live, "the transform this demand is about did nothing — the fixture is inert"
@@ -1670,16 +1004,6 @@ def test_repeat_key_normalizes_the_live_call_to_its_stored_form(tmp_path):
 
 
 def test_trip_row_survives_the_learning_extractors_payload_gate(three_identical_requests):
-    """trip_row_survives_the_learning_extractors_payload_gate — the trip is written through
-    the existing `_record` path, so `lead_extraction` — O4's named audience — really sees it:
-    `payload_status` computes to "error", a valid enum member, so `extract_from_joined` cannot
-    raise LeadAuthorError and kill the run's whole lead-author pass; and the EMPTY
-    `gather_raw/{lead}/{seq}.json` sidecar is still written, so the row is not dropped by the
-    payload-existence gate that runs BEFORE the error_class filter — which is precisely the
-    blind spot O4 exists to close."""
-    # rejected: a bespoke trip-row writer that skips _persist_payload — `payload_path: null`
-    #   is its natural shape, and such a row is invisible to extract_from_joined: O4 satisfied
-    #   on paper and defeated in fact for its named audience.
     r, rec = three_identical_requests
     trip = r.own_rows[2]
     assert trip["payload_status"] == "error"
@@ -1698,13 +1022,6 @@ def test_trip_row_survives_the_learning_extractors_payload_gate(three_identical_
 
 
 def test_screen_refused_repeats_count_toward_the_trip(tmp_path):
-    """screen_refused_repeats_count_toward_the_trip — M2 places the guard ABOVE `_screen`, so
-    the guard owns the repeats it can see: three identical calls that each fail the verb's own
-    parameter check are counted, and the third ends the lead with a `GatherDeadEnd` instead of
-    earning a third identical corrective ModelRetry the model has already ignored twice. The
-    trip row is therefore written before any verb looked at the call's parameters. Not
-    discharged by replay — the fitted corpus holds zero repeat groups whose calls failed, so
-    this drives the real path."""
     rec = VerbRecorder()
     bad = {"native_query": "FROM logs", "nosuch_param": 1}
     r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-screen", turns=[
@@ -1725,19 +1042,6 @@ def test_screen_refused_repeats_count_toward_the_trip(tmp_path):
 
 
 def test_concurrent_identical_siblings_still_stop_the_lead(tmp_path):
-    """concurrent_identical_siblings_still_stop_the_lead — `gather_dispatch` drives
-    `query_tool` CONCURRENTLY (two query calls in one gather turn is a pinned existing
-    scenario), and the guard's read sits before `handler(args)` and outside `_seq_lock`. That
-    placement is WHY the spec states N as a FLOOR rather than an exact cap — but the floor is
-    a CONSTRAINT ON WHAT MAY BE ASSERTED, carried by the
-    `repeat_threshold_is_a_floor_not_an_exact_cap` clause, and it is not something this test
-    demonstrates: the overshoot needs two same-key siblings to read one stale count, an
-    interleaving neither this run nor the fitted corpus produces. What this test DOES
-    demonstrate is the obligation that survives concurrency: with two prior occurrences on the
-    key, a turn issuing two identical siblings STOPS THE LEAD — neither sibling reaches the
-    backend, a trip row lands in `executed_queries`, and main receives the dead end. It
-    deliberately asserts NO exact row count and no exact trip seq: under concurrency the spec
-    pins neither."""
     rec = VerbRecorder()
     same = {"system": "elastic", "verb": "probe", "params": {"tag": "alpha"}}
 
@@ -1763,74 +1067,7 @@ def test_concurrent_identical_siblings_still_stop_the_lead(tmp_path):
     assert [row["exit_code"] for row in r.own_rows[:2]] == [0, 0]
 
 
-def test_gather_dead_end_payload_binds_reason_and_escape(tmp_path):
-    """gather_dead_end_payload_binds_reason_and_escape — `GatherDeadEnd`'s payload has both
-    its slots BOUND: a `reason` naming this trip's own repeated request, and an `escape`
-    that is ONE fixed, system-agnostic sentence, identical on every trip. The escape states
-    the structural fact and hands the decision to main; it names no system and no verb,
-    because a per-system escape table would make the guard a progress oracle — and the one
-    concrete escape the issue proposed was already the path one of the two recorded repeat
-    leads was repeating on."""
-    # rejected: a per-system escape table derived from skills/{system}/execution.md — N2
-    #   forbids it by name, and it would have been WRONG on reviewer-measure-0807 (C9).
-    # rejected: dropping `escape` and carrying only `reason` — it changes the declared
-    #   two-part payload and removes the only part aimed at what main should do next.
-    assert REPEAT_ESCAPE.strip(), "the escape slot is bound to nothing"
-    # All SEVEN granted systems, off P-e's executed census of GATHER_DEF's 28 (system, verb)
-    # pairs — `change-mgmt` is a granted system like the other six.
-    for system in ("elastic", "cmdb", "identity", "ticket", "threat-intel", "host-state",
-                   "change-mgmt"):
-        assert system not in REPEAT_ESCAPE, f"the escape names {system} — it is not system-agnostic"
-    # …and no VERB either: the demand's outcome is that the escape names no system AND no verb.
-    # These are real verb names off the same census and off the corpus (`esql` is 0807 l-001's
-    # 37 calls, C9). Bare `query` is deliberately absent from this tuple: it is a granted verb
-    # name AND an ordinary English word a system-agnostic sentence may legitimately use, so
-    # banning it would fail an escape that names nothing. The discriminating check for that
-    # residue is the identity of the escape across the two trips driven below, on two different
-    # (system, verb) pairs.
-    for verb in ("health-check", "list-roles", "esql", "sshd-auth-window", "host-trust-edges"):
-        assert verb not in REPEAT_ESCAPE, f"the escape names {verb} — it is not verb-agnostic"
-
-    rec = VerbRecorder()
-    r = _run_two_leads(
-        tmp_path, verbs=two_systems(rec), run_id="d807-escape",
-        first=(LEAD, "elastic"), second=(SIBLING, "cmdb"), turns=[
-            q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-            q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-            q("elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
-            SUMMARY_TURN,                       # the elastic lead's summary turn (#987)
-            q("cmdb", "host-trust-edges", {"host": "db-1"}),
-            q("cmdb", "host-trust-edges", {"host": "db-1"}),
-            q("cmdb", "host-trust-edges", {"host": "db-1"}),
-            DONE,
-        ])
-    first, second = r.summary(LEAD), r.summary(SIBLING)
-    assert REPEAT_ESCAPE in first
-    assert REPEAT_ESCAPE in second
-    assert "sshd-auth-window" in first
-    assert "host-trust-edges" in second
-    assert "host-trust-edges" not in first, "the reason slot is not this trip's own request"
-    assert "sshd-auth-window" not in second
-
-
 def test_dead_end_message_does_not_echo_model_authored_params(tmp_path):
-    """dead_end_message_does_not_echo_model_authored_params — the dead end names the request's
-    IDENTITY (`system`, `verb`, the earlier seq) and never echoes the model-authored `params`
-    text: an unbounded, attacker-influenced fragment must not cross into main's context on a
-    refusal path, by way of either surface the dead end reaches — the string written into
-    `model_context` or the `gather_summaries/{lead_id}.md` account that survives compaction.
-    Positive control, the shape a redaction demands: the very same bytes ARE recoverable
-    through the sanctioned path — they are in the queries-table row's `params` and
-    `raw_command`, which is where main is pointed to find the exact request from
-    (lead_id, seq).
-
-    SCOPE, NARROWED BY #987 AND STATED SO IT IS NOT READ WIDER THAN IT IS. What this demand
-    binds is the HARNESS-AUTHORED half of what main receives — the per-arm notice, which is now
-    the header of a message whose body the gather model writes. The body is model-authored text
-    crossing the same `untrusted`-wrapped channel every CLEAN lead's summary crosses, where a
-    model could always have echoed its own params, so a canary appearing there would not be
-    this defect. The assertions below stay green because this script's summary turn consumes
-    `DONE`, whose text carries no canary."""
     canary = "CANARY-4f2a-model-authored-filter"
     rec = VerbRecorder()
     r = _run(tmp_path, verbs=named_verbs(rec), run_id="d807-noecho", turns=[
@@ -1855,12 +1092,6 @@ def test_dead_end_message_does_not_echo_model_authored_params(tmp_path):
 
 
 def test_dead_end_message_names_the_earliest_matching_seq(tmp_path):
-    """dead_end_message_names_the_earliest_matching_seq — when several rows share the key, the
-    message names the EARLIEST matching row's seq, so it is deterministic under duplicate or
-    non-monotonic seqs and it names the occurrence that started the repetition rather than the
-    one a concurrent write can shift. Driven over a table whose two matching rows were written
-    out of order (seq 9 first, then seq 5 — a branch sibling's inherited prefix, #1235): the
-    message names seq 5."""
     rec = VerbRecorder()
     prefix = [
         _row(LEAD, 9, "elastic", "sshd-auth-window", {"native_query": "FROM logs"}),
@@ -1884,78 +1115,7 @@ def test_dead_end_message_names_the_earliest_matching_seq(tmp_path):
     assert hit.first_seq == 5
 
 
-def test_dead_end_message_states_the_leads_executed_query_count(tmp_path):
-    """dead_end_message_states_the_leads_executed_query_count — the message states how many
-    queries this lead executed BEFORE the stop, so the inherited idiom's "reason from what was
-    captured" stops pointing at nothing and main can tell "this lead found things and then
-    looped" from "this lead never got anywhere". The guard already has the number from its own
-    table read, so this costs no new I/O. DELIBERATELY BEYOND O2's literal oracle, which names
-    only the repeated request and the structural cause: the widening is the human's, recorded
-    here as such. A lead that executed four queries before repeating its second one for the
-    third time names 4 — not 5, which would count the refused call itself."""
-    rec = VerbRecorder()
-    key = {"native_query": "FROM logs"}
-    r = _run(tmp_path, verbs=named_verbs(rec), run_id="d807-count", turns=[
-        q("elastic", "sshd-auth-window", {"native_query": "FROM alpha"}),
-        q("elastic", "sshd-auth-window", key),
-        q("elastic", "sshd-auth-window", {"native_query": "FROM beta"}),
-        q("elastic", "sshd-auth-window", key),
-        q("elastic", "sshd-auth-window", key),
-        DONE,
-    ])
-    assert len(rec.calls) == 4, "the lead did not execute the four queries this assertion counts"
-    summary = r.summary()
-    assert INCOMPLETE_IDIOM in summary
-    assert "seq 1" in summary, "the message names the wrong earlier occurrence"
-    assert re.search(r"\b4\b", summary), \
-        "the message does not state how many queries the lead executed before the stop"
-    assert not re.search(r"\b5\b", summary), \
-        "the count includes the refused call — it must be the queries executed BEFORE the stop"
-
-
-def test_trip_row_detail_names_the_repetition(tmp_path):
-    """trip_row_detail_names_the_repetition — the trip row announces itself as a repeat in the
-    row's EXISTING detail field, `payload_digest`, which `_record` already fills for a non-zero
-    exit as `f"exit={code}; {detail[:160]}"`. Without it the trip row is byte-shaped like a
-    bad-parameter refusal — same exit, same error_class, same empty payload, same row keys
-    — and O4's named audience, the learning loop, reads "fix this parameter" off it. Contrast
-    asserted in the same run: an ordinary `_screen` parameter refusal's detail names the
-    parameter and never the repetition."""
-    rec = VerbRecorder()
-    r = _run(tmp_path, verbs=elastic_ok(rec), run_id="d807-detail", turns=[
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        q("elastic", "query", {"native_query": "FROM logs", "nosuch_param": 1}),
-        q("elastic", "query", {"native_query": "FROM logs"}),
-        DONE,
-    ])
-    rows = r.own_rows
-    assert len(rows) == 4
-    refusal, trip = rows[2], rows[3]
-
-    assert refusal["payload_digest"].startswith("exit=64; ")
-    assert "unknown param(s)" in refusal["payload_digest"]
-    assert "repeat" not in refusal["payload_digest"].lower(), \
-        "the contrast is gone: a parameter refusal already claims to be a repeat"
-
-    assert trip["payload_digest"].startswith("exit=64; ")
-    assert "repeat" in trip["payload_digest"].lower(), \
-        "the trip row is indistinguishable from a bad-parameter refusal"
-    assert "seq 0" in trip["payload_digest"], \
-        "the detail does not say which earlier call the trip counted"
-    assert len(trip["payload_digest"]) <= len("exit=64; ") + 160, \
-        "the detail is truncated at 160 chars by _record; it must fit"
-    assert set(trip) == ROW_KEYS, "the repetition was named by adding a key of its own"
-
-
 def test_repeat_of_a_failing_request_still_trips(tmp_path):
-    """repeat_of_a_failing_request_still_trips — `repeat_trip.identity` carries no outcome
-    component: M1 counts occurrences of a REQUEST, not of a success, and the guard's rationale
-    applies at least as strongly to a request that keeps failing identically. Three identical
-    calls whose verb raises an agent-fixable upstream fault each write their own row and the
-    third is refused — and because those rows are exit 1, not an infra exit, the
-    `circuit_breaker` never opens and cannot answer first. Not discharged by replay: the
-    fitted corpus contains zero failing-repeat groups."""
     rec = VerbRecorder()
     r = _run(
         tmp_path, verbs=raising(rec, UpstreamFault("no matching documents")),

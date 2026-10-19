@@ -138,7 +138,7 @@ seam-harness/
 
 # The old shared episodes root (the retired DEFENDER_EPISODES_BASE): episodes live under each
 # tenant's `<data root>/<T>/episodes/` since #1187, and the one-time
-# `defender/ops/retire_legacy_runs.py --old-episodes-root` moves this folder's entries into the
+# `defender/cli/retire_legacy_runs.py --old-episodes-root` moves this folder's entries into the
 # playground tenant. Kept ignored so a dev box's leftover copy is never re-added.
 .defender-episodes/
 
@@ -150,4 +150,4 @@ experiments/*/sessions/
 
 # Local Lean toolchain + mathlib4 checkout (elan install, .olean build output): an
 # 8GB local dependency tree, not source.
-lean-tooling/
+/seam-harness/lean-tooling/

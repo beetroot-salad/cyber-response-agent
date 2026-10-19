@@ -130,7 +130,7 @@
 schema_version: 2
 design: '1120'   # gh issue #1120 piece 1 — .spec-flow/doc-1120.md read through
                  # .spec-flow/frontiers/15-design-corrections.md (H1-H3), scoped by scope-piece1.md
-tests: defender/tests/tenant_1120_piece1   # DERIVED (claim PD3): check_binds and the null stub
+tests: defender/tests/tenancy/tenant_1120_piece1   # DERIVED (claim PD3): check_binds and the null stub
                  # scan the named directory FLAT (glob('*.py')), so 20-demands' split homes
                  # (defender/tests/test_1120_*.py + defender/tests/e2e/test_1120_run_settings.py)
                  # cannot be one `tests:`. Every piece-1 test file lives in this one directory,

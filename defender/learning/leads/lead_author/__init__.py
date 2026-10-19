@@ -25,9 +25,9 @@ from uuid import uuid4
 if (_root := str(Path(__file__).resolve().parents[4])) not in sys.path:
     sys.path.insert(0, _root)
 
-from defender import _corpus
+from defender.knowledge import _corpus
 from defender import _git
-from defender import _scaffold_rules
+from defender.knowledge import _scaffold_rules
 from defender._io import Held
 from defender._untrusted import wrap
 from defender.learning.core import config as _loop_config
@@ -39,7 +39,7 @@ from defender.learning.leads import lead_neighbors
 from defender._claim_git import ClaimGit
 from defender.learning.author._config import GIT_TIMEOUT_SECONDS
 from defender.learning.leads import lead_render
-from defender.runtime import box as _box
+from defender import box as _box
 from defender.runtime.verbs import engine_for
 
 from defender.learning.leads.path_validation import (  # noqa: F401  (re-exported)
@@ -510,7 +510,7 @@ def main(argv: list[str]) -> int:
                    help=f"the defender run, by its id — its folder holds "
                         f"{names['EXECUTED_QUERIES']} + {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
-    from defender._command_line_run import open_command_line_run
+    from defender.execution._command_line_run import open_command_line_run
 
     # The request's tenant, accepted under the configured data root, and its run opened by id
     # through that tenant's repository (a link at the run's name is never followed). A refusal

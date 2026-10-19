@@ -238,7 +238,7 @@ claims:
      observed: "test job: working-directory defender, `uv run pytest tests/ learning/`. ruff `.` lists spec-flow/scripts/*.py. No spec-flow pytest config.", verdict: holds}
   - {id: d5d6-lint-scope, kind: referential, probe_kind: read,
      claim: "lint_monkeypatch and lint_raw_git_subprocess are defender-scoped; a spec-flow test is unscanned by both; even under defender the raw-git-fixture pattern is exempt and monkeypatch.chdir is allowed (only .setattr ratcheted).",
-     probe: "read scripts/lint/lint_monkeypatch.py + lint_raw_git_subprocess.py SCOPE/exempt logic.",
+     probe: "read tooling/lint/lint_monkeypatch.py + lint_raw_git_subprocess.py SCOPE/exempt logic.",
      observed: "both SCOPE=REPO_ROOT/'defender'; monkeypatch matcher requires attr=='setattr'; raw-git linter exempts the test category.", verdict: holds}
   - {id: e1-self-degenerate, kind: behavior, probe_kind: executed,
      claim: "`spec-graph actors` cannot gate THIS tooling spec: it censuses defender codeRoots, but #643 changes check_actors.py OUTSIDE them, so no import-arm finding can attach to the change. Worse than vacuous — the un-`changed`-gated SUBPROCESS arm fires on pre-existing defender standing hazards unrelated to #643.",

@@ -1,0 +1,61 @@
+{
+  "issue": 1187,
+  "pull_request": 1269,
+  "status": "Main layout preserved; local affected gates passed. Hosted CI pending.",
+  "main_ref": "55dd2bee8c4a4391d9c358493d63f371eea6de73",
+  "pre_merge_ref": "f37eb3124e0983c43617c96ec8c23dc80d46819d",
+  "history": "Merge main without rebasing the immutable contract ancestry recorded in 1187-implementation.json.",
+  "layout": [
+    "Retain main records/, tenancy/, episodes/, _filesystem/, extracted learning owners, evaluations/, and presentation owners.",
+    "Place feature tests in tests/storage/ids_1187; shared UUID fixtures in tests/support/shared; redaction tests in tests/learning/branch.",
+    "Place the retirement command in the existing defender/cli directory, updating the command hint, docs and test census. This is a path-only adjustment to the original defender/ops command.",
+    "Port moved tests in their current folders; remove obsolete old-path duplicates rather than restoring the flat tree."
+  ],
+  "semantic_dispositions": [
+    {
+      "decision": "Preserve main #1255 arm indistinguishability",
+      "details": "New arm and natural provenance world_id, parent_run_id and fork_turn remain None. Display-only started_at/alert_label survive. Arm fixture expects None and hidden lineage; old-world-token expectation was superseded by main #1255."
+    },
+    {
+      "decision": "Preserve main model filesystem view",
+      "details": "Boundary probes execute under /runs/current; hostile host target operands remain inaccessible host paths. Snapshot baseline is after host box startup and before execution, final snapshot before host cleanup. All model write denials and byte checks remain."
+    },
+    {
+      "decision": "Integrate main #1256 startup verdicts with #1187 known-identity redaction",
+      "details": "Thread authoritative family identities into ReasonScope through judge_run and the standalone driver; escaped-fault fallback receives query scope. Do not infer unknown UUIDs from shape. Six independent integration cases cover known/unknown IDs and held/fallback status views."
+    },
+    {
+      "decision": "Retire obsolete container-record-only checks",
+      "details": "Cases whose sole obligation is creating/racing/corrupting _tenant.json or an external episode-root override are superseded by #1187 absence/tenant-layout/roster coverage. Retain main snapshot and model-view assertions; valid fixture producers use canonical UUIDs and the tenant repository."
+    }
+  ],
+  "prose_reduction": {
+    "before_lines": 8280,
+    "after_lines": 6482,
+    "all_executable_asts_identical": true,
+    "tests": 154,
+    "asserts": 835,
+    "parametrize": 39,
+    "scope": "Initial prose-only edit of the ten feature suite files, before separately reviewed fixture/API integration. Subsequent prose polish also checked per-file executable AST identity."
+  },
+  "verification": {
+    "collection": "18038 tests collected, no errors",
+    "ruff": "Both exact CI commands pass",
+    "mypy": "Success: no issues found in 348 source files",
+    "feature": "307 passed, 3 skipped in83.17s; complete moved #1187 suite plus six startup status integration regressions. Skips: two runsc variants and same-filesystem second-mount case.",
+    "main_1255": "Twin/snapshot instrument 31 passed; snapshot branch point 13 passed; clock/fork-command22passed2skipped; view integrations19passed plus corrected case rerun.",
+    "legacy_regressions": "69 corpus/presentation1110 tests passed;40 moved1105 repository tests passed;37 page/spec-hole/boundary regressions passed2skipped.",
+    "main_1256": "250 passed in initial startup/provider batch; two obsolete provider fixtures repaired in29pass rerun; cold authorization and estate seam22passed across21pass plus1pass rerun.",
+    "remaining_moved_tests": "62 tenant/replay cases passed; package/live-contract/natural-boundary16passed2skipped, then six reader cases passed.",
+    "custom_lints": "33 checks completed:32passed initially; borrowed-vocabulary finding repaired by existing unnamed_files_unavailable helper and rerun passed. Stale-reference check must run after merge commit so its base includes main refactor."
+  },
+  "limitations": [
+    "Full unit suite belongs to hosted CI.",
+    "Local daemon has runc only; gVisor boundary variants require CI.",
+    "Same-filesystem second mount unavailable locally; F6 requires its provisioned environment."
+  ],
+  "retired_test_evidence": {
+    "test_1105_episode_record.py": "21 functions, no main-added functions or executable function/class differences versus original merge base after stripping docstrings; follows pre-merge1187 deletion. Replaced by tenant-owned roster contract.",
+    "test_1078_records.py": "Only Run.for_tenant mismatch backstop retired; all tenant-row/write-race coverage kept."
+  }
+}

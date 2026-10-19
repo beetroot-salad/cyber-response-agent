@@ -67,7 +67,7 @@
 # ==========================================================================================
 schema_version: 2
 design: '1105'
-tests: defender/tests/tenant_1105_run_repository
+tests: defender/tests/storage/tenant_1105_run_repository
 base: 80888efb
 demands:
 - id: d12_runid_built_only_by_parse_and_mint

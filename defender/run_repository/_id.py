@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, NoReturn
 
-from defender._run_id import mint_uuid, run_id_fault
+from defender.records._run_id import mint_uuid, run_id_fault
 from defender.run_repository._errors import RunRefused
 
 def _admit(text: str) -> str:
@@ -90,7 +90,7 @@ class RunId:
     def __copy__(self) -> RunId:
         return _rebuild(self._text)
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> RunId:
+    def __deepcopy__(self, _memo: dict[int, Any]) -> RunId:
         return _rebuild(self._text)
 
     def __eq__(self, other: object) -> bool:

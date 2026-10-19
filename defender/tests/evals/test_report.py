@@ -1,12 +1,3 @@
-"""Pins for the roll-up reporter (#711 M3/AC 4/AC 5).
-
-The reporter's job is to stop the suite overstating itself. Each test below pins
-one way the old hand-rolled percentage did overstate: counting shared envelopes
-as independent trials, publishing a point estimate off one unit, pooling the
-pool the prompt was fitted to with the pool that is supposed to certify it —
-and, since the judge redesign, letting the quiet band carry the headline and
-charging a judge abstention to the oracle.
-"""
 from __future__ import annotations
 
 import json
@@ -14,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from defender.evals.oracle_golden import report as REPORT
+from evaluations.oracle_golden import report as REPORT
 import yaml
 
 
@@ -50,9 +41,6 @@ def _row(lead: str, system: str, delta_kind: str, *, faithful: bool | None,
 
 
 def test_cases_sharing_one_envelope_count_as_one_unit(tmp_path):
-    """The mistake the whole issue is about: 27 of the suite's 36 leads are one
-    capture shown three times, and reading that as n=36 is what made 33/36 look
-    like a result."""
     for case_id in ("case-a", "mut-a", "neg-a"):
         _write_case(tmp_path, case_id, split="dev", family="brute-force",
                     host_pair="ws->canary", env="snap-1",
@@ -160,9 +148,6 @@ def test_an_unreachable_bound_says_so_rather_than_naming_an_n(tmp_path):
 # bands and abstentions (#711 §5)
 
 def test_the_quiet_band_cannot_carry_the_headline(tmp_path):
-    """The fix worth having. On the seed data 27 of 36 dev leads were `0`, so a pooled
-    0.92 was three-quarters correctly-said-nothing. Active and quiet are reported
-    separately so a perfect quiet band cannot hide a failing active one."""
     _write_case(tmp_path, "case-a", split="dev", family="f", host_pair="a->b", env="e",
                 rows=[_row("l-1", "elastic", "present", faithful=False),
                       _row("l-2", "elastic", "absent", faithful=True),
@@ -216,9 +201,6 @@ def test_a_slice_that_abstains_more_than_it_decides_is_not_a_measurement(tmp_pat
 # the mechanical results
 
 def test_a_derived_case_contributes_no_rows_but_is_still_named(tmp_path):
-    """A mutation case has no capture of its own, so there is no measurement to grade a
-    projection against. Dropping it silently would leave `cases: [...]` claiming a case
-    that contributed nothing."""
     _write_case(tmp_path, "case-a", split="dev", family="f", host_pair="a->b", env="e",
                 rows=[_row("l-1", "elastic", "present", faithful=True)])
     _write_case(tmp_path, "mut-a", split="dev", family="f", host_pair="a->b", env="e",
@@ -230,18 +212,6 @@ def test_a_derived_case_contributes_no_rows_but_is_still_named(tmp_path):
 
 
 def test_the_mechanical_results_survive_into_the_rollup(tmp_path):
-    """`score.py` decides malformed grammar, pre-mutation leaks and the manifest's
-    `expectation:` clauses in code and never calls the judge for them. If the roll-up did
-    not carry them, a mutation case's whole result would vanish with its rows.
-
-    `expectation_failures` is the load-bearing one and was the one missing: a derived
-    case contributes no judged rows BY CONSTRUCTION, so those clauses are not part of its
-    result, they ARE its result. It carries four of the manifest's five clauses
-    (`empty_leads`, `no_suppression`, `no_noise_marker`, `must_emit`); the fifth,
-    `must_not_emit`, is the one already carried here as `leaked_values`. This fixture set
-    only the two that were folded in, so it stayed green while the roll-up printed a
-    derived case's name and dropped its verdict.
-    """
     _write_case(tmp_path, "mut-a", split="dev", family="f", host_pair="a->b", env="e",
                 rows=[], judged=False,
                 mechanical={"malformed_leads": {"l-2": "prose, not a marker"},
@@ -258,11 +228,6 @@ def test_the_mechanical_results_survive_into_the_rollup(tmp_path):
 
 
 def test_a_derived_cases_expectation_failures_are_printed_not_just_counted(tmp_path, capsys):
-    """The roll-up is the artifact a reader treats as the suite's answer. `score.py` still
-    exits 1 per case and still prints `!! expectation — …`, so a caller scoring
-    case-by-case sees the violation; only the aggregate hid it — under sixteen
-    "contributes NO judged rows" lines that named each derived case while stating nothing
-    about whether it passed."""
     _write_case(tmp_path, "case-a", split="dev", family="f", host_pair="a->b", env="e",
                 rows=[_row("l-1", "elastic", "present", faithful=True)])
     _write_case(tmp_path, "corrupt-a", split="dev", family="f", host_pair="a->b", env="e",
@@ -284,9 +249,6 @@ def test_the_rollup_reports_clean_expectations_rather_than_staying_silent(tmp_pa
 
 
 def test_a_pre_judge_score_document_is_refused_rather_than_skipped(tmp_path):
-    """The old scorer's artifacts have no `delta_kind` and no `faithful`. Skipping one
-    would drop a case from every rate while leaving it in the case count printed beside
-    them."""
     case = tmp_path / "case-a"
     (case / "scores").mkdir(parents=True)
     (case / "manifest.yaml").write_text(yaml.safe_dump(

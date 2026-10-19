@@ -1,0 +1,131 @@
+"""Circuit-breaker exit-code taxonomy + the usage-error structured signal."""
+from __future__ import annotations
+
+import pytest
+
+from defender.runtime import circuit_breaker as cb
+
+
+@pytest.mark.parametrize(("exit_code", "counts"), [
+    (0, False),
+    (1, False),
+    (2, True),
+    (64, False),
+    (124, True),
+])
+def test_is_infra_failure_keys_on_exit_code_only(exit_code, counts):
+    assert cb.is_infra_failure(exit_code) is counts
+
+
+def _state(run_dir):
+    """A run's state (#1235 round 2): the breaker lives on the run's one `RunState`."""
+    from defender.runtime.run_state import RunState
+
+    return RunState(run_dir, "run-cb")
+
+
+def test_usage_error_does_not_trip_breaker(tmp_path):
+    """Exit 64 is the agent's own usage error: it charges nothing. #1235: the breaker is the run's state, so..."""
+    state = _state(tmp_path)
+    cb.record_outcome(state, "elastic", 64)
+    cb.record_outcome(state, "elastic", 64)
+    assert not cb.is_tripped(state, "elastic")
+    snapshot = state.breaker_snapshot()
+    assert "elastic" not in snapshot["systems"], f"a usage error charged the breaker: {snapshot}"
+    assert snapshot["total_failures"] == 0, snapshot
+
+
+def test_two_infra_failures_trip_breaker(tmp_path):
+    state = _state(tmp_path)
+    cb.record_outcome(state, "elastic", 2)
+    cb.record_outcome(state, "elastic", 2)
+    assert cb.is_tripped(state, "elastic")
+    snapshot = state.breaker_snapshot()
+    assert snapshot["systems"]["elastic"]["failures"] == 2, snapshot
+    assert "tripped_at" in snapshot["systems"]["elastic"], snapshot
+    assert snapshot["total_failures"] == 2, snapshot
+
+
+def test_a_new_runs_state_starts_with_a_blank_breaker(tmp_path):
+    """A run's breaker starts blank (#1235: `RunState(...)` is the run's start): whatever an earlier run over the..."""
+    earlier = _state(tmp_path)
+    cb.record_outcome(earlier, "elastic", 2)
+    cb.record_outcome(earlier, "elastic", 2)
+    assert cb.is_tripped(earlier, "elastic"), "the control never tripped"
+
+    fresh = _state(tmp_path)
+    assert not cb.is_tripped(fresh, "elastic"), "a new run inherited a tripped system"
+    assert fresh.breaker_snapshot() == {"systems": {}, "total_failures": 0}
+    assert cb.is_tripped(earlier, "elastic"), "starting a new run's state reset the earlier one"
+
+
+def test_a_breaker_file_in_the_run_folder_is_not_the_breaker(tmp_path):
+    """#1235 D3: the breaker lives in the run's state, and no file in the run folder moves it. Two real infra..."""
+    run_dir = tmp_path / "runs" / "run-1235"
+    run_dir.mkdir(parents=True)
+    state = _state(run_dir)
+    cb.record_outcome(state, "elastic", 2)
+    cb.record_outcome(state, "elastic", 2)
+    on_disk = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")
+                     if not p.is_dir())
+    assert on_disk == [], f"the breaker wrote files: {on_disk}"
+
+    planted = run_dir / "circuit_breaker.json"
+    planted.write_text('{"systems": {}, "total_failures": 0}', encoding="utf-8")
+    assert cb.is_tripped(state, "elastic"), "a planted blank breaker revived a down system"
+    assert "is DOWN for this run" in cb.down_message(state, "elastic")
+
+    planted.write_text('{"systems": {"cmdb": {"failures": 5, "tripped_at": '
+                       '"2026-01-01T00:00:00+00:00"}}, "total_failures": 5}', encoding="utf-8")
+    assert not cb.is_tripped(state, "cmdb"), "a planted file put a healthy system down"
+
+    planted.write_bytes(b"\xff\xfe not json")
+    assert not cb.is_tripped(state, "cmdb"), \
+        "unreadable bytes at the old state name still read as tripped"
+    assert cb.is_tripped(state, "elastic"), "the host's own trip was lost"
+    snapshot = state.breaker_snapshot()
+    assert snapshot["systems"]["elastic"]["failures"] == 2, snapshot
+    assert "cmdb" not in snapshot["systems"], snapshot
+
+
+def test_the_breakers_causes_are_reachability_not_configuration(tmp_path):
+    from defender.runtime.case_ticket import ESCALATION_COMMENT_BODY
+    from defender.runtime.lead_zero import (
+        ENDING_TRIPPED_BREAKER,
+        CorrelationOutcome,
+        render_correlation_section,
+    )
+
+    assert "configur" not in cb.INFRA_CAUSES.lower(), \
+        f"the breaker's causes still offer configuration (DP2): {cb.INFRA_CAUSES!r}"
+
+    state = _state(tmp_path)
+    for _ in range(cb.PER_SYSTEM_FAIL_LIMIT):
+        cb.record_outcome(state, "elastic", 2)
+    assert cb.is_tripped(state, "elastic"), "precondition: two infra failures trip the breaker"
+    down = cb.down_message(state, "elastic")
+    assert f"{cb.PER_SYSTEM_FAIL_LIMIT} {cb.INFRA_CAUSES}" in down, \
+        f"the down message restates its count and the causes: {down!r}"
+    assert "tripped" in down, f"the down message names the trip: {down!r}"
+    assert "not configured" not in down.lower(), \
+        f"a tripped system's down message still names a config cause (DP2): {down!r}"
+    assert "e.g." in down, f"the down message closes its list of causes: {down!r}"
+    codes = " / ".join(str(c) for c in sorted(cb.INFRA_EXIT_CODES))
+    assert f"exit {codes}" in down, f"the down message restates the infra codes: {down!r}"
+
+    aborted = str(cb.RunAborted(cb.RUN_FAIL_KILL_LIMIT, ["elastic"]))
+    assert f"{cb.RUN_FAIL_KILL_LIMIT} {cb.INFRA_CAUSES}" in aborted, \
+        f"the run-kill message restates the causes: {aborted}"
+    assert "unconfigured" not in aborted.lower(), \
+        f"the run-kill message still blames configuration (DP2): {aborted}"
+    assert "not configured" not in aborted.lower(), \
+        f"the run-kill message still names 'not configured' (DP2): {aborted}"
+
+    opening = render_correlation_section(
+        CorrelationOutcome(ending=ENDING_TRIPPED_BREAKER, system="elastic"), grant_home="-")
+    assert "elastic" in opening, opening
+    assert "unreachable" not in opening, \
+        f"MAIN's opening message blames connectivity for a tripped breaker: {opening!r}"
+
+    assert "unconfigured" in ESCALATION_COMMENT_BODY, \
+        f"the operator's escalation note blames connectivity alone: {ESCALATION_COMMENT_BODY!r}"

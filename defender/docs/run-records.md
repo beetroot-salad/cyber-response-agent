@@ -2,12 +2,12 @@
 
 The inventory issue #1076 asked for: one page naming every record kind a run has and where it
 lives. #1077 turns that inventory into the file-backed `Run` handle: `defender/run_repository/_layout.py`
-(`RunPaths`), `defender/_episode_paths.py` (`EpisodePaths`) and `defender/_tenant.py` own every
+(`RunPaths`), `defender/episodes/_episode_paths.py` (`EpisodePaths`) and `defender/tenancy/_tenant.py` own every
 name a run or episode record carries, and `defender/run_repository/_handle.py` (`Run`, `RunRecord`,
 `RecordHandle`, `ArchivedWorld`) wraps them into the handle application code addresses by
 `(tenant_id, run_id)`.
 
-**This page is generated.** `scripts/lint/lint_run_records.py` renders the table below from the
+**This page is generated.** `tooling/lint/lint_run_records.py` renders the table below from the
 one checked-in table of record kinds:
 
 - `run-records-kinds.tsv` — one row per record *kind*: its path template, which table it
@@ -24,7 +24,7 @@ census) and the page's former per-kind reader/writer tables retired with it.
 
 ## The model this page uses
 
-- **Tenant** owns worlds and runs (`defender/_tenant.py`). Every run names its tenant on the
+- **Tenant** owns worlds and runs (`defender/tenancy/_tenant.py`). Every run names its tenant on the
   request (#1078, no default); the tenant exists once its row `<data root>/<T>/tenant.json` does.
   Where a run or an episode sits says whose it is (#1187 R1): `<T>/runs/` and `<T>/episodes/`
   are reached only through the tenant's own walk, so no record in a runs base restates it.
@@ -69,7 +69,7 @@ means the read is admitted but goes through the payload read cap and untrusted f
 (`is_captured_payload`), which `decide_read` never consults. Sidecars outside the run dir are
 unreachable by root containment rather than by a named deny.
 
-<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run scripts/lint/lint_run_records.py --render -->
+<!-- generated: run-records kinds table — edit run-records-kinds.tsv and run tooling/lint/lint_run_records.py --render -->
 
 | kind | table | path | denied to | archived as | sub-collection | note |
 |---|---|---|---|---|---|---|
@@ -77,13 +77,11 @@ unreachable by root containment rather than by a named deny.
 | report | 1 | `report.md` | confined | report.md | run.documents.report | the close tool is its only writer; no role holds a write grant for it (`close_tool.py:1`) |
 | investigation | 1 | `investigation.md` | confined | investigation.md | run.documents.investigation | seeds (lead-0, branch resume) write it before the first turn; the document tool during |
 | queries | 1 | `executed_queries.jsonl` | confined | staged as a table | run.tables.queries | append-only; the gather lane's denial rows land here too |
-| source_refs | 1 | `source_refs.yaml` | confined (`run_repository/_layout.py`: `CASE_ANSWER_KEY_NAMES` and `RunPaths.source_refs`) | — | run.documents.source_refs | no writer in this repo — consumed only; test helpers fabricate it (`tests/conftest.py:202`); `tests/test_orchestrate_thresholds.py:509` records that its writer is gone |
 | gather_raw | 1 | `gather_raw/<lead>/<seq>.json` | shape | staged as a table | run.tables.payloads | by-ref payloads; the model reaches them by the bash `cat` lane only |
 | lead_claim | 1 | `gather_raw/<lead>.lead.json` | shape (same dir) | with gather_raw | run.tables.leads | per-lead claim sidecar, exclusive create |
 | gather_summaries | 1 | `gather_summaries/<lead>.md` | — | gather_summaries/ | run.documents.gather_summaries |  |
 | lead_author | 1 | `lead_author/` | — | — | run.documents.lead_author | learning-stage outputs under a run dir; learning-internal |
 | wire_log | 1 | `wire_logs/llm_requests.jsonl` | outright | — (dropped) | run.observability.wire_log | `review_roles` is a second writer into the same log |
-| forward_check_trace | 1 | `wire_logs/<prefix>.<stem>.<n>.trace.jsonl` | outright (dir) | — | run.observability.forward_check_trace | the learning verifier writes into the CITED run's dir after the fact |
 | review_trace | 1 | `wire_logs/review_<role>_trace.jsonl` | outright (dir) | — | run.observability.review_trace |  |
 | review_record | 1 | `review_record.<turn>.json` | — | — | run.observability.review_record | one per close attempt |
 | tool_trace | 1 | `tool_trace.jsonl` | — | — | run.observability.tool_trace | a whole-file rebuild from the session store, written once after the agent returns |
@@ -97,6 +95,8 @@ unreachable by root containment rather than by a named deny.
 | scrub_verdict | 2 | `<run>.scrub-verdict.json` | — | scrub_verdict.json (renamed, `archive.py:79`) | run.facts.scrub_verdict |  |
 | ticket_write | 2 | `<run>.ticket-write.json` | — | — | run.observability.ticket_write | the case-ticket write's receipt, written by the host's record step (`ticket_writer._write_receipt`); moved out of the run dir by #1107 so the box can neither plant nor block it |
 | session_pointer | 2 | `<run>.session-pointer.json` | — | — | run.observability.session_pointer | the run -> case link (which case's session store holds this run), written by the driver before the first turn; moved out of the run dir by #1235 so the box can neither forge nor delete it |
+| call_join | 2 | `<run>.call-join.jsonl` | — | call_join.jsonl | run.tables.call_join | one line per query-table row the run wrote, `(lead_id, seq)` -> the call's host-written id, appended by `record_query.append_query_row`; beside the run folder so the model's table carries no id (#1255 G4/G6); archived as `worlds/<label>/call_join.jsonl` |
+| ticket_comments | 2 | `<run>.ticket-comments.jsonl` | — | — | run.observability.ticket_comments | every comment the record step got the store to accept, `{key, body}`, appended by `ticket_writer._record_posted_comment`; the run's own writes to the world, handed to a branched world's oracle (#1255 P5) |
 | session_db | 3 | `<sessions>/<lineage id>.db` | — | — | run.session.session_db | SQLite; the connection at `_bare_connect` carries every read and append |
 | family | 4 | `family.yaml` | — | — | episode.family | the fork point, declared once per episode |
 | arm_roster | 4 | `arms.json` | — | — | episode.arm_roster | #1187 R2: `{label: arm uuid}`, written once by the host at the start of RUNS through the complete-or-absent lane, after `runs/`; no box mounts it |
@@ -107,7 +107,7 @@ unreachable by root containment rather than by a named deny.
 | judge_draw | 4 | `worlds/<label>/judge/<n>.yaml, worlds/family/judge/<n>.yaml` | — | — | episode.judge_draw |  |
 | timing | 4 | `timing.json` | — | — | episode.timing | per launcher step |
 | staged | 4 | `staged.yaml` | — | — | episode.staged | the sole record that a cluster write happened |
-| served | 4 | `served/base.jsonl, served/<token>.jsonl` | — | — | episode.served | base: primed once by the host before any sibling; <token>: appended live per sibling |
+| served | 4 | `served/base.jsonl, served/unrecorded.jsonl, served/<token>.jsonl` | — | — | episode.served | base: primed once by the host before any sibling; <token>: appended live per sibling; unrecorded: the primer's skip record (#1255 D6), created once beside base — calls the source asked whose answer base lacks (failed or unreadable) |
 | priming_lock | 4 | `served/.priming` | — | — | episode.priming_lock | `O_CREAT\|O_EXCL`; never unlinked, so a crashed priming leaves the episode permanently claimed |
 | stage_trace | 4 | `wire_logs/<stage>.trace.jsonl, wire_logs/<agent>_framed_trace.jsonl` | — | — | episode.stage_trace | episode-root wire traces of the learning stages |
 | learning_html | 4 | `learning.html` | — | — | episode.learning_html |  |

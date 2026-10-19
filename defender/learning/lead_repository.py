@@ -30,7 +30,7 @@ from defender.run_repository import (
 )
 from defender._text import as_str
 from defender.runtime.circuit_breaker import error_class_for_exit
-from defender._query_rules import is_reserved_query_id
+from defender.knowledge._query_rules import is_reserved_query_id
 
 if TYPE_CHECKING:
     from defender.skills.invlang.schema import CompanionBody
@@ -49,6 +49,13 @@ def _as_int(value, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError, OverflowError):
         return default
+
+
+def row_seq(rec: dict) -> int:
+    """A queries-table row's `seq` as the surface reads it (`QueryRow.seq`): the row's own
+    `(lead_id, seq)` key, also for a row that spells it as a string. Every reader keying a row
+    by its seq reads it here, so none drifts from the surface."""
+    return _as_int(rec.get("seq", 0))
 
 
 @model(frozen=True)
@@ -84,10 +91,6 @@ class QueryRow:
     #: string the writer coarsened to `system=""`; `""` elsewhere. Coerced as the guard's `_trip`
     #: coerces it, so an older table replays exactly as it ran. For the guard, not a model.
     system_key: str = ""
-    #: The call's host-written id (`record_query.next_call_id`, A12): the key its served-ledger
-    #: rows share. `None` when the row carries no string id (a row older than the column, or
-    #: one seeded from the source run as that run wrote it).
-    call_id: str | None = None
     #: The parsed JSON record this row was read from, by identity — see `record()`. Excluded
     #: from equality and repr; `SkipValidation` because validation would copy it.
     _record: Annotated[dict | None, SkipValidation] = field(
@@ -220,7 +223,7 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
         rows.append(
             QueryRow(
                 lead_id=str(lead_id),
-                seq=_as_int(rec.get("seq", 0)),
+                seq=row_seq(rec),
                 system=str(rec.get("system", "")),
                 verb=str(rec.get("verb", "")),
                 query_id=str(rec.get("query_id", "")),
@@ -234,7 +237,6 @@ def load_queries_report(run_dir: Path) -> tuple[list[QueryRow], int]:
                 # `as_str`: the guard's own coercion (absent / `None` / non-string -> `""`).
                 payload_sha256=as_str(rec.get("payload_sha256")),
                 system_key=as_str(rec.get("system_key")),
-                call_id=cid if isinstance(cid := rec.get("call_id"), str) else None,
                 _record=rec,
             )
         )

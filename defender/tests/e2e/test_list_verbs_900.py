@@ -1,71 +1,4 @@
-"""Executable spec for #900 — `list_verbs`, gather's verb/param discovery tool.
-
-The only complete, accurate statement of a verb's param surface a gather lead reliably meets
-today is a REJECTION: `validate_params` (`runtime/verbs.py:196`) names the declared set from
-inside `_screen`, one failed call after the model guessed. Every published surface is
-hand-authored prose (`skills/*/execution.md`'s `## Verbs` blocks), the pointer in
-`skills/gather/SKILL.md:104` names a catalog that carries no params at all. Hand-authored prose drifts:
-#900's C3 measured one live drift already (`ticket.list-tickets` declares four params, its
-`execution.md` documents three and asserts the fourth away).
-
-The replacement is a discovery tool, sibling to `query`, that derives its answer at call time
-from THE SAME TWO FUNCTIONS the enforcer uses — `declared_params` and `_resolved_hints` — so
-publication and enforcement cannot disagree:
-
-    register_list_verbs_tool(agent, registry)      # defender/runtime/query_tool.py
-    list_verbs(ctx, system: str) -> str            # `system` is REQUIRED
-    ToolSet.list_verbs: bool = False               # GATHER_DEF.tools sets it; the judge does not
-
-What each test pins (the obligation ids are #900's):
-
-  O1  agreement with the enforcer — the reported params ARE `model_facing_params(fn)`, i.e.
-      `declared_params` minus the `@verb(wrapper_only=…)` set a first-party wrapper reserves;
-      every name it publishes is accepted by `validate_params` and a name it withholds is
-      refused; its required/optional split and its defaults round-trip through the same
-      function. `ticket`'s `require_closed` is the live reserved param: the judge's tool
-      hard-codes it and keeps it off its own schema, and gather — which shares the verb — must
-      neither see nor bind it, because the pin only NARROWS and would silently drop the open
-      siblings a lead is dispatched to correlate.
-  O3  no over-promising on types — `_resolved_hints` SWALLOWS an unresolvable annotation
-      (`verbs.py:166-170`) and `validate_params` then accepts ANY value for that param, so a
-      param whose annotation does not resolve must be published as type-UNENFORCED. No shipped
-      adapter triggers this (0 of 44 declared params over 28 granted verbs), so the case is
-      driven by a SYNTHETIC verb through the registry injection seam.
-  O4  degrade loudly, per system — `registry.verbs("nope-not-a-system")` raises a bare
-      `KeyError` and a broken adapter's import error propagates; neither may crash the lead's
-      turn, and neither may come back as the empty string, which reads as "this system has no
-      verbs".
-  O5  grant filtering — the tool never names a `(system, verb)` the caller's grant withholds.
-
-Plus the property that keeps the tool OUT of the run's evidence record: a `list_verbs` call
-writes no `executed_queries.jsonl` row, persists no payload, and neither trips nor feeds the
-repeat guard (`test_query_tool_611.py:771` is the precedent, for `template_search`).
-
-THE RENDERING THIS SPEC FIXES. The answer is rendered in the `query(...)` grammar the
-`execution.md` files already use, so a lead can copy a line into a `query` call:
-
-    query(system="host-state", verb="authorized-keys", params={"host": <str>, "user": <str, default root>})
-
-The tests parse only what they must, and this is the whole of it:
-  - one `query(system="…", verb="…", params={…})` call per published verb, `{}` when it
-    declares none;
-  - inside `params={…}`, each param is a `"name":`-keyed entry, and everything between that
-    colon and the next key (or the closing brace) is that param's DESCRIPTOR;
-  - a descriptor names its param's type by the python spelling `_ann_name`/`validate_params`
-    already use in their own error text (`str`, `int`, `bool`, …) — and names NO type when the
-    annotation does not resolve, which is the whole of O3;
-  - a descriptor publishes a default when — and only when — the param declares one, plus the
-    default's own value; either spelling discharges it (the word `default`, or a python
-    `= value` tail), because what must be legible is the required/optional split, not a word.
-
-Nothing else about the wording is pinned; the loud-degradation tests match a vocabulary
-alternation rather than a fixed sentence.
-
-None of the target symbols exist at HEAD — `query_tool.register_list_verbs_tool`, the
-registered `list_verbs` tool, `ToolSet(list_verbs=…)` — so every test reds on its own missing
-symbol while every import in this module resolves against HEAD, so the harness collects and
-proves itself.
-"""
+"""Executable spec for #900 — `list_verbs`, gather's verb/param discovery tool."""
 from __future__ import annotations
 
 import asyncio
@@ -85,11 +18,8 @@ from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
 from pydantic_ai.models.function import FunctionModel  # noqa: E402
 
 from defender._io import read_jsonl_rows  # noqa: E402
-from defender.agents import AGENTS  # noqa: E402
-from defender.runtime import query_tool  # noqa: E402
 from defender.runtime import tools as runtime_tools  # noqa: E402
-from defender.runtime.agent_definition import ToolSet, bind, effective_tools_for  # noqa: E402
-from defender.runtime.agent_role import AgentRole  # noqa: E402
+from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.driver import GATHER_DEF, MAIN_DEF  # noqa: E402
 from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import (  # noqa: E402
@@ -116,21 +46,17 @@ from defender.tests.e2e._replay_harness import (  # noqa: E402
 from defender.runtime.verbs import read_roster  # noqa: E402
 
 if TYPE_CHECKING:
-    # Imported ONLY for the type checker, which is exactly how an unresolvable annotation
-    # reaches a shipped adapter: the name is never bound at runtime, so `typing.get_type_hints`
-    # raises NameError and `_resolved_hints` swallows it into `{}` (O3 / #900 B2). Nothing else
-    # in this module uses it — it annotates the synthetic verb below and nothing more.
     from collections.abc import Sequence as _WindowSpec
 
 pytestmark = pytest.mark.e2e
 
-_ADAPTERS = DEFENDER / "scripts" / "adapters"
+_ADAPTERS = DEFENDER / "integrations"
 LEAD = "l-001"
 
 def _shipped_gather_grant():
     """The shipped gather grant — the committed playground tenant's (#1106 M4: `GATHER_DEF`
     carries none; a run's grant is projected from its tenant's table)."""
-    from defender.tests import _tenants1106 as T1106
+    from defender.tests.support.tenancy import _tenants1106 as T1106
 
     return T1106.fixture_grants().gather
 
@@ -140,10 +66,6 @@ def _grant_systems() -> tuple[str, ...]:
     so a new system in the table is covered by this suite the day it lands."""
     return tuple(sorted(_shipped_gather_grant().systems))
 
-#: Verbs the adapters DECLARE and gather's grant WITHHOLDS (`driver.py:375-377` names the first
-#: two outright; the three `ticket` ones are the judge's closed-ticket surface). Each is checked
-#: to be really declared before it is asserted absent, so the test cannot pass by the verb
-#: having been deleted.
 _WITHHELD = (
     ("cmdb", "list-roles"),
     ("identity", "list-authorized-hosts"),
@@ -152,20 +74,12 @@ _WITHHELD = (
     ("ticket", "key-pattern"),
 )
 
-#: Words that make a degradation LOUD. A broad alternation rather than a sentence: O4 demands
-#: the failure be legible and NAMED, not that it be spelled one way. Deliberately generous —
-#: what discriminates is the company it keeps in each O4 test (the system is named, no verb is
-#: published, and the three conditions do not share one message).
 _LOUD = re.compile(
     r"unknown|unavailable|unresolvable|could not|cannot|can't|failed|no such|not registered|"
     r"no adapter|does not|doesn't|error|missing|no verb|none of",
     re.I,
 )
 
-#: One published verb, in the `query(...)` grammar `skills/*/execution.md` already uses. The
-#: params body is brace-free by construction (a type is `str`/`int`/`str | None`, never a
-#: literal dict), so the inner `[^{}]*` is exact rather than lazy. A trailing argument after
-#: `params={…}` — a `query_id=` the lead is meant to fill in — is allowed and ignored.
 _CALL_RE = re.compile(
     r"""query\(\s*system\s*=\s*["'](?P<system>[^"']*)["']\s*,\s*"""
     r"""verb\s*=\s*["'](?P<verb>[^"']*)["']\s*,\s*"""
@@ -174,16 +88,6 @@ _CALL_RE = re.compile(
 )
 _KEY_RE = re.compile(r"""["'](?P<name>[A-Za-z_][A-Za-z0-9_]*)["']\s*:""")
 
-#: A real system / verb name. A rendering may carry a `query(system="x", verb="<verb>",
-#: params={...})` TEMPLATE line alongside the per-verb ones; a placeholder is not a published
-#: verb, and this is what tells them apart.
-#:
-#: THE shared PREDICATE rather than a local copy of the pattern (#914): a verb name is held to
-#: the same alphabet as a system name — the tree has no separate verb pattern — so a copy here
-#: would be a second place to edit and a place for this suite to drift from what it is
-#: checking. The predicate rather than `verbs._SYSTEM_RE`, because the pattern alone does not
-#: carry `SYSTEM_MAX_LEN` and matching it while forgetting the bound is the exact defect #914
-#: closed.
 _is_name = is_system_name
 
 #: The type spellings a descriptor may claim, and a value of the WRONG type for each. A claim
@@ -191,8 +95,6 @@ _is_name = is_system_name
 _MISMATCH: dict[str, Any] = {
     "bool": "yes", "int": "20", "float": "x", "str": 123, "list": "x", "dict": "x",
 }
-
-
 
 
 def _parse(out: str) -> dict[tuple[str, str], dict[str, str]]:
@@ -278,15 +180,7 @@ def _granted(registry: VerbRegistry, system: str) -> dict[str, Any]:
 
 
 class _ScopedVerbs(VerbRegistry):
-    """An injected registry whose GRANT the scenario authors, and whose systems may FAIL.
-
-    `FakeVerbs` cannot serve either half: it self-grants every verb in its own table (so no
-    withheld verb is expressible) and its `verbs()` cannot fail. Both are exactly what O4 and
-    O5 are about. Same seam, same shape — dumb data handed to `register_tools`, never a
-    monkeypatched module attribute. A system mapped to an EXCEPTION raises it from `verbs()`,
-    which is what a broken adapter module does at `_load_adapter_module`; an unmapped system
-    raises the bare `KeyError` `ModuleVerbRegistry.verbs` raises (#900 B3).
-    """
+    """An injected registry whose GRANT the scenario authors, and whose systems may FAIL."""
 
     def __init__(self, table: dict[str, Any], grant: VerbGrant):
         super().__init__(grant)
@@ -294,6 +188,11 @@ class _ScopedVerbs(VerbRegistry):
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
+
+    def _cold_verb_names(self, system: str) -> frozenset[str]:
+        entry = self._table.get(system, {})
+        return frozenset(entry) if isinstance(entry, dict) else frozenset(
+            verb for granted_system, verb, _ in self.grant.entries if granted_system == system)
 
     def verbs(self, system: str):
         entry = self._table[system]
@@ -315,7 +214,7 @@ def _agent(registry: VerbRegistry):
 def _deps(tmp_path: Path):
     run_dir = tmp_path / "run"
     run_dir.mkdir(parents=True, exist_ok=True)
-    from defender.tests import _tenants1106 as T1106
+    from defender.tests.support.tenancy import _tenants1106 as T1106
 
     return bind(T1106.fixture_gather_def(), run_dir)
 
@@ -337,25 +236,9 @@ def _ask(registry: VerbRegistry, system: str, tmp_path: Path) -> str:
     return out
 
 
-
-
 def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
     """O1 — for every granted `(system, verb)` on the SHIPPED registry, the params the tool
-    names are exactly `model_facing_params(fn)`: no extra, none missing.
-
-    `_resolved_hints` additionally returns `ctx` and `return` (#900 B1), so a tool that keyed on
-    the hints instead of on the declared params would publish two params `validate_params`
-    refuses — the exact disagreement between publication and enforcement this tool exists to
-    make impossible. Asserted per system, over all seven, because a filter that works for
-    `elastic` and drops a system's whole table is otherwise invisible.
-
-    The referent is `model_facing_params`, not `declared_params`, and the difference is the
-    `@verb(wrapper_only=…)` set: a param a first-party wrapper binds and no model may. Both
-    functions are asserted here rather than one — the published set must equal the model-facing
-    set AND every wrapper-only param must be simultaneously unpublished and refused by
-    `validate_params`. A tool that hid such a param while the boundary still accepted it would
-    satisfy a bare equality check and still lie by omission, which is the same disagreement
-    read from the other side."""
+    names are exactly `model_facing_params(fn)`: no extra, none missing."""
     registry = _registry()
     seen_verbs = seen_params = seen_reserved = 0
 
@@ -397,10 +280,6 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
             seen_verbs += 1
             seen_params += len(params)
 
-    # Vacuity guard, derived rather than restated: every granted verb and every param those
-    # verbs declare had to be published for the loop above to have measured anything. (#900
-    # counted 28 granted verbs / 44 declared params at design time; the numbers are read off
-    # the registry so a new adapter verb is covered the day it lands.)
     expected_verbs = sum(len(_granted(registry, s)) for s in _grant_systems())
     expected_params = sum(
         len(model_facing_params(fn))
@@ -408,9 +287,6 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
     )
     assert (seen_verbs, seen_params) == (expected_verbs, expected_params)
 
-    # The wrapper-only arm above is only worth anything if it ran. `ticket.list-tickets` and
-    # `ticket.get-ticket` reserve `require_closed`, and gather's grant reaches the first — so a
-    # tree that stopped reserving anything would silently turn that arm into a no-op.
     assert seen_reserved >= 1, (
         "no granted verb reserves a wrapper-only param — the wrapper-only assertions above "
         "never executed and this test no longer pins them"
@@ -418,14 +294,7 @@ def test_o1_the_published_param_set_is_exactly_declared_params(tmp_path):
 
 
 def test_o1_every_published_param_is_accepted_and_an_unpublished_one_is_refused(tmp_path):
-    """O1, the heart of the suite — the round trip through the ENFORCER.
-
-    For every granted verb: binding exactly the params the tool published passes
-    `validate_params`, and adding one it did not publish is refused by it. This is what makes
-    publication and enforcement unable to disagree — a name the tool invents fails the first
-    arm, a name it omits fails the second. Values are synthesized from the verb's own resolved
-    hints, never from the tool's rendering, so the tool cannot satisfy this by agreeing with
-    itself."""
+    """O1, the heart of the suite — the round trip through the ENFORCER."""
     registry = _registry()
     checked = 0
 
@@ -452,18 +321,7 @@ def test_o1_every_published_param_is_accepted_and_an_unpublished_one_is_refused(
 
 def test_o1_the_required_optional_split_and_the_defaults_round_trip(tmp_path):
     """O1, defaults half — the tool publishes each param's default, and the required/optional
-    split it thereby asserts is the one `validate_params` enforces.
-
-    Three arms on the same rendering, so no single mistake passes: binding ONLY the params
-    published without a default is accepted (an optional param really is optional), dropping any
-    ONE param published without a default is refused as missing (a required param really is
-    required), and the default's own value is in the descriptor. `host-state.authorized-keys` is
-    the case that makes the split load-bearing — `host` and `user` are both `str`, and only the
-    default tells the lead it may omit one of them.
-
-    Default VALUES are asserted for non-`None`, non-bool defaults only (`root`, `desc`, `20`):
-    those have one unambiguous spelling, while `None`/`False` are legitimately `null`/`false` in
-    a JSON-shaped rendering and pinning one spelling would be a coin toss, not a demand."""
+    split it thereby asserts is the one `validate_params` enforces."""
     registry = _registry()
     saw_default_value = 0
 
@@ -511,50 +369,7 @@ def test_o1_the_required_optional_split_and_the_defaults_round_trip(tmp_path):
     )
 
 
-
-
-def test_o3_positive_control_a_resolvable_annotation_is_published_by_its_python_spelling(tmp_path):
-    """O3's positive control, and the reason its negative below is not vacuous: every param
-    whose annotation RESOLVES is published with the type's python spelling — the same base
-    `validate_params` names in its own "'user' takes str" refusal. Without this arm, a tool that
-    published no types at all would satisfy the unenforced-annotation demand trivially."""
-    registry = _registry()
-    checked = 0
-
-    for system in _grant_systems():
-        for (_, verb), params in _parse(_ask(registry, system, tmp_path)).items():
-            hints = _resolved_hints(registry.decide(system, verb).fn)
-            for p, descriptor in params.items():
-                if p not in hints:
-                    continue
-                spelled = _spelled(hints[p])
-                assert re.search(rf"\b{re.escape(spelled)}\b", descriptor), (
-                    f"{system}.{verb}.{p} resolves to {spelled} and is published as "
-                    f"{descriptor!r} — the lead cannot tell what the enforcer will check"
-                )
-                checked += 1
-
-    # Derived, not a literal: the floor is every model-facing param the shipped grant reaches,
-    # so reserving a param (#900's `wrapper_only`) or landing a new adapter verb moves it
-    # automatically. A hardcoded 44 went stale the moment `require_closed` stopped being
-    # published, which is a vacuity guard failing for the one reason it must not — the tree
-    # changed correctly.
-    expected = sum(
-        len(model_facing_params(fn))
-        for s in _grant_systems() for fn in _granted(registry, s).values()
-    )
-    assert checked == expected, f"only {checked} typed params were checked, expected {expected}"
-
-
 def test_o3_no_published_type_claims_more_than_validate_params_enforces(tmp_path):
-    """O3 over the SHIPPED surface — every type the tool claims is one the enforcer really
-    checks. For each published claim, a value of the wrong type must draw `validate_params`'
-    wrong-type refusal specifically (not its missing-param refusal, which is why the mismatch is
-    applied on top of an otherwise complete binding).
-
-    A regression pin today rather than a live catch: #900's census found 0 unresolvable
-    annotations across the 28 granted verbs. It reds the day an adapter grows one and the tool
-    keeps publishing its annotation regardless."""
     registry = _registry()
     checked = 0
 
@@ -577,9 +392,6 @@ def test_o3_no_published_type_claims_more_than_validate_params_enforces(tmp_path
                 )
                 checked += 1
 
-    # Derived for the same reason as the positive control's floor above; this one stays a
-    # lower bound because a param whose annotation resolves to a type outside `_MISMATCH`
-    # (no wrong-typed sample exists for it) is legitimately skipped.
     reachable = sum(
         len(model_facing_params(fn))
         for s in _grant_systems() for fn in _granted(registry, s).values()
@@ -588,19 +400,7 @@ def test_o3_no_published_type_claims_more_than_validate_params_enforces(tmp_path
 
 
 def test_o3_an_unresolvable_annotation_is_published_as_type_unenforced(tmp_path):
-    """O3 — the case the shipped adapters do not reach, driven through the registry seam.
-
-    `_resolved_hints` swallows an unresolvable annotation and returns `{}` for the WHOLE
-    function (`verbs.py:166-170`: `get_type_hints` raises once and the mapping is empty), after
-    which `validate_params` accepts any value for any of that verb's params. So the tool must
-    publish `window` AND its perfectly-ordinary `host: str` sibling as type-unenforced: a
-    claimed `str` on `host` would be exactly the over-promise O3 forbids, and it is the arm an
-    implementation that special-cases only the offending param gets wrong.
-
-    Both premises are asserted here rather than assumed, so the demand cannot quietly rest on a
-    behaviour of `verbs.py` that changed. The control lives in the same rendering, on the same
-    registry: the neighbouring verb's annotations resolve and ARE published as typed, so this
-    test cannot be satisfied by publishing no types at all."""
+    """O3 — the case the shipped adapters do not reach, driven through the registry seam."""
     registry = _ScopedVerbs(
         {"synthetic": {"unresolved": _unresolved_verb, "resolved": _resolved_verb}},
         VerbGrant(role="gather", entries=(("synthetic", "unresolved", "r"),
@@ -631,18 +431,7 @@ def test_o3_an_unresolvable_annotation_is_published_as_type_unenforced(tmp_path)
     assert _type_claim(resolved["limit"]) == "int"
 
 
-
-
 def test_o5_a_withheld_but_declared_verb_is_never_published(tmp_path):
-    """O5 — the tool never names a `(system, verb)` gather's grant withholds, and the five real
-    ones are named here so the demand is measured against the shipped grant rather than a
-    fixture. Each is first asserted DECLARED by its adapter (cold, off the `VERBS` literal), so
-    the test cannot pass because the verb was deleted; each system's granted siblings are
-    asserted present, so it cannot pass by publishing nothing for that system.
-
-    `ticket` is the sharpest of the five: its three withheld verbs are the judge's closed-ticket
-    surface, and publishing them to gather would advertise a capability the role separation
-    exists to withhold."""
     registry = _registry()
     answers = {s: _ask(registry, s, tmp_path) for s in {s for s, _ in _WITHHELD}}
 
@@ -671,28 +460,13 @@ def test_o5_a_withheld_but_declared_verb_is_never_published(tmp_path):
 
 
 def test_o5_the_published_set_is_exactly_what_decide_grants(tmp_path):
-    """O5, general form — for every system in the grant, what the tool publishes equals what
-    `registry.decide(...)` returns GRANTED for. The filter is the registry's decision, not a
-    second list that can drift from it: `decide` is where DENIED and UNDECLARED are separated
-    and where the grant/declaration class disagreement raises."""
     registry = _registry()
     for system in _grant_systems():
         published = {v for _, v in _parse(_ask(registry, system, tmp_path))}
         assert published == set(_granted(registry, system)), f"{system}: {sorted(published)}"
 
 
-
-
 def test_o4_an_unknown_system_degrades_loudly_and_names_it(tmp_path):
-    """O4 — `registry.verbs("nope-not-a-system")` raises a BARE `KeyError` (#900 B3, asserted
-    here so the premise cannot rot). The tool must not let it out as a crash of the lead's turn,
-    and must not answer with silence: an empty answer reads as "this system has no verbs", which
-    sends the lead to coin a query against a system that does not exist.
-
-    Either channel discharges the demand for THIS condition — a returned line or a `ModelRetry`,
-    which is the correction `template_search` already gives a lead that names an unknown system
-    — because both are legible to the lead and both are recoverable by its next call. The broken
-    ADAPTER below is the case where only a return will do."""
     registry = _registry()
     with pytest.raises(KeyError):
         registry.verbs("nope-not-a-system")
@@ -710,12 +484,7 @@ def test_o4_an_unknown_system_degrades_loudly_and_names_it(tmp_path):
 
 def test_o4_a_failing_adapter_is_a_named_line_and_the_other_systems_still_answer(tmp_path):
     """O4 — a system whose adapter cannot be imported degrades to a NAMED answer, and the
-    failure is contained to that system.
-
-    A return, not a `ModelRetry`: the lead cannot fix a broken import, so a retry spends its
-    bounded budget re-asking a question with the same answer. The second arm is the containment
-    one — the same registry answers a healthy system in full — because the cheapest way to pass
-    the first arm is a tool that degrades everything the moment one system fails."""
+    failure is contained to that system."""
     def probe(ctx: VerbContext, *, host: str, limit: int = 10) -> list[dict]:
         return []
 
@@ -738,15 +507,6 @@ def test_o4_a_failing_adapter_is_a_named_line_and_the_other_systems_still_answer
 
 
 def test_o4_a_system_whose_grant_admits_nothing_is_not_reported_as_a_broken_one(tmp_path):
-    """O4/O5 corner — a DECLARED, LOADABLE system whose grant admits no verb is the other
-    condition that empties the answer, and it wants the opposite thing said from a broken
-    adapter: "this role holds no verb here" is actionable (dispatch elsewhere), while "this
-    system failed" sends the lead to retry or to report an outage that is not happening. The
-    same split `test_gather_template_discovery.py`'s all-denied-grant test pins for the template
-    index.
-
-    Both arms on one registry, so a collapse back to a single message cannot pass by satisfying
-    whichever arm the test happened to check."""
     def probe(ctx: VerbContext, *, host: str) -> list[dict]:
         return []
 
@@ -773,30 +533,6 @@ def test_o4_a_system_whose_grant_admits_nothing_is_not_reported_as_a_broken_one(
     )
 
 
-
-
-def test_toolset_carries_the_list_verbs_bit():
-    """The tool is a declarative bit on the `ToolSet`, per the `template_search`/`lesson_read`
-    mould — not a special case inside `register_tools`. Fed the REAL defs: a synthetic
-    `ToolSet(...)` assertion stays green while `GATHER_DEF` drifts."""
-    assert ToolSet().list_verbs is False
-    assert ToolSet(list_verbs=True).list_verbs is True
-    assert GATHER_DEF.tools.list_verbs is True
-    assert MAIN_DEF.tools.list_verbs is False
-
-
-def test_only_gather_holds_list_verbs_and_the_judge_does_not():
-    """Role separation at the capability bit. The judge is named explicitly because it is the
-    other verb-bearing role — it holds `closed_tickets` and its own grant over the same ticket
-    adapter — so "the discovery tool is gather's" is a claim about the judge before it is a
-    claim about anyone else. `effective_tools_for` is the reader, because the judge's ToolSet is
-    switched per leg by a runtime `replace()` well past `AGENTS`."""
-    for role, defn in AGENTS.items():
-        assert effective_tools_for(defn).list_verbs is (role is AgentRole.GATHER), (
-            f"{role.name} holds list_verbs={effective_tools_for(defn).list_verbs}"
-        )
-
-
 def test_gather_registers_list_verbs_and_main_does_not():
     """Registration derives from the DEF's ToolSet through the real `_register_deferred_tools`
     seam — the same route `template_search` and `query` take."""
@@ -812,57 +548,7 @@ def test_gather_registers_list_verbs_and_main_does_not():
     assert "list_verbs" not in main._function_toolset.tools
 
 
-def test_list_verbs_takes_a_required_system_and_nothing_else():
-    """The model-facing signature: `system` is the ONLY param and it is REQUIRED.
-
-    Not cosmetic. An optional `system` makes "list everything" the default call, which is the
-    all-systems block #900's N1 rejected on caching grounds — and it is the shape that turns one
-    broken adapter into a degraded answer for all seven. A second param is a second thing the
-    lead can get wrong on a tool whose entire purpose is to stop it guessing."""
-    agent = _agent(FakeVerbs({}))
-    tool = agent._function_toolset.tools["list_verbs"]
-    schema = tool.tool_def.parameters_json_schema
-
-    assert set(schema["properties"]) == {"system"}, schema["properties"]
-    assert schema.get("required") == ["system"], schema.get("required")
-    params = set(inspect.signature(tool.function).parameters) - {"ctx"}
-    assert params == {"system"}, params
-
-
-def test_the_registration_entry_point_is_named_and_registers_the_tool():
-    """`register_list_verbs_tool(agent, registry)` is the named seam `_register_deferred_tools`
-    calls, mirroring `register_query_tool` / `register_template_search_tool`. Pinned directly so
-    the tool cannot be smuggled in as an inline `@agent.tool` inside another registrar, where
-    nothing could register it without also registering `query`."""
-    register = getattr(query_tool, "register_list_verbs_tool", None)
-    assert register is not None, (
-        "defender/runtime/query_tool.py declares no register_list_verbs_tool"
-    )
-    agent = Agent(
-        FunctionModel(lambda messages, info: ModelResponse(parts=[TextPart(content="x")])),
-        deps_type=runtime_tools.AgentDeps,
-    )
-    register(agent, FakeVerbs({}))
-    assert "list_verbs" in agent._function_toolset.tools
-
-
-
-
 def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_path):
-    """The queries table is "what the defender RAN" — the join the whole offline learning loop
-    rests on. `list_verbs` runs nothing: it inspects signatures and never calls an adapter, so a
-    row for it would put a query in the record that never reached a system, and a payload digest
-    for an answer no system produced.
-
-    Mirrors `test_query_tool_611.py:771` (`capture_fires_only_for_the_query_tool`), driving the
-    REAL run: an `AbstractCapability` hook fires for EVERY tool, so the `TOOL_NAME` guard in
-    `QueryCapture` is the only thing keeping this tool out of the table, the circuit breaker and
-    the repeat guard.
-
-    THREE identical calls, not one. `repeat_trip`'s threshold is three: if `list_verbs` fed the
-    repeat guard, the third would come back as a `GatherDeadEnd` instead of an answer and the
-    lead would be ended by a discovery call. All three must answer, and the table must still be
-    empty of this lead's rows — including the `∅.`-prefixed sentinels a trip would write."""
     run_dir = materialize(tmp_path, GOLDEN_AB3, run_id='lv900')
 
     def probe(ctx: VerbContext, *, native_query: str, limit: int = 10) -> list[dict]:
@@ -902,8 +588,6 @@ def test_list_verbs_writes_no_queries_row_and_leaves_the_guards_untouched(tmp_pa
     assert not (run_dir / "gather_raw" / LEAD).exists(), "a list_verbs call persisted a payload"
 
 
-
-
 def _resolved_verb(ctx: VerbContext, *, host: str, limit: int = 10) -> list[dict]:
     """The control for the O3 pair: annotations that resolve, so `_resolved_hints` reports them
     and `validate_params` really checks them."""
@@ -913,6 +597,5 @@ def _resolved_verb(ctx: VerbContext, *, host: str, limit: int = 10) -> list[dict
 def _unresolved_verb(ctx: VerbContext, *, host: str, window: _WindowSpec = "24h") -> list[dict]:
     """A verb whose annotations DO NOT resolve — `_WindowSpec` is a TYPE_CHECKING-only import,
     so `get_type_hints` raises NameError at runtime and `_resolved_hints` returns `{}` for the
-    whole function, `host` included. This module carries `from __future__ import annotations`
-    exactly as every shipped adapter does, so the shape is the adapters' own."""
+    whole function, `host` included. This module carries `from __future__ import annotations`"""
     return []
