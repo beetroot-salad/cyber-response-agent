@@ -83,8 +83,9 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
     acme = H1105.tenant(root, fixture_uuid("tenant:acme"))
     runs = acme.runs_repository()
     with runs.create_episode() as view:
-        roster = view.start_runs(["b", "c"])
         ep = root / fixture_uuid("tenant:acme") / "episodes" / view.episode_id
+        P.write_family(ep, P.family_doc(episode_id=view.episode_id))
+        roster = view.start_runs(["b", "c"])
         with Episode.open(ep) as episode:
             exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=fixture_uuid("tenant:acme"))
     assert ep.parent == root / fixture_uuid("tenant:acme") / "episodes", ep

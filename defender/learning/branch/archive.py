@@ -40,7 +40,7 @@ from typing import Any
 
 from defender.episodes._episode_handle import Episode
 from defender._io import Bound, entry_present, read_text_utf8
-from defender.episodes._episode_paths import LAYOUT, EpisodePaths, WorldPaths
+from defender.episodes._episode_paths import LAYOUT, WorldPaths
 from defender.runtime.branch._family import load_family
 from defender.run_repository import (
     RunPaths,
@@ -60,7 +60,7 @@ from defender.box._scrub import verdict_path
 _logger = logging.getLogger(__name__)
 
 # This module binds no record names of its own: sources and destinations are both reached
-# through the owners' accessors (`RunPaths`, `EpisodePaths`), so a rename in the owner cannot
+# through the owners' accessors (`RunPaths`, `WorldPaths`), so a rename in the owner cannot
 # strand a re-binding here.
 
 
@@ -232,7 +232,7 @@ def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Pa
         # Resolve the selector through the persisted mapping before constructing UUID paths.
         world_id = family.world(world).world_id
         handle = episode.world(world_id)
-        dest = EpisodePaths(episode.dir).world(world_id)
+        dest = WorldPaths(episode.dir, LAYOUT.world(world_id))
         sources = _screened_sources(world, run_dir, dest)
         world_dir = dest.dir
         handle.dir.ensure()

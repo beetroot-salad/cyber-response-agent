@@ -333,8 +333,7 @@ def test_1120_every_tenant_taking_entry_point_refuses_what_accept_tenant_refuses
 def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
         data_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     H.adopted(data_root)
-    episode = tmp_path / "episodes" / "ep-1"
-    episode.mkdir(parents=True)
+    episode = T.episode(tmp_path, root=tmp_path / "episodes")
     argv = branch_cli.sibling_argv(episode.name, "a", tenant_id=_tenant.TenantId(H.TID))
     at = argv.index("--tenant")
     assert argv[at + 1] == H.TID, argv

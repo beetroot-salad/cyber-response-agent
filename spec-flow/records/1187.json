@@ -45,7 +45,8 @@
     "scope": "F1-F13 dispositions and sampled attack discrimination retained at immutable ref; bounded sampling is not proof.",
     "next": "Independent review after world UUID amendment and updated CI. Keep draft; do not merge.",
     "tenant_amendment": "Independent source/migration review found no aliases, normalization or historical-ID mutation; retirement documentation ambiguity repaired. Tenant amendment tests were authored during implementation. Nonidentity adapter, repository and scenario names retained; migration uses chosen UUID without rewriting historical records.",
-    "world_amendment": "Independent source and filesystem probes found no label-derived path/identity fallback; old F1-F13 evidence is historical and does not certify changed world namespaces. Pre-existing role-uniqueness validation asymmetry recorded outside this amendment."
+    "world_amendment": "Independent source and filesystem probes found no label-derived path/identity fallback; old F1-F13 evidence is historical and does not certify changed world namespaces. Pre-existing role-uniqueness validation asymmetry recorded outside this amendment.",
+    "world_ci_repair": "Independent review withdrew the roster-only fixture workaround and approved the source inclusion fix. Declaration loop validates UUID before any namespace read; unknown grade entries remain unnameable. Original no-roster page fixture and main path-owner census remain intact."
   },
   "tenant_migration": "Offline: archive entire named tenant outside data root; copy knowledge only to chosen UUID folder, update and commit marker, run setup/check. Historical records retain old identity and bytes. See defender/docs/development-operations.md.",
   "consolidation": {
@@ -70,6 +71,7 @@
       "learning/branch/test_1007_namespace.py: 220/1000-character actual launch, preflight/oracle and archive",
       "learning/branch/test_947_triplet_questioner.py: absent/null/explicit host IDs, early refusal and file immutability"
     ],
-    "hosted_ci": "Pending publication; c50af87b baseline is green but does not certify this amendment."
+    "hosted_ci": "4340b253 / run39298208338: lint, code-smells and both box jobs passed; unit shards had 18081 passes and seven failures. Repairs are locally verified; the follow-up hosted run is tracked in PR checks.",
+    "ci_repairs": "Restore main archive WorldPaths ownership (census unchanged,37 passed); bind declared graded page worlds without a RUNS roster, keeping unknown grade labels metadata-only (original p193 unchanged,225 passed/12 skipped plus one transient source-inspection case passed fresh); shared reply/wire fixtures49 passed; three bare family fixtures repaired, seed/entry suites37 passed. No new skips or weakened assertions."
   }
 }

@@ -856,8 +856,7 @@ def test_p155_reap_scan_and_archive_walk_a_former_mountpoint(tmp_path):
     scrub.scrub(d.run_dir)
     assert scrub.tree_verified(d.run_dir), "the reap scan did not verify the run folder"
     episode_cls = S.sym("episodes._episode_handle", "Episode")
-    ep = tmp_path / "s08-archive-ep"
-    ep.mkdir()
+    ep = T.episode(tmp_path / "archive")
     with episode_cls.open(ep) as episode:
         archived = S.sym("learning.branch.archive", "archive_episode")(episode, {"b": d.run_dir})
     world = Path(archived["b"])

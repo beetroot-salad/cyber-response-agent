@@ -8,8 +8,9 @@ The episode is reached only through its tenant's walk, so another tenant's episo
 any level and an id that is not a UUID (`latest` included) are refused before anything is read.
 The manifest must name the episode it was read from (#1187 R5). The arms are the arm roster's
 (`arms.json`, `view.arm_ids()`), each opened by its roster id; an entry in `runs/` the roster
-does not name is never shown. No roster means the episode never reached RUNS: no world
-sections and no arm links. A roster the reader refuses is the arms' `refused` state, with its
+does not name is never shown. Manifest worlds without a grade row need a roster to get a
+section. Declared, graded worlds render through their UUID bindings even without a roster;
+arm links require a roster. A roster the reader refuses is the arms' `refused` state, with its
 reason; the rest of the page renders. An unreadable container reads as absent.
 
 Two phases. `load_episode` reads every record the page shows exactly once, through the package
@@ -321,10 +322,10 @@ def _load_draws(bound: Bound, world_id: str | None) -> tuple[dict[int, dict[str,
 
 def _build_roster(ep: _Episode, grade_row_labels: list[str], *,
                   reached_runs: bool) -> tuple[dict[str, WorldEntry], list[RosterItem], int]:
-    """Every world label that gets a section: manifest worlds — once the episode reached RUNS,
-    which the arm roster's presence is (`reached_runs`; a refused roster was still written) —
-    ∪ `judge.yaml` rows. Each one's arm is opened by its roster id later (`_load_arms`); an
-    entry in `runs/` that is neither is never shown (#1105 J3: the worlds are the manifest's,
+    """Every world label that gets a section: manifest worlds with a grade row or whose episode
+    reached RUNS (`reached_runs`; a refused arm roster was still written), ∪ `judge.yaml` rows.
+    Each one's arm is opened by its roster id later (`_load_arms`); an entry in `runs/` that is
+    neither is never shown (#1105 J3: the worlds are the manifest's,
     not a listing of the container).
 
     Returns the entries by label (manifest order first), the classified roster, and the count
@@ -349,7 +350,7 @@ def _build_roster(ep: _Episode, grade_row_labels: list[str], *,
         label = w.get("label")
         if not isinstance(label, str) or label == _FAMILY_LABEL:
             continue
-        if label not in entries and not reached_runs:
+        if label not in grade_row_labels and not reached_runs:
             continue
         entry(label)
         entries[label].in_manifest = True
