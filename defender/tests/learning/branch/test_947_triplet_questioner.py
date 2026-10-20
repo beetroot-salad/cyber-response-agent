@@ -23,12 +23,15 @@ def _family_mod():
 # registration, and everything that moves with it
 
 
-def test_947_questioner_definition_grants_no_tool_and_no_verb():
+def test_947_questioner_definition_grants_no_tool_and_no_verb(tmp_path):
     QUESTIONER_DEF = _questioner().QUESTIONER_DEF
     assert tuple(QUESTIONER_DEF.tools) == ()
     assert QUESTIONER_DEF.verb_grant.entries == ()
     compile_policy_for = T.sym("runtime.permission", "compile_policy_for")
-    policy = compile_policy_for(QUESTIONER_DEF, run_dir=T.DEFENDER, defender_dir=T.DEFENDER)
+    run_dir, defender_dir = tmp_path / "run", tmp_path / "defender"
+    run_dir.mkdir()
+    defender_dir.mkdir()
+    policy = compile_policy_for(QUESTIONER_DEF, run_dir=run_dir, defender_dir=defender_dir)
     assert not policy.bash_allow
     assert not policy.write_roots
     assert not policy.read_roots
