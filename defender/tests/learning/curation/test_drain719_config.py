@@ -278,12 +278,15 @@ def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
 def test_1186_no_global_learning_paths_or_ambient_factory_remain():
     """O1: the removed public defaults cannot remain an accidental production entry path."""
     for name in ("DEFAULT_PATHS", "LEARNING_DIR", "loop_paths"):
-        assert name not in vars(learning_config), f"{name} still supplies tenant-free paths"
+        assert not hasattr(learning_config, name), f"{name} still supplies tenant-free paths"
 
 
 @pytest.mark.parametrize("shape", ["plain", "directory-link", "dangling-link"])
-def test_1186_tenant_state_requires_a_real_learning_directory(data_root, tmp_path, shape):
-    """O1/O6: a selected tenant cannot redirect its state through a root symlink."""
+@pytest.mark.parametrize("selection", ["at-open", "stored", "author-checkout"])
+def test_1186_tenant_state_requires_a_real_learning_directory(
+    data_root, tmp_path, shape, selection,
+):
+    """O1/O4/O6: opening tenant state refuses root links, including with stored paths."""
     from defender.learning.core.state import StateRefused
     from defender.tenancy._tenant import TenantRefused
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
@@ -295,12 +298,20 @@ def test_1186_tenant_state_requires_a_real_learning_directory(data_root, tmp_pat
         queue = target / FINDINGS.queue
         queue.parent.mkdir(parents=True)
         queue.write_text('{"finding_id":"boundary/0","run_id":"boundary"}\n', encoding="utf-8")
+    tenant.learning.mkdir(exist_ok=True)
+    selected = None
+    if selection != "at-open":
+        selected = LoopPaths.for_tenant(tenant)
+        if selection == "author-checkout":
+            selected = selected.with_repo_root(tmp_path / "other-author-checkout")
     if shape != "plain":
+        tenant.learning.rmdir()
         tenant.learning.symlink_to(target, target_is_directory=True)
     before_root, before_target = H.tree_census(data_root), H.tree_census(target)
 
     def read_selected():
-        with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
+        paths = LoopPaths.for_tenant(tenant) if selected is None else selected
+        with LearningState.open(paths) as state:
             return state.rows(FINDINGS)
 
     if shape == "plain":

@@ -637,6 +637,8 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
     H.plant_row(root)
+    # O5: this setup re-run starts from a fully provisioned tenant.
+    (H.tenant_folder(root) / "learning").mkdir()
     env, reason, repair = fault(tmp_path, knowledge)
     try:
         for proc in (_check_id(root, **env), _check_folder(knowledge, **env)):
