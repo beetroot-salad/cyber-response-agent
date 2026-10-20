@@ -16,7 +16,6 @@ from defender import box as box_mod
 from .. import permission
 from ..permission.files import RESOLVE_ERRORS
 from ..agent_role import AgentRole
-from ..model_view import MODEL_RUN
 from ..run_state import run_state_of
 
 from defender._untrusted import wrap_fresh
@@ -121,12 +120,12 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
     _deny_authored_bash_read(deps, operands)
     try:
         # The pipelines are the model's own parse: under the model view the box mounts each
-        # tree at its model path, so it runs the command as typed, at the model's working
-        # directory (#1255 C8); the host-side gate mapped the operands above.
+        # tree at its model path, so it runs the command as typed, at the declared working
+        # directory; the host-side gate mapped the operands above.
         result = deps.box.run_parsed(
             list(decision.pipelines or ()),
             command=command,
-            cwd=Path(MODEL_RUN) if view is not None else deps.cwd_anchor,
+            cwd=Path(view.cwd),
             timeout=_BASH_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired as e:
@@ -167,19 +166,15 @@ def _grep_lines(text: str, pattern: str) -> str:
 
 
 def _resolve_operand(deps: AgentDeps, path: str) -> Path:
-    """The host path a model-supplied operand names: through the run's model view where the
-    role has one (#1255 P1 inbound — the one point a model path becomes a host path, before
-    the gate or a file tool sees it), else rebased on the deps' cwd anchor. An operand outside
+    """The host path a model-supplied operand names through its workspace view, before
+    the gate or a file tool sees it. An operand outside
     the view (a host path, a `..` climb) is refused naming only what the model typed."""
     view = deps.view
-    if view is None:
-        p = Path(path)
-        return p if p.is_absolute() else deps.cwd_anchor / p
     host = view.to_host(path)
     if host is None:
         raise ModelRetry(
             f"Blocked: paths are limited to this run's workspace trees ({view.roots_text()}), "
-            f"named relative to the run folder or absolute, with no '..' component; {path} is "
+            f"named relative to {view.cwd} or absolute, with no '..' component; {path} is "
             "outside them."
         )
     return host
@@ -285,7 +280,7 @@ def _bash_overflow_hint(
     if permission.command_shape.terminal_reducer(list(decision.pipelines or ())):
         return _BASH_REDUCED_HINT
     view = deps.view
-    shown = view.to_model(capping) if view is not None else str(capping)
+    shown = view.to_model(capping)
     return _overflow_filter_hint(shown, deps.policy)
 
 

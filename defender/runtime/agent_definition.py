@@ -12,6 +12,7 @@ from .agent_role import AgentRole
 from .permission import AgentPolicy, require_anchor_root
 from .permission.grant import Grant, PathShapes
 from .verb_grant import DENY_ALL, GrantError, VerbGrant
+from .model_view import ModelView, RootPairs
 
 if TYPE_CHECKING:
     from .tools import AgentDeps
@@ -65,6 +66,7 @@ class ResolvedRoots:
     scripts: tuple[Path, ...]
     corpus_dir: Path | None = None
     tenant_agent: Path | None = None
+    model_roots: RootPairs = ()
 
 
 @model(frozen=True)
@@ -100,6 +102,8 @@ class RunScope:
     scripts: tuple[Path, ...] = ()
     corpus_name: str | None = None
     tenant_agent: Path | None = None
+    #: Names external roots; grants remain in add_dirs/read_confine, never inferred here.
+    model_roots: RootPairs = ()
 
 
 _DEFAULT_SCOPE = RunScope()
@@ -119,6 +123,8 @@ def resolve_roots(
     run_dir: Path, corpus_dirs: tuple[str, ...], scope: RunScope,
     defender_dir: Path = PATHS.defender_dir,
 ) -> ResolvedRoots:
+    for _, source in scope.model_roots:
+        require_anchor_root("model root source", source)
     tenant_agent = scope.tenant_agent if not scope.read_confine else None
     bases = (defender_dir,) if tenant_agent is None else (defender_dir, tenant_agent)
     corpus_roots = tuple(_resolve_corpus_dir(name, base)
@@ -136,6 +142,7 @@ def resolve_roots(
         read_confine=tuple(scope.read_confine),
         scripts=tuple(scope.scripts),
         corpus_dir=corpus_dir,
+        model_roots=scope.model_roots,
     )
 
 
@@ -250,6 +257,14 @@ def _build_roots(
     roots = resolve_roots(
         run_dir, defn.corpus_dirs, scope, defender_dir=_resolved_tree(defender_dir),
     )
+    view = ModelView.for_scope(
+        run_dir, roots.defender_dir,
+        roots.defender_dir.parent if defn.anchors_on_tree else run_dir,
+        roots.tenant_agent, extra_roots=roots.model_roots,
+    )
+    for root in scope.add_dirs:
+        # A confine restricts existing access; it does not introduce a workspace tree.
+        view.to_model(root)  # An unnamed additional read root is a wiring error.
     if defn.requires_corpus:
         assert roots.corpus_dir is not None
         # Compare resolved paths, as `decide_write` does at runtime; a lexical check fails

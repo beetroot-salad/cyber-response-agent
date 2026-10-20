@@ -20,7 +20,7 @@ import importlib.util
 import inspect
 import re
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -286,7 +286,7 @@ def _deps(tmp_path: Path, definition, *, box=None, read_root=None):
     dfn = tmp_path / "tree" / "defender"
     run.mkdir(parents=True)
     dfn.mkdir(parents=True)
-    scope = RunScope(add_dirs=(read_root,)) if read_root else RunScope()
+    scope = RunScope(add_dirs=(read_root,), model_roots=((PurePosixPath("/inputs/shared"), read_root),)) if read_root else RunScope()
     return bind(definition, run, defender_dir=dfn, scope=scope, box=box)
 
 
@@ -328,6 +328,7 @@ def _learning_read_deps(tmp_path: Path, *, box=None):
         CORPUS_AUTHOR_DEF, run, defender_dir=dfn,
         scope=RunScope(
             add_dirs=(add_dir,), corpus_name="lessons",
+            model_roots=((PurePosixPath("/inputs/shared"), add_dir),),
             # NON-EMPTY BY REFUSAL, not by taste: `bind` rejects an empty confine for this role
             # because an empty one widens its reads to the whole defender dir (#512). The
             # corpus it curates is the confine production gives it.
@@ -351,7 +352,7 @@ def _corpus_author_deps_scene(tmp_path: Path, result: BoxResult):
     )
     deps = replace(deps, box=Box(result))
     assert deps.role is CORPUS_AUTHOR_DEF.role
-    return deps, corpus, f"cat {corpus / 'lesson.md'}"
+    return deps, corpus, f"cat {deps.view.to_model(corpus / 'lesson.md')}"
 
 
 
@@ -459,7 +460,7 @@ def _drive_learning_read(
     artifact = (deps.run_dir if in_run_dir else comparison) / name
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text(body, encoding="utf-8")
-    return _tool_read_file(deps, str(artifact))
+    return _tool_read_file(deps, deps.view.to_model(artifact))
 
 
 def _drive_learning_bash(
@@ -473,7 +474,7 @@ def _drive_learning_bash(
     artifact = deps.corpus_dir / "lead.md"
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text("the executor boundary is injected", encoding="utf-8")
-    command = f"cat {artifact}"
+    command = f"cat {deps.view.to_model(artifact)}"
     return _tool_bash(deps, command)
 
 

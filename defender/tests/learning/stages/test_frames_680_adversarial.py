@@ -73,7 +73,7 @@ def test_learning_role_reads_an_attacker_controlled_non_run_file(tmp_path):
     path = skills / "ordinary.md"
     path.write_text("ordinary")
     assert deps.role is LEAD_AUTHOR_DEF.role
-    assert _tool_read_file(deps, str(path)) == "ordinary"
+    assert _tool_read_file(deps, deps.view.to_model(path)) == "ordinary"
 
 
 def test_stage_body_is_authored_after_its_reader_token_was_disclosed(tmp_path):
@@ -85,14 +85,14 @@ def test_stage_body_is_authored_after_its_reader_token_was_disclosed(tmp_path):
     )
     pre = corpus / "lesson.md"
     pre.write_text("---\nname: pre\n---\npre-authored")
-    assert "pre-authored" in _tool_lesson_read(deps, str(pre), "body")
+    assert "pre-authored" in _tool_lesson_read(deps, deps.view.to_model(pre), "body")
     assert "pre-authored" in _tool_bash(deps, command)
     post = corpus / "post.md"
-    _tool_write_file(deps, str(post), "---\nname: post\n---\nauthored")
+    _tool_write_file(deps, deps.view.to_model(post), "---\nname: post\n---\nauthored")
     with pytest.raises(ModelRetry):
-        _tool_lesson_read(deps, str(post), "body")
+        _tool_lesson_read(deps, deps.view.to_model(post), "body")
     with pytest.raises(ModelRetry):
-        _tool_bash(deps, f"cat {post}")
+        _tool_bash(deps, f"cat {deps.view.to_model(post)}")
 
 
 def test_corpus_author_reopens_a_lesson_it_authored_after_learning_the_stage_salt(
@@ -106,16 +106,16 @@ def test_corpus_author_reopens_a_lesson_it_authored_after_learning_the_stage_sal
     )
     old = corpus / "lesson.md"
     old.write_text("---\nname: old\n---\npreexisting")
-    read_before = _tool_lesson_read(deps, str(old), "body")
+    read_before = _tool_lesson_read(deps, deps.view.to_model(old), "body")
     bash_before = _tool_bash(deps, command)
     assert "preexisting" in read_before
     assert "preexisting" in bash_before
     new = corpus / "new.md"
-    _tool_write_file(deps, str(new), "---\nname: new\n---\nauthored")
+    _tool_write_file(deps, deps.view.to_model(new), "---\nname: new\n---\nauthored")
     with pytest.raises(ModelRetry):
-        _tool_lesson_read(deps, str(new), "body")
+        _tool_lesson_read(deps, deps.view.to_model(new), "body")
     with pytest.raises(ModelRetry):
-        _tool_bash(deps, f"cat {new}")
+        _tool_bash(deps, f"cat {deps.view.to_model(new)}")
 
 
 def test_cacheable_instructions_are_preceded_by_hostile_contract_lookalikes_in_user_input(

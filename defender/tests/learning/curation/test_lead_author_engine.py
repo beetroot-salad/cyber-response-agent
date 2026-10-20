@@ -182,25 +182,28 @@ def test_lead_author_deps_cannot_be_born_without_policy(tmp_path):
 def test_rm_repo_relative_draft_allowed_regardless_of_worktree_location(tmp_path):
     wt = _worktree(tmp_path)
     pol = _lead_deps(_run_dir(tmp_path), wt).policy
-    assert permission.decide_bash("rm defender/skills/elastic/_draft/x.md", policy=pol).allow
-    assert permission.decide_bash(f"rm {wt}/defender/skills/elastic/_draft/x.md", policy=pol).allow
+    assert permission.decide_bash("rm defender/skills/elastic/_draft/x.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
+    assert permission.decide_bash(f"rm {wt}/defender/skills/elastic/_draft/x.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
 
 
 def test_rm_outside_skills_denied(tmp_path):
     """rm of a path OUTSIDE defender/skills (lessons, an absolute system file) → denied: the
-    skills prefix is baked into the anchored regex (operands are unconfined on the bash lane)."""
-    pol = _lead_policy(_worktree(tmp_path) / "defender" / "skills")
-    assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol).allow
-    assert not permission.decide_bash("rm /etc/passwd", policy=pol).allow
+    skills prefix and the resolved operand's scope are both checked."""
+    wt = _worktree(tmp_path)
+    pol = _lead_policy(wt / "defender" / "skills")
+    assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
+    assert not permission.decide_bash("rm /etc/passwd", policy=pol, run_dir=wt, cwd_anchor=wt).allow
 
 
 def test_rm_flags_and_multipath_denied(tmp_path):
     """F3: single-path rm only. ``rm -rf <skills>`` (a flag) and ``rm a b`` (multi-path) are
     DENIED — matching the old ``rm defender/skills/:*`` intent (one draft removed at a time)."""
-    pol = _lead_policy(_worktree(tmp_path) / "defender" / "skills")
-    assert not permission.decide_bash("rm -rf defender/skills/elastic/_draft/x.md", policy=pol).allow
+    wt = _worktree(tmp_path)
+    pol = _lead_policy(wt / "defender" / "skills")
+    assert not permission.decide_bash("rm -rf defender/skills/elastic/_draft/x.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
     assert not permission.decide_bash(
-        "rm defender/skills/elastic/_draft/a.md defender/skills/elastic/_draft/b.md", policy=pol
+        "rm defender/skills/elastic/_draft/a.md defender/skills/elastic/_draft/b.md",
+        policy=pol, run_dir=wt, cwd_anchor=wt,
     ).allow
     # rejected: allow -f / multi-path because "it's all under skills" — the agent issues one rm
     #           per draft; the git scope gate is containment, the regex is shape (mirrors the actor)
@@ -209,9 +212,10 @@ def test_rm_flags_and_multipath_denied(tmp_path):
 def test_rm_command_substitution_denied(tmp_path):
     """``rm $(...)`` is denied by _stage_unsafe (structural), independent of the operand — the
     gate never expands the substitution."""
-    pol = _lead_policy(_worktree(tmp_path) / "defender" / "skills")
+    wt = _worktree(tmp_path)
+    pol = _lead_policy(wt / "defender" / "skills")
     assert not permission.decide_bash(
-        "rm $(echo defender/skills/elastic/_draft/x.md)", policy=pol).allow
+        "rm $(echo defender/skills/elastic/_draft/x.md)", policy=pol, run_dir=wt, cwd_anchor=wt).allow
 
 
 def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
@@ -227,8 +231,8 @@ def test_cross_surface_parity_out_of_scope_denied_on_both_lanes(tmp_path):
         lessons, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
     # rm (bash) surface — repo-relative spellings the matcher recognizes
     assert permission.decide_bash(
-        "rm defender/skills/gather/queries/elastic/_draft/y.md", policy=pol).allow  # positive
-    assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol).allow             # negative
+        "rm defender/skills/gather/queries/elastic/_draft/y.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow  # positive
+    assert not permission.decide_bash("rm defender/lessons/z.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow             # negative
 
 
 def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
@@ -237,13 +241,13 @@ def test_both_lanes_deny_dotdot_traversal_escape(tmp_path):
     escape = wt / "defender" / "skills" / ".." / "lessons" / "x.md"
     assert not permission.decide_write(
         escape, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
-    assert not permission.decide_bash("rm defender/skills/../lessons/x.md", policy=pol).allow
+    assert not permission.decide_bash("rm defender/skills/../lessons/x.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
     # a ..-escape via the absolute spelling is denied too
-    assert not permission.decide_bash(f"rm {wt}/defender/skills/../../etc/passwd", policy=pol).allow
+    assert not permission.decide_bash(f"rm {wt}/defender/skills/../../etc/passwd", policy=pol, run_dir=wt, cwd_anchor=wt).allow
     ok = wt / "defender" / "skills" / "gather" / "queries" / "elastic" / "z.md"
     assert permission.decide_write(
         ok, "b\n", run_dir=rd, defender_dir=wt / "defender", policy=pol).allow
-    assert permission.decide_bash("rm defender/skills/gather/queries/elastic/_draft/z.md", policy=pol).allow
+    assert permission.decide_bash("rm defender/skills/gather/queries/elastic/_draft/z.md", policy=pol, run_dir=wt, cwd_anchor=wt).allow
 
 
 # run_stage — require_output (the new flag) + the writers toolset

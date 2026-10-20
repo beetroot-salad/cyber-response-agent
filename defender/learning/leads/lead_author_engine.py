@@ -18,7 +18,7 @@ from defender.runtime import providers
 from defender.runtime.agent_definition import AgentDefinition, ResolvedRoots, ToolSet, bind
 from defender.runtime.agent_role import AgentRole
 from defender.runtime.driver import MakeModel
-from defender.runtime.permission.grant import SEG, Grant
+from defender.runtime.permission.grant import SEG, Grant, PathShapes
 from defender.runtime.tools import AgentDeps
 
 _LEAD_AUTHOR_DENY_REASON = (
@@ -135,13 +135,20 @@ def _rm_skills_grant(skills_dir: Path, systems: tuple[str, ...]) -> Grant:
     a batch discard at the commit gate. `SEG` excludes spaces and newlines, matching the write
     side; `..` can't match since system names are `SEG`-shaped and `_draft` is literal.
     """
-    spellings = "|".join(re.escape(s) for s in (SKILLS_REL.rstrip("/"), str(skills_dir)))
+    from defender.runtime.model_view import MODEL_WORKSPACE
+
+    relative = SKILLS_REL.rstrip("/")
+    spellings = "|".join(re.escape(s) for s in (
+        relative, str(MODEL_WORKSPACE / relative), str(skills_dir),
+    ))
     sys_alt = "|".join(re.escape(s) for s in systems)
     lanes = "|".join((_draft_tail(_CATALOG_TAIL, sys_alt), _draft_tail("", sys_alt)))
     return Grant(
         program="rm",
         pattern=re.compile(rf"^rm (?:{spellings})/(?:{lanes})$"),
         pins_path=True,
+        resolve_operand=True,
+        scope=PathShapes(_skill_write_lanes(skills_dir, systems)),
     )
 
 

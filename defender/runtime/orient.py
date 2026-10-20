@@ -102,7 +102,9 @@ def _hits_in_view(hits: str | None, view: ModelView) -> str | None:
     corpus's model path; the shim prints no other, and any other line is shown as printed."""
     if not hits:
         return hits
-    corpus = KnowledgePaths.of_defender_dir(view.defender_dir).lessons_dir
+    defender_dir = view.to_host("/defender")
+    assert defender_dir is not None
+    corpus = KnowledgePaths.of_defender_dir(defender_dir).lessons_dir
     real, shown = corpus.resolve(), view.to_model(corpus)
     lines = []
     for line in hits.splitlines():
@@ -200,7 +202,7 @@ def orientation(  # noqa: PLR0913 — the orientation's inputs, each a seam or a
 
     Every path is rendered in the run's model view (#1255 P1)."""
     run_shim = shim if shim is not None else _shim
-    view = ModelView(Path(run_dir), Path(defender_dir), tenant_agent)
+    view = ModelView.for_run(Path(run_dir), Path(defender_dir), tenant_agent)
     try:
         from defender import run_common
         env = run_common.run_env(defender_dir, run_dir, tenant_agent=tenant_agent)

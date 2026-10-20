@@ -46,6 +46,6 @@ def test_host_side_write_tools_write_live_tree_in_process(tmp_path):
     deps = bind(CORPUS_AUTHOR_DEF, tmp_path / "lrd", scope=scope, defender_dir=dtree,
                 box=box_mod.BoxExecutor(transport=transport))
     target = dtree / "lessons" / "spec-new.md"
-    runtime_tools._tool_write_file(deps, str(target), "spec content")
+    runtime_tools._tool_write_file(deps, "/workspace/defender/lessons/spec-new.md", "spec content")
     assert transport.calls == [], "a host-side write crossed the box transport"
     assert target.read_text(encoding="utf-8") == "spec content", "the write did not land on the live tree"

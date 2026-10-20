@@ -252,10 +252,11 @@ def test_the_drain_box_mounts_exactly_the_labels_list(tmp_path: Path, label: Dra
 
     expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
     assert label.writable_trees(lf.wt_paths) == tuple(expected)
-    assert rw_mounts(request) == [(m, m) for m in expected]
-    assert ro_mounts(request) == [(lf.wt, lf.wt)]
+    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(lf.wt)) for m in expected]
+    assert ro_mounts(request) == [(lf.wt, Path("/workspace"))]
     assert len(request.mounts) == 1 + len(expected)
     assert Path(request.workdir) == lf.wt
+    assert request.model_workdir == Path("/workspace")
     assert request.name == "defender-drain-batch-1"
     assert not lf.wt.exists(), "_drain_box_request touched the disk"
 
@@ -275,8 +276,8 @@ def test_a_leaf_that_is_a_git_checkout_is_still_mounted_read_only(
     request = drains._drain_box_request(lf.wt, "batch-1", label, lf.paths)
 
     expected = [lf.wt / rel for rel in EXPECTED_MOUNTS[label]]
-    assert ro_mounts(request) == [(lf.wt, lf.wt)], "the git leaf is not mounted read-only"
-    assert rw_mounts(request) == [(m, m) for m in expected]
+    assert ro_mounts(request) == [(lf.wt, Path("/workspace"))], "the git leaf is not mounted read-only"
+    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(lf.wt)) for m in expected]
     assert len(request.mounts) == 1 + len(expected)
     assert git.is_file() if dot_git == "file" else git.is_dir()
 
@@ -351,7 +352,7 @@ def test_a_non_member_raises_at_the_box_and_the_holder_and_nothing_is_held(
 
     for owner in KNOWN:
         request = drains._drain_box_request(lf.wt, "batch-1", owner, lf.paths)
-        assert rw_mounts(request) == [(lf.wt / rel, lf.wt / rel) for rel in EXPECTED_MOUNTS[owner]]
+        assert rw_mounts(request) == [(lf.wt / rel, Path("/workspace") / rel) for rel in EXPECTED_MOUNTS[owner]]
         with pytest.raises(FileNotFoundError):
             open_drain_trees(lf.wt_paths, owner)
         assert held_roots(tmp_path) == []
@@ -395,8 +396,8 @@ def test_the_box_and_the_held_trees_both_follow_whatever_trees_paths_names(
 
     request = drains._drain_box_request(wt, "batch-1", label, paths)
 
-    assert rw_mounts(request) == [(m, m) for m in expected]
-    assert ro_mounts(request) == [(wt, wt)]
+    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(wt)) for m in expected]
+    assert ro_mounts(request) == [(wt, Path("/workspace"))]
     assert len(request.mounts) == 1 + len(expected)
     assert_asked_of(asked, wt, label, "the box")
     asked.clear()
@@ -440,10 +441,9 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
 
     assert relative.repo_root == rel_root
     assert label.writable_trees(relative) == listed
-    request = drains._drain_box_request(
-        rel_root, "batch-1", label, LoopPaths(repo_root=tmp_path / MAIN))
-    assert rw_mounts(request) == [(m, m) for m in listed]
-    assert ro_mounts(request) == [(rel_root, rel_root)]
+    with pytest.raises(ValueError, match="host root"):
+        drains._drain_box_request(
+            rel_root, "batch-1", label, LoopPaths(repo_root=tmp_path / MAIN))
     with pytest.raises(ValueError):  # noqa: PT011 — DrainTrees' mount refusal; the type is the contract
         open_drain_trees(relative, label)
     assert held_roots(tmp_path) == [], "a relative mount was held"
@@ -553,9 +553,9 @@ def assert_the_lane_mounted_its_leaf_trees_and_its_work_step_held_them(d: Drive)
     rels = shipped if d.kind == "shipped" else relocated_rels(d.label, leaf)
     expected = [leaf / rel for rel in rels]
 
-    assert rw_mounts(request) == [(m, m) for m in expected], (
+    assert rw_mounts(request) == [(m, Path("/workspace") / m.relative_to(leaf)) for m in expected], (
         f"the box's rw mounts are {rw_mounts(request)}, not {rels} under the leaf")
-    assert ro_mounts(request) == [(leaf, leaf)]
+    assert ro_mounts(request) == [(leaf, Path("/workspace"))]
     assert len(request.mounts) == 1 + len(expected)
     for m in request.mounts:
         assert Path(m.source).is_absolute(), m
