@@ -193,7 +193,8 @@ def _make_repo(tmp_path: Path) -> Path:
 def make_paths(tmp_path: Path, *, state_dir: Path | None = None) -> LoopPaths:
     """`LoopPaths` over a fresh repo. `state_dir` relocates every queue, lock and
     graveyard away from the worktree without moving the corpus."""
-    paths = LoopPaths(repo_root=make_repo(tmp_path), state_dir=state_dir)
+    repo = make_repo(tmp_path)
+    paths = LoopPaths(repo_root=repo, state_dir=state_dir if state_dir is not None else repo / "defender" / "learning")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return paths
 

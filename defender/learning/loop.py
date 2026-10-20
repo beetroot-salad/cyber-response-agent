@@ -16,7 +16,6 @@ if (_root := str(Path(__file__).resolve().parents[2])) not in sys.path:
 
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.core.config import (  # noqa: E402
-    DEFAULT_PATHS,
     RunAlreadyLive,
     RunUnprocessable,
     StageAbort,
@@ -39,7 +38,7 @@ from defender.learning.core.validate import (  # noqa: E402
 #: A facade: the two authoring drains, the CLI, and the helpers other packages import through
 #: this name rather than reaching into `core/`.
 __all__ = [
-    "DEFAULT_PATHS", "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
+    "RunAlreadyLive", "RunUnprocessable", "StageAbort", "LoopPaths",
     "author_drain", "lead_author_drain",  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
     "main",
     "normalize_disposition", "reply_document_text", "MalformedReply",

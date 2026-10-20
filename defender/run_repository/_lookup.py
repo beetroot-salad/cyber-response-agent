@@ -261,6 +261,11 @@ class RunsRepository:
         self._io = io
 
     @property
+    def tenant(self) -> Tenant:
+        """The accepted identity this repository carries, including its data-root layout."""
+        return self._tenant
+
+    @property
     def tenant_id(self) -> TenantId:
         return self._tenant.id
 

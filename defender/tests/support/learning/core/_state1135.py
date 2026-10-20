@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from defender.learning.core.config import loop_paths
-from defender.learning.core.state import STATE_DIR_ENV, LearningState
+from defender.learning.core.config import LoopPaths
+from defender.learning.core.state import LearningState
+
+STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 
 def set_state_dir(monkeypatch, root: Path) -> Path:
@@ -23,7 +25,10 @@ def set_state_dir(monkeypatch, root: Path) -> Path:
 
 def env_state() -> LearningState:
     """A handle over the root the environment currently names (what a launcher entry opens)."""
-    return LearningState.open(loop_paths())
+    import os
+
+    root = Path(os.environ[STATE_DIR_ENV])
+    return LearningState.open(LoopPaths(repo_root=root, state_dir=root))
 
 
 def state_over(root: Path) -> LearningState:

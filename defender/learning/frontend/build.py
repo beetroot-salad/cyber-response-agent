@@ -17,7 +17,7 @@ from defender.execution._venv import reexec_into_venv  # noqa: E402
 if __name__ == "__main__":
     reexec_into_venv(__file__)
 
-from defender.learning.core.config import LoopPaths, loop_paths  # noqa: E402
+from defender.learning.core.config import LoopPaths  # noqa: E402
 from defender.learning.frontend import serialize, serialize_queues  # noqa: E402
 from defender.presentation.visualize_primitives import (  # noqa: E402
     esc_untrusted,
@@ -517,9 +517,9 @@ def render(view: dict) -> str:
     )
 
 
-def main(paths: LoopPaths | None = None) -> int:
-    """Both pages, into this directory. `paths` is the queue page's input; `None` resolves the
-    state root at call time."""
+def main(paths: LoopPaths) -> int:
+    """Both pages, into this directory, for the explicitly selected tenant."""
+    queues = serialize_queues.stamped_view(paths)
     view = serialize.stamped_view()
 
     json_out = HERE.parent / "lessons.json"
@@ -531,7 +531,6 @@ def main(paths: LoopPaths | None = None) -> int:
     counts = {k: len(v["lessons"]) for k, v in view["groups"].items()}
     print(f"wrote {json_out.relative_to(REPO_ROOT)} + {html_out.relative_to(REPO_ROOT)} — {counts}")
 
-    queues = serialize_queues.stamped_view(paths if paths is not None else loop_paths())
     q_json = HERE.parent / "queues.json"
     q_json.write_text(serialize_queues.dump_contract(queues), encoding="utf-8")
     q_html = HERE.parent / "queues.html"
@@ -544,4 +543,10 @@ def main(paths: LoopPaths | None = None) -> int:
 if __name__ == "__main__":
     from defender._log import configure_from_env
     configure_from_env()
-    sys.exit(main())
+    import argparse
+    from defender.learning.core.cli import command_line_paths
+
+    parser = argparse.ArgumentParser(description="Build this tenant's learning queue pages")
+    parser.add_argument("--tenant", required=True)
+    args = parser.parse_args()
+    sys.exit(main(command_line_paths(parser, args.tenant)))

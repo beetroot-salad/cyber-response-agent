@@ -62,8 +62,6 @@ _ROW_FIELDS = ("tenant_id", "created_at")
 #: `lint_run_records`'s import arm).
 _DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 
-#: The learning-state knob O13's widened refusal compares the data root against.
-_LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 class TenantRefused(Exception):
     """The one refusal shape (#0, F0/J29) for every tenant owner — this module (acceptance
@@ -847,9 +845,8 @@ def _read_row(paths: _TenantPaths) -> TenantRow:
 def resolve_data_root() -> Path:
     """The one path from `DEFENDER_DATA_ROOT` to an absolute, symlink-resolved root. No
     default: an unset or empty value is refused, naming the variable (settled by the user).
-    Carries O13's widened learning-state-overlap refusal (moved here by fork J24: it must run
-    wherever the data root resolves, siblings included). Called ONCE, by an entry point; the
-    root is handed inward from there."""
+    Called once by an entry point; the root is handed inward from there. Learning state now
+    belongs to the selected tenant below this root; there is no ambient state-root override."""
     raw = os.environ.get(_DATA_ROOT_ENV, "")
     if not raw:
         raise TenantRefused(f"{_DATA_ROOT_ENV} is not set — there is no default data root")
@@ -857,19 +854,7 @@ def resolve_data_root() -> Path:
     if not root.is_absolute():
         raise TenantRefused(f"{_DATA_ROOT_ENV}={raw!r} must be an absolute path")
     resolved = _resolve_or_refuse(root)
-    _refuse_widened_learning_state_overlap(resolved)
     return resolved
-
-
-def _refuse_widened_learning_state_overlap(data_root: Path) -> None:
-    raw = os.environ.get(_LEARNING_STATE_ENV)
-    if not raw:
-        return
-    learning = _resolve_or_refuse(Path(raw))
-    if learning == data_root or data_root in learning.parents or learning in data_root.parents:
-        raise TenantRefused(
-            f"{_LEARNING_STATE_ENV}={learning} overlaps the data root {data_root} — learning "
-            "state and tenant data must not share a tree")
 
 
 def runs_base_for(tenant: Tenant) -> Path:

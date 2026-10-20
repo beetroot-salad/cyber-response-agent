@@ -6,8 +6,8 @@ and stuck reports, the gap ledger, the disposition reports, the lock files — i
 `LearningState`, opened at an entry point on an EXISTING root (`LearningState.open(paths)`). No
 production module outside this one composes, opens, lists, locks or renames a path to one of
 those records (the census in `tests/learning/state_contracts/test_1135_front_door.py` holds that).
-`runs/`, under the same root, is #1166's and is still reached by path, and the eval harness
-seeds its own scratch tree by path; neither is a record of this handle.
+The retired `runs/` bundles are preserved only by offline adoption; there is no runtime
+reader for them. The eval harness seeds its own explicit scratch tree by path.
 
 A planted link, hard link, FIFO, or a folder where a file belongs, anywhere below the root is
 refused as `StateRefused`, never followed and never read as absent (the display verbs below
@@ -18,8 +18,9 @@ it: the queue page, the run-end enqueue, the judge and the eval harness are the 
 exemptions (the display verbs convert it to an unreadable count for the page,
 `run_common.enqueue_curation` catches it at the run-end enqueue, `branch/cli._grade` for the
 judge, `evals/harness.run_author` for the harness). Ordinary I/O errors
-keep today's routes. A link at or above the root is operator configuration and is followed once,
-at `open`.
+keep today's routes. A tenant learning root must be a real directory: `open` refuses an
+existing or dangling root link before resolving it. Explicit scratch roots retain their
+resolved-once semantics.
 
 The verbs are queue-shaped: records are named by their meaning (channel, request key, delivery
 id, lock role), never by a path, and rename and lock are private to the file backend. The one
@@ -57,6 +58,9 @@ from defender._io import (
     move_at,
     open_lock_at,
     stat_entry,
+    read_plain_bytes,
+    guarded_mkdir,
+    write_guarded,
 )
 
 from defender.learning.core.config import DrainLabel
@@ -69,7 +73,6 @@ _logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
-STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 
 class StateRefused(BaseException):  # noqa: N818 — named for the refusal it reports, like `NotPlainEntry`
@@ -349,15 +352,16 @@ class LearningState:
 
     @classmethod
     def open(cls, paths: LoopPaths) -> LearningState:
-        """Hold the state root `paths` names, resolved once to its real path (a link at or above
-        it is operator configuration, followed here and nowhere else). The root must exist: a
-        missing root, or one that is not a folder, is a `FatalConfigError` naming it and
-        `DEFENDER_LEARNING_STATE_DIR`. Nothing is created."""
-        root = Path(paths.state_root).resolve()
+        """Hold an existing state root. Tenant roots must be real directories; explicit
+        scratch roots retain their resolved-once handle semantics. Nothing is created."""
+        original = Path(paths.state_root)
+        if paths.tenant is not None and original.is_symlink():
+            raise FatalConfigError(f"the tenant learning state root {original} must be a real directory, not a symlink")
+        root = original.resolve()
         if not root.is_dir():
             raise FatalConfigError(
-                f"the learning state root {root} does not exist or is not a folder — create it, "
-                f"or point {STATE_DIR_ENV} at an existing folder (nothing here creates it)")
+                f"the learning state root {original if paths.tenant is not None else root} does not exist or is not a folder — "
+                "provision the tenant with tenant.py setup (nothing here creates it)")
         return cls(hold(root), root)
 
     def close(self) -> None:
@@ -908,3 +912,276 @@ class LearningState:
         """`([(record id, body)], unreadable)` of the live delivery records, for the queue page:
         read-only, so a torn record is counted and never quarantined (that is the drain's verb)."""
         return self._json_records(_DELIVERY)
+
+# ---------------------------------------------------------------------------------------------
+# Offline setup adoption. Runtime record I/O remains owned by this module.
+# ---------------------------------------------------------------------------------------------
+
+
+def _adoption_locks() -> tuple[str, ...]:
+    roles = (REPO_LOCK, AUTHOR_DRAIN_LOCK, LEAD_AUTHOR_DRAIN_LOCK,
+             LEAD_QUEUE_LOCK, CURATOR_DRAIN_LOCK)
+    return tuple(sorted({role.file for role in roles} | {
+        channel.append_lock for channel in (FINDINGS, QUESTIONER_FINDINGS, PITFALLS)}))
+
+
+def _adoption_entries() -> tuple[str, ...]:
+    """The live state children, plus retired bundles preserved during offline adoption."""
+    return (*sorted({_QUEUE, _DELIVERY, _PENDING, _PENDING_LEADS, _PENDING_PITFALLS} |
+                    {name.split('/')[0] for name in _adoption_locks()}), "runs")
+
+
+class LearningAdoption:
+    """D10's aside/copy/publish/delete protocol for an explicitly selected setup source.
+
+    Construction checks the complete plan without writes. `run` requires quiescence, keeps
+    all existing learning locks held, and publishes by a same-filesystem directory rename.
+    A rerun uses matching tokens to distinguish unpublished copies from committed data.
+    """
+
+    def __init__(self, destination: Path, source: Path | None, *, tenant_id: str,
+                 data_root: Path, repo_root: Path) -> None:
+        from defender.tenancy._tenant import TenantRefused
+
+        self.destination = destination
+        self.source = source
+        self.aside = source / f".adopting-to-{tenant_id}" if source is not None else None
+        self.partial = destination.with_name(destination.name + ".adopting")
+        self.stage = self.aside.with_name(self.aside.name + ".stage") if self.aside else None
+        self.entries = _adoption_entries()
+        self.in_place = False
+        self.published = False
+        if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+            raise TenantRefused(f"{destination} must be a real learning directory, not a link or file")
+        if source is None:
+            if os.path.lexists(self.partial) or os.path.lexists(destination / ".adoption"):
+                raise TenantRefused(f"{destination}: interrupted learning adoption requires its explicit source")
+            return
+        if not source.is_dir():
+            raise TenantRefused(f"learning migration source {source} is not an existing directory")
+        resolved = source.resolve()
+        if resolved == destination.resolve():
+            self.in_place = True
+            return
+        for root in (data_root.resolve(), repo_root.resolve()):
+            if resolved == root or root.is_relative_to(resolved) or (
+                    root == data_root.resolve() and resolved.is_relative_to(root)):
+                raise TenantRefused(f"learning migration source {source} overlaps {root}")
+        self._validate_existing_state()
+
+    def _validate_existing_state(self) -> None:
+        from defender.tenancy._tenant import TenantRefused
+
+        assert self.aside is not None
+        source, destination = self.source, self.destination
+        assert source is not None
+        assert self.stage is not None
+        aside_exists = self._validate_staging()
+        self.source_token = self._token(self.aside) if aside_exists else None
+        self.destination_token = self._token(destination)
+        occupied = destination.exists() and any(destination.iterdir())
+        if aside_exists:
+            if self.source_token is None:
+                if any(self.aside.iterdir()) or self.destination_token is None:
+                    raise TenantRefused(f"{self.aside} has no adoption token")
+                self.published = True
+            elif occupied:
+                if self.source_token != self.destination_token:
+                    raise TenantRefused(f"{destination} and {self.aside} have different adoption ownership; never merge")
+                self.published = True
+            else:
+                for name in self.entries:
+                    if os.path.lexists(source / name) and os.path.lexists(self.aside / name):
+                        raise TenantRefused(f"{source / name} conflicts with {self.aside / name}")
+        elif self.destination_token is None and occupied and self._remaining():
+            raise TenantRefused(f"{destination} is occupied: {', '.join(p.name for p in destination.iterdir())}; never merge")
+        bases = (source, self.aside) if aside_exists else (source,)
+        self._check_unpublished_permissions(bases)
+
+    def _check_unpublished_permissions(self, bases: tuple[Path, ...]) -> None:
+        if not self.published:
+            for base in bases:
+                self._check_permissions(base)
+
+    def _validate_staging(self) -> bool:
+        from defender.tenancy._tenant import TenantRefused
+
+        assert self.stage is not None
+        assert self.aside is not None
+        if os.path.lexists(self.stage):
+            if (self.stage.is_symlink() or not self.stage.is_dir()
+                    or any(p.name != ".adoption" for p in self.stage.iterdir())):
+                raise TenantRefused(f"{self.stage}: unknown adoption stage")
+            self._token(self.stage)
+        aside_exists = os.path.lexists(self.aside)
+        if aside_exists and (self.aside.is_symlink() or not self.aside.is_dir()):
+            raise TenantRefused(f"{self.aside} must be a real adoption directory")
+        if aside_exists:
+            unknown = [child for child in self.aside.iterdir()
+                       if child.name not in {*self.entries, ".adoption"}]
+            if unknown:
+                raise TenantRefused(f"{self.aside}: unknown adoption entries: {', '.join(map(str, unknown))}")
+        if os.path.lexists(self.partial) and (not aside_exists or self.partial.is_symlink()
+                                               or not self.partial.is_dir()):
+            raise TenantRefused(f"{self.partial} has no trusted adoption source")
+        return aside_exists
+
+    @staticmethod
+    def _token(root: Path) -> str | None:
+        from defender.tenancy._tenant import TenantRefused
+        path = root / ".adoption"
+        if not os.path.lexists(path):
+            return None
+        try:
+            token = read_plain_bytes(path).decode("utf-8")
+            import uuid
+            uuid.UUID(token.strip())
+        except (OSError, ValueError) as invalid:
+            raise TenantRefused(f"{path}: invalid adoption token: {invalid}") from invalid
+        return token
+
+    def _remaining(self) -> list[Path]:
+        assert self.source is not None
+        return [self.source / name for name in self.entries if os.path.lexists(self.source / name)]
+
+    def _check_permissions(self, base: Path) -> None:
+        from defender.tenancy._tenant import TenantRefused
+        if not os.access(base, os.W_OK | os.X_OK):
+            raise TenantRefused(f"{base}: learning adoption requires write and search permission")
+        for name in self.entries:
+            path = base / name
+            if path.is_symlink() or not path.is_dir():
+                continue
+            for parent, _children, _files in os.walk(path, followlinks=False):
+                if not os.access(parent, os.W_OK | os.X_OK):
+                    raise TenantRefused(f"{parent}: learning adoption requires write and search permission")
+
+    @staticmethod
+    def _remove(path: Path) -> None:
+        import shutil
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+    @staticmethod
+    def _copy(source: Path, destination: Path) -> None:
+        import shutil
+        shutil.copytree(source, destination, symlinks=True)
+        if os.geteuid() == 0:
+            for parent, directories, files in os.walk(source, followlinks=False):
+                for name in [".", *directories, *files]:
+                    original = Path(parent) / name
+                    copied = destination / original.relative_to(source)
+                    info = original.lstat()
+                    os.chown(copied, info.st_uid, info.st_gid, follow_symlinks=False)
+                    # chown can clear set-id mode bits; restore the source metadata last.
+                    shutil.copystat(original, copied, follow_symlinks=False)
+
+    def run(self, *, before_move: Callable[[], object] | None = None) -> None:
+        from defender.tenancy._tenant import TenantRefused
+
+        try:
+            with contextlib.ExitStack() as locks:
+                self._lock_existing(locks)
+                if before_move is not None:
+                    before_move()
+                if self.source is None or self.in_place:
+                    guarded_mkdir(self.destination, base=self.destination.parent)
+                    return
+                assert self.aside is not None
+                if self.stage is not None and self.stage.exists():
+                    self._remove(self.stage)
+                if not self.aside.exists() and self.destination_token is not None:
+                    (self.destination / ".adoption").unlink()
+                    self._refuse_remaining()
+                    return
+                if not self.aside.exists() and not self._remaining():
+                    guarded_mkdir(self.destination, base=self.destination.parent)
+                    return
+                if not self.aside.exists():
+                    self._prepare_aside(locks)
+                if not self.published:
+                    self._publish()
+                self._finish()
+        except OSError as failed:
+            raise TenantRefused(f"learning adoption {self.source} -> {self.destination}: {failed}") from failed
+
+    def _lock_existing(self, locks: contextlib.ExitStack) -> None:
+        from defender.tenancy._tenant import TenantRefused
+        import fcntl
+        import stat
+
+        if self.source is None or self.in_place:
+            return
+        bases = [self.source]
+        if self.aside is not None and self.aside.exists():
+            bases.append(self.aside)
+        for base in bases:
+            for name in _adoption_locks():
+                lock = base / name
+                if not os.path.lexists(lock):
+                    continue
+                # Parent components must also be real: a planted queue-folder link must
+                # never cause setup to take a lock in another tree.
+                if any(parent.is_symlink() for parent in lock.parents if parent != base
+                       and parent.is_relative_to(base)):
+                    raise TenantRefused(f"{lock}: linked learning lock parent")
+                fd = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                locks.callback(os.close, fd)
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise TenantRefused(f"{lock}: learning lock must be a regular file")
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError as held:
+                    raise TenantRefused(f"{lock}: learning migration lock is held") from held
+
+    def _prepare_aside(self, locks: contextlib.ExitStack) -> None:
+        import fcntl
+        import uuid
+
+        assert self.source is not None
+        assert self.aside is not None
+        assert self.stage is not None
+        modified_dirs: dict[Path, os.stat_result] = {}
+        for name in _adoption_locks():
+            lock = self.source / name
+            if os.path.lexists(lock):
+                continue
+            if lock.parent != self.source and lock.parent.exists():
+                modified_dirs.setdefault(lock.parent, lock.parent.stat())
+            guarded_mkdir(lock.parent, base=self.source)
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o644)
+            locks.callback(os.close, fd)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for directory, info in modified_dirs.items():
+            os.utime(directory, ns=(info.st_atime_ns, info.st_mtime_ns))
+        guarded_mkdir(self.stage, base=self.source)
+        write_guarded(self.stage / ".adoption", str(uuid.uuid4()) + "\n", mode="create")
+        self.stage.rename(self.aside)
+
+    def _publish(self) -> None:
+        assert self.aside is not None
+        for path in self._remaining():
+            path.rename(self.aside / path.name)
+        if self.partial.exists():
+            self._remove(self.partial)
+        self._copy(self.aside, self.partial)
+        self.partial.rename(self.destination)
+
+    def _finish(self) -> None:
+        assert self.aside is not None
+        for child in self.aside.iterdir():
+            if child.name != ".adoption":
+                self._remove(child)
+        (self.aside / ".adoption").unlink(missing_ok=True)
+        self.aside.rmdir()
+        (self.destination / ".adoption").unlink()
+        self._refuse_remaining()
+
+    def _refuse_remaining(self) -> None:
+        from defender.tenancy._tenant import TenantRefused
+        remaining = self._remaining()
+        if remaining:
+            raise TenantRefused(f"learning adoption completed but source records were recreated: "
+                                f"{', '.join(map(str, remaining))}; preserve and move them by hand")

@@ -656,7 +656,9 @@ def current_tenant() -> Any:
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     existing = sorted(p.name for p in root.iterdir()
                       if (p / "tenant.json").is_file()) if root.is_dir() else []
-    return set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
+    tenant = set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
+    tenant.learning.mkdir(exist_ok=True)  # setup provisions mutable state for launched runs
+    return tenant
 
 
 def tenant_episodes(data_root: Path) -> Path:
@@ -717,7 +719,9 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
         existing = sorted(p.name for p in root.iterdir()
                           if (p / "tenant.json").is_file()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
-    base = _tenant.runs_base_for(set_up_tenant(root, tenant_id))
+    tenant = set_up_tenant(root, tenant_id)
+    tenant.learning.mkdir(exist_ok=True)  # setup provisions the real launcher queue root
+    base = _tenant.runs_base_for(tenant)
     base.mkdir(parents=True, exist_ok=True)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
