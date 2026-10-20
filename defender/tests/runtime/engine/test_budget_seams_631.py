@@ -448,30 +448,36 @@ def test_enforce_flag_unrecognized_token(monkeypatch):
         driver.enforcement_enabled()
 
 
-def test_the_learning_state_root_and_the_runs_base_cannot_be_the_same_dir(
+def test_retired_learning_state_override_cannot_redirect_tenant_state(
     tmp_path, monkeypatch, d9_tenant, data_root,
 ):
-    """The learning state root and the runs base cannot resolve to the same directory: pairing the two onto one..."""
+    """O1: a retired ambient root cannot change accepted runs or actual tenant state reads."""
     from defender.tenancy import _tenant
+    from defender.learning.core.config import LoopPaths
+    from defender.learning.core.state import FINDINGS, LearningState
 
-    def runs_base() -> Path:
-        return _tenant.runs_base_for(T1106.accept(_tenant.resolve_data_root(), d9_tenant))
-
-    base = T1106.accept(data_root, d9_tenant).runs
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(base))
-    with pytest.raises(_tenant.TenantRefused):  # the owner's one refusal class (#1078 d0)
-        runs_base()
-
+    tenant = T1106.accept(data_root, d9_tenant)
+    tenant.learning.mkdir(exist_ok=True)
+    expected = {"finding_id": "tenant/0", "run_id": "tenant"}
+    with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
+        assert state.append(FINDINGS, [expected]) == (1, 0)
     alias = tmp_path / "alias"
     alias.symlink_to(data_root)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(alias))
-    with pytest.raises(_tenant.TenantRefused):
-        runs_base()
-
-    learn = tmp_path / "learn"
-    learn.mkdir()
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learn))
-    assert runs_base() == data_root.resolve() / d9_tenant / "runs"
+    decoy = tmp_path / "ambient-learning"
+    queue = decoy / FINDINGS.queue
+    queue.parent.mkdir(parents=True)
+    decoy_bytes = b'{"finding_id":"ambient/0","run_id":"ambient"}\n'
+    queue.write_bytes(decoy_bytes)
+    for ambient in (tenant.runs, alias, decoy):
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(ambient))
+        accepted = T1106.accept(_tenant.resolve_data_root(), d9_tenant)
+        assert _tenant.runs_base_for(accepted) == data_root.resolve() / d9_tenant / "runs"
+        paths = LoopPaths.for_tenant(accepted)
+        assert paths.state_root == tenant.learning
+        with LearningState.open(paths) as state:
+            assert state.rows(FINDINGS) == [expected]
+    assert queue.read_bytes() == decoy_bytes
+    assert not (tenant.runs / FINDINGS.queue).exists()
 
 
 def test_every_agent_construction_pins_retries_explicitly(tmp_path):

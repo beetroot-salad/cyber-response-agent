@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from defender.tests.support.shared.contracts._frontend_outputs import frontend_outputs_lock  # noqa: F401 — shared pytest fixture
+
 from defender.tenancy import _tenant
 from defender import run as run_py
 from defender.learning.branch import cli as branch_cli
@@ -421,6 +423,7 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
 @pytest.mark.parametrize("identity", [
     [], ["--tenant", "not-a-tenant"], ["--tenant", H.OTHER],
 ], ids=["missing", "malformed", "unknown"])
+@pytest.mark.usefixtures("frontend_outputs_lock")
 def test_1186_learning_operator_commands_refuse_identity_before_state_access(
     data_root: Path, tmp_path: Path, script: str, args: list[str], identity: list[str],
 ):
