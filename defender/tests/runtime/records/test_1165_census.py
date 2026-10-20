@@ -132,6 +132,8 @@ RESIDUE = {
     ("hooks.inject_system_skill_description", "read_description", "read_text_soft"): (1, "nonrecord", ('skill_path',)),
     ("runtime.bash_policy", "_load_policy", "read_text_utf8"): (1, "nonrecord", ('path',)),
     ("box._docker", "_own_container_ids", "read_text_soft"): (2, "nonrecord", ('hostname_path', 'mountinfo_path')),
+    # #1205: send the request frame to the Docker client's stdin pipe, not a run record.
+    ("box._output", "_send", "os.write"): (1, "nonrecord", ("fd",)),
     ("box._clock", "write_clock", "write_guarded"): (1, "job_state", ('clock_file',)),
     ("box._clock", "prepare_clock", "guarded_mkdir"): (1, "job_state", ('where',)),
     ("box._clock", "prepare_clock", "write_guarded"): (1, "job_state", ('clock_file',)),
