@@ -717,7 +717,9 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
         existing = sorted(p.name for p in root.iterdir()
                           if (p / "tenant.json").is_file()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
-    base = _tenant.runs_base_for(set_up_tenant(root, tenant_id))
+    tenant = set_up_tenant(root, tenant_id)
+    tenant.learning.mkdir(exist_ok=True)  # setup provisions the real launcher queue root
+    base = _tenant.runs_base_for(tenant)
     base.mkdir(parents=True, exist_ok=True)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
@@ -1024,16 +1026,15 @@ class FakeCapture:
         return built
 
 
-#: The learning state root's override (`learning/core/config.py::loop_paths`, read at call time).
+#: Explicit test scratch setting for injected state handles; production ignores this variable.
 LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 
 def isolate_learning_state(tmp_path: Path, monkeypatch: Any) -> Path:
-    """Point the learning state root inside `tmp_path`. An ACCEPTED launch ends in the family
-    judge, which appends its findings (e.g. the mechanical `unreachable-difference` one) to the
-    questioner queue under `loop_paths().state_root` — by default `defender/learning/` in the
-    checkout itself, where a later test asserting nothing was written outside a run's records
-    finds it. The root must exist: nothing creates it."""
+    """Create and name explicit test scratch state for helpers that inject a state handle.
+
+    Production launchers select tenant.learning and ignore this retired environment setting.
+    """
     root = tmp_path / "learning-state"
     root.mkdir(exist_ok=True)
     monkeypatch.setenv(LEARNING_STATE_ENV, str(root))
