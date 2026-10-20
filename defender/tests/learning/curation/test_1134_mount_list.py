@@ -441,7 +441,7 @@ def test_a_relative_repo_root_is_refused_before_anything_is_held_never_joined_to
     assert relative.repo_root == rel_root
     assert label.writable_trees(relative) == listed
     request = drains._drain_box_request(
-        rel_root, "batch-1", label, LoopPaths(repo_root=tmp_path / MAIN))
+        rel_root, "batch-1", label, LoopPaths(repo_root=tmp_path / MAIN, state_dir=tmp_path / MAIN / "defender" / "learning"))
     assert rw_mounts(request) == [(m, m) for m in listed]
     assert ro_mounts(request) == [(rel_root, rel_root)]
     with pytest.raises(ValueError):  # noqa: PT011 — DrainTrees' mount refusal; the type is the contract

@@ -21,7 +21,7 @@ from defender.learning.leads import lead_author  # type: ignore[import-not-found
 
 def _paths(tmp_path) -> LoopPaths:
     """`LoopPaths` over `tmp_path` with its learning state root made (never created lazily)."""
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
     paths.state_root.mkdir(parents=True, exist_ok=True)
     return paths
 
@@ -29,7 +29,7 @@ def _paths(tmp_path) -> LoopPaths:
 def test_has_curator_work_raises_on_bad_threshold(tmp_path, monkeypatch):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "high")
     with pytest.raises(FatalConfigError):
-        drains._has_curator_work(_state1135.state_for_paths(LoopPaths(repo_root=tmp_path)))
+        drains._has_curator_work(_state1135.state_for_paths(LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")))
 
 
 def test_has_lead_author_work_raises_on_bad_pitfalls_threshold_with_marker_queued(

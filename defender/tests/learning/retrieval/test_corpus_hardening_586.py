@@ -88,7 +88,7 @@ def test_the_real_lessons_cli_survives_a_c_locale_over_the_real_corpus(tmp_path)
 def test_the_curator_preflight_tolerates_what_the_walk_tolerates(tmp_path, capsys):
     """demand (review) — ``iter_lessons`` warn-SKIPS an unreadable lesson, so the id pre-flight
     sitting beside it must not CRASH on one."""
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
     cfg = build_author_config(paths, trees=author_trees(paths), state=open_state(paths))
     d = cfg.corpus_dir
     d.mkdir(parents=True, exist_ok=True)  # the trees made the mount point (a drain's always exists)
