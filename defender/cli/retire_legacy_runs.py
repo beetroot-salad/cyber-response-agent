@@ -1,5 +1,34 @@
 #!/usr/bin/env python3
-"""Move a tenant's pre-#1187 entries aside, once (#1187 Flow 6)."""
+"""Move a tenant's pre-#1187 entries aside, once (#1187 Flow 6).
+
+Since #1187 a run folder is named by a bare UUID, an episode lives at
+``<data root>/<T>/episodes/<uuid>/``, and nothing reads ``_tenant.json`` or ``_episodes``. The
+tenant's runs listing refuses anything else in ``<T>/runs`` and names this command. It moves,
+by rename, with nothing copied or deleted:
+
+  * every entry of ``<T>/runs`` that is not a UUID run folder or a sidecar file of one (old
+    run folders and their sidecars, ``_tenant.json``, ``_episodes``) into ``<T>/runs-legacy/``;
+  * with ``--old-episodes-root DIR`` (the retired ``DEFENDER_EPISODES_BASE``, named here; no
+    environment is read for it), every entry of DIR into ``<T>/episodes-legacy/``, whatever
+    tenant it once ran for. An absent DIR is nothing to move.
+
+It reports each move on stdout. A second run finds nothing to move and changes nothing; a run
+stopped midway is finished by running it again.
+
+BEFORE IT RUNS: no run, fork (a branch launch) or drain may be in flight on this data root, from
+any checkout — the command does not detect one — and no checkout from before #1187 may use the
+data root again (it would re-create ``_tenant.json``). Drain or clear the curation queue on the
+old code first: the new drain quarantines a queued row naming an old run id.
+
+It refuses before moving anything, listing everything it found, when an entry to move is a link
+or anything but a folder or a regular file (remove it by hand: ``rm`` the link), when
+``<T>/runs-legacy`` or ``<T>/episodes-legacy`` exists and is not a real folder, when a name is
+already taken in its destination, or when DIR (or an entry, or a destination) is on another
+filesystem than ``<T>``: the command only renames.
+
+Usage:
+  python3 defender/cli/retire_legacy_runs.py --tenant T [--old-episodes-root DIR]
+"""
 from __future__ import annotations
 
 import argparse

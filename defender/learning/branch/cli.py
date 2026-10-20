@@ -1,5 +1,35 @@
 #!/usr/bin/env python3
-"""Fork one finished run into a questioner-authored family of worlds, calibrate it, and run it."""
+"""Fork one finished run into a questioner-authored family of worlds, calibrate it, and run it.
+
+The operator names a source run and the message to branch at; this module runs the episode's
+steps (`branch/steps.py::Step`) in order:
+
+1. **Launch checks** (not a `Step`). Everything that can refuse before anything is spent: the
+   tenant's gather grant serves at least one system, the branch point is in range, the source
+   alert is a plain file, the source's stamp can anchor a family, and every role a branch uses
+   has a usable model (the oracle's two included, M25).
+2. **`Step.QUESTIONER`.** A deny-all role authors the family: a base story and worlds that each
+   carry natural-language facts over the tenant's served systems. Its output is validated into
+   `Family` and held to one identity gate; a reply that does not validate records `refused`.
+3. **`Step.PREFLIGHT`.** Every original call is replayed through each fact world's oracle and
+   verifier to calibrate it (`preflight_replay`). The forged rows and recorded facts it verifies
+   are frozen as that world's store; no served answer is kept. The write-once outcome record
+   (`outcome.yaml`) says `accepted`, `unusable` or `refused` before any sibling starts.
+4. **`Step.RUNS`.** On `accepted`, each servable world runs as its own
+   `run.py --tenant T --episode <episode_id> --world <label>` process, started together in the
+   episode's container (`runs/`, made with the tenant's record just before), each holding an
+   equal slice of the episode's query rate. A sibling that exits without its own world record is recorded
+   `did not finish`; once two worlds have failed the family is unusable and the siblings still
+   running are stopped (N18).
+5. **`Step.VERIFY`, then `Step.JUDGE`.** Every sibling's scrub verdict and provenance stamp is
+   checked and each verified world archived (a world the archive refuses is recorded
+   `not archived`); agreeing stamps on an `accepted` family write the family stamp. The judge
+   grades the archive.
+
+Siblings are always `run.py` processes (for the box lifecycle, reap scan, role preflight and
+provenance stamp); this module never runs an investigation in-process. A launch never reuses an
+episode directory: a relaunch, or a second launch beside a running one, is a new episode (N17).
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,46 @@
 #!/usr/bin/env python3
-"""defender/cli/tenant.py — the tenant lifecycle's operator command."""
+"""defender/cli/tenant.py — the tenant lifecycle's operator command.
+
+    python3 defender/cli/tenant.py new-id
+    python3 defender/cli/tenant.py scaffold <tenant-id> <empty dir>
+    python3 defender/cli/tenant.py setup <tenant-id>
+    python3 defender/cli/tenant.py check <tenant-id> | --folder <path>
+    python3 defender/cli/tenant.py migrate <tenant-id> <new knowledge folder>   # one-off
+
+A tenant's knowledge (its `settings/` and `agent/` halves) lives in the tenant's OWN repo, never
+in the product repo. `scaffold` starts one: it copies `knowledge/tenant-template` into an empty
+directory, writes `agent/.tenant-id`, and commits it on branch `main`; the operator pushes it to
+a new private repo. To deploy it, the operator clones it ON THE HOST into the data root —
+
+    git clone <tenant repo> "$DEFENDER_DATA_ROOT/<tenant-id>/knowledge"
+
+(with a credential helper or an ssh agent, never a credential in the URL) — and, once the clone
+has exited 0, runs `setup <tenant-id>`. Setup ADOPTS the placed folder; it never fetches,
+copies or writes into it, and makes no git call. It runs the one-tenant guard, then the folder
+rules (no link or special file in either half, `agent/.tenant-id` naming this tenant, nothing at
+the folder's top level outside the allow-list, the settings files parse) and run start's own
+readiness function (`run_tenant.resolve_run_tenant`: anything that would make a run refuse is
+setup's refusal), and only then writes the tenant's row through `create_tenant`. It provisions that tenant's
+real `learning/` directory, or adopts an explicitly selected legacy source with
+`--learning-state-from PATH`. Adoption requires quiescence and never discovers an ambient
+source. A re-run over a finished, provisioned tenant runs every rule again and writes nothing.
+
+`check` reports what setup does not refuse: the grant census against the RUNNING code (a verb
+the adapters declare that the table leaves undecided, a row for a verb nobody declares), the
+lead-zero agreement, and — for a git clone — that `agent/.tenant-id` is what the tenant's repo
+commits (failing closed when git cannot answer). `check <id>` judges the tenant under
+`$DEFENDER_DATA_ROOT` through acceptance; `check --folder <path>` judges a tenant repo's working
+folder with no data root at all (tenant CI).
+
+`migrate` is ONE-OFF, for a tenant set up before #1120 (a row and `runs/` under the data root,
+its settings committed in the product repo until #1120 deleted them): it builds the knowledge
+folder acceptance now requires from the last copy in the checkout's history, as a new repo
+exactly like scaffold's, and the operator then runs `setup <tenant-id>`.
+
+Exit status: 0 clean, 1 a finding or a refusal, 2 a usage error. A check that could not judge (the
+grant census not taken, `.tenant-id` unverifiable) is one more finding, not a separate code, and
+the checks that need no census still run. Every refusal is printed as `[tenant.py] <message>`.
+"""
 from __future__ import annotations
 
 import argparse

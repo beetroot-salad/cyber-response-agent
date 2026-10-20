@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Defender entrypoint — investigate one alert end-to-end."""
+"""Defender entrypoint — investigate one alert end-to-end.
+
+The investigation is driven by the in-process PydanticAI driver
+(`runtime/driver.py`): materialize the run dir → run → cross-check the two live
+tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
+via `run_common.py`.
+
+Usage (every run names its tenant, and there is no default; on the host,
+clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then set it up once with
+    `python3 defender/cli/tenant.py setup <tenant>`):
+    python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
+
+Billing / credentials: the engine calls the first-party Anthropic REST API and
+needs a real billable API key. Inside a Claude Code session the *ambient*
+ANTHROPIC_API_KEY is the subscription credential (it 401s against the REST API),
+so the billable key is sourced from a `.env` file (`resolve_first_party_key`) and
+takes precedence over the ambient value.
+"""
 
 from __future__ import annotations
 

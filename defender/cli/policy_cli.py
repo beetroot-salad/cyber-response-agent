@@ -1,4 +1,23 @@
-"""`defender-policy` — the gate's audit CLI: what may this agent do, and why was that denied?"""
+"""`defender-policy` — the gate's audit CLI: what may this agent do, and why was that denied?
+
+Two subcommands:
+
+    defender-policy show <agent> --run-dir <dir> [--defender-dir <tree>]
+    defender-policy explain <agent> '<command>' --run-dir <dir> [--defender-dir <tree>] [--json]
+
+Gather's verb grant belongs to a run and is projected from one tenant's table, so `gather` also
+takes `--tenant <id>`, accepted under `$DEFENDER_DATA_ROOT` exactly as a run accepts it: the
+policy shown is the one a run for that tenant would compile.
+
+`<agent>` is a role name.
+
+This is a second consumer of the gate, never a second implementation: `explain` calls
+`permission.decide_bash`, the same function the driver calls, and prints what it returns. An
+audit tool that modelled the gate separately would certify a policy nobody runs.
+
+An operator tool, not an agent one: `hooks/_cmd_segments.OPERATOR_TOOLS` keeps it out of the
+adapter taxonomy and no agent's grant names it. An agent able to read its own gate would hold a
+map of what to attack."""
 
 from __future__ import annotations
 
