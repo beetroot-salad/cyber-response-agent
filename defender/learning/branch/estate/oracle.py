@@ -318,56 +318,89 @@ class _ArgumentRefused(Exception):
 
 
 async def _within_deadline(run: _Run, work: Callable[[], Any]) -> tuple[bool, Any]:
-    """Bound useful work, then settle owned Python execution before classifying its outcome.
+    """Emit one outcome after useful work, cancellation, and owned cleanup have settled."""
+    import anyio
 
-    Limiter waits extend the useful-work deadline. Cancellation stops the box while the
-    protected Python worker drains; terminal worker failures survive that cancellation.
-    A result returned before the watcher runs wins, but a late normal result is a timeout.
+    cancel_requested = asyncio.Event()
+    supervisor = asyncio.create_task(_settle_attempt(run, work, cancel_requested))
+    failures: list[BaseException] = []
+    # The first caller cancellation requests shutdown. Protection prevents an enclosing
+    # AnyIO scope from repeatedly cancelling this wait; direct Task.cancel() is still
+    # caught and recorded without ever cancelling the settlement task.
+    with anyio.CancelScope() as waiting:
+        while not supervisor.done():
+            try:
+                await asyncio.shield(supervisor)
+            except asyncio.CancelledError as exc:
+                waiting.shield = True
+                if not supervisor.cancelled() and not failures:
+                    failures.append(exc)
+                    cancel_requested.set()
+            except BaseException:  # noqa: BLE001 — retrieve the supervisor's failure once below
+                break
+    try:
+        in_time, result, settled_failures = supervisor.result()
+        failures.extend(settled_failures)
+    except BaseException as exc:  # noqa: BLE001 — cancellation and failure share one final decision
+        failures.append(exc)
+    if len(failures) == 1:
+        raise failures[0]
+    if failures:
+        raise BaseExceptionGroup("Oracle attempt failed", failures)
+    return in_time, result
+
+
+async def _settle_attempt(
+    run: _Run, work: Callable[[], Any], cancel_requested: asyncio.Event,
+) -> tuple[bool, Any, list[BaseException]]:
+    """Own the full scope lifecycle and drain workers before returning its outcome facts.
+
+    The caller requests cancellation through an event, so repeated cancellation cannot
+    interrupt this supervisor. The outer capture includes task-group and scope exits.
+    Expected deadline cancellation stays a timeout; other termination causes are retained.
     """
     import anyio
 
     outcome: list[Any] = []
-    failed: list[Exception] = []
-    shutdown_failed: list[Exception] = []
+    failures: list[BaseException] = []
     expired = False
-    with anyio.CancelScope() as scope:
-        async with anyio.create_task_group() as group:
-            async def watch() -> None:
-                nonlocal expired
-                try:
-                    while (left := run.remaining()) > 0:
-                        await anyio.sleep(left)
-                    if not outcome:
-                        expired = True
-                        scope.cancel()
-                finally:
-                    # Also covers caller cancellation. Shutdown runs alongside the worker;
-                    # removing its container/scratch belongs to the attempt's finalizer.
-                    if run.box is not None and (not outcome or run.has_box_work):
-                        with anyio.CancelScope(shield=True):
-                            try:
-                                await asyncio.to_thread(run.box.cancel)
-                            except Exception as exc:  # noqa: BLE001 — settled after the worker's failure
-                                shutdown_failed.append(exc)
-
-            group.start_soon(watch)
-            try:
-                outcome.append(await work())
-            except Exception as exc:  # noqa: BLE001 — re-raised below, as itself, not grouped
-                failed.append(exc)
-            finally:
-                group.cancel_scope.cancel()
-                with anyio.CancelScope(shield=True):
+    try:
+        with anyio.CancelScope() as scope:
+            async with anyio.create_task_group() as group:
+                async def watch() -> None:
+                    nonlocal expired
                     try:
-                        await run.settle_box_work()
-                    except Exception as exc:  # noqa: BLE001 — retain owned worker outcomes
-                        failed.append(exc)
-    failed.extend(shutdown_failed)
-    if len(failed) == 1:
-        raise failed[0]
-    if failed:
-        raise ExceptionGroup("Oracle attempt failed", failed)
-    return (True, outcome[0]) if outcome and not expired else (False, None)
+                        while (left := run.remaining()) > 0 and not cancel_requested.is_set():
+                            with anyio.move_on_after(left):
+                                await cancel_requested.wait()
+                        if not outcome:
+                            expired = not cancel_requested.is_set()
+                            scope.cancel()
+                    finally:
+                        if run.box is not None and (not outcome or run.has_box_work):
+                            with anyio.CancelScope(shield=True):
+                                try:
+                                    await asyncio.to_thread(run.box.cancel)
+                                except BaseException as exc:  # noqa: BLE001 — retain shutdown outcomes
+                                    failures.append(exc)
+
+                group.start_soon(watch)
+                try:
+                    if not cancel_requested.is_set():
+                        outcome.append(await work())
+                except Exception as exc:  # noqa: BLE001 — expected scope cancellation is handled by its owner
+                    failures.append(exc)
+                finally:
+                    group.cancel_scope.cancel()
+    except BaseException as exc:  # noqa: BLE001 — includes failures leaving either context manager
+        failures.append(exc)
+    finally:
+        try:
+            await run.settle_box_work()
+        except BaseException as exc:  # noqa: BLE001 — every worker outcome participates in settlement
+            failures.append(exc)
+    in_time = bool(outcome) and not expired
+    return in_time, outcome[0] if in_time else None, failures
 #: A tool called after another tool of the same reply already ended the attempt.
 _NOT_RUN = "Not run: this attempt had already ended."
 
