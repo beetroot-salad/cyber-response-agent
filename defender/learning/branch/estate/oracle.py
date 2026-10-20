@@ -17,6 +17,7 @@ in the world's own oracle-side state directory (`oracle/<world-uuid>/`, one writ
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import hashlib
 import json
@@ -317,22 +318,37 @@ class _ArgumentRefused(Exception):
 
 
 async def _within_deadline(run: _Run, work: Callable[[], Any]) -> tuple[bool, Any]:
-    """Await `work()` under one deadline for the whole of it — model requests, tools, host
-    checks and the verifier alike: `(True, result)`, or `(False, None)` once `run.remaining()`
-    reaches zero. Limiter waits push the deadline back as they happen.
+    """Bound useful work, then settle owned Python execution before classifying its outcome.
 
-    A `work()` that returned is reported as completed even when the deadline's cancel landed
-    as it returned: a finished result wins over the cancellation that came too late for it."""
+    Limiter waits extend the useful-work deadline. Cancellation stops the box while the
+    protected Python worker drains; terminal worker failures survive that cancellation.
+    A result returned before the watcher runs wins, but a late normal result is a timeout.
+    """
     import anyio
 
     outcome: list[Any] = []
     failed: list[Exception] = []
+    shutdown_failed: list[Exception] = []
+    expired = False
     with anyio.CancelScope() as scope:
         async with anyio.create_task_group() as group:
             async def watch() -> None:
-                while (left := run.remaining()) > 0:
-                    await anyio.sleep(left)
-                scope.cancel()
+                nonlocal expired
+                try:
+                    while (left := run.remaining()) > 0:
+                        await anyio.sleep(left)
+                    if not outcome:
+                        expired = True
+                        scope.cancel()
+                finally:
+                    # Also covers caller cancellation. Shutdown runs alongside the worker;
+                    # removing its container/scratch belongs to the attempt's finalizer.
+                    if run.box is not None and (not outcome or run.has_box_work):
+                        with anyio.CancelScope(shield=True):
+                            try:
+                                await asyncio.to_thread(run.box.cancel)
+                            except Exception as exc:  # noqa: BLE001 — settled after the worker's failure
+                                shutdown_failed.append(exc)
 
             group.start_soon(watch)
             try:
@@ -341,11 +357,17 @@ async def _within_deadline(run: _Run, work: Callable[[], Any]) -> tuple[bool, An
                 failed.append(exc)
             finally:
                 group.cancel_scope.cancel()
-    if failed:
+                with anyio.CancelScope(shield=True):
+                    try:
+                        await run.settle_box_work()
+                    except Exception as exc:  # noqa: BLE001 — retain owned worker outcomes
+                        failed.append(exc)
+    failed.extend(shutdown_failed)
+    if len(failed) == 1:
         raise failed[0]
-    # A cancellation reaching `work()` raises out of it (`CancelledError`), so `outcome` holds a
-    # value only if `work()` returned; `scope.cancelled_caught` alone may say the deadline fired.
-    return (True, outcome[0]) if outcome else (False, None)
+    if failed:
+        raise ExceptionGroup("Oracle attempt failed", failed)
+    return (True, outcome[0]) if outcome and not expired else (False, None)
 #: A tool called after another tool of the same reply already ended the attempt.
 _NOT_RUN = "Not run: this attempt had already ended."
 
@@ -529,7 +551,7 @@ class Oracle:
         attempt stops its own box as it ends, so none is left otherwise."""
         live = self._live_box
         if live is not None:
-            live.stop()
+            live.cancel()
 
     def _family_block(self) -> str:
         """The family's base story, branch point and example answers: the same bytes for every
@@ -683,7 +705,7 @@ class Oracle:
             return self._fail_text(f"the model's replies could not be used "
                                    f"({type(unusable).__name__})")
         finally:
-            # The attempt's box ends with it, an abandoned python frame inside it included.
+            # Owned Python work has settled before its container and scratch are removed.
             self._live_box = None
             box.stop()
         if not in_time:
@@ -704,7 +726,8 @@ class Oracle:
             if run.ended is not None:
                 return _NOT_RUN
             try:
-                return await run.blocking(lambda: self._tool(name, args, run))
+                invoke = run.box_work if name == "python" else run.blocking
+                return await invoke(lambda: self._tool(name, args, run))
             except _ArgumentRefused as refused:
                 return f"{name} refused: {wrap_fresh(str(refused), 'untrusted')}"
             except (_AttemptFailed, StoreFailure) as failed:
