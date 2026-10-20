@@ -231,7 +231,7 @@ def tmp_repo(tmp_path: Path):
     from defender.learning.core.config import LoopPaths  # type: ignore[import-not-found]
     from defender.tests.support.learning.curation._curator1134 import author_trees
 
-    paths = LoopPaths(repo_root=repo)
+    paths = LoopPaths(repo_root=repo, state_dir=repo / "defender" / "learning")
     from defender.tests.support.learning.curation._curator1134 import open_state
     state = open_state(paths)
     cfg = author_mod.build_author_config(paths, state=state, trees=author_trees(paths))

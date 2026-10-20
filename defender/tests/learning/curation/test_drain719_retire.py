@@ -163,7 +163,7 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
         "from defender.learning.author import drain\n"
         "from defender.learning.core.config import LoopPaths\n"
         "from defender.learning.core.state import FINDINGS, LearningState\n"
-        "paths = LoopPaths(repo_root=Path(sys.argv[1]))\n"
+        f"paths = LoopPaths(repo_root=Path(sys.argv[1]), state_dir=Path({str(paths.state_root)!r}))\n"
         "out = drain.retire(LearningState.open(paths), channel=FINDINGS, batch_ids=['a/0'],\n"
         "                   reason='second process', max_attempts=2)\n"
         "print(out.bumped['a/0'])\n"

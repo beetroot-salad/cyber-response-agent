@@ -220,9 +220,14 @@ def _held_out_fixtures(tmp_path: Path, *members: bytes) -> Path:
     return fixtures
 
 
-def _curation_requests() -> dict[str, Path]:
+def _curation_requests(run_dir: Path) -> dict[str, Path]:
     """Every curation request on the queue: its case key -> the run folder it names."""
-    paths = S.sym("learning.core.config", "loop_paths")()
+    from defender.learning.core.config import LoopPaths
+    from defender.tenancy._tenant import requested_tenant
+
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    tenant = requested_tenant(root, Path(run_dir).parent.parent.name)
+    paths = LoopPaths.for_tenant(tenant)
     out: dict[str, Path] = {}
     for name in author_markers(paths):
         body = marker_body(Path(paths.state_root) / CURATION_QUEUE / name)
@@ -233,7 +238,7 @@ def _curation_requests() -> dict[str, Path]:
 
 def _request_key_for(run_dir: Path) -> str | None:
     """The case key of the curation request naming `run_dir`, or None when none does."""
-    for key, named in _curation_requests().items():
+    for key, named in _curation_requests(run_dir).items():
         if named.resolve() == Path(run_dir).resolve():
             return key
     return None
@@ -625,6 +630,7 @@ def test_p118_run_restarted_in_the_same_run_directory_after_th(tmp_path):
 
 def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
     planted = S.plant_tenant()
+    planted.accept().learning.mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-1")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)
@@ -676,6 +682,7 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
 
 def test_p145_input_file_changes_during_the_run_and_post_run_s(tmp_path):
     planted = S.plant_tenant()
+    planted.accept().learning.mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-2")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)
@@ -711,6 +718,7 @@ def test_p145_input_file_changes_during_the_run_and_post_run_s(tmp_path):
 
 def test_p128_held_out_copies_of_the_alert_exist_under_the_run(tmp_path):
     planted = S.plant_tenant()
+    planted.accept().learning.mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-3")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)

@@ -493,12 +493,22 @@ def grade_at(episode_dir: Path, *, runs: Any = None, **kw: Any) -> Any:
 def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any) -> Any:
     """`learning.judge.grade_episode` over the episode at `episode_dir` (`grade_at`) — the one
     grading entry point since #1224 retired the offline `grade_family`. `judge=None` is
-    `scripted_judge()`; `state=None` is the env-configured learning state (each suite points it
-    inside `tmp_path`)."""
+    `scripted_judge()`. With no state argument, this test helper injects an explicit scratch
+    handle when configured, otherwise the episode tenant's prepared learning state. This
+    does not exercise the launcher's production state selection."""
     if state is None:
         from defender.tests.support.learning.core._state1135 import env_state
 
-        state = env_state()
+        if os.environ.get(STATE_DIR_ENV):
+            state = env_state()
+        else:
+            from defender.learning.core.config import LoopPaths
+            from defender.learning.core.state import LearningState
+            from defender.tenancy._tenant import requested_tenant
+
+            tenant = requested_tenant(*episode_location(episode_dir))
+            tenant.learning.mkdir(exist_ok=True)
+            state = LearningState.open(LoopPaths.for_tenant(tenant))
     return grade_at(episode_dir, judge=judge if judge is not None else scripted_judge(),
                     state=state, **kw)
 

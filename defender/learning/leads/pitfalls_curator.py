@@ -483,7 +483,7 @@ PitfallsDisposition = _disposition.PitfallsDisposition
 
 def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     *,
-    paths: _loop_config.LoopPaths | None = None,
+    paths: _loop_config.LoopPaths,
     state: LearningState | None = None,
     trees: DrainTrees,
     invoke: Callable[..., int] | None = None,
@@ -494,8 +494,6 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
 ) -> int:
     """One curation tick over the pitfalls queue."""
     # An entry point on its own (by hand) opens the handle; the drain hands its own in.
-    if paths is None:
-        paths = _loop_config.loop_paths()
     if state is None:
         with LearningState.open(paths) as own:
             return run_pitfalls(

@@ -37,7 +37,7 @@ def lead_trees(paths: LoopPaths) -> DrainTrees:
 def lane_tree_for(repo: Path) -> TreeForFn:
     """The lead drain's `trees.tree_for` over the repo at `repo` (the root git-status names are
     relative to). The trees stay open while the returned bound method is referenced."""
-    return lead_trees(LoopPaths(repo_root=repo)).tree_for
+    return lead_trees(LoopPaths(repo_root=repo, state_dir=repo / "defender" / "learning")).tree_for
 
 
 def lane_fields(paths: LoopPaths) -> dict[str, Any]:

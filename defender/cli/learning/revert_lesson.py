@@ -9,7 +9,7 @@ if (_root := str(Path(__file__).resolve().parents[3])) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.knowledge._knowledge import CHECKOUT_KNOWLEDGE, LESSONS
-from defender.learning.core.config import loop_paths
+from defender.learning.core.cli import command_line_paths
 from defender.learning.core.state import AUTHOR_DRAIN_LOCK, TRY_ONCE, LearningState
 from defender.learning.author.branch import AuthorBranch, BranchError
 
@@ -39,11 +39,15 @@ def revert(
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 1:
-        print("usage: revert_lesson.py <lesson_name>", file=sys.stderr)
-        return 64
-    with LearningState.open(loop_paths()) as state:
-        return revert(argv[0], state=state)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Revert a lesson under its tenant's drain lock")
+    parser.add_argument("--tenant", required=True)
+    parser.add_argument("lesson_name")
+    args = parser.parse_args(argv)
+    paths = command_line_paths(parser, args.tenant)
+    with LearningState.open(paths) as state:
+        return revert(args.lesson_name, state=state)
 
 
 if __name__ == "__main__":

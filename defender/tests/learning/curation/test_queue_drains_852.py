@@ -22,7 +22,10 @@ from defender.tests.support.sandbox._spec791 import (
     noop_stop_box,
 )
 from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
+from defender.learning.core.config import LoopPaths
 from defender.tests.support.learning.core import _state1135
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 # F-02 — the corpus commit is pathspec-wide; attribution is what bounds it
@@ -170,6 +173,44 @@ def _drain(paths, tmp_path: Path, **overrides):
         start_box=noop_start_box, stop_box=noop_stop_box, scrub=noop_scrub,
         **overrides,
     )
+
+
+def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_path):
+    """O4: a valid foreign Run address in A's queue cannot grant access to tenant B."""
+    from defender.run_repository import RunAddress
+    from defender.tenancy import _tenant
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+
+    tenant = set_up_tenant(current_data_root())
+    other_id = fixture_uuid("tenant:other-1186")
+    # Setup permits one tenant per fresh root, but acceptance can see two existing tenants.
+    # Plant the established acceptance fixture so an absent foreign run cannot explain refusal.
+    H.adopted(current_data_root(), other_id)
+    other = H.accept(_tenant, current_data_root(), other_id)
+    own_run = _state1135.curation_run_dir("own-1186", tenant_id=str(tenant.id))
+    foreign_run = other.runs / fixture_uuid("foreign-1186")
+    foreign_run.mkdir(parents=True)
+    foreign = other.runs_repository().resolve(RunAddress(other.id, foreign_run.name))
+    assert foreign.run_dir == foreign_run.resolve()
+    repo = loop_paths(tmp_path).repo_root
+    paths = LoopPaths.for_tenant(tenant).with_repo_root(repo)
+    state = _state1135.state_for_paths(paths)
+    _enqueue(paths, "a-foreign", foreign_run)
+    _enqueue(paths, "b-own", own_run)
+    served = []
+    assert _drain(paths, tmp_path,
+                  run_lead_author=lambda _p, _s, run, **kw: served.append(run.run_dir)) == 0
+    assert served == [own_run.resolve()], "a foreign request reached the author"
+    failed, unreadable = state.failed_requests()
+    assert unreadable == 0
+    assert len(failed) == 1
+    _, record = failed[0]
+    assert record["case_id"] == "a-foreign"
+    assert record["tenant_id"] == str(other.id)
+    assert "tenant" in record["failed"].lower()
+    assert author_markers(paths) == []
+    assert list((paths.state_root / "author-queue" / "inflight").glob("*.json")) == []
+    assert not (other.learning / "author-queue").exists()
 
 
 def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path):

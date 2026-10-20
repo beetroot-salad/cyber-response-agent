@@ -53,7 +53,7 @@ def test_o10_rowless_folder_refused(tmp_path, shape):
 
 
 @pytest.mark.parametrize("shape", ["absent", "empty", "missing-parent"])
-def test_o10_fresh_root_writes_exactly_row(tmp_path, shape):
+def test_o10_fresh_root_writes_exactly_row_and_empty_learning(tmp_path, shape):
     top = tmp_path / "top"
     root = {"absent": top, "empty": top, "missing-parent": top / "a" / "b" / "c"}[shape]
     if shape == "empty":
@@ -66,8 +66,10 @@ def test_o10_fresh_root_writes_exactly_row(tmp_path, shape):
     rel_root = root.relative_to(top).as_posix()
     prefix = "" if rel_root == "." else f"{rel_root}/"
     after = H.census(top)
-    assert set(after) - set(before) == {f"{prefix}{TID}/{H.ROW_NAME}"}, (
-        f"setup wrote more (or less) than the row: {sorted(set(after) - set(before))}")
+    assert set(after) - set(before) == {
+        f"{prefix}{TID}/{H.ROW_NAME}", f"{prefix}{TID}/learning",
+    }, f"setup did not add exactly the row and learning root: {sorted(set(after) - set(before))}"
+    assert list((H.tenant_dir(root, TID) / "learning").iterdir()) == []
     assert {k: after[k] for k in before} == before, "setup changed the placed knowledge folder"
     assert after[f"{prefix}{TID}/{H.ROW_NAME}"][0] == "file"
     row = json.loads(H.row_path(root, TID).read_text(encoding="utf-8"))
@@ -157,7 +159,10 @@ def test_s7_j08_setup_rerun_completes_rowless_own_folder(tmp_path):
     done = H.run_setup(root, TID)
     H.assert_setup_ran(done)
     assert done.returncode == 0, f"the unfinished setup was not completed:\n{H.setup_output(done)}"
-    assert set(H.census(root)) == set(before) | {f"{TID}/{H.ROW_NAME}"}
+    after = H.census(root)
+    assert set(after) == set(before) | {f"{TID}/{H.ROW_NAME}", f"{TID}/learning"}
+    assert list((H.tenant_dir(root, TID) / "learning").iterdir()) == []
+    assert {k: after[k] for k in before} == before
     assert H.require_tenant(root, TID).tenant_id == TID
 
     foreign = tmp_path / "foreign-in-own"

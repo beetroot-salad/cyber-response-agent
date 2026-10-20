@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 from collections.abc import Callable
 
-from defender.learning.core.config import RunAlreadyLive, RunUnprocessable
+from defender.learning.core.config import LoopPaths, RunAlreadyLive, RunUnprocessable
 from defender.learning.core.drains import author_drain, lead_author_drain
 from defender.learning.core.faults import SYSTEMIC_FAULTS
 
@@ -61,9 +62,18 @@ def _run_stage(stage: Callable[[], int], *, allow_run_error: bool = False) -> in
         return 2
 
 
-def main(argv: list[str]) -> int:
-    import argparse
+def command_line_paths(parser: argparse.ArgumentParser, raw_tenant: str) -> LoopPaths:
+    """Accept an explicitly selected tenant before a command touches state or outputs."""
+    from defender.tenancy import _tenant
 
+    try:
+        return LoopPaths.for_tenant(
+            _tenant.requested_tenant(_tenant.resolve_data_root(), raw_tenant))
+    except _tenant.TenantRefused as refused:
+        parser.error(str(refused))
+
+
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="defender/learning/loop.py",
         description=(
@@ -86,7 +96,9 @@ def main(argv: list[str]) -> int:
              "catalog + system skills for each queued run and open one lead-author "
              "PR (separate from the lessons PR; takes no run_dir; one drainer at a time).",
     )
+    parser.add_argument("--tenant", required=True, help="tenant whose learning queues are drained")
     ns = parser.parse_args(argv[1:])
+    paths = command_line_paths(parser, ns.tenant)
 
     if ns.author_drain and ns.lead_author_drain:
         print("--author-drain and --lead-author-drain are mutually exclusive",
@@ -94,10 +106,10 @@ def main(argv: list[str]) -> int:
         return 1
 
     if ns.author_drain:
-        return _run_stage(author_drain)
+        return _run_stage(lambda: author_drain(paths))
 
     if ns.lead_author_drain:
-        return _run_stage(lead_author_drain)
+        return _run_stage(lambda: lead_author_drain(paths))
 
     # A bare invocation is a usage error.
     print("one of --author-drain / --lead-author-drain is required", file=sys.stderr)

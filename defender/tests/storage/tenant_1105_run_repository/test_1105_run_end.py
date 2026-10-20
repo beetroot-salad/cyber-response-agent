@@ -7,11 +7,10 @@ from typing import Any
 
 from defender import run as run_py
 from defender import run_common
-from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant
+from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 from defender.tests.support.sandbox._spec791 import (
     SpecTail,
     author_markers,
-    loop_paths,
     plant_alert,
     require_tail_seam,
     satisfy_entrypoint_keys,
@@ -71,9 +70,16 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
     injected and this arm's own learning state; returns (the order the steps ran in, main's
     return value or what it raised, the curation requests queued)."""
     require_tail_seam(run_py.main)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(arm / "state"))
+    from defender.learning.core.config import LoopPaths
+
+    root = arm / "data"
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     satisfy_entrypoint_keys(monkeypatch, arm)
-    paths = loop_paths(arm)
+    tenant = set_up_tenant(root)
+    tenant.learning.mkdir(exist_ok=True)
+    repo = arm / "repo"
+    (repo / "defender").mkdir(parents=True)
+    paths = LoopPaths.for_tenant(tenant).with_repo_root(repo)
     order: list[str] = []
     tail = _Tail(paths, order, fail=fail)
     handler = _Order(order)
@@ -82,7 +88,7 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
     try:
         # The alert's folder names the minted run id's label: one id per arm.
         alert = plant_alert(arm / f"alert-{arm.name}")
-        argv = [str(alert), "--tenant", ensure_d9_tenant(), "--update-ticket"]
+        argv = [str(alert), "--tenant", str(tenant.id), "--update-ticket"]
         try:
             outcome: Any = run_py.main(argv, lifecycle=tail.lifecycle, visualize=tail.visualize,
                                        ticket_writer=tail, enqueue=tail.enqueue)

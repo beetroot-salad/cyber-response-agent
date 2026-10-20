@@ -630,13 +630,13 @@ def _grade(runs: RunsRepository, *, episode_id: str, judge: Any) -> None:
     judge opens the episode by id through `runs`, the request's tenant's repository."""
     try:
         from defender.learning import judge as judge_mod
-        from defender.learning.core.config import loop_paths
+        from defender.learning.core.config import LoopPaths
         from defender.learning.core.state import LearningState, StateRefused
 
         # The root is resolved and opened here, once, and handed to the grade (RF5). A missing
         # root or a refused entry is logged below like any judge failure: grading never fails a
         # launch.
-        with LearningState.open(loop_paths()) as state:
+        with LearningState.open(LoopPaths.for_tenant(runs.tenant)) as state:
             judge_mod.grade_episode(runs, episode_id, judge=judge, state=state)
     # Imports are inside the `try` too, so an import or config fault is a judge failure
     # rather than reaching `_launch`'s abort arm with a false "no sibling started" message.

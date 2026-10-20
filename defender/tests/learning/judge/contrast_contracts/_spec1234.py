@@ -1988,18 +1988,18 @@ class RealBuilt:
 
 @contextlib.contextmanager
 def _launcher_judge_suppressed(tmp_path: Path) -> Iterator[None]:
-    """For the launch only, the learning-state root names a directory that does not exist, so
-    the launcher's JUDGE step (`cli._grade`) refuses to open its state, logs, and writes
-    nothing; the test grades afterwards with its own judge. Restored after."""
-    before = os.environ.get(LEARNING_STATE_ENV)
-    os.environ[LEARNING_STATE_ENV] = str(Path(tmp_path) / "no-learning-state-during-launch")
+    """Keep this tenant's real learning root absent during the launch; grade afterwards."""
+    root = T.current_tenant().learning
+    saved = Path(tmp_path) / "saved-tenant-learning"
+    had_root = root.exists()
+    if had_root:
+        root.rename(saved)
     try:
         yield
     finally:
-        if before is None:
-            os.environ.pop(LEARNING_STATE_ENV, None)
-        else:
-            os.environ[LEARNING_STATE_ENV] = before
+        assert not root.exists(), "the launcher created its missing learning root"
+        if had_root:
+            saved.rename(root)
 
 
 def real_family(tmp_path: Path, worlds: Mapping[str, RealWorld] | None = None, *,  # noqa: PLR0913 — one switch per real-path input

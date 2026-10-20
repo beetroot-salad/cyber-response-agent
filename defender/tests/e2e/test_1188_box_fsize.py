@@ -244,12 +244,7 @@ class _DockerExec:
 
     name: str
     tree: Path
-
-    @property
-    def inside(self) -> Path:
-        """The writable tree as the box names it: a lane box mounts it at its own host path (a
-        learning-loop box, which #1255's model view does not cover — design rev 5, C12)."""
-        return self.tree
+    inside: Path
 
     def at(self, host: Path) -> str:
         """`host`, a path under `tree`, as a command in the box names it."""
@@ -312,12 +307,12 @@ def _lane_box(base: Path, runtime: str) -> Iterator[_DockerExec]:
     request = dataclasses.replace(
         request, spec=dataclasses.replace(request.spec, runtime=runtime),
     )
-    writable = [Path(m.source) for m in request.mounts if m.writable]
+    writable = [m for m in request.mounts if m.writable]
     assert len(writable) == 1, f"the lead-author drain box mounts {writable} writable, not one"
     box = box_mod.start_box(request, docker=box_mod._docker)
     try:
         assert box.sandboxed, "start_box returned the unsandboxed host fallback, not a box"
-        yield _DockerExec(box.name, writable[0])
+        yield _DockerExec(box.name, Path(writable[0].source), Path(writable[0].target))
     finally:
         box_mod.stop_box(box)
 

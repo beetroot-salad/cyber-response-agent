@@ -234,6 +234,7 @@ def tenant_source(root: Path, tenant_id: str = VALID_ID, *, row: bool = True,
     root = Path(root)
     if row:
         make_tenant(root, tenant_id)
+        accept(root, tenant_id).learning.mkdir(exist_ok=True)
     base = runs_dir(root, tenant_id)
     base.mkdir(parents=True, exist_ok=True)
     return base, source_run(base, run_id)

@@ -528,9 +528,15 @@ def cell(name, root):
     out = {"raised": None, "errno": None, "refusal": False, "oserror": False, "answer": None}
     try:
         if name == "e1":
-            os.environ["DEFENDER_LEARNING_STATE_DIR"] = root
-            run_dir = Path(spec["run_dir"])
-            out["answer"] = run_common.enqueue_curation(S.run_of(run_dir), run_common.RunPaths(run_dir).alert)
+            from defender.run_repository import RunId
+            from defender.tenancy._tenant import requested_tenant
+
+            run_dir = Path(spec["e1_runs"][root])
+            data_root = run_dir.parents[2]
+            os.environ["DEFENDER_DATA_ROOT"] = str(data_root)
+            tenant = requested_tenant(data_root, run_dir.parent.parent.name)
+            run = tenant.runs_repository().open(RunId.parse(run_dir.name))
+            out["answer"] = run_common.enqueue_curation(run, run_common.RunPaths(run_dir).alert)
             return out
         state = S.LearningState.open(paths)
         if name == "append":
@@ -551,15 +557,15 @@ def cell(name, root):
     return out
 
 
-for name, root in spec["warm"].items():   # every lazy import happens here, as the owner
-    cell(name, root)
+warm = {name: cell(name, root) for name, root in spec["warm"].items()}
 if spec["drop"]:
     os.setgroups([])
     os.setresgid(65534, 65534, 65534)
     os.setresuid(65534, 65534, 65534)
 lines.clear()
 results = {name: cell(name, root) for name, root in spec["cells"].items()}
-print(json.dumps({"results": results, "lines": lines, "uid": os.geteuid()}))
+print(json.dumps({"results": results, "warm_e1": warm["e1"],
+                  "lines": lines, "uid": os.geteuid()}))
 '''
 
 
@@ -577,8 +583,8 @@ def _verb_tree(base: Path, name: str, row: dict, run_dir: Path) -> Path:
     owned by whoever made it — the child drops to an unprivileged user when that is root), or,
     for the two read-side cells, the findings queue file itself made unreadable (mode 000)
     while its folder and append lock stay writable."""
-    root = base / name
-    root.mkdir(mode=0o755)
+    root = run_dir.parent.parent / "learning" if name == "e1" else base / name
+    root.mkdir(mode=0o755, exist_ok=name == "e1")
     if name in ("read", "rotate_unreadable"):
         queue = root / "_pending" / "findings.jsonl"
         S.write_jsonl(queue, _unreadable_queue_rows(row))
@@ -630,23 +636,29 @@ def _assert_an_unreadable_queue_never_reads_as_empty(
         "the rotate over an unreadable queue appended to the consumed ledger"
 
 
+def _accepted_enqueue_run(base: Path, label: str):
+    """An accepted natural run with certified input for the real enqueue permission probe."""
+    from defender.run_repository import RunId
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+    from defender.box import _scrub as scrub_mod
+
+    tenant = set_up_tenant(base / label)
+    run = tenant.runs_repository().create(RunId.parse(fixture_uuid(label)))
+    run.run_dir.mkdir()
+    plant_alert(run.run_dir, {"rule": {"name": "everyday"}})
+    scrub_mod.scrub(run.run_dir)
+    return tenant, run.run_dir
+
+
 def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_path, monkeypatch):
     base = Path(tempfile.mkdtemp(prefix="ls1135-everyday-", dir="/tmp"))
     os.chmod(base, 0o755)
     try:
-        # A natural run where run setup leaves one (#1105 PR 2: run end is handed the `Run`, and
-        # the row it files is the run's address): `<T>/runs/<id>`. #1187 (R1, declared change
-        # 1): the id is a canonical UUID and the container holds no `_tenant.json`.
-        from defender.tests.support.shared._fixture_uuid import fixture_uuid
-
-        run_dir = base / fixture_uuid("tenant:acme") / "runs" / fixture_uuid("1135-everyday-case-a")
-        run_dir.mkdir(parents=True)
-        plant_alert(run_dir, {"rule": {"name": "everyday"}})
-        from defender.box import _scrub as scrub_mod
-
-        scrub_mod.scrub(run_dir)  # a certified tree: the enqueue's refusal gate passes it
-        for p in (base / fixture_uuid("tenant:acme"), run_dir.parent, run_dir):
-            os.chmod(p, 0o755)
+        # O1/O2: enqueue derives state from an accepted Run, so the permission fault
+        # belongs under its real tenant.learning, with a separate accepted warm-up run.
+        tenant, run_dir = _accepted_enqueue_run(base, "e1-data")
+        warm_tenant, warm_run_dir = _accepted_enqueue_run(base, "e1-warm-data")
         row = _defender_row("ep-1/b/0/9", "caught")
         names = ("e1", "append", "rotate", "move", "lock", "read", "rotate_unreadable")
         cells = {n: str(_verb_tree(base / "cells", n, row, run_dir))
@@ -656,12 +668,15 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
             w = base / "warm" / n
             w.mkdir(parents=True)
             warm[n] = str(w)
+        warm_tenant.learning.mkdir(exist_ok=True)
+        warm["e1"] = str(warm_tenant.learning)
+        e1_runs = {str(tenant.learning): str(run_dir), warm["e1"]: str(warm_run_dir)}
         for p in (base / "cells", base / "warm"):
             os.chmod(p, 0o755)
         script = base / "verb_child.py"
         script.write_text(_VERB_CHILD, encoding="utf-8")
         os.chmod(script, 0o644)
-        spec = {"cells": cells, "warm": warm, "row": row, "run_dir": str(run_dir),
+        spec = {"cells": cells, "warm": warm, "row": row, "e1_runs": e1_runs,
                 "repo": str(base / "repo"), "drop": os.geteuid() == 0}
         proc = subprocess.run([sys.executable, str(script), json.dumps(spec)],
                               capture_output=True, text=True, timeout=120,
@@ -695,12 +710,17 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
 
     assert out["uid"] != 0, "the child still ran as root: permission bits would not bite"
     results = out["results"]
+    assert out["warm_e1"]["raised"] is None, \
+        f"the writable accepted-run enqueue control raised: {out['warm_e1']}"
+    assert out["warm_e1"]["answer"] is True, \
+        f"the writable accepted-run enqueue control failed: {out['warm_e1']}"
     e1 = results["e1"]
     assert e1["raised"] is None, f"the run-end enqueue raised on an everyday failure: {e1}"
     assert e1["answer"] is False, \
         f"the run-end enqueue did not answer False on an everyday failure: {e1}"
-    assert any(lvl == "ERROR" and "Permission denied" in m for lvl, m in out["lines"]), \
-        f"the run-end enqueue's failure was not logged: {out['lines']}"
+    assert any(lvl == "ERROR" and "Permission denied" in m
+               and str(tenant.learning / "author-queue") in m for lvl, m in out["lines"]), \
+        f"the run-end enqueue's selected queue permission failure was not logged: {out['lines']}"
     for name in ("append", "rotate", "move", "lock"):
         got = results[name]
         assert got["raised"] == "PermissionError", \

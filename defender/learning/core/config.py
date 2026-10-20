@@ -18,6 +18,8 @@ from defender.run_repository import WIRE_LOG_NAMES
 from defender._paths import DefenderPaths  # noqa: F401 — LoopPaths' base class + re-export
 
 
+from defender.tenancy._tenant import Tenant
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -72,13 +74,24 @@ class LoopPaths(DefenderPaths):
     for the whole set and directory names stay owned by `_paths.py`."""
 
     state_dir: Path | None = None
+    tenant: Tenant | None = field(default=None, kw_only=True)
+
+    @classmethod
+    def for_tenant(cls, tenant: Tenant) -> LoopPaths:
+        """@owns tenant learning root — accepted identity selects mutable state, never env."""
+        from defender.run_repository._held import require_accepted_tenant
+
+        accepted = require_accepted_tenant(tenant)
+        return cls(repo_root=REPO_ROOT, state_dir=accepted.learning, tenant=accepted)
 
     @property
     def state_root(self) -> Path:
-        return self.state_dir if self.state_dir is not None else self.learning_dir
+        if self.state_dir is None:
+            raise FatalConfigError("learning state requires an explicit tenant or scratch state_dir")
+        return self.state_dir
 
     def with_repo_root(self, repo_root: Path) -> LoopPaths:
-        return LoopPaths(repo_root=repo_root, state_dir=self.state_root)
+        return LoopPaths(repo_root=repo_root, state_dir=self.state_root, tenant=self.tenant)
 
     @property
     def quarantine_dir(self) -> Path:
@@ -86,28 +99,6 @@ class LoopPaths(DefenderPaths):
         `worktree_base`, not `state_root`: a copied state dir carries none of this host's
         tainted trees. `AuthorBranch.quarantine_dir` is the same path on the writer's side."""
         return self.worktree_base / QUARANTINE_DIRNAME
-
-
-def _env_state_dir() -> Path | None:
-    raw = os.environ.get("DEFENDER_LEARNING_STATE_DIR")
-    if not raw:
-        return None
-    return Path(raw).resolve()
-
-
-
-
-DEFAULT_PATHS = LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())
-
-
-def loop_paths() -> LoopPaths:
-    """`DEFAULT_PATHS`, resolved at call time rather than at import.
-
-    The constant freezes `DEFENDER_LEARNING_STATE_DIR` at import; callers that must honour a
-    state root set later (a test isolating the queue, a re-pointed worker) use this."""
-    return LoopPaths(repo_root=REPO_ROOT, state_dir=_env_state_dir())
-
-LEARNING_DIR = DEFAULT_PATHS.learning_dir
 
 
 #: The three buckets a lesson can be authored from. Separate from `QUEUEABLE_FINDING_TYPES`,

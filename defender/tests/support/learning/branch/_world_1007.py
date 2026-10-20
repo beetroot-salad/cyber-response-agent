@@ -169,12 +169,9 @@ def write_outcome(episode_dir: Path, *, outcome: str = "accepted", reason: str =
 
 
 def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
-    """`_triplet_947.configured_layout`, plus the LEARNING STATE ROOT pointed inside `tmp_path`.
+    """Build the layout and configure explicit test scratch state for injected handles.
 
-    The judge's appender writes to the ONE configured queue, resolved through
-    `config.loop_paths()`. A scenario that left this root ambient would append its fixture rows
-    into the developer's — and CI's — real `learning/_pending/`, which is a shared sink no test
-    may touch. Environment steering through the resolver the shipped code already reads.
+    Production launchers use their tenant's learning root and ignore this test setting.
     """
     base, src, root = _configured_layout_947(tmp_path, monkeypatch)
     (tmp_path / "learning-state").mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)

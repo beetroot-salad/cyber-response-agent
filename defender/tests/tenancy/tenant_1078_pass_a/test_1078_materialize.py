@@ -190,7 +190,9 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
         [src.name, RunPaths(src).session_pointer().name])
 
 
-def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_root):
+@pytest.mark.parametrize("state_location", ["root", "inside", "ancestor", "disjoint"])
+def test_1186_sibling_ignores_legacy_state_override(
+        tmp_path, monkeypatch, tenant_root, state_location):
     src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
     alert = RunPaths(src).alert
     # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
@@ -202,19 +204,11 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
         # PR 2's `container_required`).
         view = H.accept(tenant_root, T_ID).runs_repository().episode(
             ep.name, held=episode, require_roster=True)
-        for n, learning in enumerate((tenant_root, tenant_root / T_ID / "learning", tmp_path)):
-            monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
-            widened = H.owner_refusal(H.resolve_data_root)
-            _rc, refused = H.drive_main(argv, H.Recorder(tmp_path / f"sib-{n}"))
-            assert refused is not None, "the sibling's entry accepted a widened learning root"
-            H.assert_verbatim(H.refusal_text(refused), widened,
-                              entry="the sibling's entry (run.py --episode)")
-            text = _refused(lambda: _materialize(alert, arm_id, T_ID, world=world,
-                                                 episode_runs=view))
-            H.assert_verbatim(text, widened, entry="the sibling's materialize_run")
-            assert not (ep / "runs" / arm_id).exists()
-        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR",
-                           str(tmp_path.parent / "elsewhere-learning"))
+        learning = {"root": tenant_root, "inside": tenant_root / T_ID / "learning",
+                    "ancestor": tmp_path, "disjoint": tmp_path.parent / "elsewhere-learning"}[
+                        state_location]
+        monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
+        assert H.resolve_data_root() == tenant_root.resolve()
         rc, refused = H.drive_main(argv, H.Recorder(tmp_path / "sib-ok"))
         assert refused is None, H.refusal_text(refused)
         assert rc == 0, rc

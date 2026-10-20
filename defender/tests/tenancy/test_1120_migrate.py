@@ -114,7 +114,9 @@ def test_migrate_gives_an_old_shape_tenant_a_folder_setup_accepts(
         "migrate changed something under the data root besides the knowledge folder")
 
     H.assert_clean(H.run_script(script, "setup", _TID, root=root, cwd=checkout))
-    assert H.census_diff(after, H.tree_census(root)) == [], "setup wrote over a migrated tenant"
+    assert H.census_diff(after, H.tree_census(root)) == [f"added: {_TID}/learning"], (
+        "setup changed more than provisioning the migrated tenant's learning root")
+    assert list((root / _TID / "learning").iterdir()) == []
     accepted = _tenant.accept_tenant(root, _tenant.TenantId(_TID),
                                      defender_dir=PATHS.defender_dir)
     assert accepted.knowledge == knowledge

@@ -1,6 +1,8 @@
 """#921 — where the judge runs, what it is triggered by, and what it leaves behind."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 
 import pytest
 
@@ -8,7 +10,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _state1135
 from defender.learning.core.config import LoopPaths
-from defender.learning.core.state import LearningState, StateRefused
+from defender.learning.core.state import FINDINGS, QUESTIONER_FINDINGS, LearningState, StateRefused
 from defender.tests.support.learning.core._state1135 import env_state
 
 
@@ -74,7 +76,12 @@ def _launch(tmp_path, *, judge=None, spawn=None, **seams):
 
 
 def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
-    rc, judge, ep = _launch(tmp_path)
+    # A family-level plan pointer remains resolvable with the launcher's newly minted world
+    # ids. The default investigator fixture cites fixed world ids and queues nothing here.
+    judge = J.scripted_judge(default=J.as_reply_text(J.reply_doc(
+        systems=["idp"], findings=[J.finding_doc(
+            subject="world", bucket="incoherent", systems=["idp"])])))
+    rc, judge, ep = _launch(tmp_path, judge=judge)
 
     assert rc in (0, 1), "the launcher's status is still about the LAUNCH, not about the grade"
     assert (ep / "judge.yaml").is_file(), "the family record was never written"
@@ -95,6 +102,16 @@ def test_921_episode_grade_is_the_artifacts_the_launcher_leaves(tmp_path):
     assert judge.calls == (len(graded) + 1) * grade["draws"]["configured"], (
         "one model call per world per draw plus one per-draw family call is the contract; the "
         "seam saw a different count")
+    # #1186 O2: exercise the launcher's real state construction, rather than grade_at(state=).
+    # Its source episode belongs to this tenant; the ambient override is a decoy.
+    tenant_learning = ep.parent.parent / "learning"
+    assert grade["world_enqueued_rows"] > 0, "positive control: the launcher queued no findings"
+    assert Path(grade["enqueued_to"]) == tenant_learning / FINDINGS.queue
+    assert Path(grade["world_enqueued_to"]) == tenant_learning / QUESTIONER_FINDINGS.queue
+    rows = [json.loads(line) for line in Path(grade["world_enqueued_to"]).read_text().splitlines()]
+    assert len(rows) == grade["world_enqueued_rows"]
+    assert all(row["run_id"] == ep.name for row in rows)
+    assert not (tmp_path / "learning-state" / QUESTIONER_FINDINGS.queue).exists()
 
 
 def test_921_unaccepted_episodes_are_not_graded(tmp_path):

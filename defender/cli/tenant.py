@@ -61,14 +61,15 @@ def _say(message: object) -> None:
 # setup
 # ==========================================================================================
 
-def setup(tenant_id: str) -> int:
-    """Adopt the operator-placed `<root>/<id>/knowledge` and write the tenant's row LAST, or
-    refuse — writing nothing — at the first rule it fails: the id grammar (before anything
+def setup(tenant_id: str, learning_state_from: Path | None = None) -> int:
+    """Validate the placed knowledge and learning adoption plan before writing the row, then
+    provision or adopt tenant learning state. Refuse at the first rule it fails: the id grammar (before anything
     under the data root is looked at), the data root, the one-tenant guard (which admits the
     placed `knowledge/` beside a missing row), a present row that is not this tenant's, the
     folder rules, the settings files parse, and run start's readiness function. A finished
-    tenant that still passes is a silent success. Every refusal is the owner's
-    `TenantRefused`, printed verbatim, exit 1."""
+    tenant with provisioned learning that still passes is a silent success. Interrupted moves
+    remain completable; recreated source records are preserved and reported. Refusals are
+    printed visibly, exit 1."""
     try:
         tid = _tenant.TenantId(tenant_id)
         root = _tenant.resolve_data_root()
@@ -78,9 +79,14 @@ def setup(tenant_id: str) -> int:
         _settings_files_parse(settings)
         run_tenant.resolve_run_tenant_or_refuse(
             settings, tenant_id=tid, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=True)
-        if not has_row:
-            _tenant.create_tenant(root, tid)
-    except _tenant.TenantRefused as refused:
+        from defender.learning.core.state import LearningAdoption
+
+        adoption = LearningAdoption(_tenant._TenantPaths(root, tid).learning, learning_state_from,
+                                    tenant_id=tid, data_root=root, repo_root=_REPO_ROOT)
+        adoption.run(before_move=(lambda: _tenant.create_tenant(root, tid)) if not has_row else None)
+        if learning_state_from is not None:
+            print(f"learning state adopted from {learning_state_from}")
+    except (OSError, _tenant.TenantRefused) as refused:
         _say(refused)
         return 1
     return 0
@@ -472,8 +478,10 @@ def main(argv: list[str]) -> int:
     scaffold_p.add_argument("tenant_id")
     scaffold_p.add_argument("target", type=Path)
     setup_p = sub.add_parser(
-        "setup", help="adopt the knowledge folder cloned into the data root; write the row")
+        "setup", help="adopt placed knowledge, create the row, and provision tenant learning")
     setup_p.add_argument("tenant_id")
+    setup_p.add_argument("--learning-state-from", type=Path, default=None,
+                         help="explicit legacy learning directory to adopt offline")
     check_p = sub.add_parser("check", help="report the census and repo findings of a tenant")
     check_p.add_argument("tenant_id", nargs="?")
     check_p.add_argument("--folder", type=Path, default=None)
@@ -489,7 +497,7 @@ def main(argv: list[str]) -> int:
     if ns.command == "scaffold":
         return scaffold(ns.tenant_id, ns.target)
     if ns.command == "setup":
-        return setup(ns.tenant_id)
+        return setup(ns.tenant_id, ns.learning_state_from)
     if ns.command == "migrate":
         return migrate(ns.tenant_id, ns.target)
     if (ns.tenant_id is None) == (ns.folder is None):
