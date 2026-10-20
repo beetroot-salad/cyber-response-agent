@@ -1,23 +1,5 @@
 """One spawn of the sql engine (`runtime/sql_engine/sql.py`), for every test that runs it as a
-PROCESS.
-
-Three files drove the tool this way, each with its own spelling of the argv, its own
-timeout (none, 60 s, 120 s) and its own choice of bytes-or-text stdin — so a change to the
-tool's CLI contract (a new required flag, a stdin encoding rule) had three easy-to-miss
-call sites instead of one (#1058). This is the one.
-
-`bin/defender-sql` is the shim a lead types, and it is deliberately bypassed here: it
-execs `$DEFENDER_DIR/.venv/bin/python3`, so driving it would test the venv layout as much as
-the tool. `tests/e2e/test_query_tool_611.py` drives the shim with `DEFENDER_DIR` set; this
-helper runs the module the shim runs (`SQL_ARGV`, the same `-P -m` form, this checkout's root
-first on `PYTHONPATH`), with the interpreter the tests run under.
-
-The exit codes are LITERALS, deliberately not read off the tool: they are the contract
-`skills/gather/defender-sql.md` teaches the lead (`1` = query error, `2` = payload never
-arrived), and every `assert proc.returncode == EXIT_*` below a spawn is what holds the tool
-to it, and `test_sql_idioms.py` pins the doc's sentence to the same numbers. Read off the
-tool they would follow any renumbering and pin nothing.
-"""
+PROCESS."""
 from __future__ import annotations
 
 import importlib.util

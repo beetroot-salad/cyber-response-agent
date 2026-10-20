@@ -1,26 +1,4 @@
-"""The two derived readers: what each world concluded, and where the worlds differ.
-
-`verdicts` answers "what disposition did each sibling reach"; `delta_o` answers "on which shared
-questions did a world's observation differ, and was it the difference that world declared".
-Both are derived on read; nothing is stored.
-
-Both read the episode directory and nothing else, through the WALKED view the tenant's runs
-repository hands out (`runs.episode(episode_id)`, #1187 S-iso): a bare path carries no tenant,
-so it cannot go through the tenant's walk, and neither reader takes one. Sibling run dirs are
-disposable and may be gone by grading time, so `verdicts` reads the archived report and
-`delta_o` pairs the archived `served/` ledgers.
-
-Both refuse an episode whose outcome record (`outcome.yaml`, written once by the launcher's
-pre-flight) says anything but exactly `accepted`: an `unusable` or `refused` family measured
-nothing, and an absent or torn record is the distinct "no record" state, never `accepted`
-(M05=A). An `accepted` episode with no readable family stamp is refused too: `verify_family`
-withheld it, so nothing shows the worlds ran the same code, knowledge and tenant
-(`outcome.not_comparable_reason`, the judge's own gate). Refusing keeps "no differences"
-distinct from "no comparison possible".
-
-An `accepted` episode with no archived worlds answers empty rather than refusing; that is safe
-only because the recorded outcome distinguishes it from "the worlds ran and agreed".
-"""
+"""The two derived readers: what each world concluded, and where the worlds differ."""
 
 from __future__ import annotations
 
@@ -279,26 +257,7 @@ def _wrong_seat(key: str, verdict: Verdict) -> str:
 
 
 def delta_o(view: EpisodeRuns, *, invoke: Invoke | None = None) -> dict[str, dict[str, str]]:
-    """Per world, per shared correlation key: one member of the comparator's delta seat.
-
-    `same`, `formatting`, `mutation` or `undeclared`, as the comparator answers it
-    (`formatting` is not folded into `same`).
-
-    Pairs `keys(base) ∩ keys(world)` on the asked form: the family's capture
-    (`served/base.jsonl`) against each world's own rows (`served/<world token>.jsonl`).
-
-    The control's drift is subtracted: the base world stages nothing, so a key where it differs
-    from the capture is the estate moving underneath the episode (a rolling index, a clock),
-    not any world's difference. Computed mechanically before any world is classified.
-
-    Every archived world gets an entry, the control included; an empty entry means the world
-    served nothing.
-
-    `view` is the episode's walked view: every read below is a no-follow walk off the folder
-    it holds, the manifest is held to the view's episode id (R5), and the arm ids every prompt
-    is cleaned of are the view's own roster (`view.arm_ids()`, none when there is no roster), so
-    no caller hands them in or forgets them (#1187 S-red).
-    """
+    """Per world, per shared correlation key: one member of the comparator's delta seat."""
     return _delta_o(_walked(view), view, invoke)
 
 

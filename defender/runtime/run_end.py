@@ -1,25 +1,4 @@
-"""How a run ended: the exit-class vocabulary, its one normalizer, and the host-side record.
-
-The vocabulary: `truncated_by` holds every value any writer of the session store's column
-may use (the driver on the main session, the gather dispatch on a lead's), spelled one way for
-every reader. `dead-end` is lead-only: it covers all host guards (the repeat guard, the
-above-guard repeat guard, the rejection budget); which one fired is recovered from the last
-trip row's `payload_digest`, whose phrases `record_query.repeat_trip_detail` and
-`record_query.rejection_detail` own. Defined here rather than in `session_store` so the ticket
-lane and family judge need not import SQLite or the agent framework.
-
-The record: a main run's exit class plus whether the model had already closed when it was
-stamped, so a model verdict is distinguishable from a host-forced one. `truncated_by: None`
-means "not cut short", not absence.
-
-The record is a sidecar beside the run dir (like `scrub.verdict_path`), never inside it: the
-box has an rw bind on the run dir, and `validate_report` admits unknown keys, so a planted
-`truncated_by:` in report.md could let a graded run exclude itself from grading.
-
-Written by the driver before the forced report write; consumed in-process by `run.py`'s
-`--update-ticket` step and on disk by the family judge via the archive copy and
-`parse_record`.
-"""
+"""How a run ended: the exit-class vocabulary, its one normalizer, and the host-side record."""
 from __future__ import annotations
 
 import json

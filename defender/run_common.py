@@ -71,25 +71,7 @@ def materialize_run(
     world: ResumeWorld | None = None, episode_runs: EpisodeRuns | None = None,
 ) -> Run:
     """Build (or finish building) the run directory for `run_id` and return the tenant-bound
-    handle the run's later records are saved through.
-
-    `tenant` is the request's tenant, accepted by the entry point (`_tenant.accept_tenant`);
-    nothing here resolves the data root or re-accepts it. The run's handle comes from the
-    tenant's runs repository (#1105 PR 2, D-create (a)): a natural run's from
-    `tenant.runs_repository().create`, which walks to `<T>/runs` no-follow and makes it when
-    absent; a fork's from `episode_runs.create` — the sibling's episode view, whose container
-    and arm roster the launcher made at RUNS, and which only an id the roster holds passes.
-
-    Every write is a guarded write-once verb (written when absent, kept when equal, refused
-    when different), so resuming needs no ordering of checks and follows no planted link.
-    `world` is a fork's `ResumeWorld`, handed in by the launcher — never derived from paths.
-
-    Order (#1105 D3.7): the run id is admitted (`RunId`: minted, or a pinned id that is
-    canonical UUID text; then the sidecar clause); then the repository's create: the container
-    walked no-follow (a link or non-directory refused before anything is created in it). The
-    stamp carries the run's display facts — when setup started it and the alert's label
-    (#1187 O7) — which its opaque id no longer spells; a natural run stamps no world.
-    """
+    handle the run's later records are saved through."""
     if not alert.is_file():
         sys.exit(f"alert not found: {alert}")
     started_at = _started_at()
@@ -350,15 +332,7 @@ def visualize(run: Run, *, update_ticket: bool = False) -> None:
     """The post-run page step as `run.py` takes it: load the renderer, then hand it the run
     (`visualize_run.publish_page` renders, saves the record through `run`, and makes the dev-only
     copy). Runs in the process holding the handle, after the sandbox has exited and the tree has
-    been scrubbed, so the model never had a chance to rewrite its own report.
-
-    `update_ticket` is `run.py`'s own `--update-ticket` (#1107 O6), passed on as an argument.
-
-    Only the load is decided here. The renderer is imported lazily — it reads its stylesheet at
-    import time, and nothing but this step needs it — and inside the `try`, so a renderer that
-    cannot even load is a `VisualizeFailed` like any other failed render, and never reaches the
-    run's exit code.
-    """
+    been scrubbed, so the model never had a chance to rewrite its own report."""
     try:
         from defender.presentation import visualize_run as vr
     except Exception as e:

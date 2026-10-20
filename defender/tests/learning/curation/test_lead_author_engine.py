@@ -56,14 +56,7 @@ def _lead_policy(skills_dir: Path) -> AgentPolicy:
     ``_lead_author_policy(skills_dir)``). ``skills_dir.parent`` is a NON-PATHS worktree defender_dir
     (LEAD_AUTHOR_DEF is ``requires_explicit_tree``, so a main-checkout tree is unbuildable — these
     shape tests use a synthetic worktree; the rm matcher recognizes the repo-relative
-    ``defender/skills`` spelling regardless of the worktree location).
-
-    ``skills_dir`` must be a REAL path under a tree that declares adapters, not the bare
-    ``/wt/defender/skills`` string these shape tests used to pass. Since #772 the policy's write
-    lanes and its ``rm`` grant are both compiled per declared system, so the tree is now an input
-    to the shape, not just an anchor for it — a policy built against a tree with no adapters
-    would be a policy with no lanes, which ``bind`` refuses.
-    """
+    ``defender/skills`` spelling regardless of the worktree location)."""
     return bind(LEAD_AUTHOR_DEF, Path("/tmp/lead-run"), defender_dir=skills_dir.parent).policy
 
 

@@ -1,41 +1,5 @@
 """The open-trees plumbing for #1134's curator step (v3, ported from v2) and the world its new
-test files share. It defines no tests.
-
-The curator step moves the corpus-author drain (`learning/author/drain.py`, `shared.py`, both
-channel modules) onto the author drain's held mounts: the label is consumed where the trees open
-(`drains._maybe_trigger_author`, each channel's `main()`, the eval harness), and below that the
-open `DrainTrees` flows. `build_author_config` / `build_questioner_config` take `trees=` (required)
-and put two fields on the config: `corpus`, the held corpus mount (`trees.mount(corpus_dir)`), and
-`tree_for`, the trees' own lookup. Everything the drain does to a corpus goes through those:
-writes and deletes through the `Held`, reads through its view. Every existing caller in
-`defender/tests` changes in call shape only (owner decisions 1 and 2 of 2026-09-29), and this
-module is the one home of the trees those calls run inside.
-
-Lifetime, the one rule here (as in `_lead_author_1134`). A `Held` closed under a reader does not
-raise: the reader answers `Bad file descriptor` as a refusal, which reads as "absent" or
-"refused", a silent wrong answer. So every call these helpers serve runs inside trees that are
-open:
-
-* `author_trees(paths)` opens the author drain's trees over `paths` exactly as the lane does
-  (`open_drain_trees(paths, AUTHOR_DRAIN_LABEL)`), after making any mount point that is missing:
-  a drain working copy always has both corpora, a fixture repo may not (`_drain719.make_repo`
-  has no `lessons-questioner/`). It is a `DrainTrees`, so `with author_trees(paths) as trees:`
-  scopes them; passed inline (`trees=author_trees(paths)`) it stays open for the call it is handed
-  to, and for as long as the config built from it is referenced.
-* Every other helper hands back an object that REFERENCES the open trees: a config holding the
-  `Held` and the bound `tree_for`, a bound `tree_for`, a `Held`, a view. The descriptors stay open
-  exactly as long as that object is referenced and are released when it is collected (CPython's
-  refcount; `_io._Handle.__del__` closes each).
-
-Fakes for the new tests enter only through injection seams: the `os_` of `DrainTrees.open` /
-`hold` (`RecordingOs`, `FailsOn`, and `_shared_readers_1134.RefusesFolder`), or a `Held` handed in
-with `dataclasses.replace(cfg, corpus=...)` (`JournalHeld`, a real `Held` subclass: the config is
-a strict pydantic model, so anything else is refused at the replace). Nothing is monkeypatched.
-
-Module-level imports are production modules and stdlib-only test helpers, so `_drain719`,
-`_spec773` and `conftest` can import from here without a cycle; `world()` imports `_drain719`
-when it is called.
-"""
+test files share. It defines no tests."""
 from __future__ import annotations
 
 import dataclasses

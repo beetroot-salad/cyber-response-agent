@@ -472,16 +472,7 @@ _LOADABLE_ADAPTER = (
 
 def unloadable_adapter(root: Path) -> tuple[ModuleVerbRegistry, Relink]:
     """The REAL production registry over a REAL adapter module, and the `Relink` that makes it
-    one that raises at import — a level-1 fault, not a stand-in for one.
-
-    Since #1256 the run imports every granted adapter at its start, so an adapter that cannot
-    be imported THEN is down for the whole run (O-5a) and no call of it ever loads it. A load
-    error at CALL time is what remains possible: the adapter changing after the start check.
-    So the file is importable when the run starts and `Relink.break_` (fired by `_after_start`
-    when the gather model asks for its first call) replaces it by a link to `_BROKEN_ADAPTER`:
-    `decide` resolves the grant cold (an AST read of the `VERBS = {...}` literal), then loads
-    the module to bind the verb, and that load raises — on every call, since a failed load is
-    never kept."""
+    one that raises at import — a level-1 fault, not a stand-in for one."""
     adapters = root / "adapters"
     adapters.mkdir(parents=True)
     (adapters / "elastic_adapter.py").write_text(_LOADABLE_ADAPTER, encoding="utf-8")

@@ -45,19 +45,7 @@ def _investigation_path(deps: AgentDeps) -> Path:
 class CompanionRead:
     """One reading of `investigation.md`, handed to every gate that judges the document as it
     stands (repair window, the close's structure check, entry price, challenge review), so no
-    two gates can decode the same file differently.
-
-    Three answers:
-
-      * never written — `text == ""`: no repair window, nothing to validate, full entry price owed.
-      * read — `text` is the document, decoded strictly with universal newlines.
-      * could not be read — `text is None`, `refusal` says why: an I/O fault, a non-plain entry
-        at the name (the rooted core refuses planted links at the open), or non-UTF-8 bytes.
-        The window derivation fails open, no gate judges a lenient decode (it would let a
-        confident close commit against an unvalidated document), and the host's forced close
-        proceeds off an empty body. The model's close turns on `retryable`: an I/O fault is a
-        refusal to retry; a fault no retry changes is decided once as the host's `unresolved`.
-        Overruling on an I/O fault would let one mount hiccup replace a settled verdict."""
+    two gates can decode the same file differently."""
 
     #: The document, `""` when never written, `None` when it could not be read.
     text: str | None
@@ -139,20 +127,7 @@ def committed_document_refusal(read: CompanionRead) -> str | None:
 
 
 def repairable_diagnostics(deps: AgentDeps) -> tuple[Diagnostic, ...]:
-    """Every row `fix_row` may address — the repair set, wider than the repair window.
-
-    The window is warn-severity only, but an error-severity row blocks every write just as hard
-    (a rule shipped after the bytes landed can make a committed row invalid). Leaving it out of
-    the repair set would leave no legal move until the retry budget force-closes `unresolved`.
-    `fix_row` still faces `decide_write`, so this cannot widen what the model may write.
-
-    Excluded: diagnostics naming no row (no locus or empty `row_text` — `fix_row` reads an empty
-    `old_row` as delete), and rows outside `:R attr_updates`. The block restriction widens
-    severity, not scope: parse diagnostics exist for every block, and admitting them would put a
-    committed `:V`/`:E` record in reach of a repair.
-
-    Fails open. Validated with the document as its own baseline, as
-    `committed_investigation_reason` does, so the set matches what the close reports."""
+    """Every row `fix_row` may address — the repair set, wider than the repair window."""
     return repairable_in(read_companion(deps))
 
 
@@ -285,20 +260,7 @@ def _tool_append_block(deps: AgentDeps, text: str) -> str:
 
 
 def _frontier_recall(deps: AgentDeps, before: str, after: str) -> str:
-    """Lessons for what this write left open — appended to the return, or "".
-
-    Keyed on the invlang frontier, not the alert signature: a lesson about a field matters once
-    the field is in hand. Emitted only when the write moved the frontier and changed the top
-    lessons, so the same block is not re-stapled to every write. Derivation is shared with the
-    compaction fold's frontier row (`lessons_push`), so "moved from `before`" also means "moved
-    from what the fold showed".
-
-    Not gated by `permission.decide_read`: the corpus is a fixed internal path, and the model
-    receives rendered text, not a read capability.
-
-    Fails open: callers reach here after the bytes landed, so raising would report a failed tool
-    call on a write that succeeded.
-    """
+    """Lessons for what this write left open — appended to the return, or ""."""
     try:
         from defender.knowledge._corpus import iter_lessons
         from defender.runtime.lessons_engine.lessons_frontier import (

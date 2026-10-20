@@ -157,14 +157,5 @@ def outstanding_authz_contracts(
 
 def _check_benign_authz(companion: CompanionBody) -> list[str]:
     """Every authz contract on a live hypothesis is discharged by an `authorized` row
-    attributable to it.
-
-    `_check_authz_contract_ids` exempts an id collision whose other declarer is refuted, since
-    on an append-only document refuting is the only repair. That is sound for the contract but
-    not the row: an `authorized` row written against the refuted declarer's `ac1` would also
-    discharge the live one's. So a shared id is scoped by anchor kind, which keeps the rule
-    repairable — appending a row with this contract's anchor kind discharges it. Two declarers
-    sharing both id and anchor kind are refused outright. An unshared id is discharged by id
-    alone.
-    """
+    attributable to it."""
     return [why for _hid, _c, why in outstanding_authz_contracts(companion)]

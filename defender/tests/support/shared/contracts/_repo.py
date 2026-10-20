@@ -1,19 +1,4 @@
-"""The throwaway git repo the author/curator suites build, and the two ways they read it.
-
-Git is local and deterministic, so this tree exercises it for real rather than faking it
-(`test_git.py`'s philosophy). The cost was that "make a repo with a seed commit" had been
-hand-rolled at fourteen sites under five different placeholder identities, each spelling
-its own `subprocess.run(["git", ...])` — which also meant fourteen sites outside the
-`defender/_git.py` seam that owns git invocation everywhere else.
-
-The seed differs in one real way between callers and that difference is a parameter, not
-drift: some suites want the corpus tree they just built committed (`add="-A"`), others
-want an empty first commit with only a `README` in it so their corpus dir shows up as an
-untracked working-tree change (`add="README"`). Both are load-bearing for the suite that
-picked them.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""The throwaway git repo the author/curator suites build, and the two ways they read it."""
 from __future__ import annotations
 
 import atexit
@@ -149,26 +134,7 @@ VERBS = {"search": search, "health-check": health_check}
 
 
 def seed_adapter_stubs(defender_dir: Path, systems: tuple[str, ...]) -> tuple[str, ...]:
-    """Declare `systems` in `defender_dir`'s tree; return the names.
-
-    THE way a synthetic worktree declares its systems, now that the lead author's WRITE gate
-    reads `declared_systems.adapter_declared_systems` the way its commit gate reads
-    `declared_systems` (#772). A tree with a `skills/elastic/` and no `elastic_adapter.py` is
-    not a cheaper fixture — it is a tree in which `elastic` is not a system, so `bind` compiles
-    no per-system write lane there and refuses outright.
-
-    Borrows `_declared869`'s FILENAME rule (`.name` off `adapter_file`) rather than copying
-    it: that module owns the inverse of `verbs._system_of` — a hyphenated system is an
-    underscored file — and a second copy of that mapping is a fixture that can silently declare
-    a system nobody asked for. What it does NOT borrow is that helper's rooting, which starts
-    from a repo root; this writes under the `defender_dir` it was handed, so a tree that is not
-    literally named `defender` declares its own systems instead of a sibling's (the same
-    footgun `_systems_or_raise` closes on the production side, #772).
-
-    Returning the input is the point, the same reason `plant_named_dirs` does: the caller
-    asserts against the systems it DECLARED, never against a second reading of the adapters
-    dir with the glob the code under test runs (`tooling/lint/lint_shared_oracle.py`).
-    """
+    """Declare `systems` in `defender_dir`'s tree; return the names."""
     from defender.tests.support.runtime.engine._declared869 import ADAPTER_BODY, adapter_file
 
     adapters = defender_dir / "integrations"

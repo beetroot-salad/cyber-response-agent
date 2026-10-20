@@ -1,37 +1,4 @@
-"""Shared fakes for the #1195 rows (both drain lanes), design amendment 3. NOT a test module.
-
-The design under test (`gh issue view 1195`, "Design amendment 3 (2026-10-06): the stop fault
-wins, the box carries its docker, and lanes get a run handle", refining amendment 2): the drain
-creates and checks its one box at batch start, as on main (`start_box`), wraps it in a
-`box.BoxRuns` handle, stops it at once (`runs.stop()`), hands the lanes the handle, and
-removes the box at batch end (`stop_box`: `docker rm -f`) before the scan.
-
-- `BoxExecutor.docker`: the docker callable the box was created with (`start_box(...,
-  docker=...)` stamps it; `compare=False, repr=False`); every lifecycle call on a sandboxed box
-  uses it, and a sandboxed box without one fails closed (F2).
-- `BoxRuns(box)`: `BoxFault` for an object with no `sandboxed`, or a sandboxed one with no
-  `docker` or `name`; an opt-out handle (no docker calls) for an unsandboxed executor.
-  `.stop()`: `docker stop -t 0`, proven `exited` or `dead` (F4). `.run()`: proven `exited`,
-  `docker start`, proven `running`, yields the executor, and stops it on EVERY exit; a stop
-  fault raises even under an in-flight exception, which becomes its `__context__` (F1).
-- `box_for_run(handle)`: `None` for `None`, the handle's run otherwise; anything else, a raw
-  executor included, is a `BoxFault` (F3, O6).
-
-Every name the design adds is reached at call time (`BoxRuns`, `box_for_run`, the executor's
-`docker` field), so the modules importing this one collect before it exists and fail at the
-row that needs it.
-
-The fake daemon (`FakeDaemon`) is callable as a docker seam, so an executor can carry it as its
-`docker`; called so, it can also raise at a chosen call instead of answering (`seam_raises`: no
-binary, a daemon that never answered). A `Tripwire` installed as the `docker` program first on
-`PATH` shows that nothing reaches the real one (`no_path_docker`). `fail_stop` makes a chosen
-`docker stop` fail each of the ways in `STOP_FAULTS`; `assert_the_stop_fault_won` is F1's
-verdict over such a stop under a failing run. A lane's host steps write into a `Journal`, which marks each into the
-daemon's own call log and notes which containers were running at that moment: so a row can
-split the log into run windows (between a `docker start` and the next `docker stop`) and see
-that each holds exactly its spawn, and that no host step ran beside a running box. Nothing is
-patched onto a module.
-"""
+"""Shared fakes for the #1195 rows (both drain lanes), design amendment 3. NOT a test module."""
 from __future__ import annotations
 
 import contextlib

@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""Defender entrypoint — investigate one alert end-to-end.
-
-The investigation is driven by the in-process PydanticAI driver
-(`runtime/driver.py`): materialize the run dir → run → cross-check the two live
-tables → enqueue learning → visualize. Run-dir + post-step helpers are shared
-via `run_common.py`.
-
-Usage (every run names its tenant, and there is no default; on the host,
-clone the tenant's repo into `$DEFENDER_DATA_ROOT/<tenant>/knowledge`, then set it up once with
-    `python3 defender/cli/tenant.py setup <tenant>`):
-    python3 defender/run.py <alert.json> --tenant <tenant> [--run-id ID] [--no-learn] [--model M]
-
-Billing / credentials: the engine calls the first-party Anthropic REST API and
-needs a real billable API key. Inside a Claude Code session the *ambient*
-ANTHROPIC_API_KEY is the subscription credential (it 401s against the REST API),
-so the billable key is sourced from a `.env` file (`resolve_first_party_key`) and
-takes precedence over the ambient value.
-"""
+"""Defender entrypoint — investigate one alert end-to-end."""
 
 from __future__ import annotations
 
@@ -574,15 +557,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
                    tenant: Callable[[], Any],
                    arm_ids: Callable[[], Mapping[str, Any] | None] = lambda: None) -> Any:
     """The world this process is, or `None` for an ordinary run — plus the sibling's
-    refusals, before anything is spent.
-
-    `--update-ticket` is refused outright rather than ignored: the two ticket calls are paired
-    around the curation marker. The manifest is read here, right after the roster gate, held to
-    the episode's id (R5); an undeclared world label and a manifest the loader refuses are each
-    refused before a run dir exists. `arm_ids` reads the episode's arm roster in full (`main`
-    hands the view's `arm_ids`), so a roster its reader refuses — an id off the rule, two worlds
-    on one arm id, a UUID set other than the manifest's worlds — is refused here too.
-    """
+    refusals, before anything is spent."""
     if ns.episode is None:
         return None
     if episode is None:

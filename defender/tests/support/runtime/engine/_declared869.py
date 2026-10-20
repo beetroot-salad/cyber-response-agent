@@ -1,67 +1,4 @@
-"""Substrate for the issue-869 executable spec (`spec-flow/specs/spec_graph_869.yaml`).
-
-Pre-implementation. `defender.learning.leads.declared_systems` does NOT exist at the base
-commit, and every seam listed below either does not exist or has a different signature — so
-this suite is RED by construction. That is what a spec written before the code looks like.
-
-**The seam contract this spec pins** (write-code-from-spec implements it). The graph's header
-mints three of these names verbatim; the rest are the threading M2 demands, and a suite that
-did not name them would leave the seam unpinned:
-
-* `defender/learning/leads/declared_systems.py` — NEW, learning-side (FK-11), importing
-  `ADAPTER_SUFFIX` / `_system_of` from `defender.runtime.verbs` at MODULE level (C27).
-  - `declared_systems(repo_root: Path) -> frozenset[str]` — the ASYMMETRIC union (NF1):
-    the adapter glob `<repo_root>/defender/integrations/*_adapter.py` read from the
-    WORKING tree, unioned with the `<repo_root>/defender/skills/<name>/execution.md` marker
-    read from the COMMITTED tree, at EXACTLY ONE directory of depth — `<name>` is the
-    segment directly under `defender/skills/`, never a nested one. Either source
-    unresolvable RAISES `LeadAuthorError` (`lead_extraction.LeadAuthorError`, which per J2
-    must not be an `OSError` subclass). Both present and the union empty returns
-    `frozenset()` plus one log line naming BOTH directories. Every emitted name has passed
-    `verbs.is_system_name`, and each refusal is logged with the source it came from (FK-5).
-  - `adapter_declared_systems(repo_root: Path) -> frozenset[str]` — NF2's SECOND
-    RESOLUTION POINT, and the value the PITFALLS lane is handed: the adapter half ALONE.
-    Named here because NF2 requires a different value at that lane and no input named the
-    call that produces it (phase F's F4). Three properties ride on it and none of them is
-    inherited from the union resolver: (a) it does NOT consult the marker source, so an
-    unresolvable marker source is not its fault to raise — only an unresolvable ADAPTER
-    source is; (b) emptiness is measured on the ADAPTER HALF, so a tree with committed
-    markers and no adapters refuses the whole pitfalls lane while genuinely declaring
-    systems; (c) it applies FK-5's `verbs.is_system_name` filter and logs one line per refusal
-    naming the source, which is the only thing closing R6's log sink on this path.
-  - the shape half is `runtime.verbs.is_system_name(name: str) -> bool` — #868's check, which
-    #914 folded into the ONE system-name predicate the dispatch seam already had, so a name
-    this resolver declares is a name `_adapter_path_under` will also resolve. Lowercase letters,
-    digits and hyphens, bounded by `verbs.SYSTEM_MAX_LEN`; membership stays a separate
-    question, so `gather` and `fakesys` are well-formed and simply undeclared.
-* `defender/_paths.py::DefenderPaths` gains `adapters_dir` (and its `adapters_rel` spelling),
-  so a worktree-rooted `LoopPaths` answers for the worktree at BOTH source directories.
-* `pitfalls_curator._build_pitfalls_handoffs(rows, *, systems: frozenset[str])` and
-  `pitfalls_curator._pitfalls_path_rule(xy, path, *, systems: frozenset[str])` — the
-  `skills_dir` / `repo_root` probes are REPLACED by the threaded value (M2/M6), and
-  `_is_real_system` is deleted along with the two stale justifications C34 refuted.
-* `lead_author._skills_path_rule(repo_root, xy, path, *, systems: frozenset[str])` (M5/RF2)
-  and `lead_author.discover_system_drafts(*, skills_dir, systems: frozenset[str])` (FK-4).
-* the two composed gates take the same threaded value rather than re-deriving one behind
-  their callers' backs: `lead_author._verify_skills_state(repo_root, baseline_stray, *,
-  systems)` and `pitfalls_curator._verify_pitfalls_state(repo_root, baseline_stray, *,
-  systems)`. (#870's review adds a second threaded value to the pitfalls half,
-  `reducer_offered` — the same principle one round on: the tick's own facts are handed to the
-  gate rather than re-derived behind its caller's back.)
-* `draft_synthesis.synthesize_drafts(executed, *, catalog_dir, catalog, systems)` (M4/FK-3).
-* `LeadAuthorDeps` carries the resolved `systems: frozenset[str]`, built once in
-  `build_lead_author_deps` from `paths` — the UNION on this lane (NF2).
-* `persist.rotate_pitfalls(batch_ids, commit_sha, *, paths, category=...)` — FK-2 splits the
-  batch AT THE CALL SITE, so the rotation takes the category it stamps rather than hardcoding
-  `consumed_committed` (47's red flag 4: it is not a string rename).
-
-Project idioms this file obeys, because CI ratchets them: fakes enter through the entry
-point's own injection seams (`invoke=`, `deps=`, `verbs=`, a constructor argument), never
-`monkeypatch.setattr`; the fakes inject faults and record what they were handed, and they
-classify nothing.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Substrate for the issue-869 executable spec (`spec-flow/specs/spec_graph_869.yaml`)."""
 from __future__ import annotations
 
 import json
@@ -251,17 +188,7 @@ def seed_tree(
     name: str = "repo",
     commit: bool = True,
 ) -> Path:
-    """A committed git repo standing in for a fresh `lead-author/<id>` worktree.
-
-    The four source axes are separate parameters ON PURPOSE. Under the asymmetric union a
-    fixture that seeds an adapter and a marker for every system can never see the split NF1
-    and NF2 turn on, and every demand that drives one half alone would pass through the
-    other. `adapters` is the working-tree half; `markers` is the committed half (so a
-    marker-only system means `commit=True` — a marker merely written to disk declares
-    NOTHING, which is the whole of NF1); `skills` seeds `SKILL.md` files, which under M6
-    declare nothing at all any more; `non_systems` seeds a directory with a `SKILL.md` and
-    NO adapter and NO marker — the six real ones this issue is named after.
-    """
+    """A committed git repo standing in for a fresh `lead-author/<id>` worktree."""
     repo = tmp_path / name
     init_git(repo)
     write(repo / ".gitignore", GIT_IGNORE)
@@ -419,22 +346,7 @@ def log_lines_naming(log: str, *needles: object) -> list[str]:
 
 
 def unreadable_dir_verdict(root: Path, target: Path) -> bool:
-    """Does `declared_systems(root)` RAISE when `target` is a directory it cannot read?
-
-    Level (1) of the fault hierarchy — a real unreadable directory driven through the real
-    resolver — with the instrument chosen from the uid the test actually runs as, because
-    the fault itself is uid-dependent and P2 measured both sides:
-
-    * as a non-root uid, `chmod 0o000` IS the fault: `os.scandir` raises `PermissionError`
-      and `Path.glob` swallows it into `[]`;
-    * as uid 0, permission bits are bypassed entirely (P2: uid 0 listed a mode-000 dir), so
-      the same chmod produces NO fault at all and a test built on it would be green against
-      a resolver with no check in it. P2's own instrument is reused instead: fork a child,
-      drop to `nobody`, and let the child run the real resolver against the real directory.
-
-    Returns True iff the resolver refused. The child reports through its exit status because
-    an exception raised after `setuid` cannot cross back any other way.
-    """
+    """Does `declared_systems(root)` RAISE when `target` is a directory it cannot read?"""
     from defender.learning.leads.lead_extraction import LeadAuthorError
 
     def _probe() -> bool:

@@ -1,87 +1,5 @@
 """Shared machinery for #1234's spec — "the judge grounded in contrast with reference runs". NO
-test functions; underscore-prefixed so pytest never collects it.
-
-Imported by every test file here as `from defender.tests.learning.judge.contrast_contracts import _spec1234 as S`.
-
-The change (`spec-flow/specs/spec_graph_1234.yaml`; `.spec-flow/design.md` as amended by
-`.spec-flow/design-amendments.md` A1-A15, with the human's rulings in
-`.spec-flow/frontiers/70-resolutions.md` and `78-gate-resolutions.md`): each planted world is
-judged against the control and every gradable sibling as labelled reference runs (A1's typed,
-episode-relative, no-follow pointers; a two-run contrast pair on every investigator finding);
-world findings `unreachable` / `incoherent` / `mislabelled`; deployment gaps; draws combine by
-UNANIMITY (A7); a user section in `judge.yaml` (named gaps, found gaps, serving findings); a
-per-world `queueing` -> append -> `queued` commit (A6); a host-written CALL ID on both call
-records (A12); retired shapes refused at every reader (A4).
-
-WHERE THINGS ENTER. The judge's one entry point is `grade_episode(runs, episode_id, *, judge,
-state, draws, git_show)` (main's signature at 463833df, unchanged by #1234), driven here through
-`_judge_921.grade_at` (`grade`). The page is `open_episode_view(runs, id)` + `build_page(view)`
-(`page`). Fakes enter through those seams (`judge=`, `git_show=`, `state=`, the launcher's
-`spawn=`/`oracle=`/`verifier=`), NEVER by `monkeypatch.setattr` (profile `tests.idioms`,
-`tooling/lint/lint_monkeypatch.py`). `monkeypatch.setenv` for the configured roots is fine.
-
-NONE OF THE NEW BEHAVIOUR EXISTS AT BASE 463833df. Every import of the code under test goes
-through `mod()` / `sym()` PER TEST, so a missing target is one failure per test, never one
-collection error hiding the rest.
-
-TWO EPISODE BUILDERS — pick by the demand, as `80-survey.md` assigns:
-
-1. `family(...)` — a HAND-BUILT archived episode (`Built`): manifest v2, pre-flight's outcome
-   record + family stamp, samples, and per world `worlds/<X>/` (report, investigation, alert,
-   lessons record, gather summaries, provenance, the query table with payload sidecars and lead
-   claims), the served ledger `served/<world UUID>.jsonl`, the oracle store `oracle/<X>/`. A
-   scenario is a few `World(...)` / `CallRow(...)` lines. Ledger rows carry the COINED call id
-   (`call_id()`), because A3/A12 make a ledger row without one malformed; since #1255 (G4/G6)
-   table rows carry none, and the world's host-only call-join record `worlds/<X>/call_join.jsonl`
-   names each own table row's id by its `(lead_id, seq)` (`J.write_call_join`).
-2. `real_family(...)` — the REAL path (I-10, 45-dispositions-drift): the launcher (`cli.main`)
-   over the #1224 fixture tenant with real pre-flight; every sibling is the REAL
-   `run.main --tenant T --episode <id> --world L`, run in-process by `InProcessSiblings` (the
-   launcher's `spawn=` seam); then the real `verify_family` -> `archive_episode` -> family
-   stamp. The call records are written by the real writers (registry `authorize_call`/`_deliver`/
-   `_record_beside`, query tool `append_query_row`/`_record_denied`, `ForkSnapshot.restore_files`), so a
-   test reads the call id OFF the rows (`call_ids`) and never plants it. Every A12/A14
-   situation, d03b-d03d, d08a and the n_t8_* runtime demands use this path. The launcher's own
-   JUDGE step is suppressed (its learning-state root is absent for the launch, so `cli._grade`
-   logs and writes nothing); the test grades explicitly with its own judge and draw count.
-   About 2 s for a triad.
-
-COINED NAMES LIVE HERE AND NOWHERE ELSE (`COINED` below). F2 left field names to the
-implementer except those the spec rules by name (`RULED` below). If write-code-from-spec names
-anything differently, it renames it HERE, never in a test file. main's OWN names a test relies on
-(`malformed_replies`, the `not_graded` stamp, `held_reason`, ...) sit apart, in `EXISTING`.
-
-SHARED READINGS (fixed here so the slices agree): a found/named gap's run is the world label
-(`found_run`); a world with no completed draw or refused at prompt build is `measured: false`
-with its reason in `not_measured_reason` (d00a's one slot), an A3 exclusion's in
-`ungradable_reason`; "byte-identical" prompts compare modulo the frame salt (`unsalted`); a run's
-labelled block is owned by the run label host text names last before it (`label_re`); "in the
-user record" is `in_user_record`; a stopped pass may raise `stops()`; a FIFO-facing pass runs
-under `no_hang`.
-
-EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE, OR A FAKE CITING ITS CLAIM:
-  * damaged archive files are planted on disk (`plant_symlink`, `plant_hardlink`, `plant_fifo`,
-    `plant_dir`, `plant_oversize` (a sparse file one byte over `_io.READ_LIMIT`), `tear_jsonl`,
-    `second_disposition`): the real bounded no-follow reader meets them on every run;
-  * a failed write of a call record is a DIRECTORY planted at the record's name mid-run by the
-    estate's adapter (`Estate1234.break_write`), so the real writer's open fails. Mode bits
-    cannot do it — this box runs as root. Observed on main by this survey's smoke run: the
-    query-table write (`write_guarded`) raises `NotPlainEntry` (Errno 40) out of `run.main`
-    (the sibling exits 1, the launcher records `did not finish`, it is not archived); the
-    served-ledger write is refused and SWALLOWED (the sibling finishes and is archived) —
-    AP-01/JP-02 (44-probes-amended) observed `_record_beside` / `_record_denied` swallowing;
-  * the judge model's failed call is `RunUnprocessable` (`RoutedJudge(fail=...)`): #921's P9,
-    EXECUTED against the real `run_stage` (a wall-clock timeout and a transport failure both
-    surface as that class). No #1234 claim re-observes it; it is carried from
-    `spec_graph_921-family-judge.yaml` exactly as `_judge_921.FakeJudge` carries it; a call
-    that fails ON SIZE is the same class over an HTTP 413 `ModelHTTPError`
-    (`RoutedJudge(overflow=...)`), claim P-AM28, executed against the real seam;
-  * a model reply is SCRIPTED CONTENT in the shape the design names (`world_reply`, `inv`, `wf`,
-    `gap`, and the retired-name variants A4 / FX-reply-retired-names rule refused).
-
-Every fake RECORDS what it was handed (`RoutedJudge.prompts`, `InProcessSiblings.launches`);
-payload demands assert on what the fake saw, never on its canned reply.
-"""
+test functions; underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -522,25 +440,7 @@ AUTO: Any = object()
 @dataclass
 class CallRow:
     """One investigator call as BOTH records see it: the table row (`executed_queries.jsonl`,
-    with its payload sidecar) and the served-ledger row, joined by one call id (A12).
-
-    #1255 G4/G6: the id is no longer ON the table row. The ledger row carries it, and the
-    world's host-only call-join record (`worlds/<X>/call_join.jsonl`, `J.CALL_JOIN`) names it
-    for the table row's `(lead_id, seq)` — one line per own table row that has an id.
-
-    `source` is the ledger decision (`passthrough`, `oracle`, `real-error`, `refused`, `fault`);
-    `None` writes no ledger row (a table-only sentinel: a reject, `∅.repeat-trip`,
-    `∅.bash-shim`). `table=False` writes no table row (a ledger-only denial: the door closed,
-    or an unmapped row). `inherited=True` is a pre-branch row seeded from the source: a table
-    row the join names NO id of this run for, never a ledger row (A12) — pass it in
-    `family(inherited=)` so it lands identically at the head of every world's table.
-    `call_id=None` gives the call no id (no join line, an id-less ledger row);
-    `call_id="<text>"` writes that text in both records (malformed / foreign ids); `AUTO` mints
-    `call_id()`. `world_id` likewise overrides the ledger row's world token (a foreign row).
-    `seq` overrides the table row's seq (`AUTO`: the lead's next): a row given the seq an
-    earlier row of its lead already holds shares that row's join key, so the join names both
-    table rows with ONE id — what a box duplicating a line of its own table leaves.
-    """
+    with its payload sidecar) and the served-ledger row, joined by one call id (A12)."""
 
     system: str = "idp"
     verb: str = "query"
@@ -616,16 +516,7 @@ def fact(fact_id: str = "f1", statement: str | None = None,
 
 @dataclass
 class World:
-    """One world of a hand-built family. A control is `role="A"` with `facts=[]` (M07=A).
-
-    `reached` is the archived report's disposition (`AUTO`: the declared one; `None`: no
-    report.md); `report` overrides the whole text. `calls` are the world's own post-branch
-    calls (the family's `inherited` rows go first in its table). `forged` are the oracle
-    store's frozen rows (`None`: one per fact on `forged_system`); `oracle=False` writes no
-    store (a control legitimately has none, AM15). `run_end` writes `run_end.json` (a cut-short
-    run: `{"truncated_by": "budget", "closed_before_cut": false}`). `world_record` writes
-    `world_records/<X>.yaml` with that reason; `archived=False` leaves no `worlds/<X>/` at all
-    (with `world_record`: a not-archived world)."""
+    """One world of a hand-built family. A control is `role="A"` with `facts=[]` (M07=A)."""
 
     label: str
     role: str = "B"
@@ -999,10 +890,7 @@ def family(tmp_path: Path, worlds: Sequence[World] | None = None, *,  # noqa: PL
     pre-flight record; `family_stamp=False` leaves the family not comparable; `outcome_reason`
     is pre-flight's `reason` text. `served/base.jsonl` (the family capture ledger) is written
     EMPTY unless `base_rows=` names its rows — a pointer at `base.jsonl#0` otherwise fails to
-    resolve for the wrong reason (no such row).
-
-    `root=` (#1187): a tenant's `episodes/` folder, or a folder that becomes the data root of a
-    scene of its own (`tenant_episodes`) — several same-id families in one test each get one."""
+    resolve for the wrong reason (no such row)."""
     worlds = list(worlds if worlds is not None else triad())
     systems = list(served_systems)
     doc = manifest_doc(worlds, served_systems=systems, predicate=predicate,
@@ -1354,21 +1242,7 @@ def parse_agent_id(agent_id: str) -> tuple[str | None, int | None, int]:
 @dataclass
 class RoutedJudge:
     """The judge's model seam (`judge=`): each call is answered by the reply routed to its
-    world, draw and attempt, and RECORDED (prompt, agent id, kwargs).
-
-    `replies` keys, most specific first: `(label, n, attempt)`, `(label, n)`, `label`
-    (`"family"` for the family call). A value is reply text or a document (dumped bare), or a
-    LIST consumed one per call made under that key. `default` answers any unrouted world call,
-    `family_default` any unrouted family call; with neither, an unrouted call is an
-    `AssertionError` (a scenario must say what every call answers).
-
-    `fail` names calls that raise `RunUnprocessable` instead (#921's P9: the one class a
-    timeout and a transport failure both surface as): an agent id, a label, or `(label, n)`.
-    `overflow` names calls that raise `RunUnprocessable` over an HTTP 413 `ModelHTTPError` —
-    claim P-AM28 (83-writer-probes, executed against the real `run_stage` seam with a mocked
-    provider transport): a prompt over the provider's limit surfaces as exactly that chain,
-    for the Anthropic and the Fireworks provider alike. The fake classifies nothing and
-    decides nothing."""
+    world, draw and attempt, and RECORDED (prompt, agent id, kwargs)."""
 
     replies: dict[Any, Any] = field(default_factory=dict)
     default: Any = None
@@ -1916,13 +1790,7 @@ class Estate1234(S24.Estate):
     `{episode}`, `{label}` filled from the call's context, then globbed) whose matches the
     adapter replaces with a DIRECTORY just before it answers. The next write of that record by
     the real writer fails (the failed-write fault of A12 / n_t8_*; on main the table write
-    raises `NotPlainEntry` out of `run.main`, the ledger write is swallowed — AP-01/JP-02).
-
-    ONLY A FRESH KEY REACHES THE ADAPTER: inside a sibling, a key the family recording already
-    holds (Q1, QP, Q2 — the pre-branch and post-branch calls of `default_turns()`) is served
-    from that recording and the adapter is never called. Script the broken call on a key no
-    recording holds (e.g. `query_params("user:bob")`) and add its `query_turn` to the world's
-    turns. `{run_dir}` is then the sibling's run dir; during pre-flight it is the episode dir."""
+    raises `NotPlainEntry` out of `run.main`, the ledger write is swallowed — AP-01/JP-02)."""
 
     def __post_init__(self) -> None:
         super().__post_init__()

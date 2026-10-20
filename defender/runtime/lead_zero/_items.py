@@ -127,17 +127,7 @@ async def run_correlation_lead(  # noqa: PLR0913 — the dispatch composition: r
     on_stamp: Any, on_end: Any,
 ) -> str:
     """Dispatch the gather subagent for `l-00c` through `tools_gather._run_gather` with
-    `pre_claimed=True` (the claim was made by the caller) and return its wrapped result.
-
-    `dispatch` is the identity the run-start check resolved (#1003): the system this lead is
-    dispatched on and cache-keyed by, and the grant that narrows its registry. `session_id` is
-    the lead's session in `store`, opened by the caller (its failure is the lead's own ending).
-    `on_stamp(reason)` sees every terminator stamped on that session; `on_end(LeadEnd)` sees
-    the lead's end before MAIN's text is composed.
-
-    `tenant` is the run's record (#1107), and `run_state` the run's live state (#1235), both
-    carried onto the lead's deps: every verb it dispatches reads that tenant's settings, and
-    every call it makes counts into the run's one budget and breaker."""
+    `pre_claimed=True` (the claim was made by the caller) and return its wrapped result."""
     from ..agent_definition import RunScope, bind
     from ..agent_role import GATHER_AGENT_ID_PREFIX
     from ..driver import build_gather_agent, gather_def_for

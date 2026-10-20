@@ -1,16 +1,4 @@
-"""Every error the API answers, in one shape: RFC 9457 problem details, `application/problem+json`.
-
-A refusal raised anywhere — a route's `HTTPException`, a port's `NotFound` / `Conflict` /
-`UnknownReference`, a body or parameter that fails validation, a route the router does not have,
-or an unexpected failure — reaches a handler here and leaves as a `Problem` (`models.py`). Every
-route declares the problems it can answer (`responses`), so the published contract says what a
-client actually receives.
-
-`type` is `about:blank` and `title` the status's phrase: the status alone says what kind of
-problem it is (RFC 9457 §4.2.1); `detail` says what happened to this request. A 422 from
-validation also lists each failing part of the request (`errors`), but never the refused value
-itself: it may be a credential. A 500 says nothing about its cause.
-"""
+"""Every error the API answers, in one shape: RFC 9457 problem details, `application/problem+json`."""
 
 from __future__ import annotations
 

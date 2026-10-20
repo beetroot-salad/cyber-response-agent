@@ -1,25 +1,4 @@
-"""The episode's stage timing record: wall time per step, written by the launcher.
-
-One document at the episode root, `timing.json`: `{"steps": [{step, started_at, ended_at}, …]}`,
-one entry per step the launcher completed, in completion order. The launcher is the only frame
-that sees every step boundary, so it holds the episode's one `StageClock`. Entries are written
-after each step, so an aborted episode records exactly the steps that finished.
-
-The whole document is replaced through the episode handle's `timing.write` after every step rather than appended
-to, so a reader sees either the previous whole or the new whole. The reader therefore tolerates
-nothing: a document not in the record's shape was put there by someone else, and it raises.
-
-The write is best-effort at the frame, like the repo's other observability writers: the record
-sits in the episode dir, where the guarded write can be refused (an alias planted at its name)
-or fail (`ENOSPC`, read-only root). Raised through the step's frame, that would turn a finished
-step into a failed one — sending `RUNS` into the abort arm or a fully graded episode out of
-`main` as an `OSError`. So the fault is logged and the step is simply absent, which the record
-already reads as "not seen to finish". A step name outside `Step` is a programming error and
-still raises.
-
-A record rather than a derivation because the archive's other clocks are inner ones (a run's
-trace events, `duration_ms`) or file mtimes, neither of which gives the episode's wall time.
-"""
+"""The episode's stage timing record: wall time per step, written by the launcher."""
 from __future__ import annotations
 
 import contextlib
@@ -50,17 +29,7 @@ class StageClock:
         self._rows: list[dict[str, Any]] = []
 
     def record(self, step: str, *, started_at: str, ended_at: str) -> dict[str, Any]:
-        """Add one completed step and rewrite the record; returns the entry written.
-
-        A `step` outside `steps.STEPS` is refused before anything is written. The write goes
-        through the episode handle (a replace that follows nothing below the episode dir), so an
-        alias planted at the record's name is refused rather than written through.
-
-        The step is kept before the write is tried: it finished regardless of whether the disk
-        took the document, and dropping it on a failed write would leave a gap in every later
-        document (e.g. `runs` recorded without the `review` it depends on). Kept first, the
-        next rewrite carries it.
-        """
+        """Add one completed step and rewrite the record; returns the entry written."""
         if step not in STEPS:
             raise ValueError(
                 f"unknown episode step {step!r}; the record's steps are {', '.join(STEPS)}")

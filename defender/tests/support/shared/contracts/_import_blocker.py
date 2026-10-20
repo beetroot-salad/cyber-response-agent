@@ -1,29 +1,4 @@
-"""One way to ask "does this import cleanly without that package installed?".
-
-Six tests had hand-rolled this: a `-c` source string that puts a finder on `sys.meta_path`
-which raises for the packages under test, then imports something and prints a verdict. The
-copies had drifted on the one detail that decides whether the block actually happens.
-
-**Three of them used `find_module`, which does not exist any more.** The import system dropped
-it in 3.12; 3.11 still honours it, but only through a deprecated fallback that emits
-`ImportWarning: X.find_spec() not found; falling back to find_module()`. This project's
-`requires-python` is `>=3.11`, so on 3.12 those finders are simply skipped — the package
-imports fine, the body passes, and the test goes green having blocked nothing. That is the
-failure this module exists to make impossible: it emits `find_spec` and nothing else, and
-it blocks a module that is certainly importable, and the import then fails.
-
-Two shapes, because the tests want opposite things:
-
-  * `block=` names what must NOT be importable — "this code path does not need pydantic".
-  * `allow_only=` names the only things that may be imported — "this closure is stdlib plus
-    our own tree, and a dependency added to it later must fail here". A denylist cannot say
-    that: it passes anything nobody thought to list.
-
-Matching is on the TOP-LEVEL package name, so blocking `pydantic` blocks `pydantic.fields`
-too. An entry ending in `*` is a prefix: `pydantic*` also covers `pydantic_core`,
-`pydantic_ai`, `pydantic_graph` and `pydantic_settings`, which is stronger than naming three
-of the five and is what one caller relied on.
-"""
+"""One way to ask "does this import cleanly without that package installed?"."""
 from __future__ import annotations
 
 import subprocess

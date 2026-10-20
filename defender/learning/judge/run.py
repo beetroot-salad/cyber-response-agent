@@ -1,23 +1,5 @@
 """The judge's model call: the correlating prompt, lenient parse / strict validate, evidence
-grounding, and one write per (world, draw).
-
-The judge runs under its own deny-all `AgentRole.JUDGE` (`JUDGE_DEF`, `agent_id` prefix
-`"judge:"`). One deny-all key per package: a grant added to `QUESTIONER_DEF` cannot reach the
-judge, and granting the judge anything must be said in this file. `agent_id` partitions traces,
-never policies, so the separation has to be the key. (The two policies differ only in
-`deny_reason`, which only the bash gate reads, so the judge never actually sees it.)
-
-Model and effort are read at call time from `config.judge_model()`/`judge_effort()` and threaded
-into the `StageWiring`. `JUDGE_DEF` names the same accessors for builds outside that wiring, but
-its `effort` is a plain string evaluated once at import, so it is only a default.
-
-`JUDGE_MODEL` and `JUDGE_EFFORT` are shared: `evals/oracle_golden/judge.py` reads both with
-different defaults (`claude-opus-5` / `high` vs `kimi-k3` / `medium`) and tags its scores with the
-resolved model, so setting either knob affects both. And `run.py`'s all-roles preflight checks
-every registered definition's model at investigation startup, so a `JUDGE_MODEL` no provider
-routes makes every alert run (and every `--episode E --world L` sibling) exit rc 2. Separating them needs a knob
-name of the judge's own.
-"""
+grounding, and one write per (world, draw)."""
 
 from __future__ import annotations
 
@@ -411,17 +393,7 @@ def validate_reply(text: str, *, scope: str = "world", served_systems: Any = Non
                    shown_its_facts: bool | None = None) -> JudgeReply:
     """Read `text` as one bare document and validate strictly — the one enforcement point (A5):
     nothing is read off the reply before this returns, and a reply it refuses is asked again
-    within `_REPLY_ATTEMPTS`.
-
-    `scope` is which call the reply came from: `"world"` carries the world's `bucket`,
-    `systems` and the three filed lists; `"family"` carries world findings only. A retired name
-    (`core/retired`: a reply word of `RETIRED_REPLY_WORDS`, an investigator finding's
-    `RETIRED_INVESTIGATOR_FIELD`) is refused BY THAT NAME (A4, A17). `served_systems` (the family's recorded list) and `shown_its_facts` (the
-    contrast table's word on the judged world) drive the M20=A and A5 bucket refusals.
-
-    The shape rule is `reply_document_text`'s: exactly one document (bare, or in exactly one
-    code fence), else refused — never guessed at. A repeated key is refused too: YAML keeps the
-    last copy silently, so the reply would mean whichever one won."""
+    within `_REPLY_ATTEMPTS`."""
     import yaml
 
     from defender._yaml import duplicate_key_paths, safe_load

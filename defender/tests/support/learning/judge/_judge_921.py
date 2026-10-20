@@ -1,81 +1,4 @@
-"""Shared machinery for #921's family-judge spec — NO test scripts.
-
-The change: a judge that grades an archived episode. One model call per archived world per
-draw over four joined views (`learning/judge/render.py`), each world's row read off its OWN
-archived record (`learning/judge/family.py`; since #1224 the MODEL decides the bucket, and a
-family-scope call gives the family's word), an appender into the existing findings queue
-(`learning/judge/enqueue.py`), and a partition inside the findings channel's one gate
-(`author/lessons/run.py::_gate_family`).
-
-**None of `learning/judge/` exists at base `d1b8b06a`**, and neither does `cli.main`'s `judge=`
-seam. That is the expected state of a spec — RED against HEAD. Every import goes through
-`mod()` PER TEST (the `_triplet_947` / `_session_store_705` idiom) so a missing target is one
-failure per test rather than one collection error that hides the other ninety-odd assertions.
-
-WHERE THE JUDGE RUNS (J10, settled at the §7 human seam). At the TAIL of the step runner —
-`cli._run_episode`, after the archive step (`verify_family`) and before the return — never in
-`_launch`'s post-teardown cleanup path, whose frame a probe found production-dead on this
-route. Every drive point in this suite follows from that: a launcher-level scenario calls
-`cli.main([...], judge=…)` and reads the artifacts back off disk; a leg-level scenario calls
-the leg's own entry point against an episode this module built.
-
-FOUR THINGS LIVE HERE AND NOTHING ELSE.
-
-1. **`mod()` / `sym()`** — re-exported from `_triplet_947`, the per-test import.
-
-2. **The builders.** An accepted episode in the #947 layout: manifest, pre-flight's outcome
-   record (`outcome.yaml`, #1224), primed base, per-world ledger files, archived world dirs carrying D7's three new inputs, and a
-   runs base holding sibling trials. A new scenario is a few lines of data against these, not
-   fresh plumbing.
-
-3. **The declarative fault-injection fakes.** One fake per dependency, driven by the data
-   `Fault(...)` spec `_triplet_947` already defines (`fail_on`, `raise_after`, `malformed`,
-   `delay`). A fake INJECTS ONLY: it never classifies a fault, never decides policy, and never
-   answers a question the production code is supposed to answer. Every fake RECORDS what it was
-   handed, because a fake that only returns answers leaves the whole outbound channel unpinned
-   — a payload demand asserts against `judge.prompts`, never against the canned reply.
-
-   **Every fault SHAPE here cites the ledger claim that observed it on the real dependency**
-   (`spec-flow/specs/spec_graph_921-family-judge.yaml`, `claims:`), and nothing in this suite
-   induces a fault by imagination:
-   * `raise_after=n` with `RunUnprocessable` — P9, EXECUTED against the real `run_stage`: a
-     wall-clock timeout and a raw transport failure BOTH surface as
-     `learning.core.config.RunUnprocessable`, never a sentinel and never a hang, separable only
-     by the `did not complete:` / `failed:` prefix and by `__cause__`. A draw handler cannot
-     branch on exception type, so this fake raises the one class both ways.
-   * (RETIRED BY #1018) `malformed="fenced-with-prose"` — C12, EXECUTED over 45 real K3
-     replies: a reply arrived fenced in a ```yaml block with prose before it; 7/20 needed a
-     lenient parser under the earlier prompt and 15/15 parsed strictly once the prompt required
-     quoting scalars with colons. The lenient parse is gone: a reply is ONE BARE DOCUMENT or it
-     is malformed (`learning/core/validate.py::reply_document_text`), and prose around a fence
-     is a refusal at the consumer. The shape and its answer are pinned in
-     `tests/shared/contracts/test_1018_reply_document.py`; this fixture no longer spells it.
-   * `malformed="not-a-mapping"` / `"lookalike-bucket"` — dispositions §1, the two reply shapes
-     the consensus set records as decided.
-   * `source="fault"` on a ledger row — A5, EXECUTED (`47-probe-a5.py`): a missing `config.env`
-     and a blank required key both raise `ConfigFault(exit_code=2)` and are filed
-     `source: "fault"`. A5's claim SENTENCE ("a `refused` row can be an environment fault at
-     prepare time") is REFUTED: `refused` is filed iff `exit_code == USAGE_EXIT_CODE` (64).
-     **No test in this suite asserts a `refused` row for a missing config** — it gets `fault`.
-   * a family row missing `run_id` — P6, EXECUTED end to end: a bare `KeyError('run_id')` out
-     of `_gate_findings`, `_tick` stuck-records THE WHOLE KEYED BATCH and re-raises.
-   * `git_show_file` returning `None` — P1, EXECUTED: a fabricated rev and a real-rev/absent-
-     path both return plain `None`, indistinguishable from each other and from an empty body.
-
-   Anything else a test wants induced is a PROBE REQUEST, not a fake: see
-   `.spec-flow/frontiers/80-author-digest.md`.
-
-4. **The reply builders.** `reply_doc` / `finding_doc` spell a `JudgeReply` once, so a scenario
-   states only the field it is about.
-
-Fakes enter through the entry point's INJECTION SEAMS (a `judge=` keyword on `cli.main`, a
-`git_show=` argument on the render), never by `monkeypatch.setattr` — the
-project profile's `tests.idioms`, ratcheted in CI by `tooling/lint/lint_monkeypatch.py`. The
-design named NO seam for the judge's model call; the seam is therefore part of the contract and
-every launcher scenario here drives through it, which is what discharges it by construction.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for #921's family-judge spec — NO test scripts."""
 from __future__ import annotations
 
 import json
@@ -221,20 +144,7 @@ staged_row = oracle_row
 
 def write_ledger(episode_dir: Path, world_label: str, rows: list[dict], *,
                  raw: str | None = None) -> Path:
-    """Land `served/<fixture_world_id>.jsonl` for one world and return its path.
-
-    `raw=` writes the file's bytes verbatim, for the two states J3's reader posture is about: a
-    torn JSON line mid-file and a duplicate pair-key whose rows disagree on `source`.
-
-    #1234 A12: every served row carries the host-written id of the call it answered
-    (`record_query.next_call_id`'s `<token>/<n>`), and the judge's usability read refuses a
-    ledger row without one of its run. A row that names no `call_id` key is written with
-    `<token>/<i>`, `i` its line index (a copy: the caller's dict is not touched); a row that
-    spells the key — `None` included — is written as given, for the scenarios about the id.
-
-    Rows carrying the fixture world's default UUID are rebound to the manifest's actual
-    identity. Explicit foreign or malformed identities remain untouched for refusal cases.
-    """
+    """Land `served/<fixture_world_id>.jsonl` for one world and return its path."""
     served = Path(episode_dir) / "served"
     served.mkdir(parents=True, exist_ok=True)
     token = world_id(episode_dir, world_label)
@@ -415,21 +325,7 @@ def archived_judge_world(  # noqa: PLR0913 — one builder with one independentl
 
 
 def investigation_document(world_id: str, *, moved: bool = True, fences_at: int = 1) -> str:
-    """An archived `investigation.md` whose resolution rows sit PAST `fences_at`.
-
-    REAL INVLANG, in the format `skills/invlang`'s own parser reads and a real run writes:
-    `h-001  before -> after    [<lead> <refutation> <severity> ⟂ <edges> :: <reasoning>]`,
-    the shape `_golden_invlang/turnN-A.investigation.md` carries. The earlier fixture wrote a
-    YAML list of `{lead, before, after}` mappings as the ONLY block in its fence — a shape no
-    writer in this repo produces, and one that made a reader which works on nothing else look
-    correct. The lead a resolution belongs to is the enclosing finding's id, never a per-row
-    key.
-
-    The fence prefix is what `fences_at` indexes: `read_frontier` takes the PREFIX and the
-    family pass wants the COMPLEMENT, which no symbol spells today (G8). `moved=False` writes
-    rows whose `before` equals their `after`, so "a row past the fence" and "a row that moved"
-    stay two separable conditions rather than one.
-    """
+    """An archived `investigation.md` whose resolution rows sit PAST `fences_at`."""
     before, after = ("open", "held") if moved else ("held", "held")
     blocks = [
         ":H hypothesize.hypotheses "
@@ -454,20 +350,7 @@ def accepted_episode(tmp_path: Path, *, root: Path | None = None,  # noqa: PLR09
                      ledgers: dict[str, list[dict]] | None = None,
                      outcome: str = "accepted", family_stamp: bool = True,
                      episode_id: str = EPISODE_ID, **world_kw: Any) -> Path:
-    """A fully archived, ACCEPTED episode in the #947 layout — the judge's whole input.
-
-    HAND-BUILT, and the known limit is declared rather than hidden: no real archived episode
-    exists (N7, and #947's "one real branched run" was never reported done), so this suite
-    tests the readers against a tree the suite itself wrote.
-
-    Every non-control world carries a NON-NULL role. A world declared `role: null` is the
-    REPLICATE arm — `runnable_worlds` drops it, so it is never run, and a fixture holding one pins a family the launcher would never have produced (the
-    trap `47-runtime-probes.md` red flag 5 records this probe's own first draft hitting).
-
-    `episode_id` names the folder AND the manifest's `episode_id`, written together (#1187 R5:
-    every manifest reader refuses a manifest whose id is not its folder's name) — a scene that
-    needs an id of its own passes one here rather than renaming the folder afterwards.
-    """
+    """A fully archived, ACCEPTED episode in the #947 layout — the judge's whole input."""
     declared = dispositions or {"a": "benign", "b": "malicious", "c": "malicious"}
     if worlds is None:
         worlds = [
@@ -839,17 +722,7 @@ def as_reply_text(doc: dict, *, malformed: str | None = None) -> str:
 
 @dataclass
 class FakeJudge:
-    """The judge's model seam (`judge=`) — a recording, fault-injecting stand-in for one call.
-
-    Tier 2 of the fault hierarchy and nothing more: an LLM is neither cheap nor deterministic
-    to drive, so the reply is scripted and the PROMPT is captured. Every payload demand in this
-    suite asserts against `prompts` — what the seam was handed — because a fake that only
-    returns answers leaves the outbound channel unpinned.
-
-    `fault.raise_after=n` raises `RunUnprocessable` after n answers. That class and no other,
-    because P9 EXECUTED both arms against the real `run_stage`: a wall-clock timeout and a raw
-    transport failure arrive as the same class, never a sentinel and never a hang.
-    """
+    """The judge's model seam (`judge=`) — a recording, fault-injecting stand-in for one call."""
 
     replies: list[str] = field(default_factory=list)
     fault: Fault = CLEAN
@@ -904,26 +777,7 @@ _STAMP_DEFAULT: Any = object()
 
 
 class FakeSibling:
-    """The launcher's process seam (`spawn=`), standing in for a sibling that RAN.
-
-    `_triplet_947.FakeSpawn` records argv and runs no code, which is right for every #947
-    scenario about how children are started. #921 grades what a child LEFT BEHIND, so this fake
-    does the one thing a real `run.py --tenant T --episode <ep> --world <label>` child does that
-    the judge can see: it materialises the sibling's arm with the artifacts the archive copies —
-    including D7's three new inputs — and, where a scenario asks, the world's own ledger rows.
-
-    #1187: the arm is where a real sibling makes it — `<data root>/<T>/episodes/<ep>/runs/<arm
-    id>`, the arm id the episode's ROSTER (`arms.json`) holds for `<label>`, read as the sibling
-    reads it before anything else (O4b). The episode comes from the argv (the launcher mints its
-    id; nothing here knows it in advance); the data root is `data_root`, else the process's
-    `DEFENDER_DATA_ROOT` at the call. A child started with no roster, or whose UUID roster does not
-    name its label, does nothing and exits 97, the fault recorded in `faults` — the double never
-    writes a roster entry itself, so "the roster is written before the first sibling" stays
-    observable. `episode_dir` is the episode the last started child ran in.
-
-    It injects no fault of its own: `exits` scripts a child's return code, which is data the
-    real seam already returns, and nothing here decides what a non-zero exit MEANS.
-    """
+    """The launcher's process seam (`spawn=`), standing in for a sibling that RAN."""
 
     def __init__(self, *, data_root: Path | None = None, exits: dict[str, int] | None = None,
                  ledgers: dict[str, list[dict]] | None = None,

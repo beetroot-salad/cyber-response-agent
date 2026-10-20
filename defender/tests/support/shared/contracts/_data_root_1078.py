@@ -1,28 +1,4 @@
-"""D9's tenant fixture helper (#1078 pass A) — the ONE place a test gets a data root and a tenant.
-
-#1078 moves every run under `<data root>/<tenant>/runs/` and makes the tenant a required,
-pre-existing thing: `DEFENDER_DATA_ROOT` has NO default (§7 J01, "NO DEFAULT DATA ROOT" — an
-unset variable is refused, naming it), a fresh run needs `--tenant <id>`, and the tenant exists
-only once `create_tenant` has written its row. So a test that drives a run needs two things it
-never needed before: a data root it owns, and a tenant created in it.
-
-* THE DATA ROOT is the autouse `data_root` fixture in `tests/conftest.py` (§7 J57(b): an autouse
-  fixture, overriding D9's "a fixture helper… not an autouse one"). Every test, whether it asks
-  or not, runs with `DEFENDER_DATA_ROOT` pointed at its own fresh tmp directory, so no test can
-  reach a host data root and none shares one with another test or another xdist worker (J58).
-  It only SETS THE VARIABLE — it calls nothing new, so it is inert against code that does not
-  read the variable yet.
-* THE TENANT is set up ON REQUEST — the committed fixture's knowledge placed, then its row
-  created — by `ensure_d9_tenant()` here (or the `d9_tenant` fixture in
-  conftest, which calls it). Never autouse: `create_tenant` is the implementation under test,
-  and an autouse call to it would turn every test in the repo into one failure about it.
-
-`D9_TENANT_ID` is a TEST value. Production code holds no tenant literal (O1's census scans
-`defender/**/*.py` minus the tests); the fixture UUID is deterministic and carries no
-operator-facing name into production.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""D9's tenant fixture helper (#1078 pass A) — the ONE place a test gets a data root and a tenant."""
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid

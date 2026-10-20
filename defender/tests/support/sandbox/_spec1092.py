@@ -1,40 +1,6 @@
 """Shared machinery for #1092's executable spec — NOT a test module (the leading underscore
 keeps pytest from collecting it). Imported by the `test_1092_*.py` files, which live directly
-under `defender/tests/` because `spec-graph binds` scans that directory non-recursively.
-
-Every demand of `spec-flow/specs/spec_graph_1092.yaml` is exactly one test in those files,
-named by the demand's `discharged_by`; the test's docstring carries the demand's prose.
-
-THE FAULT-INJECTION HIERARCHY, applied (phases/author.md):
-
-  tier 1 — REAL input through the REAL primitive, in the test itself. A tree that cannot
-  name an image is built by deleting a file or putting a DIRECTORY in its place (root runs
-  this suite, so a permission bit cannot make a file unreadable — `IsADirectoryError` can);
-  the shims are the real `bin/defender-*` scripts exec'd by the real shell over stub
-  interpreters; `reexec_into_venv` really `os.execv`s; the build script's `docker` is a
-  real executable on PATH that records its argv; the drain's worktree is a real git repo
-  whose HEAD is the commit the fault must name.
-
-  tier 2 — a declarative fake whose fault CONTENT cites the ledger claim that observed it on
-  the real daemon. `RecordingDocker` (from `_box665`) is reused; `NoSuchImageDocker` below
-  answers the preflight `docker image inspect` with the daemon's `No such image: <ref>` rc 1
-  (`NO_SUCH_IMAGE_CITE`), echoing the image token OFF THE ASKED ARGV so a fixture can never
-  name an image the builder did not resolve — and leaves the create healthy, so a preflight
-  that did not fire is caught by the create it lets through.
-
-  tier 3 — an author-imagined fault is banned; none is used here.
-
-RED AGAINST HEAD is the expected state of a spec. `box/_image.py`,
-`defender/box/image_cli.py`, `defender/box.Dockerfile`, `_BOX_MARK_ENV`, the `box` extra,
-the missing-image preflight and the CI build step do not exist at b016749c. Every reference to a
-future symbol is LAZY — reached inside a call site a test invokes (`box_mod.image_tag`, a path
-that is stat'd in the body) — so every module still COLLECTS at HEAD and each test fails on
-its own missing piece rather than taking the suite's collection down with it.
-
-No `monkeypatch.setattr` anywhere: fakes enter through `docker=`, `start_box=`, `branch=`,
-`shared_mounts` and the `run=` seam this spec demands of `_spec771.run_probe_under_profile`;
-`monkeypatch.setenv`/`delenv` are used for env knobs and are outside the ratcheted gate.
-"""
+under `defender/tests/` because `spec-graph binds` scans that directory non-recursively."""
 from __future__ import annotations
 
 import contextlib

@@ -1,14 +1,5 @@
 """Lesson-corpus fixtures shared by the frontier-retrieval suites — and the MAIN `deps`
-those suites drive `_frontier_recall` through.
-
-HERE rather than in `test_frontier_recall_919.py`, which is where `_write_lesson` was born and
-where `test_lessons_frontier_scale_935.py` first reached for it. Importing a name out of a
-COLLECTED test module loads that module a second time — pytest imports it under its
-rootdir-relative name (`test_frontier_recall_919`) and the import statement loads it again as
-`defender.tests.invlang.validation.test_frontier_recall_919`, so every module-level statement in it runs twice in
-one session. The repo already answers this with `_`-prefixed helper modules that pytest does
-not collect (`_engine_helpers`, `_declared869`, `_repo`, `_by_path`, …); this is one more.
-"""
+those suites drive `_frontier_recall` through."""
 from __future__ import annotations
 
 from pathlib import Path

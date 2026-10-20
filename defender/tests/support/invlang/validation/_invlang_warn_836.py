@@ -1,37 +1,4 @@
-"""Shared fixtures and drivers for the #836 suite — warn severity, the repair window, `fix_row`.
-
-Five test modules import this one:
-
-    test_invlang_warn_severity_836.py   M1/M2 — Diagnostic.severity and the three validators
-    test_invlang_warn_window_836.py     M3/M5 — the derived window and the gate
-    test_invlang_fix_row_836.py         M4    — the repair verb
-    test_invlang_ident_key_836.py       M6    — `ident` becomes a legal refinement key
-    test_invlang_warn_rosters_836.py    the six by-name rosters, the grants, the prose
-
-Nothing here is a test. The fixtures below were EXECUTED against the real `diagnose` at
-c0dca747 while this file was written, and each one's recorded diagnostic set is stated in its
-comment — a fixture that quietly carried a second fault would let a weaker implementation pass
-every `_only`-shaped assertion in the suite (the lesson `test_the_bad_key_is_the_documents_only
-_fault` records for #810's sibling suite).
-
-TWO FIXTURE FACTS ARE LOAD-BEARING AND EASY TO GET WRONG:
-
-  * the warn-family key is `owner` / `dept`, never `ident`. M6 makes `ident` LEGAL, so a
-    fixture keyed on `ident` stops being flagged the moment M6 lands and every window test
-    built on it goes green by vacuity. `owner` and `dept` are outside `class` / `attrs.*` /
-    `ident` and stay flagged after M6 — this is the doc's own accepted risk ("M1 upgrades the
-    CHECK, not the measured `ident` population") made into a fixture rule.
-  * every `:R attr_updates` row targets a vertex the `:V` block DECLARES. H8 mints a refusal
-    for a refinement naming an undeclared vertex (PR-11: today it lands with zero diagnostics
-    and `effective_vertex_state` fabricates the vertex), so an undeclared target would add a
-    SECOND, error-severity diagnostic and turn a warn-only fixture into a refused one.
-
-Symbols this spec MINTS are imported inside function bodies, never at module scope: the suite
-must still COLLECT against `c0dca747`, where `warn_diagnostics` and `_tool_fix_row` do not
-exist yet. Red is the expected state of a spec; an uncollectable file is not.
-
-Underscore-prefixed so pytest does not collect it.
-"""
+"""Shared fixtures and drivers for the #836 suite — warn severity, the repair window, `fix_row`."""
 from __future__ import annotations
 
 import os

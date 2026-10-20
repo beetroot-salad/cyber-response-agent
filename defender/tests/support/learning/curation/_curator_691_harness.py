@@ -1,31 +1,4 @@
-"""Shared machinery for the #691 curator-bindable executable spec (write-tests phase E).
-
-The #691 change makes CORPUS_AUTHOR *bindable*: its per-spawn policy is compiled through
-``bind`` (not a private ``_corpus_author_policy`` that roots write_allow at ``run_dir``), its
-corpus is found BY NAME (M1), its reads are confined to the three shipped lesson corpora (R4),
-and ``CuratorDeps.for_run`` collapses to a thin wrapper over ``bind`` (M9). None of that exists
-at HEAD — ``CORPUS_AUTHOR_DEF.bindable`` is ``False`` and ``for_run`` bypasses ``bind`` — so the
-binding-seam calls below RAISE or mis-resolve today. That is the design: these tests ARE the
-contract the refactor is written against, RED against HEAD by construction.
-
-This module is the ONE reconcile point for the provisional target API (phase-D forks f1-f6):
-the corpus name rides on ``RunScope`` (F89 — a bind INPUT resolved before ``bind`` returns; F83 —
-optional-with-sentinel so every bare ``RunScope()`` caller survives), the confine is the three
-shipped corpora (R4), and the tree is the spawn's worktree (M3). ``write-code-from-spec``
-reconciles the code's actual spelling against these call sites; the join stays HERE so there is
-exactly one place to fix, never N. The leading underscore keeps pytest from collecting it.
-
-Two seam entry points, deliberately distinct:
-
-* ``bind_curator`` drives the binding seam ITSELF (``bind(CORPUS_AUTHOR_DEF, …)``) — for the
-  construction / census / M-mechanism demands. RED today (bindable=False raises; RunScope has no
-  ``corpus_name`` field yet). The tests that use it assert on the message / observable so the raise
-  they see is the DEMANDED one once #0 lands, not an incidental import error.
-* ``curator_deps`` builds a ``CuratorDeps`` through the STABLE ``for_run`` entry point (M9 keeps it)
-  and its real ``.policy`` is then driven through the real gates. The confine / membership / rm
-  corrections surface as the policy's OWN decisions changing under the refactor — each test red on
-  its own assertion, not on a shared crash.
-"""
+"""Shared machinery for the #691 curator-bindable executable spec (write-tests phase E)."""
 from __future__ import annotations
 
 from pathlib import Path

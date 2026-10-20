@@ -1,42 +1,4 @@
-"""Shared machinery for #1025's episode page spec (`learning.html`) — NO test scripts.
-
-The change: a page rendered from an episode directory alone —
-`presentation/visualize_episode.py::render_episode(episode_dir) -> Path`, written beside
-`judge.yaml` through `_io.write_guarded`'s replace lane, called by the launcher after the JUDGE
-clock frame closes (`cli._render_page`, under its own non-fatal boundary) and by
-the standalone CLI `main([episode_dir])`. NONE of it exists at base `e8d22ac0`; every import goes
-through `mod()` PER TEST (the `_triplet_947` / `_judge_921` idiom) so the missing target is one
-failure per test, never a collection error hiding the other assertions.
-
-THE ARCHIVES ARE NOT VISIBLE TO CI (F27: `/workspace/.defender-episodes/` is gitignored and
-outside the checkout), so the "sample" the design doc quotes off `fresh-authkeys-20260909-n124`
-is carried here by a SUITE-BUILT episode that reproduces an oracle-era archive's SHAPE with its
-own numbers: `sample_episode()` — three worlds (the control `a`, `no_remote_session` whose fact
-touched no served call, `prior_fake_key_precedent` whose oracle answered one), one draw each plus
-a family draw, three questioner traces, three judge traces with their framed twins, three
-sibling run dirs each ending in a result event, pre-flight's `outcome.yaml`, the samples and
-provenance records — and no `timing.json`, because both archives predate prep 1 (c25). Every
-fixture number is a module constant (`SAMPLE`), so a test asserts against the fixture's
-declared figure, never against a value its own body computed from the records.
-
-EVERY RECORD IS WRITTEN IN THE SHAPE ITS PRODUCTION WRITER LEAVES AND READ BACK THROUGH ITS
-PRODUCTION READER before a test sees it — `write_judge` round-trips through `judge.read_grade`,
-`draw_document` through `enqueue.draws_on_disk`, `outcome.yaml` and `world_records/` are
-written by `learning/branch/outcome.py` itself, the manifest by `_triplet_947.write_family`, the
-served ledgers by `_judge_921.write_ledger`, the run dirs by `_triplet_947.sibling_run_dir`. A
-fixture the real reader refuses is a fixture bug, and it fails HERE, loudly, rather than
-turning up as a page that rendered "unreadable" for a record the test believed intact. Where a
-scenario WANTS an unreadable record it writes raw bytes (`plant_raw`) and says so.
-
-Fault content cites the ledger claim that observed it on the real dependency
-(`spec-flow/specs/spec_graph_1025.yaml`, `claims:`): the trace row shape is c2, the result event
-c4, the framed row c8, the refusal classes F25/p6/x16, the replace lane's refusal p1, the NUL /
-lone-surrogate encode behaviour p4, the unscreened world leaves p2. Nothing here induces a fault
-by imagination; the only fakes are the launcher harness's own (`_judge_921.FakeSibling` /
-`FakeJudge`), reached through `cli.main`'s seams (never `monkeypatch.setattr`).
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for #1025's episode page spec (`learning.html`) — NO test scripts."""
 from __future__ import annotations
 
 import contextlib
@@ -827,15 +789,7 @@ def _leads(world_dir: Path, label: str) -> None:
 
 
 def copy_episode(ep: Episode, dest: Path) -> Episode:
-    """A whole-tree copy of `ep` named `dest.name` — the O6 fixture.
-
-    #1187 (Layout A, O9): an episode is reached by id only under its tenant's `<T>/episodes/`,
-    so `dest.parent` is taken as the DATA ROOT of a scene of its own (`T.tenant_episodes`) and
-    the copy lands at `<dest.parent>/<T>/episodes/<dest.name>` — another root, as O6 wants. Its
-    name stays `dest.name`: a caller keeping the id (`.../<ep.dir.name>`) gets a copy the page
-    reaches; one naming another folder gets the renamed copy R5 refuses (a manifest names its
-    own folder — correction 4's "the id from the manifest, never the directory" is the half
-    #1187 turns into a refusal)."""
+    """A whole-tree copy of `ep` named `dest.name` — the O6 fixture."""
     target = T.tenant_episodes(dest.parent) / dest.name
     shutil.copytree(ep.dir, target, symlinks=True)
     return Episode(target, ep.tmp_path)
@@ -944,12 +898,7 @@ def when_inside(act: Callable[[], Any], *, marker: str = PAGE_FILE, tick: float 
                 budget: float = 60.0) -> Iterator[dict[str, Any]]:
     """Run `act()` from a signal handler the first time a frame of `marker` is on the main
     thread's stack — an interrupt, a rewrite or a raise landing INSIDE the render, with no seam
-    on the render itself (d40: the renderer is a plain call).
-
-    The interval timer re-arms every `tick` until the frame is seen or `budget` runs out, so
-    the observation is "what happened when the fault landed mid-render", not "what happened at
-    some unrelated moment". The dict yielded reports `hit` (the frame was seen) so a test can
-    fail for the right reason when the render never ran or finished under a tick."""
+    on the render itself (d40: the renderer is a plain call)."""
     seen = {"hit": False, "count": 0}
     started = time.monotonic()
 

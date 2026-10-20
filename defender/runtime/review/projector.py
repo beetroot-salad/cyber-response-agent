@@ -1,15 +1,5 @@
 """The projections the blind lenses read — the observation/inference cut, in one definition,
-over the parsed companion.
-
-A lens reconstructs the investigation's belief movement from what it observed, which only
-measures anything if the lens cannot see the movement. Built in two stages, prune → render:
-the prune removes withheld keys from the parsed object, so the renderer cannot leak them and
-"no inference reaches a lens" is assertable on a data structure.
-
-The cut is the whole `:T` tag family (`resolutions`, `conclude`, `close`), plus the belief
-columns and plan blocks listed below; `:V`, `:E`, `:R`, `:H` and `:L` are what a lens sees. It
-reads the parsed object, not tag prefixes over raw text.
-"""
+over the parsed companion."""
 
 from __future__ import annotations
 

@@ -1,30 +1,4 @@
-"""#1106 — the per-tenant knowledge folder: shared fixtures for the spec and the migrated suites.
-
-The four settings kinds (each system's `config.env`, `verb-grants.yaml`, `lead-zero.yaml`,
-`systems/case-history/mapping.yaml`) live in a tenant's knowledge folder under the DATA ROOT,
-`<root>/<tenant>/knowledge/settings/`, beside an `agent/` half the box mounts read-only (#1120
-D1/D2). A tenant is reached only through `_tenant.accept_tenant`; `accept` below calls it.
-
-THE SEAMS THIS MODULE REACHES — each imported at CALL time, never at collection:
-
-  * `defender.tenancy._tenant.accept_tenant(root, id, *, defender_dir)` -> `Tenant`.
-  * `defender.runtime.verb_dispositions.run_grants(settings_dir) -> RunGrants` — the per-run
-    grants (`path`, `gather`, `correlation`, `correlation_system`); and
-    `dispositions_path(settings_dir)`.
-  * `defender.runtime.lead_zero_config.lead_zero_config_path(settings_dir)`.
-  * `VerbContext(..., settings_dir=...)` — a REQUIRED field with no default.
-
-A test that names no tenant runs as the committed fixture (`knowledge/tenant-fixture/`), set up
-under its own tmp data root (`fixture_tenant`, #1120 H2). The lab is retired (#1120, PR #1157):
-a test that wants a complete committed settings folder reads `FIXTURE_SETTINGS`, its copy.
-
-THE ORACLES ARE LITERALS. Every PLANTED tenant is written from data spelled here — never copied
-from a committed tenant, never from the retired
-`defender/knowledge/environment/` — so an expected value can disagree with the file under test,
-and the fixtures do not depend on where the committed copy lives.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""#1106 — the per-tenant knowledge folder: shared fixtures for the spec and the migrated suites."""
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid

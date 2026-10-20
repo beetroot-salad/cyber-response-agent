@@ -1,19 +1,4 @@
-"""The request ceiling, enforced at the round.
-
-A gather lead runs under `UsageLimits(request_limit=L)`, and its summary is the text of its
-last answered request. So the model must be told which request is its last, whatever tool the
-round used. Two hooks around every model request share one predicate, `is_final_request`,
-comparing the request count to `ctx.usage_limits`.
-
-Before the final request, the closing sentence is appended to its user turn and it is sent
-with `tool_choice: none` (tool definitions stay on the wire: a history with tool blocks must
-define tools). After the response, any tool call the provider let through is dropped, so the
-run ends on the model's text like a finished lead.
-
-The ceiling is recorded on the lead's `LeadStop` when the sentence goes out, so main's notice
-reads a recorded fact rather than an inferred count. These sentences are gather's vocabulary;
-main's "treat this lead as incomplete" idiom lives in `tools_gather`.
-"""
+"""The request ceiling, enforced at the round."""
 from __future__ import annotations
 
 from dataclasses import replace

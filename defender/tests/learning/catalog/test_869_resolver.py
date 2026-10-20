@@ -42,23 +42,7 @@ def _adapter_half_of(repo: Path) -> set[str]:
 
 
 def _committed_skills_paths(repo: Path) -> list[str]:
-    """Every path under `defender/skills/` at HEAD — the committed tree, listed once.
-
-    DELIBERATELY NOT the plumbing the resolver runs (#910's shared-oracle gate). `_marker_names`
-    asks `ls-tree` for HEAD; an oracle that re-ran that same query could not disagree with the
-    code about how the tree is read — it could only confirm the implementation does what the
-    test's own copy does, and every input on which the shared primitive is wrong would be
-    invisible BY CONSTRUCTION. That is not a hypothetical here: it is how #869 shipped a
-    marker half that dropped every non-ASCII and every spaced name.
-
-    `ls-files` answers from the INDEX rather than from HEAD — a different command, a different
-    parse, and a different question. For these fixtures the two coincide exactly, because
-    every one of them reaches this helper through `commit_all`, and a file merely WRITTEN is
-    in neither (which is the NF1 asymmetry this suite turns on, so the substitution does not
-    quietly relax it). `-z` and `--full-name` are for the oracle's own correctness: NUL
-    delimiting so a spaced or non-ASCII path is neither torn nor C-quoted, and root-relative
-    output so `count("/") == 3` means what it says.
-    """
+    """Every path under `defender/skills/` at HEAD — the committed tree, listed once."""
     listing = _git.git(
         ["ls-files", "-z", "--full-name", "--cached", "--", SKILLS_REL], cwd=repo,
     )

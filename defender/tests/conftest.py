@@ -105,13 +105,7 @@ def run_visualizations_dir(tmp_path_factory, monkeypatch) -> Path:
     `run-visualizations/` (#1084 O3, M4). This is the PREVENTION. For a test that removes
     it, the resolver still refuses the real checkout under pytest (`MirrorRootRefused`), so no
     copy lands there — but since #1110 a refused copy is a logged WARNING, not a failed render,
-    so that refusal surfaces as a warning in the test's log, never as a failing test.
-
-    `mktemp`, not `tmp_path`: several suites snapshot or list their own `tmp_path`, and an
-    extra entry there would be a change they never made. The dir sits beside it instead.
-    Requested by name, it hands a test the location without re-reading the environment; a
-    test's own `monkeypatch.setenv`/`delenv` wins (same function-scoped instance, later).
-    """
+    so that refusal surfaces as a warning in the test's log, never as a failing test."""
     mirror = tmp_path_factory.mktemp("run-visualizations")
     monkeypatch.setenv(RUN_VISUALIZATIONS_ENV, str(mirror))
     return mirror
@@ -151,20 +145,7 @@ def session_data_root(tmp_path_factory) -> Iterator[Path]:
 
 @pytest.fixture(autouse=True)
 def data_root(tmp_path_factory, monkeypatch) -> Path:
-    """Every test's `DEFENDER_DATA_ROOT` is its own fresh tmp directory (#1078 D9, §7 J57(b)).
-
-    #1078 gives the data root NO default — an unset `DEFENDER_DATA_ROOT` is refused, naming the
-    variable (§7 J01) — so this fixture is the PREVENTION half: no test, whether it asks for
-    isolation or not, can reach a host data root, and no two tests (or xdist workers) share
-    one (J58). The detector half J57 once planned (a pytest-time refusal of the code default)
-    collapsed into that production refusal: with no default there is nothing to refuse.
-
-    `mktemp`, not `tmp_path`, for the same reason as `run_visualizations_dir` above: suites
-    that snapshot their own `tmp_path` must not see an entry they never made. It SETS THE
-    VARIABLE AND NOTHING ELSE — the tenant is created on request (`d9_tenant` below), never
-    here. A test's own `monkeypatch.setenv`/`delenv` wins (same function-scoped instance,
-    later).
-    """
+    """Every test's `DEFENDER_DATA_ROOT` is its own fresh tmp directory (#1078 D9, §7 J57(b))."""
     from defender.tests.support.shared.contracts._data_root_1078 import DATA_ROOT_ENV
 
     root = tmp_path_factory.mktemp("data-root")
@@ -197,15 +178,7 @@ _malloc_trim = _resolve_malloc_trim()
 
 @pytest.fixture(scope="module", autouse=True)
 def _return_freed_arenas():
-    """Hand freed allocator arenas back to the OS at every module boundary.
-
-    xdist workers are persistent and `--dist loadfile` keeps feeding them new files, so one
-    transient peak raises that worker's floor for the rest of the run: the memory is already
-    free to Python, but glibc keeps the arenas. The three files that drive the runtime loop to
-    its request limit each cost 150-250 MB this way, and a single trim returns essentially all
-    of it (one measured case: 157 MB grown, 152 MB returned). Runs after the module's own
-    fixtures tear down, so what it reclaims is genuinely dead.
-    """
+    """Hand freed allocator arenas back to the OS at every module boundary."""
     yield
     _malloc_trim()
 

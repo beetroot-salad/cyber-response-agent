@@ -418,15 +418,7 @@ def git_commit_paths(
     env: Mapping[str, str] | None = None,
 ) -> str | None:
     """Stage exactly `present` (added) and `absent` (deleted) and commit them; `None` if nothing
-    changed. `env` is every git call's environment (`None`: this process's).
-
-    The caller says which paths still stand in the worktree: this module asks the filesystem
-    nothing (#1134 — the drain judges present from absent through its mount handle). `git add`
-    refuses the whole call if any path is gone from both worktree and index ("did not match any
-    files"), so absent paths go through `git rm --cached --ignore-unmatch`, a no-op when the
-    index no longer has them. Nothing to stage returns `None` without calling git: `git commit
-    -F - --` with an empty pathspec would commit the whole index, sweeping in whatever else is
-    staged."""
+    changed. `env` is every git call's environment (`None`: this process's)."""
     paths = [*present, *absent]
     if not paths:
         return None

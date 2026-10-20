@@ -317,13 +317,7 @@ def read_query_template(
 ) -> tuple[QueryTemplate | None, str]:
     """One template file, as `(template, reason)` — `reason` empty on success, else why the file
     is not a template. A link, hard link or anything but a plain file at the name is refused,
-    never followed. For callers holding one name (the commit gate), which need the reason.
-
-    `read_query_template(view, name, where=…)`: the template at `name` below the `Bound` `view`
-    (its `read` grammar), spelled `where / name` — the drain's form, e.g. `(skills.view(),
-    "gather/queries/<sys>/x.md", where=skills_dir)`. `read_query_template(path)`: today's form,
-    `path.name` read under `bind(path.parent)` (rooted there, following that spelling, so never
-    from drain code)."""
+    never followed. For callers holding one name (the commit gate), which need the reason."""
     if isinstance(source, Bound):
         if name is None:
             raise ValueError("read_query_template(view, name, where=…): a Bound needs the name")

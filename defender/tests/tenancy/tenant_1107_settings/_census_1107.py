@@ -1,42 +1,4 @@
-"""The production-code censuses #1107 pins, each as ONE scanner function over a ROOT.
-
-A root is a repo-shaped tree (`<root>/defender/...`): the checkout (`REPO_ROOT`) for the
-negative, or a tmp tree holding a planted module for the positive control. Sharing one function
-between the two is what makes the control prove the observation channel — a scanner that saw
-nothing would be green on the real tree and red on the plant. Every scanner returns
-`(files_scanned, findings)`, the count being the negative's own precondition (a census over zero
-files is green for any implementation).
-
-  * `elastic_key_reads`  (d4, F12)     — a read of an `ELASTIC_*` / `ELASTICSEARCH_URL` key's VALUE
-    out of a mapping (a `SystemConfig`, a parsed config file, an env) in runtime/, learning/ or
-    run.py (the Elastic view that once exempted its own module went with #1222's M1).
-  * `settings_copies`    (S3)          — a copy / link / byte-transfer whose SOURCE derives from a
-    tenant's `settings` folder (`RunTenant.settings`, a `settings_dir`, a `settings/` path).
-  * `settings_dir_hits`  (F7)          — every `settings_dir` identifier outside F7's allow-list.
-  * `helper_location_lookups` (N3)     — `process_defender_dir()` / `run_env()` calls and
-    `DEFENDER_DIR` / `DEFENDER_RUN_DIR` lookups in the four swept trees, outside a module-level
-    `def main`.
-  * `soc_playground_reads` (D2)        — a lookup of a `SOC_PLAYGROUND_*` name in any mapping.
-  * `doc_env_teaching`   (MF-14)       — model-facing doc lines that teach environment overrides of
-    config, `SOC_PLAYGROUND_*` settings, environment-variable secrets or the `_ENV` suffix, or a
-    hard-coded host-state context.
-
-GREP FLOORS, recorded rather than hidden:
-* Key resolution is NAME-LEVEL per file: a string constant, a name bound anywhere in the file to a
-  constant or a literal collection of constants, an element of such a collection
-  (`_KEYS[verb]`), or a loop / comprehension variable iterating one. A key reaching a lookup
-  through another module, a function return or string building is below the floor.
-* The copy census taints through assignments by name within one file and through `/`,
-  `Path(...)` and method calls on a tainted value; a path handed in from another module is not
-  traced.
-* The doc census is line-oriented, reading on into the next line only where a sentence does; a
-  sentence spread over three lines, or phrased without the trigger words, is below it. A line
-  whose trigger is negated (`not`, `never`, `no longer`, `cannot` within four words before it) or
-  that describes the new convention (`_SECRET_REF`, `secrets.env`) is not a finding — that is
-  what keeps the rewritten docs, and the listed homonyms, out of it.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""The production-code censuses #1107 pins, each as ONE scanner function over a ROOT."""
 from __future__ import annotations
 
 import ast

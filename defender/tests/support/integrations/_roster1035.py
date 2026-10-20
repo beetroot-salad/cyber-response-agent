@@ -1,28 +1,5 @@
 """Substrate for the #1035 pins (`test_1035_one_roster_read.py`): the generalised
-drop-to-`nobody` instrument, and the surface under test.
-
-WHY A SECOND INSTRUMENT. `_declared869.unreadable_dir_verdict` is the right idea and the wrong
-shape for this issue: it hardcodes the probe (`declared_systems(root)`, the union), the mode
-(`0o000`, the cannot-LIST arm) and the restore (`0o755`), and its child maps EVERY escape that
-is not a `LeadAuthorError` to exit 2 — "setup failed". #1035's defect is a raw `PermissionError`
-out of the resolver over a mode-`0o400` directory (listable, not searchable), so under that
-helper the red run would read "the child never reached the resolver" — a misdiagnosis of the
-very fault the pin exists to name. This one is parameterised on the probe and the expected
-class, gives "raised something else" its own exit code, and ships the child's verdict — the
-raised class, its message, the returned value's repr, and everything the probe logged — back
-over a pipe, because `capsys` cannot see across `os._exit` and an assertion about a log line
-("(continuing)" must not appear) or a message ("names the directory") needs the text.
-
-WHY `nobody` AT ALL. The local gate runs as uid 0, for whom `chmod` is a no-op on the fault
-(P2 of #869 measured it: root lists a mode-000 directory), and a `skipif(geteuid() == 0)`
-leaves the pin unexecuted exactly where it is run most. So the child forks, drops to `nobody`,
-and meets the real fault through the real primitive. As a NON-root uid (CI's `runner`) the
-mode bits ARE the fault for the process itself, and neither the chown nor the setuid is
-permitted — so both are skipped, the same split `_declared869.unreadable_dir_verdict` makes;
-the fork stays, so the verdict travels the same channel on both uids.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+drop-to-`nobody` instrument, and the surface under test."""
 from __future__ import annotations
 
 import io

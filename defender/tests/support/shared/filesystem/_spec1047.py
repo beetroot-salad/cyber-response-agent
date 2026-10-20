@@ -1,83 +1,4 @@
-"""Shared machinery for #1047's cut-short-record spec — NO test scripts.
-
-THE CHANGE. The exit class a run ended on (`truncated_by`) moves onto a path no box can
-write, and three consumers key on it: the family judge files a cut-short world as a third row
-shape instead of grading the host's forced report as a verdict (O1); the ticket lane decides
-per exit class instead of on "is there a readable report.md" (O2); the archive writes each
-world a host-owned record of how its run ended (O3). The design's FIRST draft put the exit
-class in `report.md`'s frontmatter and was refuted by its own cold review — `validate_report`
-admits unknown keys (claim h3) and the judge reads a copy of a file the box had an rw bind on
-(claim h4), so a planted `truncated_by:` line would have let a graded subject exclude its own
-world from grading. Everything in this module exists to keep the value off that path.
-
-**None of the mechanism exists at base `59bdea44`.** `session_store.normalized_truncated_by`,
-`runtime/run_end.py`, `archive.RUN_END_NAME`, `read_world`'s cut-short early return and
-the ticket lane's exit-class parameter are all absent. That is the expected state of a
-spec — RED against HEAD. Every import goes through `mod()`/`sym()` PER TEST (the
-`_triplet_947` / `_judge_921` idiom) so a missing target is one failure per test rather than
-one collection error that hides the other ninety-odd assertions.
-
-THE RESOLVED MECHANISM, as §7 settled it — a test written against the doc's own sentences
-would be written against two refuted readings:
-
-* **F2 reading A (human).** The archive does NOT read a session store. The sibling's own
-  host-side process writes a SIDECAR beside its run dir — `verdict_path`'s shape
-  (`tree.parent / f"{tree.name}<suffix>"`, `runtime/scrub.py:124-129`) — and
-  `archive_episode` copies it in as `worlds/<world-uuid>/run_end.json`. Reading B (pre-minted
-  session ids threaded through argv) was rejected.
-* **F-A/F-B reading B (human, §7 round 2).** The record carries a SECOND field,
-  `closed_before_cut`, saying whether the model had already closed
-  (`challenge_gate.ReviewState.of(deps).closed`) when the exit class was stamped. Probe p21
-  (EXECUTED) found the forced close's `closed`-skip branch reachable on all five exit classes
-  with zero test coverage, so a world can carry a real model verdict AND a stamped exit class.
-  The record must distinguish the two; a cut-short world that had already decided keeps its
-  verdict. The write therefore sits in the DRIVER, before the forced report write
-  (`driver/__init__.py:303`), not in `run.py`'s tail — probe p25 (EXECUTED) drove three arms
-  of that tail that raise and skip everything after them, one of which loses the summary
-  itself, so a tail-sited write has no value to write even in principle.
-* **F3 reading A (human).** The ticket lane takes the exit class as an IN-PROCESS PARAMETER
-  from `run.py`, exactly as `enqueue_curation` already does twelve lines later. It reads no
-  store and nothing inside the run dir — reading B (recover the case id from
-  `session_store_pointer.json`) is precisely the box-writable input O1's security dive
-  forbids as a decider of "was this run cut short".
-* **F5 reading A (human).** The cut-short check runs BEFORE `_missing_required_input`, so all
-  five exit classes name their exit rather than only the two that also produce a forced report.
-* **F-D (auto, confirmed EXECUTED by round-2 probe #30).** The leave-open arm's ticket identity
-  is `run_dir.name` — the same namespace `open_case_ticket` already writes under, reachable
-  with no report.md on disk at all.
-* **F-F (auto, confirmed EXECUTED by round-2 probe #11), resolved at the LANE rather than the
-  leaf.** The archive's `copy2` lane wrote THROUGH a pre-existing hard link at a destination
-  leaf. Rather than fork one file out of that lane, the record is the seventh single file —
-  beside the scrub verdict, the other host-side sidecar — and the lane's pre-copy destination
-  screen now refuses a hard link at ANY of the seven (`_layout.plain_file`, the rule
-  `write_guarded` already applied). The archive interprets nothing: it copies the sidecar's
-  bytes, and the judge alone decides what they mean (`run_end.parse_record`).
-* **F-M (auto).** The vocabulary owner is STRICT — no whitespace strip, no case fold, no
-  confusable fold. Under the resolved mechanism the value's only producer is the driver's own
-  stamp, so leniency buys nothing and costs a coercion path.
-
-FAULT INJECTION, down the charge's hierarchy and never off it. Tier 1 wherever the primitive
-is cheap: the undecodable bytes are written, the symlink is planted, the run dir is emptied,
-`ReviewState.of(deps).closed` is really set, and the driver's five exit classes are reached by
-raising the REAL exception classes through the REAL `agent.iter` loop (`_spec923.StuckModel`
-exhausts pydantic-ai's own tool-retry budget; `BudgetKill`/`RunAborted` are raised from the
-model call, the seam the real kills reach the loop through). Tier 2 for the two dependencies
-that are neither cheap nor deterministic — the model and the ticket system's HTTP endpoint —
-and each fake's fault content cites the ledger claim that observed it:
-
-* `FakeTicketSystem(status=...)` — the transport's own answer shape, `(status, body)`, from
-  `ticket_writer._request`; the "no/malformed response" arm is `status=None`, the shape a
-  `TransportFault` already produces there (claim n4's namespace probe, round-2 item 2,
-  EXECUTED, drove exactly this stand-in against the real writer and the real mapping.yaml).
-* `FakeTicketSystem(configured=False)` — a tenant whose settings carry no case-history
-  `config.env`, the unconfigured lane (#1107: its record has no store to name).
-
-Fakes enter through the entry point's INJECTION SEAMS — `deps=` on `record_case_ticket`,
-`run_dirs=` on `archive_episode`, the `agent`/`store` arguments on `_drive_agent` — never by
-`monkeypatch.setattr`, which CI ratchets (`tooling/lint/lint_monkeypatch.py`).
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for #1047's cut-short-record spec — NO test scripts."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -242,13 +163,7 @@ def graded(episode_dir: Path, *, judge: Any = None) -> dict[str, dict]:
 def graded_record(episode_dir: Path, *, judge: Any = None) -> Any:
     """The family record (`EpisodeGrade`) — the real judge pass
     (`learning.judge.grade_episode`, which reads each world through `family.read_world`) over
-    a real episode dir, which is the entry point every O1 demand is stated at.
-
-    #1224 retired the offline mechanical pass; the pass is now the judge itself, driven through
-    its model seam (`judge=`, default `scripted_judge()`). Each call grades afresh: an earlier
-    pass's `judge.yaml` would otherwise be returned as final, and every scenario here compares
-    passes over an episode it changed in between. The queue and runs base are the episode's
-    own, beside it, so a pass never appends into another scenario's queue."""
+    a real episode dir, which is the entry point every O1 demand is stated at."""
     ep = Path(episode_dir)
     (ep / "judge.yaml").unlink(missing_ok=True)
     side = ep.parent / f".{ep.name}-judge"
@@ -258,14 +173,7 @@ def graded_record(episode_dir: Path, *, judge: Any = None) -> Any:
 
 def graded_with_view(episode_dir: Path) -> tuple[dict[str, dict], dict[str, str]]:
     """One pass: the per-world rows, and what the family-scope call was shown of each world,
-    keyed by label.
-
-    #1234: the family call (`run._build_family_prompt`) is shown every USABLE run under
-    `### run <X>` in its computed header, with the reached verdict its archived `report.md`
-    carries; a run the usability read excluded is shown only as a line of the noise context
-    (`- world <X>: <why>`), never with a verdict. "Does X put a verdict in front of that call"
-    is asked of that text: a usable run's entry reads `verdict='<reached>'`, an excluded run's
-    `NOT JUDGED` (the why is the row's `ungradable_reason`, compared on the rows)."""
+    keyed by label."""
     judge = scripted_judge()
     record = graded_record(episode_dir, judge=judge)
     family = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True)
@@ -369,19 +277,7 @@ class TicketCall:
 
 @dataclass
 class FakeTicketSystem:
-    """The ticket system's HTTP endpoint, injected through `TicketWriterDeps`.
-
-    TIER 2 OF THE FAULT HIERARCHY AND NOTHING MORE. A real ticket system is neither cheap nor
-    deterministic to drive, so the transport's ANSWER is scripted and every REQUEST is
-    recorded — a fake that only returned statuses would leave the entire outbound channel
-    unpinned, and the outbound channel is the whole of what O2 is about.
-
-    It injects faults only; it classifies nothing. `status=None` is `_request`'s own
-    transport-error answer (`ticket_writer.py:70-75`: a `TransportFault` returns
-    `(None, "transport error: …")`), and `configured=False` is a tenant record with no
-    case-history config, the unconfigured lane. No other fault is induced here,
-    because no claim in the ledger observes one on this dependency.
-    """
+    """The ticket system's HTTP endpoint, injected through `TicketWriterDeps`."""
 
     status: str | None = "200"
     configured: bool = True

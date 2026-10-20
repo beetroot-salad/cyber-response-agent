@@ -1,46 +1,4 @@
-"""Fixtures and the pre-implementation import shim for #995's verb-disposition table.
-
-Pre-implementation. `defender.runtime.verb_dispositions` does NOT exist at the base commit,
-so every symbol below resolves to a stub that raises on CALL rather than on IMPORT — the
-suite collects, and each test fails with the name it wanted instead of the whole file
-erroring at collection and hiding how many demands there are.
-
-WHAT #995 ADDS
-
-* `defender/runtime/verb_dispositions.py` — NEW. The one authored table of who may call
-  what, loaded from a per-deployment YAML file. Owns three things and nothing else:
-
-  - `load_dispositions(path) -> tuple[Disposition, ...]` — parse + VALIDATE. Every
-    malformed shape raises `DispositionError`; nothing degrades to a partial table, and
-    nothing degrades to an empty one (an empty table is the deny-all that #995 exists to
-    stop happening by accident).
-  - `grant_for(role, dispositions) -> VerbGrant` — the per-role projection. The returned
-    type is the UNCHANGED `VerbGrant`, so everything downstream of it is untouched.
-  - `census_gaps(walked, dispositions) -> CensusGaps` — PURE. Takes the walked census as an
-    argument rather than resolving it, because resolving it reads the committed tree through
-    git and this module is imported at runtime startup, where git must not run.
-
-* `defender/knowledge/environment/verb-grants.yaml` — NEW. The table itself, per-deployment
-  config rather than a Python literal in the shipped runtime. (#1106 moved it to each
-  tenant's `knowledge/tenants/<id>/settings/verb-grants.yaml` at the repo root;
-  `dispositions_path` now takes that settings folder.)
-
-* `tooling/lint/lint_verb_disposition_census.py` — NEW. Wires the resolver's walk to
-  `census_gaps` and fails CI on residue in either direction.
-
-THE ORACLE THIS SUITE IS BUILT AGAINST
-
-The defect being closed is that a system can be connected and silently ungranted, and that
-the thing which LOOKS like it guards the grant compares two hand-written copies and so
-cannot see the case. So the discriminating tests here are the ones that PLANT a system the
-table does not mention and demand the gate go red. A test that only reads the shipped tree
-would pass against the broken world too — the shipped tree is currently complete by luck,
-not by construction.
-
-Assertions are made against what the test PLANTED, never against a second reading of the
-tree with the same walker the code uses (`tooling/lint/lint_shared_oracle.py` refuses that
-shape at the gate, and #869 shipped three misreads behind it).
-"""
+"""Fixtures and the pre-implementation import shim for #995's verb-disposition table."""
 from __future__ import annotations
 
 import json

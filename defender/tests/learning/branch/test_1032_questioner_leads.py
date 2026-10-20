@@ -83,30 +83,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     its own ASCII marker: the real row's marker is in the section, neither sentinel's is, and
     neither sentinel id's ASCII tail is. `questioner_leads` returns that lead with exactly one
     query. Beside it, a second lead whose ONLY row is a sentinel is kept — with its goal and no
-    queries — the same decision `actor_view` records: the run did open it.
-
-    Two more sentinel shapes sit on the first lead, and they are what pins the RULE rather
-    than the two ids above: a `∅.repeat-trip` row, which the guard writes with the REAL
-    `system` and `verb` and the model's own `params` (so a filter on `system == ""` or on the
-    two literal tails keeps it), and a synthetic `∅.future-sentinel` id no writer spells today
-    — `is_sentinel` is the `∅.` prefix (`is_reserved_query_id`), so a sentinel defined
-    tomorrow partitions the day it is defined, and the render must follow the predicate, not
-    a list. (The adversary's replay of the tests-only commit greened both filters.)
-
-    The section is also held to O1 here — the key-set census and the `raw_command` /
-    `payload_path` marker negatives — because this is the one fixture with a bash-shim row,
-    and a render that leaked a column only in a sentinel's presence passed the O1 test's
-    fixture untouched.
-
-    The premise is asserted first: the surface partitions the five rows as `queries=[0]`,
-    `sentinels=[1, 2, 3, 4]` (C10), so the negatives refute a render that reads `.rows` or
-    `.sentinels` and not a fixture the join never held.
-
-    Observed failing by: `questioner_leads` missing; a sentinel's marker in the section text
-    (today's `__dict__` dump renders them under `sentinels`, and so would a render over
-    `jl.rows` filtered on the two known tails or on an empty `system`); the lead returned
-    with more than one query; the sentinel-only lead absent; a query dict with a key outside
-    the nine; a `raw_command` / path marker in the section."""
+    queries — the same decision `actor_view` records: the run did open it."""
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()

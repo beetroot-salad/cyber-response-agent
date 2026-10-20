@@ -104,15 +104,9 @@ def test_1105_run_id_is_a_frozen_value_ordered_by_its_text_and_never_equal_to_a_
 
 def test_1105_run_id_parse_refuses_what_refuse_bad_run_id_refuses_and_any_non_str_as_run_refused():
     """RunId.parse raises RunRefused, never ValueError or AttributeError, for every text
-    refuse_bad_run_id refuses ('', '_episodes', '_tenant.json', '../x', 'a/b', '.hidden', 'r1\\n'),
+    refuse_bad_run_id refuses ('', '_episodes', '_tenant.json', '../x', 'a/b', '.hidden', 'r1\n'),
     for text that is not case-stable ('Run1'), and for a non-str (5, None, b'r1'). Positive
-    control: a canonical UUID parses.
-
-    #1187 declared change 1: the controls were 'r1', '2026-x.y_z' and a 206-byte id, which are no
-    longer run ids. The old text cross-checked each refused id against `refuse_bad_run_id`; that
-    helper has no caller left in this path, so only `RunId.parse`'s own refusal is asserted.
-    `RunId.mint` takes no argument now, so its non-str-label refusal is gone with the label
-    (the ids slice's tests pin that a label is refused)."""
+    control: a canonical UUID parses."""
     from defender.run_repository import RunId, RunRefused
 
     for good in (S.SAMPLE_UUID, S.new_id()):
@@ -177,13 +171,7 @@ def test_1105_the_handle_constructors_keep_taking_str_and_todays_run_id_check(tm
     repository's one rule, RunId.parse: a bad id and an upper-case one each raise RunRefused,
     so no handle is built for a run whose sidecar files could not be named. (Owner ruling,
     #1105 PR 1 review: this replaced PR 1's split, where the constructors kept
-    refuse_bad_run_id and its ValueError; the name is kept because the spec graph cites it.)
-
-    #1187 declared changes 1 and 6 (R1, S-iso): `Run.for_tenant` — which re-read the
-    container's `_tenant.json` by path — is replaced by `Run.under(container, id,
-    tenant_id=)`, so its half is retired and the container holds no record. The rule is
-    canonical lowercase UUID text: an old id (`r1`, a minted `<stamp>-<label>`), an upper-case
-    UUID and a 207-byte id are each refused for their shape, not a byte count. (Name kept.)"""
+    refuse_bad_run_id and its ValueError; the name is kept because the spec graph cites it.)"""
     import uuid
 
     from defender.run_repository import Run, RunId, RunRefused
@@ -209,10 +197,7 @@ def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subcla
     RunRefused. Positive control: a valid RunId round-trips by each route equal to the original.
     The forged payloads cover every pickle protocol (0 to pickle.HIGHEST_PROTOCOL), each RunId's
     own stream with its text overwritten in place; every replace route is driven, and one that
-    does not exist must raise TypeError rather than be skipped (91 BF-08).
-
-    #1187 declared change 1: the id is a canonical uuid4 text (36 bytes), and each in-place
-    forgery is that long; the guard is unchanged."""
+    does not exist must raise TypeError rather than be skipped (91 BF-08)."""
     from defender.run_repository import RunId, RunRefused
 
     text = S.SAMPLE_UUID  # 36 bytes: each in-place forgery below is exactly as long

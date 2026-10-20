@@ -38,20 +38,7 @@ REQUEST_TIMEOUT_SEC = 30
 
 
 class OutboundBody:
-    """A request body that has already been past the run's clock.
-
-    The wire (`_http_json`) accepts only this type, and both minting functions (`_search_body`,
-    `_esql_body`) take `ctx` and consult the clock, so a new search verb cannot reach
-    Elasticsearch with an open window by forgetting a call. An unbounded `desc` read of a live
-    stream returns the newest documents right now, which a branched run must not see. Hand
-    minting is still possible, just not accidental. Memoised base-tier hits bypass the adapter
-    entirely, so this says nothing about them.
-
-    Immutable, so the minted body is the body sent.
-
-    Hand-written rather than a `@dataclass`: adapters are imported by path under a module name
-    not in `sys.modules`, and `dataclass` resolving string annotations there raises at import.
-    """
+    """A request body that has already been past the run's clock."""
 
     payload: dict
     __slots__ = ("payload",)
@@ -86,10 +73,7 @@ def _record_config(tenant: RunTenant) -> dict[str, str]:
     not configured for this run (`check_settings` raises it at run start, so elastic is down from
     the start, #1256). The record's `elastic` view judges the
     keys platform code reads; this reader judges the ones IT needs, so each reports its own view
-    (MF-7 c).
-
-    Nothing is looked up in the environment, and the file is not re-read: the values are those
-    of the run's start (O1, O2)."""
+    (MF-7 c)."""
     entry = transport.record_entry(tenant, SYSTEM)
     transport.record_access_context(tenant, SYSTEM)
     config = dict(entry)
@@ -470,20 +454,7 @@ def esql_payload(query: str, resp: dict) -> dict:
 
 
 def bounded_esql(ctx: VerbContext, query: str) -> str:
-    """`query` with the run's clock as an upper bound, when the run has one.
-
-    The ES|QL counterpart of `_bounded_end`, where the window lives inside the model's query.
-    The bound is appended as an independent pipe stage right after the source command, never by
-    editing the model's predicate, so it can only narrow the row set (as in
-    `evals/oracle_golden/controls.add_esql_window`). The source command is found by ES|QL's own
-    separator, not by newline: splicing after a one-line pipeline's `LIMIT` would filter one
-    arbitrary row.
-
-    Only applied when the source command is `FROM` (`opens_with_from`): `ROW` or `SHOW` have no
-    `@timestamp`, and a blank query would become a bare pipe — either way the sibling would get
-    an error its base did not. `lte` matches `_build_search_body`, so a document at the branch
-    point is inside both windows. Unbranched runs get the query back untouched.
-    """
+    """`query` with the run's clock as an upper bound, when the run has one."""
     at = getattr(ctx, "as_of", None)
     if at is None or not opens_with_from(query):
         return query

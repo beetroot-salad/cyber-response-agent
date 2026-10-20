@@ -225,21 +225,7 @@ def run(
     box: Any = None,
     on_done: DoneSink | None = None,
 ) -> int:
-    """Serve one run under the per-author queue lock.
-
-    `on_done` is the consumption switch: left `None`, a clean exit writes the `done` sentinel
-    at once (the CLI's contract); given, the commit sha is handed to it instead, so the drain
-    can record the run done only after the scrub. The `pitfalls_collected` marker and pitfalls
-    rows are written either way — they are facts about the run, not a commit.
-
-    `label` is the drain lane whose mount list grants `skills/` (the CLI passes
-    `LEAD_AUTHOR_DRAIN_LABEL`): without `deps`, the held trees are opened for it here, under the
-    queue lock, and closed when the run ends; with `deps`, a label that does not mount
-    `deps.paths.skills_dir` is refused (#1134). The label is used first, on both paths, so a
-    non-member raises before the queue lock or any of the run (#1179 O1').
-
-    `run` is the opened run (#1105 PR 2): the open that made it judged its folder, so there is
-    no existence check here; its `lead_author/` state goes through `run.run_dir`."""
+    """Serve one run under the per-author queue lock."""
     if deps is None and paths is None:
         raise TypeError("run takes paths= (or deps=)")
     writable = label.writable_trees(deps.paths if deps is not None else paths)  # type: ignore[arg-type]

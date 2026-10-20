@@ -1,23 +1,4 @@
-"""Retrieve defender lessons by frontier containment — what the investigation has not settled.
-
-The signature lane (`runtime/orient.py`) greps `source_signature:.*<rule.id>` once, before the
-investigation exists. That suits coverage lessons ("this rule is blind to X") but not
-observable-semantics lessons ("`loginuid=-1` licenses only non-interactive automated context"),
-whose trigger is holding the field, not which rule fired.
-
-This keys on the open set instead (`skills/invlang/frontier.py`), on two axes matching invlang's
-two closure mechanisms:
-
-  * NODE — `(vertex type, class pattern, slot)`, for lessons about what a field licenses or
-    how to close a slot. Closed by `:R attr_updates`.
-  * EDGE — `(rel, auth_kind, anchor_kind)`, for lessons about what an authorization check
-    can and cannot conclude. Closed by `:R authz`.
-
-Both are optional lesson frontmatter (`frontier_nodes`, `frontier_edges`). A lesson declaring
-neither is simply not on this lane; SKILL.md routes it through the signature block and
-`defender-lessons`. Selectors are not required, since a procedure-triggered lesson has no
-truthful selector to write.
-"""
+"""Retrieve defender lessons by frontier containment — what the investigation has not settled."""
 from __future__ import annotations
 
 import argparse
@@ -175,17 +156,7 @@ def _candidate_members(slot: str) -> frozenset[str]:
 
 
 def _class_pins(selector_class: str, case_class: str, vertex_type: str) -> int | None:
-    """How many class slots this selector pinned about this cell — `None` on a miss.
-
-    A slot matches when the selector names `*`, the same value, or the case slot is still open.
-    A slot that matched only because the case slot was open discriminated nothing, so it earns
-    no credit; otherwise a `class=??` vertex would rank every guessed class above a selector
-    naming the exact open attribute.
-
-    Anchored, not per-slot: a pattern with no equality match anywhere pins nothing, but once one
-    slot matches by equality, its other named slots are credited (`ip-only/internet` beats
-    `ip-only` against `ip-only/??/??`). Two mutually exclusive guesses at one open slot tie.
-    """
+    """How many class slots this selector pinned about this cell — `None` on a miss."""
     sel = class_slots(selector_class)
     case = class_slots(case_class)  # a fresh list per call, so the padding below may mutate it
 
@@ -406,17 +377,7 @@ def match_loaded(
 def _spread_over_items(ranked: list[tuple[Hit, tuple[str, ...]]]) -> list[Hit]:
     """The ranked hits, re-ordered so the head covers distinct frontier items before doubling up:
     the best lesson about each item first, then the second-best about each, and so on, score
-    order within each pass. Each hit is recorded against the item it was placed on.
-
-    Needed alongside the scale: floor-level selectors are equally specific, and without this
-    two lessons about one contract could take two of three slots and evict a lesson about a
-    different open item. A lesson tied across several items is placed on the least-covered one.
-
-    Deterministic: `ranked` is sorted by `(-score, name)`, candidates are sorted, and placement
-    is a single forward pass. The emitted order depends on coverage, not just score, which is
-    why `runtime/tools._frontier_recall` compares a sorted set of (lesson, score) rather than
-    the list.
-    """
+    order within each pass. Each hit is recorded against the item it was placed on."""
     used: dict[str, int] = {}
     keyed: list[tuple[int, int, Hit]] = []
     for position, (hit, candidates) in enumerate(ranked):

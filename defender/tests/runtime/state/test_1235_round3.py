@@ -87,15 +87,7 @@ def test_a_failing_call_whose_view_write_is_refused_is_still_charged_and_recorde
     """O1 at the query tool's recorder: a call that failed on the transport (exit 2) is
     recorded while `executed_queries.jsonl` is squatted (a planted symlink, or a directory). The
     view write's `OSError` propagates — the run is not told the call was viewed — and before it
-    does, the failure is charged to the system's breaker and the row is in the run's state.
-
-    Positive control, same folder and deps: with the view writable again the next failing call
-    is charged too (the count is the sum, not a reset) and its row lands in both the state and
-    the view.
-
-    Observed failing by: round 2's `_record`, which charged the breaker only after the append
-    returned — a refused view write cost the breaker its charge and the state its row, so a
-    system failing every call while its view is blocked never trips."""
+    does, the failure is charged to the system's breaker and the row is in the run's state."""
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)

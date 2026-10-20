@@ -50,18 +50,7 @@ def _upstream(
     pr_files: dict[str, str | None] | None = None,
 ) -> Path:
     """A repo whose `main` defines `some_removed_helper` in mod.py and calls it from
-    caller.py, and whose `pr` branch deletes the definition.
-
-    `main_files` are committed on `main`, so the PR does NOT touch them. That is where a
-    surviving reference must live to be *seen*: `_batch_grep` already skips hits inside
-    the diff's own changed files, so a reference planted in a `pr_files` entry is excluded
-    for that reason and never reaches the rule under test — a test that passes without
-    exercising anything. `pr_files` is therefore only for what the PR really does change
-    (pass None to delete).
-
-    Several commits deep on purpose: a depth-1 graft needs real history to be cut off from,
-    or the merge-base would be findable by accident.
-    """
+    caller.py, and whose `pr` branch deletes the definition."""
     up = tmp_path / "up"
     up.mkdir()
     _git(up, "init", "-q", "-b", "main")

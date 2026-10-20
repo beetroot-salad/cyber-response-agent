@@ -1,26 +1,4 @@
-"""The run clock's source, held by a run's `RunState` (#1255, design rev 4 "Time").
-
-The run clock is host-owned: every time the model can see (a stamp in a readable file, a capture
-stamp, a budget limit) is a reading of it, never a fresh read of the host's wall clock. This
-module is its SOURCE half: a reading of where the run's time stands, in two forms —
-
-  * `ticks()`, non-decreasing float seconds: what elapsed time is measured in (`RunState`
-    subtracts its origin tick and the seconds oracle turns held the world);
-  * `at(ticks)`, the absolute instant that tick count names (aware UTC).
-
-There are two kinds of source:
-
-  * the HOST's (`RunClock()`, production's natural run): anchored at the wall clock's reading
-    when the clock was made, advancing by `time.monotonic()`. A wall clock stepped back or
-    forward (NTP) moves no reading: the run's own time only ever runs forward.
-  * an INJECTED one (`RunClock(source)`, `run_investigation(clock=…)`): a zero-argument callable
-    returning an aware UTC datetime. Its forward moves accumulate; a step back is absorbed —
-    the reading holds where it was and the source's later forward moves count from its new
-    position (rev 5 C10: "elapsed accumulates only the source's forward moves").
-
-Pauses (oracle turns) and an arm's start at its source's reading are `RunState`'s, which reads
-this clock and keeps the origin and credits beside it.
-"""
+"""The run clock's source, held by a run's `RunState` (#1255, design rev 4 "Time")."""
 from __future__ import annotations
 
 import threading

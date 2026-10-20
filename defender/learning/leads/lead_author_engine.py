@@ -89,19 +89,7 @@ def _draft_tail(prefix: str, sys_alt: str) -> str:
 
 
 def _skill_write_lanes(skills_dir: Path, systems: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
-    """The lead lane's write allow: one compiled pattern per named lane.
-
-    Not a blanket `<skills>/**.md`: that subtree holds `gather/SKILL.md` and `invlang/SKILL.md`,
-    agent system prompts, which a lane fed attacker-influenced run text must not rewrite.
-
-    Separate patterns so `defender-policy show` prints one named lane per line.
-
-    Every variable segment is `SEG`, so no lane admits a space or newline in a filename; the
-    commit gate reads unquoted `git status -z` and would otherwise accept one.
-
-    A strict subset of the two commit gates' union, so a refusal here is a recoverable tool
-    denial rather than a batch discard.
-    """
+    """The lead lane's write allow: one compiled pattern per named lane."""
     base = re.escape(str(skills_dir.resolve()))
     sys_alt = "|".join(re.escape(s) for s in systems)
     cat = _CATALOG_TAIL

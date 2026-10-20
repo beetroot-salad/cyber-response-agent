@@ -1,16 +1,4 @@
-"""The launcher's model seam, resolved for a real episode.
-
-`learning/branch/cli.py` takes `questioner` and `invoke` as injected callables so a
-test can stand in for them. This module says what each seam is when nobody supplies one; the
-launcher resolves them at its boundary and threads them inward non-`None`, so no frame
-downstream asks again and no two frames can disagree about which model answered.
-
-The two model seams are one function: `author_family` and `comparator.compare` both call
-`(prompt, *, role, agent_id)` as `AgentRole.QUESTIONER`, differing only in `agent_id`. A second
-builder would be a second place for them to acquire different models, and the family's
-comparability stamp cannot see that — it compares the model across siblings, and these calls
-all happen in the launcher.
-"""
+"""The launcher's model seam, resolved for a real episode."""
 
 from __future__ import annotations
 

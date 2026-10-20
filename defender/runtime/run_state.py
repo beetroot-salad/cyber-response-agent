@@ -1,36 +1,4 @@
-"""One run's live decision state, held by the run's own process (#1235).
-
-`run_investigation` resolves one `RunState` at its boundary — the one its caller hands it, or a
-new one for its own folder and run id — before lead-0 and before any tool call, and carries it
-by reference: on MAIN's `AgentDeps` (every gather lead's deps hold the same object), on lead-0's
-capture deps, and on each `VerbContext` the query tool and lead-0 build. It holds what the run
-decides on while it runs:
-
-  * the run clock (#1255) — the host-owned source every model-visible time is read from
-    (`run_clock.RunClock`), its origin, and the reading `now()` the run's stamps take;
-  * the budget — the tool-call and spawn counters and the clock's origin;
-  * the circuit breaker — each system's failures and when it tripped;
-  * each system down for a cause the breaker does not count — not configured, or its adapter
-    broken — judged once at run start (#1256) and never cleared, and the scope every such
-    cause's reason is shown in — the live status every surface asks when it renders;
-  * the queries table's rows, by lead, in append order — the record of every call the run
-    made (the table file is the model's view of it), or the rows seeding handed over for a
-    branch sibling, never rows read back from the file;
-  * the oracle clock — the seconds an oracle turn held the world, and the turn open now.
-
-No file is read into it and none is written from it. The run folder is the box's writable mount,
-so a decision answered from there is one the model can move; and a run folder is only ever used
-by one run (`run_common._setup_state`), so nothing needs to outlive the process.
-
-The behaviour stays with each concern's own module, which takes the state first:
-`budget_enforcer` (counting, the oracle clock), `circuit_breaker` (charging, the trip),
-`system_status` (a system down at start, or on an escaped config fault) and `record_query` (the
-row append, the seq, the repeat note). Each does its read-modify-write under
-the state's one `lock`. Outside readers take the budget and breaker snapshots, which are copies,
-and the row accessors (`lead_rows`, `row_count`), which hand out the stored rows:
-a row is never changed once recorded. Nothing process-wide refers to a state, so it lives
-exactly as long as the run that holds it.
-"""
+"""One run's live decision state, held by the run's own process (#1235)."""
 from __future__ import annotations
 
 import copy

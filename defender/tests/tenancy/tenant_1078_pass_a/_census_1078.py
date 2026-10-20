@@ -1,26 +1,6 @@
 """The three production-code censuses #1078 pass (A) pins — O1 (no tenant literal, no
 `DEFAULT_TENANT_ID`), O2 (one writer of the tenant row) and U6 (no tenant data written into the
-box-mounted `defender/` tree) — each as ONE scanner function.
-
-Each scanner is driven TWICE by its tests: over the real tree (the negative: nothing is found
-that should not be) and over a planted synthetic module (the positive control: the same
-function, fed the violation, reports it). Sharing one function is what makes the control prove
-the observation channel — a scanner that saw nothing would be green on the real tree and red
-on the plant.
-
-GREP FLOORS, recorded rather than hidden (the census's honest limit, C55-style):
-* O1 sees a tenant id only where it reaches the AST as a string constant at a tenant-shaped
-  position (a `tenant`/`tenant_id` keyword or parameter default, the tenant slot of an owner
-  call, the element after `--tenant` in an argv list, an argparse `--tenant` default, an
-  f-string spelling `--tenant <id>`, a `*TENANT*` name bound to a grammar-shaped id). A literal
-  that reaches a tenant slot through an unrelated variable is below the floor.
-* O2 attributes a write to the top-level function holding the write call; a write through a
-  path value another function returned sits below the floor (dropped premise #99).
-* U6 traces a path only through names bound in the same module or function to a defender-tree
-  anchor; a path built in another file is not seen (C55's own floor).
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+box-mounted `defender/` tree) — each as ONE scanner function."""
 from __future__ import annotations
 
 import ast

@@ -3,20 +3,7 @@ acceptance — ONE rule for its two surfaces: `tenant.py check` (an operator, or
 CI) and `tooling/lint/lint_verb_disposition_census.py` (the product repo's CI, over the template
 and the fixture). The surfaces share the judgement of which gaps count, not an exit status: the
 lint exits 2 when the census was never taken (the gate could not run); `check` reports it as one
-more finding, exit 1, and still judges everything that needs no census (`folder_findings`).
-
-The census is the RUNNING checkout's: every verb its adapters declare must be decided by the
-tenant's table, and every row of the table must name a declared verb. It is taken from the code
-that runs, never from the tenant — a tenant cannot vouch for which systems exist. A gap does not
-stop a run (an undecided verb is simply not granted), so it is a finding here and never a
-refusal at setup or run start.
-
-The census reads this machine's git and the running checkout, never the tenant's folder, so a
-census that cannot be taken is never the folder's doing: `CensusUnavailable` names which of the
-two failed. What the folder alone decides — its table loads, its lead-zero config agrees with the
-table and the running catalog — is judged without a census, so losing the census costs only the
-judgement that needs it.
-"""
+more finding, exit 1, and still judges everything that needs no census (`folder_findings`)."""
 from __future__ import annotations
 
 import dataclasses

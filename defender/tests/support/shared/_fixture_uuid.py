@@ -1,16 +1,4 @@
-"""A fixture's run and episode ids under #1187 — NO test functions.
-
-#1187 (design rev 2, O1/O2) makes every run, arm and episode id a random canonical lowercase
-uuid4 that carries no meaning: `RunId.parse`, the episode-id rule and `RunAddress` admit nothing
-else. A test that names a run (a curation row's run, a fixture source, a planted arm) still wants
-a readable handle for it, so it keeps a LABEL and asks here for the id: `fixture_uuid(label)` is a
-uuid4-shaped id derived from the label alone (the same label gives the same id in every test, a
-different label a different id). The label never reaches production; only the id does.
-
-Pure: imports nothing from production, so it collects and runs at any base.
-
-Underscore-prefixed so pytest does not collect it.
-"""
+"""A fixture's run and episode ids under #1187 — NO test functions."""
 from __future__ import annotations
 
 import hashlib

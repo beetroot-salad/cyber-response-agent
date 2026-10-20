@@ -75,14 +75,7 @@ def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(
     container is `RunAbsent`: the run is gone with it. `resolve` answers the same family; an
     address naming another tenant stays `TenantRefused` (a caller's bug). Positive control: the
     same open over the good container hands out the run. RED before the fix: the container
-    faults are a bare `TenantRefused`, which an `except RunRefused` misses.
-
-    #1187 declared changes 1 and 6 (R1): the record faults (a corrupt `_tenant.json`, none,
-    another tenant's) are retired — no record is judged, and a container holding none is the
-    good one. Ids are UUIDs. Declared change 8 (S-iso): the link is refused by the walk from
-    `<T>`; the open still answers the one `RunRefused` family naming the level, but whether as
-    `RunUnreachable` raised from a `TenantRefused` or as a `RunRefused` of the walk's own is not
-    pinned (the design allows either at a link below `<T>`). (Name kept.)"""
+    faults are a bare `TenantRefused`, which an `except RunRefused` misses."""
     import uuid
 
     from defender.run_repository import RunAbsent, RunAddress, RunRefused
@@ -213,12 +206,7 @@ def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
     `TenantRefused`, which VERIFY must hold too), the launch returns a status rather than
     raising, and the judge step is still reached (its row is on the stage timing record).
     Nothing is archived from the link's target. Positive control: a clean launch under fresh
-    roots archives the worlds, records none `not archived` and grades.
-
-    Review round 2, F24: the launcher-level half of the retired
-    `test_a_a_container_spoiled_after_the_siblings_ran_is_recorded_and_judged`, whose fault (a
-    spoiled `_tenant.json`) #1187 R1 retires; S-iso lets the open raise either class here, and
-    `_finished_arms` catching only `RunRefused` would crash the launch on the other."""
+    roots archives the worlds, records none `not archived` and grades."""
     est, src = P.launch_source(tmp_path)
     outside = tmp_path / "outside-the-episode"
     outside.mkdir()

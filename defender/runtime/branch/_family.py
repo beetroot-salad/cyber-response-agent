@@ -1,19 +1,4 @@
-"""The family manifest: the one document a sibling is told, and the schema that gates it.
-
-`episodes/<id>/family.yaml` carries three authors: the launcher's derived half (episode id,
-source run, branch point, T0, the served systems) and the questioner's authored half (base story, discriminator, worlds and their facts).
-`run.py --tenant T --episode <episode_id> --world X` derives everything else from it.
-
-The schema lives in the runtime because a resumed run must not import the learning tree to know
-which world it is. Learning validates the questioner's output through the same loader.
-
-Strict both ways: an unknown top-level field is refused (a manifest edited after review must not
-load as if the edit were part of the contract), and every closed vocabulary is the shipped one.
-Model-authored scalars are written through a structured dumper, never string interpolation, so a
-`base_story` carrying `episode_id: hijacked` round-trips as one opaque scalar. A manifest written
-before the oracle (a world as a patch table and a staged corpus) is refused as such, at every
-reader, before any other fault is reported.
-"""
+"""The family manifest: the one document a sibling is told, and the schema that gates it."""
 
 from __future__ import annotations
 

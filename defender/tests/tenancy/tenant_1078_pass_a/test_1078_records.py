@@ -169,24 +169,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
     the name absent or the file complete, never empty or partial; the file has exactly one name
     throughout (no two-named alias window), mode 0644 under umask 022 (and the writing
     process's owner), and a crash before the write completes leaves no stray entry in the
-    directory.
-
-    Three observations, each against the REAL lane: (2) the row race with a bystander reader;
-    (3) mode, owner and name count of what it leaves; (4) a real SIGKILL of a child looping
-    over the lane. (2)-(3) run under a pinned umask 022, so (3)'s 0644 never rides the host's
-    ambient umask (the umask is process-wide, so the racing threads share it). (4) asserts no
-    mode, so its children run under whatever umask the suite was started with.
-
-    #1187 declared change 6 (R1): the runs-base record `_tenant.json` is retired, so the
-    record halves — (1) the N-way `ensure_runs_base_record` race with its bystander and the
-    record's crash lane — are gone with it; the row lane is unchanged. (Name kept.)
-
-    PLATFORM-NEUTRAL BY CONSTRUCTION (phase F RC1): the harness uses only POSIX primitives —
-    threads, `os.lstat`/`os.listdir`, `os.geteuid`, a child process and SIGKILL — and asserts
-    only the OBSERVABLE, never a mechanism (`O_TMPFILE`, `linkat`, `renameat2` are the
-    implementer's per-platform choice). So it runs, and means the same thing, on any POSIX
-    host; nothing here is Linux-only, so nothing is skipped. Which platforms the guarantee is
-    REQUIRED on is RC1's open §7 question, not this test's."""
+    directory."""
     with umask(0o022):
         # (2) + (3) the tenant row
         row_fields = ("tenant_id", "created_at")

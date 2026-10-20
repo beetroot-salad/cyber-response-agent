@@ -171,15 +171,7 @@ def _curator_queue_checks() -> list[tuple[Channel, str]]:
 def _pending_queue_counts(state: LearningState, channel: Channel) -> tuple[int, int]:
     """`(authorable, held)` — queued rows a tick could still author, and rows it has declined.
     Both come from one read, since the wake gate's number means little to an operator without
-    the other.
-
-    A row is held iff it carries `held_reason`, which only the pre-author gate's permanent
-    holds stamp (the closing rotation writes them back). Counting held rows as work would pin
-    the wake gate open forever re-holding the same rows. Presence, not truthiness: a row
-    stamped `held_reason: ""` or `null` is still held.
-
-    An unreadable line counts as authorable, so a queue of junk still wakes a tick;
-    `drain._tick` then runs through to a rotation, which rewrites the file without it."""
+    the other."""
     rows, unreadable = state.rows_report(channel)
     held = sum(1 for row in rows if "held_reason" in row)
     return len(rows) - held + unreadable, held
@@ -338,23 +330,7 @@ class ServedMarker:
 @model(frozen=True)
 class BatchDisposition:
     """Everything a lead-author tick consumes from shared state, collected during `do_work`
-    and applied only once the batch's tree has passed the scrub.
-
-    The consumption points (served marker release, per-run `done` sentinel, pitfalls rotation
-    and decline bumps) write to the state root, which survives the worktree swap. Applied
-    inside `do_work`, a tainted scrub would already have emptied the queue for a commit that
-    must never be delivered.
-
-    After the scrub, not the push: the commits then sit on a local branch as durable as the
-    queues, and delivery is retried separately (`_deliver_pending`) without re-running agents.
-
-    Never persisted: an exit before the apply drops it, and served claims stay in `inflight/`
-    for the next claim to reclaim (not re-queued, since a stale re-queue and a fresher
-    same-case marker would collide on one inflight path). Each reclaim counts an attempt, so a
-    batch that never passes the scrub is quarantined at the usual ceiling.
-
-    `apply` is ordered sentinels → releases → pitfalls rotation → decline bumps, so a crash
-    mid-apply costs a re-serve or re-curation, never a loss."""
+    and applied only once the batch's tree has passed the scrub."""
 
     served: list[ServedMarker]
     pitfalls: PitfallsDisposition | None
@@ -424,19 +400,7 @@ def _drain_lead_author_markers(
     data_root: Path,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[ServedMarker]:
-    """Claim the queued curation requests and serve each one's run to `run_lead_author`.
-
-    A row stores its run's address (#1105 D-stored); `data_root` is the one the tick resolved
-    before its worktree and box existed (`lead_author_drain`), and every claim is served under
-    it. A tick that resolved none (no row was queued when it started) never reaches here.
-
-    Each claim is rehydrated before it is served — its tenant accepted (once per tick: a
-    refusal is cached for the tick too), its run opened through that tenant's repository. A row
-    whose run is GONE (`RunAbsent`) is quarantined at once as `artifact-missing` (uncounted, no
-    retry). Any other refusal — the tenant's acceptance, a container that cannot be trusted or
-    read right now (`RunUnreachable`), an entry refused at the run's name — is a counted attempt
-    on the transient lane: re-queued until `LEAD_AUTHOR_MAX_RETRIES`, then quarantined
-    `transient-exhausted` (owner decision on #1236, changing rev 5.1's S9)."""
+    """Claim the queued curation requests and serve each one's run to `run_lead_author`."""
     from defender.run_repository import RunAbsent
 
     max_retries = env_int("LEAD_AUTHOR_MAX_RETRIES", 3)
@@ -748,18 +712,7 @@ def _run_worktree_batch(  # noqa: PLR0913, C901 — one batch, kept whole
     scrub: Callable[[Path], None] = box_mod.scrub,
 ) -> int:
     """One batch: deliver what an earlier tick retained, then worktree, box, `do_work`,
-    scrub, consume, `finish_batch`, cleanup.
-
-    The box is created and checked once, then stopped before `do_work`: it runs only inside
-    each agent run's `box_for_run`, which stops it again after (#1195).
-
-    `do_work` may return a `BatchDisposition` (the lead-author lane does; the lessons lane
-    returns `None`), applied once the tree has passed the scrub. A push or PR that then fails
-    is recorded for next tick's delivery, not re-served. On exits before the apply (taint, box
-    fault, interrupt) the disposition is dropped and the log says what stays for reclaim.
-
-    The label is asked for its trees first: a non-member raises before `_open_batch`, so no
-    delivery, worktree, box, held root or record ever exists for it (#1179 O1')."""
+    scrub, consume, `finish_batch`, cleanup."""
     label.writable_trees(paths)
     opened = _open_batch(state, branch, label=label, has_work=has_work)
     if opened is None:

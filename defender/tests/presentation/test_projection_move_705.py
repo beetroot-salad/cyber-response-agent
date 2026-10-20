@@ -169,14 +169,7 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
 # gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
 
 def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
-    """`(T, run_dir)` with the driven run moved to where the run page's repository opens it.
-
-    #1105 PR 2 (declared change 7): the standalone re-render is `--tenant T <run_id>` and opens
-    the run by id through T's repository, so the run moves to `<data root>/<T>/runs/<run_id>`
-    (#1187 R1, declared change 6: the runs folder carries no `_tenant.json`; the tenant's folder
-    holding it is the owner). The store stays where the drive put it: the run's pointer names
-    it by its absolute path. (Not driven there in place: `_driven_run` puts the store under the
-    same folder it puts the run in.)"""
+    """`(T, run_dir)` with the driven run moved to where the run page's repository opens it."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 
     tenant = ensure_d9_tenant()

@@ -249,11 +249,7 @@ class _FirstCommitsSecondFaults:
     regression tier's own config builder (`_drain719.cfg_for`), with only the model faked
     (`_drain719.committing`); for the questioner curator it raises `StageAbort`, a
     SYSTEMIC_FAULTS member that is not a refusal, at the seam — C32's executed shape (a
-    non-OSError systemic fault raised in trigger_author is contained).
-
-    SIGNATURE-AGNOSTIC: the design reshapes this seam to take the handle (O5); this fake finds
-    the curator's module name among its arguments by value and the batch worktree's `LoopPaths`
-    by type, and pins nothing else about the call."""
+    non-OSError systemic fault raised in trigger_author is contained)."""
 
     def __init__(self) -> None:
         self.modules: list[str] = []

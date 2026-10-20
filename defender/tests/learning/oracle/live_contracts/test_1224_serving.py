@@ -149,12 +149,7 @@ class _CallRouted:
     stable to volatile (design: static instructions, family block, world block, then the
     per-call turns), so the call a request is about is the one whose marker occurs LAST in the
     request's inbound text — whether each call opens a fresh conversation or extends the
-    sibling's one. Markers must not contain one another.
-
-    Tier 2: it routes a script and decides nothing. Each route is a `S.ScriptedModel`, which
-    records what it was handed; a request carrying no marker is answered text-only and recorded
-    in `unrouted`, which the scenario asserts empty. Named after a priced model
-    (`S.double_model_name`, R-08) like every double."""
+    sibling's one. Markers must not contain one another."""
 
     __name__ = "CallRouted"
 

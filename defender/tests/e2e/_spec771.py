@@ -1,52 +1,5 @@
 """Shared fakes, the writer census, and the future-symbol shims for #771's executable spec
-— NOT a test module (the leading underscore keeps pytest from collecting it).
-
-Imported by `test_771_write_backstop.py`, `test_771_alias_ban.py` and
-`test_771_lifecycle_and_scope.py`. Every demand of
-`spec-flow/specs/spec_graph_771.yaml` is exactly one test in those three files, named by
-that demand's `discharged_by`.
-
-THE FAULT-INJECTION HIERARCHY, applied (phases/author.md):
-
-  tier 1 — REAL input through the REAL primitive, in the test itself. Every alias is built
-  with `os.symlink` / `os.link` / `os.mkfifo` on a real tree, and the premise is re-probed
-  (`os.path.islink`, `st_ino`, `st_nlink`) before the outcome is asserted. The taxonomy
-  assumption therefore ceases to exist rather than being pinned once. This is how EVERY
-  filesystem fault in this suite is built — including the ones that look expensive.
-
-  tier 2 — a declarative fake whose fault CONTENT cites the ledger claim that observed it on
-  the real dependency. Only the docker daemon and the model qualify. `RecordingDocker` (from
-  `_box665`) is reused rather than re-plumbed; `AliasProbeDocker` below extends it with the
-  in-box probe's verdict, and every canned verdict carries `cite=`.
-
-  tier 3 — an author-imagined fault is BANNED. Where a fault has no ledger claim, the test is
-  not written; the probe request is in `82-author-digest.md`'s red flags instead.
-
-RED AGAINST HEAD, and that is the expected state of a spec. The guarded write primitive
-(`_io.write_guarded`), the startup probe (`box._probe_alias_ban`), the shipped seccomp profile
-(`box.ALIAS_PROFILE_PATH`), the scan verdict marker (`scrub.tree_verified`, sited OUTSIDE the
-tree by §7 D8) and the new lint do not exist at `c98bc86c`. Every reference to them is
-LAZY — inside a call site a test invokes — so all three modules still COLLECT at HEAD and each
-test fails on its own missing symbol rather than taking the suite's collection down with it.
-
-No `monkeypatch.setattr` anywhere: fakes enter through `docker=`, `store_factory=`, `box=`,
-`limits=`, `start_box=`/`stop_box=`/`scrub=` — the seams the code already carries — because
-`tooling/lint/lint_monkeypatch.py` is a blocking ratcheted gate. `monkeypatch.setenv` is used
-for env knobs and is explicitly outside that gate.
-
-A note on ROOT: `defender/CLAUDE.md` records four #631 tests that invert under root because
-they simulate an unwritable target with a permission bit. Nothing here does. Every refusal in
-this suite is forced by a PLANTED ALIAS, a real occupied name, or a REAL DIRECTORY squatting
-an artifact name — all three of which root respects.
-
-THE CENSUS IS THE INSTRUMENT EVERY WRITE-SIDE DEMAND KEYS ON, so its two late additions are
-worth reading before anything else: the DRIVER'S FAULT-EXIT trace write (one of the two sites
-the original issue reported, absent from this census, from the lint's gate list and from the
-project profile's writer list at the same time) and the QUERY TOOL'S QUERIES TABLE (the second
-artifact of a writer counted once). The lint's hard-gate module set is derived from the census
-rather than typed beside it, so the next added row cannot go missing from the gate the way
-this one did.
-"""
+— NOT a test module (the leading underscore keeps pytest from collecting it)."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
@@ -122,31 +75,7 @@ def load_write_lint():
 
 
 def ban_dependency_files() -> dict[str, Path]:
-    """Every file in this repository the alias ban's correctness depends on.
-
-    THE SWEEP'S RULE IS GENERAL AND WAS APPLIED TO ONE CASE. The containment argument is: the
-    drain box writes into a checkout of this repo, and that lane's job is opening a PR from it,
-    so a file the box can rewrite is a file it can get MERGED — and the weakened version then
-    reaches every later box through main. That is true of the seccomp profile, and it is just
-    as true of every other file the ban leans on. Five qualify and all five are out of reach
-    today for the same reason the profile was: an accident of where they sit, not a rule.
-
-      * the profile itself — the syscall set the ban IS;
-      * the vendored platform default it is DERIVED from — rewrite that and the next
-        regeneration ships a weakened profile the generator will call correct;
-      * the generator that performs the subtraction — it decides what "derived" MEANS, so it
-        can define the ban away as surely as editing the output can;
-      * the write lint's ratchet baseline — ratchet a census row into it and the backstop
-        stops gating that writer, with no test turning red;
-      * the CI workflow — it is what registers the runtime with `--oci-seccomp`, without which
-        the shipped default runtime enforces nothing at all (C1-fix, executed).
-
-    THE SECOND AND THIRD ENTRIES ARE THE SWEEP'S OWN RULE APPLIED TO THIS PR'S CHANGE. Deriving
-    the profile rather than hand-writing it replaced ONE file the ban rests on with THREE, and
-    a sweep still naming only the output would have shrunk its coverage while looking untouched.
-
-    The profile is a future symbol, so this raises `AttributeError` at HEAD like every other
-    reference to one — `alias_profile_path()` is evaluated first for exactly that reason."""
+    """Every file in this repository the alias ban's correctness depends on."""
     return {
         "the seccomp profile the ban is": alias_profile_path(),
         "the vendored platform default it derives from": load_seccomp_generator().MOBY_DEFAULT_PATH,
@@ -336,26 +265,7 @@ def run_probe_under_profile(
     script: str, profile: Path | None, *, run: Callable[..., Any] = subprocess.run,
 ) -> dict[str, str]:
     """Run `script` in the box rootfs and return its verdict map, under `profile` or — when
-    `profile` is None — under whatever the daemon applies by ITSELF.
-
-    The `None` arm is the whole mechanism: there is no way to ask a daemon what its default
-    profile contains, but there is a way to ask what it DOES, which is to run a container
-    without `--security-opt` and observe. That turns "our profile does not widen the platform
-    default" from a claim about two documents into a claim about two containers on the daemon
-    in front of us — and it stays true across a daemon upgrade that moves the default out from
-    under the vendored copy, which no digest check can see.
-
-    The script arrives on STDIN rather than through a bind mount so the comparison also runs
-    under docker-outside-of-Docker, where a host path need not exist on the daemon's side.
-
-    #1092: this is the FOURTH `docker run <rootfs>` site — it takes the same resolver
-    (`resolve_rootfs` over DEFENDER, the running package's own tree), the same `--pull=never`
-    the two argv builders carry (JF5), and the same preflight (`require_image`: the daemon is
-    asked for the image before the run names it, so a missing image raises with the build
-    remedy against DEFENDER's own tree). `run=` is an injectable seam, keyword-only,
-    defaulting to `subprocess.run`, so a test can observe the argv without a daemon; the
-    preflight and the run both go through it.
-    """
+    `profile` is None — under whatever the daemon applies by ITSELF."""
     try:
         rootfs = box_mod.resolve_rootfs(None, DEFENDER)
         box_mod.require_image(
@@ -405,16 +315,7 @@ _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def shapes_named_in(argv_text: str) -> set[str]:
-    """The shape names `argv_text` NAMES, matched as whole tokens and never as substrings.
-
-    The suite's oracle for "which shapes did the probe attempt", read off the probe's own argv
-    rather than off a verdict the probe reports about itself. Whole-token matching is what makes
-    it falsifiable: `shapes_named_in("... symlinkat ... mknodat ...")` is exactly
-    `{symlinkat, mknodat}`, so a probe that quietly narrowed its set fails the equality the
-    demand asserts instead of satisfying it by spelling.
-
-    The probe therefore owes the test one thing, and it is part of the contract: each attempted
-    shape appears in the exec's argv as its own bare token (`symlink`, not `SYMLINK_DENIED`)."""
+    """The shape names `argv_text` NAMES, matched as whole tokens and never as substrings."""
     return {t for t in _TOKEN.findall(argv_text) if t in KNOWN_SHAPES}
 
 #: The registration that carries the ban on the shipped default runtime. Settled by an
@@ -593,16 +494,7 @@ def write_guarded(path: Path, text: str, *, mode: str = "replace", **kw: Any) ->
 def guarded_mkdir(path: Path, *, base: Path) -> None:
     """`defender._io.guarded_mkdir` — the parents-creating half of M3. Separate from
     `write_guarded` because B8 shows the leaf's own `O_NOFOLLOW` cannot protect a component:
-    the rule is stated over the whole call and is DEPTH-AGNOSTIC (firm consensus #13).
-
-    `base` ANCHORS the walk at the shared tree's root, and #13's depth-agnosticism is stated
-    BELOW it rather than below `/`. The box's writable mounts start at the tree, so a component
-    it can plant is a component under `base`; a symlinked ANCESTOR is a host configuration the
-    box cannot influence, and refusing on one refuses everything — `/tmp` is a symlink on
-    macOS, which is where the default runs base lives, so an unanchored walk means no run opens
-    its session store and every sidecar write degrades to a permanent silent no-op. Required
-    keyword-only, so a new call site must NAME the tree it trusts instead of inheriting an
-    anchor by default."""
+    the rule is stated over the whole call and is DEPTH-AGNOSTIC (firm consensus #13)."""
     from defender import _io
 
     return _io.guarded_mkdir(path, base=base)  # type: ignore[attr-defined]
@@ -621,15 +513,7 @@ def sweep_staged(tree: Path) -> list[Path]:
 
 def allowed_syscalls(profile: dict) -> set[str]:
     """Every syscall name the profile can let through — the names under an `SCMP_ACT_ALLOW`
-    rule, whatever that rule's conditions are.
-
-    CONDITIONS ARE DELIBERATELY IGNORED, and the direction of that choice is the point. A
-    capability-gated allow (`includes: {caps: [CAP_SYS_ADMIN]}`) counts here as allowed even
-    though a box without the capability can never reach it. That OVER-counts the shipped
-    profile's surface and equally over-counts the platform default's, so a widening comparison
-    built on it can only ever be too strict — it cannot miss a widening, which is the failure
-    that matters. A predicate that tried to model the conditions would be a second, unverified
-    implementation of dockerd's profile loader sitting inside the assertion."""
+    rule, whatever that rule's conditions are."""
     return {
         name
         for rule in profile.get("syscalls", [])
@@ -666,14 +550,7 @@ def tree_verified(tree: Path) -> bool:
 
 def verdict_sidecar(tree: Path) -> Path:
     """Where §7 D8 sites the scan's verdict: `<tree>.scrub-verdict.json`, a SIBLING of the
-    tree, keyed by the tree's own directory name.
-
-    The location is computed here rather than read back from the implementation deliberately.
-    A helper that asked the production code where it put the marker would agree with any
-    siting the implementer chose, including the in-tree one D8 rejected — the assertion would
-    then be about self-consistency instead of about where the artifact landed. This is the
-    same discipline `accounting_sidecar`'s callers apply from the other direction: that one
-    reads the production path AND the test asserts it is not under the run dir."""
+    tree, keyed by the tree's own directory name."""
     tree = Path(tree)
     return tree.parent / f"{tree.name}{SCRUB_VERDICT_SUFFIX}"
 
@@ -777,30 +654,7 @@ class AliasProbeDocker(RecordingDocker):
 # The writer census (C1 as re-derived by C3-fix: >=14 writers, >=5 idioms)
 @dataclass(frozen=True)
 class Writer:
-    """One host-side writer into a shared tree while a box is alive.
-
-    `artifact` is the run-dir-relative name it writes; `invoke` drives the REAL production
-    entry point over a run dir, AT THE ALTITUDE WHERE THE SITE'S POSTURE IS DECIDED. That
-    altitude is part of the row, not an implementation detail: the sentinel row driven at the
-    low-level plant helper measures the helper's error and not the startup fault the design
-    cares about, and the lesson-load row driven at the shared appender measures a raise the
-    production site swallows.
-
-    `module` is the repo-relative module the write lives in — the lint's hard-gate list is
-    DERIVED from this field rather than typed out beside it, because a hand-typed list is how
-    the driver's fault-exit write went missing from the gate while staying in the census.
-
-    `posture` carries X5's label WHERE THE LEDGER NAMED THE SITE AT THIS ALTITUDE, and
-    `unmeasured` everywhere else. It is documentation, never an expectation: the parity test
-    measures each row's today-observable in the test itself (see `POSTURES`), so no row's
-    outcome is an author's prior about a site the ledger never looked at. The ledger's four
-    MEASURED postures are anchored separately, at X5's own four sites and under X5's own
-    faults, by `X5_MEASURED_SITES` below — parity alone cannot see a site that moved in both
-    lanes, and re-deriving X5's labels from a census row's altitude is what misattributed two
-    of them (see `write_trace`'s row).
-
-    `idiom` names which of the five write idioms it reaches the tree through; `cite` is the
-    ledger claim behind the row."""
+    """One host-side writer into a shared tree while a box is alive."""
 
     id: str
     artifact: str
@@ -915,38 +769,13 @@ def _invoke_queries_table(run_dir: Path) -> Any:
 
 
 def _invoke_sentinel_plant(run_dir: Path) -> None:
-    """The run-dir sentinel plant — and the plant helper IS where the conversion happens.
-
-    MEASURED, because the altitude question was raised against this row and the answer was not
-    the expected one: driven here, a failed write already comes back as a box STARTUP fault and
-    not as a plain OSError. So the row sits at the right altitude and the defect was on the
-    reading side — the tests that touched it caught `OSError`, which a startup fault is not, so
-    the row carrying X5's one fatal posture class ERRORED instead of asserting. `drive_writer`
-    catches `BaseException` for exactly that reason.
-
-    Driving `start_box` itself is the wrong instrument here for a second reason: a start that
-    SUCCEEDS clears the sentinel again, so the census's "every writer lands its artifact"
-    positive control would have nothing left to observe — measured, not assumed."""
+    """The run-dir sentinel plant — and the plant helper IS where the conversion happens."""
     box_mod._plant(run_dir / ".box-sentinel", "token-771")
 
 
 def _invoke_fault_exit_trace(run_dir: Path) -> None:
     """The DRIVER's fault-exit trace write — `write_text("")` onto the same fixed
-    `tool_trace.jsonl` name `observe.write_trace` owns.
-
-    C1's row 2, and one of the two sites the issue itself reported. It went missing from the
-    census, from the lint's gate list and from the profile's writer list at once, because all
-    three were re-derived by hand from an instrument that only sees the happy-path writer.
-
-    RETURNS NOTHING, like every other census driver whose site has no meaningful return value —
-    and that is a fix to the INSTRUMENT, not a relaxation of the demand it feeds. This used to
-    hand back the `ReplayFn` the drive built, whose `repr` carries its address; `posture_class`
-    keys a return BY VALUE, so two arms of the parity demand could never compare equal on it,
-    and no caller ever read it. The row was therefore able to pass on one posture only — a
-    RAISE — silently pinning "this site must raise", which is not what the demand states and
-    not a claim F1 ever made about this site. `None` in both arms restores the comparison the
-    demand asks for; the anti-vacuity guard above (a missing symbol reads as
-    `raised:AttributeError`) is what still keeps `None` from meaning "nothing happened"."""
+    `tool_trace.jsonl` name `observe.write_trace` owns."""
     drive_fault_exit_trace(run_dir)
 
 
@@ -1136,14 +965,7 @@ LINT_HARD_GATED_MODULES: frozenset[str] = CENSUS_MODULES | DRAIN_MODULES | {
 
 
 def posture_class(outcome: object) -> str:
-    """The observable CLASS of one site's reaction to a failed write.
-
-    Two writes land in the same class iff a caller cannot tell them apart: a raise is keyed by
-    its exception type (a startup fault is not an ordinary OSError, and that distinction IS
-    X5's fourth class), and a return is keyed by its value. Used to compare a site's reaction
-    to an ALIAS refusal against its reaction to an ordinary write failure MEASURED IN THE SAME
-    TEST — which is what lets the parity demand cover every census row without inventing a
-    posture for the eleven rows X5 never looked at."""
+    """The observable CLASS of one site's reaction to a failed write."""
     if isinstance(outcome, BaseException):
         return f"raised:{type(outcome).__name__}"
     return f"returned:{outcome!r}"
@@ -1233,27 +1055,7 @@ def quarantine_a_tainted_tree(
     tree: Path, quarantine_dir: Path, *, batch_id: str = "b-771", verdict: dict | None = None,
 ):
     """Drive #747's REAL quarantine path over a real tainted tree, and return
-    `(archive, manifest_doc)` — the manifest of THIS batch, never whatever sorted first.
-
-    The taint is real: a symlink is planted with `os.symlink` and the production `scrub` walks
-    it, so the `RunTainted` handed to the preserve step carries findings the production walk
-    produced. This is the path §7 D8's accepted cost lands on — quarantine exists to hand a
-    human a tainted tree, and under D8 the verdict is no longer inside the thing it hands over.
-
-    TWO REPAIRS, AND BOTH ARE WHAT MADE THE FAIL-CLOSED ARM UNSATISFIABLE BY ANY CORRECT
-    IMPLEMENTATION. This helper used to return the manifest by globbing the quarantine
-    directory and taking the first entry alphabetically. Both arms of the demand quarantine
-    into ONE directory on purpose, and the judged tree's batch id sorts first — so the arm that
-    asserts an UNJUDGED tree's manifest records the absence read the JUDGED tree's manifest and
-    fired on a real verdict. The manifest is now keyed by the batch id the caller gave, which
-    is the name the production code writes it under.
-
-    The second is `verdict`, and it exists because the walk that produces the taint is the same
-    walk that writes the tree's verdict: left alone, the "unjudged" tree is judged by this
-    helper's own drive before the quarantine step ever sees it. So the arm's premise is
-    established BETWEEN the walk and the preserve step — `verdict=None` removes any verdict the
-    walk left (an unjudged tree, which is the fail-closed arm's whole condition), and a dict
-    writes that verdict where the scan would have. Neither touches what the manifest must say."""
+    `(archive, manifest_doc)` — the manifest of THIS batch, never whatever sorted first."""
     from defender.learning.core.config import AUTHOR_DRAIN_LABEL
     from defender.learning.core.quarantine import preserve_tainted_tree
     from defender.box import _scrub as scrub_mod

@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
-"""Fork one finished run into a questioner-authored family of worlds, calibrate it, and run it.
-
-The operator names a source run and the message to branch at; this module runs the episode's
-steps (`branch/steps.py::Step`) in order:
-
-1. **Launch checks** (not a `Step`). Everything that can refuse before anything is spent: the
-   tenant's gather grant serves at least one system, the branch point is in range, the source
-   alert is a plain file, the source's stamp can anchor a family, and every role a branch uses
-   has a usable model (the oracle's two included, M25).
-2. **`Step.QUESTIONER`.** A deny-all role authors the family: a base story and worlds that each
-   carry natural-language facts over the tenant's served systems. Its output is validated into
-   `Family` and held to one identity gate; a reply that does not validate records `refused`.
-3. **`Step.PREFLIGHT`.** Every original call is replayed through each fact world's oracle and
-   verifier to calibrate it (`preflight_replay`). The forged rows and recorded facts it verifies
-   are frozen as that world's store; no served answer is kept. The write-once outcome record
-   (`outcome.yaml`) says `accepted`, `unusable` or `refused` before any sibling starts.
-4. **`Step.RUNS`.** On `accepted`, each servable world runs as its own
-   `run.py --tenant T --episode <episode_id> --world <label>` process, started together in the
-   episode's container (`runs/`, made with the tenant's record just before), each holding an
-   equal slice of the episode's query rate. A sibling that exits without its own world record is recorded
-   `did not finish`; once two worlds have failed the family is unusable and the siblings still
-   running are stopped (N18).
-5. **`Step.VERIFY`, then `Step.JUDGE`.** Every sibling's scrub verdict and provenance stamp is
-   checked and each verified world archived (a world the archive refuses is recorded
-   `not archived`); agreeing stamps on an `accepted` family write the family stamp. The judge
-   grades the archive.
-
-Siblings are always `run.py` processes (for the box lifecycle, reap scan, role preflight and
-provenance stamp); this module never runs an investigation in-process. A launch never reuses an
-episode directory: a relaunch, or a second launch beside a running one, is a new episode (N17).
-"""
+"""Fork one finished run into a questioner-authored family of worlds, calibrate it, and run it."""
 
 from __future__ import annotations
 
@@ -183,19 +153,7 @@ def prepare_episode(
     prime: Callable[[Path, Episode], PrimeReport] = _PRIME_ALLOWING_EMPTY,
 ) -> EpisodeRuns:
     """Claim a fresh episode, copy the source's input into it, prime the family's base into it
-    once, and hand back its view held open: the launcher's door, whose caller closes it.
-
-    N17: a launch never reuses an episode folder. `runs.create_episode()` mints a fresh UUID
-    and claims `<T>/episodes/<uuid>` with one exclusive create, walked from the tenant's folder
-    no-follow (#1187 dc 3): an entry already at the name refuses, with no retry, so nothing a
-    dead launch left is adopted. The id carries no meaning: the manifest records the source run
-    and the branch point. On any error after the claim the view is closed and the error raised
-    as it was.
-
-    `source_run_dir` is the source run's folder, as its opened `Run` hands it out. `prime` is
-    injectable so a test can observe whether priming ran; it is handed the episode the
-    returned view holds.
-    """
+    once, and hand back its view held open: the launcher's door, whose caller closes it."""
     # Judged before an episode is claimed, so a refused source leaves no debris.
     raw, record_text = source_input(source)
     try:
@@ -310,17 +268,7 @@ def sibling_argv(
     episode_id: str, world_label: str, *, tenant_id: _tenant.TenantId, model: str | None = None,
 ) -> list[str]:
     """One sibling's command line: its tenant, its episode and which arm of it this process is
-    — ids only, never a path (#1105 PR 2) — and the model.
-
-    Everything else a sibling needs is derived from the episode's manifest and its arm roster,
-    which the child reads through its tenant's runs repository (`<T>/episodes/<episode id>`),
-    and the data root from the environment it inherits: the child re-accepts its tenant there,
-    and its roster must name its world. `sys.executable` so the child uses the same venv
-    interpreter.
-
-    The model is not in the manifest, so it is passed here; without it every arm would silently
-    agree on the default model rather than the one the preflight checked.
-    """
+    — ids only, never a path (#1105 PR 2) — and the model."""
     argv = [sys.executable, str(PATHS.defender_dir / "run.py"),
             # EVERY RUN NAMES ITS TENANT (#1078), a sibling included: the episode's, which this
             # launcher accepted once. The child looks its episode up under that tenant only.
@@ -341,33 +289,7 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
     spawn: Callable[..., int] | None = None, model: str | None = None,
     tenant_id: _tenant.TenantId | None, rate: float | None = None, failed_before: int = 0,
 ) -> dict[str, int]:
-    """Start the selected world UUIDs together, returning exits keyed by those UUIDs.
-
-    Each UUID resolves through the published family before any child starts; only its label
-    is passed to the operator-facing `--world` selector.
-
-    The children are spawned from N threads that rendezvous first, so the arms overlap in time;
-    run serially they would be compared across a moving estate, which the primed capture and
-    shared T0 exist to prevent.
-
-    Each child's runs base is the episode's arm container, which the launcher made with the arm
-    roster just before (`EpisodeRuns.start_runs`): the child reaches it through its episode and
-    takes its own run id from the roster, so the launcher exports no `DEFENDER_RUNS_BASE`, and
-    siblings stay out of runs-base walkers' reach. `--tenant` and `--episode` ride on each
-    command line, and the child inherits this process's environment — `DEFENDER_DATA_ROOT`
-    with it — and re-accepts.
-
-    `rate` is the episode's tenant-query rate R: each child's environment carries its slice
-    R/k as `ORACLE_RATE` (k = the worlds launched, the control included; S18), so the slices sum
-    to R and no limiter state crosses a process (S16).
-
-    A child that exits non-zero without its own world record (killed, refused at start, never
-    spawned) is recorded `did not finish` by this launcher, after the process is gone (S8).
-    Once `failed_before` (pre-flight's unservable worlds) plus the arms that failed reach two,
-    the family is unusable (O5) and the arms still running are stopped (N18): the production
-    spawn terminates its child; an injected `spawn` seam has no handle on its child and is
-    left to finish.
-    """
+    """Start the selected world UUIDs together, returning exits keyed by those UUIDs."""
     from defender.tenancy import _tenant
     from defender.learning.core.config import KNOB_RATE
 
@@ -477,16 +399,7 @@ if _missing := [f for f in _ANCHORED if _HELD[f].off_anchor is None]:
 
 def parse_branch_args(argv: list[str]) -> argparse.Namespace:
     """The operator's whole command line: a tenant, a source run of it, a branch point, and
-    what to say.
-
-    `--tenant` is required, with no default (J8): the tenant comes from the request, never
-    from a record or a stamp. The source is named by its run id (O1(d)): the launcher opens it
-    through the tenant's repository, so a path where the id belongs is refused. No episode id
-    argument: it is derived from the source run and branch point.
-
-    No continuation prompt (#1255 D1, P4): an arm resumes with no user message, so there is no
-    instrument text for an operator to author.
-    """
+    what to say."""
     p = argparse.ArgumentParser(prog="branch", description=__doc__)
     p.add_argument("--tenant", required=True,
                    help="the tenant whose run is forked; required, with no default")
@@ -516,20 +429,7 @@ def main(  # noqa: PLR0913 — the launcher's inputs plus its injection seams
     verifier: Any = None,
     roster: Any = None,
 ) -> int:
-    """Launch one episode, reporting a refusal as an operator exit rather than a traceback.
-
-    `oracle` / `verifier` are pre-flight's oracle and verifier models (pydantic-ai `Model`s;
-    `None` builds each from its knobs, `ORACLE_MODEL` / `ORACLE_CHECK_MODEL`). `roster` is the
-    adapters roster pre-flight's grant-decided reader serves through (`None`: the checkout's
-    adapters, read once here). The siblings build their own from their own process.
-
-    The delegated checks (source store, branch point, primer, family loader, grant) raise their
-    own classes with operator-ready messages; they are converted here. `sqlite3.Error` is
-    included because a corrupt source store raises it, not `BranchError`.
-
-    One abort rule: anything else raised before the first sibling starts is also reported as a
-    refusal (in `_launch`), naming the episode it ended.
-    """
+    """Launch one episode, reporting a refusal as an operator exit rather than a traceback."""
     try:
         return _launch(argv, spawn=spawn, questioner=questioner, preflight=preflight,
                        judge=judge, lessons_dir=lessons_dir, live_tree=live_tree,
@@ -698,11 +598,7 @@ def _finished_arms(view: EpisodeRuns, world_ids: Sequence[str]) -> dict[str, Run
     (only a real directory is a run) — or the refusal for it, which `verify_family` records as
     that world's own fault: a roster id with no folder is "not started" (`RunAbsent`), an entry
     that is not a real directory its own; a container that went bad after the siblings ran is
-    every arm's `RunUnreachable` (or `RunAbsent` when it is gone).
-
-    A roster the reader refuses (torn, an id off the rule, a world UUID set other than the
-    manifest's worlds, a link) is not one world's fault: VERIFY refuses outright, naming it,
-    and no arm is opened."""
+    every arm's `RunUnreachable` (or `RunAbsent` when it is gone)."""
     try:
         ids = view.arm_ids()
     except RunRefused as refused:

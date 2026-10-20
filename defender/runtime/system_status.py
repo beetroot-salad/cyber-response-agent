@@ -1,30 +1,4 @@
-"""Which of a run's granted systems it can use — judged once per run, at its start (#1256).
-
-A system is UP or DOWN for a run, and a down system carries its cause:
-
-  * `NotConfigured(reason)` — its adapter's settings check (`check_settings`) raised
-    `ConfigFault` over the run's tenant record at start; or, later, a verb raised `ConfigFault`
-    at call time — a fault the check did not cover, which is an adapter defect (DP3, O-5b).
-  * `AdapterBroken(reason)` — at start, its adapter would not import, declares no check, or its
-    check raised anything but `ConfigFault` (O-5a).
-  * `Tripped(failures)` — the circuit breaker's count reached its limit during the run.
-
-The first two are held on the run's `RunState` (`system_down`), written here and nowhere else;
-the third is the breaker's own count. Every gate that refuses a down system — the gather
-dispatch, the query tool's in-call check, lead zero, `list_verbs` — asks one question,
-`down_cause`, and renders its refusal from the cause (`refusal_if_down`). A system down for a
-cause that is not a trip is never charged to the breaker: no call to it runs, and the one call
-that can reveal it (an escaped `ConfigFault`) is not charged (`mark_escaped`). So the breaker
-counts only what can change during a run (DP2).
-
-What makes a system usable is fixed before the agent's first turn (DP1): its settings are
-frozen in the run's record, and its adapter is the roster's. `judge_run` judges it there, once
-per run (`run.py` before the run folder exists; the driver only when started without that
-verdict), from the adapter's own declaration (`judge_adapter`; system rules live with the
-adapter, #1215); nothing is inferred from call outcomes. The verdict travels inward as one
-value (`RunSystems`) and is held on the run's state; every surface that marks a system down
-asks the state's CURRENT status when it renders (`down_notes`), not a copy taken at start.
-"""
+"""Which of a run's granted systems it can use — judged once per run, at its start (#1256)."""
 from __future__ import annotations
 
 import functools
@@ -203,12 +177,7 @@ def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path,
     adapter's own settings check over the run's frozen record (O-1, O-5), or the reason its
     adapter cannot be judged (O-5a), each from `judge_adapter`. Every other granted system is
     up. Pure: it logs nothing and records nothing (`hold_at_start` does), so `run.py` can ask it
-    before the run exists.
-
-    The adapters are `roster`'s — the tree the run reads, never an injected registry (K2) — each
-    imported afresh (`fresh_adapter_module`), never through the call-time cache. A granted
-    system the roster does not hold refuses startup as an invalid grant (C11), before any
-    adapter check runs. The registry still validates the granted verbs at construction."""
+    before the run exists."""
     scope = ReasonScope(tenant=tenant, defender_dir=Path(defender_dir),
                         adapters_root=Path(roster.root), known_ids=frozenset(known_ids))
     down: dict[str, StartCause] = {}
@@ -342,12 +311,7 @@ def mark_escaped(state: RunState, system: str, fault_text: str, *,
 def down_notes(state: RunState, systems: Iterable[str]) -> dict[str, str]:
     """The cause of each of `systems` that is down NOW (`down_cause`): what MAIN's workspace view,
     gather's system index and the like print beside it (O-3), asked when they render — so a
-    system downed after the start (an escaped config fault, a trip) is marked too.
-
-    Named as `cause_text` names it, save a trip, named without its count: the count keeps
-    moving while the run goes on, and a mark is standing text — MAIN's opening prose, which two
-    runs ending their correlation lead the same way must share (#1222 A2), and gather's index,
-    the cached prefix of every dispatch. The trip's own refusal names the count."""
+    system downed after the start (an escaped config fault, a trip) is marked too."""
     notes: dict[str, str] = {}
     for system in systems:
         cause = down_cause(state, system)

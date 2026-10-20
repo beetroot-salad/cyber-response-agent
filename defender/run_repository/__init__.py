@@ -1,21 +1,6 @@
 """The runs repository (#1105): the one owner of run-folder layout, the run handle, the
 tenant-scoped repository (`Tenant.runs_repository()`, PR 2), whose episode view owns the arm
-roster (#1187). This module is its door.
-
-The door serves the public surface lazily (PEP 562 `__getattr__`): reading a name imports the
-one submodule that defines it, and nothing else. That is load-bearing twice over (R4-6):
-
-- in-box code imports layout names with no third-party package installed, and the handle
-  (through `_tenant`) needs pydantic, so a layout name must load `_layout` alone;
-- the handle imports `_report`, `_artifact_schema` and `_episode_paths`, each of which imports
-  layout names from here, so an eager door would import itself in a cycle.
-
-A failed first import propagates and is retried on the next read (NF-13): nothing is cached
-until a submodule has imported. `__all__`, the names declared under `TYPE_CHECKING` (so mypy
-types each as its real object, R4-30) and the names `__getattr__` serves are one set, pinned
-by a test. Every submodule is `_`-prefixed: outside the package and its owner modules
-(`_episode_paths`, `_episode_handle`, `_tenant`), production code imports from this door only.
-"""
+roster (#1187). This module is its door."""
 from __future__ import annotations
 
 import importlib

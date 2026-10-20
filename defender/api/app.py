@@ -1,24 +1,4 @@
-"""The routes: #1131's public API, each a thin translation onto a port.
-
-Every route resolves the caller through the one login dependency (`_principal`) and passes its
-tenant to the ports; no route reads a tenant from the request. Every write — and every audited
-read — runs in one store transaction opened for the caller: the route writes the record and its
-audit event through it, so the two commit together or not at all. Which actions are audited, and
-with what, is decided here; that they commit together is the store's (`ports.py`). The routes
-decide no data rule — which request replays which record, what may be cancelled, deleted or
-learned from is the store's (`ports.py`). What they own is the mapping onto HTTP:
-
-- A create answers 201 with a `Location` header when the port says it created, else 200 with
-  the record the port returned.
-- `None` from a read, or `NotFound`, is a 404; a record another tenant owns reads the same.
-- `UnknownReference` (a body naming a missing record) is a 422; `Conflict` is a 409.
-- Every error is an RFC 9457 problem (`problems.py`), and each route declares the ones it can
-  answer.
-- Malformed input never reaches a port, whichever way it comes in (path, query, body or
-  cursor): ids outside `RECORD_ID_PATTERN`, times without an offset and bare numbers where a
-  time is due are 422s at the boundary.
-- An answer a port's contract rules out is a 500 (`StoreBrokePromise`), never served.
-"""
+"""The routes: #1131's public API, each a thin translation onto a port."""
 
 from __future__ import annotations
 

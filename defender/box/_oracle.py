@@ -2,17 +2,7 @@
 fresh runner folder read-only and a fresh scratch folder, and nothing else — nothing of the
 investigator's (no run dir, no tenant agent half) and nothing of the checkout. It never yields an
 unsandboxed executor, whatever `DEFENDER_ALLOW_UNSANDBOXED` says: a start that is not sandboxed
-raises `BoxStartRefused`.
-
-The box's only in-box code is the transport's entry point, `python3 -m
-defender.execution.bash_exec`, which imports the stdlib and `box_codec` alone. So the runner folder
-holds copies of exactly those modules, plus the content-free code check file box start reads back
-through a `code` mount (`RUNNER_FILES`), bound at the checkout's path: the request's workdir
-stays the checkout (the start path reads its `box.Dockerfile` on the host to name the image, and
-the box's `PYTHONPATH` is that path), but inside the box that path holds the runner and nothing
-more. The repository root, its `.env` and the rest of the tree are never a bind source, so oracle
-Python cannot read them.
-"""
+raises `BoxStartRefused`."""
 from __future__ import annotations
 
 import os

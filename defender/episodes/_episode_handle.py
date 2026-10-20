@@ -1,36 +1,5 @@
 """The file-backed `Episode` handle (#1133): every write into an episode tree goes through it,
-and it writes only through a folder the rooted core holds open (`_io.Held`, #1111).
-
-A door opens the handle once and holds it for its own duration: `Episode.open(episode_dir)` for
-an episode that exists, `Episode.create` for the one door that makes it. Both reach the folder
-through their `io=` seam only (`io.hold` / `io.hold_new`). An episode is reached by id through
-its tenant's runs repository (`runs.episode(episode_id)`, `runs.create_episode()`,
-`runs.episode_files(episode_id)`, #1187 S-iso), the one production caller of the doors: it
-hands them its walk as the seam, so the folder they hold is the one walked from the tenant's
-folder with every level no-follow, never a path they resolve. With the default seam (the core's
-`hold`, following the spelling as `bind` does; `hold_new`, judging the name from its parent)
-they serve a folder handed in whole. Both are context managers. Every verb then works relative
-to the held folder, so the episode dir is never resolved by name again and a verb never makes
-it.
-
-Records and folders are handed out by `_episode_paths.LAYOUT`'s relative names, the only place
-those names are spelled. A record answers `.path` plus exactly the verbs its row in
-`RECORD_VERBS` grants — one class per verb set, so a verb the row does not grant is absent from
-the class; a folder answers `.path` and `.ensure()`. Each verb is one call on the held folder.
-
-`view()` is a `Bound` over the same held folder, for a pass that reads the tree it writes (the
-judge). Episode readers use this view through the repository's walked handle, so no reader
-re-binds the episode directory by path. The archive's copy lane
-(`learning/branch/archive.py`) is the declared exception and does not go through here.
-
-`refuse_bad_episode_id` is the episode id's rule (`_run_id.episode_id_fault`: canonical
-lowercase UUID text), refused as `EpisodeRefused` before any path is built from the id; both
-live beside the layout (`_episode_paths`) and are re-exported here. The owner never reads
-inside the episode's `runs/`: that container, its arms and the arm roster (`arms.json`,
-`LAYOUT.arm_roster`) are the runs repository's episode view
-(`tenant.runs_repository().episode(episode_id)`), built on this handle's held folder
-(`_held_folder`). The one hand-out of the container's path is `box_mounted_container`.
-"""
+and it writes only through a folder the rooted core holds open (`_io.Held`, #1111)."""
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath

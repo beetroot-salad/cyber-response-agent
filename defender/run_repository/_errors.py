@@ -1,16 +1,5 @@
 """The runs repository's error types. How its refusals show a name is `defender._shown`'s
-rule, shared with the tenant owner.
-
-`RunRefused` is every refusal the repository makes that is not the tenant's (#1105 OP-5):
-`RunId`'s, the lookups' and the arm roster's. A fault of a folder on the tenant's walk (a
-link, a non-directory) is `_tenant.TenantRefused` instead (P2) — except where a run is opened, which
-answers one family: `RunAbsent` (the run is gone: nothing at its name, or no container at all)
-and `RunUnreachable` (the container that holds it cannot be trusted or read right now), each a
-`RunRefused`, the second raised `from` the container's `TenantRefused` (#1105 PR 2 review). It
-is a plain `Exception`, not a `ValueError`, so neither error's handler ever catches the other.
-
-Pydantic-free: `RunId` imports it, and in-box code may import `RunId` (NM-05).
-"""
+rule, shared with the tenant owner."""
 from __future__ import annotations
 
 from defender._shown import escaped

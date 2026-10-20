@@ -1,25 +1,4 @@
-"""The unboxed fallback's model view: a per-run staging tree (#1255 P1 "Every mode", C6, C8).
-
-A box mounts the run folder at `/runs/current`, the checkout at `/defender` and the tenant's
-agent half at `/agent`, and runs every command in the model view. When the operator opted into
-running without a box, the host executes the same commands — so it needs the same view, or the
-shims would be handed the real runs folder (which, for an arm, holds its siblings) and model
-paths would name nothing.
-
-The staging tree is a fresh temporary folder laid out as `runs/current`, `defender`, `agent`:
-
-* `runs/current` is a real folder mirroring the run folder, refreshed before every command, so
-  a shim sees the payloads and document edits written mid-run (C6). It is a real folder, not a
-  link: invlang's corpus walk does not follow a linked folder, and the run's own files are read
-  with links refused. The caller names what is left out (the wire logs: no role may read them).
-* `defender` and `agent` link to the checkout and the agent half, which a run never writes (the
-  checkout's venv comes with it, so the shims re-exec as they do from the checkout).
-
-A command's model paths (`/runs/current/…`, `/defender/…`, `/agent/…`) — its argv words and its
-working directory — are resolved into the staging tree just before it runs; nothing else is
-rewritten, and the output is the program's own. The tree is removed when its executor is
-collected.
-"""
+"""The unboxed fallback's model view: a per-run staging tree (#1255 P1 "Every mode", C6, C8)."""
 from __future__ import annotations
 
 import os

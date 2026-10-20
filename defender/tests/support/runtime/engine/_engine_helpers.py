@@ -1,19 +1,4 @@
-"""Shared `FunctionModel` replay plumbing for the engine/tool test modules.
-
-Every hermetic engine test drives a real stage through its `make_model` DI seam with
-a scripted `FunctionModel` under `override_allow_model_requests(False)`. That needs
-the same three pieces every time — a `BuiltModel` wrapper, a scripted response fn,
-and (for the tool-calling stages) a way to see what the model was shown. They lived
-as private copies in ten modules; the copies' own comments recorded the copy chain
-(`mirrors _replay_harness` / `mirrors the verify engine test` / `mirrors the
-lead-author test`), which is what a drifting hand-copy looks like.
-
-Import AFTER the module's `pytest.importorskip("pydantic_ai")` — this module imports
-pydantic_ai at module level, so a tree without the runtime extra must skip first.
-
-`e2e/_replay_harness.py` stays separate on purpose: it replays whole golden runs
-against the driver, not a single stage.
-"""
+"""Shared `FunctionModel` replay plumbing for the engine/tool test modules."""
 from __future__ import annotations
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
@@ -93,17 +78,7 @@ def learning_run_dir(tmp_path):
 
 
 def assert_stage_tools(deps_cls, *, label: str, effort: str, expected: list[str]) -> None:
-    """A built stage agent exposes EXACTLY `expected` tools and nothing that writes.
-
-    Four sibling suites asserted this with only the deps class, the label, the effort and
-    the tool list swapped. The property is the same one in all four and it is a negative:
-    a stage that acquires a writing tool by accident — through a shared toolset, a new
-    default, a copied wiring — is a stage that can edit the tree it was only meant to
-    read, and nothing else in these suites would notice.
-
-    Kept as a helper rather than a `parametrize` table because the four cases live in four
-    modules, one per stage, each importing its own deps class.
-    """
+    """A built stage agent exposes EXACTLY `expected` tools and nothing that writes."""
     from pathlib import Path
 
     from defender.learning.core.config import StageWiring

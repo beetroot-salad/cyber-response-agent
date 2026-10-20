@@ -152,18 +152,7 @@ HALF, RIDE = "half", "ride"
 
 def _probe(built: Any, pointer: str, filed: str) -> dict[str, Any]:
     """Grade with b's reply filing `pointer` three ways, and read back what the resolver
-    decided:
-
-    * finding 0, `probe`: an investigator finding citing `pointer` as its reference half beside
-      b's report (`half`), or beside the resolving pair of b's and the control's reports
-      (`ride`);
-    * finding 1, `sibling`: a resolving pair of b's investigation and the control's report — the
-      in-reply positive control that b was graded and its rows queue;
-    * finding 2, `alone`: a world finding citing `pointer` only — `pointers unresolved` when it
-      does not resolve, `names only another run` when it resolves into another run.
-
-    Also read back which outputs (both queues, the user record) each finding's claim reached.
-    """
+    decided:"""
     probe = ([S.conduct("b"), pointer] if filed == HALF
              else [S.conduct("b"), S.conduct("a"), pointer])
     reply = _reply(investigator=[_inv(probe, tag="probe"),

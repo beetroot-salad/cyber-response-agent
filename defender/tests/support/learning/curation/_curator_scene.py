@@ -1,20 +1,4 @@
-"""The curator scene the forward-check and lesson-read suites all build.
-
-Three suites — `test_forward_check_tool`, `test_forward_check_trace`,
-`test_lesson_read_tool` — each need the same starting world before they can drive
-anything: a worktree with a lessons corpus in it, a runs dir, an empty pending-findings
-file, and a `CuratorDeps` wired to those. All three had hand-rolled it, and they had
-already drifted — one `_scene` created the two sibling corpora and the other two did not,
-one `_deps` could take a box and the other could not — which is the shape where a test
-starts asserting against a world its siblings do not have.
-
-What is deliberately NOT here: each suite's `_lesson`. The three signatures are genuinely
-different questions (a fenced lesson at a named corpus, a lesson keyed by `name` vs by
-`techniques`, a lesson whose repo-relative operand is the return value), and collapsing
-them would mean a helper with three modes and no caller that wants two of them.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""The curator scene the forward-check and lesson-read suites all build."""
 from __future__ import annotations
 
 import re

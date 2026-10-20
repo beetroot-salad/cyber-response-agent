@@ -1,22 +1,4 @@
-"""The tacit-knowledge registry: the estate's authored record of sanctioned patterns.
-
-The one system with no service behind it: the file
-(`defender/skills/tacit-knowledge/registry.yaml`) is the system of record. Its safety rests on
-provenance — every entry traces to a human commit, since nothing a run can reach writes it, so
-the commit is the sign-off.
-
-Read-only end to end: this module exports no write-capable function and
-`permission.decide_write` refuses the path for every run role. A registry populated from the
-agent's own closes would be the system vouching for itself.
-
-  * `load_entries` — the file, validated entry by entry. A malformed row is dropped and the
-    rest loads (as in `defender.knowledge._corpus.iter_query_templates`), rather than one bad row sinking
-    every sanction.
-  * `find_entry` — the pure lookup, with `now` passed as a value so expiry is testable.
-
-`lookup` is the gather verb over the pair, taking the tree and the as-of moment from its
-`VerbContext`.
-"""
+"""The tacit-knowledge registry: the estate's authored record of sanctioned patterns."""
 from __future__ import annotations
 
 import datetime as dt

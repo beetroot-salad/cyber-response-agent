@@ -1,24 +1,4 @@
-"""Tenants: the tenant id, the one acceptance of a tenant, and its row.
-
-Every run names its tenant on the request; there is no default. `TenantId` is the one check
-of an id. A tenant's tree is `<data root>/<T>/`: its row `tenant.json` (`create_tenant`,
-`require_tenant`), its runs, sessions, episodes and learning state, and `knowledge/` — the
-settings and agent halves the operator placed there (`_tenants`). `accept_tenant` is the ONE
-function that accepts a tenant, and the only constructor of `Tenant`, the value every entry
-point hands inward; `resolve_data_root` reads the required `DEFENDER_DATA_ROOT`, once per entry
-point. A runs folder records no tenant (#1187 R1): the folder's place under `<T>` is its
-tenant, and the repository reaches it from the accepted tenant's folder without following a
-link.
-
-The row is created complete-or-absent, off its held folder (`_io.hold_new`, `Held.write`), so a
-reader sees it absent or complete. Every refusal is a `TenantRefused` naming the refused value —
-an id, or the content of an `agent/.tenant-id`, escaped and bounded (`_shown`); a path,
-operator-set, as it is — which entry points catch and print verbatim; a corrupt row refuses the
-run rather than reading as `None`.
-
-Acceptance is a point-in-time check: a `Tenant` says the tree passed when it was accepted, not
-that it still does.
-"""
+"""Tenants: the tenant id, the one acceptance of a tenant, and its row."""
 from __future__ import annotations
 
 import dataclasses
@@ -85,11 +65,7 @@ class TenantId(str):
     `TenantId` handed back in is returned as-is. It IS a `str` (paths, JSON, argv and log lines
     take it unchanged, and its repr is the string's), but a function that declares `TenantId`
     tells mypy a plain, unchecked `str` does not belong there. Entry points build one from the
-    request; records and rows build one as they parse.
-
-    The first custom pydantic type in this tree: `__get_pydantic_core_schema__` makes a
-    `@model` field typed `TenantId` accept a string and run this constructor on it, so a
-    record naming an off-grammar tenant is refused as it is read."""
+    request; records and rows build one as they parse."""
 
     __slots__ = ()
 
@@ -421,29 +397,7 @@ def accept_tenant(
 ) -> Tenant:
     """`raw_id` under `data_root`, checked whole — the ONE acceptance of a tenant, and the
     only constructor of `Tenant`. Refused with `TenantRefused` naming the refused value, at the
-    FIRST check that fails, in this order:
-
-      1. the id grammar (`TenantId`), before anything under the root is named;
-      2. the root is absolute and outside the running checkout's `defender/` (the layout
-         class's guards), then the row (`require_tenant`);
-      3. `knowledge/` is a real directory at `<T>/knowledge`, reached without following `<T>`
-         or itself, holding nothing at its top level outside `_tenants.TOP_LEVEL_ALLOWED`;
-      4. its `settings/` and `agent/` halves, and `REQUIRED_SETTINGS`;
-      5. no link and no special file inside either half (`knowledge/.git` is never walked: a
-         local clone's objects are hard links);
-      6. `agent/.tenant-id` holds this id;
-      7. `settings/` lies outside `defender_dir`, the tenant's own `runs/` and every
-         `box_mounted` tree — the settings half is host-only — and none of those trees lies
-         inside either half, nor the runs base anywhere inside the knowledge folder, where a
-         run's writes would become the tenant's knowledge or land in its repo. A path
-         comparison: the halves' real paths are the data root's resolution joined below it
-         (steps 3-5 saw no link there), against each tree's resolution.
-
-    Reads only. The knowledge folder is walked through `_io.bind`'s no-follow reader, from the
-    data root down, so no link below the root is followed there; the row is read off `<T>`
-    (no-follow at the file itself), and step 7 judges `runs/` by where it leads. Any read a check cannot complete — an `OSError`, or a link
-    loop where a path given to it is resolved — is the refusal, naming the path and the
-    reason."""
+    FIRST check that fails, in this order:"""
     tenant_id = TenantId(raw_id)
     paths = _TenantPaths(data_root, tenant_id)
     row = _read_row(paths)
@@ -567,11 +521,7 @@ def check_knowledge_folder(folder: Path, *, tenant_id: TenantId | None) -> None:
     special file; and `agent/.tenant-id` reads as `tenant_id`. With `tenant_id` None (a tenant
     repo checked on its own, `tenant.py check --folder`, CI's census lint) the file may be
     absent, and is held only to the id grammar when present. Raises `TenantRefused` naming the
-    path at the first rule that fails. Reads only, and opens no file but `.tenant-id`.
-
-    `folder` itself is opened as spelled (the operator's own path, a link to it included); the
-    walk below it follows nothing. `.tenant-id` is then opened by its path, no-follow at the
-    file itself, once the walk has seen `agent/` as a real directory."""
+    path at the first rule that fails. Reads only, and opens no file but `.tenant-id`."""
     folder = Path(folder)
     with _real_io.bind(folder) as bound:
         _check_knowledge(bound, folder, tenant_id=tenant_id)

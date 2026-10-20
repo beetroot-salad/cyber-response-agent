@@ -1,39 +1,5 @@
 #!/usr/bin/env python3
-"""Lesson → in-context-outcome traceability (platform-design §4.4 control loop).
-
-For a merged lesson, surface which subsequent cases had it **in context** and what
-disposition each reached — post-merge visibility for a human control loop. This is **in
-context**, not demonstrably *influenced* (see ``defender/hooks/record_lesson_load.py``); the
-green bar and one-click revert are the safety controls, this is best-effort visibility.
-
-Two kinds of row reach ``lessons_loaded.jsonl``, each naming its ``kind`` and ``role``. A READ
-records a lesson the model chose to open. A PUSH records a lesson whose ``description`` and
-dimensions the runtime showed MAIN (on a frontier-moving write, or the compaction fold) —
-weaker evidence than a read. The PLAN-time signature block pushes the same way but records
-nothing, so a lesson with ``frontier_nodes``/``frontier_edges`` selectors has more ways to earn
-a row; compare counts between lessons with that in mind.
-
-The ``evidence`` column names the strongest class behind a case's "in context": ``read`` (a
-MAIN read) > ``push`` (to MAIN) > ``indirect`` (another role only) > ``unknown`` (older rows
-that do not say). ``loaded_at`` is the earliest row of that class. Both come from
-``hooks.record_lesson_load.exposures``, the same reader the judge uses. Rows outside the
-lesson's ``created_at`` window do not count. The value is emitted from that closed vocabulary,
-never the row's bytes, so a forged ``kind`` cannot forge a column.
-
-Usage:
-  trace_lesson.py --tenant T --all             # <name>\\t<description>\\t<in_context_cases>\\t<main_read_cases>
-  trace_lesson.py --tenant T <lesson_name>     # per-case: case_id  disposition  loaded_at  evidence
-
-Runs scanned: the natural runs of the tenant ``--tenant`` names (required, no default; #1105
-J8), listed and opened through its run repository — every case's ``report.md`` +
-``lessons_loaded.jsonl``. The listing rule applies (rev 4.1 H4): an entry in the runs folder
-that is not a run (a stray file, an off-rule name) fails the trace loudly, naming it, rather
-than being skipped. Lessons: ``defender/lessons/``,
-overridable with ``--lessons-dir``; ``--all`` walks it through the shared ``iter_lessons``
-and so inherits the corpus discovery rules (underscore-skip, warn on a malformed lesson).
-A lesson the walk skips still gets a marker row with an unwindowed count — the audit index
-must not silently lose a lesson that has in-context cases.
-"""
+"""Lesson → in-context-outcome traceability (platform-design §4.4 control loop)."""
 from __future__ import annotations
 
 import argparse

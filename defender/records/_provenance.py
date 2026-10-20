@@ -1,33 +1,4 @@
-"""What a run ran against, recorded at the moment the run dir is made.
-
-Unlike the rest of a run dir, which is content the run produced, this is a fact about the
-host tree that must be captured while it is still true. The box mounts `defender/` read-only
-off whatever is checked out, so without it a sibling family could silently differ in code and
-an archived episode could be recomputed against a different version.
-
-It pins how the world was built, never what it currently holds: state systems and the event
-store change at runtime (corpus drift is handled separately). It is captured, never enforced:
-a dirty tree is recorded and the run proceeds; callers needing the guarantee (archive, fork)
-refuse.
-
-The commit is repo-wide (a sha can only name the checkout), but `dirty` is scoped to
-`CODE_SCOPE` — what the box mounts and the interpreter imports — and the scope is recorded in
-the file. A repo-wide bit would be set by any stray note and so be ignored. `dirty is False`
-says nothing about git-ignored paths; the box's dependencies come from an image whose tag
-hashes the tracked lockfile, so a stale image is misnamed rather than silently stale.
-
-The run dir is the box's rw bind, so the stamp is written by the host before the box exists,
-and the read gate denies the file to every agent (it names host paths of uncommitted work).
-
-Without git (the shipped runtime image), the commit comes from a build stamp baked at image
-build time, always with `dirty=None`: a workspace may be mounted over the built code, so
-nothing can confirm the bytes on disk are the bytes that were built.
-
-The run also reads the tenant's own knowledge clone (settings; lessons after #1108), which no
-product commit names. `knowledge` records which commit of that clone was checked out at run
-start (#1204), read from its `.git` files directly because the runtime image has no git. It is
-the commit only: no dirty bit, and nothing pins it for the rest of the run.
-"""
+"""What a run ran against, recorded at the moment the run dir is made."""
 
 from __future__ import annotations
 
@@ -333,18 +304,7 @@ def capture_tree(
 
 
 def capture_knowledge(knowledge_dir: Path) -> KnowledgeRevision:
-    """Read which commit the tenant knowledge clone at `knowledge_dir` has checked out.
-
-    @owns knowledge — `RunProvenance.knowledge`, every stamp's tenant knowledge revision. The
-    run stamp and the fork launcher's live capture both take it from here.
-
-    Read from `.git` files, never by running git (the runtime image has none), through the
-    rooted no-follow reader, so a link anywhere below `knowledge_dir` is refused rather than
-    followed. Only `<knowledge_dir>/.git` as a real directory counts: there is no upward search,
-    so a plain folder inside another repository (the product checkout, in dev) is unversioned
-    rather than stamped with that repository's commit. Never raises: this is a record, not a
-    gate, and every failure lands in the reason.
-    """
+    """Read which commit the tenant knowledge clone at `knowledge_dir` has checked out."""
     try:
         with bind(knowledge_dir) as root:
             return _read_knowledge(root)

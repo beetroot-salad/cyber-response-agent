@@ -1,20 +1,5 @@
 """The judge's appenders: finding rows onto the defender and questioner queues, and the one
-builder of those rows.
-
-A defender row is an investigator finding of a measured, unanimous, non-`none` world (A7,
-A13); a questioner row is a design world finding (A1: not gap-only, with a resolving plan
-pointer). Which finding goes where is `route.fate`'s decision; this module builds the row,
-screens it one last time against its channel's rule, and appends through the pass's `state=`
-handle — never a queue path of its own.
-
-Each appender refuses a row of the wrong shape outright (a row missing `finding_id`/`run_id`/
-`direction` would raise a bare `KeyError` inside the shared findings gate and stuck-record the
-whole keyed batch; a row carrying a retired name is refused by that name, A4). A world's rows are
-appended once, by its `queueing` -> `queued` commit (A6). Both channels drop a row whose
-`finding_id` they already hold, including an earlier row in one append, so re-appending one
-pass's rows adds none. The pass names, on its ledger, any new finding whose id a row of an
-earlier pass already holds, so dedup never loses one silently (A25; `_Pass._place`).
-"""
+builder of those rows."""
 
 from __future__ import annotations
 
@@ -222,13 +207,7 @@ class EnqueueReport:
 def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: LearningState,
                    drawn: DrawnRows) -> EnqueueReport:
     """Append one commit's rows: `drawn`, the rows the pass built from the replies it drew for
-    `record` — the world row (or the family row) being committed `queueing` -> `queued` (A6).
-
-    `drawn` is required and must be the pass's own `DrawnRows`: there is no path that rebuilds
-    rows from draw files on disk (A8), so `drawn=None` is refused by name and nothing is
-    appended. Every row must belong to `record` (its `finding_id`'s world half is the row's
-    `world`, `family` for the family row), so one commit never appends another world's rows.
-    Both channels' rows are screened before either is written."""
+    `record` — the world row (or the family row) being committed `queueing` -> `queued` (A6)."""
     where = _refusal_prefix(episode_dir)
     if not isinstance(drawn, DrawnRows):
         raise JudgeRefused(
@@ -263,23 +242,7 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     recorded_signature: str | None = None,
 ) -> dict[str, Any]:
     """The `FindingRow` for one finding of one draw of one world (`label="family"`: the family
-    call's).
-
-    @owns finding_id
-    @owns source_run_dir
-    @owns direction
-    @owns recorded_signature
-    @owns contrast_evidence
-    @owns world_label_doubted
-
-    `finding_id` is `{run_id}/{label}/{draw}/{index}`, the index the finding's place in the
-    draw's three filed lists (A13): deterministic across retries over the same draw files.
-    `citations` are the finding's resolving pointers (A1). A defender row (`subject:
-    defender`) carries `contrast_evidence` (the resolving conduct pointers of its two-run
-    contrast), `on_verdict_path` as filed and `world_label_doubted` (the world's own draws'
-    doubt mark); a world row carries `world` (the pass's stamp, `None` for the family call),
-    the finding's own `systems` (A5) and `provenance`. `direction` is derived from `subject`
-    so the two cannot disagree."""
+    call's)."""
     if (label == "family") != (world_id is None):
         raise ValueError("a world finding needs its host UUID; only the family call has none")
     source = f"episodes/{run_id}"

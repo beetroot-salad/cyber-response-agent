@@ -20,16 +20,7 @@ SOURCE_RUN = fixture_uuid("run-source-001")
 
 
 def source_and_sibling(tmp_path, *, document=None, plant=None):
-    """The planted source, its sibling, and the spec the sibling forks the source by.
-
-    `plant(source)` writes the source's own evidence (or the alias a test plants at one of its
-    names) BEFORE the source is built: #1255 P2 snapshots a source when its branch response
-    arrives — counters, appended lengths, the document's content, and a HASH of every
-    write-once file already there (gather summaries, raw payloads, lead claims) — and for a
-    hand-built source that point is at or after `planted_source` returns (the fixture-only
-    planting helper is applied to what it returns). A file written after that is one the snapshot never
-    recorded, so the fork would be judged against evidence the source did not have when it
-    branched. `planted_source` makes its folder with `exist_ok`, so what `plant` wrote stays."""
+    """The planted source, its sibling, and the spec the sibling forks the source by."""
     text = document if document is not None else GOLDEN_INVESTIGATION.read_text(encoding="utf-8")
     source_io, target_io = RecordIO(), RecordIO()
     source = run_handle(runs_base(tmp_path) / SOURCE_RUN, source_io)

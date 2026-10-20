@@ -1,27 +1,5 @@
 """The walk below a tenant's folder, and the runs folder's entries (#1105 H1–H4, #1187 S-iso):
-the bottom layer every lookup works through, and the argument checks the lookups share.
-
-`walk_from_tenant(tenant, io, names)` holds `<data root>/<T>` no-follow (the data root itself is
-followed, as configuration), then each folder of `names` OFF ITS PARENT'S HANDLE, never followed
-(`_io.hold_under`), and hands back the last one held. So a link at `<T>`, `<T>/runs`,
-`<T>/episodes`, `<ep>` or `<ep>/runs` is refused at its own level, naming it, and nothing of
-another tenant's is reached through one (#1187 R1: where a folder is says whose it is, so no
-record restates it). Every refusal of a level is `TenantRefused`; an absent level is
-`FileNotFoundError`, which each caller reads as its own expected state.
-
-`listing(view, folder, tenant_id, io=)` judges every entry of a natural runs folder from its
-directory entry, never followed (H4): a UUID run folder and a known sidecar file of one are the
-only entries it serves. Anything else — a pre-#1187 run, an old sidecar, `_tenant.json`,
-`_episodes`, a link, a stray file — refuses the whole listing with `RunRefused` naming the entry
-and the one-time command that moves such entries aside (#1187 O6).
-
-`plan_retire(tenant, old_episodes_root, io=)` is the one-time command's plan (#1187 Flow 6):
-the entries `listing` refuses, and the old shared episodes root's, each bound for a legacy folder
-below `<T>`, every reason to move nothing listed before anything moves (S-move).
-
-This module is the package's bottom layer: `_lookup` imports it, and it imports nothing of the
-package's but its errors and `RunId`.
-"""
+the bottom layer every lookup works through, and the argument checks the lookups share."""
 from __future__ import annotations
 
 import contextlib
@@ -435,18 +413,7 @@ def _judge_destination(plan: RetirePlan, lane: _Lane, io: Any) -> None:
 
 
 def plan_retire(tenant: Tenant, old_episodes_root: Path | None, *, io: Any) -> RetirePlan:
-    """The one-time command's plan (#1187 Flow 6 steps 1-2, S-move), with nothing moved.
-
-    `<T>` is held no-follow and `<T>/runs` listed off that hold (a link there is
-    `TenantRefused`, naming it; absent, nothing to move): every entry the listing would not
-    serve (`served_entry` — old run folders and their sidecars, `_tenant.json`, `_episodes`, a
-    link, a stray file) goes to `<T>/runs-legacy/`. With `old_episodes_root` — the operator's,
-    held FOLLOWING its spelling, as configuration; absent is nothing to move — every entry of
-    it goes to `<T>/episodes-legacy/`. Each entry is judged from its own directory entry, never
-    followed. `faults` lists every reason to move nothing: a link or special file in the move
-    set, a destination that is not a real folder, a destination name already taken, a source
-    (or an entry, or a destination) on another filesystem than `<T>`, and an old episodes root
-    inside the data root (it would move this tenant's live episodes) or holding it."""
+    """The one-time command's plan (#1187 Flow 6 steps 1-2, S-move), with nothing moved."""
     tenant_held = hold_tenant_folder(tenant, io)
     try:
         plan = RetirePlan(tenant_held, io.held_stat(tenant_held).st_dev, io)

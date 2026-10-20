@@ -1,37 +1,5 @@
 """The static checks #1080's placement demands run: the O1 import census, the O2 direction
-test, the placement check over `defender/scripts/`, and the file-depth-anchor scan. NO tests.
-
-All four are STATIC (s129): they read files and parse ASTs, never import a module to learn
-where it is defined, so they run in the dev-only code-smells job as well as here. Each takes a
-checkout ROOT, so a planted copy of the tree (a tmp git repo built by `tree_copy`) is scanned
-by exactly the code that scans the real one; an `overlay` (repo-relative path → source) adds
-or replaces files on top of a root without copying it, for the cheap positive controls.
-
-WHAT THE CENSUS COUNTS (O1, §7 auto-resolutions): import STATEMENTS only — `import x`,
-`from x import y`, wherever they sit (module level, function body, `try`, `if TYPE_CHECKING:`,
-a platform conditional: s002), relative forms resolved against the importer's package (s150),
-aliases, wildcards and several names on a line each counted (s149), the bare
-`from defender import scripts` and `import defender.scripts` included ([148]). A path load, a
-`-m` run, a spawn by path or a dotted name in a string is NOT an import (H1 (a), [1], s151,
-s152). Targets are `defender.scripts` and anything under it — never the repo's own top-level
-`scripts/` package (s156). Importers: every TRACKED `.py` under `defender/` and the repo's
-`scripts/` (`git ls-files`, so an untracked scratch file, a nested checkout, a `.venv` link and
-`__pycache__` never count: s003, s154), minus the test exemption drawn by location ([155]:
-under a directory named `tests`, or a `conftest.py`) and minus `defender/scripts/` itself
-(inside-scripts edges are free: s157). A file the census cannot parse fails it, named ([153]).
-
-THE EXCEPTION LISTS ARE DATA HERE AND ASSERTED BY TESTS: O1's named (importer, target) pairs
-(`O1_EXCEPTIONS`) — since the 2026-10-04 scope cut, the pairs into the `scripts/` modules the cut
-leaves where they are, each tagged with the issue that retires it: 35 pairs (37 import statements)
-at the cut, 32 (33) since #1190 moved `case_ticket` under `defender/runtime/` and retired its 3,
-22 (22) since the live oracle (#1224) retired cluster staging and its 10,
-20 (20) since the alert front door (#1222) retired lead-zero's item 1 and its 2;
-O2's N5 edges (dF7 (a)): learning's page entry points importing reports (the O2 tests are parked
-with #1105 / #1172; their helpers stay here for the preserved copies). A listed edge that no
-longer exists is a finding ([218]), never a silent widening, so the list can only shrink.
-
-Underscore-prefixed so pytest does not collect it.
-"""
+test, the placement check over `defender/scripts/`, and the file-depth-anchor scan. NO tests."""
 from __future__ import annotations
 
 import ast

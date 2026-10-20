@@ -1,44 +1,4 @@
-"""Shared machinery for the #754 head-pointer + head-log spec suite — NO test scripts.
-
-`session.head_message_id`, the `session_head_log` table and the three reader helpers
-(`displaced_tip`, `branch_point`, `fold_history`) do not exist at the base this spec forks
-from (`1cecad37`); this module is the single place that names their observation channel, so
-a missing target produces one failure *per test* rather than one collection error per file.
-
-It builds on `_session_store_705.py` rather than beside it: the store builders, the message
-builders, the `sql()` raw-read channel and the `FaultStore` fault-injection fake are all
-imported from there, never re-implemented here. What lives here is only what the head
-pointer adds:
-
-1. **The observation channel for the two new pieces of state** — `head_of()` reads the
-   `session.head_message_id` column straight out of the file, `log_rows()` reads
-   `session_head_log` in `id` order. Both go through the raw connection, never through the
-   reader under test, exactly as `_session_store_705.sql` does.
-2. **`legacy_v1_store_file()`** — a REAL #705/#744-shaped store file at `PRAGMA
-   user_version = 1`, hand-built with a raw connection so it carries none of the new shape
-   and stays in the default (`delete`) journal mode. That is what makes "the refusal fires
-   before any DDL or the WAL pragma" observable: a file the new `open_store` touched would
-   have gained tables and become WAL.
-3. **`NotSerializable`** — the one fault object the suite injects. Its fault content is not
-   authored: the object passes `append`'s own pre-transaction `_find_nonrepresentable`
-   scan and is then refused by the REAL `ModelMessagesTypeAdapter.dump_python` INSIDE the
-   `BEGIN IMMEDIATE` block, after a preceding message's row has already been inserted.
-   Ledger claim **B8** (executed) is what this rests on — "append([good_request, an object
-   dump_python rejects]) → PydanticSerializationError; message rows 1 -> 1; path unchanged;
-   in_transaction False afterwards" — and it is the only construction available that puts a
-   real failure between two statements of one `append`. `FaultStore` cannot address three
-   independent points inside one `append` — it breaks the file BEFORE delegating — so P12 is
-   driven here and P13/P14 are discharged by their own stated observable ("the mid-transaction
-   ordering is invisible externally").
-4. **`raised_by()`** — call something and hand back the exception it raised. Used where the
-   spec deliberately does NOT pin an exception class (P2's STRICT violation, the
-   root-of-lineage refusal): `pytest.raises(Exception)` would both over-promise and trip
-   the repo's own `PT011` gate.
-5. **`fresh_process_readback()`** — reads head, path and log back in a REAL second
-   interpreter, which is the shape C11/F6 describe: `visualize_run` opens the store from
-   another process through the run-dir pointer file, and it is the only cross-process
-   reader.
-"""
+"""Shared machinery for the #754 head-pointer + head-log spec suite — NO test scripts."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -183,17 +143,7 @@ CREATE TABLE message_payload (
 
 def legacy_v1_store_file(path: Path, *, migrated: bool = True) -> Path:
     """Write a real SQLite store file carrying the shape #705/#744 shipped, stamped
-    `PRAGMA user_version = 1`.
-
-    Hand-built with a raw connection on purpose, three ways over:
-      * the file is genuinely at version 1 — the exact case obligation 9 names and the one
-        the shipped `(0, SCHEMA_VERSION + 1)` arithmetic stops covering after the bump (C2);
-      * it carries no `session_head_log` and no `head_message_id`, so "the DDL did not run"
-        is observable as a table/column set rather than inferred;
-      * it stays in the DEFAULT `delete` journal mode, so "the WAL pragma did not run" is
-        observable too — a file today's `open_store` had touched would already be WAL
-        (PR-11: the DDL and the pragmas all run before the version stamp).
-    """
+    `PRAGMA user_version = 1`."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))

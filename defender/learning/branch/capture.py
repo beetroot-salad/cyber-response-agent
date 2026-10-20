@@ -1,18 +1,4 @@
-"""The family's base tier, taken from the source run's own capture.
-
-The base world is captured, not authored: its state is whatever the real adapters returned
-during the real run, and a sibling is that capture plus a diff. Recording the base from a live
-call mid-episode would make it depend on when the estate was asked, so an archived episode's
-`ΔO` would not be replayable.
-
-The base file is written once, here, before any sibling forks, and is read-only for the rest of
-the run, so parallel siblings never contend for it and no check-then-act race exists for a
-captured key.
-
-Not covered: a sibling continuing an investigation asks questions the source never asked. Those
-keys have no captured row, each world reads them live, and two worlds can get two answers. Each
-such read records a `base` row in the world's own file, so counting them sizes the residual.
-"""
+"""The family's base tier, taken from the source run's own capture."""
 
 from __future__ import annotations
 
@@ -171,18 +157,7 @@ def _captured_call(row: QueryRow, counts: dict,
                    skipped: list[tuple[QueryRow, str]]) -> ServedCall | None:
     """One capture row as a family-tier `ServedCall`, or `None` with `counts` advanced — and, for
     a call that reached its system but whose answer is not recordable (it failed, or its payload
-    is unreadable), the row and its class appended to `skipped` (#1255 D6's skip record).
-
-    Successful answers only. The family tier never holds a failure (a live adapter error is
-    filed in the world tier as a fault). Priming an error digest would hand it to the applier as
-    a successful response; refusing any capture containing an error would make real sources
-    unbranchable. So a captured failure is re-attempted live by each world; `PrimeReport.failed`
-    sizes that, and an exit of `1` is not an infra code, so it cannot trip the circuit breaker.
-
-    A `QueryRow`, so sentinel detection, `exit_code` coercion and `payload_path` containment are
-    `lead_repository`'s. `params` arrives as `{}` when the stored value is not a dict, matching
-    what `request_key` does, so primed and live keys agree.
-    """
+    is unreadable), the row and its class appended to `skipped` (#1255 D6's skip record)."""
     if row.is_sentinel:
         # A `∅.` row never reached a system; there is no estate answer to replay.
         counts["sentinels"] += 1

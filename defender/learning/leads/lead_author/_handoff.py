@@ -206,15 +206,7 @@ def discover_system_drafts(
 ) -> list[Path]:
     """Every draft under a declared system's `_draft/` in the held `skills/` mount's view, each
     spelled `where / name`, in path order. Undeclared directories are skipped (the commit gate
-    would refuse their edits) and each skip is logged.
-
-    Listed through the view to the tree's fixed depth (`<system>/_draft/<draft>`, three levels),
-    never following a link: a link at a system folder, at `_draft` or at a draft name is neither a
-    directory nor a plain file, so it is neither entered nor returned (#1134). A declared
-    system's folder or `_draft` whose own listing is refused is warned with that listing's reason
-    and skipped, and every other system is still read; one found gone since the folder above was
-    listed is passed over silently, as a missing folder always was. A listing refused whole is
-    warned and finds nothing."""
+    would refuse their edits) and each skip is logged."""
     listed = list_tree(skills, depth=3)
     if listed.reason is not None:
         _logger.warning(f"warn: skipping {where} ({listed.reason})")

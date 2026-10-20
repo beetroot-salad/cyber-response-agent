@@ -17,19 +17,7 @@ _TOKEN_MARK = "[a run id]"
 
 
 def redact_model_visible(detail: str, known_ids: Collection[str]) -> str:
-    """`detail` with every episode and world token removed, and nothing else touched.
-
-    `known_ids` is every branch identity the caller's process knows (`family_identities`), or
-    an empty set for a natural run. Required, so no caller can forget it silently. Matched as
-    literal text, case-insensitively, longest first. No shape-based matching is used.
-
-    Called from `runtime/query_tool.py` at `_model_view` (the model's copy) and
-    `QueryCapture._record` (the failure digest), and from the comparator's prompt; that wiring
-    is pinned by a driven run.
-
-    A non-string is passed through `str`, and an empty member is dropped (it would match
-    between every character): this runs inside fault handlers, which must not raise.
-    """
+    """`detail` with every episode and world token removed, and nothing else touched."""
     text = detail if isinstance(detail, str) else str(detail)
     names = sorted({str(n) for n in known_ids if n}, key=len, reverse=True)
     if names:

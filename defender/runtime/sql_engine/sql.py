@@ -91,17 +91,7 @@ def _json_source(node: dict) -> bool:
 
 
 def _arrow_refusal(con, sql: str) -> str | None:
-    """Why the query must not run, if one of its `->>` arrows is misbound; else None.
-
-    duckdb binds `->>` more loosely than the operators written before it, so
-    `v[1]->>'$' = 'x' AND v[2]->>'$' = 'y'` parses as `((v[1]->>'$') = 'x' AND v[2]) ->> '$' = 'y'`
-    and `'x' = v[1]->>'$'` as `('x' = v[1]) ->> '$'`. Depending on the values that errors or
-    answers a silent, wrong count — the fake absence a lead cannot tell from a real one. Each
-    arrow's source is read off duckdb's own parse and must be something that can hold JSON. The
-    parse keeps no parentheses, so a deliberate `(a || b)->>'$'` is refused with it; the refusal
-    names the CAST that says so. Only SELECT statements have a parse to read, so any other
-    statement holding an arrow is refused too.
-    """
+    """Why the query must not run, if one of its `->>` arrows is misbound; else None."""
     if "->>" not in sql:
         return None
     try:

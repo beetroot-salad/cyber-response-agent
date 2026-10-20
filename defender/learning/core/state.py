@@ -1,35 +1,4 @@
-"""The learning-state handle (#1135): the one front door to the learning state tree.
-
-Everything the host keeps under the learning state root — the curation request queue, the
-pending deliveries, the three findings-shaped queues with their consumed ledgers, dead letters
-and stuck reports, the gap ledger, the disposition reports, the lock files — is reached through
-`LearningState`, opened at an entry point on an EXISTING root (`LearningState.open(paths)`). No
-production module outside this one composes, opens, lists, locks or renames a path to one of
-those records (the census in `tests/learning/state_contracts/test_1135_front_door.py` holds that).
-`runs/`, under the same root, is #1166's and is still reached by path, and the eval harness
-seeds its own scratch tree by path; neither is a record of this handle.
-
-A planted link, hard link, FIFO, or a folder where a file belongs, anywhere below the root is
-refused as `StateRefused`, never followed and never read as absent (the display verbs below
-turn it into an unreadable count instead of raising). `StateRefused` is not an `Exception`,
-so no `except OSError` or `except Exception` arm swallows it, and it is a member of
-`faults.SYSTEMIC_FAULTS`, so a drain tick stops and exits 2. Only an arm that names it catches
-it: the queue page, the run-end enqueue, the judge and the eval harness are the declared
-exemptions (the display verbs convert it to an unreadable count for the page,
-`run_common.enqueue_curation` catches it at the run-end enqueue, `branch/cli._grade` for the
-judge, `evals/harness.run_author` for the harness). Ordinary I/O errors
-keep today's routes. A link at or above the root is operator configuration and is followed once,
-at `open`.
-
-The verbs are queue-shaped: records are named by their meaning (channel, request key, delivery
-id, lock role), never by a path, and rename and lock are private to the file backend. The one
-path-returning verb is `stage_dir`, the escape that hands the stage harness its folder until
-#1142 gives that harness its own handle.
-
-@owns the record names of the learning state tree — the folder and file names below are the one
-spelling of what lives where; the tests derive the paths they check from these constants
-(`paths.state_root / FINDINGS.queue`), so a rename here moves their oracles with it.
-"""
+"""The learning-state handle (#1135): the one front door to the learning state tree."""
 from __future__ import annotations
 
 import contextlib
@@ -74,16 +43,7 @@ STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 class StateRefused(BaseException):  # noqa: N818 — named for the refusal it reports, like `NotPlainEntry`
     """An entry below the state root the handle will not follow: a link, a hard link, a FIFO, a
-    folder where a file belongs, a linked or non-folder holding folder.
-
-    Deliberately not an `Exception`, like `KeyboardInterrupt`: every broad arm between a verb and
-    its entry point (`_run_curator_module`'s `except OSError`, the stuck recorders' and the
-    curator containment's `except Exception`) would otherwise swallow a refusal as an ordinary
-    fault, and each new one would need its own re-raise. Only an arm that names it catches it.
-    It is a `SYSTEMIC_FAULTS` member, so the stage runner stops the tick and names `record`.
-
-    `record` is the record the operation named (an absolute path string, for the operator);
-    `reason` is why it was refused."""
+    folder where a file belongs, a linked or non-folder holding folder."""
 
     def __init__(self, record: str, reason: str) -> None:
         super().__init__(f"refused {record}: {reason}")
@@ -462,17 +422,7 @@ class LearningState:
 
     @contextlib.contextmanager
     def lock(self, role: LockRole, *, wait: Wait | float) -> Iterator[bool]:
-        """Hold `role`'s lock for the block. `wait` says how a held lock ends the take:
-
-        * `TRY_ONCE` — yields whether the lock was taken; the block should run only when it was;
-        * a number of seconds — a deadline (`0` tries exactly once, never coerced to a default),
-          polled at the role's interval; raises `TimeoutError` when it expires;
-        * `BLOCK` — waits until the holder releases.
-
-        The lock file and its holding folder are made below the root as needed. A refused lock
-        file is `StateRefused` for every role: never "not taken". A channel's append lock is not
-        a role: `append`, `rotate`, `retire_rows` and `read_window` take it inside, so no caller
-        holds it (a second open of one name blocks against the same process)."""
+        """Hold `role`'s lock for the block. `wait` says how a held lock ends the take:"""
         if not isinstance(role, LockRole):
             raise ValueError(f"not a lock role: {role!r}")
         if not isinstance(wait, (Wait, int, float)) or isinstance(wait, bool):
@@ -733,18 +683,7 @@ class LearningState:
         noun: str = "lead-author",
         extra: str = "",
     ) -> Iterator[Claimed]:
-        """Claim every queued request and yield the servable ones, orphans first.
-
-        Claiming moves the record out of the queue (`move_at`) before serving, so a re-ask
-        landing mid-serve gets a free top-level slot. Orphans in `inflight/` from a dead pass are
-        reclaimed unconditionally — sound only because every caller must hold the drainer lock, so
-        no live pass can own a claim (today's one caller, the lead-author drain, does). A queued request whose name is already claimed in this pass
-        is not moved, which would overwrite the claim: it waits for the next pass.
-
-        An unreadable record is quarantined rather than skipped, or it would be reclaimed and
-        fail every tick while keeping the wake gate true; `identity_key` names its dead letter
-        (`run_id` or `case_id`). An entry planted at a record name is `StateRefused` when the
-        claim reaches it."""
+        """Claim every queued request and yield the servable ones, orphans first."""
         orphans = self._json_names(_INFLIGHT)
         queued = self._json_names(_QUEUE)
         _logger.info(

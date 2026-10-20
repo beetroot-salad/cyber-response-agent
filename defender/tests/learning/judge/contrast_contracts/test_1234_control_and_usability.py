@@ -192,13 +192,7 @@ def _finding_reply(focus: str, control: str) -> dict:
 
 def _shared_id_calls(label: str, first: S.CallRow) -> list[S.CallRow]:
     """`first`, then a table-only reject joined to THE SAME call id: two table rows of the run
-    sharing one id (A12). The ledger holds one row, so only the table check can fire.
-
-    #1255 G4/G6: a table row carries no id; the host-only call-join record names one per
-    `(lead_id, seq)`. So two table rows share one id by sharing one key — the reject is written
-    at `first`'s seq on `first`'s lead (the world's first row: these builds have no inherited
-    rows), the shape a box leaves by duplicating a line of its own table. The join record itself
-    stays well-formed (one line for the key), so the fault is the table's."""
+    sharing one id (A12). The ledger holds one row, so only the table check can fire."""
     shared = S.call_id(label, 0)
     return [dataclasses.replace(first, call_id=shared),
             S.CallRow(params=S.query_params("user:carol"), source=None, lead=first.lead,

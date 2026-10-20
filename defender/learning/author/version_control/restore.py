@@ -71,16 +71,7 @@ def _unanswered(e: GitError | GitTimeout) -> str:
 def _put_back(
     repo_root: Path, rel: str, *, tree_for: TreeFor, timeout: float | None = None,
 ) -> None:
-    """Return one path to what HEAD has: checked out if tracked, removed if not.
-
-    An untracked name is judged by `kind_at` (#1134, addendum 2 B3). Inside one of the lane's
-    mounts (this corpus or its sibling) it is judged by its folder's listing and removed through
-    that mount's held root: a plain file is unlinked; anything else that is not a folder (a link,
-    a hard link, a FIFO, or a name below a holding folder whose listing is refused) goes to the
-    same `unlink`, which refuses it — `NotPlainEntry` for an entry AT the name, left in place for
-    the scrub (O5.2), the core's plain `OSError` for a refused holding folder. A name outside the
-    lane's mounts lies in the box's read-only area and keeps its plain path (D3): `kind_at`
-    answers it from that path, and only a file there is unlinked."""
+    """Return one path to what HEAD has: checked out if tracked, removed if not."""
     _git.git(["checkout", "-q", "--", rel], cwd=repo_root, check=False, **_worktree_git(timeout))
     tracked = _git.git_ok(["ls-files", "--error-unmatch", "--", rel], cwd=repo_root,
                           **_worktree_git(timeout))
@@ -105,14 +96,7 @@ def _snapshot_corpus(
 ) -> dict[str, bytes]:
     """The corpus's before-state: every regular file the commit `head` carries under
     `corpus_dir`, nested folders included, with its exact stored bytes, keyed by its name under
-    the corpus mount.
-
-    Read from git, not from the worktree (#1134 addendum 2 correction, C1): the clean gate
-    (`assert_clean_corpus_dir`) refused the tick unless the corpus equals the tick-start commit,
-    so `head` names exactly what stood there, and git's own read (`_git.git_tree_blobs`, N-a)
-    lists no folder and follows no worktree entry (O3, O5.1). A tracked symlink (mode 120000) is
-    left out, so no restore writes it back as a file. A git failure raises `GitError` before the
-    agent runs."""
+    the corpus mount."""
     rel = corpus_dir.relative_to(repo_root).as_posix()
     prefix = "" if rel == "." else f"{rel}/"
     return {path[len(prefix):]: blob
@@ -127,22 +111,7 @@ def _undo_agent_edits(
     baseline_stray: list[str],
     head_before: str,
 ) -> None:
-    """Put the worktree back the way the agent found it after a faulted tick.
-
-    The corpus is restored only if the commit did not land: `git_commit` reads HEAD after
-    committing, so a git failure there arrives with the lessons already in history, and
-    restoring would delete them and wedge the channel. When git can't say whether HEAD moved,
-    nothing is deleted.
-
-    Strays outside the corpus are always reverted (the commit is pathspec-limited, so it
-    can't have captured them); otherwise they fold into the next tick's baseline and disarm
-    the out-of-scope-write guard.
-
-    Both run while a fault is propagating, and every host touch of the lane's trees goes through
-    its held mounts (#1134). An entry the core will not remove or write over because it is not a
-    plain file (`NotPlainEntry`: a link, hard link, FIFO or folder at the name) is logged and
-    passed over (`_left_for_scrub`), so the fault being unwound propagates unchanged and keeps
-    its routing; the entry stays for the scrub (O5.3). Any other `OSError` propagates."""
+    """Put the worktree back the way the agent found it after a faulted tick."""
     if not _commit_landed(cfg.repo_root, head_before, timeout=cfg.git_timeout):
         _restore_corpus(cfg.repo_root, cfg.corpus_dir, snapshot, corpus=cfg.corpus,
                         head_before=head_before, timeout=cfg.git_timeout)
@@ -247,32 +216,7 @@ def _restore_corpus(
 ) -> None:
     """Put the corpus back to its pre-agent contents, through `corpus`, its held mount
     (`corpus_dir` is that folder's spelling, the git pathspec only), as the before-state read at
-    `head_before` holds them.
-
-    The content restore is filesystem-only: the failure it handles is usually git's, and a git
-    restore would need the index lock that failed (`git status`, a read, needs none). The
-    unstage is best-effort, for a rejected commit where the add did land.
-
-    No folder is listed (#1134 addendum 2 correction, C1): which names the agent made comes from
-    git (`git status --untracked-files=all` over the corpus), and each one the snapshot (the
-    before-state) does not hold is removed through `corpus`: a plain file is unlinked; a link,
-    hard link or anything else at the name is the core's refusal, never followed (O5.2). A name
-    git does not report — a gitignored file, a FIFO or socket — is left (C2).
-
-    When `git status` fails (a broken index: the fault being unwound is often git's), git is
-    asked instead for every non-ignored worktree file under the corpus against an empty index
-    (`_git.git_worktree_files`, which never opens the real index), and each the snapshot lacks
-    is swept the same way; a tracked symlink is then among them, and its unlink is refused and
-    logged. If git cannot answer that either, nothing is swept (a warning).
-
-    Then each snapshot file git does not find unchanged since `head_before` — rewritten, gone,
-    replaced by a link or anything else — is written back through `corpus` (`_unchanged_names`,
-    addendum 3 D1: git compares, nothing here reads the worktree). A hard link holding the exact
-    before-state bytes is unchanged to git and left (declared, N-a). If git cannot compare, every
-    snapshot file is written back (a warning): an identical rewrite is harmless. Each git call is
-    bounded by `timeout` and reads attributes from HEAD's tree (`_worktree_git`); one that does not
-    answer in time is handled as one that failed, so the fault being unwound keeps propagating.
-    Fault path only: see `_undo_agent_edits`."""
+    `head_before` holds them."""
     if snapshot is None:
         return
     # Best-effort, like its unchecked exit: a reset that does not answer in time is passed over.

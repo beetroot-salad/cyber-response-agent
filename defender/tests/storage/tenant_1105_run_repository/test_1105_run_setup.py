@@ -41,15 +41,7 @@ def test_1105_run_setup_admits_the_id_then_checks_the_folder_then_the_record_the
         tmp_path, data_root):
     """Run setup refuses in order: a bad id over a linked runs folder gets 'invalid run id: ...'
     and nothing is created; a linked runs folder gets TenantRefused ('[run.py] ...') with
-    nothing created through the link.
-
-    #1187 declared changes 1, 6 and 13: the steps after the folder are gone. `_tenant.json` as a
-    pinned id is no longer the collision guard's own message (`refuse_colliding_run_id` is
-    retired): it is not a UUID, so it is the invalid-run-id exit like any old id (`r1`). No
-    container record is required and no `_episodes` claim is read: over a real runs folder
-    holding no `_tenant.json` and an `_episodes` record claiming the pinned UUID, run setup
-    creates that run. (Whether a container still holding a stray `_tenant.json` refuses run
-    setup is not pinned here: the design pins that refusal for the listing only.) (Name kept.)"""
+    nothing created through the link."""
     import uuid
 
     alert = H.alert_file(tmp_path / "in")
@@ -128,17 +120,7 @@ def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
     created with the run. The link is P2's one representative state of the runs folder; a
     dangling link and a non-directory there are not driven here: _io.hold(follow=False) tells
     those states apart (test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart).
-    The tenant.runs arm is driven through run.main itself.
-
-    #1187 declared changes 1, 6 and 8 (R1, S-iso): the pinned id is a UUID (an old id such as
-    `r1` is now the invalid-run-id exit, which fires before the folder is looked at); the
-    positive control writes no `_tenant.json`; and the refusal at the link is `TenantRefused` or
-    `RunRefused` naming the level. The sibling arm (a linked `runs/` in a pre-#1187 episode
-    outside `<T>/episodes`, its arm named `<ep>-<label>`) is retired: the arm container is
-    `<T>/episodes/<ep>/runs` now, and a link there is
-    ids_1187/test_1187_layout_isolation.py::test_a_link_at_an_arm_container_is_refused_and_the_real_folder_opens
-    and ids_1187/test_1187_roster_sibling.py::test_a_link_or_a_file_at_runs_refuses_before_any_roster_is_written.
-    (Name kept.)"""
+    The tenant.runs arm is driven through run.main itself."""
     import uuid
 
     from defender.run_repository import RunRefused
@@ -176,14 +158,7 @@ def test_1105_run_setups_refusals_are_one_stderr_line_naming_the_path(tmp_path, 
     RunId's repr-quoted refusal. Odd occupants at a pinned id's name keep today's outcome
     (RG-21-a): a regular file exits '<runs>/<id> is not a directory — refusing to materialise a
     run over it', an empty directory proceeds, and a directory holding investigation.md exits
-    'run dir already exists and a run has been in it: ...'.
-
-    #1187 declared change 13 (R6, D-del): the claimed-id half is retired — run setup reads no
-    `_episodes` record, so a torn record or a stray name there refuses nothing (pinned by
-    `ids_1187/test_1187_layout_isolation.py::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`).
-    The pinned ids are UUIDs (declared change 1). A linked runs folder is refused by the walk
-    from `<T>` with `TenantRefused` or `RunRefused` (declared change 8; which is not pinned).
-    (Name kept.)"""
+    'run dir already exists and a run has been in it: ...'."""
     import uuid
 
     from defender.run_repository import RunId, RunRefused

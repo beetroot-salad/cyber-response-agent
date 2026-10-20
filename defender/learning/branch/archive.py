@@ -1,34 +1,4 @@
-"""The archive: one directory per world, holding everything a later reader may ask about.
-
-After archiving, `delta_o`, `verdicts` and the grader answer from `episodes/<id>/` alone, with no
-re-run and no path outside it. That self-containment requires a complete copy: the report, the
-investigation document, the two tables, the run's provenance stamp, the scrub verdict, the
-run-end record, the lessons-loaded table, the alert and the gather summaries.
-
-None is sourced from another. No pointer back to the arm's folder is written (#1187 R8): the
-episode's arm roster names every arm by id, and nothing read the pointer.
-
-The scrub verdict and run-end record are sidecars beside the run dir (`scrub.verdict_path`,
-`run_end.sidecar_path`), written outside the tree they describe because a file inside a
-box-writable tree is plantable and forgeable. Looking for them inside the run dir would silently
-archive a world with no verdict.
-
-Every read out of the run dir is lstat-screened before anything lands. The run dir is the box's
-rw bind, so an artifact's name may be a planted symlink, and `shutil.copy2` would copy the
-target's bytes into the archive as if they were in-run artifacts. The tables go through
-`lead_repository.stage_tables` (its own screened staging); single files through
-`_layout.artifact_file`. The whole world is screened before anything is copied, so a world
-carrying one planted link archives NOTHING rather than a half-world whose missing file reads as a
-run that did not produce one. One exception: a run the host ended because its query table could
-not be written (the run-end sidecar says `executed_queries`, A12) is not refused for what sits at
-the table's name — that is the record whose write failed. The table is copied when it is a
-regular file and reported refused otherwise (never followed), and the world reads cut short.
-
-Absent and planted are different answers. A missing path is skipped and reported (a sibling
-that died before writing its report still has other artifacts; the launcher's `incomplete`
-outcome records that). A path that exists but is not a regular file (or, for `gather_raw`, a
-real directory) is a refusal.
-"""
+"""The archive: one directory per world, holding everything a later reader may ask about."""
 
 from __future__ import annotations
 

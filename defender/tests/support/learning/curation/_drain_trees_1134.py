@@ -1,28 +1,5 @@
 """The drain's verbs and the child-process open watch for `test_1134_drain_trees.py`. It defines
-no tests.
-
-At import it needs only the standard library and `_tree_listing_1134` (itself stdlib-only), so
-a child interpreter installs its audit hook BEFORE any `defender` module is imported, and the
-pytest worker never installs one (`sys.addaudithook` cannot be removed; #1134 step 1's rule).
-
-* `do_verb(held, name, verb, below=)`: one verb on the pair `DrainTrees.tree_for` hands back,
-  spelled the way the drain will spell it. Writes and deletes go through the `Held`, reads
-  through its view, as #1133 shipped them: `read(name)`; `entries`, the listing of the folder
-  holding `name` (`view().under(<its folder>).entries()`, `view().entries()` at the top), where
-  the entry at `name` is that listing's row; and `listing`, the folder `name` (`view()` itself
-  for the mount, `name == "."`) and each folder `below` it in the tree's known shape, each by
-  its own `under(...).entries()`.
-* `child()`: a child interpreter's entry point. It reads one JSON request on stdin, a list of
-  scenarios, and writes one JSON answer on stdout. Each scenario opens `DrainTrees` over its
-  mounts, then, with the watch armed, maps its path with `tree_for`, asks `mount` and `tree_for`
-  of every mount point again (as the drain does mid-batch), and runs its verb. The watch
-  records every open BY NAME with its flags (the spelling as the caller gave it) and, for every
-  open or listing BY DESCRIPTOR (`fdopen`, `scandir`), what that descriptor names. A spawned
-  process is recorded too. Non-vacuity: before the call, the watch must see an `O_PATH` open of
-  the scenario's plant by its absolute spelling.
-* `watch_in_child(scenarios, deadline=)`: run `child` over this tree's `defender` and answer its
-  rows.
-"""
+no tests."""
 from __future__ import annotations
 
 import contextlib

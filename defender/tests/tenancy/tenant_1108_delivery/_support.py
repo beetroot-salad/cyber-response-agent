@@ -211,26 +211,7 @@ def configured_origin(clone):
 
 
 class ForgeHTTP:
-    """Boundary fake: replies from the observed Forgejo schema, records actual requests.
-
-    It answers our repository (`GET /repos/{o}/{r}`), branch protection, one PR
-    (`GET /pulls/N`), the PR listing (`state`, `page`, `limit`) and PR creation, on the
-    origin's scheme, host and port only; a request anywhere else is recorded in `foreign`
-    and answered 404. The listing clamps `limit` to `page_size` (Forgejo's
-    `max_response_items`), counts every row of the state asked for in `X-Total-Count`
-    (`total_count`: `True`, `False` to omit it, or a number to lie), and links the next page
-    from `LINK_ROOT`, never our address (`link`, when set, is sent as the next page's URL
-    instead, whatever the page). Rows come in the order they were added.
-
-    With `remote` (a bare repository; `delivery()` sets it), the PRs live in that remote,
-    creating one writes `refs/pull/N/head` there, and an open PR's head follows its branch,
-    as on Forgejo; without it they live here. `pages` (`{n: rows}`), when set, replaces the
-    listing for shape cases (a short page before the end); `every_page` answers every page
-    number with the same rows (a server that ignores `page`).
-
-    `on_request(request)` runs before each reply (a probe of the host's state while the
-    request is in flight); `fault(request)`, when set, may return a transport exception
-    (`httpx.ConnectError`, say) to raise instead of replying."""
+    """Boundary fake: replies from the observed Forgejo schema, records actual requests."""
 
     def __init__(self, on_request=None, *, remote=None, origin=None):
         self.requests = []

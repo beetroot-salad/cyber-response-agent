@@ -83,37 +83,7 @@ def verify_family(
     allow_dirty: bool = False,
 ) -> dict:
     """Check every sibling, archive each verified one, and write the family stamp unless a
-    comparability fault forbids it.
-
-    `arms` is every finished arm, keyed by its declared world UUID (no identity is decoded
-    from a folder's name): the `Run` its episode view opened, or the refusal the open raised. A
-    `RunAbsent` is a missing arm folder, read as before: a world with no scrub verdict, so its
-    own `not archived` record. Any other refusal (an entry that is not a real directory,
-    declared change 5, or a container that cannot be reached, `RunUnreachable`) is likewise that
-    world's own `not archived` record, and nothing is read through it.
-
-    `source` is the source run's stamp as judged by `preflight_episode`. Required with no
-    default, so siblings are always held to the source's commit rather than only to each other.
-
-    Runs only after an `accepted` pre-flight (no sibling starts otherwise), and never touches
-    the outcome record pre-flight wrote (S6). Only scrub-verified worlds are archived, each on
-    its own: a world whose tree the archive refuses, or that has no scrub verdict, is one the
-    judge cannot see, and gets its own `not archived` record (S10, counted by O5) while the
-    others are still archived.
-
-    Two kinds of fault (FORK-1 as amended 2026-10-10, PR #1232 round 7). A PER-WORLD fault (no
-    scrub verdict, an archive refusal, a refused arm entry) is that world's own record and does
-    not withhold the stamp, which records the agreement among the verified, archived siblings.
-    A COMPARABILITY fault — `_family_refusal`'s (commit/knowledge mismatch, dirt unless waived),
-    `_cross_tenant_fault`'s, or no sibling verified and archived at all — withholds the stamp,
-    and its reason is recorded (`outcome.write_not_comparable`) for the judge, which stamps such
-    a family `not comparable`.
-
-    Returns `comparable` (the stamp was written: no comparability fault), `reason` (every
-    fault of both kinds, `""` when none) and `not_comparable` (the comparability faults alone,
-    the recorded reason; `""` when the stamp was written). `worlds`, `archived`, and
-    `scrub_verified` contain world UUIDs, never display labels.
-    """
+    comparability fault forbids it."""
     family = load_family(episode.view(), expected_episode_id=episode.dir.name)
     labels = {world_id: family.world_by_id(world_id).label for world_id in arms}
     runs = {world_id: arm for world_id, arm in arms.items() if isinstance(arm, Run)}
@@ -253,21 +223,7 @@ def _write_family_stamp(
     waived: list[str] | None = None,
 ) -> None:
     """The family's one stamp: what every sibling agreed on, what it was anchored to, and
-    whether it was waved through.
-
-    @owns source — the family stamp's `source` key, the source run's whole provenance record as
-    `_stamp_of` read it at preflight. Copied verbatim so a waived dirty source shows
-    `source.dirty` beside `allow_dirty`, and the archive never reads as anchored to a clean sha.
-
-    @owns waived — the family stamp's `waived` key: the kinds of fault (`DIRT`,
-    `UNPROVEN_KNOWLEDGE`) `--allow-dirty` actually waived for this family, from
-    `_family_refusal`'s judgement; `[]` when nothing was. `allow_dirty` alone cannot tell a
-    dirty-code family from one whose source merely predates the knowledge stamp.
-
-    The agreed record (about the siblings), the source (what they were held to) and the
-    override (the operator's flag, and what it waived) are kept separate so a clean family and
-    a waived one read differently.
-    """
+    whether it was waved through."""
     present = [stamp for stamp in stamps.values() if stamp is not None]
     # Every held field is the agreed record's, since `_family_refusal` passed: the first
     # sibling's value, except where an unknown is its own waived fault — there the agreed value

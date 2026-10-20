@@ -217,21 +217,7 @@ def _drop_refused_dispatch(
 
 
 def leads_at(store: Any, session_id: str, branch_message_id: int, run_dir: Path, *, source_run: Run) -> set[str]:
-    """Which gather leads the run held by `branch_message_id`.
-
-    Query rows carry no timestamp or message id, so leads are dated by their `gather`
-    call/return pair in MAIN's transcript. A lead counts when its return is at or before the
-    branch point; a dispatch whose return had not landed is intentionally dropped, since the
-    resumed model's history cannot cite it.
-
-    Leads no dispatch accounts for (lead-0's, written before the first turn) are always kept,
-    derived as a set difference against the run dir's census rather than hardcoded ids. The
-    subtrahend is every lead an unrefused dispatch named, returned or not, so an outstanding
-    dispatch is not misread as lead-0's.
-
-    Precondition, enforced by `validate` before `store.fork`: the session is unfolded. A fold
-    hides the dispatches and the difference would degenerate to the whole census.
-    """
+    """Which gather leads the run held by `branch_message_id`."""
     ids = session_store.path_row_ids(store, session_id)
     messages = session_store.hydrate(store, session_id, role="analysis")
     pending: dict[str, str] = {}
@@ -294,13 +280,7 @@ def _lead_of(name: str) -> str:
 
 def carried_retries(prefix: list) -> dict[str, int]:
     """The retry count each tool carries into the step after `prefix` — the framework's own
-    bookkeeping, replayed over the conversation (rev 5 C1).
-
-    The framework keeps a tool's count across later steps until that tool succeeds: at each
-    step, a tool with a returned call is cleared, and a tool whose call was refused for retry
-    counts one more on what it carried (`pydantic_ai.ToolManager.for_run_step`). Those counts
-    live only in the framework's run and cannot be seeded into a resumed one, so a branch
-    point at which any tool carries one is a step a resumed run would take differently."""
+    bookkeeping, replayed over the conversation (rev 5 C1)."""
     retries: dict[str, int] = {}
     for message in prefix:
         if not isinstance(message, ModelRequest):

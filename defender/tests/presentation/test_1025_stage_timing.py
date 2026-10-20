@@ -463,12 +463,7 @@ def test_1025_an_accepted_episode_leaves_every_step_in_launch_order(tmp_path):
     launch, `started_at <= ended_at`, and each step starting no earlier than the previous one
     ended. The rows are on disk from inside a LATER step: the sibling spawned during `runs`
     already sees `questioner`, `preflight`, and the judge called during `judge` sees the four
-    before it — a record buffered and flushed on the way out shows them nothing.
-
-    Fails when a step is not recorded, when the file's rows are out of order, when a timestamp
-    is not one `parse_iso_utc` accepts or lies outside the launch, when two steps' intervals
-    overlap, or when the rows are not on disk until the launcher exits.
-    """
+    before it — a record buffered and flushed on the way out shows them nothing."""
     nxt = _NextEpisode()
     sibling = _WatchingSibling()
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))

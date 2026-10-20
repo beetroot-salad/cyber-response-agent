@@ -1,13 +1,4 @@
-"""Split one pytest run into N shards by whole test files, balanced by what each file cost.
-
-CI runs the suite as parallel jobs, each taking `--shard I/N`. A shard keeps whole files because
-the run uses `--dist loadfile` (a file's module-scoped fixtures and per-file tmp repos stay on one
-worker), and a file's cost is read from `_shard_weights.json` — seconds of one worker's time per
-file, measured from a CI run. A file the table has not seen (new, or under 0.3s) costs
-`DEFAULT_SECONDS_PER_TEST` per collected test, so a new file lands somewhere reasonable and the
-table can go stale without a shard going missing. The split depends only on the set of collected
-files and the table, so every shard — and every xdist worker inside it — computes the same one.
-"""
+"""Split one pytest run into N shards by whole test files, balanced by what each file cost."""
 from __future__ import annotations
 
 import json

@@ -111,17 +111,7 @@ from defender.skills.invlang.validate._ceiling import (
 
 def _check_false_positive_gating(companion: CompanionBody) -> list[str]:
     """`false-positive` closes on a claim about the rule, so it must prove it also looked at
-    the entity.
-
-    Checked: `detection_notes` states a defect (the empty marker is not one); `entity_check`
-    names a lead that exists and returned a result (not merely planned, not only a
-    `fail_reason`); and that lead targets a vertex the prologue carried, i.e. one the alert
-    named rather than one the refutation introduced.
-
-    Not checked: whether the lead's question was a good one (query parameters never reach this
-    layer), or independent of the alert's claim. Closing those needs an indicator set the
-    runtime executes; a passing gate is not a swept host.
-    """
+    the entity."""
     conclude = companion.get("conclude") or {}
     errors: list[str] = []
 
@@ -292,24 +282,7 @@ def _recorded_lookup_ids(companion: CompanionBody, lead_id: str) -> set[str]:
 
 
 def _authz_row_grounding_error(companion: CompanionBody, row: Any) -> str | None:
-    """Why this one `:R authz` row's grounding does not stand, or `None`.
-
-    Refused:
-
-      * `grounding telemetry-baseline` (folded, so case and separator variants cannot slip
-        past): a baseline grounds a `:R consultations` row, never an authorization.
-      * `anchor_kind runtime-evidence`: the same claim through the other cell.
-      * a `tacit-knowledge` row citing an `anchor_id` its own lead never recorded as a hit, or
-        an `authorized` one citing none. Checked against the document only (the validator never
-        reads the registry), so this refuses cheap fabrications — an id from nowhere, another
-        lead's id, a recorded miss — without proving the entry exists. Faking an authorization
-        then takes two coordinated rows, the second a retrieval claim `executed_queries.jsonl`
-        independently records.
-
-    `grounding` is folded rather than closed against a vocabulary because the corpus writes
-    specific record types (`iam-policy-binding`), not the documented pair; `anchor_kind` is the
-    closed cell that says which registry answered.
-    """
+    """Why this one `:R authz` row's grounding does not stand, or `None`."""
     where = f"`:R authz` row for contract {_cell(row, 'fulfills_contract') or '?'}"
     # Rule #27 reads `cites_past_case` to decide what is a past case, so the cell must be one
     # it can read: a run id when filled, and filled whenever the row says it rests on one.
@@ -424,22 +397,7 @@ def _contract_anchor_kind(companion: CompanionBody, row: Any) -> str:
 
 
 def _exhausted_receipt_error(companion: CompanionBody, row: Any) -> str | None:
-    """Does this `basis=exhausted` row's own lead back the claim, or `None`.
-
-    `exhausted` claims every anchor kind applicable to the contract was actually queried and
-    none answered. Checked, like a `ceiling_test` `ref`, against what the document records about
-    the resolving lead:
-
-      * its retrieval came back with something (`_lead_retrieval_came_back`); a lead that exists
-        only as a name in a `resolved_by` cell recorded no dispatch;
-      * its `:L findings` `system` cell matches the contract's anchor kind via
-        `vocab.ANCHOR_KIND_SYSTEMS`. Otherwise any lead would do, since every lead carries an
-        ORIENT bookkeeping `:R attr_updates` row.
-
-    Known limitation: an anchor kind missing from `ANCHOR_KIND_SYSTEMS` falls back to the
-    retrieval check alone. `executed_queries.jsonl` is the authoritative dispatch record, but
-    the validator sees only text, so the `system` cell is the closest in-document signal.
-    """
+    """Does this `basis=exhausted` row's own lead back the claim, or `None`."""
     lead_id = _cell(row, "resolved_by_lead")
     where = (
         f"`:R authz` row for contract {_cell(row, 'fulfills_contract') or '?'}: "
@@ -617,23 +575,7 @@ class EntryPrice:
 
 def disposition_entry_price(disposition: str, companion_text: str) -> EntryPrice:
     """What `disposition` still owes, read off an `investigation.md`; nothing for an unpriced
-    keyword.
-
-    A price must be collected at both boundaries: this module gates the `investigation.md`
-    write, but `close_investigation` takes its disposition as an argument and never reads the
-    companion. Without this, writing a cheaper keyword in `:T conclude` and passing the priced
-    one to the close would bypass the price, and `report.md` is what the learning loop, evals
-    and ticket lane read. Reads the same `_DISPOSITION_GATES` table as
-    `_check_disposition_gating`.
-
-    Normalized through `_rendered_disposition` so a zero-width character cannot turn a gate
-    off. Typed `str` because an unrecognized value fails open (unpriced), and a wider type would
-    let a caller swap the two `str` arguments unnoticed. Over an empty companion both priced
-    keywords owe their full price (`false-positive` demands stated content, `benign` a prologue
-    vertex).
-
-    The text surface over `entry_price`.
-    """
+    keyword."""
     return entry_price(disposition, parse_dense_companion(companion_text)[0])
 
 
@@ -672,24 +614,7 @@ SCREEN_MATCH = "match"
 
 
 def _check_screen_structure(companion: CompanionBody) -> list[str]:
-    """Two ways a `screen_result` can decide nothing.
-
-    On a lead whose mode is not `screen`, it is a verdict about a screen that never ran, in the
-    slot readers take for the fast-path answer. A `match` beside a `hypothesize` block claims
-    both that no investigation was needed and that one happened; whichever half was written
-    first, the other has a reachable repair (do not write the block, or record `no_match`).
-
-    Known gap: a `match` on an earlier screen, followed by a later `no_match` screen and a `:H`
-    block, is still refused over the committed `match`, which no write can withdraw. Fixing it
-    needs the loop's last `screen_result` in `:L findings` order, which `companion["findings"]`
-    (first-mention order) does not carry. For the same reason no rule refuses an intermediate
-    screen's result: whether a screen is the last is unknowable when writing it, and by then
-    the row cannot be withdrawn.
-
-    Read off `findings[].screen_result`, where the column projects (never nested under
-    `outcome`). Whether the verdict is right is not checked; nothing beneath the scalar is
-    projected.
-    """
+    """Two ways a `screen_result` can decide nothing."""
     leads = _leads(companion)
     # Lowercased at the read: neither cell is vocab-checked, so a raw `Screen` would fail
     # closed and a raw `Match` would fail open. `mode` is read per row inside the loop so no
@@ -738,17 +663,7 @@ def _weight_text(weight: Any) -> str:
 def _check_hypothesis_persistence(companion: CompanionBody) -> list[str]:
     """A close that enumerates its survivors must enumerate all of them: each hypothesis ends
     at `--` (refuted) or has a `:T conclude.surviving` row. Otherwise a dropped hypothesis reads
-    exactly like one never proposed.
-
-    A close with no surviving table is out of scope: the table is optional by construction
-    (benign gating computes survival from the resolution record), so its absence defers to that
-    record. Requiring it would refuse most documents in the tree, both shipped goldens
-    included; that is a spec decision. The table is read as the author's assertion, never as
-    evidence.
-
-    No other discharges: `termination.rationale`/`category` are unchecked free text, and
-    `matched_archetype` resolves against a catalog that does not exist.
-    """
+    exactly like one never proposed."""
     conclude = companion.get("conclude") or {}
     # Key presence, not row count: an absent block leaves the key off, while an explicit empty
     # table (`none`) claims that nothing survived, which a live hypothesis contradicts.
@@ -777,20 +692,7 @@ SEVERITY_CEILING = "severity-ceiling"
 
 
 def _check_ceiling_test_scope(companion: CompanionBody) -> list[str]:
-    """A run terminating on `severity-ceiling` must name the check it could not make.
-
-    It is the one category that ends a run by declaring the question unanswerable, so it most
-    needs a receipt: without `ceiling_test`, a real tooling boundary is indistinguishable from
-    stopping. The empty marker `none` projects as absence, and both are refused.
-
-    Only half the spec rule: `ceiling_test` is not forbidden under other terminations. The
-    shipped field lists checks the run could not make, lessons instruct writing it whenever a
-    source was out of reach, and runs routinely name gaps while terminating on something else
-    (`golden-v2sshd`: `data-ceiling`). Refusing those would discard runs for obeying lessons.
-
-    The trigger is free text (see `SEVERITY_CEILING`); closing that vocabulary is a spec-owner
-    decision.
-    """
+    """A run terminating on `severity-ceiling` must name the check it could not make."""
     conclude = companion.get("conclude") or {}
     category = (conclude.get("termination") or {}).get("category")
     # Per row, not list truthiness: `ceiling_test  ""` projects as `[""]`, truthy yet naming no

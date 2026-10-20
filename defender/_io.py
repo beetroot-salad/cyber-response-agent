@@ -160,23 +160,7 @@ def read_guarded(
 def read_plain(path: Path, *, errors: str = "strict", os_: Any = os) -> str:
     """The guarded read as a RAISING primitive: the text of the plain, single-linked regular
     file at ``path``, read with universal newlines exactly as ``Path.read_text`` would — or the
-    exception that stopped it, every one a member of :data:`TEXT_READ_ERRORS`:
-
-      * ``FileNotFoundError`` — nothing at the name;
-      * an ``OSError`` carrying :data:`ALIAS_READ_REFUSAL` — the entry is not a plain file: a
-        symlink (refused at the open, ``ELOOP``), a hard link (``EMLINK``, the write side's
-        own errno for the shape ``O_NOFOLLOW`` cannot refuse), a directory, fifo, socket or
-        device (``ELOOP``, as the write side folds them);
-      * any other ``OSError`` — the file is there and could not be read (``EACCES``, ``EIO``),
-        including the read step's refusals (:func:`_read_plain_fd`): larger than
-        :data:`READ_LIMIT` (``EFBIG``), no data yet on the non-blocking descriptor
-        (``EAGAIN``), gone while it was read (an ``ENOENT`` that is NOT a
-        ``FileNotFoundError``), and a path that does not encode (``EINVAL``);
-      * ``UnicodeDecodeError`` — its bytes are not UTF-8.
-
-    Plainness is judged on the open descriptor (``O_NOFOLLOW`` then ``fstat``), not by
-    ``lstat``-then-read, which leaves a race window for a plant.
-    """
+    exception that stopped it, every one a member of :data:`TEXT_READ_ERRORS`:"""
     # `_open_plain_fd` opens with `O_NONBLOCK`: a planted FIFO would otherwise block the open
     # forever before `fstat` could refuse it.
     fd, st = _open_plain_fd(path, os_)
@@ -812,14 +796,7 @@ def hold_under(held: Held, name: str, *, create: bool = False,
     """Hold the folder `name` — one component — below the held folder, opened off its handle and
     judged as `_step` judges every folder of a walk, so a link at `name` (dangling or not) is
     `OSError(ELOOP)` and anything but a directory `NotADirectoryError`. An absent folder is
-    `FileNotFoundError`, unless `create` makes it first (adopting one already there).
-
-    `exclusive` claims the name instead: ONE `mkdir` off the held handle, and any entry already
-    at the name (a folder, a link, anything) is `FileExistsError` — no retry, nothing adopted,
-    so of two callers racing for one name exactly one wins it. A made folder's entry is synced
-    in the held folder. A function beside `Held`, as `move_at` is: the handle's own surface is
-    pinned to its verbs (#1133). The walk of a tenant's tree below `<T>` steps through here, one
-    level at a time (#1187 S-iso)."""
+    `FileNotFoundError`, unless `create` makes it first (adopting one already there)."""
     if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
         raise ValueError(f"{name!r}: {_NOT_A_NAME}")
     os_ = held._os
@@ -878,13 +855,7 @@ def create_complete(held: Held, name: str | PurePath, text: str | bytes) -> None
 def move_at(held: Held, src: str | PurePath, dst: str | PurePath) -> None:
     """Rename the plain file `src` to `dst`, both below the held root, by `renameat` between the
     two holding folders' descriptors. A function beside `Held`, not a method: the handle's own
-    surface is pinned to its verbs (#1133).
-
-    Both folder chains are walked with no link followed (`dst`'s are made). Both leaves are
-    judged by `_leaf_present`: the source must be a plain file (`FileNotFoundError` when absent),
-    the destination absent or a plain file, which is replaced as `os.replace` does. A link, hard
-    link, FIFO or folder at either is the core's refusal and is left in place. The judgement and
-    the rename are two steps, with the swap caveat `_unlink_at` documents."""
+    surface is pinned to its verbs (#1133)."""
     os_ = held._os
     _s_spelling, s_parts = _parse_name(src)
     _d_spelling, d_parts = _parse_name(dst)
@@ -909,15 +880,7 @@ def rename_into(src: Held, name: str, dst: Held) -> None:
     """Rename the entry `name` — one component, a real directory or a regular file — out of the
     held folder `src` into the held folder `dst`, under the same name, by ONE `renameat` between
     the two descriptors: nothing is copied, and a move across filesystems is the kernel's
-    `EXDEV`, raised as it comes. A function beside `Held`, as `move_at` is.
-
-    Both names are judged no-follow immediately before the rename: at `name` in `src`, absent is
-    `FileNotFoundError` and a link or anything but a directory or regular file is the core's
-    non-plain refusal (`NotPlainEntry`, left in place); ANY entry at `name` in `dst` is
-    `FileExistsError`. A rename replaces a file or an empty directory at its destination and
-    Python exposes no `RENAME_NOREPLACE` (#1187 R2-22), so the judgement and the rename are two
-    steps, with the swap caveat `_unlink_at` documents: non-replacement holds while nothing
-    else writes the destination folder."""
+    `EXDEV`, raised as it comes. A function beside `Held`, as `move_at` is."""
     if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
         raise ValueError(f"{name!r}: {_NOT_A_NAME}")
     os_ = src._os

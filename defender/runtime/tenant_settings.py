@@ -1,28 +1,5 @@
 """#1107 — the settings half of a run's tenant record: what each system's `config.env` says, parsed
-ONCE at resolve.
-
-WHY IT EXISTS. Adapters used to find their URLs, container names and credentials themselves, when
-called: each parsed its own `config.env` and let the process environment override it, so "whose
-systems does this run talk to" was decided by how the process was launched. Here the file is read
-once, when the run's tenant is resolved (`run_tenant.resolve_run_tenant`), and the values ride the
-run as the record's `systems` field. Nothing below the entry point reads
-the process environment or the tenant folder for a setting again.
-
-FAULTS ARE VALUES, never raises, at resolve. A system whose `config.env` is missing, unreadable or
-not UTF-8 is kept as its `ConfigFault` under its name. At run start each granted system's adapter
-judges the record (`check_settings`, #1256) and raises that fault: the system is down for the
-run as not configured, no verb of it is called, and nothing is charged to the breaker. The run
-goes on unless no granted system is left usable, which the run's own start check refuses (O-8),
-never resolution. `TenantRefused` keeps only its tenant-acceptance reasons (D4).
-
-NO MODEL, NO PYDANTIC. The record's parts are plain read-only classes: a pydantic `ValidationError`
-echoes the offending field's repr into error text.
-
-NO SECRETS. Credential delivery (`*_SECRET_REF` references into a tenant `secrets.env`) is #1163;
-until it lands a `config.env` holds no secret, and the connect validator FAILs one.
-
-This module is outside `bash_exec`'s per-exec import closure (#1096) and must stay so.
-"""
+ONCE at resolve."""
 from __future__ import annotations
 
 import errno
@@ -65,21 +42,7 @@ _LINE_END = re.compile(r"\r\n|\r|\n")
 # --------------------------------------------------------------------------------------------
 
 def parse_env(text: str) -> dict[str, str]:
-    """`KEY=VALUE` lines of a `config.env`, as written. @owns config.env parse
-
-    THE ONE PARSE for every settings file (the system configs, and the connect validator that
-    checks them) — two parsers had grown with different quote rules, so one
-    file described two deployments. Rules:
-      * blank lines, `#` comment lines and lines with no `=` are skipped; a `#` mid-line is part
-        of the value;
-      * an `export K=v` line is skipped, not a key literally named `export K`;
-      * the value is stripped, then ONE matched pair of surrounding quotes is trimmed (never a
-        character set: a value that legitimately ends in a quote keeps it);
-      * keys match case-sensitively and keep their prefix; a duplicate key yields the later
-        line; a leading byte-order mark is not part of the first key;
-      * a line ends at CRLF, CR or LF (`_LINE_END`), so a file the validator reads as five lines
-        is five lines here too.
-    """
+    """`KEY=VALUE` lines of a `config.env`, as written. @owns config.env parse"""
     return {key: value for key, value, exported in assignments(text) if not exported}
 
 

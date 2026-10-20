@@ -1,20 +1,4 @@
-"""The live oracle that serves a branched world (#1224).
-
-A sibling's world carries natural-language facts. Every uncached call in a world with facts gets
-one oracle turn: the oracle model may `run_query` the tenant (through the gather grant, at the
-branch-point clock, rate-limited), `forge` telemetry for a fact, `record_fact`, run `python` in
-its own sandboxed box, self-`check`, and `submit` a served answer with a claim of what it
-changed. The host checks the submission (`checks.check_submission`), then a verifier model, in a
-cold context of its own, passes or fails it. N failed attempts on one call raise
-`OracleUnservable`, which never reaches the investigator as a fault row.
-
-One conversation per sibling, appended to call after call until it has held `restart_after`
-attempts or would pass `_PROMPT_BUDGET`, then restarted from its prefix (the world's frozen rows
-and recorded facts come from the store, never only from the conversation); one turn at a time
-(the registry holds the lock).
-Nothing here writes into the sibling's run records: the oracle's spend, trace and queries live
-in the world's own oracle-side state directory (`oracle/<world-uuid>/`, one writer, S19).
-"""
+"""The live oracle that serves a branched world (#1224)."""
 from __future__ import annotations
 
 import asyncio
@@ -464,27 +448,7 @@ class Oracle:
               live: bool = False,
               gate: Callable[[Any], str | None] | None = None) -> tuple[Any, dict, dict, int]:
         """Turns until a verified submission is committed (`commit(served, claim, verdict,
-        attempts, staged)`); returns `(served, claim, verdict, attempts)`.
-
-        `fixed` frames the call as one the source run made before the branch point (M01=A).
-        `live` frames its base as a live read, the system as it stands now (#1255 D3/D6): the
-        oracle serves it as it stood at the branch point.
-        `gate(served)`, when given, is asked first of every submission: a reason it returns
-        refuses the submission before the host checks and the verifier run — a failed attempt
-        like any refused submission, the reason handed to the oracle.
-
-        The one place a turn's outcome is decided, by one rule:
-        - a verified submission whose `commit` returns is the answer; nothing after it undoes
-          it (its frozen-row collisions are recorded then, best-effort);
-        - an attempt that ends without one — no or a refused submission, a passed deadline, an
-          unusable model, the oracle's own store or rate limiter failing (`StoreFailure`,
-          `_AttemptFailed`), or a `commit` that cannot store the answer (`OSError`) — is a
-          failed attempt, and `retry_cap` of them make the call unservable (`retries`);
-        - the world's budget spent ends the call unservable (`budget`);
-        - any other error escaping an attempt is the serving machinery broken: it is logged
-          with its traceback and the call ends unservable (`fault`), never reaching the
-          investigator as an ordinary exception. A `ServingAbort` passes as itself, and so
-          does what `commit` raises other than `OSError` (pre-flight's `PrebranchChanged`)."""
+        attempts, staged)`); returns `(served, claim, verdict, attempts)`."""
         if self.unservable is not None:
             # The world's one failure, whichever call asks: concurrent calls abort together and
             # the first abort found writes the world's record, which must name the failing call

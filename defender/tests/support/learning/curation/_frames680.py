@@ -1,17 +1,4 @@
-"""Shared harness for the #680 systemic-stage-frame suite (split out by #720).
-
-Everything the four parts of the suite drive through: the frame regexes and the two
-salts, the `Box` / `RecordingBox` fakes, the per-producer prompt-capture helpers whose
-returns are `PromptObservation`s, the deps scenes, and the `_drive_*` entries into the
-learning-stage read and bash lanes.
-
-The prompt-capture helpers are the point of the file. Each one builds the REAL producer
-(judge invocation, actor, lead prompt, curator, …) and returns what that producer would
-hand a model, so a demand can assert over the bytes a stage actually emits rather than
-over a reconstruction of them.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared harness for the #680 systemic-stage-frame suite (split out by #720)."""
 from __future__ import annotations
 
 import ast
@@ -256,20 +243,7 @@ def _pitfalls_prompt(
 def _all_prompt_observations(
     tmp_path: Path, monkeypatch, hostile: str, *, salt="5a" * 16
 ):
-    """Drive every bound real producer; no assertions are shared across owners.
-
-    FOUR PRODUCERS SINCE #1166, down from nine (#922 took four, #1166 the forward check). The judge fixture, both actor legs, the oracle's
-    per-lead prompt and the actor forward-check were the four the old pipeline owned, and they
-    went with it. What the tuple is FOR is unchanged: every surviving stage that assembles a
-    model message from attacker-reachable text is driven here, so a producer that stopped
-    framing its input fails in this file rather than in whichever suite happens to touch it.
-
-    The learning side keeps a witness — the curator, the lead author and the pitfalls curator
-    all still read model-authored rows. The questioner and the family judge are
-    the two new stages on the same shape, and they are witnessed in `test_922_witnesses.py`
-    against their own archives rather than restaged here, because their whole input is an
-    episode capture this harness has no builder for.
-    """
+    """Drive every bound real producer; no assertions are shared across owners."""
     return (
         _curator_prompt(tmp_path / "curator", hostile=hostile, salt=salt),
         _lead_author_prompt(
@@ -443,19 +417,7 @@ class RecordingBox:
 def _drive_learning_read(
     tmp_path: Path, body: str, *, name: str = "lead.md", in_run_dir: bool = False
 ) -> str:
-    """One learning-stage `read_file`, through the real tool.
-
-    `in_run_dir` puts the artifact where PRODUCTION puts it. For a learning stage the run dir is
-    not private workspace — it is the SHARED cross-stage directory: `benign_actor/run.py:47` and
-    `run_cycle.py:97` write `past_tickets.txt` and the actor story into it, and the judge's own
-    closed-ticket capture lands at `ticket_reads/{seq}.json`. This harness staged those under
-    an add-dir instead, which is a real add-dir but the wrong one, and that spelling is what
-    kept #849's F-11 (run-dir reads arriving unframed) out of view here.
-
-    DRIVEN THROUGH THE CURATOR SINCE #922. The judge was this lane's witness and is deleted; the
-    corpus author is the surviving learning role that actually holds `read_file`, so it is what
-    the property is now observed on. The questioner and the family judge cannot stand in — both
-    are deny-all with no tools at all, so there is no read for them to arrive framed."""
+    """One learning-stage `read_file`, through the real tool."""
     deps, comparison = _learning_read_deps(tmp_path)
     artifact = (deps.run_dir if in_run_dir else comparison) / name
     artifact.parent.mkdir(parents=True, exist_ok=True)

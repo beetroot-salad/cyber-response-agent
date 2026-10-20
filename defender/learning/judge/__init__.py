@@ -1,30 +1,4 @@
-"""The family judge: grades an archived branched episode against each world's contrast (#1234).
-
-`grade_episode` is called by `learning/branch/cli.py` after the archive step, and is also
-callable directly without the launcher.
-
-The judge MODEL files findings; code routes them (P-c). Flow, per episode:
-1. The gates: a non-positive `JUDGE_DRAWS` is refused naming the knob, before anything else;
-   a manifest predating the oracle is stamped not-graded (O15, ahead of the outcome gate); a
-   world record for a label the manifest does not declare refuses the pass; pre-flight's
-   `outcome.yaml` must say `accepted`; O5 counts the failed worlds; the family stamp must
-   certify the siblings comparable; the control must be usable (A3). Every stamp carries the
-   recorded rows verbatim. Past the gates, a world or the family row a stopped pass left
-   `queueing` refuses the grade naming it (A6).
-2. `runs.read_run_set` — every run through the one usability read (`family.read_world`).
-3. Per planted world, in manifest order, unless its row is already `queued`: `render.render`
-   + `run._build_prompt` (M3's layout under A9's cap, `layout.world_layout`); one model call per draw through
-   the injected `judge=` seam, each reply through `run.validate_reply` (a refused reply is asked
-   again within `_REPLY_ATTEMPTS`; a failed call is not), written to `worlds/<X>/judge/<n>.yaml`;
-   then `route.combine_draws` (A7) and `route.fate` per filed finding (A13); the world's rows
-   are committed `queueing` -> append through `state=` -> `queued` (A6).
-4. The family call, once (a `queued` family row is final): every usable run's computed
-   sections (`layout.family_layout`), family-scope world findings only, combined by union,
-   committed the same way.
-5. `judge.yaml` written last. The user record's found gaps (A2) are computed once per pass,
-   right after the manifest read, so every write — a stamp, each A6 commit, the last — carries
-   them.
-"""
+"""The family judge: grades an archived branched episode against each world's contrast (#1234)."""
 
 from __future__ import annotations
 
@@ -160,14 +134,7 @@ def _run_world_draws(  # noqa: C901, PLR0913 — one loop over draws and their b
 ) -> tuple[int, dict[int, dict[str, Any]], int, str | None]:
     """Call the judge `draws` times over `prompt`, writing one `worlds/<X>/judge/<n>.yaml` per
     draw. Returns `(completed_draws, draw documents by index, malformed replies, the last
-    refusal's reason)`.
-
-    A failed call writes a draw record naming its failure and is not asked again; a call
-    refused for its size (`_is_size_failure`) also ends the world's draws, since every later
-    draw sends the same prompt (A23). A reply the
-    validator refuses is counted and asked again, up to `_REPLY_ATTEMPTS` asks per draw; a draw
-    whose every ask was refused writes nothing. Documents are returned, not read back: the pass
-    routes what it just produced, never a stale file from an earlier attempt."""
+    refusal's reason)`."""
     from defender.learning.core.config import StageWiring
     from defender.runtime.agent_role import AgentRole
 

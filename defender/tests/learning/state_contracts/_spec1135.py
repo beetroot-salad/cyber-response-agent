@@ -1,69 +1,5 @@
 """Shared machinery for #1135's spec — "one learning-state handle with queue verbs, file-backed
-on `Held`". NO test functions; underscore-prefixed so pytest never collects it.
-
-Imported by every test file here as
-`from defender.tests.learning.state_contracts import _spec1135 as S`.
-
-The change (`spec-flow/specs/spec_graph_1135-learning-state-handle.yaml`; the design is
-revision 3 as clarified by revision 3.1, `.spec-flow/inputs/design.md`): every host touch of the
-learning-state tree goes behind ONE handle, `LearningState`, opened at an entry point on an
-EXISTING root (R15; a missing or non-folder root is `FatalConfigError` naming the root and
-`DEFENDER_LEARNING_STATE_DIR`). Today's request layout is unchanged (R14). The one new behaviour
-is that a non-plain entry planted below the root (a link, hard link, FIFO, or a folder where a
-file belongs) is refused as `StateRefused(record, reason)`: not an `OSError`, a member of
-`faults.SYSTEMIC_FAULTS`, so a drain tick exits 2 through `_run_stage` (R16, 3.1 A/B). The
-exemptions are E1 (the run-end enqueue logs and continues), E2 (the queue page counts it
-unreadable) and E3 (the judge logs and continues). Ordinary I/O errors keep today's routing.
-
-NONE OF THE NEW NAMES EXISTS AT BASE d9128afa. The handle's module is imported ONCE below inside
-a `try`, so a missing module is ONE failure per test at the point the test first uses the
-handle (`ModuleNotFoundError` from `_Missing`), never a collection error hiding every other
-test. The two core functions D2 adds to an EXISTING module (`defender._io.move_at`,
-`open_lock_at`) are reached through `core_fn(name)`, so their absence is an `AssertionError`
-naming the missing function in the test that needs it.
-
-THE NAMES THE DESIGN FIXES (F1, auto-resolved at §7): the module
-`defender/learning/core/state.py`; `LearningState.open(paths)` as the only constructor;
-`StateRefused(record, reason)`; `Channel`, `Claimed`; D1's verbs as spelled there
-(`rows`, `append(channel, rows, *, dedup_key=None) -> (appended, malformed)`,
-`rotate(channel, held, consumed, commit_sha, *, timeout)`, `deadletter_rows`, `has_requests`,
-`claim(identity_key)`, `stamp(claimed, spec)`, `requeue(claimed) -> bool`, `done(claimed)`,
-`lock(role, *, wait)` (a context manager), `describe(record) -> str`, `stage_dir(lane) -> Path`);
-`move_at(held, src, dst)` and `open_lock_at(held, name)` in `defender._io`.
-
-COINED NAMES LIVE HERE AND NOWHERE ELSE. The design does not spell these, so this suite does;
-if write-code-from-spec names anything differently it renames it HERE (`COINED`), never
-through a `conceptAliases` entry:
-  * the channels, as module-level `Channel` values: `FINDINGS`, `QUESTIONER_FINDINGS`,
-    `PITFALLS` (the three queues: `_pending/findings.jsonl`, `_pending/questioner_findings.jsonl`,
-    `_pending_pitfalls/pitfalls.jsonl`);
-  * the lock roles, as module-level values: `REPO_LOCK` (`_author.lock`, a deadline role),
-    `AUTHOR_DRAIN_LOCK` (`.author-drain.lock`, try-once), `LEAD_AUTHOR_DRAIN_LOCK`
-    (`.lead-author-drain.lock`, try-once), `LEAD_QUEUE_LOCK` (`_pending_leads/.lock`),
-    `CURATOR_DRAIN_LOCK` (`_pending/.lock`, try-once). No append-lock role is exposed (the
-    lock-nesting rule);
-  * the `wait=` spellings: `TRY_ONCE` and `BLOCK` are module-level values; a deadline is a
-    number of seconds (`wait=0` tries exactly once, as `_flock.take(timeout_seconds=0)` does).
-    A try-once take yields whether it was taken (`with state.lock(r, wait=TRY_ONCE) as taken`);
-    a deadline take raises `TimeoutError` on expiry;
-  * a `stage_dir` lane is a drain lane label `config` already spells once
-    (`AUTHOR_DRAIN_LABEL` -> `_pending/`, `LEAD_AUTHOR_DRAIN_LABEL` -> `_pending_leads/`);
-  * `Claimed.spec` (the request body) and `Claimed.key` (the request key: the record name's
-    stem, JF7);
-  * `claim("case_id")` takes the identity key positionally, as today's `claim_markers` does.
-
-RECORD NAMES ARE TODAY'S (R14). Every oracle in this suite reads the tree by the names
-`LoopPaths` spells at base (`author-queue/<case_id>.json`, `author-queue/inflight/`,
-`_pending/findings.jsonl`, `_pending/consumed.jsonl`, `<queue>.deadletter.jsonl`,
-`<queue>.stuck.jsonl`, `_author.lock`, ...), through `os.lstat`/`readlink`, never through the
-handle under test — so an absence assert fails if the code wrote that record anywhere it names.
-
-EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE (the author charge's rule 1): the
-links, hard links, FIFOs, folders at file names, missing and dangling roots are made on disk in
-the test itself. The fakes are the entry points' own injection seams (`author_drain`'s
-`branch=` / `start_box=` / `stop_box=` / `scrub=`, a stage's model seam), which record what they
-are handed and decide nothing — never `monkeypatch.setattr` (`tooling/lint/lint_monkeypatch.py`).
-"""
+on `Held`". NO test functions; underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
 import contextlib
@@ -223,13 +159,7 @@ def plant(at: Path, shape: str, *, target: Path | None = None) -> Path:
 def fifo_holding(at: Path, payload: bytes) -> Iterator[Callable[[], bool]]:
     """A FIFO at `at` that already holds `payload`, written through a read-write descriptor
     this helper keeps open (so neither end of the pipe blocks the test). Yields `unread()`,
-    which is True while every byte of the payload is still in the pipe.
-
-    This is how a test SEES "the link's target is unread": a regular file's bytes are the same
-    after a read, but a read through any link to this FIFO consumes the payload. A reader that
-    reads to end of file also blocks (this helper's descriptor is a live writer), so the test
-    runs the operation under `within`. `tree_snapshot` lists the FIFO without opening it. The
-    descriptor is closed on exit, which ends any reader still blocked on it."""
+    which is True while every byte of the payload is still in the pipe."""
     at.parent.mkdir(parents=True, exist_ok=True)
     os.mkfifo(at)
     fd = os.open(at, os.O_RDWR | os.O_NONBLOCK)

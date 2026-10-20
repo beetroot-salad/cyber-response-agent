@@ -1,21 +1,4 @@
-"""The run clock inside the box (#1255, design rev 4 "Time / Into the box").
-
-The SQL engine and every other program in the box evaluate time themselves, and shadowing one
-spelling of `now()` misses the rest (U3). So the box image preloads a time-faking library for
-every run (libfaketime, from the `box` extra's `libfaketime` wheel; `LD_PRELOAD` and its
-settings on the create command, `CLOCK_ENV`), which reads the run clock from a small
-file in its own read-only mount, `CLOCK_TARGET`. The mount lands outside the model view's trees,
-so no read shape of the permission gate reaches it; only the preload reads it.
-
-The file holds the run clock's OFFSET from the wall clock, in whole seconds, in libfaketime's
-relative spelling (`+N` / `-N`): a natural run reads an offset of (about) zero, an arm the gap
-between its run clock and the wall — the same shape for both. The host rewrites it before every
-command the box runs (`BoxExecutor.run_parsed`), because the run clock moves against the wall
-(an oracle turn pauses it; an injected source moves on its own).
-
-The host side of the mount is a per-run directory in a sibling of the runs base (`clock_dir`),
-never under any of the run's trees.
-"""
+"""The run clock inside the box (#1255, design rev 4 "Time / Into the box")."""
 from __future__ import annotations
 
 import shutil

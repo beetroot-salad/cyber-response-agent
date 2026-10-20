@@ -1,26 +1,4 @@
-"""An episode's two outcome records (#1224): pre-flight's write-once outcome, and each world's own.
-
-`outcome.yaml` is written once, by the launcher's pre-flight, before any sibling starts, and is
-never rewritten (S6): `accepted`, `unusable` (two or more worlds failed calibration) or
-`refused` (nothing to calibrate, for a reason that belongs to no world), with the reason, the
-worlds pre-flight found unservable, the calls it could not replay and the calls whose live
-answer drifted from the recording.
-
-Anything learned after launch is a world's own record, `world_records/<world-uuid>.yaml`, holding
-one reason (S7, S8): `oracle unservable` or `budget` (written by the sibling as it aborts),
-`did not finish` (written by the launcher when a sibling's process exited without a record),
-or `not archived` (written by the launcher when the archive refused that world's tree). Every
-record has one writer; the exclusive create refuses a second.
-
-Readers treat every word other than exactly `accepted` as not gradable, and an absent or torn
-outcome record as the distinct "no record" state, never as `accepted` (M05=A).
-
-An `accepted` family is comparable only once `verify_family` wrote the family stamp
-(`provenance.json`): every verified, archived sibling ran the source's code and knowledge,
-clean or waived, under one tenant. When it withheld the stamp it records why in `not_comparable.yaml`, and readers
-call a family with no readable stamp `not comparable` (`not_comparable_reason`), naming that
-reason (PR #1232 round 7: retiring `incomplete` had left such a family gradable).
-"""
+"""An episode's two outcome records (#1224): pre-flight's write-once outcome, and each world's own."""
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping

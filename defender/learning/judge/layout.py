@@ -1,28 +1,5 @@
 """The judge's prompt layout (design M3) under the payload cap (A9), its host text outside every
-untrusted frame (A10).
-
-A world call's sections, in order after the task: the computed header, the contrast table, the
-fact surfaces and the aligned lead view (sections 2-4), the reference runs (5), the judged
-world's views (6) and the noise context (7). A section is a host title and its blocks; a block
-is a host label (a run's, or none) and its parts: host text (`str`) or run text (`RunText`),
-which goes inside its own untrusted frame where it stands. So a computed row is host text with
-every run- or manifest-derived value it embeds framed in place (a value read off one archived
-record — a manifest entry, a query-table row — framed whole, as that record spells it), and no
-frame holds host text.
-
-THE CAP (`JUDGE_PAYLOAD_CAP`) counts the characters of every section's content — host rows and
-run text — except the judged world's call list (VIEW 1); the task, titles, run labels and frame
-tags around the content are the host's scaffolding and are not counted. What remains after
-sections 2-4 is spent on sections 5, 7 and 6's views, and when they do not fit they give in that
-order: section 5 first, its budget shared equally among the references, the control included
-(a reference that needs less than its share hands the rest on); then section 7; then section
-6's views, shared the same way. Of sections 2-4, only a reference run's own header block (its
-manifest entry and facts, "that run's labelled section") ever gives, and only after all of
-those; the judged world's computed rows, every contrast row, the fact surfaces and the aligned
-lead view never do. A cut block keeps its label, at least one frame and a host line saying it
-was cut (`CUT_NOTICE`); a world whose uncuttable rows and those notices alone exceed the cap is
-refused (`JudgeRefused`, naming the cap) and never asked.
-"""
+untrusted frame (A10)."""
 
 from __future__ import annotations
 

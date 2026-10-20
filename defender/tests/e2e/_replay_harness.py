@@ -1,50 +1,4 @@
-"""Reusable machinery for the hermetic e2e replay tests — NO test scripts.
-
-The runtime e2e tests drive the REAL `driver.run_investigation` loop with a
-`FunctionModel` that replays a scripted sequence of model turns — no API key, no
-network, no dollars (`override_allow_model_requests(False)` makes any real
-provider call raise). This module holds the *machinery* the test scripts share:
-
-    FunctionModel(replay) -> driver.agent.iter loop -> real generic tools
-      -> real permission gate (incl. invlang validation) -> real observe
-      projection (tool_trace.jsonl) + budget hook -> run-dir artifacts
-
-The *scripts* (the turn sequences + their assertions) live in the `test_*`
-modules that import this one: `test_replay_skeleton.py` (happy-path golden
-replays + the deny-tail) and `test_replay_error_paths.py` (the driver's error
-handling + the gate-as-feedback recovery loop). Keeping the two apart means a new
-scenario is a few lines of `Turn(...)` against this harness, not a fresh copy of
-the plumbing.
-
-This is NOT a test module (the leading underscore keeps pytest from collecting
-it). Drive a run with `drive(run_dir, run_id=…, main=<callable>)`, where
-the callable is a `ReplayFn` / `DenyProbe` / `NeverEndsModel` — `drive` wraps it
-in `FunctionModel`, so scripts never touch the pydantic plumbing.
-
-Below the model there are exactly SEVEN injected seams, and every one is a VALUE the run
-is handed (never a monkeypatched module attribute): the model itself (`make_model`), the
-data-source verb registry (`verbs=` → `run_investigation(verbs=…)`, #611), the budget cap
-table (`limits=` → `run_investigation(limits=…)`, #631), the box executor (`box=` →
-`run_investigation(box=…)`, #540), the per-case session store (`store_factory=` →
-`run_investigation(store_factory=…)`, #705), and the review-stage bundle (`review_stages=`
-→ `run_investigation(review_stages=…)`, #774) the close tool's live write-time gate drives
-its three model-backed stages through, and the gate's bounds object (`bounds=` →
-`run_investigation(bounds=…)`, the #774 repair) carrying the request ceiling's own base. The fifth exists because environment steering
-cannot express contention or corruption — it can only express "the store is missing", one
-third of O19's stated domain, while reading as covered — and the project profile forbids
-the `monkeypatch.setattr` that would express the rest (R12). The sixth exists because the
-gate's three review-stage calls have no injection point in the design at all — without a
-value the run is handed they are live provider calls, and no hermetic scenario could drive
-a single arm of the gate. A scenario hands `drive` a
-`FakeVerbs` table of plain
-annotated functions; the real query tool validates against their real signatures, the real
-capture capability writes the real rows. A scenario hands `drive` a `limits` dict; the real
-accounting hook and the real enforcing seam read it, so a run crosses a real cap in a few
-`Turn(...)` lines. The `box` seam is the same shape one layer lower: the bash tool's
-execution boundary is a container the test process cannot start hermetically, so a scenario
-hands in a `BoxExecutor` built over a fake transport and the REAL framing codec still runs
-on both sides.
-"""
+"""Reusable machinery for the hermetic e2e replay tests — NO test scripts."""
 from __future__ import annotations
 
 import asyncio
@@ -308,20 +262,7 @@ def _split_at_fences(text: str, n: int) -> list[str]:
 
 
 def _retarget_writes_as_appends(turns: list[Turn]) -> list[Turn]:
-    """Re-express a golden's recorded investigation.md writes as `append_block` calls (#810).
-
-    The goldens were recorded when main held `write_file`/`edit_file`, and at least one of
-    them (sshpivot-ab3) used `write_file` as a whole-document REWRITER — its four recorded
-    contents share a 176-character common prefix and then diverge, because the model kept
-    restating vertex rows instead of refining them. Main cannot express that any more, and
-    should not: the artifact is append-only.
-
-    So the recorded writes are not translated one-for-one — there is no delta to translate.
-    The LAST recorded content is the document the run actually produced, and it is split
-    across the same number of turns, on fence boundaries. Turn count, gather dispatches, bash
-    and read calls are all untouched, and the final artifact is byte-identical to the golden,
-    which is what the replays assert. What is lost is the intermediate states, which were
-    never asserted and which the surface no longer admits."""
+    """Re-express a golden's recorded investigation.md writes as `append_block` calls (#810)."""
     sites = [
         (t_i, c_i)
         for t_i, turn in enumerate(turns)
@@ -352,22 +293,7 @@ def load_turns_from_trace(
     trace_path: Path, *, old_run_dir: str | None = None, new_run_dir: str | None = None,
     as_appends: bool = False,
 ) -> list[Turn]:
-    """Parse a real `tool_trace.jsonl` into scripted Turns.
-
-    Rewrites `old_run_dir`->`new_run_dir` in string args — the context-repro step
-    (a recorded write/read names an absolute path into the ORIGINAL run dir). Full
-    replay of the nested gather subagent additionally needs stubbed adapter deps.
-
-    Parsing is FAITHFUL by default: a recorded `write_file` comes back as a `write_file`
-    turn. `test_projection_move_705` reads this function as a frozen consumer of the
-    projection's format and would not be able to tell a format regression from a
-    translation if the translation were unconditional.
-
-    `as_appends=True` re-expresses recorded investigation.md writes as `append_block` —
-    what a script needs to DRIVE a golden through MAIN, whose write grant is `append`
-    since #810. See `_retarget_writes_as_appends` for why that is a re-split rather than
-    a rename.
-    """
+    """Parse a real `tool_trace.jsonl` into scripted Turns."""
     turns: list[Turn] = []
     for rec in read_jsonl_rows(Path(trace_path)):
         if rec.get("type") == "assistant":
@@ -384,31 +310,7 @@ REPLAY_RUN_ID = fixture_uuid("replay-run")
 
 def materialize(tmp_path: Path, golden: Path, *, run_id: str = REPLAY_RUN_ID) -> Path:
     """The on-disk run dir a driven run starts from: `gather_raw/`, the copied alert, and the
-    provenance stamp.
-
-    The folder is `tmp_path / <the run's id>`. `run_id` is a UUID (`REPLAY_RUN_ID` when left
-    out) or a scenario's readable LABEL: #1187 makes every run id a meaningless uuid4 (O1/O2),
-    so a label names the folder `_fixture_uuid.fixture_uuid(label)` — the same label, the same
-    id, in every test — and never reaches production as an id. A test that needs the run's id
-    reads it off the folder (`run_dir.name`), never off its label. This is the ONE place a
-    replay's label becomes an id; `drive`'s own `run_id=` is a legacy label nothing reads.
-
-    Takes no `salt`: it seeds NOTHING salted. It was a parameter only because this used to
-    write the run's retired metadata file (#647); the trust token is now minted in process by
-    `run_common.materialize_run` and threaded as a value, so there is nothing on disk for this
-    to seed. Keeping the parameter would let a test pass `salt=` and believe
-    it had set up a salted run dir — setup a test can silently pass without.
-
-    THE STAMP IS WRITTEN HERE BECAUSE PRODUCTION WRITES IT (#976). What that buys is FILE-SET
-    parity with `run_common.materialize_run` — `test_salt_origin_647`'s parity arm, the
-    same trap #647's was built to catch pointing the other way. It is NOT message 0's listing:
-    `workspace_map._unlisted()` suppresses the stamp, so a replayed message 0 is byte-identical
-    either way, and a reader deciding whether the other hand-built run-dir fixtures need one
-    should weigh the parity arm rather than the prompt.
-
-    Captured against `run_common.REPO_ROOT` — production's own constant, not a second path
-    derived by counting `parents[...]` here — so "like production's" is a fact rather than a
-    coincidence of where this file sits in the tree."""
+    provenance stamp."""
     run_dir = tmp_path / (run_id if is_fixture_uuid_shape(run_id) else fixture_uuid(run_id))
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)
@@ -536,13 +438,7 @@ def investigate_as_handed(main, gather=None, *, review_stages=None, orient_shim=
     run with EXACTLY the keywords production composed for it — the `run`, the `RunTenant`, the
     roster, the verb registry, the box, and whatever else run.py hands its driver — plus only
     what no hermetic run can build: the fake models (`main` / `gather`, wired as `drive` wires
-    them), the review bundle (`drive`'s `holds` default) and the ORIENT shims (none).
-
-    For a scenario about what run.py HANDS the run (#1256: its one judgement of the systems):
-    `drive` / `_spec1222.run_alert` re-resolve the tenant and build a fresh `Run`, so anything
-    run.py attached to either, or passed as a further lifecycle keyword, never reaches their
-    driver. Composed with production's own `_run_investigation_lifecycle` and
-    `_drive_investigation`, this keeps the whole chain production's."""
+    them), the review bundle (`drive`'s `holds` default) and the ORIENT shims (none)."""
     def investigate(**handed: Any) -> dict:
         make_model = _fake_make_model(
             main, gather,
@@ -622,130 +518,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     """Run the real driver with injected fake models — no monkeypatching of the
     model symbol. `main`/`gather` are plain replay callables (ReplayFn / DenyProbe
     / NeverEndsModel); this wraps each in `FunctionModel`, so scripts stay
-    plumbing-free.
-
-    `verbs` is the SECOND injection seam (#611): a `FakeVerbs` registry handed straight
-    to `run_investigation(verbs=…)`, which threads it to the gather agent's query tool.
-    Omit it and the run resolves the production `ModuleVerbRegistry` off `defender_dir`
-    — a scenario that never calls `query` needs no registry, and one that does never
-    reaches a real transport. It is passed only when supplied, so the seam stays optional
-    at the boundary rather than making every replay name a registry it does not use.
-
-    `make_model` is the driver's DI seam — now keyed on `(name, effort)`
-    (#493): it dispatches on the model NAME (`driver.gather_model()` marks the nested
-    gather; anything else is the main loop) so the main loop and a nested gather get
-    distinct fakes, each returned as a `BuiltModel` (settings=None — a FunctionModel
-    needs no provider settings). `override_allow_model_requests(False)` makes any real
-    provider call raise, so the run is provably hermetic.
-
-    `tenant` (#1106) is the run's accepted `Tenant`; omitted, the committed fixture tenant set
-    up under this test's own data root and accepted through the real `accept_tenant` (#1120
-    H2). A scenario's grants are its tenant folder's `verb-grants.yaml`: it plants a tenant
-    whose table says what it needs (#1107). The tenant is handed to the driver as one
-    `RunTenant` (`_tenants1106.run_tenant`, i.e. `resolve_run_tenant`).
-
-    `box` is the THIRD injection seam (#540): a `BoxExecutor` handed straight to
-    `run_investigation(box=…)`, which threads it through `bind` onto `AgentDeps.box`, so
-    every bash tool call in the replay executes through THAT executor. A scenario that wants
-    to ASSERT on what crossed the boundary passes its own recording executor.
-
-    Omitted, it defaults to PRODUCTION'S unboxed mode (#1255 C6: "every mode includes the
-    hermetic harness"): `box.start_box` over a docker that has no daemon (`_no_docker_daemon`),
-    with `DEFENDER_ALLOW_UNSANDBOXED=1` set for that one call and restored after
-    (`_unsandboxed_allowed`) — the operator's opt-out, taken the way `run.py` takes it, with the
-    run's tenant half and identity. So whatever production builds for an unboxed run (the run's
-    environment today; the model view, once #1255 lands) is what every replay's bash lane runs
-    in, rather than a lane only tests take. These runs have no daemon, and the alternative (the
-    sandboxed default with no opt-out) makes every bash turn fail closed on infrastructure. It
-    does not weaken the boundary claim, which is pinned directly in the #540 suite: without the
-    opt-out a startup fault aborts the run.
-
-    `review_stages` is the SIXTH injection seam (#774), demanded rather than described: the
-    live write-time gate drives three lenses and a composer from inside the close tool, and
-    without a value the run is handed they are real provider calls that no hermetic scenario
-    can drive.
-
-    Omitted, it defaults to a bundle whose four stages answer without a provider and whose
-    composer finds `holds` — the same reasoning as the `box` default above, one layer up.
-    It was passed through ONLY when supplied while #797 left the bundle empty, which was
-    harmless exactly as long as there was no reviewer to build: once #796 bound one,
-    `run_investigation`'s own default became `live_review_stages`, and every replay that
-    drafted a confident disposition built three live provider clients, wrote their empty
-    `review_*_live_trace.jsonl` files into the run dir, and had the review fail on the
-    unreachable provider. The scripts still passed — `override_allow_model_requests(False)`
-    keeps that hermetic — but they were asserting the SHAPE OF A FAULT while believing they
-    asserted the interim posture, and #796's reviewer had no end-to-end coverage at all. A
-    scenario about a gate arm still hands in its own bundle; `holds` is the default because
-    a replay of a real run is a happy-path script.
-
-    `bounds` is the SEVENTH injection seam (#774 repair): the gate's bounds object, carrying
-    the request ceiling's own BASE alongside the forced-turn cap. Without it the base is a
-    module constant with no environment backing and no path through the entry point, so
-    "the raised ceiling is READ FROM the cap rather than restated as a literal" cannot be
-    discriminated at all — the shipped base and a hardcoded copy of it are the same number.
-    Reaching it any other way means the technique this project ratchets in CI, which is why
-    the seam is the demand. Passed through only when supplied. RED until
-    `run_investigation` accepts it.
-
-    `toolset` is the EIGHTH injection seam (#872, O7/M6): a foreign toolset — one defender
-    does not own, carrying a tool whose return is a dict or a list — handed straight to
-    `run_investigation(toolset=…)`. It exists because O1 is otherwise UNDRIVABLE on the
-    shipped tree: all fourteen registered tools are annotated `-> str` except `query`, and
-    `query`'s dict is discarded by `QueryCapture` at every candidate seam, so there is no
-    in-tree value for the TOON gate to act on and no way to point one at it without patching
-    a module attribute. Supplied once at the entry point and held for the whole run, like the
-    nine existing optional seams; omitted, the run's tool set, capability list and
-    model-visible text are identical to today's. Passed through only when supplied. RED until
-    `run_investigation` accepts it.
-
-    `resume` is NOT an injection seam — it is #920's turn-N branch, a runtime parameter
-    (`branch.BranchSpec`) naming the run and the message this one continues from. It rides here
-    because a resumed run is still a driven replay in every other respect, and the alternative
-    is a second copy of this function's model wrapping, hermetic guard and seam assembly in the
-    #920 scripts. Passed through only when supplied, so every existing call is byte-identical.
-    It is MUTUALLY EXCLUSIVE with `store_factory=` — see `_refuse_conflicting_store_seams`.
-
-    `defender_dir` is the TREE the run reads (#1003): the catalog it walks at run start, the
-    adapters it rosters, the skills it prompts from. It defaults to this checkout, which is
-    what every scenario before #1003 drove; a scenario about the run-start check over a
-    DEPLOYMENT's own catalog (a planted template whose `verb:` disagrees with the shipped
-    table) hands in a planted mirror of the tree instead. The same tree feeds the box's env,
-    so a bash turn in such a scenario runs against the tree the run was told it is in.
-
-    `orient_shim` is ORIENT's shim runner (`orient.ShimRunner`): the three read-only
-    subprocesses behind message 0's lessons and corpus-vocabulary sections. Omitted, it is
-    `no_orient_shims` — those sections are absent, the fail-safe shape a failed shim already
-    has, and no scenario here is about them. Real, they were over a third of the whole unit
-    suite's CPU (three interpreters per drive, ~0.7s of a ~0.95s replay) and made every replay
-    depend on the checked-in lessons corpus. A scenario about those sections passes
-    `orient._shim`.
-
-    `run_state` is the run's live state (#1235 round 3). Production's summary does not carry
-    it: `run_investigation(run_state=…)` is the seam, resolved once at its boundary to
-    `RunState(run_dir, run_id)` when handed none. The harness builds that same state itself,
-    injects it, and returns it in ITS OWN result under `"run_state"` — the one place a driven
-    test reaches a run's state. A scenario whose run ends by RAISING (no result comes back)
-    builds the state first and passes it here, so it still holds what the run decided on.
-    `roster` is the adapters roster the run reads (`run_investigation(roster=…)`): the adapter
-    modules whose declared settings checks judge each granted system at run start (#1256).
-    Omitted, an injected registry that carries its own roster (`ModuleVerbRegistry.roster`,
-    e.g. a planted estate's) hands the run that one, so the run judges the adapters it calls,
-    as production's one roster does; otherwise the run reads `defender_dir`'s.
-    `systems` is the run's judgement of its granted systems that run.py made before the run
-    folder existed and hands its lifecycle (#1256 r4: one judgement per run;
-    `run_investigation(systems=…)`). Passed through only when supplied: omitted, the driver
-    judges them itself, as it does when started without one.
-
-    `driver_summary` is the same drive returning production's summary untouched.
-
-    `clock` is the run clock's source (#1255: `run_investigation(clock=…)`, a zero-argument
-    callable returning an aware UTC datetime). Passed through only when supplied, so every
-    existing call is byte-identical; RED until `run_investigation` accepts it.
-
-    `wrap_model(kind, model)` (#1243) is applied to each scripted `FunctionModel` before it is
-    handed out as a `BuiltModel` — `kind` is `"main"` or `"gather"` — so a scenario can put a
-    production model wrapper (the provider retrier) between the run and its fake. Omitted, the
-    fakes are handed out bare, as before."""
+    plumbing-free."""
     # Legacy replay labels are retained in this helper's call shape. The real run identity
     # comes from its directory: materialize(run_id=<label>) names it the label's fixture UUID.
     state = run_state if run_state is not None else RunState(run_dir, run_dir.name)

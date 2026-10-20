@@ -238,14 +238,7 @@ def _relocated(tmp_path, monkeypatch):
     """The relocated layout, built through the production resolver: a runs base holding only the
     source run, and an episode `runs.create_episode()` claims under the tenant's own
     `<T>/episodes/`, with this episode's three sibling arms in its own container at the ids its
-    roster names (`view.start_runs`) — the container the child processes are handed.
-
-    Nothing here hand-places an episode: the whole point of the demand is WHERE the production
-    resolver puts one, so a fixture that chose the path itself would assert about its own
-    arithmetic. #1187 declared change 5: the configured `episode_dir` resolver is retired; the
-    episode's id is minted, so a reader finds an arm through the roster (`_arm`), never by a
-    composed `<episode id>-<label>` name.
-    """
+    roster names (`view.start_runs`) — the container the child processes are handed."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
@@ -293,13 +286,7 @@ def test_947_a_runs_base_walk_still_finds_an_ordinary_run(tmp_path, monkeypatch)
 def test_947_the_episode_dir_is_outside_the_runs_base(tmp_path, monkeypatch):
     """The episode dir is outside the runs base AND outside the checkout: every recursive walker
     of the base descends into every directory under it, and an untracked directory inside the
-    checkout is what a sibling's own provenance stamp reports as a dirty tree.
-
-    #1187 declared change 5: the episode is claimed by `runs.create_episode()` at the tenant's
-    own `<T>/episodes/<uuid>/`, beside the runs base `<T>/runs`, and `DEFENDER_EPISODES_BASE` is
-    read by nothing — so the variable naming a folder inside the runs base or inside the
-    checkout is no longer refused (the `episodes_root` refusals are retired): it is ignored,
-    nothing is created there, and every claimed episode still lands outside both. (Name kept.)"""
+    checkout is what a sibling's own provenance stamp reports as a dirty tree."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
@@ -357,14 +344,7 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
     """An episode's own placement never dirties a sibling's provenance stamp: with the runs base
     inside a checkout — the shape the devcontainer documents — the episode dir, its manifest and
     its sibling run dirs all land outside that checkout, so a stamp captured over it still reads
-    a clean tree and the family completes without the dirty override.
-
-    #1187 declared change 5: the episode is claimed by `runs.create_episode()` at the tenant's
-    own `<T>/episodes/<uuid>/` (its arm at `<ep>/runs/<uuid>/`), and `DEFENDER_EPISODES_BASE` is
-    read by nothing — so the variable naming a folder INSIDE the checkout (where the configured
-    resolver placed the episode, dirtying the stamp) moves nothing into it: the episode lands
-    under the data root, outside the checkout, and the stamp stays clean. Positive control on
-    the same channel: an untracked file put inside the checkout does read dirty. (Name kept.)"""
+    a clean tree and the family completes without the dirty override."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     checkout = _clean_checkout(tmp_path)

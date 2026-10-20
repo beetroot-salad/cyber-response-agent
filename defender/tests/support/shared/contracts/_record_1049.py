@@ -1,35 +1,4 @@
-"""Shared machinery for #1049's episode-tree reader spec — NO test scripts.
-
-The change (`spec-flow/specs/spec_graph_1049.yaml`, 70-resolutions.md "Resolved shape of demand
-#0"): an episode-tree reader never holds an absolute path it could format. The primitive is
-`defender._io.bind(root, *, os_=os)` — the ONLY operation that takes a path — and the reader it
-answers walks a relative name component by component from the root's own handle
-(`os.open(component, O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC, dir_fd=<previous handle>)`, the
-handle `fstat`-classified), answering a frozen `RecordRead` in exactly one of three states:
-present (`text` is a `str`), absent (`absent=True`, ENOENT at any component) or refused
-(`refusal == f"{name}: {reason}"`). `bound.read_jsonl(name)` is the JSONL twin
-(`errors="replace"` fixed); `bound.under(name)` is a reader bound at a directory named relative
-to it, DERIVED from the parent's handle by the same no-follow components (never path-opened). A name is a
-sequence of plain components — `''`, `'.'`, `'..'`, a NUL and an absolute spelling cannot be
-constructed (`ValueError` naming no path, before any open).
-
-NONE of it exists at base 085b76e0; every import goes through `mod()` PER TEST (the
-`_triplet_947` idiom) so the missing primitive is one failure per test, never a collection
-error hiding the other assertions.
-
-EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE — the shapes are planted on the
-filesystem by `plant_shape` and re-probed on every run; the only fake is `RecordingOs`, a
-pass-through RECORDER over the real `os` that injects nothing and records what the walk asks of
-it (which opens, with which flags and `dir_fd`, which `fstat`s, which closes). It enters through
-`bind`'s `os_=` seam, never `monkeypatch.setattr` (`tooling/lint/lint_monkeypatch.py`). Fault
-content cites the claims that observed it on the real filesystem: the leaf shapes are g1/c-15
-(hard link → EMLINK, both names refused), the permission arms g2/v2-1 (executed as uid 65534
-via `setpriv`), the parent-component shapes v2-1 (a symlinked or dangling parent is the
-`O_PATH|O_NOFOLLOW` handle to the link itself, `S_ISLNK` on `fstat`; a file or fifo squatting a parent
-is "Not a directory" off the handle's `fstat`), the over-long name rg1, the JSONL policy rg3.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for #1049's episode-tree reader spec — NO test scripts."""
 from __future__ import annotations
 
 import ast
@@ -404,20 +373,7 @@ def attribute_names(tree: ast.AST) -> set[str]:
 
 def path_typed_parameters(fn: ast.FunctionDef) -> list[str]:
     """The parameters of `fn` that could carry a ROOT: annotated `Path` or `PathLike`, or
-    named like a root (`path`, `root`, `episode_dir`, `world_dir`, `run_dir`, `*_path`).
-
-    `PurePath` ALONE IS NOT A ROOT, and the distinction is #1077 D7's (it used to be flagged
-    with the other two). A `Path` resolves against the filesystem and can be opened; a
-    `PurePath` is lexical only, and the owner hands the episode tree's readers their record
-    names in that form (`LAYOUT.world(label).report`) precisely so no caller composes one.
-    What makes the exemption safe is not the type but the bind's own grammar: `_io._parse_name`
-    refuses an absolute spelling, a NUL and any `.`/`..` component before a single walk
-    happens, so a name — of either type — cannot name a root. `test_1049_...components` asserts
-    that refusal directly, so this carve-out rests on a checked fact rather than on a promise.
-
-    A `PurePath` parameter that is ALSO named like a root is still reported: the name is what
-    says the caller meant a tree, whatever type it arrived as.
-    """
+    named like a root (`path`, `root`, `episode_dir`, `world_dir`, `run_dir`, `*_path`)."""
     rooty = {"path", "root", "episode_dir", "world_dir", "run_dir"}
     out = []
     a = fn.args
