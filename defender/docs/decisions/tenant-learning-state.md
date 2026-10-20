@@ -40,7 +40,7 @@ root migrations also retain owners/groups. Migration requires quiescent writers.
 
 The original executable contract is `8d550a4a019785abb08eeae5c5a3322a5dda0334`
 on base `27a5d1fc4b2726907202471f9e30434269d784f3`. The current reviewed tests-only contract is
-`b5416c694a2d7f171c652b2ea1d8b38a05c65dac` on `contract/1186-repairs`,
+`d156e7808e8113bfebac11dd01a99d8b3dfc1f8b` on `contract/1186-repairs`,
 merged without rewriting the original base or production implementation. They correct
 finished-tenant and explicit-scratch fixtures, preserve accepted-run producer
 observations, and strengthen runtime API removal, stored-path root checks,
