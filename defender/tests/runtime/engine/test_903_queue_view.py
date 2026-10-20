@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.shared.contracts._frontend_outputs import frontend_outputs_lock  # noqa: F401 — shared pytest fixture
+
 from defender._io import read_jsonl_rows
 from defender.learning.author import drain
 from defender.learning.author.branch import AuthorBranch
@@ -741,6 +743,7 @@ def test_content_that_spells_a_placeholder_is_content(view):
     assert _embedded_data(page) == loud
 
 
+@pytest.mark.usefixtures("frontend_outputs_lock")
 def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths, data_root, tmp_path):
     frontend = Path(build.__file__).resolve().parent
     names = ("lessons.json", "lessons.html", "queues.json", "queues.html")
