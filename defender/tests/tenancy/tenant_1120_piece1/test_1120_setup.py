@@ -151,6 +151,7 @@ def test_1186_setup_moves_only_named_state_and_preserves_metadata(tmp_path: Path
 
 @pytest.mark.parametrize("fault", [
     "missing-source", "file-source", "unknown-partial", "foreign-token", "unowned-aside-child",
+    "unowned-stage-child",
 ])
 def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path, fault: str) -> None:
     """O5: an explicit bad source or unexplained migration state cannot be guessed away."""
@@ -159,7 +160,7 @@ def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path,
     destination = H.tenant_folder(root) / "learning"
     if fault == "file-source":
         source.write_text("not a directory", encoding="utf-8")
-    elif fault in {"unknown-partial", "foreign-token", "unowned-aside-child"}:
+    elif fault in {"unknown-partial", "foreign-token", "unowned-aside-child", "unowned-stage-child"}:
         _legacy_learning(source)
         if fault == "unknown-partial":
             partial = destination.with_name("learning.adopting")
@@ -167,8 +168,10 @@ def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path,
             (partial / "unowned").write_text("do not discard", encoding="utf-8")
         else:
             aside = source / f".adopting-to-{H.TID}"
+            if fault == "unowned-stage-child":
+                aside = aside.with_name(f"{aside.name}.stage")
             aside.mkdir()
-            if fault == "unowned-aside-child":
+            if fault in {"unowned-aside-child", "unowned-stage-child"}:
                 (aside / ".adoption").write_text(
                     "63ac3146-4d58-4bb8-9f94-124902ceef1a\n", encoding="utf-8")
                 (aside / "unrelated").mkdir()
