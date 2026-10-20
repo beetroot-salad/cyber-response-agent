@@ -715,7 +715,10 @@ class LearningState:
         investigation of one case coalesces onto one request, and the later run wins. Lock-free
         and atomic (a staged replace), so the end-of-run enqueue never waits on a drain."""
         name = f"{_QUEUE}/{case_id}.json"
-        self._write(name, json.dumps(spec) + "\n", "replace")
+        try:
+            self._write(name, json.dumps(spec) + "\n", "replace")
+        except OSError as failed:
+            raise OSError(failed.errno, failed.strerror, self._abs(name)) from failed
         _logger.info(f"enqueued for curation: {self._abs(name)}")
 
     def _json_names(self, folder: str) -> list[str]:

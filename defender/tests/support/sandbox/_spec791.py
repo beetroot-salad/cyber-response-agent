@@ -424,10 +424,12 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
     `--tenant` with D9's one tenant, created in this test's own data root (the autouse
     `data_root` fixture) through the real `create_tenant` first — without it `main` refuses the
     run before anything is spent."""
-    from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant
+    from defender.tests.support.shared.contracts._data_root_1078 import ensure_d9_tenant, current_data_root
+    from defender.tenancy._tenant import requested_tenant
 
     require_tail_seam(main)
     tenant_id = ensure_d9_tenant()
+    requested_tenant(current_data_root(), tenant_id).learning.mkdir(exist_ok=True)
     return main([str(alert), "--tenant", tenant_id, *args], lifecycle=tail.lifecycle,
                 visualize=tail.visualize, ticket_writer=tail)
 

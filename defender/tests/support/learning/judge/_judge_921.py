@@ -615,7 +615,15 @@ def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any)
     if state is None:
         from defender.tests.support.learning.core._state1135 import env_state
 
-        state = env_state()
+        if os.environ.get(STATE_DIR_ENV):
+            state = env_state()
+        else:
+            from defender.learning.core.config import LoopPaths
+            from defender.learning.core.state import LearningState
+
+            tenant = episode_runs_for(episode_dir).tenant
+            tenant.learning.mkdir(exist_ok=True)
+            state = LearningState.open(LoopPaths.for_tenant(tenant))
     return grade_at(episode_dir, judge=judge if judge is not None else scripted_judge(),
                     state=state, **kw)
 

@@ -656,9 +656,7 @@ def current_tenant() -> Any:
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
     existing = sorted(p.name for p in root.iterdir()
                       if (p / "tenant.json").is_file()) if root.is_dir() else []
-    tenant = set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
-    tenant.learning.mkdir(exist_ok=True)  # setup provisions mutable state for launched runs
-    return tenant
+    return set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
 
 
 def tenant_episodes(data_root: Path) -> Path:

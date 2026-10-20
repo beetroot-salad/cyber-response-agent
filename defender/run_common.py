@@ -487,7 +487,7 @@ def enqueue_curation(
                 case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),
                           "run_id": str(address.run_id)})
     except OSError as e:
-        _logger.error(f"NOT enqueuing for curation: could not write the request: {e!r}")
+        _logger.error(f"NOT enqueuing for curation: could not write the request: {e}")
         return False
     except StateRefused as refused:
         _logger.error(f"NOT enqueuing for curation: could not enqueue the request, refused "
