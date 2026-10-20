@@ -89,12 +89,7 @@ def _captured_at(ctx: VerbContext) -> str:
     source's reading at the fork. Never the cut-off `ctx.as_of`: that bounds what a world
     serves, and stamping it would freeze one visible time while every other one advances. A
     context that belongs to no run (no run state: the CLI lane, pre-flight, a test stub) has
-    no run clock and stamps the wall clock (rev 5 C4).
-
-    `getattr` because duck-typed contexts (CLI lane, test stubs) reach this adapter, and an
-    `AttributeError` in a verb body is filed as an infra fault (exit 2). `health_check` stamps
-    nothing and does not call this.
-    """
+    no run clock and stamps the wall clock (rev 5 C4)."""
     state = getattr(ctx, "run_state", None)
     at = state.now() if state is not None else datetime.datetime.now(datetime.UTC)
     return _clock.z_seconds(at)

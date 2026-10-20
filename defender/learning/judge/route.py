@@ -1,22 +1,6 @@
 """Routing (design M5 as amended: A1, A7, A13, A15, A16): what becomes of every finding a draw
 filed, computed from its typed pointers and its own world's draws — never from a word another
-world or the family call said (P-c, I2).
-
-Two decisions, each made here and nowhere else:
-
-* `combine_draws` — a world's completed draws combine by UNANIMITY (A7) into its verdict: the
-  outcome (not measured, `none`, or an investigator bucket) and the systems count only when
-  every draw agrees; otherwise the world is withheld (`draws_disagree`). The doubt mark is set
-  when ANY draw keeps a `mislabelled` finding; a named gap is listed when EVERY draw names the
-  same blocked call (A2's key). The family's draws combine by union.
-* `fate` — every filed finding's one ledger lane (A13): a drop reason (precedence: pointers
-  unresolved, names only another run, no two-run pair), the O16 sample-citation drop, or a
-  routing fate (defender, questioner, user record, or one of the world-gate lanes).
-
-The index of a finding runs over the three filed lists in filing order, before any drop
-(`filed_findings`), so `finding_id = <episode>/<world>/<draw>/<index>` keeps its form and kept
-ids may skip numbers.
-"""
+world or the family call said (P-c, I2)."""
 
 from __future__ import annotations
 

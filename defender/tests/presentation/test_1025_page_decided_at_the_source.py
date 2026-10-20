@@ -45,11 +45,7 @@ def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
     relative name `worlds/<w>/report.md` at its source and never holds the root, so a short
     relative spelling of the root has nothing to leak from and nothing to be cut out of a
     word). Before, the same page read "<episode>port.md could not be <episode>ad" (review of
-    PR #1042). Positive control: the root's spelling is absent from the page.
-
-    #1187 (Layout A, R5): an episode is reached by id under its tenant and its folder is named
-    by its id, so the short spelling is the DATA ROOT's — the scene's own data root `re`,
-    rendered from inside its parent — and the episode folder keeps its id."""
+    PR #1042). Positive control: the root's spelling is absent from the page."""
     ep = E.sample_episode(tmp_path)
     copy = E.copy_episode(ep, tmp_path / "re" / ep.dir.name)
     short = copy.dir

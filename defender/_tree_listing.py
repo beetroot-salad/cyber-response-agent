@@ -1,17 +1,5 @@
 """Fixed-shape listings of a held tree, built only from `Bound.entries()` and `Bound.under()`
-(#1134, design addendum 2, B2).
-
-The trees the learning drains read have known, shallow shapes: a lesson corpus is flat (depth
-1), the query catalog is at most `<sys>/_draft/<file>.md` (depth 3). So nothing here walks a
-tree of unknown depth, and nothing holds a descriptor: every folder is listed by its own
-`entries()` call, which re-walks the folder's name from the held root, no-follow, and closes
-what it opened before answering. A folder swapped or removed after its parent was listed is
-therefore that folder's own refusal or absence, never an empty folder (`entries()` answers a
-folder removed while it is listed absent).
-
-Neither helper opens anything itself, and neither catches anything: every refusal is the
-reason `entries()` gave, verbatim. `under()` validates a name and opens nothing.
-"""
+(#1134, design addendum 2, B2)."""
 from __future__ import annotations
 
 import dataclasses
@@ -37,16 +25,7 @@ class EntryKind:
 
 def entry_kind(view: Bound, name: str | PurePath) -> EntryKind:
     """What stands at `name` below `view`, as its folder's listing judges it (`entries()`:
-    a link of any sort, a FIFO, socket or device is `ENTRY_OTHER`, a hard link `ENTRY_FILE`).
-
-    One listing: `view.entries()` for a one-component name, else `view.under(<parent>)
-    .entries()`. Absent when that folder is absent or has no row for the leaf; refused, with
-    the listing's reason, when the listing was refused — a linked or non-directory holding
-    folder among them (a caller that needs O2's "other" for that maps the refusal to it).
-
-    `name` follows `Bound.read`'s grammar, checked by `under` before any I/O (`ValueError`);
-    `""` and `"."` are refused too, since the view's own folder has no listed parent here
-    (ask `view.entries()`). Never raises for a plant or a refusal."""
+    a link of any sort, a FIFO, socket or device is `ENTRY_OTHER`, a hard link `ENTRY_FILE`)."""
     spelling = name.as_posix() if isinstance(name, PurePath) else name
     view.under(name)  # the grammar check: opens nothing, raises ValueError for a bad name
     folder, _sep, leaf = spelling.rpartition("/")
@@ -82,16 +61,7 @@ def _parts_order(name: str) -> tuple[str, ...]:
 
 def list_tree(view: Bound, *, depth: int) -> TreeListing:
     """Every entry of `view`'s folder down to `depth` levels (`1`: the folder's own entries,
-    exactly `view.entries()`), named relative to the view.
-
-    Each directory row above the last level is listed by its own `view.under(<name>)
-    .entries()`, so it is judged afresh, from the held root, without following links; a
-    directory at the last level is reported and never listed. A folder whose listing is refused
-    is in `refused` with its reason, one found gone since its parent's listing is in `gone`,
-    and the rest of the shape is still listed. It stops at the first level that holds no folder
-    to list, so a depth deeper than the tree costs nothing. `depth` is required: an `int` of at
-    least 1, else `ValueError` before any I/O. Never raises for a plant or a refusal; holds
-    nothing open."""
+    exactly `view.entries()`), named relative to the view."""
     if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
         raise ValueError(f"depth must be an int of at least 1, not {depth!r}")
     top = view.entries()

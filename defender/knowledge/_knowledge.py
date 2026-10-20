@@ -1,22 +1,4 @@
-"""Where a tenant's model-facing agent knowledge lives: the one owner of its layout (#1108).
-
-The agent knowledge is the per-tenant half of what a run's model reads: the lesson corpora,
-the per-system skills (`skills/<system>/`), the saved query catalog
-(`skills/gather/queries/<system>/`) and what a system keeps in its skill folder (the
-tacit-knowledge registry). Every reader and writer
-gets those locations from a `KnowledgePaths`; nothing else joins a corpus name onto a root.
-
-Today the knowledge still sits inside the product checkout, at `defender/` itself
-(`of_defender_dir`), so its folders coincide with the code tree's. #1108 moves it into each
-tenant's own repo (`<data root>/<T>/knowledge/agent/`), keeping the same relative shape under
-the agent root; only the construction of a `KnowledgePaths` changes then.
-
-The GENERAL skills (gather's own `SKILL.md` and `defender-sql.md`, invlang, handbook, advisory,
-connect) are product code, not knowledge: they stay under `defender_dir / "skills"` and are
-never reached through here, even while the two folders coincide.
-
-Pure path arithmetic: nothing here touches disk.
-"""
+"""Where a tenant's model-facing agent knowledge lives: the one owner of its layout (#1108)."""
 from __future__ import annotations
 
 from pathlib import Path

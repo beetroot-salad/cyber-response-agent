@@ -37,13 +37,7 @@ def test_g15_a_source_id_that_leaves_no_room_for_a_sibling_is_refused_before_any
         tmp_path, monkeypatch):
     """G15(ii), at the entry point: a source id the launcher cannot branch from is refused
     before the questioner, with no episode folder. The positive control is a source under a
-    fresh data root: it launches.
-
-    #1187 declared changes 1, 3 and 4: nothing is derived from the source id any more — the
-    episode is a fresh UUID, so no "room for `-<label>`" rule exists. The 201-byte source id is
-    refused because it is not a UUID (`RunId` admits only canonical lowercase UUID text, and
-    the launcher's `--tenant T <id>` refuses an old id), never for the room it leaves. The
-    control's source is named by a UUID. (Name kept.)"""
+    fresh data root: it launches."""
     import uuid
 
     long_id = ("2026" + "x" * 199)[:201]
@@ -74,12 +68,7 @@ def test_g15_a_link_at_the_derived_episode_name_is_passed_over_and_left_untouche
     """G15(iii), at the entry point. The launcher's exclusive claim adopts nothing: a link
     planted among the tenant's episodes (pointing at a real folder outside the data root) is
     passed over, the launch claims an episode of its own and runs there, and the link and its
-    target are untouched.
-
-    #1187 declared change 3: there is no derived episode name to squat and no `<id>-r2` to move
-    on to. The launch claims a fresh canonical-UUID folder under `<T>/episodes/` — a real
-    directory, holding the manifest — beside the link, which is left as it was. The source is
-    named by a UUID (declared change 1). (Name kept.)"""
+    target are untouched."""
     import uuid
 
     from defender.tests.storage.ids_1187 import _spec1187 as S
@@ -191,12 +180,7 @@ def test_g19_a_sibling_for_another_tenant_is_refused_before_any_write_or_spend(t
     and BEFORE ANY WRITE: the episodes root and the data root are census-identical after it.
     Today `_sibling_tenant_agrees` refuses after the manifest read; PR 2 refuses earlier, at
     `runs.episode(ep)`. The existing pins assert no spend but take no write census. The positive
-    control is the same episode resumed by T: it runs.
-
-    #1187 declared changes 6 and 8 (R1, O8): the record half flips. `acme`'s repository looks
-    for the episode under `<acme>/episodes/` only, finds nothing and refuses — it reads nothing
-    of the owning tenant's, so its refusal can no longer name that tenant (today it does, from
-    the container record). (Name kept.)"""
+    control is the same episode resumed by T: it runs."""
     src, ep = P.sibling_scene(tmp_path)
     P.second_tenant(P.data_root(), H.T_ID)
     episodes_before, data_before = P.tree(P.episodes(P.SIBLING_TENANT)), P.tree(P.data_root())

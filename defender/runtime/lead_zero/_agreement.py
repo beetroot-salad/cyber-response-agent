@@ -1,17 +1,5 @@
 """Item 3's dispatch identity: the configured template, resolved against the deployment's own
-catalog and checked for agreement with the table's grant, once, at run start.
-
-The table (`verb-grants.yaml`) decides whether the correlation lead runs and under which pair;
-the config (`lead-zero.yaml`) decides which template it binds. They are authored separately and
-can disagree, and a silent disagreement makes the lead burn its whole request budget trying to
-bind a template its grant-filtered index cannot list.
-
-The check is composed of the lead's own predicates (`_corpus.is_established` for the index,
-`resolve_query_id` for the query tool) rather than a second spelling of them, which could
-accept an id the lead cannot bind. It runs on every run, since the operator who can author the
-mismatch never runs CI. It lives here, not in the table loader, because the loader cannot name
-the template without an import cycle and has no catalog.
-"""
+catalog and checked for agreement with the table's grant, once, at run start."""
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -54,24 +42,7 @@ def resolve_correlation_dispatch(
     template_id: str, templates: Iterable[QueryTemplate], grant: VerbGrant, *,
     source: Path | None = None, table: Path | None = None,
 ) -> CorrelationDispatch:
-    """Resolve `template_id` against `templates` and check it agrees with `grant`.
-
-    When the grant holds no query verb the lead is skipped and the id is not consulted: a
-    withholding degrades the run rather than stopping it.
-
-    Otherwise, refuse — naming both sides — when:
-      (a) the id resolves to no established template, or to more than one (a catalog fault);
-      (b) `resolve_query_id` would not hand the id back verbatim on the system the file is
-          filed under (a fault in the file, not the table);
-      (c) the template declares no `verb:` (a malformed template, not a table mismatch);
-      (d) `(template.system, template.verb)` is not exactly the holder's one query pair.
-
-    The grant passes through unchanged: the config selects a template, only the table grants.
-    `source`, when given, is the config file the id was read from, and `table` the grant
-    table the grant was loaded from: each refusal opens with the file its fault is in, so an
-    operator is told which one to edit — the table for a grant of the wrong shape, the config
-    for everything about the template it names.
-    """
+    """Resolve `template_id` against `templates` and check it agrees with `grant`."""
     def at(message: str, where: Path | None = source) -> str:
         return message if where is None else f"{where}: {message}"
 

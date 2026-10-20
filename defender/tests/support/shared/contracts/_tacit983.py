@@ -1,27 +1,4 @@
-"""The container-root investigation the #983 suites are all written against.
-
-ONE document builder, shared by the unit suites and the e2e replay, because every #983
-scenario is the SAME case with one cell moved: a container's UID 0 rewriting the CA bundle
-on a build-runner host — the actor class the issue's own transcript dead-ended on, because
-no identity system in this deployment holds a record for container UID 0 (claim c7, carried
-as given). Each scenario differs only in which `:R` row it writes, so a second hand-built
-document per test would be four copies of the same eleven blocks drifting apart.
-
-The blocks are modelled on `examples/example-b-parallel-iam-cmdb.md`, which the shipped
-corpus keeps green — so a refusal any of these suites reports is about the cell the scenario
-moved and not about a hypothesis block that never validated in the first place.
-
-WHAT A REGISTRY HIT COSTS THE DOCUMENT (the anchor-receipt contract, added in the hardening
-pass). A `:R authz` row citing `anchor_kind: tacit-knowledge` may not name an `anchor_id` out
-of the air: the lead that resolved the row has to have RECORDED the matching entry as its own
-lookup outcome first, as a `:R consultations` row on that same lead. So the authorized scene
-is TWO rows, not one — `authorized_rows()` builds the pair — and every scenario that fakes a
-hit fakes it by moving one cell of that pair (`cited_id=` fabricates the citation, `hit_by=`
-moves the recorded hit onto a different lead). See `test_tacit_authz_983`'s
-`test_authz_anchor_id_must_match_its_own_leads_recorded_hit` for the check itself.
-
-NOT a test module (the leading underscore keeps pytest from collecting it).
-"""
+"""The container-root investigation the #983 suites are all written against."""
 
 from __future__ import annotations
 
@@ -150,22 +127,7 @@ def lookup_hit_row(
     reasoning: str = "tacit-knowledge.lookup returned one unexpired scope-matching entry",
 ) -> str:
     """The lead's own record of what `tacit-knowledge.lookup` came back with — a
-    `:R consultations` row under the SAME anchor kind the contract is declared under.
-
-    The existing mechanism, not a new one. `AnchorConsultation` (`schema.py`) already carries
-    `anchor_kind`, `anchor_id`, `result` and `anchor_query`, it lands on the dispatching lead's
-    own `outcome.anchor_consultations`, and it structurally cannot discharge a contract — so
-    recording the hit costs the document nothing and buys it nothing on its own. That is
-    exactly the property the anchor-receipt check needs: the `:R authz` row still has to be
-    written, and it is now checkable against something the same lead already recorded.
-
-    A MISS records no `anchor_id` — there is no entry to name — and it SAYS SO, in the `hit:`/
-    `miss:` token its `result` opens with (`enum consultation.lookup_outcome`). Reading the
-    outcome off the id's presence alone was the first cut, and it made "a miss names no
-    `anchor_id`" a convention rather than a rule: a row saying `miss` and naming an entry anyway
-    backed a citation, which is the one fabrication shape `SKILL.md` publishes as refused. The
-    receipt now reads the outcome, and the two cells are held against each other.
-    """
+    `:R consultations` row under the SAME anchor kind the contract is declared under."""
     return consultation_row(
         anchor_kind="tacit-knowledge", grounding="org-authority", anchor_id=anchor_id,
         result=result, window=window, reasoning=reasoning, resolved_by=resolved_by,
@@ -350,21 +312,7 @@ def document(
     second_contract: bool = False,
     conclude: str = "",
 ) -> str:
-    """The investigation, with `rows` spliced into the `:R` block.
-
-    `settled=True` grades `h-001` to `++` and `h-002` to `--` — the shape a benign close
-    needs. `settled=False` leaves both at a mild grade, which is what a run whose
-    authorization question is still open honestly records.
-
-    `system` is `l-001`'s `:L findings` system cell — the document's own record of WHICH
-    system that lead queried, which is what `basis=exhausted` is checked against.
-
-    `second_contract=True` declares `h-002.ac2` beside `h-001.ac1`, so a frontier assertion
-    can tell "this row cleared its own contract" from "this row cleared the frontier".
-
-    `conclude` is appended verbatim; the default writes NO `:T conclude` at all, so a
-    scenario can drive the close tool's own entry price rather than the document's.
-    """
+    """The investigation, with `rows` spliced into the `:R` block."""
     strong = dict(
         h1="++", h1_cites="p1,p2", h1_force="severe",
         h1_note="sanctioned by an authored registry entry", h2="--", h2_force="severe",
@@ -412,16 +360,7 @@ def authorized_rows(
     **authz_kwargs,
 ) -> str:
     """The rows a REAL registry hit writes: the lead's recorded lookup outcome, then the
-    `:R authz` row that cites it.
-
-    Four knobs, one per way a document can claim a hit it does not have:
-      * `cited_id` — what the `:R authz` row cites, defaulting to what the lead recorded. Set
-        it to something else and the citation is a fabrication.
-      * `hit_by` / `resolved_by` — which lead recorded the hit, and which lead the row hangs
-        off. Split them and the row is citing another lead's finding as its own.
-      * `baseline=True` adds mechanism A's `runtime-evidence` consultation beside the pair,
-        which is the shape a real container-root close has (O3 context + O1 authorization).
-    """
+    `:R authz` row that cites it."""
     consultations = [lookup_hit_row(anchor_id=hit_id, resolved_by=hit_by)]
     if baseline:
         consultations.append(consultation_row())

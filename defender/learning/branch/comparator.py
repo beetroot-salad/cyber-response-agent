@@ -1,24 +1,4 @@
-"""Two payloads and an axis: the only comparison this design makes, blind by signature.
-
-One implementation, two seats. The review asks "do these two answers to one question
-contradict each other?" with no axis; `episode.delta_o` asks "does this world's answer differ
-along the axis it declared?" with the world's axis text. Neither question is about which world
-produced the payloads, so the function admits two payloads and an axis and nothing else.
-
-That signature is the blindness guarantee: a comparator that could see which side was the base
-or what a world declared could have its verdict predicted from the label rather than read off
-the bytes. `build_prompt` has the same property: no parameter could carry an identity into the
-prompt. The one further argument, `known_ids`, is what the prompt must NOT carry: the family's
-whole identity set for the redaction filter, the same for both payloads, so it says nothing
-about which side is which and nothing of it is rendered.
-
-Mechanical checks come first: a canonical re-dump settles `same` for differing key order, and a
-key-spelling fold settles `formatting` for `host-name` versus `host_name`, with no model call
-and no nondeterminism. Most replayed pairs are settled this way.
-
-One `Verdict` type spans both seats, and each caller refuses members outside its own seat. Two
-enums would be two vocabularies to keep in step.
-"""
+"""Two payloads and an axis: the only comparison this design makes, blind by signature."""
 
 from __future__ import annotations
 
@@ -138,18 +118,7 @@ def mechanical(a: str, b: str) -> Verdict | None:
 
 
 def build_prompt(a: str, b: str, axis: str | None, known_ids: Collection[str]) -> str:
-    """The one prompt this comparison sends, from the two payloads and the axis alone.
-
-    No other rendered parameter, so no prompt can render an identity it was never handed.
-    `known_ids` (the family's `family_identities`, required) is only removed from the text.
-
-    Each payload is attacker-influenced adapter output and gets its own fresh untrusted frame;
-    one shared frame would let the first payload close the frame around the second.
-
-    Both are also redacted: a frame stops text being obeyed, not being read. A ledger row's
-    `payload_text` can be a recorded refusal naming the view namespace, the view template and
-    the world token, all of which must stay hidden from the model.
-    """
+    """The one prompt this comparison sends, from the two payloads and the axis alone."""
     seat = _seat_guide(axis, known_ids)
     return (
         "Two recorded answers to the same question are below, each inside its own untrusted "

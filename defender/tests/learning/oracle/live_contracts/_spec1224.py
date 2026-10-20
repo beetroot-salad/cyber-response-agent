@@ -1,143 +1,5 @@
 """Shared machinery for #1224's spec — "branching through a live oracle". NO test functions;
-underscore-prefixed so pytest never collects it.
-
-Imported by every test file here as `from defender.tests.learning.oracle.live_contracts import _spec1224 as S`.
-
-The change (`spec-flow/specs/spec_graph_1224.yaml`; `.spec-flow/design-doc.md` as amended by
-`.spec-flow/design-amendments.md`, with the human's answers in
-`.spec-flow/frontiers/70-resolutions.md`): a sibling's world is served by a live ORACLE at the
-`serve_one` seam instead of the staging/applier machinery. A world carries natural-language
-`facts`; every uncached call in a world with facts gets one oracle turn (it may `run_query`,
-`forge` telemetry, `record_fact`, run `python` in a sandboxed box, self-`check`, then `submit`
-a served answer plus a claim), host checks 1-5, and a verifier pass in its own context. N
-failed attempts on one call raise `OracleUnservable`, which never reaches the investigator.
-Pre-flight replays the original calls through each world's oracle to CALIBRATE (Amendment 2:
-it keeps only forged rows and recorded facts, never a served answer) and writes the
-write-once episode outcome record (`accepted` / `unusable` / `refused`); a sibling writes its
-own per-world record when it goes unservable, the launcher writes "did not finish" when a
-sibling process exits without one. The judge model decides each world's bucket.
-
-NONE OF THE NEW NAMES EXISTS AT BASE 96e4cdb0. Every import goes through `mod()` / `sym()` PER
-TEST (the `_triplet_947` idiom), so a missing target is one failure per test, never one
-collection error hiding the other four hundred.
-
-COINED NAMES LIVE HERE AND NOWHERE ELSE (`COINED` below). The design leaves these names to
-the implementer (fork F-01, provisional, non-material); this suite spells them once, and if
-write-code-from-spec names anything differently it renames it HERE, never in a test file:
-
-  Module `defender.learning.branch.estate.oracle` (M3/M4/M5/M6/M7/M13):
-    * `OracleUnservable(Exception)` with `.reason` (a short word: "retries", "budget",
-      "sandbox", ...) and `.call` (the `(system, verb, params)` it failed on).
-    * `OracleSandboxError(Exception)` — the oracle's box is not sandboxed (M18, H-05).
-    * `start_box(*, env)` — the production oracle box factory; it never yields an
-      unsandboxed executor, `DEFENDER_ALLOW_UNSANDBOXED=1` notwithstanding.
-    * `oracle_settings(env)` -> an object with `retry_cap`, `rate`, `budget`,
-      `turn_deadline`, `model`, `check_model`; a bad knob raises `FatalConfigError` naming it.
-    * `check_submission(base, served, claim, *, world, store, real_data)` -> list of failure
-      texts (empty = passes) — M4's ONE host checker, shared by the host and the oracle's
-      advisory `check` tool.
-  Module `defender.learning.branch.estate.limiter`: `RateLimiter(rate, *, clock, sleep)` with
-    `.acquire()` — waits, never refuses (M11=A); a limiter that cannot read its own state
-    raises (fails closed, S17).
-
-  `WorldRegistry(roster, grant, *, world, ledger, as_of, serving, oracle_dir, limiter, tenant,
-    grant_home)` — `serving` is `registry.oracle_serving(settings, *, oracle, verifier, box,
-    restart_after)`: `oracle` / `verifier` are pydantic-ai `Model`s (the doubles below are
-    `FunctionModel`s), `box` is a zero-arg callable returning a `BoxExecutor`, and `settings`
-    the oracle's knobs (`retry_cap`, `turn_deadline`, `budget`, `rate`); `oracle_dir` is the
-    world's oracle-side state directory. They are settled once at the boundary and passed in
-    whole; `registry_seams` below holds the suite's defaults for the ones a scenario does not
-    set.
-  `cli.main(argv, *, spawn, questioner, preflight, judge, lessons_dir, live_tree, oracle,
-    verifier, roster)` — the launcher; `door=`, `door_transport=`, `adapters=` and `invoke=`
-    leave with staging/review. `roster=` is pre-flight's grant-decided reader's roster.
-  `run.main(argv, *, ..., oracle, verifier, roster)` — the sibling, the same three seams.
-  `Step.PREFLIGHT` between `Step.QUESTIONER` and `Step.RUNS` (F-21); `Step.STAGING` and
-    `Step.REVIEW` are gone.
-  `AgentRole.ORACLE == "oracle"`, `AgentRole.ORACLE_CHECK == "oracle_check"` (M11).
-  `run.preflight_role_models(model_override=None, *, branching=False)` (M25: the oracle roles
-    are preflighted only where `branching=True`).
-
-  Oracle tools (the `ToolCallPart.tool_name`s the doubles emit): `run_query(system, verb,
-    params)`, `forge(forged_id, fact_id, system, row)`, `record_fact(entity, field, value)`,
-    `python(code)`, `check(served, claim)`, `submit(served, claim)` (ends the turn).
-  Verifier tools: `run_query(system, verb, params)`, `verdict(passed, reason)` (ends its pass).
-  A failed attempt's verdict reaches the oracle's next request naming `check <n>` (1-5) or
-  `verifier` (`verdict_names`).
-
-  Claim (`claim()` below): `added: [{forged_id, fact_id}]`, `removed: [{row, side_query:
-    {system, verb, params}, count}]`, `changed: [{entity, field, old, new}]`, `counts: [{group,
-    base, added, removed, served}]`, `entity_refs: [{forged_id, column, entity}]` (M12=A's
-    entity-reference exemption).
-
-  Records (all paths relative to the episode dir):
-    * `outcome.yaml` — pre-flight's write-once outcome record: `{outcome: accepted|unusable|
-      refused, reason, unservable_worlds: [{world, reason, call}], not_replayable: [{system,
-      verb, params, reason}], drift: [{system, verb, params, status: drifted|unknown}]}`. It
-      replaces `review.yaml` and `staged.yaml`. An absent or torn one is "no record".
-    * `world_records/<label>.yaml` — a world's own record: `{world, reason: "oracle
-      unservable"|"did not finish"|"budget", call, detail}`.
-    * `oracle/<label>/` — the world's oracle-side state, ONE writer (S19), outside the archive
-      tree and the run dir (N14): `forged.jsonl` (frozen rows `{forged_id, fact_id, system,
-      row}`), `facts.jsonl` (`{entity, field, value}`), `answers.jsonl` (the served-answer
-      cache, `{system, verb, params, served}`), `ledger.jsonl` (the oracle-side ledger:
-      `{actor: oracle|verifier|preflight|host-check, system, verb, params}`), `base.jsonl`
-      (this world's own live base answers, M16).
-    * `samples.yaml` — keyed by system: `{<system>: {verbs: {<verb>: [<answer text>, ...]}}}`
-      or `{<system>: {unavailable: <reason>}}`; a citation names `samples.yaml#<system>`.
-    * `served/<episode token>.<label>.jsonl` — the world ledger (unchanged path). Decisions
-      (`source`): `passthrough`, `oracle`, `real-error`, `refused`, and `fault` only for
-      `resolve_call`'s adapter-cannot-load row (F-02=A). An `oracle` row also carries
-      `base_digest`, `claim`, `verifier_verdict`, `attempts`.
-  Manifest v2 (`family_v2`): a world carries `facts: [{fact_id, statement, entities}]` (an
-    explicit `facts: []` for the control world, M07=A); the top level carries `served_systems`;
-    `discriminator` keeps only `predicate`. `overlay`, `configured_patterns`,
-    `captured_patterns`, `discriminator.holding_system` and `discriminator.envelope` refuse the
-    manifest naming that it predates the oracle (O15).
-  Judge reply v2: a world-scope reply carries a top-level `bucket` and `systems: [..]`;
-    findings carry no `pattern` / `holding_system`. #1234 replaced the rest of this reply
-    (the `observability` bucket and the family-scope verdict word are retired names,
-    `learning/core/retired.py`; the reply's three lists and `judge.yaml`'s rows are
-    `judge_contrast_1234/_spec1234.py`'s). `judge.yaml` keeps a family
-    `validity: usable|unusable`.
-  Lesson frontmatter: `systems: [..]` replaces `pattern` / `holding_system`.
-  Question-writer: `author_family(*, source_run_dir, episode_dir, invoke, leads, alert, frontier,
-    served_systems, samples, lessons)` (`stageable_patterns` -> `served_systems`,
-    `corpus_samples` -> `samples`, the per-system samples document);
-    `_questioner_lessons_section(lessons, *, served_systems)`;
-    `cli.system_samples(source_run_dir, served_systems)` -> the samples document.
-  Pre-flight: `cli.preflight_replay(episode, *, roster, tenant, oracle, verifier, **knobs)` is
-    the coined unit entry; scenarios prefer the whole launcher (`launch`). The launcher hands
-    each sibling its rate slice as the CHILD ENV's `ORACLE_RATE` (= R/k, k = worlds launched,
-    the control world included), observable on `FakeSpawn.launches[i]["env"]`.
-  Knobs (environment, set with `monkeypatch.setenv`): `ORACLE_MODEL`, `ORACLE_CHECK_MODEL`,
-    `ORACLE_EFFORT`, `ORACLE_CHECK_EFFORT`, `ORACLE_RETRY_CAP`, `ORACLE_RATE` (queries/second
-    per episode), `ORACLE_BUDGET`, `ORACLE_TURN_DEADLINE` (seconds).
-  The investigator clock's excluded oracle-held total lives on the run's one `RunState`
-    (#1235 round 2: `budget_enforcer.oracle_held(state)`, read off `drive(...)["run_state"]`);
-    no file holds it, so no credit outlives its run (S15; the retired sidecar was #1239).
-
-EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE, OR A FAKE CITING ITS CLAIM:
-  * adapter errors are the real `AdapterFault` subclasses (`integrations/faults.py`), raised
-    by real adapter modules this file plants on disk (GA-40, GD-36: exit 2 for Config/Transport,
-    exit 1 for Upstream);
-  * the unsandboxed box is a real `BoxExecutor()` (GD-16: `sandboxed` is False for anything
-    but a docker transport); the sandboxed one is a `_DockerTransport` subclass that records
-    the frame and answers it, the one property GD-16 says tells the two apart;
-  * a model's bad submission is SCRIPTED CONTENT the design itself names as the failure (O3:
-    "an oracle double that adds an undeclared row, edits a base row silently, or drops a
-    covered fact's telemetry");
-  * a model provider outage is the exception GPR-01 observed the model client raise once its
-    own bounded retries give up: `provider_outage(status)` builds it (`ModelHTTPError` 503 / 429,
-    or `ModelAPIError` "Connection error." when no connection is made); a model double raises it
-    from a request (`raising(...)` moves, or `Fault(raise_after=n)`);
-  * a box run cut off by its time bound raises `subprocess.TimeoutExpired`, unwrapped, out of
-    `BoxExecutor.run_parsed` — never a `BoxResult`, never an exit code (GPR-02).
-
-Fakes enter through the injection seams above and never by `monkeypatch.setattr` (the project
-profile's `tests.idioms`, `tooling/lint/lint_monkeypatch.py`). Every fake RECORDS what it was
-handed; payload demands assert against what the fake saw, never against its canned reply.
-"""
+underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
 import contextlib
@@ -728,23 +590,7 @@ def _usage_without_utf8(messages: list[Any], response: Any) -> None:
 
 
 class ScriptedModel:
-    """A recording, fault-injecting model double: each model request pops the next `Move`.
-
-    Tier 2 of the fault hierarchy: a model is neither cheap nor deterministic to drive, so its
-    replies are SCRIPTED and everything it is handed is RECORDED — `seen` (every request's
-    INBOUND text: the host-authored `ModelRequest` parts plus the agent's instructions; the
-    double's own earlier tool-call args are not in it), `messages` (the raw message lists),
-    `tools` (the tool names offered on each request). Payload demands assert against these.
-
-    `fault` is data: `delay` sleeps that many seconds before each answer (oracle latency, O4's
-    "an investigator time limit fires because of oracle latency"); `raise_after=n` is a
-    provider outage after n answers (`provider_outage()`, GPR-01). A `raising(...)` move is
-    the same failure at one point of the script.
-
-    `then` is the move repeated once the script is spent (e.g. a verifier that always passes);
-    without it a spent script answers text-only and sets `overrun`, which a scenario asserts
-    False — a double cannot invent a submission.
-    """
+    """A recording, fault-injecting model double: each model request pops the next `Move`."""
 
     __name__ = "ScriptedModel"
 
@@ -1162,11 +1008,7 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     `J.write_ledger` stamps (`<token>/<i>`, or the ledger row's own `call_id`); a ledger row
     whose `call_id` is `None` gets no table row. Calls are filed under lead `l-001`, in ledger
     order; a decision other than `passthrough`/`oracle` is a non-zero exit. The payload sidecar
-    each row names is written beside it.
-
-    #1255 G4/G6: the table row carries no id. The world's host-only call-join record
-    (`worlds/<X>/call_join.jsonl`, `J.write_call_join`) names each row's id by its
-    `(lead_id, seq)` — written even when the ledger is empty."""
+    each row names is written beside it."""
     rq = mod("runtime.record_query")
     breaker = mod("runtime.circuit_breaker")
     world = Path(ep) / "worlds" / T.world_id(ep, label)
@@ -1240,14 +1082,7 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
     base recording, every world archived under `worlds/<X>/` (the #921 archive builder), the
     world ledgers with the query-table rows they answered (`write_call_table`), each planted
     world's oracle store directory, and pre-flight's outcome record (`outcome=None` writes
-    none).
-
-    #1187 R2 (review-4 F38): an episode whose worlds are archived reached RUNS, so it carries
-    `runs/` and the arm roster naming every manifest world (the fixture's explicit RUNS step,
-    `_triplet_947.plant_roster`, taken last). Without it the page renders the episode with no
-    world sections (design Flow 4: manifest present, roster absent = never reached RUNS), a
-    state this fixture's archived worlds contradict. No roster is planted when no world is
-    archived (`labels=()`)."""
+    none)."""
     ep = episode_v2(tmp_path, doc=doc, root=root, episode_id=episode_id, base_rows=[
         captured("idp", "query", query_params("user:alice"),
                  {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]})])
@@ -1608,23 +1443,7 @@ def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = No
                after_source: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
     """A runs base on the fixture tenant holding ONE finished source run whose captured calls
     are `calls` (default `default_calls()`), each also answered by the live estate with the
-    same payload — so a clean replay finds no drift. Returns `(runs base, source run dir)`.
-
-    `after_source(src)` is a scenario's own PRE-branch edit of the source (a sentinel row
-    appended to its table) or of the live estate (a drifted answer).
-
-    #1255 (P2/P3): a fork snapshot holds what the source's model-readable files held when its
-    branch response arrived — the table's length, each payload's hash — and an arm restores
-    the table cut to that length and is refused at launch if the source no longer opens on it.
-    So the source is written in the order a real run writes it:
-      * BEFORE its session is seeded (`T.runs_base(land_calls=...)`, where a fixture snapshot is
-        planted): the pre-branch calls, then `after_source` — everything the source held at the
-        branch point;
-      * AFTER it, APPENDED (the table only grows past the branch point, never rewritten): the
-        post-branch calls (`POST_BRANCH_LEAD`), with the main-session pair that dispatched
-        their lead after the branch message.
-    Every live answer (`est.answer`) is set before `after_source` runs, so a drift it plants
-    over one of them stands."""
+    same payload — so a clean replay finds no drift. Returns `(runs base, source run dir)`."""
     calls = list(default_calls() if calls is None else calls)
     est.place(tenant_id=tenant_id)
     pre = [c for c in calls if not c.post_branch]

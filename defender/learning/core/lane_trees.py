@@ -85,15 +85,7 @@ class DrainTrees:
 
     def tree_for(self, path: Path | str) -> tuple[Held, str] | None:
         """The held mount containing `path`, and `path`'s POSIX name below it (`"."` for the
-        mount point itself), or `None` when no mount contains it.
-
-        Lexical: no `resolve()` and no filesystem access, so a link anywhere neither moves a
-        path into a mount nor out of one; containment is by whole path components (a
-        `lessons-questioner/` path is never under `lessons/`). `path` must be absolute and
-        anchored at one `/` (`ValueError` otherwise: never `None`, which would send the caller
-        to a plain path). A `..` component below a mount is `ValueError`: lexically
-        inside, it may name something outside. A `..` above every mount is not collapsed, so
-        such a path is `None` even when it would collapse into a mount."""
+        mount point itself), or `None` when no mount contains it."""
         p = _absolute(path)
         for mount, held in self._held:
             try:
@@ -163,14 +155,7 @@ KIND_ABSENT = "absent"
 
 def kind_at(repo_root: Path, tree_for: TreeFor, path: Path | str) -> str:
     """What stands at the working-copy `path` (absolute, or relative to `repo_root` as git
-    status spells it): `"absent"`, `"file"`, `"dir"` or `"other"`.
-
-    Asked of the held mount when `tree_for` places `path` inside one: its folder's listing
-    judges it (`entry_kind`), so nothing below the mount point is followed and a hard link is
-    `"file"` here (refused by :func:`read_at`). A holding folder whose listing is refused —
-    linked, not a directory, unreadable — answers `"other"` (#1134 O2): something stands in the
-    way, and it is not the plain entry. Never raises for a plant or a refusal. A path outside
-    the lane's mounts keeps its plain path: it lies in the box's read-only area (#1134 D3)."""
+    status spells it): `"absent"`, `"file"`, `"dir"` or `"other"`."""
     full = repo_root / path
     hit = tree_for(full)
     if hit is not None:

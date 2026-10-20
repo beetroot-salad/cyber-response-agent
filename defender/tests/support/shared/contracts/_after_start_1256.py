@@ -1,21 +1,4 @@
-"""#1256 — a fault planted in an adapter AFTER the run's start check.
-
-Since #1256 a run imports every granted adapter at its start (gather's system index did so
-before it, C5): an adapter that cannot be imported then is down for the whole run with its cause
-(O-5a), and no call to it is made. A call that fails to LOAD its adapter is therefore only
-possible when the adapter changes after that start — something that can change during a run,
-which the breaker still counts as an infra failure (DP2).
-
-The loader (`runtime.verbs._load_adapter_module`) keeps one module per RESOLVED file, so new
-bytes written over a file already loaded change nothing a later call sees. What a later call does
-load afresh is a different file: `Relink.break_` replaces the adapter by a link to a module that
-cannot be imported (the link resolves elsewhere, so the call loads that module, and fails), and
-`Relink.restore` puts the original file back (it resolves to what the run loaded at start).
-Nothing is patched in process; the fault is real input through the real loader.
-
-`AfterStart` fires such an action when the model ASKS for one scripted turn: after the run
-started and every earlier call of that conversation was answered, before this turn's calls run.
-"""
+"""#1256 — a fault planted in an adapter AFTER the run's start check."""
 from __future__ import annotations
 
 from collections.abc import Callable

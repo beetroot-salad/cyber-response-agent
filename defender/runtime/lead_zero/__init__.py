@@ -1,16 +1,4 @@
-"""The harness-dispatched correlation lead (`l-00c`), run to its end before MAIN's opening message.
-
-The lead reads this run's alert itself (its stored goal is the harness contract plus a pointer to
-the alert file, never alert bytes), is bound by ONE harness deadline, and ends in exactly one way
-MAIN is told of: its framed summary, or one fixed sentence naming why there is none (A2, A4, A7).
-The ending is decided here, once, from what the lead did, never from text a model or provider
-wrote.
-
-  * `_spec`    — the reserved id, the ending vocabulary, the correlation grant.
-  * `_agreement` — the run-start check that the configured template and the table agree.
-  * `_capture` — the lead's run-folder bookkeeping (declaring row, spawn spend, queries rows).
-  * `_items`   — the lead's contract and its one dispatch.
-"""
+"""The harness-dispatched correlation lead (`l-00c`), run to its end before MAIN's opening message."""
 from __future__ import annotations
 
 import asyncio

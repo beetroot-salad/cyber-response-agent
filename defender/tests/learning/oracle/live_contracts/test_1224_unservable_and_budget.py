@@ -210,13 +210,7 @@ class _Sibling:
 def _sibling_episode(tmp_path: Path, monkeypatch: Any, est: S.Estate) -> Path:
     """A v2 episode whose source is a finished run on the fixture tenant (a sibling resumes
     from it). Called BEFORE a scenario scripts its own answers: the source run answers the
-    default captured calls.
-
-    #1105 PR 2: the sibling opens its episode by id. #1187 (R1, R2, O9, declared changes 5
-    and 6): the episode is the fixture tenant's, at `<T>/episodes/<uuid>` (no configured
-    episodes base, no container record), and the launcher's RUNS step (`T.episode_view` over
-    that tenant) has made `runs/` and the arm roster the sibling reads its arm id from (O4b) —
-    what the launcher makes before the first sibling."""
+    default captured calls."""
     from defender.episodes._episode_handle import Episode
 
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))

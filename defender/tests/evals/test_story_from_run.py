@@ -86,17 +86,7 @@ def test_the_catalog_description_is_not_rendered():
 
 
 def _renderer_prose(meta: dict) -> str:
-    """The story minus every block quoted verbatim from the runner record.
-
-    The leak this file guards is the RENDERER inserting a host the run did not touch —
-    the catalog `description` naming a scenario's default target, which retired two
-    cases. A host inside a `cmd` or its output is the opposite: it is what actually ran,
-    and censoring it would hide the operation from the oracle.
-
-    `living-off-the-land` is the case that forces the distinction. Its target resolves to
-    canary-1 and its command is `curl -fsS http://web-1/`, so `web-1` appears in the
-    story and must — a sweep over the raw text calls that a second target and is wrong.
-    """
+    """The story minus every block quoted verbatim from the runner record."""
     prose = STORY.render_story(meta)
     for step in meta.get("steps") or []:
         for verbatim in (step.get("cmd"), step.get("stdout_tail"), step.get("stderr_tail")):

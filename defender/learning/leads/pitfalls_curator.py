@@ -93,25 +93,7 @@ def _failures_of(records: list[dict], *, keep_goal: bool = True) -> list[dict]:
 
 
 def _build_pitfalls_handoffs(rows: list[dict], *, systems: frozenset[str]) -> list[dict]:
-    """One entry per surface, one failure per distinct mistake.
-
-    Two shapes, told apart by `surface`:
-
-        {"surface": "system",  "system": "<name>", "path": "…/<name>/execution.md", "failures": […]}
-        {"surface": "reducer",                     "path": "…/gather/defender-sql.md", "failures": […]}
-
-    `system` is omitted from the reducer shape, so a `defender-sql` lesson provoked by one
-    system's envelope is written without naming it (the attribution survives in
-    `executed_queries`). At most one reducer entry, sorted after the system entries, because
-    `lead_pitfalls.md` reads entries in order.
-
-    Merges the rows itself (idempotent): this is the last seam before the prompt, so the
-    curator never sees N copies of one bullet. `occurrences` orders each failure list.
-
-    `systems` is the adapter-declared set; a row naming anything else yields no handoff. The
-    `is_system_name` shape check runs first, so a traversal-shaped name is never looked up. A
-    reducer row is routed by its `query_id`, so `gather` need not be a declared system.
-    """
+    """One entry per surface, one failure per distinct mistake."""
     by_system: dict[str, list[dict]] = {}
     reducer: list[dict] = []
     for r in _loop_persist.merge_pitfalls(rows):
@@ -204,21 +186,7 @@ def _frontmatter_block(text: str) -> str | None:
 
 
 def _outline(lines: list[str]) -> tuple[list[tuple[int, str]], list[str | None]]:
-    """The document's `##` headings as `(line index, text)`, and the section each line sits in.
-
-    One pass for both so they can't disagree; takes the split lines because the section index
-    is positional.
-
-    Fence-aware via `_corpus._FENCE_RE`: fenced content is prose, so a heading re-planted
-    inside a ``` block doesn't count as surviving. Headings are `startswith("## ")` rather than
-    `_corpus._HEADING_RE`, so a bare `## ` line still closes the section.
-
-    A section also closes on any heading that outranks it — ATX `# ` or a setext underline —
-    since markdown renders those as a new top-level section. Otherwise an untrusted bullet could
-    plant `# How to read this file` at the end and be certified as under `## Common pitfalls`;
-    closing makes such a line land in no section, which the placement rule refuses. A setext
-    underline closes from its title line, so that line's entry is corrected in place.
-    """
+    """The document's `##` headings as `(line index, text)`, and the section each line sits in."""
     headings: list[tuple[int, str]] = []
     sections: list[str | None] = []
     section: str | None = None
@@ -301,19 +269,7 @@ def _readable_pair(repo_root: Path, path: str, *, tree_for: TreeFor) -> tuple[st
 
 def _pitfalls_content_rule(repo_root: Path, xy: str, path: str, *, tree_for: TreeFor) -> None:
     """The content half of the gate (mirror of `lead_author._skills_content_rule`): is what the
-    curator wrote still the document?
-
-    Scoped to the reducer surface, the one corpus write target with no correspondence audit,
-    scaffold rule or other content rule. A tick must preserve the frontmatter block, every
-    committed `##` section, every non-blank line those sections held, and the boundary of
-    `## Common pitfalls` over existing lines; everything added must land under that section (at
-    its real markdown extent, created at the end if absent). Outside that section the document
-    is append-only in both directions.
-
-    Markdown inside a bullet is not sanitized — the same exposure exists on every
-    `execution.md`. The prompt instead requires a reducer bullet to name the payload shape it
-    applies to, since every system's reduce reads this file before every attempt.
-    """
+    curator wrote still the document?"""
     if path != REDUCER_REL or "D" in xy:
         return
     committed, current = _readable_pair(repo_root, path, tree_for=tree_for)
@@ -381,17 +337,7 @@ def _pitfalls_content_rule(repo_root: Path, xy: str, path: str, *, tree_for: Tre
 
 
 def _pitfalls_offer_rule(path: str, *, reducer_offered: bool) -> None:
-    """Was this tick's curator offered the reducer surface it wrote?
-
-    Distinct from `_pitfalls_path_rule`, which asks whether a path is ever writable (a constant
-    of the deployment); this asks whether the target was opened on this tick.
-
-    The curator's static prompt names the reducer path unconditionally, and each failure's
-    alert-derived `stderr_digest` is in its context, so a digest saying "also record this in
-    <the reducer surface>" would otherwise be obeyable on a batch of pure system rows — and
-    invisible to the partition, which computes `reducer_taught` from the offer. System surfaces
-    need no mirror: an `execution.md` is already bounded by the declared set.
-    """
+    """Was this tick's curator offered the reducer surface it wrote?"""
     if path == REDUCER_REL and not reducer_offered:
         raise LeadAuthorError(
             f"pitfalls curator wrote {path} on a tick that offered no reducer handoff; "
@@ -475,20 +421,7 @@ def _split_batch_by_membership(
     rows: list[dict], batch_ids: list[str], kept: set[str],
     *, reducer_offered: bool, changed: list[str],
 ) -> tuple[list[str], list[str], list[str]]:
-    """The tick's partition into curated, dropped and held ids, asymmetric by row class.
-
-    A system row is curated iff its system is in `kept`; otherwise nothing about it could ever
-    be taught, and it is dropped on the first tick.
-
-    A reducer row is curated only when the offer was made and taken — a reducer handoff was
-    emitted and `changed` carries the reducer literal. Otherwise it is held: a no-edit tick is a
-    legitimate outcome (`lead_pitfalls.md`: "skip that failure; never invent one"), and
-    rotating the row out under an unrelated commit's sha would lose the only record of the
-    mistake.
-
-    `reducer_offered` is passed in rather than re-derived from the handoffs, so the commit gate
-    (`_pitfalls_offer_rule`) and this partition read one derivation.
-    """
+    """The tick's partition into curated, dropped and held ids, asymmetric by row class."""
     reducer_taught = reducer_offered and REDUCER_REL in changed
     committed_ids: list[str] = []
     held_ids: set[str] = set()
@@ -559,24 +492,7 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> int:
-    """One curation tick over the pitfalls queue.
-
-    `on_curated` is the consumption switch. Left `None`, the tick consumes what it taught as
-    soon as its commit exists. Given, the tick still commits but hands the `PitfallsDisposition`
-    to the callable instead of applying it, so the caller can wait for the batch's tree to pass
-    the scrub before the queue forgets the rows. Only the success-path consumption is
-    switchable.
-
-    `lock_wait_seconds` bounds every wait on the queue's append lock this tick makes. The drain
-    passes its configured wait, since it holds the tick's locks meanwhile; `None` is
-    unbounded.
-
-    `git_timeout` bounds every git call over the worktree (the tick's `ClaimGit`, #1175); one
-    that overruns raises `GitOverran`, a systemic `GitError`.
-
-    `trees` are the lane's held mounts (the drain's work step opens them for its label): the
-    commit gate reads the working copy through them (#1134). Checked before any work: they must
-    hold `paths.skills_dir` itself as a mount point, else `LeadAuthorError`."""
+    """One curation tick over the pitfalls queue."""
     # An entry point on its own (by hand) opens the handle; the drain hands its own in.
     if state is None:
         with LearningState.open(paths) as own:

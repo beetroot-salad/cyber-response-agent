@@ -174,28 +174,7 @@ def render_report(  # noqa: PLR0913 — the report's full inputs; each is a host
     evidence: str | None = None, ceiling_test: tuple[CeilingReceipt, ...] = (),
     runtime_evidence: tuple[RuntimeEvidenceReceipt, ...] = (),
 ) -> str:
-    """Render report.md from typed, host-chosen arguments; there is no model-supplied body.
-
-    `disposition`, `outcome`, `failure_kind` and `cause` all come from closed vocabularies, so
-    no review stage's prose reaches this file, which goes verbatim into the judge's prompt and
-    out through the ticket bridge. `failure_kind` is omitted, not written empty, when the
-    review did not fail, so a count can filter on its presence.
-
-    Two companion-derived exceptions, both model-chosen structure rather than model-authored
-    prose: `ceiling_test` receipts (a priced `inconclusive` close's `ref`/`state`/`cap`, ids
-    already verified against the run's `:L findings`) go into the frontmatter, and
-    `runtime_evidence` (the recorded baseline consultations, with a host-parsed window) goes
-    into the body so a reader can see whether the alerted pattern recurs in this estate. The
-    frontmatter carries nothing the host has not checked.
-
-    Free text for the analyst (a receipt's `note`, a baseline's `result`/`reasoning`) goes in
-    the body only. The whole file is still capped and may not contain `</report>`, so the write
-    gate refuses the delimiter in those cells and bounds both body blocks; the bounds together
-    keep the file cap unreachable by notes alone. The blocks are rendered by the price gate's
-    own renderers so its byte bounds measure exactly what is written here.
-
-    The cause is a frontmatter key only, not repeated in the body, to avoid a further egress.
-    """
+    """Render report.md from typed, host-chosen arguments; there is no model-supplied body."""
     kind_line = f"failure_kind: {failure_kind}\n" if failure_kind is not None else ""
     ceiling_block = ceiling_test_block(ceiling_test)
     body = f"Disposition recorded by the close gate. outcome={outcome}."
@@ -342,16 +321,7 @@ async def _close_investigation_async(  # noqa: PLR0913 — the close's own seams
     evidence: str | None = None, validator: ArtifactValidator = validate_artifact,
     forced: bool = False,
 ) -> CloseResult:
-    """The close shared by the sync host entry and the async tool.
-
-    `forced` marks the framework's close of a run cut short (set only by the driver's
-    `_close_a_run_cut_short`). It exempts the close from the flagged-row window and the
-    structure check: with no model left to repair, gating would leave the run with no
-    report.md at all, which is worse than publishing off a malformed companion.
-
-    The companion is read and parsed once, and that one body is threaded through every gate,
-    so the review judges the document the price gate priced and the report carries the rows
-    the review saw."""
+    """The close shared by the sync host entry and the async tool."""
     if deps.role is not AgentRole.MAIN:
         raise ModelRetry(
             "close_investigation is reachable only from the investigator (main) role — "
@@ -541,19 +511,7 @@ def _refuse_if_entry_price_is_owed(
     text: str, disposition: str, *, forced: bool = False,
 ) -> CompanionBody:
     """Collect the structural price this close's disposition owes, refuse if unpaid, and return
-    the parsed `investigation.md` it was read from.
-
-    Returning the parsed body means the companion is parsed once, here, inside the guard that
-    turns a parse fault into a refusal, and the review and report use exactly the rows this
-    gate priced. The price is collected here as well as at the write gate because nothing else
-    on the close path reads the companion. Per-disposition rules live in the owner's
-    `_DISPOSITION_GATES`.
-
-    `text` is `""` for a never-written companion, which owes every priced disposition its full
-    price. A parse failure refuses (fails closed) rather than waiving the price. `forced` is
-    exempt from the parse fault only, never the price: an unparseable document becomes the
-    empty body, so a forced close of a priced disposition is still refused.
-    """
+    the parsed `investigation.md` it was read from."""
     try:
         companion, _warnings = parse_dense_companion(text)
     except Exception as exc:

@@ -319,13 +319,7 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
         tmp_path, episodes):
     """An episode before RUNS has no container (N-ep): the view opens, its `state` is absent,
     and `view.open` / `view.create` refuse — the create making nothing (G5: an arm is never
-    made in a container nobody bound).
-
-    #1187 declared change 10 (R2): `create_container()` is replaced by `start_runs(labels)`,
-    which makes `runs/` — with no record — then writes the arm roster once, one fresh UUID per
-    manifest world; before it, `view.arm_ids()` is `None`. Then `view.create(view.arm_id(b))`
-    hands out the arm at `<ep>/runs/<roster id>`. A second `start_runs` REFUSES (C-19's
-    adoption is gone) and changes neither the roster nor the arm. (Name kept.)"""
+    made in a container nobody bound)."""
     import uuid
 
     from defender.tests.support.learning.branch import _triplet_947 as T
@@ -366,13 +360,7 @@ def test_an_unreadable_container_is_recorded_not_raised_and_never_written_throug
     """R51-20 / G25: a link at `<episode>/runs` — to a real folder holding an arm and no
     record — is an UNREADABLE container. The view opens (the page reads it as absent), its
     `state` unreadable with the reason recorded; `view.open` refuses; nothing is written
-    through the link.
-
-    #1187 declared changes 2, 10 and 15 (R2): the episode is `<T>/episodes/<uuid>/`, before
-    RUNS (no roster); the arm in the link's target is named by a UUID. `create_container()` is
-    replaced by `start_runs(labels)`, which REFUSES the link before any roster is written (no
-    `arms.json` appears, nothing lands in the target). Positive control: with a real, empty
-    `runs/` in the link's place, `start_runs` writes the roster. (Name kept.)"""
+    through the link."""
     import uuid
 
     from defender.tests.support.learning.branch import _triplet_947 as T
@@ -405,14 +393,7 @@ def test_an_unreadable_container_is_recorded_not_raised_and_never_written_throug
 def test_episode_files_is_the_owners_handle_alone_and_creates_nothing(tmp_path, episodes):
     """`runs.episode_files(ep)` is the judge's door: the owner's handle on the episode folder.
     A missing episode and a file at the episode's name are refused, and nothing is created
-    (#1133 O4.8.2, G23).
-
-    #1187 declared change 6 (R1): the door judges no container record — the half that refused
-    a `_tenant.json` naming another tenant is retired (O8: another tenant's episode is not under
-    `<T>/episodes` at all, pinned by
-    `ids_1187/test_1187_layout_isolation.py::test_another_tenants_episode_is_absent_to_this_tenants_repository`).
-    The tenant's own episode, its arm container holding no record, opens. Ids are UUIDs and the
-    episode is `<T>/episodes/<uuid>` (declared changes 1 and 5). (Name kept.)"""
+    (#1133 O4.8.2, G23)."""
     import uuid
 
     from defender.tests.storage.ids_1187 import _spec1187 as S

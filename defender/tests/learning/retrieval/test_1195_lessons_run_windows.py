@@ -1056,11 +1056,7 @@ class LeftProcess:
     """A process the spawn leaves in the box, simulated over the fake daemon: it lives while the
     container keeps running in the boot it was started in, and dies with the run's stop (a
     later start is a fresh boot, as a stopped container's processes do not come back). With
-    `outlives_its_run` it acts regardless (the control: what a process that survived would do).
-
-    It gets its turn whenever the host asks a placement (`cfg.tree_for`), which the tick first
-    does for the commit, after the citation read: the schedule on which a live process beats the
-    commit. `turns` counts the turns it was given; `acts` what it did."""
+    `outlives_its_run` it acts regardless (the control: what a process that survived would do)."""
 
     def __init__(self, daemon: X.FakeDaemon, *, outlives_its_run: bool = False) -> None:
         self.daemon, self.outlives = daemon, outlives_its_run

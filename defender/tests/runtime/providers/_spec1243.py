@@ -1,39 +1,6 @@
 """Shared machinery for #1243 part 1's contract — "one retrier for temporary provider failures; a
 provider that stays down ends the run by name". NO test functions; underscore-prefixed so pytest
-never collects it.
-
-The design is the issue's current revision (r2, base `d7b1886d`). Its obligations: O1 retry (408,
-409, 429, >=500 and no response; at most 4 wire attempts; Retry-After honoured; no attempt starts
-10 min after the first began; a retry is invisible to the run, P3), O2 nothing else retried, O3
-provider-down ends the run (MAIN, its leads, the correlation lead, a review stage), O4 no report,
-O5 legible downstream, O6 a branched sibling records "did not finish"; P1 one retry owner below
-every caller (client libraries' own retries off).
-
-THE SUITE IS WRITTEN BEFORE THE IMPLEMENTATION. Every new surface is reached through `mod()` /
-`sym()` PER TEST, so a missing target is one failure per test, never a collection error.
-
-COINED NAMES (the design names `ProviderDown` and "the policy, injected through the `make_model`
-seam"; the spellings below are this contract's, binding on the implementer):
-
-  * `runtime.providers.ProviderDown(model, status, attempts)` — `.model`, `.status` (`None` = no
-    response), `.attempts`; raised `from` the last original error.
-  * `runtime.providers.RetryPolicy(sleep=, clock=, jitter=)` — every field defaulted to the real
-    thing: `sleep` an async `(seconds) -> None`, `clock` a monotonic `() -> float` in seconds,
-    `jitter` a `() -> float` in `[0, 1)`.
-  * `runtime.providers.with_retries(model, policy)` — the retrier applied to any pydantic-ai model.
-  * `runtime.providers.build_for_effort(name, effort, *, retry=...)` — the two-argument
-    `make_model` shape kept; the returned model carries the retrier.
-  * each retry's WARNING line (O1: "call site, status, attempt n/4, wait") names the model's
-    `model_name` (the call site the wrapper knows, AF2), the status when there is one, `n/4`,
-    and the wait it is about to take, in SECONDS, as a number.
-
-The run-end value is the literal `"provider-down"` and `run.py`'s exit the literal 4 (D4).
-
-FAULTS ARE DATA, grounded in the installed pydantic-ai 2.43 (C1, C17): an HTTP failure is a
-`ModelHTTPError(status, model, body, headers=...)` (its `headers` are lowercased; `retry-after` is
-the documented read); no response is a `ModelAPIError` with no status (`_spec1222.provider_timeout`,
-PA-15's observed shape). The fakes decide nothing: which status retries is production's.
-"""
+never collects it."""
 from __future__ import annotations
 
 import asyncio

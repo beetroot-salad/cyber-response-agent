@@ -1,20 +1,5 @@
 """The alert's front door (#1222): admission, the tenant's alert mapping, the three facts and the
-run's record — the one owner of each, so no reader re-derives what another already settled.
-
-* `admit` — run start's check of the operator's raw alert bytes, before any run folder exists.
-  Strict UTF-8, no byte-order mark, exactly one JSON object the parser can follow (what Python's `json` accepts: a duplicate member is last-wins, by ruling), no unpaired
-  surrogate escape. A refusal is `AlertRefused`, a fixed sentence naming the cause and echoing
-  nothing of the alert.
-* `AlertMapping` / `settings_reasons` / `load_alert_mapping` — the tenant's REQUIRED
-  `settings/alert-mapping.yaml` (dotted paths for `signature`, `event_time`, `summary`) and the
-  tenant check's reasons for it and for the case-history mapping: one fixed sentence per fault,
-  naming the file, never the parser's own words or a host path.
-* `derive_facts` — the one derivation of the three facts from an admitted alert and a mapping.
-* `AlertRecord` / `record_text` / `read_record` / `verified_record` — the per-run record the
-  facts are written to, once, with the alert's byte digest. Every later reader takes the alert's
-  identity and its facts from it; a host-side read of the alert's bytes checks them against the
-  digest first (`verified_alert`).
-"""
+run's record — the one owner of each, so no reader re-derives what another already settled."""
 from __future__ import annotations
 
 import dataclasses

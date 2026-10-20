@@ -1,24 +1,5 @@
 """`tacit_cli` — the tacit-knowledge registry's author-side CLI: does this file say what its
-author thinks it says?
-
-    defender/.venv/bin/python -m defender.cli.tacit_cli check [--defender-dir <tree>]
-    defender/.venv/bin/python -m defender.cli.tacit_cli show  [--defender-dir <tree>] [--as-of YYYY-MM-DD]
-
-The registry is a hand-edited, committed YAML file. A malformed entry is dropped rather than
-refused, and the reason goes to stderr during an investigation run where nobody reads it, so a
-typo looks exactly like an unwritten entry: the lookup misses and the run escalates a case
-someone had sanctioned. This gives the loader's refusal text a reader.
-
-It is a second consumer of the loader, never a second implementation: `check` prints what
-`tacit_knowledge_adapter.read_registry` returns, the same walk a live `lookup` uses. A separate
-validator could certify a file the runtime reads differently. For the same reason `check` fails
-only on the loader's drops; everything under `notes` (expiring soon, legal but broad) is advice
-the loader does not judge.
-
-A maintainer tool with no `bin/` shim: agents reach the registry through the typed `query`
-tool, and a `defender-*` command would be one more thing for the gate to classify. Humans and
-CI run it as a module.
-"""
+author thinks it says?"""
 
 from __future__ import annotations
 

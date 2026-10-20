@@ -98,13 +98,7 @@ def _opens_through_the_seam_no_follow(rec: H.RecordingIO, t) -> bool:
     call went through the injected seam; every `hold` passes `follow=False` and holds `<T>` or
     `<T>/runs`; a `bind` is rooted at the data root (it follows only its root's spelling, as
     configuration); no `hold_new` (its `makedirs` follows links). How many openers the walk
-    takes is not pinned.
-
-    This reads the CALLS' arguments only — it does not observe that nothing below the data root
-    is followed. That a link there is refused is driven on the filesystem by
-    `test_1105_a_link_at_tenant_runs_refuses_every_function_naming_it` (a link at `<T>/runs`) and
-    `ids_1187/test_1187_layout_isolation.py::test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repository_door`
-    (a link at `<T>`)."""
+    takes is not pinned."""
     opens = [(n, a, k) for n, a, k in rec.calls if n in _OPENERS]
     if not opens:
         return False
@@ -140,14 +134,7 @@ def test_1105_open_run_returns_the_tenants_run_under_tenant_runs(tmp_path):
     """open_run(tenant, RunId.parse(id)) over a runs folder whose entry tenant.runs/<id> is a
     real directory returns the Run that Run.under(tenant.runs, id, tenant_id=tenant.id) builds:
     its tenant_id is tenant.id, its runs_base is tenant.runs (tenant.data_root / tenant.id /
-    'runs'), its run_dir is tenant.runs / id; nothing is written.
-
-    #1187 declared changes 1, 6 and 8 (R1, S-iso): the container holds no `_tenant.json`, so no
-    record is read at all — no call through the recording io= seam names `_tenant.json`; the id
-    is a UUID; and the open's openers have the no-follow shape
-    (`_opens_through_the_seam_no_follow`: the calls' arguments, not a link refused — that is
-    the link tests'), where PR 1 pinned one hold of `tenant.runs` at its last level. (Name
-    kept.)"""
+    'runs'), its run_dir is tenant.runs / id; nothing is written."""
     from defender.run_repository import Run, RunId, RunsRepository
 
     rid = str(uuid.uuid4())
@@ -177,13 +164,7 @@ def test_1105_every_tenant_keyed_function_raises_type_error_before_any_read(tmp_
     Path, a RunTenant), and runs.open raises it when the run id it takes is not a RunId, a str
     included; the proof that nothing was read is a runs folder planted as a link, which would
     otherwise refuse, and a recording io= seam passed to each refused call records no call at
-    all. Positive control: the same calls with an accepted Tenant and a RunId answer.
-
-    #1187 declared changes 1, 6, 8 and 13 (R1, R6, S-iso): the tenant-keyed record functions
-    (`record_episode_runs`, `episode_runs`, `sibling_run_ids`) are deleted with the `_episodes`
-    record, so the TypeError guard is the repository's constructor and runs.open's run id; the
-    ids are UUIDs and no folder holds `_tenant.json`; the linked runs folder refuses at its
-    level (`TenantRefused` or `RunRefused`). (Name kept.)"""
+    all. Positive control: the same calls with an accepted Tenant and a RunId answer."""
     from defender.run_repository import RunId, RunsRepository
     from defender.runtime.run_tenant import RunTenant
 
@@ -224,13 +205,7 @@ def test_1105_the_repository_answers_from_the_tenant_it_is_handed_and_reads_no_e
     """With DEFENDER_DATA_ROOT unset or naming another data root, and with the tenant's knowledge
     folder removed after acceptance, every repository function answers exactly as before from
     tenant.runs of the Tenant it was handed. Positive control: accept_tenant at the edge
-    refuses the same tenant once its knowledge folder is gone.
-
-    #1187 declared changes 1, 6 and 13 (R1, R6): the record readers and writer are deleted with
-    the `_episodes` record, so the answers are the repository's own (`runs.open`, `runs.list`,
-    `runs.all_runs`), and `runs.create` stands in for the writer: it lands under
-    `tenant.runs`, never under the environment's data root. Ids are UUIDs and the container
-    holds no `_tenant.json`. (Name kept.)"""
+    refuses the same tenant once its knowledge folder is gone."""
     from defender.run_repository import RunId
 
     r1, r2 = _uuids(2)
@@ -292,14 +267,7 @@ def test_1105_every_repository_function_takes_an_injected_io_like_the_handle(tmp
     """The repository takes a keyword-only injected I/O seam (default: the real defender._io) —
     PR 2: RunsRepository(tenant, *, io=) — passes it to the Run it hands out, and routes each
     method's own open through it, so a recording seam sees it. The suite uses the seam to
-    observe calls, never to inject an I/O fault (test shape).
-
-    #1187 declared changes 6, 8 and 13 (R1, R6, S-iso): the record functions and their own
-    seams (`record_episode_runs`, `episode_runs`, `sibling_run_ids`, `episode_sibling_ids`)
-    are deleted; and PR 1's "one `hold(tenant.runs, follow=False)`" is the walk from `<T>`, so
-    what is pinned is that each method opens through the seam and never follows a link below
-    the data root (`_opens_through_the_seam_no_follow`). The id is a UUID and the container
-    holds no `_tenant.json`. (Name kept.)"""
+    observe calls, never to inject an I/O fault (test shape)."""
     from defender.run_repository import RunId, RunsRepository
 
     rid = str(uuid.uuid4())
@@ -336,15 +304,7 @@ def test_1105_open_run_refuses_each_sidecar_suffixed_id_as_run_refused(tmp_path)
     """open_run refuses with RunRefused an id ending in each of the host-only sidecar suffixes
     (`H.SIDECAR_SUFFIXES`) and an id of the staged shape (a sidecar suffix, then '.staged-',
     then lowercase hex digits), even when the runs folder is absent (before the folder), and
-    even when a real directory sits at the name over a good folder.
-
-    #1187 declared change 1: run ids are canonical lowercase UUIDs, so each sidecar-suffixed
-    name is `<uuid><suffix>`, refused at `RunId.parse` or at the open (either way RunRefused
-    naming it, before the folder); and the names PR 1 placed just outside the clause (MF-21 B's
-    boundary: `<uuid>.run-end.json-2`, `run-end.json`, `<uuid>.run-end.json.staged-g`,
-    `<uuid>.oracle-held.json`) are no run ids at all any more — each is refused too, where
-    today each opens as a run. Positive control: the plain UUID opens over a container holding
-    no `_tenant.json`. (Name kept.)"""
+    even when a real directory sits at the name over a good folder."""
     from defender.run_repository import RunId, RunRefused
 
     rid = str(uuid.uuid4())
@@ -443,17 +403,11 @@ def test_1105_every_listed_id_opens_with_open_run(tmp_path):
 
 
 def test_1105_refusal_text_quotes_names_repr_style_and_truncates_long_ones(tmp_path):
-    """A refusal that quotes a caller-supplied name (RunId.parse('a\\nb'), an episode id 'ep\\n1')
+    """A refusal that quotes a caller-supplied name (RunId.parse('a\nb'), an episode id 'ep\n1')
     escapes control characters repr-style so the message holds no raw newline or tab, and a
     10 000-character name is truncated with a marker rather than quoted whole: the message is
     under 2,000 characters and still holds the name's first 20 characters. A name carrying DEL,
-    a C1 control (U+009B) and U+2028 is escaped the same way (91 BF-09).
-
-    #1187 declared changes 1 and 13 (R6, D-del): the episode-record writer that quoted an
-    episode id and a label is deleted. The episode id's rule is `episode_id_fault` (UUID text
-    only, interface sheet), whose fault quotes the id the same escaped, bounded way, and is
-    asked here directly; the label case goes with the writer (no repository refusal quotes a
-    caller's label any more). (Name kept.)"""
+    a C1 control (U+009B) and U+2028 is escaped the same way (91 BF-09)."""
     from defender.records._run_id import episode_id_fault
     from defender.run_repository import RunId, RunRefused
 
@@ -519,14 +473,7 @@ def test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidec
 def test_1105_open_run_checks_types_then_name_then_folder_then_record_then_entry(tmp_path):
     """open_run checks in order: a str id over a linked runs folder raises TypeError; a
     sidecar-suffixed id over a linked runs folder raises RunRefused; a linked runs folder raises
-    RunUnreachable from TenantRefused (the hold refuses it); an absent entry raises RunRefused.
-
-    #1187 declared changes 1 and 6: the record step is gone — no `_tenant.json` is read, so a
-    real folder holding none goes straight to the entry, and a link at the entry is refused
-    (RunRefused, never followed). Ids are UUIDs; a UUID plus a sidecar suffix is refused at
-    `RunId.parse` or at the open, either way before the folder. Declared change 8 (S-iso): the
-    linked runs folder is refused by the walk from `<T>` with `TenantRefused` or `RunRefused`
-    naming the level — which of the two is not pinned. (Name kept.)"""
+    RunUnreachable from TenantRefused (the hold refuses it); an absent entry raises RunRefused."""
     import uuid
 
     from defender.run_repository import RunId, RunRefused
@@ -746,13 +693,7 @@ def test_1105_a_legacy_run_folder_named_off_the_rules_makes_the_listings_refuse_
     """A real directory in tenant.runs whose name the id rules refuse makes list_run_ids raise
     RunRefused naming that folder; moving it lets the listing answer. "Naming" is checked as
     the name's first 40 characters appearing in the message (design NF-8 may truncate a long
-    name past them).
-
-    #1187 declared change 1: the rule is canonical lowercase UUID text, so an old id today's
-    grammar admits (`live-lever-up-20260930-sudo`, a minted `20260101t000000z-x`) and a
-    206-byte name are legacy folders too, refused like 'Bad Name', 'Run1' and a 207-byte name;
-    the positive control is UUID runs in a container holding no `_tenant.json`. (Whether the
-    message also names the one-time command is test_1187_retire_command's.) (Name kept.)"""
+    name past them)."""
     from defender.run_repository import RunRefused
 
     ids = _uuids(2)
@@ -780,15 +721,7 @@ def test_1105_a_link_at_tenant_runs_refuses_every_function_naming_it(tmp_path):
     folder is byte-unchanged; a link to a folder holding this tenant's own run refuses the same
     way, so it is the no-follow walk that refuses. Positive control: the same calls answer over
     a real tenant.runs, and over a real tenant.runs under a linked data root (configuration,
-    followed as spelled): open_run hands out the run and list_run_ids lists it.
-
-    #1187 declared changes 1, 6, 8 and 13 (R1, R6, S-iso): the tenant-keyed record functions
-    are deleted, so every function is the repository's open, list and all_runs
-    (`_repository_calls`); no container holds `_tenant.json`, so no record compare can be what
-    refuses; the refusal is `TenantRefused` or `RunRefused` naming the level; ids are UUIDs. A
-    link at `<T>` itself refusing too is
-    `ids_1187/test_1187_layout_isolation.py::test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repository_door`.
-    (Name kept.)"""
+    followed as spelled): open_run hands out the run and list_run_ids lists it."""
     from defender.run_repository import RunId
 
     rid = str(uuid.uuid4())
@@ -867,12 +800,7 @@ def test_1105_open_run_and_run_exists_answer_beside_a_torn_record_and_a_stray_na
     claim, as it would with no _episodes: it does not read _episodes. With a directory
     'Bad Name' planted beside r1 (and _episodes removed), open_run(tenant, r1) still serves.
     Positive control: over the same tree list_run_ids refuses, and list_run_ids, which lists
-    both runs once _episodes is gone, refuses the folder once it holds 'Bad Name'.
-
-    #1187 declared changes 6 and 13 (R6, D-del): the `_episodes` readers (`episode_runs`,
-    `sibling_run_ids`) are deleted, so their halves are retired; the listing refuses because
-    `_episodes` is off the natural container's rules, not because it reads the torn record.
-    Ids are UUIDs and the container holds no `_tenant.json` (declared changes 1, 6)."""
+    both runs once _episodes is gone, refuses the folder once it holds 'Bad Name'."""
     import uuid
 
     from defender.run_repository import RunId, RunRefused
@@ -960,11 +888,7 @@ def test_1105_every_lookup_and_record_function_closes_its_held_handle_on_each_pa
     lookup on its success path and on each refusal path (TypeError before any read opens none;
     the container's refusal; RunRefused). The RunRefused paths include one after the folder is
     held for each lookup: a folder named 'Bad Name' (list_run_ids, all_runs) and a link at
-    runs.open's own entry.
-
-    #1187 declared changes 1, 6, 8 and 13 (R1, R6, S-iso): the record functions and their
-    refusal paths are deleted with the `_episodes` record; the container's refusal path is a
-    link at `tenant.runs` (there is no record to swap); ids are UUIDs. (Name kept.)"""
+    runs.open's own entry."""
     from defender.run_repository import RunId, RunRefused, RunsRepository
 
     rid, other, absent = (str(uuid.uuid4()) for _ in range(3))
@@ -1022,12 +946,7 @@ def test_1105_refusals_quoting_a_disk_read_entry_name_escape_it_and_stay_one_lin
     included) makes list_run_ids raise RunRefused, each message holding no raw newline or escape
     character and still naming the entry (a visible run of its characters appears); positive
     control: a plain-named stray entry is named verbatim. A run folder carrying DEL, a C1
-    control (U+009B) and U+2028 is among the hostile names (91 BF-09).
-
-    #1187 declared changes 6 and 13 (R6, D-del): the `_episodes` half is retired — no reader
-    lists `_episodes` any more (the folder itself is a stray the listing refuses by its own
-    name, declared change 6), and run setup reads no claimed ids, so it has no refusal over it
-    to keep to one line. The container holds a UUID run and no `_tenant.json`. (Name kept.)"""
+    control (U+009B) and U+2028 is among the hostile names (91 BF-09)."""
     from defender.run_repository import RunRefused
 
     rid = str(uuid.uuid4())

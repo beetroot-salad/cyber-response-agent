@@ -1,20 +1,4 @@
-"""Rule-free stand-ins for the ports, for the demo server (`demo.py`).
-
-They keep records per tenant and answer the obvious thing, and they enforce NONE of the data
-rules `ports.py` states — no `client_request_id` replay, no one-live-investigation collapse, no
-refusal to cancel, delete or learn from an investigation in the wrong state. Those rules are the
-store's (#1082), which enforces them with constraints and transactions and tests them against
-the ports; re-deriving them here in Python is how a second, subtly different copy of each rule
-gets written. So a demo client that double-submits gets two investigations, and nothing here is
-a reference for how the platform behaves.
-
-What they do keep is the ports' shape: writes go through a transaction (`transaction`), and
-the audit events written through it are kept once its block exits normally — none when it
-raises. Records written before a raise are NOT undone; the demo needs no atomicity for them.
-
-Every record is keyed by `(tenant_id, id)`, so one tenant's record can never displace
-another's, and every read iterates a snapshot, so a concurrent write cannot fail it.
-"""
+"""Rule-free stand-ins for the ports, for the demo server (`demo.py`)."""
 
 from __future__ import annotations
 

@@ -76,13 +76,7 @@ def _source_run(tmp_path, sink, *, docs):
 def _spec(source, store):
     """A `BranchSpec` fixed at the source run's last tool-calling MAIN response — its final
     `append_block` CALL (D1: the tip itself is a text-only response, not a branch point).
-    Returns the spec and the main path through that response (the arm's inherited prefix).
-
-    Built through `spec_at`, which derives the spec's `as_of` (#947) with the runtime's own
-    `branch_point_time`: T0 is a coordinate of the branch point rather than of the sibling, and
-    `validate` refuses a spec that carries any other moment — so a resume driven with a
-    hand-chosen one would be refused before the driver ever reached the seams this file is
-    about."""
+    Returns the spec and the main path through that response (the arm's inherited prefix)."""
     ss = store_mod()
     path_ids = ss.path_row_ids(store, ss.main_session_id(store))
     point = S.tool_calling_responses(store)[-1]

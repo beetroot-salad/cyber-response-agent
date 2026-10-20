@@ -1,24 +1,4 @@
-"""The invlang validator's public face.
-
-The rules themselves live in seven modules, layered one way. Each holds one family, and each imports only from the
-families above it in this list:
-
-  * `_diag`   — the `Diagnostic`/`Locus` types, the severity vocabulary, and the
-                whole-document surface check.
-  * `_refs`   — does every id a row cites resolve to something the document declares.
-  * `_predictions` — append-only history, weight moves and their provenance, and whether
-                a hypothesis' predictions were settled.
-  * `_structure` — the shape of a prediction row, and the closed vocabularies.
-  * `_state`  — attribute updates, the effective vertex state they build, open slots,
-                and whether a declared vertex is ever connected to anything.
-  * `_gating` — what a disposition costs: benign grounding, false-positive gating, the
-                screen, and the severity ceiling.
-  * `_closure` — the three closure gates, which are one sentence over three namespaces.
-
-`diagnose` below is the only place that knows the running order, which matters where its
-comments say so. Everything else here is a re-export kept because callers import those names
-from `validate`.
-"""
+"""The invlang validator's public face."""
 
 from __future__ import annotations
 

@@ -1,38 +1,5 @@
 """Shared machinery for the #791 spec suite — NO test scripts (the leading underscore
-keeps pytest from collecting it).
-
-#791 retires the OFFLINE oracle from the learning cycle. Every test in the four
-`test_791_*.py` modules is one demand of `spec-flow/specs/spec_graph_791-retire-offline-oracle.yaml`,
-named by that demand's `discharged_by`; this module holds only what more than one of them
-needs.
-
-The subagents doubles this module carried are GONE (#922). They implemented the learning
-cycle's stage protocol — the one whose judge parameter #791's seam demand was about — and that
-protocol, its cycle and its four roles are deleted, so the doubles had nothing left to stand
-in for. What survives here is the run.py TAIL machinery, which the four `test_791_*.py`
-modules still drive for real.
-
-Two seams are DEMANDED rather than described, because the design gives the dependency none
-and a demand with no executable witness discharges nothing:
-
-* `run.py`'s tail is DRIVEN, not read (R22). `main` takes its three undrivable
-  dependencies — the credentialed investigation lifecycle, the HTML render and the case
-  ticket endpoint — through an injection seam, exactly as `_run_investigation_lifecycle`
-  already takes its own (#741's argument, applied one layer out). Everything else in the
-  tail runs for real, so "the tail writes no learn marker", "the trigger is handed the
-  operator's flag", "curation is sited above the render step" and both ordering cells are
-  observations of a run rather than readings of a statement sequence. A source read cannot
-  fail when behaviour changes, which is the failure this flow exists to prevent.
-
-`call_order` survives for the one claim that is genuinely about source shape — which
-consumer names the shipped ordering property lists, an inline tuple inside another test —
-and for the composition claim over the learning CLI's own dispatch.
-
-The surviving fakes are declarative fault-injectors and nothing else: they carry canned
-content and record what they were handed. They classify nothing and decide no policy.
-Fault content that cites a real dependency's behaviour cites the ledger claim that
-observed it — see each fake's own comment.
-"""
+keeps pytest from collecting it)."""
 from __future__ import annotations
 
 import ast
@@ -110,22 +77,7 @@ PROJECTION_WORDS = (
 @pytest.fixture(scope="session", autouse=True)
 def worktree_package_guard():
     """Fail the whole module loudly, naming the ENVIRONMENT cause, when the suite has
-    imported a different checkout's copy of the package than the one holding these tests.
-
-    The main checkout carries its own installed copy, so any invocation whose working
-    directory is the main checkout silently loads THAT copy instead — probed, and it
-    answered a registry query with eight roles where this tree has eleven. Every "every role"
-    claim in this suite is then made against the wrong tree and passes or fails for a reason
-    that has nothing to do with the change.
-
-    The guard is keyed on the MODULE PATH, never on a role count — which is why it still
-    guards after the resolutions that took the count to eleven, and after #797 took it back
-    down; a guard written on the count would have needed editing to keep passing and would
-    have stopped meaning anything.
-
-    It moved here from `_gate774` when #797 deleted that module: this suite is its one
-    surviving consumer, and a session-scoped autouse fixture only guards the modules that
-    import it."""
+    imported a different checkout's copy of the package than the one holding these tests."""
     import defender.agents as agents_mod
 
     here = Path(__file__).resolve().parents[4]
@@ -297,17 +249,7 @@ class TailStep:
 
 
 class SpecTail:
-    """The investigation tail's three injected dependencies, each recording what it saw.
-
-    One fake per dependency, driven by data (`disposition`, `truncated_by`, `certify`); it
-    injects and records, and classifies nothing. The lifecycle fake does what a real
-    investigation does to the run dir — leaves the report, the work log and the two tables,
-    and lets the real scrub certify the tree — because every tail step below it reads that
-    tree for real.
-
-    `certify=False` is the one fault it injects, and it is a real one through the real
-    primitive: a tree with no scan verdict is what the shared refusal predicate refuses.
-    """
+    """The investigation tail's three injected dependencies, each recording what it saw."""
 
     def __init__(
         self,

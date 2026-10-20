@@ -1,55 +1,4 @@
-"""Scenario machinery for the #808 harness-executed lead-0 spec — NO test scripts.
-
-This is the #808 half of what `_replay_harness.py` is to the runtime suite: the plumbing a
-lead-0 scenario needs, so a test is a few lines of data and a docstring. It is NOT a test
-module (the leading underscore keeps pytest from collecting it) and it holds no assertions.
-
-Everything below the two replay models is production code. A scenario hands `run()` an alert
-document and an `answer(verb, params)` callback; between the two, the REAL `orientation()`,
-the REAL `QueryCapture` screens, the REAL `claim_lead`, the REAL circuit breaker, the REAL
-budget hook, the REAL session store and the REAL two tables run.
-
-WHAT IS FAKED, AND WHY IT IS THE ONLY THING FAKED
--------------------------------------------------
-The elastic verbs. `elastic_adapter.query`/`alerts`/`esql` reach a cluster over
-`docker --context soc-playground exec … curl`, which no hermetic run can start (c3 is
-`unprobed` for exactly this reason: soc-playground.invalid does not resolve). The verb
-registry is the run's declared injection seam (`run_investigation(verbs=…)`, #611), so the
-scenario hands in a table of plain annotated functions whose SIGNATURES mirror the real
-adapter's — the real `validate_params` screen checks lead-0's outbound params against them,
-and the real capture capability writes the real rows.
-
-The fakes inject faults and canned envelopes; they classify nothing. Every exit code, error
-class, breaker outcome and payload status in a scenario's assertions is production's work.
-Fault content is probe-derived, never authored: `answer` raises the adapter's own
-`ConfinementFault`/`TransportFault`/`UpstreamFault` (P2, executed: `confine_index` fires on
-the adapter side of both call paths; r3, executed: `resolve_sort` raises `UpstreamFault`),
-and the canned envelope is built by the REAL `elastic_adapter.search_envelope`, so a scenario
-cannot express a response shape the adapter cannot produce.
-
-WHERE `kibana.alert.group.id` COMES FROM — AND WHY NOT FROM `alert.json`
-------------------------------------------------------------------------
-Item 1's FIRST backend call always fetches the alert's own SHELL DOCUMENT by `alert_id`
-against the index the alert declares it came from (`signal_index`), reads `group.id` off THAT
-document, and only then branches. `alert_doc()` therefore does NOT write
-`kibana.alert.group.id` into the run-dir `alert.json`: brief R3 / claim `g17` (executed) shows
-nothing under `defender/` produces that file — the projection lives in three `experiments/`
-scripts and one evals synthesizer, and `project_alert.py` hardcodes a tree path and shells out
-to a CLI that is not in this tree — so "the alert projection must start carrying `group.id`"
-(F4 arm (a)) cannot be demanded of shipped code. §7 took arm (b) twice, and phase F caught the
-first cut of this suite encoding arm (a) instead.
-
-A scenario therefore supplies the group id through `run(shell=shell_doc(group_id="grp-0"))` —
-the document the by-`alert_id` fetch RETURNS — and `alert_group_id.domain.distinguished[grp-0]`
-is where the graph pins that value. Every other field of `alert_doc()` is copied from
-`playground-v2/examples/alerts/v2-sshd-success-after-failures/alert.json`'s real shape: brief R6 (the
-design's own key list matches none of the five checked-in fixtures) is why the base document is
-read off the tree rather than off the doc.
-
-`elastic_backend` answers the shell fetch itself, so a scenario's `answer` callback serves only
-the calls AFTER it — and `Res.shell_call` / `Res.ancestor_calls` split the record the same way,
-because "which call was the shell fetch" is a question every item-1 assertion now asks.
-"""
+"""Scenario machinery for the #808 harness-executed lead-0 spec — NO test scripts."""
 from __future__ import annotations
 
 import json
@@ -349,23 +298,7 @@ class Res:
         return self.main.seen[1]
 
     def section(self) -> str:
-        """Lead-0's ORIENT section BODY — the text inside its own untrusted frame.
-
-        Sliced on the frame rather than on the next `##` deliberately: a forged `##` inside
-        the frame reads as evidence text (K1), so a heading-to-heading slice would be reading
-        the injection's own boundary.
-
-        The frame is found by SHAPE — the first `<run-…-untrusted>` after the heading, and its
-        OWN matching closer via the backreference. It used to be found by a known `SALT`, which
-        #875 removed: `wrap_fresh` mints each frame's delimiter after its content is in hand,
-        so no caller (this harness included) can predict it. Matching the pair is also the
-        stronger read, and the same one MAIN is told to do — a forged closer carrying a
-        different salt inside the body no longer truncates the slice.
-
-        Each precondition is its own `assert` (never a bare `.index()`) so a caller that
-        never got a lead-0 section at all fails here on an AssertionError naming what is
-        missing, not on a generic `ValueError: substring not found` `spec-graph nullstub`
-        would classify as riding machinery rather than discriminating."""
+        """Lead-0's ORIENT section BODY — the text inside its own untrusted frame."""
         assert LEAD_ZERO_HEADING in self.message_zero, \
             "message 0 carries no lead-0 section — the resolution did not happen before ORIENT"
         head = self.message_zero.index(LEAD_ZERO_HEADING)
@@ -392,13 +325,7 @@ class Res:
     def ancestor_calls(self) -> list:
         """Every call AFTER the shell fetch: the branch item 1 took once it knew whether this
         alert is an EQL sequence. One per distinct mapped backing index, never one per
-        ancestor — so the ordinary alert is exactly one of these, and item 1 is two calls.
-
-        It NAMES call 0 rather than assuming it. A bare `rec.calls[1:]` is satisfied by an
-        implementation whose first call is anything at all, and eleven tests read this
-        property — so the shell fetch's identity was carried on behalf of all of them by the
-        five tests that pin the verb sequence, and narrowing any of those five would have
-        unmoored the rest silently. The check is here, once, where every reader gets it."""
+        ancestor — so the ordinary alert is exactly one of these, and item 1 is two calls."""
         assert self.rec.calls, "item 1 issued no backend call at all"
         first = self.rec.calls[0]
         assert self.alert_id is None or self.alert_id in first.params.get("native_query", ""), (
@@ -504,39 +431,7 @@ def run(  # noqa: PLR0913 — a scenario builder: one parameter per thing a scen
     defender_dir: Path | None = None,
     tenant: Any = None,
 ) -> Res:
-    """Drive a REAL `run_investigation` over a synthesized alert.
-
-    `verbs` defaults to an `elastic_backend` over `answer`; pass `verbs=None` explicitly for
-    the K12 scenario in which no registry is injected at all — 61 of 96 `drive()` sites omit
-    `verbs=` (P9, executed), and that is the state lead-0 must not acquire a backend from.
-
-    `shell` is what item 1's by-`alert_id` fetch RETURNS: a `shell_doc()` with no group id
-    (the default, and the state of all five checked-in fixtures), a `shell_doc(group_id=…)`
-    for the sequence path, `[]` for "unresolvable by alert_id", or an exception to raise.
-    `answer` therefore serves only the calls AFTER the shell fetch.
-
-    `before(run_dir)` runs on the materialized run dir just before the driver starts — the
-    seam a scenario needs to plant a REAL fault in the tree the run is about to write into
-    (a directory squatting an artifact's own name, a pre-claimed lead sidecar).
-
-    Host state lead-0 must already find (a tripped breaker) has no seam here: since #1235's
-    round 2 it lives on the run's `RunState`, which the driver creates and no seam hands out
-    before lead-0. A scenario about it calls `lead_zero.resolve_lead_zero(run_state=…)` over a
-    state it built, or seeds through the run's own verbs, whose context carries the state.
-
-    `defender_dir` is the tree the run READS (#1003) — `drive`'s own seam of that name,
-    passed through only when supplied, so a scenario over a planted catalog (a template
-    whose `verb:` disagrees with the shipped table) can drive the run-start check while every
-    scenario before it keeps driving this checkout.
-
-    `tenant` (#1106) is the run's accepted `Tenant` (#1120) — where its `lead-zero.yaml`, its
-    table (the scenario's grants, #1107) and its systems' settings come from now that none lives
-    in the tree. Passed through to `drive` only when supplied; omitted, the run is the fixture
-    tenant's, set up under the test's data root.
-
-    MAIN's default script makes TWO requests (a read, then a text turn) because `d23`'s
-    observable lives at the second one; the gather model answers item 3's dispatch with the
-    kind of summary `d16`'s dimensions ask for."""
+    """Drive a REAL `run_investigation` over a synthesized alert."""
     doc = alert if alert is not None else alert_doc()
     run_dir = materialize_alert(root, doc)
     rec = VerbRecorder()

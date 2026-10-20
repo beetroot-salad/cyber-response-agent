@@ -1,21 +1,4 @@
-"""The queue-state view: what the learning loop gave up on, parked, or set aside.
-
-Reads the host-local state root (unlike `serialize.py`, which reads the checked-in corpus):
-the three channels' dead letters, stuck records and held rows, plus what the drains
-quarantined. Per-host and stale once built, so the contract names the state root and the CLI
-stamps the time.
-
-The channels are a literal list, never derived from another table, so deleting that table
-cannot silently narrow this page. `drains._curator_queue_checks` answers a different question
-("which queues wake the drain") and keeps its own.
-
-A JSONL line that cannot be parsed is counted, not dropped (a torn dead letter is exactly the
-evidence this page shows); an unreadable file counts as one.
-
-The contract is the typed boundary: state-root files may be hand-edited, so every emitted value
-is coerced to its contract type (string, int, list of strings, mapping, or null) and degrades to
-the empty value on a mismatch. Nothing raises on content, and the renderer never converts.
-"""
+"""The queue-state view: what the learning loop gave up on, parked, or set aside."""
 from __future__ import annotations
 
 import datetime as _dt

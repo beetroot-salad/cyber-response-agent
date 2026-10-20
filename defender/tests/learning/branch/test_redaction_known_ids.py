@@ -1,26 +1,5 @@
 """The redaction filter hides the branch identities the host KNOWS, not only the ones shaped
-like a UTC stamp.
-
-`learning/branch/redaction.py` used to find an episode or world token by its shape alone: a
-leading `\\d{8}t\\d{6}z`. An episode forked from a run whose id the operator pinned
-(`live-lever-up-20260930-sudo`) carries no stamp, so its episode id, its tokens and every arm's
-run id reached the model untouched — and #1187 makes every id a random UUID, which no shape
-rule can see. The fix hands the filter the identities themselves: the family's episode id and
-token, every world token, and every arm's run id (`_family.family_identities`), bound where the
-host knows them — the world's registry for the query tool, the loaded manifest for the
-comparator. A natural run knows none and leaves the text unchanged.
-
-The wired channels are pinned beside their neighbours: the query tool's in
-`test_947_triplet_served.py` (a driven run), the comparator's prompt here.
-
-#1187 (declared change 15): every arm's run id is the one the host-written arm roster
-(`<ep>/arms.json`) holds, so `family_identities(family, arm_ids)` takes them; the comparator
-reads them from the walked episode view (`delta_o(view, *, invoke=)`). The unit test of the
-registry's one-line binding (`branch_identities` reading `self.world` alone) is retired: the
-manifest-derived world no longer holds the family's arm ids. Its replacement is the sibling-built
-registry in `ids_1187/test_1187_roster_consumers.py::test_the_siblings_query_tool_knows_every_
-roster_arm_id` (exact set) and `test_a_world_registry_knows_its_whole_family` below.
-"""
+like a UTC stamp."""
 from __future__ import annotations
 
 import inspect

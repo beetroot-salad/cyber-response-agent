@@ -130,19 +130,7 @@ def _empty_user() -> dict[str, list[dict[str, Any]]]:
 
 @model
 class EpisodeGrade:
-    """`grade_episode`'s return value and the schema of `judge.yaml`, in both directions.
-
-    Strict (no coercion), so a document of the wrong shape fails at the constructor.
-    `episode_dir` and `graded_worlds` are derived: never written, recomputed from the rows on
-    every read (`_DERIVED`).
-
-    Each world row carries its combined draws (`route.combine_draws`: `bucket`, `systems`,
-    `draws`, `measured`, `not_measured_reason`, `draws_disagree`, `world_label_doubted`),
-    `completed_draws`/`malformed_replies`, and its commit `state` (A6); a world that could not
-    be judged carries `ungradable` and its reason instead. `family` is the family call's own
-    row; `user` the user record (named, found, serving, unkeyed and gap-only entries);
-    `dispositions` the ledger — one `{finding_id, lane, reason}` per filed finding (A13).
-    """
+    """`grade_episode`'s return value and the schema of `judge.yaml`, in both directions."""
 
     episode_dir: Path
     worlds: Annotated[list[dict[str, Any]], AfterValidator(_rows_name_their_world)] = field(
@@ -201,17 +189,7 @@ def _existing_grade(episode: Episode) -> dict[str, Any] | None:
 
 
 def read_grade(episode: Episode) -> EpisodeGrade | None:
-    """The episode's recorded grade off `judge.yaml`, or `None` when there is none.
-
-    The one reader, shared with the episode page and the re-run, over the episode handle the
-    runs repository's walk returned (`runs.episode_files`, or an `EpisodeRuns` view's
-    `.episode`): a bare path carries no tenant, so it cannot go through that walk (#1187
-    S-iso). A record carrying a name
-    #1234 retired (`_retired_names_in`) is `JudgeRefused` naming it, before anything is read
-    (A4). Otherwise absent fields take defaults and unknown keys are dropped, never read; a
-    planted link, a non-mapping or a schema failure is `JudgeRefused`. A `not_graded` stamp
-    reads back as a grade carrying it.
-    """
+    """The episode's recorded grade off `judge.yaml`, or `None` when there is none."""
     doc = _existing_grade(episode)
     return None if doc is None else _grade_from_document(Path(episode.dir), doc)
 

@@ -1,19 +1,4 @@
-"""The tenant knowledge folder's contract: `<data root>/<T>/knowledge/{settings,agent}/`.
-
-A tenant's knowledge lives under the data root, beside its row and runs, never in the checkout:
-`defender/` is mounted into every run's box, and the box must hold no tenant's settings. The
-operator places it — a `git clone` of the tenant's own repo on the host, or a plain folder —
-and `tenant.py setup <id>` adopts it. Two halves:
-
-  * `settings/` — host-only (`config.env`s, `verb-grants.yaml`, `lead-zero.yaml`,
-    `systems/case-history/mapping.yaml`). Never a mount source.
-  * `agent/` — model-facing, mounted read-only into the run's box.
-
-This module only names the folder's shape. The rules that judge a folder against it, and the
-one acceptance of a tenant, are `_tenant.check_knowledge_folder` and `_tenant.accept_tenant`.
-The repo keeps `knowledge/tenant-template/` (what `tenant.py scaffold` copies) and the frozen
-test fixture beside it; neither is ever a run's tenant.
-"""
+"""The tenant knowledge folder's contract: `<data root>/<T>/knowledge/{settings,agent}/`."""
 from __future__ import annotations
 
 import argparse

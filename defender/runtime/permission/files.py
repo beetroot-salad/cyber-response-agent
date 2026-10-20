@@ -127,20 +127,7 @@ def decide_read(
     path: Path, *, run_dir: Path, defender_dir: Path, policy: AgentPolicy,
     shown: str | None = None,
 ) -> Decision:
-    """Allow/deny a file read: a deny-by-default allowlist over the resolved path.
-
-    1. Roots: the run dir, the defender corpus (or `read_confine` in its place), and the
-       agent's `read_roots`.
-    2. `policy.read_allow` shapes: the same tuple the agent's bash `cat` grant carries as its
-       scope, so the read tool and `cat` admit the same paths. Empty means no shape filter.
-
-    Holding a root is not permission to see every file under it: `gather_raw/`, the case's
-    answer-key artifacts (confined agents), `wire_logs/` and the provenance stamp get their own
-    denies below. The secret/ground-truth denylist applies last. Resolve errors fail closed.
-
-    `shown` is how a refusal names the operand: the path the model typed, for a role that sees
-    the model view (#1255 P1 — a refusal never names the host path it was mapped to); omitted,
-    the host path is named."""
+    """Allow/deny a file read: a deny-by-default allowlist over the resolved path."""
     p = Path(path)
     named = repr(shown) if shown is not None else repr(p)
     try:

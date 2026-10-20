@@ -88,20 +88,7 @@ def read_query_table(bound: Bound, world_id: str) -> list[dict[str, Any]] | None
     """World `world_id`'s archived query table, every line a row joined to its call id; `None`
     when nothing is at the name (a world not archived); `JudgeRefused` naming the file and the
     refusal (a link, a FIFO, a directory, an oversize file, a torn line, or malformed call
-    fields).
-
-    The table carries no call id (#1255 G4: the model reads it). Each row the run itself wrote
-    is handed back carrying the id its host-only call join (`read_call_join`) records for the
-    row's own `(lead_id, seq)`, its seq read as the surface reads it (`lead_repository.row_seq`)
-    — never by the row's place in the table — under `calls.CALL_ID`,
-    the one key every judge reader of a row's id reads. A row with no join line (a seeded,
-    pre-branch row) carries none. A table row that spells an id itself is refused: no writer
-    writes one since #1255, so it is an archive from before the join or a planted column.
-
-    Unlike the tolerant lead reader, grading must preserve the raw call identity rather than
-    coerce it. Validate the string fields used by the computed views before admitting any
-    rows, including unserved calls that have no ledger partner to check them against.
-    Params retain the shared reader's tolerant handling of non-mappings."""
+    fields)."""
     table = _admitted_query_table(bound, world_id)
     if table is None:
         return None
@@ -193,16 +180,7 @@ def read_call_records(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """One run's two call records — its query table and its served ledger — read whole through
     the bounded no-follow reader and required well-formed (A3, A12), or `JudgeRefused` naming
-    the file and the refusal.
-
-    @owns call_records — the grading pass's one read of `executed_queries.jsonl` and
-    `served/<world-uuid>.jsonl`; the join (`calls.py`), the resolver and the found gaps read
-    these rows and nothing else.
-
-    Well-formed: every line parses; every ledger row names this run (`world_id`), carries a
-    decision word and the call id of this run; no two table rows of this run share an id; a
-    ledger row and the table row its id joins agree on `(system, verb, params)` (A21). An
-    absent table or ledger is no calls (a world whose investigator asked nothing)."""
+    the file and the refusal."""
     from defender.learning.judge.calls import CALL_ID, call_id_names_run
 
     token = world_id

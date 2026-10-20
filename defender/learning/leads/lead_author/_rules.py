@@ -388,22 +388,7 @@ def _covers_rule(
     *,
     tree_for: TreeFor,
 ) -> None:
-    """The two whole-batch invariants on `covers:` — the identities a template accounts for.
-
-    The author names the established file for what it measures, so `covers:` is the only link
-    between a draft and its promoted template.
-
-    Transfer: a draft that leaves the tree must have its identities land somewhere (a promote
-    writes them onto the new file; a discard-into-widen adds them to the widened template). A
-    bare discard is refused — an unattributable draft should be skipped, since deleting it just
-    gets it re-minted next run, silently looping. Scored against the whole tree, the question
-    `synthesize_drafts` asks next run. Its mirror is `_refuse_half_promote`.
-
-    Monotonicity: an established template may gain identities but never lose them, and its
-    `id:` may not change. Overwriting an established template is a legal fold, so a name
-    collision would otherwise silently replace a different measurement; lost provenance is what
-    separates a clobber from a widen.
-    """
+    """The two whole-batch invariants on `covers:` — the identities a template accounts for."""
     # `_is_catalog_template` already excludes drafts.
     established = [p for xy, p in records if "D" not in xy and _is_catalog_template(p)]
     # Identities newly moved onto an established template (`after` minus `before`), so the

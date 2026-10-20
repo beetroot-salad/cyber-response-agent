@@ -1,23 +1,4 @@
-"""Resume a finished investigation from one of its own messages, in a sibling world.
-
-The turn-N branch forks a real run once its evidence is in hand and continues it under a world
-that differs from the one it ran in. This package owns which message may be branched from and
-where the forked session lives.
-
-A branch point is a MAIN response that called tools (#1255 D1). `session_store.fork()` charges
-the child for the whole prefix through it, and `hydrate(role="send")` hands that same list back
-(the fork point is kept even though its calls are unanswered), so the resumed framework runs
-those calls first and its next request is the one a natural run would have sent.
-
-  * `_spec`     — what a branch request is, and opening the store it reads from.
-  * `_frontier` — reading the source run: its sessions, what the clock said at the branch
-                     point, the retry counts the framework carried into it.
-  * `_snapshot` — the fork snapshot: what the run held when each MAIN response arrived, and
-                     restoring an arm's folder from it.
-  * `_seed`     — writing the sibling's folder from the snapshot.
-
-`validate` refuses a branch that would not be a faithful fork.
-"""
+"""Resume a finished investigation from one of its own messages, in a sibling world."""
 
 from __future__ import annotations
 
@@ -92,26 +73,7 @@ def validate(store: Any, spec: BranchSpec, *, source_run: Run,
 def admitted_snapshot(store: Any, spec: BranchSpec, *, source_run: Run,
                       require_capture: bool = True) -> _snapshot.ForkSnapshot:
     """Refuse a branch point that cannot carry a sibling world, and return the fork snapshot
-    an arm taken there restores.
-
-    A branch point is a MAIN response that called tools whose answers are not yet in the
-    history (#1255 D1): the arm resumes with no new message, and its framework runs those calls
-    against the arm's world. Admitted only when, beyond being on MAIN's own path in a session
-    that was never folded (D4):
-
-    - no tool carries a retry count into it (rev 5 C1): the framework's counts cannot be seeded;
-    - the run recorded a fork snapshot for it (N4: a run recorded before the snapshot existed
-      cannot be branched), and the source still holds what that snapshot recorded;
-    - the clock the spec carries is this branch point's;
-    - the capture as it stood there is non-empty (branching before any capture makes every
-      world trivially consistent). The launcher passes `require_capture=False`: an empty
-      capture is pre-flight's to record as a `refused` episode (#1224, M05=A);
-    - something is open in the frontier the snapshot's document holds — `slots` or
-      `contracts`, not `not is_empty()`, which also counts settled `held` facts.
-
-    Every legality check reads the source as of the branch point's snapshot, never the whole
-    finished source (rev 5 C7).
-    """
+    an arm taken there restores."""
     from defender.skills.invlang.frontier import frontier_from_text
     from defender.skills.invlang.parser import scan_fences
 
@@ -243,20 +205,7 @@ def attach_case_pointer(
 def open_main_session(
     store: Any, spec: BranchSpec | None, run_state: RunState, *, run: Run, source_run: Run | None = None,
 ) -> tuple[str, list | None]:
-    """MAIN's session for this run and the history it starts from.
-
-    The one place the fresh/resumed choice is made. A fresh run gets a new session and `None`.
-    A resume is validated (every refusal before the fork), forks at the branch point, and
-    returns the prefix through the branch response via `hydrate(role="send")` — the list
-    `fork` charged the child for — so the framework runs that response's calls first. The
-    run folder is restored to what the source held at the branch point
-    (`ForkSnapshot.restore_files`); the driver starts the run's counters, review gate, caps
-    and request count from the same snapshot (`snapshot_at`).
-
-    Other faults (e.g. a pydantic `ValidationError` on a payload from another framework
-    version, or the private `framework_view` import disappearing) are converted to
-    `BranchError` so the driver's store-setup handler catches them.
-    """
+    """MAIN's session for this run and the history it starts from."""
     if spec is None:
         return store.new_session(agent_id="main"), None
     try:

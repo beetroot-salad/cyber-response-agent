@@ -1,39 +1,4 @@
-"""Shared machinery for #1007's grade-the-world spec — NO test scripts.
-
-This is the executable form of the spec in `spec-flow/specs/spec_graph_1007-world-quality.yaml`,
-as amended by the human seam (`.spec-flow/frontiers/70-resolutions.md`) and then by #1224, which
-replaced cluster staging and the replay review with each world's live oracle. What survives of
-#1007: the per-world judge is shown the questioner's own samples (M4); a family-level call judges
-what one world cannot (M5); findings partition by `subject` into a second queue channel (M6)
-feeding a second authored corpus, `defender/lessons-questioner/`, with its own curator (M7),
-which the questioner reads back at call 1 (M8). The reachability block, the withholding ladder
-and the mechanical world bucket went with the review (#1224 design: "No mechanical bucket").
-#1234 then closed the world-finding vocabulary (`unreachable`, `incoherent`, `mislabelled`),
-made a finding's subject the reply list it is filed under rather than a `subject` key, and
-retired every model word that spoilt a family (`episode_outcome`, the family `verdict_word`).
-
-Every import goes through `mod()` / `sym()` PER TEST (the `_triplet_947` idiom this module
-extends) so a missing target is one failure per test rather than one collection error hiding
-the rest.
-
-ONE THING THIS SUITE DELIBERATELY DOES NOT ASSERT, a decision on the record:
-
-1. **O5 is scoped to one attempt** (RS-1 / accepted gap G-2). A re-entered `Step.QUESTIONER`
-   overwrites `samples.yaml`, so the byte-identity obligation holds WITHIN ONE ATTEMPT, and the
-   re-entry's accepted behaviour (the second attempt's samples win) is pinned by its own test.
-
-FAULT INDUCTION follows the hierarchy: a real input through the real primitive wherever the
-primitive can be driven (the elastic search envelope is read off a REAL `_search` over a REAL
-raw Elasticsearch response, through a fake `docker` on the run's own PATH); a declarative
-fault-injection fake whose fault content cites a probed ledger claim where the dependency is a
-model; and nothing imagined. Every fault shape reused here comes from `_triplet_947.Fault`.
-
-FAKES ENTER THROUGH INJECTION SEAMS — a `deps`-shaped keyword, a constructor argument, an
-environment root the shipped resolver already reads — and never by `monkeypatch.setattr`
-(the project profile's `tests.idioms`, ratcheted in CI by `tooling/lint/lint_monkeypatch.py`).
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for #1007's grade-the-world spec — NO test scripts."""
 from __future__ import annotations
 
 import json
@@ -421,19 +386,7 @@ def questioner_lesson(paths: Any, name: str = "q-lesson", *, body: str = "Ask th
 
 def questioner_lesson_raw(paths: Any, name: str, *, frontmatter: str,
                           body: str = "Ask the corpus.") -> Path:
-    """One `<name>.md` whose frontmatter is written as RAW TEXT, not through a dumper.
-
-    `questioner_lesson` above composes its frontmatter with `yaml.safe_dump`, which quotes a
-    hostile value and makes the forgery this fixture exists to express UNSPELLABLE. The lesson
-    document is authored by the curator MODEL through the box's file tools, not by a dumper in
-    production — so the bytes a forged lesson actually carries are these, and a fixture that can
-    only hand the reader the easy shape is the taxonomy assumption in disguise (rules.md's
-    `primitive` value-type discipline, applied to a document).
-
-    PB3 (executed): `_frontmatter.split_frontmatter` applies no schema and no key validation, and
-    `yaml` resolves a repeated key LAST-WINS in silence — which is how a model-chosen value
-    carrying a newline forges a key the reader keys on.
-    """
+    """One `<name>.md` whose frontmatter is written as RAW TEXT, not through a dumper."""
     corpus = Path(paths.lessons_questioner_dir)
     corpus.mkdir(parents=True, exist_ok=True)
     path = corpus / f"{name}.md"

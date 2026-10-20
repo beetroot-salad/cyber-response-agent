@@ -1276,17 +1276,7 @@ def _pb_change() -> list:
 
 def _pb_registry(tmp_path: Path, o: Any, v: Any, *, prebranch: bool, retry_cap: int = 3) -> Any:
     """World b's registry over a tenant answering the alice call `_PB_BASE`; `prebranch` puts
-    that call in the source run's pre-branch set, as `prebranch_calls` derives it.
-
-    A pre-branch call is one the source RECEIVED an answer to, so the family's recording holds
-    it: `prebranch=True` primes `_PB_BASE` as the source's captured answer — the state the real
-    primer leaves for an answered call. #1255 D6 (owner decision, 2026-10-16): only a recorded
-    pre-branch answer is fixed (served unchanged); a pre-fork call the source asked that has no
-    recording because its call failed or its payload was unreadable (the primer's skip record)
-    is reconstructed by the oracle at the fork time, and its change IS served
-    (`test_1255_world_serving.test_1255_a_pre_fork_question_with_no_recording_is_reconstructed_at_the_fork_time`).
-    A pre-branch key with neither a recording nor a skip record is a state production never
-    produces, so this fixture no longer builds one."""
+    that call in the source run's pre-branch set, as `prebranch_calls` derives it."""
     from defender.learning.branch.ledger import request_key
 
     est = S.estate(tmp_path)

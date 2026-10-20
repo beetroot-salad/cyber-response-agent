@@ -472,31 +472,7 @@ def _cannot_read(adapters_dir: Path, e: BaseException, *, blame_entry: bool = Tr
 
 
 def read_roster(adapters_dir: Path) -> RosterRead:
-    """The one read of an adapters directory; raises `RegistryError` if it cannot be read.
-
-    Read once at process start and handed down as a value, so every consumer (registry,
-    dispatch catalogs, workspace map, gate, audit) sees the same set.
-
-    @owns accepted — derived here and nowhere else.
-    @owns refused — derived here and nowhere else.
-    @owns verbs — the cold verb read, per accepted system, here and nowhere else.
-    @owns unparsed — the parser's reason per adapter whose source it refused.
-
-    All disk I/O happens in one `try` pass, so its `except` fully covers "the host could not
-    read the tree"; parsing happens afterwards on bytes in memory and is recorded per file in
-    `unparsed`. `os.scandir` is used because it raises for an absent, non-directory or
-    unreadable path, where `Path.glob` silently yields `[]`.
-
-    Every entry is `lstat`ed: a directory with the read bit but not the search bit lists fine,
-    then fails every resolve (on 3.14+ `is_file` swallows `EACCES`, giving a silent empty
-    roster). `follow_symlinks=False` so a dangling symlink is dropped, not treated as that fault.
-
-    Names are filtered through `_adapter_path_under`, not `is_system_name` alone, because
-    `_system_of`'s `_`->`-` mapping is not invertible (e.g. `change-mgmt_adapter.py` derives a
-    name the seam looks for at `change_mgmt_adapter.py`), and a directory can end in the suffix.
-
-    `RuntimeError` covers `Path.resolve` on a symlink loop (3.11/3.12); `PermissionError` can
-    come from `is_file` (3.11-3.13) or `read_bytes`. All are the same "cannot read" fault."""
+    """The one read of an adapters directory; raises `RegistryError` if it cannot be read."""
     adapters_dir = Path(adapters_dir)
     try:
         with os.scandir(adapters_dir) as it:

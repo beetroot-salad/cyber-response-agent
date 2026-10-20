@@ -1,18 +1,5 @@
 """The frontier-keyed lessons push, shared by its two callers so they agree on what "the
-lessons for this document" means:
-
-  * the `append_block` / `fix_row` return (`runtime/tools/_document._frontier_recall`),
-    pushed when a write changes the top hits;
-  * the compaction fold's frontier row (`runtime/driver/_build._make_store_render_processor`):
-    the fold displaces the turns that carried earlier blocks, so the row carries a block
-    derived fresh over the full document at mint (`compose_fold`). Not over
-    `compaction.frontier_text`, which may be cut before the slot a lesson keys on, and not
-    a copy of the displaced blocks, which reflect an earlier state.
-
-Each caller keeps its own gate for whether to push. Not gated by `permission.decide_read`:
-that governs what the model may read, and this is the runtime composing text from a fixed
-internal path, never a model operand.
-"""
+lessons for this document" means:"""
 from __future__ import annotations
 
 import logging

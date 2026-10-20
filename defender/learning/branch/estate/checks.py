@@ -1,49 +1,4 @@
-"""The five host checks every oracle submission passes before anything is served (#1224, M4).
-
-`check_submission` is the ONE host checker: the serving path gates each submission with it and
-the oracle's advisory `check` tool answers with it, so the two can never disagree. It returns
-failure texts, each naming the check it failed (`check <n>`); an empty list passes.
-
-  1. Structure: every difference between the base answer and the served one is claimed — an
-     added row is a claimed forged row, a removed row a claimed removal, a changed value a
-     claimed change or, for a count cell (the answer's own count of its rows: a total, an
-     aggregate's value, a bucket's count — never an ordinary field of a document; see
-     `_counts_change`), one `counts` entry used up by it — and every claim entry is found. Mapping key order is
-     not a difference, list order is, duplicates are a multiset (N09).
-  2. Shape: a forged row has the shape of a real row: its columns EQUAL the column set of at
-     least one real row of its system (the call's, stamped by the host at forge) at the same
-     place, and its values carry the types real rows of that column set give them. One answer
-     may mix row shapes (event and alert documents at one path): a forged row matches
-     one of them, never their union. With no real example there is nothing to compare (D2).
-     (Re-ruled 2026-10-10, PR #1232 round 7; M14=B's union is gone.)
-  3. Ids: no id-like value of a newly forged row (nested fields included, by their dotted
-     column) equals a real identifier — a real value that itself sat in an id-like column or
-     is UUID / 16+ hex shaped — unless the claim declares it a reference to an entity (S21).
-     "Id-like" is judged by column name and value shape only (`id_column`): a column named
-     exactly `id`, ending in `_id`/`-id`/`.id` or a camelCase `Id`, a short id word (pid, ppid,
-     uid, gid, sid, tid, uuid, guid, hash), or ending in `_hash`/`.hash`/`uuid`/`guid`; or a
-     value shaped like a UUID or 16+ hex digits in any column; placeholders ("", "none", "n/a",
-     ...) never are. Equality is exact whole-value text. In memory, no lookup. (Re-ruled
-     2026-10-10, PR #1232 round 7: M12=A's `*id` suffix and any-real-scalar collision are gone.)
-  4. Facts: a recorded fact is contradicted only by a served mapping whose own string values
-     include the entity and which itself carries the field with a different value — the same
-     mapping, no nesting or cross-row linkage — every frozen row a claim names is served
-     exactly as frozen (M13=A, S4), and every claimed row is claimed under the fact it was
-     forged for.
-  5. Counting: the claim's counts add up, and each removal's side query, re-run through the
-     run-query door, selects the claimed count (H-02).
-
-Every check reads an answer's rows through ONE row model (`tables`): a table is a list of rows
-at a key path. A list whose items are mappings is a table at its path, each mapping a row; an
-ES|QL answer (`{"columns": [{"name": ...}], "values": [[...], ...]}`) is a table at its
-`values` path, each value array a row zipped with the column names (the `columns` descriptors
-are not rows). A row's cells are its top-level columns; its flat view (`flatten`) spells every
-nested field as a dotted column (`process.entity_id`). A list inside a row is ONE cell, never
-exploded into columns; a list of mappings inside a row is also a table of its own at the
-deeper path, and check 3 judges each scalar inside a list cell under that cell's column.
-Check 2 compares cells (top-level columns, or ES|QL column names); check 3, the collision
-record and the real-data index read the flat view.
-"""
+"""The five host checks every oracle submission passes before anything is served (#1224, M4)."""
 from __future__ import annotations
 
 import difflib
@@ -590,20 +545,7 @@ def _counts_change(entry: Mapping[str, Any], key: str, old: Any, new: Any,  # no
                    base_map: Mapping[str, Any], served_map: Mapping[str, Any],
                    row: Mapping[str, Any] | None, path: tuple[str, ...] = ()) -> bool:
     """A count entry accounts for this changed value: the value is a count cell (a whole
-    number) going from the entry's `base` to its `served`, and it is the entry's group's count.
-
-    A count cell is the answer's own count of its rows, never an ordinary field of a document:
-    - "*" (the whole answer) counts a bare value (the answer is the count), a cell outside
-      every table row that the answer names a count (`_count_named`: `{"count": 3}`,
-      `{"total": 2, "rows": [...]}`, `hits.total.value`, an aggregation's value), or a cell of
-      an all-number row (an ES|QL `STATS COUNT(*)` row);
-    - a named group counts the cell keyed by the group outside a table row when that cell is
-      count-named or its mapping is a group-to-count map (every value a number,
-      `{"db-1": 3, "web-1": 5}`), or a bucket row's count: a count-named cell or a cell of a
-      row whose every other cell beside the unchanged group cell is a number (`STATS n =
-      COUNT(*) BY host`).
-    So `{"user": {"name": "alice", "failed_logins": 3}}` holds no count cell: an edit to it,
-    as to an ordinary field of a real row, is a claimed change."""
+    number) going from the entry's `base` to its `served`, and it is the entry's group's count."""
     if not (_is_int(old) and _is_int(new)):
         return False
     if canonical_json(entry.get("base")) != canonical_json(old) or canonical_json(

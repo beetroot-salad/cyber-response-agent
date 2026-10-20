@@ -107,12 +107,7 @@ def _on_post(double: Any, *, name: str, extra: Mapping[str, Any] | None = None) 
     """One world's pre-flight double under M01=A: `double` answers the requests of the
     post-branch call (routed by `_MARK_POST`; `extra` maps further post-branch call markers to
     their doubles), and every pre-branch call is served unchanged (`_passing()`). No marker is
-    a substring of another, and none is carried by a pre-branch call's params.
-
-    Routed LAST-WINS (phase-F re-verify): a world's pre-flight may keep one append-only oracle
-    conversation across the calls it replays (d18a pins that shape for the sibling), so a later
-    post-branch call's requests still carry an earlier one's marker; the call a request is
-    about is the one whose marker occurs last, as `test_1224_serving._CallRouted` routes."""
+    a substring of another, and none is carried by a pre-branch call's params."""
     return _Routed({_MARK_POST: double, **(extra or {})}, default=_passing(), name=name,
                    last_wins=True)
 

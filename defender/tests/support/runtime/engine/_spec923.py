@@ -1,89 +1,5 @@
 """Shared machinery for the #923 spec suite — NO test scripts (the leading underscore keeps
-pytest from collecting it).
-
-#923 partitions one keyword in two: the analyst-facing `inconclusive` keeps its meaning and
-gains an ENTRY PRICE (a named coverage gap), and a NEW fifth member `unresolved` carries the
-verdict the HOST reaches when it terminates a run. Every test in the five `test_923_*.py`
-modules is one demand of `spec-flow/specs/spec_graph_923-inconclusive.yaml`, named by that
-demand's `discharged_by`; this module holds only what more than one of them needs.
-
-RED AGAINST HEAD IS THE EXPECTED STATE. No implementation exists: `unresolved` is not in
-`DISPOSITION_VALUES`, `_DISPOSITION_GATES` has no `inconclusive` row, and every producer still
-commits the old keyword. The fixtures below declare the DEMANDED shapes, not today's.
-
-FIVE HUMAN RESOLUTIONS ARE ENCODED HERE AND MUST NOT BE LOOSENED — a resolution applied loosely
-is a fork silently re-opened:
-
-* **A `ceiling_test` row is a RECEIPT, not a sentence, and this is a REPLACEMENT, not an
-  addition.** §7 round 4 (a SECOND human decision, POST-PHASE, superseding the round-4 widening
-  originally pinned here): the free-text "does this row name a source or capability" predicate
-  is retired outright — no free-text lane survives beside it, because leaving one in place means
-  `ceiling_test "unknown"` still buys a close, which is the exact bug the redesign exists to
-  delete (measured against the retired predicate: `EDR not available` was REFUSED for being
-  three letters short while `unknown` PAID). A row now parses as
-  `state=<query-failed|query-empty|nothing-to-try> [ref=<lead-id>|cap=<system[.verb]>]
-  note=<text>`. `query-failed`/`query-empty` anchor to a `:L findings` lead THIS RUN dispatched
-  (`ref=`), mechanically checked against `_lead_returned_a_result` — the SAME lookup
-  `entity_check` uses — for whether the lead actually came back with something, and against
-  that lead's own `fail_reason` presence for which of the two states is honest.
-  `nothing-to-try` anchors to nothing (`cap=` instead of `ref=`): it is the one lane with no
-  call to point at, checked NEGATIVELY against the closed verb roster this codebase's own
-  `integrations/` ships — a capability the roster DOES declare refuses the row (that names
-  a call that should have been made, or a lead it should point at). `note` is free text for the
-  analyst; it gates NOTHING (only `state`/`ref`/`cap` are checked) and rides into the report
-  BODY, never the frontmatter. `HOST_ONLY_ROW` (the retired free-text shape — does not even
-  PARSE as a receipt) is the discriminating negative; `PAYING_ROW`/`SECOND_PAYING_ROW`
-  (`query-failed`/`query-empty`, distinct leads) and `CAPABILITY_ROW` (`nothing-to-try`) are the
-  paying positives; `SOURCE_ONLY_ROW` is a well-formed receipt whose `ref` names a lead that
-  ACTUALLY returned a result — refused for contradicting its own referenced lead's row, not for
-  anything its `note` says.
-* **The no-review bypass matches BOTH verdicts**, not `forced`. Keying it on `forced` would push
-  every model-authored uncertain close into a live review — an unrequested change to the common
-  path arriving disguised as a bug fix. `BYPASS_BY_MEMBER` is the encoding, and it is written
-  per member over the WHOLE vocabulary rather than as the set of members that skip: a yes-set
-  cannot fail when a sixth member joins the enum and the branch never learns about it, which is
-  the drift the resolution's owed clause was written for.
-* **Every authoring surface refuses the host-only verdict** — the close tool argument, the
-  invlang document keyword, the analyst-editable ticket resolution line, and (since #920, found
-  by the census rather than by this list) a branched world's `disposition_declared`. The ticket refusal
-  is written FOR A PERSON, and `person_facing_refusal_defects` is that clause's oracle: an
-  analyst who typed a word into a field needs to be told which field, what it may say instead,
-  and by whom the refused verdict IS written — none of which a model's tool-argument diagnostic
-  carries, and none of which the bare word `unresolved` carries either.
-* **The gap row is hardened three ways**: a row that RENDERS to a human as the empty marker
-  does not pay in any of the four spellings P10 measured paying, at BOTH boundaries; rows must
-  be DISTINCT; and the accumulated row text is BOUNDED. The demand is the outcome and NOT the
-  mechanism the resolution suggested — measured, the normalizer the disposition keywords
-  already go through catches 2 of the 4 (`strip_zero_width` gets the two zero-width spellings,
-  NFKC would reach the fullwidth one, and the Cyrillic homoglyph needs a confusable fold that
-  exists nowhere under `defender/`). Extending that shared normalizer is the likely route and
-  its existing callers need checking; a second field-specific spelling of normalization is how
-  this codebase's rules have already drifted.
-
-ONE DESIGN CHANGE ARRIVED DURING THE SPEC PHASE (human, §7 round 4) AND IT IS ENCODED HERE:
-**a malformed verdict is never coerced.** On WRITE — where there is still an author to ask —
-both gates refuse with actionable retry text, which is already the shipped behaviour and which
-both gates carry a comment explaining. On READ the shared reader now agrees with them: it does
-not strip a value into the member it resembles and it does not stand a placeholder in its
-place. The run is marked MALFORMED and left for a person. `MALFORMED_MEMBER_SPELLINGS` is the
-input class; where the mark is recorded, and the fact that one malformed run is skipped-and-
-flagged rather than stopping a batch, are deliberately left to code review and are NOT pinned
-here. The consequence the suite does pin: at a WRITE gate a malformed keyword still fails
-CLOSED — a zero-width-laced `inconclusive` still OWES its price rather than taking the unpriced
-branch (#722's mechanism), so "never coerced" must not be implemented by gutting the shared
-normalizer and letting every dispatch fail open.
-
-Two premises are STRUCK and must not be inherited into any docstring here: "the gate cannot
-hold a named target at force time" (refuted — arms 2 and 3 both force holding
-`review.ask.target`), and the original three-arm producer oracle (replaced, not extended — an
-enumeration of named arms is the shape that hid the fourth producer).
-
-The fakes are declarative fault injectors and nothing else. Fault content that cites a real
-dependency cites the executed probe that observed it: the confusable spellings in
-`CONFUSABLE_EMPTY_ROWS` are P10's own ten-spelling probe output, the non-string rows are P1's,
-and the driver's retry-exhaustion shape is driven through the REAL agent loop with a model that
-never stops retrying a refused call rather than through an imagined exception.
-"""
+pytest from collecting it)."""
 from __future__ import annotations
 
 import asyncio
@@ -491,17 +407,7 @@ OVERSIZE_CLAIM = " ".join(
 def finished_run(tmp_path: Path, *, disposition: str, name: str = "case-923",
                  rows: tuple[str, ...] = (PAYING_ROW,), cause: str | None = HOST_CAUSE,
                  confidence: str | None = "medium", body: str | None = None) -> Path:
-    """A finished run dir a downstream reader accepts, whose `report.md` carries `disposition`.
-
-    Written as bytes rather than through the close, deliberately: these scenarios are about
-    what a READER does with a committed verdict, and half of them read run dirs that arrived
-    from an import, a replay or a hand edit — which is exactly the population the shared
-    accessor exists for. `cause=None` is that population's own shape and its own lane: the
-    ticket bridge falls back to the report BODY for its outbound reason when the key is
-    absent.
-
-    `name` is a LABEL: #1187 (declared change 1) — a run id is a canonical UUID, so the folder
-    (the run's id) is `fixture_uuid(name)`; a UUID passes as it is. Read the id off the folder."""
+    """A finished run dir a downstream reader accepts, whose `report.md` carries `disposition`."""
     run_dir = tmp_path / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     run_dir.joinpath("alert.json").write_text(
@@ -525,19 +431,7 @@ def finished_run(tmp_path: Path, *, disposition: str, name: str = "case-923",
 
 
 def person_facing_refusal_defects(message: str, *, value: str) -> list[str]:
-    """Everything a refusal written FOR A PERSON is missing, as a list of named defects.
-
-    J2's second owed clause — "the ticket refusal needs a message written for a person, not a
-    model" — reached the suite twice as a note and once as a two-phrase blacklist that the
-    single word `unresolved` satisfied. It is encoded here as what a WRONG build fails, not as
-    what a right one happens to contain: an analyst who typed a verdict into a field needs to
-    be told WHICH field, and WHAT the field may say instead. A bare `unresolved` carries
-    neither; the model's tool-argument diagnostic carries neither and renders the host-only
-    member back as if it were on offer.
-
-    Returned rather than asserted so the caller reports every defect at once — a refusal that
-    is wrong in three ways should not be repaired three times.
-    """
+    """Everything a refusal written FOR A PERSON is missing, as a list of named defects."""
     from defender._vocab import DISPOSITION_ENUM, DISPOSITION_VALUES
 
     defects: list[str] = []

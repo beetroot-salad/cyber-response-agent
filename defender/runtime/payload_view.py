@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""What a captured query payload looks like by the time a lead reads it.
-
-A payload small enough to reason from arrives whole and uncommented; a larger one arrives
-structurally reduced, with every reduction marked where it happened. Only size decides — never
-key names, since each bespoke system names its bulk list after its contents (`values`,
-`entries`, `hosts`, …). Every identification here is by count, size or type.
-
-`Completeness` is what the server did, read off the envelope's scalars (`total`, `returned`,
-`truncated`, `row_count`), which survive any reduction since scalars are metadata and arrays are
-bulk. `Elision` is what this view did. Keeping them apart stops a lead from believing rows are
-missing from the world when they are only missing from its context. Under the ceiling nothing
-is said: `elisions == []` means the view is complete.
-"""
+"""What a captured query payload looks like by the time a lead reads it."""
 
 from __future__ import annotations
 

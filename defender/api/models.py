@@ -1,29 +1,4 @@
-"""The API's wire shapes: what a request may carry and what a response says.
-
-These are the contract, so they change only with the API's version, never because a store
-changed. Request bodies forbid unknown fields; in particular a body cannot name a tenant, which
-comes from the login alone (#1131 "Tenancy").
-
-Vocabulary follows #1131: "investigation" in the public API ("run" stays the internal name), and
-`status` is the execution lifecycle, distinct from `disposition`, the outcome
-(`defender/docs/platform-design.md` §2.3).
-
-Two shapes are closed by one type each, used on EVERY way data crosses the boundary — a path,
-a query, a body, a cursor (`pages.py`), and a record the store answers — so nothing past it has
-to handle them:
-
-- every moment is an `Instant`: timezone-aware (a time without an offset is refused, never a
-  naive value compared against an aware one), never a bare number (`20260928` is not read as
-  seconds since 1970), and normalized to UTC, so one instant has one spelling wherever it is
-  compared, digested or served;
-- every record id is a `RecordId`, matching `RECORD_ID_PATTERN`.
-
-On the way in a violation is the caller's 422. On the way out the record cannot even be built: a
-store that reads a row breaking its promise (`ports.py`) fails as it builds the record, a 500,
-rather than serving an id the API could not address again or put safely into a `Location`.
-(The framework does not re-check a record a route returns; the check is the record's own, at
-construction.)
-"""
+"""The API's wire shapes: what a request may carry and what a response says."""
 
 from __future__ import annotations
 

@@ -163,41 +163,7 @@ def record_case_ticket(  # noqa: PLR0913 — the lane's inputs are the run's exi
 ) -> None:
     """Record the investigation into the case, never close it: at most one
     `POST /tickets/{key}/comments`, no transition. Closing is a person's act, which is what lets
-    the store's `closed` mean "a person reviewed this".
-
-    Which comment depends on the exit class, passed in-process from `run.py` (never read from
-    the run dir):
-
-        aborted                        -> the escalation note: no verdict, a person escalates
-        request-limit, retry-exhausted -> the record, proposing the host's own forced
-                                          `unresolved`; no usable report (the forced close
-                                          itself failed) -> the escalation note
-        budget, store, provider-down   -> no call at all, no receipt
-        anything else (None, a real
-        vocabulary member with no arm, an out-of-vocabulary string)
-                                        -> the record, proposing the report's disposition
-
-    `closed_before_cut` makes the no-verdict arms (`aborted`, `budget`/`store`/`provider-down`) record off the
-    model's own report instead, when it had already decided before the cut.
-
-    §7 R6/FAM-3: a failed or colliding open does NOT suppress this attempt (the two post-steps
-    are independent statements under one flag); every write fault is caught, warned once, and
-    leaves the run's exit code exactly what it would have been (O7). `key` is a parameter (§7
-    R8/FK04) so a vendor-minted, pre-existing key on a later deployment is a call-site edit —
-    today's deployment keeps `case_id = run_dir.name`. Keyword-only, so a bare string in the
-    second position cannot bind as `deps` and vanish into the catch-all. The key is the
-    case's identity EVERYWHERE this write names it: the two paths, the receipt and the
-    rendered `{case_id}`.
-
-    #1107 O6 — `tenant` is the run's record, `defender_dir` and `env` are run.py's. The #1047
-    no-verdict check runs BEFORE the config is read, so a budget- or store-cut run writes no
-    receipt whatever its tenant's config says, and every branch that writes no receipt first
-    removes any receipt an earlier attempt on this run dir left (a resumed run drives this step
-    again), so a page never shows a ticket line this attempt did not write. Every other failure —
-    no usable config, a refused mapping, a store that cannot be reached or answers an error, or an
-    unexpected error anywhere in the step — writes an `error` receipt whose `reason` is the failing check's own text with the host's settings
-    path redacted (`redact_settings_path`); `url` is null when there was no usable config to
-    name a store, and the store's address otherwise."""
+    the store's `closed` mean "a person reviewed this"."""
     run_dir = run.run_dir
     case_id = key if key is not None else run_dir.name
     try:

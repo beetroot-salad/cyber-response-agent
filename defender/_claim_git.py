@@ -1,24 +1,4 @@
-"""Git over a worktree an agent can write, as one claim sees it (#1175).
-
-The agent writes into the corpus (`corpus_rel`), and git opens a worktree `.gitignore` or
-`.gitattributes` when it walks or hashes there: one left as a FIFO blocks that call for good, a
-plain one rewrites what a check sees (a `*` hides every new file from `status`) or what git
-hashes. `ClaimGit` is every git call such a lane makes over the worktree, and none opens either:
-
-- attributes come from HEAD's tree (`_git.committed_view_env`), and no repo hook or automatic
-  maintenance runs in any call (`_LOCAL_ONLY`, as `GIT_CONFIG_*` so every call carries it);
-- `changes` lists tracked paths with `status --untracked-files=no` (no folder walk) and new
-  files under the corpus with `ls-files --others`, filtered by HEAD's root `.gitignore` read
-  from the commit, never from the worktree;
-- `commit` stages from those same records onto an index reset to HEAD and commits the index
-  alone: it reads nothing from the worktree;
-- `claim`'s cleanup runs `clean` with `-x` (no ignore rules), scoped to the corpus.
-
-Each call is bounded by the session's `timeout`, and an overrun is `GitOverran`: a `GitError`,
-so a caller routes it as a systemic fault, and not a `SubprocessError`, which a transient
-handler would swallow. A FIFO git never opens is left standing; git does not list special files,
-and a later scrub refuses the tree.
-"""
+"""Git over a worktree an agent can write, as one claim sees it (#1175)."""
 from __future__ import annotations
 
 import contextlib

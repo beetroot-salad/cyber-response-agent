@@ -1,45 +1,4 @@
-"""Shared machinery for #1077's run-handle spec — NO test scripts.
-
-The change (`spec-flow/specs/spec_graph_1077.yaml`, `70-resolutions.md`): no module outside
-the name owners spells a run or episode record's name. `defender/run_repository/_layout.py::RunPaths` grows
-from seven accessors to ~twenty, a new `defender/episodes/_episode_paths.py::EpisodePaths` owns the
-episode layout, a new `defender/tenancy/_tenant.py` owns `<runs_base>/_tenant.json`, and a new handle
-module wraps all three: `Run` with five sub-collections (`tables`, `facts`, `documents`,
-`observability`, `session`), a `RunRecord` value object at `run.record`, and a per-kind
-`RecordHandle` every record accessor answers.
-
-NONE of it exists at base db1af01a. Every import goes through `mod()` PER CALL (the
-`_triplet_947` / `_record_1049` idiom) so a missing module is ONE failure per test rather than
-a collection error that hides every other assertion in the file.
-
-COINED NAMES LIVE HERE AND NOWHERE ELSE. `70-resolutions.md` decision 1c names no type for the
-wrapper and decision 1b says "`run.record` (or similar)", so `RecordHandle`, `RunRecord`, the
-handle module's path and the `_tenant` / `_episode_paths` entry points are this suite's
-coinage (spec_graph_1077 `handoff.deviations`, "A COINED ID"). They are gathered in this one
-module so write-code-from-spec can RENAME the graph, this file and nothing else — never add a
-`conceptAliases` entry, which silently disables `check_binds`' prose-not-in-binds scan for the
-concept.
-
-EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE unless a fake is named below: the
-malformed tenant records, the traversal-shaped components, the colliding run ids, the
-non-regular file squatting a record's path and the planted directory trees are written to the
-filesystem by these helpers and re-probed on every run. Two fakes exist, both entering through
-an injection seam and never `monkeypatch.setattr` (`tooling/lint/lint_monkeypatch.py`):
-
-* `RecordingIo` — a pass-through recorder over the real `defender._io` that injects a fault
-  only where a `IoFault` says to. Its fault content cites the ledger: `write_guarded`'s
-  `OSError` carrying the alias marker on a non-plain target and its `FileExistsError` on the
-  `O_CREAT|O_EXCL|O_NOFOLLOW` staging collision are claim C19's observed behaviour of the real
-  `_io.py:818-822`, not an author's guess at what a write failure looks like.
-* `ProbeDocker` — a fake `DockerFn` for the alias-ban probe. `docker exec` is the one
-  dependency in this spec that is too expensive and too nondeterministic to drive for a
-  timeout, and the two faults it injects cite the real seam: `subprocess.TimeoutExpired` is
-  what `box/_docker.py`'s fixed `timeout=120` raises, and the malformed result is the
-  probe's own `_CONTROL_FAILED_MARKER` path (claim C3 / claim C14, which observed the probe on
-  the real sandbox).
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for #1077's run-handle spec — NO test scripts."""
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
@@ -493,15 +452,7 @@ def member_args(name: str, *, runs_base: Path | None = None) -> tuple[Any, ...]:
 
 
 def fixture_run(directory: Path) -> Any:
-    """A fixture's real Run, including its sidecar root, built without reading the tree.
-
-    #1187 (declared change 1; review-3 F31): a run folder's name is its canonical UUID run id,
-    so a fixture folder is made at `fixture_uuid(<label>)` by its CREATOR (the replay harness's
-    rule: the label maps where the folder is made). This helper does not map — it is handed a
-    folder its caller made and keeps using by path, so a mapped handle would address a
-    different folder — and refuses a non-UUID name LOUDLY, naming the folder, rather than
-    leaving the RunId refusal to production after implementation (where a refusal test would
-    then pass for the wrong reason)."""
+    """A fixture's real Run, including its sidecar root, built without reading the tree."""
     from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
 
     directory = Path(directory)
@@ -761,16 +712,7 @@ def compare_to_baseline(run_dir: Path, *, path: Path = TREE_BASELINE) -> list[st
 @dataclasses.dataclass(frozen=True)
 class IoFault:
     """A declarative fault-spec for `RecordingIo`. The fake classifies nothing and decides no
-    policy: it raises what it is told to raise, where it is told to raise it.
-
-    `fail_on` names the `_io` operations that raise (a path seam such as `write_guarded`, or a
-    rooted one such as `rooted_write`); `error` is the exception raised, defaulting to the
-    `FileExistsError` claim C19 observed when a guarded exclusive create meets an existing
-    entry. `raise_after` lets the Nth call through before failing. `before_write` runs just
-    before every write call (`write_guarded`, `rooted_write`, `rooted_locked_for_rewrite`),
-    handed the RECORD's path (a rooted call's trust root joined with its name), which is how the
-    tenant-record create race (decision 13) is opened deterministically.
-    """
+    policy: it raises what it is told to raise, where it is told to raise it."""
     fail_on: tuple[str, ...] = ()
     error: BaseException | None = None
     raise_after: int = 0

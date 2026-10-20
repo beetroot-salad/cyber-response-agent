@@ -1,17 +1,4 @@
-"""The owned box image's name, derived from the tree it is built from.
-
-Stdlib-only with no package-relative import: `defender/box/image_cli.py` also loads this
-file by path on a bare CI `python3` with no venv.
-
-The name hashes only the parts of `box.Dockerfile`, `uv.lock` and `pyproject.toml` the image is
-built from: the Dockerfile's bytes, `[tool.uv]`, the core + `box` requirement strings, and the
-lock's `box_closure`. Edits the image cannot see (lint config, other extras, lock reformatting)
-keep the name; an unlocked requirement edit renames it so `uv sync --locked` can refuse it. The
-closure is a superset, so some relocks rename an unchanged image: an extra rebuild, never a
-stale image.
-
-No file is read at import time.
-"""
+"""The owned box image's name, derived from the tree it is built from."""
 from __future__ import annotations
 
 import hashlib

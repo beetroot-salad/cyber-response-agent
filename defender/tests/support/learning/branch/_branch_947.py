@@ -1,35 +1,4 @@
-"""Shared machinery for the #947 turn-N foundations spec — NO test scripts.
-
-#947 makes T0 — the branch point's own moment — a REQUIRED coordinate of a branch: `BranchSpec`
-carries `as_of`, and `validate` refuses a spec whose moment disagrees with what
-`branch_point_time` derives from the prefix it forks at. That turns a `BranchSpec(...)` literal
-into a two-step construction, and it is a two-step construction at every call site in three
-suites — so it is spelled once, here.
-
-Three things live here and nothing else:
-
-1. **`branch_mod()`** — `defender.runtime.branch`, imported per test (the `_session_store_705`
-   idiom), so a missing target is one failure per test rather than one collection error.
-2. **`spec_at`** — the LEGAL spec for a branch point: it derives `as_of` through the runtime's
-   own `branch_point_time` rather than choosing a moment of its own, so a caller that means
-   "the spec this branch point admits" cannot accidentally pin a T0 the derivation disagrees
-   with. Its `as_of=` override is for the arms whose subject IS that disagreement.
-3. **`legal_source`** — a finished run a branch could legally be taken from BEFORE #1255: a
-   case pointer, a prefix of complete pairs, an `append_block` turn carrying the document, and
-   a captured query, all written straight into the store. After #1255 it is the shape of a run
-   recorded before the fork snapshot existed (N4: refused); see its docstring.
-
-#1255 FIXTURE RULE (design rev 5, C2; contract review R1). `legal_source` STAYS SNAPSHOT-LESS:
-it is the contract's N4 fixture (`tests/e2e/test_1255_snapshot_restore.py::test_n4_…`) and
-must never gain a fork snapshot. A suite that needs a hand-planted source an arm IS admitted
-from uses `planted_source` (the same shape) instead; any snapshot-planting helper the implementer
-adds for that one is FIXTURE-ONLY
-(it builds test inputs, it is not evidence the driver records snapshots), lives outside the
-`_1255_snapshot` helper, and no `test_1255_snapshot_*` module may import it — those observe the
-snapshot only through driven runs.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for the #947 turn-N foundations spec — NO test scripts."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -110,23 +79,7 @@ def declares_retired_prompt() -> bool:
 
 def spec_at(store: Any, run_dir: Path, message_id: int, *,
             prompt: str = "continue", as_of: Any = DERIVE):
-    """The `BranchSpec` this branch point admits, T0 included.
-
-    Two steps, because the two coordinates are not independent: `branch_point_time` reads the
-    prefix the spec names, and `validate` then refuses any spec whose `as_of` is not what that
-    derivation answered. A test that built a spec with a moment of its own would be refused for
-    a reason it was not written about.
-
-    `as_of=` overrides the derivation for the arms whose subject is exactly that refusal — and
-    it is compared against `DERIVE` rather than against `None`, so an arm may pass `None`, or any
-    other falsy non-moment, and get exactly what it asked for.
-
-    `prompt` reaches the spec ONLY while `BranchSpec` still declares the continuation prompt
-    (`declares_retired_prompt`). #1255 (D1, P4) removes the field: an arm resumes with no user
-    message at all, so on a tree past #1255 `prompt` is dropped here and a test still asserting
-    the prompt reached the model fails on its own assertion — which is the reversal it should
-    report, not a construction error.
-    """
+    """The `BranchSpec` this branch point admits, T0 included."""
     branch = branch_mod()
     coordinates: dict[str, Any] = {
         "source_run_dir": Path(run_dir), "branch_message_id": message_id, "as_of": DRAFT_MOMENT,
@@ -145,35 +98,7 @@ def legal_source(
     case_id: str = "case-source", name: str = "run-source-001",
 ):
     """A finished run a branch WAS legally taken from before #1255 — store rows written
-    directly, no driver.
-
-    #1255 CHANGES WHAT THIS IS. A source is branchable only at a MAIN response that called tools
-    (D1) and only if production recorded a fork snapshot for that response while the run was
-    driven (P2); a run with no snapshot is a run recorded before the change, and forking one is
-    refused (N4). Nothing here drives a run, so after #1255 every branch from this fixture is
-    the N4 case — `tests/e2e/test_1255_snapshot_restore.py` uses it as exactly that. A test that
-    needs a source a branch is ADMITTED from drives one: `tests/_1255_snapshot.drive_source`.
-
-    Returns `(store, run_dir, session_id, path_ids)`:
-
-    - `path_ids[3]` is the `append_block` CALL (a tool-calling response, but taken BEFORE the
-      document landed, so its frontier is empty);
-    - `path_ids[LEGACY_BRANCH_CALL]` (= 5) is a trailing `bash` CALL, after the document
-      landed — the D1 shape with an open frontier, the branch point a caller re-pointed by
-      #1255 uses;
-    - `path_ids[-1]` is that call's RETURN — a complete pair, the shape `validate` admitted
-      before #1255 and refuses after it.
-
-    STAYS SNAPSHOT-LESS (module docstring): every branch from it is N4's after #1255, wherever
-    the snapshot is checked (C2: the fork command; the arm launch).
-
-    The `append_block` call carries the DOCUMENT as its `text`, which is what a real append
-    that authored this file would have sent: `fence_count_at` reads the appended text, so a
-    placeholder there would land a document the store says holds no fences.
-
-    `investigation=None` writes no document (the empty-frontier fixture) and `queries=None`
-    writes no table (the no-capture fixture), so each precondition can be failed on its own.
-    """
+    directly, no driver."""
     return _hand_planted_source(tmp_path, investigation=investigation, queries=queries,
                                 case_id=case_id, name=name)
 
@@ -183,19 +108,7 @@ def planted_source(
     case_id: str = "case-source", name: str = "run-source-001",
 ):
     """A hand-planted source an arm is meant to be ADMITTED from — `legal_source`'s exact shape
-    (same rows, same `path_ids` indexes, same files), but NOT the N4 fixture.
-
-    For the suites that need a source whose prefix they write row by row (state a driven run
-    cannot reach, e.g. a lead's rows with no claim for it: `test_1235_run_state_e2e`,
-    `test_repeat_breaker_807`). After #1255 an arm forks only a source with a fork snapshot,
-    so the implementer's fixture-only snapshot-planting helper MAY — and, for those suites to
-    run, must — snapshot this source at its branch points. That helper builds test inputs; it
-    is not evidence the driver records snapshots, and no `test_1255_snapshot_*` module imports
-    this builder or the helper (they observe snapshots only through driven runs).
-    `legal_source` stays snapshot-less: it is N4's fixture and never the helper's input.
-
-    Snapshotted here, as of the files this builder planted, for every tool-calling response
-    (`_fork_snapshot_plant`, #1255 deferred verification 4)."""
+    (same rows, same `path_ids` indexes, same files), but NOT the N4 fixture."""
     from defender.tests.support.runtime.state._fork_snapshot_plant import plant_fork_snapshots
 
     planted = _hand_planted_source(tmp_path, investigation=investigation, queries=queries,

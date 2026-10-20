@@ -1,46 +1,4 @@
-"""A docker daemon faked over one folder, for the #1195 rows. NOT a test module.
-
-Standard library only, so the same code answers two callers over the same state:
-
-- in process, as an injected `docker=` seam (`_box1195.FakeDaemon.__call__` calls `handle`);
-- as a `docker` program first on `PATH` (`FakeDaemon.install`), which runs this file as a
-  script, so the box code's DEFAULT seam (`box._docker`, a real subprocess) reaches it
-  too: a box `start_box` created with no `docker=` carries that default, and every lifecycle
-  call on it (the post-create stop, each run, the batch-end removal) reaches the program.
-
-The folder holds `state.json` (the containers by name, each `{"status", "token"}`, the faults
-still to inject, the per-verb call counts, and the host writes a box makes as it starts or
-stops) and `calls.jsonl` (every argv, one JSON list per line, plus the marks a test writes
-between them). The daemon decides nothing about what an answer means: it keeps container state
-the way a daemon does and answers each verb the box code asks.
-
-- `inspect -f <fmt> <name>`: the status or the start-token label, or rc 1 for no such
-  container. `inspect <id> --format ...` (the own-mount-table probe) is rc 1: no such object.
-- `version`: rc 0, unless the daemon is `down` (then every verb answers rc 1, as an
-  unreachable daemon does).
-- `image inspect`: rc 0 (the image is held).
-- `run --name <n> --label defender.start-token=<t> ...`: creates `<n>` running, or rc 125 when
-  the name is taken (docker's own conflict) or a create fault is set.
-- `exec [flags] <name> cat <path>`: the host file the in-box `<path>` names through the
-  container's bind table (nested mounts winning; a path no bind covers is read as given — the
-  drain's mounts sit at their own paths, while since #1255 a run box mounts each tree at a
-  fixed model path such as `/runs/current`), or other bytes under a `sentinel` fault;
-  `exec ... python3 -c <probe>`: the alias
-  probe's healthy verdict, or one shape allowed when `alias_allowed`. A container that is not
-  running answers rc 1.
-- `start <name>`: `exited` (or `created`) -> `running`. On a container already running it
-  answers rc 0 and changes nothing, as docker does (#1195 C3). A paused or dead one is refused.
-- `stop [-t N] <name>`: `running` (or `paused`) -> `exited` (or `dead`, under a `dead` fault, or
-  whatever status a `leave` fault names); rc 0 and no change on one that is not running.
-- `rm -f <name>`: removes it (rc 0 whether or not it existed, as docker 29 does), unless an
-  `rm` fault is pending: then rc 1 and the container stays as it was.
-
-Faults on `start` and `stop`, by the call's ordinal (from 1, counted per verb) or `"*"` for
-every call: `refuse` (rc 1, nothing changes) or `noop` (rc 0, nothing changes: a verb that
-did not take). `inspect -f` calls can be refused the same way (rc 1, as for no such object: a
-daemon that flaked on the question). `on_start`/`on_stop` are the box's own writes (or removals) through its mounts: on its
-first act once up, or its last act while still up.
-"""
+"""A docker daemon faked over one folder, for the #1195 rows. NOT a test module."""
 from __future__ import annotations
 
 import json

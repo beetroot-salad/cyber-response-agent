@@ -1,15 +1,5 @@
 """The TOON view gate: a provenance-gated, cost-bounded substitution of a foreign tool's
-dict/list result with a smaller TOON view, framed like every other untrusted span.
-
-Installed at the single `Agent(...)` composition root (`driver.build_agent_core`), so it is
-on every build path. Defender's own tools are identified by toolset identity (the agent's
-`_function_toolset`), not by name, so a same-named foreign tool cannot pass. Any other toolset
-is foreign and gated unless marked with `mark_owned()`.
-
-`_prevalidate` runs before the encoder: `toons.dumps` segfaults (rather than raising) on
-self-referential or very deep containers. Encoder/decoder calls are guarded against
-`BaseException` (the encoder's panic is one), re-raising only control-flow exceptions.
-"""
+dict/list result with a smaller TOON view, framed like every other untrusted span."""
 from __future__ import annotations
 
 import asyncio

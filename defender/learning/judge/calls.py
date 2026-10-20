@@ -1,30 +1,5 @@
 """One run's two call records, joined by the host-written call id (A2, A12), and the one
-definition of a BLOCKED CALL (A2, A14).
-
-The served ledger (`served/<world-uuid>.jsonl`, the host's) owns what was served or blocked; the
-query table (`worlds/<X>/executed_queries.jsonl`) owns call order and the pre-branch rows. The
-two are joined on the call id — exactly, never on `(system, verb, params)`. The ledger row
-carries the id; the table row does not (#1255 G4: the model reads that table), and the id a
-table row is joined by is its run's host-only call join's for the row's `(lead_id, seq)`
-(`family.read_query_table` hands each row back carrying it under `CALL_ID`):
-
-* a table row whose id names this run is the run's own call; its ledger partner is the ledger
-  row carrying the same id (none: the call is UNSERVED);
-* a table row carrying no id of this run is INHERITED (pre-branch, seeded from the source): the
-  shared baseline, never paired, never unserved;
-* a ledger row whose id is in no table row is UNMAPPED.
-
-A blocked call is a ledger `refused`/`fault` row, a table row whose ledger partner is one, the
-inherited pre-branch `∅.denied` row present identically in every readable run's table (J3), or
-a pre-flight `not_replayable` entry. Every reader that asks "was this blocked" — the resolver's
-gap-only rule, the found gaps, a named gap's key — asks `is_blocked_ledger_row` /
-`is_blocked_table_row` here; none re-derives it. An outage (`real-error`) is served, not
-blocked.
-
-The id's spelling (`<world token>/<n>`) is the runtime writer's (query tool and registry, A12);
-`call_id_names_run` is the one place the judge reads it, so when the writer exports its own
-parser this function is re-pointed at it and nothing else changes.
-"""
+definition of a BLOCKED CALL (A2, A14)."""
 
 from __future__ import annotations
 
@@ -226,20 +201,7 @@ def table_refusals(bound: Bound, manifest: Mapping[str, Any],
 def found_gaps(bound: Bound, manifest: Mapping[str, Any], *,
                not_replayable: Iterable[Any] = ()) -> list[dict[str, Any]]:
     """The user record's found gaps (A2), computed by code from the archive, never by the
-    model, on every pass that read the manifest (graded or stamped).
-
-    @owns unread — a found-gap entry `{run, unread}` naming a census input that could not be
-    read and why (NA04); the page shows it beside the listed entries.
-
-    Every manifest world's served ledger, the control's and every failed, cut-short, excluded
-    or not-archived world's included, is read on its own (`family.read_served_ledger`, whatever
-    that run's query table holds): each blocked row (`refused`/`fault`) is listed once per key
-    `(run, system, verb, params)` with its count. A ledger that cannot be read is one entry
-    under its run naming the cause; it costs no other run its entries. Then the family's own
-    entries under `FAMILY_RUN`: J3's inherited denials, identified over every readable query
-    table (`readable_tables`) and counted as often as each table holds the row — or, with fewer
-    than two readable tables, one entry naming that unread — and pre-flight's `not_replayable`
-    calls. Entries come in manifest order, control first, then the family's."""
+    model, on every pass that read the manifest (graded or stamped)."""
     from defender.learning.judge.family import (
         control_world, non_control_worlds, read_served_ledger)
 

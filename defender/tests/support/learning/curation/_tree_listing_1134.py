@@ -1,39 +1,5 @@
 """Seams, plants and child-process runners for #1134 v3 step 1's suite
-(`test_1134_tree_listing.py`). It defines no tests.
-
-It imports only the standard library at module level. `defender._io` and
-`defender._tree_listing` are resolved inside the functions that use them, so a missing name fails
-the row that calls it (never collection), and a child interpreter loads this module in a fraction
-of a second.
-
-* `os_` stand-ins: pass-throughs over the real `os`, handed in through `bind(root, os_=...)` or
-  `hold(root, os_=...)` (nothing is monkeypatched):
-  - `CallRecorder` records the name of every attribute asked of the seam, so an empty record
-    after a call means it made no I/O through the seam at all;
-  - `OsCallLog` records every call with its descriptors named by what they open, so the I/O of
-    two calls can be compared as a sequence or a multiset;
-  - `FailsOn` fails opening or stat-ing one name with an errno;
-  - `RefusesListing` fails the listing of one folder on one route (`LISTING_ROUTES`);
-  - `ListingFaults` fails the reopen of chosen folders with an errno, and REALLY removes chosen
-    folders at a chosen moment of their own listing (`REMOVAL_MOMENTS`), after the step into
-    them (addendum 3, D2);
-  - `ReportsLinks` reports a chosen link count for the `fstat` of a folder's reopened descriptor
-    only, flipping it when that folder's scan ends (H2: a judgement after the scan, not before);
-  - `SwapsOnStep` REALLY moves a folder out of the tree, and plants a file, a FIFO, a symlink or
-    nothing at its name, the moment it is first stepped into (#1134 v2 finding #2).
-* `ParkedWriter`: a thread parked in a FIFO's write open. While it stays parked, nothing has
-  opened the FIFO to read.
-* Plants (`plant_entry`, `plant_folder`): real filesystem entries.
-* The child: `run_child(request)` runs `child()` in a fresh interpreter under `CHILD_DEADLINE`
-  (the test worker never forks). Mode `as_nobody` drops to uid/gid 65534 after its imports when
-  it runs as root, so a real permission bit bites; mode `low_fd_limit` lowers its own soft
-  `RLIMIT_NOFILE` to a few descriptors above what it holds; mode `audited` installs an audit
-  hook (in the child; the test worker never gets one) and reports every audit event raised
-  during each helper call, whatever `os` the code under test reached. Each runs listing
-  scenarios and answers JSON. Not `subprocess.run(user=65534)`: where `sys.executable` resolves under a folder
-  uid 65534 cannot search (uv's `/root/.local/share/uv/python`, mode 0700), that exec fails
-  with EACCES before any test code runs.
-"""
+(`test_1134_tree_listing.py`). It defines no tests."""
 from __future__ import annotations
 
 import contextlib
@@ -686,14 +652,7 @@ def owned_tree(tmp_path: Path) -> Iterator[Path]:
     """A folder an unprivileged reader can reach and OWNS (as the drain host owns its tree):
     under `tmp_path` when this process is not root; as root, a fresh folder under `/tmp` opened
     to all (pytest's own tmp chain is 0700 to root), handed to `NOBODY` by `hand_over()`. Yields
-    the root to build under.
-
-    Every folder's mode is put back before removal, however the body left it (an unreadable or
-    unsearchable folder included), through descriptors only: `os.fwalk` opens each folder
-    no-follow. As root (which enters any folder) each folder is `fchmod`ed through the
-    descriptor `fwalk` opened; never by path, since by then `NOBODY` owns the tree and could
-    swap a name for a link. Unprivileged, each child folder is restored off its parent's
-    descriptor before `fwalk` descends into it (and the top through its own)."""
+    the root to build under."""
     if os.geteuid() != 0:
         top = tmp_path / "owned"
         top.mkdir()

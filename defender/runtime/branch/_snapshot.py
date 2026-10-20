@@ -1,30 +1,4 @@
-"""The fork snapshot: what a run held when one of MAIN's responses arrived (#1255 P2, P3).
-
-When a MAIN model response that called tools arrives, before any of its calls run, the host
-records (`SnapshotWriter.record`):
-
-  * every per-run counter the model can feel — the budget counters, permanent system-down
-    causes and the circuit breaker
-    (`RunState.fork_counters`), the challenge gate's rounds and raised asks, main's request
-    count (this response included, the snapshot's key), and the caps the run runs under (its
-    limits and its request ceiling, rev 5 C3);
-  * each append-only model-readable file by length and digest (the queries table, the lessons
-    and denials logs);
-  * the rewritable document (`investigation.md`, which `fix_row` edits in place) by content;
-  * each write-once file by digest (lead claims, raw payloads, gather summaries, review records).
-
-It is kept in the run's session store (`session_store.write_fork_snapshot`), beside the runs base
-and outside every box mount (P3), keyed by the session that drove the response and the
-framework's request count. Gather and review run inside MAIN's awaited tool calls and nothing
-writes in the background, so the moment a response arrives is a clean cut.
-
-An arm restores the snapshot of its branch point (`ForkSnapshot.verify` before the fork,
-`restore_files` after it): each append-only file is copied cut to its recorded length, the
-document is written from its recorded content, each write-once file is copied whole, and every
-copy must be the bytes that were recorded — a restore that does not match refuses the arm. The
-counters, the gate's state and the caps are handed to the driver, which runs the arm under them.
-This replaces the per-file cut rules (fence counting, lead selection) a sibling was seeded by.
-"""
+"""The fork snapshot: what a run held when one of MAIN's responses arrived (#1255 P2, P3)."""
 
 from __future__ import annotations
 

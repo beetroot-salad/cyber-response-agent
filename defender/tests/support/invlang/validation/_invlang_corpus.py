@@ -1,19 +1,4 @@
-"""The shipped ```invlang documents, in one place.
-
-Every rule that says "and the corpus stays green" parametrizes over this list, so the list
-itself is one fact with one owner rather than a glob each new rule re-derives (#803).
-
-`learning/runs/` is deliberately absent. It is gitignored machine-local run output
-(`.gitignore` line 79; `git ls-files` lists nothing under it), so globbing it makes the
-parametrization a function of what happens to sit on the developer's disk — empty on CI,
-where the guard is supposed to run, and on a laptop able to go red over a run nobody is
-shipping.
-
-That is a rule about TRACKING, not about provenance: `fixtures-e2e/` holds run output too,
-and `_golden_invlang/turnN-A.investigation.md` is a copy of one committed so the lesson
-retrieval it is the north star for can be judged in CI (#935). Once a document is in the
-tree, every rule that says the corpus stays green owes it the same guard.
-"""
+"""The shipped ```invlang documents, in one place."""
 
 from __future__ import annotations
 

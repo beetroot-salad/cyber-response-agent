@@ -779,17 +779,7 @@ def _rename_check(source: str, new: str) -> str:
 
 def _with_settings_check(source: str, arm: str) -> str:
     """The copied cmdb adapter as each arm needs it — so an arm that removes the check removes it
-    for a reader that imports the module and for one that reads its AST alike:
-
-    * `declared` keeps the adapter's own check (appending a stub that answers "usable" only when
-      it declares none);
-    * `none` removes every top-level binding of it; `not-callable` then binds the name to a
-      string;
-    * `rebound` keeps the declared `def` and then rebinds the name to a string — what the module
-      holds is not callable, whatever its source declares first;
-    * `assigned` renames the declared `def` and binds `check_settings` to it by assignment;
-      `imported` removes the check and binds the name by importing the shipped cmdb adapter's own
-      — each a callable check, bound by a form other than a `def` of that name."""
+    for a reader that imports the module and for one that reads its AST alike:"""
     declared = source if _binds_check(source) else source + _STUB_CHECK
     if arm == "declared":
         return declared

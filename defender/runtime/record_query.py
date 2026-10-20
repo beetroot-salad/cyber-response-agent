@@ -54,16 +54,7 @@ def derive_system(inner: list[str]) -> str | None:
 
 
 def payload_digest(stdout: str, stderr: str, exit_code: int) -> str:
-    """The row's human-readable display string — prose for offline readers, never an identity.
-
-    On success it is a serialized length, so equal-length payloads share it; `_result_identity`
-    pairs it with `payload_sha256`. On failure it is the discriminating half, since every failed
-    row hashes the same empty payload — except for above-guard rejections whose `system` was
-    coarsened away: those record host text only, so two rejections naming different undeclared
-    systems share both this string and the hash. That is safe because `repeat_note` skips every
-    `ABOVE_GUARD_QUERY_ID` row and `collect_general_failures` drops systemless rows before
-    `pitfall_key` merges on the digest. For unreadable-system rejections (`system_key == ""`)
-    the two strings are unrecoverable from the table."""
+    """The row's human-readable display string — prose for offline readers, never an identity."""
     if exit_code != 0:
         return f"exit={exit_code}; {stderr.strip()[:160]}"
     lines = stdout.count("\n") + 1 if stdout.strip() else 0
@@ -88,42 +79,13 @@ def payload_sha256(payload_text: str) -> str:
 
 
 def names_something_readable(raw_system: Any) -> bool:
-    """Does `raw_system` name anything a reader could tell apart from an empty argument?
-
-    Public because this module's repeat grouping and `query_tool._undeclared_target`'s
-    dead-end wording must agree: a group the guard folds is a group the message describes.
-
-    Uses `_text.is_content_less` rather than `.strip()` (which leaves zero-width and format
-    codepoints standing, each minting its own digest while rendering as empty) or
-    `str.isprintable()` (which depends on the interpreter's Unicode database, so the answer
-    could change across Python versions, and calls private-use glyphs unreadable). A non-`str`
-    is unreadable rather than a raise: both callers run inside a rejection handler.
-
-    Not closed: assigned, visible-category characters that render blank in most fonts
-    (U+3164, U+2800, U+115F/U+1160, a lone variation selector) count as readable and mint their
-    own identity. "Renders blank" is a font property, not a string property; the containment is
-    `rejection_budget_trip`, which counts rejections regardless of identity."""
+    """Does `raw_system` name anything a reader could tell apart from an empty argument?"""
     return isinstance(raw_system, str) and not is_content_less(raw_system)
 
 
 def system_fingerprint(raw_system: Any, recorded_system: str) -> str:
     """@owns system_key — the row's `system_key` column: the only value derived from a
-    model-authored system string allowed to leave the writer's frame.
-
-    `""` when the row already separates the call: a declared system (`recorded_system` carries
-    it) or a system with nothing readable in it (all such calls are one repeat group).
-
-    `raw_system` is coerced via `names_something_readable` rather than trusted, because both
-    above-guard callers run inside a rejection handler that would not catch a raise here.
-
-    Otherwise the full-width `sha256` of the raw string. Truncating buys nothing: a system name
-    is low-entropy either way, and `verb`, `params` and `raw_command` on the same row already
-    store unbounded model text verbatim. `sha256` rather than `hash()` so a replay agrees with
-    the run that wrote the table. Kept out of `system` because the digest is name-shaped and
-    `system` feeds corpus paths; only the guard's `_trip` reads this column.
-
-    Never minted for a declared name: `recorded_system` is `""` exactly when the registry's
-    fixed roster does not declare `raw_system`."""
+    model-authored system string allowed to leave the writer's frame."""
     if recorded_system or not names_something_readable(raw_system):
         return ""
     return _sha256_hex(raw_system)
@@ -159,15 +121,7 @@ def raw_command(system: str, verb: str, params: dict) -> str:
 
 def persist_payload(run: Run, lead_id: str, seq: int, text: str) -> str | None:
     """Write the payload sidecar at `gather_raw/{lead_id}/{seq}.json`, best-effort; returns its
-    run-dir-relative path or `None`.
-
-    Catches `ValueError` too: `guarded_mkdir` raises it when a `lead_id` with separators or
-    `..` escapes the tree. The sidecar must exist even when empty, because
-    `lead_extraction.extract_from_joined` drops any row whose `raw_ref` is not a file.
-
-    A payload over `READ_LIMIT` bytes is not written (#1217): every reader of a sidecar refuses
-    one, and a host write is outside the box's `fsize` cap. `None` is the shape any failed write
-    already takes, so the row records no sidecar and readers fall back as they do for that."""
+    run-dir-relative path or `None`."""
     owner = RunPaths(run.run_dir)
     try:
         data = text.encode("utf-8")
@@ -238,34 +192,7 @@ def append_query_row(  # noqa: PLR0913 — one parameter per ROW COLUMN the call
     """@owns QUERY_ROW_COLUMNS @owns CALL_JOIN_COLUMNS — the single append to the queries
     table: allocate the lead's next seq, persist the payload sidecar, record the row in the
     run's state, record the call's join line (`(lead_id, seq)` -> `call_id`, host-only, beside
-    the run folder: #1255 G4/G6) and append the row's line in `QUERY_ROW_COLUMNS` order.
-
-    The call id (`call_id`, default: the next one this run allocates) is never on the row: the
-    table is the model's to read and the box's to write, and on an arm the id spells the world
-    token. The judge joins a table row to its served-ledger rows through the call join, by the
-    row's own `(lead_id, seq)` — never by the row's position, which a refused view write or a
-    box edit can shift.
-
-    Every writer goes through here. A row whose keys or order differ from the declaration is a
-    `RuntimeError` at the first write. Params past `PARAMS_NESTING_LIMIT` are `ParamsTooDeep`
-    before anything is written, so every row is one its reader can read back. `error_class`
-    and `payload_sha256` are derived here so a caller cannot disagree with them.
-
-    `system_key` is required: `""` is a real answer, so a default would hide a writer that
-    should have fingerprinted. It cannot be derived here because the string it fingerprints is
-    absent from the row.
-
-    The run's `state` is the record of the call; `executed_queries.jsonl` is the model's view of
-    it (#1235 round 3). So, under the state's lock: the seq is taken from the state, the payload
-    sidecar persisted (best-effort: a sidecar that cannot land is a row with no payload), the row
-    recorded in the state, and only then the view line written. A refused view write raises its
-    `OSError` with the row already recorded and its seq spent — the call it records was made, and
-    every live decision (the guards, the seq, the repeat note) still counts it. What is refused
-    before anything — too-deep params, a row that disagrees with the declaration — records
-    nothing. The state holds the row as its line parses (`json.loads(json.dumps(row))`), so it and
-    the view agree on every line that landed. The join line is written before the view line, so
-    a call the run made is joined whether or not its view line lands; a refused join write
-    raises its `OSError` as the view's does."""
+    the run folder: #1255 G4/G6) and append the row's line in `QUERY_ROW_COLUMNS` order."""
     # First, so too-deep params are refused before a seq is taken or a sidecar written.
     with state.lock:
         stored_params = _json_safe_params(dict(params))
@@ -614,15 +541,7 @@ def rejection_trip(
     """The companion guard: `repeat_trip` over the rejections that never reached
     `wrap_tool_execute`'s placement (argument-schema failures, unresolvable verbs at the grant
     check), which `repeat_trip` cannot see. The two domains are disjoint, so neither can report
-    a trip the other's placement could have prevented. The domain is `in_rejection_domain`.
-
-    `system_key` carries the identity the row cannot: an undeclared system is recorded as
-    `""`, so without it three rejections naming three different systems would trip. Required
-    here (unlike `repeat_trip`) because omitting it would silently key every ghost alike.
-
-    `rejection_budget_trip` also counts this domain, identity-blind. The two are checked in
-    order with distinct sentences, so a lead ended here did repeat itself, and the row's detail
-    says which guard fired."""
+    a trip the other's placement could have prevented. The domain is `in_rejection_domain`."""
     return _trip(
         rows, lead, system=system, verb=verb, params=params, threshold=threshold,
         system_key=system_key,
@@ -634,21 +553,7 @@ def rejection_budget_trip(
     rows: Sequence[dict], lead: str, *, budget: int = REJECTION_BUDGET,
 ) -> RejectionBudgetTrip | None:
     """`None` while this call is below the lead's `budget`-th above-guard rejection, else the
-    trip. The guarded call counts: `budget - 1` prior rows trip.
-
-    The domain is exactly `rejection_trip`'s (`in_rejection_domain`). Widening it by
-    `error_class` would turn adapter outages into dead ends; widening it to below-guard
-    parameter refusals would end healthy leads (30 of 320 archived leads have 4+, tails up to
-    98).
-
-    Identity-blind: it reads none of `system`, `verb`, `params` or `system_key`, since those
-    are exactly what an attacker-influenced turn chooses freely. Counts over the lead's
-    lifetime, since the framework's counter is what gets reset.
-
-    The guarded call's rejection row is written whether or not it trips, so a recorded table
-    holds exactly `budget` matching rows at a trip and replays reach the same verdict. `>=`
-    because `query` is not `sequential`: parallel calls can read a stale count and arrive past
-    the budget, and the stop must still land."""
+    trip. The guarded call counts: `budget - 1` prior rows trip."""
     count = sum(
         1 for r in rows
         if in_rejection_domain(r) and r.get("lead_id") == lead

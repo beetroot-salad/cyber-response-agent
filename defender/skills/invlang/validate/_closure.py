@@ -201,20 +201,7 @@ def _check_authz_contract_closure(
     companion: CompanionBody, *, gated: set[str] | None = None
 ) -> list[str]:
     """Every declared `:H h-NNN.authz` contract is fulfilled by a `:R authz` row, or deferred
-    in `:T conclude.deferred_authz` with a reason.
-
-    Broader than `_check_benign_authz`: it runs under every disposition and covers contracts on
-    refuted hypotheses too, since refutation is a deferral rationale the run should state, not
-    an automatic discharge.
-
-    Stands down on any contract the disposition gate is already refusing, matched on that
-    gate's output (`gated`, handed in by `diagnose`): otherwise one missing row is reported
-    twice, and this rule's "defer it" repair would leave the disposition gate still blocked.
-
-    Fulfilment is read by id with no verdict condition; a shared `ac*` id is scoped by anchor
-    kind (see `_discharged_by_row`). `resolved` is spelled qualified, because the shared walk
-    also accepts a bare `local_id` and a bare set would reintroduce the cross-owner discharge.
-    """
+    in `:T conclude.deferred_authz` with a reason."""
     conclude = companion.get("conclude") or {}
     if not _is_closing(companion):
         return []
@@ -273,17 +260,7 @@ def _check_authz_contract_closure(
 def _check_impact_closure(companion: CompanionBody) -> list[str]:
     """Every declared `ip*` is graded by a `:R impact` row or deferred in
     `:T conclude.deferred_impact` with a reason — and the roll-up over those grades is
-    internally consistent.
-
-    An ungraded predicate lets a run choose after the fact which threshold to be measured
-    against. Applies across all leads, including failed ones: the deferral arm covers a query
-    that errored.
-
-    The roll-up check is presence only: `impact_severity` is required exactly when the verdict
-    claims a consequence (`exceeds` / `indeterminate`) and forbidden otherwise. Not checked:
-    either cell's vocabulary (the runtime SKILL never states it) and whether the roll-up is
-    arithmetically right over the rows.
-    """
+    internally consistent."""
     conclude = companion.get("conclude") or {}
     if not _is_closing(companion):
         return []
@@ -354,17 +331,7 @@ _SEVERITY_OWING: frozenset[str] = frozenset(vocab.IMPACT_VERDICT) - {"within"}
 
 def _check_prediction_closure(companion: CompanionBody) -> list[str]:
     """Every `p*`/`ap*` on a hypothesis the run is still carrying was settled by some
-    resolution, or deferred in `:T conclude.deferred_preds` with a reason.
-
-    PREDICT pre-commits predictions so grading cannot be chosen after the evidence lands; this
-    stops the uncited ones from silently disappearing. `_check_prediction_completeness` (#6)
-    covers a hypothesis standing at `++` at write time with no deferral; this covers every other
-    live hypothesis at CONCLUDE, where "the tool was never available" is a final answer.
-
-    Refutation is read from the resolution record (weight moved to `--`), not the `status`
-    column, which append-only fixes at declaration. A citation counts only from a resolution
-    with a non-null `after`, and only for the declaring hypothesis.
-    """
+    resolution, or deferred in `:T conclude.deferred_preds` with a reason."""
     conclude = companion.get("conclude") or {}
     if not _is_closing(companion):
         return []

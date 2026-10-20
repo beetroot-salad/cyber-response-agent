@@ -1,35 +1,4 @@
-"""The one dataclass decorator every boundary type in the tree is built with.
-
-`@model` wraps `pydantic.dataclasses.dataclass`, usable bare or as `@model(frozen=True)`, with:
-strict by default (no coercion — `"3"` is never an `int`); `extra="forbid"` (pydantic's default
-silently drops unknown keywords, so a typo in a constructor or `dataclasses.replace` would keep
-the old value); and `arbitrary_types_allowed`.
-
-**Forward references.** A field naming a class defined later in the same module leaves the
-schema incomplete, and pydantic finishes it on first construction from whichever thread gets
-there first. Call `complete(cls)` at module end to finish it at import.
-
-**Validator exceptions.** Pydantic wraps only `ValueError`/`AssertionError` into its
-`ValidationError`; anything else propagates unchanged. So:
-
-- Raise a **domain exception** (deriving from `Exception`, not `ValueError`) when the reader is
-  a human with a traceback: it arrives unconverted, first-fail. A `ValueError` subclass would be
-  wrapped and a caller's `except ThatClass` would silently miss it.
-- Raise **`ValueError`** when a model reads the message back as a tool result: pydantic batches
-  every failed check into one `ValidationError` naming each field path.
-
-**`strict` is a per-class knob.** Nested in another schema, a strict dataclass demands an
-actual instance, not a mapping: `TypeAdapter(list[Foo]).validate_python({...})` raises
-`dataclass_exact_type`. `pydantic_ai` validates tool args in Python mode when a provider hands
-back already-parsed args, so a strict dataclass as a tool parameter type can refuse a
-well-typed call; the same holds for our own read-back sites building records from parsed
-YAML/JSON (`judge._grade_from_document`). Pass `strict=False` for a class instantiated from
-external data at such a boundary — lax mode only adds ordinary coercions, never `int` for `str`.
-
-**`ArgsKwargs`.** On a pydantic dataclass a `mode="before"` validator receives a
-`pydantic_core.ArgsKwargs` (positional and keyword args held separately), not a `dict`. Call
-`unwrap_before(cls, value)` first to get the field-name -> value `dict`.
-"""
+"""The one dataclass decorator every boundary type in the tree is built with."""
 
 from __future__ import annotations
 

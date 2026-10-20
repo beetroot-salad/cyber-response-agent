@@ -1,63 +1,6 @@
 """The tracked-text pointer scans #1080's coherence demands run — a doc, comment, config comment,
 test table or lint list that still points into `defender/scripts/` at something the move took
-away. NO tests.
-
-Every scan takes a checkout ROOT and lists its files with `git -C <root> ls-files -z`: TRACKED
-files only, so an untracked scratch file, a nested checkout, a `.venv` link and `__pycache__`
-never count (s003). A symlink is not followed and a file that is not UTF-8 text (or holds a NUL
-byte) is not text. The same functions scan the real checkout and a tmp git repo holding a planted
-copy, which is what lets a test's positive control prove the observation channel.
-
-WHAT IS NOT SCANNED (each a frozen record of its own moment, rewriting which would falsify it —
-the archival and recorded-data trees of `tooling/lint/lint_stale_refs.py`'s `_ARCHIVAL_DIRS` and
-`EXCLUDED_GREP_DIRS`): `experiments/`, `docs/decisions/`, `docs/archive/`, `spec-flow/specs/`
-(the committed spec graphs quote pre-change code by construction), `.claude/worktrees/`, the
-vendored fixtures and golden case records, the lesson corpora, the judge-alignment dataset —
-and THIS suite's own directory, which records the base on purpose. Unlike the lint,
-`docs/` (outside its decision records and archive), `defender/docs/` and every other tracked
-text file ARE scanned: markdown under `defender/` and `docs/`, `bin/README.md`,
-`knowledge/*/settings/**/config.env` comments, `defender/CLAUDE.md`, Python comments and test
-tables, the lint lists, the baselines, `.claude/spec-flow.json`.
-
-THE BASE IS THE REFERENCE. `S.base_inventory()` (captured at 80888efb) lists every tracked file
-and subfolder `defender/scripts/` held; an "entry" is one of them, relative to
-`defender/scripts/`. A pointer NAMES an entry when, read as a path, its longest leading part is
-one — spelled
-
-  * as a path:    `defender/scripts/<entry>…`, `${DEFENDER}/scripts/<entry>…`, or a bare
-                  `scripts/<entry>…` not itself the tail of a longer path (`spec-flow/scripts/…`
-                  is not one);
-  * as a module:  `defender.scripts.<entry dotted>…` or `scripts.<entry dotted>…` (the
-                  `mod("integrations.ticket_writer")` helpers), and the module an
-                  import names: `from defender.integrations import faults` names
-                  `adapters/faults.py`;
-  * as a join:    `"integrations" / "ticket_writer.py"`.
-
-A name that only LOOKS like an entry is never a pointer: the bare word `visualize` (a live
-identifier), `defender/lessons/` (the lesson content folder), a surviving file's stem, or the
-repo's own top-level `tooling/lint/…` — whose tail names no base entry (s199).
-
-The three scans:
-
-  * `stale_scripts_pointers(root)` — every pointer naming an entry that no longer exists under
-    `root` (m5_text_pointers_follow_moves, s106, s199). Returns `(relpath, line, text)` tuples,
-    `text` being the pointer exactly as spelled.
-  * `vanished_folder_mentions(root)` — every pointer into a base SUBFOLDER that no longer exists,
-    plus that subfolder's name written as a bare path component (`case_history/`, the layout
-    line in `defender/CLAUDE.md`) where nothing path-like precedes it (s106). A bare name that is
-    also a live `defender/<name>/` folder (`lessons/`, once `scripts/lessons/` went with its
-    wrapper) names that folder, not the vanished one, and is not a mention.
-  * `dead_scripts_pointers(root)` — the unanchored scan: every `scripts/<path>` spelling (path
-    form only) that resolves under neither `root/defender/scripts/` nor `root/scripts/`, whether
-    or not the base held it. This is the scan that meets the pre-change dead pins (s110), which
-    a caller accounts for separately (a golden of the base's own dead pins), never by widening
-    the scan.
-
-No hit cap: unlike `lint_stale_refs` (which drops a name with more than 50 hits), every
-occurrence is returned.
-
-Underscore-prefixed so pytest does not collect it.
-"""
+away. NO tests."""
 from __future__ import annotations
 
 import functools

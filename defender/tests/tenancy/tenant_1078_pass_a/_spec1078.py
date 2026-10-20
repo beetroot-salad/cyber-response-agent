@@ -1,44 +1,4 @@
-"""Shared machinery for #1078 pass (A)'s spec — "tenant 1 on the request". NO test scripts.
-
-The change (`spec-flow/specs/spec_graph_1078-pass-a.yaml`, `.spec-flow/frontiers/70-resolutions.md`):
-every request names its tenant, the tenant must exist (its ROW, `<data root>/<T>/tenant.json`,
-written only by `create_tenant`), and the runs base follows from it
-(`runs_base_for(T) == TenantPaths(resolve_data_root(), T).runs == <root>/<T>/runs`). A fork
-takes its tenant from the request (#1105 PR 2: `branch --tenant T <source_run_id>`; the
-`tenant_of_run_dir` derivation is gone, F-13) and holds it to the host-only runs-base record,
-never to the stamp a box can write.
-
-NONE of the new names exists at base ed5386bc. Every import goes through `mod()` PER CALL (the
-`_triplet_947` / `_spec1077` idiom) so a missing name is ONE failure per test rather than a
-collection error that hides every other assertion in the file.
-
-COINED NAMES LIVE HERE AND NOWHERE ELSE. The design names every new owner function
-(`is_valid_tenant_id`, `TenantId`, `TenantPaths`, `create_tenant`, `require_tenant`,
-`ensure_runs_base_record`, `resolve_data_root`, `runs_base_for`), and §7
-J06 places them all in `defender/tenancy/_tenant.py`. What it does NOT name is the setup command's
-Python entry; the tests therefore drive it as the operator does, as a PROCESS
-(`python3 defender/cli/tenant.py setup <id>`), and read its exit status and output. If
-write-code-from-spec renames anything, it renames it HERE, never through a `conceptAliases`
-entry (which silently disables `check_binds`' prose-not-in-binds scan for the concept).
-
-THE REFUSAL SHAPE (demand #0, §7 F0/J29, human): every owner function refuses by raising ONE
-class, `TenantRefused` (an `Exception`, not a `ValueError`), whose message names the refused
-value, and every entry passes the
-owner's message through VERBATIM. So "refused by X" is observed here as: the entry's refusal
-text CONTAINS `str(X's own refusal)`, which this suite obtains by calling X directly on the
-same input (`owner_refusal`). That makes "which guard fired" an observation, not a guess at a
-message.
-
-EVERY FAULT HERE IS A REAL INPUT THROUGH THE REAL PRIMITIVE: the off-grammar ids, the torn and
-disagreeing records, the rowless folders, the stray entries, the symlinked roots and the
-racing creators are written to (or run against) the real filesystem in the test itself, and
-re-probed on every run. The one fake family is the entry points' own injection seams
-(`run.main`'s `preflight=`/`materialize=`/`lifecycle=`, the launcher's `spawn=`/`preflight=`),
-which RECORD what they are handed and inject nothing — never `monkeypatch.setattr`
-(`tooling/lint/lint_monkeypatch.py`).
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for #1078 pass (A)'s spec — "tenant 1 on the request". NO test scripts."""
 from __future__ import annotations
 
 import json

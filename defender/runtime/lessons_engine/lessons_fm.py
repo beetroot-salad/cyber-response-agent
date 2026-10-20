@@ -1,38 +1,4 @@
-"""Grep defender lesson FRONTMATTER (only) + enumerate viable tags.
-
-Plan-time discovery primitive for the defender orchestrator (SKILL §Lessons)
-and the lessons author. Both modes are scoped to frontmatter so the freeform
-body can never false-match a tag query:
-
-  1. Pattern mode — AND one or more regexes against each lesson's YAML
-     frontmatter block; print ``<path>\\t<description>`` per match as the cheap
-     scan surface, then Read the bodies that fit.
-  2. ``--tags`` — enumerate the values already in use per retrieval dimension,
-     so callers grep only tokens that exist and authors reuse a spelling
-     instead of coining a near-synonym.
-
-No index: a per-call directory scan is fine at this scale.
-
-Retrieval dimensions (frontmatter list fields):
-  source_signature   the signature(s) (the recorded alert key) the lesson came from / bites
-  telemetry_source   sensor(s) the check keys on (incl. the absent one it names)
-  attack_phase       MITRE ATT&CK tactic(s) where the pitfall bites
-
-Usage:
-    defender-lessons                                   # whole corpus: <path>\\t<description>
-    defender-lessons 'telemetry_source:.*\\bsshd\\b'     # one frontmatter regex
-    defender-lessons 'source_signature:.*v2-cross-tier-ssh-pivot' 'attack_phase:.*persistence'
-                                                       # AND across patterns (= piped greps)
-    defender-lessons --signature SIG                   # lessons whose source_signature lists SIG
-                                                       # (exact, case-sensitive, whole entry)
-    defender-lessons --tags                            # viable values for every dimension
-    defender-lessons --tags telemetry_source           # viable values for one dimension
-    defender-lessons --show defender/lessons/foo.md    # print just a lesson's frontmatter
-
-PATTERNs are Python regexes matched case-insensitively against the frontmatter
-as one ``key: value`` line per key, each value in the one-line spelling ``--tags``
-lists (``Lesson.match_text``), so a pattern cannot run from one key into the next. Exit 0 always (no match = no output); a bad regex exits 2.
-"""
+"""Grep defender lesson FRONTMATTER (only) + enumerate viable tags."""
 from __future__ import annotations
 
 import argparse

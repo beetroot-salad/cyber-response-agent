@@ -2,28 +2,7 @@
 `judge.yaml`, the episode opened by id through the request's tenant's repository
 (`runs.episode(episode_id)`, #1105 PR 2); `main(argv)` is the standalone CLI
 (`--tenant T <episode_id>`). The launcher (`branch/cli.py::_render_page`) calls `render_episode`
-after the judge frame closes, under its own non-fatal boundary.
-
-The episode is reached only through its tenant's walk, so another tenant's episode, a link at
-any level and an id that is not a UUID (`latest` included) are refused before anything is read.
-The manifest must name the episode it was read from (#1187 R5). The arms are the arm roster's
-(`arms.json`, `view.arm_ids()`), each opened by its roster id; an entry in `runs/` the roster
-does not name is never shown. Manifest worlds without a grade row need a roster to get a
-section. Declared, graded worlds render through their UUID bindings even without a roster;
-arm links require a roster. A roster the reader refuses is the arms' `refused` state, with its
-reason; the rest of the page renders. An unreadable container reads as absent.
-
-Two phases. `load_episode` reads every record the page shows exactly once, through the package
-readers, into a typed model (`_Episode`), and runs the findings walk once over it. Section
-renderers take the model and never touch the directory. The manifest and its world UUID
-bindings refuse the whole page; other unreadable records or malformed fields land in their own slots (a `_Record.error`,
-an empty list, a `None`) and renders as that slot's sentence, so one bad file cannot take the
-page down and no two renderers can read a record differently.
-
-The page shows the decisions passes wrote down (`judge.yaml.dispositions`, the enqueue ledger),
-never a re-run of a pass's rule over the rows: re-deriving them disagrees with the pass at the
-edges the page exists to explain. If a decision is not recorded, fix the writer.
-"""
+after the judge frame closes, under its own non-fatal boundary."""
 from __future__ import annotations
 
 import argparse

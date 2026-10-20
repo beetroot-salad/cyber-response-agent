@@ -99,15 +99,7 @@ class QueryRow:
     def record(self) -> dict:
         """The row as read — the parsed JSON record, the shape the run's `RunState.lead_rows`
         hands the guard live (each row the parse of its table line), never a re-projection of
-        the typed fields.
-
-        The typed view coerces while the guard reads keys verbatim, so a replay over
-        re-projected rows could reach a verdict the live run never reached. This is what makes
-        `rejection_trip([r.record() for r in load_queries(run_dir)], ...)` the run's own
-        verdict.
-
-        The dict is shared with the typed view (not a copy): read it, do not write to it. A row
-        built by keyword (a fixture) has no record to return."""
+        the typed fields."""
         if self._record is None:
             raise ValueError("QueryRow.record(): this row was not read from a queries table")
         return self._record

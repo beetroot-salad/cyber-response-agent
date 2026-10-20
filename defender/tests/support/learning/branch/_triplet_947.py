@@ -1,55 +1,4 @@
-"""Shared machinery for #947's questioner-authored-triplet spec — NO test scripts.
-
-This is the spec suite for the design in `.spec-flow/design-doc.md`: an operator names
-(source run, N); a deny-all QUESTIONER role authors a triplet of worlds into
-`episodes/<id>/family.yaml`; each world then runs as its own `run.py --resume` PROCESS; the
-launcher verifies every scrub and stamp, archives each world under `worlds/<X>/`, and two
-derived readers compute from the episode dir. (#1224 replaced #947's cluster staging, its write
-door and the replay review with each world's live oracle: a world is now the natural-language
-`facts` it asserts, and the family records its `served_systems`. The builders below write that
-v2 manifest; the write-door fake and the staging/review readers went with the design.)
-
-**Eight of the modules these tests drive do not exist at the base commit** (X16:
-`learning/branch/{staging,review,comparator,archive,episode}.py`, `learning/branch/questioner/`,
-`runtime/branch/_family.py`). That is the expected state of a spec — RED against HEAD. Every
-import goes through `mod()` PER TEST (the `_session_store_705` / `_branch_947` idiom) so a
-missing target is one failure per test rather than one collection error that hides the other
-hundred-odd assertions.
-
-Four things live here and nothing else.
-
-1. **`mod()` / `sym()`** — the per-test import.
-
-2. **The declarative fault-injection fakes.** One fake per dependency, each driven by a data
-   `Fault(...)` spec (`fail_on`, `raise_after`, `malformed`, `delay`). A fake INJECTS ONLY: it
-   never classifies a fault, never decides policy, and never answers a question the production
-   code is supposed to answer. Every fake RECORDS what it was handed, because a fake that only
-   returns answers leaves the whole outbound channel unpinned — the assertion a payload demand
-   makes is against `fake.calls`, not against the canned reply.
-
-   Every fault SHAPE here cites the ledger claim that observed it on the real dependency
-   (`spec-flow/specs/spec_graph_947.yaml`, `claims:`). No fault in this suite is imagined:
-   * `malformed="no-status-line"` — PO-C3: `split_status` over stdout with no parseable
-     trailing status line yields `("", <whole body>)`.
-   * `raise_after=n` with `TransportFault` — the real class at `integrations/faults.py`,
-     exit_code 2, which `docker_exec_curl` raises when the docker exec itself fails (X9).
-   * `fail_on=(<name>,)` — a per-name refusal from the far side.
-   Anything else a test wants induced is a PROBE REQUEST, not a fake: see 80-author-digest.md.
-
-3. **The builders** — an episode on disk, a runs base with a source run, an archived world.
-   A new scenario is a few lines of data against these, not fresh plumbing.
-
-4. **The untrusted-frame reader** (`assert_wrapped_untrusted`). `wrap_fresh` mints a fresh salt
-   per frame, so a test that calls it a SECOND time to build a marker names a frame the target
-   never emitted — an assertion no implementation can satisfy. Read the frame off the text.
-
-Fakes enter through the entry point's INJECTION SEAMS (a `deps`-shaped keyword, a constructor
-argument) and never by `monkeypatch.setattr` — the project profile's `tests.idioms`, ratcheted
-in CI by `tooling/lint/lint_monkeypatch.py`. Where the design named no seam, the seam is part of
-the contract and is pinned by a `kind: seam` demand rather than reached around.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Shared machinery for #947's questioner-authored-triplet spec — NO test scripts."""
 from __future__ import annotations
 
 
@@ -118,23 +67,7 @@ def sym(dotted: str, name: str):
 
 
 def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:
-    """The role-model preflight, neutralised — for every scenario that is not about it.
-
-    `preflight_role_models` sources a BILLABLE provider key and exits 2 when there is none, so a
-    launcher scenario that leaves it to the ambient environment passes or fails on whether the
-    host happens to be credentialed rather than on the thing it asserts. CI is not credentialed
-    and a developer's machine usually is, which is the shape that makes a suite look flaky.
-
-    The second cost is worse than the first: a scenario asserting "this refuses" is SATISFIED by
-    the preflight's own refusal, so it goes green in an uncredentialed runner without ever
-    reaching the check it names. Injected here, those arms refuse for their own reason or not
-    at all.
-
-    The family-level preflight is not left unexercised by this — it has its own demand and its
-    own test, `test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling`,
-    which injects a RECORDING seam and observes the call. That test deliberately does not use
-    this one.
-    """
+    """The role-model preflight, neutralised — for every scenario that is not about it."""
     return 0
 
 
@@ -452,14 +385,7 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
                as_of: str = AS_OF, continuation_prompt: str = "Continue from here.",
                **over: Any) -> dict:
     """A v2 `Family` document: the launcher's derived half, the operator's instrument field and
-    the questioner's authored half, one document.
-
-    #1255 COMPAT. The fields in `RETIRED_FAMILY_FIELDS` are written only while `Family` still
-    declares them, so the suites built on this document stay about what they test on both sides
-    of #1255 instead of failing on a field the change removed (whether a manifest that still
-    CARRIES one is refused or ignored is not stated by the design). Whether the field is GONE is
-    asked by `test_1255_snapshot_instrument.py`, never answered here. Delete the filter once
-    #1255 has landed; `continuation_prompt=` goes with it."""
+    the questioner's authored half, one document."""
     doc: dict[str, Any] = {
         "episode_id": EPISODE_ID,
         "source_run_dir": source_run_dir,
@@ -549,21 +475,7 @@ def _default_root(tmp_path: Path) -> Path:
 def episode(tmp_path: Path, *, doc: dict | None = None,
             episode_id: str = EPISODE_ID, root: Path | None = None) -> Path:
     """An episode dir with its manifest and an empty `served/` — the shape `Step.QUESTIONER`
-    leaves.
-
-    HAND-BUILT: this is the episode's CONTENTS for the scenarios that are not about where an
-    episode lives. #1187 (Layout A) puts every episode at `<data root>/<T>/episodes/<uuid>/`,
-    derived from its tenant (O9: no configured episodes root), so that is the default here:
-    the tenant this data root holds (`current_tenant()`, set up from the committed fixture on
-    first use — BEFORE its `episodes/` is made, since `create_tenant` refuses a tenant folder
-    already holding entries). An episode a test grades, pages or resumes by id must sit there.
-
-    `root=` puts the episode elsewhere — for a scenario that hands the folder straight to the
-    function under test, or that is about an episode outside its tenant. With no `root=`,
-    `tmp_path` tells one scene from another (`_default_root`: the first under this data root's
-    tenant, another under a data root of its own); the tenant, not `tmp_path`, places it (#1187
-    O9).
-    """
+    leaves."""
     if root is None:
         root = _default_root(tmp_path)
     ep = Path(root) / episode_id
@@ -612,27 +524,7 @@ def _plant_source_input(ep: Path, source_run_dir: str | None, source_run_id: str
 
 
 def branchable_investigation() -> str:
-    """A one-fence investigation document a branch may actually be TAKEN from.
-
-    `branch.validate` refuses a branch point with nothing OPEN in its frontier — no slot and no
-    contract is no question for a pair of worlds to divide, which is "branched too late" — and
-    the launcher asks that rule before it pays the questioner. The earlier fixture document was
-    a single `?h1` row, whose frontier is empty in all three cells: every launcher scenario was
-    therefore running against a source no production launcher would accept, and the whole suite
-    was green only while the check was missing from the launch path.
-
-    THE GOLDEN'S FIRST FENCE, rather than a hand-written open row, because "what makes a
-    frontier open" is `skills/invlang/frontier`'s answer and not this file's — a fixture that
-    spelled its own open slot would be a second opinion about the document format, and it would
-    go stale silently the day that vocabulary moves. Measured: block 1 of the golden holds 2
-    open slots and 7 held facts.
-
-    ONE fence, because the seeded session lands one `append_block` and `fence_count_at` scores
-    the branch point at 1. A document with more would make the branch point's fence index run
-    short of the total — legal, but it would mean the questioner is shown a prefix while
-    `validate` judges the same prefix, and a fixture whose two halves agree is the one that
-    makes a launcher test about the launcher.
-    """
+    """A one-fence investigation document a branch may actually be TAKEN from."""
     from defender.skills.invlang.parser import scan_fences
 
     bodies = scan_fences(GOLDEN_INVESTIGATION.read_text(encoding="utf-8")).bodies
@@ -676,39 +568,7 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
               tenant_id: str | None = None, recorded: bool | None = None,
               pre_snapshot: bool = False,
               land_calls: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
-    """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir).
-
-    `pre_snapshot=True` (#1255, N4/C2) is a run recorded before the fork snapshot existed: its
-    session never gets one, whatever `seed_source_session` plants for the others.
-
-    `land_calls(src)` (#1255 P2/P3) writes the source's own pre-branch query rows and payloads
-    INSTEAD of the default one elastic capture, onto an empty table, BEFORE the session is
-    seeded. A fork snapshot holds what the source's model-readable files held when its branch
-    response arrived (the table's length, each payload's hash), and an arm whose source no
-    longer opens on that refuses at launch — so what the source held at the branch point is
-    final before `seed_source_session` (which is where a fixture snapshot is planted), and is
-    never rewritten after `runs_base` returns. Rows the source wrote after the branch point
-    are APPENDED afterwards (`_spec1224.source_run`): the table only grows past the snapshot.
-
-    `recorded=False` is a run from before #1222: its alert at the former place and no record, so
-    it is not a run any reader admits. `recorded=True` is the run the front door makes: the alert
-    and its record in the input directory. Left out, `PLANT_RECORDS` decides (see there).
-
-    #1078: `base` is a real tenant's runs base (`<data root>/<tenant>/runs`) — the data root
-    the autouse `data_root` fixture already pointed this test's `DEFENDER_DATA_ROOT` at, with a
-    tenant created on first use, so the tenant's runs repository (which the launcher opens its
-    source through) sees an ordinary tenant location. #1187 (R1): the natural container holds
-    run folders and their sidecars only — no `_tenant.json` is written; the run's tenant is the
-    folder it sits under.
-
-    O10 permits only ONE tenant per data root, so when `tenant_id` is not given this reuses
-    whichever tenant already exists there (e.g. one a `d9_tenant` fixture already created)
-    rather than colliding with it, and falls back to `SOURCE_TENANT` for a still-empty root.
-
-    The source carries the two artifacts a sibling seeds from — `alert.json` and
-    `investigation.md` — because both are model-writable (the run dir is a prior box's rw bind)
-    and the containment demands drive exactly those reads.
-    """
+    """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir)."""
     from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
@@ -764,11 +624,7 @@ def source_case_id(src: Path) -> str:
     case of its own for any other source id. The store is per case (`<sessions>/<case>.db`), and
     its row ids are the STORE's, so a second source seeded into the first source's case starts
     its session past `BRANCH_MESSAGE_ID` and the branch point can never land on its main path —
-    each source run gets its own case, as each real investigation does.
-
-    The other source's case is named by a short digest of its id, not the id itself: a case id
-    is bounded (128 characters), and a test about an over-long source id (`test_1105_pr2_guards`
-    g15) must reach the launcher, not stop in this fixture's store."""
+    each source run gets its own case, as each real investigation does."""
     if src.name == SOURCE_RUN_ID:
         return SOURCE_CASE_ID
     digest = hashlib.sha256(src.name.encode("utf-8")).hexdigest()[:16]
@@ -793,34 +649,7 @@ def _source_handle(src: Path) -> Any:
 
 
 def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) -> None:
-    """Give the source run the session store a branch is actually taken from.
-
-    A RUN WITHOUT ONE IS NOT BRANCHABLE, and pretending otherwise pushed the cost into the
-    production code: T0 is the moment the branch point was written, `branch_point_time` reads it
-    off the store because the store is the only thing that knows, and a fixture with no store
-    forces every caller into a fallback. Seeded here, once, so every launcher scenario derives
-    its clock the way a real episode does.
-
-    LONG ENOUGH TO HOLD THE BRANCH POINT. `BRANCH_MESSAGE_ID` is a row id on the run's own main
-    path, so the session has to have at least that many rows before the id names anything —
-    complete pairs are appended until it does. Before #1255 the id lands on a RETURN (the
-    resolved boundary `validate` admitted); past it, on a CALL (D1) — see the body.
-
-    STILL A RUN RECORDED BEFORE #1255. Nothing here drives a run, so no fork snapshot exists
-    for any of its responses (N4), and design rev 5 C2 settles where that is refused: the fork
-    command (`learning/branch/cli.py`) refuses it before the questioner, pre-flight or any
-    episode spend (`tests/runtime/state/test_1255_snapshot_fork_command.py` drives exactly this source for
-    that). So after #1255 every launcher scenario built on this source needs a snapshot for
-    its branch point. Any snapshot-planting helper the implementer adds for that is
-    FIXTURE-ONLY — a test input, not evidence the driver records snapshots — and no
-    `test_1255_snapshot_*` module may import it; `_branch_947.legal_source` stays snapshot-less
-    (it is the N4 fixture). This function may call such a helper — but NEVER when
-    `pre_snapshot=True`, which is how the C2 test asks for the snapshot-less source. It calls
-    `_fork_snapshot_plant.plant_fork_snapshots` otherwise.
-
-    Idempotent: `runs_base` is called more than once in some scenarios, and a second session
-    under one case id would make "the run's own main session" ambiguous.
-    """
+    """Give the source run the session store a branch is actually taken from."""
     from defender.run_repository import RunPaths, SessionPaths
 
     ss = mod("runtime.session_store")
@@ -862,24 +691,7 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
 def capture_call(run_dir: Path, *, system: str = "elastic", verb: str = "query",
                  params: dict | None = None, payload: Any = None, lead: str = "l-001",
                  seq: int = 0) -> dict:
-    """Land ONE captured call in a source run: the queries-table row and the sidecar it names.
-
-    The shape `query_tool` writes and `prime_base` reads — a real `query_id` (so the row is a
-    capture rather than a writer-only sentinel), `exit_code: 0` (so it is an ANSWER, which is
-    the only thing the family tier has a representation for), and a payload file at the path the
-    row names.
-
-    Here rather than inside one scenario because it is the only way to give a LAUNCHER test a
-    primed capture at all: the launcher primes from the source run's own table, so a test that
-    needs the episode's base to hold a key has to put that key in the source.
-
-    THE WRITER'S FULL ROW (#1255 G4): the fourteen columns `append_query_row` writes, in writer
-    order, and no `call_id` — the shape every row of a real run's table has once the id leaves
-    it. A branch seeds the source's rows into each sibling's table verbatim, so a short row here
-    would be a short row in every arm's table (`test_1255_queries_rows`). `raw_command`,
-    `error_class`, `payload_status` and `payload_sha256` come from the writer's own rules over
-    the bytes the sidecar holds.
-    """
+    """Land ONE captured call in a source run: the queries-table row and the sidecar it names."""
     rq = mod("runtime.record_query")
     breaker = mod("runtime.circuit_breaker")
     p = dict(params or {"index": EVENTS_PATTERN})
@@ -949,21 +761,7 @@ def provenance_record(*, commit: str | None = "deadbee", dirty: bool | None = Fa
                       scope: str | None = "repo",
                       tenant_id: str | None = None,
                       knowledge: Any = _DEFAULT_KNOWLEDGE) -> dict:
-    """One `provenance.json` document, in a shape `capture_tree` can produce.
-
-    Four shapes and no others: the clean tree, the dirty tree, the git-status failure (a sha in
-    hand and no answer about the tree, with the reason beside it) and the git-unavailable case
-    (no sha at all). `scope` is carried because the record does; `scope=None` is the shape a
-    stamp written before the field existed reads back as (#976: compared on commit alone), and
-    `model=None` is what `capture_tree` itself produces — the model is the sibling's own
-    per-process fact, never the live tree's.
-
-    `knowledge` (#1204) is the tenant knowledge revision's WIRE value, written verbatim: by
-    default `{"commit": KNOWLEDGE_SHA}` (what every post-#1204 run from one tenant clone
-    carries); `"unversioned"` or `{"unavailable": "<reason>"}` for the other two shapes
-    `capture_knowledge` answers with; `None` for an explicit JSON `null`; `NO_KNOWLEDGE_KEY` to
-    omit the key (a pre-#1204 stamp). Anything else is written as given, for forgery scenarios.
-    """
+    """One `provenance.json` document, in a shape `capture_tree` can produce."""
     doc: dict[str, Any] = {
         "commit": commit, "dirty": dirty, "dirty_paths": [], "dirty_path_count": 0,
         "unavailable": unavailable, "scope": scope, "model": model,
@@ -1055,18 +853,7 @@ def source_capture(**overrides: Any) -> FakeCapture:
 
 
 def report_text(disposition: str, *, extra: str = "", body: str = "") -> str:
-    """`report.md` AS THE CLOSE GATE WRITES IT — YAML frontmatter, not a bare line.
-
-    `close_tool._render_report` is the only writer of this file in production and it emits a
-    `---` block carrying `disposition`/`outcome`/`cause`. A fixture writing a bare
-    `disposition: x` line produces a shape no production path makes, and a reader built against
-    it — `_report.read_report`, which every other consumer of a report in this repo goes
-    through — answers `None` for it. Every fixture report in this suite therefore renders here,
-    so a reader tested against them is tested against the shape it will actually meet.
-
-    `extra` adds further frontmatter lines (already newline-terminated); `body` is the prose
-    under the fence.
-    """
+    """`report.md` AS THE CLOSE GATE WRITES IT — YAML frontmatter, not a bare line."""
     return (
         "---\n"
         f"disposition: {disposition}\n"
@@ -1171,26 +958,7 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
                     commit: str | None = "deadbee", dirty: bool | None = False,
                     unavailable: str | None = None,
                     model: str = "m-1", stamp: bool = True, **record: Any) -> Path:
-    """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`.
-
-    `base` is the arm container the sibling's own PROCESS was handed — `<episode_dir>/runs`
-    (§7 FORK-13), never the operator's runs base. #1187: the arm folder is named by its ARM ID,
-    a uuid4 holding neither the label nor the episode id (O3) — `arm_id` when given (the spawn
-    double passes the roster's); else, under an episode (`<base>/..` holds a manifest or a
-    roster), the id that episode's roster holds for `label` (`roster_arm_id`, read-only: the
-    scene's RUNS step — the launcher, `plant_roster` or `episode_view` — must have written it);
-    else (a bare folder a test hands straight to the function under test) `fixture_uuid` of the
-    folder and the label, so a second call for one label names the same folder.
-
-    The verdict is written at `scrub.verdict_path(run_dir)` — `tree.parent /
-    f"{tree.name}.scrub-verdict.json"` — because G17 REFUTED the design's "inside the run dir"
-    reading; a fixture that put it in the tree would make the archive test green on a path the
-    production writer never uses.
-
-    Any further keyword (`scope=`, `knowledge=`) passes through to `provenance_record` (#1204:
-    one sibling differing on an anchored field is the fork check's behavioural arm); left out,
-    each takes the record's own default.
-    """
+    """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`."""
     base = Path(base)
     run_dir = base / (arm_id if arm_id is not None else _arm_name(base, label))
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
@@ -1296,20 +1064,7 @@ def family_arms(episode: Any, labels: Any, *, tenant: Any = None) -> dict[str, A
 
 
 def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
-    """The source's runs base, the source run, and the episodes folder — the relocated layout.
-
-    Returns `(runs_base, source_run_dir, episodes_root)`. #1187 (O9, declared change 5): the
-    episodes root is no longer CONFIGURED — it is the source tenant's own `<T>/episodes/`,
-    derived from the tenant, beside (never inside) its runs base `<T>/runs/`; nothing here sets
-    `DEFENDER_EPISODES_BASE`.
-
-    #1078: `runs_base()`'s base IS the source's real tenant runs base (the launcher's own
-    derivation needs it to be). Pointed at its OWN fresh data root under `tmp_path` — isolated
-    from whatever tenant an ambient fixture (`d9_tenant`) may already have created — so O10's
-    one-tenant-per-root rule never collides with it. The retired `DEFENDER_RUNS_BASE` knob is
-    still set here, to `base` itself — today's "stale configured value" a child inherits
-    unchanged (J46) — never one the launcher composes.
-    """
+    """The source's runs base, the source run, and the episodes folder — the relocated layout."""
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "configured-data-root"))
     base, src = runs_base(tmp_path, recorded=True)
     monkeypatch.setenv(RUNS_BASE_ENV, str(base))

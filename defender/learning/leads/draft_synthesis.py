@@ -221,13 +221,7 @@ def synthesize_drafts(
     catalog: list | None = None, systems: frozenset[str],
 ) -> list[Path]:
     """Mint a catalog draft for each uncatalogued coined `query_id`; return the drafts written,
-    each spelled `where / name`.
-
-    `skills` is the lane's held `skills/` mount and `where` the Path it is spelled as (never
-    opened). A draft is written at `gather/queries/<system>/_draft/<hex>.md` below the mount point,
-    so a link planted anywhere below it (the catalog folder included) is refused, never followed
-    (#1134 O3, O5.4). A refused draft — a link at its name or at a holding folder, or a holding
-    folder that cannot be listed — is logged and skipped, and the claim goes on (O5.5)."""
+    each spelled `where / name`."""
     if catalog is None:
         catalog = lead_neighbors.load_lane_catalog(skills.view(), where=where)
     # Includes `covers:`, or every promoted or discarded draft is re-minted when a run next

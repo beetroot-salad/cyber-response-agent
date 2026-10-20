@@ -49,16 +49,7 @@ _ONE_FENCED_DOCUMENT = re.compile(r"\A```([A-Za-z0-9_+-]*)[ \t]*\n(.*)\n```[ \t]
 
 
 def reply_document_text(text: str) -> str:
-    """The bare document text of one model reply, or `MalformedReply` naming the shape.
-
-    A reply is one document or it is malformed; the parser never guesses which of several
-    blocks the model meant, since guessing silently records wrong verdicts. In order: CRLF and
-    a leading BOM are normalised; a bare reply that doesn't load as a mapping may have a
-    reasoning prelude ending in a think-close line, which is dropped; the remainder is exactly
-    one fenced block (any tag) or unfenced text. A column-0 ``` line inside is a second block
-    unless the text loads as one mapping. Loading and schema validation are the consumer's
-    job; the loads here are shape tests.
-    """
+    """The bare document text of one model reply, or `MalformedReply` naming the shape."""
     s = text.replace("\r\n", "\n").lstrip("\ufeff").strip()
     if not s:
         raise MalformedReply("empty reply")

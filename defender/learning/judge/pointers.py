@@ -1,28 +1,5 @@
 """The typed, episode-relative, no-follow evidence-pointer resolver (A1, A15, A22), and what a
-finding's resolving pointers say about it.
-
-`_resolves` is the ONE resolver: every site that decides whether a judge evidence pointer
-resolves — the draw's routing, the two-run rule, gap-only, design-vs-serving, the citations a
-queue row carries — calls it. It maps one pointer to exactly one run and one class, or to
-nothing ("unresolved"):
-
-* CONDUCT of run X — `worlds/<X>/report.md`, `worlds/<X>/investigation.md`,
-  `worlds/<X>/gather_summaries/<lead>.md`, `worlds/<X>/executed_queries.jsonl#<row>`,
-  `served/<world-uuid>.jsonl#<row>` (a row fragment is required and must index a line);
-* BUILT layer of run X — `oracle/<X>/<leaf>[#frag]`;
-* PLAN — `family.yaml#worlds/<X>` (names X) or `family.yaml#<key>` for a family-level key of
-  the manifest (names no run);
-* CONTEXT (names no run) — `samples.yaml#<section>` (world scope only, A22),
-  `outcome.yaml[#<key>]`, and a run's non-conduct files `alert.json`, `provenance.json`,
-  `run_end.json`, `lessons_loaded.jsonl`.
-
-Anything else is unresolved: `judge.yaml`, `worlds/*/judge/`, `wire_logs/`, `world_records/`,
-`not_comparable.yaml`, `served/base.jsonl`, a stray file under a world, an absolute path, a
-traversal out of the episode or out of a world's subtree, a run outside the scope (failed, cut
-short, malformed, not archived), and any file the bounded no-follow reader refuses (a link, a
-hard link, a FIFO, a directory, an oversize file). Only the archived runs of this episode, its
-manifest and its oracle store can be named — never a path a sandbox could have linked.
-"""
+finding's resolving pointers say about it."""
 
 from __future__ import annotations
 

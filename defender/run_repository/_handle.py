@@ -1,25 +1,5 @@
 """The file-backed `Run` handle: five sub-collections, a `RunRecord` value object, and a
-per-kind `RecordHandle` every record accessor answers.
-
-`Run.under(container, run_id, *, io=, tenant_id=)` builds the handle with no I/O: the
-repository's opens and creates use it once they have walked the container from the tenant
-folder without following a link (#1187 S-iso; the container holds no tenant record).
-`Run.at(directory)` is the eval/fixture/tooling escape hatch with no runs base. Outside the
-package every constructor is
-gated by `tooling/lint/lint_run_layout_imports.py`; application code gets a `Run` from its
-tenant's repository (`tenant.runs_repository().open(run_id)`, `.create`, or an episode view's).
-
-Every accessor answers a `RecordHandle` (`.path`, `.read`, and the record's own write verb),
-never parsed contents. Asking for `.path` creates nothing; writes create the holding directory
-through the same injected `io=` seam as every read.
-
-Every read and write goes through the rooted seam (`_io.rooted_read`, `rooted_mkdir`,
-`rooted_write`): the record's trust root, whose spelling is
-followed, and its name relative to that root, which never is (#1111). The trust root is the run
-dir; the runs base for the sidecars; `SessionPaths(runs_base).trust_root` for the session
-db. The session db itself is opened through `session_store.open_store`. The two model-authored documents are validated against
-`_artifact_schema` at every write, so no writer bypasses the schema.
-"""
+per-kind `RecordHandle` every record accessor answers."""
 from __future__ import annotations
 
 import contextlib

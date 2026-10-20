@@ -1,22 +1,5 @@
 """The write-time review gate's harness: bounds, per-run review state, the review record,
-stage invocation with a wall-clock deadline, and the trace rows.
-
-`challenge_gate` reviews every close except the host's own `unresolved`: a confident
-disposition against its conclusion, `inconclusive` against its ceiling claim. It never writes
-report.md or the review record; `close_tool.py` owns both writes.
-
-The reviewer is blind lenses plus a composer. Each lens reads a projection that withholds the
-belief movement it must reconstruct, and lenses run concurrently since none reads another's
-output. The lenses are SUPPORT and its ABLATION (the same reading with one load-bearing edge
-withheld): a soundness plus a sensitivity check. The composer runs last and alone sees both
-the readings and the investigation's own account; its question is keyed on the disposition and
-phrased so "yes" always means the close stands.
-
-Fail closed: a stage that raises, times out, or otherwise does not complete overrides any
-reviewed disposition (including `inconclusive`) to the host's `unresolved`, so an unexamined
-model claim never commits as the model's claim. The typed `failure_kind` distinguishes a
-machinery failure from an evidence-driven override with the same outcome.
-"""
+stage invocation with a wall-clock deadline, and the trace rows."""
 
 from __future__ import annotations
 

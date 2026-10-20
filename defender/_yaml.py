@@ -188,23 +188,7 @@ class Readings(NamedTuple):
 
 
 def safe_load_typed_and_spelled(text: str) -> Readings:
-    """`safe_load`'s document and its spelling, constructed from one composed tree.
-
-    @owns spelled — the text reading of a YAML document, produced here and nowhere else.
-    Construction re-spells scalars (`2026-07-25T07:48:37.065Z` becomes a `datetime`, `0755`
-    becomes `493`, `yes` becomes `True`), so text-containment checks must scan the spelling or
-    their result depends on whether the model quoted a value.
-
-    `spelled` has the same shape as `typed` (containers and keys; `compose` refuses aliases, so
-    there are no shared or cyclic parts) and differs
-    only where a scalar is a value (a mapping's value or a sequence's item): there it is the
-    source text, with nulls as their spelling (`~` is `"~"`, empty is `""`). Keys stay typed,
-    since text keys would merge `1:` with `'1':`; a bare scalar document stays typed too. One
-    tree guarantees the checked values are the values of the structure shown, and building
-    the typed half first means whatever `safe_load` refuses is refused here.
-
-    Edges: `!!omap`/`!!pairs`/`!!set` members stay typed.
-    """
+    """`safe_load`'s document and its spelling, constructed from one composed tree."""
     with _construction_errors_as_yaml_errors():
         # This module's `compose`, which pins `safe_load`'s loader.
         root = compose(text)
@@ -275,16 +259,7 @@ ITEM = "[]"
 
 def written_locations(text: str) -> Iterator[tuple[tuple[str, ...], str | None]]:  # noqa: C901 — one event loop; its frame state is shared by every branch
     """Every node `text` WRITES, as `(path, scalar)`: the path of mapping keys (a sequence item
-    is `ITEM`) and the node's scalar text, or `None` for a collection or an alias.
-
-    Read off the parser's event stream, never the constructed document, so it sees what
-    construction collapses: both of two repeated keys, the keys inside a `<<:` merge (each
-    under its own `<<` step), and a key whose value is an alias (aliases are not expanded, so
-    a few hundred bytes of them cost a few hundred bytes of work). Iterative, so a
-    thousand-deep nesting is walked, not recursed. A key that is not a scalar is `?`, and
-    nothing inside it is reported. Stops quietly where the text stops parsing: the caller's own
-    load reports that.
-    """
+    is `ITEM`) and the node's scalar text, or `None` for a collection or an alias."""
     # One frame per open collection: [is_mapping, path, the key awaiting its value or None].
     stack: list[list[Any]] = []
     inside_key = 0  # depth inside a collection used as a mapping key

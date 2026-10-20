@@ -1,39 +1,4 @@
-"""Shared machinery for the #767 spec suite — NO test scripts.
-
-Every test in `test_767_*.py` is one demand of
-`spec-flow/specs/spec_graph_767-ticket-store-approval.yaml`, named by that demand's
-`discharged_by`. RED against `a77335d5` is the expected state: `record_case_ticket`,
-`case_record_to_comment` and the mapping's `comment:` section are COINED here — none of them
-existed yet. Where the implementation spells a symbol otherwise, these names follow the code.
-
-A PERSON CLOSES A CASE; THE HOST NEVER DOES, AND NEVER ASKS. `status` is a closed vocabulary the
-store itself enforces, so nothing rendered from an alert can move a case along it. Since #1221's
-amendment (2026-10-08) the writer does not read a case back or decline a closed one either: the
-release screen that gave a person's close its meaning to later runs is gone (every comment is
-served, the host's own tagged), so the mapping no longer names a released status and a
-`released:` section an un-migrated tenant still carries is loaded and ignored.
-
-THE SEAMS THESE FAKES ENTER THROUGH ARE PRODUCTION'S OWN (the project profile forbids
-`monkeypatch.setattr`, and CI ratchets new sites):
-
-  * the writer's collaborator — `TicketWriterDeps{request}`, the frozen dataclass threaded as
-    the second parameter of both writers (g16: there is no third); the store's address is
-    the tenant record's, never a seam of its own (#1107);
-  * the mapping file — the tenant's `settings/` folder, resolved into the run's record (#1107:
-    `ticket_mapping`). `use_mapping` plants a complete tenant whose mapping is the test's and
-    returns its settings folder; the helpers below resolve the record of the tenant the test
-    planted (or, with none planted, the committed fixture tenant's) and hand it to the real
-    writer, so a hostile-mapping control still needs no new seam;
-  * the entrypoint's tail — `run.py main(..., ticket_writer=)`, the duck-typed seam
-    `tests/support/sandbox/_spec791.py` already implements (g10).
-
-FAULT CONTENT IS PROBE-DERIVED, NEVER AUTHORED. `FakeStore`'s arms are exactly the shapes
-the ledger observed on the real dependency: `TransportFault` and the `(None, detail)`
-transport-error return are `ticket_writer._request`'s own two failure spellings (c14, g2);
-the status words are what the real stub answered when it was driven (c8: create 201, a
-duplicate create 409, an unknown key 404, PATCH/PUT 405). The fake injects and records; it
-classifies nothing and decides no policy.
-"""
+"""Shared machinery for the #767 spec suite — NO test scripts."""
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -368,33 +333,7 @@ class OutboundCall:
 
 
 class FakeStore:
-    """The writer's `request` dependency: records what it receives, injects a stated fault.
-
-    The fault vocabulary is data, and each arm cites the claim that observed that shape on
-    the real dependency:
-
-      * ``transport_fault`` — a `TransportFault` raised by the transport underneath
-        `ticket_writer._request`, which `_request`'s own `except` clause converts to the
-        `(None, "transport error: …")` return (c14, read at ticket_writer.py:62-77). The
-        fake stands in for `deps.request` — i.e. for `_request` itself — so it answers with
-        that converted shape rather than raising: no production `request` ever raises this,
-        and a fake that did would exercise a path the writer cannot reach;
-      * ``transport_error`` — the `(None, detail)` return `_request` produces when curl
-        answered nothing parseable (c14);
-      * ``status`` / ``status_by_suffix`` — HTTP status words the real stub answered when it
-        was driven: 201 on create and on comment, 409 on a duplicate create, 404 on an
-        unknown key, 405 on PATCH/PUT (c8, executed).
-      * ``body`` — the reply text to a WRITE. A malformed one is FK31's arm; nothing reads
-        it (c5), and no assertion in this suite is made against it.
-      * ``ticket`` — the ticket object a `GET /tickets/{key}` would answer with (200);
-        `None` answers such a read with a 404. Since #1221's amendment the writer makes NO
-        read — it posts its one comment whatever the case's status — so a GET here is a
-        regression the writer tests assert absent on `calls`; the fake still answers one so
-        that a regressed read is recorded rather than crashing the scenario. Defaults to an
-        open case.
-
-    It classifies nothing and decides no policy: every branch here is "record, then answer".
-    """
+    """The writer's `request` dependency: records what it receives, injects a stated fault."""
 
     def __init__(
         self,
@@ -476,14 +415,7 @@ class FakeStore:
 
     def comment_body(self) -> str:
         """The rendered comment BELOW the agent tag line — what every pre-#1221 assertion about
-        the body's shape is about.
-
-        #1221 M1: every comment the host posts opens with one plain-text line naming the
-        authoring run, added at the single POST and never through the mapping's template. So
-        this reads the posted body, requires that its first line is a tag (the exact line, and
-        which run it names, are `test_1221_agent_tag.py`'s), and hands back the rest: the
-        mapping's own rendering, unchanged. A body that does not open with the tag is a failure
-        here, on every writer scenario, not only in the tag's own suite."""
+        the body's shape is about."""
         from defender.runtime import case_ticket
 
         prefix = require(

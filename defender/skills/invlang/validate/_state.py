@@ -57,16 +57,7 @@ def _is_legal_refinement_key(key: str) -> bool:
 
 
 def _unquoted_key(cell: str) -> str:
-    """A key cell with one wrapping pair of double quotes removed, for building a repair only.
-
-    Unlike `_cells._unquote` this does not unescape: an escape inside a key cell is part of the
-    malformed key, and decoding it would hand back a `use:` line that is not the author's bytes.
-
-    Not a decoding step for validation. In invlang a quote protects a delimiter and is kept, so
-    `"class"` is not the key `class` and `_is_legal_refinement_key` must not accept it. The
-    repair, though, should suggest the key the author meant (`class`), not `attrs."class"`,
-    which `_candidate_refusal` would reject, leaving no repair at all.
-    """
+    """A key cell with one wrapping pair of double quotes removed, for building a repair only."""
     if len(cell) >= 2 and cell.startswith('"') and cell.endswith('"'):
         return cell[1:-1]
     return cell
@@ -75,22 +66,7 @@ def _unquoted_key(cell: str) -> str:
 def _candidate_refusal(
     block: Block, cols: list[str], parsed: list[str], at: int, candidate: str
 ) -> str | None:
-    """Why this rebuilt row cannot be offered, or `None` when it can.
-
-    Four checks, since "the parser accepts it" is only one way a rebuild can go wrong:
-
-      * a cell carrying ``` would close the fence early (the row reader has no notion of it);
-      * `_row_cells` must read it back (this also catches a `"` the splice opened);
-      * it must split to exactly the declared width: `_row_cells` pads a short row silently,
-        but `fix_row`'s guard (`runtime.tools._new_row_shape_reason`) demands equality, and a
-        trailing backslash in the author's last cell can escape the rejoining `|`;
-      * every other cell must survive unchanged: `key` is spliced from the parsed record, where
-        `\\|` is already unescaped, so a key carrying an escaped pipe can shift the value cell
-        while passing both width checks.
-
-    Compared against the row as the parser reads it, so normalising padding is allowed and
-    moving a byte across a cell boundary is not.
-    """
+    """Why this rebuilt row cannot be offered, or `None` when it can."""
     if "```" in candidate:
         # Rows live inside a ```invlang fence and `_row_cells` has no notion of it, so without
         # this the offer would hand the model a row `fix_row` refuses.
@@ -170,20 +146,7 @@ class _DeclaredTypes:
 def _route_refusal(
     declared: _DeclaredTypes, rec: dict[str, str], key: str
 ) -> str | None:
-    """Why a refinement under this key, keeping this row's value, cannot be offered, or `None`.
-
-    The offer rewrites the key and keeps the author's value, and a landed `class` or
-    `attrs.<name>` cell is judged against its vertex type's vocabulary: on a `compute` vertex,
-    `owner|svc.config-mgmt` rewritten to `class|svc.config-mgmt` would be refused. Offering a
-    repair the validator then rejects gets the model refused for a cell it did not choose. Each
-    route asks through the same functions that judge the pasted row (`_class_cell_errors`,
-    `_attr_route_errors`), so offer and gate cannot disagree.
-
-    `None` for an undeclared target (no grammar to prove it wrong against), for `ident`, and for
-    an `attrs.<name>` naming no closed vocabulary. The reason is carried into the message so a
-    withheld `use:` line does not read as the validator contradicting itself; the enums it cites
-    are real slot keys `defender-invlang enum` accepts (a glob is not).
-    """
+    """Why a refinement under this key, keeping this row's value, cannot be offered, or `None`."""
     target = rec.get("target") or ""
     types = declared.types_of(target)
     if not types:
@@ -329,18 +292,7 @@ def _check_attr_update_keys(
     proposed_text: str, declared: _DeclaredTypes
 ) -> list[Diagnostic]:
     """`:R attr_updates` refinement rows — the key and its value — checked over the rows
-    rather than the folded records.
-
-    Reads blocks directly because this check quotes a row back and offers a corrected one. The
-    fold drops the header, and `_row_dict` zips whatever header the block declares, so
-    rebuilding from the fold would assume `resolved_by|target|key|value` order and transpose
-    columns under any other header. Here the `key` cell is replaced in place; a block with no
-    `key` column yields nothing.
-
-    A blank `value` is refused rather than warned: an empty cell settles nothing, and since
-    neither `has_open_slot("")` nor `is_unresolved("")` reads `""` as open, it would otherwise
-    pass for a resolution. No `fix` is offered: the missing value is the one thing this check
-    cannot supply."""
+    rather than the folded records."""
     out: list[Diagnostic] = []
     for fence_blocks in iter_fence_blocks(proposed_text):
         # One map per fence: `append_block` sends one fence per call, so a fence is one atomic
@@ -466,20 +418,7 @@ def _records_an_observation(block: Block) -> bool:
 
 def _opening_prologue_ids(proposed_text: str) -> set[str]:
     """Vertex ids declared by `:V prologue.vertices` blocks written while the document is still
-    opening its graph, before any lead recorded an observation.
-
-    Read off the fence stream, not `companion["prologue"]["vertices"]`: the projection folds
-    every prologue block into one list, so keying on the block name alone would let a later
-    write move an orphan row into a `:V prologue.vertices` block and inherit the exemption.
-
-    The boundary is the first recorded observation, not the first `:L findings` block, because
-    the harness writes lead-0's `:L findings` row before main's first turn. Judged per fence
-    (the atomic write), so reordering blocks within one write does not help.
-
-    The document's first fence always counts as opening: a document written as one block
-    (examples, fixtures) declares and reports together, and in a live run that fence is the
-    harness's, never the model's.
-    """
+    opening its graph, before any lead recorded an observation."""
     ids: set[str] = set()
     for nth, fence_blocks in enumerate(iter_fence_blocks(proposed_text)):
         if nth and any(_records_an_observation(b) for b in fence_blocks):
@@ -566,24 +505,7 @@ def _check_vertex_participation(
     current_companion: CompanionBody | None,
 ) -> list[str]:
     """Every vertex this write declares must be an endpoint of some `:E` row, or the
-    `attached_to` of some hypothesis, anywhere in the document.
-
-    SKILL.md forbids creating vertices just for facts; this enforces it. A hypothesis anchor
-    discharges it because a lead that can only hypothesize how an entity connects has exactly
-    one honest record: declare the vertex and attach an `:H` row. `proposed_edge` does not count
-    (it names a parent's type and class, never an id), nor does an `:R attr_updates` target,
-    which records a fact about an existing object rather than an event.
-
-    Exempt: ids the opening prologue declares (`_opening_prologue_ids`). A lead re-declaring one
-    inherits the exemption, matching `_walkers.vertex_types`' first-declaration-wins.
-
-    Scoped to what this write introduces, like `_check_surface`: the document is append-only,
-    and `committed_investigation_reason` and `restore_run_folder` re-validate a committed
-    document as its own baseline, so a document-global reading would dead-letter finished runs
-    over bytes no repair can reach.
-
-    One diagnostic per `(site, vertex)`; the repair text is printed once, on the first.
-    """
+    `attached_to` of some hypothesis, anywhere in the document."""
     exempt = _opening_prologue_ids(proposed_text)
     spoken_for = _edge_participants(companion) | {
         h["anchor"] for h in _walkers.all_hypotheses(companion).values()
@@ -891,18 +813,7 @@ def _declared_row_errors(companion: CompanionBody) -> list[str]:
 def _check_vocab_class_cells(
     companion: CompanionBody, declared: _DeclaredTypes
 ) -> list[str]:
-    """A vertex's `class` tuple and its closed-vocabulary `attrs` siblings, per type.
-
-    Reads inside the `class` cell, where the type's grammar lives: `container` in the first slot
-    of a `compute` class is a `compute.kind` value in the `compute.role` slot, and would
-    otherwise reach the frontier as a held fact that lesson selectors mis-match.
-
-    Two walks, deduped: `_declared_row_errors` sees concrete classes the fold discards, and the
-    folded walk sees values only an `:R attr_updates` refinement supplies (the write most likely
-    to name a value). Ids with no `:V` row are skipped, having no type to dispatch on
-    (`_check_attr_update_targets` refuses a target naming nothing). An id declared under
-    several types is refused only where none of them can hold the value.
-    """
+    """A vertex's `class` tuple and its closed-vocabulary `attrs` siblings, per type."""
     errors: list[str] = _declared_row_errors(companion)
     for cell in iter_vertex_cells(companion, include_ident=False):
         if cell.slot == SLOT_CLASS or cell.slot.startswith(ATTR_PREFIX):

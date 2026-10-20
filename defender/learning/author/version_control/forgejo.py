@@ -173,17 +173,7 @@ def _pull_request(row: dict) -> PullRequest:
 
 
 class ForgejoForge:
-    """Host-only Forgejo client; importing the legacy forge needs no HTTP stack.
-
-    The origin is parsed once, here, into `address` (O-G): every request goes to its API. A
-    listing asks for each page by number on that address (`?state=S&page=N&limit=L`) and never
-    follows or compares Forgejo's `Link`, which Forgejo builds from its own `ROOT_URL` (#1108
-    amendment 3, C4): it stops at an empty page, or once the rows seen (every row, counted
-    before any is skipped) reach `X-Total-Count`. Only PRs whose head repository id is this
-    repository's (read once from `GET /repos/{o}/{r}`) count, by exact head and by prefix
-    alike: a fork's PR, a namesake's, or one with no head repository at all (D-fork) is never
-    ours, and never holds the writer lease. This service owns client dependencies, not a
-    serialized boundary record; its default representation exposes no credentials."""
+    """Host-only Forgejo client; importing the legacy forge needs no HTTP stack."""
 
     def __init__(
         self, *, origin: str, identity: ForgejoIdentity, client: httpx.Client

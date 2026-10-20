@@ -1,26 +1,4 @@
-"""The corpus-author drain body and its retire seam.
-
-Every corpus-author channel reaches its batch through `run_batch`. What varies per channel
-(pre-author gate, AUTHOR_RESULT buckets, row key, the queue's locks, commit trailers, the held
-report) is a field on the config; the batch body (read, partition, author, commit, project,
-rotate, log) is this module.
-
-Retirement is reachable only from `RETIRE_SET`. A fault whose class is not in it leaves its row
-queued — stuck, recoverable, and recorded in the channel's stuck-row file — so a novel exception
-class retries unboundedly rather than being counted toward a ceiling and deleted. The authoring
-region's cleanup is class-blind: it restores the worktree, then retires or re-raises.
-
-A `GitError` is a member only where the commit failed. Git reads of repo state (worktree status,
-HEAD) go through `_git_read`, which re-raises as the non-member `GitProbeError`: index-lock
-contention on a busy repo records a stuck tick instead of burning one of the batch's attempts.
-Each read over the worktree is bounded by `cfg.git_timeout` and runs with attributes from HEAD's
-tree (`_git.committed_view_env`): one that does not answer in time is a `GitProbeError` too, so a
-FIFO the agent left where git opens a file (`.gitignore`) stops the tick instead of hanging it,
-and one at `.gitattributes` is never opened at all.
-
-The pitfalls and lead-author legs use `core/faults.run_or_dead_letter`'s re-raise set, which
-contains `GitError`, so a commit-time `GitError` retires here but kills the drain there.
-"""
+"""The corpus-author drain body and its retire seam."""
 from __future__ import annotations
 
 import hashlib
@@ -181,27 +159,7 @@ def retire(
     counter_key: str = "attempts",
     timeout_seconds: int | None = None,
 ) -> RetireOutcome:
-    """Bump every named row by one; retire the rows now at or over the ceiling.
-
-    The count is a lifetime count on the row — never reset by a success or a requeue — and the
-    ceiling is consulted only here, after an observed failure, so a row already over the
-    ceiling rides through a clean tick untouched.
-
-    `counter_key` names what is counted. `attempts` (the default) counts faulting ticks; the
-    pitfalls lane also counts offers the curator declined, which are not faults. One shared
-    counter would make each ceiling arrive early under the other's traffic: two infra faults
-    would spend a fresh row's offer budget and its first decline would retire it untaught. The
-    graveyard's `attempts` slot reports whichever count drove the retirement; the other rides
-    inside `row`.
-
-    The graveyard entry lands first, then the locked rotation writes the row into the consumed
-    ledger, which makes retirement terminal (the append path dedups against it). A crash
-    between the two costs one duplicate advisory record.
-
-    `timeout_seconds` bounds both append-lock waits and is required of any caller holding the
-    repo lock (the corpus drain; the pitfalls leg via `PitfallsDisposition.apply`): that lock
-    serialises every channel, so an unbounded wait would let one wedged appender stall them
-    all. Expiry raises `TimeoutError`; the batch is not bumped and the tick surfaces as stuck."""
+    """Bump every named row by one; retire the rows now at or over the ceiling."""
     key = channel.id_key
 
     bumped = state.retire_rows(
@@ -434,17 +392,7 @@ class _Tree:
 
 
 def _settle_tree(cfg: CorpusAuthorConfig, state: _PreState) -> _Tree:
-    """The post-spawn normaliser. In order:
-
-    1. non-`.md` files under the corpus are reverted — they cite nothing, so this is cleanup,
-       and it must precede the stray check that would otherwise refuse the tick;
-    2. a change outside the corpus (beyond tick-start dirt) raises `AuthorError`;
-    3. an unmerged path under the corpus raises;
-    4. a mode-only change (bytes identical to HEAD) is put back — it isn't content to commit,
-       and would stay dirty after the commit and wedge the next tick's cleanliness gate;
-    5. the curator spawn's deletions are honoured and committed.
-
-    Git reads go through `_git_read`: a git failure here is the host's, not the batch's."""
+    """The post-spawn normaliser. In order:"""
 
     def settle() -> _Tree:
         _revert_non_md_strays(cfg)
@@ -721,17 +669,7 @@ def _restore_unapproved_files(
     head_before: str,
 ) -> None:
     """Put every file this tick changed but did not approve back to its tick-start bytes, or
-    remove it if the tick created it, through the corpus mount (#1134).
-
-    Which tick-start files still hold their bytes is git's answer against `head_before`, the
-    commit the before-state was read at (`_unchanged_names`, addendum 3 D1); the rest are written
-    back. A git failure there is the tick's `GitProbeError`, raised before anything is written
-    or removed. Not on the fault path, so a refusal propagates: anything left at a created name,
-    even a non-file, must go, and the held root refuses (never follows, never unlinks) a link, a
-    hard link or a FIFO there, leaving it for the scrub (O5.2); a folder raises
-    `IsADirectoryError`, as the plain `unlink()` did. The folder test asks the name's folder
-    listing (`entry_kind`, addendum 2 B3); a holding folder whose listing is refused is no folder
-    here, so the `unlink` meets it and the core's `OSError` propagates."""
+    remove it if the tick created it, through the corpus mount (#1134)."""
     if snapshot is None:
         return
     names = {rel: _corpus_relative(cfg, rel) for rel in rels}
@@ -923,19 +861,7 @@ def record_stuck(
 def _record_stuck(
     state: LearningState, channel: Channel, exc: BaseException, rows: list[dict],
 ) -> None:
-    """@owns recorded_at — the operator signal for a stuck tick, and when it was written.
-
-    The stuck report is the visible trace of a fault outside `RETIRE_SET`, whose row stays
-    queued: one record per non-retiring tick, naming the fault class, the stalled rows and how
-    many consecutive ticks they have been stuck. A row can be both graveyarded and queued:
-    `_retire_unkeyable` and `retire` append dead letters before the rotation that removes the
-    rows, releasing the append lock in between, so a rotation that times out against an
-    appender (or a crash) in that window leaves the row in both, plus a duplicate dead letter
-    each later stuck tick. Keyless rows are named by a content fingerprint (`_stuck_row_ids`).
-
-    The file is append-only and never cleared, so the stamp is what lets the queue page say
-    "last faulted at". The count is per tick, not per row: a non-retiring row must stay
-    byte-identical, so the last record is read back instead."""
+    """@owns recorded_at — the operator signal for a stuck tick, and when it was written."""
     fault_class = type(exc).__name__
     ids = _stuck_row_ids(channel, rows)
     previous = state.stuck_rows(channel)

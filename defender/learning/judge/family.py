@@ -1,26 +1,4 @@
-"""The judge's archive readers: per-world facts read off each world's own archived record.
-
-Every fact reads ONE world's own `served/<world_token>.jsonl`, its archived
-`report.md`/`investigation.md`, and the manifest — never `served/base.jsonl`, never a sibling,
-never the comparator. Nothing here decides a bucket: the judge MODEL decides each world's bucket
-from what these readers put in front of it (O11).
-
-The manifest is read through the runtime loader's own gate (`load_manifest_document`), so a
-manifest the sibling refuses — one predating the oracle, a label off the world-token rule — is
-refused here too, plus a repeated key, which YAML would otherwise resolve silently.
-
-Where a refusal stops: a fault in the MANIFEST (duplicate or case-colliding label, a label that
-cannot name a directory or collides with a real run) refuses the whole pass, because the
-manifest says which worlds there are. A fault in one world's own archive stops at that world:
-absent inputs (tier 1) and malformed ones (tier 2) both mark it `ungradable` with no model call,
-and a malformed world also carries `malformed: true`, so "not there" and "there and wrong" stay
-distinguishable on the record.
-
-This module is also the one home of the episode archive's record readers (`read_manifest`,
-`read_samples_record`, `read_world_facts`, `screened_yaml_mapping`) and the accessors in
-`__all__`, shared by the judge's input builder (`render.py`) and the episode page. The world's
-leads and queries come off `lead_repository.joined`.
-"""
+"""The judge's archive readers: per-world facts read off each world's own archived record."""
 
 from __future__ import annotations
 
@@ -72,15 +50,7 @@ def screened_yaml_mapping(
     bound: Bound, name: str | PurePath, *, what: str, empty_ok: bool = False,
 ) -> dict[str, Any] | None:
     """A YAML mapping at `name` (relative to `bound`) through the screened read, or `None`
-    only when nothing is at the name.
-
-    The episode dir is reachable from a sibling box's rw bind, so an entry at the name may be a
-    planted link. Absent is an ordinary absence the caller decides about; anything present that
-    is not the record (a link, an unreadable entry, a torn document, a non-mapping) is
-    `JudgeRefused`, naming the relative name and never the operator's tree.
-
-    `empty_ok`: a present document that YAML reads as `None` (empty, or `null`) is `{}` rather
-    than a refusal — for a sample, "nothing recorded yet" and "present but empty" are the same."""
+    only when nothing is at the name."""
     import yaml
 
     from defender._yaml import safe_load
@@ -136,10 +106,7 @@ def read_manifest(bound: Bound, *, expected_episode_id: str) -> dict[str, Any]:
     rule, a hostile system name, an `episode_id` other than `expected_episode_id` (the folder
     it was read from, #1187 R5) — is refused here too, before any of it reaches a prompt or a
     page. A repeated key is refused as well: YAML keeps the last spelling silently, and the
-    judge and the page must not read a document whose meaning depends on which copy won.
-
-    The refusal is `JudgeRefused` raised FROM the loader's `FamilyError`, so a caller can tell
-    an archive of the old design (`ManifestPredatesOracle` as the cause) from a damaged one."""
+    judge and the page must not read a document whose meaning depends on which copy won."""
     from defender._yaml import duplicate_key_paths
 
     try:
@@ -587,16 +554,7 @@ def read_world_facts(bound: Bound, label: str, *, world_id: str,  # noqa: PLR091
                      summary_leads: frozenset[str] = frozenset()) -> WorldFacts:
     """Read one world's archived record — ledger, then document, then report — for the
     grading path. Unlike the standalone readers, an absent input refuses here: grading has
-    nothing to return for a world it cannot see.
-
-    `absent_ledger_ok` reads an absent served ledger as no calls. The pass sets it: whether a
-    world ran is its own record's to say (`world_records/`, S8), so an archived world with no
-    ledger is one whose investigator made no call that reached it.
-
-    `leads` is deferred (`leads_by_id` takes a `Path`, not a bound reader) and runs only after
-    the three reads pass, so a planted link at `worlds/<world-uuid>` is refused by the document read
-    first. Set on the one construction because `dataclasses.replace` on a `@model` would copy
-    the whole ledger."""
+    nothing to return for a world it cannot see."""
     ledger_name = world_ledger_name(world_id)
     if call_records is not None:
         table_rows, ledger_rows = call_records

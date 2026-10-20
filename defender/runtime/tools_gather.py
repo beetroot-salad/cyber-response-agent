@@ -478,25 +478,7 @@ async def _run_gather(  # noqa: C901, PLR0912, PLR0913, PLR0915 — one except a
     *, catalog: SystemIndex | None, pre_claimed: bool = False,
     on_end: Callable[[Any], None] | None = None,
 ) -> str:
-    """Run one gather lead and return main's wrapped result.
-
-    `on_end`, when given, is called once with a `lead_zero._items.LeadEnd` (the lead's own
-    summary, how a fault ended its session, what the harness's stops recorded) just before the
-    result is composed: the harness's correlation lead decides its ending from it, since the
-    composed text mixes the notice and the summary.
-
-    `stamp_terminator(agent_id, reason)` records how the session ended; the composition root
-    supplies it because the session is opened inside the factory. `None` skips stamping.
-
-    `catalog` is the descriptor index, built once at run start so an unreadable adapters tree
-    fails there rather than mid-tool, and rendered here with the systems down NOW marked
-    (#1256). `None` means no index to show.
-
-    The `except` arms are one per way a gather run can end: three faults degrade the lead into
-    a notice, two run-level ends pass through. A harness stop is not an exception: a guard's
-    stop is a tool result, and the ceiling's `RequestCeiling` capability marks the last
-    allowed request and withholds tools on it. Either writes to the lead's `LeadStop`, the
-    model writes its summary, and `_compose` puts the stop's notice above it."""
+    """Run one gather lead and return main's wrapped result."""
     lead_id, system = request.lead_id, request.system
     if not _LEAD_ID_RE.match(lead_id):
         raise ModelRetry(

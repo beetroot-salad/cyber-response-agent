@@ -87,23 +87,7 @@ def is_reducer_row(row: dict) -> bool:
 
 
 def pitfall_key(row: dict) -> tuple[str, str]:
-    """The identity of a mistake, which is not the identity of a failing row.
-
-    `(owner, stderr_digest)`, where the owner is the surface the lesson would be taught on:
-    the reducer sentinel for a reducer row (collision-free, since `is_system_name` admits no
-    `∅`), else the stripped system name (matching `_build_pitfalls_handoffs`' grouping).
-    Keying on `system` alone would split one reducer mistake across attributed systems and
-    merge a system row with a reducer row sharing a digest.
-
-    The digest is the adapter's diagnosis, which the curator uses to name the mistake, so
-    rows sharing it under one owner are one lesson however the query was phrased; `query_id`
-    only decides the owner.
-
-    A row whose digest carries no diagnosis (absent, blank, or only the `exit=N;` envelope)
-    keys to itself: merging on the absence of a verdict would fold unrelated mistakes behind
-    one exemplar and consume the rest as though curated. `is_content_less`, not `.strip()`, so
-    zero-width filler doesn't count as a diagnosis.
-    """
+    """The identity of a mistake, which is not the identity of a failing row."""
     owner = (
         BASH_SHIM_QUERY_ID if is_reducer_row(row)
         else str(row.get("system") or "").strip()

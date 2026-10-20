@@ -98,24 +98,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
 
 class _StateThatLetsAnAppenderIn(LearningState):
     """The learning state handle, plus one callback fired at the single instant an appender can
-    arrive with no race to lose.
-
-    That instant is the end of the retirement's graveyard append. `_retire_unkeyable` calls
-    `state.deadletter(...)` and then `state.rotate(...)`, and the call between them sits AFTER
-    `_tick` released the append lock (the batch read is over) and BEFORE the rotation asks for
-    it again. So nothing holds the lock when the callback runs and the appender can take it
-    SYNCHRONOUSLY: `Holder.__enter__` returns only once it OWNS the lock, so when the drain
-    resumes the lock is already held. No thread, no interval to guess at, nothing to lose
-    under load.
-
-    Nothing about the contention is faked. The appender takes the real `flock` on the real
-    lock file with the appender's own blocking discipline (no deadline), and the `TimeoutError`
-    under test is raised by the retire rotation's own bounded wait. What the hook decides is
-    only WHEN the appender arrives.
-
-    It enters through `dataclasses.replace(cfg, state=...)`, the config seam, not through
-    `monkeypatch.setattr`: a handle sharing the real one's descriptor (`over`), with the one
-    verb wrapped. The real handle must outlive it."""
+    arrive with no race to lose."""
 
     _on_deadletter: Callable[[], None] | None = None
     _fired: bool = False
@@ -136,15 +119,7 @@ class _StateThatLetsAnAppenderIn(LearningState):
 
 
 class _StateWhoseDiskIsFull(LearningState):
-    """The learning state handle, with one verb answering `ENOSPC` while `full` is set.
-
-    #1135: a folder planted where the graveyard or the held report belongs is now a refusal
-    (`StateRefused`), which stops the tick and records NOTHING by design ("a planted entry
-    stops the tick, and nothing is recorded after it"). The fault these tests need is an
-    ordinary I/O fault outside `RETIRE_SET`, met at the same seam, so it is a full disk on the
-    one verb that seam calls. It enters through `dataclasses.replace(cfg, state=...)`, the
-    config seam, sharing the real handle's descriptor (the real handle must outlive it), and
-    `full = False` is the obstruction removed, for the paired control on the same config."""
+    """The learning state handle, with one verb answering `ENOSPC` while `full` is set."""
 
     _verb: str = ""
     full: bool = True
@@ -174,17 +149,7 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(
     paths, ch, *, lock_wait: int = 1,
 ) -> BaseException | None:
     """One real `run_batch` whose unkeyable retirement — and only that — meets a held append
-    lock. Returns whatever escaped the tick.
-
-    The ordering is exact rather than probable: the appender acquires the lock in the
-    foreground, from inside the drain's own call stack, in the window the retirement opens
-    between releasing the lock and asking for it again (see
-    `_QueueFileThatLetsAnAppenderIn`). By the time the rotation runs the lock is held, so its
-    bounded wait is the only thing that can expire. `repo_lock_wait_seconds=lock_wait` is that
-    deadline: 1 by default, as in `tests/learning/curation/test_drain719_hardening.py`; 0 (one try, as the drain
-    takes it in `tests/learning/core/test_952_consumption_follows_durability.py`) where the caller's subject
-    is what the expiry leaves behind, not the wait.
-    """
+    lock. Returns whatever escaped the tick."""
     appender = h.Holder(paths.state_root / ch.append_lock)
 
     def _an_appender_arrives() -> None:

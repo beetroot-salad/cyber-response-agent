@@ -1,37 +1,5 @@
 """Watches, seams and the unprivileged child runner for `test_1134_shared_readers.py`. It
-defines no tests.
-
-Like `_tree_listing_1134` (whose `RealOs`, `fd_path`, `spelled`, `NOBODY` and privilege drop
-it reuses), it imports only the standard library and that module at module level, and the
-readers only inside the functions that call them, so a child interpreter loads it fast and
-imports every reader BEFORE it drops privileges.
-
-* `kernel_watch`: an inotify watch below Python. `IN_ACCESS` reports each read(2) of a watched
-  file (and each listing of a watched folder), by whatever name, whatever the mount's atime
-  policy; `IN_OPEN` reports each open of one for reading (an `O_PATH` open, a `stat`, an
-  `fstat` report nothing). So a reader that opens a link's target, or reads a hard link before
-  refusing it, is seen however it reached the file: through the `os_` seam, around it, or by
-  a `Path` the reader formatted itself.
-* `os_` stand-ins over the real `os`: `SpellingRecorder` (every `os_.open` with its flags and
-  `dir_fd`, judged for a spelling that could follow a link), `RefusesFolder` (one folder,
-  named by its real path, refused on one route with one errno: a `_draft` folder appears at two
-  depths in the test tree, so a last-component match would refuse both; with `once`, only its
-  first listing; `RefusesFolders` holds several at once), `VanishesOnOpen`
-  (a listed record removed the moment it is opened: absent at read time), and
-  `SwapsFolderBetweenListings` (a folder its parent's listing showed as a directory REALLY
-  moved out of the tree, and a link to a marked folder, a file, a FIFO or nothing left at its
-  name, the moment its own listing first steps into it). `RefusesFolder`'s
-  `step` route also refuses a plain FILE's open at its path, as a real unreadable file is
-  refused: at the open, never at a `stat`.
-* `run_readers` / `child`: run the shared readers over trees with REAL permission bits, as an
-  unprivileged user (in-process when the caller is unprivileged; in a child interpreter that
-  drops to uid/gid 65534 after its imports when the caller is root), reporting each reader's
-  records and warnings as JSON.
-* `audit_readers` / `child` in `audit` mode: run the readers in a child interpreter with an
-  audit hook (never installed in a pytest worker: a hook cannot be removed) that records every
-  `open` by a name, with its flags, while the reader runs. The bare `Path` form has no `os_`
-  seam, so this is how its opens are seen.
-"""
+defines no tests."""
 from __future__ import annotations
 
 import contextlib

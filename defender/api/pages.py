@@ -1,25 +1,4 @@
-"""Cursor pagination for every list endpoint.
-
-A list answers `Page[T]`: at most `limit` items and a `next_cursor`, `null` on the last page. A
-client pages by sending the same query again with `cursor=<next_cursor>`. The cursor is opaque:
-base64url JSON naming the list it came from, the tenant that asked, a digest of the filters it was
-issued for, and the position of the last item served. The filters go in as a digest, not their
-values, so a cursor's size never depends on the query: whatever filter a list accepts, the cursor
-it issues fits the cursor parameter it is sent back in. What a cursor carries back in is checked
-with the same types as every other input — its position's id is a `RecordId` and its moment an
-`Instant` (`models.py`) — so an edited cursor cannot hand a port what a path or query could not. A cursor that does not decode, or that names
-another list, another tenant or other filters, is a 422 — never a silently different page. It is
-not signed: it cannot widen what a caller reads, since the tenant comes from the login and the
-store filters by it whatever the cursor says.
-
-Each list has one total order, which the store answers in (its ports say which): newest first
-by `(timestamp, id)` for alerts, investigations and learning jobs, and by id for lessons and
-systems. The id breaks ties, so a page boundary between two rows with one timestamp neither
-repeats nor skips either. The route asks its port for one row more than `limit`; that row, if
-it comes back, is how the page knows another follows. The route also checks that the rows
-advance past `after`, in order: a store whose page does not (an off-by-one at the boundary)
-would otherwise hand the client the same cursor forever, so it is a 500 (`StoreBrokePromise`).
-"""
+"""Cursor pagination for every list endpoint."""
 
 from __future__ import annotations
 

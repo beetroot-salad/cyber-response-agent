@@ -1,19 +1,4 @@
-"""The one place a model request is retried (#1243, P1).
-
-A request that fails *temporarily* (HTTP 408, 409, 429, >=500, or no response at all) is resent
-unchanged, up to `MAX_ATTEMPTS` wire attempts in all; no new attempt starts once `WINDOW_S` has
-passed since the first began. Exhausted, it raises `ProviderDown` from the last original error.
-Everything else propagates exactly as the model raised it. The client libraries' own retries are
-off (the provider builders set them to 0), so these are the only retries on the wire.
-
-The wrapper sits on the model object, below every caller: the run's agents, the review stages,
-the learning stages and the branching oracle all get their model from `build_for_effort`, so one
-fault gets one handling. A retry is the same request resent inside one `request` call, so the
-framework above counts one request, runs its history processors once and writes one wire record.
-
-pydantic_ai names are imported inside functions: this package is imported by the runtime-free
-install.
-"""
+"""The one place a model request is retried (#1243, P1)."""
 from __future__ import annotations
 
 import asyncio

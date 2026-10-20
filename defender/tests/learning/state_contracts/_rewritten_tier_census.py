@@ -1,36 +1,4 @@
-"""Clause #41's old-assert census: the generator of `rewritten_tier_map.yaml`. NO test functions.
-
-#1135's O3 (revision 3 / R17) keeps two test tiers. The regression tier changes only imports and
-fixtures. The REWRITTEN tier is every unit test of a helper the design removes, rewritten
-against the handle's verbs WITH EACH OF ITS ASSERTS KEPT, and the old-assert -> new-assert map is
-committed beside the suite (`o3_rewritten_tier_keeps_every_assert`, a clause). JF11 (auto, §7)
-draws the tier PER TEST: any test edited beyond imports, fixtures and the one named arity site
-(`test_drain719_locks.py:307`) has a map entry, whatever file it is in.
-
-This module seeds the map's OLD side at phase E, against base d9128afa: it walks
-`defender/tests/**/*.py` (this suite's own directory and `__pycache__` excluded) and records
-every test function (module-level, or a method of a test class) whose body reaches a name the
-design removes or reshapes, directly or through a helper it calls (same-file, or a function of
-another test module it imports), with every `assert` in its body (and each `pytest.raises(...)`
-context) as `ast.unparse` text and `new: null`. write-code-from-spec fills each `new` as it
-rewrites the test, or marks the reference a pure import/fixture edit.
-
-What reaches a removed name (`REMOVED`): a `Name` bound by an import of it, an attribute access
-`<x>.<name>`, a `queue_dir=` keyword (the judge's override, decision 4), a call of
-`trigger_author` / `_maybe_trigger_author` with five positional arguments or a starred argument
-(the 5-positional seam), a `trigger_author=` fake written as a lambda that names any positional
-parameter (it binds the seam's positional shape, so it changes when the seam takes the handle;
-`lambda *a, **k: ...` names none and stays a fixture edit), or a string constant naming it
-exactly (a census row pinned by name).
-
-JF11's planted-folder class is seeded by hand (`PLANTED_FOLDER_TESTS`): a test that plants a
-folder where a state record belongs to inject an ordinary fault is a rewritten-tier test with
-its asserts, because under 3.1 A that plant is now a refusal (StateRefused, exit 2, no stuck
-record), whatever route it reaches a removed name by.
-
-Run from the repo root (rewrites the map in place):
-    PYTHONPATH=<worktree> python defender/tests/learning/state_contracts/_rewritten_tier_census.py
-"""
+"""Clause #41's old-assert census: the generator of `rewritten_tier_map.yaml`. NO test functions."""
 from __future__ import annotations
 
 import ast

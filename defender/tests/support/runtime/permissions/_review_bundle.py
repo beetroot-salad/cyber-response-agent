@@ -1,21 +1,4 @@
-"""A review bundle whose four stages answer without a provider — for both test trees.
-
-The gate dispatches three lenses and a composer from inside the close tool, so ANY scenario
-that drafts a confident disposition drives four model calls. A hermetic suite therefore needs
-a bound bundle the way it needs a fake main model, and it needs the same one on both sides of
-the e2e line: `tests/test_796_gate_arms` drives `challenge_gate` directly, the replay harness
-drives it through `run_investigation`, and both want "every lens answers, the composer says
-X". Neutral home rather than either suite's, exactly as `_docker.py` is.
-
-What deliberately does NOT live here: which finding a scenario's composer returns. That IS
-the scenario — a bundle default that picked one would put the interesting half of every gate
-test somewhere other than the test — so `composer` is a required argument with no default.
-The one exception is the replay harness's own seam default, which is `holds` because a replay
-of a real run is a HAPPY-path script: a bundle that overrode every confident close would make
-those replays assert a degenerate outcome, which is the state this module was written to end.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""A review bundle whose four stages answer without a provider — for both test trees."""
 from __future__ import annotations
 
 import json

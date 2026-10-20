@@ -1,39 +1,4 @@
-"""The questioner: a deny-all role that authors one family of sibling worlds.
-
-An operator names a finished run and a branch point; sibling worlds are then run from that
-point. This module owns the authoring half — the model calls that turn the captured past into a
-`family.yaml` the launcher validates, calibrates and runs. It opens no cluster, spawns no process
-and writes no manifest.
-
-The role grants nothing, by omission: `tools=ToolSet()`, no `bash_shapes`, `write_shapes` or
-`verb_grant`. `AgentDefinition`'s defaults are deny-all, so any widening has to add a grant in
-this file where a reviewer sees it; spelled-out empty grants would make widening a one-word
-edit. The role needs nothing: its input is inlined by the host and its output is one YAML
-document.
-
-The host, not the model, fans out (one family call, then one call per authored world): a tool
-the model could call would be a new capability inside a deny-all role.
-
-WHY THREE CALLS SHARE ONE ROLE KEY: the rule (`agent_role.py`) is one key per package, not per
-grant. These calls and the comparator's are all branch-package machinery. They are told apart by
-`agent_id` (`questioner`, `questioner:b`, `questioner:c`), which the wire log and per-id trace
-partition on, so a duplicate id would silently overwrite a trace. Another package (e.g. the
-family judge) holds its own key even with an equally empty policy, so a grant added here cannot
-reach it.
-
-Every input is wrapped in an untrusted frame, including Call 1's own reply before it seeds the
-world calls: the capture (leads, alert, investigation document) was written in a box's rw bind
-and is attacker-reachable, and a model restating it does not clean it.
-
-Messages go through `learning._prompt.stage_user_message` so they carry the reader contract, and
-each section is a literal `titled_section` call (its host title outside, its body in the frame)
-so `tooling/lint/lint_stage_prompt_frames.py` can inspect them.
-
-One salt per call (`_untrusted.message_salt`), not per family: Call 1's reply is framed into the
-later calls, so a salt Call 1's model had seen would be a delimiter the framed party holds. One
-salt is shared across a message's sections, so "matching frame tags in this message" holds for
-the set.
-"""
+"""The questioner: a deny-all role that authors one family of sibling worlds."""
 from __future__ import annotations
 
 from defender._model import model
@@ -210,21 +175,7 @@ _QUESTIONER_LESSONS_CAP = 20
 
 
 def _questioner_lessons_section(lessons: Any, *, served_systems: Sequence[str]) -> str:
-    """Every candidate lesson path, read, screened and selected — the section body, or "".
-
-    `lessons` is the launcher's unread glob of `defender/lessons-questioner/`. A lesson is
-    selected iff its frontmatter `systems` — a non-empty list of strings — shares a member with
-    `served_systems`, matched exactly (no case or separator folding; N03). Its old pattern and
-    holding-system keys select nothing. A lesson that cannot be read, has no closed
-    frontmatter, repeats a top-level key (`safe_load` resolves repeats last-wins silently, which
-    would let a model-authored value steer the selector) or carries a malformed `systems` is
-    skipped with a warning naming it (N24) — never shown by guess.
-
-    Each file is read once, whole, so a lesson replaced while this runs is selected from one
-    version or not at all. The chosen lessons are ordered by file name, never by the order the
-    candidates arrive in, and the cap applies after selection, so matching lessons are never
-    crowded out and the same lessons always make the same section.
-    """
+    """Every candidate lesson path, read, screened and selected — the section body, or ""."""
     if not lessons:
         return ""
     from defender._frontmatter import FrontmatterError, split_frontmatter
@@ -498,23 +449,7 @@ def author_family(  # noqa: PLR0913 — one keyword per captured input plus `les
     samples: Any = None,
     lessons: Any = None,
 ) -> dict[str, Any]:
-    """Author one family document: one family call plus one call per planned world.
-
-    Returns the raw composed declaration; the launcher assigns world UUIDs and validates
-    through `accept_family` before publication or preflight.
-
-    `source_run_dir` and `episode_dir` are only named in the prompt, never read. The captured
-    inputs arrive already read: the host owns every read of a model-writable tree.
-
-    Composition: base world A, then the authored worlds in seat order with roles assigned by
-    seat. The launcher adds the measurement facts (`episode_id`, `source_run_dir`,
-    `source_run_id`, `branch_message_id`, `fences_at`, `as_of`).
-
-    `served_systems` is the manifest's recorded list (M21), named in every call's host text;
-    `samples` is the per-system samples document (`samples.yaml`). `lessons` is the unread
-    candidate list of questioner-corpus paths; they are screened and selected by system against
-    `served_systems` and reach Call 1 only.
-    """
+    """Author one family document: one family call plus one call per planned world."""
     served = list(dict.fromkeys(served_systems))
     header = _measurement_header(Path(source_run_dir), Path(episode_dir), served)
     # Rendered once for all calls; framing is per call because the salt is.

@@ -1,31 +1,5 @@
 """The open-trees plumbing for #1134 step 6's tests, and the scene its two new files share. It
-defines no tests.
-
-Step 6 moves the lead author and the pitfalls curator onto the drain's held `skills/` mount: the
-readers take a `Bound` (the mount's view) plus `where=`, the Path that folder is spelled as; the
-draft writer takes the `Held`; the post-agent rules take `tree_for=`, the `DrainTrees.tree_for`
-of the lane's open trees; the deps, `run_pitfalls` and `run_under_held_queue_lock` take the open
-`trees`. Every existing caller in `defender/tests` changes in call shape only (owner decisions 1
-and 2 of 2026-09-29), and this module is the one home of the trees those calls run inside.
-
-Lifetime, the one rule here. A `Held` closed under a reader does not raise: the reader answers
-`Bad file descriptor` as a refusal, which reads as "absent" or "refused", a silent wrong answer.
-So every call these helpers serve runs inside trees that are open:
-
-* `lead_trees(paths)` opens the lead drain's trees over `paths` exactly as the lane does
-  (`open_drain_trees(paths, LEAD_AUTHOR_DRAIN_LABEL)`). It is a `DrainTrees`, so `with
-  lead_trees(paths) as trees:` scopes them; passed inline (`trees=lead_trees(paths)`) it stays
-  open for the call it is handed to.
-* Every other helper hands back an object that REFERENCES the open trees: a bound `tree_for`,
-  a `Held`, a view, or deps holding the `Held` and the bound `tree_for`. The descriptors stay
-  open exactly as long as that object is referenced and are released when it is collected
-  (CPython's refcount; `_io._Handle.__del__` closes each). Nothing here closes trees a caller
-  still holds, and no test that uses these looks at its own descriptors.
-
-`lane_tree_for(repo)` is always the REAL `trees.tree_for` over the repo the rules are asked
-about, never a stand-in such as `lambda p: None` (that would send every rule down the
-plain-path fallback, D3, and test nothing of the handle).
-"""
+defines no tests."""
 from __future__ import annotations
 
 import dataclasses

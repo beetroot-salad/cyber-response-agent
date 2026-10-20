@@ -1,42 +1,4 @@
-"""The tenant-scoped runs repository (#1105 PR 2, decision C) and run lookup (#1105 D2).
-
-The accepted `Tenant` hands out its repository — `runs = tenant.runs_repository()` — bound to
-that tenant; below it everything is ids. No method takes a `Tenant`, a folder or a path from its
-caller, and none reads the environment (rev 4 S2). Every folder is reached by the walk from the
-tenant's own folder, each level held off its parent's handle and never followed (#1187 S-iso,
-`_held.walk_from_tenant`): `<T>/runs` for natural runs, `<T>/episodes/<episode id>` for an
-episode and its `runs/` for the episode's arms. Where a folder is says whose it is, so no
-folder holds a record restating its tenant (#1187 R1).
-
-* natural container: `runs.open(run_id) -> Run`, `runs.list() -> Listed`,
-  `runs.all_runs() -> list[Run]`, `runs.create(run_id)`, `runs.resolve(address) -> Run`;
-* episodes: `runs.create_episode() -> EpisodeRuns` claims a fresh `<T>/episodes/<uuid>`;
-  `runs.episode(episode_id) -> EpisodeRuns` opens one (`require_roster=True` is the sibling's form);
-  `runs.episode_files(episode_id) -> Episode` is the owner's handle alone (the judge's door);
-* the episode view `EpisodeRuns`: the arm roster (`start_runs`, `arm_id`, `arm_ids`), the arms
-  (`open`, `arms`, `create`), and `episode`, the owner's handle;
-* `open_requested_run(data_root, tenant, run_id)`: a command line's `--tenant T <run_id>`,
-  opened, or its refusal as text;
-* `RunAddress(tenant_id, run_id, episode_id | None)`: the stored and transported address.
-
-Each lookup walks to its container afresh (no descriptor outlives a call, and none is kept from
-acceptance) and does every read relative to that handle, closing it before it returns. One held
-handle is how a link at any level is refused, and how one call's listing comes from one folder;
-it is not race protection (P1: the host is not malicious).
-
-P2: an unexpected state raises one named error — `TenantRefused` for a level of the walk that
-cannot be held (a link, a non-directory, an unreadable folder), `RunRefused` for everything
-else — naming the path and the fault, at the first failed check, before any write. Opening a
-run is the exception: `open` (natural and episode) and `resolve` answer one family,
-`RunRefused`, of three kinds — `RunAbsent` when the run is gone (nothing at its name, or no
-container), `RunUnreachable` (raised from the level's `TenantRefused`) when the container
-cannot be reached, and a plain `RunRefused` when the entry itself is refused (a link or a file
-at the name, a bad id) — so a caller handles one family and cannot forget the other (#1105 PR 2
-review). `resolve`'s refusal of another tenant's address stays `TenantRefused`: that is a
-caller's bug, not a state of the run. The expected states, and only these, answer normally: an
-absent container (empty answers), an episode with no roster yet (`arm_ids()` is `None`), and
-the known sidecar files beside natural run folders, a sidecar write's staged file included.
-"""
+"""The tenant-scoped runs repository (#1105 PR 2, decision C) and run lookup (#1105 D2)."""
 from __future__ import annotations
 
 import builtins
@@ -133,18 +95,7 @@ def _hand_out(tenant_id: TenantId, folder: Path, io: Any, hold: _Hold,
               run_ids: Sequence[RunId] | None = None) -> Iterator[Handout]:
     """The one single-hold routine (#1105 PR 2 review): the container `folder` held ONCE by
     `hold` (the walk, every level no-follow), and a `Run` handed out per id — every lookup of
-    runs (`open`, `list`, `all_runs`, an episode view's `open` and `arms`) goes through it.
-
-    * `run_ids` `None` — the natural listing (`_held.listing`): every run the held folder
-      holds, sorted by text. Every entry is judged (an entry that is not a UUID run folder or a
-      sidecar of one refuses it, `RunRefused`); a container that cannot be held raises
-      `TenantRefused`; an absent one is `absent` with no runs.
-    * `run_ids` given — each id judged at its own entry (`_at_entry`), so one arm's entry
-      never spoils another's; a sidecar-shaped id is that id's `RunRefused`. The container's
-      own faults are every id's: absent is `RunAbsent` (the run is gone with it), one that
-      cannot be held `RunUnreachable`.
-
-    The handle is closed when the block ends; the handed-out `Run`s outlive it."""
+    runs (`open`, `list`, `all_runs`, an episode view's `open` and `arms`) goes through it."""
     folder = Path(folder)
     asked = None if run_ids is None else [require_run_id(r) for r in run_ids]
     held: _io.Held | None = None
@@ -374,13 +325,7 @@ class RunsRepository:
         only, before any path is built); then `<T>/episodes/<episode_id>` is walked from the
         tenant's folder no-follow — a link at any level is `TenantRefused` naming it, a missing
         episode `FileNotFoundError` (G23) — or `held`, the handle a caller already holds on
-        this same episode, is adopted.
-
-        The container's state is recorded, not judged: present, absent, or unreadable.
-        `require_roster=True` is the sibling's door: a missing roster is `TenantRefused`,
-        malformed UUID keys or arm IDs are `RunRefused`, before the manifest is read.
-        World membership is checked by `arm_ids` against the persisted manifest UUIDs.
-        """
+        this same episode, is adopted."""
         episode_id = refuse_bad_episode_id(episode_id)
         if held is None:
             return EpisodeRuns(self._tenant, episode_id, self._walk_episode(episode_id),
@@ -748,13 +693,7 @@ def open_requested_run(data_root: Path, raw_tenant: str, raw_run_id: str, *,
     """The run a command line's `--tenant T [--episode E] <run_id>` names — T accepted under
     `data_root` (the root its entry point resolved), then the run opened by id through T's
     repository: `runs.open`, or with `episode_id` the episode view's `open` (an arm). Neither
-    follows a link at any level below the tenant's folder.
-
-    The one opener those command lines share (#1105 PR 2 review). A refusal — the tenant's
-    (`TenantRefused`), the run's (`RunRefused`), the episode's (`EpisodeRefused`, or the
-    `OSError` of an episode folder that is not there) — is RETURNED as one line of text naming
-    the request, never raised or logged: the command line prints it on stderr and exits with its
-    own status (defender/CLAUDE.md: a refusal is a value, not a diagnostic)."""
+    follows a link at any level below the tenant's folder."""
     from defender.tenancy._tenant import requested_tenant
 
     try:

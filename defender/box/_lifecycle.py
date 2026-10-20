@@ -723,14 +723,7 @@ _STOPPED_STATES = frozenset({"exited", "dead"})
 
 class BoxRuns:
     """The lanes' handle on the batch's box (#1195): the box is reachable only inside `.run()`,
-    one agent run's window, so no spawn can run in it outside one and none can forget to.
-
-    The box is stopped between runs. `.run()` refuses to start it unless it is proven stopped
-    (`docker start` on a running box succeeds and does nothing), starts it, proves it running,
-    yields it, and stops it on every exit; a stop that can't be proven wins over whatever the
-    run raised, since the host's next step must not run beside the box. Every call goes through
-    the docker the box was created with. The unsandboxed fallback's handle makes no docker
-    call."""
+    one agent run's window, so no spawn can run in it outside one and none can forget to."""
 
     def __init__(self, box: object) -> None:
         sandboxed = getattr(box, "sandboxed", None)

@@ -1,31 +1,4 @@
-"""Is there a docker daemon this process can actually use.
-
-The fact several suites need before they can decide whether to run at all, and which had
-been hand-copied four times across the e2e tree and the top-level tree. Neutral home rather
-than either harness's, because the callers straddle both: `e2e/_box665`, `e2e/_spec771`,
-`e2e/test_540_box_boundary` and `tests/test_store_boundary_705` all ask the same question.
-
-It also carried an ambient-engine-key primer, for the run cycle #922 deleted; the primer went
-with its one caller.
-
-What deliberately does NOT live here: the pytest MARKERS built on these predicates. Those
-differ genuinely between suites — one skips on no-daemon-or-DooD, one on no-daemon alone,
-one adds a shared-mount coverage condition — and each reason string names the specific
-capability its own tests need. A shared marker would flatten three different reasons into
-one wrong one.
-
-It also answers the two questions the live-box suites ask before starting a box: which
-runtimes the daemon registers (`docker_runtimes`), and, under DooD, where a bind source must
-live for the daemon to see it (`dood_anchor`). Both had been near-copied between
-`e2e/test_540_box_boundary` and `e2e/test_1188_box_fsize`.
-
-The three daemon probes are each asked once per process (`functools.cache`): several suites
-ask at import and one parametrized over runtimes asks per case, and every ask is a `docker`
-subprocess with a 30s timeout. A probe that raises is not cached, so it raises again for the
-next caller rather than being remembered as an answer.
-
-Underscore-prefixed so pytest does not collect it; it defines no tests.
-"""
+"""Is there a docker daemon this process can actually use."""
 from __future__ import annotations
 
 import functools
@@ -87,15 +60,7 @@ def docker_runtimes() -> frozenset[str]:
 
 def dood_anchor() -> Path | None:
     """Where a live box's bind sources must live under DooD, or None if the topology is
-    unobservable here.
-
-    A bind SOURCE has to lie on a path this container shares with the daemon, and pytest's
-    `tmp_path` is a private `/tmp` that does not. The repo tree does — the defender dir is
-    bound out of it — so the anchor is the gitignored `.defender-runs/` beside it. If even
-    the repo is uncovered, `start_box` would refuse (C46) and there is nothing to observe, so
-    the caller skips instead of asserting into the dark. Only meaningful under DooD
-    (`is_dood()`); the box package is imported here, not at module top, so the suites that
-    only ask `daemon_reachable` do not pay for it."""
+    unobservable here."""
     from defender import box as box_mod
 
     mounts = box_mod._shared_mounts(box_mod._docker)

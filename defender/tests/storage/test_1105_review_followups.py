@@ -101,11 +101,7 @@ def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
     """An open's `RunAbsent` over an absent runs folder (#1105 PR 2 review: an open answers an
     absent container as the run gone) is raised outside the hold's `except`, so it carries no
     `FileNotFoundError` as its context (a traceback that blamed the wrong error). Positive
-    control: once the folder and the run exist, the same open hands the run out.
-
-    #1187 declared changes 1 and 11 (R1b): the container half's vehicle, `runs.base_world_id()`,
-    is deleted with `base_world_id`, so the open is the absent folder's refusal left to pin; the
-    id is a UUID and the folder holds no `_tenant.json`. (Name kept.)"""
+    control: once the folder and the run exist, the same open hands the run out."""
     import uuid
 
     t = H.tenant(tmp_path / "data")

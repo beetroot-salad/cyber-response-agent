@@ -455,17 +455,7 @@ RECEIPT_UNREADABLE = "receipt unreadable"
 
 def render_ticket_line(run_dir: Path) -> str:
     """The page's one line about the case-ticket write (#1107 O6): the key, status and reason the
-    host's record step left in its receipt, or nothing when it left no receipt.
-
-    The receipt is a sidecar beside the run dir (`ticket_writer.receipt_path`), out of the box's
-    reach. It is still read defensively: only as a plain regular file (`read_guarded` — a link at
-    that name is refused, never followed), decoded by the repo's one bounded loader
-    (`load_json_artifact`, so the verdict never depends on stack depth), only if it is a JSON
-    object whose fields have the types the writer gives them, and every field that reaches the
-    page is escaped. Anything else renders `RECEIPT_UNREADABLE` in the receipt's place. The URL
-    is shown as text, never as a link: nothing on the page sends the reader to an address a file
-    named. The receipt's producer is the ticket writer's `_write_receipt`; this only reads what it
-    wrote."""
+    host's record step left in its receipt, or nothing when it left no receipt."""
     path = RunPaths(run_dir).ticket_write()  # = ticket_writer.receipt_path
     if not path.is_symlink() and not path.exists():
         return ""

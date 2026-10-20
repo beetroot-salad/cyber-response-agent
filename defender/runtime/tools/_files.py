@@ -48,12 +48,7 @@ def _read_operand(deps: AgentDeps, p: Path, path: str) -> str | None:
 def _write_operand(deps: AgentDeps, p: Path, path: str, text: str) -> None:
     """Replace the file at the operand `p` with `text` through the rooted core, off the same
     root its read takes, in one walk that makes the missing holding folders: nothing below the
-    root is followed and a non-plain entry at the name is refused and left in place.
-
-    A planted entry on the path (a link, a hard link, a FIFO or folder at the name, a file used
-    as a folder) is the model's to route around, so it is a `ModelRetry` naming no host path.
-    Any other fault (a full disk, an I/O error) is the host's and propagates, as it did before
-    the move: a retry cannot fix it."""
+    root is followed and a non-plain entry at the name is refused and left in place."""
     root, name = _rooted_operand(deps, p, path=path)
     try:
         with hold(root) as tree:

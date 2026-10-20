@@ -132,19 +132,7 @@ _SAMPLE_CAP = 4000
 
 def system_samples(source_run_dir: Path, served_systems: Sequence[str]) -> dict[str, dict]:
     """The samples document: real example answers from the source run's capture, keyed by
-    served system and grouped per verb (O16, N26).
-
-    @owns samples — the shipped `samples.yaml` shape: `{<system>: {verbs: {<verb>: [<answer
-    text>, ...]}}}`, or `{<system>: {unavailable: <reason>}}` when the system's captured answers
-    could not be read. Every served system has a section, one the capture never asked included
-    (an empty `verbs`); a captured system the tenant no longer serves has none. Which verbs
-    exist is whatever the capture called, never a verb-name heuristic.
-
-    Each example is the answer's canonical JSON, ASCII-escaped (no raw control or binary byte
-    survives), cut at `_SAMPLE_CAP` characters with a marker. The source run dir is a prior
-    box's rw bind, so every read is the screened surface (`lead_repository`), and a read fault
-    is an `unavailable` reason, never a crash.
-    """
+    served system and grouped per verb (O16, N26)."""
     from defender.learning.lead_repository import load_queries_report
 
     served = list(dict.fromkeys(served_systems))

@@ -219,19 +219,7 @@ def _rendered_errors(found: list[Diagnostic]) -> str | None:
 def committed_investigation_reason(text: str) -> str | None:
     """Is `investigation.md` as it stands well-formed enough to publish? The deny reason, or
     `None`. The close publishes without going through `permission.decide_write`, so it needs
-    its own check.
-
-    Narrower than `validate_investigation`:
-
-      * No byte bound: a close adds nothing, and the write gate's over-bound refusal offers
-        closing as the way out.
-      * The document is its own baseline: checks keyed on `current` ask what a write
-        introduces, and a close introduces nothing. With `None`, every unfenced header already
-        on disk would read as new, and since the document is append-only the close would be
-        refused for the rest of the run with no possible repair.
-
-    Fails open (logged) on an internal validator error: failing closed would make a validator
-    bug an unclosable run. Unreadable documents are handled by the close before this gate."""
+    its own check."""
     try:
         found = diagnose(text, text)
     except Exception as e:  # noqa: BLE001 — fail open; an unclosable run is worse

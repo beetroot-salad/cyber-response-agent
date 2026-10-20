@@ -1,22 +1,5 @@
 """Shared fakes for the #665 box-delivery spec — NOT a test module (leading underscore
-keeps pytest from collecting it). Imported by the `test_665_*` files.
-
-Every fake enters the target through a real injection seam (a `docker=` fn, a `box=`
-constructor/param, an injected `start_box`/`stop_box`/`agents`/`branch`) — never a
-monkeypatch (`tooling/lint/lint_monkeypatch.py` is a blocking ratcheted gate). No fake
-classifies or decides policy: faults are declarative, requests are recorded, and startup
-readbacks use fixture files. Demands assert on the captured geography/argv/box.
-
-Fault content is DECLARATIVE and cites the ledger claim (see
-`spec_graph_665-box-learning-roles.yaml` `claims:`) that observed the exact failure on a
-real daemon — never author-imagined (`DockerFault.cite`).
-
-RED-AGAINST-HEAD: the target (box delivery param, the two creation sites, box.py's
-`BoxRequest` geography, the mount model) does not exist yet. These helpers reference the
-future symbols only INSIDE call sites the tests invoke, so the modules still COLLECT at
-HEAD and the tests fail (import at HEAD is clean; the future entry points raise
-TypeError/AttributeError until built).
-"""
+keeps pytest from collecting it). Imported by the `test_665_*` files."""
 from __future__ import annotations
 
 import shutil
@@ -298,19 +281,7 @@ class RecordingDocker:
 
 def reaped_after_create(calls) -> bool:
     """Whether the container CREATE ASKED FOR was reaped AFTER create — the only form of this
-    assertion that says anything.
-
-    Both start paths open with a pre-create `docker rm -f <name>` (the stale-same-name sweep
-    in each of `_start_boxed`/`_start_boxed_request`) whenever that name holds a FINISHED
-    container — unconditionally so before #955 F-49 put a state check in front of it, and
-    still so for every case that models a stale one. On those paths — whether or not the fault
-    arm reaps at all — BOTH of the obvious spellings are already true: `any(c[:3] == [docker, rm, -f] for c in calls)`, and equally
-    `[docker, rm, -f, <the created name>] in calls`, since the pre-create reap names that same
-    container. The first passed against the create-fault arm that provably did NOT reap
-    (#884 F-29), which is how that leak survived a test suite that believed it pinned the reap;
-    naming the container does not rescue it. Only the POSITION discriminates, so position and
-    name are asserted together, here, once — and here rather than in either test module,
-    because BOTH #665's create-fault arms and #771's startup-fault arm need exactly it."""
+    assertion that says anything."""
     create = next(
         (i for i, c in enumerate(calls) if len(c) > 1 and c[1] == "run"), None
     )
@@ -510,20 +481,7 @@ def drive_worktree_batch(tmp_path, rec, *, do_work, has_work=None, branch=None,
 
 
 def _path_matches(value, needle: str) -> bool:
-    """Does `value` (a path) match `needle`?
-
-    An ABSOLUTE needle matches by path identity (it, or a tree under it). A RELATIVE needle
-    is a run of whole path COMPONENTS and must match component-wise — never a bare substring.
-    The substring spelling was non-discriminating in the false-POSITIVE direction: pytest names
-    `tmp_path` after the test function, so under `test_gather_raw_.../` every mount's path
-    contains the literal "gather_raw" and `mount_for(req, "gather_raw")` answered with an
-    unrelated mount instead of None. Same distinction the gate draws at
-    runtime/permission/files.py:222-228 (the `gather_raw` path component vs. the word).
-
-    A MULTI-component relative needle ("defender/skills") is matched as a contiguous run of
-    components. Testing the raw needle string against `p.parts` could never match one, so an
-    `is None` assertion over such a needle would pass vacuously.
-    """
+    """Does `value` (a path) match `needle`?"""
     p = Path(str(value))
     n = Path(needle)
     if n.is_absolute():

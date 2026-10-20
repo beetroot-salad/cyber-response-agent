@@ -111,16 +111,7 @@ def _create_unnamed(
     synced on an unnamed file, set to 0644 masked by the process umask (`_link_unnamed` says
     why it sets the mode itself), which is then given `path`'s name in one `linkat`. No
     reader ever sees the name absent-then-empty or partial, the file never has two names (its
-    link count goes 0 -> 1), and a crash before the link leaves nothing in the directory.
-
-    The link passes the directory as a descriptor, so CPython calls `linkat(AT_SYMLINK_FOLLOW)`
-    through `/proc/self/fd/N` — unprivileged. Without the descriptor it calls plain `link(2)`,
-    which does not follow that magic link and fails `EXDEV` on every host.
-
-    True when this lane wrote the file; False when this filesystem or host cannot make an
-    unnamed file (or has no `/proc`, or cannot report the umask), and the caller falls back. An
-    occupied name raises `FileExistsError` (the ordinary create race); anything else
-    propagates."""
+    link count goes 0 -> 1), and a crash before the link leaves nothing in the directory."""
     try:
         fd = open_unnamed(path.parent)
     except OSError as e:
@@ -175,15 +166,7 @@ def _link_unnamed(
     unnamed `fd` to `_FILE_MODE` masked by the process umask, write `text` to it in full, sync
     it, then name it `leaf` in `dir_fd`. False, with nothing named, when the umask cannot be
     read from `status` or the host has no `/proc` to link through; the caller then falls back.
-    The caller owns both descriptors.
-
-    The lane sets the mode itself because the kernel did not always mask it. Before Linux 6.0
-    (ac6800e279a2, "fs: Add missing umask strip in vfs_tmpfile", backported to the 4.19+ stable
-    lines), an `O_TMPFILE` open on a filesystem without POSIX ACLs skipped the umask, so the
-    file kept the 0644 it asked for even under umask 077. `0644 & ~umask` is what every other
-    lane lands, on every kernel (#1144). The umask is read by `_process_umask`, which does not
-    change it. Where it cannot be read, the lane stands down: the named fallback's plain open,
-    which every kernel masks, writes the file instead."""
+    The caller owns both descriptors."""
     mask = _process_umask(status)
     if mask is None:
         return False
@@ -309,24 +292,7 @@ def write_guarded(
     stage_name: Callable[[Path], Path] = stage_name,
     open_unnamed: Callable[[Path], int] = open_unnamed, **kw: object,
 ) -> None:
-    """The single write seam every shared-tree writer routes through.
-
-    Modes:
-      * `replace` — stage under an unpredictable name, then `os.replace` into place (replaces
-        a planted symlink without following it).
-      * `create` — for write-once records; an occupied name raises `FileExistsError`. The body
-        is written to an unnamed file and linked to the name in one step (`_create_unnamed`),
-        so a reader sees the name absent or the file complete, and the file never has two
-        names (a named stage hard-linked into place would, and guarded readers refuse that).
-        Where the filesystem cannot make an unnamed file it falls back to one
-        `O_CREAT|O_EXCL|O_NOFOLLOW` open: a reader racing the write can then see an empty
-        record (and refuses it as corrupt), and a crash can leave a partial one.
-      * `append` — the JSONL lane, `O_NOFOLLOW` at open.
-      * `update` — locked read-modify-write via `locked_for_rewrite`.
-
-    `text` may be `bytes`. `stage_name` and `open_unnamed` are the name and unnamed-open seams.
-    `**kw` accepts only `encoding` (ignored; utf-8 is pinned): swallowing other keywords would
-    let a misspelt `mode=` silently truncate a file meant for appending."""
+    """The single write seam every shared-tree writer routes through."""
     unexpected = set(kw) - {"encoding"}
     if unexpected:
         raise TypeError(

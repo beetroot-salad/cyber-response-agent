@@ -161,25 +161,7 @@ class FakeDocker:
         return source / inside.relative_to(target)
 
     def _all_succeed(self, call: _DockerCall) -> tuple[int, str, str]:
-        """The default daemon: everything works, INCLUDING reading a file back.
-
-        `(0, "", "")` for every verb is not an all-succeed daemon — it is a daemon whose
-        `cat` returns nothing, which is precisely the C46 silent-empty-bind shape the
-        startup sentinel exists to refuse. A fake that cannot model a working read cannot
-        stand in for a working box, and every test here that just needs A BOX would have
-        been asserting the failure path instead.
-
-        So an `exec` that ends in a path echoes that file's bytes, the way a real `cat`
-        would. Everything else still succeeds silently. `inspect` never reaches here — see
-        `existing` on the class, which exists because this same trap bit the state query too
-        (#955 F-49).
-
-        #771 M2's alias-ban probe (`docker exec -w <cwd> <name> python3 -c <script>`) is
-        answered as the healthy verdict rather than falling into the path-echo branch below:
-        its last argv token is a python script body, not a path, and `Path(...).is_file()` on
-        an arbitrarily long script raises `OSError` (`File name too long`) on a real
-        filesystem — an artifact of this fake's own path-echo trick, not a claim about the
-        probe's outcome."""
+        """The default daemon: everything works, INCLUDING reading a file back."""
         if call.verb == "exec" and "python3" in call.argv and "-c" in call.argv:
             return (0, "alias-probe: all banned shapes denied; ordinary create ok\n", "")
         if call.verb == "exec" and len(call.argv) > 1:
@@ -967,21 +949,7 @@ def test_a_box_authored_filename_cannot_forge_a_workspace_map_section(tmp_path):
 
 def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monkeypatch):
     """d_hostile_run_id_fails_loudly — a hostile run id fails LOUDLY rather than splitting the
-    container-name grammar or the colon-separated bind spec.
-
-    #1187 declared change 2: a minted run id carries no alert label. The ATTACKER-INFLUENCED
-    half — the alert's own filename stem, which the mint used to interpolate into the id — no
-    longer reaches the id at all. A stem carrying a colon, a comma and whitespace would,
-    interpolated unchecked, append a mount option or a whole second bind source to the argv,
-    or open a second flag. The alert file is created with that literal name on the real
-    filesystem and passed through the real mint: the run it yields is named by a canonical
-    UUID, nothing under the runs folder is named by the stem, and no argv the box start hands
-    the daemon — its `--name`, its bind specs — carries any of the stem; every bind spec keeps
-    its own fields and no more.
-
-    The guard stands (N11 keeps the container-name grammar): a run folder that does carry such
-    a name fails loudly, asserted as BOTH a raise and the absence of any emitted argv — a start
-    that refused only after handing the daemon a split spec would not be a refusal."""
+    container-name grammar or the colon-separated bind spec."""
     from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
     from defender.runtime.model_view import MODEL_RUN

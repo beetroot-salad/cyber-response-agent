@@ -161,16 +161,7 @@ def _tokenize_fence(body: str) -> tuple[list[Block], list[ParseWarning]]:
 
 @model(frozen=True)
 class FenceScan:
-    """What a document's ```invlang fences enclose, and what they leave out.
-
-    The one place that decides which bytes are invlang content. The complement is reported
-    alongside the content so no reader can drop it silently: content outside a fence never
-    reaches the tokenizer, so it cannot even raise a `ParseWarning`.
-
-    Reports, never refuses: `validate._check_surface` refuses only orphans a given write
-    introduces, since committed bytes cannot be fenced after the fact, and the frontier and
-    seed readers must never raise. A trailing unterminated fence counts as open to the end of
-    the document (a write cut off mid-block, which the next append closes)."""
+    """What a document's ```invlang fences enclose, and what they leave out."""
 
     #: The text inside each fence, in document order.
     bodies: tuple[str, ...]

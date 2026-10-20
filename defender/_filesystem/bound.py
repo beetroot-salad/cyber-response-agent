@@ -116,29 +116,7 @@ def _read_plain_fd(
     limit: int = READ_LIMIT, budget: int | None = None,
 ) -> str | bytes:
     """The one place a whole file's bytes are read (#1174): every whole-file read in `_io`
-    comes here, the guarded readers, the canonical wrappers and the locked JSON routines.
-
-    The whole content of `fd`, an open descriptor, or the refusal that stopped it:
-    `_TooLarge` when `size` (the `st_size` of the open's own `fstat`, not asked again: one
-    `fstat` per opened handle, #1049) is over `limit`, before any byte is read, or when the
-    reads run past it (it grew); `BlockingIOError` when a non-blocking descriptor has no data
-    yet; `_ReadVanished` for an `ENOENT` from a `read`. `limit` only lowers the bound: it is
-    clamped to `READ_LIMIT` (#1188 D1), and a non-int (`None` included) is a `TypeError`.
-
-    The first read asks for `size + 1`, so a file whose size `fstat` tells reads in one call
-    plus the empty one that says EOF; the step keeps reading until a read returns nothing,
-    whatever `fstat` said, so a file that grew, or a procfs file reporting `st_size` 0, reads
-    in full. Text is decoded as UTF-8 under `errors`, then given universal newlines exactly as
-    `Path.read_text` would (translated only when a `\\r` is there). The descriptor stays the
-    caller's to close.
-
-    With `budget`, the read is a PREFIX instead: no more than `budget` bytes are taken off the
-    file, by reads asking only for what is left of it, and `size` does not apply — so a caller
-    tells a file over its cap from one within it without reading it whole. `limit` still does:
-    a budget above it reads at most `limit` + 1 bytes and refuses a file over `limit` exactly
-    as a whole read does, so no cap takes more memory than the default read. A prefix is
-    byte-faithful: its text is decoded but newlines are NOT translated, because its caller
-    judges bytes (a size bound, a byte compare against what it would write)."""
+    comes here, the guarded readers, the canonical wrappers and the locked JSON routines."""
     limit = _read_cap(limit)
     if budget is not None:
         if budget <= limit:
@@ -671,13 +649,7 @@ class Bound:
 
     def entries(self) -> EntriesRead:
         """What is in the bound directory, each entry judged without following it. For an
-        `under` derivation the walk is the same no-follow walk `read` makes.
-
-        A directory removed while it is listed (after the walk reached it, before or during the
-        scan; the held root among them) is absent, never present and empty: the kernel lets a
-        dead directory be reopened and the C library ends its listing early, so it is judged
-        by its link count once the scan is done (`st_nlink == 0`: no name holds it). A
-        directory still linked when the scan ends was there for the whole listing."""
+        `under` derivation the walk is the same no-follow walk `read` makes."""
         absent, reason, listed = self._listing(_entry_kind, lambda e: e.strerror or str(e))
         return EntriesRead(name="/".join(self._prefix), entries=listed, absent=absent,
                            reason=reason)
@@ -686,15 +658,7 @@ class Bound:
         self, judge: Callable[[Any], Any], reason_of: Callable[[OSError], str],
     ) -> tuple[bool, str | None, dict[str, Any] | None]:
         """The one listing step `entries()` and `stat_entries` share: `(absent, reason, rows)`,
-        each row `judge(entry)` of one scanned entry, and a scan fault `reason_of(error)`.
-
-        A directory no name holds when its listing ends (`st_nlink == 0` on the reopened
-        descriptor, the held root among them) is absent, never present and empty: the kernel
-        lets a dead directory be reopened and the C library ends its listing early, so the
-        link count is asked once the scan is done, and also when the scan faulted, so an entry
-        vanishing with its dead folder is the folder's absence, not a refusal. A live
-        directory's scan fault stays the refusal (the dead check failing on a faulted scan
-        leaves it so), and the check's own fault after a clean scan is a refusal too."""
+        each row `judge(entry)` of one scanned entry, and a scan fault `reason_of(error)`."""
         if self._absent:
             return True, None, None
         if self._error is not None:

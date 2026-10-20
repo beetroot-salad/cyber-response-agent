@@ -1,16 +1,5 @@
 """#1256 r4 — gather's system index, as the tests that pinned the retired `descriptor_catalog` read
-it now.
-
-The run builds the index ONCE at run start (`descriptor_index(skills, roster, grant)`, a
-`SystemIndex`) and renders it at use against the run's CURRENT down map (`.render(down)`;
-`system_status.NONE_DOWN` when nothing is down) — "every surface reads the run state's current
-status when it is rendered" (r4). Each such test renders it with nothing down, which is what
-`descriptor_catalog` returned, and reads its system lines with `listing`, whatever the render
-frames them with.
-
-Late-bound (`importlib` per call), so a missing name is one failure per test, never a collection
-error. Where the two names live is spelled once here (`INDEX_MODULE`, `STATUS_MODULE`): one edit
-each if the implementation puts them elsewhere."""
+it now."""
 from __future__ import annotations
 
 import importlib

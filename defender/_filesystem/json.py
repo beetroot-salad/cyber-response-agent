@@ -114,22 +114,7 @@ def json_safe(value: Any, *, non_finite: Literal["text", "null"],
               max_depth: int | None = None, deeper: Literal["repr", "refuse"] = "repr",
               naive_is_utc: bool = False) -> Any:
     """`value` with only the parts the JSON encoder cannot carry replaced; text, numbers,
-    booleans and null are left as the encoder would write them.
-
-    A set becomes a list, ordered by each member's written JSON. A key is always text. A key
-    or value JSON has no type for becomes text: a date or time in ISO 8601, a timestamp that
-    knows its zone in UTC as `2026-01-01T10:00:00.000000Z` — one fixed width, so every
-    timestamp in one output reads alike. `naive_is_utc` is for a caller whose zone-less
-    timestamps are known to be UTC; any other zone-less one is written without a zone.
-
-    A non-finite float goes the way the caller says: `"text"` keeps it, spelled as the
-    Protocol Buffers JSON mapping and OpenTelemetry spell it (`"NaN"`, `"Infinity"`), for a
-    reader diagnosing; `"null"` makes it missing, for a reader computing over the field.
-    `max_depth` bounds the walk. By default a deeper value is cut to its repr, for a caller
-    handed arbitrary objects (a log). `deeper="refuse"` instead raises `JsonTooDeep` at the
-    first container that would sit deeper than `max_depth` levels, for a caller whose data must
-    be stored whole or not at all. Either way the walk never recurses past `max_depth`, so a
-    cyclic value ends too."""
+    booleans and null are left as the encoder would write them."""
     if non_finite not in ("text", "null"):
         raise ValueError(f"non_finite must be 'text' or 'null', not {non_finite!r}")
     if deeper not in ("repr", "refuse"):

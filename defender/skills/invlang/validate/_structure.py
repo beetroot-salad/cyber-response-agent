@@ -76,17 +76,7 @@ _LEAD_PRED_CELLS: tuple[tuple[str, str, str], ...] = (
 
 def _check_lead_prediction_structure(companion: CompanionBody) -> list[str]:
     """`:L l-NNN.lead_preds` rows: a lead's pre-committed route, checked for what makes it
-    followable.
-
-    A route fixes the interpretation before the data arrives, so it needs an `lp<n>` id, a
-    condition, a reading, and a destination. `advance_to` must name a declared lead (by name,
-    including the declaring lead itself, since names are not unique across loops) or a
-    sentinel; a not-yet-declared destination is refused, as PLAN writes leads before routes.
-
-    Not checked: uniqueness (enforced by the parser), and route compliance ("followed by
-    another lead"), which would refuse a committed row based on what follows it and has no
-    honest warning channel, since the rows involved must not be rewritten.
-    """
+    followable."""
     # Both sides through `_cell` so quoting or padding cannot make a correct destination miss.
     leads = _leads(companion)
     names = {

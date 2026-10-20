@@ -249,12 +249,7 @@ def sibling_scene(tmp_path: Path, *, roster: bool = True,
     branchable source run at its natural runs folder (`_triplet_947.runs_base`), and an episode
     at `<data root>/<SIBLING_TENANT>/episodes/<episode_id>` (#1187 Layout A) holding the
     launcher's manifest (`T.family_doc`, naming that source) and a primed `served/base.jsonl`,
-    built by the shared `_spec1187.make_episode`.
-
-    `roster`: `True` is the episode as RUNS leaves it — `runs/` made, then the arm roster
-    (`arms.json`) naming every manifest world at a fresh uuid4 (R2); `False` is a pre-RUNS
-    episode (pre-flight refused or aborted, or the launcher crashed first): no roster and no
-    `runs/` — the state a sibling must refuse before anything is spent (O4b)."""
+    built by the shared `_spec1187.make_episode`."""
     from defender import _yaml
     from defender.tests.storage.ids_1187 import _spec1187 as R
 

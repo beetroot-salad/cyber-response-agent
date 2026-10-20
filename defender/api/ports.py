@@ -1,38 +1,4 @@
-"""What the routes need from the rest of the platform, as interfaces.
-
-The store (#1082), the job model (#1081), the secret store and the login provider implement
-these; `fakes.py` holds rule-free stand-ins for the demo server. Every read takes the tenant
-first, and every write runs in a transaction opened for one tenant: a record of another tenant's
-answers `None` or raises `NotFound`, exactly as a missing one does, so the API never tells a
-caller that an id exists elsewhere.
-
-The data rules are the STORE's, enforced with constraints and transactions, not in the routes,
-and each has ONE home: `defender/docs/platform-design.md` — §4.1 for starting an investigation and its
-request-id replay, §2.5 for re-learns. The methods here name the rule they answer to and state
-only the shape of the answer. The API maps that answer onto HTTP. The rules' own tests belong
-with the store's implementation (#1082), run against these ports; the API's tests
-(`tests/api/test_api_stub.py`) script the answers and check the mapping.
-
-What the API relies on is written here too, as the store's promise, never assumed — and where a
-check is cheap, the API checks it and answers a broken promise as a 500 (`StoreBrokePromise`)
-rather than serving a wrong answer:
-
-- **Every record answered fits the wire models' types** (`models.py`): its ids match
-  `RECORD_ID_PATTERN`, its moments carry an offset, and a disposition is stored already
-  normalized. The store checks this when it writes, so a read never meets a row it cannot serve;
-  a row that breaks it is the store's bug, and fails as the store builds the record — a 500.
-- **A list answers rows strictly after `after`, in the list's order, and fewer than `limit`
-  only when no more follow.** The route asks for `limit + 1`, reads a short answer as the end of
-  the list, and refuses a page that does not advance (`pages.py`), so a store's off-by-one is a
-  500 rather than a client paging forever.
-- **A create answers a record for what the request named**: a replay of an investigation
-  request answers an investigation of the alert the body names; a re-learn's, a job of the
-  investigation it names. Checked by the route.
-- **A transaction is all or nothing.** The route writes the record and its audit event through
-  one transaction, so a write is audited exactly when it commits, and a retry that replays it
-  neither repeats nor loses the event (§2.10). WHAT is audited is the API's, pinned by its
-  tests; that it commits together is the store's.
-"""
+"""What the routes need from the rest of the platform, as interfaces."""
 
 from __future__ import annotations
 

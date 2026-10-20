@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""The declared-systems resolver — the authoritative "is this name a system?" answer.
-
-Two sources, unioned:
-
-* the adapter roster (`defender/integrations/*_adapter.py`), read from the working tree
-  through `runtime.verbs.read_roster` — the same read `ModuleVerbRegistry.systems()` uses;
-* the `execution.md` marker, read from the committed tree, at exactly depth 1 under
-  `defender/skills/`.
-
-Asymmetric: an uncommitted marker declares nothing, while an uncommitted adapter counts.
-Either source unresolvable raises `LeadAuthorError`; silently falling back to the other would
-retire every system only the absent one declared.
-
-`adapter_declared_systems` is the adapter half alone, used by the pitfalls lane.
-"""
+"""The declared-systems resolver — the authoritative "is this name a system?" answer."""
 from __future__ import annotations
 
 import logging
@@ -47,16 +33,7 @@ class AdaptersUnreadable(LeadAuthorError, RegistryError):
 
 def read_adapters(adapters_dir: Path) -> RosterRead:
     """The adapter half's one read — a cold read, never an import, so an adapter whose import
-    raises is still named.
-
-    Uses `runtime.verbs.read_roster`, the primitive every registry is built over, so this half
-    and the runtime roster agree by construction. Its `RegistryError` is re-raised as
-    `AdaptersUnreadable`: not an `OSError`, so the drain seam's `(SubprocessError, OSError)`
-    swallow can't turn an unreadable tree into a green tick. The message must keep `not a
-    directory this process can read` (`test_hardening_772` matches it).
-
-    Refused names are logged once each, in sorted order. Returns the whole roster so a caller
-    needing what each system declares doesn't read twice."""
+    raises is still named."""
     try:
         roster = read_roster(adapters_dir)
     except RegistryError as e:

@@ -239,18 +239,7 @@ class QueryCapture(AbstractCapability[Any]):
 
     @staticmethod
     def _coarse_schema_detail(e: BaseException) -> str:
-        """The detail a coarsened schema rejection records, built from host material only.
-
-        `str(e)`, or a scrub of it, would carry model text via `input_value`, an invented `loc`
-        key, and repr-escaping. So the sentence is built from: the error count; the field, which
-        is `loc[0]` only if it is in `DECLARED_ARGS` and the error is not `extra_forbidden`
-        (else `argument`; deeper `loc` elements are keys inside `params`); and pydantic's `msg`,
-        which quotes no input (a `json_invalid` message names a position, which is kept).
-        `include_input=False` alone is not enough, since it leaves `loc`.
-
-        A non-`ValidationError` (`ModelRetry`) keeps `str(e)`: no retry that reaches this hook
-        formats an argument, because `query` has no per-tool args validator. Adding one that
-        does would make this unsafe."""
+        """The detail a coarsened schema rejection records, built from host material only."""
         if not isinstance(e, ValidationError):
             return str(e)
         errs = e.errors(include_input=False, include_url=False)
@@ -637,20 +626,7 @@ class QueryCapture(AbstractCapability[Any]):
         self, deps, *, system: str, verb: str, query_id: str, params: dict,
         payload: Any, exit_code: int, detail: str, system_key: str, charged: bool = True,
     ) -> tuple[dict, str]:
-        """Append the row and charge the circuit breaker to its `system`.
-
-        The charge is the call's outcome, not the view's: it lands whether or not the row's
-        view line could be written. A refused write (`append_query_row` has already recorded
-        the row in the run's state) is charged first and then propagates; the run is not told
-        the call was viewed. `charged=False` writes the row only: a call whose `ConfigFault`
-        escaped the start check marks its system not configured, which the breaker never
-        counts (#1256 O-5b).
-
-        A coarsened row charges `""`, which `record_outcome` skips; the rejection guards bound
-        those instead. `system_key` has no default so every writer must state it explicitly.
-
-        No lock of its own: `append_query_row` takes the seq and records the row under the
-        run state's lock, and nothing here awaits between the two."""
+        """Append the row and charge the circuit breaker to its `system`."""
         lead_id = _dispatched_lead(deps)
         state = run_state_of(deps)
 

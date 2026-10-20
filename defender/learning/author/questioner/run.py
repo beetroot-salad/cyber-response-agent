@@ -102,17 +102,7 @@ def _gate_questioner(
     """Idempotency, the retired-name hold, and the one shape rule a lesson's selection key
     needs: a world finding carries no defender disposition to gate on, so every row not already
     attributed to a lesson in this corpus is authored — unless it carries a retired name or
-    names no systems.
-
-    A row queued before #1234 carries a retired name (`core/retired`: the family word its
-    appender forced to None, or the retired finding type). It is held naming it (A4, I10) —
-    never authored, never consumed; the drain keeps it queued and inert, and the tick's report
-    line names it with its reason, until an operator moves it.
-
-    A row queued before #1224 carries the old selection keys (a pattern and a holding system)
-    and no `systems`. A lesson authored from it could select a tenant only by guess, so it is
-    drained without authoring (consumed: the row will never change) and named in a warning
-    (N23). Returns `(held, consumed_pre, to_author)`."""
+    names no systems."""
     from defender.learning.core.retired import retired_row_names
 
     existing_ids = questioner_existing_finding_ids(cfg)

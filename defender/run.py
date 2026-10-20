@@ -574,15 +574,7 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
                    tenant: Callable[[], Any],
                    arm_ids: Callable[[], Mapping[str, Any] | None] = lambda: None) -> Any:
     """The world this process is, or `None` for an ordinary run — plus the sibling's
-    refusals, before anything is spent.
-
-    `--update-ticket` is refused outright rather than ignored: the two ticket calls are paired
-    around the curation marker. The manifest is read here, right after the roster gate, held to
-    the episode's id (R5); an undeclared world label and a manifest the loader refuses are each
-    refused before a run dir exists. `arm_ids` reads the episode's arm roster in full (`main`
-    hands the view's `arm_ids`), so a roster its reader refuses — an id off the rule, two worlds
-    on one arm id, a UUID set other than the manifest's worlds — is refused here too.
-    """
+    refusals, before anything is spent."""
     if ns.episode is None:
         return None
     if episode is None:

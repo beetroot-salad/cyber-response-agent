@@ -217,26 +217,7 @@ def _settled_predictions(companion: CompanionBody) -> dict[str, set[str]]:
 
 
 def _confirmed_and_standing(companion: CompanionBody) -> dict[str, str]:
-    """Per hypothesis STANDING at `++`, the FIRST lead whose resolution moved it there.
-
-    The single predicate partitioning rules #6 (standing at `++`: every prediction must be
-    cited) and #34 (everything else not refuted: cite or defer), so no hypothesis falls
-    between them.
-
-    Standing rather than "ever `++`", so appending `h-NNN ++ → +` withdraws a coverage claim
-    that a later-declared prediction broke; otherwise the document has no legal next write.
-
-    Counted, not ordered: each row entering `++` adds one and each leaving it (including to
-    `null`) subtracts one, edge-triggered so `++ → ++` is neither. On a well-chained history
-    that equals last-move-wins without needing an order. `_walkers.final_weights` is not used
-    because it orders by lead declaration, which would ignore some withdrawals. Both cells are
-    read closed on the weight vocabulary, so a typo does not count as leaving `++`.
-
-    Known gaps: a `++` entered and left within one block is counted out (rule #34 still covers
-    its predictions); a `before` cell that misstates the prior weight can cancel a real `++`
-    (fixable by a continuity rule on `before`, not by clamping); and a hypothesis declared at
-    `++` that no resolution moves is invisible here.
-    """
+    """Per hypothesis STANDING at `++`, the FIRST lead whose resolution moved it there."""
     confirmed: dict[str, str] = {}
     net: dict[str, int] = {}
     for lid, res in _walkers.iter_resolutions(companion):

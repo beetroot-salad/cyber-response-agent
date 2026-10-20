@@ -1,25 +1,4 @@
-"""Shared transport for the stub adapters (cmdb, identity, change-mgmt, threat-intel, ticket).
-
-All five stubs are auth-less FastAPI services on the compose network, reached by
-shelling out to `docker --context <the system's own context> exec <bastion> curl ...` — the same
-transport elastic_adapter.py uses for Kibana detection-rule installs. Host-state has
-a different shape (docker exec → command output, no HTTP) and keeps its own transport
-in host_state_adapter.py.
-
-Two rules the family obeys:
-
-  - **A transport RAISES, it never exits.** `SystemExit` is a `BaseException`, so it
-    unwinds straight out of `agent.iter()` and takes the run with it, writing no row
-    for the very failure the taxonomy exists to record. The fault classes in
-    `faults.py` carry the exit code AND the upstream diagnosis instead.
-  - **The record and the env are PARAMETERS** (a `VerbContext`), never module constants
-    read at import, and nothing is looked up in the env. Settings come from the run's
-    tenant record (#1107), built once when the run began; a child forked with no `env=`
-    inherits the driver's `os.environ`, provider keys included, so every child is handed
-    the run's scrubbed env explicitly.
-
-House conventions (auth posture, config keys, exit codes) are in `README.md` here.
-"""
+"""Shared transport for the stub adapters (cmdb, identity, change-mgmt, threat-intel, ticket)."""
 
 from __future__ import annotations
 
@@ -107,18 +86,7 @@ def record_access_context(tenant: RunTenant, system: str) -> str:
     exactly, and the
     context must be named and not blank. There is NO default for either: an absent or empty
     context would be handed to docker as `--context ''`, which docker defers to its own
-    `DOCKER_CONTEXT` or current context, re-opening the very steering this record removed (MF-3).
-
-    Called by every docker transport entry, so a system reached through docker that is down for
-    its access method faults naming that key before any docker child runs — and by the settings
-    check of every adapter reached through docker, so such a system is down from run start
-    (#1256). Not by `load_config`: the two keys are this transport's own requirement, and a
-    system its adapter reaches directly declares neither.
-
-    The two keys are named after the system FOLDER (`system_prefix`: `case-history` →
-    `CASE_HISTORY_TRANSPORT`), whatever prefix an adapter uses for its other keys. One derivation,
-    the same the resolver's warning and the connect validator use, so `load_config` and the
-    transport can never judge two different keys."""
+    `DOCKER_CONTEXT` or current context, re-opening the very steering this record removed (MF-3)."""
     entry = record_entry(tenant, system)
     prefix = system_prefix(system)
     method = entry.get(f"{prefix}_TRANSPORT")
@@ -155,13 +123,7 @@ def load_config(
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
     """`record_config` over the call's run record (`ctx.tenant`): the loader every verb calls,
-    under the signature the case-history ticket writer and the connect example keep.
-
-    In a run its `ConfigFault` is no call-time outcome: the system's settings check raises the
-    same fault at run start, so such a system is down from the start and no verb of it is called
-    (#1256 O-5). A fault that still reaches a verb means the check missed a key: the query tool
-    marks the system down as not configured, uncharged (O-5b). The case-history ticket writer
-    calls it outside any start check (case-history is no gather system)."""
+    under the signature the case-history ticket writer and the connect example keep."""
     return record_config(ctx.tenant, system, prefix, required)
 
 
@@ -169,28 +131,7 @@ def record_config(
     tenant: RunTenant, system: str, prefix: str,
     required: tuple[str, ...] = REQUIRED_CONFIG_KEYS_TEMPLATE,
 ) -> dict[str, str]:
-    """`system`'s settings from the run's record: its `config.env`, prefix stripped.
-
-    The record is the one resolved when the run began (`run_tenant.resolve_run_tenant`), not the
-    file as it is now and not the process environment: an edit mid-run and an exported variable
-    change nothing a run addresses (O1, O2). The prefix namespaces the file's keys
-    (CMDB_URL_BASE, IDENTITY_BASTION_HOST); caller-friendly stripped keys come back as URL_BASE /
-    BASTION_HOST / TIMEOUT_SEC. A system with no usable config, or a missing, blank or malformed
-    required key is a `ConfigFault`: the system is not configured for this run. Its adapter's
-    settings check raises the same fault at run start, so in a run such a system is down from the
-    start and no verb of it is called (#1256).
-
-    The access method is not checked here: it is the docker transport's requirement, checked by
-    each docker transport entry (`access_context`), so a system its adapter reaches directly
-    declares no `<PREFIX>_TRANSPORT` / `<PREFIX>_DOCKER_CONTEXT`.
-
-    `required` is the key set THIS system needs — the three-key transport template by default,
-    which is what the five docker-exec-curl stubs declare. A system needing more passes its own
-    tuple (`ticket_adapter.REQUIRED_CONFIG_KEYS` adds KEY_PATTERN, its key grammar). There is
-    deliberately no optional-with-default lane: every value read here is required, absent or
-    blank means down, and a caller wanting a fallback must say so in its own code rather than
-    have a missing environment fact resolve silently.
-    """
+    """`system`'s settings from the run's record: its `config.env`, prefix stripped."""
     entry = record_entry(tenant, system)
     cfg: dict[str, str] = {}
     for key in required:
@@ -237,22 +178,7 @@ def docker_exec_curl(  # noqa: PLR0913 — one curl request's per-call state
     auth: str | None = None,
     system: str,
 ) -> tuple[int, str, str]:
-    """Run curl inside `container` over `system`'s docker context.
-
-    Returns (returncode, stdout, stderr); stdout carries the response body
-    followed by ``\\n<http_code>`` (recover with `split_status`). Raises
-    `TransportFault` when the docker exec itself fails (CLI missing / timeout),
-    so a reachable-but-erroring service still returns its status + body.
-
-    `system` is required: it names the tenant system the call is for, so its OWN docker context
-    is used. A docker context is a per-system fact and is never guessed from the URL.
-
-    `auth` (e.g. ``"elastic:${ELASTIC_PASSWORD}"``) runs curl inside the
-    container's shell so the ``${VAR}`` secret expands *there*, against the
-    container's own env, never on this host; None = no ``-u`` (the auth-less
-    stubs). `insecure` adds ``-k`` for the stack's self-signed TLS. A tenant credential has no
-    lane here yet (#1163).
-    """
+    """Run curl inside `container` over `system`'s docker context."""
     flags = ["-sS"] + (["-k"] if insecure else [])
     args = ["-X", method, "--max-time", str(timeout_sec), "-H", "Accept: application/json"]
     for key, val in (headers or {}).items():

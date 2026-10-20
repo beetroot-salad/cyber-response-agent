@@ -1,17 +1,4 @@
-"""`RunId`: a run's id as a closed value type (#1105 D12; MF-02, MF-08).
-
-Built only by `RunId.parse(text)` (a pinned id, or one read back from storage) and
-`RunId.mint()` (the host's own id, a random uuid4). Both admit by `_run_id.run_id_fault`:
-canonical lowercase UUID text and nothing else (#1187 O2). Every refusal is `RunRefused`.
-
-Unforgeable: a direct `RunId(...)`, `RunId.__new__(RunId)` and a subclass each raise
-`RunRefused`, and every copy route (pickle, `copy.copy`, `copy.deepcopy`) rebuilds through
-`RunId.parse`. A strict value: not a `str`, not path-like, not JSON-serialisable, never equal
-to a `str` and unordered against one; `str(run_id)` is its text, an exact `str`.
-
-The sidecar clause is not part of `RunId`: the repository's `exists` takes a `RunId` and
-answers for a sidecar file at such a name (D2.1). Pydantic-free (NM-05).
-"""
+"""`RunId`: a run's id as a closed value type (#1105 D12; MF-02, MF-08)."""
 from __future__ import annotations
 
 from collections.abc import Callable

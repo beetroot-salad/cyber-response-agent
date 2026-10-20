@@ -1,37 +1,5 @@
 """Shared documents and readers for the #954 suite — F-46 (a repeated `:L findings` lead id)
-and F-47 (a repair suggestion rebuilt from parsed cells).
-
-Nothing here is a test. Every fixture below was EXECUTED against the real parser/validator at
-base `505b8d1c` while this file was written, and each one's recorded observation is stated in
-its comment — a fixture that quietly carried a second fault would let a weaker implementation
-pass every `_only`-shaped assertion in the suite.
-
-FOUR FIXTURE FACTS ARE LOAD-BEARING AND EASY TO GET WRONG:
-
-  * a minimal `:R attr_updates` fixture draws CO-RESIDENT ERROR diagnostics (`undeclared lead
-    'l-001'`, `refines 'v-001', which no :V or :E block declares`) alongside the warn-severity
-    illegal-key one. Every F-47 assertion selects the warn diagnostic explicitly — via
-    `key_warning` — or it rides a sibling's refusal and a null implementation passes.
-  * `locus.row_text` is the row the TOKENIZER kept: `_tokenize_fence` strips every line, so a
-    row written with trailing padding arrives without it (J7). O8's byte-identity is against
-    that text, and a fixture whose expectation carries trailing padding tests something the
-    mechanism cannot deliver.
-  * the projection does not write the cells the `:L findings` header names. `loop` is coerced
-    through `int()`, `window` lands at `query_details["time_window"]` and `fail_reason` at
-    `outcome["failure_reason"]` (J5) — `lead["window"]`, `lead["fail_reason"]` and
-    `lead["loop"] == "2"` are all assertions about keys nothing writes.
-  * the HEADER spelling and the BUCKET KEY differ for `trust_root` too: the column is
-    `trust_root` and the projected key is `trust_root_reached`. A header declaring the bucket
-    key projects the cell nowhere, silently, and an assertion over C1's own five-field list
-    then reads as "the value did not survive" when nothing ever wrote it.
-    `STRAND_FINDINGS_HEADER` carries the spelling that works.
-
-Symbols this spec MINTS are imported inside function bodies, never at module scope: the suite
-must still COLLECT against `505b8d1c`, where the fix does not exist. Red is the expected state
-of a spec; an uncollectable file is not.
-
-Underscore-prefixed so pytest does not collect it.
-"""
+and F-47 (a repair suggestion rebuilt from parsed cells)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -308,15 +276,7 @@ def main_deps(tmp_path: Path) -> tuple[Any, Path]:
 
 
 def seed_investigation(run_dir: Path, text: str) -> Path:
-    """Put `text` on disk as the run's investigation.md, bypassing the write verbs.
-
-    Deliberately not through `append_block`: the F-L scenarios need a document ALREADY
-    holding the repeat as their starting state, and after this change no GATED VERB can
-    produce one — which is the whole point of a uniform formation gate. Said that way on
-    purpose: the gate is uniform across the verbs the agent writes through, and this fixture
-    is a third writer of the same shape as the one production writer that also bypasses it
-    (`lead_zero._declare_l_finding`, filed as #964). The difference is that this one is a test
-    device and says so."""
+    """Put `text` on disk as the run's investigation.md, bypassing the write verbs."""
     from defender.tests.support.invlang.validation._invlang_warn_836 import seed_investigation as _seed
 
     return _seed(run_dir, text)

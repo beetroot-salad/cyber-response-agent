@@ -1,17 +1,4 @@
-"""The agent's tool surface: what a role may call, and the wiring that registers it.
-
-The tool bodies live in four modules, layered one way:
-
-  * `_deps`     — `AgentDeps`/`GatherDeps`, the objects every tool is handed, plus the
-                  read caps and result formatting they share.
-  * `_bash`     — the bash verb and the path plumbing that decides what a command may open.
-  * `_files`    — read, write and edit, each through the permission gate.
-  * `_document` — the invlang repair window, and the three verbs that move the
-                  investigation: append a block, repair a row, recall the frontier.
-
-This module keeps the registration functions — the only place that knows which verbs a
-role actually gets — and re-exports the tool bodies for existing importers.
-"""
+"""The agent's tool surface: what a role may call, and the wiring that registers it."""
 
 from __future__ import annotations
 

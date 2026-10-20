@@ -1,17 +1,5 @@
 """`run_sql_py`'s answer without a fresh interpreter per case: one warm child runs `sql.py`'s
-own `main()` once per request.
-
-Each real spawn of the tool costs ~0.3 s of interpreter start and the duckdb import, and the
-#1138 / idiom suites ask the tool a few hundred questions. The child imports `sql.py` once and
-then, per request, hands `main()` a fresh argv, a fresh stdin and fresh captured stdout/stderr,
-and reports the exit code (`SystemExit` from argparse included; an uncaught exception becomes a
-`Traceback` on stderr and exit 1, as CPython would). `main()` opens a new in-memory duckdb
-connection on every call, so no engine state crosses requests.
-
-What this does NOT exercise, and `run_sql_py` (a real spawn) still does: the `__main__` guard,
-the process environment (`env=`), the working directory and the C-locale stdio. A call that sets
-any of those falls through to the real spawn.
-"""
+own `main()` once per request."""
 from __future__ import annotations
 
 import atexit

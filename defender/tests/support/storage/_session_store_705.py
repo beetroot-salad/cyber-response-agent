@@ -1,47 +1,4 @@
-"""Shared machinery for the #705 session-store spec suite — NO test scripts.
-
-`runtime/session_store.py` and `runtime/selection.py` do not exist at the base this
-spec forks from (`4e4645aa`); this module is the single place that names them, so a
-missing target produces one failure *per test* rather than one collection error per
-file, and — under `spec-graph nullstub` — every test still reaches its own
-demand-specific assertion instead of dying in a shared fixture.
-
-Three things live here and nothing else:
-
-1. **The imports** (`store_mod()` / `selection_mod()`), called per test.
-2. **Message and fixture builders** — the nine-row path-exactness fixture, the
-   mid-pair session the truncation demands turn on, the part-kind zoo.
-3. **`FaultStore`** — the one declarative fault-injection fake, entering through the
-   store-factory seam R12 authorized on `run_investigation`. It **injects faults
-   only**; it classifies nothing and decides no policy. Its fault content is not an
-   authored exception taxonomy: every fault is realized by doing something real to
-   the real SQLite file (unlink it, overwrite it with non-database bytes, hold a
-   genuine `BEGIN EXCLUSIVE` on a second real connection) and letting the real
-   `sqlite3` primitive raise whatever it actually raises. That keeps the fault at
-   tier 1 of the author charge's hierarchy — the test re-probes reality on every
-   run — while still steering *when* the failure lands, which environment steering
-   cannot express (R12's stated reason for the seam).
-
-Ledger citations for the faults this module can produce:
-  * `absent` / `corrupt`  — real primitive, induced in-test (no claim needed: the
-    exception is not authored, it is observed live).
-  * `locked`              — real primitive; `life:po7` shape (3) observed a writer
-    holding an uncommitted insert against a concurrent connection. What a contention
-    that outlasts `busy_timeout` does is `auth:P7`, **unprobed** — so no test here
-    asserts a *specific* exception class for it; the demand asserts the run stops
-    through a handled exit, whatever SQLite raises.
-  * `disk-full`           — real primitive; `rp-c1` (EXECUTED) measured what the
-    installed sqlite3 raises when the database cannot grow:
-    `sqlite3.OperationalError("database or disk is full")`, `SQLITE_FULL`/13 — the
-    same error a genuinely full filesystem produces for the database file, with
-    already-committed rows still readable (exhaustion, not corruption). The same
-    probe measured that the ceiling is PER-CONNECTION (so it is applied to the
-    store's own handle) and that once the freelist is exhausted an append of a
-    render-boundary-sized payload fails on the very next call: 0 survivors in 8/8
-    trials at >=5 KB, against real per-append payloads of 33-60 KB in the scenario
-    `store_append_is_fail_closed` drives. `auth:P7` stays unprobed and `rp-c1` does
-    not stand in for it.
-"""
+"""Shared machinery for the #705 session-store spec suite — NO test scripts."""
 from __future__ import annotations
 
 import importlib
@@ -202,18 +159,7 @@ def mid_pair_session(store, *, agent_id: str = "main"):
 
 
 def nine_row_fixture(store, *, folded_body: str = "pre-fold chatter"):
-    """Invariant 7's fixture, built as rows in a real store.
-
-    Nine messages; `main` tips at row 7, `fork-a` tips at row 9, and the synthesized
-    frontier (row 5) is parented to the ROOT (row 1), so the folded turns 2,3,4 lie
-    on no path from any tip. Returns `{"row_ids": [...], "main": sid, "fork_a": sid}`
-    with `row_ids` 1-indexed by the fixture's own numbering.
-
-    `folded_body` is the text of row 4 — an OFF-PATH row after the fold. A caller that
-    needs to observe whether some read path can reach a folded row passes a marker
-    here, so the observation is over content this fixture demonstrably wrote rather
-    than over a string nobody put in the store.
-    """
+    """Invariant 7's fixture, built as rows in a real store."""
     main = store.new_session(agent_id="main")
     ids: dict[int, int] = {}
     ids[1] = store.append(main, [user_request("orientation")], agent_id="main")[0]

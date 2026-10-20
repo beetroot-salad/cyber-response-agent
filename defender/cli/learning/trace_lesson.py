@@ -21,7 +21,7 @@ lesson's ``created_at`` window do not count. The value is emitted from that clos
 never the row's bytes, so a forged ``kind`` cannot forge a column.
 
 Usage:
-  trace_lesson.py --tenant T --all             # <name>\\t<description>\\t<in_context_cases>\\t<main_read_cases>
+  trace_lesson.py --tenant T --all             # <name>\t<description>\t<in_context_cases>\t<main_read_cases>
   trace_lesson.py --tenant T <lesson_name>     # per-case: case_id  disposition  loaded_at  evidence
 
 Runs scanned: the natural runs of the tenant ``--tenant`` names (required, no default; #1105

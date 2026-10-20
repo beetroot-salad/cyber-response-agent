@@ -63,20 +63,7 @@ def _verify_corpus_scope(
     git: ClaimGit,
     batch_rule: Callable[[list[tuple[str, str]]], None] | None = None,
 ) -> list[str]:
-    """Per-path `rule` over every in-corpus change, then an optional whole-batch `batch_rule`.
-
-    `batch_rule` is for invariants only decidable across the batch (e.g. whether a deleted
-    draft's identity was taken over by another file in the same commit). It runs last, on
-    records `rule` already admitted.
-
-    Every record `rule` admits that is not a deletion must also be a plain, single-linked file,
-    judged without following it through the lane's held mount (`tree_for`): a link, a hard link
-    or a FIFO at a committed name is refused, never committed, and so is a name no held mount
-    places (#1178). Checked after `rule`, so a refusal `rule` already gives keeps its own
-    message.
-
-    The changes come from the claim's `git` session, which no ignore or attributes file the agent
-    left can hide a path from or block (#1175); its corpus test is the one the baseline used."""
+    """Per-path `rule` over every in-corpus change, then an optional whole-batch `batch_rule`."""
     records = git.changes()
     new_stray = sorted({p for _, p in records if not git.in_corpus(p)} - set(baseline_stray))
     if new_stray:

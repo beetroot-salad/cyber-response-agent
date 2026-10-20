@@ -1,24 +1,4 @@
-"""The model's workspace coordinates (#1255 and #1262).
-
-Every run, natural or arm, boxed or not, shows the model the same three trees at the same three
-paths, whatever the host's layout:
-
-    run folder         -> /runs/current
-    code checkout      -> /defender
-    tenant agent half  -> /agent
-
-The host keeps working on its own paths. A path the model hands back is mapped to the host at
-one inbound point (`ModelView.to_host`, called by the tool lanes before the permission gate or a
-file tool sees it), and a host path that goes into model-bound text is rendered through
-`ModelView.to_model` where that text is built. Evidence bytes (payloads, the alert) are never
-rewritten: nothing here scans text.
-
-Learning authors use `/workspace` and `/learning/current`; tenant drafts use `/defender` and
-`/draft`. Naming a tree neither grants access nor mounts it in a sandbox.
-
-@owns MODEL_RUN, MODEL_DEFENDER, MODEL_AGENT, MODEL_WORKSPACE, MODEL_LEARNING, MODEL_DRAFT — the
-workspace names. Callers declare host roots; only this module chooses standard model names.
-"""
+"""The model's workspace coordinates (#1255 and #1262)."""
 from __future__ import annotations
 
 import dataclasses

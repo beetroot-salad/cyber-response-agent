@@ -1,18 +1,7 @@
 """The judge's input (design M2): the computed context of one judged world — every run's
 header, contrast row and joined call list, the fact surfaces and aligned lead rows, the judged
 world's own views, the noise and the questioner inputs — derived on read (`JudgeContext`).
-`layout` turns it into the prompt's sections.
-
-The views over the judged world were ported from
-`experiments/judge-context-921/variants/contexts.py::render_proposed`, the measured arm. Reads
-only `episode_dir` and the checkout at the sibling's recorded commit — never a sibling's own run
-dir, which may be gone, and never the tenant's runs: the judge reads only the episode it is
-handed (#1105 J3 removed the same-alert sibling union and its spread).
-
-A reference run's facts appear only in that run's own labelled blocks (M3); the lessons view
-shows the judged world's own lessons alone. Every model-bound text the host did not author
-arrives inside an untrusted frame (M26, A10: `RunText`).
-"""
+`layout` turns it into the prompt's sections."""
 
 from __future__ import annotations
 
@@ -280,12 +269,7 @@ def render_family_text(record: dict[str, Any] | None,
     each world that could not be judged by its label, its reason word and the investigator's
     call it failed on; the calls pre-flight could not replay; and the calls whose live answer
     drifted from the capture. Host text, every string the record holds framed in place
-    (`RunText`, A10).
-
-    A failed world's `detail` is never shown: it is the oracle's last refusal, which can quote
-    the rows it forged for that world's facts, or the verifier's reasoning about them, and this
-    text reaches every judged world's prompt, where only a reference run's own labelled section
-    may hold its facts."""
+    (`RunText`, A10)."""
     if record is None:
         parts: list[Any] = ["No pre-flight outcome record is readable for this episode.\n"]
     else:
@@ -325,16 +309,7 @@ def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that
     """The judge's computed context for one planted world (design M2, derived on read, P-b):
     the computed header, contrast table, fact surfaces and aligned lead rows of the focus and
     every reference run, the reference runs' compressed sections, the focus world's own views,
-    the noise, and the questioner inputs (samples record, base story).
-
-    `bound` is the walked episode's view (`Episode.view()` off the runs repository's walk),
-    which every read here goes through; `episode_dir` names that folder for the path-taking
-    lead reader and in messages, and is never re-bound (#1187 S-iso). `git_show` is the
-    `(cwd, rev, path) -> str | None` seam for reading a lesson body at a recorded commit.
-    `lessons_commit` overrides the per-world provenance read. `facts`, `manifest`, `samples`,
-    `family_text` and `runs` are the caller's already-read per-pass inputs; each is read or
-    computed here only when not handed over.
-    """
+    the noise, and the questioner inputs (samples record, base story)."""
     episode_dir = Path(episode_dir)
     doc = manifest if manifest is not None else read_manifest(
         bound, expected_episode_id=episode_dir.name)
@@ -647,10 +622,7 @@ def aligned_lead_rows(runs: list[RunView], surfaces: list[dict[str, Any]]) -> li
     its own. A lead is a (run, lead id) pair: one id in two runs names two leads, which only a
     surface or a system/verb match puts in one row. Every row is heuristic (text-matched, not
     established). A row holding the judged world's (`runs[0]`) leads whose calls all come before
-    its first altered answer is the shared baseline (noise); with no altered answer, no row is.
-
-    Each row: `leads` (`{"run", "lead"}` entries, in run order), `matched_by`, the `fact_id` or
-    the `system`/`verb` it was matched on, `heuristic` (always `True`) and `shared_baseline`."""
+    its first altered answer is the shared baseline (noise); with no altered answer, no row is."""
     first_call, numbers, order = _lead_index(runs)
     taken: set[tuple[str, str]] = set()
     rows: list[dict[str, Any]] = []

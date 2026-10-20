@@ -1,32 +1,4 @@
-"""The frontier of a live investigation: what the document has not settled yet.
-
-Retrieval keyed on the alert signature asks "which rule fired"; a lesson about what an
-observation licenses is relevant once the field is in hand. This module answers "what is
-still open right now" so retrieval can key on that instead.
-
-invlang closes open things two ways, and the frontier is typed to match (SKILL.md):
-
-  * a `??` / `{a, b}` slot on a `:V` vertex (its class tuple, `ident`, or an `attrs.<name>`
-    value), closed by a `:R attr_updates` row. Node-anchored.
-  * an `ac<n>` authorization contract declared under `:H h-NNN.authz`, closed by a
-    `:R authz` row with an `authorized` verdict. Edge-anchored, via `edge_ref`.
-
-A `??` `:H parent_class` is not included: no row can close it. Impact predictions (`ip*`)
-are not included either: nothing models an unfulfilled impact contract.
-
-Derived, never stored: every entry point recomputes from the document, so it cannot go stale.
-
-Both axes call the disposition gate's own walks (`outstanding_authz_contracts`,
-`iter_vertex_cells`), with two known divergences:
-
-  1. `ident` is included here and excluded by the gate (`include_ident`): an unresolved
-     identifier is among the most retrieval-worthy open slots.
-  2. A `:R attr_updates` row may target an edge; the gate treats it as open, but this module
-     drops it, since an `OpenSlot` needs a vertex `type`. So an authz question opened on an
-     edge attribute recalls nothing. A limitation, not a design choice.
-
-This module must never be wired into that gate.
-"""
+"""The frontier of a live investigation: what the document has not settled yet."""
 from __future__ import annotations
 
 import sys

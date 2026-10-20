@@ -1,19 +1,4 @@
-"""What the estate served, one row per call.
-
-Every response the defender sees in a branched run passes the estate seam and lands here with
-the decision that produced it. Under staging, a query reaching a real adapter is expected; the
-hazard is a response reaching the defender without passing the applier — silent scenario
-deletion, a run that looks fine and measures nothing.
-
-`passthrough` is therefore a decision, not an absence. A served response with no row is the
-failure this table exists to make visible.
-
-There is no `query_id` column: the seam sits below `QueryCapture`, where a model-supplied
-`query_id` is resolved. The run's `executed_queries.jsonl` records it against the same call:
-a row here carries the call's host-written `call_id` (A12, #1234), and the run's host-only call
-join (#1255 G4/G6) pairs that id with the call's table row by its `(lead_id, seq)`; their
-`(system, verb, params)` must agree on it.
-"""
+"""What the estate served, one row per call."""
 
 from __future__ import annotations
 
@@ -138,22 +123,7 @@ def correlation_key_of(row: Any) -> str | None:
 
 @model(frozen=True)
 class ServedCall:
-    """One served call, under both the question asked and the question run.
-
-    They differed only under staging (retired by #1224), which rewrote a call to its world's
-    corpus. Under the oracle a call runs as asked; rows written before still carry both forms,
-    and their readers read them as written.
-
-    `key` is the form that ran, and is what the family tier memoizes on. Keying the memo on the
-    asked form would have replayed another world's staged answer to a sibling.
-
-    `correlation_key` is the form asked, and is what cross-world comparison pairs on. On a
-    staged system the ran forms never matched across worlds.
-
-    `payload_text` is the answer as served. A staging-era row holds it with the world's staged
-    identity taken back out, because responses echo it (`query`/`alerts` return the index,
-    `esql` the query text). `params` holds what actually ran.
-    """
+    """One served call, under both the question asked and the question run."""
 
     system: str
     verb: str
@@ -239,19 +209,7 @@ def served_line(row: dict) -> str:
 
 @model
 class Ledger:
-    """The append-only record of one world's served calls, and the family's shared base.
-
-    Two files: `base_path` is the family's capture, primed before any sibling forks and
-    read-only for the run; `path` is this world's own rows, with exactly one writer. Rows off a
-    world's staged set are therefore byte-identical across siblings.
-
-    One writer per file matters because siblings run in parallel and an append writes a
-    large row in several `write()` calls; two processes appending would tear lines that
-    `read_jsonl_rows` silently drops. It also removes any check-then-act race for captured keys.
-
-    Not closed: a key the source run never asked has no captured row, so each world reads it
-    live and records its own `base` row. Counting those rows sizes that residual.
-    """
+    """The append-only record of one world's served calls, and the family's shared base."""
 
     path: Path
     base_path: Path

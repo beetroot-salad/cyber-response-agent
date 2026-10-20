@@ -80,23 +80,7 @@ def _normalize_newlines(text: str) -> str:
 
 
 def _check_surface(proposed_text: str, current_text: str | None) -> list[str]:
-    """Refuse invlang block headers this write puts outside a ```invlang fence.
-
-    A ```yaml fence is the loud case. No fence at all is the quiet one: a model that closes a
-    fence, writes prose, then continues with `## PLAN` and `:H` blocks produces a file that
-    reads correctly and parses to nothing, so every hypothesis-side rule passes vacuously and
-    `_check_append_only` sees no drop in fence pairs. `parser.scan_fences` does the accounting;
-    this is the policy over it.
-
-    Scoped to headers this write introduces: the baseline's orphans are subtracted as a
-    multiset, not a count, so dropping one committed orphan while adding two still names the
-    right lines. `investigation.md` is append-only, so committed unfenced rows can never be
-    fenced and a whole-document reading would refuse every later write.
-
-    A baseline ending inside an unterminated ```invlang fence is exempt: the fence regex pairs
-    it with the next append's opening delimiter, so that append's own block reads as orphaned
-    and every retry would be refused identically.
-    """
+    """Refuse invlang block headers this write puts outside a ```invlang fence."""
     errors: list[str] = []
     if _YAML_FENCE_RE.search(proposed_text):
         # Reported alongside the unfenced-header half, not instead of it, so orphans are not

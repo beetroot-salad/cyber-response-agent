@@ -80,26 +80,7 @@ def preflight_episode(  # noqa: PLR0913 — every refusal knowable before a mode
     oracle: Any = None, verifier: Any = None,
 ) -> dict:
     """Everything that can refuse before the questioner is paid for, in one block, so an
-    operator with several problems hears about them all before spending anything.
-
-    Returns the source's stamp, so later steps use exactly the value judged here: it is the
-    anchor `verify_family` compares siblings against; re-reading it from the prior box's rw
-    bind could see a changed file.
-
-    `live_tree` returns the checkout's stamp, called at most once; injectable so tests don't
-    compare against whatever HEAD the suite runs under. It is only an early exit (siblings stamp
-    themselves and `verify_family` compares those) — a launcher on the wrong commit would
-    otherwise spend N investigations on a family verify will refuse.
-
-    The role preflight is asked with `branching=True` (M25=A): a branch launch whose oracle or
-    oracle-check model cannot be used refuses here, as an operator's configuration error, before
-    pre-flight spends anything or charges any world.
-
-    The oracle's own configuration is judged here too, by the rules pre-flight applies when it
-    configures each world: its knobs (`config.oracle_settings` — rate, budget, retry cap, turn
-    deadline) and both roles' pricing rows (`oracle.price_row`), for `oracle` / `verifier` as
-    `main` was handed them (`None`: the knobs' models).
-    """
+    operator with several problems hears about them all before spending anything."""
     source_run_dir = source.run_dir
     _check_oracle_side(oracle=oracle, verifier=verifier)
     _check_branch_point(source, branch_message_id)
@@ -168,18 +149,7 @@ MAX_BRANCH_MESSAGE_ID = 100 * 60
 
 
 def _check_branch_point(source: Run, branch_message_id: int) -> None:
-    """Refuse a branch point the source run could not have produced.
-
-    Where a session store exists, `branch.validate` is asked here — before the questioner is
-    paid — rather than only inside each sibling, where every child would refuse identically
-    after the whole episode was spent. Some of its preconditions also govern what the
-    questioner is shown. `as_of` comes from `branch_point_time`, which `validate`
-    cross-checks.
-
-    A source with no fork snapshot for the branch point — one recorded before #1255, or one with
-    no session store at all (imported, replayed, pruned) — is refused here (N4, rev 5 C2):
-    before the questioner, the role preflight or any episode spend.
-    """
+    """Refuse a branch point the source run could not have produced."""
     source_run_dir = source.run_dir
     if branch_message_id < 0:
         raise LauncherRefused(
@@ -306,32 +276,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     verifier: Any = None, **knobs: Any,
 ) -> dict[str, Any]:
     """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
-    verifier, and write the episode's write-once outcome record (`outcome.write_outcome`).
-
-    Pre-flight only CALIBRATES (Amendment 2 change 1). For each world that carries a fact, every
-    replayable original call gets one oracle turn and verifier pass against its base answer
-    (`registry.calibrate_one`): the forged rows and recorded facts it verifies are frozen as the
-    world's store, so a sibling is later served the same telemetry (O2); no served answer is
-    cached and no world-ledger row written (S1). A world whose call cannot be served — retries
-    spent, budget spent, or a change to a call made before the branch point (M01=A) — failed
-    calibration; once two have failed the family is unusable and no further oracle turn is
-    spent on a world still replaying (N18). The control world (`facts: []`) spends nothing.
-
-    Every tenant read goes through `roster` under the live gather grant's decision (a call the
-    grant no longer admits is never sent, and is listed `not_replayable`), at the family's
-    branch-point clock, and under ONE limiter holding the episode rate for the whole pass
-    (S18). Each call is read live once, to compare against the recording (`drift`: `drifted`, or
-    `unknown` when the read fails; drift never changes the outcome, N16). A call the capture
-    recorded as an error is read live too: still failing, it is the world's own telemetry and
-    no oracle's to serve; answering now, it is calibrated against that answer and recorded as
-    drift (M22=A).
-
-    `refused` (no world carries a fact, the source made no call, or none is replayable) spends
-    no oracle turn. `knobs` are the oracle's (`retry_cap=`, `budget=`, `turn_deadline=`,
-    `rate=` — the episode rate R —, each defaulting to its environment knob) and its seams
-    (`box=`, `restart_after=`); this is where they are settled (`registry.oracle_serving`).
-    Returns the record as written.
-    """
+    verifier, and write the episode's write-once outcome record (`outcome.write_outcome`)."""
     if not isinstance(episode, Episode):
         raise TypeError("preflight_replay requires the walked episode handle")
     from defender.learning.branch.estate.limiter import RateLimiter
@@ -665,22 +610,7 @@ def _unknown_faults(who: str, stamp: dict) -> list[_Fault]:
 def _family_faults(
     source: dict, members: dict[str, dict | None], *, source_who: str,
 ) -> list[_Fault]:
-    """Every reason `members` are not provably one family continuing `source`.
-
-    One judgement for both tiers: at preflight the members are the live tree alone, at verify
-    the siblings' stamps. Verify re-judges the source rather than trusting that preflight ran.
-
-    The source is checked first; a source with no commit ends anchoring there, so the fault
-    names the source rather than the members. Each member must match the source on every
-    `anchored` field the source pins (`STAMP_FIELD_CLASSES`), and any non-clean tree on either
-    side is a fault — an unknown is not clean. Members must also agree with each other on every
-    `constant` field, and on each anchored field the source does not pin.
-
-    Waivable: dirt, and knowledge nothing proves (unversioned, unavailable, or not recorded —
-    a source stamped before #1204 must stay forkable). A wrong or missing commit, a different
-    scope or knowledge commit, or siblings disagreeing is a confound, and a silent member waived
-    would drop out of the agreement and let another arm's value stand as the family's.
-    """
+    """Every reason `members` are not provably one family continuing `source`."""
     faults: list[_Fault] = []
     anchored = _stamp_speaks(source)
     if not anchored:

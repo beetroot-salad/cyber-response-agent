@@ -1,26 +1,4 @@
-"""The verb-disposition table: the one authored answer to "who may call what".
-
-Which systems exist, which verbs each declares and what params each takes are derived by
-walking the adapters. Which of those any role may call is authored here by a human. The second
-must never be derived from the first: an adapter file appearing on disk would then grant itself
-read access to the estate. `grant_for` reads only the table, never the filesystem.
-
-What is derived instead is the obligation to decide: `census_gaps` reports residue in both
-directions, so a new system can be ungranted only on the record, with a reason.
-
-The table lives in each tenant's `settings/` folder as data, so the shipped runtime carries no
-vendor names and a product with no table grants nothing. That is safe only because
-`load_dispositions` refuses an absent or empty table.
-
-A row's `roles:` names grant holders: gather, or `lead-zero-correlation`, the turn-zero
-correlation lead. The lead runs under gather's key (`agent_role.CORRELATION_GRANT_HOLDER`) but
-holds its own narrower projection; `_refuse_incoherent_narrowing` keeps it a narrowing. Which
-query verb the lead uses is the tenant's `lead-zero.yaml` template's to say, and
-`lead_zero._agreement` refuses at run start a table granting the lead any other.
-
-There is no `verb_class` field: every shipped verb is read-class and the projection hardcodes
-`r`, so a write grant costs a schema change and its own review rather than a one-word data edit.
-"""
+"""The verb-disposition table: the one authored answer to "who may call what"."""
 from __future__ import annotations
 
 import functools
@@ -248,20 +226,7 @@ def _validated_rows(path: Path, text: str) -> tuple[Disposition, ...]:
 
 
 def _refuse_incoherent_narrowing(path: Path, rows: tuple[Disposition, ...]) -> None:
-    """Refuse a table under which the correlation lead is not a narrowing of gather.
-
-    * The lead never holds a pair gather does not: it runs under gather's policy, tools and
-      trace. Withholding a pair from the lead alone is fine and only degrades the run.
-    * The lead's rows reach at most one system, since it is dispatched against exactly one.
-    * The lead holds at most one query verb. It is dispatched by the harness with no model
-      choosing to spend it, and index confinement depends on which verb it holds (search verbs
-      are confined, native-query verbs are not). Without this rule, adding the lead to a wider
-      verb gather already holds would pass the other two rules and hand it an unconfined read.
-      Which verb is checked at run start by `lead_zero._agreement`, where the template is known.
-
-    `health-check` is excluded from the last two rules: it is never a dispatch target, so
-    counting it would refuse an unambiguous table.
-    """
+    """Refuse a table under which the correlation lead is not a narrowing of gather."""
     gather = AgentRole.GATHER.value
     for d in rows:
         if CORRELATION_GRANT_HOLDER in d.roles and gather not in d.roles:

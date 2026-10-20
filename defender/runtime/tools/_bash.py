@@ -56,20 +56,7 @@ def _record_shim_failure(
     deps: AgentDeps, decision: permission.BashDecision, command: str, result: Any,
 ) -> None:
     """Record a failed reducer shim (`cat <payload> | defender-sql …`) as a queries-table row
-    for the pitfalls curator.
-
-    Only when all hold:
-
-    * gather only (`GatherDeps.lead_id`): the row is per-lead;
-    * a non-zero exit — failures, not every call;
-    * the reducer is the terminal stage: the box reports only the last stage's exit code, so
-      otherwise the code cannot be attributed to the reducer.
-
-    The run's state is required: gather deps carrying none are a wiring fault, and that
-    `TypeError` (`run_state_of`) propagates. Only the row's append is best-effort — a refused
-    table write (the row is already in the state, `append_query_row`) or any other failure
-    recording it never fails the command it observes.
-    """
+    for the pitfalls curator."""
     if not isinstance(deps, GatherDeps) or deps.lead_id is None or result.rc == 0:
         return
     lead_id: str = deps.lead_id
@@ -183,15 +170,7 @@ def _resolve_operand(deps: AgentDeps, path: str) -> Path:
 def _rooted_operand(deps: AgentDeps, p: Path, *, path: str) -> tuple[Path, str]:
     """The operand `p` (as `_resolve_operand` spells it) as the trust root it sits in and its
     POSIX name below that root, for both a read and a write of it. The rooted core opens the
-    root following its spelling and follows nothing below it.
-
-    The trust roots are the host-chosen folders: the run dir, the defender dir and the agent's
-    declared extra roots (`policy.read_roots`), each matched as spelled and resolved; the
-    innermost wins (the run dir may sit inside the defender dir). A read confine is the gate's
-    rule, never a trust root: rooting at a confined corpus folder would follow a link AT it.
-    `p` itself is never resolved, which would collapse the links the core exists to refuse. A
-    `..` component, a path naming a root itself, or no root at all (a path that reaches one
-    only through a symlink) is refused as `ModelRetry`: the operand is model-supplied."""
+    root following its spelling and follows nothing below it."""
     if p.anchor == "//":  # POSIX lets `//x` mean `/x`; pathlib keeps it as its own anchor
         p = Path("/", *p.parts[1:])
     if ".." in p.parts:
