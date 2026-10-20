@@ -324,8 +324,9 @@ def _done_run(tenant_id: str) -> Path:
 
     from defender.learning.leads import lead_author
 
-    runs = P.data_root() / tenant_id / "runs"
-    run = H.make_run(runs, str(uuid.uuid4()))
+    tenant = H.tenant(P.data_root(), tenant_id)
+    tenant.learning.mkdir(exist_ok=True)
+    run = H.make_run(tenant.runs, str(uuid.uuid4()))
     lead_author.write_done_sentinel(run, "0" * 40)
     return run
 
