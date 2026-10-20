@@ -1,8 +1,9 @@
 # #1205 — bounded box responses
 
-Current design: R2, implemented over base `5fb8d8fe18e3ee6560ba22d4a8d71c305aeca66d`.
-R1 is superseded for Oracle cancellation ownership; its byte budget, refusal behavior,
-and other commitments remain in force. R1's grounding below retains its recorded base.
+Current design: R3, implemented over base `4da7d1c8`.
+R2 is superseded for outcome emission during caller cancellation; R2 worker ownership
+and R1 byte budget, refusal behavior, and other commitments remain in force. Earlier
+grounding below retains its recorded revision.
 
 ## Principles
 
@@ -83,6 +84,31 @@ The owner approved this lifecycle change in discussion. Independent review check
 ownership model and its implementation; its error-ordering finding was resolved by preserving
 combined failures. Recheck Oracle deadline, startup, shutdown, and retry contracts downstream.
 
+### R3 — One settlement boundary owns every exit
+
+R2 drained workers in a `finally` block but emitted their failures after leaving the
+scope. Caller cancellation could resume before emission, discarding fatal overflow
+or a failed shutdown proof. The caller-cancellation matrix reproduced this at R2:
+all three cases with worker or shutdown failures lost those failures.
+
+A dedicated attempt supervisor now owns the complete work, task-group, scope-exit,
+and worker-drain lifecycle. It captures exceptional exits including base exceptions
+and returns settled outcome facts. The caller requests cancellation through an event;
+shielded waiting prevents repeated caller cancellation from interrupting settlement.
+The first caller cancellation is retained once, regardless of repeated requests.
+
+Only the outer boundary emits the result after settlement. Cancellation alone remains
+`CancelledError`; cancellation together with worker, shutdown, or lifecycle failures
+becomes a `BaseExceptionGroup` retaining all causes. Deadline cancellation still yields
+a timeout, and a late worker success cannot become a successful attempt. This uses
+one cancellation-independent settlement task rather than overflow-specific terminal
+state. External-read abandonment and existing resource-removal ownership are unchanged.
+
+The owner approved this change in discussion. Independent review confirmed failure
+preservation and found repeated cancellation was initially counted as multiple failures;
+that was corrected by retaining the first cancellation. Regression coverage includes
+successful and failing repeated cancellation and enclosing AnyIO cancellation scopes.
+
 ## Review and verification
 
 Independent design review accepted R1 after correcting fatal propagation through broad
@@ -146,5 +172,19 @@ claims:
     probe: Locked pytest run of tests/learning/oracle/test_1205_owned_box_work.py, test_1224_oracle_loop_regressions.py, and live_contracts/test_1224_oracle_context_and_box.py under R2.
     probe_kind: executed
     observed: 97 passed, including the previously failing regression and ordinary-timeout controls.
+    verdict: holds
+  - id: C8
+    kind: behavior
+    claim: R2 caller cancellation discards worker and shutdown failures after draining.
+    probe: Caller-cancellation matrix at base 4da7d1c8, through the pytest lock.
+    probe_kind: executed
+    observed: Three failure-bearing cases failed; the clean cancellation control passed.
+    verdict: holds
+  - id: C9
+    kind: behavior
+    claim: R3 preserves all settlement failures across caller cancellation and repeated cancellation.
+    probe: Locked pytest run of the three Oracle files listed in C7 under R3.
+    probe_kind: executed
+    observed: 108 passed, including successful and failing caller cancellation, repeated cancellation, enclosing AnyIO scopes, and grouped lifecycle failures. Additional late-result regression passed separately. Ruff, Oracle mypy, and all 34 custom lints passed.
     verdict: holds
 ```

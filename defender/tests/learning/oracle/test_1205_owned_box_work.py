@@ -15,7 +15,7 @@ from defender.runtime.exception_groups import carried
 
 
 class _Worker:
-    def __init__(self, *, fault=None, stop_fails=False, lost=False):
+    def __init__(self, *, fault=None, stop_fails=False, lost=False, release=None):
         self.started = threading.Event()
         self.shutdown = threading.Event()
         self.finished = threading.Event()
@@ -23,6 +23,7 @@ class _Worker:
         self.fault = fault
         self.stop_fails = stop_fails
         self.lost = lost
+        self.release = release
         self.owner = _AttemptBox(self.factory)
 
     def docker(self, argv):
@@ -40,6 +41,8 @@ class _Worker:
         self.started.set()
         try:
             assert self.shutdown.wait(5), "deadline never stopped the box"
+            if self.release is not None:
+                assert self.release.wait(5), "worker settlement was never released"
             if self.fault is not None:
                 raise self.fault
             if self.lost:
@@ -252,3 +255,150 @@ def test_external_reads_cannot_starve_owned_execution_or_its_shutdown():
         release_read.set()
         worker.shutdown.set()
         worker.owner.stop()
+
+
+@pytest.mark.parametrize("worker_fails", [False, True])
+@pytest.mark.parametrize("stop_fails", [False, True])
+def test_caller_cancellation_preserves_all_settlement_failures(worker_fails, stop_fails):
+    fault = box.BoxOutputLimitExceeded() if worker_fails else None
+    worker = _Worker(fault=fault, stop_fails=stop_fails)
+    run = _Run(door=None, deadline=10, box=worker.owner)
+
+    async def work():
+        return await run.box_work(worker.work)
+
+    async def cancel():
+        attempt = asyncio.create_task(_within_deadline(run, work))
+        assert await anyio.to_thread.run_sync(worker.started.wait, 5)
+        attempt.cancel("caller ended the attempt")
+        expected = BaseExceptionGroup if worker_fails or stop_fails else asyncio.CancelledError
+        with pytest.raises(expected) as caught:
+            await attempt
+        assert carried(caught.value, asyncio.CancelledError) is not None
+        if worker_fails:
+            assert carried(caught.value, box.BoxOutputLimitExceeded) is fault
+        if stop_fails:
+            leaves = _leaves(caught.value)
+            assert any(isinstance(leaf, box.BoxFault) and "could not stop" in str(leaf)
+                       for leaf in leaves)
+        assert worker.finished.is_set()
+        assert not run.has_box_work
+        assert not worker.removed()
+
+    try:
+        anyio.run(cancel)
+    finally:
+        worker.shutdown.set()
+        worker.owner.stop()
+
+
+def _leaves(exc):
+    if isinstance(exc, BaseExceptionGroup):
+        return [leaf for child in exc.exceptions for leaf in _leaves(child)]
+    return [exc]
+
+
+@pytest.mark.parametrize("worker_fails", [False, True])
+@pytest.mark.parametrize("stop_fails", [False, True])
+def test_repeated_caller_cancellation_cannot_interrupt_settlement(worker_fails, stop_fails):
+    release = threading.Event()
+    fault = box.BoxOutputLimitExceeded() if worker_fails else None
+    worker = _Worker(fault=fault, stop_fails=stop_fails, release=release)
+    run = _Run(door=None, deadline=10, box=worker.owner)
+
+    async def work():
+        return await run.box_work(worker.work)
+
+    async def cancel():
+        attempt = asyncio.create_task(_within_deadline(run, work))
+        assert await anyio.to_thread.run_sync(worker.started.wait, 5)
+        attempt.cancel("first cancellation")
+        assert await anyio.to_thread.run_sync(worker.shutdown.wait, 5)
+        for message in ("second cancellation", "third cancellation"):
+            attempt.cancel(message)
+            await asyncio.sleep(0)
+            assert not attempt.done(), "caller cancellation interrupted settlement"
+        assert not worker.finished.is_set()
+        release.set()
+        expected = BaseExceptionGroup if worker_fails or stop_fails else asyncio.CancelledError
+        with pytest.raises(expected) as caught:
+            await attempt
+        cancellation = carried(caught.value, asyncio.CancelledError)
+        assert cancellation is not None
+        assert cancellation.args == ("first cancellation",)
+        if worker_fails:
+            assert carried(caught.value, box.BoxOutputLimitExceeded) is fault
+        assert worker.finished.is_set()
+        assert not run.has_box_work
+        if stop_fails:
+            assert any(isinstance(leaf, box.BoxFault) and "could not stop" in str(leaf)
+                       for leaf in _leaves(caught.value))
+
+    try:
+        anyio.run(cancel)
+    finally:
+        release.set()
+        worker.shutdown.set()
+        worker.owner.stop()
+
+
+@pytest.mark.parametrize("worker_fails", [False, True])
+def test_enclosing_anyio_cancellation_settles_before_leaving_scope(worker_fails):
+    fault = box.BoxOutputLimitExceeded() if worker_fails else None
+    worker = _Worker(fault=fault)
+    run = _Run(door=None, deadline=10, box=worker.owner)
+
+    async def work():
+        return await run.box_work(worker.work)
+
+    async def scenario():
+        async with anyio.create_task_group() as group:
+            async def cancel(scope):
+                assert await anyio.to_thread.run_sync(worker.started.wait, 5)
+                scope.cancel()
+
+            with anyio.CancelScope() as scope:
+                group.start_soon(cancel, scope)
+                if worker_fails:
+                    with pytest.raises(BaseExceptionGroup) as caught:
+                        await _within_deadline(run, work)
+                    assert carried(caught.value, asyncio.CancelledError) is not None
+                    assert carried(caught.value, box.BoxOutputLimitExceeded) is fault
+                else:
+                    await _within_deadline(run, work)
+                    pytest.fail("cancelled attempt returned successfully")
+            assert worker.finished.is_set()
+            assert not run.has_box_work
+
+    try:
+        anyio.run(scenario)
+    finally:
+        worker.shutdown.set()
+        worker.owner.stop()
+
+
+def test_base_exception_leaving_work_is_preserved_after_settlement():
+    fault = box.BoxOutputLimitExceeded()
+    cancellation = asyncio.CancelledError("tool cancellation")
+    run = _Run(door=None, deadline=10)
+
+    async def work():
+        raise BaseExceptionGroup("tool exit", [cancellation, fault])
+
+    with pytest.raises(BaseExceptionGroup) as caught:
+        anyio.run(_within_deadline, run, work)
+    assert carried(caught.value, asyncio.CancelledError) is cancellation
+    assert carried(caught.value, box.BoxOutputLimitExceeded) is fault
+    assert not run.has_box_work
+
+
+def test_work_suppressing_deadline_cancellation_cannot_return_a_late_result():
+    run = _Run(door=None, deadline=0)
+
+    async def work():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            return "late result"
+
+    assert anyio.run(_within_deadline, run, work) == (False, None)
