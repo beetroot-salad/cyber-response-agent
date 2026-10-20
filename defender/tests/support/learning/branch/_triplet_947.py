@@ -1097,7 +1097,7 @@ def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicio
 
 
 def read_roster(episode_dir: Path) -> dict[str, str]:
-    """`<episode_dir>/arms.json` as plain JSON (`{label: arm id}`) — the test reading back what a
+    """`<episode_dir>/arms.json` as plain JSON (`{world UUID: arm id}`) — the test reading back what a
     builder or the launcher wrote; `{}` when there is none."""
     path = Path(episode_dir) / ROSTER_NAME
     if not path.is_file():
@@ -1113,15 +1113,10 @@ def write_roster(episode_dir: Path, roster: dict[str, str]) -> Path:
     return path
 
 
-def _manifest_labels(episode_dir: Path) -> list[str]:
-    """The world labels of the manifest at `<episode_dir>/family.yaml`, in order; `[]` when there
-    is no readable manifest with worlds (a container that is not an episode's)."""
-    path = Path(episode_dir) / "family.yaml"
-    if not path.is_file():
-        return []
-    doc = _yaml.safe_load(path.read_text(encoding="utf-8"))
-    worlds = doc.get("worlds") if isinstance(doc, dict) else None
-    return [str(w["label"]) for w in worlds or [] if isinstance(w, dict) and "label" in w]
+def _manifest_world_ids(episode_dir: Path) -> list[str]:
+    """Explicit persisted world UUIDs of a hand-built episode, in manifest order."""
+    doc = _yaml.safe_load((Path(episode_dir) / "family.yaml").read_text(encoding="utf-8"))
+    return [world["world_id"] for world in doc["worlds"]]
 
 
 def plant_roster(episode_dir: Path) -> dict[str, str]:
@@ -1141,12 +1136,12 @@ def plant_roster(episode_dir: Path) -> dict[str, str]:
     if (episode_dir / ROSTER_NAME).exists():
         raise AssertionError(f"plant_roster: {episode_dir / ROSTER_NAME} already exists — the "
                              "RUNS step writes the roster once")
-    labels = _manifest_labels(episode_dir)
-    if not labels:
+    world_ids = _manifest_world_ids(episode_dir)
+    if not world_ids:
         raise AssertionError(f"plant_roster: {episode_dir / 'family.yaml'} names no world — a "
                              "roster names exactly the manifest's worlds (#1187 R2)")
     (episode_dir / "runs").mkdir(parents=True, exist_ok=True)
-    roster = {label: str(uuid.uuid4()) for label in labels}
+    roster = {world_id: str(uuid.uuid4()) for world_id in world_ids}
     write_roster(episode_dir, roster)
     return roster
 
@@ -1154,7 +1149,7 @@ def plant_roster(episode_dir: Path) -> dict[str, str]:
 def roster_arm_id(episode_dir: Path, world_id: str) -> str:
     """The arm id the episode's roster holds for `world_id`. READ-ONLY (review-3 F33): it never
     writes or extends a roster, so a scene whose launcher (or explicit RUNS step,
-    `plant_roster` / `episode_view`) wrote none fails here loudly, and so does a label the
+    `plant_roster` / `episode_view`) wrote none fails here loudly, and so does a world UUID the
     roster does not name (a roster names exactly the manifest's worlds, #1187 R2)."""
     episode_dir = Path(episode_dir)
     if not (episode_dir / ROSTER_NAME).is_file():
@@ -1170,7 +1165,7 @@ def roster_arm_id(episode_dir: Path, world_id: str) -> str:
 
 
 def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario varies, plus the arm id the spawn double passes
-        base: Path, world_id: str, *, arm_id: str | None = None,
+        base: Path, label: str, *, arm_id: str | None = None,
                     scrub_ran: bool = True,
                     commit: str | None = "deadbee", dirty: bool | None = False,
                     unavailable: str | None = None,
@@ -1181,7 +1176,7 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
     (§7 FORK-13), never the operator's runs base. #1187: the arm folder is named by its ARM ID,
     a uuid4 holding neither the label nor the episode id (O3) — `arm_id` when given (the spawn
     double passes the roster's); else, under an episode (`<base>/..` holds a manifest or a
-    roster), the id that episode's roster holds for `world_id` (`roster_arm_id`, read-only: the
+    roster), the id that episode's roster holds for `label` (`roster_arm_id`, read-only: the
     scene's RUNS step — the launcher, `plant_roster` or `episode_view` — must have written it);
     else (a bare folder a test hands straight to the function under test) `fixture_uuid` of the
     folder and the label, so a second call for one label names the same folder.
@@ -1196,10 +1191,10 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
     each takes the record's own default.
     """
     base = Path(base)
-    run_dir = base / (arm_id if arm_id is not None else _arm_name(base, world_id))
+    run_dir = base / (arm_id if arm_id is not None else _arm_name(base, label))
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
-    (run_dir / "investigation.md").write_text(f"# world {world_id}\n", encoding="utf-8")
+    (run_dir / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text("", encoding="utf-8")
     if stamp:
         (run_dir / "provenance.json").write_text(
@@ -1212,22 +1207,22 @@ def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario
     return run_dir
 
 
-def _arm_name(base: Path, world_id: str) -> str:
-    """The folder name `sibling_run_dir` gives `world_id`'s arm under `base` (see there)."""
+def _arm_name(base: Path, label: str) -> str:
+    """The folder name `sibling_run_dir` gives `label`'s arm under `base` (see there)."""
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
     episode_dir = Path(base).parent
     if (episode_dir / "family.yaml").is_file() or (episode_dir / ROSTER_NAME).is_file():
-        return roster_arm_id(episode_dir, world_id)
-    return fixture_uuid(f"{Path(base).absolute()}/{world_id}")
+        return roster_arm_id(episode_dir, world_id(episode_dir, label))
+    return fixture_uuid(f"{Path(base).absolute()}/{label}")
 
 
-def arm_run_dir(episode_dir: Path, world_id: str, **kw: Any) -> Path:
+def arm_run_dir(episode_dir: Path, label: str, **kw: Any) -> Path:
     """A finished arm in the episode's own container, `<episode_dir>/runs/<arm id>` — the arm id
-    the episode's roster holds for `world_id` (#1187: an arm is opened by its roster id through
+    the episode's roster holds for `label` (#1187: an arm is opened by its roster id through
     the episode's view, `family_arms`): `sibling_run_dir` over `<episode_dir>/runs`, every
     keyword passed through."""
-    return sibling_run_dir(Path(episode_dir) / "runs", world_id, **kw)
+    return sibling_run_dir(Path(episode_dir) / "runs", label, **kw)
 
 
 def corpus_document(run_dir: Path) -> Path:
@@ -1270,31 +1265,32 @@ def episode_view(episode: Any, *, tenant: Any = None) -> Any:
     root's one tenant, `current_tenant()`), adopting the held `episode` — `runs.episode(<id>,
     held=episode)`. #1187: no container record is judged or planted (R1). An episode with no
     arm roster yet never reached RUNS, so the fixture takes the launcher's RUNS step for it:
-    `view.start_runs(<every manifest world label>)` makes `runs/` and writes the roster (R2).
+    `view.start_runs(<every manifest world UUID>)` makes `runs/` and writes the roster (R2).
     A roster a scene already planted (`arm_run_dir`) is the episode's own and is kept.
     `start_family` callers reach RUNS this way; `verify_family` callers open their arms through
     it (`family_arms`)."""
     owner = current_tenant() if tenant is None else tenant
     view = owner.runs_repository().episode(episode.dir.name, held=episode)
     if view.arm_ids() is None:
-        view.start_runs(_manifest_labels(Path(episode.dir)))
+        view.start_runs(_manifest_world_ids(Path(episode.dir)))
     return view
 
 
 def family_arms(episode: Any, labels: Any, *, tenant: Any = None) -> dict[str, Any]:
-    """`verify_family`'s `arms`: each label's arm, at the id the episode's roster holds for it
-    (`view.arm_id(label)`, #1187), opened by id through the episode's view (`episode_view`), as
+    """`verify_family`'s UUID-keyed `arms`, resolving the fixture labels through the manifest
+    before `view.arm_id(world_uuid)`, opened by id through the episode's view (`episode_view`), as
     the launcher's `_finished_arms` does — the `RunRefused` an open raises (`RunAbsent` for a
-    roster id with no folder: "not started") kept as that label's value."""
+    roster id with no folder: "not started") kept as that world UUID's value."""
     from defender.run_repository import RunRefused
 
     view = episode_view(episode, tenant=tenant)
     arms: dict[str, Any] = {}
     for label in labels:
+        wid = world_id(Path(episode.dir), label)
         try:
-            arms[label] = view.open(view.arm_id(label))
+            arms[wid] = view.open(view.arm_id(wid))
         except RunRefused as refused:
-            arms[label] = refused
+            arms[wid] = refused
     return arms
 
 

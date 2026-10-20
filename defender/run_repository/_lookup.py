@@ -11,7 +11,7 @@ folder holds a record restating its tenant (#1187 R1).
 * natural container: `runs.open(run_id) -> Run`, `runs.list() -> Listed`,
   `runs.all_runs() -> list[Run]`, `runs.create(run_id)`, `runs.resolve(address) -> Run`;
 * episodes: `runs.create_episode() -> EpisodeRuns` claims a fresh `<T>/episodes/<uuid>`;
-  `runs.episode(episode_id) -> EpisodeRuns` opens one (`roster_label=` is the sibling's form);
+  `runs.episode(episode_id) -> EpisodeRuns` opens one (`require_roster=True` is the sibling's form);
   `runs.episode_files(episode_id) -> Episode` is the owner's handle alone (the judge's door);
 * the episode view `EpisodeRuns`: the arm roster (`start_runs`, `arm_id`, `arm_ids`), the arms
   (`open`, `arms`, `create`), and `episode`, the owner's handle;
@@ -52,10 +52,9 @@ from typing import Any, cast
 from defender import _io
 from defender.episodes._episode_handle import Episode, EpisodeRefused, refuse_bad_episode_id
 from defender.episodes._episode_paths import LAYOUT
-from defender.records._run_id import mint_uuid
+from defender.records._run_id import mint_uuid, uuid_id_fault
 from defender._shown import escaped, quoted
 from defender.tenancy._tenant import Tenant, TenantId, TenantRefused
-from defender.episodes._world_label import world_label_fault
 from defender.run_repository._errors import RunAbsent, RunRefused, RunUnreachable
 from defender.run_repository._handle import Run
 from defender.run_repository._held import (
@@ -360,11 +359,11 @@ class RunsRepository:
         except OSError as exc:
             raise TenantRefused(f"the episode folder {path} could not be made: "
                                 f"{exc.strerror or exc}") from None
-        return EpisodeRuns(self._tenant, episode_id, episode, owns=True, roster_label=None,
+        return EpisodeRuns(self._tenant, episode_id, episode, owns=True, require_roster=False,
                            io=self._io)
 
     def episode(self, episode_id: str, *, held: Episode | None = None,
-                roster_label: str | None = None) -> EpisodeRuns:
+                require_roster: bool = False) -> EpisodeRuns:
         """The episode `episode_id`'s view: its arm container `runs/`, its arm roster and the
         arms, under this tenant. The id is judged first (`EpisodeRefused`: canonical UUID text
         only, before any path is built); then `<T>/episodes/<episode_id>` is walked from the
@@ -372,21 +371,20 @@ class RunsRepository:
         episode `FileNotFoundError` (G23) — or `held`, the handle a caller already holds on
         this same episode, is adopted.
 
-        The container's state is recorded, not judged: present, absent, or unreadable (a link,
-        a non-directory, an unlistable folder; the page reads it as absent). `roster_label` is
-        the sibling's form (O4b): the view refuses (`TenantRefused`) unless the arm roster is
-        there — read through the held episode, never followed — and names that label; a roster
-        that cannot be decoded is the roster's own refusal (`RunRefused`). Only presence and the
-        label are checked, so the manifest is not read (label-set equality is `arm_ids`')."""
+        The container's state is recorded, not judged: present, absent, or unreadable.
+        `require_roster=True` is the sibling's door: a missing roster is `TenantRefused`,
+        malformed UUID keys or arm IDs are `RunRefused`, before the manifest is read.
+        World membership is checked by `arm_ids` against the persisted manifest UUIDs.
+        """
         episode_id = refuse_bad_episode_id(episode_id)
         if held is None:
             return EpisodeRuns(self._tenant, episode_id, self._walk_episode(episode_id),
-                               owns=True, roster_label=roster_label, io=self._io)
+                               owns=True, require_roster=require_roster, io=self._io)
         if not isinstance(held, Episode) or held.dir.name != episode_id:
             raise TypeError(f"the adopted episode handle is not episode "
                             f"{quoted(episode_id)}'s")
         return EpisodeRuns(self._tenant, episode_id, held, owns=False,
-                           roster_label=roster_label, io=self._io)
+                           require_roster=require_roster, io=self._io)
 
     def episode_files(self, episode_id: str) -> Episode:
         """The episode owner's handle on `episode_id` — the judge's door: the same walk as
@@ -435,7 +433,7 @@ class _EpisodeWalk:
 #: An episode container's states, as the view records them when it opens.
 PRESENT, ABSENT, UNREADABLE = "present", "absent", "unreadable"
 
-#: The largest roster the reader accepts, in bytes: one short label and one UUID per world.
+#: The largest roster the reader accepts, in bytes: one world UUID and one arm UUID per world.
 _ROSTER_CAP = 65536
 
 
@@ -443,16 +441,42 @@ def _no_duplicate_keys(pairs: builtins.list[tuple[str, Any]]) -> dict[str, Any]:
     doc: dict[str, Any] = {}
     for key, value in pairs:
         if key in doc:
-            raise ValueError(f"the label {quoted(key)} appears twice")
+            raise ValueError(f"the world UUID {quoted(key)} appears twice")
         doc[key] = value
     return doc
 
 
-def _roster_text(arm_ids: Mapping[str, RunId]) -> str:
-    """@owns arm roster text — the one serialisation of the arm roster (#1187 R2): `{label:
-    arm id}`, ids as their text, keys sorted, so equal content is equal bytes."""
-    return json.dumps({label: str(arm) for label, arm in arm_ids.items()},
+def _encode_roster(arm_ids: Mapping[str, RunId]) -> str:
+    """@owns arm roster text — canonical UUID-to-UUID JSON, sorted and newline-terminated."""
+    return json.dumps({world_id: str(arm) for world_id, arm in arm_ids.items()},
                       indent=2, sort_keys=True) + "\n"
+
+
+def _check_roster_size(size: int) -> None:
+    if size > _ROSTER_CAP:
+        raise RunRefused(f"the arm roster would be {size} bytes, over its {_ROSTER_CAP}-byte "
+                         "reader budget")
+
+
+def check_arm_roster_capacity(world_count: int) -> None:
+    """Refuse a family whose future arm roster cannot fit the reader's byte budget.
+
+    Every admitted key and value is canonical UUID text: the wire size depends only on
+    world count. Derive entry width from the same encoder publication uses, without minting
+    any identity or touching the filesystem. The nil UUID here is a sizing sample only.
+    """
+    if not isinstance(world_count, int) or isinstance(world_count, bool) or world_count < 1:
+        raise RunRefused("an arm roster needs a positive integer world count")
+    sample = RunId.parse("00000000-0000-0000-0000-000000000000")
+    framing = len(_encode_roster({}).encode("utf-8"))
+    entry = len(_encode_roster({str(sample): sample}).encode("utf-8")) - framing
+    _check_roster_size(framing + world_count * entry)
+
+
+def _roster_text(arm_ids: Mapping[str, RunId]) -> str:
+    text = _encode_roster(arm_ids)
+    _check_roster_size(len(text.encode("utf-8")))
+    return text
 
 
 class EpisodeRuns:
@@ -467,7 +491,7 @@ class EpisodeRuns:
     episode handle when the view opened it (an adopted handle stays its owner's to close)."""
 
     def __init__(self, tenant: Tenant, episode_id: str, episode: Episode, *, owns: bool,
-                 roster_label: str | None, io: Any) -> None:
+                 require_roster: bool, io: Any) -> None:
         self._tenant = tenant
         self._io = io
         self.episode_id = episode_id
@@ -479,8 +503,8 @@ class EpisodeRuns:
         self.unreadable_reason: str | None = None
         try:
             self._judge()
-            if roster_label is not None:
-                self._require_roster_names(roster_label)
+            if require_roster:
+                self._require_started()
         except BaseException:
             self.close()
             raise
@@ -535,11 +559,12 @@ class EpisodeRuns:
         return RunRefused(f"the arm roster {self._roster_path} is refused ({why}) — it fails "
                           "closed until an operator repairs or removes it")
 
-    def _roster_document(self) -> dict[str, str] | None:
-        """The roster as `{label: id text}`, or `None` when there is none (the episode never
-        reached RUNS). The text (`_read_roster_text`) must be one strict JSON object, nested no
-        deeper than the decoder's limit, no label twice, every value text. Any other shape is
-        `RunRefused` naming the roster."""
+    def _roster_document(self) -> dict[str, RunId] | None:
+        """Strict UUID-to-UUID roster, or `None` when RUNS has not published one.
+
+        Validate syntax and uniqueness before any manifest read; membership belongs to
+        `arm_ids`. Duplicate JSON keys are refused by the decoder, never collapsed.
+        """
         text = self._read_roster_text()
         if text is None:
             return None
@@ -547,11 +572,23 @@ class EpisodeRuns:
         if reason is not None:
             raise self._roster_refused(f"not one strict JSON document: {reason}")
         if not isinstance(doc, dict) or not doc:
-            raise self._roster_refused("not a non-empty JSON object of world label to arm id")
-        for label, value in doc.items():
-            if not isinstance(value, str):
-                raise self._roster_refused(f"the arm id of {quoted(label)} is not text")
-        return cast(dict[str, str], doc)
+            raise self._roster_refused("not a non-empty JSON object of world UUID to arm UUID")
+        arms: dict[str, RunId] = {}
+        owners: dict[RunId, str] = {}
+        for world_id, value in doc.items():
+            if (why := uuid_id_fault(world_id, "world")) is not None:
+                raise self._roster_refused(why)
+            try:
+                arm = RunId.parse(value)
+            except RunRefused:
+                raise self._roster_refused(
+                    f"the arm id of world {quoted(world_id)} is not a run id: {quoted(value)}") from None
+            if arm in owners:
+                raise self._roster_refused(
+                    f"worlds {quoted(owners[arm])} and {quoted(world_id)} share one arm id")
+            owners[arm] = world_id
+            arms[world_id] = arm
+        return arms
 
     def _read_roster_text(self) -> str | None:
         """The roster's strict UTF-8 text, or `None` when it is absent. Read through the held
@@ -579,93 +616,69 @@ class EpisodeRuns:
             raise self._roster_refused(f"it is over {_ROSTER_CAP} bytes")
         return answer.text
 
-    def _require_roster_names(self, label: str) -> None:
-        """The sibling's gate (O4b, G5/G19): the roster is present and names `label`. Presence
-        and the label only — nothing else of the episode is read."""
-        doc = self._roster_document()
-        if doc is None:
+    def _require_started(self) -> None:
+        """Refuse absent or malformed RUNS publication before reading a manifest."""
+        if self._roster_document() is None:
             raise TenantRefused(
                 f"episode {quoted(self.episode_id)} has no arm roster ({self._roster_path} is "
                 "absent): it never reached RUNS, and an arm runs only in an episode its "
                 "launcher started")
-        if label not in doc:
-            raise TenantRefused(
-                f"the arm roster {self._roster_path} names no world {quoted(label)} — an arm "
-                "runs only for a world its launcher started")
 
     def arm_ids(self) -> dict[str, RunId] | None:
-        """The whole arm roster `{label: RunId}`, or `None` when there is none (the episode
-        never reached RUNS — `runs/` with no roster included, F27). Every rule is checked, else
-        `RunRefused` naming the roster: its decoding (`_roster_document`), each label by the
-        family model's label rule, each id by `RunId.parse`, no two labels on one id, and a
-        label set exactly the manifest's worlds — so a torn or partial roster cannot pass as a
-        subset. The manifest's world labels are read through the one loader, held to this
-        episode's id (`manifest_world_labels(..., expected_episode_id=)`: R5 and the worlds'
-        shape only, so the roster check needs no loadable family; its refusal is
-        `FamilyError`)."""
-        from defender.runtime.branch._family import manifest_world_labels
+        """The complete `{world UUID: RunId}` mapping, or `None` before RUNS.
 
-        doc = self._roster_document()
-        if doc is None:
+        Syntax, byte budget and uniqueness are checked before manifest loading. Its UUID set
+        must then exactly match this episode's validated manifest: no partial or foreign arm
+        mapping can be used. Descriptive labels never participate in roster identity.
+        """
+        from defender.runtime.branch._family import manifest_world_ids
+
+        arms = self._roster_document()
+        if arms is None:
             return None
-        arms: dict[str, RunId] = {}
-        for label, text in doc.items():
-            if (why := world_label_fault(label)) is not None:
-                raise self._roster_refused(why)
-            try:
-                arms[label] = RunId.parse(text)
-            except RunRefused:
-                raise self._roster_refused(
-                    f"the arm id of {quoted(label)} is not a run id: {quoted(text)}") from None
-        owners: dict[RunId, str] = {}
-        for label, arm in arms.items():
-            if arm in owners:
-                raise self._roster_refused(
-                    f"the worlds {quoted(owners[arm])} and {quoted(label)} share one arm id")
-            owners[arm] = label
-        worlds = set(manifest_world_labels(self.episode.view(),
-                                           expected_episode_id=self.episode_id))
+        worlds = set(manifest_world_ids(self.episode.view(), expected_episode_id=self.episode_id))
         if set(arms) != worlds:
             missing = sorted(worlds - set(arms))
             extra = sorted(set(arms) - worlds)
             raise self._roster_refused(
-                "its labels are not exactly the manifest's worlds (missing "
+                "its world UUIDs are not exactly the manifest's worlds (missing "
                 f"{[quoted(m) for m in missing]}, not in the manifest "
                 f"{[quoted(e) for e in extra]})")
         return arms
 
-    def arm_id(self, label: str) -> RunId:
-        """The arm `label`'s run id, as the roster holds it (`arm_ids`' rules). With no roster,
-        or for a label the roster does not name, it is `RunAbsent`."""
+    def arm_id(self, world_id: str) -> RunId:
+        """One declared world's arm, by persisted world UUID; absent before RUNS."""
         arms = self.arm_ids()
         if arms is None:
             raise RunAbsent(f"episode {quoted(self.episode_id)} has no arm roster "
                             f"({self._roster_path} is absent): it never reached RUNS, so it has "
-                            f"no arm {quoted(label)}")
-        if not isinstance(label, str) or label not in arms:
-            raise RunAbsent(f"the arm roster {self._roster_path} names no world {quoted(label)}")
-        return arms[label]
+                            f"no arm for world {quoted(world_id)}")
+        if not isinstance(world_id, str) or world_id not in arms:
+            raise RunAbsent(f"the arm roster {self._roster_path} names no world {quoted(world_id)}")
+        return arms[world_id]
 
-    def start_runs(self, labels: Sequence[str]) -> dict[str, RunId]:
-        """The start of RUNS (#1187 R2): `runs/` made off the episode's handle, no-follow (a
-        link or a non-directory there refuses, `TenantRefused`, G25), then one fresh UUID per
-        label, then the roster written ONCE through the complete-or-absent lane — `runs/`
-        first, so a crash between the two leaves no roster (F27). `labels` is every world label
-        of the manifest, each held to the family model's label rule, none twice. A roster
-        already there refuses (`RunRefused`) and is left as it was. Answers the roster as
-        written."""
-        labels = builtins.list(labels)
-        if not labels:
-            raise RunRefused("start_runs takes every world label of the manifest; none was given")
-        for label in labels:
-            if (why := world_label_fault(label)) is not None:
+    def start_runs(self, world_ids: Sequence[str]) -> dict[str, RunId]:
+        """Publish RUNS once: every declared world UUID maps to one fresh arm UUID.
+
+        Validate UUIDs, capacity and complete manifest membership before creating anything.
+        Then make `runs/` no-follow and publish the roster complete-or-absent; a crash between
+        those steps leaves no roster. Labels are resolved at operator-facing boundaries.
+        """
+        from defender.runtime.branch._family import manifest_world_ids
+
+        world_ids = builtins.list(world_ids)
+        check_arm_roster_capacity(len(world_ids))
+        for world_id in world_ids:
+            if (why := uuid_id_fault(world_id, "world")) is not None:
                 raise RunRefused(why)
-        if len(set(labels)) != len(labels):
-            raise RunRefused(f"start_runs was given a world label twice: "
-                             f"{[quoted(label) for label in labels]}")
+        if len(set(world_ids)) != len(world_ids):
+            raise RunRefused("start_runs was given a world UUID twice")
+        declared = manifest_world_ids(self.episode.view(), expected_episode_id=self.episode_id)
+        if set(world_ids) != set(declared):
+            raise RunRefused("start_runs needs exactly the manifest's world UUIDs")
         self._hold_container(create=True).close()
         self.state, self.unreadable_reason = PRESENT, None
-        arms = {label: RunId.mint() for label in labels}
+        arms = {world_id: RunId.mint() for world_id in world_ids}
         if len(set(arms.values())) != len(arms):
             raise RunRefused("two freshly minted arm ids are one; the roster is not written")
         try:

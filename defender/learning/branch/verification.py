@@ -35,6 +35,7 @@ from defender.run_repository import (
 
 
 from defender.learning.branch import outcome as outcome_mod
+from defender.runtime.branch._family import load_family
 
 
 
@@ -84,8 +85,8 @@ def verify_family(
     """Check every sibling, archive each verified one, and write the family stamp unless a
     comparability fault forbids it.
 
-    `arms` is every finished arm, keyed by its label (#1105 PR 2: nothing decodes a label from a
-    folder's name): the `Run` its episode view opened, or the refusal the open raised. A
+    `arms` is every finished arm, keyed by its declared world UUID (no identity is decoded
+    from a folder's name): the `Run` its episode view opened, or the refusal the open raised. A
     `RunAbsent` is a missing arm folder, read as before: a world with no scrub verdict, so its
     own `not archived` record. Any other refusal (an entry that is not a real directory,
     declared change 5, or a container that cannot be reached, `RunUnreachable`) is likewise that
@@ -110,16 +111,19 @@ def verify_family(
 
     Returns `comparable` (the stamp was written: no comparability fault), `reason` (every
     fault of both kinds, `""` when none) and `not_comparable` (the comparability faults alone,
-    the recorded reason; `""` when the stamp was written).
+    the recorded reason; `""` when the stamp was written). `worlds`, `archived`, and
+    `scrub_verified` contain world UUIDs, never display labels.
     """
-    runs = {label: arm for label, arm in arms.items() if isinstance(arm, Run)}
-    absent = [label for label, arm in arms.items() if isinstance(arm, RunAbsent)]
-    refused = {label: arm for label, arm in arms.items()
+    family = load_family(episode.view(), expected_episode_id=episode.dir.name)
+    labels = {world_id: family.world_by_id(world_id).label for world_id in arms}
+    runs = {world_id: arm for world_id, arm in arms.items() if isinstance(arm, Run)}
+    absent = [world_id for world_id, arm in arms.items() if isinstance(arm, RunAbsent)]
+    refused = {world_id: arm for world_id, arm in arms.items()
                if isinstance(arm, RunRefused) and not isinstance(arm, RunAbsent)}
-    scrub_verified = [label for label in runs if _scrub_ran(runs[label])]
+    scrub_verified = [world_id for world_id in runs if _scrub_ran(runs[world_id])]
     # An absent arm has no tree, so no scrub verdict records a walk of one.
     unverified = sorted((set(runs) - set(scrub_verified)) | set(absent))
-    stamps = {label: _stamp_of(run) for label, run in runs.items()}
+    stamps = {world_id: _stamp_of(run) for world_id, run in runs.items()}
 
     # `blocking`: the comparability faults, which withhold the stamp. `per_world`: faults that
     # are one world's own record and leave the stamp to the rest.
@@ -130,10 +134,11 @@ def verify_family(
                         "there is nothing to hold to the source's commit or to archive")
     if unverified:
         per_world.append(
-            f"sibling(s) {unverified} have no scrub verdict recording a completed walk — an "
+            f"sibling(s) {[labels[world_id] for world_id in unverified]} have no scrub verdict "
+            "recording a completed walk — an "
             "unwalked tree is one nothing has certified as free of what the box left behind")
     judged = _family_refusal(
-        source, {f"sibling {label!r}": stamps[label] for label in scrub_verified},
+        source, {f"sibling {labels[world_id]!r}": stamps[world_id] for world_id in scrub_verified},
         source_who="the source run", allow_dirty=allow_dirty)
     if judged.refusal is not None:
         blocking.append(judged.refusal)
@@ -152,7 +157,7 @@ def verify_family(
         # The agreement among the verified, archived siblings: a world with only its own
         # `not archived` record is not a member of what the stamp certifies.
         _write_family_stamp(
-            episode, {label: stamps[label] for label in archived}, source=source,
+            episode, {world_id: stamps[world_id] for world_id in archived}, source=source,
             allow_dirty=allow_dirty, waived=judged.waived)
     else:
         # The judge names this reason when it stamps the family `not comparable`.
@@ -170,7 +175,7 @@ def _archive_worlds(
 ) -> list[str]:
     """`verify_family`'s per-world pass: archive every scrub-verified run, and give every other
     finished world its own `not archived` record, appending each such fault to `per_world`.
-    Returns the labels archived.
+    Returns the world UUIDs archived.
 
     `worlds/` exists whatever happens below; a world's own record says why one is missing.
     Every finished world ends archived or with its own `not archived` record — never neither,
@@ -178,32 +183,32 @@ def _archive_worlds(
     arm is among `unverified`."""
     from defender.learning.branch import archive as archive_mod
 
-    from defender.runtime.branch._family import load_family
-
     family = load_family(episode.view(), expected_episode_id=episode.dir.name)
+    labels = {world_id: family.world_by_id(world_id).label
+              for world_id in {*runs, *refused, *unverified}}
     episode.worlds.ensure()
     archived: list[str] = []
-    for label in sorted(refused):
-        per_world.append(f"world {label}'s run folder was refused ({refused[label]})")
+    for world_id in sorted(refused):
+        per_world.append(f"world {labels[world_id]}'s run folder was refused ({refused[world_id]})")
         outcome_mod.write_world_record(
-            episode, family.world(label).world_id, outcome_mod.NOT_ARCHIVED,
-            detail=f"its run folder was refused, so nothing was read from it: {refused[label]}")
-    for label in sorted({*runs, *unverified}):
-        if label in unverified:
+            episode, world_id, outcome_mod.NOT_ARCHIVED,
+            detail=f"its run folder was refused, so nothing was read from it: {refused[world_id]}")
+    for world_id in sorted({*runs, *unverified}):
+        if world_id in unverified:
             outcome_mod.write_world_record(
-                episode, family.world(label).world_id, outcome_mod.NOT_ARCHIVED,
+                episode, world_id, outcome_mod.NOT_ARCHIVED,
                 detail="no scrub verdict records a completed walk of its tree, so it was not "
                        "archived")
             continue
         try:
-            archive_mod.archive_episode(episode, {label: runs[label].run_dir})
+            archive_mod.archive_episode(episode, {world_id: runs[world_id].run_dir})
         except Exception as refusal:  # noqa: BLE001 — one world's archive, recorded; the rest go on
-            per_world.append(f"world {label}'s tree could not be archived ({refusal})")
+            per_world.append(f"world {labels[world_id]}'s tree could not be archived ({refusal})")
             outcome_mod.write_world_record(
-                episode, family.world(label).world_id, outcome_mod.NOT_ARCHIVED,
+                episode, world_id, outcome_mod.NOT_ARCHIVED,
                 detail=f"the archive refused its finished tree: {refusal}")
             continue
-        archived.append(label)
+        archived.append(world_id)
     return archived
 
 

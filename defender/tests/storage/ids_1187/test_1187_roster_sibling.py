@@ -22,6 +22,8 @@ B_ID = S.H5.U_ID
 LABELS = ("a", "b", "c")
 #: The world every sibling scene starts.
 LABEL = "b"
+WORLD_IDS = tuple(T.fixture_world_id(label) for label in LABELS)
+WORLD_ID = T.fixture_world_id(LABEL)
 #: The manifest's poison: a top-level field the family loader refuses BY NAME.
 SENTINEL = "zz_spec1187_never_read_before_the_gate"
 RUNS_BASE_ENV = "DEFENDER_RUNS_BASE"
@@ -65,9 +67,9 @@ def _episode(root: Path, tenant_id: str, *, roster=False, arms: bool = False) ->
 def _texts(mapping) -> dict[str, str]:
     """A `{label: RunId}` answer as `{label: text}`."""
     return {label: str(run_id) for label, run_id in mapping.items()}
-# Writing the roster: `view.start_runs(labels)` (R2; G25).
+# Writing the roster: `view.start_runs(world_uuids)` (R2; G25).
 
-def test_start_runs_makes_runs_then_writes_one_fresh_uuid_per_label(data_root):
+def test_start_runs_makes_runs_then_writes_one_fresh_arm_uuid_per_world(data_root):
     t = S.tenant(data_root, A_ID)
     runs = t.runs_repository()
     episode_id, ep = _episode(data_root, A_ID)
@@ -75,12 +77,12 @@ def test_start_runs_makes_runs_then_writes_one_fresh_uuid_per_label(data_root):
 
     with runs.episode(episode_id) as view:
         assert view.arm_ids() is None, "an episode with no roster answered arm ids"
-        answered = view.start_runs(list(LABELS))
+        answered = view.start_runs(list(WORLD_IDS))
 
     assert _real_dir(ep / "runs"), "start_runs did not make runs/ as a real directory"
     assert os.listdir(ep / "runs") == [], f"runs/ holds {sorted(os.listdir(ep / 'runs'))}"
     written = S.read_roster(ep)
-    assert sorted(written) == sorted(LABELS), f"the roster's labels are {sorted(written)}"
+    assert sorted(written) == sorted(WORLD_IDS), f"the roster's labels are {sorted(written)}"
     assert all(S.is_canonical_uuid(v) for v in written.values()), written
     assert len(set(written.values())) == len(LABELS), f"two labels share an id: {written}"
     assert _texts(answered) == written, "start_runs returned other ids than it wrote"
@@ -88,12 +90,12 @@ def test_start_runs_makes_runs_then_writes_one_fresh_uuid_per_label(data_root):
 
     with runs.episode(episode_id) as view:
         assert _texts(view.arm_ids()) == written
-        assert str(view.arm_id(LABEL)) == written[LABEL]
+        assert str(view.arm_id(WORLD_ID)) == written[WORLD_ID]
 
     with runs.create_episode() as claimed:
         fresh = S.episodes_dir(data_root, A_ID) / claimed.episode_id
         (fresh / S.MANIFEST_NAME).write_text(_manifest(claimed.episode_id), encoding="utf-8")
-        second = _texts(claimed.start_runs(list(LABELS)))
+        second = _texts(claimed.start_runs(list(WORLD_IDS)))
     assert S.read_roster(fresh) == second
     assert not set(second.values()) & set(written.values()), "two episodes share an arm id"
 
@@ -153,21 +155,29 @@ def test_uuid_roster_requires_the_complete_manifest_binding(data_root, fault):
         assert str(view.arm_id(world_ids[1])) == good[world_ids[1]]
 
 
-def test_start_runs_refuses_an_over_capacity_family_before_creating_runs(data_root):
+@pytest.mark.parametrize("count", [799, 800])
+def test_start_runs_only_publishes_a_roster_the_reader_can_reopen(data_root, count):
     runs = S.tenant(data_root, A_ID).runs_repository()
     doc = T.family_doc(worlds=[T.base_world(), *[
-        T.world_doc(f"w{index}", role=None, facts=[]) for index in range(799)]])
+        T.world_doc(f"w{index}", role=None, facts=[]) for index in range(count - 1)]])
     episode_id = S.new_id()
     doc["episode_id"] = episode_id
     ep = S.make_episode(data_root, A_ID, episode_id, manifest=_yaml.safe_dump(doc), roster=False)
     before = S.tree(ep)
+    world_ids = [world["world_id"] for world in doc["worlds"]]
     with runs.episode(episode_id) as view:
-        refused = S.raised(view.start_runs, [world["world_id"] for world in doc["worlds"]])
-    assert isinstance(refused, RunRefused), refused
-    assert "roster" in str(refused).lower(), refused
-    assert S.tree(ep) == before
-    assert not (ep / "runs").exists()
-    assert not (ep / S.ROSTER_NAME).exists()
+        if count == 800:
+            refused = S.raised(view.start_runs, world_ids)
+            assert isinstance(refused, RunRefused), refused
+            assert "roster" in str(refused).lower(), refused
+            assert S.tree(ep) == before
+            assert not (ep / "runs").exists()
+            assert not (ep / S.ROSTER_NAME).exists()
+        else:
+            written = _texts(view.start_runs(world_ids))
+            assert (ep / S.ROSTER_NAME).stat().st_size == 65_521
+            assert _texts(view.arm_ids()) == written
+            assert set(written) == set(world_ids)
 
 
 def test_a_second_start_runs_refuses_and_leaves_the_roster_byte_identical(data_root):
@@ -176,20 +186,20 @@ def test_a_second_start_runs_refuses_and_leaves_the_roster_byte_identical(data_r
     episode_id, ep = _episode(data_root, A_ID)
 
     with runs.episode(episode_id) as view:
-        view.start_runs(list(LABELS))
+        view.start_runs(list(WORLD_IDS))
         roster_bytes = (ep / S.ROSTER_NAME).read_bytes()
-        again = S.raised(view.start_runs, list(LABELS))
+        again = S.raised(view.start_runs, list(WORLD_IDS))
         assert _is_refusal(again), f"a second start_runs on the same view gave {again!r}"
     with runs.episode(episode_id) as view:
-        fresh = S.raised(view.start_runs, ["a", "b", "c", "d"])
+        fresh = S.raised(view.start_runs, list(WORLD_IDS))
         assert _is_refusal(fresh), f"a second start_runs on a fresh view gave {fresh!r}"
     assert (ep / S.ROSTER_NAME).read_bytes() == roster_bytes, "the roster was rewritten"
     assert os.listdir(ep / "runs") == []
 
-    planted_id, planted = _episode(data_root, A_ID, roster={k: S.new_id() for k in LABELS})
+    planted_id, planted = _episode(data_root, A_ID, roster={k: S.new_id() for k in WORLD_IDS})
     planted_bytes = (planted / S.ROSTER_NAME).read_bytes()
     with runs.episode(planted_id) as view:
-        err = S.raised(view.start_runs, list(LABELS))
+        err = S.raised(view.start_runs, list(WORLD_IDS))
     assert _is_refusal(err), f"start_runs over a planted roster gave {err!r}"
     assert (planted / S.ROSTER_NAME).read_bytes() == planted_bytes
 
@@ -207,6 +217,7 @@ from pathlib import Path
 from defender.tenancy._tenant import TenantRefused
 from defender.run_repository import RunRefused
 from defender.tests.storage.ids_1187 import _spec1187 as S
+from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 from defender.run_repository import RunId, RunRefused
 from defender.tenancy._tenant import TenantRefused
@@ -223,7 +234,7 @@ with runs.episode(episode_id) as view:
                 raise OSError(errno.EOPNOTSUPP, "injected unsupported anonymous create")
         sys.addaudithook(unavailable)
     try:
-        view.start_runs(["a", "b", "c"])
+        view.start_runs([T.fixture_world_id(label) for label in ("a", "b", "c")])
     except (TenantRefused, RunRefused):
         print("REFUSED", flush=True)
     else:
@@ -277,7 +288,7 @@ def test_a_failed_atomic_roster_write_leaves_no_named_fallback(data_root, failur
     assert sorted(set(os.listdir(ep)) - {S.MANIFEST_NAME, "runs"}) == []
     with runs.episode(episode_id) as view:
         assert view.arm_ids() is None, "a failed write reads as a roster"
-    gate = S.raised(_open_and_close, runs, episode_id, roster_label=LABEL)
+    gate = S.raised(_open_and_close, runs, episode_id, require_roster=True)
     assert isinstance(gate, TenantRefused), gate
 
     # A killed writer is compared with a fresh episode; an unsupported lane must retry in place.
@@ -285,7 +296,7 @@ def test_a_failed_atomic_roster_write_leaves_no_named_fallback(data_root, failur
     done = _start_runs_in_a_child(data_root, control_id, limit=0)
     assert done.returncode == 0, done.stderr[-1500:]
     assert "STARTED" in done.stdout.splitlines(), done.stdout
-    assert sorted(S.read_roster(control)) == sorted(LABELS)
+    assert sorted(S.read_roster(control)) == sorted(WORLD_IDS)
 
 
 @pytest.mark.parametrize("occupant", ["link-to-another-tenants-arms", "regular-file"])
@@ -293,7 +304,7 @@ def test_a_link_or_a_file_at_runs_refuses_before_any_roster_is_written(
         tmp_path, data_root, occupant):
     t = S.tenant(data_root, A_ID)
     S.tenant(data_root, B_ID)
-    _b_id, b_ep = _episode(data_root, B_ID, roster={k: S.new_id() for k in LABELS}, arms=True)
+    _b_id, b_ep = _episode(data_root, B_ID, roster={k: S.new_id() for k in WORLD_IDS}, arms=True)
     episode_id, ep = _episode(data_root, A_ID)
     if occupant == "regular-file":
         (ep / "runs").write_text("not a container\n", encoding="utf-8")
@@ -308,7 +319,7 @@ def test_a_link_or_a_file_at_runs_refuses_before_any_roster_is_written(
         assert _is_refusal(opened), f"episode() over a {occupant} at runs/ gave {opened!r}"
     else:
         with runs.episode(episode_id) as view:
-            err = S.raised(view.start_runs, list(LABELS))
+            err = S.raised(view.start_runs, list(WORLD_IDS))
         assert _is_refusal(err), f"start_runs over a {occupant} at runs/ gave {err!r}"
     assert not os.path.lexists(ep / S.ROSTER_NAME), "a roster was written past a bad runs/"
     assert S.tree(ep) == occupant_before, "the episode folder changed"
@@ -316,8 +327,8 @@ def test_a_link_or_a_file_at_runs_refuses_before_any_roster_is_written(
 
     os.unlink(ep / "runs")
     with runs.episode(episode_id) as view:
-        view.start_runs(list(LABELS))
-    assert sorted(S.read_roster(ep)) == sorted(LABELS)
+        view.start_runs(list(WORLD_IDS))
+    assert sorted(S.read_roster(ep)) == sorted(WORLD_IDS)
     assert _real_dir(ep / "runs")
 # Reading the roster: `arm_id`, `arm_ids`, and `create` held to it (R2; O4).
 
@@ -329,23 +340,23 @@ def test_the_arm_ids_are_the_rosters_and_an_unknown_label_is_absent(data_root):
     bare_id, _bare = _episode(data_root, A_ID)
     with runs.episode(bare_id) as view:
         assert view.arm_ids() is None
-        assert _is_refusal(S.raised(view.arm_id, LABEL)), "an arm id was named with no roster"
+        assert _is_refusal(S.raised(view.arm_id, WORLD_ID)), "an arm id was named with no roster"
 
     gap_id, gap = _episode(data_root, A_ID, arms=True)
     assert _real_dir(gap / "runs")
     assert not os.path.lexists(gap / S.ROSTER_NAME)
     with runs.episode(gap_id) as view:
         assert view.arm_ids() is None, "runs/ with no roster answered arm ids"
-        assert _is_refusal(S.raised(view.arm_id, LABEL)), "an arm id was named with no roster"
+        assert _is_refusal(S.raised(view.arm_id, WORLD_ID)), "an arm id was named with no roster"
         made = S.raised(view.create, RunId.parse(S.new_id()))
         assert _is_refusal(made), f"an arm was created in the crash window: {made!r}"
     assert os.listdir(gap / "runs") == [], "a refused create made something in runs/"
 
-    roster = {label: S.new_id() for label in LABELS}
+    roster = {label: S.new_id() for label in WORLD_IDS}
     episode_id, _ep = _episode(data_root, A_ID, roster=roster)
     with runs.episode(episode_id) as view:
         assert _texts(view.arm_ids()) == roster
-        for label in LABELS:
+        for label in WORLD_IDS:
             arm = view.arm_id(label)
             assert str(arm) == roster[label]
             assert str(arm) != f"{episode_id}-{label}"
@@ -361,12 +372,12 @@ def test_an_arm_is_created_only_at_an_id_the_roster_holds(data_root):
     with runs.episode(episode_id) as view:
         early = S.raised(view.create, RunId.parse(S.new_id()))
         assert _is_refusal(early), f"an arm was created before RUNS: {early!r}"
-        ids = _texts(view.start_runs(list(LABELS)))
+        ids = _texts(view.start_runs(list(WORLD_IDS)))
         stranger = S.raised(view.create, RunId.parse(S.new_id()))
         assert _is_refusal(stranger), f"an id outside the roster was created: {stranger!r}"
         assert os.listdir(ep / "runs") == [], "a refused create made something"
-        arm = view.create(RunId.parse(ids[LABEL]))
-    assert Path(arm.run_dir) == ep / "runs" / ids[LABEL]
+        arm = view.create(RunId.parse(ids[WORLD_ID]))
+    assert Path(arm.run_dir) == ep / "runs" / ids[WORLD_ID]
     assert S.is_canonical_uuid(Path(arm.run_dir).name)
     assert episode_id not in Path(arm.run_dir).name
 
@@ -438,7 +449,7 @@ def _ids_json(pairs: list[tuple[str, object]]) -> str:
 
 def _deep_text(good: dict[str, str], _text: str) -> str:
     """The good roster with `a`'s id nested `DEEP` arrays down (about 40 KB in all)."""
-    deep = "[" * DEEP + json.dumps(good["a"]) + "]" * DEEP
+    deep = "[" * DEEP + json.dumps(good[T.fixture_world_id("a")]) + "]" * DEEP
     rest = "".join(f", {json.dumps(k)}: {json.dumps(v)}" for k, v in good.items() if k != "a")
     return '{"a": ' + deep + rest + "}\n"
 
@@ -446,32 +457,32 @@ def _deep_text(good: dict[str, str], _text: str) -> str:
 #: Each text-planted fault: `(good roster, its text) -> the faulty roster's text or bytes`.
 ROSTER_TEXTS = {
     "torn": lambda good, text: S.torn(text),
-    "not-an-object": lambda good, text: json.dumps(list(LABELS)) + "\n",
-    "duplicate-ids": lambda good, text: _ids_json(list({**good, "b": good["a"]}.items())),
-    "missing-label": lambda good, text: _ids_json([(k, v) for k, v in good.items() if k != "c"]),
-    "extra-label": lambda good, text: _ids_json([*good.items(), ("d", S.new_id())]),
-    "non-uuid-id": lambda good, text: _ids_json(list({**good, "a": S.OLD_MINTED_ID}.items())),
+    "not-an-object": lambda good, text: json.dumps(list(WORLD_IDS)) + "\n",
+    "duplicate-ids": lambda good, text: _ids_json(list({**good, T.fixture_world_id("b"): good[T.fixture_world_id("a")]}.items())),
+    "missing-label": lambda good, text: _ids_json([(k, v) for k, v in good.items() if k != T.fixture_world_id("c")]),
+    "extra-label": lambda good, text: _ids_json([*good.items(), (S.new_id(), S.new_id())]),
+    "non-uuid-id": lambda good, text: _ids_json(list({**good, T.fixture_world_id("a"): S.OLD_MINTED_ID}.items())),
     "uppercase-uuid": lambda good, text: _ids_json(
-        list({**good, "a": S.SAMPLE_UUID.upper()}.items())),
+        list({**good, T.fixture_world_id("a"): S.SAMPLE_UUID.upper()}.items())),
     "deep-nesting": _deep_text,
     # The good roster behind a UTF-8 byte-order mark: not strict UTF-8 JSON, which the host
     # never writes (a `utf-8-sig` or a bytes-sniffing decode would accept it).
     "bom": lambda good, text: b"\xef\xbb\xbf" + text.encode("utf-8"),
     # `a` twice: a last-wins decode yields a consistent roster ({a, b, c}, distinct UUIDs), so
     # only a reader that refuses a repeated key refuses it.
-    "duplicate-key": lambda good, text: _ids_json([*good.items(), ("a", S.new_id())]),
+    "duplicate-key": lambda good, text: _ids_json([*good.items(), (T.fixture_world_id("a"), S.new_id())]),
     # A label off the label rule (so off the manifest's worlds too) that is hostile text: what
     # this pins is that the refusal quoting it stays one bounded line.
     "label-off-rule": lambda good, text: _ids_json(
-        [(k, v) for k, v in good.items() if k != "a"] + [(HOSTILE_LABEL, good["a"])]),
-    "int-id": lambda good, text: _ids_json(list({**good, "a": 5}.items())),
-    "list-id": lambda good, text: _ids_json(list({**good, "a": [good["a"]]}.items())),
+        [(k, v) for k, v in good.items() if k != T.fixture_world_id("a")] + [(HOSTILE_LABEL, good[T.fixture_world_id("a")])]),
+    "int-id": lambda good, text: _ids_json(list({**good, T.fixture_world_id("a"): 5}.items())),
+    "list-id": lambda good, text: _ids_json(list({**good, T.fixture_world_id("a"): [good[T.fixture_world_id("a")]]}.items())),
     # `a`'s entry under the key `"\ud800"` (a JSON escape, so the file itself is plain ASCII):
     # decoded, a lone surrogate no UTF-8 encoder takes (adversary F12) — off the label rule and
     # off the manifest's worlds; what this pins is that the reader refuses rather than raising
     # while it measures or quotes the label.
     "lone-surrogate-label": lambda good, text: _ids_json(
-        [("\ud800", good["a"])] + [(k, v) for k, v in good.items() if k != "a"]),
+        [("\ud800", good[T.fixture_world_id("a")])] + [(k, v) for k, v in good.items() if k != T.fixture_world_id("a")]),
 }
 
 
@@ -509,7 +520,7 @@ def _plant_roster_fault(fault: str, ep: Path, good: dict[str, str], tmp_path: Pa
 def test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused(tmp_path, data_root, fault):
     t = S.tenant(data_root, A_ID)
     runs = t.runs_repository()
-    good = {label: S.new_id() for label in LABELS}
+    good = {label: S.new_id() for label in WORLD_IDS}
     episode_id, ep = _episode(data_root, A_ID, roster=good)
     good_text = (ep / S.ROSTER_NAME).read_text(encoding="utf-8")
     try:
@@ -519,13 +530,13 @@ def test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused(tmp_path, data_
         with runs.episode(episode_id) as view:
             whole = S.raised(view.arm_ids)
             assert _is_refusal(whole), f"arm_ids() over a {fault} roster gave {whole!r}"
-            one = S.raised(view.arm_id, "a")
+            one = S.raised(view.arm_id, T.fixture_world_id("a"))
             assert _is_refusal(one), f"arm_id('a') over a {fault} roster gave {one!r}"
         for what, err in (("arm_ids()", whole), ("arm_id('a')", one)):
             assert _unbounded(S.message(err)) == [], (
                 f"{what}'s refusal over a {fault} roster is not one bounded line: "
                 f"{_unbounded(S.message(err))}")
-        gate = S.raised(_open_and_close, runs, episode_id, roster_label="a")
+        gate = S.raised(_open_and_close, runs, episode_id, require_roster=True)
         assert gate is None or _is_refusal(gate), (
             f"the sibling's gate over a {fault} roster failed otherwise: {gate!r}")
         assert _unbounded(S.message(gate)) == [], (
@@ -537,13 +548,14 @@ def test_a_roster_that_is_torn_inconsistent_or_a_link_is_refused(tmp_path, data_
     S.write_roster(ep, raw=good_text)
     with runs.episode(episode_id) as view:
         assert _texts(view.arm_ids()) == good
-        assert str(view.arm_id("a")) == good["a"]
+        assert str(view.arm_id(T.fixture_world_id("a"))) == good[T.fixture_world_id("a")]
 
 
-def _open_and_close(runs, episode_id: str, **kwargs) -> None:
+def _open_and_close(runs, episode_id: str, *, world_id=None, **kwargs) -> None:
     """Open `runs.episode(episode_id, **kwargs)` and close it again (a refusal propagates)."""
-    with runs.episode(episode_id, **kwargs):
-        pass
+    with runs.episode(episode_id, **kwargs) as view:
+        if world_id is not None:
+            view.arm_id(world_id)
 
 
 def test_a_refusal_quoting_a_callers_label_stays_one_bounded_line(data_root):
@@ -551,7 +563,7 @@ def test_a_refusal_quoting_a_callers_label_stays_one_bounded_line(data_root):
 
     t = S.tenant(data_root, A_ID)
     runs = t.runs_repository()
-    good = {label: S.new_id() for label in LABELS}
+    good = {label: S.new_id() for label in WORLD_IDS}
     episode_id, _ep = _episode(data_root, A_ID, roster=good)
 
     for hostile in (HOSTILE_LABEL, *SURROGATE_LABELS):
@@ -559,22 +571,22 @@ def test_a_refusal_quoting_a_callers_label_stays_one_bounded_line(data_root):
         with runs.episode(episode_id) as view:
             absent = S.raised(view.arm_id, hostile)
             assert isinstance(absent, RunAbsent), f"arm_id({shown}) gave {absent!r}"
-            assert str(view.arm_id("a")) == good["a"]
+            assert str(view.arm_id(T.fixture_world_id("a"))) == good[T.fixture_world_id("a")]
         assert _unbounded(S.message(absent)) == [], (
             f"arm_id's refusal quoting the caller's label {shown}: "
             f"{_unbounded(S.message(absent))}")
 
-        gate = S.raised(_open_and_close, runs, episode_id, roster_label=hostile)
+        gate = S.raised(_open_and_close, runs, episode_id, world_id=hostile, require_roster=True)
         assert _is_refusal(gate), f"the gate for the unnamed label {shown} gave {gate!r}"
         assert _unbounded(S.message(gate)) == [], (
             f"the gate's refusal quoting the caller's label {shown}: "
             f"{_unbounded(S.message(gate))}")
-    with runs.episode(episode_id, roster_label="a") as view:
-        assert str(view.arm_id("a")) == good["a"]
+    with runs.episode(episode_id, require_roster=True) as view:
+        assert str(view.arm_id(T.fixture_world_id("a"))) == good[T.fixture_world_id("a")]
 
 
 @pytest.mark.parametrize("roster_state",
-                         ["absent", "runs-without-roster", "label-missing", "torn"])
+                         ["absent", "runs-without-roster", "invalid-world-key", "torn"])
 def test_the_sibling_form_of_the_view_refuses_unless_the_roster_names_the_label(
         data_root, roster_state):
     from defender.tenancy._tenant import TenantRefused
@@ -584,19 +596,19 @@ def test_the_sibling_form_of_the_view_refuses_unless_the_roster_names_the_label(
     episode_id, ep = _episode(data_root, A_ID)
     doc = T.family_doc(episode_id=episode_id, source_run_id=S.new_id())
     T.write_family(ep, {**doc, SENTINEL: "read"})
-    roster = {label: S.new_id() for label in LABELS}
+    roster = {label: S.new_id() for label in WORLD_IDS}
     if roster_state != "absent":
         (ep / "runs").mkdir()
-    if roster_state == "label-missing":
-        S.write_roster(ep, {k: v for k, v in roster.items() if k != LABEL})
-    elif roster_state == "torn":
+    if roster_state == "invalid-world-key":
+        S.write_roster(ep, {**roster, "b": roster[WORLD_ID]})
+    elif roster_state in ("torn", "invalid-world-key"):
         S.write_roster(ep, raw=S.torn(json.dumps(roster, indent=2)))
     before = S.tree(ep)
 
     with S.FileReads(ep / S.MANIFEST_NAME) as watch:
-        err = S.raised(runs.episode, episode_id, roster_label=LABEL)
+        err = S.raised(runs.episode, episode_id, require_roster=True)
         seen = watch.events()
-    if roster_state == "torn":
+    if roster_state in ("torn", "invalid-world-key"):
         assert _is_refusal(err), f"a torn roster gave {err!r}"
     else:
         assert isinstance(err, TenantRefused), f"roster {roster_state}: {err!r}"
@@ -612,8 +624,8 @@ def test_the_sibling_form_of_the_view_refuses_unless_the_roster_names_the_label(
     S.write_roster(ep, roster)
     T.write_family(ep, doc)
     with S.FileReads(ep / S.MANIFEST_NAME) as watch:
-        with runs.episode(episode_id, roster_label=LABEL) as view:
-            assert str(view.arm_id(LABEL)) == roster[LABEL]
+        with runs.episode(episode_id, require_roster=True) as view:
+            assert str(view.arm_id(WORLD_ID)) == roster[WORLD_ID]
         assert watch.reads() > 0, (
             "control: the channel saw no read of the manifest where `arm_id` checks the roster "
             "against the manifest's worlds")
@@ -634,7 +646,7 @@ class _Scene:
                                 episode_id=self.episode_id)
         self.ep = T.episode(tmp_path, doc=self.doc, root=S.episodes_dir(root, owner),
                             episode_id=self.episode_id)
-        self.roster = {w["label"]: S.new_id() for w in self.doc["worlds"]}
+        self.roster = {w["world_id"]: S.new_id() for w in self.doc["worlds"]}
 
     def poison(self) -> None:
         T.write_family(self.ep, {**self.doc, SENTINEL: "read"})
@@ -658,7 +670,7 @@ def _sibling(tenant_id: str, episode_id: str):
     return rc, refused, f"{P.refusal_text(refused)}\n{err}", rec
 
 
-SIBLING_CASES = ("pre-runs", "runs-without-roster", "label-not-in-roster", "torn-roster",
+SIBLING_CASES = ("pre-runs", "runs-without-roster", "invalid-world-key", "torn-roster",
                  "another-tenants-episode", "linked-episode")
 
 
@@ -676,8 +688,8 @@ def test_the_sibling_is_refused_before_the_manifest_unless_its_roster_names_it(
             S.replace_with_link(S.episodes_dir(data_root, A_ID) / scene.episode_id, scene.ep)
     elif case == "runs-without-roster":
         (scene.ep / "runs").mkdir()
-    elif case == "label-not-in-roster":
-        scene.start_runs_by_hand({k: v for k, v in scene.roster.items() if k != LABEL})
+    elif case == "invalid-world-key":
+        scene.start_runs_by_hand({**scene.roster, "b": scene.roster[WORLD_ID]})
     elif case == "torn-roster":
         scene.start_runs_by_hand(raw=S.torn(json.dumps(scene.roster, indent=2)))
     scene.poison()
@@ -712,6 +724,21 @@ def test_the_sibling_is_refused_before_the_manifest_unless_its_roster_names_it(
     _run_control(scene, case)
 
 
+def test_a_child_refuses_a_missing_world_uuid_after_resolving_its_label(tmp_path, data_root):
+    scene = _Scene(tmp_path, data_root, B_ID)
+    scene.start_runs_by_hand({wid: arm for wid, arm in scene.roster.items() if wid != WORLD_ID})
+    before = S.tree(data_root)
+    with S.FileReads(scene.ep / S.MANIFEST_NAME) as watch:
+        rc, refused, said, rec = _sibling(B_ID, scene.episode_id)
+        assert watch.reads() > 0, "world binding was not read through the manifest"
+    assert refused is not None, said
+    assert rc is None, said
+    assert rec.order == [], "a missing world binding spent before refusing"
+    assert S.tree(data_root) == before, "a refused child changed the host tree"
+    S.write_roster(scene.ep, scene.roster)
+    _run_control(scene, "repaired missing world UUID")
+
+
 def _run_control(scene: _Scene, case: str):
     """Exercise the real sibling with its valid manifest, checking arm placement and isolation."""
     natural = S.natural_runs(scene.root, scene.owner)
@@ -720,7 +747,7 @@ def _run_control(scene: _Scene, case: str):
     rc, refused, err = P.drive_run_py(P.new_sibling_argv(scene.owner, scene.episode_id, LABEL), ok)
     assert refused is None, f"{case}: {P.refusal_text(refused)} {err}"
     assert rc == 0, f"{case}: {rc}: {err}"
-    assert ok.run_dir == scene.ep / "runs" / scene.roster[LABEL], ok.run_dir
+    assert ok.run_dir == scene.ep / "runs" / scene.roster[WORLD_ID], ok.run_dir
     assert S.is_canonical_uuid(Path(ok.run_dir).name), ok.run_dir
     assert scene.episode_id not in Path(ok.run_dir).name
     assert sorted(os.listdir(natural)) == before, "an arm or sidecar landed in natural runs"

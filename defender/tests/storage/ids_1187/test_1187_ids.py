@@ -165,15 +165,15 @@ def test_1187_o1_a_resumed_world_never_composes_its_arm_id(tmp_path):
 
     episode_id = S.new_id()
     family = _family.parse_family(_family_doc_for(episode_id, "b"))
-    roster = {label: RunId.parse(S.new_id()) for label in ("a", "b")}
+    roster = {family.world(label).world_id: RunId.parse(S.new_id()) for label in ("a", "b")}
     faults = []
     for label in ("a", "b"):
         composed = f"{episode_id}-{label}"
         handed = _family.resume_world_from(family, label, tmp_path, arm_ids=roster)
         kind, value = _attribute(handed, "run_id")
-        if kind == "value" and str(value) != str(roster[label]):
+        if kind == "value" and str(value) != str(roster[family.world(label).world_id]):
             faults.append(f"{label}: handed the roster, run_id is {value!r}, not "
-                          f"{str(roster[label])!r}")
+                          f"{str(roster[family.world(label).world_id])!r}")
         bare = _family.resume_world_from(family, label, tmp_path)
         kind, value = _attribute(bare, "run_id")
         if kind == "value" and str(value) == composed:

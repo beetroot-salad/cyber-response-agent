@@ -293,8 +293,8 @@ def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
     with Episode.open(ep) as episode:
         T.episode_view(episode)
         exits = P.mod("learning.branch.cli").start_family(
-            episode, ["a", "b"], spawn=spawn, tenant_id=T.SOURCE_TENANT)
-    assert exits.get("b") == P.PROVIDER_DOWN_EXIT
+            episode, [T.world_id(ep, label) for label in ("a", "b")], spawn=spawn, tenant_id=T.SOURCE_TENANT)
+    assert exits.get(T.world_id(ep, "b")) == P.PROVIDER_DOWN_EXIT
     records = {p.stem: p.read_text(encoding="utf-8") for p in ep.rglob("world_records/*.yaml")}
     assert T.world_id(ep, "b") in records, f"no world record for the sibling that exited 4: {sorted(records)}"
     assert P.sym("learning.branch.outcome", "DID_NOT_FINISH") in records[T.world_id(ep, "b")]
@@ -333,7 +333,7 @@ def _sibling_episode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     with P.mod("learning.branch.cli").prepare_episode(runs, source) as view:
         ep = Path(view.episode.dir)
         T.write_family(ep, T.family_doc(episode_id=ep.name, source_run_dir=str(src)))
-        view.start_runs(("a", "b", "c"))
+        view.start_runs([T.world_id(ep, label) for label in T.WORLDS])
     return ep
 
 

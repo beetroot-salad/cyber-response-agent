@@ -387,7 +387,7 @@ def control_episode(tmp_path: Path, source_run_dir: Path, branch_message_id: int
             episode_id=view.episode_id, branch_message_id=branch_message_id,
             as_of=as_of.isoformat().replace("+00:00", "Z"))
         T.write_family(view.episode.dir, doc)
-        view.start_runs([world["label"] for world in doc["worlds"]])
+        view.start_runs([world["world_id"] for world in doc["worlds"]])
         return view.episode.dir
 
 

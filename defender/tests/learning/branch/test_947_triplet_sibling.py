@@ -179,7 +179,7 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
     """A sibling run reaches the curation lane on none of its exits"""
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
-    roster = {w: S.new_id() for w in T.WORLDS}
+    roster = {T.world_id(ep, w): S.new_id() for w in T.WORLDS}
     S.write_roster(ep, roster)
     seen: list[str] = []
     rec = _Recorder([])
@@ -187,7 +187,7 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
                 preflight=_no_preflight,
                 enqueue=lambda run_dir, alert, truncated_by=None: seen.append(run_dir.name))
     assert seen == [], "a sibling reached the curation lane"
-    assert rec.kwargs["run_dir"] == ep / "runs" / roster["b"], (
+    assert rec.kwargs["run_dir"] == ep / "runs" / roster[T.world_id(ep, "b")], (
         "the sibling did not run at its roster id (#1187 declared change 2)")
 
 
@@ -332,14 +332,14 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
 
     base, src = T.runs_base(tmp_path)
     ep = _episode(tmp_path, src)
-    roster = {w: S.new_id() for w in T.WORLDS}
+    roster = {T.world_id(ep, w): S.new_id() for w in T.WORLDS}
     S.write_roster(ep, roster)
     rec = _Recorder([])
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=_no_preflight)
     run_dir = rec.kwargs["run_dir"]
-    assert run_dir == ep / "runs" / roster["b"], (
-        f"the sibling ran at {run_dir}, not at its roster id {roster['b']}")
+    assert run_dir == ep / "runs" / roster[T.world_id(ep, "b")], (
+        f"the sibling ran at {run_dir}, not at its roster id {roster[T.world_id(ep, 'b')]}")
     assert S.is_canonical_uuid(run_dir.name), run_dir.name
     assert ep.name not in run_dir.name, f"{run_dir.name} carries the episode id"
     assert not run_dir.name.endswith("-b"), f"{run_dir.name} carries the label"

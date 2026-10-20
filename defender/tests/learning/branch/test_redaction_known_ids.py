@@ -62,7 +62,7 @@ def _arm_ids() -> dict:
     """The roster's ids, as `family_identities` takes them (#1187: `{label: RunId}`)."""
     from defender.run_repository import RunId
 
-    return {label: RunId.parse(text) for label, text in ROSTER.items()}
+    return {T.fixture_world_id(label): RunId.parse(text) for label, text in ROSTER.items()}
 
 
 def _known(episode_id: str) -> frozenset[str]:
@@ -210,7 +210,7 @@ def test_a_world_registry_knows_its_whole_family(tmp_path):
     est = S.estate(tmp_path)
     doc = S.family_v2(episode_id=UUID_EPISODE, source_run_id=UUID_SOURCE)
     ep = S.episode_v2(tmp_path, doc=doc, episode_id=UUID_EPISODE, base_rows=[])
-    R.write_roster(ep, ROSTER)
+    R.write_roster(ep, {T.world_id(ep, label): arm for label, arm in ROSTER.items()})
     registry = S.world_registry(ep, "b", est)
     known = {str(member) for member in registry.branch_identities()}
     expected = {UUID_EPISODE, *(T.fixture_world_id(label) for label in ROSTER), *ROSTER.values()}
@@ -260,7 +260,7 @@ def test_delta_o_hands_the_comparator_the_familys_identities(data_root):
     from defender.tests.storage.ids_1187 import _spec1187 as R
 
     runs = R.tenant(data_root).runs_repository()
-    ep = R.make_episode(data_root, R.H5.T_ID, UUID_EPISODE, labels=ROSTER, roster=ROSTER)
+    ep = R.make_episode(data_root, R.H5.T_ID, UUID_EPISODE, labels=ROSTER, roster={T.fixture_world_id(label): arm for label, arm in ROSTER.items()})
     T.write_family(ep, T.family_doc(episode_id=UUID_EPISODE, source_run_id=UUID_SOURCE))
     with runs.episode(UUID_EPISODE) as view:
         T.mod("learning.branch.outcome").write_outcome(

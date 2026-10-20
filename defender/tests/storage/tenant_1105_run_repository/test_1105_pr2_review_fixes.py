@@ -64,10 +64,9 @@ def _post_runs_episode(tenant_id: str, labels: tuple[str, ...]) -> tuple[Path, s
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     episode_id = S.new_id()
-    roster = {label: S.new_id() for label in labels}
-    ep = S.make_episode(P.data_root(), tenant_id, episode_id, labels=labels, roster=roster,
+    ep = S.make_episode(P.data_root(), tenant_id, episode_id, labels=labels, roster=True,
                         arms=True)
-    return ep, episode_id, roster
+    return ep, episode_id, S.read_roster(ep)
 
 
 def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(tmp_path):
@@ -130,9 +129,9 @@ def test_a_an_arm_whose_container_goes_bad_after_the_view_opened_is_run_refused(
     t = _uuid_tenant()
     ep, episode_id, roster = _post_runs_episode(H.T_ID, ("a", "b"))
     view = t.runs_repository().episode(episode_id)
-    arm = view.arm_id("a")
-    assert str(arm) == roster["a"]
-    assert Path(view.open(arm).run_dir) == ep / "runs" / roster["a"], "positive control"
+    arm = view.arm_id(P.T.world_id(ep, "a"))
+    assert str(arm) == roster[P.T.world_id(ep, "a")]
+    assert Path(view.open(arm).run_dir) == ep / "runs" / roster[P.T.world_id(ep, "a")], "positive control"
 
     (ep / "runs").rename(tmp_path / "container-gone")
     err = H.raised(view.open, arm)
@@ -148,13 +147,13 @@ def test_a_verify_opens_every_finished_arm_or_hands_back_its_refusal(tmp_path):
     labels = ("a", "b", "c")
     ep, episode_id, roster = _post_runs_episode(H.T_ID, labels)
     with t.runs_repository().episode(episode_id) as view:
-        arms = cli._finished_arms(view, labels)
-        assert all(isinstance(arms[label], Run) for label in labels), f"control: {arms}"
-        assert {label: Path(arms[label].run_dir).name for label in labels} == roster
+        arms = cli._finished_arms(view, [P.T.world_id(ep, label) for label in labels])
+        assert all(isinstance(arms[P.T.world_id(ep, label)], Run) for label in labels), f"control: {arms}"
+        assert {P.T.world_id(ep, label): Path(arms[P.T.world_id(ep, label)].run_dir).name for label in labels} == roster
         (ep / "runs").rename(tmp_path / "container-gone")
-        arms = cli._finished_arms(view, labels)
-    assert sorted(arms) == sorted(labels)
-    assert all(isinstance(arms[label], RunRefused) for label in labels), arms
+        arms = cli._finished_arms(view, [P.T.world_id(ep, label) for label in labels])
+    assert sorted(arms) == sorted(P.T.world_id(ep, label) for label in labels)
+    assert all(isinstance(arms[P.T.world_id(ep, label)], RunRefused) for label in labels), arms
 
 
 class _ContainerLinkingSibling(P.J.FakeSibling):

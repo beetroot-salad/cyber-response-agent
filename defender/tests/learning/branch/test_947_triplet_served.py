@@ -160,7 +160,7 @@ def _branched_backend(rec: VerbRecorder, detail: str) -> FakeVerbs:
 
     family = T.sym("runtime.branch._family", "parse_family")(
         T.family_doc(episode_id=PINNED_EPISODE, source_run_id="live-lever-up-20260930-sudo"))
-    arm_ids = {label: RunId.parse(text) for label, text in ROSTER.items()}
+    arm_ids = {T.fixture_world_id(label): RunId.parse(text) for label, text in ROSTER.items()}
     known = T.sym("runtime.branch._family", "family_identities")(family, arm_ids)
     plain = _faulting_backend(rec, detail)
 

@@ -474,7 +474,7 @@ def family_for(source: Path, *, episode_id: str = T.EPISODE_ID, roster: bool = T
     ep = T.episode(episodes.parent, doc=doc, episode_id=episode_id, root=episodes)
     if roster:
         (ep / "runs").mkdir(exist_ok=True)
-        T.write_roster(ep, {w["label"]: str(uuid.uuid4()) for w in doc["worlds"]})
+        T.write_roster(ep, {w["world_id"]: str(uuid.uuid4()) for w in doc["worlds"]})
     return ep / "family.yaml"
 
 

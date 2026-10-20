@@ -88,7 +88,7 @@ def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
     src, ep = P.sibling_scene(tmp_path, roster=False)
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     (ep / "runs").mkdir(exist_ok=True)
-    S.write_roster(ep, {w["label"]: S.new_id() for w in doc["worlds"]})
+    S.write_roster(ep, {w["world_id"]: S.new_id() for w in doc["worlds"]})
     P.second_tenant(P.data_root(), H.U_ID)
     records = _episode_records(ep)
     assert {"family.yaml", S.ROSTER_NAME} <= records

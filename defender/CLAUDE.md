@@ -50,4 +50,7 @@ and are not passed to the retirement command. No legacy name is an alias.
 
 World declarations use `label` as metadata. The host assigns `world_id` UUIDs once before
 preflight and publishes the manifest create-only; every world artifact uses that UUID.
-Pre-UUID world manifests require a fresh episode; readers never derive or mint missing IDs.
+Pre-UUID world manifests and label-keyed arm rosters require a fresh episode; readers never
+derive or mint missing IDs or translate an old roster. `arms.json` maps world UUIDs to arm
+UUIDs; labels remain manifest metadata and CLI selectors. Family admission checks the roster
+byte budget before publication or preflight, independently of label length.

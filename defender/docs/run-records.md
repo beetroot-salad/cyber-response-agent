@@ -37,8 +37,10 @@ census) and the page's former per-kind reader/writer tables retired with it.
   not an ownership level: the fork point is declared once in `family.yaml` (`source_run_id`,
   `branch_message_id`, `fences_at`; #1105 PR 2 stopped writing `source_run_dir` and never reads
   an old manifest's; `_family.py:85, 411-415`), and a sibling
-  links to its world only through the arm roster `arms.json` (`{label: arm uuid}`, #1187 R2),
-  which the host writes once at the start of RUNS; its run id carries no label.
+  links to its world only through the arm roster `arms.json` (`{world UUID: arm UUID}`, #1187 R2),
+  which the host writes once at the start of RUNS; its run id carries no label. Family
+  admission checks the future roster against the reader's byte budget before publication
+  or preflight. Canonical UUID widths make that budget depend on world count, not labels.
 - **Run** — the unit of record, addressed by `(tenant_id, run_id)` (`RunAddress`) through the
   tenant's run repository (`Tenant.runs_repository()`; an episode's arms through
   `runs.episode(episode_id)`).
@@ -97,7 +99,7 @@ unreachable by root containment rather than by a named deny.
 | ticket_comments | 2 | `<run>.ticket-comments.jsonl` | — | — | run.observability.ticket_comments | every comment the record step got the store to accept, `{key, body}`, appended by `ticket_writer._record_posted_comment`; the run's own writes to the world, handed to a branched world's oracle (#1255 P5) |
 | session_db | 3 | `<sessions>/<lineage id>.db` | — | — | run.session.session_db | SQLite; the connection at `_bare_connect` carries every read and append |
 | family | 4 | `family.yaml` | — | — | episode.family | the fork point and host-assigned world UUIDs, declared once per episode before preflight |
-| arm_roster | 4 | `arms.json` | — | — | episode.arm_roster | #1187 R2: `{label: arm uuid}`, written once by the host at the start of RUNS through the complete-or-absent lane, after `runs/`; no box mounts it |
+| arm_roster | 4 | `arms.json` | — | — | episode.arm_roster | #1187 R2: `{world UUID: arm UUID}`, written once by the host at the start of RUNS through the complete-or-absent lane, after `runs/`; no box mounts it |
 | family_stamp | 4 | `provenance.json` | — | — | episode.family_stamp | a different shape from the run stamp; written by `verify_family` |
 | review_yaml | 4 | `review.yaml` | — | — | episode.review | written at `Step.REVIEW`, before the siblings run; the outcome is merged in at the end (`cli.py:1120`) |
 | samples | 4 | `samples.yaml` | — | — | episode.samples | written at `Step.QUESTIONER`, before the model call |

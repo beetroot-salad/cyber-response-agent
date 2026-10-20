@@ -75,7 +75,7 @@ def _arms(label: str) -> list[tuple[Path, str]]:
     folder that has a roster naming it (#1187: the arm is at the roster's id)."""
     out = []
     for ep in sorted(S.episodes_root().iterdir()) if S.episodes_root().is_dir() else []:
-        arm = S.T.read_roster(ep).get(label)
+        arm = S.T.read_roster(ep).get(S.T.world_id(ep, label))
         if arm is not None:
             out.append((ep, arm))
     return out

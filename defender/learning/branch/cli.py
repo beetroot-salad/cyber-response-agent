@@ -337,11 +337,14 @@ SPAWN_FAILED_EXIT = 70
 
 
 def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every arm runs on, the rate they share and the failures already counted
-    episode: Episode, world_labels: Sequence[str], *,
+    episode: Episode, world_ids: Sequence[str], *,
     spawn: Callable[..., int] | None = None, model: str | None = None,
     tenant_id: _tenant.TenantId | None, rate: float | None = None, failed_before: int = 0,
 ) -> dict[str, int]:
-    """Start every servable sibling together, and wait for all of them.
+    """Start the selected world UUIDs together, returning exits keyed by those UUIDs.
+
+    Each UUID resolves through the published family before any child starts; only its label
+    is passed to the operator-facing `--world` selector.
 
     The children are spawned from N threads that rendezvous first, so the arms overlap in time;
     run serially they would be compared across a moving estate, which the primed capture and
@@ -376,20 +379,21 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
             "on — refused before any sibling started")
     stop = threading.Event()
     start = functools.partial(_default_spawn, stop=stop) if spawn is None else spawn
-    labels = list(world_labels)
     family = load_family(episode.view(), expected_episode_id=episode.dir.name)
-    if not labels:
+    worlds = {world_id: family.world_by_id(world_id) for world_id in world_ids}
+    if not worlds:
         return {}
-    ready = threading.Barrier(len(labels))
+    ready = threading.Barrier(len(worlds))
     exits: dict[str, int] = {}
     failed = [failed_before]
     tally = threading.Lock()
 
-    def ended(label: str, code: int, why: str) -> None:
-        exits[label] = code
+    def ended(world_id: str, code: int, why: str) -> None:
+        label = worlds[world_id].label
+        exits[world_id] = code
         if not code:
             return
-        if outcome_mod.write_world_record(episode, family.world(label).world_id, outcome_mod.DID_NOT_FINISH,
+        if outcome_mod.write_world_record(episode, world_id, outcome_mod.DID_NOT_FINISH,
                                           detail=why):
             _logger.warning(f"world {label}: {why}; recorded as did not finish")
         with tally:
@@ -400,32 +404,33 @@ def start_family(  # noqa: PLR0913, C901 — the family's arms, the tenant every
                     "family is unusable; stopping the siblings still running")
                 stop.set()
 
-    def launch_one(label: str) -> None:
+    def launch_one(world_id: str) -> None:
+        label = worlds[world_id].label
         env = dict(os.environ)
         if rate is not None:
-            env[KNOB_RATE] = str(rate / len(labels))
+            env[KNOB_RATE] = str(rate / len(worlds))
         # Rendezvous first, so "started together" does not depend on the pool's scheduling.
         ready.wait(timeout=30)
         try:
             code = start(sibling_argv(episode.dir.name, label, tenant_id=tenant_id,
                                       model=model), env=env)
         except Exception as never_started:  # noqa: BLE001 — one arm's failure, not the family's
-            ended(label, SPAWN_FAILED_EXIT, f"its process never started ({never_started!r})")
+            ended(world_id, SPAWN_FAILED_EXIT, f"its process never started ({never_started!r})")
             return
-        ended(label, code, f"its process exited {code} without a record of its own"
+        ended(world_id, code, f"its process exited {code} without a record of its own"
               + (" (stopped: the family became unusable)" if stop.is_set() else ""))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(labels)) as pool:
-        futures = {label: pool.submit(launch_one, label) for label in labels}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(worlds)) as pool:
+        futures = {world_id: pool.submit(launch_one, world_id) for world_id in worlds}
     # A thread that died outside `start` (a broken barrier fails all N at once) is recorded as a
     # result, not re-raised: raising would skip `verify_family`, leaving completed siblings
     # unarchived.
-    for label, future in futures.items():
+    for world_id, future in futures.items():
         try:
             future.result()
         except Exception as never_started:  # noqa: BLE001 — one arm's failure, not the family's
-            if label not in exits:
-                ended(label, SPAWN_FAILED_EXIT, f"its process never started ({never_started!r})")
+            if world_id not in exits:
+                ended(world_id, SPAWN_FAILED_EXIT, f"its process never started ({never_started!r})")
     return exits
 
 
@@ -651,32 +656,33 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
                      f"({record['reason']})")
         return 1
     unservable = {entry["world"] for entry in record["unservable_worlds"]}
-    labels = [w.label for w in runnable_worlds(family) if w.label not in unservable]
+    worlds = [w for w in runnable_worlds(family) if w.label not in unservable]
+    world_ids = [w.world_id for w in worlds]
     started.set()
     with clock.step(Step.RUNS):
         # The arm container, then the roster — one fresh id for EVERY manifest world, the
         # unservable and the `role: null` replicate included — before the first sibling
         # starts: each sibling's run start checks the roster names its world, and takes its
         # run id from it.
-        view.start_runs([world.label for world in family.worlds])
-        exits = start_family(episode, labels, spawn=spawn, model=ns.model,
+        view.start_runs([world.world_id for world in family.worlds])
+        exits = start_family(episode, world_ids, spawn=spawn, model=ns.model,
                              tenant_id=tenant.tenant_id, rate=process_oracle_settings().rate,
                              failed_before=len(unservable))
-    finished = [label for label in labels if exits.get(label) == 0]
+    finished = [world_id for world_id in world_ids if exits.get(world_id) == 0]
     with clock.step(Step.VERIFY):
         report = verify_family(
             episode, _finished_arms(view, finished), source=source_stamp,
             allow_dirty=ns.allow_dirty)
-    failed = sorted(label for label, code in exits.items() if code)
-    for label in failed:
-        _logger.warning(f"world {label} exited {exits[label]}")
+    failed = sorted(world_id for world_id, code in exits.items() if code)
+    for world_id in failed:
+        _logger.warning(f"world {family.world_by_id(world_id).label} exited {exits[world_id]}")
     if not report["comparable"]:
         _logger.warning(f"episode {episode_id}: the family stamp is withheld "
                         f"({report['not_comparable']})")
     elif report["reason"]:
         _logger.warning(f"episode {episode_id}: per-world faults, each on its own world's "
                         f"record ({report['reason']})")
-    _logger.info(f"episode {episode_id}: {len(report['archived'])}/{len(labels)} worlds "
+    _logger.info(f"episode {episode_id}: {len(report['archived'])}/{len(world_ids)} worlds "
                  "archived")
     with clock.step(Step.JUDGE):
         _grade(runs, episode_id=episode_id, judge=judge)
@@ -686,7 +692,7 @@ def _run_episode(  # noqa: PLR0913 — the episode's whole identity plus its sea
     return 1 if failed else 0
 
 
-def _finished_arms(view: EpisodeRuns, labels: Sequence[str]) -> dict[str, Run | RunRefused]:
+def _finished_arms(view: EpisodeRuns, world_ids: Sequence[str]) -> dict[str, Run | RunRefused]:
     """Every finished arm, at the id the episode's roster holds for it (`view.arm_ids()`, read
     once), from ONE hold of the arm container (`view.arms`), each arm judged at its own entry
     (only a real directory is a run) — or the refusal for it, which `verify_family` records as
@@ -694,7 +700,7 @@ def _finished_arms(view: EpisodeRuns, labels: Sequence[str]) -> dict[str, Run | 
     that is not a real directory its own; a container that went bad after the siblings ran is
     every arm's `RunUnreachable` (or `RunAbsent` when it is gone).
 
-    A roster the reader refuses (torn, an id off the rule, a label set other than the
+    A roster the reader refuses (torn, an id off the rule, a world UUID set other than the
     manifest's worlds, a link) is not one world's fault: VERIFY refuses outright, naming it,
     and no arm is opened."""
     try:
@@ -706,8 +712,8 @@ def _finished_arms(view: EpisodeRuns, labels: Sequence[str]) -> dict[str, Run | 
         raise LauncherRefused(
             f"[branch] episode {view.episode_id}: its arm roster is gone, so no finished arm "
             "can be named — VERIFY refuses rather than guess an arm's id")
-    with view.arms([ids[label] for label in labels]) as handout:
-        return {label: handout[ids[label]] for label in labels}
+    with view.arms([ids[world_id] for world_id in world_ids]) as handout:
+        return {world_id: handout[ids[world_id]] for world_id in world_ids}
 
 
 def _render_page(runs: RunsRepository, *, episode_id: str) -> None:

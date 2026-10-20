@@ -724,7 +724,7 @@ class Episode:
 
     def run(self, label: str) -> Path:
         """The arm folder of `label`: `runs/<the id the arm roster holds for it>` (#1187)."""
-        return self.dir / "runs" / T.read_roster(self.dir)[label]
+        return self.dir / "runs" / T.read_roster(self.dir)[T.world_id(self.dir, label)]
 
     def record(self, name: str) -> Path:
         return self.dir / name

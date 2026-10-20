@@ -54,7 +54,7 @@ def _tenant_scene(root: Path, tenant_id: str) -> dict:
     run_id = S.new_id()
     S.make_run(S.natural_runs(root, tenant_id), run_id, alert=f'{{"alert": "{tenant_id}"}}\n')
     ep_id = S.new_id()
-    roster = {label: S.new_id() for label in ("a", "b", "c")}
+    roster = {T.fixture_world_id(label): S.new_id() for label in ("a", "b", "c")}
     ep = S.make_episode(root, tenant_id, ep_id, manifest=_manifest(ep_id), roster=roster,
                         arms=True)
     return {"tenant": t, "run_id": run_id, "episode_id": ep_id, "episode": ep,
@@ -187,7 +187,7 @@ def test_an_arm_id_is_absent_from_the_natural_container_and_opens_through_its_ep
     runs_dir = S.natural_runs(data_root, A_ID)
     before = S.tree(runs_dir)
     runs = a["tenant"].runs_repository()
-    arm = a["roster"]["b"]
+    arm = a["roster"][T.fixture_world_id("b")]
 
     err = S.raised(runs.open, _rid(arm))
     assert isinstance(err, RunAbsent), f"runs.open(<arm id>) gave {err!r}"
@@ -225,7 +225,7 @@ def _link_paths(root, scene):
     episode = scene["episode"]
     return {"runs": natural, "episodes": episode.parent, "episode": episode,
             "arms": episode / "runs", "run": natural / scene["run_id"],
-            "arm": episode / "runs" / scene["roster"]["b"]}
+            "arm": episode / "runs" / scene["roster"][T.fixture_world_id("b")]}
 
 
 @pytest.mark.parametrize("level", ["runs", "episodes", "episode", "arms", "run", "arm"])
@@ -253,9 +253,9 @@ def test_linked_repository_levels_refuse_and_restore(tmp_path, data_root, level)
     else:
         if level == "arm":
             _episode_door(runs, a["episode_id"])  # A bad leaf must not refuse the episode.
-        arm = b["roster"]["a"] if level == "arms" else a["roster"]["b"]
+        arm = b["roster"][T.fixture_world_id("a")] if level == "arms" else a["roster"][T.fixture_world_id("b")]
         probes = {operation: lambda operation=operation: _arm_door(
-            runs, a["episode_id"], a["roster"]["a"] if operation == "create" else arm, operation)
+            runs, a["episode_id"], a["roster"][T.fixture_world_id("a")] if operation == "create" else arm, operation)
             for operation in (("open", "arms", "create") if level == "arms" else ("open",))}
     for name, probe in probes.items():
         err = S.raised(probe)
@@ -272,7 +272,7 @@ def test_linked_repository_levels_refuse_and_restore(tmp_path, data_root, level)
         assert Path(runs.open(_rid(a["run_id"])).run_dir) == S.natural_runs(data_root, A_ID) / a["run_id"]
         assert [str(rid) for rid in runs.list()] == [a["run_id"]]
     else:
-        arm = a["roster"]["b"]
+        arm = a["roster"][T.fixture_world_id("b")]
         assert Path(_arm_door(runs, a["episode_id"], arm).run_dir) == a["episode"] / "runs" / arm
         with runs.episode_files(a["episode_id"]) as handle:
             assert Path(handle.dir) == a["episode"]
@@ -388,7 +388,7 @@ def _decoy_episode(a: dict, root: Path, stranger: str) -> Path:
     """Copy tenant A's episode outside its tenant tree as a cross-tenant decoy."""
     decoy = root / a["episode_id"]
     shutil.copytree(a["episode"], decoy, symlinks=True)
-    S.write_roster(decoy, {"a": stranger, "b": S.new_id(), "c": S.new_id()})
+    S.write_roster(decoy, {T.fixture_world_id("a"): stranger, T.fixture_world_id("b"): S.new_id(), T.fixture_world_id("c"): S.new_id()})
     S.make_run(decoy / "runs", stranger, alert='{"alert": "decoy"}\n')
     return decoy
 
@@ -397,7 +397,7 @@ def _decoy_episode(a: dict, root: Path, stranger: str) -> Path:
 def test_a_level_swapped_for_a_link_after_the_view_opened_is_never_followed(
         tmp_path, data_root, level):
     a = _tenant_scene(data_root, A_ID)
-    stranger = a["roster"]["a"]
+    stranger = a["roster"][T.fixture_world_id("a")]
     shutil.rmtree(a["episode"] / "runs" / stranger)
     decoy = _decoy_episode(a, tmp_path / "decoy", stranger)
     decoy_before = S.tree(decoy)
@@ -440,26 +440,26 @@ def test_a_level_swapped_for_a_link_after_the_view_opened_is_never_followed(
 
 def _episode_doors(a: dict, bare_id: str) -> dict:
     """Pair each repository episode door with the paths its walk may open."""
-    arm = a["episode"] / "runs" / a["roster"]["b"]
+    arm = a["episode"] / "runs" / a["roster"][T.fixture_world_id("b")]
 
     def episode(runs) -> None:
         with runs.episode(a["episode_id"]) as view:
             view.arm_ids()
-            view.arm_id("b")
-            view.open(_rid(a["roster"]["b"]))
+            view.arm_id(T.fixture_world_id("b"))
+            view.open(_rid(a["roster"][T.fixture_world_id("b")]))
 
     def arms(runs) -> None:
         with runs.episode(a["episode_id"]) as view, view.arms(
-                [_rid(a["roster"]["b"])]) as handout:
-            handout[_rid(a["roster"]["b"])]
+                [_rid(a["roster"][T.fixture_world_id("b")])]) as handout:
+            handout[_rid(a["roster"][T.fixture_world_id("b")])]
 
     def sibling(runs) -> None:
-        with runs.episode(a["episode_id"], roster_label="b") as view:
-            view.arm_id("b")
+        with runs.episode(a["episode_id"], require_roster=True) as view:
+            view.arm_id(T.fixture_world_id("b"))
 
     def start_runs(runs) -> None:
         with runs.episode(bare_id) as view:
-            view.start_runs(["a", "b", "c"])
+            view.start_runs([T.fixture_world_id(label) for label in ("a", "b", "c")])
 
     def episode_files(runs) -> None:
         runs.episode_files(a["episode_id"]).close()
@@ -724,7 +724,7 @@ def test_the_episodes_variable_changes_nothing_and_no_episodes_root_refusal_fire
         tmp_path, data_root, monkeypatch, variable):
     a = _tenant_scene(data_root, A_ID)
     decoy = tmp_path / "decoy-episodes"
-    decoy_roster = {label: S.new_id() for label in ("a", "b", "c")}
+    decoy_roster = {T.fixture_world_id(label): S.new_id() for label in ("a", "b", "c")}
     S.make_episode(decoy.parent, decoy.name, a["episode_id"],
                    manifest=_manifest(a["episode_id"]), roster=decoy_roster)
     decoy = decoy / "episodes"
@@ -779,8 +779,8 @@ def test_another_tenants_episode_is_absent_to_this_tenants_repository(data_root)
     finally:
         handle.close()
     with runs_a.episode(a["episode_id"]) as view:
-        assert Path(view.open(_rid(a["roster"]["a"])).run_dir) == (
-            a["episode"] / "runs" / a["roster"]["a"])
+        assert Path(view.open(_rid(a["roster"][T.fixture_world_id("a")])).run_dir) == (
+            a["episode"] / "runs" / a["roster"][T.fixture_world_id("a")])
 # R6 / declared change 13: no `_episodes` claim is read by `create`.
 
 def test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses(data_root):

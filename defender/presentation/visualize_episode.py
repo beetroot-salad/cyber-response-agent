@@ -94,7 +94,7 @@ from defender.presentation.episode_transcript import (
     _stem_names_scope as _stem_names_scope,
     _transcript_block as _transcript_block,
     _transcript_blocks_for_step as _transcript_blocks_for_step,
-    _unattributed_traces as _unattributed_traces,
+    _classify_judge_traces as _classify_judge_traces,
     _unnameable as _unnameable,
     _uv as _uv,
 )
@@ -214,8 +214,8 @@ ROSTER_WORLD = "world"
 
 
 def _read_roster(view: EpisodeRuns) -> _Record:
-    """The arm roster (`view.arm_ids()`, `{label: RunId}`): absent when the episode never
-    reached RUNS; a roster the reader refuses — or a manifest its label check cannot load — is
+    """The arm roster (`view.arm_ids()`, `{world UUID: RunId}`): absent when the episode never
+    reached RUNS; a roster the reader refuses — or a manifest its identity check cannot load — is
     present with the refusal as its error, the arms' `refused` state."""
     try:
         arms = view.arm_ids()
@@ -270,7 +270,7 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
         ep.draws[label] = ({n: d for n, d in docs.items() if n in recorded}, skipped)
     nameable_worlds = [w for w in ep.entries.values() if w.nameable]
     if ep.roster_rec.ok and ep.roster_rec.value is not None:
-        _load_arms(nameable_worlds, view, episode_dir, ep.roster_rec.value)
+        _load_arms(ep, view, ep.roster_rec.value)
     for w in nameable_worlds:
         w.archive = _load_world_archive(bound, ep.world_id(w.label))
     for item in ep.sectioned:
@@ -284,28 +284,31 @@ def _load_episode(episode_dir: Path, bound: Bound, view: EpisodeRuns) -> _Episod
     return ep
 
 
-def _load_arms(worlds: list[WorldEntry], view: EpisodeRuns, episode_dir: Path,
-               arm_ids: dict[str, RunId]) -> None:
+def _load_arms(ep: _Episode, view: EpisodeRuns, arm_ids: dict[str, RunId]) -> None:
     """Every world's arm, from ONE hold of the episode's container (`view.arms`), each opened
     by its roster id (`arm_ids`, never a name composed from the label; an entry rule that
     takes only a real directory): its run folder's name, its run page's link relative to the
     episode page, and its result event, read through a no-follow reader walked from that same
     hold. Anything refused for an arm — nothing at the id, a link or a file there, a container
     gone since the view opened — leaves that arm absent."""
-    ids = {w.label: arm_ids[w.label] for w in worlds if w.label in arm_ids}
-    with view.arms(list(ids.values())) as handout:
-        for w in worlds:
-            if w.label not in ids:
-                continue
-            run = handout[ids[w.label]]
+    selected: list[tuple[WorldEntry, RunId]] = []
+    for world in ep.entries.values():
+        if not world.nameable:
+            continue
+        world_id = ep.world_id(world.label)
+        if world_id in arm_ids:
+            selected.append((world, arm_ids[world_id]))
+    with view.arms([arm_id for _world, arm_id in selected]) as handout:
+        for w, arm_id in selected:
+            run = handout[arm_id]
             if isinstance(run, RunRefused):
                 continue
             try:
-                w.result = _result_event(handout.reader(ids[w.label]))
+                w.result = _result_event(handout.reader(arm_id))
             except (RunRefused, OSError):
                 continue
             w.run_dir_name = run.run_dir.name
-            w.run_page = _run_page_link(run, episode_dir)
+            w.run_page = _run_page_link(run, ep.dir)
 
 
 def _run_page_link(run: Run, episode_dir: Path) -> str:

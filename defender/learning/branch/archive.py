@@ -219,18 +219,19 @@ def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Pa
     """Archive each world's run dir into the episode's `worlds/<world-uuid>/`; return what was
     written.
 
-    `run_dirs` is keyed by short world label and chosen by the caller: an `incomplete` episode
-    archives only its clean siblings, so the set is not derived from the manifest.
+    `run_dirs` and the returned paths are keyed by declared world UUID, chosen by the caller:
+    an `incomplete` episode archives only its clean siblings, so the set is not derived from
+    the manifest.
 
     Each world is screened, then copied. Worlds go in sorted order so a partial failure always
     leaves the same prefix.
     """
     archived: dict[str, Path] = {}
     family = load_family(episode.view(), expected_episode_id=episode.dir.name)
-    for world in sorted(run_dirs):
-        run_dir = Path(run_dirs[world])
-        # Resolve the selector through the persisted mapping before constructing UUID paths.
-        world_id = family.world(world).world_id
+    worlds = {world_id: family.world_by_id(world_id) for world_id in run_dirs}
+    for world_id in sorted(run_dirs):
+        world = worlds[world_id].label
+        run_dir = Path(run_dirs[world_id])
         handle = episode.world(world_id)
         dest = WorldPaths(episode.dir, LAYOUT.world(world_id))
         sources = _screened_sources(world, run_dir, dest)
@@ -259,7 +260,7 @@ def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Pa
             _logger.warning(f"world {world}: {len(refused)} non-artifact entr"
                             f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                             f"{', '.join(str(p) for p in refused)}")
-        archived[world] = world_dir
+        archived[world_id] = world_dir
     return archived
 
 

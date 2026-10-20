@@ -580,8 +580,8 @@ def _resume_target(ns: argparse.Namespace, *, episode: Episode | None,
     around the curation marker. The manifest is read here, right after the roster gate, held to
     the episode's id (R5); an undeclared world label and a manifest the loader refuses are each
     refused before a run dir exists. `arm_ids` reads the episode's arm roster in full (`main`
-    hands the view's `arm_ids`), so a roster its reader refuses — an id off the rule, two labels
-    on one id, a label set other than the manifest's worlds — is refused here too.
+    hands the view's `arm_ids`), so a roster its reader refuses — an id off the rule, two worlds
+    on one arm id, a UUID set other than the manifest's worlds — is refused here too.
     """
     if ns.episode is None:
         return None
@@ -669,10 +669,10 @@ def _sibling_box_mounted(ns: argparse.Namespace, data_root: Path) -> tuple[Path,
 
 
 def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
-    """The sibling's episode view, in its sibling form (`roster_label=`, O4b): the episode is
+    """The sibling's episode view, in its sibling form (`require_roster=True`, O4b): the episode is
     walked from the accepted tenant's own folder, no link followed at any level, and its arm
-    roster must name `--world` — an episode that never reached RUNS, a roster that does not
-    name the world, a missing episode (another tenant's included) or a link anywhere is refused
+    roster must have been published — an episode that never reached RUNS, a roster that does not
+    contain UUID identities, a missing episode (another tenant's included) or a link anywhere is refused
     here, right after acceptance and before the manifest is read (G5/G19). `None` for an
     ordinary run."""
     if ns.episode is None:
@@ -681,7 +681,7 @@ def _open_episode_runs(ns: argparse.Namespace, accepted: _tenant.Tenant) -> Any:
     from defender.run_repository import RunRefused
 
     try:
-        return accepted.runs_repository().episode(ns.episode, roster_label=ns.world)
+        return accepted.runs_repository().episode(ns.episode, require_roster=True)
     except (_tenant.TenantRefused, RunRefused, EpisodeRefused, OSError) as refused:
         sys.exit(f"[run.py] --episode {ns.episode} for tenant {accepted.id!r}: {refused}")
 
@@ -695,7 +695,7 @@ def _case_input(ns: argparse.Namespace, world: Any,
         from defender.run_repository import RunRefused
 
         try:
-            arm_id = episode_runs.arm_id(world.label)
+            arm_id = episode_runs.arm_id(world.world_id)
         except RunRefused as refused:
             sys.exit(f"[run.py] --episode {ns.episode}: {refused}")
         return _screened_source_alert(episode_runs.episode), str(arm_id)
@@ -750,7 +750,7 @@ def main(  # noqa: C901, PLR0913 — the entry point's inputs plus its six injec
     accepted = _accept_request_tenant(
         ns, data_root=data_root, box_mounted=_sibling_box_mounted(ns, data_root))
     # A sibling's door, right after acceptance: its episode walked from the tenant's own
-    # folder and its roster checked for this world, before anything else of the episode is
+    # folder and its roster publication checked before anything else of the episode is
     # read. The view's episode handle is held for the whole run; it serves the manifest read
     # and the world ledger's writes, and nothing below reopens the episode by name.
     episode_runs = _open_episode_runs(ns, accepted)

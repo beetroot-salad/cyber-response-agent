@@ -221,7 +221,10 @@ def _launch(planted: S.Planted, src: Path) -> Path:
     arm roster — it replaces `create_container`), the view released."""
     cli = S.mod(CLI)
     with cli.prepare_episode(planted.accept().runs_repository(), Run.at(src)) as view:
-        view.start_runs(list(T.WORLDS))
+        ep = Path(view.episode.dir)
+        T.write_family(ep, T.family_doc(episode_id=ep.name, source_run_dir=str(src),
+                                        source_run_id=src.name))
+        view.start_runs([T.world_id(ep, label) for label in T.WORLDS])
         return Path(view.episode.dir)
 
 
@@ -356,7 +359,7 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
 
     archive = S.mod(ARCHIVE)
     with S.sym(EPISODE_HANDLE, "Episode").open(ep) as handle:
-        archive.archive_episode(handle, {"b": sib})
+        archive.archive_episode(handle, {T.world_id(handle.dir, 'b'): sib})
     archived = set(_files_under(ep / "worlds" / T.world_id(ep, "b")).values())
     assert raw in archived, "the world archive does not keep the alert"
     assert record_bytes in archived, "the world archive does not keep the record"

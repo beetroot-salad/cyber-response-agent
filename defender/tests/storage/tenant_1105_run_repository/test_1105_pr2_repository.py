@@ -1,6 +1,8 @@
 """The tenant-scoped run repository: open/create/list, RunAddress, episode views and their refusals."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import uuid
 
 import os
@@ -302,12 +304,12 @@ def test_an_arm_created_for_t_opens_for_t_through_its_episode_and_never_as_a_nat
     runs = t.runs_repository()
 
     view = runs.episode(episode_id)
-    arm_id = view.arm_id(LABEL)
+    arm_id = view.arm_id(T.world_id(ep, LABEL))
     assert isinstance(arm_id, RunId)
-    assert str(arm_id) == roster[LABEL]
+    assert str(arm_id) == roster[T.world_id(ep, LABEL)]
     assert episode_id not in str(arm_id)
     arm = view.open(arm_id)
-    assert Path(arm.run_dir) == ep / "runs" / roster[LABEL]
+    assert Path(arm.run_dir) == ep / "runs" / roster[T.world_id(ep, LABEL)]
     assert str(arm.tenant_id) == H.T_ID
     assert Path(view.episode.dir) == ep
     assert isinstance(H.raised(runs.open, arm_id), RunAbsent)
@@ -340,12 +342,12 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
     assert isinstance(H.raised(view.create, stranger), _refusal_classes())
     assert not (ep / "runs").exists(), "a create over an absent container made it"
 
-    ids = {label: str(arm) for label, arm in view.start_runs(list(T.WORLDS)).items()}
-    assert sorted(ids) == sorted(T.WORLDS)
+    ids = {label: str(arm) for label, arm in view.start_runs([T.world_id(ep, label) for label in T.WORLDS]).items()}
+    assert sorted(ids) == sorted(T.world_id(ep, label) for label in T.WORLDS)
     assert (ep / "runs").is_dir()
     assert not (ep / "runs" / "_tenant.json").exists(), "start_runs wrote a container record"
-    arm = view.create(view.arm_id(LABEL))
-    assert Path(arm.run_dir) == ep / "runs" / ids[LABEL]
+    arm = view.create(view.arm_id(T.world_id(ep, LABEL)))
+    assert Path(arm.run_dir) == ep / "runs" / ids[T.world_id(ep, LABEL)]
     assert str(arm.tenant_id) == H.T_ID
 
     # create hands out the Run; materializing its folder is the run writer's job.
@@ -355,7 +357,7 @@ def test_an_absent_container_opens_the_view_but_no_arm_until_the_launcher_create
     again = H.raised(t.runs_repository().episode(episode_id).start_runs, list(T.WORLDS))
     assert isinstance(again, _refusal_classes()), f"a second start_runs gave {again!r}"
     assert (ep / "arms.json").read_bytes() == roster_bytes
-    assert (ep / "runs" / ids[LABEL]).is_dir()
+    assert (ep / "runs" / ids[T.world_id(ep, LABEL)]).is_dir()
     assert (Path(arm.run_dir) / "PLANTED").read_text(encoding="utf-8") == "arm bytes\n"
 
 
@@ -388,15 +390,15 @@ def test_an_unreadable_container_is_recorded_not_raised_and_never_written_throug
     assert view.state == "unreadable", f"a linked container read as {view.state}"
     assert view.unreadable_reason, "a linked container's reason was not recorded"
     assert isinstance(H.raised(view.open, _rid(stray_arm)), _refusal_classes())
-    assert isinstance(H.raised(view.start_runs, list(T.WORLDS)), _refusal_classes())
+    assert isinstance(H.raised(view.start_runs, [T.world_id(ep, label) for label in T.WORLDS]), _refusal_classes())
     assert not os.path.lexists(ep / "arms.json"), "a roster was written over a linked runs/"
     assert H.tree_state(target) == before
     assert (ep / "runs").is_symlink()
 
     os.unlink(ep / "runs")
     (ep / "runs").mkdir()
-    ids = t.runs_repository().episode(episode_id).start_runs(list(T.WORLDS))
-    assert sorted(ids) == sorted(T.WORLDS), f"control: start_runs over a real runs/ gave {ids!r}"
+    ids = t.runs_repository().episode(episode_id).start_runs([T.world_id(ep, label) for label in T.WORLDS])
+    assert sorted(ids) == sorted(T.world_id(ep, label) for label in T.WORLDS), f"control: start_runs over a real runs/ gave {ids!r}"
     assert (ep / "arms.json").is_file()
 
 

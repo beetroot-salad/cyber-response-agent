@@ -193,7 +193,7 @@ def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_
     assert report["comparable"] is True, report
     assert "'c'" in report["reason"]
     assert report["not_comparable"] == ""
-    assert report["archived"] == ["b"]
+    assert report["archived"] == [T.world_id(ep, "b")]
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["agreed"]["commit"] == "deadbee", stamp
     assert not (ep / "not_comparable.yaml").exists()

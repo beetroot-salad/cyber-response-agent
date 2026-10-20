@@ -916,7 +916,7 @@ class FakeSibling:
     id>`, the arm id the episode's ROSTER (`arms.json`) holds for `<label>`, read as the sibling
     reads it before anything else (O4b). The episode comes from the argv (the launcher mints its
     id; nothing here knows it in advance); the data root is `data_root`, else the process's
-    `DEFENDER_DATA_ROOT` at the call. A child started with no roster, or whose roster does not
+    `DEFENDER_DATA_ROOT` at the call. A child started with no roster, or whose UUID roster does not
     name its label, does nothing and exits 97, the fault recorded in `faults` — the double never
     writes a roster entry itself, so "the roster is written before the first sibling" stays
     observable. `episode_dir` is the episode the last started child ran in.
@@ -968,7 +968,7 @@ class FakeSibling:
         if not roster_path.is_file():
             self.faults.append(f"sibling {label}: no roster at {roster_path}")
             return 97
-        arm_id = json.loads(roster_path.read_text(encoding="utf-8")).get(label)
+        arm_id = json.loads(roster_path.read_text(encoding="utf-8")).get(world_id(ep, label))
         if arm_id is None:
             self.faults.append(f"sibling {label}: the roster at {roster_path} does not name it")
             return 97

@@ -278,11 +278,10 @@ def _header_markers() -> list[str]:
 
 
 def _rewrite_manifest(ep: Path, edit: Callable[[dict], None]) -> None:
-    """Edit the archived family's manifest. When the edit renames a world, the arm roster is
-    re-planted from the edited manifest (#1187 R2, review-4 F38): a launch writes its roster
-    from the manifest it wrote, so a roster still naming the old label would make the episode
-    refuse for a roster/manifest mismatch — a second cause in front of the one the scenario
-    is about. (`S.family` makes no arm folders, so nothing is orphaned.)"""
+    """Edit an archived manifest; replant the roster only if its world UUID set changes.
+
+    Label-only edits preserve UUID bindings. These fixtures have no arm folders to orphan.
+    """
     manifest = ep / "family.yaml"
     doc = _yaml.safe_load(manifest.read_text(encoding="utf-8"))
     before = [w.get("world_id") for w in doc.get("worlds") or []]

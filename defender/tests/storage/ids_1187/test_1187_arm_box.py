@@ -149,7 +149,9 @@ def _session(root: Path, runtime: str) -> dict[str, Any]:
     t = S.tenant(root, H.T_ID)
     episode = S.make_episode(root, t.id, labels=("a", "b"), roster=True, arms=True)
     roster = S.read_roster(episode)
-    arm_id, sibling_id = roster["a"], roster["b"]
+    from defender.tests.support.learning.branch import _triplet_947 as T
+
+    arm_id, sibling_id = (roster[T.world_id(episode, label)] for label in ("a", "b"))
     arm = episode / "runs" / arm_id
     sibling = episode / "runs" / sibling_id
     (sibling / "secret.txt").write_text(SIBLING_SECRET, encoding="utf-8")

@@ -85,11 +85,11 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
     with runs.create_episode() as view:
         ep = root / fixture_uuid("tenant:acme") / "episodes" / view.episode_id
         P.write_family(ep, P.family_doc(episode_id=view.episode_id))
-        roster = view.start_runs(["b", "c"])
+        roster = view.start_runs([P.world_id(ep, label) for label in P.WORLDS])
         with Episode.open(ep) as episode:
-            exits = cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=fixture_uuid("tenant:acme"))
+            exits = cli.start_family(episode, [P.world_id(ep, label) for label in ("b", "c")], spawn=spawn, tenant_id=fixture_uuid("tenant:acme"))
     assert ep.parent == root / fixture_uuid("tenant:acme") / "episodes", ep
-    assert exits == {"b": 0, "c": 0}
+    assert exits == {P.world_id(ep, label): 0 for label in ("b", "c")}
     assert len(spawn.launches) == 2
     for launch in spawn.launches:
         argv = launch["argv"]
@@ -97,7 +97,7 @@ def test_start_family_seeds_the_episodes_tenant_before_any_child_starts(tmp_path
         assert launch["episode"] == ep.resolve(), launch
         label = _arg(argv, "--world")
         assert isinstance(launch["roster_at_spawn"], dict), launch
-        assert launch["roster_at_spawn"].get(label) == str(roster[label]), launch
+        assert launch["roster_at_spawn"].get(P.world_id(ep, label)) == str(roster[P.world_id(ep, label)]), launch
         assert _child_data_root(launch).resolve() == root.resolve()
     assert sorted(p.name for p in root.rglob("_tenant.json")) == [], (
         "a `_tenant.json` was written (#1187 R1 retires it)")
@@ -111,7 +111,7 @@ def test_start_family_refuses_an_episode_with_no_tenant_and_starts_nothing(tmp_p
     spawn = SpawnRecorder()
     with Episode.open(ep) as episode, \
             pytest.raises(Exception) as caught:  # noqa: PT011 — the class is the launcher's; the effect is pinned
-        cli.start_family(episode, ["b"], spawn=spawn, tenant_id=tenant_id)
+        cli.start_family(episode, [P.fixture_world_id("b")], spawn=spawn, tenant_id=tenant_id)
     assert not isinstance(caught.value, TypeError), (
         f"start_family does not take the episode's tenant yet: {caught.value!r}")
     assert "tenant" in str(caught.value).lower(), caught.value
@@ -218,7 +218,8 @@ def test_a_launched_episodes_siblings_run_on_the_source_stamps_tenant(tmp_path):
         assert launch["tenant_at_spawn"] == fixture_uuid("tenant:acme"), launch
         assert _child_data_root(launch).resolve() == root.resolve()
         assert isinstance(launch["roster_at_spawn"], dict), launch
-        assert _arg(launch["argv"], "--world") in launch["roster_at_spawn"], launch
+        label = _arg(launch["argv"], "--world")
+        assert P.world_id(launch["episode"], label) in launch["roster_at_spawn"], launch
     made = _episodes_made()
     assert len(made) == 1, made
     assert Path(made[0]).parent == root / fixture_uuid("tenant:acme") / "episodes", made

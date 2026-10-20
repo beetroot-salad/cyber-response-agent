@@ -204,7 +204,7 @@ class _Siblings(J.FakeSibling):
             return code
         label = _arg(argv, "--world")
         if label in self.edits:
-            stamp = self.episode_dir / "runs" / X.read_roster(self.episode_dir)[label] / "provenance.json"
+            stamp = self.episode_dir / "runs" / X.read_roster(self.episode_dir)[J.world_id(self.episode_dir, label)] / "provenance.json"
             doc = json.loads(stamp.read_text(encoding="utf-8"))
             stamp.write_text(json.dumps({**doc, **self.edits[label]}), encoding="utf-8")
         self.labels.append(label)

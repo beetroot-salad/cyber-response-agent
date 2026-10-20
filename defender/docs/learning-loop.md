@@ -360,7 +360,7 @@ findings whose source case has a ground truth.
 ```text
 $DEFENDER_DATA_ROOT/<tenant>/episodes/<episode uuid>/
   family.yaml                 # labels and host-minted world UUIDs, published once before preflight
-  arms.json                   # the arm roster {label: arm uuid}, written once by the host at the start of RUNS
+  arms.json                   # the arm roster {world UUID: arm UUID}, written once by the host at the start of RUNS
   samples.yaml                # real example answers per served system, for the questioner and judge
   outcome.yaml                # pre-flight's write-once outcome: accepted | unusable | refused
   world_records/<world UUID>.yaml  # a world's own post-launch record (unservable, budget, did not finish, not archived)

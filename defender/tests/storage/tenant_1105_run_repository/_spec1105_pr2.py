@@ -271,7 +271,7 @@ def sibling_scene(tmp_path: Path, *, roster: bool = True,
         T._plant_source_input(ep, str(src), SOURCE_RUN_ID)
     if roster:
         (ep / "runs").mkdir(exist_ok=True)
-        R.write_roster(ep, {label: R.new_id() for label in labels})
+        R.write_roster(ep, {T.world_id(ep, label): R.new_id() for label in labels})
     return src, ep
 
 

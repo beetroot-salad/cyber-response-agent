@@ -104,8 +104,8 @@ def _arm_run(layout: V.Layout, tmp_path: Path, monkeypatch) -> object:
             episode_id=EPISODE_ID, worlds=[T.world_doc("b", world_id=fixture_uuid("world:view-box:b"),
                                                        role="A", axis=None, facts=[])])))
         view = layout.tenant.runs_repository().episode(EPISODE_ID, held=episode)
-        view.start_runs(("b",))
-        arm = view.create(view.arm_id("b"))
+        view.start_runs((fixture_uuid("world:view-box:b"),))
+        arm = view.create(view.arm_id(fixture_uuid("world:view-box:b")))
     Path(arm.run_dir).mkdir()
     _alert_plant.plant_alert(Path(arm.run_dir), ALERT)
     return arm

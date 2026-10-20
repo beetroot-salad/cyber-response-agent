@@ -182,8 +182,8 @@ def test_921_archive_writes_gather_summaries_lessons_loaded_and_alert_json(tmp_p
     plant_alert(run_dir, {"alert_id": J.ALERT_ID})
 
     with Episode.open(ep) as episode:
-        archived = archive.archive_episode(episode, {"b": run_dir})
-    world = archived["b"]
+        archived = archive.archive_episode(episode, {T.world_id(ep, "b"): run_dir})
+    world = archived[T.world_id(ep, "b")]
     assert (world / "gather_summaries" / "l-001.md").is_file()
     assert (world / "lessons_loaded.jsonl").is_file()
     assert (world / "alert.json").is_file()
@@ -209,8 +209,8 @@ def test_921_the_archived_directory_input_refuses_a_non_artifact_entry_and_keeps
     (summaries / "l-002.md").symlink_to(outside)
 
     with Episode.open(ep) as episode:
-        archived = archive.archive_episode(episode, {"b": run_dir})
-    world = archived["b"]
+        archived = archive.archive_episode(episode, {T.world_id(ep, "b"): run_dir})
+    world = archived[T.world_id(ep, "b")]
     kept = world / "gather_summaries" / "l-001.md"
     assert kept.is_file(), "one refused entry cost the world its whole directory"
     assert kept.read_text(encoding="utf-8") == "a real summary\n"

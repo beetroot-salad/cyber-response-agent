@@ -78,7 +78,7 @@ def _three_sites(tmp_path, value):
     S.plant_sidecar(run_dir, truncated_by=value)
     # `archive_episode` now takes the `Episode` handle, not the episode dir path (#1133 rev 2).
     with Episode.open(ep) as episode:
-        S.mod("learning.branch.archive").archive_episode(episode, {"b": run_dir})
+        S.mod("learning.branch.archive").archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
     archived = json.loads((ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).read_text(encoding="utf-8"))
 
     graded_ep = S.cut_short_episode(tmp_path / "graded")

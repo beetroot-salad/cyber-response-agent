@@ -248,7 +248,7 @@ def test_947_launcher_verifies_each_siblings_scrub_verdict(tmp_path):
     T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     report = _verify_family(ep, source=T.provenance_record())
-    assert report["scrub_verified"] == list(T.WORLDS)
+    assert report["scrub_verified"] == [T.world_id(ep, label) for label in T.WORLDS]
 
 
 def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp_path):
@@ -262,7 +262,7 @@ def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp
 
         report = _verify_family(ep, dirs, source=T.provenance_record())
         assert world in report["reason"]
-        assert world not in report["archived"]
+        assert T.world_id(ep, world) not in report["archived"]
         assert report["comparable"] is True, report
         assert report["not_comparable"] == ""
         assert (ep / "provenance.json").exists()
@@ -278,7 +278,7 @@ def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_re
 
     report = _verify_family(ep, dirs, source=T.provenance_record())
 
-    assert "b" not in report["archived"]
+    assert T.world_id(ep, "b") not in report["archived"]
     with bind(Path(ep)) as bound:
         failed = outcome.failed_worlds(bound, {}, family=T.sym("runtime.branch._family", "parse_family")(T.family_doc()))
     assert sorted(failed) == ["b"]

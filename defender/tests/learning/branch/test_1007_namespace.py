@@ -153,6 +153,7 @@ def test_preflight_checks_the_same_roster_capacity_before_oracle_or_writes(tmp_p
     ep = S.episode_v2(tmp_path, doc=doc, base_rows=rows)
     oracle = S.oracle(then=S.submit(P.BASE_ANSWER, S.EMPTY_CLAIM))
     before = {path.relative_to(ep): path.read_bytes() for path in ep.rglob("*") if path.is_file()}
+    paths_before, calls_before = sorted(ep.rglob("*")), est.calls()
     with Episode.open(ep) as episode:
         if count == 800:
             with pytest.raises(_family.FamilyError, match="roster"):
@@ -160,6 +161,8 @@ def test_preflight_checks_the_same_roster_capacity_before_oracle_or_writes(tmp_p
                                      tenant=est.run_tenant(), oracle=oracle.model,
                                      verifier=S.passing_verifier().model)
             assert oracle.requests == 0
+            assert est.calls() == calls_before, "over-capacity preflight reached a tenant adapter"
+            assert sorted(ep.rglob("*")) == paths_before, "over-capacity preflight created a path"
             assert {path.relative_to(ep): path.read_bytes() for path in ep.rglob("*")
                     if path.is_file()} == before
         else:

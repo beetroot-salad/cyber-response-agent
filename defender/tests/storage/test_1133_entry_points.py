@@ -158,8 +158,8 @@ def start_family(episode: Any, spawn: Any) -> dict[str, int]:
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     acme = set_up_tenant(Path(os.environ["DEFENDER_DATA_ROOT"]), fixture_uuid("tenant:acme"))
-    acme.runs_repository().episode(episode.dir.name, held=episode).start_runs(list(T.WORLDS))
-    return branch_cli().start_family(episode, ["b", "c"], spawn=spawn, tenant_id=acme.id)
+    acme.runs_repository().episode(episode.dir.name, held=episode).start_runs([T.world_id(episode.dir, label) for label in T.WORLDS])
+    return branch_cli().start_family(episode, [T.world_id(episode.dir, label) for label in ("b", "c")], spawn=spawn, tenant_id=acme.id)
 
 
 class Spawned:
@@ -197,7 +197,7 @@ def test_h1_start_family_refuses_a_linked_runs_base_and_starts_no_sibling_there(
     planted.remove()
     with S.open_episode(ep) as episode:
         exits = start_family(episode, spawn)
-    assert exits == {"b": 0, "c": 0}
+    assert exits == {T.world_id(ep, label): 0 for label in ("b", "c")}
     assert len(spawn.argvs) == 2
     assert_real_folder(ep / "runs")
     # #1187 declared change 6 (R1): the arm container holds no `_tenant.json`; an arm's tenant
@@ -289,7 +289,7 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
     before, host_before = planted.state(), S.census(host)
 
     with S.open_episode(ep) as episode:
-        raised = S.raised_by(lambda: archive.archive_episode(episode, {"b": run_dir}))
+        raised = S.raised_by(lambda: archive.archive_episode(episode, {T.world_id(ep, "b"): run_dir}))
 
     assert_folder_refusal(raised, planted, where=f"the archive over a link at {at}")
     assert planted.state() == before, f"the archive wrote through the link at {at}"
@@ -298,9 +298,9 @@ def test_h1_the_archive_refuses_a_linked_world_folder_and_copies_nothing_through
 
     planted.remove()
     with S.open_episode(ep) as episode:
-        archived = archive.archive_episode(episode, {"b": run_dir})
+        archived = archive.archive_episode(episode, {T.world_id(ep, "b"): run_dir})
     world = ep / "worlds" / WORLD_B
-    assert archived == {"b": world}
+    assert archived == {T.world_id(ep, "b"): world}
     assert_real_folder(world)
     assert (world / "report.md").is_file()
 

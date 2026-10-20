@@ -230,7 +230,7 @@ def _sample(tmp_path: Path, tenant_id: str) -> E.Episode:
 def test_g9_a_linked_episode_container_reads_as_absent_on_the_page(tmp_path, d9_tenant):
     ep = _sample(tmp_path, d9_tenant)
     roster = E.T.read_roster(ep.dir)
-    arm_link = f"runs/{roster[E.CONTROL]}/runtime.html"
+    arm_link = f"runs/{roster[E.T.world_id(ep.dir, E.CONTROL)]}/runtime.html"
 
     ok = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
     assert ok.rc == 0, f"the control page was not rendered: {ok.said}"

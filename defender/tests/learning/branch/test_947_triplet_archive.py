@@ -59,7 +59,7 @@ def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
     ep = T.episode(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     for w in T.WORLDS:
         world = ep / "worlds" / T.world_id(ep, w)
         for name in ("report.md", "investigation.md", "executed_queries.jsonl", "gather_raw",
@@ -78,7 +78,7 @@ def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_pa
     (run_dir / "report.md").unlink()
     (run_dir / "report.md").symlink_to(secret)
     with Episode.open(ep) as episode, pytest.raises(T.refusals()):
-        _archive().archive_episode(episode, {"b": run_dir})
+        _archive().archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
     assert not (ep / "worlds" / T.world_id(ep, "b") / "report.md").exists()
     src_text = (T.DEFENDER / "learning" / "branch" / "archive.py").read_text(encoding="utf-8")
     assert "stage_tables" in src_text
@@ -92,7 +92,7 @@ def test_947_archive_reads_the_scrub_verdict_at_its_sidecar_path(tmp_path):
     run_dir = T.sibling_run_dir(base, "b", scrub_ran=True)
     assert not (run_dir / "scrub-verdict.json").exists()
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, {"b": run_dir})
+        _archive().archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
     copied = json.loads((ep / "worlds" / T.world_id(ep, "b") / "scrub_verdict.json").read_text(encoding="utf-8"))
     assert copied["ran"] is True
 
@@ -106,7 +106,7 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
     ep = _accepted(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     pointer = ep / "worlds" / T.world_id(ep, "b") / "run_dir"
     assert not os.path.lexists(pointer), "the archive wrote the run_dir pointer"
     before = J.through_view(ep, _episode().verdicts)
@@ -124,7 +124,7 @@ def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path
     ep = _accepted(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     T.base_capture(ep, [T.captured_row(key="k1")])
     (ep / "served" / f"{T.fixture_world_id('b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload={"hits": [{"_id": "planted"}]})) + "\n",
@@ -251,17 +251,17 @@ def _relocated(tmp_path, monkeypatch):
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     tenant = _tenant_paths()
     with tenant.runs_repository().create_episode() as view:
-        arms = view.start_runs(list(T.WORLDS))
         ep = S.episodes_dir(tenant.data_root, str(tenant.id)) / view.episode_id
         T.write_family(ep, T.family_doc(episode_id=view.episode_id))
+        arms = view.start_runs([T.world_id(ep, label) for label in T.WORLDS])
     for w in T.WORLDS:
-        T.sibling_run_dir(ep / "runs", w, arm_id=str(arms[w]))
+        T.sibling_run_dir(ep / "runs", w, arm_id=str(arms[T.world_id(ep, w)]))
     return base, src, root, ep
 
 
 def _arm(ep, world_id):
     """The arm folder the episode's roster (`arms.json`) names for `world_id`."""
-    return ep / "runs" / T.read_roster(ep)[world_id]
+    return ep / "runs" / T.read_roster(ep)[T.world_id(ep, world_id)]
 
 
 def test_947_no_sibling_artifact_is_reachable_by_a_runs_base_walk(tmp_path, monkeypatch):
@@ -406,7 +406,7 @@ def test_947_a_sibling_run_dir_lives_under_the_episode_not_the_runs_base(tmp_pat
         # The launcher makes the container before the first sibling (#1105 PR 2).
         T.episode_view(episode)
         T.mod("learning.branch.cli").start_family(
-            episode, ["a", "b", "c"], spawn=spawn, tenant_id=T.SOURCE_TENANT)
+            episode, [T.world_id(ep, label) for label in T.WORLDS], spawn=spawn, tenant_id=T.SOURCE_TENANT)
     assert spawn.launches, "no sibling was started"
     for launch in spawn.launches:
         assert launch["env"].get("DEFENDER_RUNS_BASE") == str(base), (

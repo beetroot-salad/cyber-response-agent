@@ -267,7 +267,7 @@ class _Spawn(S.FakeSpawn):
             # The arm id the LAUNCHER's roster holds, read as `_judge_921.FakeSibling` reads it;
             # the double never writes or extends a roster (review-3 F33), so a launcher that
             # wrote none is a fault here, not a roster the double made for it.
-            arm_id = S.T.read_roster(ep).get(world) if (ep / S.T.ROSTER_NAME).is_file() else None
+            arm_id = S.T.read_roster(ep).get(S.T.world_id(ep, world)) if (ep / S.T.ROSTER_NAME).is_file() else None
             if arm_id is None:
                 with self._mine:
                     self.faults.append(f"sibling {world}: no roster entry at {ep / S.T.ROSTER_NAME}")
@@ -1025,7 +1025,7 @@ def test_1224_archive_fails_after_the_siblings_ran(tmp_path, episodes_root):
     def link_cs_report(world: str) -> None:
         if world != "c":
             return
-        tree = spawn.eps[-1] / "runs" / S.T.read_roster(spawn.eps[-1])[world]  # #1187
+        tree = spawn.eps[-1] / "runs" / S.T.read_roster(spawn.eps[-1])[S.T.world_id(spawn.eps[-1], world)]  # #1187
         report = tree / "report.md"
         report.unlink()
         report.symlink_to(outside)

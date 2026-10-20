@@ -516,7 +516,7 @@ def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
     assert f"old-name-before-repair/{E.GRADED_WORLD}/0/4" in text, text
     assert "enqueued" in _group_of(page, f"f-{E.GRADED_WORLD}-0-4").text()
     assert "unqueueable" in _group_of(page, f"f-{E.GRADED_WORLD}-0-1").text()
-    assert f"runs/{roster[E.GRADED_WORLD]}/runtime.html" in page.hrefs
+    assert f"runs/{roster[T.world_id(ep.dir, E.GRADED_WORLD)]}/runtime.html" in page.hrefs
     assert not [h for h in page.hrefs if "old-name-before-repair" in h]
 
 

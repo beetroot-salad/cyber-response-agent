@@ -45,7 +45,7 @@ def _arm(alert: Path, world, ep: Path):
         view = T.episode_view(episode, tenant=tenant)
         # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
         # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
-        return _materialize(alert, T.roster_arm_id(ep, world.label), world=world,
+        return _materialize(alert, T.roster_arm_id(ep, world.world_id), world=world,
                             episode_runs=view)
 
 
@@ -354,12 +354,16 @@ def test_the_cross_tenant_comparison_runs_over_the_stamped_siblings_and_records_
 def _label(ep: Path, arm: Path) -> str:
     """The world label the episode's roster binds to `arm`'s id (#1187: an arm's folder name
     holds no label)."""
-    return {arm_id: label for label, arm_id in T.read_roster(ep).items()}[arm.name]
+    world_id = _world_id(ep, arm)
+    from defender import _yaml
+
+    worlds = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))["worlds"]
+    return next(world["label"] for world in worlds if world["world_id"] == world_id)
 
 
 def _world_id(ep: Path, arm: Path) -> str:
-    """A world token for `arm`: `<episode token>.<label>`, the shape a forked sibling stamps."""
-    return f"{ep.name.replace('-', '.')}.{_label(ep, arm)}"
+    """The persisted world UUID whose roster entry binds this arm run."""
+    return {arm_id: world_id for world_id, arm_id in T.read_roster(ep).items()}[arm.name]
 
 
 def _arm_stamp_has_the_unforked_shape(run_dir: Path, *, token: str, natural_world: str | None) -> None:

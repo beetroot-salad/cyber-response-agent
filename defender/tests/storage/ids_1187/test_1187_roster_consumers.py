@@ -70,7 +70,7 @@ def _episode_at(data_root: Path, episode_id: str, doc: dict,
                 roster: Any) -> tuple[Path, str, dict | None]:
     """Create a tenant-scoped episode containing the supplied loadable manifest."""
     R.tenant(data_root)
-    mapping = {label: R.new_id() for label in _labels(doc)} if roster is True else roster
+    mapping = {world["world_id"]: R.new_id() for world in doc["worlds"]} if roster is True else roster
     ep = R.make_episode(data_root, TENANT, episode_id, labels=_labels(doc),
                         roster=mapping if mapping is not None else False)
     T.write_family(ep, doc)
@@ -202,7 +202,7 @@ def test_manifest_consumers_refuse_other_episode_ids_before_side_effects(
 
     ep, episode_id, roster = _episode(data_root)
     if consumer == "verify":
-        _arm(ep, roster["a"])
+        _arm(ep, roster[T.world_id(ep, "a")])
     runs = R.tenant(data_root).runs_repository()
     judge = P.quiet_judge()
     state = _state1135.state_over(tmp_path / "judge-state")
@@ -225,9 +225,9 @@ def test_manifest_consumers_refuse_other_episode_ids_before_side_effects(
                 assert err is not None, "VERIFY opened arms under another episode's manifest"
                 assert not isinstance(err, (TypeError, AttributeError, NameError)), err
                 return R.message(err)
-            opened = cli._finished_arms(view, ["a"])
-            assert isinstance(opened["a"], Run), opened
-            assert Path(opened["a"].run_dir) == ep / "runs" / roster["a"]
+            opened = cli._finished_arms(view, [T.world_id(ep, "a")])
+            assert isinstance(opened[T.world_id(ep, "a")], Run), opened
+            assert Path(opened[T.world_id(ep, "a")].run_dir) == ep / "runs" / roster[T.world_id(ep, "a")]
             return ""
 
     other = R.near_miss_id(episode_id)
@@ -242,7 +242,7 @@ def test_manifest_consumers_refuse_other_episode_ids_before_side_effects(
 def test_page_links_each_arm_by_its_roster_id_never_a_composed_name(data_root):
     ep, episode_id, roster = _episode(data_root, null_world=True)
     for label in ("a", "c", "d"):
-        _arm(ep, roster[label])
+        _arm(ep, roster[T.world_id(ep, label)])
     for label in ("a", "b"):
         _arm(ep, f"{episode_id}-{label}")
 
@@ -250,7 +250,7 @@ def test_page_links_each_arm_by_its_roster_id_never_a_composed_name(data_root):
     assert got.rc == 0, f"the page was not rendered: {got.said}"
     page = E.read_page(ep)
     for label in ("a", "c", "d"):
-        expected = f"runs/{roster[label]}/runtime.html"
+        expected = f"runs/{roster[T.world_id(ep, label)]}/runtime.html"
         assert expected in page.anchors_in(f"world-{label}"), (
             f"world {label}'s arm is not linked by its roster id: {page.anchors_in(f'world-{label}')}")
     composed = [h for h in page.hrefs if f"{episode_id}-" in h]
@@ -262,7 +262,7 @@ def test_page_links_each_arm_by_its_roster_id_never_a_composed_name(data_root):
                          ids=["no_runs", "empty_runs_without_roster", "runs_without_roster"])
 def test_page_without_a_roster_renders_no_world_section_and_no_arm_link(data_root, runs_folder):
     ep, episode_id, _none = _episode(data_root, roster=None)
-    mapping = {label: R.new_id() for label in LABELS}
+    mapping = {T.fixture_world_id(label): R.new_id() for label in LABELS}
     if runs_folder == "empty":
         (ep / "runs").mkdir()
     elif runs_folder == "with_arms":
@@ -290,13 +290,13 @@ def _refused_roster(kind: str, ep: Path, good: dict[str, str], tmp_path: Path) -
     if kind == "torn":
         R.write_roster(ep, raw=R.torn(text))
     elif kind == "missing_label":
-        R.write_roster(ep, {k: v for k, v in good.items() if k != "c"})
+        R.write_roster(ep, {k: v for k, v in good.items() if k != T.world_id(ep, "c")})
     elif kind == "extra_label":
-        R.write_roster(ep, {**good, "z": R.new_id()})
+        R.write_roster(ep, {**good, R.new_id(): R.new_id()})
     elif kind == "shared_id":
-        R.write_roster(ep, {**good, "b": good["c"]})
+        R.write_roster(ep, {**good, T.world_id(ep, "b"): good[T.world_id(ep, "c")]})
     elif kind == "old_id":
-        R.write_roster(ep, {**good, "b": R.OLD_MINTED_ID})
+        R.write_roster(ep, {**good, T.world_id(ep, "b"): R.OLD_MINTED_ID})
     elif kind == "link":
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir(exist_ok=True)
@@ -334,7 +334,8 @@ def test_page_shows_a_refused_roster_as_the_arms_state_and_renders_the_rest(data
     assert control.rc == 0, control.said
     page = E.read_page(ep)
     assert R.ROSTER_NAME not in page.text, "the control still shows a roster refusal"
-    for label, arm_id in good.items():
+    for wid, arm_id in good.items():
+        label = T.mod("runtime.branch._family").label_for_world_id(_manifest_of(ep), wid)
         assert f"runs/{arm_id}/runtime.html" in page.anchors_in(f"world-{label}"), label
 
 
@@ -365,7 +366,7 @@ def test_the_page_for_one_tenant_never_renders_another_tenants_episode(data_root
     R.tenant(data_root)
     R.tenant(data_root, other)
     episode_id = R.new_id()
-    roster = {label: R.new_id() for label in LABELS}
+    roster = {T.fixture_world_id(label): R.new_id() for label in LABELS}
     ep = R.make_episode(data_root, other, episode_id, labels=LABELS, roster=roster)
     T.write_family(ep, _doc(episode_id))
     for arm_id in roster.values():
@@ -386,17 +387,17 @@ def test_verify_opens_each_finished_arm_by_its_roster_id(data_root):
     from defender.run_repository import Run, RunAbsent
 
     ep, episode_id, roster = _episode(data_root)
-    _arm(ep, roster["a"])
+    _arm(ep, roster[T.world_id(ep, "a")])
     _arm(ep, f"{episode_id}-b")
-    _arm(ep, roster["c"])
+    _arm(ep, roster[T.world_id(ep, "c")])
     runs = R.tenant(data_root).runs_repository()
     with runs.episode(episode_id) as view:
-        arms = cli._finished_arms(view, ["a", "b"])
-    assert set(arms) == {"a", "b"}, f"VERIFY opened {sorted(arms)}"
-    assert isinstance(arms["a"], Run), f"a: {arms['a']!r}"
-    assert Path(arms["a"].run_dir) == ep / "runs" / roster["a"]
-    assert isinstance(arms["b"], RunAbsent), (
-        f"b, whose roster id has no folder, was answered {arms['b']!r} (the decoy composed?)")
+        arms = cli._finished_arms(view, [T.world_id(ep, label) for label in ("a", "b")])
+    assert set(arms) == {T.world_id(ep, label) for label in ("a", "b")}, f"VERIFY opened {sorted(arms)}"
+    assert isinstance(arms[T.world_id(ep, "a")], Run), f"a: {arms[T.world_id(ep, 'a')]!r}"
+    assert Path(arms[T.world_id(ep, "a")].run_dir) == ep / "runs" / roster[T.world_id(ep, "a")]
+    assert isinstance(arms[T.world_id(ep, "b")], RunAbsent), (
+        f"b, whose roster id has no folder, was answered {arms[T.world_id(ep, 'b')]!r} (the decoy composed?)")
 
 
 def test_verify_refuses_outright_on_a_refused_roster(data_root):
@@ -404,12 +405,12 @@ def test_verify_refuses_outright_on_a_refused_roster(data_root):
     from defender.run_repository import Run
 
     ep, episode_id, good = _episode(data_root)
-    _arm(ep, good["a"])
+    _arm(ep, good[T.world_id(ep, "a")])
     runs = R.tenant(data_root).runs_repository()
 
     def verify() -> dict:
         with runs.episode(episode_id) as view:
-            return cli._finished_arms(view, ["a"])
+            return cli._finished_arms(view, [T.world_id(ep, "a")])
 
     R.write_roster(ep, raw=R.torn(json.dumps(good)))
     err = R.raised(verify)
@@ -418,17 +419,17 @@ def test_verify_refuses_outright_on_a_refused_roster(data_root):
     assert R.ROSTER_NAME in R.message(err), f"the refusal does not name the roster: {err!r}"
 
     R.write_roster(ep, good)
-    assert isinstance(verify()["a"], Run), "the control failed: a good roster did not open a"
+    assert isinstance(verify()[T.world_id(ep, "a")], Run), "the control failed: a good roster did not open a"
 
 
 def test_r8_the_archive_writes_no_run_dir_pointer(data_root):
     archive = T.mod("learning.branch.archive")
     ep, episode_id, roster = _episode(data_root)
     # The finished arm and its scrub-verdict sidecar, at the roster's id for `b`.
-    T.sibling_run_dir(ep / "runs", "b", arm_id=roster["b"])
+    T.sibling_run_dir(ep / "runs", "b", arm_id=roster[T.world_id(ep, "b")])
     runs = R.tenant(data_root).runs_repository()
     with runs.episode(episode_id) as view:
-        archive.archive_episode(view.episode, {"b": ep / "runs" / roster["b"]})
+        archive.archive_episode(view.episode, {T.world_id(ep, "b"): ep / "runs" / roster[T.world_id(ep, "b")]})
     world = ep / "worlds" / T.world_id(ep, "b")
     assert (world / "report.md").is_file(), "the control failed: nothing was archived"
     assert not os.path.lexists(world / "run_dir"), "the archive wrote the run_dir pointer"
@@ -467,14 +468,14 @@ def test_a_launch_verifies_finished_arms_by_roster_id_archives_no_pointer_and_pa
         world = ep / "worlds" / T.world_id(ep, label)
         assert (world / "report.md").is_file(), f"finished world {label} was not archived"
         assert not os.path.lexists(world / "run_dir"), f"world {label}: a run_dir pointer"
-    assert (ep / "runs" / roster["c"]).is_dir(), "the control failed: c left no arm"
+    assert (ep / "runs" / roster[T.world_id(ep, "c")]).is_dir(), "the control failed: c left no arm"
     assert not (ep / "worlds" / T.world_id(ep, "c") / "report.md").exists(), "VERIFY opened an unfinished arm"
 
     page = ep / E.PAGE_NAME
     assert page.is_file(), "the launcher rendered no page"
     parsed = E.Page.parse(page.read_text(encoding="utf-8"))
     for label in finished:
-        assert f"runs/{roster[label]}/runtime.html" in parsed.anchors_in(f"world-{label}"), label
+        assert f"runs/{roster[T.world_id(ep, label)]}/runtime.html" in parsed.anchors_in(f"world-{label}"), label
 # Launch the arm family through the real entrypoint.
 
 #: The manifest's poison (`test_1187_roster_sibling`'s technique): a top-level field the family
@@ -578,7 +579,7 @@ def test_a_launch_whose_preflight_does_not_accept_writes_no_roster_and_its_sibli
     assert R.tree(data_root) == before, "the refused sibling wrote under the data root"
 
     (ep / "runs").mkdir()
-    R.write_roster(ep, {w["label"]: R.new_id() for w in doc["worlds"]})
+    R.write_roster(ep, {w["world_id"]: R.new_id() for w in doc["worlds"]})
     rc, refused, said, rec = _hand_sibling(ep.name, "b")
     assert refused is not None, f"the poisoned manifest was not read past the gate: rc {rc}"
     assert SENTINEL in said, f"past the gate the refusal should name {SENTINEL}: {said!r}"
@@ -613,7 +614,7 @@ def test_a_launch_rosters_every_manifest_world_and_starts_only_the_servable_ones
     labels = {w["label"] for w in _manifest_of(ep)["worlds"]}
     assert labels == {"a", "b", "c"}, labels
     roster = R.read_roster(ep)
-    assert set(roster) == labels, f"the roster names {sorted(roster)}, the manifest {sorted(labels)}"
+    assert set(roster) == {world["world_id"] for world in _manifest_of(ep)["worlds"]}, f"the roster names {sorted(roster)}, the manifest {sorted(labels)}"
     assert all(R.is_canonical_uuid(v) for v in roster.values()), roster
     assert len(set(roster.values())) == len(roster), f"two labels share an id: {roster}"
     assert sorted(_spawn_worlds(spawn)) == ["a", "b"], f"started {_spawn_worlds(spawn)}"
@@ -779,7 +780,7 @@ def test_family_identities_is_the_episode_its_tokens_and_every_roster_arm_id():
     from defender.runtime.branch._family import family_identities
 
     episode_id = R.new_id()
-    roster = {label: R.new_id() for label in LABELS}
+    roster = {T.fixture_world_id(label): R.new_id() for label in LABELS}
     family = _family(episode_id)
     expected = {episode_id, *(world.world_id for world in family.worlds), *roster.values()}
     known = {str(member) for member in family_identities(family, _arm_ids(roster))}
@@ -800,9 +801,9 @@ def test_a_roster_arm_id_is_redacted_and_an_unrelated_uuid_is_not():
     from defender.runtime.branch._family import family_identities
 
     episode_id = R.new_id()
-    roster = {label: R.new_id() for label in LABELS}
+    roster = {T.fixture_world_id(label): R.new_id() for label in LABELS}
     known = family_identities(_family(episode_id), _arm_ids(roster))
-    detail = (f"run {roster['c']} refused; sibling {roster['b'].upper()} served; "
+    detail = (f"run {roster[T.fixture_world_id('c')]} refused; sibling {roster[T.fixture_world_id('b')].upper()} served; "
               f"index {UNRELATED_UUID} unavailable")
     assert redact_model_visible(detail, known) == (
         f"run {MARK} refused; sibling {MARK} served; index {UNRELATED_UUID} unavailable")
@@ -817,7 +818,7 @@ def test_the_comparator_prompt_never_carries_a_roster_arm_id(data_root):
     for label in LABELS:
         T.archived_world(ep, label)
     T.base_capture(ep, [T.captured_row(key="k1")])
-    leaked = {"hits": [{"_id": "x", "note": f"seen by {roster['c']} near {UNRELATED_UUID}"}]}
+    leaked = {"hits": [{"_id": "x", "note": f"seen by {roster[T.world_id(ep, 'c')]} near {UNRELATED_UUID}"}]}
     (ep / "served" / f"{T.world_id(ep, 'b')}.jsonl").write_text(
         json.dumps(T.captured_row(key="k1", payload=leaked)) + "\n", encoding="utf-8")
     delta_o = T.sym("learning.branch.episode", "delta_o")
@@ -828,7 +829,7 @@ def test_the_comparator_prompt_never_carries_a_roster_arm_id(data_root):
         out = delta_o(view, invoke=agent)
     assert out["b"]["k1"] == "mutation"
     assert agent.prompts, "the comparator was never asked"
-    assert roster["c"] not in agent.prompts[0], "a roster arm id reached the comparator prompt"
+    assert roster[T.world_id(ep, "c")] not in agent.prompts[0], "a roster arm id reached the comparator prompt"
     assert MARK in agent.prompts[0]
     assert UNRELATED_UUID in agent.prompts[0], "the payload never reached the prompt"
 
@@ -893,7 +894,7 @@ def test_the_siblings_query_tool_knows_every_roster_arm_id(tmp_path, monkeypatch
                    episode_id=episode_id)
     # The natural container in #1187's shape: no `_tenant.json` (R1).
     (src.parent / "_tenant.json").unlink(missing_ok=True)
-    roster = {w["label"]: R.new_id() for w in doc["worlds"]}
+    roster = {w["world_id"]: R.new_id() for w in doc["worlds"]}
     (ep / "runs").mkdir()
     R.write_roster(ep, roster)
 

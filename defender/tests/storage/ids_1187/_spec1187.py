@@ -127,7 +127,9 @@ def make_episode(data_root: Path, tenant_id: str, episode_id: str | None = None,
         encoding="utf-8")
     mapping: Mapping[str, str] | None
     if roster is True:
-        mapping = {label: new_id() for label in labels}
+        from defender.tests.support.learning.branch._triplet_947 import world_id
+
+        mapping = {world_id(ep, label): new_id() for label in labels}
     elif roster is False or roster is None:
         mapping = None
     else:
@@ -167,15 +169,17 @@ def roster_for_arms(episode_dir: Path, arms: Mapping[str, Path]) -> dict[str, st
     if (episode_dir / ROSTER_NAME).is_file():
         return read_roster(episode_dir)
     runs = episode_dir / "runs"
-    roster = {label: new_id() for label in arms}
+    from defender.tests.support.learning.branch._triplet_947 import world_id
+
+    roster = {world_id(episode_dir, label): new_id() for label in arms}
     for label, arm in arms.items():
         arm = Path(arm)
         if arm.is_dir() and not arm.is_symlink():
-            os.rename(arm, runs / roster[label])
+            os.rename(arm, runs / roster[world_id(episode_dir, label)])
         for suffix in SIDECAR_SUFFIXES:
             sidecar = arm.parent / f"{arm.name}{suffix}"
             if os.path.lexists(sidecar):
-                os.rename(sidecar, runs / f"{roster[label]}{suffix}")
+                os.rename(sidecar, runs / f"{roster[world_id(episode_dir, label)]}{suffix}")
     write_roster(episode_dir, roster)
     return roster
 

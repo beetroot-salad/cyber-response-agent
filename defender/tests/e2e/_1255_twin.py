@@ -520,7 +520,7 @@ def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, in
             served_systems=cli.served_systems(run_tenant.grants.gather))
         doc.pop("source_run_dir", None)
         T.write_family(episode.dir, doc)
-        view.start_runs((CONTROL, REPLICATE))
+        view.start_runs([world["world_id"] for world in doc["worlds"]])
         return episode.dir.name, k, {w["label"]: w["world_id"] for w in doc["worlds"]}
     finally:
         view.close()

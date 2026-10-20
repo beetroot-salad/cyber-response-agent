@@ -180,7 +180,7 @@ def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_ten
     page = E.read_page(ep)
     for label in E.WORLDS:
         assert f"world-{label}" in page.by_id, f"the manifest arm {label} has no section"
-        assert f"runs/{roster[label]}/runtime.html" in page.hrefs, (
+        assert f"runs/{roster[P.T.world_id(ep.dir, label)]}/runtime.html" in page.hrefs, (
             f"the manifest arm {label} has no run-page link at its roster id: {page.hrefs}")
         assert not any(f"runs/{P.EPISODE_ID}-{label}/" in href for href in page.hrefs), (
             f"the manifest arm {label} is linked at its composed decoy: {page.hrefs}")
@@ -207,7 +207,7 @@ class _LinkingSibling(P.J.FakeSibling):
         rc = super().__call__(argv, env=env, **kw)
         if self.episode_dir is None:
             return rc
-        arm_id = P.T.read_roster(self.episode_dir).get("b")
+        arm_id = P.T.read_roster(self.episode_dir).get(P.T.world_id(self.episode_dir, "b"))
         if arm_id is None:
             return rc
         arm = self.episode_dir / "runs" / arm_id
@@ -260,10 +260,11 @@ def test_dc6_a_sibling_over_an_absent_container_is_refused(tmp_path):
     rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
     assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
     assert rc == 0, f"the control was refused: {P.refusal_text(refused)} {err}"
-    assert ok.run_dir == ep / "runs" / roster["b"], f"the arm is at {ok.run_dir}"
+    assert ok.run_dir == ep / "runs" / roster[P.T.world_id(ep, "b")], f"the arm is at {ok.run_dir}"
 
 
 def test_dc6_the_sibling_judges_the_container_before_the_manifest(tmp_path):
+    """Malformed UUID roster keys refuse before the poisoned manifest is read."""
     from defender import _yaml
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
@@ -271,7 +272,7 @@ def test_dc6_the_sibling_judges_the_container_before_the_manifest(tmp_path):
     src, ep = P.sibling_scene(tmp_path, roster=False)
     good = (ep / "family.yaml").read_bytes()
     roster = _start_runs_by_hand(ep)
-    S.write_roster(ep, {k: v for k, v in roster.items() if k != "b"})
+    S.write_roster(ep, {**roster, "b": roster[P.T.world_id(ep, "b")]})
     doc = _yaml.safe_load(good.decode("utf-8"))
     (ep / "family.yaml").write_text(_yaml.safe_dump({**doc, poison: "read"}), encoding="utf-8")
 
@@ -503,10 +504,11 @@ def _roster_by_hand(ep: Path) -> dict[str, str]:
     if (ep / P.T.ROSTER_NAME).is_file():
         return S.read_roster(ep)
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    roster = {w["label"]: S.new_id() for w in doc["worlds"]}
+    roster = {w["world_id"]: S.new_id() for w in doc["worlds"]}
     runs = ep / "runs"
     runs.mkdir(exist_ok=True)
-    for label, arm_id in roster.items():
+    for world in doc["worlds"]:
+        label, arm_id = world["label"], roster[world["world_id"]]
         composed = runs / f"{P.EPISODE_ID}-{label}"
         if composed.is_dir():
             composed.rename(runs / arm_id)
@@ -522,7 +524,7 @@ def _start_runs_by_hand(ep: Path) -> dict[str, str]:
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    roster = {w["label"]: S.new_id() for w in doc["worlds"]}
+    roster = {w["world_id"]: S.new_id() for w in doc["worlds"]}
     (ep / "runs").mkdir(exist_ok=True)
     S.write_roster(ep, roster)
     return roster

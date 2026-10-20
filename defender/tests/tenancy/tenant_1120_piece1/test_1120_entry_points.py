@@ -344,7 +344,7 @@ def test_1120_a_child_gets_the_tenant_id_inherits_the_data_root_and_re_accepts(
     spawn = T.FakeSpawn()
     # #1133 (merged into this branch, PR #1157): start_family takes the held Episode.
     with Episode.open(episode) as held:
-        branch_cli.start_family(held, ["a"], spawn=spawn, tenant_id=_tenant.TenantId(H.TID))
+        branch_cli.start_family(held, [T.world_id(episode, "a")], spawn=spawn, tenant_id=_tenant.TenantId(H.TID))
     assert len(spawn.launches) == 1, spawn.launches
     child_argv, child_env = spawn.launches[0]["argv"], spawn.launches[0]["env"]
     assert child_env.get(H.DATA_ROOT_ENV) == str(data_root), (

@@ -175,7 +175,7 @@ def test_d2_sibling_runs_base(tmp_path, tenant_root):
     src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b")
     world_c = H.run_py().resume_world(
         Episode.open(ep), "c", tenant=lambda: H.T1106.run_tenant(H.accept(tenant_root, T_ID)))
-    arm_b, arm_c = H.T.roster_arm_id(ep, "b"), H.T.roster_arm_id(ep, "c")
+    arm_b, arm_c = H.T.roster_arm_id(ep, H.T.world_id(ep, "b")), H.T.roster_arm_id(ep, H.T.world_id(ep, "c"))
     alert = RunPaths(src).alert
     with Episode.open(ep) as episode:
         view = H.accept(tenant_root, T_ID).runs_repository().episode(ep.name, held=episode)
@@ -195,13 +195,13 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
     alert = RunPaths(src).alert
     # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
     # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
-    arm_id = H.T.roster_arm_id(ep, "b")
+    arm_id = H.T.roster_arm_id(ep, H.T.world_id(ep, "b"))
     argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
     with Episode.open(ep) as episode:
-        # #1187 (O4b): the sibling's form names its roster label (`roster_label=`, replacing
+        # #1187 (O4b): the sibling's form requires its UUID roster (`require_roster=True`, replacing
         # PR 2's `container_required`).
         view = H.accept(tenant_root, T_ID).runs_repository().episode(
-            ep.name, held=episode, roster_label="b")
+            ep.name, held=episode, require_roster=True)
         for n, learning in enumerate((tenant_root, tenant_root / T_ID / "learning", tmp_path)):
             monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
             widened = H.owner_refusal(H.resolve_data_root)

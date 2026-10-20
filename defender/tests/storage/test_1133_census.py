@@ -489,7 +489,7 @@ WALK_OWNER_DIR = "run_repository"
 WALK_DOORS_REQUIRED = ("create", "open")
 WALK_CALLS_REQUIRED = (
     ("learning.branch.cli", "create_episode", None),
-    ("run", "episode", "roster_label"),
+    ("run", "episode", "require_roster"),
 )
 
 
@@ -753,14 +753,14 @@ def test_o5_only_the_doors_open_or_create_an_episode():
 def test_o5_the_walk_call_census_finds_what_it_is_meant_to_find():
     good_cli = ast.parse("def launch(runs):\n    return runs.create_episode()\n")
     good_run = ast.parse("def main(runs, ep, label):\n"
-                         "    return runs.episode(ep, roster_label=label)\n")
+                         "    return runs.episode(ep, require_roster=True)\n")
     assert _walk_calls_missing(_method_calls("learning.branch.cli", good_cli)
                                | _method_calls("run", good_run)) == []
     bare_ref = ast.parse("def launch(runs):\n    door = runs.create_episode\n    return door\n")
     no_kw = ast.parse("def main(runs, ep):\n    return runs.episode(ep)\n")
     assert _walk_calls_missing(_method_calls("learning.branch.cli", bare_ref)
                                | _method_calls("run", no_kw)) == [
-        ("learning.branch.cli", "create_episode", None), ("run", "episode", "roster_label")]
+        ("learning.branch.cli", "create_episode", None), ("run", "episode", "require_roster")]
     elsewhere = _method_calls("learning.judge", good_cli) | _method_calls("learning.judge", good_run)
     assert len(_walk_calls_missing(elsewhere)) == 2
 

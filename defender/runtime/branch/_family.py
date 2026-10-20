@@ -490,6 +490,15 @@ def _parse_discriminator(raw: Any) -> dict:
     return {"predicate": predicate}
 
 
+def _check_roster_capacity(world_count: int) -> None:
+    from defender.run_repository import RunRefused, check_arm_roster_capacity
+
+    try:
+        check_arm_roster_capacity(world_count)
+    except RunRefused as refused:
+        raise FamilyError(str(refused)) from refused
+
+
 def _parse_worlds(raw_worlds: Any) -> list[World]:
     """The declared worlds: non-empty, labels usable and distinct, exactly one base."""
     if not isinstance(raw_worlds, list):
@@ -499,6 +508,7 @@ def _parse_worlds(raw_worlds: Any) -> list[World]:
         raise FamilyError(
             "the manifest declares no worlds — the questioner's flow produces the base plus "
             "two by construction, and the family would have nothing to run")
+    _check_roster_capacity(len(raw_worlds))
     worlds = [parse_world(entry) for entry in raw_worlds]
     _check_labels([w.label for w in worlds])
     ids = [w.world_id for w in worlds]
@@ -573,8 +583,8 @@ def load_manifest_document(view: Bound, *, expected_episode_id: str) -> dict:
     return cast(dict, doc)
 
 
-def manifest_world_labels(view: Bound, *, expected_episode_id: str) -> list[str]:
-    """Return labels in declaration order after validating the persisted manifest.
+def manifest_world_ids(view: Bound, *, expected_episode_id: str) -> list[str]:
+    """Return world UUIDs in declaration order after validating the persisted manifest.
 
     The rooted loader binds it to the expected episode; the full family schema validates
     the label-to-UUID mapping before a reader compares it with the arm roster.
@@ -583,7 +593,7 @@ def manifest_world_labels(view: Bound, *, expected_episode_id: str) -> list[str]
     if not isinstance(doc, dict) or doc.get("episode_id") != expected_episode_id:
         raise FamilyError(f"the manifest ({LAYOUT.family}) does not name episode "
                           f"{quoted(expected_episode_id)}")
-    return [world.label for world in parse_family(doc).worlds]
+    return [world.world_id for world in parse_family(doc).worlds]
 
 
 def _read_manifest(view: Bound) -> str:
@@ -683,6 +693,7 @@ def refuse_reserved_world_label(label: str, *, at: str) -> None:
 
 def check_identities(family: Family) -> None:
     """Hold directly constructed families to the same label, UUID and role rules."""
+    _check_roster_capacity(len(family.worlds))
     roles: dict[str, str] = {}
     ids: set[str] = set()
     _check_labels([world.label for world in family.worlds])
@@ -771,7 +782,7 @@ __all__ = [
     "refuse_reserved_world_label",
     "load_family",
     "load_manifest_document",
-    "manifest_world_labels",
+    "manifest_world_ids",
     "parse_as_of",
     "parse_family",
     "parse_world",
