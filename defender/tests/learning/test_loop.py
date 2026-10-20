@@ -82,7 +82,7 @@ def _noop_scrub(_path, **_kw):
 
 
 def _isolate(tmp_path: Path) -> tuple[object, Path]:
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
     learning_run_dir = paths.state_root / "runs" / "case-x"
     learning_run_dir.mkdir(parents=True)
     paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
@@ -844,7 +844,7 @@ def test_author_branch_revert_idempotent_return_falls_back_to_head_without_url(t
 
 def test_revert_cli_holds_drain_lock_and_calls_through(tmp_path: Path):
     from defender.cli.learning import revert_lesson as rl  # type: ignore[import-not-found]
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
     _, work = _origin_work(tmp_path, lessons={"defender/lessons/bad.md": "bad\n"})
     forge = _FakeForge(create_ref="https://pr/7")
     b = ab.AuthorBranch(forge=forge, repo_root=work, worktree_base=tmp_path / "wt")
@@ -856,7 +856,7 @@ def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
     import fcntl as _fcntl
 
     from defender.cli.learning import revert_lesson as rl  # type: ignore[import-not-found]
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
     lock = paths.state_root / AUTHOR_DRAIN_LOCK.file
     lock.parent.mkdir(parents=True, exist_ok=True)
     holder = lock.open("a+")

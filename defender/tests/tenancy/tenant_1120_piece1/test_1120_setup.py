@@ -149,7 +149,9 @@ def test_1186_setup_moves_only_named_state_and_preserves_metadata(tmp_path: Path
     assert H.tree_census(root) == snapshot, "completed adoption is idempotent"
 
 
-@pytest.mark.parametrize("fault", ["missing-source", "file-source", "unknown-partial", "foreign-token"])
+@pytest.mark.parametrize("fault", [
+    "missing-source", "file-source", "unknown-partial", "foreign-token", "unowned-aside-child",
+])
 def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path, fault: str) -> None:
     """O5: an explicit bad source or unexplained migration state cannot be guessed away."""
     root, source = tmp_path / "data", tmp_path / "legacy"
@@ -157,7 +159,7 @@ def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path,
     destination = H.tenant_folder(root) / "learning"
     if fault == "file-source":
         source.write_text("not a directory", encoding="utf-8")
-    elif fault in {"unknown-partial", "foreign-token"}:
+    elif fault in {"unknown-partial", "foreign-token", "unowned-aside-child"}:
         _legacy_learning(source)
         if fault == "unknown-partial":
             partial = destination.with_name("learning.adopting")
@@ -166,10 +168,16 @@ def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path,
         else:
             aside = source / f".adopting-to-{H.TID}"
             aside.mkdir()
-            (aside / ".adoption").write_text("source-token\n", encoding="utf-8")
-            destination.mkdir()
-            (destination / ".adoption").write_text("different-token\n", encoding="utf-8")
-            (destination / "existing").write_text("do not merge", encoding="utf-8")
+            if fault == "unowned-aside-child":
+                (aside / ".adoption").write_text(
+                    "63ac3146-4d58-4bb8-9f94-124902ceef1a\n", encoding="utf-8")
+                (aside / "unrelated").mkdir()
+                (aside / "unrelated" / "keep").write_text("do not adopt or delete", encoding="utf-8")
+            else:
+                (aside / ".adoption").write_text("source-token\n", encoding="utf-8")
+                destination.mkdir()
+                (destination / ".adoption").write_text("different-token\n", encoding="utf-8")
+                (destination / "existing").write_text("do not merge", encoding="utf-8")
     before = H.tree_census(tmp_path)
     H.assert_refused(_adopt_learning(root, source))
     assert H.tree_census(tmp_path) == before
