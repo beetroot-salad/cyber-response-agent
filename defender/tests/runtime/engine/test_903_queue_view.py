@@ -16,7 +16,7 @@ from defender._io import read_jsonl_rows
 from defender.learning.author import drain
 from defender.learning.author.branch import AuthorBranch
 from defender.learning.core import quarantine
-from defender.learning.core.config import LoopPaths, loop_paths
+from defender.learning.core.config import LoopPaths
 from defender.learning.core.state import FINDINGS, PITFALLS, QUESTIONER_FINDINGS, Channel, LearningState
 from defender.learning.frontend import build, serialize_queues
 from defender.learning.leads import pitfalls_curator
@@ -596,20 +596,27 @@ def test_an_unreadable_sidecar_or_directory_is_counted_not_fatal(paths):
 # the header — O5
 
 
-def test_stamped_view_resolves_the_state_root_at_call_time_and_stamps_it(tmp_path, monkeypatch):
-    root = tmp_path / "late-state"
-    (root / "_pending").mkdir(parents=True)
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(root))
+def test_stamped_view_uses_the_explicit_tenant_root_and_stamps_it(data_root, tmp_path, monkeypatch):
+    """#1186 O1/O3: the explicit tenant supplies state despite an old ambient override."""
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    tenant = set_up_tenant(data_root)
+    tenant.learning.mkdir(parents=True, exist_ok=True)
+    poison = tmp_path / "old-env-root"
+    poison.mkdir()
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))
+    paths = LoopPaths.for_tenant(tenant)
 
     with _Clock() as clock:
-        stamped = serialize_queues.stamped_view(loop_paths())
+        stamped = serialize_queues.stamped_view(paths)
 
-    assert Path(stamped["state_root"]) == root.resolve()
-    assert stamped["quarantine"]["tainted"]["dir"] == str(loop_paths().quarantine_dir)
+    assert Path(stamped["state_root"]) == tenant.learning
+    assert stamped["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
     clock.check(stamped["generated_at"].replace("Z", "+00:00"))
     assert [ch["name"] for ch in stamped["channels"]] == [
         "findings", "questioner_findings", "pitfalls",
     ]
+    assert not list(poison.iterdir())
 
 
 def test_stamped_view_takes_the_paths_it_is_handed(paths):
@@ -734,7 +741,7 @@ def test_content_that_spells_a_placeholder_is_content(view):
     assert _embedded_data(page) == loud
 
 
-def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths):
+def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths, data_root, tmp_path):
     frontend = Path(build.__file__).resolve().parent
     names = ("lessons.json", "lessons.html", "queues.json", "queues.html")
     before = {
@@ -755,6 +762,25 @@ def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths):
         assert _embedded_data((frontend / "queues.html").read_text(encoding="utf-8")) == queues
         assert (frontend / "lessons.json").is_file()
         assert (frontend / "lessons.html").is_file()
+
+        # #1186 O3: the operator CLI must resolve the selected tenant, rather than the
+        # package checkout or a still-exported legacy state variable.
+        import shutil
+        from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+        from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+        tenant = set_up_tenant(data_root, H.TID)
+        shutil.copytree(paths.state_root, tenant.learning, dirs_exist_ok=True)
+        poison = tmp_path / "ambient-state"
+        poison.mkdir()
+        proc = H.run_script(Path(build.__file__), "--tenant", H.TID, root=data_root,
+                            DEFENDER_LEARNING_STATE_DIR=str(poison))
+        assert proc.returncode == 0, H.output(proc)
+        selected = json.loads((frontend / "queues.json").read_text(encoding="utf-8"))
+        assert Path(selected["state_root"]) == tenant.learning
+        assert _channel(selected, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
+        assert _embedded_data((frontend / "queues.html").read_text(encoding="utf-8")) == selected
+        assert not list(poison.iterdir())
     finally:
         for name, blob in before.items():
             if blob is None:

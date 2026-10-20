@@ -93,20 +93,15 @@ def test_state_refused_is_a_systemic_fault_no_oserror_arm_holds(tmp_path: Path, 
         "the stage's CRITICAL line does not name the refused record"
 
 
-@pytest.mark.parametrize("spelled", ["env", "loop_paths"])
-def test_open_holds_the_resolved_existing_root(tmp_path: Path, monkeypatch, spelled):
-    # rejected: N1 — the root does not move or become per-tenant here (D11, #1186)
+def test_open_holds_the_resolved_existing_scratch_root(tmp_path: Path):
+    # Explicit scratch paths retain the handle's resolved-once semantics.
     real = tmp_path / "real"
     elsewhere = tmp_path / "elsewhere"
     real.mkdir()
     elsewhere.mkdir()
     link = tmp_path / "spelled"
     link.symlink_to(real)
-    if spelled == "env":
-        monkeypatch.setenv(ENV, str(link))
-        paths = config.loop_paths()
-    else:
-        paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=link)
+    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=link)
 
     state = S.LearningState.open(paths)
     link.unlink()
@@ -137,31 +132,36 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, monkeyp
         parent.mkdir()
         root.write_text("a file, not a folder\n", encoding="utf-8")
     before = S.tree_snapshot(tmp_path)
-    monkeypatch.setenv(ENV, str(root))
-    paths = config.loop_paths()
+    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=root)
 
     opened = S.caught(lambda: S.LearningState.open(paths))
     assert isinstance(opened, FatalConfigError), f"open answered {opened!r}"
     assert str(root.resolve()) in str(opened), f"the error does not name the root: {opened}"
-    assert ENV in str(opened), f"the error does not name {ENV}: {opened}"
 
     caplog.set_level(logging.INFO)
     rc, escaped = _drain_stage(tmp_path, paths)
     assert escaped is None, f"the drain stage raised {escaped!r}"
     assert rc == 2, f"the drain stage answered rc={rc}"
-    assert any(str(root.resolve()) in line and ENV in line for line in _critical_lines(caplog)), \
-        "the stage's CRITICAL line does not name the root and the env var"
+    assert any(str(root.resolve()) in line for line in _critical_lines(caplog)), \
+        "the stage's CRITICAL line does not name the root"
 
     caplog.clear()
     planted = S.curation_run_dir("case-r15")
     run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
     scrub_mod.scrub(run_dir)
+    # The run-end fault belongs to the run's tenant, independent of the scratch root above.
+    run_state = run_dir.parent.parent / "learning"
+    if run_state.exists():
+        run_state.rmdir()
+    if shape == "not-a-folder":
+        run_state.write_text("a file, not a folder\n", encoding="utf-8")
+    monkeypatch.setenv(ENV, str(run_state))  # safe input for the pre-#1186 implementation
     answered: list[bool] = []
     enqueued = S.caught(lambda: answered.append(
         run_common.enqueue_curation(S.run_of(run_dir), run_dir / "alert.json")))
     assert enqueued is None, f"the run-end enqueue raised {enqueued!r} into the investigation"
     assert answered == [False], f"the run-end enqueue answered {answered!r}"
-    assert any(ENV in r.getMessage() for r in caplog.records), "E1 did not log the root error"
+    assert any(str(run_state) in r.getMessage() for r in caplog.records), "E1 did not log the tenant root error"
 
     created = {k for k in S.tree_snapshot(tmp_path) if k not in before and k.split(os.sep)[0]
                not in ("runs", "worktrees")}
@@ -178,14 +178,12 @@ def test_1135_root_is_a_dangling_link(tmp_path: Path, monkeypatch, caplog):
     target = tmp_path / "gone" / "learning-state"
     link = tmp_path / "state-link"
     link.symlink_to(target)
-    monkeypatch.setenv(ENV, str(link))
-    paths = config.loop_paths()
+    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=link)
 
     opened = S.caught(lambda: S.LearningState.open(paths))
     assert isinstance(opened, FatalConfigError), f"a dangling root answered {opened!r}"
     assert not S.is_refusal(opened), f"a dangling root answered a refusal {opened!r}"
     assert str(target) in str(opened), f"the error does not name the resolved root: {opened}"
-    assert ENV in str(opened), f"the error does not name {ENV}: {opened}"
 
     caplog.set_level(logging.INFO)
     rc, escaped = _drain_stage(tmp_path, paths)
@@ -200,24 +198,25 @@ def test_1135_root_is_a_dangling_link(tmp_path: Path, monkeypatch, caplog):
 
 
 @pytest.mark.parametrize("value", [None, ""], ids=["unset", "empty"])
-def test_1135_unset_and_empty_state_dir_open_the_package_folder(monkeypatch, value):
+def test_1135_unset_and_empty_state_env_keep_the_explicit_tenant_root(data_root, monkeypatch, value):
+    """#1186 O1: absence of the retired override never selects the code package."""
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    tenant = set_up_tenant(data_root)
+    tenant.learning.mkdir(parents=True, exist_ok=True)
     if value is None:
         monkeypatch.delenv(ENV, raising=False)
     else:
         monkeypatch.setenv(ENV, value)
     package = S.DEFENDER / "learning"
     listing = sorted(os.listdir(package))
+    paths = config.LoopPaths.for_tenant(tenant)
+    assert paths.state_root == tenant.learning
+    with S.LearningState.open(paths) as state:
+        described = state.describe(S.coined("FINDINGS"))
+        assert described == str(tenant.learning / "_pending" / "findings.jsonl")
+    assert sorted(os.listdir(package)) == listing, "opening tenant state changed the package"
 
-    paths = config.loop_paths()
-    assert paths.state_root == package, f"loop_paths() named {paths.state_root}, not the package folder"
-    assert paths.state_root != Path("").resolve(), "the empty string was read as the launching directory"
-    state = S.LearningState.open(paths)
-    described = state.describe(S.coined("FINDINGS"))
-
-    assert isinstance(described, str), f"describe() answered {described!r}"
-    assert described == str(package / "_pending" / "findings.jsonl"), \
-        f"the handle does not hold the package folder: {described!r}"
-    assert sorted(os.listdir(package)) == listing, "opening the default root created something"
 
 
 @pytest.mark.parametrize("at", ["queue-file", "holding-folder"])

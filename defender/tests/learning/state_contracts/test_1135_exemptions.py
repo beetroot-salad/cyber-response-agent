@@ -103,14 +103,15 @@ def _channel(view: dict, name: str) -> dict:
 @pytest.mark.parametrize("at", ["queue-folder", "record"])
 def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path: Path, monkeypatch,
                                                                       caplog, at):
-    paths = S.built_paths(tmp_path)
-    monkeypatch.setenv(ENV, str(paths.state_root))
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     # #1105 PR 2 (declared change 8): run end hands the curation request its `Run` — a natural
     # run of a real tenant (`S.curation_run_dir`) — and the row it files is that run's address.
     planted = S.curation_run_dir("case-1135")
     run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
     scrub_mod.scrub(run_dir)
+    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=run_dir.parent.parent / "learning")
+    paths.state_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv(ENV, str(paths.state_root))  # inert after #1186; safe for the old implementation
     case_id = case_ref(RunPaths(run_dir).alert.read_bytes())
 
     if at == "queue-folder":
@@ -209,15 +210,16 @@ def test_e2_the_queue_page_counts_a_refused_sidecar_unreadable(tmp_path: Path):
 @pytest.mark.parametrize("fault", ["linked-queue", "missing-root"])
 def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path, monkeypatch,
                                                                   caplog, fault):
-    if fault == "linked-queue":
-        paths = S.built_paths(tmp_path)
-        root = paths.state_root
-        target = S.outside(tmp_path, "findings.jsonl", json.dumps({"finding_id": LEAKED}) + "\n")
-        planted = S.plant(paths.state_root / FINDINGS.queue, "symlink", target=target)
-    else:
-        root = tmp_path / "absent" / "learning-state"
-    _judge_roots(tmp_path, monkeypatch, root)
     ep = _gradable_episode(tmp_path)
+    root = ep.parent.parent / "learning"
+    paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=root)
+    if fault == "linked-queue":
+        root.mkdir(parents=True, exist_ok=True)
+        target = S.outside(tmp_path, "findings.jsonl", json.dumps({"finding_id": LEAKED}) + "\n")
+        planted = S.plant(root / FINDINGS.queue, "symlink", target=target)
+    elif root.exists():
+        root.rmdir()
+    _judge_roots(tmp_path, monkeypatch, root)
     archived = S.tree_snapshot(ep)
 
     caplog.set_level(logging.INFO)
@@ -245,11 +247,10 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
                                           for e in _exception_chain(r.exc_info[1]))]
         assert named, ("_grade logged no warning carrying the missing root's FatalConfigError: "
                        f"{[_record_text(r) for r in warned]}")
-        assert any(str(root.resolve()) in _record_text(r) and ENV in _record_text(r)
-                   for r in named), \
-            f"the warning does not name the root and {ENV}: {[_record_text(r) for r in named]}"
-        assert S.entry_kind(root.parent) == "absent", "the grade created the missing root"
-        opened = S.caught(lambda: S.LearningState.open(config.loop_paths()))
+        assert any(str(root.resolve()) in _record_text(r) for r in named), \
+            f"the warning does not name the root: {[_record_text(r) for r in named]}"
+        assert S.entry_kind(root) == "absent", "the grade created the missing tenant root"
+        opened = S.caught(lambda: S.LearningState.open(paths))
         assert isinstance(opened, FatalConfigError), \
             f"LearningState.open over the missing root answered {opened!r}"
 
@@ -367,7 +368,8 @@ def test_pitfalls_curator_on_a_non_default_root_writes_nothing_under_the_default
         "query_id": "elastic.esql", "goal": "g", "executed_query": "bad pipe",
         "stderr_digest": "exit=1; mismatched input", "error_class": "agent-fixable",
     }])
-    default = (config.DEFAULT_PATHS.state_root / LEAD_QUEUE_LOCK.file).parent
+    other_paths = S.built_paths(tmp_path / "unselected-state")
+    default = (other_paths.state_root / LEAD_QUEUE_LOCK.file).parent
     default_kind = S.entry_kind(default)
     default_before = S.tree_snapshot(default)
 

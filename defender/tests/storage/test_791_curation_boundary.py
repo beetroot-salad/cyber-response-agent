@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import inspect
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from defender.run_repository import RunPaths
+from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender import run as run_py  # noqa: E402
 from defender import run_common
@@ -38,18 +41,19 @@ HELD_OUT_ALERT = json.dumps({"rule": {"id": "9999"}, "held": "out"}).encode("utf
 
 @pytest.fixture
 def state(tmp_path, monkeypatch):
-    """A learning state root and a runs base under tmp, and a key per provider so the
-    entrypoint's startup preflight cannot fail ahead of the tail these demands are about."""
-    set_state_dir(monkeypatch, tmp_path / "state")  # the root is never created lazily (#1135)
+    """#1186 O2: run-end uses its tenant's queue, despite an ambient legacy root."""
+    set_state_dir(monkeypatch, tmp_path / "legacy-state")
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
-    return loop_paths(tmp_path)
+    tenant = set_up_tenant(current_data_root())
+    tenant.learning.mkdir(exist_ok=True)
+    return replace(loop_paths(tmp_path), state_dir=tenant.learning)
 
 
-def _certified_run(*, name="case-791", alert_bytes=None) -> Path:
+def _certified_run(*, name="case-791", alert_bytes=None, tenant_id=None) -> Path:
     """A finished, certified natural run `name`, where run setup leaves one (#1105 PR 2):
 `<data root>/<T>/runs/<name>` under a real tenant (`curation_run_dir`), so the curation row
 it files is an address the drain can rehydrate. Hand it to run end as `run_of(run_dir)`."""
-    planted = curation_run_dir(name)
+    planted = curation_run_dir(name, tenant_id=tenant_id)
     run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign",
                            alert_bytes=alert_bytes)
     scrub_mod.scrub(run_dir)
@@ -143,6 +147,29 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
     assert body.get("run_id"), f"the curation request names no run: {body}"
     assert _opened(body).is_dir(), "the run the drain would hand the curator is gone"
     assert _opened(body).resolve() == run_dir.resolve()
+
+
+def test_1186_run_end_keeps_identical_cases_in_their_runs_tenant_queues(tmp_path, state, monkeypatch):
+    """O2: run identity selects state; equal case digests cannot coalesce across tenants."""
+    first_root = current_data_root()
+    other_root = tmp_path / "other-data"
+    other = set_up_tenant(other_root, fixture_uuid("tenant:other-1186"))
+    other.learning.mkdir(exist_ok=True)
+    alert = b'{"rule":{"id":"1186"},"case":"same-alert"}'
+    first = _certified_run(name="tenant-a", alert_bytes=alert)
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(other_root))
+    second = _certified_run(name="tenant-b", alert_bytes=alert, tenant_id=str(other.id))
+    for root, run_dir in ((first_root, first), (other_root, second)):
+        monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
+        assert run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json") is True
+    queues = [state.state_root / "author-queue", other.learning / "author-queue"]
+    markers = [list(queue.glob("*.json")) for queue in queues]
+    assert [len(items) for items in markers] == [1, 1]
+    bodies = [marker_body(items[0]) for items in markers]
+    assert bodies[0]["case_id"] == bodies[1]["case_id"]
+    assert [(body["tenant_id"], body["run_id"]) for body in bodies] == [
+        (run_dir.parent.parent.name, run_dir.name) for run_dir in (first, second)]
+    assert not (tmp_path / "legacy-state" / "author-queue").exists()
 
 
 def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_path, state):

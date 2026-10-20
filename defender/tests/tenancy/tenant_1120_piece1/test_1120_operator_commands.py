@@ -345,6 +345,12 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
                           H.knowledge_dir(data_root)):
             assert not _exposes(Path(m["source"]), forbidden), (
                 f"the bind of {m['source']} exposes {forbidden} inside the box")
+        learning = (H.tenant_folder(data_root) / "learning").resolve()
+        source = Path(m["source"]).resolve()
+        assert not _exposes(source, learning), (
+            f"the bind of {source} exposes tenant learning {learning} inside the box")
+        assert not source.is_relative_to(learning), (
+            f"the bind of {source} exposes a child of tenant learning {learning} inside the box")
     # The control on the same predicate: the agent bind does expose the agent half.
     assert _exposes(Path(agent_mounts[0]["source"]), H.agent_dir(data_root))
 
@@ -401,3 +407,76 @@ def test_1120_no_tenant_or_data_root_key_enters_the_box_env(tmp_path: Path) -> N
     clock = {k for k in env_keys | set(allow) if _CLOCK_KEY.search(k)}
     assert env_keys - clock == set(allow) - {"DEFENDER_AGENT_DIR"} - clock, env_keys
     assert "DEFENDER_AGENT_DIR" not in env_keys
+
+
+@pytest.mark.parametrize(("script", "args"), [
+    ("defender/learning/loop.py", ["--author-drain"]),
+    ("defender/learning/loop.py", ["--lead-author-drain"]),
+    ("defender/learning/author/lessons/run.py", []),
+    ("defender/learning/author/questioner/run.py", []),
+    ("defender/learning/frontend/build.py", []),
+    ("defender/cli/learning/revert_lesson.py", ["example-lesson"]),
+    ("defender/cli/learning/trace_lesson.py", ["--all"]),
+])
+@pytest.mark.parametrize("identity", [
+    [], ["--tenant", "not-a-tenant"], ["--tenant", H.OTHER],
+], ids=["missing", "malformed", "unknown"])
+def test_1186_learning_operator_commands_refuse_identity_before_state_access(
+    data_root: Path, tmp_path: Path, script: str, args: list[str], identity: list[str],
+):
+    """O3: neither absent nor malformed tenant identity can select an ambient queue."""
+    poison = tmp_path / "ambient-state"
+    poison.mkdir()
+    (poison / "operator-sentinel").write_bytes(b"untouched")
+    before_state = {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()}
+    # The old frontend writes to its package before discovering state errors. Restore the
+    # existing build outputs even when this contract fails against that implementation.
+    frontend = H.REPO_ROOT / "defender/learning/frontend"
+    outputs = [frontend / n for n in ("lessons.json", "lessons.html", "queues.json", "queues.html")]
+    before_pages = {p: p.read_bytes() if p.exists() else None for p in outputs}
+    try:
+        proc = H.run_script(H.REPO_ROOT / script, *args, *identity, root=data_root,
+                            DEFENDER_LEARNING_STATE_DIR=str(poison))
+        out = H.output(proc)
+        assert proc.returncode != 0, f"tenant-free command ran successfully: {out}"
+        assert "tenant" in out.lower(), out
+        assert "traceback" not in out.lower(), out
+        assert {p.relative_to(poison): p.read_bytes() for p in poison.rglob("*") if p.is_file()} == before_state
+        assert {p: p.read_bytes() if p.exists() else None for p in outputs} == before_pages
+        assert not list(data_root.iterdir()), "identity refusal touched a tenant directory"
+    finally:
+        for p, blob in before_pages.items():
+            if blob is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.write_bytes(blob)
+
+
+@pytest.mark.parametrize(("script", "args", "lock_name", "diagnostic", "status"), [
+    ("defender/learning/loop.py", ["--author-drain"], ".author-drain.lock",
+     "another drainer holds the lock", 0),
+    ("defender/learning/loop.py", ["--lead-author-drain"], ".lead-author-drain.lock",
+     "another drainer holds the lock", 0),
+    ("defender/learning/author/lessons/run.py", [], "_pending/.lock",
+     "drain lock held by another process", 0),
+    ("defender/learning/author/questioner/run.py", [], "_pending/.lock",
+     "drain lock held by another process", 0),
+    ("defender/cli/learning/revert_lesson.py", ["example-lesson"], ".author-drain.lock",
+     "an author drain is in progress", 3),
+])
+def test_1186_learning_operator_cli_uses_the_explicit_tenants_lock(
+    data_root: Path, tmp_path: Path, script: str, args: list[str], lock_name: str,
+    diagnostic: str, status: int,
+):
+    """O3/O4: valid --tenant reaches its own held lock despite a conflicting old override."""
+    from defender.tests.support.learning.curation._drain719 import Holder
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    tenant = set_up_tenant(data_root, H.TID)
+    tenant.learning.mkdir(parents=True, exist_ok=True)
+    with Holder(tenant.learning / lock_name, blocking_discipline=False):
+        proc = H.run_script(H.REPO_ROOT / script, *args, "--tenant", H.TID, root=data_root,
+                            DEFENDER_LEARNING_STATE_DIR=str(data_root))
+    assert proc.returncode == status, H.output(proc)
+    assert diagnostic in H.output(proc), H.output(proc)
+    assert not (data_root / lock_name).exists(), "retired ambient root received the lock"
