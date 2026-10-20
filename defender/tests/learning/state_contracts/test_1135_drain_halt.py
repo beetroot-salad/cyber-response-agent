@@ -561,15 +561,15 @@ def cell(name, root):
     return out
 
 
-for name, root in spec["warm"].items():   # every lazy import happens here, as the owner
-    cell(name, root)
+warm = {name: cell(name, root) for name, root in spec["warm"].items()}
 if spec["drop"]:
     os.setgroups([])
     os.setresgid(65534, 65534, 65534)
     os.setresuid(65534, 65534, 65534)
 lines.clear()
 results = {name: cell(name, root) for name, root in spec["cells"].items()}
-print(json.dumps({"results": results, "lines": lines, "uid": os.geteuid()}))
+print(json.dumps({"results": results, "warm_e1": warm["e1"],
+                  "lines": lines, "uid": os.geteuid()}))
 '''
 
 
@@ -714,12 +714,17 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
 
     assert out["uid"] != 0, "the child still ran as root: permission bits would not bite"
     results = out["results"]
+    assert out["warm_e1"]["raised"] is None, \
+        f"the writable accepted-run enqueue control raised: {out['warm_e1']}"
+    assert out["warm_e1"]["answer"] is True, \
+        f"the writable accepted-run enqueue control failed: {out['warm_e1']}"
     e1 = results["e1"]
     assert e1["raised"] is None, f"the run-end enqueue raised on an everyday failure: {e1}"
     assert e1["answer"] is False, \
         f"the run-end enqueue did not answer False on an everyday failure: {e1}"
-    assert any(lvl == "ERROR" and "Permission denied" in m for lvl, m in out["lines"]), \
-        f"the run-end enqueue's failure was not logged: {out['lines']}"
+    assert any(lvl == "ERROR" and "Permission denied" in m
+               and str(tenant.learning / "author-queue") in m for lvl, m in out["lines"]), \
+        f"the run-end enqueue's selected queue permission failure was not logged: {out['lines']}"
     for name in ("append", "rotate", "move", "lock"):
         got = results[name]
         assert got["raised"] == "PermissionError", \
