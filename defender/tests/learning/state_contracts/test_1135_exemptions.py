@@ -261,13 +261,15 @@ def test_e3_a_refused_findings_queue_leaves_the_launch_unaffected(tmp_path: Path
     else:
         root.mkdir(parents=True)
     control = _gradable_episode(tmp_path / "control")
+    control_root = control.parent.parent / "learning"
+    control_root.mkdir(parents=True, exist_ok=True)
     caplog.clear()
     escaped = _launcher_grade(control)
     assert escaped is None, f"the control's _grade raised {escaped!r}"
     failed = [_record_text(r) for r in caplog.records if r.levelno >= logging.WARNING]
     assert not failed, f"the control's grade logged a failure with no fault planted: {failed}"
-    queued = S.jsonl_rows(root / "_pending" / "findings.jsonl")
-    assert queued, "the control's grade appended no rows at today's queue name"
+    queued = S.jsonl_rows(control_root / "_pending" / "findings.jsonl")
+    assert queued, "the control's grade appended no rows at its tenant's queue name"
     assert len(queued) == J.judge_record(control).get("enqueued_rows"), (
         f"the control's grade appended {len(queued)} rows, not the episode's enqueued count")
 

@@ -21,7 +21,6 @@ from defender.tests.support.sandbox._spec791 import (
     SpecTail,
     author_markers,
     drive_tail,
-    loop_paths,
     plant_alert,
     satisfy_entrypoint_keys,
 )
@@ -42,9 +41,15 @@ class Tail(SpecTail):
 def state(tmp_path, monkeypatch):
     """A learning state root and a runs base under tmp, and a key per provider so the
     entrypoint's startup preflight cannot fail ahead of the tail these demands are about."""
-    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
+    from defender.learning.core.config import LoopPaths
+    from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
+
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
-    return loop_paths(tmp_path)
+    tenant = set_up_tenant(current_data_root())
+    tenant.learning.mkdir(exist_ok=True)
+    repo = tmp_path / "repo"
+    (repo / "defender").mkdir(parents=True)
+    return LoopPaths.for_tenant(tenant).with_repo_root(repo)
 
 
 def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch):
