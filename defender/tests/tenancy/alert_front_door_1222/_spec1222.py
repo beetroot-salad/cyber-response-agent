@@ -714,6 +714,7 @@ def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each p
     knowledge = T6.place_tenant(root, tenant_id, table=table, lead_zero=lead_zero,
                                 configs=texts)
     planted = Planted(root=root, tenant_id=tenant_id, knowledge=knowledge)
+    (root / tenant_id / "learning").mkdir(exist_ok=True)  # setup provisions mutable state
     planted.case_mapping.write_text(
         case_mapping if case_mapping is not None else case_mapping_text(), encoding="utf-8")
     if isinstance(alert_mapping, str):
