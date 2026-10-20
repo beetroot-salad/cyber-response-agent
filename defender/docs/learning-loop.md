@@ -140,7 +140,7 @@ defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>
         └── 5. judge            — judge.yaml + findings → learning/_pending/findings.jsonl
         │
         ▼
-defender/learning/loop.py --author-drain   (at LEARNING_AUTHOR_THRESHOLD)
+defender/learning/loop.py --tenant <T> --author-drain   (at LEARNING_AUTHOR_THRESHOLD)
         ├── lock + clean-scope + idempotency + family-row gates
         ├── new/fold/skip lesson edits under defender/lessons/
         └── commit from a worktree + open one PR + rotate the queue
@@ -379,11 +379,11 @@ $DEFENDER_DATA_ROOT/<tenant>/episodes/<episode uuid>/
   judge.yaml                  # written last; its presence certifies the pass
   learning.html               # the episode page (#1025) — rendered after judge.yaml, from the episode dir alone
 
-defender/learning/_pending/{findings,consumed}.jsonl + findings.held_report.log
+<data root>/<T>/learning/_pending/{findings,consumed}.jsonl + findings.held_report.log
 defender/lessons/*.md         # committed lessons read at PLAN time
 ```
 
-**`learning/runs/` is an orphan.** It holds per-case directories the deleted
+**`<data root>/<T>/learning/runs/` is an orphan.** It holds per-case directories the deleted
 pipeline's persist step wrote; nothing reads it. `defender/cli/learning/trace_lesson.py --tenant <T>`
 answers "which cases was this lesson in context for" from that tenant's natural
 runs (`<T>/runs`, through the tenant's run repository; a stray entry there
@@ -451,8 +451,8 @@ From the checkout root, inspect which tenant runs had a lesson in context:
 python defender/cli/learning/trace_lesson.py --tenant <tenant-id> <lesson-name>
 ```
 
-Open a revert PR for a merged lesson (uses the configured learning state and author lock):
+Open a revert PR for a merged lesson (uses the selected tenant’s learning state and author lock):
 
 ```bash
-python defender/cli/learning/revert_lesson.py <lesson-name>
+python defender/cli/learning/revert_lesson.py --tenant <tenant-id> <lesson-name>
 ```

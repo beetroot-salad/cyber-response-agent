@@ -470,7 +470,7 @@ def enqueue_curation(
         _logger.info(f"NOT enqueuing for curation: {reason}")
         return False
     from defender.configuration._env import FatalConfigError
-    from defender.learning.core.config import loop_paths
+    from defender.learning.core.config import LoopPaths
     from defender.learning.core.state import LearningState, StateRefused
 
     address = RunAddress(tenant_id=_tenant.TenantId(run.tenant_id), run_id=run.id)
@@ -481,18 +481,19 @@ def enqueue_curation(
         if record is None:
             raise OSError("the run's record vanished")
         case_id = case_ref_of_digest(record.digest)
-        with LearningState.open(loop_paths()) as state:
+        with LearningState.open(LoopPaths.for_tenant(
+                _tenant.requested_tenant(_tenant.resolve_data_root(), run.tenant_id))) as state:
             state.enqueue_curation(
                 case_id, {"case_id": case_id, "tenant_id": str(address.tenant_id),
                           "run_id": str(address.run_id)})
     except OSError as e:
-        _logger.error(f"NOT enqueuing for curation: could not write the request: {e!r}")
+        _logger.error(f"NOT enqueuing for curation: could not write the request: {e}")
         return False
     except StateRefused as refused:
         _logger.error(f"NOT enqueuing for curation: could not enqueue the request, refused "
                       f"{refused.record}: {refused.reason}")
         return False
-    except FatalConfigError as config_error:
+    except (FatalConfigError, _tenant.TenantRefused) as config_error:
         _logger.error(f"NOT enqueuing for curation: could not enqueue the request: "
                       f"{config_error}")
         return False

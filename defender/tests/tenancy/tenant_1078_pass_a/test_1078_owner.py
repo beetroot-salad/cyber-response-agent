@@ -317,7 +317,7 @@ def test_data_root_itself_is_a_symlink(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("shape", ["equal", "learning-inside-data-root",
                                    "learning-contains-data-root", "equal-through-a-symlink"])
-def test_o13_widened_refusal(tmp_path, monkeypatch, shape):
+def test_1186_legacy_state_override_cannot_refuse_the_data_root(tmp_path, monkeypatch, shape):
     data = tmp_path / "data"
     data.mkdir()
     learning = {
@@ -330,7 +330,7 @@ def test_o13_widened_refusal(tmp_path, monkeypatch, shape):
         learning.symlink_to(data, target_is_directory=True)
     H.set_data_root(monkeypatch, data)
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
-    H.owner_refusal(H.resolve_data_root)
-    # the control: a disjoint pair passes
+    assert H.resolve_data_root() == data.resolve(), "O1: the retired state override is inert"
+    # Both overlapping and disjoint stale overrides are ignored.
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "elsewhere" / "learning"))
     assert H.resolve_data_root() == data.resolve()

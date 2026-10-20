@@ -26,7 +26,7 @@ EXTRA_ADAPTER = 'VERBS = {"verb": None}\n'
 BROKEN_SYSTEM = H.BROKEN_SYSTEM
 BROKEN_ADAPTER = H.BROKEN_ADAPTER
 
-#: The learning-state knob whose overlap with the data root `resolve_data_root` refuses.
+#: The retired learning-state knob; #1186 commands must ignore it even when overlapping.
 OVERLAP_ENV = H.LEARNING_STATE_ENV
 
 #: #1159: what `check` says when the census cannot be taken — the folder's table went unjudged
@@ -362,7 +362,7 @@ def test_1120_s9_check_over_grant_table_verb_filed_under_wrong_real_system(
                      "identity.list-authorized-hosts")
 
 
-def test_1120_scaffold_and_check_folder_run_with_no_data_root_and_ignore_the_learning_overlap(
+def test_1186_tenant_commands_ignore_the_retired_learning_overlap(
         tmp_path: Path) -> None:
     git_identity = dict(H.GIT_IDENTITY)
     unset = tuple(k for k in os.environ if k.startswith("GIT_")) + (OVERLAP_ENV,)
@@ -383,9 +383,14 @@ def test_1120_scaffold_and_check_folder_run_with_no_data_root_and_ignore_the_lea
     H.assert_clean(H.check(tenant_py, root, "--folder", str(second), **overlap))
 
     before = H.tree_census(root)
-    H.assert_refused(_check_id(root, **overlap), OVERLAP_ENV)
-    H.assert_refused(H.setup(tenant_py, root, **overlap), OVERLAP_ENV)
-    assert H.census_diff(before, H.tree_census(root)) == [], "a refused command wrote"
+    H.assert_clean(_check_id(root, **overlap))
+    assert H.tree_census(root) == before, "check wrote into the tenant"
+    H.assert_clean(H.setup(tenant_py, root, **overlap))
+    assert H.census_diff(before, H.tree_census(root)) == [f"added: {H.TID}/learning"]
+    assert list((H.tenant_folder(root) / "learning").iterdir()) == []
+    initialized = H.tree_census(root)
+    H.assert_clean(H.setup(tenant_py, root, **overlap))
+    assert H.tree_census(root) == initialized, "setup rewrote initialized state"
 
 
 def test_1120_check_with_both_or_neither_selector_is_a_usage_error(tmp_path: Path) -> None:
@@ -632,6 +637,8 @@ def test_1120_check_fails_closed_when_git_cannot_say_the_tenant_id_is_committed(
     root = tmp_path / "data"
     knowledge = H.cloned_tenant(tmp_path / "src", root)
     H.plant_row(root)
+    # O5: this setup re-run starts from a fully provisioned tenant.
+    (H.tenant_folder(root) / "learning").mkdir()
     env, reason, repair = fault(tmp_path, knowledge)
     try:
         for proc in (_check_id(root, **env), _check_folder(knowledge, **env)):

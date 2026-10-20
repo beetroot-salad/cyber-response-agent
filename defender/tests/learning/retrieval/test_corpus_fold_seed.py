@@ -289,7 +289,7 @@ def test_e1_the_author_config_can_pin_the_manifest_seed(tmp_path):
         _findings_lesson(corpus, f"lesson-{i}")
     rows = [{"id": "f/1", "text": "a finding"}]
 
-    paths = LoopPaths(repo_root=tmp_path)
+    paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
     pinned = build_author_config(paths, state=open_state(paths), trees=author_trees(paths),
                                 manifest_seed="fixed-eval-seed")
     a = _prompt_manifest(build_user_prompt(rows, "batch-one", pinned))

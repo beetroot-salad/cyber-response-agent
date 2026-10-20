@@ -21,7 +21,6 @@ SLUG = "m05-lsass-access"
 OTHER = "b01-benign-logon"
 #: The tenant `launch` names for run.py, which requires one (Flow 5).
 LAUNCH_TENANT = fixture_uuid("tenant:playground")
-STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 INDEX_NAME = "held-out-index.jsonl"
 #: The failure bucket an absent or recordless indexed run lands in (recheck X2, quoted).
 NO_RUN_RECORD = "launched, no run record"
@@ -197,7 +196,7 @@ def _launched_run_id(call: SpawnCall, alert: Path) -> str:
     run_id = flags[flags.index("--run-id") + 1]
     assert S.is_canonical_uuid(run_id), f"the minted run id {run_id!r} is not a canonical UUID"
     return run_id
-# The launch scene: the data root, a separate learning state root, the operator's own folder
+# The launch scene: the data root, tenant learning state, the operator's own folder
 
 @dataclass
 class Scene:
@@ -216,11 +215,10 @@ class Scene:
 
 
 @pytest.fixture
-def scene(tmp_path: Path, data_root: Path, monkeypatch: pytest.MonkeyPatch) -> Scene:
+def scene(tmp_path: Path, data_root: Path) -> Scene:
     """`DEFENDER_DATA_ROOT` is conftest's per-test root (outside `tmp_path`)."""
-    state = tmp_path / "learning-state"
-    state.mkdir()
-    monkeypatch.setenv(STATE_ENV, str(state))
+    state = Path(data_root) / LAUNCH_TENANT / "learning"
+    state.mkdir(parents=True)
     ops = tmp_path / "ops"
     ops.mkdir()
     fixtures = _fixtures(tmp_path / "fixtures", {SLUG: "malicious", OTHER: "benign"})

@@ -19,7 +19,6 @@ from defender.learning.core.config import (
     LoopPaths,
     author_max_attempts,
     env_int,
-    loop_paths,
     merge_mode,
     now_iso,
     pitfalls_threshold,
@@ -449,6 +448,9 @@ def _drain_lead_author_markers(
     served: list[ServedMarker] = []
     for claim in claims:
         spec = claim.spec
+        if paths.tenant is not None and spec.get("tenant_id") != str(paths.tenant.id):
+            state.quarantine(claim, f"tenant {spec.get('tenant_id')!r} does not own selected tenant {paths.tenant.id}'s queue")
+            continue
         run = _rehydrate(claim, data_root, accepted)
         if isinstance(run, RunAbsent):
             state.quarantine(claim, "artifact-missing")
@@ -856,7 +858,7 @@ def _lead_author_pr_body(branch: str, base: str) -> str:
 
 
 def author_drain(
-    paths: LoopPaths | None = None,
+    paths: LoopPaths,
     *,
     # `(paths, state, channel, threshold_env, module_name, pending_label, *, box)`.
     trigger_author: Callable[..., None] | None = None,
@@ -866,8 +868,6 @@ def author_drain(
     scrub: Callable[[Path], None] = box_mod.scrub,
 ) -> int:
     _validate_merge_mode()
-    if paths is None:
-        paths = loop_paths()
     # The lane's label reaches its work step bound into the DEFAULT seam, so an injected seam
     # keeps its call shape (#1134).
     if trigger_author is None:
@@ -892,7 +892,7 @@ def author_drain(
 
 
 def lead_author_drain(
-    paths: LoopPaths | None = None,
+    paths: LoopPaths,
     *,
     run_lead_author: Callable[..., None] | None = None,
     run_pitfalls: Callable[..., int] | None = None,
@@ -906,8 +906,6 @@ def lead_author_drain(
     here, and, bound into the DEFAULT seams only, the lanes' own (#1175). One that overruns is a
     systemic `GitError` (`_claim_git.GitOverran`)."""
     _validate_merge_mode()
-    if paths is None:
-        paths = loop_paths()
     # Read every configured value before a worktree, box or agent exists, so a malformed
     # setting refuses the tick rather than a commit.
     lock_wait_seconds = repo_lock_wait_seconds()
@@ -948,7 +946,8 @@ def lead_author_drain(
             # the tick (`FatalConfigError`) with every row still queued. A tick with nothing
             # queued now reads no root and claims no row: one that lands mid-tick waits for
             # the next tick.
-            data_root = _data_root() if state.has_requests() else None
+            data_root = ((paths.tenant.data_root if paths.tenant is not None else _data_root())
+                         if state.has_requests() else None)
             return _run_worktree_batch(
                 paths, state, branch, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,

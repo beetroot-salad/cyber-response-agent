@@ -220,18 +220,22 @@ def test_an_unquoted_operator_is_still_an_operator():
 
 
 # The same invariant, at the layer that actually decides.
-def test_the_gate_does_not_rewrite_the_command_before_it_parses_it():
+def test_the_gate_does_not_rewrite_the_command_before_it_parses_it(tmp_path):
     """`decide_bash` is the entry point"""
     from defender.runtime.agent_definition import compile_policy_for
     from defender.runtime.permission import decide_bash
 
-    run_dir = Path(tempfile.mkdtemp()) / "run"
-    run_dir.mkdir(parents=True)
-    defender_dir = run_dir / "defender"
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    defender_dir = tmp_path / "defender"
     defender_dir.mkdir()
     target = run_dir / "report.md"
     target.write_text("x", encoding="utf-8")
     policy = compile_policy_for(T1106.fixture_gather_def(), run_dir=run_dir, defender_dir=defender_dir)
+    plain = decide_bash(
+        f"cat {target}", policy=policy, run_dir=run_dir, defender_dir=defender_dir,
+    )
+    assert plain.pipelines is not None, "the gate refused the ordinary host-path control"
 
     for blank in _NOT_SHELL_BLANKS:
         cmd = f"cat {target}{blank}"

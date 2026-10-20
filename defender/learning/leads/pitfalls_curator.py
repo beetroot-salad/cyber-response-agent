@@ -550,7 +550,7 @@ PitfallsDisposition = _disposition.PitfallsDisposition
 
 def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     *,
-    paths: _loop_config.LoopPaths | None = None,
+    paths: _loop_config.LoopPaths,
     state: LearningState | None = None,
     trees: DrainTrees,
     invoke: Callable[..., int] | None = None,
@@ -578,8 +578,6 @@ def run_pitfalls(  # noqa: PLR0913, C901 — one tick's whole injection surface
     commit gate reads the working copy through them (#1134). Checked before any work: they must
     hold `paths.skills_dir` itself as a mount point, else `LeadAuthorError`."""
     # An entry point on its own (by hand) opens the handle; the drain hands its own in.
-    if paths is None:
-        paths = _loop_config.loop_paths()
     if state is None:
         with LearningState.open(paths) as own:
             return run_pitfalls(

@@ -17,6 +17,288 @@ from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 #: The remedy every "no knowledge folder" refusal carries (DC2, N12 re-read): clone the tenant
 REMEDY_WORDS = ("clone", "tenant.py setup")
 
+# #1186 O5: setup has an explicitly named migration source, never a checkout/env fallback.
+# The eight live state entries plus the retired forward-check bundles are preserved.
+LEARNING_ENTRIES = (
+    ".author-drain.lock", ".lead-author-drain.lock", "_author.lock", "_pending",
+    "_pending_delivery", "_pending_leads", "_pending_pitfalls", "author-queue", "runs",
+)
+LEARNING_LOCKS = (
+    ".author-drain.lock", ".lead-author-drain.lock", "_author.lock", "_pending/.lock",
+    "_pending/.findings.lock", "_pending/.questioner_findings.lock",
+    "_pending_leads/.lock", "_pending_pitfalls/.pitfalls.lock",
+)
+
+
+def _legacy_learning(source: Path) -> dict:
+    source.mkdir(parents=True, exist_ok=True)
+    for name in LEARNING_ENTRIES:
+        target = source / name if name.endswith(".lock") else source / name / "record.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(f"preserve {name}\n", encoding="utf-8")
+        target.chmod(0o640)
+        os.utime(target, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+    (source / "run.py").write_text("# package source stays here\n", encoding="utf-8")
+    (source / "unrelated").mkdir()
+    (source / "unrelated" / "keep").write_text("not learning state", encoding="utf-8")
+    return H.tree_census(source)
+
+
+def _adopt_learning(root: Path, source: Path, **env: str) -> subprocess.CompletedProcess:
+    return H.tenant_py(
+        tenant_py, "setup", H.TID, "--learning-state-from", str(source), root=root, **env)
+
+
+@pytest.mark.parametrize("migrate", [False, True], ids=["fresh", "explicit-migration"])
+@pytest.mark.parametrize("target_shape", ["existing", "dangling"])
+def test_1186_setup_refuses_a_linked_learning_destination(
+        tmp_path: Path, migrate: bool, target_shape: str) -> None:
+    """O5/O6: refuse existing/dangling root links, accept an empty real destination."""
+    root, source, outside = tmp_path / "data", tmp_path / "legacy", tmp_path / "outside"
+    H.adopted(root)
+    source_before = _legacy_learning(source) if migrate else {}
+    if target_shape == "existing":
+        outside.mkdir()
+    learning = H.tenant_folder(root) / "learning"
+    learning.symlink_to(outside, target_is_directory=True)
+    root_before = H.tree_census(root)
+
+    def setup_selected():
+        return _adopt_learning(root, source) if migrate else H.setup(tenant_py, root)
+
+    H.assert_refused(setup_selected(), str(learning))
+    assert H.tree_census(root) == root_before
+    assert H.tree_census(source) == source_before
+    assert os.path.lexists(outside) == (target_shape == "existing")
+    assert H.tree_census(outside) == {}
+    # A real destination succeeds through the same CLI; empty-target refusal is not no-merge.
+    learning.unlink()
+    learning.mkdir()
+    H.assert_clean(setup_selected())
+    assert learning.is_dir()
+    assert not learning.is_symlink()
+    if migrate:
+        assert (learning / "author-queue" / "record.json").read_text() == "preserve author-queue\n"
+    else:
+        assert list(learning.iterdir()) == []
+
+
+@pytest.mark.parametrize("legacy_location", ["env", "checkout"])
+def test_1186_setup_without_source_ignores_legacy_locations(
+        tmp_path: Path, legacy_location: str) -> None:
+    """O5: fresh setup provisions this tenant, without discovering a migration source."""
+    root, source = tmp_path / "data", tmp_path / "legacy"
+    H.place_knowledge(root)
+    checkout = H.tmp_checkout(tmp_path / "checkout")
+    if legacy_location == "checkout":
+        source = checkout / "defender" / "learning"
+    before = _legacy_learning(source)
+    env = {"DEFENDER_LEARNING_STATE_DIR": str(source)} if legacy_location == "env" else {}
+    H.assert_clean(H.run_script(
+        checkout / "defender" / "cli" / "tenant.py", "setup", H.TID,
+        root=root, unset=(H.LEARNING_STATE_ENV,), **env))
+    assert H.tree_census(source) == before
+    assert list((H.tenant_folder(root) / "learning").iterdir()) == []
+
+
+def test_1186_setup_moves_only_named_state_and_preserves_metadata(tmp_path: Path) -> None:
+    """O5: migrate queues/locks/deliveries and legacy bundles, preserving package source."""
+    root, source, decoy = tmp_path / "data", tmp_path / "legacy", tmp_path / "env-decoy"
+    H.place_knowledge(root)
+    _legacy_learning(source)
+    decoy_before = _legacy_learning(decoy)
+    outside = tmp_path / "outside"
+    outside.write_text("must not be followed", encoding="utf-8")
+    (source / "_pending" / "alias").symlink_to(outside)
+    record = source / "_pending" / "record.json"
+    nested = source / "_pending" / "nested"
+    nested.mkdir()
+    (nested / "data").write_text("nested state", encoding="utf-8")
+    nested.chmod(0o750)
+    os.utime(nested, ns=(1_700_000_000_000_000_000, 1_700_000_000_000_000_000))
+    if os.geteuid() == 0:
+        os.chown(record, 1234, 2345)
+        os.chown(nested, 1234, 2345)
+    owner = (record.stat().st_uid, record.stat().st_gid)
+    nested_stat = nested.stat()
+    before = H.tree_census(source)
+
+    done = _adopt_learning(root, source, DEFENDER_LEARNING_STATE_DIR=str(decoy))
+
+    text = H.assert_clean(done)
+    assert str(source) in text, "the operator must see which source was adopted"
+    destination = H.tenant_folder(root) / "learning"
+    after = H.tree_census(destination)
+    moved = {k: v for k, v in before.items() if k.split("/")[0] in LEARNING_ENTRIES}
+    assert {k: after.get(k) for k in moved} == moved
+    copied = (destination / "_pending" / "record.json").stat()
+    assert (copied.st_uid, copied.st_gid) == owner
+    copied_dir = (destination / "_pending" / "nested").stat()
+    assert (copied_dir.st_mtime_ns, copied_dir.st_mode, copied_dir.st_uid, copied_dir.st_gid) == (
+        nested_stat.st_mtime_ns, nested_stat.st_mode, nested_stat.st_uid, nested_stat.st_gid)
+    assert all(not (source / entry).exists() for entry in LEARNING_ENTRIES)
+    assert H.tree_census(source) == {k: v for k, v in before.items() if k not in moved}
+    assert H.tree_census(decoy) == decoy_before
+    assert outside.read_text(encoding="utf-8") == "must not be followed"
+    assert not (destination / ".adoption").exists()
+    assert not (destination.parent / "learning.adopting").exists()
+    assert not (source / f".adopting-to-{H.TID}").exists()
+    _row_is_acme(root)
+    snapshot = H.tree_census(root)
+    H.assert_clean(_adopt_learning(root, source))
+    assert H.tree_census(root) == snapshot, "completed adoption is idempotent"
+
+
+@pytest.mark.parametrize("fault", [
+    "missing-source", "file-source", "unknown-partial", "foreign-token", "unowned-aside-child",
+    "unowned-stage-child",
+])
+def test_1186_setup_refuses_ambiguous_adoption_without_data_loss(tmp_path: Path, fault: str) -> None:
+    """O5: an explicit bad source or unexplained migration state cannot be guessed away."""
+    root, source = tmp_path / "data", tmp_path / "legacy"
+    H.adopted(root)
+    destination = H.tenant_folder(root) / "learning"
+    if fault == "file-source":
+        source.write_text("not a directory", encoding="utf-8")
+    elif fault in {"unknown-partial", "foreign-token", "unowned-aside-child", "unowned-stage-child"}:
+        _legacy_learning(source)
+        if fault == "unknown-partial":
+            partial = destination.with_name("learning.adopting")
+            partial.mkdir()
+            (partial / "unowned").write_text("do not discard", encoding="utf-8")
+        else:
+            aside = source / f".adopting-to-{H.TID}"
+            if fault == "unowned-stage-child":
+                aside = aside.with_name(f"{aside.name}.stage")
+            aside.mkdir()
+            if fault in {"unowned-aside-child", "unowned-stage-child"}:
+                (aside / ".adoption").write_text(
+                    "63ac3146-4d58-4bb8-9f94-124902ceef1a\n", encoding="utf-8")
+                (aside / "unrelated").mkdir()
+                (aside / "unrelated" / "keep").write_text("do not adopt or delete", encoding="utf-8")
+            else:
+                (aside / ".adoption").write_text("source-token\n", encoding="utf-8")
+                destination.mkdir()
+                (destination / ".adoption").write_text("different-token\n", encoding="utf-8")
+                (destination / "existing").write_text("do not merge", encoding="utf-8")
+    before = H.tree_census(tmp_path)
+    H.assert_refused(_adopt_learning(root, source))
+    assert H.tree_census(tmp_path) == before
+
+
+@pytest.mark.parametrize("lock_name", LEARNING_LOCKS)
+def test_1186_setup_refuses_held_source_lock_before_moving(tmp_path: Path, lock_name: str) -> None:
+    """O5: neither a queue appender nor an author/drain may be migrated mid-operation."""
+    import fcntl
+
+    root, source = tmp_path / "data", tmp_path / "legacy"
+    H.adopted(root)
+    _legacy_learning(source)
+    lock = source / lock_name
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a+", encoding="utf-8") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        source_before, root_before = H.tree_census(source), H.tree_census(root)
+        H.assert_refused(_adopt_learning(root, source), str(lock))
+        assert H.tree_census(source) == source_before
+        assert H.tree_census(root) == root_before
+    H.assert_clean(_adopt_learning(root, source))  # Same observation channel, lock released.
+    assert (H.tenant_folder(root) / "learning" / "author-queue" / "record.json").is_file()
+
+
+@pytest.mark.parametrize("location", ["data-root", "ancestor", "tenant-child", "checkout"])
+def test_1186_setup_refuses_overlapping_migration_source(tmp_path: Path, location: str) -> None:
+    """O5: adoption cannot recursively move a tenant, its data root, or the running checkout."""
+    root = tmp_path / "data"
+    H.adopted(root)
+    child = H.tenant_folder(root) / "runs"
+    child.mkdir()
+    checkout = H.tmp_checkout(tmp_path / "checkout") if location == "checkout" else None
+    source = {"data-root": root, "ancestor": tmp_path, "tenant-child": child,
+              "checkout": checkout}[location]
+    before = H.tree_census(root)
+    if checkout is None:
+        done = _adopt_learning(root, source)
+    else:
+        done = H.run_script(
+            checkout / "defender" / "cli" / "tenant.py", "setup", H.TID,
+            "--learning-state-from", str(source), root=root)
+    H.assert_refused(done, str(source))
+    assert H.tree_census(root) == before
+
+
+def test_1186_setup_never_merges_state_and_accepts_already_in_place(tmp_path: Path) -> None:
+    """O5: occupied destination refuses without loss; selecting the destination is a no-op."""
+    root, source = tmp_path / "data", tmp_path / "legacy"
+    H.adopted(root)
+    _legacy_learning(source)
+    destination = H.tenant_folder(root) / "learning"
+    destination.mkdir()
+    (destination / "existing").write_text("already here", encoding="utf-8")
+    source_before, root_before = H.tree_census(source), H.tree_census(root)
+    H.assert_refused(_adopt_learning(root, source), str(destination))
+    assert H.tree_census(source) == source_before
+    assert H.tree_census(root) == root_before
+    H.assert_clean(_adopt_learning(root, destination))
+    assert H.tree_census(root) == root_before
+
+
+@pytest.mark.parametrize("phase", [
+    "staging-empty", "staging-partial", "staging-complete",
+    "moving", "copying", "published", "deleting", "racing-write",
+])
+def test_1186_setup_completes_interrupted_adoption(tmp_path: Path, phase: str) -> None:
+    """O5/D10: recover token staging, split moves and cleanup; preserve/report recreated writes."""
+    root, source = tmp_path / "data", tmp_path / "legacy"
+    H.adopted(root)
+    before = _legacy_learning(source)
+    aside = source / f".adopting-to-{H.TID}"
+    stage = aside.with_name(f"{aside.name}.stage")
+    token = "63ac3146-4d58-4bb8-9f94-124902ceef1a\n"
+    staging_tokens = {"staging-empty": "", "staging-partial": "63ac3146-4d58-",
+                      "staging-complete": token}
+    if phase in staging_tokens:
+        stage.mkdir()
+        (stage / ".adoption").write_text(staging_tokens[phase], encoding="utf-8")
+    else:
+        aside.mkdir()
+        (aside / ".adoption").write_text(token, encoding="utf-8")
+        for name in LEARNING_ENTRIES[:2] if phase == "moving" else LEARNING_ENTRIES:
+            (source / name).rename(aside / name)
+    destination = H.tenant_folder(root) / "learning"
+    if phase in {"published", "deleting", "racing-write"}:
+        shutil.copytree(aside, destination, symlinks=True)
+        if phase == "deleting":
+            shutil.rmtree(aside / "_pending")
+    elif phase == "copying":
+        partial = destination.with_name("learning.adopting")
+        partial.mkdir()
+        (partial / "partial").write_text("incomplete copy", encoding="utf-8")
+    residual = source / "author-queue" / "new-request.json"
+    if phase == "racing-write":
+        residual.parent.mkdir()
+        residual.write_text("racing writer's new data\n", encoding="utf-8")
+
+    done = _adopt_learning(root, source)
+    if phase == "racing-write":
+        text = H.assert_refused(done, str(residual.parent))
+        assert "author-queue" in text
+        assert residual.read_text(encoding="utf-8") == "racing writer's new data\n"
+    else:
+        H.assert_clean(done)
+
+    moved = {k: v for k, v in before.items() if k.split("/")[0] in LEARNING_ENTRIES}
+    after = H.tree_census(destination)
+    assert {k: after.get(k) for k in moved} == moved
+    remaining = H.tree_census(source)
+    if phase == "racing-write":
+        remaining = {k: v for k, v in remaining.items() if k.split("/")[0] != "author-queue"}
+    assert remaining == {k: v for k, v in before.items() if k not in moved}
+    assert not aside.exists()
+    assert not stage.exists()
+    assert not destination.with_name("learning.adopting").exists()
+    assert not (destination / ".adoption").exists()
+
 
 def _rowless_empty_own_folder(root: Path) -> None:
     (root / H.TID).mkdir(parents=True)
@@ -94,7 +376,7 @@ PLACEMENTS = [
 
 
 @pytest.mark.parametrize("place", PLACEMENTS)
-def test_1120_setup_adopts_an_operator_placed_knowledge_folder_writing_only_the_row(
+def test_1120_setup_adopts_knowledge_and_provisions_tenant_learning(
         tmp_path: Path, place) -> None:
     """Over a data root whose only entry is acme/knowledge, placed by the operator, `tenant.py setup
     acme` exits 0 and prints nothing."""
@@ -106,8 +388,10 @@ def test_1120_setup_adopts_an_operator_placed_knowledge_folder_writing_only_the_
     proc = H.setup(tenant_py, root)
     text = H.assert_clean(proc)
     assert text == "", f"a successful adopt printed something:\n{text}"
-    assert H.census_diff(before, H.tree_census(root)) == [f"added: {H.TID}/{H.ROW_NAME}"], (
-        "setup's adopt wrote something other than exactly the row")
+    assert H.census_diff(before, H.tree_census(root)) == [
+        f"added: {H.TID}/learning", f"added: {H.TID}/{H.ROW_NAME}",
+    ], "#1186 O5: fresh setup provisions learning beside the tenant's knowledge"
+    assert list((H.tenant_folder(root) / "learning").iterdir()) == []
     _row_is_acme(root)
     if (knowledge / ".git").exists():
         assert H.git_status(knowledge) == "", "setup dirtied the operator's clone"
@@ -211,6 +495,8 @@ def test_1120_setup_over_a_finished_tenant_succeeds_and_writes_nothing(tmp_path:
     # pulling).
     root = tmp_path / "data"
     H.adopted(root)
+    # O5: a finished tenant already has the learning root that fresh setup provisions.
+    (H.tenant_folder(root) / "learning").mkdir()
     before = H.tree_census(root)
     text = H.assert_clean(H.setup(tenant_py, root))
     assert text == "", f"a clean re-run printed something:\n{text}"

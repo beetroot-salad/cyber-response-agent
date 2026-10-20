@@ -84,9 +84,19 @@ def run_lead_author(tmp: Path, run_dir: Path) -> subprocess.CompletedProcess:
     venv_py = find_venv_py(REAL_REPO_ROOT)
     env = os.environ.copy()
     (tmp / "_state").mkdir(exist_ok=True)  # lint-unguarded-tree-write: ok — eval scratch dir; the handle never creates its root
-    env["DEFENDER_LEARNING_STATE_DIR"] = str(tmp / "_state")
     return _run(
-        [str(venv_py), str(tmp / "defender" / "learning" / "leads" / "lead_author.py"), str(run_dir)],  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
+        [str(venv_py), "-c", """
+import sys
+from pathlib import Path
+from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL, LoopPaths
+from defender.learning.leads.lead_author import run
+from defender.run_repository import Run
+from defender._log import configure_from_env
+configure_from_env()
+root, run_dir = map(Path, sys.argv[1:])
+sys.exit(run(Run.at(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL,
+             paths=LoopPaths(repo_root=root, state_dir=root / "_state")))
+""", str(tmp), str(run_dir)],
         cwd=tmp, env=env, check=False,
     )
 

@@ -511,6 +511,7 @@ def main(argv: list[str]) -> int:
                         f"{names['EXECUTED_QUERIES']} + {names['RAW_MARKER']}/")
     args = p.parse_args(argv)
     from defender.execution._command_line_run import open_command_line_run
+    from defender.tenancy import _tenant
 
     # The request's tenant, accepted under the configured data root, and its run opened by id
     # through that tenant's repository (a link at the run's name is never followed). A refusal
@@ -520,7 +521,8 @@ def main(argv: list[str]) -> int:
         print(f"lead_author: {run_}", file=sys.stderr)  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
         return 2
     # By hand this serves the lead-author lane's own queue under its lock, so it names that lane.
-    return run(run_, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL, paths=_loop_config.loop_paths())
+    return run(run_, label=_loop_config.LEAD_AUTHOR_DRAIN_LABEL, paths=_loop_config.LoopPaths.for_tenant(
+        _tenant.requested_tenant(_tenant.resolve_data_root(), run_.tenant_id)))
 
 
 #: Re-exports: callers import these names from here; their real homes are the source

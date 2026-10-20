@@ -9,8 +9,12 @@ from defender.tests.support.learning.curation import _drain719 as h
 from defender.tests.support.learning.curation._drain719 import drain  # the not-yet-written target, via the suite's own shim
 from defender.learning.author import shared as author_shared  # type: ignore[import-not-found]
 from defender.learning.core import drains, persist  # type: ignore[import-not-found]
-from defender.learning.core.config import FatalConfigError
-from defender.learning.core.state import FINDINGS, PITFALLS  # type: ignore[import-not-found]
+from defender.learning.core import config as learning_config
+from defender.learning.core.config import FatalConfigError, LoopPaths
+from defender.learning.core.state import (
+    AUTHOR_DRAIN_LOCK, LEAD_AUTHOR_DRAIN_LOCK, LEAD_QUEUE_LOCK, REPO_LOCK, TRY_ONCE,
+    FINDINGS, PITFALLS, QUESTIONER_FINDINGS, LearningState,
+)  # type: ignore[import-not-found]
 from defender.learning.leads import pitfalls_curator  # type: ignore[import-not-found]
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation._lead_author_1134 import lead_trees
@@ -266,3 +270,116 @@ def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
     assert worker.finished_within(20)
     assert [r["pitfall_id"] for r in h.pending(paths, ch)] == ["r:l-001:0"]
     assert [r["pitfall_id"] for r in h.graveyard(paths, ch)] == ["r:l-000:0"]
+
+
+# #1186 — production paths require an accepted tenant, independently of code checkout.
+
+
+def test_1186_no_global_learning_paths_or_ambient_factory_remain():
+    """O1: the removed public defaults cannot remain an accidental production entry path."""
+    for name in ("DEFAULT_PATHS", "LEARNING_DIR", "loop_paths"):
+        assert not hasattr(learning_config, name), f"{name} still supplies tenant-free paths"
+
+
+@pytest.mark.parametrize("shape", ["plain", "directory-link", "dangling-link"])
+@pytest.mark.parametrize("selection", ["at-open", "stored", "author-checkout"])
+def test_1186_tenant_state_requires_a_real_learning_directory(
+    data_root, tmp_path, shape, selection,
+):
+    """O1/O4/O6: opening tenant state refuses root links, including with stored paths."""
+    from defender.learning.core.state import StateRefused
+    from defender.tenancy._tenant import TenantRefused
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+
+    tenant = set_up_tenant(data_root)
+    target = tenant.learning if shape == "plain" else tmp_path / "outside-state"
+    if shape != "dangling-link":
+        queue = target / FINDINGS.queue
+        queue.parent.mkdir(parents=True)
+        queue.write_text('{"finding_id":"boundary/0","run_id":"boundary"}\n', encoding="utf-8")
+    tenant.learning.mkdir(exist_ok=True)
+    selected = None
+    if selection != "at-open":
+        selected = LoopPaths.for_tenant(tenant)
+        if selection == "author-checkout":
+            selected = selected.with_repo_root(tmp_path / "other-author-checkout")
+    if shape != "plain":
+        tenant.learning.rmdir()
+        tenant.learning.symlink_to(target, target_is_directory=True)
+    before_root, before_target = H.tree_census(data_root), H.tree_census(target)
+
+    def read_selected():
+        paths = LoopPaths.for_tenant(tenant) if selected is None else selected
+        with LearningState.open(paths) as state:
+            return state.rows(FINDINGS)
+
+    if shape == "plain":
+        assert read_selected() == [{"finding_id": "boundary/0", "run_id": "boundary"}]
+    else:
+        with pytest.raises((TenantRefused, FatalConfigError, StateRefused)) as refused:
+            read_selected()
+        assert str(tenant.learning) in str(refused.value)
+        assert tenant.learning.is_symlink()
+    if shape == "dangling-link":
+        assert not target.exists()
+        assert not target.is_symlink()
+    assert H.tree_census(data_root) == before_root
+    assert H.tree_census(target) == before_target
+
+
+def test_1186_tenant_paths_keep_state_and_locks_across_author_checkouts(
+    data_root: Path, tmp_path: Path, monkeypatch,
+):
+    """O1/O4: queues, record children and locks belong to a tenant, across worktrees."""
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    a = set_up_tenant(data_root, fixture_uuid("tenant:learning-a"))
+    # Creation admits one tenant per data root; each accepted tenant has its own root.
+    b = set_up_tenant(tmp_path / "other-data-root", fixture_uuid("tenant:learning-b"))
+    poison = tmp_path / "ambient-state"
+    poison.mkdir()
+    monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))
+    first = LoopPaths.for_tenant(a)
+    second = LoopPaths.for_tenant(b)
+    assert first.state_root == a.learning
+    assert second.state_root == b.learning
+    worktree = tmp_path / "different-author-checkout"
+    moved = first.with_repo_root(worktree)
+    assert moved.repo_root == worktree
+    assert moved.state_root == a.learning
+
+    # A real read/write through each handle rejects roots that only look tenant scoped.
+    for root in (a.learning, b.learning):
+        root.mkdir(parents=True, exist_ok=True)
+    with LearningState.open(first) as sa, LearningState.open(second) as sb, \
+            LearningState.open(moved) as same_a:
+        for ch in (FINDINGS, QUESTIONER_FINDINGS, PITFALLS):
+            row_a = {ch.id_key: "same-id", "run_id": "a", "owner": "a"}
+            row_b = {ch.id_key: "same-id", "run_id": "b", "owner": "b"}
+            assert sa.append(ch, [row_a]) == (1, 0)
+            assert sb.append(ch, [row_b]) == (1, 0)
+            assert same_a.rows(ch) == [row_a]
+            assert sb.rows(ch) == [row_b]
+            assert (a.learning / ch.queue).is_file()
+            assert (b.learning / ch.queue).is_file()
+            assert (a.learning / ch.append_lock).is_file()
+            assert (b.learning / ch.append_lock).is_file()
+
+        sa.record_delivery("same-batch", {"batch_id": "same-batch", "owner": "a"})
+        sb.record_delivery("same-batch", {"batch_id": "same-batch", "owner": "b"})
+        assert same_a.delivery_rows() == ([("same-batch", {"batch_id": "same-batch", "owner": "a"})], 0)
+        assert sb.delivery_rows() == ([("same-batch", {"batch_id": "same-batch", "owner": "b"})], 0)
+
+        # Same-tenant contention is the positive control for cross-tenant independence.
+        for role in (AUTHOR_DRAIN_LOCK, LEAD_AUTHOR_DRAIN_LOCK, REPO_LOCK,
+                     FINDINGS.drain_role, LEAD_QUEUE_LOCK):
+            assert role is not None
+            with sa.lock(role, wait=TRY_ONCE) as acquired:
+                assert acquired
+                with same_a.lock(role, wait=TRY_ONCE) as duplicate:
+                    assert not duplicate, f"worktree redirected {role.name} away from tenant A"
+                with sb.lock(role, wait=TRY_ONCE) as independent:
+                    assert independent, f"tenant A blocked tenant B's {role.name}"
+    assert not list(poison.iterdir()), "the ambient state override was used"

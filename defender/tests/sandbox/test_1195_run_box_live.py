@@ -132,6 +132,9 @@ def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa:
     request = drains._drain_box_request(
         wt, f"t1195-{uuid.uuid4().hex[:8]}", LEAD_AUTHOR_DRAIN_LABEL, paths,
     )
+    writable = [m for m in request.mounts if m.writable]
+    assert len(writable) == 1, f"expected one writable skills mount: {writable}"
+    host_tree, inside_tree = Path(writable[0].source), Path(writable[0].target)
     box = box_mod.start_box(request)
     try:
         assert box.sandboxed, "start_box handed back a host executor"
@@ -142,7 +145,7 @@ def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa:
 
         with X.box_for_run(runs) as run_box:
             assert run_box is box, "a run handed its spawn something but the batch's executor"
-            _leave_a_writer(box, left)
+            _leave_a_writer(box, inside_tree / left.relative_to(host_tree))
             for marker in MARKERS:
                 rc, out = _exec(box, "sh", "-c", f"printf m > {marker}")
                 assert rc == 0, f"run 1 could not leave {marker}: {out}"
@@ -162,10 +165,11 @@ def test_a_stopped_box_keeps_nothing_a_run_left_and_keeps_its_link_ban(  # noqa:
             for marker in MARKERS:
                 assert _exec(box, "test", "-e", marker)[0] != 0, f"run 1's {marker} survived its stop"
             draft = paths.skills_dir / "elastic" / "_draft"
-            rc, out = _exec(box, "sh", "-c", "printf x > plain1195", cwd=draft)
+            inside_draft = inside_tree / draft.relative_to(host_tree)
+            rc, out = _exec(box, "sh", "-c", "printf x > plain1195", cwd=inside_draft)
             assert rc == 0, f"an ordinary create in the writable mount failed (control): {out}"
             for argv in (["ln", "-s", "plain1195", "sym1195"], ["ln", "plain1195", "hard1195"]):
-                rc, out = _exec(box, *argv, cwd=draft)
+                rc, out = _exec(box, *argv, cwd=inside_draft)
                 assert rc != 0, f"`{' '.join(argv)}` was allowed after a restart: {out}"
                 assert not os.path.lexists(draft / argv[-1]), f"`{' '.join(argv)}` left a link"
             (draft / "plain1195").unlink()

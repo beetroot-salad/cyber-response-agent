@@ -66,7 +66,7 @@ def run_author(tmp: Path) -> tuple[AuthorRun, float]:
     from defender.learning.core.lane_trees import open_drain_trees
     from defender.learning.core.state import LearningState, StateRefused
 
-    paths = LoopPaths(repo_root=tmp)
+    paths = LoopPaths(repo_root=tmp, state_dir=tmp / "defender" / "learning")
     paths.state_root.mkdir(parents=True, exist_ok=True)  # lint-unguarded-tree-write: ok — eval harness scratch tmp dir; the handle never creates its root
     with LearningState.open(paths) as state, open_drain_trees(paths, AUTHOR_DRAIN_LABEL) as trees:
         cfg = author.build_author_config(

@@ -29,7 +29,6 @@ from defender.learning.author._config import BucketSpec, CorpusAuthorConfig
 from defender.learning.core.config import (
     AUTHOR_DRAIN_LABEL,
     LoopPaths,
-    loop_paths,
     StageContext,
     StageWiring,
     author_effort as _author_effort,
@@ -233,10 +232,13 @@ def run_batch(
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 1:
-        print("usage: run.py", file=sys.stderr)
-        return 64
-    paths = loop_paths()
+    import argparse
+    from defender.learning.core.cli import command_line_paths
+
+    parser = argparse.ArgumentParser(description="Curate this tenant's queued findings")
+    parser.add_argument("--tenant", required=True)
+    args = parser.parse_args(argv[1:])
+    paths = command_line_paths(parser, args.tenant)
     with LearningState.open(paths) as state, open_drain_trees(
             paths, AUTHOR_DRAIN_LABEL) as trees:
         return run_batch(paths=paths, state=state, trees=trees)

@@ -19,6 +19,7 @@ from defender.learning.core.config import LEAD_AUTHOR_DRAIN_LABEL
 from defender.learning.core.state import LEAD_QUEUE_LOCK, PITFALLS, TRY_ONCE
 from defender.tests.support.learning.curation._lead_author_1134 import lane_tree_for, lead_deps, repo_skills, skills_view
 from defender.tests.support.learning.core._state1135 import curation_run_dir, run_of
+from defender.tests.support.learning.core._state1135 import state_over, set_state_dir
 
 
 def _ensure_declarable(repo_root: Path) -> None:
@@ -48,7 +49,8 @@ def _deps(tmp_path: Path, **overrides):
     """Production lead-author deps rooted at a tmp tree, with leaf collaborators
     overridden by keyword — replaces monkeypatching lead_author's own functions."""
     _ensure_declarable(tmp_path)
-    return replace(lead_deps(LoopPaths(repo_root=tmp_path)), **overrides)
+    return replace(lead_deps(LoopPaths(
+        repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")), **overrides)
 
 
 def _executed_lead(**kw):
@@ -278,6 +280,31 @@ def test_run_held_queue_lock_reports_a_skip_not_a_serve(run_dir: Path, tmp_path:
         rc = lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps)
     assert rc == lead_author.QUEUE_LOCK_SKIP_RC
     assert rc != 0
+
+
+@pytest.mark.parametrize("held_root", ["tenant", "legacy"])
+def test_1186_lead_author_cli_takes_the_runs_tenant_queue_lock(
+    run_dir, tmp_path, monkeypatch, held_root,
+):
+    """O2: the CLI uses its Run's tenant for the queue lock and pitfall writes."""
+    set_state_dir(monkeypatch, tmp_path / "legacy-state")
+    learning = run_dir.parent.parent / "learning"
+    _write_lead_meta(run_dir, "l-001", "failed query")
+    _write_query(run_dir, "l-001", 0, "idp.query", payload_status="error")
+    learning.mkdir(exist_ok=True)
+    root = learning if held_root == "tenant" else tmp_path / "legacy-state"
+    with (state_over(root) as holder, holder.lock(LEAD_QUEUE_LOCK, wait=TRY_ONCE) as held):
+        assert held
+        rc = lead_author.main(["--tenant", run_dir.parent.parent.name, run_dir.name])
+    assert rc == (lead_author.QUEUE_LOCK_SKIP_RC if held_root == "tenant" else 0)
+    if held_root == "tenant":
+        assert not (run_dir / "lead_author" / "pitfalls_collected").exists()
+        assert not (learning / PITFALLS.queue).exists()
+        assert not (tmp_path / "legacy-state" / LEAD_QUEUE_LOCK.file).exists()
+    else:
+        rows = [json.loads(line) for line in (learning / PITFALLS.queue).read_text().splitlines()]
+        assert [(row["source_run"], row["query_id"]) for row in rows] == [(run_dir.name, "idp.query")]
+    assert not (tmp_path / "legacy-state" / PITFALLS.queue).exists()
 
 
 def test_run_done_sentinel_short_circuits(run_dir: Path, tmp_path: Path):

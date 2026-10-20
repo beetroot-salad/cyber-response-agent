@@ -14,7 +14,7 @@ Launch one held-out run for an explicitly named tenant UUID::
 
     python3 evaluations/held_out.py launch <slug> --tenant <tenant-uuid> --index F
 
-It refuses an F under the resolved data root or the learning state root, or reached through a
+It refuses an F under the resolved data root (including all tenant learning roots), or reached through a
 link; mints a UUID; APPENDS ``{slug, run_id}`` to F; and only then runs
 ``run.py <fixture alert> --tenant <tenant-uuid> --run-id <uuid> --no-learn`` (``--no-learn`` keeps
 a scored run out of the learning corpora). A run that crashes, hangs or is killed still has
@@ -165,12 +165,6 @@ def _hold_index_folder(index: Path) -> tuple[_io.Held, Path, str]:
     return held, absolute, leaf
 
 
-def _learning_state_root() -> Path:
-    from defender.learning.core.config import loop_paths
-
-    return Path(loop_paths().state_root).resolve()
-
-
 def _fixture(fixtures_dir: Path, slug: str) -> HeldOutAlert | None:
     return next((fx for fx in load_held_out_fixtures(fixtures_dir) if fx.slug == slug), None)
 
@@ -187,11 +181,9 @@ def launch(slug: str, index: Path, fixtures_dir: Path, *, tenant_id: str, spawn:
         raise IndexRefused(f"no labelled held-out fixture {slug!r} under {fixtures_dir}")
     held, absolute, leaf = _hold_index_folder(index)
     with held:
-        for root, what in ((data_root, "the data root"),
-                           (_learning_state_root(), "the learning state root")):
-            if _inside(absolute, root):
-                raise IndexRefused(f"it is under {what} {root}, where a box or the loop can "
-                                   "write it")
+        if _inside(absolute, data_root):
+            raise IndexRefused(f"it is under the data root {data_root}, where a box or the loop can "
+                               "write it")
         run_id = str(RunId.mint())
         row = json.dumps({"slug": slug, "run_id": run_id})  # lint-jsonl-io: ok — one row through the held folder's no-follow append; `append_jsonl` follows the spelling
         try:

@@ -18,17 +18,32 @@ git clone <tenant repo> "$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge"   # the tenan
 python3 defender/cli/tenant.py setup "$TENANT_ID"    # once, after the clone exits 0, before the first run
 python3 defender/run.py <alert.json> --tenant "$TENANT_ID"   # one investigation → run dir under $DEFENDER_DATA_ROOT/$TENANT_ID/runs/; --no-learn skips curation enqueue
 python3 defender/learning/branch/cli.py --tenant "$TENANT_ID" <run_id> <branch_message_id>   # fork a finished run (by id, under the tenant's runs) into a family of worlds and grade it
-python3 defender/learning/loop.py --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
+python3 defender/learning/loop.py --tenant "$TENANT_ID" --author-drain     # fold the findings queue into lessons; --lead-author-drain is the sibling stage
 python3 defender/api/serve.py --tenant <id>           # the stub platform API on 127.0.0.1:8000, seeded for the named tenant(s) (needs the `api` extra: `uv sync --extra dev --extra runtime --extra api`, as CI does — a bare `uv sync --extra api` uninstalls the others); tokens `<id>-analyst`
 ```
 
-Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
-default data root), after the clone into `<root>/<id>/knowledge` has exited 0 (clone with a
-credential helper or an ssh agent, never a credential in the URL; setup adopts the folder and
-copies nothing), and no run, fork or drain in flight on any checkout of the host, as the same
-user that runs defender; a destination already occupied makes setup refuse, naming it in the
-message. (Adopting an existing (B)/(C) installation whose old entries are root-owned may need
-setup run as root — that adoption case only.)
+Run `tenant.py setup` with `DEFENDER_DATA_ROOT` set after the clone into
+`<root>/<id>/knowledge` has exited successfully. Setup validates that folder and provisions
+`<root>/<id>/learning/` as a real directory. It has no default tenant or learning-state
+source. `DEFENDER_LEARNING_STATE_DIR` no longer selects runtime state.
+
+To move an existing learning-state directory, stop all runs, forks and drains on every
+checkout using it, then name the source explicitly:
+
+```bash
+python3 defender/cli/tenant.py setup "$TENANT_ID" --learning-state-from /path/to/old/learning
+```
+
+Setup moves only the known queues, markers, locks, deliveries and legacy `runs/` bundles;
+Python source and unrelated entries stay at the source. It never merges into occupied
+learning state. The source must be disjoint from the data root, except an already-in-place
+source equal to the destination. Re-run the same command to complete an interrupted move.
+Modes and timestamps are preserved; running as root also preserves owners and groups.
+Root-owned legacy state may require migration as root. An unexpected writer that recreates
+source records is reported and those records remain for the operator to reconcile.
+
+The drains, standalone author commands, frontend, trace and revert commands require
+`--tenant <T>`. Run-associated writers derive the tenant from the accepted run or episode.
 
 
 ## Tenant version control credentials (PR #1253)

@@ -155,11 +155,11 @@ def test_1120_run_tenant_is_the_accepted_tenant_plus_its_grants_and_dispatch(
 
 
 #: The cells each entry point takes (F8 closed by correction 3; M7). `tenant.py setup` has no
-ALL_CELLS = ("bad-id", "no-row", "knowledge-link", "mounted-tree", "learning-state-overlap")
+ALL_CELLS = ("bad-id", "no-row", "knowledge-link", "mounted-tree")
 CELLS_OF = {
     "run.main": ALL_CELLS,
     "branch.cli.main": ALL_CELLS,
-    "tenant.setup": ("bad-id", "knowledge-link", "mounted-tree", "learning-state-overlap"),
+    "tenant.setup": ("bad-id", "knowledge-link", "mounted-tree"),
     "tenant.check": ALL_CELLS,
     "tenant.scaffold": ("bad-id",),
     "policy_cli.main": ALL_CELLS,
@@ -204,17 +204,6 @@ def _build_cell(entry: str, cell: str, base: Path, monkeypatch) -> _Cell:  # noq
     if cell == "knowledge-link":
         _knowledge_link(base, root)
         cell_ = _Cell(root, H.TID, _owner(root))
-        if launcher:
-            cell_.source = _source_under(root)
-        return cell_
-    if cell == "learning-state-overlap":
-        H.adopted(root)
-        env = {H.LEARNING_STATE_ENV: str(root)}
-        monkeypatch.setenv(H.DATA_ROOT_ENV, str(root))
-        monkeypatch.setenv(H.LEARNING_STATE_ENV, str(root))
-        expected = str(H.refusal(_tenant, _tenant.resolve_data_root))
-        monkeypatch.delenv(H.LEARNING_STATE_ENV)
-        cell_ = _Cell(root, H.TID, expected, env=env)
         if launcher:
             cell_.source = _source_under(root)
         return cell_

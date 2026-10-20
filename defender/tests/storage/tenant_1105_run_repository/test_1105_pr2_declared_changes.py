@@ -319,7 +319,11 @@ def test_dc7_the_run_page_refuses_a_linked_run_folder(tmp_path):
 
 def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tenant):
     from defender.box import _scrub as scrub
+    from defender.learning.core.config import LoopPaths
+    from defender.tenancy._tenant import requested_tenant
 
+    tenant = requested_tenant(P.data_root(), d9_tenant)
+    tenant.learning.mkdir(exist_ok=True)
     alert = H.alert_file(tmp_path / "in")
     rec = P.SiblingRecorder()
 
@@ -338,9 +342,7 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
     run_dir = rec.run_dir
     assert run_dir is not None
     assert run_dir.parent == P.data_root() / d9_tenant / "runs"
-    from defender.learning.core.config import loop_paths
-
-    queue = Path(loop_paths().state_root) / "author-queue"
+    queue = LoopPaths.for_tenant(tenant).state_root / "author-queue"
     rows = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(queue.glob("*.json"))]
     assert len(rows) == 1, rows
     row = rows[0]
