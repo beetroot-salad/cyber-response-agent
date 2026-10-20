@@ -49,7 +49,8 @@ def _deps(tmp_path: Path, **overrides):
     """Production lead-author deps rooted at a tmp tree, with leaf collaborators
     overridden by keyword — replaces monkeypatching lead_author's own functions."""
     _ensure_declarable(tmp_path)
-    return replace(lead_deps(LoopPaths(repo_root=tmp_path)), **overrides)
+    return replace(lead_deps(LoopPaths(
+        repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")), **overrides)
 
 
 def _executed_lead(**kw):
