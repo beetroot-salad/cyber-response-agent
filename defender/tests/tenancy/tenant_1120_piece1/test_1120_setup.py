@@ -49,6 +49,40 @@ def _adopt_learning(root: Path, source: Path, **env: str) -> subprocess.Complete
         tenant_py, "setup", H.TID, "--learning-state-from", str(source), root=root, **env)
 
 
+@pytest.mark.parametrize("migrate", [False, True], ids=["fresh", "explicit-migration"])
+@pytest.mark.parametrize("target_shape", ["existing", "dangling"])
+def test_1186_setup_refuses_a_linked_learning_destination(
+        tmp_path: Path, migrate: bool, target_shape: str) -> None:
+    """O5/O6: refuse existing/dangling root links, accept an empty real destination."""
+    root, source, outside = tmp_path / "data", tmp_path / "legacy", tmp_path / "outside"
+    H.adopted(root)
+    source_before = _legacy_learning(source) if migrate else {}
+    if target_shape == "existing":
+        outside.mkdir()
+    learning = H.tenant_folder(root) / "learning"
+    learning.symlink_to(outside, target_is_directory=True)
+    root_before = H.tree_census(root)
+
+    def setup_selected():
+        return _adopt_learning(root, source) if migrate else H.setup(tenant_py, root)
+
+    H.assert_refused(setup_selected(), str(learning))
+    assert H.tree_census(root) == root_before
+    assert H.tree_census(source) == source_before
+    assert os.path.lexists(outside) == (target_shape == "existing")
+    assert H.tree_census(outside) == {}
+    # A real destination succeeds through the same CLI; empty-target refusal is not no-merge.
+    learning.unlink()
+    learning.mkdir()
+    H.assert_clean(setup_selected())
+    assert learning.is_dir()
+    assert not learning.is_symlink()
+    if migrate:
+        assert (learning / "author-queue" / "record.json").read_text() == "preserve author-queue\n"
+    else:
+        assert list(learning.iterdir()) == []
+
+
 @pytest.mark.parametrize("legacy_location", ["env", "checkout"])
 def test_1186_setup_without_source_ignores_legacy_locations(
         tmp_path: Path, legacy_location: str) -> None:

@@ -281,6 +281,42 @@ def test_1186_no_global_learning_paths_or_ambient_factory_remain():
         assert name not in vars(learning_config), f"{name} still supplies tenant-free paths"
 
 
+@pytest.mark.parametrize("shape", ["plain", "directory-link", "dangling-link"])
+def test_1186_tenant_state_requires_a_real_learning_directory(data_root, tmp_path, shape):
+    """O1/O6: a selected tenant cannot redirect its state through a root symlink."""
+    from defender.learning.core.state import StateRefused
+    from defender.tenancy._tenant import TenantRefused
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+    from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
+
+    tenant = set_up_tenant(data_root)
+    target = tenant.learning if shape == "plain" else tmp_path / "outside-state"
+    if shape != "dangling-link":
+        queue = target / FINDINGS.queue
+        queue.parent.mkdir(parents=True)
+        queue.write_text('{"finding_id":"boundary/0","run_id":"boundary"}\n', encoding="utf-8")
+    if shape != "plain":
+        tenant.learning.symlink_to(target, target_is_directory=True)
+    before_root, before_target = H.tree_census(data_root), H.tree_census(target)
+
+    def read_selected():
+        with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
+            return state.rows(FINDINGS)
+
+    if shape == "plain":
+        assert read_selected() == [{"finding_id": "boundary/0", "run_id": "boundary"}]
+    else:
+        with pytest.raises((TenantRefused, FatalConfigError, StateRefused)) as refused:
+            read_selected()
+        assert str(tenant.learning) in str(refused.value)
+        assert tenant.learning.is_symlink()
+    if shape == "dangling-link":
+        assert not target.exists()
+        assert not target.is_symlink()
+    assert H.tree_census(data_root) == before_root
+    assert H.tree_census(target) == before_target
+
+
 def test_1186_tenant_paths_keep_state_and_locks_across_author_checkouts(
     data_root: Path, tmp_path: Path, monkeypatch,
 ):
