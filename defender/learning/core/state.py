@@ -1012,7 +1012,11 @@ class LearningAdoption:
             if (self.stage.is_symlink() or not self.stage.is_dir()
                     or any(p.name != ".adoption" for p in self.stage.iterdir())):
                 raise TenantRefused(f"{self.stage}: unknown adoption stage")
-            self._token(self.stage)
+            staged_token = self.stage / ".adoption"
+            if os.path.lexists(staged_token):
+                # The aside is not published yet: a stopped token write is safe to discard,
+                # but a link or directory at the reserved token name is never accepted.
+                read_plain_bytes(staged_token)
         aside_exists = os.path.lexists(self.aside)
         if aside_exists and (self.aside.is_symlink() or not self.aside.is_dir()):
             raise TenantRefused(f"{self.aside} must be a real adoption directory")
