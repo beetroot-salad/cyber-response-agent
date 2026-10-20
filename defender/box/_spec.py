@@ -29,6 +29,7 @@ from defender.execution.box_codec import (
 )
 from ._clock import write_clock
 from ._output import BoxOutputLimitExceeded, capture_bounded
+from defender.runtime.model_view import ModelView
 from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
     Finding,
     RunTainted,
@@ -108,6 +109,16 @@ class BoxRequest:
     defender_dir: Path | None = None
     #: Tenant knowledge must never run in the host fallback lane.
     require_sandbox: bool = False
+    #: Host geography remains authoritative; only container-facing paths use this view.
+    view: ModelView | None = None
+
+    @property
+    def model_workdir(self) -> Path:
+        return Path(self.view.to_model(self.workdir)) if self.view is not None else self.workdir
+
+    @property
+    def model_code_dir(self) -> Path:
+        return Path(self.view.to_model(self.code_dir)) if self.view is not None else self.code_dir
 
     @property
     def code_dir(self) -> Path:
@@ -263,10 +274,35 @@ class _DockerTransport:
 class _HostTransport:
 
     env: dict[str, str]
+    view: ModelView | None = None
 
     def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
+        pipelines = decode_request(frame)
+        if self.view is not None:
+            from defender.runtime.permission.grant import PROGRAMS, rm_target_files
+
+            # The permission grammar owns which arguments are paths. A grep pattern or
+            # Python string that resembles a workspace path must keep its literal bytes.
+            translated = []
+            for pipeline in pipelines:
+                stages = []
+                for stage in pipeline.stages:
+                    extract = rm_target_files if stage.argv[0] == "rm" else PROGRAMS[stage.argv[0]]
+                    operands = extract(stage.argv) or ()
+                    argv = [
+                        str(host) if word in operands and Path(word).is_absolute()
+                        and (host := self.view.to_host(word)) is not None else word
+                        for word in stage.argv
+                    ]
+                    stages.append(bash_exec.Stage(argv, stage.stderr))
+                translated.append(bash_exec.Pipeline(pipeline.connector, stages))
+            pipelines = translated
+            host_cwd = self.view.to_host(str(cwd))
+            if host_cwd is None:
+                raise BoxFault(f"working directory is outside the workspace: {cwd}")
+            cwd = host_cwd
         rc, out, err = bash_exec.run_parsed(
-            decode_request(frame), command="", env=self.env, cwd=cwd, timeout=timeout,
+            pipelines, command="", env=self.env, cwd=cwd, timeout=timeout,
         )
         return RawExec(rc=rc, stdout=encode_response(BoxResult(
             rc=rc,

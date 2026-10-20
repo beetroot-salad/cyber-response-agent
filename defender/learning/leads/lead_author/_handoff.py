@@ -273,9 +273,12 @@ def invoke_agent(
     box: Any = None,
 ) -> int:
     pending_drafts = pending_drafts or []
+    from defender.runtime.model_view import ModelView
+
+    view = ModelView.for_learning(run_dir, repo_root)
     stage_salt = salt if salt is not None else uuid4().hex
     context = (
-        f"run_dir: {run_dir}\n"
+        f"run_dir: {view.to_model(run_dir)}\n"
         f"catalog_dir: {CATALOG_REL}\n"
         f"skills_dir: {SKILLS_REL}"
     )

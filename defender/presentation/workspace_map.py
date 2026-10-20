@@ -65,7 +65,8 @@ DOWN_GUIDANCE = (
 
 def _map_roots(run_dir: Path, view: ModelView | None):
     if view is not None:
-        defender_dir = Path(view.defender_dir)
+        defender_dir = view.to_host("/defender")
+        assert defender_dir is not None
         knowledge = KnowledgePaths.of_defender_dir(defender_dir)
 
         def shown(p: Path) -> str:

@@ -485,9 +485,9 @@ def _render_argv(
         argv += ["--mount", spec_str]
     argv += [
         "--tmpfs", f"/tmp:rw,noexec,nosuid,mode=1777,size={request.spec.tmpfs_size}",
-        "--workdir", str(request.workdir),
+        "--workdir", str(request.model_workdir),
     ]
-    env = _render_env(request.env, Path(request.workdir), defender_dir=request.code_dir)
+    env = _render_env(request.env, request.model_workdir, defender_dir=request.model_code_dir)
     for key in sorted(env):
         argv += ["--env", f"{key}={env[key]}"]
     # Resolved here, never at BoxRequest construction.
@@ -549,7 +549,7 @@ def _start_boxed_request(
         # reaped and the trees marked like any other startup fault.
         _refuse_a_second_code_mount(request)
         for m in request.mounts:
-            _check_mount_sentinel(m, docker, request.name, code_dir=request.code_dir)
+            _check_mount_sentinel(m, docker, request.name, code_dir=request.model_code_dir)
         _probe_alias_ban(docker, request.name, _probe_cwd_for_request(request), request.spec.runtime)
     except BaseException as e:
         # The box is ours; best-effort reap, then mark (sentinels were already planted).
@@ -596,6 +596,11 @@ def _host_fallback_env(request: BoxRequest) -> dict[str, str]:
     for var in providers.api_key_vars():
         env.pop(var, None)
     env.update({k: v for k, v in request.env.items() if k in BOX_ENV_ALLOWLIST})
+    if request.view is not None and "DEFENDER_AGENT_DIR" in env:
+        agent = request.view.to_host(env["DEFENDER_AGENT_DIR"])
+        if agent is None:
+            raise BoxFault("DEFENDER_AGENT_DIR is outside the workspace")
+        env["DEFENDER_AGENT_DIR"] = str(agent)
     defender_dir = request.code_dir
     env["DEFENDER_DIR"] = str(defender_dir)
     env["PATH"] = f"{defender_dir / 'bin'}{os.pathsep}{env.get('PATH', '')}"
@@ -644,7 +649,8 @@ def start_box(
             if request.require_sandbox:
                 raise
             _opt_out_or_raise(e)
-        return unboxed_executor(request.spec, env=_host_fallback_env(request))
+        return BoxExecutor(spec=request.spec,
+                           transport=_HostTransport(_host_fallback_env(request), request.view), name="")
 
     return _start_run_box(run_dir_or_request, defender_dir, spec, docker, tenant_agent, tenant_id,
                           write_verdict)

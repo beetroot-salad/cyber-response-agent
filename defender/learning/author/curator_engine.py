@@ -32,6 +32,7 @@ from defender.runtime.permission.grant import (
     under,
 )
 from defender.runtime.tools import AgentDeps
+from defender.runtime.model_view import MODEL_WORKSPACE
 
 AuthorError = _shared.AuthorError
 
@@ -94,7 +95,9 @@ def lesson_read_confine(defender_dir: Path) -> tuple[Path, ...]:
 
 def _corpus_spellings(corpus_dir: Path) -> str:
     rel = f"{CHECKOUT_KNOWLEDGE.agent_rel}/{corpus_dir.name}"
-    return "|".join(re.escape(s) for s in (rel, str(corpus_dir)))
+    # The operator's policy API still accepts host operands; model tools additionally map
+    # and scope-check every operand before execution, so that spelling grants no host alias.
+    return "|".join(re.escape(s) for s in (rel, str(MODEL_WORKSPACE / rel), str(corpus_dir)))
 
 
 def _rm_grant(corpus_dir: Path) -> Grant:

@@ -322,9 +322,13 @@ def test_a_curator_on_a_symlinked_repo_root_reads_and_writes_as_today(spelling, 
     (real_corpus / "a.md").write_text("plain lesson\n", encoding="utf-8")
 
     read_path = _spellings(link, real, "defender/lessons/a.md")[spelling]
+    if spelling != "relative":
+        read_path = deps.view.to_model(Path(read_path))
     assert "plain lesson" in _tool_lesson_read(deps, read_path, part="full")
 
     write_path = _spellings(link, real, "defender/lessons/new.md")[spelling]
+    if spelling != "relative":
+        write_path = deps.view.to_model(Path(write_path))
     _tool_write_file(deps, write_path, "first line\n")
     assert (real_corpus / "new.md").read_text(encoding="utf-8") == "first line\n"
 

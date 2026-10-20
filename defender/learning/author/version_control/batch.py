@@ -7,6 +7,7 @@ from pathlib import Path
 
 from defender.tenancy._tenant import Tenant
 from defender import box
+from defender.runtime.model_view import ModelView
 
 from .commits import CommitMaker, _Line
 from .exports import TenantExport, agent_blobs
@@ -34,15 +35,16 @@ class Batch:
 
     def box_request(self) -> box.BoxRequest:
         """The drain box: product code read-only (`code`), the draft's root read-only (`staged`),
-        and each lane writable inside it. Never the clone, an export, `settings/`, `.git` or
-        `forge/`. `agent/` is the workdir and `DEFENDER_AGENT_DIR`. It requires a sandbox."""
+        and each lane writable inside it. The model sees `/defender` and `/draft`;
+        `/draft/agent` is its cwd and `DEFENDER_AGENT_DIR`. It requires a sandbox."""
         agent = self.draft_root / "agent"
         code = self.defender_dir
+        view = ModelView.for_draft(code, self.draft_root)
         mounts = [
-            box.Mount(source=code, target=code, kind="code"),
-            box.Mount(source=self.draft_root, target=self.draft_root, kind="staged"),
+            box.Mount(source=code, target=Path(view.to_model(code)), kind="code"),
+            box.Mount(source=self.draft_root, target=Path(view.to_model(self.draft_root)), kind="staged"),
             *(
-                box.Mount(source=agent / lane, target=agent / lane, writable=True)
+                box.Mount(source=agent / lane, target=Path(view.to_model(agent / lane)), writable=True)
                 for lane in self.lanes
             ),
         ]
@@ -52,7 +54,8 @@ class Batch:
             workdir=agent,
             defender_dir=code,
             require_sandbox=True,
-            env={"DEFENDER_AGENT_DIR": str(agent)},
+            env={"DEFENDER_AGENT_DIR": view.to_model(agent)},
+            view=view,
         )
 
     def change_set(self) -> ChangeSet:

@@ -1,4 +1,4 @@
-"""The model's one view of its workspace (#1255, design rev 4 P1).
+"""The model's workspace coordinates (#1255 and #1262).
 
 Every run, natural or arm, boxed or not, shows the model the same three trees at the same three
 paths, whatever the host's layout:
@@ -13,8 +13,11 @@ file tool sees it), and a host path that goes into model-bound text is rendered 
 `ModelView.to_model` where that text is built. Evidence bytes (payloads, the alert) are never
 rewritten: nothing here scans text.
 
-@owns MODEL_RUN, MODEL_DEFENDER, MODEL_AGENT — the model view's three roots (the box mounts each
-tree at its root; nothing else spells them).
+Learning authors use `/workspace` and `/learning/current`; tenant drafts use `/defender` and
+`/draft`. Naming a tree neither grants access nor mounts it in a sandbox.
+
+@owns MODEL_RUN, MODEL_DEFENDER, MODEL_AGENT, MODEL_WORKSPACE, MODEL_LEARNING, MODEL_DRAFT — the
+workspace names. Callers declare host roots; only this module chooses standard model names.
 """
 from __future__ import annotations
 
@@ -28,6 +31,11 @@ MODEL_RUN = PurePosixPath("/runs/current")
 MODEL_DEFENDER = PurePosixPath("/defender")
 #: The tenant's agent half as the model sees it.
 MODEL_AGENT = PurePosixPath("/agent")
+MODEL_WORKSPACE = PurePosixPath("/workspace")
+MODEL_LEARNING = PurePosixPath("/learning/current")
+MODEL_DRAFT = PurePosixPath("/draft")
+
+RootPairs = tuple[tuple[PurePosixPath, Path], ...]
 
 
 def _fold_double_slash(p: PurePosixPath) -> PurePosixPath:
@@ -37,19 +45,56 @@ def _fold_double_slash(p: PurePosixPath) -> PurePosixPath:
 
 @dataclasses.dataclass(frozen=True)
 class ModelView:
-    """One run's mapping between the model's paths and the host's. Built from the run's own
-    roots (the role deps carry them), so every tool of the run maps the same way."""
+    """Immutable root mappings and working directory, shared by all filesystem roles."""
 
-    run_dir: Path
-    defender_dir: Path
-    tenant_agent: Path | None = None
+    roots: RootPairs
+    cwd: PurePosixPath
+
+    def __post_init__(self) -> None:
+        for model, host in self.roots:
+            if model.anchor != "/" or model == PurePosixPath("/") or ".." in model.parts:
+                raise ValueError(f"invalid model root: {model}")
+            if not host.is_absolute() or ".." in host.parts:
+                raise ValueError(f"invalid host root: {host}")
+        for i, (model, host) in enumerate(self.roots):
+            for other, source in self.roots[:i]:
+                if model == other or model in other.parents or other in model.parents:
+                    raise ValueError(f"conflicting model roots: {model}, {other}")
+                if host.resolve() == source.resolve():
+                    raise ValueError(f"ambiguous host root: {host}")
+        if not self.cwd.is_absolute() or self.to_host(str(self.cwd)) is None:
+            raise ValueError(f"working directory is outside the model view: {self.cwd}")
+
+    @classmethod
+    def for_run(cls, run_dir: Path, defender_dir: Path, tenant_agent: Path | None = None,
+                *, extra_roots: RootPairs = ()) -> ModelView:
+        roots: RootPairs = ((MODEL_RUN, Path(run_dir)), (MODEL_DEFENDER, Path(defender_dir)))
+        if tenant_agent is not None:
+            roots += ((MODEL_AGENT, Path(tenant_agent)),)
+        return cls((*roots, *extra_roots), MODEL_RUN)
+
+    @classmethod
+    def for_learning(cls, run_dir: Path, repo_root: Path, *, extra_roots: RootPairs = ()) -> ModelView:
+        return cls(((MODEL_WORKSPACE, Path(repo_root)), (MODEL_LEARNING, Path(run_dir)),
+                    *extra_roots), MODEL_WORKSPACE)
+
+    @classmethod
+    def for_draft(cls, defender_dir: Path, draft_root: Path) -> ModelView:
+        return cls(((MODEL_DEFENDER, Path(defender_dir)), (MODEL_DRAFT, Path(draft_root))),
+                   MODEL_DRAFT / "agent")
+
+    @classmethod
+    def for_scope(cls, run_dir: Path, defender_dir: Path, cwd_anchor: Path,
+                  tenant_agent: Path | None = None, *, extra_roots: RootPairs = ()) -> ModelView:
+        """Compile bind's run-anchored or checkout-anchored workspace geography."""
+        if cwd_anchor == defender_dir.parent:
+            agent = ((MODEL_AGENT, tenant_agent),) if tenant_agent is not None else ()
+            return cls.for_learning(run_dir, defender_dir.parent, extra_roots=(*agent, *extra_roots))
+        return cls.for_run(run_dir, defender_dir, tenant_agent, extra_roots=extra_roots)
 
     def trees(self) -> tuple[tuple[PurePosixPath, Path], ...]:
         """(model root, host root) for each tree this run has. The model roots are disjoint."""
-        pairs = [(MODEL_RUN, Path(self.run_dir)), (MODEL_DEFENDER, Path(self.defender_dir))]
-        if self.tenant_agent is not None:
-            pairs.append((MODEL_AGENT, Path(self.tenant_agent)))
-        return tuple(pairs)
+        return self.roots
 
     def roots_text(self) -> str:
         """The model roots, for a refusal telling the model where it may name paths."""
@@ -57,14 +102,13 @@ class ModelView:
 
     # -- inbound ---------------------------------------------------------------------------
     def to_host(self, operand: str) -> Path | None:
-        """The host path a model-supplied operand names, or `None` when it names nothing in the
-        view: outside the three trees, or carrying a `..` component (refused as the rooted file
-        core refuses it; a climb is never resolved here). A relative operand is anchored on the
-        model's working directory, the run folder. The result is lexical: nothing is resolved,
+        """The host path a model operand names, or `None` outside the declared trees or with a
+        `..` component. A relative operand is anchored on the declared working directory.
+        The result is lexical: nothing is resolved,
         so a link stays for the gate and the rooted core to refuse."""
         p = _fold_double_slash(PurePosixPath(operand))
         if not p.is_absolute():
-            p = MODEL_RUN / p
+            p = self.cwd / p
         if ".." in p.parts:
             return None
         for model, host in self.trees():
@@ -105,4 +149,5 @@ def runs_base() -> PurePosixPath:
     return MODEL_RUN.parent
 
 
-__all__ = ["MODEL_AGENT", "MODEL_DEFENDER", "MODEL_RUN", "ModelView", "runs_base"]
+__all__ = ["MODEL_AGENT", "MODEL_DEFENDER", "MODEL_RUN", "MODEL_WORKSPACE", "MODEL_LEARNING",
+           "MODEL_DRAFT", "ModelView", "RootPairs", "runs_base"]

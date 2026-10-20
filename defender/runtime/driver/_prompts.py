@@ -61,14 +61,14 @@ def _user_prompt(  # noqa: PLR0913 — the harness's own pre-turn seams
         lead_zero_section=correlation_section, shim=orient_shim, tenant_agent=tenant_agent,
         down=down,
     )
-    view = ModelView(Path(run_dir), Path(defender_dir), tenant_agent)
+    view = ModelView.for_run(Path(run_dir), Path(defender_dir), tenant_agent)
     return f"Begin the investigation.\n\n{_coordinates(view, alert_path)}\n{orientation}"
 
 
 def _coordinates(view: ModelView, alert_path: Path) -> str:
     """The two lines telling MAIN where this run's tree is, in the model view (#1255 P1): the
     run folder is `/runs/current` on every run, and the alert its model path."""
-    return f"run_dir: {view.to_model(view.run_dir)}\nalert: {view.to_model(alert_path)}\n"
+    return f"run_dir: {view.cwd}\nalert: {view.to_model(alert_path)}\n"
 
 
 def _opening_prompt(  # noqa: PLR0913 — `_user_prompt`'s parameters plus the resume it chooses between

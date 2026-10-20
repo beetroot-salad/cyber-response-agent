@@ -281,7 +281,9 @@ def test_rm_can_no_longer_name_an_agent_prompt(tmp_path: Path):
     pol = bind(LEAD_AUTHOR_DEF, run, defender_dir=defender_dir).policy
 
     def bash(cmd: str) -> bool:
-        return permission.decide_bash(cmd, policy=pol).allow
+        return permission.decide_bash(
+            cmd, policy=pol, run_dir=run, cwd_anchor=defender_dir.parent,
+        ).allow
 
     assert not bash("rm defender/skills/gather/SKILL.md")
     assert not bash(f"rm {defender_dir}/skills/gather/SKILL.md")

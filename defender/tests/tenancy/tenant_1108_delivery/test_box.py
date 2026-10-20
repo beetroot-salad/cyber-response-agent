@@ -154,19 +154,19 @@ def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(
     assert request.defender_dir == DEFENDER
     assert request.workdir == draft / "agent"
     assert {(Path(m.source), Path(m.target), m.writable, m.kind) for m in request.mounts} == {
-        (DEFENDER, DEFENDER, False, "code"), (draft, draft, False, "staged"),
-        (draft / "agent/lessons", draft / "agent/lessons", True, None)}
-    assert request.env["DEFENDER_AGENT_DIR"] == str(draft / "agent")
+        (DEFENDER, Path("/defender"), False, "code"), (draft, Path("/draft"), False, "staged"),
+        (draft / "agent/lessons", Path("/draft/agent/lessons"), True, None)}
+    assert request.env["DEFENDER_AGENT_DIR"] == "/draft/agent"
     host_only = (tenant.knowledge, tenant.worktrees, tenant.dir / "exports", tenant.dir / "forge")
     for mount in request.mounts:
         source = Path(mount.source)
         assert not any(source.is_relative_to(h) or h.is_relative_to(source) for h in host_only), source
     create = _lifecycle._render_argv(request, [], "probe-token")
     env = [create.argv[i + 1] for i, part in enumerate(create.argv) if part == "--env"]
-    assert f"DEFENDER_DIR={DEFENDER}" in env
-    assert f"PYTHONPATH={DEFENDER.parent}" in env
-    assert any(e.startswith(f"PATH={DEFENDER / 'bin'}:") for e in env)
-    assert f"DEFENDER_AGENT_DIR={draft / 'agent'}" in env
+    assert "DEFENDER_DIR=/defender" in env
+    assert "PYTHONPATH=/" in env
+    assert any(e.startswith("PATH=/defender/bin:") for e in env)
+    assert "DEFENDER_AGENT_DIR=/draft/agent" in env
     rendered = json.dumps(create.argv)
     assert TOKEN not in rendered
     for path in host_only:
@@ -221,12 +221,15 @@ def test_a_drain_start_fault_raises_and_leaves_nothing_under_the_drafts(repo, tm
     drafts = batch.draft_root.parent
     request = replace(batch.box_request(), spec=_PINNED)
     if fault == "code-check-missing":
+        from defender.runtime.model_view import ModelView
+
         code = tmp_path / "code-without-check"
         code.mkdir()
-        request = replace(request, defender_dir=code, mounts=tuple(
-            replace(m, source=code, target=code) if m.kind == "code" else m for m in request.mounts))
+        request = replace(request, defender_dir=code,
+                          view=ModelView.for_draft(code, batch.draft_root), mounts=tuple(
+            replace(m, source=code) if m.kind == "code" else m for m in request.mounts))
     before = _snapshot(drafts)
-    daemon, docker = _refusing(fault, batch.draft_root, tmp_path)
+    daemon, docker = _refusing(fault, Path("/draft"), tmp_path)
     with pytest.raises(box.BoxFault):
         d.start_box(request, docker=docker)
     assert daemon.names() == []
@@ -806,7 +809,7 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
         argv = [str(a) for a in argv]
         if argv[1:2] == ["exec"]:
             reads.append(argv[-1])
-            if wrong == "token" and _at_root(argv[-1], root):
+            if wrong == "token" and _at_root(argv[-1], Path("/draft")):
                 return subprocess.CompletedProcess(argv, 0, "another draft's token\n", "")
         return daemon(argv, **kwargs)
     if wrong is not None:
@@ -818,17 +821,21 @@ def test_drain_start_reads_the_code_check_and_the_drafts_token_before_returning_
         executor = d.start_box(request, docker=boundary)
         assert executor.sandboxed
         assert daemon.names() == [request.name]
-        assert str(DEFENDER / box.CODE_CHECK_FILE) in reads, "the product check file was never read"
+        assert str(Path("/defender") / box.CODE_CHECK_FILE) in reads, "the product check file was never read"
         assert files_under(root / "agent") == agent_before
     if wrong != "settings-at-root":
-        assert [r for r in reads if _at_root(r, root)], "the draft's token was never read back"
+        assert [r for r in reads if _at_root(r, Path("/draft"))], "the draft's token was never read back"
     assert not any(r.endswith("/.tenant-id") or r.endswith("/SKILL.md") for r in reads)
     assert git(repo[0].knowledge, "status", "--porcelain") == status_before
 
 
 def _with_code_at(request, source: Path):
-    return replace(request, defender_dir=source, mounts=tuple(
-        replace(mount, source=source, target=source) if mount.source == DEFENDER else mount
+    from defender.runtime.model_view import ModelView
+
+    draft = request.view.to_host("/draft")
+    assert draft is not None
+    return replace(request, defender_dir=source, view=ModelView.for_draft(source, draft), mounts=tuple(
+        replace(mount, source=source) if mount.source == DEFENDER else mount
         for mount in request.mounts))
 
 

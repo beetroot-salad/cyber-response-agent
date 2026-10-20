@@ -94,7 +94,7 @@ def test_corpus_author_reads_a_lesson_written_by_an_earlier_model_via_lesson_rea
     deps, corpus, _ = _corpus_author_deps_scene(tmp_path, BoxResult(0, b"", b""))
     lesson = corpus / "prior-lesson.md"
     lesson.write_text("---\nname: prior\n---\nmodel-authored lesson")
-    out = _tool_lesson_read(deps, str(lesson), "body")
+    out = _tool_lesson_read(deps, deps.view.to_model(lesson), "body")
     assert_one_frame(out, "model-authored lesson", "untrusted")
 
 
@@ -110,7 +110,7 @@ def test_lead_author_read_file_cross_agent_artifact(tmp_path):
     deps, skills, _ = _lead_author_deps_scene(tmp_path, BoxResult(0, b"", b""))
     artifact = skills / "lead-author.md"
     artifact.write_text("LEAD-AUTHOR-CROSS-AGENT")
-    out = _tool_read_file(deps, str(artifact))
+    out = _tool_read_file(deps, deps.view.to_model(artifact))
     assert_one_frame(out, "LEAD-AUTHOR-CROSS-AGENT", "untrusted")
 
 
