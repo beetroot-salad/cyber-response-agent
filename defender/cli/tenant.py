@@ -108,8 +108,9 @@ def setup(tenant_id: str, learning_state_from: Path | None = None) -> int:
     under the data root is looked at), the data root, the one-tenant guard (which admits the
     placed `knowledge/` beside a missing row), a present row that is not this tenant's, the
     folder rules, the settings files parse, and run start's readiness function. A finished
-    tenant with provisioned learning that still passes is a silent success. Adoption errors
-    preserve the source aside for a rerun. Refusals are printed visibly, exit 1."""
+    tenant with provisioned learning that still passes is a silent success. Interrupted moves
+    remain completable; recreated source records are preserved and reported. Refusals are
+    printed visibly, exit 1."""
     try:
         tid = _tenant.TenantId(tenant_id)
         root = _tenant.resolve_data_root()
