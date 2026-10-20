@@ -312,11 +312,23 @@ def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
     est = S.estate(tmp_path)
     est.answer("idp", "query", ALICE, ALICE_ROWS)
 
+    stopped = threading.Event()
+    finished = threading.Event()
+
+    def docker(argv, **_kwargs):
+        if argv[1] == "stop":
+            stopped.set()
+        return subprocess.CompletedProcess(argv, 0, "exited", "")
+
     def slow_box() -> Any:
         def run_parsed(*_a: Any, **_kw: Any) -> Any:
-            time.sleep(4.0)
-            return SimpleNamespace(out=b"", err=b"", rc=0)
-        return SimpleNamespace(sandboxed=True, name="slow-box", run_parsed=run_parsed)
+            try:
+                assert stopped.wait(4), "the deadline did not stop Python"
+                return SimpleNamespace(out=b"", err=b"", rc=0)
+            finally:
+                finished.set()
+        return SimpleNamespace(sandboxed=True, name="slow-box", run_parsed=run_parsed,
+                               docker=docker, clock_file=None)
 
     o = S.oracle(S.python("print('slow')"), S.submit(ALICE_ROWS, S.EMPTY_CLAIM))
     reg = S.world_registry(S.episode_v2(tmp_path), "b", est, oracle=o, box=slow_box,
@@ -324,6 +336,7 @@ def test_a_slow_tool_is_cut_off_by_the_attempt_deadline(tmp_path):
 
     began = time.monotonic()
     served = S.call(reg, "idp", "query", est.ctx(tmp_path / "inv"), q="user:alice")
+    assert finished.is_set(), "the attempt returned before its Python worker settled"
 
     assert served == ALICE_ROWS
     assert time.monotonic() - began < 3.0, "the attempt waited out the slow tool"
@@ -507,7 +520,7 @@ def _python_box_factory(tmp_path: Path, *, slow_first: float = 0.0) -> tuple[Any
     def docker(argv: list[str], **_kw: Any) -> subprocess.CompletedProcess:
         if argv[:3] == ["docker", "rm", "-f"]:
             log.removed.append(argv[3])
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, "exited" if argv[1] == "inspect" else "", "")
 
     @dataclass(frozen=True)
     class _Frames(_spec._DockerTransport):

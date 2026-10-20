@@ -475,3 +475,12 @@ def test_infrastructure_fault_text_reaches_the_model_labelled(tmp_path):
     assert "OCI runtime create failed" in shown, "the infrastructure detail never reached the model"
     assert "--- stdout ---" not in shown, "a box fault was dressed as program output"
     assert "exit=" not in shown, "a box fault was given a program exit code"
+
+
+def test_output_limit_fault_is_fatal_instead_of_a_model_retry(tmp_path):
+    run_dir = _run_dir(tmp_path)
+    transport = RecordingTransport(box.BoxOutputLimitExceeded())
+    deps = _main_deps(run_dir, transport)
+    with pytest.raises(box.BoxOutputLimitExceeded):
+        _bash(deps, _cat_alert(run_dir))
+    transport.only()

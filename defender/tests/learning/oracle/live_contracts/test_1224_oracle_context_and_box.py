@@ -286,7 +286,7 @@ def _torn_down_box(*, delay: float = 0.0, out: bytes = b"") -> tuple[Any, _Teard
 
     def docker(argv: list[str], **_kw: Any) -> subprocess.CompletedProcess:
         log.docker_calls.append(list(argv))
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, "exited" if argv[1] == "inspect" else "", "")
 
     @dataclass(frozen=True)
     class _Slow(spec_mod._DockerTransport):
@@ -1331,3 +1331,93 @@ def test_1224_claim_text_cannot_close_the_verifiers_or_the_judges_frame(tmp_path
     prompts = "\n".join(judge.prompts)
     S.assert_wrapped_untrusted(prompts, "CLAIMO34-3434", "the verified claim at the judge")
     _never_outside(prompts, "HOSTO34-3434", "the judge's prompt")
+
+
+def test_box_output_overflow_ends_the_world_without_retrying_or_replacing_the_box(tmp_path):
+    from defender import box as box_mod
+    from defender.learning.branch.estate.oracle import OracleUnservable
+
+    starts = []
+    calls = []
+
+    def docker(argv, **_kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "exited", "")
+
+    class OverflowTransport(box_mod._DockerTransport):
+        def __call__(self, frame, *, cwd, timeout):
+            raise box_mod.BoxOutputLimitExceeded()
+
+    def factory():
+        starts.append(True)
+        return box_mod.BoxExecutor(name="overflow-oracle", docker=docker,
+                                   transport=OverflowTransport("overflow-oracle", box_mod.BoxSpec()))
+
+    est = _estate(tmp_path)
+    ep = _episode(tmp_path)
+    model = S.oracle(S.python("print('result')"), *_forge_submit())
+    registry = S.sandboxed_registry(ep, "b", est, model, S.passing_verifier(), box=factory)
+    with pytest.raises(OracleUnservable) as caught:
+        _ask(registry, est, tmp_path)
+    assert caught.value.reason == "fault"
+    assert len(starts) == 1
+    assert model.requests == 1
+    assert ["docker", "stop", "-t", "0", "overflow-oracle"] in calls
+
+
+def test_overflow_cleanup_crossing_deadline_is_settled_before_attempt_can_retry(tmp_path):
+    import threading
+
+    from defender import box as box_mod
+    from defender.learning.branch.estate.oracle import OracleUnservable
+
+    release_cleanup = threading.Event()
+    worker_finished = threading.Event()
+    stop_calls = []
+    removed_before_settlement = []
+    starts = []
+
+    def docker(argv, **_kwargs):
+        if argv[1] == "stop":
+            stop_calls.append(argv)
+            if len(stop_calls) == 1:
+                assert release_cleanup.wait(5), "overflow cleanup was never released"
+            else:
+                release_cleanup.set()  # the deadline has requested shutdown too
+        if argv[1:3] == ["rm", "-f"]:
+            removed_before_settlement.append(not worker_finished.is_set())
+            release_cleanup.set()  # also allow the old, abandoning implementation to finish
+        return subprocess.CompletedProcess(argv, 0, "exited", "")
+
+    class OverflowTransport(box_mod._DockerTransport):
+        def __call__(self, frame, *, cwd, timeout):
+            raise box_mod.BoxOutputLimitExceeded()
+
+    class RecordingExecutor(box_mod.BoxExecutor):
+        def run_parsed(self, *args, **kwargs):
+            try:
+                return super().run_parsed(*args, **kwargs)
+            finally:
+                worker_finished.set()
+
+    def factory():
+        starts.append(True)
+        return RecordingExecutor(name="deadline-overflow", docker=docker,
+                                 transport=OverflowTransport("deadline-overflow", box_mod.BoxSpec()))
+
+    est = _estate(tmp_path)
+    ep = _episode(tmp_path)
+    model = S.oracle(S.python("print(1)"), S.python("print(2)"), *_forge_submit())
+    registry = S.sandboxed_registry(ep, "b", est, model, S.passing_verifier(), box=factory,
+                                    retry_cap=2, turn_deadline=0.3)
+    try:
+        with pytest.raises(OracleUnservable) as caught:
+            _ask(registry, est, tmp_path)
+        assert caught.value.reason == "fault"
+        assert worker_finished.is_set()
+        assert len(starts) == 1
+        assert model.requests == 1
+        assert len(stop_calls) == 2
+        assert removed_before_settlement == [False]
+    finally:
+        release_cleanup.set()

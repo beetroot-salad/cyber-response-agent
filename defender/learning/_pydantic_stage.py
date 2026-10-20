@@ -6,6 +6,8 @@ from dataclasses import replace
 from typing import Any, ClassVar, Protocol
 
 from defender._text import is_content_less
+from defender.box._output import BoxOutputLimitExceeded
+from defender.runtime.exception_groups import carried
 from defender.learning.core.config import (
     FatalConfigError,
     RunUnprocessable,
@@ -126,6 +128,8 @@ def run_stage(
     except (StageAbort, FatalConfigError):
         raise
     except Exception as e:
+        if carried(e, BoxOutputLimitExceeded) is not None:
+            raise
         if require_output and _last_response_is_empty_text(logger.messages):
             raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
         raise RunUnprocessable(f"{stage} ({label}) failed: {e!r}") from e

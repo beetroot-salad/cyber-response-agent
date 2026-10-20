@@ -131,6 +131,8 @@ def _tool_bash(deps: AgentDeps, command: str) -> str:
         )
     except subprocess.TimeoutExpired as e:
         raise ModelRetry(f"command timed out after {_BASH_TIMEOUT_S}s: {command}") from e
+    except box_mod.BoxOutputLimitExceeded:
+        raise
     except box_mod.BoxFault as e:
         raise ModelRetry(f"the sandbox could not run this command: {e}") from e
     # Behind the gate's NUL deny: the box encoder raises a bare `ValueError` for an argv it
