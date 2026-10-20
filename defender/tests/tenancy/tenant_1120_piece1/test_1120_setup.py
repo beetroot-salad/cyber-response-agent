@@ -240,18 +240,28 @@ def test_1186_setup_never_merges_state_and_accepts_already_in_place(tmp_path: Pa
     assert H.tree_census(root) == root_before
 
 
-@pytest.mark.parametrize("phase", ["moving", "copying", "published", "deleting", "racing-write"])
+@pytest.mark.parametrize("phase", [
+    "staging-empty", "staging-partial", "staging-complete",
+    "moving", "copying", "published", "deleting", "racing-write",
+])
 def test_1186_setup_completes_interrupted_adoption(tmp_path: Path, phase: str) -> None:
-    """O5: recover split moves and partial cleanup; preserve/report recreated source records."""
+    """O5/D10: recover token staging, split moves and cleanup; preserve/report recreated writes."""
     root, source = tmp_path / "data", tmp_path / "legacy"
     H.adopted(root)
     before = _legacy_learning(source)
     aside = source / f".adopting-to-{H.TID}"
-    aside.mkdir()
+    stage = aside.with_name(f"{aside.name}.stage")
     token = "63ac3146-4d58-4bb8-9f94-124902ceef1a\n"
-    (aside / ".adoption").write_text(token, encoding="utf-8")
-    for name in LEARNING_ENTRIES[:2] if phase == "moving" else LEARNING_ENTRIES:
-        (source / name).rename(aside / name)
+    staging_tokens = {"staging-empty": "", "staging-partial": "63ac3146-4d58-",
+                      "staging-complete": token}
+    if phase in staging_tokens:
+        stage.mkdir()
+        (stage / ".adoption").write_text(staging_tokens[phase], encoding="utf-8")
+    else:
+        aside.mkdir()
+        (aside / ".adoption").write_text(token, encoding="utf-8")
+        for name in LEARNING_ENTRIES[:2] if phase == "moving" else LEARNING_ENTRIES:
+            (source / name).rename(aside / name)
     destination = H.tenant_folder(root) / "learning"
     if phase in {"published", "deleting", "racing-write"}:
         shutil.copytree(aside, destination, symlinks=True)
@@ -282,6 +292,7 @@ def test_1186_setup_completes_interrupted_adoption(tmp_path: Path, phase: str) -
         remaining = {k: v for k, v in remaining.items() if k.split("/")[0] != "author-queue"}
     assert remaining == {k: v for k, v in before.items() if k not in moved}
     assert not aside.exists()
+    assert not stage.exists()
     assert not destination.with_name("learning.adopting").exists()
     assert not (destination / ".adoption").exists()
 
