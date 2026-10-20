@@ -48,6 +48,24 @@ requests were informed by implementation failures; the independent test author
 did not inspect the honest implementation. The orchestrator reviewed each patch
 before integration. Available GPT agents were used; Opus/Sonnet are unavailable.
 
+The executable coverage map uses existing suites:
+
+| Obligation | Suites | Observable commitment |
+| --- | --- | --- |
+| O1: tenant root, no defaults | `test_drain719_config`, `test_1135_front_door`, `test_1135_handle` | Runtime API removal, channel/delivery content isolation, no ambient fallback |
+| O2: run-derived writes | `test_791_curation_boundary`, `test_921_launcher_frame`, `test_lead_author` | Actual run/episode findings and requests reach the owning tenant queue |
+| O3: explicit command identity | `test_1120_operator_commands`, `test_903_queue_view` | Missing/invalid identity refuses before mutation; selected locks and rendered records agree |
+| O4: ownership and lifetime | `test_queue_drains_852`, `test_drain719_config` | Foreign requests are dead-lettered; same-tenant requests run; state and locks survive checkout changes |
+| O5: provisioning/adoption | `test_1120_setup` | Named-entry preservation, held locks, no merge, tokens, interruption recovery, unrelated-file refusal |
+| O6: root/mount boundary | `test_drain719_config`, `test_1120_setup`, `test_1120_operator_commands` | Static/stored/rebound root-link refusal; fresh/migration setup refusal; no learning mount |
+
+Consumer repairs also preserve the existing `test_1222_admission_record`,
+`test_1105_pr2_declared_changes`, `test_1187_held_out` and
+`test_1135_drain_halt` observations against the actual selected state root.
+The last suite requires a successful accepted-run enqueue control and a denied
+write whose diagnostic names that tenant's queue. Tests remain on a separate
+contract-only lineage, with implementation-stage checks recorded separately.
+
 Independent contract sampling used a detached worktree at the original contract,
 without access to the honest implementation. It demonstrated a factory-only root
 guard that passes the old configuration tests while stored paths read an outside
