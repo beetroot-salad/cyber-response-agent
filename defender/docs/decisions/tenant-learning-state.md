@@ -39,8 +39,9 @@ preserved and reported. File and directory modes/times and symlinks are retained
 root migrations also retain owners/groups. Migration requires quiescent writers.
 
 The original executable contract is `8d550a4a019785abb08eeae5c5a3322a5dda0334`
-on base `27a5d1fc4b2726907202471f9e30434269d784f3`. Reviewed repairs remain on
-`contract/1186-repairs`, separately from production implementation. They correct
+on base `27a5d1fc4b2726907202471f9e30434269d784f3`. The current reviewed tests-only contract is
+`40e074ce04aef739656633e062dbe4b7f3ab19ba` on `contract/1186-repairs`,
+merged without rewriting the original base or production implementation. They correct
 finished-tenant and explicit-scratch fixtures, preserve accepted-run producer
 observations, and strengthen runtime API removal, stored-path root checks,
 unknown-aside refusal, and selected-queue permission discrimination. Repair
