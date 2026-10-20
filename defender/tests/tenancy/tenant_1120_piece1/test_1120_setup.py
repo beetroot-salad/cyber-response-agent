@@ -473,6 +473,8 @@ def test_1120_setup_over_a_finished_tenant_succeeds_and_writes_nothing(tmp_path:
     # pulling).
     root = tmp_path / "data"
     H.adopted(root)
+    # O5: a finished tenant already has the learning root that fresh setup provisions.
+    (H.tenant_folder(root) / "learning").mkdir()
     before = H.tree_census(root)
     text = H.assert_clean(H.setup(tenant_py, root))
     assert text == "", f"a clean re-run printed something:\n{text}"
