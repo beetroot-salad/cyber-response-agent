@@ -28,6 +28,7 @@ from defender.execution.box_codec import (
     encode_response,
 )
 from ._clock import write_clock
+from ._output import BoxOutputLimitExceeded, capture_bounded
 from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
     Finding,
     RunTainted,
@@ -148,6 +149,8 @@ class BoxExecutor:
         default=None, compare=False, repr=False,
     )
 
+    _output_refused: bool = field(default=False, compare=False, repr=False)
+
     def follow_clock(self, reading: Callable[[], datetime]) -> None:
         """Have the box's programs read the run's clock: before every command, the clock file is
         rewritten from `reading()` (the run clock moves against the wall — it pauses for an
@@ -172,10 +175,23 @@ class BoxExecutor:
         self, pipelines: Sequence[bash_exec.Pipeline], *,
         command: str, cwd: Path, timeout: float,
     ) -> BoxResult:
+        if self._output_refused:
+            raise BoxOutputLimitExceeded()
         self._sync_clock()
         frame = encode_request(pipelines)
         try:
             raw = self.transport(frame, cwd=cwd, timeout=timeout)
+        except BoxOutputLimitExceeded as overflow:
+            self._output_refused = True
+            # The lifecycle owns the daemon and proof that every box process has stopped.
+            from ._lifecycle import BoxRuns
+
+            try:
+                BoxRuns(self).stop()
+            except Exception as cleanup:
+                overflow.add_note(f"could not confirm the box stopped: {cleanup}")
+                raise overflow from cleanup
+            raise
         except BoxFault:
             raise
         except subprocess.TimeoutExpired:
@@ -229,16 +245,18 @@ class _DockerTransport:
 
     name: str
     spec: BoxSpec
+    popen: Callable[..., subprocess.Popen[bytes]] = field(
+        default=subprocess.Popen, compare=False, repr=False,
+    )
 
     def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
-        proc = subprocess.run(  # noqa: S603
+        return capture_bounded(
             [
                 "docker", "exec", "-i", "-w", str(cwd), self.name,
                 "python3", "-m", "defender.execution.bash_exec",
             ],
-            input=frame, capture_output=True, check=False, timeout=timeout,
+            frame, timeout=timeout, popen=self.popen,
         )
-        return RawExec(rc=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
 @dataclass(frozen=True)

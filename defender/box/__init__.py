@@ -48,6 +48,7 @@ from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.p
     verdict_path,
     write_did_not_run,
 )
+from ._output import BOX_OUTPUT_LIMIT, BoxOutputLimitExceeded
 from ._spec import (
     ALIAS_PROFILE_PATH,
     BANNED_SHAPES,
@@ -148,6 +149,8 @@ __all__ = [
     "BOX_ENV_ALLOWLIST",
     "BoxExecutor",
     "BoxFault",
+    "BOX_OUTPUT_LIMIT",
+    "BoxOutputLimitExceeded",
     "BoxLike",
     "BoxRequest",
     "BoxResult",

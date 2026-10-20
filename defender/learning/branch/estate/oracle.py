@@ -818,6 +818,7 @@ class Oracle:
 
     def _python(self, args: dict, run: _Run) -> str:
         from defender.execution.box_codec import BoxFault, encode_request
+        from defender.box._output import BoxOutputLimitExceeded
 
         code = args.get("code")
         if not isinstance(code, str):
@@ -849,6 +850,8 @@ class Oracle:
                                     timeout=_PYTHON_TIMEOUT)
         except subprocess.TimeoutExpired:
             return "python timed out."
+        except BoxOutputLimitExceeded:
+            raise
         except BoxFault:
             run.box.lost(box)
             return "python failed: the box was lost; a fresh one starts on the next run."

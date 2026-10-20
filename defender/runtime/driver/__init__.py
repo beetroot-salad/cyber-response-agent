@@ -31,6 +31,7 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.capabilities.hooks import Hooks
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
+from defender.box._output import BoxOutputLimitExceeded
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.usage import RunUsage, UsageLimits
 
@@ -251,7 +252,7 @@ def _flush_run_end(run: Any, store: Any, session_id: str, truncated_by: str | No
             _logger.warning(f"truncated_by write skipped: {e!r}")
 
 
-async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent, prompt, deps, store, bounds
+async def _drive_agent(  # noqa: PLR0913, PLR0912, C901 — the loop's own inputs: agent, prompt, deps, store, bounds
     agent: Agent[AgentDeps, str], prompt: str | None, deps: AgentDeps, store: Any,
     session_id: str, bounds: challenge_gate.Bounds, message_history: list | None = None,
     *, usage: RunUsage | None = None, snapshots: branch.SnapshotWriter | None = None,
@@ -310,6 +311,8 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
     except (run_end.CallRecordWriteFailed, providers.ProviderDown, BaseExceptionGroup) as e:
         # Two failures end the run by name. Concurrent leads may deliver either inside an
         # exception group; a group that carries neither propagates as itself.
+        if carried(e, BoxOutputLimitExceeded) is not None:
+            raise
         failed = carried(e, run_end.CallRecordWriteFailed)
         down = _provider_down_in(e)
         if failed is not None:
@@ -356,7 +359,8 @@ def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
 def _provider_down_in(exc: BaseException) -> providers.ProviderDown | None:
     """The `ProviderDown` that should end the run on `exc` (bare, or carried by a group that
     holds no interrupt, kill or abort), else `None`."""
-    return carried_unless_overridden(exc, providers.ProviderDown, (BudgetKill, RunAborted))
+    return carried_unless_overridden(
+        exc, providers.ProviderDown, (BudgetKill, RunAborted, BoxOutputLimitExceeded))
 
 
 def _write_run_end_sidecar(deps: AgentDeps, end: run_end.RunEnd) -> bool:

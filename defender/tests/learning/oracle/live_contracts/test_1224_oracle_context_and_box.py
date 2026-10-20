@@ -1331,3 +1331,35 @@ def test_1224_claim_text_cannot_close_the_verifiers_or_the_judges_frame(tmp_path
     prompts = "\n".join(judge.prompts)
     S.assert_wrapped_untrusted(prompts, "CLAIMO34-3434", "the verified claim at the judge")
     _never_outside(prompts, "HOSTO34-3434", "the judge's prompt")
+
+
+def test_box_output_overflow_ends_the_world_without_retrying_or_replacing_the_box(tmp_path):
+    from defender import box as box_mod
+    from defender.learning.branch.estate.oracle import OracleUnservable
+
+    starts = []
+    calls = []
+
+    def docker(argv, **_kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "exited", "")
+
+    class OverflowTransport(box_mod._DockerTransport):
+        def __call__(self, frame, *, cwd, timeout):
+            raise box_mod.BoxOutputLimitExceeded()
+
+    def factory():
+        starts.append(True)
+        return box_mod.BoxExecutor(name="overflow-oracle", docker=docker,
+                                   transport=OverflowTransport("overflow-oracle", box_mod.BoxSpec()))
+
+    est = _estate(tmp_path)
+    ep = _episode(tmp_path)
+    model = S.oracle(S.python("print('result')"), *_forge_submit())
+    registry = S.sandboxed_registry(ep, "b", est, model, S.passing_verifier(), box=factory)
+    with pytest.raises(OracleUnservable) as caught:
+        _ask(registry, est, tmp_path)
+    assert caught.value.reason == "fault"
+    assert len(starts) == 1
+    assert model.requests == 1
+    assert ["docker", "stop", "-t", "0", "overflow-oracle"] in calls

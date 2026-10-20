@@ -495,3 +495,27 @@ def test_unroutable_model_source_key_fatal_config(tmp_path):
             model="gpt-4-turbo",
             source_key=config.source_first_party_key,
             run_author=lambda *a, **kw: "x")
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+def test_box_output_overflow_is_not_an_unprocessable_learning_stage(tmp_path, grouped):
+    from defender.box import BoxOutputLimitExceeded
+    from defender.runtime.exception_groups import carried
+
+    overflow = BoxOutputLimitExceeded()
+    fault = ExceptionGroup("stage", [overflow]) if grouped else overflow
+    deps = _lead_deps(_run_dir(tmp_path), _worktree(tmp_path))
+
+    def fail(_messages, _info):
+        raise fault
+
+    with pytest.raises(type(fault)) as caught:
+        run_stage(
+            stage="lead_author",
+            wiring=StageWiring(prompt_path=_prompt(tmp_path), model="m", effort=None,
+                               trace_name="output-overflow.jsonl", label="la"),
+            ctx=StageContext(learning_run_dir=deps.run_dir, user="u", request_limit=4,
+                             wall_clock_timeout=config.subagent_timeout()),
+            deps=deps, make_model=_fake_model(fail),
+        )
+    assert carried(caught.value, BoxOutputLimitExceeded) is overflow
