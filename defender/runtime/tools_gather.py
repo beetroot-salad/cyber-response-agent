@@ -245,8 +245,6 @@ def _gather_prompt(
     # Every path the dispatch names is in the run's model view (#1255 P1): gather is handed
     # the trees by the paths it will name them back by. Only a run's own role dispatches.
     view = deps.view
-    if view is None:
-        raise TypeError(f"a gather dispatch comes from a run role; {deps.role} has no model view")
     # Section order is the cache prefix: the indexes vary only per system, the Dispatch block
     # per lead, so indexes go first to let same-system leads share a cached prefix.
     block = "Begin gathering this lead.\n\n"

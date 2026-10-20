@@ -114,8 +114,8 @@ def test_the_read_and_cat_lanes_agree_on_a_run_dir_artifact(tmp_path):
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.write_text(body, encoding="utf-8")
 
-    assert FRAME_RE.search(_tool_read_file(deps, str(artifact)))
-    assert FRAME_RE.search(_tool_bash(deps, f"cat {artifact}"))
+    assert FRAME_RE.search(_tool_read_file(deps, deps.view.to_model(artifact)))
+    assert FRAME_RE.search(_tool_bash(deps, f"cat {deps.view.to_model(artifact)}"))
 
 
 def test_a_runtime_agents_own_run_dir_read_stays_unframed(tmp_path):

@@ -6,6 +6,8 @@ from dataclasses import replace
 from typing import Any, ClassVar, Protocol
 
 from defender._text import is_content_less
+from defender.box._output import BoxOutputLimitExceeded
+from defender.runtime.exception_groups import carried
 from defender.learning.core.config import (
     FatalConfigError,
     RunUnprocessable,
@@ -15,6 +17,7 @@ from defender.learning.core.config import (
 )
 from defender.runtime import observe, providers
 from defender.runtime.agent_role import AgentRole
+from defender.runtime.model_view import ModelView
 from defender.runtime.driver import MakeModel, build_agent_core
 
 from pydantic_ai import Agent
@@ -44,6 +47,7 @@ def build_stage_agent(
     make_model: MakeModel = providers.build_for_effort,
     tools: Any = None,
     verbs: Any = None,
+    workspace: ModelView | None = None,
 ) -> Agent[Any, str]:
     from defender.agents import AGENTS
 
@@ -51,10 +55,18 @@ def build_stage_agent(
     if tools is not None:
         overrides["tools"] = tools
     defn = replace(AGENTS[deps_type.role], **overrides)
+    instructions = read_text_utf8(wiring.prompt_path)
+    if workspace is not None:
+        instructions += (
+            "\n\nYou are part of the defender learning loop.\n"
+            f"Working directory: {workspace.cwd}\n"
+            f"Workspace roots: {workspace.roots_text()}\n"
+            "These paths name your workspace; your declared tool permissions still apply.\n"
+        )
     return build_agent_core(
         defn,
         deps_type=deps_type,
-        instructions=read_text_utf8(wiring.prompt_path),
+        instructions=instructions,
         logger=logger,
         agent_id=wiring.label,
         make_model=make_model,
@@ -101,6 +113,8 @@ def run_stage(
     """Drive one in-process stage. `wiring` is how the stage is configured, `ctx` is what
     this spawn is about."""
     label = wiring.label
+    from defender.runtime.tools import AgentDeps
+
     # Under `wire_logs/`, never the run dir root: the trace is the stage's whole context
     # verbatim, learning run dirs are shared, and readers of the root are not shape-filtered.
     # The wire-log policy denial (`files.names_wire_log_dir`) only covers this subdirectory.
@@ -113,6 +127,7 @@ def run_stage(
             agent = build_stage_agent(
                 type(deps), wiring, logger,
                 make_model=make_model, tools=tools, verbs=verbs,
+                workspace=deps.view if isinstance(deps, AgentDeps) else None,
             )
         except ValueError as e:
             raise FatalConfigError(f"{stage} ({label}) misconfigured: {e}") from e
@@ -126,6 +141,8 @@ def run_stage(
     except (StageAbort, FatalConfigError):
         raise
     except Exception as e:
+        if carried(e, BoxOutputLimitExceeded) is not None:
+            raise
         if require_output and _last_response_is_empty_text(logger.messages):
             raise RunUnprocessable(f"{stage} ({label}) returned empty output") from e
         raise RunUnprocessable(f"{stage} ({label}) failed: {e!r}") from e

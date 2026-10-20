@@ -43,12 +43,8 @@ def corpus_dir(deps: AgentDeps, *, lane: str) -> Path | None:
 
 
 def shown_path(deps: AgentDeps) -> Callable[[Path], str]:
-    """How a pushed lesson's path is named to the role: its model path in the run's view
-    (#1255 P1); a role without one is shown the resolved host path."""
-    view = deps.view
-    if view is not None:
-        return view.to_model
-    return lambda p: str(p.resolve())
+    """Pushed lessons use the same workspace coordinates as the role's file tools."""
+    return deps.view.to_model
 
 
 def shape(hits: Iterable[Hit]) -> list[tuple[str, int]]:

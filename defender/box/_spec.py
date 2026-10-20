@@ -28,6 +28,8 @@ from defender.execution.box_codec import (
     encode_response,
 )
 from ._clock import write_clock
+from ._output import BoxOutputLimitExceeded, capture_bounded
+from defender.runtime.model_view import ModelView
 from defender.box._scrub import (  # noqa: F401 — re-exported: run.py/drains.py/tests import `box.scrub`, `box.RunTainted`
     Finding,
     RunTainted,
@@ -107,6 +109,16 @@ class BoxRequest:
     defender_dir: Path | None = None
     #: Tenant knowledge must never run in the host fallback lane.
     require_sandbox: bool = False
+    #: Host geography remains authoritative; only container-facing paths use this view.
+    view: ModelView | None = None
+
+    @property
+    def model_workdir(self) -> Path:
+        return Path(self.view.to_model(self.workdir)) if self.view is not None else self.workdir
+
+    @property
+    def model_code_dir(self) -> Path:
+        return Path(self.view.to_model(self.code_dir)) if self.view is not None else self.code_dir
 
     @property
     def code_dir(self) -> Path:
@@ -148,6 +160,8 @@ class BoxExecutor:
         default=None, compare=False, repr=False,
     )
 
+    _output_refused: bool = field(default=False, compare=False, repr=False)
+
     def follow_clock(self, reading: Callable[[], datetime]) -> None:
         """Have the box's programs read the run's clock: before every command, the clock file is
         rewritten from `reading()` (the run clock moves against the wall — it pauses for an
@@ -172,10 +186,23 @@ class BoxExecutor:
         self, pipelines: Sequence[bash_exec.Pipeline], *,
         command: str, cwd: Path, timeout: float,
     ) -> BoxResult:
+        if self._output_refused:
+            raise BoxOutputLimitExceeded()
         self._sync_clock()
         frame = encode_request(pipelines)
         try:
             raw = self.transport(frame, cwd=cwd, timeout=timeout)
+        except BoxOutputLimitExceeded as overflow:
+            self._output_refused = True
+            # The lifecycle owns the daemon and proof that every box process has stopped.
+            from ._lifecycle import BoxRuns
+
+            try:
+                BoxRuns(self).stop()
+            except Exception as cleanup:
+                overflow.add_note(f"could not confirm the box stopped: {cleanup}")
+                raise overflow from cleanup
+            raise
         except BoxFault:
             raise
         except subprocess.TimeoutExpired:
@@ -229,26 +256,53 @@ class _DockerTransport:
 
     name: str
     spec: BoxSpec
+    popen: Callable[..., subprocess.Popen[bytes]] = field(
+        default=subprocess.Popen, compare=False, repr=False,
+    )
 
     def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
-        proc = subprocess.run(  # noqa: S603
+        return capture_bounded(
             [
                 "docker", "exec", "-i", "-w", str(cwd), self.name,
                 "python3", "-m", "defender.execution.bash_exec",
             ],
-            input=frame, capture_output=True, check=False, timeout=timeout,
+            frame, timeout=timeout, popen=self.popen,
         )
-        return RawExec(rc=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 
 
 @dataclass(frozen=True)
 class _HostTransport:
 
     env: dict[str, str]
+    view: ModelView | None = None
 
     def __call__(self, frame: bytes, *, cwd: Path, timeout: float) -> RawExec:
+        pipelines = decode_request(frame)
+        if self.view is not None:
+            from defender.runtime.permission.grant import PROGRAMS, rm_target_files
+
+            # The permission grammar owns which arguments are paths. A grep pattern or
+            # Python string that resembles a workspace path must keep its literal bytes.
+            translated = []
+            for pipeline in pipelines:
+                stages = []
+                for stage in pipeline.stages:
+                    extract = rm_target_files if stage.argv[0] == "rm" else PROGRAMS[stage.argv[0]]
+                    operands = extract(stage.argv) or ()
+                    argv = [
+                        str(host) if word in operands and Path(word).is_absolute()
+                        and (host := self.view.to_host(word)) is not None else word
+                        for word in stage.argv
+                    ]
+                    stages.append(bash_exec.Stage(argv, stage.stderr))
+                translated.append(bash_exec.Pipeline(pipeline.connector, stages))
+            pipelines = translated
+            host_cwd = self.view.to_host(str(cwd))
+            if host_cwd is None:
+                raise BoxFault(f"working directory is outside the workspace: {cwd}")
+            cwd = host_cwd
         rc, out, err = bash_exec.run_parsed(
-            decode_request(frame), command="", env=self.env, cwd=cwd, timeout=timeout,
+            pipelines, command="", env=self.env, cwd=cwd, timeout=timeout,
         )
         return RawExec(rc=rc, stdout=encode_response(BoxResult(
             rc=rc,

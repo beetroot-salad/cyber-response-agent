@@ -21,12 +21,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from defender.box._output import BoxOutputLimitExceeded
 from defender._io import read_text_utf8
 from defender.run_repository import RunPaths
 from defender.hooks.budget_enforcer import BudgetKill, count_call
 from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, claim_lead
 from defender.runtime import circuit_breaker, providers, run_end, system_status
-from defender.runtime.exception_groups import carried_unless_overridden
+from defender.runtime.exception_groups import carried, carried_unless_overridden
 from defender.runtime.run_state import RunState
 from defender.runtime.verb_grant import GrantError, VerbGrant
 from ._spec import (
@@ -270,7 +271,7 @@ def _ending_of(end: LeadEnd, run_state: RunState) -> str | None:
     return None
 
 
-async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit per way the lead fails to start; the dispatch seams
+async def run_correlation(  # noqa: C901, PLR0911, PLR0912, PLR0913 — one early exit per way the lead fails to start; the dispatch seams
     *, run: Any, run_state: RunState, defender_dir: Path, verbs: Any, limits: dict,
     make_model: Any, logger: Any, box: Any, store: Any,
     catalog: SystemIndex | None, dispatch: CorrelationDispatch, tenant: Any, deadline: float,
@@ -339,6 +340,8 @@ async def run_correlation(  # noqa: C901, PLR0911, PLR0913 — one early exit pe
             asyncio.CancelledError, KeyboardInterrupt, GeneratorExit, SystemExit):
         raise
     except Exception as e:  # noqa: BLE001 — the lead's own dispatch must never break the run
+        if carried(e, BoxOutputLimitExceeded) is not None:
+            raise
         if carried_unless_overridden(e, providers.ProviderDown, (BudgetKill, circuit_breaker.RunAborted)):
             raise  # a provider that stayed down, inside a group (#1243)
         _logger.warning(f"correlation lead dispatch failed ({type(e).__name__}); naming it")

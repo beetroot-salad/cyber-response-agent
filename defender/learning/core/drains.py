@@ -619,20 +619,22 @@ def _validate_merge_mode() -> None:
 def _drain_box_request(
     wt: Path, batch_id: str, label: DrainLabel, paths: LoopPaths,
 ) -> box_mod.BoxRequest:
-    """The drain box's mounts: ro over the whole worktree leaf as its `code` mount (it carries
-    `<wt>/defender`, the request's code root, and is both drain roles' cwd_anchor), rw over
-    exactly `label.writable_trees` of the leaf's paths, in its order, each at its own path.
+    """The drain box's mounts: ro over the worktree at `/workspace` as its `code` mount,
+    rw over exactly `label.writable_trees` at their workspace paths, in its order.
     Nothing outside the leaf.
 
     The rw list is taken whole from its owner, never derived here, so the box's writable
     mounts and the roots `lane_trees.open_drain_trees` holds are one list (#1134 O4). A
     non-member raises here rather than getting a box."""
+    from defender.runtime.model_view import MODEL_WORKSPACE, ModelView
+
     wt_paths = paths.with_repo_root(wt)
-    mounts = [box_mod.Mount(source=wt, target=wt, writable=False, kind="code")]
+    view = ModelView(((MODEL_WORKSPACE, wt),), MODEL_WORKSPACE)
+    mounts = [box_mod.Mount(source=wt, target=Path(view.to_model(wt)), writable=False, kind="code")]
     for d in label.writable_trees(wt_paths):
-        mounts.append(box_mod.Mount(source=d, target=d, writable=True))
+        mounts.append(box_mod.Mount(source=d, target=Path(view.to_model(d)), writable=True))
     return box_mod.BoxRequest(
-        name=f"defender-drain-{batch_id}", mounts=tuple(mounts), workdir=wt, env={},
+        name=f"defender-drain-{batch_id}", mounts=tuple(mounts), workdir=wt, env={}, view=view,
     )
 
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 from defender.agents import MAIN_DEF
@@ -113,11 +113,11 @@ def test_new_learning_role_is_registered_with_read_and_bash_tools(tmp_path):
         future,
         run,
         defender_dir=tree,
-        scope=RunScope(add_dirs=(root,)),
+        scope=RunScope(add_dirs=(root,), model_roots=((PurePosixPath("/inputs/shared"), root),)),
         box=Box(BoxResult(0, b"future role bytes", b"")),
     )
-    read_out = _tool_read_file(deps, str(artifact))
-    bash_out = _tool_bash(deps, f"cat {artifact}")
+    read_out = _tool_read_file(deps, deps.view.to_model(artifact))
+    bash_out = _tool_bash(deps, f"cat {deps.view.to_model(artifact)}")
     assert frame_salt_of(read_out, "untrusted")
     assert frame_salt_of(bash_out, "untrusted")
     assert read_out != "future role bytes"
