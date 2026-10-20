@@ -114,6 +114,35 @@ def test_1025_a_framed_only_judge_trace_naming_no_roster_label_is_listed_as_unat
     assert "tx-judge_zz_gone_0_trace" not in page.by_id
 
 
+
+def test_judge_trace_uuid_scope_is_shared_by_blocks_and_unattributed_list(tmp_path):
+    """Declared UUID traces route once; unknown scopes stay separate from recorded draws."""
+    ep = E.sample_episode(tmp_path)
+    world_id = T.world_id(ep.dir, E.GRADED_WORLD)
+    unknown_id = T.fixture_world_id("unknown_trace_world")
+    grade_only_id = T.fixture_world_id("grade_only")
+    grade = E.sample_grade()
+    grade["worlds"].append(E.world_row("grade_only", declared="benign"))
+    E.write_judge(ep.dir, grade)
+    scopes = [(world_id, 0), ("family", 0), (world_id, 9),
+              (unknown_id, 0), (grade_only_id, 0), ("grade_only", 0)]
+    for scope, draw in scopes:
+        E.write_framed(ep.dir, f"judge:{scope}:{draw}", prompt=f"scope {scope} draw {draw}")
+    page = render(ep)
+    blocks = [node.id for node in page.section("stage-judge").find_all(cls="tx-stream")]
+    assert blocks[0] == "tx-judge_family_0_trace"
+    assert f"tx-judge_{world_id}_0_trace" in blocks
+    assert f"scope {world_id} draw 0" in page.text_of(f"tx-judge_{world_id}_0_trace")
+    unmatched = page.one(cls="st-unattributed").text()
+    assert f"judge_{world_id}_0_trace" not in unmatched
+    assert "judge_family_0_trace" not in unmatched
+    assert f"judge_{world_id}_9_trace" not in unmatched
+    for scope in (unknown_id, grade_only_id, "grade_only"):
+        assert f"judge_{scope}_0_trace" in unmatched
+        assert f"tx-judge_{scope}_0_trace" not in page.by_id
+    assert f"tx-judge_{world_id}_9_trace" not in page.by_id
+
+
 def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_count(tmp_path):
     """A world whose draw directory holds one unparsable document."""
     ep = E.sample_episode(tmp_path)

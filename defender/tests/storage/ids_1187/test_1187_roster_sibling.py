@@ -98,6 +98,78 @@ def test_start_runs_makes_runs_then_writes_one_fresh_uuid_per_label(data_root):
     assert not set(second.values()) & set(written.values()), "two episodes share an arm id"
 
 
+def test_a_seventy_thousand_character_label_has_a_readable_uuid_roster_and_child(tmp_path, data_root):
+    scene = _Scene(tmp_path, data_root, A_ID)
+    label = "w" * 70_000
+    scene.doc["worlds"][1]["label"] = label
+    T.write_family(scene.ep, scene.doc)
+    world_ids = [world["world_id"] for world in scene.doc["worlds"]]
+    runs = S.tenant(data_root, A_ID).runs_repository()
+    with runs.episode(scene.episode_id) as view:
+        written = _texts(view.start_runs(world_ids))
+    assert set(written) == set(world_ids)
+    assert S.read_roster(scene.ep) == written
+    assert (scene.ep / S.ROSTER_NAME).stat().st_size < 1024
+    assert label.encode() not in (scene.ep / S.ROSTER_NAME).read_bytes()
+    with runs.episode(scene.episode_id) as view:
+        assert _texts(view.arm_ids()) == written
+        assert str(view.arm_id(world_ids[1])) == written[world_ids[1]]
+    natural_before = S.tree(S.natural_runs(data_root, A_ID))
+    rec = P.SiblingRecorder()
+    rc, refused, err = P.drive_run_py(P.new_sibling_argv(A_ID, scene.episode_id, label), rec)
+    assert refused is None, f"{P.refusal_text(refused)} {err}"
+    assert rc == 0, err
+    assert rec.run_dir == scene.ep / "runs" / written[world_ids[1]]
+    assert S.tree(S.natural_runs(data_root, A_ID)) == natural_before
+
+
+@pytest.mark.parametrize("fault", ["label-key", "foreign-uuid", "missing-world",
+                                  "duplicate-arm", "duplicate-world"])
+def test_uuid_roster_requires_the_complete_manifest_binding(data_root, fault):
+    runs = S.tenant(data_root, A_ID).runs_repository()
+    episode_id, ep = _episode(data_root, A_ID)
+    world_ids = [world["world_id"] for world in _yaml.safe_load(
+        (ep / S.MANIFEST_NAME).read_text())["worlds"]]
+    good = {world_id: S.new_id() for world_id in world_ids}
+    broken = dict(good)
+    if fault in ("label-key", "foreign-uuid"):
+        broken["b" if fault == "label-key" else S.new_id()] = broken.pop(world_ids[1])
+    elif fault == "missing-world":
+        del broken[world_ids[1]]
+    elif fault == "duplicate-arm":
+        broken[world_ids[1]] = broken[world_ids[0]]
+    if fault == "duplicate-world":
+        S.write_roster(ep, raw=_ids_json([*good.items(), (world_ids[1], S.new_id())]))
+    else:
+        S.write_roster(ep, broken)
+    before = S.tree(ep)
+    with runs.episode(episode_id) as view:
+        assert _is_refusal(S.raised(view.arm_ids)), fault
+        assert _is_refusal(S.raised(view.arm_id, world_ids[1])), fault
+    assert S.tree(ep) == before, "reading a bad roster changed the episode"
+    S.write_roster(ep, good)
+    with runs.episode(episode_id) as view:
+        assert _texts(view.arm_ids()) == good
+        assert str(view.arm_id(world_ids[1])) == good[world_ids[1]]
+
+
+def test_start_runs_refuses_an_over_capacity_family_before_creating_runs(data_root):
+    runs = S.tenant(data_root, A_ID).runs_repository()
+    doc = T.family_doc(worlds=[T.base_world(), *[
+        T.world_doc(f"w{index}", role=None, facts=[]) for index in range(799)]])
+    episode_id = S.new_id()
+    doc["episode_id"] = episode_id
+    ep = S.make_episode(data_root, A_ID, episode_id, manifest=_yaml.safe_dump(doc), roster=False)
+    before = S.tree(ep)
+    with runs.episode(episode_id) as view:
+        refused = S.raised(view.start_runs, [world["world_id"] for world in doc["worlds"]])
+    assert isinstance(refused, RunRefused), refused
+    assert "roster" in str(refused).lower(), refused
+    assert S.tree(ep) == before
+    assert not (ep / "runs").exists()
+    assert not (ep / S.ROSTER_NAME).exists()
+
+
 def test_a_second_start_runs_refuses_and_leaves_the_roster_byte_identical(data_root):
     t = S.tenant(data_root, A_ID)
     runs = t.runs_repository()
