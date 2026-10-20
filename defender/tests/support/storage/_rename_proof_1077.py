@@ -52,8 +52,8 @@ def main(root: Path) -> int:
     with Episode.open(episode_dir) as episode:
         episode.family.create(_yaml.safe_dump(T.family_doc(
             episode_id=episode_dir.name, worlds=[T.base_world(), T.world_doc("b", world_id=WORLD_ID)])))
-        archived = archive_episode(episode, {"b": run_dir})
-    assert set(archived) == {"b"}, archived
+        archived = archive_episode(episode, {WORLD_ID: run_dir})
+    assert set(archived) == {WORLD_ID}, archived
 
     world = EpisodePaths(episode_dir).world(WORLD_ID)
 
