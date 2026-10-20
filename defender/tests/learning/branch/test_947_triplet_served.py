@@ -114,12 +114,18 @@ def test_947_a_driven_faults_detail_reaches_the_model_with_no_world_token(tmp_pa
         assert leak not in seen, f"{leak!r} reached the model on the fault channel"
 
 
-def test_947_a_driven_ordinary_fault_still_reaches_the_model_intact(tmp_path):
+@pytest.mark.parametrize("plain", [
+    "Elasticsearch query failed (HTTP 400): [logs-*] is not a valid index expression",
+    "archive 20260930t120000z-retention-check missing",
+])
+def test_947_a_driven_ordinary_fault_still_reaches_the_model_intact(tmp_path, plain):
     rec = VerbRecorder()
-    plain = "Elasticsearch query failed (HTTP 400): [logs-*] is not a valid index expression"
-    gather, _run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, plain))
+    gather, run_dir = _drive_one_query(tmp_path, _faulting_backend(rec, plain))
     seen = "\n".join(gather.seen)
     assert plain in seen, "an ordinary refusal told the model nothing at all"
+    failures = _own_failure_rows(run_dir)
+    assert failures
+    assert all(plain in row["payload_digest"] for row in failures)
 
 
 def test_947_the_queries_table_digest_carries_no_world_token(tmp_path):

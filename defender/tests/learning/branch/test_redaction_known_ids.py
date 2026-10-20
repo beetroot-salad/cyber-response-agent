@@ -8,7 +8,7 @@ run id reached the model untouched — and #1187 makes every id a random UUID, w
 rule can see. The fix hands the filter the identities themselves: the family's episode id and
 token, every world token, and every arm's run id (`_family.family_identities`), bound where the
 host knows them — the world's registry for the query tool, the loaded manifest for the
-comparator. A natural run knows none and keeps the shape rule alone.
+comparator. A natural run knows none and leaves the text unchanged.
 
 The wired channels are pinned beside their neighbours: the query tool's in
 `test_947_triplet_served.py` (a driven run), the comparator's prompt here.
@@ -137,12 +137,23 @@ def test_text_naming_no_known_identity_passes_unchanged(detail):
     assert _redact(detail, _known(PINNED_EPISODE)) == detail
 
 
-def test_a_natural_run_keeps_todays_behaviour():
-    """A natural run knows no branch identity: the pinned-source text passes unchanged (there is
-    nothing to hide in a run that has no siblings), and the stamp-shaped token rule still runs."""
+def test_a_natural_run_leaves_all_text_unchanged():
+    """An empty known set never masks a name, regardless of its spelling."""
     assert _redact(PROBE, frozenset()) == PROBE
     stamped = "run 20260728t161845z-fresh-case-n59.b refused"
-    assert _redact(stamped, frozenset()) == f"run {MARK} refused"
+    assert _redact(stamped, frozenset()) == stamped
+
+
+@pytest.mark.parametrize("identity", [
+    "20260930t120000z-retention-check",
+    "20260930T120000Z.archive",
+    "20260930t120000z_arm-record",
+])
+def test_timestamp_shaped_names_are_only_removed_when_explicitly_known(identity):
+    detail = f"archive {identity} missing"
+    assert _redact(detail, _known(UUID_EPISODE)) == detail
+    assert _redact(detail, frozenset()) == detail
+    assert _redact(detail, frozenset({identity})) == f"archive {MARK} missing"
 
 
 def test_an_empty_or_non_text_member_neither_raises_nor_shreds_the_detail():
