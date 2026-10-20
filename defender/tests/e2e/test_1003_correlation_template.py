@@ -1,6 +1,8 @@
 """#1003 e2e: a correlation template whose verb disagrees with the table's grant refuses the run at start, before anything is spent; runs that never dispatch the lead are not refused."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import re
 from defender.tests.support.runtime.state._1255_view import MODEL_DEFENDER, model_path
 
@@ -177,9 +179,9 @@ def test_the_config_is_read_from_the_tree_the_run_reads(tmp_path):
     )
     # #1106: the config is the RUN's tenant's, handed in — a tenant planted outside the tree
     # whose table grants the lead `elastic.alerts` and whose config names the planted id.
-    T1106.place_tenant(tmp_path / "tenants", "acme", configs=S1107.config_texts("acme"),
+    T1106.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"), configs=S1107.config_texts("acme"),
                        lead_zero=f"correlation_template: {planted_id}\n")
-    tenant = T1106.accept(tmp_path / "tenants", "acme")
+    tenant = T1106.accept(tmp_path / "tenants", fixture_uuid("tenant:acme"))
     config = lead_zero_config_path(tenant.settings)
     assert config.is_file(), "the planted tenant carries no config"
     assert not config.is_symlink(), "the config must be the tenant's own copy"

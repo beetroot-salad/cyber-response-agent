@@ -1,6 +1,8 @@
 """#1234 judge contrast: contrast rows and call records (ids, retries, write failures) for judged runs."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
@@ -31,10 +33,10 @@ IDP_LOOKUP = {"entity": "alice"}
 WITHHELD = (("edr", "lookup"), ("idp", "lookup"))
 #: The source run's pre-branch calls on the held lead (`S.source_calls(post=False)`).
 PRE_BRANCH = len(S.source_calls(post=False))
-LEDGER_GLOB = "*/served/*.{label}.jsonl"
-TABLE_GLOB = "*/runs/*-{label}/executed_queries.jsonl"
+LEDGER_GLOB = "served/{world_id}.jsonl"
+TABLE_GLOB = "runs/{arm}/executed_queries.jsonl"
 #: `Estate1234.break_write` patterns (filled per call by the adapter).
-BREAK_LEDGER = "{episode}/served/*.{label}.jsonl"
+BREAK_LEDGER = "{episode}/served/{world_id}.jsonl"
 
 
 def q(system: str, verb: str, params: Mapping[str, Any]) -> Any:
@@ -68,8 +70,20 @@ class _Between:
         return (self._make() if self._make is not None else self._turn).tool_calls
 
 
+def _arms(label: str) -> list[tuple[Path, str]]:
+    """`(episode folder, arm id)` for `label` in every episode under the tenant's episodes
+    folder that has a roster naming it (#1187: the arm is at the roster's id)."""
+    out = []
+    for ep in sorted(S.episodes_root().iterdir()) if S.episodes_root().is_dir() else []:
+        arm = S.T.read_roster(ep).get(S.T.world_id(ep, label))
+        if arm is not None:
+            out.append((ep, arm))
+    return out
+
+
+
 def _run_dir(label: str) -> Path:
-    return next(p for p in S.episodes_root().glob(f"*/runs/*-{label}") if p.is_dir())
+    return next(ep / "runs" / arm for ep, arm in _arms(label) if (ep / "runs" / arm).is_dir())
 
 
 def reducer_make(label: str = "b") -> Callable[[], Any]:
@@ -97,8 +111,9 @@ def plant_dir_at(glob: str, label: str = "b") -> Callable[[], None]:
     """The host action: the record at `glob` (this world's) becomes a directory, so the real
     writer's next open of it fails (mode bits cannot do it as root)."""
     def plant() -> None:
-        for path in S.episodes_root().glob(glob.format(label=label)):
-            S.plant_dir(path)
+        for ep, arm in _arms(label):
+            for path in ep.glob(glob.format(label=label, arm=arm, world_id=T.world_id(ep, label))):
+                S.plant_dir(path)
     return plant
 
 
@@ -378,8 +393,8 @@ def test_1234_am_repeat_pairing_when_one_attempt_left_no_ledger_row(tmp_path: Pa
     assert first in _field(b, "contrast.errored")
 
     reply = S.world_reply("lead-quality", ["idp"], investigator=[
-        S.inv("lead-quality", contrast=[S.table_ptr("b", reject_b), S.table_ptr("a", reject_a)]),
-        S.inv("lead-quality", contrast=[S.table_ptr("b", denied_b), S.table_ptr("a", denied_a)],
+        S.inv("lead-quality", contrast=[built.table("b", reject_b), built.table("a", reject_a)]),
+        S.inv("lead-quality", contrast=[built.table("b", denied_b), built.table("a", denied_a)],
               claim="the refusal was never worked around")])
     S.grade(built, S.judge({"b": reply}), draws=1)
     queued = {r.get("finding_id") for r in S.from_world(S.defender_queue(), "b")}
@@ -452,8 +467,8 @@ def test_1234_world_ledger_read_keeps_every_row_of_a_repeated_triple(tmp_path: P
 
     read = S.sym(S.JUDGE_FAMILY, "read_world_ledger")
     with S.mod("_io").bind(built.ep) as bound:
-        kept_b = read(bound, "b", episode_token=built.token)[0]
-        kept_c = read(bound, "c", episode_token=built.token)[0]
+        kept_b = read(bound, T.world_id(built.ep, "b"))[0]
+        kept_c = read(bound, T.world_id(built.ep, "c"))[0]
     assert [S.canonical(r["params"]) for r in kept_c] == \
         [S.canonical(r["params"]) for r in raw_c], "control: every row of c is kept, in order"
     assert [S.canonical(r["params"]) for r in kept_b] == \
@@ -586,7 +601,7 @@ def test_1234_failed_served_ledger_write_ends_the_run(tmp_path: Path, writer: st
         S.done_turn()]))
     assert estate_calls(built, ERIN), "control: the estate's call log never saw ERIN"
     assert estate_calls(built, CAROL) == [], "no further call is served after the failed write"
-    assert (built.ep / "worlds" / "b").is_dir(), "the world is archived"
+    assert (built.ep / "worlds" / T.world_id(built.ep, "b")).is_dir(), "the world is archived"
     S.grade(built, S.judge(), draws=1)
     reason = _cut_short_reason(S.row(built, "b"))
     assert S.word_re(S.COINED["cut.ledger"]).search(reason), (

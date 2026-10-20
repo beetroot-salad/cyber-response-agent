@@ -23,6 +23,7 @@ from defender.learning.leads.lead_extraction import LeadAuthorError
 from defender import box as box_mod
 from defender.runtime.agent_definition import bind
 from defender.box import BoxFault
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.sandbox import _box1195 as X
 from defender.tests.support.learning.core import _state1135
 from defender.tests.support.learning.curation._claim1175 import claim_git
@@ -1020,7 +1021,7 @@ def test_control_a_claims_agent_fault_dead_letters_that_claim_and_the_next_is_se
 
     def author(run_dir: Path) -> None:
         log.append(("agent",))
-        if run_dir.name == "run-0":
+        if run_dir.name == fixture_uuid("run-0"):
             raise LeadAuthorError("the agent failed")
         write(s.at(AGENT_NAME), VETTED)
 
@@ -1336,7 +1337,7 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
 
     def author(run_dir: Path) -> None:
         daemon.mark(f"agent:{run_dir.name}")
-        if run_dir.name != "run-0":
+        if run_dir.name != fixture_uuid("run-0"):
             write(s.at(AGENT_NAME), VETTED)
             return
         if stop != "holds":  # 1: the post-create stop; 2: this run's; its proof: the next ask
@@ -1354,8 +1355,8 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
         assert got is None, got
         assert _failed(s) == ["case-run-0.json"], _failed(s)
         if follows == "next-claim":
-            assert kept == ["create", "stop", "start", "agent:run-0", "stop", "start",
-                            "agent:run-1", "stop", "rm", "scan"], kept
+            assert kept == ["create", "stop", "start", f"agent:{fixture_uuid('run-0')}", "stop", "start",
+                            f"agent:{fixture_uuid('run-1')}", "stop", "rm", "scan"], kept
             assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
             assert any(e.startswith("finish_batch:") for e in events), events
         return
@@ -1366,7 +1367,7 @@ def test_a_stop_fault_under_a_failing_agent_halts_the_lead_drain_with_the_failur
         f"the box fault charged the claim more than its one serve: {_claim_attempts(s)}")
     assert _claim_files(s) == (["case-run-1.json"] if follows == "next-claim" else [],
                                ["case-run-0.json"]), _claim_files(s)
-    assert kept[:4] == ["create", "stop", "start", "agent:run-0"], kept
+    assert kept[:4] == ["create", "stop", "start", f"agent:{fixture_uuid('run-0')}"], kept
     assert "start" not in kept[4:], f"a later run was started beside the box: {kept}"
     assert kept[-2:] == ["rm", "scan"], kept
     assert lanes.pitfalls_ticks == 0
@@ -1389,7 +1390,7 @@ def test_a_claims_stop_fault_after_a_clean_agent_halts_the_production_drain(
 
     got, _lanes, events, watch = _production_lead_drain(s, daemon, author)
 
-    assert "agent:run-0" in daemon.steps(), "the agent was never reached"
+    assert f"agent:{fixture_uuid('run-0')}" in daemon.steps(), "the agent was never reached"
     assert daemon.names() == [], "a box outlived the batch"
     watch.assert_scanned_once_the_box_was_gone()
     if docker == "carried":
@@ -1426,7 +1427,7 @@ def test_a_claim_a_box_fault_halted_is_served_on_the_next_tick(tmp_path: Path, m
     got2, _lanes, events2, watch2 = _production_lead_drain(s, daemon, author)
 
     assert got2 is None, f"tick 2 did not serve the claim: {got2!r}"
-    assert served == ["run-0", "run-0"], f"tick 2 did not serve the claim again: {served}"
+    assert served == [fixture_uuid("run-0"), fixture_uuid("run-0")], f"tick 2 did not serve the claim again: {served}"
     assert _failed(s) == [], f"the claim was quarantined or dead-lettered: {_failed(s)}"
     assert _git.git_show_file(s.repo, "HEAD", s.rel(AGENT_NAME)) == VETTED
     assert any(e.startswith("finish_batch:") for e in events2), events2

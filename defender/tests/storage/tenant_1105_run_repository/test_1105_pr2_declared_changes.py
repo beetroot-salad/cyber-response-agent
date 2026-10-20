@@ -1,5 +1,6 @@
 """Migrated callers (launcher, run page, judge enqueue/drain, tracer, ...) address runs by tenant and id: refusals for links, absent containers, and bad rows."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 import copy
@@ -15,18 +16,24 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
 
+RID_R1 = fixture_uuid('pr2-dc8-r1')
+
+ONLY_IN_U = fixture_uuid('pr2-dc8-only-in-u')
+
+NOPE = fixture_uuid('pr2-dc8-nope')
+
+LINKED = fixture_uuid('pr2-dc8-linked')
+
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
 
 
-def _episodes() -> Path:
-    return Path(os.environ[P.EPISODES_BASE_ENV])
-
-
 def _episode_names() -> set[str]:
-    root = _episodes()
-    return {p.name for p in root.iterdir()} if root.is_dir() else set()
+    """Every entry under any tenant's `<data root>/<T>/episodes/` — #1187 Layout A, where every
+    launch claims its episode (O9: no configured episodes root)."""
+    root = P.data_root()
+    return {str(p.relative_to(root)) for p in root.glob("*/episodes/*")}
 
 
 def _launched(got: P.Launched) -> bool:
@@ -38,14 +45,9 @@ def _refused_unspent(got: P.Launched) -> bool:
     return (got.raised is not None or got.rc not in (0, None)) and got.questioner.calls == 0
 
 
-def _sample(tmp_path: Path, tenant_id: str | None) -> E.Episode:
-    """`_episode_1025`'s sample episode under the configured episodes base, its container
-    record naming `tenant_id` (`None`: the fixture as it is, with no record — an episode
-    launched before #1078)."""
-    ep = E.sample_episode(tmp_path, root=_episodes())
-    if tenant_id is not None:
-        P.plant_record(ep.dir / "runs", tenant_id)
-    return ep
+def _sample(tmp_path: Path, tenant_id: str) -> E.Episode:
+    """Create a tenant-scoped sample with a roster and arms at their recorded UUIDs."""
+    return E.sample_episode(tmp_path, root=P.episodes(tenant_id))
 
 
 def _corrupt_manifest(ep: Path) -> None:
@@ -54,6 +56,7 @@ def _corrupt_manifest(ep: Path) -> None:
 
 def test_dc1_a_source_under_a_linked_runs_folder_is_refused(tmp_path):
     est, src = P.launch_source(tmp_path)
+
     runs = src.parent
     moved = tmp_path / "runs-elsewhere"
     runs.rename(moved)
@@ -63,16 +66,6 @@ def test_dc1_a_source_under_a_linked_runs_folder_is_refused(tmp_path):
     refused = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
     assert _refused_unspent(refused), "a source under a linked runs folder launched"
     assert _episode_names() == before
-    # The cause is the link: the refusal names `<T>/runs` as one, and (its paths set aside, so
-    # a temp folder's name cannot speak for it) it is neither C2's nor G16's.
-    assert str(runs) in refused.message, (
-        f"the refusal does not name the runs folder: {refused.message!r}")
-    assert "is a link" in refused.message, (
-        f"the refusal does not call the runs folder a link: {refused.message!r}")
-    said = refused.message.replace(str(src), "<source>").replace(str(runs), "<runs>")
-    for other in ("snapshot", "store"):
-        assert other not in said, (
-            f"refused for the source's {other}, not the link: {refused.message!r}")
 
     os.unlink(runs)
     moved.rename(runs)
@@ -116,7 +109,7 @@ def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
     assert got.judge.prompts, (
         f"the judge was never asked — a world label equal to a natural run id under <T>/runs "
         f"refused the grade: {judge_failures}")
-    ep = _episodes() / P.EPISODE_ID
+    ep = _the_launched_episode()
     graded = J.world_rows(J.judge_record(ep))
     assert {"b", "c"} <= set(graded), f"the episode's worlds were not graded: {sorted(graded)}"
     assert natural.is_dir()
@@ -127,8 +120,8 @@ def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
         doc = yaml.safe_load(good)
         # A deep copy: a shared node would be dumped as a YAML alias, which the manifest
         # reader refuses before any label is judged.
-        seat = copy.deepcopy(next(w for w in doc["worlds"] if w.get("world_id") == "c"))
-        doc["worlds"].append({**seat, "world_id": bad})
+        seat = copy.deepcopy(next(w for w in doc["worlds"] if w.get("label") == "c"))
+        doc["worlds"].append({**seat, "label": bad, "world_id": fixture_uuid("world:invalid:" + bad)})
         manifest.write_text(yaml.safe_dump(doc), encoding="utf-8")
         with pytest.raises(J.refusals()) as refused:
             P.grade(ep, P.LAUNCH_TENANT)
@@ -138,54 +131,47 @@ def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
         assert not (ep / "judge.yaml").exists()
 
 
-def test_dc4_a_container_with_no_record_refuses_the_page(tmp_path, d9_tenant):
-    ep = _sample(tmp_path, None)
-    assert not (ep.dir / "runs" / "_tenant.json").exists()
-
-    refused = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
-    assert refused.rc not in (0, None) or refused.raised is not None, (
-        "an episode whose container holds no record was rendered")
-    assert not ep.page.exists()
-
-    P.plant_record(ep.dir / "runs", d9_tenant)
-    ok = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
-    assert ok.rc == 0, ok.said
-    assert ep.page.is_file(), ok.said
-
-
 def test_dc4_the_page_judges_the_container_record_first(tmp_path, d9_tenant):
-    ep = _sample(tmp_path, d9_tenant)
-    P.second_tenant(P.data_root(), "beta")
-    record = ep.dir / "runs" / "_tenant.json"
-    own = record.read_bytes()
-    record.unlink()
-    P.plant_record(ep.dir / "runs", "beta")
-    good_manifest = (ep.dir / "family.yaml").read_bytes()
+    P.second_tenant(P.data_root(), H.U_ID)
+    ep, episode_id = _tenant_episode(H.U_ID)
+    page = ep / E.PAGE_NAME
+    good_manifest = (ep / "family.yaml").read_bytes()
+    before = P.tree(ep)
 
-    foreign = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+    foreign = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
     assert foreign.rc not in (0, None) or foreign.raised is not None, (
         "another tenant's episode was rendered")
-    assert not ep.page.exists()
+    assert not page.exists()
+    assert P.tree(ep) == before, "T's request changed beta's episode"
 
-    _corrupt_manifest(ep.dir)
-    first = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+    _corrupt_manifest(ep)
+    first = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
     assert first.rc not in (0, None) or first.raised is not None
-    assert "_tenant.json" in first.said or "beta" in first.said, (
-        f"the manifest was judged before the container record: {first.said!r}")
+    assert "family.yaml" not in first.said, (
+        f"T's request read beta's manifest before refusing: {first.said!r}")
 
-    record.write_bytes(own)
-    manifest_first = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
-    assert manifest_first.rc not in (0, None) or manifest_first.raised is not None
-    assert "_tenant.json" not in manifest_first.said
-    (ep.dir / "family.yaml").write_bytes(good_manifest)
-    ok = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+    own_corrupt = P.drive_cli(P.page_main(), P.new_page_argv(H.U_ID, episode_id))
+    assert own_corrupt.rc not in (0, None) or own_corrupt.raised is not None
+    assert "family.yaml" in own_corrupt.said, (
+        f"control: beta's own request did not reach its manifest: {own_corrupt.said!r}")
+    (ep / "family.yaml").write_bytes(good_manifest)
+    ok = P.drive_cli(P.page_main(), P.new_page_argv(H.U_ID, episode_id))
     assert ok.rc == 0, ok.said
-    assert ep.page.is_file(), ok.said
+    assert page.is_file(), ok.said
 
 
 def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_tenant):
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
     ep = _sample(tmp_path, d9_tenant)
-    strays = ("stray_run_dir", f"{P.EPISODE_ID}-orphan")
+    roster = _roster_by_hand(ep.dir)
+    for label in E.WORLDS:
+        E.run_dir(ep.dir, label)
+        decoy = ep.dir / "runs" / f"{P.EPISODE_ID}-{label}"
+        (decoy / "gather_raw").mkdir(parents=True, exist_ok=True)
+        (decoy / "runtime.html").write_text("<!doctype html><title>decoy</title>",
+                                            encoding="utf-8")
+    strays = ("stray_run_dir", f"{P.EPISODE_ID}-orphan", S.new_id())
     for name in strays:
         (ep.dir / "runs" / name / "gather_raw").mkdir(parents=True)
 
@@ -194,8 +180,10 @@ def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_ten
     page = E.read_page(ep)
     for label in E.WORLDS:
         assert f"world-{label}" in page.by_id, f"the manifest arm {label} has no section"
-        assert f"runs/{P.EPISODE_ID}-{label}/runtime.html" in page.hrefs, (
-            f"the manifest arm {label} has no run-page link: {page.hrefs}")
+        assert f"runs/{roster[P.T.world_id(ep.dir, label)]}/runtime.html" in page.hrefs, (
+            f"the manifest arm {label} has no run-page link at its roster id: {page.hrefs}")
+        assert not any(f"runs/{P.EPISODE_ID}-{label}/" in href for href in page.hrefs), (
+            f"the manifest arm {label} is linked at its composed decoy: {page.hrefs}")
     shown = sorted(i for i in page.ids_with("world-")
                    if i not in {f"world-{label}" for label in E.WORLDS})
     assert shown == [], f"a stray runs/ entry was sectioned: {shown}"
@@ -208,15 +196,21 @@ def test_dc4_the_page_roster_is_the_manifests_arms_and_no_stray(tmp_path, d9_ten
 
 class _LinkingSibling(P.J.FakeSibling):
     """`FakeSibling` whose arm `b` is materialised OUTSIDE the container, with a link left at
-    its name: the one arm-entry shape a host (never a box: seccomp, B-03) can leave."""
+    its name: the one arm-entry shape a host (never a box: seccomp, B-03) can leave. #1187: the
+    arm's name is the id the episode's roster holds for `b`."""
 
-    def __init__(self, episode_dir: Path, *, outside: Path) -> None:
-        super().__init__(episode_dir)
+    def __init__(self, *, outside: Path) -> None:
+        super().__init__()
         self.outside = outside
 
     def __call__(self, argv, *, env=None, **kw):
         rc = super().__call__(argv, env=env, **kw)
-        arm = self.episode_dir / "runs" / f"{P.EPISODE_ID}-b"
+        if self.episode_dir is None:
+            return rc
+        arm_id = P.T.read_roster(self.episode_dir).get(P.T.world_id(self.episode_dir, "b"))
+        if arm_id is None:
+            return rc
+        arm = self.episode_dir / "runs" / arm_id
         if arm.is_dir() and not arm.is_symlink():
             target = self.outside / arm.name
             shutil.move(str(arm), str(target))
@@ -230,10 +224,13 @@ def test_dc5_an_arm_entry_that_is_a_link_is_never_archived(tmp_path, monkeypatch
     est, src = P.launch_source(tmp_path)
     outside = tmp_path / "outside-arms"
     outside.mkdir()
-    ep = _episodes() / P.EPISODE_ID
-    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src),
-                         spawn=_LinkingSibling(ep, outside=outside))
+    linking = _LinkingSibling(outside=outside)
+    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src), spawn=linking)
     assert got.questioner.calls > 0, f"the launch never ran: {got.message!r}"
+    ep = _the_launched_episode()
+    assert linking.faults == [], linking.faults
+    assert any(p.is_symlink() for p in (ep / "runs").iterdir()), (
+        "the double left no link at arm b's name: the scene this test is about was not built")
     archived = [p for p in (ep / "worlds").rglob("*") if p.is_file()] if (
         ep / "worlds").is_dir() else []
     leaked = [p for p in archived if b"OUTSIDE-THE-CONTAINER" in p.read_bytes()]
@@ -246,45 +243,53 @@ def test_dc5_an_arm_entry_that_is_a_link_is_never_archived(tmp_path, monkeypatch
     est2, src2 = P.launch_source(control_root)
     clean = P.drive_launch(est2, P.launch_argv(P.LAUNCH_TENANT, src2))
     assert _launched(clean), f"the control did not launch: {clean.message!r}"
-    assert (_episodes() / P.EPISODE_ID / "worlds" / "b" / "report.md").is_file()
+    assert (_the_launched_episode() / "worlds" / P.T.world_id(_the_launched_episode(), "b") / "report.md").is_file()
 
 
 def test_dc6_a_sibling_over_an_absent_container_is_refused(tmp_path):
-    src, ep = P.sibling_scene(tmp_path, container=None)
+    src, ep = P.sibling_scene(tmp_path, roster=False)
     assert not (ep / "runs").exists()
     rec = P.SiblingRecorder()
     rc, refused, _err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
-    assert refused is not None, "a sibling ran over an episode with no container"
+    assert refused is not None, "a sibling ran over an episode that never reached RUNS"
     assert rec.order == [], f"the sibling spent before refusing: {rec.order}"
     assert not (ep / "runs").exists(), "the refused sibling made the container"
 
-    P.plant_record(ep / "runs", P.SIBLING_TENANT)
+    roster = _start_runs_by_hand(ep)
     ok = P.SiblingRecorder()
     rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
     assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
     assert rc == 0, f"the control was refused: {P.refusal_text(refused)} {err}"
+    assert ok.run_dir == ep / "runs" / roster[P.T.world_id(ep, "b")], f"the arm is at {ok.run_dir}"
 
 
 def test_dc6_the_sibling_judges_the_container_before_the_manifest(tmp_path):
-    src, ep = P.sibling_scene(tmp_path, container="beta")
-    P.second_tenant(P.data_root(), "beta")
+    """Malformed UUID roster keys refuse before the poisoned manifest is read."""
+    from defender import _yaml
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    poison = "zz_dc6_never_read_before_the_roster"
+    src, ep = P.sibling_scene(tmp_path, roster=False)
     good = (ep / "family.yaml").read_bytes()
-    _corrupt_manifest(ep)
+    roster = _start_runs_by_hand(ep)
+    S.write_roster(ep, {**roster, "b": roster[P.T.world_id(ep, "b")]})
+    doc = _yaml.safe_load(good.decode("utf-8"))
+    (ep / "family.yaml").write_text(_yaml.safe_dump({**doc, poison: "read"}), encoding="utf-8")
 
     rec = P.SiblingRecorder()
     _rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
     said = f"{P.refusal_text(refused)}\n{err}"
     assert refused is not None
     assert rec.order == []
-    assert "_tenant.json" in said or "beta" in said, (
-        f"the manifest was read before the container record: {said!r}")
+    assert poison not in said, f"the manifest was read before the roster: {said!r}"
 
-    shutil.rmtree(ep / "runs")
-    P.plant_record(ep / "runs", P.SIBLING_TENANT)
+    S.write_roster(ep, roster)
     mrec = P.SiblingRecorder()
     _rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), mrec)
     assert refused is not None
-    assert "_tenant.json" not in f"{P.refusal_text(refused)}\n{err}"
+    assert poison in f"{P.refusal_text(refused)}\n{err}", (
+        "past the roster, the manifest's refusal should name the poisoned field")
+    assert mrec.order == []
 
     (ep / "family.yaml").write_bytes(good)
     ok = P.SiblingRecorder()
@@ -293,25 +298,11 @@ def test_dc6_the_sibling_judges_the_container_before_the_manifest(tmp_path):
     assert rc == 0, f"the control was refused: {P.refusal_text(refused)} {err}"
 
 
-def test_dc6_a_sibling_needs_the_episodes_base(tmp_path, monkeypatch):
-    src, ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
-    monkeypatch.delenv(P.EPISODES_BASE_ENV)
-    rec = P.SiblingRecorder()
-    _rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
-    assert refused is not None, "a sibling ran with no episodes base"
-    assert rec.order == [], "a sibling ran with no episodes base"
-    assert P.EPISODES_BASE_ENV in f"{P.refusal_text(refused)}\n{err}"
-
-    monkeypatch.setenv(P.EPISODES_BASE_ENV, str(ep.parent))
-    ok = P.SiblingRecorder()
-    rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
-    assert refused is None, f"the control was refused: {P.refusal_text(refused)} {err}"
-    assert rc == 0, f"the control was refused: {P.refusal_text(refused)} {err}"
-
-
 def test_dc7_the_run_page_refuses_a_linked_run_folder(tmp_path):
-    src, _ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
-    target = tmp_path / "elsewhere" / "20260101t000000z-linked"
+    src, _ep = P.sibling_scene(tmp_path)
+    # #1187 declared change 1: the link's name is a uuid, so the id rule admits it and the
+    # refusal is the link's (O8), never the id grammar's.
+    target = tmp_path / "elsewhere" / fixture_uuid("dc7-linked")
     shutil.copytree(src, target)
     link = src.parent / target.name
     os.symlink(target, link)
@@ -360,24 +351,24 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
 
 
 def _drain_scene(tmp_path: Path):
-    """Two real tenants under the data root, each with a natural runs folder holding `r1`, and
+    """Two real tenants under the data root, each with a natural runs folder holding `RID_R1`, and
     the drain's paths (a git work tree and a state root)."""
     root = P.data_root()
     t = H.tenant(root, H.T_ID)
     u = H.tenant(root, H.U_ID)
     for tenant in (t, u):
         H.runs_folder(tenant)
-        H.make_run(tenant.runs, "r1")
+        H.make_run(tenant.runs, RID_R1)
     return t, u, P.loop_paths(tmp_path)
 
 
 def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
     t, u, paths = _drain_scene(tmp_path)
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": "r1"})
-    P.queue_row(paths, "case-u", {"case_id": "case-u", "tenant_id": H.U_ID, "run_id": "r1"})
+    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
+    P.queue_row(paths, "case-u", {"case_id": "case-u", "tenant_id": H.U_ID, "run_id": RID_R1})
     lane = P.Lane()
     P.drain(paths, lane)
-    assert sorted(lane.run_dirs) == sorted([Path(t.runs) / "r1", Path(u.runs) / "r1"]), (
+    assert sorted(lane.run_dirs) == sorted([Path(t.runs) / RID_R1, Path(u.runs) / RID_R1]), (
         f"served {lane.run_dirs}")
     assert P.dead_letter(paths, "case-t") is None
     assert P.dead_letter(paths, "case-u") is None
@@ -385,22 +376,22 @@ def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
 
 def test_dc8_a_row_that_cannot_be_reached_is_artifact_missing(tmp_path):
     t, u, paths = _drain_scene(tmp_path)
-    H.make_run(u.runs, "only-in-u")
-    os.symlink(Path(t.runs) / "r1", Path(t.runs) / "linked")
+    H.make_run(u.runs, ONLY_IN_U)
+    os.symlink(Path(t.runs) / RID_R1, Path(t.runs) / LINKED)
     gone = {
-        "absent": {"case_id": "absent", "tenant_id": H.T_ID, "run_id": "nope"},
-        "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": "only-in-u"},
+        "absent": {"case_id": "absent", "tenant_id": H.T_ID, "run_id": NOPE},
+        "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": ONLY_IN_U},
     }
     not_now = {
-        "ghost": {"case_id": "ghost", "tenant_id": "ghost", "run_id": "r1"},
-        "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": "linked"},
+        "ghost": {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": RID_R1},
+        "linked": {"case_id": "linked", "tenant_id": H.T_ID, "run_id": LINKED},
     }
     for case_id, body in {**gone, **not_now}.items():
         P.queue_row(paths, case_id, body)
-    P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.U_ID, "run_id": "only-in-u"})
+    P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.U_ID, "run_id": ONLY_IN_U})
     lane = P.Lane()
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(u.runs) / "only-in-u"], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(u.runs) / ONLY_IN_U], f"served {lane.run_dirs}"
     for case_id in gone:
         letter = P.dead_letter(paths, case_id)
         assert letter is not None, f"{case_id}: {letter!r}"
@@ -413,7 +404,7 @@ def test_dc8_a_row_that_cannot_be_reached_is_artifact_missing(tmp_path):
 def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypatch):
     t, _u, paths = _drain_scene(tmp_path)
     root = os.environ[P.DATA_ROOT_ENV]
-    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": "r1"})
+    P.queue_row(paths, "case-t", {"case_id": "case-t", "tenant_id": H.T_ID, "run_id": RID_R1})
     monkeypatch.delenv(P.DATA_ROOT_ENV)
     lane = P.Lane()
     H.raised(P.drain, paths, lane)
@@ -423,7 +414,7 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(t.runs) / "r1"]
+    assert lane.run_dirs == [Path(t.runs) / RID_R1]
 
 
 def _lead_author_main():
@@ -446,13 +437,15 @@ def _lesson(lessons: Path, stem: str) -> None:
 
 
 def test_dc10_the_tracer_walks_the_tenants_runs_and_refuses_a_stray(tmp_path, d9_tenant):
+    import uuid
+
     from defender.cli.learning import trace_lesson
 
     lessons = tmp_path / "lessons"
     _lesson(lessons, "L")
     runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = runs / "20260605t000000z-case-a"
+    runs.mkdir(parents=True, exist_ok=True)
+    run = runs / str(uuid.uuid4())
     run.mkdir()
     from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(run)
@@ -480,3 +473,58 @@ def test_dc10_the_tracer_walks_the_tenants_runs_and_refuses_a_stray(tmp_path, d9
         assert "stray.txt" in got.said, got.said
     else:
         assert "stray.txt" in str(stray), repr(stray)
+
+
+def _the_launched_episode() -> Path:
+    """Return the single episode created under the launch tenant."""
+    made = P.launched_episodes()
+    assert len(made) == 1, f"expected the launch's one episode under <T>/episodes: {made}"
+    return made[0]
+
+
+def _tenant_episode(tenant_id: str) -> tuple[Path, str]:
+    """#1187's layout (decision 1, declared change 5): `<data root>/<tenant_id>/episodes/<uuid>/`
+    holding a manifest the family model loads (`_triplet_947.family_doc`, worlds a, b, c) that
+    names that uuid (R5), and the arm roster `arms.json` naming every manifest world — no
+    container record anywhere. Returns `(folder, episode id)`."""
+    from defender.tests.support.learning.branch import _triplet_947 as T
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    episode_id = S.new_id()
+    ep = S.make_episode(P.data_root(), tenant_id, episode_id, labels=T.WORLDS, roster=True)
+    T.write_family(ep, T.family_doc(episode_id=episode_id, source_run_id=S.new_id()))
+    return ep, episode_id
+
+
+def _roster_by_hand(ep: Path) -> dict[str, str]:
+    """Reuse a roster or migrate fixture arms and sidecars to freshly recorded UUIDs."""
+    from defender import _yaml
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    if (ep / P.T.ROSTER_NAME).is_file():
+        return S.read_roster(ep)
+    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
+    roster = {w["world_id"]: S.new_id() for w in doc["worlds"]}
+    runs = ep / "runs"
+    runs.mkdir(exist_ok=True)
+    for world in doc["worlds"]:
+        label, arm_id = world["label"], roster[world["world_id"]]
+        composed = runs / f"{P.EPISODE_ID}-{label}"
+        if composed.is_dir():
+            composed.rename(runs / arm_id)
+        for sidecar in runs.glob(f"{P.EPISODE_ID}-{label}.*"):
+            sidecar.rename(runs / f"{arm_id}{sidecar.name[len(composed.name):]}")
+    S.write_roster(ep, roster)
+    return roster
+
+
+def _start_runs_by_hand(ep: Path) -> dict[str, str]:
+    """Write a complete roster for the manifest worlds, matching the RUNS step."""
+    from defender import _yaml
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
+    roster = {w["world_id"]: S.new_id() for w in doc["worlds"]}
+    (ep / "runs").mkdir(exist_ok=True)
+    S.write_roster(ep, roster)
+    return roster

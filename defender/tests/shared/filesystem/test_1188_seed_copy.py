@@ -9,13 +9,15 @@ from defender.runtime.run_state import RunState
 from defender.tests.support.runtime.state._fork_snapshot_plant import recorded_snapshot
 from defender.runtime.branch._spec import BranchError
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 MiB = 1024 * 1024
 
 
 def _copy_records(tmp_path):
-    source = fixture_run(tmp_path / "source").tables.payloads("l-001", 0)
-    target = fixture_run(tmp_path / "target").tables.payloads("l-001", 0)
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    source = fixture_run(tmp_path / fixture_uuid("source")).tables.payloads("l-001", 0)
+    target = fixture_run(tmp_path / fixture_uuid("target")).tables.payloads("l-001", 0)
     source.path.parent.mkdir(parents=True)
     return source, target
 

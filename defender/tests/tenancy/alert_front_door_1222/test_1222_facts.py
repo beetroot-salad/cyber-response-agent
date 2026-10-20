@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+_REFERENCE_RUN_ID = fixture_uuid('s01-unmapped')
 
 # Inputs
 
@@ -78,7 +81,8 @@ def _drive(tmp_path: Path, planted: S.Planted, alert: Mapping[str, Any] | bytes,
     return d
 
 
-def _reference(tmp_path: Path, planted: S.Planted, run_id: str = "s01-unmapped") -> S.Drive:
+def _reference(tmp_path: Path, planted: S.Planted,
+               run_id: str = _REFERENCE_RUN_ID) -> S.Drive:
     """The "no signature" reference: a mapping that names none, an alert with no `rule.id`."""
     return _drive(tmp_path, planted, _alert(ABSENT), run_id, mapping=UNMAPPED)
 
@@ -195,11 +199,11 @@ def _fail(problems: Sequence[str]) -> str:
 def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
     mapping = {"signature": "detection.key", "event_time": "detection.seen",
                "summary": "detection.title"}
-    planted = S.plant_tenant("acme", alert_mapping=mapping)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=mapping)
     detection = {"key": "DK-7731", "seen": "2026-09-30T08:20:00Z", "title": "Odd beacon cadence"}
-    mapped = _drive(tmp_path, planted, _alert(detection=detection), "s01-mapped")
-    absent = _drive(tmp_path, planted, _alert(), "s01-absent")
-    partial = _drive(tmp_path, planted, _alert(detection=detection), "s01-partial",
+    mapped = _drive(tmp_path, planted, _alert(detection=detection), fixture_uuid("s01-mapped"))
+    absent = _drive(tmp_path, planted, _alert(), fixture_uuid("s01-absent"))
+    partial = _drive(tmp_path, planted, _alert(detection=detection), fixture_uuid("s01-partial"),
                      mapping={"summary": "detection.title"})
 
     problems = _carries(mapped, "DK-7731", "mapped")
@@ -228,7 +232,7 @@ def test_alert_facts_resolve_each_mapped_path_or_absent(tmp_path: Path) -> None:
 
 
 def test_alert_facts_value_domain(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
 
     # Real signatures, mapped through vendor.code beside a decoy rule.id.
@@ -252,9 +256,9 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
         ("over bound", json.dumps(OVER_BOUND), (OVER_BOUND,)),
     ]
     reals = [(name, _drive(tmp_path, planted, _literal(_alert(vendor=_HOLE), lit),
-                           f"s01-real-{i}", mapping=VENDOR), want)
+                           fixture_uuid(f"s01-real-{i}"), mapping=VENDOR), want)
              for i, (name, lit, want) in enumerate(real)]
-    bads = [(name, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit), f"s01-bad-{i}",
+    bads = [(name, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit), fixture_uuid(f"s01-bad-{i}"),
                           mapping=SHIPPED), leaked)
             for i, (name, lit, leaked) in enumerate(bad)]
     # RD-05: rule.name over the committed fixture alerts; each against its own fixture's reference.
@@ -263,8 +267,8 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
     for i, slug in enumerate(S.FIXTURE_SLUGS):
         fixture = S.fixture_alert(slug)
         bare = {**fixture, "rule": {k: v for k, v in fixture["rule"].items() if k != "id"}}
-        named = _drive(tmp_path, planted, fixture, f"s01-name-{i}", mapping=by_name)
-        name_ref = _drive(tmp_path, planted, bare, f"s01-name-ref-{i}", mapping=UNMAPPED)
+        named = _drive(tmp_path, planted, fixture, fixture_uuid(f"s01-name-{i}"), mapping=by_name)
+        name_ref = _drive(tmp_path, planted, bare, fixture_uuid(f"s01-name-ref-{i}"), mapping=UNMAPPED)
         names.append((slug, named, name_ref, fixture["rule"]["name"], fixture["rule"]["id"]))
 
     problems: list[str] = []
@@ -291,7 +295,7 @@ def test_alert_facts_value_domain(tmp_path: Path) -> None:
 def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
     mapping = {"signature": "vendor.rule.key", "event_time": "detected_at",
                "summary": "rule.description"}
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     shapes: list[tuple[str, Mapping[str, Any], Any]] = [
         ("list on the path", mapping, [{"rule": {"key": "LK-7731"}}]),
@@ -304,7 +308,7 @@ def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
         ("list at the end", {**mapping, "signature": "vendor"}, ["LK-7731"]),
         ("object at the end", {**mapping, "signature": "vendor"}, {"rule": {"key": "LK-7731"}}),
     ]
-    runs = [(name, _drive(tmp_path, planted, {**_alert(), "vendor": value}, f"s01-list-{i}",
+    runs = [(name, _drive(tmp_path, planted, {**_alert(), "vendor": value}, fixture_uuid(f"s01-list-{i}"),
                           mapping=m))
             for i, (name, m, value) in enumerate(shapes)]
 
@@ -320,16 +324,16 @@ def test_p044_mapping_path_crosses_a_list(tmp_path: Path) -> None:
 
 
 def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
-    valid = _drive(tmp_path, planted, _alert(VALID), "s01-dash-control", mapping=SHIPPED)
+    valid = _drive(tmp_path, planted, _alert(VALID), fixture_uuid("s01-dash-control"), mapping=SHIPPED)
     cases = [("double dash", json.dumps("--Zq7731-high"), "--Zq7731-high"),
              ("option-shaped", json.dumps("--runs-base=/elsewhere"), "--runs-base=/elsewhere"),
              ("single dash", json.dumps("-Zq7731h"), "-Zq7731h"),
              ("negative rule number", "-7731", "-7731"),
              ("negative number as text", json.dumps("-7731"), "-7731")]
     runs = [(name, value, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit),
-                                 f"s01-dash-{i}", mapping=SHIPPED))
+                                 fixture_uuid(f"s01-dash-{i}"), mapping=SHIPPED))
             for i, (name, lit, value) in enumerate(cases)]
 
     # Positive control: a valid rule.id IS handed to the lookups as one argument.
@@ -347,19 +351,19 @@ def test_p047_signature_value_begins_with_a_dash(tmp_path: Path) -> None:
 
 
 def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     controls = [("NUL", "Zq7731\u0000nul"), ("escape", "Zq7731\u001b[31mred"),
                 ("DEL", "Zq7731\u007fdel"), ("tab", "Zq7731\ttab"), ("bell", "Zq7731\u0007")]
-    runs = [(name, value, _drive(tmp_path, planted, _alert(value), f"s01-ctl-{i}",
+    runs = [(name, value, _drive(tmp_path, planted, _alert(value), fixture_uuid(f"s01-ctl-{i}"),
                                  mapping=SHIPPED))
             for i, (name, value) in enumerate(controls)]
     nul_data = _drive(tmp_path, planted, S.generic_alert(
         rule={"id": VALID, "description": "first part\u0000second part"},
-        detected_at="2026-09-30T08:15:00Z\u0000"), "s01-nul-data", mapping=SHIPPED)
+        detected_at="2026-09-30T08:15:00Z\u0000"), fixture_uuid("s01-nul-data"), mapping=SHIPPED)
     before = sorted(p.name for p in planted.runs.iterdir())
     surrogate = S.run_alert(
-        tmp_path, tenant=planted, run_id="s01-surrogate",
+        tmp_path, tenant=planted, run_id=fixture_uuid("s01-surrogate"),
         alert=_literal(_alert(_HOLE), '"Zq7731\\ud800tail"'), orient_shim=S.RecordingShim())
 
     problems: list[str] = []
@@ -385,7 +389,7 @@ def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
 
 
 def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     digits_128 = "9" * 128
     real = [("integer", "5710", "5710"), ("negative zero", "-0", "0"),
@@ -396,9 +400,9 @@ def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> N
            ("long fraction", "12345678901234567890.5",
             ("12345678901234567890.5", "1.2345678901234567e+19"))]
     reals = [(name, _drive(tmp_path, planted, _literal(_alert(vendor=_HOLE), lit),
-                           f"s01-num-{i}", mapping=VENDOR), want)
+                           fixture_uuid(f"s01-num-{i}"), mapping=VENDOR), want)
              for i, (name, lit, want) in enumerate(real)]
-    bads = [(name, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit), f"s01-nan-{i}",
+    bads = [(name, _drive(tmp_path, planted, _literal(_alert(_HOLE), lit), fixture_uuid(f"s01-nan-{i}"),
                           mapping=SHIPPED), leaked)
             for i, (name, lit, leaked) in enumerate(bad)]
 
@@ -420,7 +424,7 @@ def test_p050_signature_is_a_float_exponent_or_huge_integer(tmp_path: Path) -> N
 
 
 def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=VENDOR)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=VENDOR)
     inner = S.alert_bytes(_alert(vendor="@@")).replace(
         b'"code": "@@"', b'"code": "FIRST-7731",\n  "code": "LAST-7731"')
     outer_doc = _alert(vendor="OUTER-1")
@@ -429,8 +433,8 @@ def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
     outer = outer[:-1].rstrip() + b',\n "vendor": {"code": "OUTER-2"}\n}'
     assert inner.count(b'"code"') == 2
     assert outer.count(b'"vendor"') == 2
-    dup_inner = _drive(tmp_path, planted, inner, "s01-dup-inner", main=S.closing_main_turns())
-    dup_outer = _drive(tmp_path, planted, outer, "s01-dup-outer")
+    dup_inner = _drive(tmp_path, planted, inner, fixture_uuid("s01-dup-inner"), main=S.closing_main_turns())
+    dup_outer = _drive(tmp_path, planted, outer, fixture_uuid("s01-dup-outer"))
 
     problems = _carries(dup_inner, "LAST-7731", "repeated member")
     problems += _not_handed(dup_inner, ["FIRST-7731"], "repeated member")
@@ -439,9 +443,9 @@ def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
     load_corpus = S.sym("skills.invlang.corpus", "load_corpus")
     companions, _report = load_corpus(planted.runs)
     seen = {c.case_id: c.signature_id for c in companions}
-    if seen.get("s01-dup-inner") != "LAST-7731":
+    if seen.get(fixture_uuid("s01-dup-inner")) != "LAST-7731":
         problems.append(f"[repeated member] the invlang corpus reads the run's signature as "
-                        f"{seen.get('s01-dup-inner')!r}; corpus: {seen!r}")
+                        f"{seen.get(fixture_uuid('s01-dup-inner'))!r}; corpus: {seen!r}")
     assert not problems, _fail(problems)
 
     assert dup_inner.recorded("signature") == "LAST-7731"
@@ -449,16 +453,16 @@ def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
 
 
 def test_p083_event_time_mapped_to_a_number_zero_or_object(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=S.DEFAULT_MAPPING)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=S.DEFAULT_MAPPING)
     fixtures = [(slug, S.fixture_alert(slug)["alert_timestamp"],
-                 _drive(tmp_path, planted, S.fixture_alert_bytes(slug), f"s01-evt-fx-{i}"))
+                 _drive(tmp_path, planted, S.fixture_alert_bytes(slug), fixture_uuid(f"s01-evt-fx-{i}")))
                 for i, slug in enumerate(S.FIXTURE_SLUGS)]
     shapes = [("integer", "1727683200", "1727683200"), ("zero", "0", "0"),
               ("text", '"now"', "now"), ("object", '{"t": 1727683200}', None),
               ("list", '["2026-09-30T08:15:00Z"]', None), ("float", "1727683200.5", None)]
     generic = [(name, want, _drive(tmp_path, planted,
                                    _literal(_alert("R-EVT-1", detected_at=_HOLE), lit),
-                                   f"s01-evt-{i}", mapping=SHIPPED))
+                                   fixture_uuid(f"s01-evt-{i}"), mapping=SHIPPED))
                for i, (name, lit, want) in enumerate(shapes)]
 
     problems: list[str] = []
@@ -491,10 +495,10 @@ def test_p179_signature_at_and_one_past_the_length_bound(tmp_path: Path) -> None
     like unmapped."""
     assert len(AT_BOUND) == S.SIGNATURE_MAX
     assert len(OVER_BOUND) == S.SIGNATURE_MAX + 1
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
-    at = _drive(tmp_path, planted, _alert(vendor=AT_BOUND), "s01-at-bound", mapping=VENDOR)
-    over = _drive(tmp_path, planted, _alert(OVER_BOUND), "s01-over-bound", mapping=SHIPPED)
+    at = _drive(tmp_path, planted, _alert(vendor=AT_BOUND), fixture_uuid("s01-at-bound"), mapping=VENDOR)
+    over = _drive(tmp_path, planted, _alert(OVER_BOUND), fixture_uuid("s01-over-bound"), mapping=SHIPPED)
 
     problems = _carries(at, AT_BOUND, "at the bound")
     problems += _unlike_unmapped(over, ref, "one past the bound")
@@ -506,7 +510,7 @@ def test_p179_signature_at_and_one_past_the_length_bound(tmp_path: Path) -> None
 
 
 def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> None:
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
     values = [("no-break space", "Zq7731\u00a0nb"), ("ideographic space", "Zq7731\u3000id"),
               ("em space", "Zq7731\u2003em"), ("zero-width space", "Zq7731\u200bzw"),
@@ -515,7 +519,7 @@ def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> 
               ("paragraph separator", "Zq7731\u2029ps"), ("next line", "Zq7731\u0085nl"),
               ("curly quotes", "\u201cZq7731\u201d"), ("guillemets", "\u00abZq7731\u00bb"),
               ("fullwidth quote", "Zq7731\uff02fw"), ("accented letter", "Zq7731\u00e9")]
-    runs = [(name, value, _drive(tmp_path, planted, _alert(value), f"s01-uni-{i}",
+    runs = [(name, value, _drive(tmp_path, planted, _alert(value), fixture_uuid(f"s01-uni-{i}"),
                                  mapping=SHIPPED))
             for i, (name, value) in enumerate(values)]
 
@@ -533,13 +537,13 @@ def test_p180_unicode_whitespace_format_and_quote_characters(tmp_path: Path) -> 
 def test_p181_negative_zero_padded_and_string_versus_integer_i(tmp_path: Path) -> None:
     """A negative integer is no signature; the string '05710' is the signature '05710'; the string
     '5710' and the integer 5710 both give '5710', one key."""
-    planted = S.plant_tenant("acme", alert_mapping=SHIPPED)
+    planted = S.plant_tenant(fixture_uuid("tenant:acme"), alert_mapping=SHIPPED)
     ref = _reference(tmp_path, planted)
-    negative = _drive(tmp_path, planted, _literal(_alert(_HOLE), "-5710"), "s01-neg",
+    negative = _drive(tmp_path, planted, _literal(_alert(_HOLE), "-5710"), fixture_uuid("s01-neg"),
                       mapping=SHIPPED)
-    padded = _drive(tmp_path, planted, _alert(vendor="05710"), "s01-padded", mapping=VENDOR)
-    as_text = _drive(tmp_path, planted, _alert(vendor="5710"), "s01-text")
-    as_int = _drive(tmp_path, planted, _literal(_alert(vendor=_HOLE), "5710"), "s01-int")
+    padded = _drive(tmp_path, planted, _alert(vendor="05710"), fixture_uuid("s01-padded"), mapping=VENDOR)
+    as_text = _drive(tmp_path, planted, _alert(vendor="5710"), fixture_uuid("s01-text"))
+    as_int = _drive(tmp_path, planted, _literal(_alert(vendor=_HOLE), "5710"), fixture_uuid("s01-int"))
 
     problems = _unlike_unmapped(negative, ref, "negative integer")
     problems += _not_handed(negative, ["-5710", "5710"], "negative integer")

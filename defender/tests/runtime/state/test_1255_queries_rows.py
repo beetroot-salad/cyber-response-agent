@@ -90,7 +90,7 @@ def _positive_control_host_names_the_arm(ep: Path, label: str) -> list[str]:
     """Verify the host ledger retains identities and the identity detector finds them."""
     identities = W.arm_identities(ep)
     ledger = S24.ledger_rows(ep, label)
-    token = S24.world_token(label)
+    token = S24.T.world_id(ep, label)
     assert all(r.get("world_id") == token for r in ledger), "positive control: the host names it"
     assert all(str(r.get(W.CALL_ID, "")).startswith(f"{token}/") for r in ledger), (
         "positive control: the host keeps each call's id")

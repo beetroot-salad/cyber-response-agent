@@ -52,6 +52,8 @@ Project idioms this file obeys, because CI ratchets them: fakes enter through
 """
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import dataclasses
 import json
 import os
@@ -234,7 +236,7 @@ def finding_row(fid: str, *, run_id: str, direction: str = "family", **extra) ->
         "finding": "narrative",
         "citations": [{"source": "investigation", "quote": "..."}],
         "source_run_dir": f"episodes/{run_id}",
-        "contrast_evidence": ["worlds/b/report.md", "worlds/a/report.md"],
+        "contrast_evidence": [f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
         "on_verdict_path": True,
         "world_label_doubted": False,
         **extra,

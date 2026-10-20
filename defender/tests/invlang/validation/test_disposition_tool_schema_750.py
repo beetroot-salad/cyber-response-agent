@@ -1,5 +1,6 @@
 """Disposition vocabulary reaches the model as a schema enum, and the host still gates: sync entry and tool lane refuse near-misses and escape invisible characters."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from dataclasses import replace as _with_fixture_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
@@ -36,13 +37,14 @@ NEAR_MISSES = ("Benign", "benign ", LACED, "totally-benign", "")
 
 def _deps(tmp_path: Path):
     """MAIN's deps through the REAL `bind` seam — the real compiled policy, the real gate."""
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     (run_dir / "alert.json").write_bytes((GOLDEN / "alert.json").read_bytes())
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)
     return _with_fixture_run_1165(bind(MAIN_DEF, run_dir, defender_dir=dfn), run=_fixture_run_1165(run_dir)), run_dir
+
 
 
 def _stages():

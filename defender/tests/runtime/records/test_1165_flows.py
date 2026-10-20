@@ -15,6 +15,7 @@ from defender.runtime import run_end
 from defender.runtime.run_state import RunState
 from defender.runtime import record_query as rq
 from defender.tests.support.runtime.records._1165_flows import RecordIO, drive_run, run_handle
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.e2e._replay_harness import GOLDEN_AB3, FakeVerbs, ReplayFn, Turn, materialize
 
 
@@ -32,7 +33,7 @@ def append(state, run, *, params=None, payload='{"hits": [1]}'):
 def test_query_writer_uses_run_and_keeps_state_before_failed_view_append(tmp_path):
     """O6: payload precedes state, state precedes append, and a failed view spends seq."""
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     state = RunState(run.run_dir, str(run.id))
     observed = []
 
@@ -59,7 +60,7 @@ def test_query_writer_uses_run_and_keeps_state_before_failed_view_append(tmp_pat
 def test_query_params_validate_before_any_run_operation_and_payload_fault_is_best_effort(tmp_path):
     """O4/O6: params failure writes nothing; payload refusal leaves a null reference."""
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     state = RunState(run.run_dir, str(run.id))
     deep = {}
     cursor = deep
@@ -81,7 +82,7 @@ def test_query_params_validate_before_any_run_operation_and_payload_fault_is_bes
 def test_parallel_query_writers_keep_the_existing_state_lock_and_order(tmp_path):
     """O6: one state lock orders seq, payload, state row, and file append together."""
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     state = RunState(run.run_dir, str(run.id))
     with ThreadPoolExecutor(max_workers=4) as pool:
         rows = list(pool.map(lambda n: append(state, run, params={"n": n}), range(12)))
@@ -207,7 +208,7 @@ def test_live_query_reads_ignore_model_file_edits_and_payload_cap_is_preserved(t
     from defender._io import READ_LIMIT
 
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     state = RunState(run.run_dir, str(run.id))
     first = append(state, run)
     planted = dict(first, seq=99, params={"q": "planted"})
@@ -231,7 +232,7 @@ def test_lead_claim_uses_the_run_and_preserves_exclusive_statuses_and_exact_byte
     from defender.hooks.record_lead import ALREADY_CLAIMED, CLAIMED, NOT_CLAIMED, claim_lead
 
     io = RecordIO()
-    run = run_handle(tmp_path / "run", io)
+    run = run_handle(tmp_path / fixture_uuid("run"), io)
     dispatch = {"run_dir": str(run.run_dir), "lead_id": LEAD,
                 "goal": "  check the source  ", "what_to_summarize": ["auth events"],
                 "provenance": "harness"}

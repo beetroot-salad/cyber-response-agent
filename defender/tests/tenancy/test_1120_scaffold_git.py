@@ -1,6 +1,8 @@
 """tenant.py scaffold commits exactly what the product repo's HEAD commits and asks git for the identity the new repo will see."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import os
 from pathlib import Path
 
@@ -34,7 +36,7 @@ def test_scaffold_copies_what_head_commits_not_what_sits_on_disk(tmp_path: Path)
     edited = template / "settings" / "lead-zero.yaml"
     committed_bytes = edited.read_bytes()
     edited.write_bytes(committed_bytes + b"# a local edit\n")
-    target = S._empty_dir(tmp_path / "acme")
+    target = S._empty_dir(tmp_path / fixture_uuid("tenant:acme"))
     script = checkout / H.script_of(tenant_py).relative_to(H.REPO_ROOT)
     H.assert_clean(S._scaffold(H.TID, target, home=S._home(tmp_path / "cfg"), script=script))
     assert _committed(target) == _template_in_head(checkout) | {H.TENANT_ID_FILE.as_posix()}
@@ -47,7 +49,7 @@ def test_scaffold_commits_template_files_the_operators_ignore_rules_match(
     every template file (each `config.env`, every table), and `git status` is clean."""
     home = S._home(tmp_path / "cfg", extra="[core]\n\texcludesFile = ~/ignore\n")
     (home / "ignore").write_text("*.env\n*.yaml\n", encoding="utf-8")
-    target = S._empty_dir(tmp_path / "acme")
+    target = S._empty_dir(tmp_path / fixture_uuid("tenant:acme"))
     H.assert_clean(S._scaffold(H.TID, target, home=home))
     committed = _committed(target)
     assert _template_in_head(H.REPO_ROOT) <= committed, (
@@ -64,7 +66,7 @@ def test_scaffold_identity_from_an_includeif_gitdir_rule_counts(tmp_path: Path) 
                         encoding="utf-8")
     home = S._home(tmp_path / "cfg", identity=False,
                    extra=f'[includeIf "gitdir:{work}/"]\n\tpath = {included}\n')
-    target = S._empty_dir(work / "acme")
+    target = S._empty_dir(work / fixture_uuid("tenant:acme"))
     H.assert_clean(S._scaffold(H.TID, target, home=home, identity_env=False,
                                GIT_CONFIG_NOSYSTEM="1"))
     author = H.git(target, "log", "-1", "--format=%ae").stdout.strip()
@@ -77,7 +79,7 @@ def test_scaffold_does_not_borrow_an_enclosing_repos_identity(tmp_path: Path) ->
     H.git(enclosing, "init", "-q", "-b", "main")
     H.git(enclosing, "config", "user.name", "Enclosing")
     H.git(enclosing, "config", "user.email", "enclosing@example.invalid")
-    target = S._empty_dir(enclosing / "acme")
+    target = S._empty_dir(enclosing / fixture_uuid("tenant:acme"))
     proc = S._scaffold(H.TID, target, home=S._home(tmp_path / "cfg", identity=False),
                        identity_env=False, GIT_CONFIG_NOSYSTEM="1")
     text = S._refused(proc, "git")
@@ -104,7 +106,7 @@ def test_scaffold_into_a_relative_target_asks_the_identity_of_that_target(
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root removes a read-only folder's entries")
 def test_a_failed_undo_is_reported_not_raised(tmp_path: Path) -> None:
-    target = S._empty_dir(tmp_path / "acme")
+    target = S._empty_dir(tmp_path / fixture_uuid("tenant:acme"))
     hooks = S._empty_dir(tmp_path / "hooks")
     (hooks / "pre-commit").write_text(
         "#!/bin/sh\nmkdir -p stuck && touch stuck/f && chmod 555 stuck\nexit 1\n",

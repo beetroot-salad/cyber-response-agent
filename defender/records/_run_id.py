@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import datetime as _dt
 import re
-from collections.abc import Callable
+import uuid
 
 from defender._shown import quoted
 from defender.records._store_errors import InvalidCaseId
@@ -11,6 +10,10 @@ RUN_ID_ALLOWED = "ASCII alphanumerics, '_', '.', '-', starting alphanumeric"
 
 
 def is_valid_run_id(run_id: str) -> bool:
+    """Legacy safe-component predicate for box, world and display labels.
+
+    Actual run admission uses `run_id_fault` / `RunId.parse`, which require UUIDs.
+    """
     return (
         bool(run_id)
         and run_id.isascii()
@@ -39,53 +42,39 @@ def is_case_stable_id(run_id: str) -> bool:
     return run_id == run_id.casefold()
 
 
-def refuse_bad_run_id(run_id: str) -> None:
-    """The run-id admission rule: valid and case-stable. Asked wherever a run id becomes a
-    directory among siblings, by both the host and the handle's constructors.
-    """
-    if not is_valid_run_id(run_id):
-        raise ValueError(f"{run_id!r} is not a valid run id (allowed: {RUN_ID_ALLOWED})")
-    if not is_case_stable_id(run_id):
-        raise ValueError(_not_case_stable(run_id))
+#: The one shape a tenant, run, arm or episode id has (#1187 O1/O2): canonical lowercase UUID text,
+#: `8-4-4-4-12` hex digits. Nothing else is an id — no braces, no `urn:`, no upper case, no
+#: missing hyphens — so every id names exactly one folder and carries no meaning.
+_UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+UUID_REQUIRED = "canonical lowercase UUID text, e.g. af3ba774-355d-4dbc-b8b6-3becc9d3e7a1"
 
 
-#: The longest run id, in bytes: NAME_MAX (255) minus the longest name a side-file write puts
-#: beside the run folder — the longest sidecar suffix (`.accounting_failures.json`, 25 bytes)  # lint-stale-ref: ok — the reserved suffix (`_layout.ACCOUNTING_FAILURES_SUFFIX`) the bound derives from, not the removed `RunPaths.accounting_failures()`
-#: plus the staged name `write_guarded`'s `replace` mode creates first (`.staged-` and 16 hex
-#: digits, 24 bytes), so 255 - 49 = 206 (#1105 R4-35..R4-37). A filesystem with a smaller
-#: NAME_MAX is not covered: the id has no path to ask.
-RUN_ID_MAX_BYTES = 206
+def uuid_id_fault(text: object, domain: str) -> str | None:
+    """The shared canonical UUID rule for tenant, run and episode admission."""
+    if not isinstance(text, str) or not _UUID_TEXT.fullmatch(text):
+        return f"{quoted(text)} is not a valid {domain} id (allowed: {UUID_REQUIRED})"
+    return None
 
 
 def run_id_fault(text: str) -> str | None:
-    """Why `text` cannot be a run id, or `None`: the grammar, case stability and
-    `RUN_ID_MAX_BYTES` — the whole rule `RunId` admits by, as one sentence that quotes the
-    text the bounded way. Asked of every id the host composes (`<episode>-<label>`) as well,
-    so a composed id is refused where it is composed, not by the child that is handed it."""
-    if not is_valid_run_id(text):
-        return f"{quoted(text)} is not a valid run id (allowed: {RUN_ID_ALLOWED})"
-    if not is_case_stable_id(text):
-        return (f"{quoted(text)} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
-                f"{quoted(text.casefold())}")
-    size = len(text.encode("utf-8"))
-    if size > RUN_ID_MAX_BYTES:
-        return (f"{quoted(text)} is not a valid run id: {size} bytes, over the "
-                f"{RUN_ID_MAX_BYTES}-byte bound")
-    return None
+    """Why `text` cannot be a run id, or `None`: an id is canonical lowercase UUID text and
+    nothing else (#1187 O2), the whole rule `RunId` admits by, as one sentence that quotes the
+    text the bounded way. A UUID is 36 bytes, so no length bound is asked separately."""
+    return uuid_id_fault(text, "run")
 
 
 def episode_id_fault(episode_id: str) -> str | None:
-    """Why `episode_id` cannot name an episode, or `None`: it must be a run id (`run_id_fault`)
-    with room left for a sibling — every sibling's run id is `<episode_id>-<label>`, so an
-    episode id that leaves no room for `-` and one label character names no sibling at all.
-    The one statement of the rule: the family model, the branch launcher and the runs
-    repository's episode record all ask it."""
-    if (why := run_id_fault(episode_id)) is not None:
-        return why
-    if len(episode_id.encode("utf-8")) + 2 > RUN_ID_MAX_BYTES:
-        return (f"{quoted(episode_id)} leaves no room for a sibling's run id "
-                f"(<episode id>-<label>, at most {RUN_ID_MAX_BYTES} bytes)")
-    return None
+    """Why `episode_id` cannot name an episode, or `None`: the same UUID rule as a run id
+    (#1187 O2). The one statement of the rule: the family model, the episode owner and the
+    stored `RunAddress` all ask it."""
+    return uuid_id_fault(episode_id, "episode")
+
+
+def mint_uuid() -> str:
+    """A fresh id: a random uuid4 as canonical lowercase text. It carries no label, time or
+    parent (#1187 O1); what a run is about lives in its host-written records."""
+    return str(uuid.uuid4())
 
 
 def refuse_bad_case_id(case_id: object) -> None:
@@ -100,16 +89,3 @@ def refuse_bad_case_id(case_id: object) -> None:
 def _not_case_stable(some_id: str) -> str:
     return (f"{some_id!r} is not case-stable ({CASE_STABLE_REQUIRED}) — use "
             f"{some_id.casefold()!r}")
-
-
-def _utc_now() -> _dt.datetime:
-    return _dt.datetime.now(_dt.UTC)
-
-
-def mint_run_id(label: str, *, clock: Callable[[], _dt.datetime] = _utc_now) -> str:
-    """The host's own run id: `<utc timestamp>-<label>`, case-folded (`20260921t143000z-…`) so
-    it passes `refuse_bad_run_id`. Folding is fine here because the id is minted, not typed.
-    """
-    run_id = f"{clock().strftime('%Y%m%dT%H%M%SZ')}-{label}".casefold()
-    refuse_bad_run_id(run_id)
-    return run_id

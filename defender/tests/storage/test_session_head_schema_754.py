@@ -1,5 +1,6 @@
 """The head log's schema, version refusal on stale stores, the two openers, and role-scoped readers."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
@@ -260,11 +261,12 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
     """A run dir whose pointer resolves a real store — the only thing the pick is given."""
     ss = store_mod()
     base = runs_base(tmp_path)
-    run_dir = tmp_path / f"run-{case_id}"
+    run_dir = tmp_path / fixture_uuid(f"run-{case_id}")
     run_dir.mkdir()
     store = ss.open_store(case_id=case_id, sessions=SessionPaths(base))
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     return run_dir, store
+
 
 
 def test_the_session_pick_resolves_the_root_of_lineage_main_session(tmp_path):

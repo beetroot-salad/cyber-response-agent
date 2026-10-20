@@ -1,10 +1,8 @@
 """`RunId`: a run's id as a closed value type (#1105 D12; MF-02, MF-08).
 
 Built only by `RunId.parse(text)` (a pinned id, or one read back from storage) and
-`RunId.mint(label, *, clock=)` (the host's own id). Both admit by `_run_id.run_id_fault`:
-today's grammar, case stability and a bound of 206 bytes on the id (`RUN_ID_MAX_BYTES`, whose
-derivation is there, beside the rule the host's composed ids are judged by too). Every refusal
-is `RunRefused`.
+`RunId.mint()` (the host's own id, a random uuid4). Both admit by `_run_id.run_id_fault`:
+canonical lowercase UUID text and nothing else (#1187 O2). Every refusal is `RunRefused`.
 
 Unforgeable: a direct `RunId(...)`, `RunId.__new__(RunId)` and a subclass each raise
 `RunRefused`, and every copy route (pickle, `copy.copy`, `copy.deepcopy`) rebuilds through
@@ -16,12 +14,10 @@ answers for a sidecar file at such a name (D2.1). Pydantic-free (NM-05).
 """
 from __future__ import annotations
 
-import datetime as _dt
 from collections.abc import Callable
 from typing import Any, NoReturn
 
-from defender.records._run_id import RUN_ID_ALLOWED, _utc_now, mint_run_id, run_id_fault
-from defender._shown import quoted
+from defender.records._run_id import mint_uuid, run_id_fault
 from defender.run_repository._errors import RunRefused
 
 def _admit(text: str) -> str:
@@ -46,7 +42,7 @@ def _rebuild(text: str) -> RunId:
 
 
 class RunId:
-    """A run's id. Build one with `RunId.parse` or `RunId.mint`; see the module docstring."""
+    """A run's id. Build one with `RunId.parse` or `RunId.mint()`; see the module docstring."""
 
     __slots__ = ("_text",)
     _text: str
@@ -65,23 +61,16 @@ class RunId:
 
     @classmethod
     def parse(cls, text: object) -> RunId:
-        """The `RunId` for `text`, or `RunRefused`: text `refuse_bad_run_id` refuses, text
-        that is not case-stable, text over 206 bytes, or anything that is not text."""
+        """The `RunId` for `text`, or `RunRefused`: anything but canonical lowercase UUID
+        text, or anything that is not text."""
         return cls._built(_exact_str(text, "to parse"))
 
     @classmethod
-    def mint(cls, label: object, *,
-             clock: Callable[[], _dt.datetime] = _utc_now) -> RunId:
-        """The host's own id, `<UTC timestamp>-<label>` case-folded (today's `mint_run_id`),
-        or `RunRefused`. The bound is measured on the folded id, since folding can lengthen a
-        label (`ß` -> `ss`); the label is never truncated to fit."""
-        label = _exact_str(label, "label")
-        try:
-            text = mint_run_id(label, clock=clock)
-        except ValueError:
-            raise RunRefused(f"cannot mint a run id from the label {quoted(label)} "
-                             f"(allowed: {RUN_ID_ALLOWED})") from None
-        return cls._built(text)
+    def mint(cls) -> RunId:
+        """The host's own id: a fresh random uuid4. It takes no label — an id carries no
+        meaning (#1187 O1); the alert's label and the start time are display facts in the
+        run's provenance."""
+        return cls._built(mint_uuid())
 
     def __str__(self) -> str:
         return self._text

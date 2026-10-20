@@ -23,6 +23,7 @@ from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core._state1135 import env_state
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 JUDGE = "learning.judge"
 CLI = "learning.branch.cli"
@@ -37,7 +38,7 @@ RUN = "run"
 SIBLINGS = "VIEW 4 — SIBLING TRIALS"
 SPREAD = "TRIAL SPREAD"
 #: The tenant every launcher scenario plants (`S.plant_tenant`'s default id).
-TENANT = "acme"
+TENANT = fixture_uuid("tenant:acme")
 #: How long a pass may take before "does not hang" fails. A real pass here takes well under a
 #: second; a blocked read never returns.
 HANG_BOUND_S = 60.0
@@ -59,13 +60,20 @@ def _alert(tag: str, **over: Any) -> bytes:
 def _episode(tmp_path: Path, name: str, *, raw: bytes | None = None,
              signature: str | None = "", copy: bool = True,
              record: bool | dict[str, Any] = True, **world_kw: Any) -> tuple[Path, bytes]:
-    """An accepted, archived episode (`J.accepted_episode`, world copies = the decoys) under its
-    own episodes root, with the launch's copies of `raw` (default `_alert(name)`) and a record
-    carrying `signature` (default `SIG-<name>`; None = no signature recorded). `copy=False`
-    plants nothing: the episode a pre-change launcher left."""
-    ep = J.accepted_episode(tmp_path, root=tmp_path / f"episodes-{name}", **world_kw)
-    # Distinct scenarios share a queue, so their episode identities must differ (#1241).
-    ep = ep.rename(ep.with_name(f"{ep.name}-{name}"))
+    """An accepted, archived episode (`J.accepted_episode`, world copies = the decoys) at
+    `<data root>/<T>/episodes/<uuid>` (#1187 Layout A: the only place a door reaches it by id),
+    with the launch's copies of `raw` (default `_alert(name)`) and a record carrying `signature`
+    (default `SIG-<name>`; None = no signature recorded). `copy=False` plants nothing: the
+    episode a pre-change launcher left."""
+    ep = J.accepted_episode(tmp_path, **world_kw)
+    # Distinct scenarios share a queue, so their episode identities must differ (#1241): each
+    # its own uuid (#1187 dc3), and the manifest names that id (R5: every manifest reader
+    # refuses a manifest whose `episode_id` is not its folder's name — a mismatch here would be
+    # refused for THAT, and a test about the record would pass on the wrong refusal).
+    episode_id = fixture_uuid(f"1222-episode-{name}")
+    ep = ep.rename(ep.with_name(episode_id))
+    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
+    T.write_family(ep, {**doc, "episode_id": episode_id})
     alert = _alert(name) if raw is None else raw
     if copy:
         sig = f"SIG-{name}" if signature == "" else signature
@@ -179,6 +187,9 @@ def _judge_refusal(ep: Path, base: Path) -> str:
 
 def _assert_names_record(text: str, what: str) -> None:
     assert "record" in text.lower(), f"{what} does not name the missing record: {text!r}"
+    # #1187 (R5): a manifest naming another episode is refused too, and its text may say
+    # "record"; a refusal of the record is never that one.
+    assert "episode_id" not in text, f"{what} is the manifest's id refusal, not the record's: {text!r}"
 
 
 # --- a pass that predates the change ---------------------------------------------------------
@@ -202,13 +213,19 @@ def _source(tmp_path: Path, raw: bytes, *, record: bool = True, digest: str | No
     return planted, base, src
 
 
-def _launch(planted: S.Planted, src: Path, episode_id: str = T.EPISODE_ID) -> Path:
-    """`prepare_episode` over `src` (the real primer), the episode handle released."""
+def _launch(planted: S.Planted, src: Path) -> Path:
+    """`prepare_episode(runs, source)` over `src` (the real primer) in the tenant's runs
+    repository — #1187 declared change 3, review-4 F37: the episode is a fresh UUID
+    `runs.create_episode()` claims, handed back as its held view — then the launcher's RUNS
+    step for the manifest's worlds (#1187 R2: `view.start_runs` makes `runs/` and writes the
+    arm roster — it replaces `create_container`), the view released."""
     cli = S.mod(CLI)
-    with cli.prepare_episode(episode_id, Run.at(src), data_root=planted.accept().data_root) as episode:
-        with planted.accept().runs_repository().episode(episode.dir.name, held=episode) as view:
-            view.create_container()
-        return Path(episode.dir)
+    with cli.prepare_episode(planted.accept().runs_repository(), Run.at(src)) as view:
+        ep = Path(view.episode.dir)
+        T.write_family(ep, T.family_doc(episode_id=ep.name, source_run_dir=str(src),
+                                        source_run_id=src.name))
+        view.start_runs([T.world_id(ep, label) for label in T.WORLDS])
+        return Path(view.episode.dir)
 
 
 def _refused_launch(planted: S.Planted, src: Path) -> str:
@@ -222,6 +239,18 @@ def _files_under(root: Path) -> dict[str, bytes]:
         return {}
     return {str(p.relative_to(root)): p.read_bytes() for p in sorted(root.rglob("*"))
             if p.is_file() and not p.is_symlink()}
+
+
+def _episode_files() -> dict[str, bytes]:
+    """Every file in every episode of every tenant: `<data root>/*/episodes/` (#1187 Layout A,
+    where a launch puts its episode and its copies; O9: no configured root). The census a
+    refused launch leaves without the source's bytes — and `test_a1`'s accepted launch does not
+    (its positive control)."""
+    root = Path(os.environ["DEFENDER_DATA_ROOT"])
+    found: dict[str, bytes] = {}
+    for episodes in sorted(root.glob("*/episodes")):
+        found.update({f"{episodes.parent.name}/{k}": v for k, v in _files_under(episodes).items()})
+    return found
 
 
 class _Lifecycle:
@@ -240,8 +269,8 @@ class _Lifecycle:
 def _resume_sibling(ep: Path, label: str = "b") -> Path:
     """World `label`'s sibling through the REAL `run.main --resume`; returns its run folder."""
     life = _Lifecycle()
-    with J.episodes_base(ep.parent):
-        return _resume_sibling_at(ep, label, life)
+    # #1187 (O9): the episode is found under `--tenant`'s own `<T>/episodes/`; no variable.
+    return _resume_sibling_at(ep, label, life)
 
 
 def _resume_sibling_at(ep: Path, label: str, life: _Lifecycle) -> Path:
@@ -263,7 +292,7 @@ def test_o11_episode_alert_is_the_episodes_copy(tmp_path):
     source = _alert("o11-source")
     _trial(planted.runs, T.SOURCE_RUN_ID, source, facts={"signature": "SIG-SOURCE-O11"})
     _trial(planted.runs, "trial-copy", raw, facts={"signature": "SIG-COPY-O11"})
-    decoy = (ep / "worlds" / "b" / "alert.json").read_bytes()
+    decoy = (ep / "worlds" / T.world_id(ep, "b") / "alert.json").read_bytes()
     _trial(planted.runs, "trial-decoy", decoy, facts={"signature": "SIG-DECOY-O11"})
 
     _grade_, judge = _grade(ep, planted.runs)
@@ -312,13 +341,15 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
     record_bytes = S.record_file(src).read_bytes()
 
     ep = _launch(planted, src)
+    assert raw in _episode_files().values(), (
+        "the census p156/p157 take never saw the accepted launch's copy (#1187: <T>/episodes)")
     assert S.episode_alert_file(ep).is_file(), "the launch put no copy of the alert in the episode"
     assert S.episode_record_file(ep).is_file(), "the launch put no copy of the record in the episode"
     assert S.episode_alert_file(ep).read_bytes() == raw, "the episode's alert is not the source's"
     assert S.episode_record_file(ep).read_bytes() == record_bytes, (
         "the episode's record is not the source's")
 
-    T.write_family(ep, T.family_doc(source_run_dir=str(src)))
+    T.write_family(ep, T.family_doc(source_run_dir=str(src), episode_id=ep.name))
     S.alert_file(src).write_bytes(_alert("a1-rewritten"))
     sib = _resume_sibling(ep)
     assert S.alert_file(sib).read_bytes() == raw, (
@@ -328,8 +359,8 @@ def test_a1_launch_copies_the_alert_and_record_into_the_episode(tmp_path):
 
     archive = S.mod(ARCHIVE)
     with S.sym(EPISODE_HANDLE, "Episode").open(ep) as handle:
-        archive.archive_episode(handle, {"b": sib})
-    archived = set(_files_under(ep / "worlds" / "b").values())
+        archive.archive_episode(handle, {T.world_id(handle.dir, 'b'): sib})
+    archived = set(_files_under(ep / "worlds" / T.world_id(ep, "b")).values())
     assert raw in archived, "the world archive does not keep the alert"
     assert record_bytes in archived, "the world archive does not keep the record"
 
@@ -549,7 +580,7 @@ def test_p062_mapping_edited_between_a_source_run_and_a_resume(tmp_path):
     planted, _base, src = _source(tmp_path, raw, signature="SIG-p062", alert_mapping=mapping,
                                   case_mapping=case_mapping)
     ep = _launch(planted, src)
-    T.write_family(ep, T.family_doc(source_run_dir=str(src)))
+    T.write_family(ep, T.family_doc(source_run_dir=str(src), episode_id=ep.name))
     S.remap(planted, {**mapping, "signature": "user.login"})
 
     sib = _resume_sibling(ep)

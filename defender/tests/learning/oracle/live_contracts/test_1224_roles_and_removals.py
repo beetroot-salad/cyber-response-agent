@@ -94,8 +94,8 @@ def _assert_spent_nothing(launch: Any, est: Any, oracle: Any, verifier: Any) -> 
     if outcome is not None:
         assert not outcome.get("unservable_worlds"), outcome
         assert outcome.get("outcome") != "unusable", outcome
-    for label in S.WORLDS:
-        assert S.read_world_record(launch.ep, label) is None, label
+    assert not (launch.ep / "family.yaml").exists(), "identities were published before preflight"
+    assert not (launch.ep / S.WORLD_RECORDS).exists(), "preflight wrote world validity records"
 
 
 def test_1224_oracle_and_its_verifier_are_their_own_roles_with_their_own_model_knobs(
@@ -175,30 +175,17 @@ def test_1224_oracle_model_knob_is_preflighted_only_where_branching_runs(
     assert oracle.requests > 0, "a launch whose models route never reached pre-flight"
 
 
-def test_1224_run_record_label_check_still_refuses_a_reserved_label(tmp_path):
-    """the runs repository's episode-record writer still refuses a reserved world label, naming the rule, and records a well-formed one."""
-    from defender import run_repository as R
-
-    H = importlib.import_module("defender.tests.storage.tenant_1105_run_repository._spec1105")
-    t = H.tenant(tmp_path / "data")
-    runs = H.runs_folder(t)
-    H.make_run(runs, "r0")
-    for label, why in (("base", "reserved"), ("BASE", "reserved"), ("family", "reserved"),
-                       ("family_3", "family_")):
-        with pytest.raises(R.RunRefused) as refused:
-            R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {label: R.RunId.parse("ep-a")})
-        assert why in str(refused.value), (label, str(refused.value))
-    R.record_episode_runs(t, "ep", R.RunId.parse("r0"), {"a": R.RunId.parse("ep-a")})
-    assert R.episode_runs(t, "ep") == {"a": R.RunId.parse("ep-a")}
 
 
 def test_1224_redaction_filter_still_masks_what_it_masked_without_the_staged_name_rule():
     """with the staged-name rule gone, the redaction filter still masks run and world tokens and leaves a wv- string alone."""
     redaction = S.mod("learning.branch.redaction")
-    redact = redaction.redact_model_visible
-    token_text = f"refused: index for run {S.EPISODE_TOKEN}.b is unavailable after 2026-07-28"
+    def redact(text):
+        return redaction.redact_model_visible(
+            text, frozenset({S.EPISODE_ID, S.fixture_world_id("b")}))
+    token_text = f"refused: index for run {S.fixture_world_id('b')} is unavailable after 2026-07-28"
     masked = redact(token_text)
-    assert S.EPISODE_TOKEN not in masked, masked
+    assert S.fixture_world_id("b") not in masked, masked
     assert masked.startswith("refused: index for run "), masked
     assert masked.endswith(" is unavailable after 2026-07-28"), masked
     view_text = "index 'wv-b-logs-' not found; tried [logs-*,-wv-b-logs-]"
@@ -239,13 +226,13 @@ def test_1224_elastic_confine_index_admits_the_same_indices_for_a_run_and_a_sibl
                           env={})
     sibling = {"as_of": S.AS_OF_DT}
     if "world_id" in {f.name for f in fields(VerbContext)}:
-        sibling["world_id"] = S.world_token("b")
+        sibling["world_id"] = S.fixture_world_id("b")
     sibling_ctx = replace(run_ctx, **sibling)
     elastic = S.mod("integrations.elastic_adapter")
     assert _confinement_gate(elastic, run_ctx, "logs-*") == "passed"
     assert _confinement_gate(elastic, run_ctx, ".security-7") == "refused"
     for index in ("logs-*", "logs-system.auth-*", "security-audit-*", ".security-7",
-                  f"wv-{S.world_token('b')}-logs-", "wv-b-logs-", "wv-a-logs-",
+                  f"wv-{S.fixture_world_id('b')}-logs-", "wv-b-logs-", "wv-a-logs-",
                   "wv-b-security-audit-"):
         on_run = _confinement_gate(elastic, run_ctx, index)
         on_sibling = _confinement_gate(elastic, sibling_ctx, index)

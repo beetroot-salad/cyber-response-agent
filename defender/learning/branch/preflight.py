@@ -302,7 +302,7 @@ def _preflight_context(episode_dir: Path, source: Run, tenant: Any, as_of: Any) 
 
 
 def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refuse, read drift, calibrate, record
-    episode: Episode | Path, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
+    episode: Episode, *, source: Run, roster: Any, tenant: RunTenant, oracle: Any = None,
     verifier: Any = None, **knobs: Any,
 ) -> dict[str, Any]:
     """`Step.PREFLIGHT`: replay every original call through each fact world's oracle and
@@ -332,6 +332,8 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     (`box=`, `restart_after=`); this is where they are settled (`registry.oracle_serving`).
     Returns the record as written.
     """
+    if not isinstance(episode, Episode):
+        raise TypeError("preflight_replay requires the walked episode handle")
     from defender.learning.branch.estate.limiter import RateLimiter
     from defender.learning.branch.estate.oracle import DEFAULT_RESTART_AFTER, OracleUnservable
     from defender.learning.branch.estate.registry import (
@@ -351,11 +353,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     # The reader first, unguarded: a tenant with no gather grant refuses here (`GrantError`),
     # before anything is read or sent (O-16).
     reader = ModuleVerbRegistry(roster, tenant.grants.gather, grant_home=tenant.table_pointer)
-    if not isinstance(episode, Episode):
-        with Episode.open(Path(episode)) as held:
-            return preflight_replay(held, source=source, roster=roster, tenant=tenant,
-                                    oracle=oracle, verifier=verifier, **knobs)
-    family = _family.load_family(episode.view())
+    family = _family.load_family(episode.view(), expected_episode_id=episode.dir.name)
     originals = _originals(source.run_dir)
     not_replayable: list[dict[str, Any]] = []
     replayable: list[_Original] = []
@@ -395,9 +393,9 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     settings = oracle_settings_with(**knobs)
     limiter = RateLimiter(settings.rate)
     ctx = _preflight_context(episode.dir, source, tenant, family.as_of)
-    resumed = {w.world_id: _family.resume_world_from(family, w.world_id, episode.dir)
+    resumed = {w.label: _family.resume_world_from(family, w.label, episode.dir)
                for w in fact_worlds}
-    recording = Ledger.for_world(episode, resumed[fact_worlds[0].world_id].world_id)
+    recording = Ledger.for_world(episode, resumed[fact_worlds[0].label].world_id)
     # The family's base recording, parsed once for every world's registry.
     family_answers = read_family_answers(recording.base_path)
     # M01=A's fixed prefix, by the one rule the sibling's registry is handed too (`run.py`).
@@ -487,7 +485,7 @@ def preflight_replay(  # noqa: C901, PLR0912, PLR0915 — one pass: admit, refus
     # is written once, from every world's result. Each runs in a copy of this context, so its
     # log lines keep the run and tenant.
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(fact_worlds)) as pool:
-        futures = [pool.submit(contextvars.copy_context().run, calibrate, w.world_id)
+        futures = [pool.submit(contextvars.copy_context().run, calibrate, w.label)
                    for w in fact_worlds]
     for future in futures:
         # Anything but a world's own failure is the launch's (it stopped every other world's
@@ -577,6 +575,7 @@ STAMP_FIELD_CLASSES: dict[str, str] = {
     "unavailable": "informational",
     "world_id": "expected_to_differ", "parent_run_id": "expected_to_differ",
     "fork_turn": "expected_to_differ",
+    "started_at": "expected_to_differ", "alert_label": "informational",
 }
 
 

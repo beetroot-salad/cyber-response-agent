@@ -31,6 +31,7 @@ from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime.tools import _tool_bash  # noqa: E402
 from defender.runtime import record_query as rq  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106
+from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 from defender.tests.sandbox.test_959_downstream import Box, _gather_scene  # noqa: E402
 from defender.tests.runtime.engine.test_budget_seams_631 import _run_dir, drive_agent  # noqa: E402
@@ -40,9 +41,10 @@ _PAYLOAD = '{"total": 1, "hits": ["web-1"]}'
 
 
 def _bare_run(root: Path, name: str = "run") -> tuple[Path, RunState]:
-    run_dir = root / name
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(name)
+    run_dir = root / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    return run_dir, RunState(run_dir, name)
+    return run_dir, RunState(run_dir, run_dir.name)
 
 
 def _append(state: RunState, *, params: dict, lead: str = LEAD) -> dict:
@@ -74,7 +76,7 @@ def _gather_deps(run_dir: Path, state: RunState):
 def _record_failure(deps, *, params: dict) -> tuple[dict, str]:
     """One backend call that failed on the transport (exit 2: an infra failure the breaker
     charges), recorded through the query tool's own recorder."""
-    return asyncio.run(QueryCapture(registry=None)._record(
+    return asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params=params,
         payload=None, exit_code=2, detail="connection refused", system_key=""))
 
@@ -82,8 +84,20 @@ def _record_failure(deps, *, params: dict) -> tuple[dict, str]:
 @pytest.mark.parametrize("kind", ["symlink", "directory"])
 def test_a_failing_call_whose_view_write_is_refused_is_still_charged_and_recorded(
         tmp_path, kind):
-    """O1 at the query tool's recorder."""
-    run_dir = tmp_path / "run"
+    """O1 at the query tool's recorder: a call that failed on the transport (exit 2) is
+    recorded while `executed_queries.jsonl` is squatted (a planted symlink, or a directory). The
+    view write's `OSError` propagates — the run is not told the call was viewed — and before it
+    does, the failure is charged to the system's breaker and the row is in the run's state.
+
+    Positive control, same folder and deps: with the view writable again the next failing call
+    is charged too (the count is the sum, not a reset) and its row lands in both the state and
+    the view.
+
+    Observed failing by: round 2's `_record`, which charged the breaker only after the append
+    returned — a refused view write cost the breaker its charge and the state its row, so a
+    system failing every call while its view is blocked never trips."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "r3-o1")
     deps = _gather_deps(run_dir, state)
@@ -117,14 +131,18 @@ def test_a_failing_call_whose_view_write_is_refused_is_still_charged_and_recorde
 
 
 def test_a_succeeding_call_whose_view_write_is_refused_charges_nothing(tmp_path):
-    run_dir = tmp_path / "run"
+    """The charge O1 keeps is the failure's, not a side effect of the refused write: a call that
+    SUCCEEDED (exit 0) while the view is squatted is in the state, the write's error propagates,
+    and the breaker is untouched."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "r3-o1-ok")
     deps = _gather_deps(run_dir, state)
     RunPaths(run_dir).executed_queries.mkdir()
 
     with pytest.raises(OSError):  # noqa: PT011 — the directory refuses in its own words
-        asyncio.run(QueryCapture(registry=None)._record(
+        asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
             deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={"q": "a"},
             payload=[{"a": 1}], exit_code=0, detail="", system_key=""))
     assert [(r["seq"], r["exit_code"]) for r in state.lead_rows(LEAD)] == [(0, 0)], \

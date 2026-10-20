@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.learning.curation._frames680 import frame_salt_of
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender._io import read_jsonl_rows
 from defender.runtime import challenge_gate
@@ -42,7 +43,8 @@ def _deps(tmp_path: Path):
     from defender.agents import MAIN_DEF
     from defender.runtime.agent_definition import bind
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     (run_dir / "alert.json").write_bytes((GOLDEN / "alert.json").read_bytes())
     (run_dir / "investigation.md").write_bytes((GOLDEN / "investigation.md").read_bytes())
@@ -333,7 +335,13 @@ def test_a_second_review_pass_is_not_recorded_as_the_first(tmp_path):
     ['{"finding": "holds", "review": "r"}', "[1, 2]", '"prose"', "3", "plain prose"],
 )
 def test_no_stage_reply_stands_as_a_trace_row_whatever_shape_it_arrives_in(tmp_path, reply):
-    run_dir = tmp_path / "run"
+    """The writer puts a reply on its own literal line only because every READER skips it, so
+    the two sides have to be one predicate — the writer asks `_io.parse_jsonl_row`, which is
+    the rule `read_jsonl_rows` applies. Asked here of the bytes, across the JSON types a model
+    can answer in: the file holds exactly one row, the gate's own, and the reply is recoverable
+    either way. A reader that loosened its rule alone would fail this from its own side."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()
     challenge_gate._write_trace_row(fixture_run(run_dir), "composer", 0, {"ok": True}, raw_reply=reply)
 
@@ -354,7 +362,8 @@ def test_the_writer_and_the_reader_agree_about_a_nested_reply_from_any_stack_dep
     from defender.tests.shared.filesystem.test_1032_json_artifact import from_a_deep_stack
 
     reply = '{"finding": "holds", "review": ' + "[" * depth + "]" * depth + "}"
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     run_dir.mkdir()
     from_a_deep_stack(
         lambda: challenge_gate._write_trace_row(fixture_run(run_dir), "composer", 0, {"ok": True},

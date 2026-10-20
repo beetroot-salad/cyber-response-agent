@@ -6,10 +6,14 @@ not cryptographically verified here; the real Forgejo integration test covers ve
 
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import base64
 import json
 
 import httpx
+
+_TENANT_BLUE = fixture_uuid('tenant:blue')
 
 NOW = 1_800_000_000
 ISSUER = "https://vault.test/v1/identity/oidc"
@@ -17,7 +21,7 @@ AUDIENCE = "forgejo-tenant-blue"
 
 
 def token(
-    tenant="blue",
+    tenant=_TENANT_BLUE,
     *,
     issued=NOW,
     ttl=600,
@@ -49,7 +53,7 @@ TOKEN = token()
 
 
 class VaultHTTP:
-    def __init__(self, tenant="blue", *, value=None, now=NOW):
+    def __init__(self, tenant=_TENANT_BLUE, *, value=None, now=NOW):
         self.tenant = tenant
         self.value = value
         self.now = now
@@ -86,5 +90,5 @@ class VaultHTTP:
         )
 
 
-def identity(tenant="blue"):
+def identity(tenant=_TENANT_BLUE):
     return VaultHTTP(tenant).identity()

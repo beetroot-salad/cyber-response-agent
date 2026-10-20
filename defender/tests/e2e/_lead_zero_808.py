@@ -66,6 +66,7 @@ from defender.tests.support.runtime.state._1255_view import model_path
 pytest.importorskip("pydantic_ai")
 
 from defender._io import read_jsonl_rows  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.integrations.elastic_adapter import search_envelope  # noqa: E402
@@ -466,7 +467,8 @@ def materialize_alert(root: Path, doc: dict) -> Path:
     than copying a golden."""
     from defender.tests.support.storage import _alert_plant
 
-    run_dir = root / "run"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run_dir = root / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     _alert_plant.plant_alert(run_dir, doc)
     return run_dir

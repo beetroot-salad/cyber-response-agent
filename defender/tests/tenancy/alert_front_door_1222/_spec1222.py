@@ -141,6 +141,8 @@ WHAT IS NOT HERE ON PURPOSE
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import asyncio
 import contextlib
 import shutil
@@ -177,6 +179,9 @@ from defender.tests.support.storage import _session_store_705 as SS
 from defender.tests.support.tenancy import _tenants1106 as T6
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.e2e import _replay_harness as H  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape  # noqa: E402
+
+_TENANT_ACME = fixture_uuid('tenant:acme')
 
 # =================================================================================================
 # 0. Late binding
@@ -684,7 +689,7 @@ class Planted:
 
 
 def plant_tenant(  # noqa: PLR0913 — one tenant folder's whole content, each part overridable
-    tenant_id: str = "acme", *,
+    tenant_id: str = _TENANT_ACME, *,
     root: Path | None = None,
     alert_mapping: Mapping[str, Any] | str | None = DEFAULT_MAPPING_GENERIC,
     case_mapping: str | None = None,
@@ -1764,11 +1769,21 @@ def operator_input(tmp_path: Path) -> Path:
 
 
 def fresh_run_id() -> str:
-    """A run id unique to this call (lower case: `run.py --run-id`'s rule). `run_alert`'s
-    default — production's own minted id has one-second resolution, so two runs of one test
-    less than a second apart would collide and the second be refused as "a different alert
-    under a used id"."""
-    return f"fd1222-{uuid.uuid4().hex[:12]}"
+    """A run id unique to this call: a fresh canonical lowercase uuid4 — #1187 (declared change
+    1): `run.py --run-id` admits nothing else. `run_alert`'s default, so two runs of one test
+    never collide on one folder."""
+    return str(uuid.uuid4())
+
+
+def _alert_run_id(run_id: str | None) -> str:
+    """Choose a fresh UUID or validate the scenario's explicit canonical run id."""
+    if run_id is None:
+        return fresh_run_id()
+    if not is_fixture_uuid_shape(run_id):
+        raise AssertionError(
+            f"run_alert(run_id={run_id!r}): a run id is a canonical UUID (#1187) — pass "
+            f"fixture_uuid({run_id!r})")
+    return run_id
 
 
 def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
@@ -1857,8 +1872,12 @@ def run_alert(  # noqa: PLR0913 — one scenario's every input, each defaulted
         d.enqueued.append((tuple(args), dict(kw)))
         return enqueue(*args, **kw) if enqueue is not None else False
 
+    # #1187 (declared change 1): `run.py --run-id` admits only a canonical UUID, so a readable
+    # label here would be refused by production for its shape, before the scenario is reached.
+    # Refused loudly HERE instead (a test names its run `fixture_uuid(<label>)`), so a label
+    # never passes at base and silently fails after the change.
     argv = [str(input_path), "--tenant", planted.tenant_id,
-            "--run-id", run_id if run_id is not None else fresh_run_id()]
+            "--run-id", _alert_run_id(run_id)]
     if no_learn and enqueue is None:
         argv.append("--no-learn")
     if update_ticket:

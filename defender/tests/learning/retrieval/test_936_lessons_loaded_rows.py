@@ -28,6 +28,7 @@ from defender.tests.support.shared.contracts._fold_936 import (
 from defender.tests.support.learning.retrieval._lessons_corpus import _main_deps, _write_lesson
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H1105  # #1105 PR 2 (J8, declared change 10)
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[3]
 
@@ -36,15 +37,18 @@ TID = H1105.T_ID
 
 
 def _tenant_runs() -> Path:
-    """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2 (J8, declared change 10)"""
-    from defender.tenancy import _tenant
+    """The tenant's natural runs folder `<data root>/<T>/runs` — #1105 PR 2 (J8, declared
+    change 10): the tracer takes a required `--tenant` and walks that tenant's runs
+    (`--runs-dir` is gone). #1187 R1 (declared change 6): the folder carries no `_tenant.json`;
+    the tenant's own folder holding it is the owner. The data root is conftest's autouse
+    per-test one; the tenant is set up here, on request, so tests that never trace keep a
+    tenant-free root."""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
     root = current_data_root()
     H1105.tenant(root, TID)
     runs = root / TID / "runs"
     runs.mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, TID)
     return runs
 
 
@@ -190,8 +194,20 @@ def _mk_lesson(lessons: Path, stem: str, *, created_at: str | None = None) -> Pa
     return p
 
 
+#: `fixture_uuid(label) -> label` for every run `_mk_run` made: the tracer's case column is
+#: the run's id, which #1187 (declared change 1) makes a canonical UUID; the tests name runs by
+#: label and read the column back through this EXACT map (an id not in it stays as printed).
+_LABEL_OF: dict[str, str] = {}
+
+
+def _label(case_id: str) -> str:
+    return _LABEL_OF.get(case_id, case_id)
+
+
 def _mk_run(runs: Path, name: str, rows: list[dict], *, disposition: str = "benign") -> Path:
-    rd = runs / name
+    run_id = fixture_uuid(name)
+    _LABEL_OF[run_id] = name
+    rd = runs / run_id
     rd.mkdir(parents=True)
     plant_alert(rd)
     (rd / "report.md").write_text(f"---\ndisposition: {disposition}\n---\nbody\n", encoding="utf-8")
@@ -214,7 +230,7 @@ def _named(tmp_path: Path, capsys, lesson: str = "L") -> dict[str, list[str]]:
     assert rc == 0, cap.err
     lines = cap.out.splitlines()
     assert [ln.startswith("#") for ln in lines] == [True] + [False] * (len(lines) - 1), lines
-    return {ln.split("\t")[0]: ln.split("\t") for ln in lines[1:]}
+    return {_label(ln.split("\t")[0]): ln.split("\t") for ln in lines[1:]}
 
 
 def test_trace_names_the_evidence_class_behind_each_case(tmp_path, capsys):
@@ -299,7 +315,7 @@ def test_the_evidence_column_is_a_closed_vocabulary_whatever_the_row_carries(tmp
     assert len(lines) == 10, f"a row was forged or lost:\n{cap.out}"
     for echoed in ("FORGED", "forged", "decisive"):
         assert echoed not in cap.out, f"the row's own bytes reached the TSV: {echoed!r}"
-    cells = {ln.split("\t")[0]: ln.split("\t") for ln in lines[1:]}
+    cells = {_label(ln.split("\t")[0]): ln.split("\t") for ln in lines[1:]}
     assert all(len(c) == 4 for c in cells.values()), cells
     assert cells["clean"][3] == "read"
     for case in ("tab-kind", "newline-kind", "word-kind", "int-kind", "list-kind"):

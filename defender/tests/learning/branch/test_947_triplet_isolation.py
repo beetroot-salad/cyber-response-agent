@@ -5,8 +5,8 @@ import pytest
 
 from defender.tests.support.learning.branch import _triplet_947 as T
 
-TOKEN_A = T.world_token("a")
-TOKEN_C = T.world_token("c")
+TOKEN_A = T.fixture_world_id("a")
+TOKEN_C = T.fixture_world_id("c")
 
 
 # NEW-1 — no model-visible text names a run or world token
@@ -14,7 +14,8 @@ TOKEN_C = T.world_token("c")
 
 def _model_text(detail: str) -> str:
     """The text a fault's detail becomes on the model's side of the tool boundary."""
-    return T.mod("learning.branch.redaction").redact_model_visible(detail)
+    return T.mod("learning.branch.redaction").redact_model_visible(
+        detail, frozenset((TOKEN_A, TOKEN_C, T.EPISODE_ID)))
 
 
 @pytest.mark.parametrize("detail", [
@@ -24,7 +25,7 @@ def _model_text(detail: str) -> str:
 ])
 def test_947_no_model_visible_fault_text_names_a_run_or_world_token(detail):
     rendered = _model_text(detail.format(a=TOKEN_A, c=TOKEN_C))
-    for leak in (TOKEN_A, TOKEN_C, T.EPISODE_TOKEN):
+    for leak in (TOKEN_A, TOKEN_C, T.EPISODE_ID):
         assert leak not in rendered, f"{leak!r} survived into model-visible text"
     assert rendered != detail.format(a=TOKEN_A, c=TOKEN_C), "nothing was redacted at all"
 

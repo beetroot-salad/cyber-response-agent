@@ -1,5 +1,6 @@
 """Replay-driven runs: record reaches the leads, resume re-resolves, grants via tenant config, settings path redacted."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
 import inspect
@@ -58,20 +59,26 @@ def _identity_worlds() -> list[dict]:
 
 def _resume_argv(manifest: Path) -> list[str]:
     """The sibling's command line (#1105 PR 2, declared change 6: `--tenant T --episode <id>
-    --world b`); its episode is opened under the episodes base `_sibling_episode` configures."""
+    --world b`); its episode is opened by id under the tenant's `<T>/episodes/`
+    (`_sibling_episode`)."""
     return H.sibling_argv(manifest, "b", "--tenant", S.PLAYGROUND_ID)
 
 
-def _sibling_episode(tmp_path: Path, doc: dict, *, root: Path, monkeypatch: Any) -> Path:
-    """The episode a sibling opens by id (#1105 PR 2): under `root`, the configured episodes
-    base the sibling is pointed at, with its container made for the playground tenant as the
-    launcher's `EpisodeRuns.create_container` leaves it before the first sibling."""
-    from defender.tenancy import _tenant
+def _sibling_episode(tmp_path: Path, doc: dict, *, label: str) -> Path:
+    """The episode a sibling opens by id (#1105 PR 2). #1187 (R1, R2, O9, declared changes 5
+    and 6): at `<data root>/<playground>/episodes/<uuid>` — its tenant's, the id
+    `fixture_uuid(label)` (so two scenes in one test are two episodes) — with no container
+    record and no episodes variable; the launcher's RUNS step (`start_runs`, through
+    `T.episode_view`) makes `runs/` and writes the arm roster the sibling reads its arm id from
+    (O4b)."""
+    from defender.episodes._episode_handle import Episode
 
-    episode = T.episode(tmp_path, doc=doc, episode_id=T.EPISODE_ID, root=root)
-    (episode / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(episode / "runs", S.PLAYGROUND_ID)
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(root))
+    root = current_data_root()
+    episode_id = fixture_uuid(f"1107-{label}")
+    episode = T.episode(tmp_path, doc={**doc, "episode_id": episode_id}, episode_id=episode_id,
+                        root=root / S.PLAYGROUND_ID / "episodes")
+    with Episode.open(episode) as held:
+        T.episode_view(held, tenant=S.tenant_folder_of(root)).close()
     return episode
 
 
@@ -180,7 +187,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
 
     episode = _sibling_episode(tmp_path, T.family_doc(source_run_dir=str(source),
                                                       worlds=_identity_worlds()),
-                               root=tmp_path / "episodes", monkeypatch=monkeypatch)
+                               label="mf16")
     sibling = S.RunRecorder(tmp_path / "sibling", before_lifecycle=edit_within)
     rc, refused = S.drive_run(_resume_argv(episode / "family.yaml"), sibling,
                               visualize=sibling.visualize)
@@ -270,6 +277,9 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
 
     raised: list[BaseException] = []
 
+    # CX5: an adapter's ConfigFault names the file under the settings folder, worded as
+    # load_config's own "config file not found: <path> — this tenant's settings do not configure
+    # this system"; here it names the path both as given and as resolved.
     def get_host(ctx: Any, *, host: str = "web-1") -> dict:
         fault = S.config_fault()(
             f"config file not found: {given}/systems/cmdb/config.env — this tenant's settings "
@@ -278,11 +288,9 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
         raise fault
 
     run_dir = LZ.materialize_alert(tmp_path / "replay", LZ.alert_doc(ancestors=[]))
-    gather = _QueryAnswers([
+    gather = ReplayFn([
         Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
                                     "params": {"host": "web-1"}})]),
-        Turn(tool_calls=[("query", {"system": "cmdb", "verb": "get-host",
-                                    "params": {"host": "web-2"}})]),
         Turn(text="Summary: the host."),
     ])
     drive(run_dir, run_id="red1107", tenant=tenant, gather=gather,
@@ -298,16 +306,6 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
     assert any(s in str(raised[0]) for s in spellings), (
         f"the fault names no settings path: {raised[0]!s}")
     after = "\n".join(gather.seen[1:])
-    assert len(gather.answers) > 2, (
-        f"the lead was never asked again after its second cmdb call ({len(gather.answers)} "
-        "requests) — the run ended before answering it")
-    second = gather.answers[2]
-    assert "not configured" in second.lower(), (
-        f"the second cmdb call's own answer is not the refusal of a system down as not "
-        f"configured (O-4, O-5b): {second!r}")
-    assert S.settings_pointer() in second, (
-        f"the second cmdb call's refusal does not name the reason by the settings pointer "
-        f"(O-4, O-5b, CX5): {second!r}")
     assert S.settings_pointer() in after, f"the fault reached the model unnamed:\n{after}"
     for surface, text in (("gather model", after), ("run-dir tables", _jsonl_text(run_dir))):
         for spelling in spellings:

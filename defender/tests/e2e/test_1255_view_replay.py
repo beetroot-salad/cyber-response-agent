@@ -14,6 +14,7 @@ from defender.run_repository import RUN_LAYOUT  # noqa: E402
 from defender import box as box_mod  # noqa: E402
 from defender.box import BoxSpec  # noqa: E402
 from defender.tests.support.runtime.state import _1255_view as V
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.shared.contracts._fold_936 import (  # noqa: E402
     CLASS_LESSON,
     CLASS_SELECTOR,
@@ -154,13 +155,13 @@ def test_b4_evidence_naming_this_runs_own_trees_is_shown_byte_for_byte(tmp_path,
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     run_id = "20261015t120000z-view-evid-own"
     old = f"{layout.data_root}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
-    own = _own_tree_evidence(layout, Path(layout.tenant.runs) / run_id)
+    own = _own_tree_evidence(layout, Path(layout.tenant.runs) / fixture_uuid(run_id))
     planted = [f"cat {p}" for p in (old, *own.values())]
     doc = json.loads(ALERT)
     for i, line in enumerate(planted):
         doc[f"process_args_evidence_{i}"] = line
     run_dir = V.natural_run(layout, json.dumps(doc, indent=2).encode("utf-8"), run_id)
-    assert run_dir == Path(layout.tenant.runs) / run_id, (
+    assert run_dir == Path(layout.tenant.runs) / fixture_uuid(run_id), (
         f"fixture: the run folder is not where the evidence named it ({run_dir})")
     main = V.Recorder([
         Turn(tool_calls=[("read_file", {"path": V.MODEL_ALERT})]),

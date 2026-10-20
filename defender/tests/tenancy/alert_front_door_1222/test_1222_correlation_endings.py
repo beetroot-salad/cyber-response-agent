@@ -19,6 +19,9 @@ from defender.run_repository import RunPaths
 from defender.tests.support.invlang.validation import _invlang_warn_836 as W836
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+_TENANT_ACME = fixture_uuid('tenant:acme')
 
 # The scene: one tenant, one alert, as many front-door drives as a test needs
 
@@ -55,7 +58,7 @@ class _Scene:
     """A planted tenant under the current data root, driven through `run.main` as often as a
     test needs; every drive gets its own input dir and run id."""
 
-    def __init__(self, tmp_path: Path, *, tenant_id: str = "acme", table: str = S.TABLE_ELASTIC,
+    def __init__(self, tmp_path: Path, *, tenant_id: str = _TENANT_ACME, table: str = S.TABLE_ELASTIC,
                  root: Path | None = None, omit_systems: Sequence[str] = ()) -> None:
         self.tmp = Path(tmp_path)
         self.tenant = S.plant_tenant(tenant_id, root=root, alert_mapping=S.DEFAULT_MAPPING,
@@ -67,7 +70,8 @@ class _Scene:
         sub = self.tmp / f"{self.tenant.tenant_id}-{self._n:02d}-{label}"
         sub.mkdir(parents=True)
         kw.setdefault("tenant", self.tenant)
-        kw.setdefault("run_id", f"fd1222-{self.tenant.tenant_id}-{label}-{self._n:02d}")
+        # #1187 (declared change 1): a run id is a canonical UUID, named after the readable label.
+        kw.setdefault("run_id", fixture_uuid(f"fd1222-{self.tenant.tenant_id}-{label}-{self._n:02d}"))
         return S.run_alert(sub, alert=_alert(), backend=backend if backend is not None
                            else _backend(), **kw)
 
@@ -287,7 +291,7 @@ def _fail_alerts(exc: Callable[[], BaseException]) -> S.Backend:
 def test_o5_withheld_correlation_is_named_in_the_opening_message(tmp_path: Path) -> None:
     """When the tenant's table withholds the correlation lead, the opening message's correlation section is the one fixed 'withheld' sentence: no correlation ran and none is coming, naming the table."""
     granting = _Scene(tmp_path)
-    withholding = _Scene(tmp_path, tenant_id="acme-withheld", table=S.TABLE_WITHHELD)
+    withholding = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-withheld"), table=S.TABLE_WITHHELD)
     control = granting.control()
     d = withholding.run("withheld")
 
@@ -501,7 +505,7 @@ def _o6_scenario(ending: str, tmp_path: Path, withheld: _Scene) -> dict[str, Any
                 "lead_faults": {S.L3: S.LeadFault(delay=S.SHORT_DEADLINE_S + 2.0)}}
     if ending == "down_at_start":
         # #1256 O-6: elastic has no config.env, so it is down from run start; cmdb stays usable.
-        return {"scene": _Scene(tmp_path, tenant_id="acme-down", omit_systems=("elastic",)),
+        return {"scene": _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down"), omit_systems=("elastic",)),
                 "leads": {S.L3: [_q(1), _q(2), S.text("narration")]}}
     raise AssertionError(f"not an A2 ending: {ending!r}")
 
@@ -515,7 +519,7 @@ O6_ENDINGS = (*S.ENDINGS, "down_at_start")
 def test_o6_every_named_non_run_reaches_report_md(tmp_path: Path, ending: str) -> None:
     """Every named ending A2 lists — withheld, dispatch raised, claim collided, claim failed, request limit, tripped breaker, empty output, every call failed, timed out — and #1256's down at start (O-6: never a run refusal) continues to a normal close and writes report.md."""
     granting = _Scene(tmp_path)
-    withheld = _Scene(tmp_path, tenant_id="acme-withheld", table=S.TABLE_WITHHELD)
+    withheld = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-withheld"), table=S.TABLE_WITHHELD)
     spec = _o6_scenario(ending, tmp_path, withheld)
     scene = spec.pop("scene", granting)
     d = scene.run(ending.replace("_", "-"), main=S.closing_main_turns("inconclusive"), **spec)

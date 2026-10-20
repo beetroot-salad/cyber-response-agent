@@ -4,10 +4,11 @@
 questions did a world's observation differ, and was it the difference that world declared".
 Both are derived on read; nothing is stored.
 
-Both read the episode directory and nothing else. Sibling run dirs are disposable and may be
-gone by grading time, so `verdicts` reads the archived report, `delta_o` pairs the archived
-`served/` ledgers, and the archived `run_dir` pointer is informational only — never opened or
-followed.
+Both read the episode directory and nothing else, through the WALKED view the tenant's runs
+repository hands out (`runs.episode(episode_id)`, #1187 S-iso): a bare path carries no tenant,
+so it cannot go through the tenant's walk, and neither reader takes one. Sibling run dirs are
+disposable and may be gone by grading time, so `verdicts` reads the archived report and
+`delta_o` pairs the archived `served/` ledgers.
 
 Both refuse an episode whose outcome record (`outcome.yaml`, written once by the launcher's
 pre-flight) says anything but exactly `accepted`: an `unusable` or `refused` family measured
@@ -24,14 +25,13 @@ only because the recorded outcome distinguishes it from "the worlds ran and agre
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import yaml
 
 from defender import _yaml
 from defender._frontmatter import parse_frontmatter_or_none
-from defender._io import Bound, bind
+from defender._io import Bound
 from defender.records._report import repeats_disposition
 from defender._vocab import DISPOSITION_ENUM, normalized_disposition
 from defender.episodes._episode_paths import LAYOUT
@@ -41,12 +41,12 @@ from defender.learning.branch.ledger import (
     LedgerError,
     correlation_key_of,
 )
+from defender.run_repository import EpisodeRuns
 from defender.runtime.branch._family import (
     BASE_ROLE,
-    episode_token_for,
-    is_reserved_world_label,
+    family_identities,
+    Family, FamilyError,
     load_family,
-    world_token_for,
 )
 
 #: What a difference is called when nothing attributed it: "differs, and not shown to be the
@@ -73,7 +73,7 @@ class EpisodeError(ValueError):
 # ---------------------------------------------------------------------------------------
 
 
-def _recorded_outcome(bound: Bound) -> tuple[str, str]:
+def _recorded_outcome(bound: Bound, family: Family) -> tuple[str, str]:
     """The episode's outcome word and its reason, from pre-flight's outcome record
     (`outcome.yaml`). An absent, torn or refused record is the "no record" state, refused
     rather than read as any word (M05=A). An `accepted` record whose O5 count
@@ -84,16 +84,16 @@ def _recorded_outcome(bound: Bound) -> tuple[str, str]:
         raise EpisodeError(
             f"the episode has no outcome record to read ({missing}) — an episode is comparable "
             "only once pre-flight recorded it accepted") from None
-    unusable = outcome_mod.unusable_reason(outcome_mod.failed_worlds(bound, record))
+    unusable = outcome_mod.unusable_reason(outcome_mod.failed_worlds(bound, record, family=family))
     if record["outcome"] == outcome_mod.ACCEPTED and unusable is not None:
         return outcome_mod.UNUSABLE, unusable
     return record["outcome"], record["reason"]
 
 
-def _refuse_incomplete(bound: Bound) -> None:
+def _refuse_incomplete(bound: Bound, family: Family) -> None:
     """Refuse an episode whose outcome record is not exactly `accepted`, naming the word and
     its reason, or the missing record — and an accepted one with no readable family stamp."""
-    word, reason = _recorded_outcome(bound)
+    word, reason = _recorded_outcome(bound, family)
     if word != outcome_mod.ACCEPTED:
         raise EpisodeError(
             f"the episode's outcome is {word!r}{f' ({reason})' if reason else ''} — only an "
@@ -106,20 +106,13 @@ def _refuse_incomplete(bound: Bound) -> None:
             "its worlds would read as a measurement nobody made")
 
 
-def _archived_labels(bound: Bound) -> list[str]:
-    """Every archived world's label, sorted — the single definition of "this episode's worlds".
-
-    Taken from the archive, not the manifest: an incomplete family archives only its clean
-    siblings, and the readers answer about what is on disk. Listed through the bind, so an entry
-    is judged on what it is rather than what it points at.
-
-    Reserved labels are skipped: the grading pass archives its own draws under
-    `worlds/family/`, which no manifest can declare, and counting it would make `delta_o`
-    refuse every graded episode. Asked through `is_reserved_world_label` so both gates agree on
-    what is reserved.
-    """
-    return [label for label in bound.under(LAYOUT.worlds).entries().dirs()
-            if not is_reserved_world_label(label)]
+def _archived_labels(bound: Bound, family: Family) -> list[str]:
+    """Archived UUID directories resolved through the host-written manifest."""
+    try:
+        return sorted(family.world_by_id(world_id).label
+                      for world_id in bound.under(LAYOUT.worlds).entries().dirs())
+    except FamilyError as refused:
+        raise EpisodeError(str(refused)) from refused
 
 
 # ---------------------------------------------------------------------------------------
@@ -144,8 +137,18 @@ def _declared_disposition(text: str) -> Any:
     return frontmatter.get("disposition")
 
 
-def verdicts(episode_dir: Path) -> dict[str, str]:
-    """Each archived world's disposition, keyed by world label.
+def _walked(view: EpisodeRuns) -> Bound:
+    """The no-follow reader over the episode folder `view` holds — the walked handle, never a
+    path re-bound by its spelling. Anything but an episode view is a `TypeError`."""
+    if not isinstance(view, EpisodeRuns):
+        raise TypeError(f"the episode readers take the episode's walked view "
+                        f"(`runs.episode(episode_id)`), not {type(view).__name__}")
+    return view.episode.view()
+
+
+def verdicts(view: EpisodeRuns) -> dict[str, str]:
+    """Each archived world's disposition, keyed by world label, read through the episode's
+    walked view.
 
     Read from each world's own archived `report.md`, never a run dir. Judged by
     `_vocab.normalized_disposition`, which owns the vocabulary including zero-width stripping
@@ -154,15 +157,16 @@ def verdicts(episode_dir: Path) -> dict[str, str]:
     A value outside the vocabulary refuses, naming it: a headline that cannot be read is not the
     same as no headline.
     """
-    with bind(Path(episode_dir)) as bound:
-        return _verdicts(bound)
+    bound = _walked(view)
+    family = load_family(bound, expected_episode_id=view.episode_id)
+    return _verdicts(bound, family)
 
 
-def _verdicts(bound: Bound) -> dict[str, str]:
-    _refuse_incomplete(bound)
+def _verdicts(bound: Bound, family: Family) -> dict[str, str]:
+    _refuse_incomplete(bound, family)
     out: dict[str, str] = {}
-    for label in _archived_labels(bound):
-        name = LAYOUT.world(label).report
+    for label in _archived_labels(bound, family):
+        name = LAYOUT.world(family.world(label).world_id).report
         # Absent and unreadable differ. The archive deliberately archives a world with no
         # report (a sibling that died before writing one), even on an accepted episode, so it
         # is skipped rather than taking every other world's headline down. A present but
@@ -233,7 +237,7 @@ def _answers(rows: list[dict]) -> dict[str, str]:
 
 
 def _classify(base: dict[str, str], world: dict[str, str], keys: list[str], axis: str | None,
-              invoke: Invoke | None) -> dict[str, str]:
+              invoke: Invoke | None, known_ids: frozenset[str]) -> dict[str, str]:
     """One world's shared keys, each classified against the base's answer.
 
     Equal canonical text is `same` with no model call. Only a real difference reaches the
@@ -257,7 +261,7 @@ def _classify(base: dict[str, str], world: dict[str, str], keys: list[str], axis
         # `.value`: callers write this table to YAML and compare bare words, and
         # `str(Verdict.SAME)` renders `'Verdict.SAME'`. Membership is checked against the
         # comparator's own `DELTA_SEAT`.
-        verdict = compare(base[key], world[key], axis, invoke=invoke)
+        verdict = compare(base[key], world[key], axis, known_ids=known_ids, invoke=invoke)
         out[key] = verdict.value if verdict in DELTA_SEAT else _wrong_seat(key, verdict)
     return out
 
@@ -274,7 +278,7 @@ def _wrong_seat(key: str, verdict: Verdict) -> str:
         f"{sorted(v.value for v in DELTA_SEAT)}")
 
 
-def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dict[str, str]]:
+def delta_o(view: EpisodeRuns, *, invoke: Invoke | None = None) -> dict[str, dict[str, str]]:
     """Per world, per shared correlation key: one member of the comparator's delta seat.
 
     `same`, `formatting`, `mutation` or `undeclared`, as the comparator answers it
@@ -289,20 +293,27 @@ def delta_o(episode_dir: Path, *, invoke: Invoke | None = None) -> dict[str, dic
 
     Every archived world gets an entry, the control included; an empty entry means the world
     served nothing.
+
+    `view` is the episode's walked view: every read below is a no-follow walk off the folder
+    it holds, the manifest is held to the view's episode id (R5), and the arm ids every prompt
+    is cleaned of are the view's own roster (`view.arm_ids()`, none when there is no roster), so
+    no caller hands them in or forgets them (#1187 S-red).
     """
-    # One bind for the pass: every read below is a no-follow walk off the same held folder.
-    with bind(Path(episode_dir)) as bound:
-        return _delta_o(bound, invoke)
+    return _delta_o(_walked(view), view, invoke)
 
 
-def _delta_o(bound: Bound, invoke: Invoke | None) -> dict[str, dict[str, str]]:
-    _refuse_incomplete(bound)
-    labels = _archived_labels(bound)
+def _delta_o(bound: Bound, view: EpisodeRuns,
+             invoke: Invoke | None) -> dict[str, dict[str, str]]:
+    family = load_family(bound, expected_episode_id=view.episode_id)
+    _refuse_incomplete(bound, family)
+    labels = _archived_labels(bound, family)
     if not labels:
         return {}
-    family = load_family(bound)
-    token = episode_token_for(family.episode_id)
-    control = next((w.world_id for w in family.worlds if w.role == BASE_ROLE), None)
+    # No roster: the episode never reached RUNS, so it has no arm ids to keep out of a prompt
+    # (the design's S-red: the question does not arise). A roster that is there but refused
+    # raises its own refusal here.
+    arm_ids = view.arm_ids() or {}
+    control = next((w.label for w in family.worlds if w.role == BASE_ROLE), None)
 
     base_rows, _malformed, base_rec = bound.read_jsonl(LAYOUT.served_base)
     if base_rec.text is None:
@@ -316,12 +327,12 @@ def _delta_o(bound: Bound, invoke: Invoke | None) -> dict[str, dict[str, str]]:
     base = _answers(base_rows)
     served: dict[str, dict[str, str]] = {}
     for label in labels:
-        if label not in {w.world_id for w in family.worlds}:
+        if label not in {w.label for w in family.worlds}:
             raise EpisodeError(
                 f"the archive holds a world {label!r} the manifest does not declare "
-                f"({[w.world_id for w in family.worlds]}) — its axis is what a difference is "
+                f"({[w.label for w in family.worlds]}) — its axis is what a difference is "
                 "classified against, so there is nothing to classify it with")
-        name = LAYOUT.served_world(world_token_for(token, label))
+        name = LAYOUT.served_world(family.world(label).world_id)
         rows, _malformed, rec = bound.read_jsonl(name)
         if rec.text is None and not rec.absent:
             # Absent is a world that served nothing; refused is not, and reading it as nothing
@@ -336,11 +347,13 @@ def _delta_o(bound: Bound, invoke: Invoke | None) -> dict[str, dict[str, str]]:
         drift = {key for key, answer in served.get(control, {}).items()
                  if key in base and base[key] != answer}
 
+    # The family's identities, removed from every prompt the comparator sends.
+    known_ids = family_identities(family, arm_ids)
     out: dict[str, dict[str, str]] = {}
     for label in labels:
         world = served[label]
         shared = sorted(set(base) & set(world) - drift)
-        out[label] = _classify(base, world, shared, family.world(label).axis, invoke)
+        out[label] = _classify(base, world, shared, family.world(label).axis, invoke, known_ids)
     return out
 
 

@@ -1,11 +1,17 @@
 """The file-backed `Episode` handle (#1133): every write into an episode tree goes through it,
 and it writes only through a folder the rooted core holds open (`_io.Held`, #1111).
 
-A door opens the handle once and holds it for its own duration: `Episode.open(episode_dir)`
-for an episode that exists (its spelling followed, as `bind` follows it), `Episode.create`
-for the one door that makes it (judged from its parent, never followed). Both are context
-managers. Every verb then works relative to the held folder, so the episode dir is never
-resolved by name again and a verb never makes it.
+A door opens the handle once and holds it for its own duration: `Episode.open(episode_dir)` for
+an episode that exists, `Episode.create` for the one door that makes it. Both reach the folder
+through their `io=` seam only (`io.hold` / `io.hold_new`). An episode is reached by id through
+its tenant's runs repository (`runs.episode(episode_id)`, `runs.create_episode()`,
+`runs.episode_files(episode_id)`, #1187 S-iso), the one production caller of the doors: it
+hands them its walk as the seam, so the folder they hold is the one walked from the tenant's
+folder with every level no-follow, never a path they resolve. With the default seam (the core's
+`hold`, following the spelling as `bind` does; `hold_new`, judging the name from its parent)
+they serve a folder handed in whole. Both are context managers. Every verb then works relative
+to the held folder, so the episode dir is never resolved by name again and a verb never makes
+it.
 
 Records and folders are handed out by `_episode_paths.LAYOUT`'s relative names, the only place
 those names are spelled. A record answers `.path` plus exactly the verbs its row in
@@ -13,17 +19,17 @@ those names are spelled. A record answers `.path` plus exactly the verbs its row
 the class; a folder answers `.path` and `.ensure()`. Each verb is one call on the held folder.
 
 `view()` is a `Bound` over the same held folder, for a pass that reads the tree it writes (the
-judge). Readers that bind the episode dir on their own keep their `_io.bind`. The archive's
-copy lane (`learning/branch/archive.py`) is the declared exception and does not go through here.
+judge). Episode readers use this view through the repository's walked handle, so no reader
+re-binds the episode directory by path. The archive's copy lane
+(`learning/branch/archive.py`) is the declared exception and does not go through here.
 
-An episode is opened by id as `Episode.open(episode_dir(data_root, episode_id))` (#1105 PR 2,
-D-ep): `episode_dir` — with `episodes_root` (the one reader of `DEFENDER_EPISODES_BASE`, with
-its refusals) and `refuse_bad_episode_id`, kept in `_episodes_root` and re-exported here —
-refuses a bad id or an unusable root (`EpisodeRefused`) before anything is read, and the door
-holds what it names. The owner never reads inside the episode's `runs/`: that container and its
-arms are the runs repository's episode view (`tenant.runs_repository().episode(episode_id)`),
-built on this handle. The one hand-out of the container's path is `box_mounted_container`, for a
-sibling's acceptance.
+`refuse_bad_episode_id` is the episode id's rule (`_run_id.episode_id_fault`: canonical
+lowercase UUID text), refused as `EpisodeRefused` before any path is built from the id; both
+live beside the layout (`_episode_paths`) and are re-exported here. The owner never reads
+inside the episode's `runs/`: that container, its arms and the arm roster (`arms.json`,
+`LAYOUT.arm_roster`) are the runs repository's episode view
+(`tenant.runs_repository().episode(episode_id)`), built on this handle's held folder
+(`_held_folder`). The one hand-out of the container's path is `box_mounted_container`.
 """
 from __future__ import annotations
 
@@ -31,21 +37,17 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from defender import _io as _real_io
-from defender.episodes._episode_paths import LAYOUT, _check_label, check_minted_token
-# The episodes root and the episode id (#1105 PR 2, D-ep) live in `_episodes_root`, so this
-# handle stays a pure holder (#1133 D6': its only I/O is `hold`/`hold_new` and their `Held`);
-# re-exported here, where the doors' callers look for them.
-from defender.episodes._episodes_root import (  # noqa: F401
-    EPISODES_BASE_ENV, EpisodeRefused, episode_dir, episodes_root, refuse_bad_episode_id,
+from defender.episodes._episode_paths import (
+    LAYOUT, EpisodeRefused, _check_world_id, refuse_bad_episode_id,
 )
 
 #: Every record the handle hands out, keyed by its address (a bare name is an attribute of the
-#: episode, `world.<name>` one of `episode.world(label)`), mapped to the verbs its row grants.
+#: episode, `world.<name>` one of `episode.world(world_id)`), mapped to the verbs its row grants.
 #: `write` replaces (stage + rename), `create` is exclusive, `append` appends, `delete` removes a
 #: plain file.
 #: No record reads: reading is the view's (`episode.view().read(LAYOUT.<record>)`).
 RECORD_VERBS: dict[str, tuple[str, ...]] = {
-    "family": ("write",),
+    "family": ("create",),
     "family_stamp": ("write",),
     "review": ("write",),
     "samples": ("write",),
@@ -58,14 +60,14 @@ RECORD_VERBS: dict[str, tuple[str, ...]] = {
     "priming_lock": ("create", "delete"),
     "wire_log": ("write",),
     "world.draw": ("write", "delete"),
-    "world.run_dir_pointer": ("write",),
+    "family_draw": ("write", "delete"),
     "world_record": ("create",),
     "outcome": ("create",),
     "not_comparable": ("write",),
 }
 
 #: Every folder the handle hands out, keyed the same way.
-FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws")
+FOLDERS: tuple[str, ...] = ("served", "runs", "worlds", "world.dir", "world.draws", "family_draws")
 
 
 class EpisodeRecord:
@@ -142,27 +144,25 @@ class EpisodeFolder:
 
 
 class EpisodeWorld:
-    """One archived world's records and folders, `worlds/<label>/`. The label passes the
-    minting check (case-stable), as `EpisodePaths.world` requires of a writer."""
+    """One archived world's records and folders, `worlds/<world UUID>/`.
 
-    def __init__(self, episode: Episode, label: str) -> None:
+    The UUID passes the same admission rule as `EpisodePaths.world`.
+    """
+
+    def __init__(self, episode: Episode, world_id: str) -> None:
         self._episode = episode
-        self._label = _check_label(label)
+        self._world_id = _check_world_id(world_id)
 
     @property
     def dir(self) -> EpisodeFolder:
-        return self._episode._folder(LAYOUT.world(self._label).dir)
+        return self._episode._folder(LAYOUT.world(self._world_id).dir)
 
     @property
     def draws(self) -> EpisodeFolder:
-        return self._episode._folder(LAYOUT.world(self._label).draws)
+        return self._episode._folder(LAYOUT.world(self._world_id).draws)
 
     def draw(self, n: int) -> WriteDeleteRecord:
-        return WriteDeleteRecord(*self._episode._at(LAYOUT.world(self._label).draw(n)))
-
-    @property
-    def run_dir_pointer(self) -> WriteRecord:
-        return WriteRecord(*self._episode._at(LAYOUT.world(self._label).run_dir_pointer))
+        return WriteDeleteRecord(*self._episode._at(LAYOUT.world(self._world_id).draw(n)))
 
 
 class Episode:
@@ -218,8 +218,8 @@ class Episode:
     # -- episode-root records ----------------------------------------------------------------
 
     @property
-    def family(self) -> WriteRecord:
-        return WriteRecord(*self._at(LAYOUT.family))
+    def family(self) -> CreateRecord:
+        return CreateRecord(*self._at(LAYOUT.family))
 
     @property
     def family_stamp(self) -> WriteRecord:
@@ -278,19 +278,25 @@ class Episode:
     def priming_lock(self) -> CreateDeleteRecord:
         return CreateDeleteRecord(*self._at(LAYOUT.priming_lock))
 
-    def served_world(self, token: str) -> AppendRecord:
-        """`served/<token>.jsonl`, a world's replay ledger; the token's label must be
-        case-stable (the minting check)."""
-        return AppendRecord(*self._at(LAYOUT.served_world(check_minted_token(token))))
+    def served_world(self, world_id: str) -> AppendRecord:
+        """A world UUID's replay ledger, independent of its descriptive label."""
+        return AppendRecord(*self._at(LAYOUT.served_world(_check_world_id(world_id))))
 
-    def world_record(self, label: str) -> CreateRecord:
-        """`world_records/<label>.yaml`, written once (#1224): a second write is refused, so a
+    def world_record(self, world_id: str) -> CreateRecord:
+        """`world_records/<world UUID>.yaml`, written once (#1224): a second write is refused, so a
         resumed sibling never rewrites its world's record."""
-        return CreateRecord(*self._at(LAYOUT.world_record(label)))
+        return CreateRecord(*self._at(LAYOUT.world_record(world_id)))
 
     def wire_log(self, name: str) -> WriteRecord:
         """`wire_logs/<name>`, by the full file name `WIRE_LOG_NAMES` gives."""
         return WriteRecord(*self._at(LAYOUT.wire_log(name)))
+
+    def family_draw(self, n: int) -> WriteDeleteRecord:
+        return WriteDeleteRecord(*self._at(LAYOUT.family_draw(n)))
+
+    @property
+    def family_draws(self) -> EpisodeFolder:
+        return self._folder(LAYOUT.family_draws)
 
     # -- folders -----------------------------------------------------------------------------
 
@@ -304,6 +310,13 @@ class Episode:
         arms are the runs repository's episode view, which is built on this handle."""
         return self._folder(LAYOUT.runs)
 
+    def _held_folder(self) -> _real_io.Held:
+        """The held episode folder itself, for the runs repository's episode view, which is
+        built on this handle (#1187 S-iso): it holds `runs/` off it and writes the arm roster
+        through it, so neither is ever reached by a path. Asking does no I/O; the handle still
+        owns (and closes) the folder."""
+        return self._held
+
     @property
     def box_mounted_container(self) -> Path:
         """The container's path, for a sibling's acceptance only (`box_mounted`): the box mounts
@@ -314,13 +327,12 @@ class Episode:
     def worlds(self) -> EpisodeFolder:
         return self._folder(LAYOUT.worlds)
 
-    def world(self, label: str) -> EpisodeWorld:
-        return EpisodeWorld(self, label)
+    def world(self, world_id: str) -> EpisodeWorld:
+        return EpisodeWorld(self, world_id)
 
 
 _DOOR = object()
 
 
-__all__ = ["EPISODES_BASE_ENV", "FOLDERS", "RECORD_VERBS", "Episode", "EpisodeFolder",
-           "EpisodeRecord", "EpisodeRefused", "EpisodeWorld", "episode_dir", "episodes_root",
-           "refuse_bad_episode_id"]
+__all__ = ["FOLDERS", "RECORD_VERBS", "Episode", "EpisodeFolder", "EpisodeRecord",
+           "EpisodeRefused", "EpisodeWorld", "refuse_bad_episode_id"]

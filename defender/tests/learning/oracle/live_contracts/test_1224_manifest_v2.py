@@ -37,9 +37,11 @@ def _episode(where: Path, doc: dict | None = None, *, text: str | None = None) -
 
 
 def _load(ep: Path) -> Any:
-    """The runtime loader over the episode's manifest on disk (`load_family` through a view)."""
+    """The runtime loader over the episode's manifest on disk (`load_family` through a view),
+    handed the episode's own folder name as the expected id (#1187 R5: a required keyword, the
+    one the episode handle supplies; review-4 F36)."""
     with _episode_cls().open(Path(ep)) as handle:
-        return S.sym(S.FAMILY, "load_family")(handle.view())
+        return S.sym(S.FAMILY, "load_family")(handle.view(), expected_episode_id=Path(ep).name)
 
 
 def _no_tenant() -> Any:
@@ -56,7 +58,9 @@ def _resume(ep: Path, label: str) -> Any:
 
 def _judge_read(ep: Path) -> dict:
     """The judge's raw manifest reader (`read_manifest` through its own bind)."""
-    return S.sym("learning.judge.family", "raw_manifest")(Path(ep))
+    with _episode_cls().open(Path(ep)) as handle:
+        return S.sym("learning.judge.family", "read_manifest")(
+            handle.view(), expected_episode_id=Path(ep).name)
 
 
 def _page(ep: Path, capsys: Any) -> tuple[int, str]:
@@ -153,7 +157,7 @@ def _loads(doc: dict) -> Any:
     family = _parse(doc)
     assert _served(family) == list(doc["served_systems"]), _served(family)
     for world in doc["worlds"]:
-        assert _facts(family, world["world_id"]) == [_fact_view(f) for f in world["facts"]]
+        assert _facts(family, world["label"]) == [_fact_view(f) for f in world["facts"]]
     return family
 
 
@@ -386,7 +390,9 @@ def test_input_facts_share_a_fact_id_across_worlds(tmp_path):
     forged_b = {"forged_id": "fb-901x", "fact_id": "f1", "system": "idp",
                 "row": {"user": "alice", "event_id": "e-77901", "action": "logon",
                         "host": "db-1", "ts": "2026-07-28T15:22:00Z"}}
-    store_b = S.oracle_dir(tmp_path / "episodes" / S.EPISODE_ID, "b")
+    # Claim the fixture's actual tenant episode before planting its world-b store.
+    ep = _episode(tmp_path, doc=doc)
+    store_b = S.oracle_dir(ep, "b")
     store_b.mkdir(parents=True, exist_ok=True)
     (store_b / "forged.jsonl").write_text(json.dumps(forged_b) + "\n", encoding="utf-8")
 
@@ -477,8 +483,8 @@ def test_p055_system_name_spelled_as_a_yaml_boolean_null_or_number(tmp_path):
             msg = _refused(lambda ep=ep: _load(ep), FamilyError)
             assert "served_systems" in msg, (literal, msg)
 
-    ep = _episode(tmp_path / "quoted", _doc())
-    with _episode_cls().open(ep) as handle:
+    ep = tmp_path / "quoted" / S.EPISODE_ID
+    with _episode_cls().create(ep) as handle:
         S.sym(S.FAMILY, "write_family")(handle, _doc(served_systems=["on", "no", "null",
                                                                      "1e3"]))
     served = _served(_load(ep))
@@ -506,10 +512,10 @@ def test_p056_entity_or_fact_id_spelled_as_a_yaml_literal(tmp_path):
                 msg = _refused(lambda ep=ep: _load(ep), FamilyError)
                 assert field_name in msg, (literal, field_name, msg)
 
-    ep = _episode(tmp_path / "quoted", _doc())
+    ep = tmp_path / "quoted" / S.EPISODE_ID
     distinct = _doc(("b", [S.fact("007", "alice logged on", ("007", "7")),
                            S.fact("7", "bob logged on", ("bob",))]), ("c", [_F2]))
-    with _episode_cls().open(ep) as handle:
+    with _episode_cls().create(ep) as handle:
         S.sym(S.FAMILY, "write_family")(handle, distinct)
     facts = _facts(_load(ep), "b")
     assert [f["fact_id"] for f in facts] == ["007", "7"]

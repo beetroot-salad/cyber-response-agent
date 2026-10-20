@@ -76,8 +76,13 @@ from defender.tests.e2e._box665 import (  # noqa: F401
 )
 from defender.tests.support.sandbox._docker import daemon_reachable, docker_runtimes, is_dood
 from defender.run_repository import SessionPaths
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[2]
+#: `run_tree`'s run folder. #1187 (declared change 1): a run id is a canonical UUID — the
+#: folder is fixture_uuid(<label>), the label `run-771` it always carried.
+RUN_771 = fixture_uuid("run-771")
+CENSUS_TENANT = fixture_uuid("tenant:census-tenant")
 REPO_ROOT = DEFENDER.parent
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 #: The write lint's ratchet baseline. Named once and shared, because two demands read it and a
@@ -455,7 +460,8 @@ def run_tree(tmp_path: Path) -> Path:
 
     Distinct from `test_540_scrub_lifecycle._clean_run_dir`, which is a FROZEN post-run tree
     for the scan to walk. This one carries only what a writer needs to exist beside."""
-    run = tmp_path / "run-771"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid("run-771")
+    run = tmp_path / RUN_771
     (run / "gather_raw" / "l-001").mkdir(parents=True)
     (run / "gather_summaries").mkdir(parents=True)
     (run / "wire_logs").mkdir(parents=True)
@@ -811,7 +817,8 @@ class Writer:
 
 
 def _invoke_write_trace(run_dir: Path) -> None:
-    from defender.runtime import observe, session_store
+    from defender.runtime import observe
+    from defender.runtime import session_store
 
     store = session_store.open_store(case_id="c-771", sessions=SessionPaths(run_dir.parent / "stores"))
     sid = store.new_session("main")
@@ -901,7 +908,7 @@ def _invoke_queries_table(run_dir: Path) -> Any:
     # carry the state a started run would.
     deps = replace(bind(_tenants1106.fixture_gather_def(), run_dir, defender_dir=DEFENDER),
                    lead_id="l-001", run=fixture_run(run_dir), run_state=RunState(run_dir, run_dir.name))
-    return asyncio.run(QueryCapture(registry=None)._record(
+    return asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={},
         payload=[{"a": 1}], exit_code=0, detail="", system_key="",
     ))
@@ -947,26 +954,15 @@ def _invoke_write_guarded(run_dir: Path) -> None:
     write_guarded(run_dir / "report.md", "guarded body\n")
 
 
-def _invoke_tenant_writer(run_dir: Path) -> None:
-    """#1077 decision 16, renamed by #1078 D1 (`ensure_tenant` -> `ensure_runs_base_record`):
-    the runs-base record's writer, beside the runs base (`run_dir.parent`) rather than inside
-    the run dir — `Writer.artifact` names it `../_tenant.json`, which the generic
-    `run / writer.artifact` harness resolves correctly since the OS collapses `..` at
-    stat/open time."""
-    from defender.tenancy import _tenant
-
-    _tenant.ensure_runs_base_record(run_dir.parent, "census-tenant")
-
-
 def _invoke_tenant_row_writer(run_dir: Path) -> None:
     """#1078 D1: the tenant ROW's writer, `create_tenant`. Its data root is a fresh subtree of
     the run dir (`tenant-root/`, never touched by `run_tree`) rather than `run_dir.parent`,
     because O10 refuses a data root holding anything beside the tenant it is creating — and
-    `run_tree`'s own sibling (`run-771`) sits directly in `run_dir.parent`. `Writer.artifact`
-    names it `tenant-root/census-tenant/tenant.json`."""
+    `run_tree`'s own sibling (`RUN_771`) sits directly in `run_dir.parent`. `Writer.artifact`
+    names it `tenant-root/<CENSUS_TENANT>/tenant.json`."""
     from defender.tenancy import _tenant
 
-    _tenant.create_tenant(run_dir / "tenant-root", "census-tenant")
+    _tenant.create_tenant(run_dir / "tenant-root", CENSUS_TENANT)
 
 
 #: The census, one row per `no_write_through_planted_leaf` bind. It is a FLOOR, not a closed
@@ -998,9 +994,9 @@ CENSUS: tuple[Writer, ...] = (
            _invoke_denial_logger, "runtime/observe.py", cite="C1,G12"),
     # #1235 F2: the run -> case pointer left the run dir for a host-only sidecar beside it,
     # `<run_id>.session-pointer.json` in the runs base — named relative to the run dir the way
-    # the tenant record's row is (`run_tree`'s dir is `run-771`). Still a setup writer, still
-    # required to refuse a planted alias at its own name.
-    Writer("write_case_pointer", "../run-771.session-pointer.json", "write_text", "unmeasured",
+    # the retired tenant record's row was (`run_tree`'s dir is `RUN_771`, #1187). Still a setup
+    # writer, still required to refuse a planted alias at its own name.
+    Writer("write_case_pointer", f"../{RUN_771}.session-pointer.json", "write_text", "unmeasured",
            _invoke_case_pointer, "runtime/session_store/_write.py", cite="C1,R4"),
     # #1235: the `budget_enforcer` and `circuit_breaker` rows retired with their artifacts.
     # The budget counters and the breaker live in the run process's memory; nothing writes
@@ -1029,23 +1025,22 @@ CENSUS: tuple[Writer, ...] = (
     # it — the budget is the run's in-memory state — so its row "write_atomic", B4/C3-fix, left.)
     Writer("write_guarded", "report.md", "guarded", "unmeasured",
            _invoke_write_guarded, "_io.py", cite="F1"),
-    # §7 decision 16: a census row for the tenant record's writer, beside the runs base rather
-    # than inside the run dir — the module joins the census-derived hard-gate set for exactly
-    # that reason (its own artifact is outside every box mount, X6-shaped).
-    Writer("tenant_writer", "../_tenant.json", "guarded", "unmeasured",
-           _invoke_tenant_writer, "tenancy/_tenant.py", cite="§7 decision 16"),
-    # #1078 D1: create_tenant's own row, a second tenancy/_tenant.py writer with its own artifact.
+    # (#1187 R1 retired the runs-base record `_tenant.json` and its writer
+    # `ensure_runs_base_record`, so §7 decision 16's `tenant_writer` row left with them;
+    # `_tenant.py` stays in the census-derived hard-gate set through the row's writer below.)
+    # #1078 D1: create_tenant's own row, the _tenant.py writer with its own artifact.
     # Still the guarded idiom since #1137: `Held.write`'s create lane off the held `<T>`, which
     # refuses an alias at the row as `write_guarded`'s did.
-    Writer("tenant_row_writer", "tenant-root/census-tenant/tenant.json", "guarded", "unmeasured",
+    Writer("tenant_row_writer", f"tenant-root/{CENSUS_TENANT}/tenant.json", "guarded", "unmeasured",
            _invoke_tenant_row_writer, "tenancy/_tenant.py", cite="#1078 D1"),
 )
 
 #: The four posture CLASSES X5 measured — the reason F1's "every call site keeps the posture
 #: it has today" is testable at all, and the thing a collapse-to-one-posture implementation
 #: has to break. They are asserted as a SET the census exhibits, never as a per-row
-#: expectation: X5 named four sites, the census has fourteen rows (fifteen until #1235 deleted
-#: `write_atomic`), and assigning a label to the others would be an author's prior standing in
+#: expectation: X5 named four sites, the census has thirteen rows (fifteen until #1235 deleted
+#: `write_atomic`, fourteen until #1187 retired `tenant_writer`), and assigning a label to the
+#: others would be an author's prior standing in
 #: for a measurement.
 POSTURES = ("swallow-continue", "return-none", "return-zero", "fault-startup")
 

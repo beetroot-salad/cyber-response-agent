@@ -39,8 +39,8 @@ def _concrete(template: str, acc: S.Accessor) -> str:
     """The TSV's path template with this suite's own component values substituted in."""
     subs = {
         "<lead>": S.LEAD_ID, "<seq>": str(S.SEQ), "<turn>": str(S.TURN), "<role>": S.ROLE,
-        "<label>": S.LABEL, "<n>": "1",
-        "<stage>": S.STAGE, "<token>": S.WORLD_TOKEN, "<episode_id>": S.EPISODE_ID,
+        "<world UUID>": S.WORLD_ID, "<n>": "1",
+        "<stage>": S.STAGE, "<episode_id>": S.EPISODE_ID,
     }
     out = template.split(",")[0].strip()
     for k, v in subs.items():
@@ -191,7 +191,7 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
 # The session database — RG-4: pin the pattern BY REFERENCE, never re-spell it
 
 def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
-    from defender.runtime.session_store import InvalidCaseId
+    from defender.runtime.session_store._write import InvalidCaseId
     with pytest.raises(InvalidCaseId) as excinfo:
         S.RunPaths(run_dir).session_db(base, lineage)
     return excinfo.value
@@ -200,7 +200,7 @@ def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
 def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_dir):
     """`session_db` refuses a lineage id the case-id pattern rejects, exactly as `store_path_for`
     does today."""
-    from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId, store_path_for
+    from defender.runtime.session_store._write import CASE_ID_RE, InvalidCaseId, store_path_for
     for lineage in ("-leading-dash", "has space", "a/b", "héllo", "..", "_under"):
         assert not CASE_ID_RE.match(lineage), (
             "the pattern is pinned BY REFERENCE at defender/records/_run_id.py (`CASE_ID_RE`) (RG-4); "
@@ -216,26 +216,21 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
 # Decision 12 — composed-identifier collisions
 
 def test_a_component_containing_the_delimiter_is_refused_at_mint_time(episode_dir):
-    """The LABEL carrying the composition's own delimiter is refused at mint time, for
-    `<episode_id>-<label>` and `<episode token>.<label>` alike."""
-    owner = S.EpisodePaths(episode_dir)
-    assert owner.sibling_run_dir(S.EPISODE_ID, "plain").name == f"{S.EPISODE_ID}-plain", (
-        "positive control: a delimiter-free label composes, byte for byte as today (O3)")
+    from defender.episodes._world_label import world_label_fault
+
+    assert world_label_fault("plain") is None, "positive control: a delimiter-free label passes"
     for label in ("has-dash", "a-b"):
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011
-            owner.sibling_run_dir(S.EPISODE_ID, label)
-        assert "-" in str(excinfo.value), (
-            "the refusal names the delimiter the component carries; two distinct pairs "
-            "composing to one sibling run id is what decision 12 closes")
-    # The world token is minted by `_family.world_token_for`; the owner's `served_world` takes
-    # the minted token, so the `.` refusal is asked of the label THERE.
-    from defender.runtime.branch import _family
-    assert owner.served_world(_family.world_token_for("ep.2026", "plain")).name == (
-        "ep.2026.plain.jsonl"), "positive control: a dotted episode TOKEN is the normal case"
+        fault = world_label_fault(label)
+        assert fault is not None, (
+            f"the label rule admitted {label!r}: N8 keeps the view-name rule's `-` refusal")
+        assert "-" in fault, f"the label rule's refusal does not name the delimiter: {fault!r}"
+    owner = S.EpisodePaths(episode_dir)
+    assert owner.served_world(S.WORLD_ID).name == f"{S.WORLD_ID}.jsonl"
     for label in ("has.dot", "a.b"):
-        with pytest.raises(_family.FamilyError) as excinfo:
-            _family.world_token_for("ep.2026", label)
-        assert "." in str(excinfo.value)
+        fault = world_label_fault(label)
+        assert fault is not None
+        assert "." in fault
+
 
 
 def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stability_refusal(
@@ -246,15 +241,14 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
     assert is_case_stable_id("plain"), by_reference
     assert not is_case_stable_id("Plain"), by_reference
 
-    for label in ("Overlay", "OVERLAY", "oVerlay"):
-        with pytest.raises(Exception):  # noqa: B017,PT011
-            owner.sibling_run_dir(S.EPISODE_ID, label)
+    assert owner.world_dir(S.WORLD_ID).name == S.WORLD_ID
+    for label in ("Overlay", "OVERLAY", "oVerlay", S.WORLD_ID.upper()):
         with pytest.raises(Exception):  # noqa: B017,PT011
             owner.world_dir(label)
     with pytest.raises(Exception):  # noqa: B017,PT011
         owner.served_world(f"{S.EPISODE_ID}.Overlay")
     # The session-database path gains the check BESIDE its existing CASE_ID_RE format check.
-    from defender.runtime.session_store import CASE_ID_RE, InvalidCaseId
+    from defender.runtime.session_store._write import CASE_ID_RE, InvalidCaseId
     mixed = "Case-0011223344556677"
     assert CASE_ID_RE.match(mixed), (
         "the format check admits a mixed-case id today (`_run_id.CASE_ID_RE`) — the case-"

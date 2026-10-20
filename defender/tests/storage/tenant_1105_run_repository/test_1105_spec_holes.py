@@ -6,11 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from defender import _io
 from defender.tenancy import _tenant
 from defender import run as run_py
 from defender import run_common
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+#: The fixture's run ids (#1187 declared change 1), named by their old handles.
+R1, R2 = fixture_uuid("spec-holes-r1"), fixture_uuid("spec-holes-r2")
 
 
 def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
@@ -23,7 +26,7 @@ def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
     return t
 
 
-def _listings(t, run_id: str = "r1"):
+def _listings(t, run_id: str = R1):
     """The repository methods that judge the whole runs folder's listing (PR 1's `list_run_ids`;
     `bound_runs` is gone, #1105 PR 2; `run_exists` is gone, #1105 PR 2 review)."""
     return [
@@ -31,17 +34,13 @@ def _listings(t, run_id: str = "r1"):
     ]
 
 
-def _every_function(t, *, run_id: str = "r1", episode_id: str = "ep9"):
-    from defender.run_repository import (
-        RunId, episode_runs, record_episode_runs, sibling_run_ids,
-    )
+def _every_function(t, *, run_id: str = R1):
+    """Every lookup over the natural container. #1187 (R6, D-del): `record_episode_runs`,
+    `episode_runs` and `sibling_run_ids` are deleted with the `_episodes` record."""
+    from defender.run_repository import RunId
 
     return [*_listings(t, run_id),
-            ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id))),
-            ("record_episode_runs", lambda: record_episode_runs(
-                t, episode_id, RunId.parse(run_id), {"a": RunId.parse(f"{episode_id}-a")})),
-            ("episode_runs", lambda: episode_runs(t, "ep")),
-            ("sibling_run_ids", lambda: sibling_run_ids(t))]
+            ("runs.open", lambda: t.runs_repository().open(RunId.parse(run_id)))]
 
 
 def _one_line_exit(err: BaseException | None) -> bool:
@@ -65,9 +64,9 @@ def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anyt
         H.make_fifo(runs)
     else:
         os.symlink(tmp_path / "nowhere", runs)
-    err = H.raised(run_common.materialize_run, alert, "r1", tenant=t)
+    err = H.raised(run_common.materialize_run, alert, R1, tenant=t)
     assert isinstance(err, _tenant.TenantRefused), f"{kind}: materialize_run raised {err!r}"
-    err = H.raised(run_py._materialize_run, alert, "r1", tenant=t, model=None)
+    err = H.raised(run_py._materialize_run, alert, R1, tenant=t, model=None)
     assert H.message(err).startswith("[run.py] "), f"{kind}: run.py gave {err!r}"
     assert not isinstance(err, OSError), f"{kind}: a raw OSError escaped: {err!r}"
     assert os.path.lexists(runs), f"{kind}: run setup removed it"
@@ -78,33 +77,6 @@ def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anyt
 # -- B1: readers over a linked or file `_episodes` ---------------------------------------------
 
 
-@pytest.mark.parametrize("kind", ["link", "file"])
-def test_1105_every_reader_refuses_a_linked_or_file_episodes(tmp_path, data_root, kind):
-    from defender.run_repository import RunRefused, episode_sibling_ids, sibling_run_ids
-
-    t = _good(tmp_path, "r0", "ep-a")
-    runs = Path(t.runs)
-    if kind == "link":
-        outside = tmp_path / "outside-runs"
-        H.plant_record(outside, "ep", t.id, "r0", {"a": "ep-a", "b": "ep-b"})
-        os.symlink(outside / "_episodes", runs / "_episodes")
-    else:
-        (runs / "_episodes").write_text("{}\n", encoding="utf-8")
-    readers = [("runs.list", lambda: t.runs_repository().list()),
-               ("sibling_run_ids", lambda: sibling_run_ids(t))]
-    for name, call in readers:
-        err = H.raised(call)
-        assert H.is_a(err, RunRefused), f"{kind} _episodes: {name} answered or raised {err!r}"
-        assert "_episodes" in H.message(err), f"{name}'s refusal does not name _episodes: {err!r}"
-    with _io.hold(runs, follow=False) as held:
-        err = H.raised(episode_sibling_ids, held.view())
-    assert H.is_a(err, RunRefused), f"{kind} _episodes: episode_sibling_ids gave {err!r}"
-    assert "_episodes" in H.message(err), f"the path-only refusal does not name it: {err!r}"
-
-    alert = H.alert_file(tmp_path / "in")
-    err = H.raised(run_common.materialize_run, alert, "ep-b", tenant=t)
-    assert _one_line_exit(err), f"{kind} _episodes: run setup gave {err!r}"
-    assert not (runs / "ep-b").exists(), "run setup created a run the broken record folder hid"
 
 
 # -- B2: every function over a file or FIFO at tenant.runs -------------------------------------
@@ -137,13 +109,13 @@ def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind)
 def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
     from defender.run_repository import RunId, RunRefused
 
-    t = _good(tmp_path, "r1")
-    entry = Path(t.runs) / "r2"
+    t = _good(tmp_path, R1)
+    entry = Path(t.runs) / R2
     if kind == "file":
         entry.write_text("x\n", encoding="utf-8")
     else:
         H.make_fifo(entry)
-    err = H.raised(t.runs_repository().open, RunId.parse("r2"))
+    err = H.raised(t.runs_repository().open, RunId.parse(R2))
     assert H.is_a(err, RunRefused), f"a {kind} at r2: runs.open gave {err!r}"
     assert str(entry) in H.message(err), f"the refusal does not name {entry}: {err!r}"
 
@@ -159,7 +131,7 @@ def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
 def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tmp_path, name):
     from defender.run_repository import RunRefused
 
-    t = _good(tmp_path, "r1")
+    t = _good(tmp_path, R1)
     (Path(t.runs) / name).write_text("{}\n", encoding="utf-8")
     for fn, call in _listings(t):
         err = H.raised(call)
@@ -170,13 +142,14 @@ def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tm
 @pytest.mark.parametrize("kind", ["link", "fifo"])
 def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_path, kind):
     """A link and a FIFO named `r1.run-end.json` beside run r1: runs.list raises RunRefused
-    naming it. A known sidecar is a REGULAR file (rev 4.1)."""
+    naming it. A known sidecar is a REGULAR file (rev 4.1). (#1187: r1 is a uuid, so the name
+    is a real sidecar name and the refusal is the entry KIND's, not the id rule's.)"""
     from defender.run_repository import RunRefused
 
-    t = _good(tmp_path, "r1")
-    entry = Path(t.runs) / "r1.run-end.json"
+    t = _good(tmp_path, R1)
+    entry = Path(t.runs) / f"{R1}.run-end.json"
     if kind == "link":
-        os.symlink(Path(t.runs) / "r1" / "alert.json", entry)
+        os.symlink(Path(t.runs) / R1 / "alert.json", entry)
     else:
         H.make_fifo(entry)
     for fn, call in _listings(t):
@@ -185,32 +158,7 @@ def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_pat
         assert entry.name in H.message(err), f"{fn}'s refusal does not name it: {err!r}"
 
 
-# -- D1 and D2: lone surrogates --------------------------------------------------------------
-
-
-def test_1105_a_json_escaped_lone_surrogate_makes_a_record_corrupt(tmp_path):
-    from defender.run_repository import (
-        RunRefused, episode_runs, episode_sibling_ids, sibling_run_ids,
-    )
-
-    t = _good(tmp_path, "r0")
-    runs = Path(t.runs)
-    raw_label = ('{"episode_id": "ep", "runs": {"\\ud800": "ep-a"}, "source_run_id": "r0", '
-                 f'"tenant_id": "{t.id}"}}')
-    H.plant_record(runs, "ep", t.id, "r0", {}, raw=raw_label)
-    for name, call in [("episode_runs", lambda: episode_runs(t, "ep")),
-                       ("sibling_run_ids", lambda: sibling_run_ids(t))]:
-        err = H.raised(call)
-        assert H.is_a(err, RunRefused), f"an escaped surrogate label: {name} gave {err!r}"
-        assert "ep.json" in H.message(err), f"{name}'s refusal does not name the file: {err!r}"
-
-    raw_tenant = ('{"episode_id": "ep", "runs": {"a": "ep-a"}, "source_run_id": "r0", '
-                  '"tenant_id": "\\ud800"}')
-    H.plant_record(runs, "ep", t.id, "r0", {}, raw=raw_tenant)
-    with _io.hold(runs, follow=False) as held:
-        err = H.raised(episode_sibling_ids, held.view())
-    assert H.is_a(err, RunRefused), f"an escaped surrogate tenant_id: path-only reader {err!r}"
-    assert "ep.json" in H.message(err), f"the path-only refusal does not name the file: {err!r}"
+# -- D2: lone surrogates (D1 retired by #1187 R6) ------------------------------------------
 
 
 def test_1105_a_surrogate_escaped_run_id_is_refused_not_a_raw_encoding_error(tmp_path,
@@ -227,17 +175,3 @@ def test_1105_a_surrogate_escaped_run_id_is_refused_not_a_raw_encoding_error(tmp
 
 
 # -- E: the tenant record is judged before the listing -----------------------------------------
-
-
-def test_1105_a_foreign_record_beside_an_odd_entry_refuses_on_the_record(tmp_path):
-    t = _good(tmp_path, "r1")
-    runs = Path(t.runs)
-    H.plant_tenant_record(runs, H.U_ID)
-    odd = "Beta Legacy Case 7"
-    (runs / odd).mkdir()
-    for fn, call in _listings(t):
-        err = H.raised(call)
-        assert H.is_a(err, _tenant.TenantRefused), f"{fn} gave {err!r}"
-        text = H.message(err)
-        assert "_tenant.json" in text, f"{fn}'s refusal does not name the record: {err!r}"
-        assert odd not in text, f"{fn}'s refusal carries the folder's entry: {err!r}"

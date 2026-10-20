@@ -1,11 +1,9 @@
 """#921 — where the judge runs, what it is triggered by, and what it leaves behind."""
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
-from defender.episodes import _episode_handle as EH
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.core import _state1135
@@ -41,14 +39,9 @@ _EMPTY: dict = {"rows": []}
 
 class _LazySibling(J.FakeSibling):
     """`J.FakeSibling`, its episode directory resolved when the launcher first starts a child
-    (the launcher names the directory; the test does not)."""
-
-    def __init__(self) -> None:
-        super().__init__(Path("/nonexistent-until-launch"))
-
-    def __call__(self, argv, *, env=None, **kw):
-        self.episode_dir = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-        return super().__call__(argv, env=env, **kw)
+    (the launcher names the directory; the test does not). #1187: `J.FakeSibling` itself now
+    finds the episode from each child's `--tenant` and `--episode` (the launcher mints the id),
+    so this is the plain double, kept under its name for the scenarios that construct it."""
 
 
 def _launch_judge() -> J.FakeJudge:
@@ -176,12 +169,21 @@ def test_921_both_episode_write_sinks_go_through_write_guarded(tmp_path):
 
     # The per-draw sink, same guarantee, same refusal.
     (ep / "judge.yaml").unlink()
-    draw_dir = ep / "worlds" / "b" / "judge"
+    draw_dir = ep / "worlds" / T.world_id(ep, "b") / "judge"
     draw_dir.mkdir(parents=True, exist_ok=True)
     (draw_dir / "0.yaml").symlink_to(outside)
     with pytest.raises(J.refusals()):
         J.grade_at(
             ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+    assert outside.read_text(encoding="utf-8") == "untouched\n"
+
+    # POSITIVE CONTROL, same episode, same channel: with neither link the same grade lands both
+    # sinks as plain files — so each refusal above was the link's, not the episode failing to
+    # open at all (which a bare `pytest.raises(J.refusals())` would also accept; #1187 sweep).
+    (draw_dir / "0.yaml").unlink()
+    J.grade_at(ep, judge=J.FakeJudge(default=J.as_reply_text(J.reply_doc())), state=env_state())
+    assert (ep / "judge.yaml").is_file(), "control: the unlinked grade wrote no judge.yaml"
+    assert not (ep / "judge.yaml").is_symlink(), "control: judge.yaml is not a plain file"
     assert outside.read_text(encoding="utf-8") == "untouched\n"
 
 
@@ -230,7 +232,7 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
 
     ep = J.accepted_episode(tmp_path)
     # One lead whose joined payload cannot fit the cap, through the real archived artifact.
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / T.world_id(ep, "b")
     (world / "gather_summaries" / "l-001.md").write_text(
         "x" * 4000 + "\nTAIL-OF-THE-OVERSIZED-LEAD\n", encoding="utf-8")
 
@@ -251,12 +253,10 @@ def test_921_the_three_knobs_are_resolved_once_and_an_oversized_lead_is_truncate
         "judge and to the reader of its reply")
     assert "l-001" in prompt, "the truncated lead vanished from the view entirely"
 
-    from defender._io import bind
 
     layout = J.mod("learning.judge.layout")
-    with bind(ep) as bound:
-        manifest = J.mod("learning.judge.family").read_manifest(bound)
-    ctx = J.mod("learning.judge.render").render(ep, "b", payload_cap=3000)
+    manifest = J.read_manifest_at(ep)
+    ctx = J.render_at(ep, "b", payload_cap=3000)
     blocks = [block for _title, section in layout.world_layout(ctx, manifest).sections
               for block in section]
     charged = sum(layout._block_cost(block) for block in blocks

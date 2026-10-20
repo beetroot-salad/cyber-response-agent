@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-from defender.episodes import _episode_handle as EH
 from defender.records import _provenance
 from defender.episodes._episode_handle import Episode
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -58,7 +57,8 @@ def _verify(tmp_path: Path, name: str, *, source: dict,
             allow_dirty: bool = False, reverse: bool = False) -> tuple[dict, dict | None]:
     """`verify_family` over three REAL sibling stamp files (`T.sibling_run_dir`, each with the
     overrides `siblings[label]` names) against `source`."""
-    ep = T.episode(tmp_path, root=tmp_path / "episodes" / name)
+    ep = T.episode(tmp_path / name)
+    T.plant_roster(ep)
     for w in T.WORLDS:
         T.sibling_run_dir(ep / "runs", w, **(siblings or {}).get(w, {}))
     labels = list(reversed(T.WORLDS)) if reverse else list(T.WORLDS)
@@ -254,8 +254,7 @@ def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incompl
         tmp_path, argv, caplog):
     """O2 end to end, the authority tier."""
     T.runs_base(tmp_path)
-    episode_dir = EH.episode_dir(T.current_tenant().data_root, T.EPISODE_ID)
-    launch = A._prepare(tmp_path, spawn=J.FakeSibling(episode_dir, knowledge={"commit": K2}))
+    launch = A._prepare(tmp_path, spawn=J.FakeSibling(knowledge={"commit": K2}))
     assert launch.run(*argv) == 0, "the exit is about the launch; the outcome is the family's"
     assert launch.questioner.calls > 0, "the launch was refused at preflight instead"
     assert sorted(launch.spawn.worlds) == list(T.WORLDS)
@@ -397,9 +396,9 @@ D4 = {
     "model": "constant",
     "dirty": "dedicated", "tenant_id": "dedicated",
     "dirty_paths": "informational", "dirty_path_count": "informational",
-    "unavailable": "informational",
+    "unavailable": "informational", "alert_label": "informational",
     "world_id": "expected_to_differ", "parent_run_id": "expected_to_differ",
-    "fork_turn": "expected_to_differ",
+    "fork_turn": "expected_to_differ", "started_at": "expected_to_differ",
 }
 CLASSES = {"anchored", "constant", "dedicated", "informational", "expected_to_differ"}
 
@@ -436,7 +435,8 @@ def test_1204_each_anchored_and_constant_field_is_compared_through_verify_family
 
 def test_1204_fields_expected_to_differ_or_informational_are_not_compared(tmp_path):
     """O3/D4, the other half."""
-    ep = T.episode(tmp_path, root=tmp_path / "episodes" / "lineage")
+    ep = T.episode(tmp_path / "lineage")
+    T.plant_roster(ep)
     dirs = [T.sibling_run_dir(ep / "runs", w) for w in T.WORLDS]
     for turn, d in enumerate(dirs, start=1):
         doc = {**T.provenance_record(), "world_id": f"{T.EPISODE_ID}.{d.name[-1]}",

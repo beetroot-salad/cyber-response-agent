@@ -1,5 +1,6 @@
 """run_common.materialize_run: the runs base follows from the tenant; record mismatch, torn record, missing row and sibling-base refusals."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
@@ -12,11 +13,12 @@ from typing import Any
 
 import pytest
 
-from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 from defender.episodes._episode_handle import Episode  # noqa: E402
 
 T_ID = H.VALID_ID
+R1 = fixture_uuid("r1")
+X = fixture_uuid("case-x")
 
 
 def _materialize(alert: Path, run_id: str | None, tenant_id: str, **kw):
@@ -80,13 +82,14 @@ def _golden_alert(tmp_path: Path) -> Path:
 
 
 def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
-    """A pass-(A) episode (under the OLD episodes base, outside the data root) whose manifest
-    names a source at T's tenant location, and the `ResumeWorld` a sibling resolves from it.
-    `family` passes through to `H.family_for` (#1105 PR 2: the container the launcher makes
-    with T's record is planted unless `container=None`)."""
+    """An episode at `<root>/<T>/episodes/<uuid>` (#1187 Layout A) whose manifest names a
+    source at T's tenant location, and the `ResumeWorld` a sibling resolves from it. `family`
+    passes through to `H.family_for` (#1187 R2: the episode as RUNS leaves it — `runs/` and the
+    arm roster — unless `roster=False`). No container record (R1)."""
+    del tmp_path
     _base, src = H.tenant_source(root, T_ID, row=False)
-    ep = tmp_path / "episodes" / T.EPISODE_ID
-    manifest = H.family_for(src, ep, **family)
+    manifest = H.family_for(src, **family)
+    ep = manifest.parent
     world = H.run_py().resume_world(
         Episode.open(manifest.parent), label,
         tenant=lambda: H.T1106.run_tenant(H.accept(root, T_ID)))
@@ -94,19 +97,20 @@ def _sibling_world(tmp_path: Path, root: Path, label: str = "b", **family: Any):
 
 
 def test_o4_materialize_layout(tmp_path, tenant_root):
-    run_dir = _materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID)
-    expected = tenant_root / T_ID / "runs" / "r1"
+    import uuid
+
+    pinned = str(uuid.uuid4())
+    run_dir = _materialize(H.plant_alert(tmp_path / "in"), pinned, T_ID)
+    expected = tenant_root / T_ID / "runs" / pinned
     assert Path(run_dir) == expected
     assert expected.is_dir()
-    record = json.loads((tenant_root / T_ID / "runs" / H.RECORD_NAME).read_text(encoding="utf-8"))
-    assert record["tenant_id"] == T_ID
+    assert not (tenant_root / T_ID / "runs" / H.RECORD_NAME).exists(), (
+        "run setup wrote the retired runs-base record")
     assert _stamp(expected)["tenant_id"] == T_ID
 
 
 def test_o4_run_store_location(tmp_path, tenant_root):
-    """A fresh run under <root>/T/runs/ keeps its session store at
-    <root>/T/sessions/<case>.db."""
-    run_dir = Path(_materialize(_golden_alert(tmp_path), "r1", T_ID))
+    run_dir = Path(_materialize(_golden_alert(tmp_path), R1, T_ID))
     _replay(run_dir)
     store = H.mod("runtime.session_store").resolve_store_path(_run_handle_1165(run_dir))
     assert store.parent == tenant_root / T_ID / "sessions", f"the store is at {store}"
@@ -115,10 +119,8 @@ def test_o4_run_store_location(tmp_path, tenant_root):
 
 
 def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
-    """A materialize writes nothing into <root>/T/ beside runs/ except sessions/, and the
-    tenant.json there exists because setup wrote it."""
     row_bytes = H.row_path(tenant_root, T_ID).read_bytes()
-    run_dir = Path(_materialize(_golden_alert(tmp_path), "r1", T_ID))
+    run_dir = Path(_materialize(_golden_alert(tmp_path), R1, T_ID))
     # `knowledge/` is the operator's (#1120 DC2: placed before setup), never materialize's.
     assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "knowledge", "runs"]), (
         "materialize wrote beside runs/")
@@ -134,46 +136,18 @@ def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
     root.mkdir()
     H.set_data_root(monkeypatch, root)
     alert = H.plant_alert(tmp_path / "in")
-    text = _refused(lambda: _materialize(alert, "r1", T_ID))
+    text = _refused(lambda: _materialize(alert, R1, T_ID))
     H.assert_verbatim(text, H.owner_refusal(H.require_tenant, root, T_ID),
                       entry="materialize_run")
     assert H.entries(root) == [], "the refused materialize created something"
 
     H.make_tenant(root, T_ID)
     row_bytes = H.row_path(root, T_ID).read_bytes()
-    _materialize(alert, "r1", T_ID)
+    _materialize(alert, R1, T_ID)
     assert H.row_path(root, T_ID).read_bytes() == row_bytes
 
 
-def test_o6_record_mismatch_refused(tmp_path, tenant_root):
-    base = tenant_root / T_ID / "runs"
-    record = H.plant_record(base, "someone-else")
-    before = record.read_bytes()
-    text = _refused(lambda: _materialize(H.plant_alert(tmp_path / "in"), "r1", T_ID))
-    H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                      entry="materialize_run")
-    assert record.read_bytes() == before, "the disagreeing record was relabelled"
-    assert H.entries(base) == [H.RECORD_NAME], "the refused materialize created a run dir"
-
-
-@pytest.mark.parametrize("body", ["", '{"tenant_id": "playgr'], ids=["empty", "truncated"])
-def test_torn_runs_base_record_under_the_tenant(tmp_path, tenant_root, body):
-    base = tenant_root / T_ID / "runs"
-    record = H.plant_record(base, T_ID, body=body)
-    alert = H.plant_alert(tmp_path / "in")
-    for run_id in ("r1", "r2"):
-        text = _refused(lambda rid=run_id: _materialize(alert, rid, T_ID))
-        H.assert_verbatim(text, H.owner_refusal(H.ensure_runs_base_record, base, T_ID),
-                          entry="materialize_run")
-        assert record.read_bytes() == body.encode("utf-8"), "the torn record was re-minted"
-    record.unlink()
-    _materialize(alert, "r3", T_ID)
-    assert json.loads(record.read_text(encoding="utf-8"))["tenant_id"] == T_ID
-
-
 def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
-    """The row is checked once, at step 1; a row removed after it does not stop the later
-    steps (no re-check within the call)."""
     row = H.row_path(tenant_root, T_ID)
     fired: list[str] = []
 
@@ -187,49 +161,47 @@ def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
     previous = sys.getprofile()
     sys.setprofile(hook)
     try:
-        run_dir = Path(_materialize(alert, "r1", T_ID))
+        run_dir = Path(_materialize(alert, R1, T_ID))
     finally:
         sys.setprofile(previous)
     assert fired, "the pipeline never ran defender.tenancy._tenant.accept_tenant (D2 step 1)"
     assert not row.exists()
-    assert run_dir == tenant_root / T_ID / "runs" / "r1"
+    assert run_dir == tenant_root / T_ID / "runs" / R1
     assert run_dir.is_dir()
     assert _stamp(run_dir)["tenant_id"] == T_ID
 
 
 def test_d2_sibling_runs_base(tmp_path, tenant_root):
-    src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b", container=None)
+    src, ep, world_b = _sibling_world(tmp_path, tenant_root, "b")
     world_c = H.run_py().resume_world(
         Episode.open(ep), "c", tenant=lambda: H.T1106.run_tenant(H.accept(tenant_root, T_ID)))
+    arm_b, arm_c = H.T.roster_arm_id(ep, H.T.world_id(ep, "b")), H.T.roster_arm_id(ep, H.T.world_id(ep, "c"))
     alert = RunPaths(src).alert
     with Episode.open(ep) as episode:
         view = H.accept(tenant_root, T_ID).runs_repository().episode(ep.name, held=episode)
-        assert view.state == "absent"
-        _refused(lambda: _materialize(alert, world_b.run_id, T_ID, world=world_b,
-                                      episode_runs=view))
-        assert not (ep / "runs").exists(), "a sibling's run setup made the episode container"
-        view.create_container()
-        record_path = ep / "runs" / H.RECORD_NAME
-        minted = json.loads(record_path.read_text(encoding="utf-8"))
-        rb = Path(_materialize(alert, world_b.run_id, T_ID, world=world_b, episode_runs=view))
-        rc = Path(_materialize(alert, world_c.run_id, T_ID, world=world_c, episode_runs=view))
-    assert rb == ep / "runs" / world_b.run_id
-    assert rc == ep / "runs" / world_c.run_id
-    assert minted["tenant_id"] == T_ID
-    assert json.loads(record_path.read_text(encoding="utf-8")) == minted, "the record changed"
-    assert _stamp(rb)["world_id"] in (None, H.mod("tenancy._tenant").read_tenant(src.parent).base_world_id)
-    # #1235 F2: the source run's case link is a host sidecar beside its run dir.
+        rb = Path(_materialize(alert, arm_b, T_ID, world=world_b, episode_runs=view))
+        rc = Path(_materialize(alert, arm_c, T_ID, world=world_c, episode_runs=view))
+    assert rb == ep / "runs" / arm_b
+    assert rc == ep / "runs" / arm_c
+    assert _stamp(rb).get("world_id") is None
+    assert _stamp(rc).get("world_id") is None
+    assert not (ep / "runs" / H.RECORD_NAME).exists()
     assert H.entries(tenant_root / T_ID / "runs") == sorted(
-        [H.RECORD_NAME, src.name, RunPaths(src).session_pointer().name])
+        [src.name, RunPaths(src).session_pointer().name])
 
 
 def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_root):
-    src, ep, world = _sibling_world(tmp_path, tenant_root, "b", monkeypatch=monkeypatch)
+    src, ep, world = _sibling_world(tmp_path, tenant_root, "b")
     alert = RunPaths(src).alert
+    # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
+    # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
+    arm_id = H.T.roster_arm_id(ep, H.T.world_id(ep, "b"))
     argv = H.sibling_argv(ep / "family.yaml", "b", "--tenant", T_ID)
     with Episode.open(ep) as episode:
+        # #1187 (O4b): the sibling's form requires its UUID roster (`require_roster=True`, replacing
+        # PR 2's `container_required`).
         view = H.accept(tenant_root, T_ID).runs_repository().episode(
-            ep.name, held=episode, container_required=True)
+            ep.name, held=episode, require_roster=True)
         for n, learning in enumerate((tenant_root, tenant_root / T_ID / "learning", tmp_path)):
             monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(learning))
             widened = H.owner_refusal(H.resolve_data_root)
@@ -237,31 +209,29 @@ def test_s7_j24_widened_refusal_on_sibling_path(tmp_path, monkeypatch, tenant_ro
             assert refused is not None, "the sibling's entry accepted a widened learning root"
             H.assert_verbatim(H.refusal_text(refused), widened,
                               entry="the sibling's entry (run.py --episode)")
-            text = _refused(lambda: _materialize(alert, world.run_id, T_ID, world=world,
+            text = _refused(lambda: _materialize(alert, arm_id, T_ID, world=world,
                                                  episode_runs=view))
             H.assert_verbatim(text, widened, entry="the sibling's materialize_run")
-            assert not (ep / "runs" / world.run_id).exists()
+            assert not (ep / "runs" / arm_id).exists()
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR",
                            str(tmp_path.parent / "elsewhere-learning"))
         rc, refused = H.drive_main(argv, H.Recorder(tmp_path / "sib-ok"))
         assert refused is None, H.refusal_text(refused)
         assert rc == 0, rc
-        assert Path(_materialize(alert, world.run_id, T_ID, world=world,
+        assert Path(_materialize(alert, arm_id, T_ID, world=world,
                                  episode_runs=view)).is_dir()
 
 
 def test_o6_old_run_id_fresh_under_tenant(tmp_path, monkeypatch, tenant_root):
-    """--run-id X --tenant T while an old run X sits in another base materializes a fresh
-    <root>/T/runs/X and leaves the old X untouched."""
     old = tmp_path / "defender-runs"
     H.plant_record(old, "default")
-    (old / "x").mkdir()
-    (old / "x" / "report.md").write_text("an old-layout run\n", encoding="utf-8")
-    (old / "x" / "alert.json").write_text('{"old": true}\n', encoding="utf-8")
+    (old / X).mkdir()
+    (old / X / "report.md").write_text("an old-layout run\n", encoding="utf-8")
+    (old / X / "alert.json").write_text('{"old": true}\n', encoding="utf-8")
     monkeypatch.setenv("DEFENDER_RUNS_BASE", str(old))
     before = H.census(old)
-    run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), "x", T_ID))
-    assert run_dir == tenant_root / T_ID / "runs" / "x"
+    run_dir = Path(_materialize(H.plant_alert(tmp_path / "in"), X, T_ID))
+    assert run_dir == tenant_root / T_ID / "runs" / X
     paths = H.mod("run_repository._layout").RunPaths(run_dir)
     assert set(os.listdir(run_dir)) == {paths.alert_input_dir.name, paths.gather_raw.name,
                                         paths.provenance.name}, "not a fresh setup"

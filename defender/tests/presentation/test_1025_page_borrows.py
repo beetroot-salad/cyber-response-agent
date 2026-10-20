@@ -97,7 +97,7 @@ def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp
     bound = E.mod("_io").bind(ep.dir)
     report = ep.world(E.GRADED_WORLD) / "report.md"
     with _restoring([report], 0):
-        got = family.read_archived_report(bound, f"worlds/{E.GRADED_WORLD}/report.md")
+        got = family.read_archived_report(bound, f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md")
     assert got.disposition is None
     assert "Permission denied" in got.reason, got.reason
     assert "aliased" not in got.reason, got.reason
@@ -107,7 +107,7 @@ def test_1025_an_unreadable_report_md_is_named_as_unreadable_not_as_an_alias(tmp
     link = ep.world(E.PASSTHROUGH_WORLD) / "report.md"
     link.unlink()
     link.symlink_to(target)
-    got = family.read_archived_report(bound, f"worlds/{E.PASSTHROUGH_WORLD}/report.md")
+    got = family.read_archived_report(bound, f"worlds/{T.fixture_world_id(E.PASSTHROUGH_WORLD)}/report.md")
     assert got.disposition is None
     assert got.reason.count("non-plain or aliased") == 1, got.reason
 
@@ -116,14 +116,14 @@ def test_1025_the_ledgers_malformed_row_count_is_the_judges_own(tmp_path):
     """A parseable ledger row whose `source` is outside the ledger's vocabulary is malformed to
     `read_world_facts` (p7."""
     ep = E.sample_episode(tmp_path)
-    ledger = ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl"
+    ledger = ep.dir / "served" / f"{T.fixture_world_id(E.GRADED_WORLD)}.jsonl"
     bogus = J.ledger_row(source="passthrough", world_label=E.GRADED_WORLD)
     bogus["source"] = "bogus-word"
     with ledger.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(bogus) + "\n")
     family = E.mod("learning.judge.family")
     facts = family.read_world_facts(E.mod("_io").bind(ep.dir), E.GRADED_WORLD,
-                                    episode_token=E.EPISODE_TOKEN)
+                                    world_id=T.world_id(ep.dir, E.GRADED_WORLD))
     assert facts.malformed_rows == 1
     block = render(ep).text_of(f"leads-{E.GRADED_WORLD}")
     assert "1 malformed row" in block, block
@@ -134,10 +134,10 @@ def test_1025_read_world_facts_refuses_an_absent_ledger_on_every_path(tmp_path):
     bare `render.render(..., facts=None)` path — which has no."""
     family = E.mod("learning.judge.family")
     ep = E.sample_episode(tmp_path)
-    (ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl").unlink()
+    (ep.dir / "served" / f"{T.fixture_world_id(E.GRADED_WORLD)}.jsonl").unlink()
     with pytest.raises(J.sym("learning.judge", "JudgeRefused"), match="ledger"):
         family.read_world_facts(E.mod("_io").bind(ep.dir), E.GRADED_WORLD,
-                                episode_token=E.EPISODE_TOKEN)
+                                world_id=T.world_id(ep.dir, E.GRADED_WORLD))
     block = render(ep).text_of(f"leads-{E.GRADED_WORLD}")
     assert "absent" in block, block
 
@@ -189,7 +189,7 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
     judge = E.mod("learning.judge")
     enqueue = E.mod("learning.judge.enqueue")
     ep = E.sample_episode(tmp_path)
-    grade = judge.read_grade(ep.dir)
+    grade = E.J.read_grade_at(ep.dir)
     assert grade.dispositions == E.sample_dispositions()
     assert grade.dispositions[0] == enqueue.disposition_entry(
         E.finding_id(E.PASSTHROUGH_WORLD, 0, 0), enqueue.LANE_DEFENDER)
@@ -197,12 +197,12 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
     doc = E.sample_grade()
     del doc["dispositions"]
     E.write_judge(ep.dir, doc)
-    assert judge.read_grade(ep.dir).dispositions is None
+    assert E.J.read_grade_at(ep.dir).dispositions is None
 
     doc = E.sample_grade()
     doc["dispositions"] = []
     E.write_judge(ep.dir, doc)
-    assert judge.read_grade(ep.dir).dispositions == []
+    assert E.J.read_grade_at(ep.dir).dispositions == []
 
     for bad in ({"finding_id": E.finding_id(E.GRADED_WORLD, 0, 0), "lane": "teleported"},
                 {"lane": "defender", "reason": None}):
@@ -210,7 +210,7 @@ def test_1025_the_ledger_is_on_the_record_and_read_back_validated(tmp_path):
         doc["dispositions"].append(bad)
         E.write_judge(ep.dir, doc, check=False)
         with pytest.raises(judge.JudgeRefused, match="ledger entry"):
-            judge.read_grade(ep.dir)
+            E.J.read_grade_at(ep.dir)
     render_text = render(ep).text_of("sec-verdict")
     assert "grade record unreadable" in render_text, render_text
 

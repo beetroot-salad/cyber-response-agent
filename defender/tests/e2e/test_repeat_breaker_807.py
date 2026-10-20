@@ -11,6 +11,7 @@ import pytest
 pytest.importorskip("pydantic_ai")
 
 from defender._io import append_jsonl, read_jsonl_rows  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
 from defender.learning import lead_repository  # noqa: E402
 from defender.learning.leads import lead_extraction  # noqa: E402
@@ -154,7 +155,7 @@ def _run(
 
 #: The planted source's run folder name (`_branch_947.planted_source`'s `name=`), so the table
 #: can be written into it before the source is built.
-SOURCE_RUN = "run-source-001"
+SOURCE_RUN = fixture_uuid("run-source-001")
 
 
 def _run_inherited(
@@ -189,7 +190,8 @@ def _run_inherited(
     # pre-#1255 shape branched at. The source is hand-planted (`planted_source`, not N4's).
     spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
     store.close()
-    sibling = root / "defender-runs" / "run-sibling-807"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    sibling = root / "defender-runs" / fixture_uuid("run-sibling-807")
     RunPaths(sibling).gather_raw.mkdir(parents=True)
     from defender.tests.support.storage._alert_plant import plant_alert
     plant_alert(sibling, RunPaths(source).alert.read_bytes())

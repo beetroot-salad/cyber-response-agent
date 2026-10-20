@@ -5,6 +5,7 @@ from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 
 from defender.tests.support.shared.contracts._by_path import DEFENDER, load_module
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import pytest
 
@@ -200,9 +201,10 @@ def _bare_run(tmp_path, name: str = "run"):
     from defender.run_repository import RunPaths
     from defender.runtime.run_state import RunState
 
-    run_dir = tmp_path / name
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid(name)
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
-    return run_dir, RunState(run_dir, name)
+    return run_dir, RunState(run_dir, run_dir.name)
 
 
 def _append(rq, state, *, params, payload=_PAYLOAD, lead=LEAD):

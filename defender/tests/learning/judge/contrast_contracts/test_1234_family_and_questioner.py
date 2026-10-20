@@ -57,7 +57,7 @@ def _b_with_blocked_calls() -> list[S.CallRow]:
 
 def _asks(judge: S.RoutedJudge, label: str) -> list[tuple[Any, Any, int]]:
     """`(label, draw, attempt)` of every model call the fake recorded for `label`, in order."""
-    return [S.parse_agent_id(a) for a in judge.calls_for(label)]
+    return [judge.coordinate(a) for a in judge.calls_for(label)]
 
 
 def _ids(rows: list[dict]) -> list[str]:

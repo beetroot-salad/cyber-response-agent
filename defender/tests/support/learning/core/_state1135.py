@@ -48,34 +48,38 @@ def state_for_paths(paths) -> LearningState:
 # A curation row is a natural run's address, `{case_id, tenant_id, run_id}`, and the lead-author
 # drain rehydrates it by accepting the tenant under the data root it resolves and opening the run
 # through that tenant's repository. So a fixture plants the run where a real one lives
-# (`<data root>/<T>/runs/<run_id>`, T a real tenant, the runs folder carrying its tenant record),
-# and derives the row from that location: a planted run and the row naming it cannot disagree.
+# (`<data root>/<T>/runs/<run_id>`, T a real tenant), and derives the row from that location: a
+# planted run and the row naming it cannot disagree. #1187: the runs folder holds no
+# `_tenant.json` (R1), and the run's id is a uuid4 (`RunId` admits nothing else, declared change
+# 1) — a test names its run by a LABEL, and the id is `fixture_uuid(label)`.
 
 
-def curation_run_dir(run_id: str, *, tenant_id: str | None = None) -> Path:
-    """`<data root>/<T>/runs/<run_id>`, made, under the test's own data root (the autouse
-    `data_root` fixture's): T (D9's tenant unless named) set up through the real `create_tenant`
-    and its runs folder's tenant record ensured, as run setup leaves them."""
-    from defender.tenancy._tenant import ensure_runs_base_record
+def curation_run_dir(label: str, *, tenant_id: str | None = None) -> Path:
+    """`<data root>/<T>/runs/<fixture_uuid(label)>`, made, under the test's own data root (the
+    autouse `data_root` fixture's): T (D9's tenant unless named) set up through the real
+    `create_tenant`, as run setup leaves it. `label` is the test's readable handle for the run;
+    the run's id — the folder's name, and the row's `run_id` — is the uuid4 derived from it
+    (`_fixture_uuid.fixture_uuid`), so one label names one run in every call."""
     from defender.tests.support.shared.contracts._data_root_1078 import D9_TENANT_ID, current_data_root, ensure_d9_tenant
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
     tenant_id = tenant_id or D9_TENANT_ID
     ensure_d9_tenant(tenant_id)
     runs = current_data_root() / tenant_id / "runs"
     runs.mkdir(parents=True, exist_ok=True)
-    ensure_runs_base_record(runs, tenant_id)
-    run_dir = runs / run_id
+    run_dir = runs / fixture_uuid(label)
     run_dir.mkdir(exist_ok=True)
     return run_dir
 
 
 def run_of(run_dir: Path):
     """The `Run` run setup hands run end for the natural run at `run_dir` (planted by
-    `curation_run_dir`): its tenant is the folder above its runs folder."""
+    `curation_run_dir`): its tenant is the folder above its runs folder (#1187: `Run.under`,
+    which reads no record, replaces `Run.for_tenant`)."""
     from defender.run_repository import Run
 
     run_dir = Path(run_dir)
-    return Run.for_tenant(run_dir.parent.parent.name, run_dir.name, runs_base=run_dir.parent)
+    return Run.under(run_dir.parent, run_dir.name, tenant_id=run_dir.parent.parent.name)
 
 
 def curation_row(case_id: str, run_dir: Path) -> dict:

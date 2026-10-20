@@ -14,7 +14,6 @@ from typing import Any
 
 import pytest
 
-from defender.episodes import _episode_handle as EH
 from defender import _io
 from defender.episodes._episode_paths import LAYOUT
 from defender.tests.support.learning.judge import _judge_921 as J
@@ -112,7 +111,7 @@ def test_r1_a_record_is_read_through_the_view_present_absent_or_refused(tmp_path
 
         planted.remove()
         assert episode.view().read(rel).absent, "control: an absent record did not read absent"
-        getattr(episode, key).write(f"{key}: plain\n")
+        getattr(getattr(episode, key), "create" if key == "family" else "write")(f"{key}: plain\n")
         assert episode.view().read(rel).text == f"{key}: plain\n"
         assert not hasattr(getattr(episode, key), "read"), (
             f"the {key} record still answers `read`: records are write-only (R1)")
@@ -302,7 +301,7 @@ def _delta_episode(tmp_path: Path) -> Path:
 
 
 def _world_file(ep: Path, label: str) -> Path:
-    return ep / LAYOUT.served_world(T.world_token(label))
+    return ep / LAYOUT.served_world(T.world_id(ep, label))
 
 
 def episode_mod() -> Any:
@@ -319,7 +318,7 @@ def test_r1_delta_o_with_no_archived_worlds_is_empty_before_the_base_is_read(tmp
     fifo = None
     if base != "absent":
         fifo = S.plant_leaf(at, base, host=host).fifo
-    assert S.in_time(lambda: episode_mod().delta_o(ep), fifo=fifo) == {}
+    assert S.in_time(lambda: J.through_view(ep, episode_mod().delta_o), fifo=fifo) == {}
 
 
 @pytest.mark.parametrize("kind", ["absent", "symlink", "dangling", "hardlink", "fifo",
@@ -333,7 +332,7 @@ def test_r1_delta_o_refuses_an_absent_or_refused_base_as_no_primed_base(tmp_path
     planted = None if kind == "absent" else S.plant_leaf(at, kind, host=host, body=good)
     before = S.census(ep)
 
-    raised = S.raised_by(lambda: episode_mod().delta_o(ep),
+    raised = S.raised_by(lambda: J.through_view(ep, episode_mod().delta_o),
                          fifo=planted.fifo if planted else None)
     assert isinstance(raised, ledger.LedgerError), f"delta_o over a {kind} base: {raised!r}"
     assert "no primed base" in str(raised), raised
@@ -342,7 +341,7 @@ def test_r1_delta_o_refuses_an_absent_or_refused_base_as_no_primed_base(tmp_path
     if planted is not None:
         planted.remove()
     at.write_bytes(good)
-    out = episode_mod().delta_o(ep)
+    out = J.through_view(ep, episode_mod().delta_o)
     assert out["b"]["k1"] == "same", out
     assert "k2" in out["b"], out
 
@@ -355,7 +354,7 @@ def test_r1_delta_o_refuses_a_refused_world_file_naming_it(tmp_path, host, kind)
     at.unlink()
     planted = S.plant_leaf(at, kind, host=host, body=good)
 
-    raised = S.raised_by(lambda: episode_mod().delta_o(ep), fifo=planted.fifo)
+    raised = S.raised_by(lambda: J.through_view(ep, episode_mod().delta_o), fifo=planted.fifo)
     assert isinstance(raised, episode_mod().EpisodeError), (
         f"delta_o over a {kind} world file: {raised!r}")
     assert at.name in str(raised), f"the refusal does not name {at.name}: {raised}"
@@ -370,7 +369,7 @@ def test_r1_delta_o_reads_an_absent_world_file_as_serving_nothing(tmp_path, stat
     elif state == "undecodable":
         at.write_bytes(b"\xff\xfe not a row\n" + json.dumps(T.captured_row(key="k1")).encode()
                        + b"\n")
-    out = episode_mod().delta_o(ep)
+    out = J.through_view(ep, episode_mod().delta_o)
     if state == "absent":
         assert out["b"] == {}, out
     else:
@@ -385,19 +384,19 @@ def test_r1_delta_os_outcome_gate_refuses_a_refused_outcome_record(tmp_path, hos
     record.unlink()
     planted = plant_record(record, kind, host=host)
 
-    raised = S.raised_by(lambda: episode_mod().delta_o(ep), fifo=planted.fifo)
+    raised = S.raised_by(lambda: J.through_view(ep, episode_mod().delta_o), fifo=planted.fifo)
     assert isinstance(raised, episode_mod().EpisodeError), (
         f"delta_o past a {kind} outcome record: {raised!r}")
 
     planted.remove()
     record.write_bytes(good)
-    assert episode_mod().delta_o(ep)["b"]["k1"] == "same"
+    assert J.through_view(ep, episode_mod().delta_o)["b"]["k1"] == "same"
     record.write_text("outcome: [unclosed\n", encoding="utf-8")
     with pytest.raises(episode_mod().EpisodeError):
-        episode_mod().delta_o(ep)
+        J.through_view(ep, episode_mod().delta_o)
     J.outcome_record(ep, "unusable", reason="r")
     with pytest.raises(episode_mod().EpisodeError):
-        episode_mod().delta_o(ep)
+        J.through_view(ep, episode_mod().delta_o)
 
 
 @pytest.mark.parametrize("via", ["bind", "episode-view", "delta_o"])
@@ -413,12 +412,14 @@ def test_r1_load_family_through_a_view_names_family_yaml_never_a_path(tmp_path, 
 
     def load() -> Any:
         if via == "delta_o":
-            return episode_mod().delta_o(ep)
+            return J.through_view(ep, episode_mod().delta_o)
+        # #1187 (R5, declared change 10): the loader is told the episode's id (its folder's
+        # name) and refuses a manifest naming another; `expected_episode_id=` is required.
         if via == "bind":
             with _io.bind(ep) as view:
-                return fam.load_family(view)
+                return fam.load_family(view, expected_episode_id=ep.name)
         with S.open_episode(ep) as episode:
-            return fam.load_family(episode.view())
+            return fam.load_family(episode.view(), expected_episode_id=ep.name)
 
     raised = S.raised_by(load)
     assert isinstance(raised, fam.FamilyError), f"{via} over a {state} manifest: {raised!r}"
@@ -490,7 +491,7 @@ def _draw0_asks() -> list[str]:
     """Every ask of world `b`'s draw 0: the first and its re-asks after a refused reply (N22,
     `judge._REPLY_ATTEMPTS` asks per draw)."""
     attempts = J.mod("learning.judge")._REPLY_ATTEMPTS
-    return ["judge:b:0", *(f"judge:b:0:{a}" for a in range(1, attempts))]
+    return [f"judge:{T.fixture_world_id('b')}:0", *(f"judge:{T.fixture_world_id('b')}:0:{a}" for a in range(1, attempts))]
 
 
 class SwappingJudge:
@@ -515,7 +516,7 @@ class SwappingJudge:
         return self.good
 
     def called_for(self, label: str) -> list[str]:
-        return [a for a in self.agent_ids if a.startswith(f"judge:{label}:")]
+        return [a for a in self.agent_ids if a.startswith(f"judge:{T.fixture_world_id(label)}:")]
 
 
 def _grade(tmp_path: Path, ep: Path, judge: Any) -> Any:
@@ -531,7 +532,7 @@ def _grade(tmp_path: Path, ep: Path, judge: Any) -> Any:
 def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_draw_removal(
         tmp_path, roots, host, reach):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    judge_dir = ep / "worlds" / "b" / "judge"
+    judge_dir = ep / "worlds" / T.world_id(ep, "b") / "judge"
     stale = b"findings: [{bucket: stale}]\n"
     reached: dict[str, Path] = {}
 
@@ -557,7 +558,7 @@ def test_r2_a_judge_folder_linked_after_its_ensure_stops_the_pass_at_the_stale_d
     judge = SwappingJudge()
     got = _grade(tmp_path, ep, judge)
     assert not isinstance(got, BaseException), f"the control pass was refused: {got!r}"
-    assert judge.called_for("b") == [*_draw0_asks(), "judge:b:1"]
+    assert judge.called_for("b") == [*_draw0_asks(), f"judge:{T.fixture_world_id('b')}:1"]
     assert sorted(p.name for p in judge_dir.iterdir()) == ["1.yaml"]
 
 
@@ -773,20 +774,31 @@ def test_r3_zero_rows_are_refused_by_default_and_primed_empty_with_allow_empty(t
         (LAYOUT.served_base, "create", "")], writes
 
 
-def _launcher(tmp_path: Path) -> tuple[Any, Path, Any, Path]:
+def _launcher(tmp_path: Path) -> tuple[Any, Path, Any]:
+    """`(cli, the source run dir, T's runs repository)` — the launcher's entry
+    `cli.prepare_episode(runs, source, *, prime=)` (#1187 declared change 3, review-4 F37: the
+    episode is claimed by `runs.create_episode()`, a fresh UUID under `<T>/episodes/`; the
+    retired `episode_dir` resolver names nothing)."""
     cli = mod("learning.branch.cli")
     _base, src = T.runs_base(tmp_path)
-    tenant = T.current_tenant()
-    return cli, src, tenant, EH.episode_dir(tenant.data_root, T.EPISODE_ID)
+    return cli, src, T.current_tenant().runs_repository()
 
 
 def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
         tmp_path, roots, caplog):
-    cli, src, tenant, ep = _launcher(tmp_path)
+    """The launcher's default primer is `prime_base(..., allow_empty=True)`: a source whose
+    capture yields no row gets an EMPTY base (a plain file), with a warning that every key
+    reaches the live estate; there is no message-matched downgrade left to create it a second
+    time (`_is_empty_capture` is removed). Through `prepare_episode(runs, source)` with no
+    `prime=` (review-4 F37), the episode it claimed is under `<T>/episodes/`."""
+    cli, src, runs = _launcher(tmp_path)
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     caplog.set_level(logging.WARNING)
-    with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=tenant.data_root) as episode:
-        assert Path(episode.dir) == ep
+    with cli.prepare_episode(runs, Run.at(src)) as view:
+        ep = Path(view.episode.dir)
+        assert ep.name == view.episode_id
+    assert ep.parent == Path(T.current_tenant().episodes), (
+        f"the launcher claimed {ep}, not an episode under <T>/episodes/")
     base = ep / LAYOUT.served_base
     assert base.read_bytes() == b""
     assert stat.S_ISREG(os.lstat(base).st_mode)
@@ -852,17 +864,19 @@ def test_r4_a_durable_append_into_a_missing_holding_folder_makes_nothing(tmp_pat
     pytest.param("Control", False, id="dotless-not-case-stable"),
     pytest.param("E1133.b", False, id="head-not-case-stable"),
     pytest.param("e1133.B", False, id="label-not-case-stable"),
-    pytest.param("control", True, id="dotless-case-stable"),
-    pytest.param("e1133.b", True, id="a-world-token"),
+    pytest.param("control", False, id="dotless-case-stable"),
+    pytest.param("e1133.b", False, id="a-world-token"),
+    pytest.param(T.fixture_world_id("b"), True, id="world-uuid"),
 ])
-def test_patch_the_minting_check_judges_the_whole_token(token, minted):
-    from defender.episodes._episode_paths import check_minted_token
+def test_patch_the_minting_check_judges_the_whole_token(tmp_path, token, minted):
+    from defender.episodes._episode_paths import EpisodePaths
 
+    paths = EpisodePaths(tmp_path)
     if minted:
-        assert check_minted_token(token) == token
+        assert paths.served_world(token).name == f"{token}.jsonl"
     else:
-        with pytest.raises(ValueError, match="not case-stable"):
-            check_minted_token(token)
+        with pytest.raises(ValueError, match="not a valid world id"):
+            paths.served_world(token)
 
 
 def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_path):

@@ -78,6 +78,7 @@ from defender.runtime.verb_grant import VerbGrant  # noqa: E402
 from defender.runtime.verbs import RosterRead, VerbRegistry  # noqa: E402
 from defender.tests.support.runtime.permissions import _review_bundle
 from defender.tests.support.tenancy import _tenants1106
+from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
 
 DEFENDER = Path(__file__).resolve().parents[2]
 GOLDEN = DEFENDER / "tests" / "fixtures" / "e2e" / "golden-v2sshd"
@@ -237,12 +238,17 @@ class FakeVerbs(VerbRegistry):
     built from its own table (#632 — pre-dating the per-role grant, this pre-authorization-era
     fake grants itself full access rather than making every #611-era scenario author one)."""
 
-    def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]]):
+    def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]], *,
+                 known_ids: frozenset[str] = frozenset()):
         self._table = {s: dict(v) for s, v in table.items()}
+        self._known_ids = known_ids
         super().__init__(VerbGrant(
             role="fake",
             entries=tuple((s, v, "r") for s, verbs in self._table.items() for v in verbs),
         ))
+
+    def branch_identities(self) -> frozenset[str]:
+        return self._known_ids
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))
@@ -370,14 +376,27 @@ def load_turns_from_trace(
 
 
 
-def materialize(tmp_path: Path, golden: Path, *, run_id: str = "run") -> Path:
+#: The run id a replay's folder carries when its scenario names none: a fixed fixture UUID.
+#: #1187 (O2, declared change 1): `RunId` — so `Run.under`, which `drive` builds the run with —
+#: admits canonical lowercase UUID text only, so the folder is never the bare word `run`.
+REPLAY_RUN_ID = fixture_uuid("replay-run")
+
+
+def materialize(tmp_path: Path, golden: Path, *, run_id: str = REPLAY_RUN_ID) -> Path:
     """The on-disk run dir a driven run starts from: `gather_raw/`, the copied alert, and the
     provenance stamp.
 
-    Takes no `run_id`/`salt`: it seeds NOTHING salted. Both were parameters only because this
-    used to write the run's retired metadata file (#647); the trust token is now minted in
-    process by `run_common.materialize_run` and threaded as a value, so there is nothing
-    on disk for this to seed. Keeping the parameters would let a test pass `salt=` and believe
+    The folder is `tmp_path / <the run's id>`. `run_id` is a UUID (`REPLAY_RUN_ID` when left
+    out) or a scenario's readable LABEL: #1187 makes every run id a meaningless uuid4 (O1/O2),
+    so a label names the folder `_fixture_uuid.fixture_uuid(label)` — the same label, the same
+    id, in every test — and never reaches production as an id. A test that needs the run's id
+    reads it off the folder (`run_dir.name`), never off its label. This is the ONE place a
+    replay's label becomes an id; `drive`'s own `run_id=` is a legacy label nothing reads.
+
+    Takes no `salt`: it seeds NOTHING salted. It was a parameter only because this used to
+    write the run's retired metadata file (#647); the trust token is now minted in process by
+    `run_common.materialize_run` and threaded as a value, so there is nothing on disk for this
+    to seed. Keeping the parameter would let a test pass `salt=` and believe
     it had set up a salted run dir — setup a test can silently pass without.
 
     THE STAMP IS WRITTEN HERE BECAUSE PRODUCTION WRITES IT (#976). What that buys is FILE-SET
@@ -390,7 +409,7 @@ def materialize(tmp_path: Path, golden: Path, *, run_id: str = "run") -> Path:
     Captured against `run_common.REPO_ROOT` — production's own constant, not a second path
     derived by counting `parents[...]` here — so "like production's" is a fact rather than a
     coincidence of where this file sits in the tree."""
-    run_dir = tmp_path / run_id
+    run_dir = tmp_path / (run_id if is_fixture_uuid_shape(run_id) else fixture_uuid(run_id))
     paths = RunPaths(run_dir)
     paths.gather_raw.mkdir(parents=True)
     plant_alert(run_dir, (golden / "alert.json").read_bytes())
@@ -728,7 +747,7 @@ def drive(  # noqa: PLR0913 — the harness entry point: one parameter per INJEC
     production model wrapper (the provider retrier) between the run and its fake. Omitted, the
     fakes are handed out bare, as before."""
     # Legacy replay labels are retained in this helper's call shape. The real run identity
-    # comes from its directory; materialize(run_id=...) preserves labels that are asserted.
+    # comes from its directory: materialize(run_id=<label>) names it the label's fixture UUID.
     state = run_state if run_state is not None else RunState(run_dir, run_dir.name)
     summary = driver_summary(
         run_dir, run_id=run_id, main=main, gather=gather, verbs=verbs, limits=limits, box=box,

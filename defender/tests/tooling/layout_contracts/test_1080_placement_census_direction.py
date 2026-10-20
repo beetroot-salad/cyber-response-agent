@@ -56,6 +56,7 @@ NOT_IN_DEV_JOB = ("pydantic_ai*", "pydantic_graph", "pydantic_evals", "anthropic
                   "mcp", "fastmcp", "logfire", "toons", "duckdb", "pytz", "fastapi", "uvicorn",
                   "starlette")
 
+# Deliberately stale imports must be reported with their original module spelling.
 PLANT_IMPORT = "from defender.scripts.policy_cli import main\n"
 
 

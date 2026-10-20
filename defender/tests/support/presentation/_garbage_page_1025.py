@@ -178,13 +178,14 @@ def render_episode(runs, episode_id):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    # `--tenant T <episode_id>`, read as dumbly: no tenant judged, the id joined to the root.
+    # `--tenant T <episode_id>`, read as dumbly: no tenant judged, the id joined to the
+    # tenant's episodes folder (#1187: `<data root>/<T>/episodes/<id>`), nothing walked.
     ids = [a for i, a in enumerate(argv) if a != "--tenant" and (i == 0 or argv[i - 1] != "--tenant")]
-    if ids:
+    tenants = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "--tenant"]
+    if ids and tenants:
         try:
-            from defender.episodes._episodes_root import episode_dir
             from defender.tenancy._tenant import resolve_data_root
-            print(_write(episode_dir(resolve_data_root(), ids[0])))
+            print(_write(resolve_data_root() / tenants[0] / "episodes" / ids[0]))
         except Exception:
             pass          # a file, a missing dir: still "success" — the CLI tests must refuse this
     return 0

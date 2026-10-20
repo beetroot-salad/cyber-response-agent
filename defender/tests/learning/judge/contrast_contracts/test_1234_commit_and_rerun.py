@@ -14,15 +14,17 @@ from typing import Any
 
 from defender import _yaml
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 #: Distinctive labels, so "the refusal names the world" is a real substring test.
 CONTROL, B, C, D = "alpha", "bravo", "charlie", "delta"
 FAMILY = S.FAMILY
 
-#: More episodes beside `S.EPISODE_ID`, for scenarios that need two or more.
-EP2 = "20260728t161845z-fresh-case-n60"
-EP3 = "20260728t161845z-fresh-case-n61"
+#: More episodes beside `S.EPISODE_ID`, for scenarios that need two or more: UUIDs, as every
+#: episode id after #1187 (declared change 1).
+EP2 = fixture_uuid("fresh-case-n60")
+EP3 = fixture_uuid("fresh-case-n61")
 
 COMPLETED = S.RULED["row.completed_draws"]
 BUCKET = S.RULED["reply.bucket"]
@@ -206,9 +208,8 @@ _VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "inpu
 
 def _without(text: str, *episode_ids: str) -> str:
     """`text` with every episode id and token replaced, so two episodes' rows compare."""
-    token_for = S.sym(S.FAMILY_LOADER, "episode_token_for")
     for ep in episode_ids:
-        text = text.replace(ep, "<ep>").replace(token_for(ep), "<ep>")
+        text = text.replace(ep, "<ep>")
     return text
 
 
@@ -290,6 +291,9 @@ class Watch:
         self.after_append = dict(after_append or {})
         self.seen: list[Seen] = []
 
+    def bind_worlds(self, world_ids):
+        self.judge.bind_worlds(world_ids)
+
     def _queue(self, kind: str) -> list[dict] | None:
         try:
             return self.real.rows(_channel(kind))
@@ -309,7 +313,7 @@ class Watch:
                              + f"; it made {[(s.event, s.who, s.kind) for s in self.seen]}")
 
     def __call__(self, prompt: str, **kw: Any) -> str:
-        label, n, _attempt = S.parse_agent_id(kw.get("agent_id", "judge"))
+        label, n, _attempt = self.judge.coordinate(kw.get("agent_id", "judge"))
         self.snap("call", label, None)
         action = self.at_call.pop((label, n), None) if label is not None else None
         if action is not None:
@@ -520,7 +524,7 @@ def test_1234_rerun_grades_only_worlds_without_a_completed_draw_and_keeps_rows_v
     second = S.judge({B: _reply(inv=[_inv(B, "late")], world=[_design(B, "late-q")])})
     S.grade(built, second)
 
-    assert {S.parse_agent_id(a)[0] for a in second.agent_ids} == {B}, second.agent_ids
+    assert {second.coordinate(a)[0] for a in second.agent_ids} == {B}, second.agent_ids
     defender_after, questioner_after = S.queue_bytes()
     for before, after, mark in ((defender_before, defender_after, "late"),
                                 (questioner_before, questioner_after, "late-q")):
@@ -644,7 +648,7 @@ def test_1234_rerun_when_draw_files_are_complete_on_disk_but_judge_yaml_is_absen
     rerun = S.judge(fresh)
     S.grade(built, rerun, draws=2)
 
-    assert rerun.calls_for(B)[:2] == [f"judge:{B}:0", f"judge:{B}:1"], rerun.agent_ids
+    assert rerun.calls_for(B)[:2] == [f"judge:{built.world_ids[B]}:0", f"judge:{built.world_ids[B]}:1"], rerun.agent_ids
     for n in range(2):
         doc = json.dumps(S.draw_doc(built, B, n))
         assert S.marker(B, f"fresh-{n}") in doc
@@ -753,7 +757,7 @@ _G05_PROCESSES, _G05_EPISODES_EACH = 4, 3
 
 
 def _g05_episode_id(k: int) -> str:
-    return f"20260728t161845z-fresh-case-n{70 + k}"
+    return fixture_uuid(f"fresh-case-n{70 + k}")  # a UUID, as every episode id after #1187
 
 
 def _g05_judge(k: int) -> S.RoutedJudge:

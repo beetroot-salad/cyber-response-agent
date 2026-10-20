@@ -1,11 +1,15 @@
 """#767 — the investigation tail: when the run records its ticket comment, and when it does not (real `run.main`)."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+from defender.episodes._episode_handle import Episode
+
 import pytest
 
 from defender import run as run_py
 from defender.tests.support.runtime.engine._spec767 import (
     COMMENTS_SUFFIX,
+    TENANT_ID,
     TICKETS_PATH,
     FakeStore,
     make_run,
@@ -109,7 +113,7 @@ def test_767_run_under_flag_leaves_an_agent_comment(tmp_path, state, monkeypatch
 
 def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
     """n7_writes_only_under_the_flag — `--update-ticket` remains the whole switch."""
-    assert run_py.parse_args(["/tmp/alert.json", "--tenant", "playground"]).update_ticket is False, (
+    assert run_py.parse_args(["/tmp/alert.json", "--tenant", TENANT_ID]).update_ticket is False, (
         "the ticket flag is no longer opt-in"
     )
 
@@ -126,15 +130,16 @@ def test_767_no_store_write_without_the_flag(tmp_path, state, monkeypatch):
 
     # #1105 PR 2 (declared change 6): a sibling names its episode by id under the configured
     # episodes base, whose container the launcher made for its tenant before any sibling.
-    from defender.tenancy import _tenant
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-    episodes = tmp_path / "episodes-root"
-    (episodes / "ep-767" / "runs").mkdir(parents=True)
-    _tenant.ensure_runs_base_record(episodes / "ep-767" / "runs", "playground")
-    monkeypatch.setenv("DEFENDER_EPISODES_BASE", str(episodes))
+    episode_id = fixture_uuid("767-run-tail-resume")
+    ep = T.episode(tmp_path, episode_id=episode_id,
+                   doc={**T.family_doc(), "episode_id": episode_id})
+    with Episode.open(ep) as held:
+        T.episode_view(held).close()
     with pytest.raises(SystemExit) as refusal:
-        run_py.main(["--episode", "ep-767", "--world", "b",
-                     "--tenant", "playground", "--update-ticket"])
+        run_py.main(["--episode", episode_id, "--world", "b",
+                     "--tenant", ep.parent.parent.name, "--update-ticket"])
     assert "--update-ticket" in str(refusal.value), (
         "the resume path accepted the ticket flag: the two ticket calls are ordered around "
         "the curation marker, so accepting-and-ignoring breaks the pairing instead of the "

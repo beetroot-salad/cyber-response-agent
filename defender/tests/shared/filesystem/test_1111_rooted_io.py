@@ -30,8 +30,10 @@ from defender.tests.support.shared.contracts import _spec1077 as S
 from defender.tests.support.storage._alert_plant import plant_alert
 from defender.tests.support.shared.contracts._create_lane import assert_single_plain, no_unnamed_files
 from defender.tests.support.shared.filesystem._umask import umask
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-RUN_ID = "run-1111"
+#: #1187 declared change 1: a run id is a canonical lowercase uuid4 text.
+RUN_ID = fixture_uuid("rooted-io-1111")
 #: How long one call may take before O3 calls it hung. A right answer takes milliseconds; the
 #: deadline only bounds a regression, so it fails the test rather than wedging the run.
 DEADLINE = 3.0
@@ -163,9 +165,10 @@ class Tree:
         return self.root(m) / m.rel
 
     def run(self, io: Any = _io) -> Any:
-        """The handle as application code builds it, over a runs base holding its tenant record
-        (#1105 NH-3: `Run.for_tenant` refuses a runs base with no `_tenant.json`)."""
-        return H.Run.for_tenant(S.DEFAULT_TENANT_ID, RUN_ID, runs_base=self.runs_base, io=io)
+        """The handle as application code builds it. #1187 (R1): `Run.for_tenant` and the
+        runs base's `_tenant.json` it read are retired; `Run.under(container, id, tenant_id=)`
+        replaces it, over a container holding no record."""
+        return H.Run.under(self.runs_base, RUN_ID, tenant_id=S.DEFAULT_TENANT_ID, io=io)
 
     def handle(self, m: Member, *, run: Any = None, io: Any = _io) -> Any:
         if m.root == "world_dir":
@@ -178,7 +181,6 @@ class Tree:
 def tree(tmp_path: Path) -> Tree:
     runs_base = tmp_path / "data" / "runs"
     (runs_base / RUN_ID).mkdir(parents=True)
-    S.plant_tenant_record(runs_base)  # #1105 NH-3: the record run setup writes first
     world = tmp_path / "worlds" / "overlay_a"
     world.mkdir(parents=True)
     host = tmp_path / "host"
@@ -642,7 +644,6 @@ def test_o5_a_symlinked_runs_base_or_data_root_keeps_every_record_readable_and_w
         tmp_path, m, aliased):
     real = tmp_path / "real-data"
     (real / "runs" / RUN_ID).mkdir(parents=True)
-    S.plant_tenant_record(real / "runs")  # #1105 NH-3: the record run setup writes first
     data = tmp_path / "data"
     if aliased == "data_root":
         data.symlink_to(real, target_is_directory=True)
@@ -680,11 +681,11 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "unused-world", tmp_path)
     assert not tree.root(m).exists()
 
-    # #1105 NH-3: a `Run.for_tenant` handle exists only over a runs base holding its record, so
-    # the record is planted (through the data root's link) after the precondition is seen.
+    # #1105 NH-3 planted the runs base's record here, after the precondition; #1187 (R1)
+    # retired the record, but the runs base is still made here so the cases stay the ones the
+    # docstring names.
     if m.root != "world_dir":
         tree.runs_base.mkdir()
-        S.plant_tenant_record(tree.runs_base)
     verb_call(tree.handle(m), m, "created")()
     assert_landed(real / tree.path(m).relative_to(tmp_path / "data"), m, "created")
 
@@ -692,9 +693,8 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
 @pytest.mark.parametrize("m", READABLE, ids=str)
 def test_o5_a_read_under_a_missing_root_is_none_and_creates_nothing(tmp_path, m):
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "worlds" / "gone", tmp_path)
-    if m.root != "world_dir":  # #1105 NH-3: the handle needs its runs base's record
+    if m.root != "world_dir":  # #1105 NH-3's precondition, kept (#1187 R1: no record now)
         tree.runs_base.mkdir(parents=True)
-        S.plant_tenant_record(tree.runs_base)
     before = census(tmp_path)
     assert tree.handle(m).read() is None
     assert census(tmp_path) == before, f"{m}: a read under a missing root made something"
@@ -1353,18 +1353,16 @@ def test_create_with_the_default_open_unnamed_links_an_unnamed_file_and_never_op
 #: A child looping over the handle's production write-once write (run setup's alert), each in
 #: a fresh run dir, until it is killed.
 _ALERT_CRASH_CHILD = r"""
-import os, sys
+import os, sys, uuid
 from pathlib import Path
 from defender.run_repository import Run
 root = Path(sys.argv[1])
 body = b"A" * (int(sys.argv[2]) - 1) + b"\n"
 print("ready", flush=True)
-i = 0
 while True:
-    run_id = f"r{i}"
+    run_id = str(uuid.uuid4())  # #1187: a run id is canonical uuid4 text
     os.mkdir(root / run_id)
     Run.under(root, run_id).facts.alert.write(body)
-    i += 1
 """
 
 ALERT_BODY_BYTES = 1 << 20

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace as _with_live_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import pytest
 
@@ -179,7 +180,7 @@ def _close(tmp_path, companion: str, disposition: str):
     from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
     from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
 
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
     dfn = tmp_path / "defender"
@@ -212,7 +213,7 @@ def test_the_close_cannot_be_reached_around_the_write_gate(tmp_path):
 def test_a_companion_that_paid_the_price_closes(tmp_path):
     result = _close(tmp_path, _paid(), "false-positive")
     assert result.outcome == "stands"
-    assert (tmp_path / "run" / "report.md").exists()
+    assert (tmp_path / fixture_uuid("run") / "report.md").exists()
 
 
 def test_benigns_price_is_collected_at_the_close_too(tmp_path):
@@ -223,7 +224,7 @@ def test_benigns_price_is_collected_at_the_close_too(tmp_path):
         _close(tmp_path, _UNPAID, "benign")
     assert "close blocked" in str(e.value)
     assert "v-001" in str(e.value), "the refusal names the vertex still holding an open slot"
-    assert not (tmp_path / "run" / "report.md").exists()
+    assert not (tmp_path / fixture_uuid("run") / "report.md").exists()
 
 
 def test_an_absent_conclude_block_does_not_buy_a_benign_close(tmp_path):
@@ -276,7 +277,7 @@ def test_a_companion_that_paid_benigns_price_closes(tmp_path):
 
     result = _close(tmp_path, _PAID_BENIGN, "benign")
     assert result.outcome == "stands"
-    assert (tmp_path / "run" / "report.md").exists()
+    assert (tmp_path / fixture_uuid("run") / "report.md").exists()
 
 
 @pytest.mark.parametrize(("companion", "shape"), [
@@ -299,7 +300,7 @@ def test_a_log_that_recorded_nothing_cannot_close_benign(tmp_path, companion, sh
     from defender.tests.support.runtime.permissions._review_bundle import bundle as _bundle
     from defender.tests.support.runtime.permissions._review_bundle import composer_reply as _composer
 
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     if companion is not None:
         (run_dir / "investigation.md").write_text(companion, encoding="utf-8")
@@ -333,7 +334,7 @@ def test_a_companion_that_cannot_be_read_never_commits_the_models_verdict(tmp_pa
     from defender.tests.support.runtime.engine._spec992 import frontmatter, record
 
     for disposition in ("benign", "false-positive"):
-        run_dir = tmp_path / disposition / "run"
+        run_dir = tmp_path / disposition / fixture_uuid("run")
         (run_dir / "gather_raw").mkdir(parents=True)
         (run_dir / "investigation.md").mkdir()          # the fault: a directory, not a file
         dfn = tmp_path / disposition / "defender"
@@ -357,7 +358,7 @@ def test_an_absent_companion_is_not_a_fault(tmp_path):
     answers, and only the second is a fault."""
     from pydantic_ai.exceptions import ModelRetry
 
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     dfn = tmp_path / "defender"
     dfn.mkdir(exist_ok=True)

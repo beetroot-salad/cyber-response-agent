@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+
 import pytest
 
 from defender.learning.author.version_control import ForgejoAuthError, ForgejoIdentity
@@ -27,7 +30,7 @@ def test_cached_identity_refreshes_before_an_operation_outlives_it():
 @pytest.mark.parametrize(
     "claims",
     [
-        {"tenant_id": "other"},
+        {"tenant_id": fixture_uuid("tenant:other")},
         {"aud": "other"},
         {"aud": [AUDIENCE, "other"]},
         {"iss": "https://other.test"},
@@ -85,16 +88,16 @@ def test_unbounded_operation_is_refused_before_vault(budget):
 @pytest.mark.parametrize(
     ("issuer", "role"),
     [
-        ("http://vault.test", "tenant-blue"),
-        (ISSUER + "/", "tenant-blue"),
+        ("http://vault.test", f"tenant-{fixture_uuid('tenant:blue')}"),
+        (ISSUER + "/", f"tenant-{fixture_uuid('tenant:blue')}"),
         (ISSUER, "../other"),
-        ("https://user:secret@vault.test", "tenant-blue"),
+        ("https://user:secret@vault.test", f"tenant-{fixture_uuid('tenant:blue')}"),
     ],
 )
 def test_identity_configuration_is_explicit_and_https(issuer, role):
     with pytest.raises(ForgejoAuthError):
         ForgejoIdentity(
-            tenant_id="blue",
+            tenant_id=fixture_uuid("tenant:blue"),
             issuer=issuer,
             role=role,
             audience=AUDIENCE,
@@ -112,7 +115,7 @@ def test_vault_request_time_counts_against_remaining_token_lifetime():
         return response
 
     with httpx.Client(transport=httpx.MockTransport(reply)) as client:
-        identity = ForgejoIdentity(tenant_id="blue", issuer=ISSUER, role="tenant-blue",
+        identity = ForgejoIdentity(tenant_id=fixture_uuid("tenant:blue"), issuer=ISSUER, role=f"tenant-{fixture_uuid('tenant:blue')}",
                                   audience=AUDIENCE, client=client, clock=lambda: vault.now)
         with pytest.raises(ForgejoAuthError, match="expired"):
             identity.token(min_validity=150)

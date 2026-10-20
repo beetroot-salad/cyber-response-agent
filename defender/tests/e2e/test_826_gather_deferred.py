@@ -16,7 +16,8 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded  
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
-from defender.runtime import circuit_breaker, session_store, tools_gather  # noqa: E402
+from defender.runtime import circuit_breaker, tools_gather  # noqa: E402
+from defender.runtime import session_store  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.tools_gather import GatherRequest  # noqa: E402
 from defender.integrations.faults import UpstreamFault  # noqa: E402

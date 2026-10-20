@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 from defender.tests.support.shared.contracts._import_blocker import run_blocked
@@ -137,16 +138,20 @@ def test_1105_a_layout_name_from_the_door_loads_the_layout_submodule_alone_witho
     assert seen["alert"] == str(RUN_LAYOUT.alert) == "alert_input/alert.json", (
         f"the child's RUN_LAYOUT is not the door's: {seen}")
     assert seen["paths"] == RunPaths.__name__ == "RunPaths", f"the child's RunPaths: {seen}"
+    # #1187 declared change 1: `RunId` admits only canonical lowercase uuid4 text.
+    rid = fixture_uuid("package-pydantic-free")
     proc = _child("from defender.run_repository import RunId, RunRefused\n"
-                  "print(RunId.parse('r1'), RunRefused.__name__)\n", block=("pydantic*",))
+                  f"print(RunId.parse({rid!r}), RunRefused.__name__)\n", block=("pydantic*",))
     assert proc.returncode == 0, f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
-    assert _out(proc).split()[:2] == ["r1", "RunRefused"], f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
+    assert _out(proc).split()[:2] == [rid, "RunRefused"], f"RunId and RunRefused must import pydantic-free (NM-05): {_out(proc)}"
     proc = _child("import defender.run_repository as rr\n"
                   "missing = [n for n in rr.__all__ if getattr(rr, n, None) is None]\n"
                   "print(len(rr.__all__), missing)\n")
     assert proc.returncode == 0, f"not every public name imports in a fresh interpreter: {_out(proc)}"
-    assert _out(proc).split()[0] == "74", f"not every public name imports in a fresh interpreter: {_out(proc)}"
+    # F18(b): the door's count as the flipped `__all__` test above pins it (#1187 R6).
+    assert _out(proc).split()[0] == "71", f"not every public name imports in a fresh interpreter: {_out(proc)}"
     assert "[]" in _out(proc), f"not every public name imports in a fresh interpreter: {_out(proc)}"
+
 
 
 def test_1105_a_failed_first_import_through_the_door_propagates_and_is_retried():
@@ -181,12 +186,13 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
 
     t = H.tenant(tmp_path / "data", H.T_ID)
     runs = H.runs_folder(t)
-    H.make_run(runs, "r1")
+    rid, neighbour = fixture_uuid("box-bind-run"), fixture_uuid("box-bind-neighbour")
+    H.make_run(runs, rid)
+    H.make_run(runs, neighbour)
     from defender.tests.support.storage._alert_plant import plant_alert
-    plant_alert(runs / "r1")
-    H.plant_record(runs, "r1-n1", t.id, "r1", {"a": "r1-n1-a"})
-    run = t.runs_repository().open(RunId.parse("r1"))
-    assert getattr(run, "run_dir", None) == runs / "r1", f"runs.open handed out {run!r}"
+    plant_alert(runs / rid)
+    run = t.runs_repository().open(RunId.parse(rid))
+    assert getattr(run, "run_dir", None) == runs / rid, f"runs.open handed out {run!r}"
     create = _create_argv("defender-run-r1", run.run_dir, H.DEFENDER,
                           BoxSpec(runtime="runc", rootfs="busybox"), tenant_agent=t.agent)
     argv = create.argv
@@ -196,23 +202,24 @@ def test_1105_no_box_bind_reaches_the_episode_records_or_the_tenant_record(tmp_p
         fields = dict(f.split("=", 1) for f in spec.split(",") if "=" in f)
         binds.append((Path(fields["source"]), "readonly" in spec.split(",")))
     writable = [src for src, ro in binds if not ro]
-    assert writable == [runs / "r1"], (
+    assert writable == [runs / rid], (
         f"the box's writable binds are {writable}, not exactly the run's own folder")
-    for protected in (runs, runs / "_tenant.json", runs / "_episodes",
-                      runs / "_episodes" / "r1-n1.json"):
+    for protected in (runs, runs / neighbour):
         under = [src for src in writable if protected == src or src in protected.parents]
         assert under == [], f"{protected} sits under a writable box bind: {under}"
     assert "--read-only" in argv, "the box's own root is read-only"
 
 
+
 def test_1105_a_handles_address_is_frozen_after_init(tmp_path):
     from defender.run_repository import Run
 
+    # #1187: a uuid run id (declared change 1) in a container with no record (R1); the
+    # record-reading `Run.for_tenant` goes (R1), `Run.under` is its replacement.
     runs = tmp_path / H.T_ID / "runs"
-    H.plant_tenant_record(runs, H.T_ID)
-    run_dir = H.make_run(runs, "r1")
-    for run in (Run.under(runs, "r1", tenant_id=H.T_ID),
-                Run.for_tenant(H.T_ID, "r1", runs_base=runs),
+    rid = fixture_uuid("package-frozen")
+    run_dir = H.make_run(runs, rid)
+    for run in (Run.under(runs, rid, tenant_id=H.T_ID),
                 Run(run_dir, runs_base=runs, tenant_id=H.T_ID)):
         for attr, value in (("run_dir", tmp_path / "elsewhere"), ("runs_base", tmp_path),
                             ("tenant_id", H.U_ID)):

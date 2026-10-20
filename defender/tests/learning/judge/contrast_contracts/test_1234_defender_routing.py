@@ -261,12 +261,12 @@ def test_1234_am_finding_resting_on_a_table_sentinel_with_no_ledger_partner(
     assert tables["a"][j3["a"]] == tables["b"][j3["b"]] == tables["c"][j3["c"]], (
         "fixture: J3's row is present identically in every run's table")
     reject_b = _first_row(tables["b"], exit_code=S.REJECT_EXIT)
-    j3_b, j3_a = S.table_ptr("b", j3["b"]), S.table_ptr("a", j3["a"])
+    j3_b, j3_a = built.table("b", j3["b"]), built.table("a", j3["a"])
     m = {k: S.marker("b", k) for k in ("j3-pair", "reject-pair", "j3-world")}
     reply = S.world_reply(
         LQ,
         investigator=[S.inv(contrast=[j3_b, j3_a], claim=m["j3-pair"]),
-                      S.inv(contrast=[S.table_ptr("b", reject_b), j3_a],
+                      S.inv(contrast=[built.table("b", reject_b), j3_a],
                             claim=m["reject-pair"])],
         world=[S.wf(MISLABELLED, systems=["edr"], evidence=[S.plan_ptr("b"), j3_b],
                     claim=m["j3-world"])])

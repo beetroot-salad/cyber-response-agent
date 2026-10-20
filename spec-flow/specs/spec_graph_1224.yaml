@@ -1598,10 +1598,11 @@ demands:
   source: 20-demands
 - id: d19c_reserved_label_rule_survives
   kind: survival
-  form: test
+  form: clause
   binds:
   - run_record_labels
-  discharged_by: test_1224_run_record_label_check_still_refuses_a_reserved_label
+  status: retired
+  outcome: {nl: "RETIRED by #1187 — design item R6 (D-del): the runs repository's episode-record writer (`record_episode_runs`, PR 1's `_episodes` record) is deleted, and with it the run-record label check this demand kept standing; an arm's label reaches the roster only as a manifest world (`view.start_runs(labels)`, one entry per manifest world), and the manifest reader keeps refusing a reserved label (`live_oracle_1224/test_1224_manifest_v2.py::test_input_world_labels_collide_or_are_reserved`). `test_1224_run_record_label_check_still_refuses_a_reserved_label`, which discharged this demand, was deleted with it. The replacement is pinned by `defender/tests/ids_1187/test_1187_roster_consumers.py::test_a_launch_rosters_every_manifest_world_and_starts_only_the_servable_ones`."}
   seed_docstring: run_repository's run-record label check still refuses a reserved world label after the view-naming rule is removed.
   source: 20-demands
 - id: d19d_docs_describe_the_oracle

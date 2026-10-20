@@ -2,8 +2,8 @@
 tenant scoping is visible from a browser or `curl`, and one investigation in each interesting
 state in the first of them.
 
-There is no default tenant (#1078): `serve.py` requires `--tenant`, and every id here derives
-from the names it is given. The tokens are predictable and public, so `serve.py` binds to
+There is no default tenant (#1078): `serve.py` requires `--tenant`, and every tenant ID here comes
+from the UUIDs it is given. The tokens are predictable and public, so `serve.py` binds to
 loopback by default.
 """
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import dataclasses
 import errno
 import functools
@@ -21,8 +23,8 @@ from defender.tests.support.shared.contracts._create_lane import assert_single_p
 from defender.tests.support.shared.filesystem._umask import umask
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 
-TID = "acme"
-OTHER = "beta"
+TID = fixture_uuid("tenant:acme")
+OTHER = fixture_uuid("tenant:beta")
 #: The good row's timestamp.
 GOOD_AT = "2026-09-26T00:00:00+00:00"
 #: The row a linked `<T>` leads to has its own timestamp, so "served" is seen to be THAT row.
@@ -217,7 +219,7 @@ def _plant_file_at_dir(w: Where) -> None:
 #: A complete, valid row except for one byte that is not UTF-8, inside `created_at`. A reader
 #: that decoded with replacement would serve it.
 _UNDECODABLE = (b'{\n  "created_at": "2026-09-26T00:00:00+00:00\xff",\n'
-                b'  "tenant_id": "acme"\n}\n')
+                + f'  "tenant_id": "{TID}"\n}}\n'.encode())
 
 #: A good row followed by whitespace past `READ_LIMIT`.
 _OVERSIZED = GOOD_ROW + " " * _io.READ_LIMIT

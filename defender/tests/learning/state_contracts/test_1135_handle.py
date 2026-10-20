@@ -153,8 +153,8 @@ def test_a_missing_root_is_an_error_and_is_never_created(tmp_path: Path, monkeyp
         "the stage's CRITICAL line does not name the root and the env var"
 
     caplog.clear()
-    runs = S.curation_run_dir("case-r15").parent
-    run_dir = make_run_dir(runs, name="case-r15", disposition="benign")
+    planted = S.curation_run_dir("case-r15")
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
     scrub_mod.scrub(run_dir)
     answered: list[bool] = []
     enqueued = S.caught(lambda: answered.append(

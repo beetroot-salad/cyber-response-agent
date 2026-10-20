@@ -180,6 +180,7 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
     # Only these steps get an id; the rest render inline.
     stages_id_map = {"questioner": "stage-questioner", "runs": "stage-runs",
                      Step.JUDGE: "stage-judge"}
+    judge_scopes, unattributed = _classify_judge_traces(ep)
     stage_blocks = []
     for step in STEPS:
         content = table_rows[list(STEPS).index(step)]
@@ -187,11 +188,10 @@ def _render_stages(ep: _Episode) -> str:  # noqa: C901, PLR0912, PLR0915 — the
         anchor = stages_id_map.get(str(step))
         id_attr = f' id="{esc(anchor)}"' if anchor else ""
         stage_blocks.append(f'<div{id_attr} class="stage-block">{content}{extra}'
-                           f'{_transcript_blocks_for_step(ep, str(step))}'
+                           f'{_transcript_blocks_for_step(ep, str(step), judge_scopes)}'
                            f'</div>')
 
     timing_block = f'<div id="stage-timing" class="stage-timing">{table}</div>'
-    unattributed = _unattributed_traces(ep)
     unattributed_html = ""
     if unattributed:
         unattributed_html = (f'<div class="st-unattributed">unattributed traces: '
@@ -222,19 +222,25 @@ def _role_cost_text(role: _RoleCost) -> str:
 
 
 
-def _unattributed_traces(ep: _Episode) -> list[str]:
-    """Every judge trace stem naming no roster label or `family`. Its cost is still in the judge
-    row; only the transcript block is withheld. Uses `_stem_names_label`, the same check the
-    judge block routes by."""
-    known_labels = [*ep.entries, _FAMILY_LABEL]
-    # `stems_for` includes framed-only twins, matching what the judge block renders.
-    return [stem for stem in sorted(ep.wire.stems_for(Step.JUDGE))
-            if not any(_stem_names_label(stem, label) for label in known_labels)]
+def _classify_judge_traces(ep: _Episode) -> tuple[dict[str, list[str]], list[str]]:
+    """Partition every judge trace by a declared UUID or family scope, before draw filtering."""
+    scoped: dict[str, list[str]] = {_FAMILY_LABEL: []}
+    for label, entry in ep.entries.items():
+        if entry.nameable:
+            scoped[ep.world_id(label)] = []
+    unmatched: list[str] = []
+    for stem in sorted(ep.wire.stems_for(Step.JUDGE)):
+        for scope_id, stems in scoped.items():
+            if _stem_names_scope(stem, scope_id):
+                stems.append(stem)
+                break
+        else:
+            unmatched.append(stem)
+    return scoped, unmatched
 
 
-
-
-def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 — one discovery pass per role, family-first ordering included
+def _transcript_blocks_for_step(  # noqa: C901 — one discovery pass per role, family-first ordering included
+        ep: _Episode, step: str, judge_scopes: dict[str, list[str]]) -> str:
     if step not in ("questioner", Step.JUDGE, "review") or not ep.wire.present:
         return ""
     blocks = []
@@ -245,19 +251,21 @@ def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 �
         # Family first, then each world in numeric draw order. Stems include framed-only
         # twins, which is all some judge calls write. Only the draws judge.yaml records (A6):
         # a call log a stopped or wider earlier pass left is never shown as this record's.
-        judge_stems = ep.wire.stems_for(Step.JUDGE)
         family_drawn = recorded_draws(ep.grade, _FAMILY_LABEL)
-        family_stems = sorted((s for s in judge_stems if _stem_names_label(s, _FAMILY_LABEL)
-                               and _draw_key_stem(s, _FAMILY_LABEL) in family_drawn),
+        family_stems = sorted((s for s in judge_scopes[_FAMILY_LABEL]
+                               if _draw_key_stem(s, _FAMILY_LABEL) in family_drawn),
                               key=lambda s: _draw_key_stem(s, _FAMILY_LABEL))
         for stem in family_stems:
             blocks.append(_transcript_block(ep.wire.traces[stem]))
         for label in sorted(ep.entries):
-            # Not a bare `startswith`: `baseline` would also claim `baseline_2`'s stems.
+            if not ep.entries[label].nameable:
+                continue
+            # Grade rows use labels; the shared classifier has already bound trace UUIDs.
             drawn = recorded_draws(ep.grade, label)
-            label_stems = sorted((s for s in judge_stems if _stem_names_label(s, label)
-                                  and _draw_key_stem(s, label) in drawn),
-                                 key=lambda s: _draw_key_stem(s, label))
+            world_id = ep.world_id(label)
+            label_stems = sorted((s for s in judge_scopes[world_id]
+                                  if _draw_key_stem(s, world_id) in drawn),
+                                 key=lambda s: _draw_key_stem(s, world_id))
             for stem in label_stems:
                 blocks.append(_transcript_block(ep.wire.traces[stem]))
     elif step == "review":
@@ -275,11 +283,9 @@ def _transcript_blocks_for_step(ep: _Episode, step: str) -> str:  # noqa: C901 �
 
 
 
-def _stem_names_label(stem: str, label: str) -> bool:
-    """Does `stem` (`judge_<label>_<n>_trace`) name a draw of `label` itself, rather than of a
-    label that merely starts with `label` (`baseline` vs `baseline_2`)? The remainder must be
-    the draw index's digits alone."""
-    prefix = f"judge_{label}_"
+def _stem_names_scope(stem: str, scope_id: str) -> bool:
+    """Match a world UUID or the family scope and its exact numeric draw suffix."""
+    prefix = f"judge_{scope_id}_"
     if not stem.startswith(prefix):
         return False
     remainder = stem[len(prefix):-len("_trace")]
@@ -289,8 +295,8 @@ def _stem_names_label(stem: str, label: str) -> bool:
 
 
 
-def _draw_key_stem(stem: str, label: str) -> int:
-    prefix = f"judge_{label}_"
+def _draw_key_stem(stem: str, scope_id: str) -> int:
+    prefix = f"judge_{scope_id}_"
     if not stem.startswith(prefix):
         return 0
     try:

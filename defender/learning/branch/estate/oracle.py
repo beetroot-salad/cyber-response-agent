@@ -13,7 +13,7 @@ attempts or would pass `_PROMPT_BUDGET`, then restarted from its prefix (the wor
 and recorded facts come from the store, never only from the conversation); one turn at a time
 (the registry holds the lock).
 Nothing here writes into the sibling's run records: the oracle's spend, trace and queries live
-in the world's own oracle-side state directory (`oracle/<label>/`, one writer, S19).
+in the world's own oracle-side state directory (`oracle/<world-uuid>/`, one writer, S19).
 """
 from __future__ import annotations
 
@@ -568,7 +568,7 @@ class Oracle:
         family = getattr(self.world, "family", None)
         label = getattr(self.world, "label", None)
         for world in getattr(family, "worlds", None) or ():
-            if getattr(world, "world_id", None) == label:
+            if getattr(world, "label", None) == label:
                 return str(getattr(world, "disposition_declared", "") or "")
         return ""
 

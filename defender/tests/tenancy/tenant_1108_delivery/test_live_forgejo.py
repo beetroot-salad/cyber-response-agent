@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import base64
 import json
 import os
@@ -36,7 +38,7 @@ def test_real_forgejo_accepts_scoped_short_lived_jwt(tmp_path):
             iss=config["issuer"],
             aud=config["audience"],
             sub="fixture",
-            tenant_id="blue",
+            tenant_id=fixture_uuid("tenant:blue"),
             iat=now,
             exp=now + 600,
         )
@@ -66,7 +68,7 @@ def test_real_forgejo_accepts_scoped_short_lived_jwt(tmp_path):
         httpx.Client(timeout=30) as client,
     ):
         identity = ForgejoIdentity(
-            "blue", config["issuer"], "tenant-blue", config["audience"], vault
+            fixture_uuid("tenant:blue"), config["issuer"], "tenant-blue", config["audience"], vault
         )
         address = ForgeAddress.parse(config["origin"])
         forge = ForgejoForge(origin=config["origin"], identity=identity, client=client)
@@ -101,7 +103,7 @@ def test_real_forgejo_accepts_scoped_short_lived_jwt(tmp_path):
             transport.push(commit, "main")
         for rejected in [
             jwt(exp=int(time.time()) - 60),
-            jwt(tenant_id="other"),
+            jwt(tenant_id=fixture_uuid("tenant:other")),
             jwt(aud="wrong-audience"),
             value[:-10] + "invalidsig",
         ]:

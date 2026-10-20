@@ -53,6 +53,7 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 from __future__ import annotations
 
 
+import hashlib
 import importlib
 import json
 import os
@@ -66,36 +67,30 @@ from typing import Any
 
 from defender import _yaml
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 DEFENDER = Path(__file__).resolve().parents[4]
 
-#: The episode token / world token shapes the design fixes (design-doc "Two ids per world, one
-#: rule"), executed as nameable by G12 with the realistic token
-#: `20260728t161845z.fresh.case.n59.b`. Kept here so every scenario spells them once.
-#: CASEFOLDED, and not merely by taste: `cli.refuse_bad_episode_id` holds an episode id to
-#: `is_case_stable_id` at b8a63e66 (executed — the mixed-case spelling exits 2 naming the
-#: casefolded one), because the id names one directory and two spellings of it are one directory
-#: wherever the filesystem folds case. The design DERIVES this id rather than taking it from the
-#: operator, so the derivation is held to the same rule; `EPISODE_TOKEN` is the same string with
-#: separators normalised.
-EPISODE_ID = "20260728t161845z-fresh-case-n59"
-EPISODE_TOKEN = "20260728t161845z.fresh.case.n59"
-#: The source run's id, CASE-FOLDED (#1105 PR 2): the launcher and the sibling open the source
-#: by id through the tenant's repository, and `RunId.parse` refuses a spelling that is not
-#: case-stable (a minted run id is folded). The derived episode id is unchanged
-#: (`episode_id_for` folds either way).
-SOURCE_RUN_ID = "20260728t161845z-fresh-case"
+#: Fixed identity for hand-built scenes; real launches mint and persist their own UUIDs.
+EPISODE_ID = "6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5"
+#: The fixture source run's id (#1187: a uuid4, as `RunId.parse` admits and `RunId.mint()` mints).
+#: The launcher and the sibling open the source by id through the tenant's repository.
+SOURCE_RUN_ID = "3b8d5e2a-1c4f-4a7b-9d6e-2f0c1a3b5d7e"
 BRANCH_MESSAGE_ID = 59
 AS_OF = "2026-07-28T16:18:45Z"
 WORLDS = ("a", "b", "c")
 
-#: The two CONFIGURED roots this design reads. `DEFENDER_RUNS_BASE` is the shipped one
-#: (`run_common.resolve_runs_base`); `DEFENDER_EPISODES_BASE` is the second the §7 round-2 seam
-#: added — the episodes root is a CONFIGURED location, outside both the runs base and the
-#: checkout, and is never derived from the runs base. Environment steering, not
-#: `monkeypatch.setattr`: `resolve_runs_base` already reads its root off the environment, so this
-#: is the seam the shipped resolver already has (project profile, `tests.idioms`).
+#: The operator runs base a child inherits (`run_common.resolve_runs_base`'s retired knob, J46):
+#: still SET by some scenarios, as a stale configured value, never read to place anything.
 RUNS_BASE_ENV = "DEFENDER_RUNS_BASE"
+#: The episodes base #1187 retires (O9, declared change 5): NOTHING reads it — an episode lives at
+#: `<data root>/<T>/episodes/<uuid>/`, derived from its tenant. The name stays only so a
+#: scenario can set it as a DECOY and show it changes nothing; no builder here sets or reads it.
 EPISODES_BASE_ENV = "DEFENDER_EPISODES_BASE"
+#: The arm roster's name in an episode folder (#1187 R2; owned by `_episode_paths.LAYOUT`,
+#: `ARM_ROSTER_NAME`): `{label: arm run id}`, one entry per manifest world, host-written at the
+#: start of RUNS. Spelled here (the builders below plant it) as `ids_1187/_spec1187` spells it.
+ROSTER_NAME = "arms.json"
 
 #: A committed `\`\`\`invlang` companion document — the orientation corpus's own input shape.
 #: `skills/invlang/corpus.load_corpus` only counts a document that PARSES (three required
@@ -143,9 +138,25 @@ def no_preflight(_model: str | None = None, *, branching: bool = False) -> int:
     return 0
 
 
-def world_token(world_id: str, *, episode_token: str = EPISODE_TOKEN) -> str:
-    """`f"{episode_token}.{X}"` — the ONE spelling the four comparing sites use."""
-    return f"{episode_token}.{world_id}"
+def fixture_world_id(label: str) -> str:
+    """Explicit identity for fixed fixture worlds; launcher worlds are read from disk."""
+    return fixture_uuid(f"world:{label}")
+
+
+def world_id(episode_dir: Path, label: str) -> str:
+    """Read the persisted identity bound to exactly one manifest label."""
+    doc = _yaml.safe_load((Path(episode_dir) / "family.yaml").read_text(encoding="utf-8"))
+    matches = [world for world in doc["worlds"] if world["label"] == label]
+    assert len(matches) == 1, (label, matches)
+    return matches[0]["world_id"]
+
+
+def declaration(doc: dict) -> dict:
+    """Questioner-authored fields, before the host assigns world identities."""
+    authored = {k: v for k, v in doc.items() if k != "world_id"}
+    if "worlds" in authored:
+        authored["worlds"] = [declaration(world) for world in authored["worlds"]]
+    return authored
 
 
 # --------------------------------------------------------------------------------------
@@ -406,12 +417,13 @@ def fact(fact_id: str = "f1", statement: str = "web-1's owner is the platform te
     return {"fact_id": fact_id, "statement": statement, "entities": list(entities)}
 
 
-def world_doc(world_id: str, *, role: str = "B", story: str = "a story",
+def world_doc(label: str, *, world_id: str | None = None, role: str = "B", story: str = "a story",
               axis: str | None = "an axis", disposition_declared: str = "malicious",
               label_basis: str = "policy-rule", facts: list[dict] | None = None) -> dict:
     """One v2 world. `facts=None` gives one default fact; pass `[]` for the control world."""
     return {
-        "world_id": world_id, "role": role, "story": story, "axis": axis,
+        "label": label, "world_id": fixture_world_id(label) if world_id is None else world_id,
+        "role": role, "story": story, "axis": axis,
         "disposition_declared": disposition_declared, "label_basis": label_basis,
         "facts": [fact()] if facts is None else facts,
     }
@@ -465,7 +477,7 @@ def family_doc(*, worlds: list[dict] | None = None, source_run_dir: str = "/runs
             base_world(),
             world_doc("b", facts=[fact("f1", "a second login to web-1 came from 10.0.0.9",
                                        ("web-1", "10.0.0.9"))]),
-            world_doc("c", facts=[fact("f2")]),
+            world_doc("c", role="C", facts=[fact("f2")]),
         ],
     }
     declared = _declared_family_fields()
@@ -489,7 +501,7 @@ def retired_continuation_argv() -> list[str]:
     parse = sym("learning.branch.cli", "parse_branch_args")
     with contextlib.redirect_stderr(io.StringIO()):
         try:
-            parse(["--tenant", "t", "run-x", "1"])
+            parse(["--tenant", SOURCE_TENANT, "run-x", "1"])
         except SystemExit:
             return ["--continuation-prompt", "go"]
     return []
@@ -511,24 +523,50 @@ def write_family(episode_dir: Path, doc: dict | None = None) -> Path:
 PLANT_RECORDS = False
 
 
+#: `tenant episodes folder -> the tmp_path of the first scene placed there by default` — see
+#: `_default_root`. Keyed by the folder, which is per test (each test has its own data root), so
+#: nothing carries between tests.
+_FIRST_SCENE: dict[str, str] = {}
+
+
+def _default_root(tmp_path: Path) -> Path:
+    """Where `episode` puts a scene built with no `root=`: the FIRST scene a test builds — and
+    every later call with the same `tmp_path` (a builder re-entered for one scene names one
+    folder) — under this data root's tenant, `<T>/episodes/`; a scene built for a DIFFERENT
+    `tmp_path` (a test's second scene, `accepted_episode(tmp_path / "linked")`) under a data root
+    of its own, `<tmp_path>/scene-data-root/<T>/episodes/` (`tenant_episodes`). Every scene keeps
+    `EPISODE_ID` and its tokens, as each did when it sat under its own `tmp_path`; Layout A holds
+    one episode per id under a tenant, so without this a second scene would be built INTO the
+    first (a FIFO the first planted then blocks the second's writes). The judge and the page
+    reach either by id through the tenant whose folder holds it (`_judge_921.episode_runs_for`)."""
+    home = current_tenant().episodes
+    first = _FIRST_SCENE.setdefault(str(Path(home).absolute()), str(Path(tmp_path).absolute()))
+    if first == str(Path(tmp_path).absolute()):
+        return home
+    return tenant_episodes(Path(tmp_path) / "scene-data-root")
+
+
 def episode(tmp_path: Path, *, doc: dict | None = None,
             episode_id: str = EPISODE_ID, root: Path | None = None) -> Path:
     """An episode dir with its manifest and an empty `served/` — the shape `Step.QUESTIONER`
     leaves.
 
-    HAND-BUILT, and deliberately so: this is the episode's CONTENTS for the scenarios that are
-    not about where an episode lives. Where it lives is a demand of its own — the episodes root
-    is a CONFIGURED location outside both the runs base and the checkout (§7 round 2), pinned by
-    `test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base` and its neighbours
-    in `test_947_triplet_archive.py`, every one of which resolves the path through the episode
-    owner's `_episode_handle.episode_dir` rather than composing one here.
+    HAND-BUILT: this is the episode's CONTENTS for the scenarios that are not about where an
+    episode lives. #1187 (Layout A) puts every episode at `<data root>/<T>/episodes/<uuid>/`,
+    derived from its tenant (O9: no configured episodes root), so that is the default here:
+    the tenant this data root holds (`current_tenant()`, set up from the committed fixture on
+    first use — BEFORE its `episodes/` is made, since `create_tenant` refuses a tenant folder
+    already holding entries). An episode a test grades, pages or resumes by id must sit there.
 
-    `root=` puts the episode under a CONFIGURED episodes root — pass `configured_layout`'s third
-    return value where a scenario must be able to tell the episodes root and the runs base apart.
-    Without it the two are indistinguishable under one `tmp_path`, and an assertion about which
-    one a value is holds for both.
+    `root=` puts the episode elsewhere — for a scenario that hands the folder straight to the
+    function under test, or that is about an episode outside its tenant. With no `root=`,
+    `tmp_path` tells one scene from another (`_default_root`: the first under this data root's
+    tenant, another under a data root of its own); the tenant, not `tmp_path`, places it (#1187
+    O9).
     """
-    ep = (root if root is not None else tmp_path / "episodes") / episode_id
+    if root is None:
+        root = _default_root(tmp_path)
+    ep = Path(root) / episode_id
     (ep / "served").mkdir(parents=True, exist_ok=True)
     # THE BASE IS PRIMED, EMPTY, because that is the shape `prepare_episode` always leaves and
     # an episode holding a manifest and no base is a state production never produces. `Ledger`
@@ -538,7 +576,9 @@ def episode(tmp_path: Path, *, doc: dict | None = None,
     base = ep / "served" / "base.jsonl"
     if not base.exists():
         base.write_text("", encoding="utf-8")
-    write_family(ep, doc)
+    # #1187 (R5): every manifest reader refuses a manifest whose `episode_id` is not its
+    # folder's name, so the default manifest names THIS episode's id.
+    write_family(ep, doc if doc is not None else family_doc(episode_id=episode_id))
     if PLANT_RECORDS:
         _plant_source_input(ep, (doc or {}).get("source_run_dir"), (doc or {}).get("source_run_id"))
     return ep
@@ -603,7 +643,7 @@ def branchable_investigation() -> str:
 #: The tenant the fixture's SOURCE run was stamped with (#1077 stamps every run's tenant; #1106
 #: M2 seeds each sibling's runs base from it). Set up from the committed fixture under the test's
 #: data root (#1120 H2), so a launch that accepts it finds a complete tenant.
-SOURCE_TENANT = "playground"
+SOURCE_TENANT = fixture_uuid("tenant:playground")
 
 
 def current_tenant() -> Any:
@@ -617,6 +657,19 @@ def current_tenant() -> Any:
     existing = sorted(p.name for p in root.iterdir()
                       if (p / "tenant.json").is_file()) if root.is_dir() else []
     return set_up_tenant(root, existing[0] if existing else SOURCE_TENANT)
+
+
+def tenant_episodes(data_root: Path) -> Path:
+    """`<data_root>/<T>/episodes/` of this suite's tenant (`current_tenant().id`) set up under a
+    data root of a scene's OWN (`_data_root_1078.set_up_tenant`; a second call is the first's
+    tenant). #1187 Layout A allows one episode per id under a tenant and reaches an episode by id
+    only there, so a test that builds several scenes at the default `EPISODE_ID` "each under its
+    own episodes root" gives each its own data root, and the judge and the page reach each through
+    that tenant's repository (`_judge_921.episode_runs_for` reads the data root off the episode's
+    location). Pass the result as `episode(root=...)`."""
+    from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+
+    return set_up_tenant(Path(data_root), current_tenant().id).episodes
 
 
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
@@ -643,9 +696,10 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
 
     #1078: `base` is a real tenant's runs base (`<data root>/<tenant>/runs`) — the data root
     the autouse `data_root` fixture already pointed this test's `DEFENDER_DATA_ROOT` at, with a
-    tenant created (and its runs-base record minted) on first use, so the tenant's runs
-    repository (which the launcher opens its source through) sees an ordinary, well-formed
-    tenant location.
+    tenant created on first use, so the tenant's runs repository (which the launcher opens its
+    source through) sees an ordinary tenant location. #1187 (R1): the natural container holds
+    run folders and their sidecars only — no `_tenant.json` is written; the run's tenant is the
+    folder it sits under.
 
     O10 permits only ONE tenant per data root, so when `tenant_id` is not given this reuses
     whichever tenant already exists there (e.g. one a `d9_tenant` fixture already created)
@@ -665,8 +719,6 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
         tenant_id = existing[0] if existing else SOURCE_TENANT
     base = _tenant.runs_base_for(set_up_tenant(root, tenant_id))
     base.mkdir(parents=True, exist_ok=True)
-    if not (base / "_tenant.json").is_file():
-        _tenant.ensure_runs_base_record(base, tenant_id)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
     if PLANT_RECORDS if recorded is None else recorded:
@@ -705,6 +757,39 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
 SOURCE_CASE_ID = "case-947-fresh"
 
 
+def source_case_id(src: Path) -> str:
+    """The case a fixture source run belongs to: `SOURCE_CASE_ID` for the default source, and a
+    case of its own for any other source id. The store is per case (`<sessions>/<case>.db`), and
+    its row ids are the STORE's, so a second source seeded into the first source's case starts
+    its session past `BRANCH_MESSAGE_ID` and the branch point can never land on its main path —
+    each source run gets its own case, as each real investigation does.
+
+    The other source's case is named by a short digest of its id, not the id itself: a case id
+    is bounded (128 characters), and a test about an over-long source id (`test_1105_pr2_guards`
+    g15) must reach the launcher, not stop in this fixture's store."""
+    if src.name == SOURCE_RUN_ID:
+        return SOURCE_CASE_ID
+    digest = hashlib.sha256(src.name.encode("utf-8")).hexdigest()[:16]
+    return f"{SOURCE_CASE_ID}-{digest}"
+
+
+def _source_handle(src: Path) -> Any:
+    """The source run's handle, for writing its case pointer. A canonical-UUID folder (every
+    run after #1187) through `_spec1077.fixture_run`, production's own rule. A source a test
+    plants under an OLD-shaped or hostile id ON PURPOSE (to see the launcher refuse it before
+    anything is spent, #1187 declared change 1) is a folder production can no longer name, so
+    its handle is built at that folder directly — the fixture still seeds the session such a
+    run had, and the refusal under test is the launcher's, not this fixture's."""
+    from defender.run_repository import Run
+    from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
+    from defender.tests.support.shared.contracts._spec1077 import fixture_run
+
+    src = Path(src)
+    if is_fixture_uuid_shape(src.name):
+        return fixture_run(src)
+    return Run(src, runs_base=src.parent)
+
+
 def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) -> None:
     """Give the source run the session store a branch is actually taken from.
 
@@ -734,7 +819,6 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
     Idempotent: `runs_base` is called more than once in some scenarios, and a second session
     under one case id would make "the run's own main session" ambiguous.
     """
-    from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
     from defender.run_repository import RunPaths, SessionPaths
 
     ss = mod("runtime.session_store")
@@ -744,12 +828,15 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
     from defender.tests.support.learning.branch import _branch_947
     from defender.tests.support.storage import _session_store_705 as S
 
+    from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
+
     assert isinstance(pre_snapshot, bool), pre_snapshot
 
     # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
-    store = ss.open_store(case_id=SOURCE_CASE_ID, sessions=SessionPaths(base))
+    case_id = source_case_id(src)
+    store = ss.open_store(case_id=case_id, sessions=SessionPaths(base))
     try:
-        ss.write_case_pointer(_run_handle_1165(src), case_id=SOURCE_CASE_ID, store_path=store.path)
+        ss.write_case_pointer(_source_handle(src), case_id=case_id, store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [S.user_request("investigate the alert")], agent_id="main")
         if not _branch_947.declares_retired_prompt():
@@ -760,7 +847,8 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
             store.append(session_id, [S.text_response("orienting")], agent_id="main")
         while BRANCH_MESSAGE_ID not in ss.path_row_ids(store, session_id):
             store.append(session_id, list(S.complete_pair()), agent_id="main")
-        if not pre_snapshot:
+        if not pre_snapshot and is_fixture_uuid_shape(src.name):
+            # Legacy or hostile source ids are refused before the snapshot gate.
             # #1255 deferred verification 4: the fixture-only planter (see its module).
             from defender.tests.support.runtime.state._fork_snapshot_plant import plant_fork_snapshots
 
@@ -989,32 +1077,109 @@ def report_text(disposition: str, *, extra: str = "", body: str = "") -> str:
     )
 
 
-def archived_world(episode_dir: Path, world_id: str, *, disposition: str = "malicious",
+def archived_world(episode_dir: Path, label: str, *, disposition: str = "malicious",
                    scrub_ran: bool = True, commit: str | None = "deadbee",
                    dirty: bool | None = False, unavailable: str | None = None) -> Path:
-    """One `worlds/<X>/` directory carrying every artifact M8's row declares."""
-    w = episode_dir / "worlds" / world_id
+    """One `worlds/<X>/` directory carrying every artifact M8's row declares. No
+    `worlds/<X>/run_dir` pointer: #1187 (R8, declared change 12) stops the archive writing it
+    (nothing reads it; the arm roster supersedes it), so a scenario about an OLD archive's
+    leftover pointer plants one itself."""
+    w = episode_dir / "worlds" / world_id(episode_dir, label)
     (w / "gather_raw").mkdir(parents=True, exist_ok=True)
     (w / "report.md").write_text(report_text(disposition), encoding="utf-8")
-    (w / "investigation.md").write_text(f"# world {world_id}\n", encoding="utf-8")
+    (w / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (w / "executed_queries.jsonl").write_text("", encoding="utf-8")
     (w / "provenance.json").write_text(
         json.dumps(provenance_record(commit=commit, dirty=dirty, unavailable=unavailable)),
         encoding="utf-8")
     (w / "scrub_verdict.json").write_text(json.dumps({"ran": scrub_ran}), encoding="utf-8")
-    (w / "run_dir").write_text(f"/runs/{EPISODE_ID}-{world_id}\n", encoding="utf-8")
     return w
 
 
-def sibling_run_dir(base: Path, world_id: str, *, scrub_ran: bool = True,
+def read_roster(episode_dir: Path) -> dict[str, str]:
+    """`<episode_dir>/arms.json` as plain JSON (`{world UUID: arm id}`) — the test reading back what a
+    builder or the launcher wrote; `{}` when there is none."""
+    path = Path(episode_dir) / ROSTER_NAME
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_roster(episode_dir: Path, roster: dict[str, str]) -> Path:
+    """`<episode_dir>/arms.json` holding `roster` — the host-written arm roster a launch leaves
+    at the start of RUNS (#1187 R2), planted by hand. Overwrites."""
+    path = Path(episode_dir) / ROSTER_NAME
+    path.write_text(json.dumps(dict(roster), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _manifest_world_ids(episode_dir: Path) -> list[str]:
+    """Explicit persisted world UUIDs of a hand-built episode, in manifest order."""
+    doc = _yaml.safe_load((Path(episode_dir) / "family.yaml").read_text(encoding="utf-8"))
+    return [world["world_id"] for world in doc["worlds"]]
+
+
+def plant_roster(episode_dir: Path) -> dict[str, str]:
+    """The fixture's EXPLICIT RUNS step for a hand-built scene (no launcher ran): makes
+    `<episode_dir>/runs/` and then writes the arm roster once, a fresh uuid4 for EVERY manifest
+    world (#1187 R2: `start_runs` makes `runs/`, then writes a roster naming exactly the
+    manifest's worlds). Returns the roster. Refuses loudly (AssertionError) when a roster is
+    already there (it is written once) or the manifest names no world. A scene that wants a
+    stray arm no roster names plants `runs/<uuid4>` directly; it never extends the roster
+    (review-3 F33)."""
+    import uuid
+
+    episode_dir = Path(episode_dir)
+    if not episode_dir.is_dir():
+        raise AssertionError(f"plant_roster: no episode at {episode_dir} (a launch that made "
+                             "none?) — there is no scene to take the RUNS step for")
+    if (episode_dir / ROSTER_NAME).exists():
+        raise AssertionError(f"plant_roster: {episode_dir / ROSTER_NAME} already exists — the "
+                             "RUNS step writes the roster once")
+    world_ids = _manifest_world_ids(episode_dir)
+    if not world_ids:
+        raise AssertionError(f"plant_roster: {episode_dir / 'family.yaml'} names no world — a "
+                             "roster names exactly the manifest's worlds (#1187 R2)")
+    (episode_dir / "runs").mkdir(parents=True, exist_ok=True)
+    roster = {world_id: str(uuid.uuid4()) for world_id in world_ids}
+    write_roster(episode_dir, roster)
+    return roster
+
+
+def roster_arm_id(episode_dir: Path, world_id: str) -> str:
+    """The arm id the episode's roster holds for `world_id`. READ-ONLY (review-3 F33): it never
+    writes or extends a roster, so a scene whose launcher (or explicit RUNS step,
+    `plant_roster` / `episode_view`) wrote none fails here loudly, and so does a world UUID the
+    roster does not name (a roster names exactly the manifest's worlds, #1187 R2)."""
+    episode_dir = Path(episode_dir)
+    if not (episode_dir / ROSTER_NAME).is_file():
+        raise AssertionError(
+            f"roster_arm_id: no arm roster at {episode_dir / ROSTER_NAME} — take the RUNS step "
+            "first (the launcher, `plant_roster` or `episode_view`); this reader never writes one")
+    roster = read_roster(episode_dir)
+    if world_id not in roster:
+        raise AssertionError(
+            f"roster_arm_id: the roster at {episode_dir / ROSTER_NAME} names {sorted(roster)}, "
+            f"not {world_id!r} — a stray arm is planted at `runs/<uuid4>` directly")
+    return roster[world_id]
+
+
+def sibling_run_dir(  # noqa: PLR0913 — one keyword per stamp field a scenario varies, plus the arm id the spawn double passes
+        base: Path, label: str, *, arm_id: str | None = None,
+                    scrub_ran: bool = True,
                     commit: str | None = "deadbee", dirty: bool | None = False,
                     unavailable: str | None = None,
                     model: str = "m-1", stamp: bool = True, **record: Any) -> Path:
     """A finished sibling run dir plus its scrub-verdict SIDECAR, under `base`.
 
-    `base` is the runs base the sibling's own PROCESS was handed — after §7 FORK-13 that is
-    `<episode_dir>/runs`, never the operator's runs base, so a scenario about containment passes
-    the relocated root here rather than hand-placing a directory the production path never makes.
+    `base` is the arm container the sibling's own PROCESS was handed — `<episode_dir>/runs`
+    (§7 FORK-13), never the operator's runs base. #1187: the arm folder is named by its ARM ID,
+    a uuid4 holding neither the label nor the episode id (O3) — `arm_id` when given (the spawn
+    double passes the roster's); else, under an episode (`<base>/..` holds a manifest or a
+    roster), the id that episode's roster holds for `label` (`roster_arm_id`, read-only: the
+    scene's RUNS step — the launcher, `plant_roster` or `episode_view` — must have written it);
+    else (a bare folder a test hands straight to the function under test) `fixture_uuid` of the
+    folder and the label, so a second call for one label names the same folder.
 
     The verdict is written at `scrub.verdict_path(run_dir)` — `tree.parent /
     f"{tree.name}.scrub-verdict.json"` — because G17 REFUTED the design's "inside the run dir"
@@ -1025,10 +1190,11 @@ def sibling_run_dir(base: Path, world_id: str, *, scrub_ran: bool = True,
     one sibling differing on an anchored field is the fork check's behavioural arm); left out,
     each takes the record's own default.
     """
-    run_dir = base / f"{EPISODE_ID}-{world_id}"
+    base = Path(base)
+    run_dir = base / (arm_id if arm_id is not None else _arm_name(base, label))
     (run_dir / "gather_raw").mkdir(parents=True, exist_ok=True)
     (run_dir / "report.md").write_text(report_text("malicious"), encoding="utf-8")
-    (run_dir / "investigation.md").write_text(f"# world {world_id}\n", encoding="utf-8")
+    (run_dir / "investigation.md").write_text(f"# world {label}\n", encoding="utf-8")
     (run_dir / "executed_queries.jsonl").write_text("", encoding="utf-8")
     if stamp:
         (run_dir / "provenance.json").write_text(
@@ -1041,22 +1207,22 @@ def sibling_run_dir(base: Path, world_id: str, *, scrub_ran: bool = True,
     return run_dir
 
 
-def arm_run_dir(episode_dir: Path, world_id: str, **kw: Any) -> Path:
-    """A finished arm in the episode's own container, `<episode_dir>/runs/<episode id>-<world>`
-    (#1105 PR 2: an arm is opened by id through the episode's view — `family_arms` — so it lives
-    in that episode's container under that episode's id): `sibling_run_dir`'s run dir and
-    scrub-verdict sidecar, every keyword passed through, renamed to the episode's own arm id
-    when the episode is not `EPISODE_ID`."""
-    episode_dir = Path(episode_dir)
-    runs = episode_dir / "runs"
-    run_dir = sibling_run_dir(runs, world_id, **kw)
-    arm = runs / f"{episode_dir.name}-{world_id}"
-    if arm != run_dir:
-        run_dir.rename(arm)
-        verdict = runs / f"{run_dir.name}.scrub-verdict.json"
-        if verdict.exists():
-            verdict.rename(runs / f"{arm.name}.scrub-verdict.json")
-    return arm
+def _arm_name(base: Path, label: str) -> str:
+    """The folder name `sibling_run_dir` gives `label`'s arm under `base` (see there)."""
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+    episode_dir = Path(base).parent
+    if (episode_dir / "family.yaml").is_file() or (episode_dir / ROSTER_NAME).is_file():
+        return roster_arm_id(episode_dir, world_id(episode_dir, label))
+    return fixture_uuid(f"{Path(base).absolute()}/{label}")
+
+
+def arm_run_dir(episode_dir: Path, label: str, **kw: Any) -> Path:
+    """A finished arm in the episode's own container, `<episode_dir>/runs/<arm id>` — the arm id
+    the episode's roster holds for `label` (#1187: an arm is opened by its roster id through
+    the episode's view, `family_arms`): `sibling_run_dir` over `<episode_dir>/runs`, every
+    keyword passed through."""
+    return sibling_run_dir(Path(episode_dir) / "runs", label, **kw)
 
 
 def corpus_document(run_dir: Path) -> Path:
@@ -1096,63 +1262,57 @@ def open_source(src: Path) -> Any:
 
 def episode_view(episode: Any, *, tenant: Any = None) -> Any:
     """The episode's view (`EpisodeRuns`) in `tenant`'s runs repository (default: this data
-    root's one tenant, `current_tenant()`), adopting the held `episode` (#1105 PR 2). Its
-    container is made with the tenant's record when absent — what the launcher does at RUNS
-    before the first sibling (`EpisodeRuns.create_container`) — and a container a fixture
-    planted as a plain folder without a record is given the tenant's, so a scene's hand-planted
-    arms are reachable through the view. `start_family` callers make the container this way;
-    `verify_family` callers open their arms through it (`family_arms`)."""
-    from defender.tenancy import _tenant
-
+    root's one tenant, `current_tenant()`), adopting the held `episode` — `runs.episode(<id>,
+    held=episode)`. #1187: no container record is judged or planted (R1). An episode with no
+    arm roster yet never reached RUNS, so the fixture takes the launcher's RUNS step for it:
+    `view.start_runs(<every manifest world UUID>)` makes `runs/` and writes the roster (R2).
+    A roster a scene already planted (`arm_run_dir`) is the episode's own and is kept.
+    `start_family` callers reach RUNS this way; `verify_family` callers open their arms through
+    it (`family_arms`)."""
     owner = current_tenant() if tenant is None else tenant
-    runs = Path(episode.dir) / "runs"
-    if runs.is_dir() and not runs.is_symlink() and not os.path.lexists(runs / "_tenant.json"):
-        _tenant.ensure_runs_base_record(runs, owner.id)
     view = owner.runs_repository().episode(episode.dir.name, held=episode)
-    if view.state == "absent":
-        view.create_container()
+    if view.arm_ids() is None:
+        view.start_runs(_manifest_world_ids(Path(episode.dir)))
     return view
 
 
 def family_arms(episode: Any, labels: Any, *, tenant: Any = None) -> dict[str, Any]:
-    """`verify_family`'s `arms` (#1105 PR 2): each label's arm `<episode>/runs/<ep>-<label>`
-    opened by id through the episode's view (`episode_view`), as the launcher's
-    `_finished_arms` does — the `RunRefused` an open raises (`RunAbsent` for a missing arm
-    folder) kept as that label's value."""
+    """`verify_family`'s UUID-keyed `arms`, resolving the fixture labels through the manifest
+    before `view.arm_id(world_uuid)`, opened by id through the episode's view (`episode_view`), as
+    the launcher's `_finished_arms` does — the `RunRefused` an open raises (`RunAbsent` for a
+    roster id with no folder: "not started") kept as that world UUID's value."""
     from defender.run_repository import RunRefused
 
     view = episode_view(episode, tenant=tenant)
     arms: dict[str, Any] = {}
     for label in labels:
+        wid = world_id(Path(episode.dir), label)
         try:
-            arms[label] = view.open(view.arm_id(label))
+            arms[wid] = view.open(view.arm_id(wid))
         except RunRefused as refused:
-            arms[label] = refused
+            arms[wid] = refused
     return arms
 
 
 def configured_layout(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
-    """The two CONFIGURED roots, both under `tmp_path`, and the source run — the relocated layout.
+    """The source's runs base, the source run, and the episodes folder — the relocated layout.
 
-    Returns `(runs_base, source_run_dir, episodes_root)`. The episodes root is a sibling of the
-    runs base here only because `tmp_path` is where a test may write; what the demands assert is
-    that it is READ FROM CONFIGURATION and is neither inside the runs base nor inside the
-    checkout.
+    Returns `(runs_base, source_run_dir, episodes_root)`. #1187 (O9, declared change 5): the
+    episodes root is no longer CONFIGURED — it is the source tenant's own `<T>/episodes/`,
+    derived from the tenant, beside (never inside) its runs base `<T>/runs/`; nothing here sets
+    `DEFENDER_EPISODES_BASE`.
 
-    #1078: `runs_base()`'s base IS the source's real tenant runs base now (the launcher's own
+    #1078: `runs_base()`'s base IS the source's real tenant runs base (the launcher's own
     derivation needs it to be). Pointed at its OWN fresh data root under `tmp_path` — isolated
     from whatever tenant an ambient fixture (`d9_tenant`) may already have created — so O10's
-    one-tenant-per-root rule never collides with it, and this base is trivially distinct from
-    `runs_base_for` of any other tenant. The retired `DEFENDER_RUNS_BASE` knob is still set
-    here, to `base` itself — today's "stale configured value" a child inherits unchanged
-    (J46) — never one the launcher composes.
+    one-tenant-per-root rule never collides with it. The retired `DEFENDER_RUNS_BASE` knob is
+    still set here, to `base` itself — today's "stale configured value" a child inherits
+    unchanged (J46) — never one the launcher composes.
     """
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "configured-data-root"))
     base, src = runs_base(tmp_path, recorded=True)
-    root = tmp_path / "episodes-root"
     monkeypatch.setenv(RUNS_BASE_ENV, str(base))
-    monkeypatch.setenv(EPISODES_BASE_ENV, str(root))
-    return base, src, root
+    return base, src, base.parent / "episodes"
 
 
 def lesson_row(run_dir: Path, name: str = "L1",
@@ -1262,7 +1422,7 @@ def refusals() -> tuple[type[BaseException], ...]:
 
 __all__ = [
     "ALERTS_PATTERN", "AS_OF", "BRANCH_MESSAGE_ID", "CLEAN", "CONFIGURED", "DEFENDER",
-    "EPISODE_ID", "EPISODE_TOKEN", "EPISODES_BASE_ENV", "EVENTS_PATTERN",
+    "EPISODE_ID", "EPISODES_BASE_ENV", "EVENTS_PATTERN",
     "GIT_STATUS_FAILED", "GIT_UNAVAILABLE", "GOLDEN_INVESTIGATION", "RUNS_BASE_ENV",
     "KNOWLEDGE_SHA", "NO_KNOWLEDGE_KEY", "OTHER_KNOWLEDGE_SHA",
     "branchable_investigation",
@@ -1270,7 +1430,8 @@ __all__ = [
     "FakeAdapters", "FakeAgent", "FakeSpawn", "FakeTransport", "SERVED_SYSTEMS",
     "UNTRUSTED_FRAME", "assert_wrapped_untrusted", "outside_untrusted_frames", "untrusted_frames",
     "Fault", "base_capture", "captured_row",
-    "archived_world", "base_world", "capture_call", "configured_layout",
+    "archived_world", "base_world", "capture_call", "configured_layout", "ROSTER_NAME",
+    "read_roster", "write_roster", "roster_arm_id", "plant_roster",
     "report_text",
     "corpus_document",
     "episode", "episode_view", "fact", "family_arms", "family_doc", "open_source",
@@ -1278,5 +1439,5 @@ __all__ = [
     "FakeCapture", "source_capture", "source_stamp", "isolate_learning_state", "LEARNING_STATE_ENV",
     "lesson_row", "mod", "refusals", "replace", "runs_base",
     "arm_run_dir", "sibling_run_dir",
-    "sym", "world_doc", "world_token", "write_family",
+    "sym", "world_doc", "fixture_world_id", "world_id", "declaration", "write_family",
 ]

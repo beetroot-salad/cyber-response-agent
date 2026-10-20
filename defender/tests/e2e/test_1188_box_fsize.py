@@ -1,6 +1,8 @@
 """#1188 e2e: the box file-size cap. Both box launch argvs carry --ulimit fsize=READ_LIMIT (investigation box and lane box), and on a live box (runsc and runc) no process can make a file past the cap, sparse, allocated or written, nor lift the limit."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import contextlib
 import dataclasses
 import errno
@@ -104,7 +106,7 @@ def _tenant_agent(base: Path) -> Path:
     """A tenant's agent half, as `run.py` always passes one:"""
     agent = base / f"tenant-agent-{uuid.uuid4().hex[:8]}"
     agent.mkdir(parents=True)
-    (agent / ".tenant-id").write_text(tenant_id_file_text(TenantId("fsize-test")), encoding="utf-8")
+    (agent / ".tenant-id").write_text(tenant_id_file_text(TenantId(fixture_uuid("tenant:fsize-test"))), encoding="utf-8")
     return agent
 
 

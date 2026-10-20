@@ -13,7 +13,8 @@ def plant_fork_snapshots(store: Any, session_id: str, run_dir: Path) -> None:
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
     from defender.hooks.budget_enforcer import DEFAULT_LIMITS
-    from defender.runtime import challenge_gate, session_store
+    from defender.runtime import challenge_gate
+    from defender.runtime import session_store
     from defender.runtime.branch import SnapshotWriter
     from defender.runtime.run_state import RunState
     from defender.tests.support.shared.contracts._spec1077 import fixture_run

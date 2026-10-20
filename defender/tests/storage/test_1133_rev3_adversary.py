@@ -65,13 +65,17 @@ def test_a_linked_outcome_record_holding_accepted_is_refused_by_both_readers(tmp
     host = tmp_path / "host"
     host.mkdir()
     record = ep / LAYOUT.outcome
+    # Both halves read through the episode's WALKED view (review-3 F32 / review-4 F36: the
+    # readers take the view and no `Path`), opened OUTSIDE `pytest.raises`, so a view that
+    # cannot be opened fails as itself instead of satisfying the refusal below.
+    read = getattr(episode, reader)
     # Control: the plain accepted record passes the gate.
-    getattr(episode, reader)(ep)
+    J.through_view(ep, read)
     record.rename(host / "outcome.yaml")
     record.symlink_to(host / "outcome.yaml")
     # A followed link would read `accepted` and pass; the gate refuses it instead.
-    with pytest.raises(episode.EpisodeError):
-        getattr(episode, reader)(ep)
+    with J.walked_view(ep) as view, pytest.raises(episode.EpisodeError):
+        read(view)
 
 
 def test_a_linked_served_folder_is_no_primed_base_never_followed(tmp_path):
@@ -83,7 +87,7 @@ def test_a_linked_served_folder_is_no_primed_base_never_followed(tmp_path):
         T.archived_world(ep, label)
     T.base_capture(ep, [T.captured_row(key="k1")])
     J.outcome_record(ep)
-    (ep / LAYOUT.served_world(T.world_token("b"))).write_text(
+    (ep / LAYOUT.served_world(T.world_id(ep, "b"))).write_text(
         json.dumps(T.captured_row(key="k1")) + "\n", encoding="utf-8")
     outside = tmp_path / "host" / "served-elsewhere"
     shutil.copytree(ep / "served", outside)
@@ -91,7 +95,7 @@ def test_a_linked_served_folder_is_no_primed_base_never_followed(tmp_path):
     (ep / "served").symlink_to(outside, target_is_directory=True)
     # A classification here means delta_o followed the linked served/ outside the episode.
     with pytest.raises(ledger.LedgerError, match="no primed base"):
-        episode.delta_o(ep)
+        J.through_view(ep, episode.delta_o)  # review-3 F32: the walked view, never a path
 
 
 def test_an_under_derivation_taken_before_close_is_refused_after_it(tmp_path):
@@ -134,8 +138,8 @@ def test_a_failed_fdopen_leaves_no_descriptor_open_on_the_leaf(tmp_path, durable
 
 
 @pytest.mark.parametrize("token", ["e1133.straße", "straße", "e1133ß.b"])
-def test_a_token_lower_accepts_but_casefold_refuses_is_refused(token):
-    from defender.episodes._episode_paths import check_minted_token
+def test_a_token_lower_accepts_but_casefold_refuses_is_refused(tmp_path, token):
+    from defender.episodes._episode_paths import EpisodePaths
     assert token == token.lower()
-    with pytest.raises(ValueError, match="not case-stable"):
-        check_minted_token(token)
+    with pytest.raises(ValueError, match="not a valid world id"):
+        EpisodePaths(tmp_path).served_world(token)

@@ -60,6 +60,8 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import hashlib
 import importlib
 import json
@@ -88,8 +90,8 @@ DATA_ROOT_ENV = "DEFENDER_DATA_ROOT"
 LEARNING_STATE_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 #: The ids the design's own examples use.
-TID = "acme"
-OTHER = "beta"
+TID = fixture_uuid("tenant:acme")
+OTHER = fixture_uuid("tenant:beta")
 
 #: `<root>/<T>/tenant.json` — the row (unchanged from #1078).
 ROW_NAME = "tenant.json"
@@ -493,7 +495,15 @@ class RunRecorder:
     has a tree to list; `lifecycle` keeps every keyword (`tenant=` is the `RunTenant`)."""
 
     def __init__(self, run_dir_at: Path) -> None:
-        self.run_dir_at = Path(run_dir_at)
+        # #1187 (declared change 1): a run id is a canonical UUID — the folder is
+        # fixture_uuid(<label>) beside the readable last segment (a UUID passes as it is).
+        # Read the folder back off `run_dir_at`, never off the label.
+        from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
+
+        run_dir_at = Path(run_dir_at)
+        if not is_fixture_uuid_shape(run_dir_at.name):
+            run_dir_at = run_dir_at.parent / fixture_uuid(run_dir_at.name)
+        self.run_dir_at = run_dir_at
         self.order: list[str] = []
         self.materialize_calls: list[dict[str, Any]] = []
         self.lifecycle_calls: list[dict[str, Any]] = []

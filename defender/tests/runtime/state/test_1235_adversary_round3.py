@@ -25,6 +25,7 @@ from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.runtime.state._1255_view import model_path  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._spec771 import DEFENDER  # noqa: E402
 from defender.tests.sandbox.test_959_downstream import Box  # noqa: E402
 from defender.tests.runtime.state.test_1235_round3 import (  # noqa: E402
@@ -135,15 +136,15 @@ def test_a_mismatched_state_is_refused_even_when_the_store_cannot_open(tmp_path,
     run_dir = materialize(tmp_path / "run", GOLDEN_AB3, run_id='adv3-k5')
     elsewhere = tmp_path / "elsewhere" / run_dir.name
     elsewhere.mkdir(parents=True)
-    stranger = (RunState(elsewhere, "adv3-k5") if other == "folder"
-                else RunState(run_dir, "adv3-someone-else"))
+    stranger = (RunState(elsewhere, run_dir.name) if other == "folder"
+                else RunState(run_dir, fixture_uuid("adv3-someone-else")))
     with pytest.raises(ValueError):  # noqa: PT011 — the wording is the implementation's
         driver_summary(run_dir, run_id="adv3-k5", main=ReplayFn([Turn(text="done")]),
                        store_factory=_store_down, run_state=stranger)
 
     own_dir = materialize(tmp_path / "own", GOLDEN_AB3, run_id='adv3-k5-own')
     cut = driver_summary(own_dir, run_id="adv3-k5-own", main=ReplayFn([Turn(text="done")]),
-                         store_factory=_store_down, run_state=RunState(own_dir, "adv3-k5-own"))
+                         store_factory=_store_down, run_state=RunState(own_dir, own_dir.name))
     assert cut["truncated_by"] == session_store.TRUNCATED_BY_STORE, cut
 
 

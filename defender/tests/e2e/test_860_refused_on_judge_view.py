@@ -1,7 +1,10 @@
 """#860 end to end — the family judge sees every refused attempt a lead made, by lead. A denied verb is a `∅.denied` sentinel row in the queries table; driven through the real gather entry, archive, join, VIEW 1 render and judge pass."""
 from __future__ import annotations
 
+from defender.tests.learning.judge.contrast_contracts import _spec1234 as S34
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 
@@ -347,7 +350,7 @@ def test_m6_the_chain_and_each_refused_entry_carry_exactly_their_named_keys(
     # The unknown-id arm: referenced by the document, unknown to the surface.
     ep2 = J.accepted_episode(tmp_path / "unknown", ledgers={"b": [J.oracle_row("b")], "c": []})
     base2, _src = J.runs_base(tmp_path / "unknown")
-    world2 = ep2 / "worlds" / "b"
+    world2 = ep2 / "worlds" / J.world_id(ep2, "b")
     assert not (world2 / "gather_raw" / "l-001.lead.json").exists()
     leads2, _text2 = _leads_view(ep2, base2)
     assert leads2["l-001"]["goal"] is None, "the arm's lead is known to the surface after all"
@@ -458,7 +461,8 @@ def test_m2_a_siblings_inherited_table_carries_the_source_runs_denial(tmp_path):
     ], run_id="d860-src")
     assert [row["query_id"] for row in r.own_rows] == [DENIED_QUERY_ID, "elastic.query"]
 
-    sibling = tmp_path / "sibling"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    sibling = tmp_path / fixture_uuid("sibling")
     sibling.mkdir()
     state = RunState(sibling, "d860-sibling")
     source_run = _writer_run_1165(r.run_dir)
@@ -528,16 +532,18 @@ def _prompt_for_world_b(ep: Path, base: Path) -> str:
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()))
     J.grade_at(
         ep, judge=judge, state=_state1135.env_state())
-    return judge.prompts[judge.agent_ids.index("judge:b:0")]
+    return judge.prompts[judge.agent_ids.index(f"judge:{J.world_id(ep, 'b')}:0")]
 
 
 #: World b's run as its call ids name it (`_triplet_947.world_token`).
-B_RUN = J.world_token("b", episode_token=J.EPISODE_TOKEN)
+B_RUN = J.fixture_world_id("b")
 
 
 def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, judge_roots):
     rec = VerbRecorder()
-    r = run_gather(tmp_path / "live", verbs=_registry(rec), turns=[
+    # A sibling's query-call identity is its world token; its run folder has a UUID id.
+    registry = _registry(rec, call_run=B_RUN)
+    r = run_gather(tmp_path / "live", verbs=registry, turns=[
         q("elastic", "nosuch-verb"), q(*DENIED_PAIR),
         q("elastic", "query", {"native_query": "FROM logs"}), DONE,
     ], run_id=B_RUN)
@@ -548,20 +554,20 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
     oracle = {**J.oracle_row("b"), J.CALL_ID: f"{B_RUN}/99"}
     ep = J.accepted_episode(tmp_path, ledgers={"b": [oracle], "c": []})
     base, _src = J.runs_base(tmp_path)
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / J.world_id(ep, "b")
     for name in ("report.md", "lessons_loaded.jsonl"):
         if (world / name).is_file():
             (r.run_dir / name).write_text((world / name).read_text(encoding="utf-8"),
                                           encoding="utf-8")
     with Episode.open(ep) as episode:
-        T.mod("learning.branch.archive").archive_episode(episode, {"b": r.run_dir})
+        T.mod("learning.branch.archive").archive_episode(episode, {T.world_id(episode.dir, 'b'): r.run_dir})
     assert (world / "executed_queries.jsonl").is_file()
     assert not (world / "policy_denials.jsonl").exists(), \
         "the archive grew a second stream for what the table already carries"
 
     prompt = _prompt_for_world_b(ep, base)
     # #1234: `render` returns a `JudgeContext`; world b's per-lead chain is its focus view's.
-    chain = J.mod("learning.judge.render").render(ep, "b").focus.leads[LEAD]
+    chain = S34.render_context(ep, "b").focus.leads[LEAD]
     expected = [
         _entry("rejected-before-dispatch", "elastic", False),
         _entry("denied", "elastic", True, verb="esql"),
@@ -581,8 +587,9 @@ def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_
         FAKE_GRANT, SERVED_FILE, World, fake_estate, served_rows, world_registry,
     )
 
+
     ledger_path = tmp_path / SERVED_FILE
-    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=World("w1"))
+    reg = world_registry(fake_estate(tmp_path), FAKE_GRANT, ledger_path, world=(world := World("w1")))
     from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 
     root = tmp_path / "tenant-data"
@@ -603,7 +610,7 @@ def test_a_real_denial_in_a_sibling_world_is_that_worlds_refused_ledger_row(tmp_
     assert [row["source"] for row in rows] == [REFUSED], \
         f"the sibling's ledger holds {[row['source'] for row in rows]}, not the denial"
     assert (rows[0]["system"], rows[0]["verb"], rows[0]["params"]) == ("elastic", "get-host", asked)
-    assert rows[0]["world_id"] == "w1"
+    assert rows[0]["world_id"] == world.world_id
     assert r.own_evidence == [], "a denied call wrote an evidence row"
     (own,) = r.own_denied_rows
     assert (own["lead_id"], own["system"], own["verb"]) == (LEAD, "elastic", "get-host")

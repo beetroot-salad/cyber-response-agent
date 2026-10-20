@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import importlib
 import re
 import sys
@@ -134,14 +136,14 @@ def test_o6_lead_on_an_unconfigured_system_ends_before_its_claim_naming_the_caus
     """l-00c whose system's settings miss a key its adapter requires is down at start: it ends before its claim and its gather count, names the cause 'not configured' in its ending (MAIN's correlation section) while the missing key reaches MAIN's opening message (O-3) — an ending that is not 'tripped breaker', 'every call failed' or 'withheld' — runs no adapter, charges no breaker, and the run goes on to report.md."""
     scene = _Scene(tmp_path)
     control = scene.control()
-    withheld = _Scene(tmp_path, tenant_id="acme-withheld", table=S.TABLE_WITHHELD).run("withheld")
+    withheld = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-withheld"), table=S.TABLE_WITHHELD).run("withheld")
     tripped = scene.run("tb-reference", before=_pre_trip(),
                         leads={S.L3: [_q(1), S.text("FD1256-TB-NARRATION")]})
     ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
                     leads={S.L3: [_q(1), S.text("FD1256-ECF-NARRATION")]})
     # Elastic misses ELASTICSEARCH_URL (one of `elastic_adapter.REQUIRED_CONFIG_KEYS`); cmdb stays
     # complete, so gather keeps a usable system and O-8 does not refuse the run.
-    unconfigured = _Scene(tmp_path, tenant_id="acme-down-url")
+    unconfigured = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
     _drop(unconfigured, "elastic", "ELASTICSEARCH_URL")
     down = unconfigured.run("down-at-start", main=S.closing_main_turns("inconclusive"),
                             **_down_lead())
@@ -172,8 +174,8 @@ def test_o6_every_start_time_settings_fault_is_down_at_start(tmp_path: Path) -> 
     """Whatever settings fault the adapter's check finds — no config.env at all, or the ES container key r1 showed `load_config` never checks — l-00c ends down at start, before its claim and count, naming 'not configured', with nothing run or charged."""
     scene = _Scene(tmp_path)
     control = scene.control()
-    no_file = _Scene(tmp_path, tenant_id="acme-no-file", omit_systems=("elastic",))
-    container = _Scene(tmp_path, tenant_id="acme-no-container")
+    no_file = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-no-file"), omit_systems=("elastic",))
+    container = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-no-container"))
     _drop(container, "elastic", "ELASTIC_ES_CONTAINER")
 
     for label, sc, tokens in (("no config.env", no_file, ()),
@@ -289,12 +291,12 @@ def test_o6_lead_on_a_system_whose_adapter_is_broken_ends_down_at_start(tmp_path
     """A correlation system whose adapter cannot be imported is down at start (adapter broken): l-00c ends before its claim and count with an ending that names the system and is not the 'not configured' one, nor 'tripped breaker', 'every call failed' or 'withheld'; nothing runs or is charged; the run goes on."""
     scene = _Scene(tmp_path)
     control = scene.control()
-    withheld = _Scene(tmp_path, tenant_id="acme-withheld", table=S.TABLE_WITHHELD).run("withheld")
+    withheld = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-withheld"), table=S.TABLE_WITHHELD).run("withheld")
     tripped = scene.run("tb-reference", before=_pre_trip(),
                         leads={S.L3: [_q(1), S.text("FD1256-TB-NARRATION")]})
     ecf = scene.run("ecf-reference", backend=_fail_alerts(S.upstream_fault),
                     leads={S.L3: [_q(1), S.text("FD1256-ECF-NARRATION")]})
-    unconfigured = _Scene(tmp_path, tenant_id="acme-down-url")
+    unconfigured = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
     _drop(unconfigured, "elastic", "ELASTICSEARCH_URL")
     not_configured = unconfigured.run("not-configured", **_down_lead())
     # The broken adapter's calls would be answered (the injected registry serves them): a run that
@@ -453,7 +455,7 @@ def test_d5_l00c_with_no_summary_after_its_system_went_down_ends_down_mid_lead(
                     leads={S.L3: [_q(1), S.text("FD1256-ECF-NARRATION")]})
     tripped = scene.run("tb-reference", before=_pre_trip(),
                         leads={S.L3: [_q(1), S.text("FD1256-TB-NARRATION")]})
-    unconfigured = _Scene(tmp_path, tenant_id="acme-down-url")
+    unconfigured = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-down-url"))
     _drop(unconfigured, "elastic", "ELASTICSEARCH_URL")
     at_start = unconfigured.run("down-at-start", **_down_lead())
     d = scene.run("d5-no-summary", backend=_fail_alerts(_escape),
@@ -559,7 +561,7 @@ def _assert_names_each(text: str, downs: tuple[tuple[str, str], ...], what: str)
 def test_o8_every_granted_system_down_at_start_refuses_the_run_naming_each(
         tmp_path: Path) -> None:
     """A run whose every granted system fails its adapter's settings check is refused at start — before the run folder, any model call or any adapter call — and the refusal names each down system with its reason ('not configured', the missing key), never the breaker's words."""
-    scene = _Scene(tmp_path, tenant_id="acme-all-down")
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-all-down"))
     _drop(scene, "cmdb", "CMDB_URL_BASE")
     _drop(scene, "elastic", "ELASTICSEARCH_URL")
     before = _runs_entries(scene.tenant)
@@ -575,11 +577,11 @@ def test_o8_every_granted_system_down_at_start_refuses_the_run_naming_each(
 def test_o8_a_system_up_with_only_its_health_check_granted_does_not_save_the_run(
         tmp_path: Path) -> None:
     """'Gather can query nothing', applied to the systems granted and up: with elastic down and cmdb up but granted only its health check (which reaches no data), the run is refused at start naming elastic and its reason. The same table with elastic configured runs."""
-    configured = _Scene(tmp_path, tenant_id="acme-hc-up", table=TABLE_CMDB_HEALTH_ONLY)
+    configured = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-hc-up"), table=TABLE_CMDB_HEALTH_ONLY)
     ran = configured.run("hc-elastic-up")
     _assert_continued(ran, "premise: the health-check-only table with elastic configured")
 
-    scene = _Scene(tmp_path, tenant_id="acme-hc-down", table=TABLE_CMDB_HEALTH_ONLY)
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-hc-down"), table=TABLE_CMDB_HEALTH_ONLY)
     _drop(scene, "elastic", "ELASTICSEARCH_URL")
     before = _runs_entries(scene.tenant)
     d = scene.run("hc-elastic-down", **_down_lead())
@@ -593,7 +595,7 @@ def test_o8_a_system_up_with_only_its_health_check_granted_does_not_save_the_run
 
 def test_o8_one_usable_system_among_several_down_runs(tmp_path: Path) -> None:
     """Control: with elastic and identity down at start and cmdb up (a query verb granted), the run is not refused — it proceeds, MAIN runs and report.md is written (#1107 O5 stands short of every system down)."""
-    scene = _Scene(tmp_path, tenant_id="acme-one-up", table=TABLE_THREE)
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-one-up"), table=TABLE_THREE)
     _drop(scene, "elastic", "ELASTICSEARCH_URL")
     _drop(scene, "identity", "IDENTITY_URL_BASE")
     d = scene.run("one-up", main=S.closing_main_turns("inconclusive"), **_down_lead())
@@ -604,7 +606,7 @@ def test_o8_one_usable_system_among_several_down_runs(tmp_path: Path) -> None:
 
 def test_o8_gather_granted_no_query_verb_is_still_refused(tmp_path: Path) -> None:
     """Control: the existing refusal stands — a table granting gather no query verb, every system configured, is refused at start naming the table, before anything is spent."""
-    scene = _Scene(tmp_path, tenant_id="acme-blank", table=T6.TABLE_BLANK)
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-blank"), table=T6.TABLE_BLANK)
     before = _runs_entries(scene.tenant)
     d = scene.run("blank", backend=_backend())
 
@@ -625,12 +627,12 @@ def _drop_present(scene: _Scene, system: str, key: str) -> None:
 
 def test_o8_all_down_through_settings_load_config_never_reads(tmp_path: Path) -> None:
     """Every granted system down for a key no `load_config` reads — cmdb misses only its docker context (the access method `access_context` checks), elastic only its ES container (`_es_container`) — is refused at start naming each with its key: the refusal is the adapters' declared checks, not a pre-check that runs `load_config` or reads stored faults. Repairing cmdb lets the same tenant run."""
-    repaired = _Scene(tmp_path, tenant_id="acme-access-repaired")
+    repaired = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-access-repaired"))
     _drop_present(repaired, "elastic", "ELASTIC_ES_CONTAINER")
     ran = repaired.run("cmdb-repaired")
     _assert_continued(ran, "control: cmdb repaired, elastic still down")
 
-    scene = _Scene(tmp_path, tenant_id="acme-access-down")
+    scene = _Scene(tmp_path, tenant_id=fixture_uuid("tenant:acme-access-down"))
     _drop_present(scene, "cmdb", "CMDB_DOCKER_CONTEXT")
     _drop_present(scene, "elastic", "ELASTIC_ES_CONTAINER")
     before = _runs_entries(scene.tenant)
@@ -716,7 +718,7 @@ def _drive_over(tree: Path, tenant: S.Planted, where: Path) -> tuple[Any, Any, B
 @pytest.mark.usefixtures("_import_state_restored")
 def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one(tmp_path: Path) -> None:
     """Every granted system down for two different causes — cmdb's adapter broken (its check raises something other than ConfigFault), elastic not configured — and the run does not start: the real driver, over the tree whose roster says so (K2), raises naming each system with its reason before MAIN's first request and before any gather or adapter call. A pre-check that counts only 'not configured' as down misses cmdb and lets the run start blind. With cmdb's adapter well formed (elastic still down) the same tenant's run proceeds. The exception's type is not pinned; its site is, by composition: the run.main arms require run.py to refuse before the lifecycle, the D4 test keeps the refusal out of the resolution that setup and `defender-policy` share, and this arm requires the driver itself to refuse an all-down start (the design's flow judges statuses there). The same mixed tenant through `run.main` (handed the planted roster) is `test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one_through_run_main`: a run.py pre-check that ignores broken adapters is caught there (N1)."""
-    tenant = S.plant_tenant("acme-mixed-down", alert_mapping=S.DEFAULT_MAPPING,
+    tenant = S.plant_tenant(fixture_uuid("tenant:acme-mixed-down"), alert_mapping=S.DEFAULT_MAPPING,
                             table=S.TABLE_ELASTIC)
 
     repaired_root = tmp_path / "repaired"
@@ -751,7 +753,7 @@ def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one(tmp_path:
 def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one_through_run_main(
         tmp_path: Path) -> None:
     """N1 (adversary A2): the mixed all-down tenant through the production front door. `run.main` handed the planted tree's roster (`roster=`: the adapters roster the run reads, the one whose declared checks judge each granted system at start, K2) — cmdb's adapter broken (its check crashes), elastic not configured — refuses the run at start, before the run folder, the lifecycle, any model call or any adapter call, naming each system with its reason. With cmdb's adapter well formed (elastic still down) the same tenant passes run start and reaches its lifecycle. A run.py pre-check that counts only 'not configured' as down (or that judges a roster other than the one the run reads) lets the mixed run reach the lifecycle, where only the driver would refuse it — after its run folder and box exist."""
-    tenant = S.plant_tenant("acme-mixed-main", alert_mapping=S.DEFAULT_MAPPING,
+    tenant = S.plant_tenant(fixture_uuid("tenant:acme-mixed-main"), alert_mapping=S.DEFAULT_MAPPING,
                             table=S.TABLE_ELASTIC)
 
     repaired_root = tmp_path / "repaired"
@@ -786,7 +788,7 @@ def test_o8_all_down_mixing_a_broken_adapter_with_a_not_configured_one_through_r
 def test_o8_d4_setup_adopts_an_all_down_tenant_whose_runs_are_refused(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """D4: the tenant-management commands judge a tenant's structure (folder rules, grants, lead-zero config), not whether its systems are usable — `tenant.py setup` adopts a tenant whose every granted system fails its settings check (exit 0, its row written) and `defender-policy show gather` over it answers (exit 0) — while a run of that same tenant through `run.main` is refused at start naming each system and its reason (O-8). Rejects O-8 placed in the tenant resolution those commands share with run start (the readiness function, `run_tenant_for` / `resolve_tenant`)."""
-    tenant_id = "acme-d4"
+    tenant_id = fixture_uuid("tenant:acme-d4")
     # The operator's folder, authored outside the data root: complete (K6) but for one key per
     # granted system.
     authored = S.plant_tenant(tenant_id, root=tmp_path / "authored",

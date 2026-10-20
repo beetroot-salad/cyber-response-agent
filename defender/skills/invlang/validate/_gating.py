@@ -22,7 +22,7 @@ from ..schema import (
 )
 from ._diag import REFUTED_WEIGHT
 from ._refs import _HYPOTHESIS_DECLARING_BLOCKS, _known_ids, _leads
-from defender.records._run_id import is_valid_run_id
+from defender.records._run_id import run_id_fault
 
 from ._structure import PAST_CASE, _cell, _check_vocab, _folded_grounding
 from ._state import (
@@ -314,7 +314,7 @@ def _authz_row_grounding_error(companion: CompanionBody, row: Any) -> str | None
     # Rule #27 reads `cites_past_case` to decide what is a past case, so the cell must be one
     # it can read: a run id when filled, and filled whenever the row says it rests on one.
     cites = _cell(row, "cites_past_case")
-    if cites and not is_valid_run_id(cites):
+    if cites and run_id_fault(cites) is not None:
         return (
             f"{where}: `cites_past_case {cites}` is not a run id — the cell names the earlier "
             f"run whose verdict this row leans on, as the agent tag on its comment spells it "

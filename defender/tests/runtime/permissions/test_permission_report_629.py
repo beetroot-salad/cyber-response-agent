@@ -1,5 +1,6 @@
 """decide_write's report.md frontmatter+size branch and investigation.md size bound, driven on real bytes."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 from dataclasses import dataclass
@@ -43,12 +44,13 @@ class Env:
 
 @pytest.fixture
 def env(tmp_path):
-    run = tmp_path / "run"
+    run = tmp_path / fixture_uuid("run")
     run.mkdir()
     dfn = tmp_path / "defender"
     dfn.mkdir()
     pol = permission.AgentPolicy(write_allow=(permission.build_write_allow(run),))
     return Env(run, dfn, pol)
+
 
 
 def report(*, disposition: str = "benign", extra_fm: str = "", body: str = "Concise analysis.\n") -> str:

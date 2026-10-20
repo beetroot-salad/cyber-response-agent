@@ -1,6 +1,8 @@
 """#1235: run-state edge cases: a payload's system is attributed from the run's state not a planted row, a gather at the cap counts no spawn, and budget increments survive thread preemption."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
@@ -25,7 +27,8 @@ def test_1235_payload_attribution_reads_the_runs_state(tmp_path):
     from defender.runtime.run_state import RunState
     from defender.runtime import record_query as rq
 
-    run_dir = tmp_path / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     state = RunState(run_dir, "k-x5")
     row = rq.append_query_row(

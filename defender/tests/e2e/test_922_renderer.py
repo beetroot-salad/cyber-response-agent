@@ -1,6 +1,8 @@
 """#922 — D7: the production transcript renderer survives the cut of the direction table."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,6 @@ import pytest
 from defender.tests.support.runtime.state._1255_view import model_path
 
 from defender import _io, run_common
-from defender.tenancy import _tenant
 from defender.run_repository import Run
 from defender.tests.e2e._replay_harness import GOLDEN, ReplayFn, Turn, drive, materialize
 
@@ -40,11 +41,11 @@ def driven_run(tmp_path: Path):
 
 def tenant_run(run_dir: Path, *, io=_io) -> Run:
     """The handle `run.py main` holds over a driven run: tenant-bound, built the way
-    `run_common.materialize_run` builds it (the runs-base record naming the run's tenant,
-    created once when absent, then `Run.for_tenant`). The runs base is the run dir's parent."""
-    runs_base = run_dir.parent
-    tenant = _tenant.ensure_runs_base_record(runs_base, _tenant.TenantId("playground"))
-    return Run.for_tenant(tenant.tenant_id, run_dir.name, runs_base=runs_base, io=io)
+    `run_common.materialize_run` builds it (#1187 R1: `Run.under(container, id, tenant_id=)`,
+    with no runs-base record — `ensure_runs_base_record` and `Run.for_tenant` are retired). The
+    runs base is the run dir's parent, where the replay harness put it. `io` is the handle's own
+    injection seam (a recorder, in #1110)."""
+    return Run.under(run_dir.parent, run_dir.name, tenant_id=fixture_uuid("tenant:playground"), io=io)
 
 
 def test_the_two_column_wrapper_never_ships_without_the_sidebar_that_fills_it(tmp_path):

@@ -79,7 +79,7 @@ def _start(argv: list[str]) -> Captured:
 def natural(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Captured:
     """A natural run's box start through `run.main`, from the fixture tenant's seed alert."""
     base, seed = T.runs_base(tmp_path)
-    tenant_id = T.mod("tenancy._tenant").read_tenant(base).tenant_id
+    tenant_id = T.current_tenant().id
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
     return _start(C.natural_argv(RunPaths(seed).alert, tenant_id))
@@ -235,7 +235,7 @@ def test_k1_a_natural_runs_clock_file_holds_the_run_clocks_reading(tmp_path, mon
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
     base, seed = T.runs_base(tmp_path)
-    tenant_id = T.mod("tenancy._tenant").read_tenant(base).tenant_id
+    tenant_id = T.current_tenant().id
 
     seen, out, _docker = _clock_file_after_a_command(
         C.natural_argv(RunPaths(seed).alert, tenant_id), C.FakeClock(START))
@@ -267,7 +267,7 @@ def test_k1_a_natural_runs_clock_file_follows_the_run_clock_between_commands(tmp
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
     base, seed = T.runs_base(tmp_path)
-    tenant_id = T.mod("tenancy._tenant").read_tenant(base).tenant_id
+    tenant_id = T.current_tenant().id
     clock = C.FakeClock(START)
 
     seen, out, _docker = _clock_file_after_a_command(
@@ -495,7 +495,7 @@ def _box_reads(seen: dict[str, Any], reading: dt.datetime, out: C.Launched) -> N
 def test_k4_live_in_box_time_reads_the_run_clock(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     base, seed = T.runs_base(tmp_path)
-    tenant_id = T.mod("tenancy._tenant").read_tenant(base).tenant_id
+    tenant_id = T.current_tenant().id
     clock = C.FakeClock(START)
     out = C.Launched()
     seen: dict[str, Any] = {}

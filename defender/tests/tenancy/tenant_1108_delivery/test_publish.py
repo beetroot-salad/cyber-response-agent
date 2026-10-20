@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import json
 import os
 import shutil
@@ -216,8 +218,13 @@ def test_publish_accepts_an_executable_blob(repo, tmp_path):
 
 
 @pytest.mark.parametrize(("marker", "accepted"), [
-    (b"blue\n", True), (b"blue\r\n", True), (b"blue", True),
-    (b"red\n", False), (b"BLUE\n", False), (b"blue\n\n", False), (b" blue\n", False),
+    ((fixture_uuid("tenant:blue") + "\n").encode(), True),
+    ((fixture_uuid("tenant:blue") + "\r\n").encode(), True),
+    (fixture_uuid("tenant:blue").encode(), True),
+    ((fixture_uuid("tenant:red") + "\n").encode(), False),
+    ((fixture_uuid("tenant:blue").upper() + "\n").encode(), False),
+    ((fixture_uuid("tenant:blue") + "\n\n").encode(), False),
+    ((" " + fixture_uuid("tenant:blue") + "\n").encode(), False),
     (None, False),
 ])
 def test_publish_requires_the_tenant_id_to_name_this_tenant_through_its_parser(
@@ -253,7 +260,7 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
     baseline = min(_timed(d.publish)[0] for _ in range(2))
     head = git(tenant.knowledge, "rev-parse", "HEAD")
     newer = advance_remote(repo, tmp_path)
-    with build_tenant(tmp_path, "red", root=tenant.data_root) as (red_tenant, red_remote, _):
+    with build_tenant(tmp_path, fixture_uuid("tenant:red"), root=tenant.data_root, repo_name="red") as (red_tenant, red_remote, _):
         mod = target()
         with LockHolder(tenant, tmp_path / "holder") as holder:
             for attempt in (d.publish, lambda: d.start_batch("busy", lanes=LANES)):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import asyncio
 import time
 from pathlib import Path
@@ -291,12 +293,12 @@ def test_o6_exit_4_is_new_and_a_sibling_exiting_4_did_not_finish(tmp_path: Path,
     with Episode.open(ep) as episode:
         T.episode_view(episode)
         exits = P.mod("learning.branch.cli").start_family(
-            episode, ["a", "b"], spawn=spawn, tenant_id=T.SOURCE_TENANT)
-    assert exits.get("b") == P.PROVIDER_DOWN_EXIT
+            episode, [T.world_id(ep, label) for label in ("a", "b")], spawn=spawn, tenant_id=T.SOURCE_TENANT)
+    assert exits.get(T.world_id(ep, "b")) == P.PROVIDER_DOWN_EXIT
     records = {p.stem: p.read_text(encoding="utf-8") for p in ep.rglob("world_records/*.yaml")}
-    assert "b" in records, f"no world record for the sibling that exited 4: {sorted(records)}"
-    assert P.sym("learning.branch.outcome", "DID_NOT_FINISH") in records["b"]
-    assert "a" not in records, "a sibling that exited 0 was recorded as failed"
+    assert T.world_id(ep, "b") in records, f"no world record for the sibling that exited 4: {sorted(records)}"
+    assert P.sym("learning.branch.outcome", "DID_NOT_FINISH") in records[T.world_id(ep, "b")]
+    assert T.world_id(ep, "a") not in records, "a sibling that exited 0 was recorded as failed"
 
 
 @pytest.mark.parametrize(("kill", "member"), [
@@ -312,7 +314,7 @@ def test_d4_exit_4_is_provider_downs_alone(tmp_path: Path, kill: Any, member: st
     assert d.rc == 0, f"a run ended {member} exited {d.rc}; only provider-down exits 4"
 
 
-SIBLING_TENANT = "acme"
+SIBLING_TENANT = fixture_uuid("tenant:acme")
 SIBLING_WORLD = "b"
 
 
@@ -322,18 +324,16 @@ def _sibling_episode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     branchable run, recorded: its alert and record at the front door's places), the episode primed from
     it by the REAL launcher door (`cli.prepare_episode`) with its container made, and the
     family manifest (worlds a, b, c) written. The episodes root is pointed at its parent."""
-    from defender.run_repository import Run
+    from defender.run_repository import RunId
 
     planted = S.plant_tenant(SIBLING_TENANT)
     _base, src = T.runs_base(tmp_path, tenant_id=SIBLING_TENANT, recorded=True)
-    accepted = planted.accept()
-    with P.mod("learning.branch.cli").prepare_episode(
-            T.EPISODE_ID, Run.at(src), data_root=accepted.data_root) as episode:
-        with accepted.runs_repository().episode(episode.dir.name, held=episode) as view:
-            view.create_container()
-        ep = Path(episode.dir)
-    T.write_family(ep, T.family_doc(source_run_dir=str(src)))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
+    runs = planted.accept().runs_repository()
+    source = runs.open(RunId.parse(src.name))
+    with P.mod("learning.branch.cli").prepare_episode(runs, source) as view:
+        ep = Path(view.episode.dir)
+        T.write_family(ep, T.family_doc(episode_id=ep.name, source_run_dir=str(src)))
+        view.start_runs([T.world_id(ep, label) for label in T.WORLDS])
     return ep
 
 

@@ -11,6 +11,7 @@ from defender.run_repository import RunPaths
 from defender.presentation import visualize_data as d
 from defender.presentation.visualize_run import render_runtime_page
 from defender.run_repository import SessionPaths
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 _USAGE = {"input_tokens": 100, "output_tokens": 800, "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 200}
 
@@ -55,7 +56,8 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
 
 
 def _build_run(tmp: Path) -> Path:
-    run = tmp / "run"
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run = tmp / fixture_uuid("run")
     (run / "gather_raw" / "l-001").mkdir(parents=True)
 
     (run / "investigation.md").write_text(_FULL_INVESTIGATION)

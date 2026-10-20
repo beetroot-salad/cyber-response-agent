@@ -110,20 +110,12 @@ class _Bystander:
 _WHY_0644 = "C-R6 found the naive staged shape regressing to 0600"
 
 
+#: The crash child: it loops over ONE real create lane in fresh directories until it is
+#: killed. Measured on the old one-open lane, a kill landed inside the runs-base record's create
+#: window in 8/40 (record-only loop) but 0/40 for the row (create_tenant's own listing and mkdir
+#: dominate its loop) — so the row lane left here is a stray-entry check with weak odds of a torn
+#: hit (red-flagged in the author digest). #1187 R1 retired the record lane with the record.
 _CRASH_CHILD = {
-    "record": r"""
-import os, sys
-from pathlib import Path
-from defender.tenancy import _tenant
-root = Path(sys.argv[1])
-print("ready", flush=True)
-i = 0
-while True:
-    base = root / f"r{i}"
-    os.mkdir(base)
-    _tenant.ensure_runs_base_record(base, "playground")
-    i += 1
-""",
     "row": r"""
 import sys
 from pathlib import Path
@@ -132,7 +124,7 @@ root = Path(sys.argv[1])
 print("ready", flush=True)
 i = 0
 while True:
-    _tenant.create_tenant(root / f"d{i}", "playground")
+    _tenant.create_tenant(root / f"d{i}", sys.argv[2])
     i += 1
 """,
 }
@@ -151,105 +143,51 @@ def _crash_leftovers(root: Path) -> list[str]:
     bad: list[str] = []
     for d in sorted(root.iterdir()):
         names = sorted(os.listdir(d))
-        if d.name.startswith("r"):
-            if names not in ([], [H.RECORD_NAME]):
-                bad.append(f"{d.name}: stray entries {names}")
-            elif names and not _complete(d / H.RECORD_NAME, ("tenant_id", "base_world_id")):
-                bad.append(f"{d.name}: a torn record {(d / H.RECORD_NAME).read_bytes()[:40]!r}")
-        else:
-            if names not in ([], [T_ID]):
-                bad.append(f"{d.name}: stray entries {names}")
-                continue
-            inner = sorted(os.listdir(d / T_ID)) if names else []
-            if inner not in ([], [H.ROW_NAME]):
-                bad.append(f"{d.name}/{T_ID}: stray entries {inner}")
-            elif inner and not _complete(d / T_ID / H.ROW_NAME, ("tenant_id", "created_at")):
-                bad.append(f"{d.name}: a torn row {(d / T_ID / H.ROW_NAME).read_bytes()[:40]!r}")
+        if names not in ([], [T_ID]):
+            bad.append(f"{d.name}: stray entries {names}")
+            continue
+        inner = sorted(os.listdir(d / T_ID)) if names else []
+        if inner not in ([], [H.ROW_NAME]):
+            bad.append(f"{d.name}/{T_ID}: stray entries {inner}")
+        elif inner and not _complete(d / T_ID / H.ROW_NAME, ("tenant_id", "created_at")):
+            bad.append(f"{d.name}: a torn row {(d / T_ID / H.ROW_NAME).read_bytes()[:40]!r}")
     return bad
 
 
-def test_o3_record_read_grammar(tmp_path, monkeypatch):
-    """A runs-base record whose tenant_id is '../../x' is refused when read, where at ed5386bc
-    it reads back unchallenged."""
-    from defender.run_repository import RunId, RunUnreachable
-
-    H.make_tenant(tmp_path / "data", T_ID)
-    base = tmp_path / "data" / T_ID / "runs"
-    H.plant_record(base, "../../x")
-    (base / "r1").mkdir()
-    tenant = H.tenant()
-    with pytest.raises(H.tenant().TenantRefused, match=r"\.\./\.\./x|tenant"):
-        tenant.read_tenant(base)
-    H.owner_refusal(H.ensure_runs_base_record, base, T_ID)
-    H.set_data_root(monkeypatch, tmp_path / "data")
-    runs = H.accept(tmp_path / "data", T_ID).runs_repository()
-    with pytest.raises(RunUnreachable) as opened:
-        runs.open(RunId.parse("r1"))
-    assert isinstance(opened.value.__cause__, H.tenant().TenantRefused), repr(opened.value)
-    good = tmp_path / "good"
-    H.plant_record(good, T_ID)
-    assert tenant.read_tenant(good).tenant_id == T_ID
-
-
-def test_o6_ensure_record_semantics(tmp_path):
-    base = tmp_path / "runs"
-    base.mkdir()
-    minted = H.ensure_runs_base_record(base, T_ID)
-    record = base / H.RECORD_NAME
-    doc = json.loads(record.read_text(encoding="utf-8"))
-    assert doc["tenant_id"] == T_ID == minted.tenant_id, "the minted record does not name T"
-    assert doc["base_world_id"] == minted.base_world_id
-    assert doc["base_world_id"], "the minted record carries no base_world_id"
-    minted_bytes = record.read_bytes()
-
-    again = H.ensure_runs_base_record(base, T_ID)
-    assert (again.tenant_id, again.base_world_id) == (T_ID, minted.base_world_id)
-    assert record.read_bytes() == minted_bytes, "a present record was rewritten"
-
-    other = tmp_path / "other"
-    H.plant_record(other, "someone-else")
-    other_bytes = (other / H.RECORD_NAME).read_bytes()
-    refusal = H.owner_refusal(H.ensure_runs_base_record, other, T_ID)
-    assert "someone-else" in str(refusal), f"the refusal does not name the disagreement: {refusal}"
-    assert (other / H.RECORD_NAME).read_bytes() == other_bytes, "the disagreeing record changed"
-
-    assert not hasattr(H.tenant(), "ensure_tenant"), (
-        "ensure_tenant still exists: D1 renames it ensure_runs_base_record(runs_base, tenant_id)")
-
-
-def test_o6_record_create_exclusive(tmp_path):
-    """Two racing ensure_runs_base_record creates for one runs base leave exactly one record,
-    and the loser returns the winner's record."""
-    for trial in range(40):
-        base = tmp_path / f"base-{trial}"
-        base.mkdir()
-        results, errors = _race(2, lambda b=base: H.ensure_runs_base_record(b, T_ID))
-        assert errors == [], f"trial {trial}: a racing create was refused: {errors!r}"
-        assert os.listdir(base) == [H.RECORD_NAME], f"trial {trial}: {os.listdir(base)}"
-        on_disk = json.loads((base / H.RECORD_NAME).read_text(encoding="utf-8"))
-        assert {r.base_world_id for r in results} == {on_disk["base_world_id"]}, (
-            f"trial {trial}: the racers disagree about the base world")
-
+# ======================================================================================
+# The create lane (J16/J63). #1187 R1 (declared change 6) retired the runs-base record, and
+# with it `ensure_runs_base_record`'s semantics (D1), its create race (O6), the record's read
+# grammar (O3), its torn read, and `Run.for_tenant`'s mismatch backstop (J34) and rekey
+# coherence (G-R7) — replaced by `ids_1187/test_1187_layout_isolation.py`
+# (`test_create_makes_the_runs_folder_and_writes_no_tenant_record`,
+# `test_a_container_with_no_record_opens_lists_and_hands_out_every_run`,
+# `test_the_listing_refuses_a_tenant_record_or_an_episodes_folder`).
+# ======================================================================================
 
 def test_s7_j16_create_lane_complete_or_absent(tmp_path):
-    with umask(0o022):
-        # (1) + (3) the runs-base record
-        record_fields = ("tenant_id", "base_world_id", "created_at")
-        for trial in range(40):
-            base = tmp_path / "records" / f"b{trial}"
-            base.mkdir(parents=True)
-            with _Bystander(base / H.RECORD_NAME, record_fields) as reader:
-                results, errors = _race(8, lambda b=base: H.ensure_runs_base_record(b, T_ID))
-            assert errors == [], (
-                f"trial {trial}: a racing ensure_runs_base_record raised {errors[0]!r} — the "
-                "empty-window read C-P2 measured on the old lane")
-            assert reader.violations == [], f"trial {trial}: the bystander saw {reader.violations}"
-            assert os.listdir(base) == [H.RECORD_NAME], f"trial {trial}: {os.listdir(base)}"
-            on_disk = json.loads((base / H.RECORD_NAME).read_text(encoding="utf-8"))
-            assert on_disk["tenant_id"] == T_ID
-            assert {r.base_world_id for r in results} == {on_disk["base_world_id"]}
-            assert_single_plain(base / H.RECORD_NAME, 0o644, why=_WHY_0644)
+    """A reader that catches a create-lane writer (create_tenant's tenant row) mid-write sees
+    the name absent or the file complete, never empty or partial; the file has exactly one name
+    throughout (no two-named alias window), mode 0644 under umask 022 (and the writing
+    process's owner), and a crash before the write completes leaves no stray entry in the
+    directory.
 
+    Three observations, each against the REAL lane: (2) the row race with a bystander reader;
+    (3) mode, owner and name count of what it leaves; (4) a real SIGKILL of a child looping
+    over the lane. (2)-(3) run under a pinned umask 022, so (3)'s 0644 never rides the host's
+    ambient umask (the umask is process-wide, so the racing threads share it). (4) asserts no
+    mode, so its children run under whatever umask the suite was started with.
+
+    #1187 declared change 6 (R1): the runs-base record `_tenant.json` is retired, so the
+    record halves — (1) the N-way `ensure_runs_base_record` race with its bystander and the
+    record's crash lane — are gone with it; the row lane is unchanged. (Name kept.)
+
+    PLATFORM-NEUTRAL BY CONSTRUCTION (phase F RC1): the harness uses only POSIX primitives —
+    threads, `os.lstat`/`os.listdir`, `os.geteuid`, a child process and SIGKILL — and asserts
+    only the OBSERVABLE, never a mechanism (`O_TMPFILE`, `linkat`, `renameat2` are the
+    implementer's per-platform choice). So it runs, and means the same thing, on any POSIX
+    host; nothing here is Linux-only, so nothing is skipped. Which platforms the guarantee is
+    REQUIRED on is RC1's open §7 question, not this test's."""
+    with umask(0o022):
         # (2) + (3) the tenant row
         row_fields = ("tenant_id", "created_at")
         for trial in range(20):
@@ -272,7 +210,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
         root = crash_root / f"{lane}-{kill}"
         root.mkdir(parents=True)
         child = subprocess.Popen(  # noqa: S603 — fixed argv, the test's own interpreter
-            [sys.executable, "-c", _CRASH_CHILD[lane], str(root)], env=env,
+            [sys.executable, "-c", _CRASH_CHILD[lane], str(root), T_ID], env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             ready = child.stdout.readline().strip()
@@ -291,7 +229,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
 
     # The 32 kills are independent (own dir, own child), so they run a few at a time: each is
     # mostly interpreter start-up and a sleep.
-    jobs = [(lane, kill) for lane, kills in (("record", 24), ("row", 8)) for kill in range(kills)]
+    jobs = [(lane, kill) for lane, kills in (("row", 8),) for kill in range(kills)]
     with ThreadPoolExecutor(max_workers=4) as pool:
         torn = [entry for found in pool.map(lambda j: crash_one(*j), jobs) for entry in found]
     assert torn == [], "a crash left a torn or stray entry:\n" + "\n".join(torn)
@@ -324,47 +262,6 @@ def test_create_does_not_swallow_an_unrelated_failure(tmp_path):
     assert not target.exists()
 
 
-def test_runs_base_record_torn_read(tmp_path, monkeypatch):
-    from defender.run_repository import RunId, RunRefused
-
-    root = tmp_path / "data"
-    H.set_data_root(monkeypatch, root)
-    H.make_tenant(root, T_ID)
-    base = H.runs_dir(root, T_ID)
-    base.mkdir()
-    run_dir = base / "r1"
-    run_dir.mkdir()
-    runs = H.accept(root, T_ID).runs_repository()
-    run_id = RunId.parse(run_dir.name)
-    # An open answers the record's refusal as `RunUnreachable` (#1105 PR 2 review).
-    with pytest.raises(RunRefused) as first:
-        runs.open(run_id)
-    absent = str(first.value)
-    for trial in range(40):
-        (base / H.RECORD_NAME).unlink(missing_ok=True)
-        seen: list[str] = []
-        stop = threading.Event()
-
-        def bystander(stop=stop, seen=seen) -> None:
-            while not stop.is_set():
-                try:
-                    seen.append("T" if runs.open(run_id).tenant_id == T_ID else "other")
-                except (H.tenant().TenantRefused, RunRefused) as refused:
-                    seen.append("absent" if str(refused) == absent else f"torn: {refused}")
-
-        reader = threading.Thread(target=bystander)
-        reader.start()
-        try:
-            results, errors = _race(8, lambda: H.ensure_runs_base_record(base, T_ID))
-        finally:
-            stop.set()
-            reader.join(timeout=30)
-        assert errors == [], f"trial {trial}: a racing loser observed a torn record: {errors!r}"
-        assert len({r.base_world_id for r in results}) == 1
-        bad = [s for s in seen if s not in ("T", "absent")]
-        assert bad == [], f"trial {trial}: the bystander observed {bad[:3]}"
-
-
 def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and_first_write(
         tmp_path):
     victim = tmp_path / "victim"
@@ -378,16 +275,3 @@ def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and
     fresh = tmp_path / "fresh"
     H.create_tenant(fresh, T_ID)
     assert (fresh / T_ID / H.ROW_NAME).is_file()
-
-
-def test_s7_j34_run_for_tenant_mismatch_backstop(tmp_path):
-    Run = H.mod("run_repository._handle").Run
-    base = tmp_path / "runs"
-    H.plant_record(base, "someone-else")
-    before = H.census(tmp_path)
-    with pytest.raises(H.tenant().TenantRefused, match="someone-else"):
-        Run.for_tenant(T_ID, "r1", runs_base=base)
-    assert H.census(tmp_path) == before, "the refused Run.for_tenant wrote something"
-    same = tmp_path / "same"
-    H.plant_record(same, T_ID)
-    assert Run.for_tenant(T_ID, "r1", runs_base=same).run_dir == same / "r1"

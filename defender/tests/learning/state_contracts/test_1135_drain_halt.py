@@ -2,6 +2,8 @@
 real `drains.author_drain` through `cli._run_stage` over a created state root and a real git repo."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 import logging
 import os
@@ -78,7 +80,7 @@ def _defender_row(fid: str, judge_outcome: str) -> dict:
     row = dict(D.finding_row(fid, run_id="ep-1", direction="family"), subject="defender",
                type="lead-set", subject_anchor="l-001", subject_topic="coverage",
                source_run_dir="episodes/ep-1/worlds/b",
-               contrast_evidence=["worlds/b/report.md", "worlds/a/report.md"],
+               contrast_evidence=[f"worlds/{T.fixture_world_id('b')}/report.md", f"worlds/{T.fixture_world_id('a')}/report.md"],
                on_verdict_path=True, world_label_doubted=False)
     row.pop("judge_outcome", None)
     return row
@@ -637,17 +639,17 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
     os.chmod(base, 0o755)
     try:
         # A natural run where run setup leaves one (#1105 PR 2: run end is handed the `Run`, and
-        # the row it files is the run's address): `<T>/runs/<id>` under its tenant record.
+        # the row it files is the run's address): `<T>/runs/<id>`. #1187 (R1, declared change
+        # 1): the id is a canonical UUID and the container holds no `_tenant.json`.
+        from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-        run_dir = base / "acme" / "runs" / "case-a"
+        run_dir = base / fixture_uuid("tenant:acme") / "runs" / fixture_uuid("1135-everyday-case-a")
         run_dir.mkdir(parents=True)
-        from defender.tenancy._tenant import ensure_runs_base_record
-        ensure_runs_base_record(run_dir.parent, "acme")
         plant_alert(run_dir, {"rule": {"name": "everyday"}})
         from defender.box import _scrub as scrub_mod
 
         scrub_mod.scrub(run_dir)  # a certified tree: the enqueue's refusal gate passes it
-        for p in (base / "acme", run_dir.parent, run_dir):
+        for p in (base / fixture_uuid("tenant:acme"), run_dir.parent, run_dir):
             os.chmod(p, 0o755)
         row = _defender_row("ep-1/b/0/9", "caught")
         names = ("e1", "append", "rotate", "move", "lock", "read", "rotate_unreadable")

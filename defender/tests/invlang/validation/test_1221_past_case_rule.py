@@ -7,7 +7,7 @@ import re
 import pytest
 
 from defender._paths import PATHS
-from defender.records._run_id import is_valid_run_id
+from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
 from defender._vocab import DISPOSITION_VALUES
 from defender.skills.invlang.validate import diagnose, validate_companion
 
@@ -19,7 +19,7 @@ GROUNDED_HEADER = (
 )
 ROW_HEAD = "l-003|e-001|ac1|authorized|iam-policy|"
 CONCLUDE_BENIGN = "disposition            benign"
-PRIOR_RUN = "20261001T000000Z-5710-sshd-prior"
+PRIOR_RUN = fixture_uuid("1221-prior-run")
 
 #: A second `authorized` row on the same contract, grounded on an affirmative record, uncited.
 ORG_AUTHORITY_ROW = (
@@ -37,8 +37,10 @@ PAST_CASE_SPELLINGS = [
 #: Groundings that are NOT past-case — what a row citing a run may still be labelled.
 OTHER_GROUNDINGS = ["org-authority", ""]
 
-#: Citations that are not run ids (`is_valid_run_id` refuses each).
-NOT_RUN_IDS = ["../x", "not a run", "a/b", "-leading-dash"]
+#: Citations that are not run ids (the UUID rule refuses each).
+NOT_RUN_IDS = ["../x", "not a run", "a/b", "-leading-dash",
+               "20261001T000000Z-5710-sshd-prior", "acme", PRIOR_RUN.upper(),
+               PRIOR_RUN.replace("-", ""), "{" + PRIOR_RUN + "}", PRIOR_RUN + "x"]
 
 
 def _example_b() -> str:
@@ -171,9 +173,9 @@ def test_1221_an_uncited_past_case_is_an_error(spelling):
 
 @pytest.mark.parametrize("cite", NOT_RUN_IDS)
 def test_1221_a_citation_that_is_not_a_run_id_is_an_error(cite):
-    """A non-empty `cites_past_case` must be a run id (`is_valid_run_id`)."""
-    assert not is_valid_run_id(cite), f"fixture bug: {cite!r} is a valid run id"
-    assert is_valid_run_id(PRIOR_RUN), f"fixture bug: {PRIOR_RUN!r} is not a valid run id"
+    """A non-empty `cites_past_case` must be a run id (the UUID rule)."""
+    assert not is_fixture_uuid_shape(cite), f"fixture bug: {cite!r} is a valid run id"
+    assert is_fixture_uuid_shape(PRIOR_RUN), f"fixture bug: {PRIOR_RUN!r} is not a valid run id"
 
     found = _row_error_everywhere(_grounded("past-case", cites=cite),
                                   f"cites_past_case {cite!r}, which is not a run id,")

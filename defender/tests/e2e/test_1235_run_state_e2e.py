@@ -25,6 +25,7 @@ from defender.tests.support.learning.branch._branch_947 import (  # noqa: E402
     spec_at,
 )
 from defender.tests.support.storage._session_store_705 import runs_base  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 from defender.tests.e2e._replay_harness import (  # noqa: E402
     GOLDEN_AB3,
     FakeVerbs,
@@ -103,7 +104,7 @@ def _real_rows(root: Path, gather_turns: list[Turn]) -> tuple[list[dict], dict[s
 
 #: The planted source's run folder name (`_branch_947.planted_source`'s `name=`), so its files
 #: can be written into it before the source is built.
-SOURCE_RUN = "run-source-001"
+SOURCE_RUN = fixture_uuid("run-source-001")
 
 
 class Branched:
@@ -124,7 +125,8 @@ class Branched:
             "the legal source carries a claim for l-001, so the sibling could not re-dispatch it")
         self.spec = spec_at(store, source, path_ids[LEGACY_BRANCH_CALL])
         store.close()
-        self.sibling = tmp_path / "defender-runs" / "run-sibling-1235"
+        # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+        self.sibling = tmp_path / "defender-runs" / fixture_uuid("run-sibling-1235")
         RunPaths(self.sibling).gather_raw.mkdir(parents=True)
         from defender.tests.support.storage._alert_plant import plant_alert
         plant_alert(self.sibling, RunPaths(source).alert.read_bytes())
@@ -286,11 +288,11 @@ def test_a_run_driven_through_a_symlinked_folder_counts_one_pool(tmp_path):
     assert probe.states, "the lead's verb was never called"
     assert all(s is state for s in probe.states), (
         "the gather lead's verb context carried a state other than the run's")
-    assert state.run_id == "r1235-v2-link"
-    assert state.run_dir.resolve() == (real / "r1235-v2-link").resolve()
+    assert state.run_id == run_dir.name
+    assert state.run_dir.resolve() == (real / run_dir.name).resolve()
     snapshot = state.budget_snapshot()
     assert (snapshot["tool_calls"], snapshot["subagent_spawns"]) == (5, 2), snapshot
-    assert list(state.lead_rows(LEAD)) == _rows(real / "r1235-v2-link"), (
+    assert list(state.lead_rows(LEAD)) == _rows(real / run_dir.name), (
         "the state's rows and the table read through the real spelling disagree")
     assert len(state.lead_rows(LEAD)) == 2
 

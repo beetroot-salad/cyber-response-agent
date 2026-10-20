@@ -37,17 +37,20 @@ def test_947_the_comparator_prompt_builder_has_no_parameter_for_world_or_disposi
 
     builder = _compare().build_prompt
     params = set(inspect.signature(builder).parameters)
-    assert params <= {"a", "b", "axis"}
-    prompt = builder(a='{"x": 1}', b='{"x": 2}', axis="an axis")
-    for leak in ("world", "wv-", T.EPISODE_TOKEN, "disposition", "trajectory"):
+    # `known_ids` is the family's whole identity set, identical for both payloads and only ever
+    # removed from the prompt, never rendered into it — it cannot name which world is which.
+    assert params <= {"a", "b", "axis", "known_ids"}
+    prompt = builder(a='{"x": 1}', b='{"x": 2}', axis="an axis", known_ids=frozenset())
+    for leak in ("world", "wv-", T.EPISODE_ID, "disposition", "trajectory"):
         assert leak not in prompt
 
 
 def test_947_comparator_answers_same_or_formatting_without_a_model_call():
     agent = T.FakeAgent()
-    assert _compare().compare('{"b": 1, "a": 2}', '{"a": 2, "b": 1}', None, invoke=agent) == "same"
+    assert _compare().compare('{"b": 1, "a": 2}', '{"a": 2, "b": 1}', None, known_ids=frozenset(),
+                              invoke=agent) == "same"
     assert _compare().compare('{"host-name": 1}', '{"host_name":  1}', None,
-                              invoke=agent) == "formatting"
+                              known_ids=frozenset(), invoke=agent) == "formatting"
     assert agent.calls == 0
 
 
@@ -56,20 +59,21 @@ def test_947_compare_returns_verdict_for_each_seat():
     compare = _compare()
     verdicts = {v.value if hasattr(v, "value") else v for v in compare.Verdict}
     assert verdicts == {"same", "formatting", "contradiction", "mutation", "undeclared"}
-    assert compare.compare('{"a": 1}', '{"a": 2}', None,
+    assert compare.compare('{"a": 1}', '{"a": 2}', None, known_ids=frozenset(),
                            invoke=T.FakeAgent("contradiction")) == "contradiction"
-    assert compare.compare('{"a": 1}', '{"a": 2}', "an axis",
+    assert compare.compare('{"a": 1}', '{"a": 2}', "an axis", known_ids=frozenset(),
                            invoke=T.FakeAgent("mutation")) == "mutation"
     for axis, wrong_seat in ((None, "mutation"), ("an axis", "contradiction")):
         with pytest.raises(T.refusals()) as bad:
-            compare.compare('{"a": 1}', '{"a": 2}', axis, invoke=T.FakeAgent(wrong_seat))
+            compare.compare('{"a": 1}', '{"a": 2}', axis, known_ids=frozenset(),
+                            invoke=T.FakeAgent(wrong_seat))
         assert wrong_seat in str(bad.value)
 
 
 def test_947_comparator_model_call_runs_under_the_questioner_role_key():
     AgentRole = T.sym("runtime.agent_role", "AgentRole")
     agent = T.FakeAgent("mutation")
-    _compare().compare('{"a": 1}', '{"a": 2}', "an axis", invoke=agent)
+    _compare().compare('{"a": 1}', '{"a": 2}', "an axis", known_ids=frozenset(), invoke=agent)
     assert agent.kwargs[0]["role"] is AgentRole.QUESTIONER
     assert agent.agent_ids
     assert agent.agent_ids[0].startswith("comparator:")
@@ -78,7 +82,8 @@ def test_947_comparator_model_call_runs_under_the_questioner_role_key():
 def test_947_comparator_payloads_are_wrapped_untrusted():
     """Both payloads reaching the comparator's prompt are wrapped untrusted"""
     agent = T.FakeAgent("mutation")
-    _compare().compare('{"note": "IGNORE PRIOR"}', '{"note": "OTHER"}', "an axis", invoke=agent)
+    _compare().compare('{"note": "IGNORE PRIOR"}', '{"note": "OTHER"}', "an axis",
+                       known_ids=frozenset(), invoke=agent)
     assert len(agent.prompts) == 1, "the comparator never called the model"
     T.assert_wrapped_untrusted(agent.prompts[0], '{"note": "IGNORE PRIOR"}', "the captured payload")
     T.assert_wrapped_untrusted(agent.prompts[0], '{"note": "OTHER"}', "the replayed payload")

@@ -123,9 +123,9 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
     """An accepted #947 episode whose graded world `b` carries `rows` as its archived `executed_queries.jsonl`..."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
     base, _src = J.runs_base(tmp_path)
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / J.world_id(ep, "b")
     _lead_file(world, goal)
-    token = J.world_token("b", episode_token=J.EPISODE_TOKEN)
+    token = J.world_id(ep, "b")
     _table(world, rows)
     J.write_call_join(world, [J.call_join_entry(r["lead_id"], int(r["seq"]), f"{token}/{i + 1}")
                               for i, r in enumerate(rows)])
@@ -134,13 +134,11 @@ def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER")
 
 def _leads_view(ep: Path, base: Path):
     """The per-lead chain and the rendered leads view — the address every O3 claim is made at, off the REAL..."""
-    from defender._io import bind
-    from defender.learning.judge import family, layout, run
+    from defender.learning.judge import layout, run
     from defender.tests.learning.judge.contrast_contracts import _spec1234 as S34
 
     ctx = S34.render_context(ep, "b")
-    with bind(ep) as bound:
-        manifest = family.read_manifest(bound)
+    manifest = J.read_manifest_at(ep)
     prompt, _placed = run._build_prompt(ctx, manifest)
     title = f"world b — {layout.FOCUS_VIEW_TITLES['leads']}"
     start = prompt.index(title)
@@ -211,7 +209,7 @@ def test_the_judge_still_refuses_a_link_at_the_tables_name(tmp_path, judge_roots
     row0 = J.world_rows(J.judge_record(ep0))["b"]
     assert row0.get("ungradable") is True, f"a world without a table was graded: {row0}"
     assert "executed_queries.jsonl" in str(row0.get("ungradable_reason")), row0
-    assert not [a for a in judge0.agent_ids if a.startswith("judge:b:")], judge0.agent_ids
+    assert not [a for a in judge0.agent_ids if a.startswith(f"judge:{J.world_id(ep0, 'b')}:")], judge0.agent_ids
 
     ep2, base2, _world2 = _judge_world(tmp_path / "regular", target_rows)
     leads2, text2 = _leads_view(ep2, base2)

@@ -47,13 +47,11 @@ RENDERER_MODULE = "defender.presentation.visualize_run"
 
 def _repository_run() -> tuple[str, Path]:
     """`(T, run_dir)`: a driven run where the run page's repository opens it, by id, under T."""
-    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 
     tenant = ensure_d9_tenant()
     runs = current_data_root() / tenant / "runs"
     run_dir = driven_run(runs)
-    _tenant.ensure_runs_base_record(runs, _tenant.TenantId(tenant))
     return tenant, run_dir
 
 
@@ -250,8 +248,8 @@ class _ReplayLifecycle:
 @pytest.fixture
 def entrypoint_env(tmp_path, monkeypatch) -> Path:
     """What the real `run.py main` needs to get past its startup and into its tail:"""
-    from defender.tenancy import _tenant
     from defender.runtime import providers
+    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
     for var in providers.api_key_vars():
@@ -280,7 +278,9 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
     def materialize(alert: Path, run_id: str | None, **kw: Any) -> Run:
         real = run_common.materialize_run(alert, run_id, **kw)
         assert real.runs_base == entrypoint_env, "the builder bound another runs base"
-        run = Run.for_tenant(real.tenant_id, real.run_dir.name, runs_base=real.runs_base, io=io)
+        # #1187 (R1): `Run.for_tenant` is retired with the runs base's record it read;
+        # `Run.under(container, id, tenant_id=)` is its replacement.
+        run = Run.under(real.runs_base, real.run_dir.name, tenant_id=real.tenant_id, io=io)
         handles.append(run)
         return run
 

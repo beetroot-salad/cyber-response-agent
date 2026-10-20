@@ -1,7 +1,8 @@
 """#947 — the launcher: what it checks, what it starts, what it refuses (preflight, `Step.RUNS`, `Step.VERIFY`"""
 from __future__ import annotations
 
-from defender.run_repository import Run
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 
 import json
 import re
@@ -9,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from defender.episodes import _episode_handle as EH
 from defender.episodes._episode_handle import Episode
 from defender._io import bind
 from defender.run_repository import RunPaths
@@ -31,6 +31,8 @@ def _cli():
 
 def _verify_family(ep_dir, plant=T.arm_run_dir, **kw):
     """`cli.verify_family` over an `Episode` opened on `ep_dir`"""
+    if not (ep_dir / T.ROSTER_NAME).exists():  # once per episode (a loop may re-verify one)
+        T.plant_roster(ep_dir)
     for world in T.WORLDS:
         plant(ep_dir, world)
     with Episode.open(ep_dir) as episode:
@@ -90,16 +92,16 @@ def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp
     assert agent.calls == 0
 
 
-def test_947_episode_token_rendering_is_injective_and_nameable(tmp_path):
-    """The episode token's rendering is injective and nameable"""
+def test_world_identities_are_independent_of_episode_and_label(tmp_path):
     fam = T.mod("runtime.branch._family")
-    ids = ["a-b_c-n1", "a_b-c-n1", "a-b-c_n1", "A-B-n1", "20260728T161845Z-fresh-case-n59"]
-    tokens = [fam.episode_token_for(i) for i in ids]
-    assert len(set(tokens)) == len(set(ids))
-    for token in tokens:
-        world = fam.world_token_for(token, "b")
-        assert world == f"{token}.b"
-        assert re.fullmatch(r"[a-z0-9][a-z0-9._]*", world), world
+    authored = T.declaration(S.family_v2())
+    first, _ = fam.accept_family(authored)
+    second, _ = fam.accept_family(authored)
+    ids = [world["world_id"] for doc in (first, second) for world in doc["worlds"]]
+    assert len(set(ids)) == len(ids)
+    assert all(re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", wid)
+               for wid in ids)
+    assert [world["label"] for world in first["worlds"]] == list(T.WORLDS)
 
 
 def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_path):
@@ -129,7 +131,7 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
     RunPaths(src).alert.unlink()
     RunPaths(src).alert.symlink_to(secret)
-    agent = T.FakeAgent(T.family_doc(), T.world_doc("b"), T.world_doc("c"))
+    agent = T.FakeAgent(T.declaration(T.family_doc()), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
     with pytest.raises(T.refusals()) as refusal:
         _cli().main(["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
                      *T.retired_continuation_argv()],
@@ -231,7 +233,7 @@ def test_947_any_failure_in_steps_two_to_four_aborts_the_episode(tmp_path):
     spawn = T.FakeSpawn()
     rc, spawn, _ep, message = _launch(
         tmp_path, spawn=spawn,
-        questioner=T.FakeAgent(S.family_v2(), fault=T.Fault(raise_after=1)))
+        questioner=T.FakeAgent(T.declaration(S.family_v2()), fault=T.Fault(raise_after=1)))
     assert rc != 0
     assert message, "the abort was not reported as a refusal"
     assert spawn.launches == [], "a sibling started after the abort"
@@ -246,7 +248,7 @@ def test_947_launcher_verifies_each_siblings_scrub_verdict(tmp_path):
     T.runs_base(tmp_path)
     ep = T.episode(tmp_path)
     report = _verify_family(ep, source=T.provenance_record())
-    assert report["scrub_verified"] == list(T.WORLDS)
+    assert report["scrub_verified"] == [T.world_id(ep, label) for label in T.WORLDS]
 
 
 def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp_path):
@@ -260,7 +262,7 @@ def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp
 
         report = _verify_family(ep, dirs, source=T.provenance_record())
         assert world in report["reason"]
-        assert world not in report["archived"]
+        assert T.world_id(ep, world) not in report["archived"]
         assert report["comparable"] is True, report
         assert report["not_comparable"] == ""
         assert (ep / "provenance.json").exists()
@@ -276,9 +278,9 @@ def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_re
 
     report = _verify_family(ep, dirs, source=T.provenance_record())
 
-    assert "b" not in report["archived"]
+    assert T.world_id(ep, "b") not in report["archived"]
     with bind(Path(ep)) as bound:
-        failed = outcome.failed_worlds(bound, {})
+        failed = outcome.failed_worlds(bound, {}, family=T.sym("runtime.branch._family", "parse_family")(T.family_doc()))
     assert sorted(failed) == ["b"]
     assert failed["b"]["reason"] == outcome.NOT_ARCHIVED
 
@@ -366,7 +368,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         "git-failed": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED},
     }
     for name, stamp in waivable.items():
-        ep = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}")
+        ep = T.episode(tmp_path, episode_id=fixture_uuid(f"947-launcher-{name}"))
 
         def dirs(ep, w, stamp=stamp):
             return T.arm_run_dir(ep, w, **(stamp if w == "b" else {}))
@@ -375,7 +377,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         assert report["comparable"] is False, name
         assert "b" in report["reason"], (name, report["reason"])
         assert not (ep / "provenance.json").exists(), name
-        ok = T.episode(tmp_path, episode_id=f"{T.EPISODE_ID}-{name}-ok")
+        ok = T.episode(tmp_path, episode_id=fixture_uuid(f"947-launcher-{name}-ok"))
         waived = _verify_family(ok, dirs, source=T.provenance_record(), allow_dirty=True)
         assert waived["comparable"] is True, name
         assert (ok / "provenance.json").is_file(), name
@@ -385,9 +387,9 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
         return T.arm_run_dir(ep, w, **(silent if w == "b" else {}))
 
     for allow_dirty in (False, True):
-        # A case-folded id: an episode id is a run id (`refuse_bad_episode_id`).
+        # #1187 declared change 1: an episode id is a canonical lowercase uuid4 text.
         ep = T.episode(tmp_path,
-                       episode_id=f"{T.EPISODE_ID}-silent-{str(allow_dirty).lower()}")
+                       episode_id=fixture_uuid(f"947-launcher-silent-{str(allow_dirty).lower()}"))
         report = _verify_family(ep, silent_dirs, source=T.provenance_record(),
                                 allow_dirty=allow_dirty)
         assert report["comparable"] is False, f"allow_dirty={allow_dirty}"
@@ -417,7 +419,7 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
     ep = T.episode(tmp_path / "per-world")
     report = _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, scrub_ran=(w != "c")),
                             source=T.provenance_record())
-    assert sorted(p.name for p in (ep / "worlds").iterdir()) == ["a", "b"]
+    assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.world_id(ep, label) for label in ("a", "b"))
     assert (ep / "provenance.json").exists()
     assert not (ep / "not_comparable.yaml").exists()
     assert report["comparable"] is True
@@ -432,7 +434,7 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
         return T.arm_run_dir(ep, w, commit="cafef00" if w == "b" else "deadbee")
 
     report = _verify_family(ep, dirs, source=T.provenance_record())
-    assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.WORLDS)
+    assert sorted(p.name for p in (ep / "worlds").iterdir()) == sorted(T.world_id(ep, label) for label in T.WORLDS)
     assert not (ep / "provenance.json").exists()
     assert report["comparable"] is False
     assert "cafef00" in report["not_comparable"]
@@ -445,18 +447,21 @@ def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability
 
 def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     """The episode directory's creation is an exclusive create, not a check-then-act"""
+    import os
     import threading
 
-    base, src = T.runs_base(tmp_path)
-    cli = _cli()
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    T.runs_base(tmp_path)
+    tenant = _tenant_paths()
     results: list = []
     barrier = threading.Barrier(2)
 
     def attempt():
         barrier.wait()
         try:
-            with cli.prepare_episode(T.EPISODE_ID, Run.at(src), data_root=_tenant_paths().data_root) as episode:
-                results.append(episode)
+            with tenant.runs_repository().create_episode() as view:
+                results.append(view.episode_id)
         except Exception as e:  # noqa: BLE001 — the refusal is the observation
             results.append(e)
 
@@ -466,11 +471,13 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
     for t in threads:
         t.join()
     assert not any(isinstance(r, Exception) for r in results), results
-    first = EH.episode_dir(_tenant_paths().data_root, T.EPISODE_ID)
-    assert sorted(r.dir for r in results) == [first, first.parent / f"{T.EPISODE_ID}-r2"]
-    for episode in results:
-        lines = (episode.dir / "served" / "base.jsonl").read_text(encoding="utf-8").splitlines()
-        assert len(lines) == len(set(lines)) == 1, (episode.dir, lines)
+    assert len(set(results)) == 2, f"two launchers claimed one episode: {results}"
+    episodes = S.episodes_dir(tenant.data_root, str(tenant.id))
+    assert sorted(os.listdir(episodes)) == sorted(results), sorted(os.listdir(episodes))
+    for episode_id in results:
+        assert S.is_canonical_uuid(episode_id), f"{episode_id!r} is not a canonical uuid"
+        assert (episodes / episode_id).is_dir(), episode_id
+        assert not (episodes / episode_id).is_symlink(), episode_id
 
 
 # the one shared mutable resource D1 newly contends

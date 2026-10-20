@@ -339,7 +339,7 @@ def docs_invoking_broken_commands() -> list[tuple[str, int, str]]:
     with a `__main__` block, and every `python … cli/tenant.py <sub>` whose subcommand the
     command's base usage does not offer."""
     usage = _golden()["staying_command_runs"]["tenant.py by path"]["usage"]
-    subcommands = set(re.search(r"\{([\w,]+)\}", usage).group(1).split(","))
+    subcommands = set(re.search(r"\{([\w,-]+)\}", usage).group(1).split(","))
     tenant_sub = re.compile(r"python3?\s+\S*scripts/tenant\.py\s+([a-z][\w-]*)")
     broken: list[tuple[str, int, str]] = []
     for rel, lines in P.tracked_text(S.REPO_ROOT):

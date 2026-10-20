@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from collections import deque
 from collections.abc import Callable
@@ -97,11 +98,14 @@ def params_of_depth(depth: int, chain: Callable[[int], Any] = dict_chain) -> dic
 # ── the writer, driven the way every production writer drives it ───────────────────────────
 
 
-def _started(root: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at module top)
-    """A run the writer can be driven on: a run folder and the run's state, started as a run
-    start starts it (#1235), since the writer takes each row's seq from the state."""
+def _started(parent: Path):  # noqa: ANN202 — a `RunState` (#1235: not imported at module top)
+    """A run the writer can be driven on: a run folder under `parent` and the run's state,
+    started as a run start starts it (#1235), since the writer takes each row's seq from the
+    state."""
     from defender.runtime.run_state import RunState
 
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    root = parent / fixture_uuid("r1127-nesting")
     RunPaths(root).gather_raw.mkdir(parents=True, exist_ok=True)
     return RunState(root, "r1127-nesting")
 

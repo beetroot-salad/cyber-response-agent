@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 import re
@@ -76,9 +77,42 @@ def _above_guard_row(seq: int, marker: str, **overrides) -> dict:
 
 
 def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
-    _lead_file(tmp_path, "GOAL_MARKER")
-    _lead_file(tmp_path, "GOAL_ONLY_TRIPS", lead_id="l-002")
-    _table(tmp_path, [
+    """O3/D1 — one lead with a real row and two sentinel rows (an above-guard rejection, and a
+    `∅.bash-shim` row written through the REAL writer `append_query_row` exactly as the gather
+    bash lane writes it, its model-authored shell text in `params.command`), each row carrying
+    its own ASCII marker: the real row's marker is in the section, neither sentinel's is, and
+    neither sentinel id's ASCII tail is. `questioner_leads` returns that lead with exactly one
+    query. Beside it, a second lead whose ONLY row is a sentinel is kept — with its goal and no
+    queries — the same decision `actor_view` records: the run did open it.
+
+    Two more sentinel shapes sit on the first lead, and they are what pins the RULE rather
+    than the two ids above: a `∅.repeat-trip` row, which the guard writes with the REAL
+    `system` and `verb` and the model's own `params` (so a filter on `system == ""` or on the
+    two literal tails keeps it), and a synthetic `∅.future-sentinel` id no writer spells today
+    — `is_sentinel` is the `∅.` prefix (`is_reserved_query_id`), so a sentinel defined
+    tomorrow partitions the day it is defined, and the render must follow the predicate, not
+    a list. (The adversary's replay of the tests-only commit greened both filters.)
+
+    The section is also held to O1 here — the key-set census and the `raw_command` /
+    `payload_path` marker negatives — because this is the one fixture with a bash-shim row,
+    and a render that leaked a column only in a sentinel's presence passed the O1 test's
+    fixture untouched.
+
+    The premise is asserted first: the surface partitions the five rows as `queries=[0]`,
+    `sentinels=[1, 2, 3, 4]` (C10), so the negatives refute a render that reads `.rows` or
+    `.sentinels` and not a fixture the join never held.
+
+    Observed failing by: `questioner_leads` missing; a sentinel's marker in the section text
+    (today's `__dict__` dump renders them under `sentinels`, and so would a render over
+    `jl.rows` filtered on the two known tails or on an empty `system`); the lead returned
+    with more than one query; the sentinel-only lead absent; a query dict with a key outside
+    the nine; a `raw_command` / path marker in the section."""
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
+    _lead_file(run_dir, "GOAL_MARKER")
+    _lead_file(run_dir, "GOAL_ONLY_TRIPS", lead_id="l-002")
+    _table(run_dir, [
         _searchable_row(0, params={"native_query": "REAL_PARAMS_MARKER"}),
         _above_guard_row(1, "ABOVEGUARD_PARAMS_MARKER"),
         _above_guard_row(0, "ONLYTRIPS_PARAMS_MARKER", lead_id="l-002"),
@@ -87,8 +121,8 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     from defender._io import read_jsonl_rows
     from defender.runtime.run_state import RunState
 
-    state = RunState(tmp_path, "r1032-questioner")
-    state.inherit_rows(read_jsonl_rows(RunPaths(tmp_path).executed_queries))
+    state = RunState(run_dir, "r1032-questioner")
+    state.inherit_rows(read_jsonl_rows(RunPaths(run_dir).executed_queries))
     append_query_row(
         state, run=fixture_run(state.run_dir), lead_id=LEAD, system="", verb="bash", system_key="",
         query_id=BASH_SHIM_QUERY_ID, params={"command": shell}, raw_command=shell,
@@ -97,7 +131,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     )
     # After the shim took seq 2: the repeat-trip row as the guard writes it — REAL system and
     # verb, the model's params — and a sentinel id nothing spells yet.
-    _table(tmp_path, [
+    _table(run_dir, [
         _searchable_row(3, query_id=REPEAT_TRIP_QUERY_ID, exit_code=64,
                         error_class=AGENT_FIXABLE_ERROR_CLASS, payload_status="error",
                         payload_digest="exit=64; repeated",
@@ -105,7 +139,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         _searchable_row(4, query_id=f"{RESERVED_QUERY_ID_PREFIX}future-sentinel",
                         params={"native_query": "FUTURESENTINEL_PARAMS_MARKER"}),
     ])
-    by_id = {jl.lead_id: jl for jl in lead_repository.joined(tmp_path)}
+    by_id = {jl.lead_id: jl for jl in lead_repository.joined(run_dir)}
     assert ([q.seq for q in by_id[LEAD].queries], [q.seq for q in by_id[LEAD].sentinels]) == \
         ([0], [1, 2, 3, 4]), "the join no longer partitions the fixture as one query and four sentinels"
     assert [q.system for q in by_id[LEAD].sentinels][2:] == ["elastic", "elastic"], \
@@ -113,7 +147,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
         "filter would no longer be refuted"
     assert (by_id["l-002"].queries, [q.seq for q in by_id["l-002"].sentinels]) == ([], [0])
 
-    text = _section(tmp_path)
+    text = _section(run_dir)
     for kept in ("REAL_PARAMS_MARKER", "GOAL_MARKER", "GOAL_ONLY_TRIPS", "elastic.ad-hoc"):
         assert kept in text, f"the section lost {kept!r} — the negatives below are vacuous"
     for dropped in (
@@ -125,7 +159,7 @@ def test_o3_no_sentinel_row_reaches_the_questioners_section(tmp_path):
     ):
         assert dropped not in text, f"a sentinel row or an unlisted column reached the questioner: {dropped!r}"
 
-    leads = {lead["lead_id"]: lead for lead in _questioner_leads(tmp_path)}
+    leads = {lead["lead_id"]: lead for lead in _questioner_leads(run_dir)}
     assert set(leads) == {LEAD, "l-002"}, f"the render returned {sorted(leads)}"
     for lead in leads.values():
         assert set(lead) == QUESTIONER_LEAD_KEYS, f"lead {lead['lead_id']!r} carries other keys"

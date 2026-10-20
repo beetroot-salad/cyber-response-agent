@@ -36,7 +36,7 @@ def _chain(depth: int) -> dict:
 @pytest.mark.parametrize("arg", ["params", "query_id"])
 def test_a_too_deep_call_that_skipped_validation_is_refused_before_anything_runs(tmp_path, arg):
     registry = _Registry()
-    capture = QueryCapture(registry)
+    capture = QueryCapture(registry, known_ids=frozenset())
     ran: list[dict] = []
 
     async def handler(args: dict):  # noqa: ANN202

@@ -2,6 +2,8 @@
 mean something."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 
 from defender.episodes._episode_handle import Episode
@@ -24,7 +26,7 @@ def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path)
     control_ep = S.cut_short_episode(tmp_path / "control")
     with Episode.open(control_ep) as episode:
         archive.archive_episode(
-            episode, {label: S.sibling_run_dir(control_base, label) for label in ("b", "c")})
+            episode, {T.world_id(episode.dir, label): path for label, path in ({label: S.sibling_run_dir(control_base, label) for label in ("b", "c")}).items()})
     control_rows, control_word = _rows_and_word(control_ep)
 
     forged_base, _src = S.runs_base(tmp_path / "forged-base")
@@ -33,13 +35,13 @@ def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path)
     for run_dir in forged_dirs.values():
         S.salt_run_dir(run_dir, value="request-limit")
     with Episode.open(forged_ep) as episode:
-        archive.archive_episode(episode, forged_dirs)
+        archive.archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in forged_dirs.items()})
     forged_rows, forged_word = _rows_and_word(forged_ep)
     assert forged_rows == control_rows, (
         "a forgery planted in a box-writable file moved the grade")
     assert forged_word == control_word, "a forgery moved the family's verdict word"
     for label in ("b", "c"):
-        assert not (forged_ep / "worlds" / label / S.run_end_name()).exists(), (
+        assert not (forged_ep / "worlds" / T.world_id(forged_ep, label) / S.run_end_name()).exists(), (
             f"{label}: a box-written file became the archived run-end record; the record is "
             "not in the copy list and no run dir entry is an input to it")
 
@@ -67,7 +69,7 @@ def test_every_box_writable_artifact_carrying_a_truncated_by_looking_value_leave
     control_base, _src = S.runs_base(tmp_path / "control-base")
     control_ep = S.cut_short_episode(tmp_path / "control")
     with Episode.open(control_ep) as episode:
-        archive.archive_episode(episode, {"b": S.sibling_run_dir(control_base, "b")})
+        archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): S.sibling_run_dir(control_base, 'b')})
     control_rows, control_word = _rows_and_word(control_ep)
     for i, name in enumerate(S.FORGEABLE_NAMES):
         base, _src = S.runs_base(tmp_path / f"base-{i}")
@@ -76,8 +78,8 @@ def test_every_box_writable_artifact_carrying_a_truncated_by_looking_value_leave
         (run_dir / name).write_text(
             json.dumps(S.record_doc("request-limit")), encoding="utf-8")
         with Episode.open(ep) as episode:
-            archive.archive_episode(episode, {"b": run_dir})
-        assert not (ep / "worlds" / "b" / S.run_end_name()).exists(), (
+            archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
+        assert not (ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).exists(), (
             f"{name}: a box-written file became the archived run-end record")
         seen_rows, seen_word = _rows_and_word(ep)
         assert seen_rows == control_rows, f"{name}: a planted value moved the grade"
@@ -104,9 +106,9 @@ def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_th
     nested.mkdir(parents=True, exist_ok=True)
     (nested / S.run_end_name()).write_text(forged, encoding="utf-8")
     with Episode.open(ep) as episode:
-        S.mod("learning.branch.archive").archive_episode(episode, {"b": run_dir})
+        S.mod("learning.branch.archive").archive_episode(episode, {T.world_id(episode.dir, 'b'): run_dir})
     archived = json.loads(
-        (ep / "worlds" / "b" / S.run_end_name()).read_text(encoding="utf-8"))
+        (ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()).read_text(encoding="utf-8"))
     assert archived == S.record_doc("aborted"), (
         f"a plant under the run dir reached the archived record: {archived!r}")
     assert S.graded(ep)["b"].get("cut_short") == "aborted"
@@ -118,7 +120,7 @@ def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_th
 def _frontmatter_row(tmp_path, name, extra=None, raw=None):
     """One episode whose world b carries a planted `report.md`, graded."""
     ep = S.cut_short_episode(tmp_path / name)
-    S.plant_frontmatter(ep / "worlds" / "b", extra=extra or "", raw=raw)
+    S.plant_frontmatter(ep / "worlds" / T.world_id(ep, "b"), extra=extra or "", raw=raw)
     return _rows_and_word(ep)
 
 
@@ -165,11 +167,11 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
     S.plant_sidecar(forged_dir, truncated_by="aborted")
     S.salt_run_dir(forged_dir, value="request-limit")
     with Episode.open(clean_ep) as episode:
-        archive.archive_episode(episode, {"b": clean_dir})
+        archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): clean_dir})
     with Episode.open(forged_ep) as episode:
-        archive.archive_episode(episode, {"b": forged_dir})
-    assert (clean_ep / "worlds" / "b" / S.run_end_name()).read_text(encoding="utf-8") == \
-           (forged_ep / "worlds" / "b" / S.run_end_name()).read_text(encoding="utf-8"), (
+        archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): forged_dir})
+    assert (clean_ep / "worlds" / T.world_id(clean_ep, "b") / S.run_end_name()).read_text(encoding="utf-8") == \
+           (forged_ep / "worlds" / T.world_id(forged_ep, "b") / S.run_end_name()).read_text(encoding="utf-8"), (
         "the archive's record changed when box-written content changed")
 
     judge_base, _src = S.runs_base(tmp_path / "judge-base")
@@ -181,9 +183,9 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
     S.plant_sidecar(forged_world, truncated_by="aborted")
     S.salt_run_dir(forged_world, value="request-limit")
     with Episode.open(clean_grade) as episode:
-        archive.archive_episode(episode, {"b": clean_world})
+        archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): clean_world})
     with Episode.open(forged_grade) as episode:
-        archive.archive_episode(episode, {"b": forged_world})
+        archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): forged_world})
     assert S.graded(forged_grade)["b"].get("cut_short") == \
            S.graded(clean_grade)["b"].get("cut_short") == "aborted"
 
@@ -211,9 +213,9 @@ def test_no_world_can_move_another_worlds_cut_short_row(tmp_path):
     (b_dir / f"{c_dir.name}.forged.json").write_text(
         json.dumps(S.record_doc("aborted")), encoding="utf-8")
     with Episode.open(ep) as episode:
-        S.mod("learning.branch.archive").archive_episode(episode, {"b": b_dir, "c": c_dir})
+        S.mod("learning.branch.archive").archive_episode(episode, {T.world_id(episode.dir, 'b'): b_dir, T.world_id(episode.dir, 'c'): c_dir})
     records = {label: json.loads(
-        (ep / "worlds" / label / S.run_end_name()).read_text(encoding="utf-8"))
+        (ep / "worlds" / T.world_id(ep, label) / S.run_end_name()).read_text(encoding="utf-8"))
         for label in ("b", "c")}
     assert records["b"]["truncated_by"] == "request-limit"
     assert records["c"]["truncated_by"] is None, (

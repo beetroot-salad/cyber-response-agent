@@ -27,6 +27,8 @@ Underscore-prefixed so pytest does not collect it; it defines no tests.
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import dataclasses
 import importlib
 import json
@@ -40,7 +42,7 @@ DEFENDER = REPO_ROOT / "defender"
 #: The committed template, as the design lays it out (M1), spelled as a literal.
 TEMPLATE_DIR = REPO_ROOT / "knowledge" / "tenant-template"
 #: The retired lab's id: tests still name a tenant `playground` under their own data root.
-PLAYGROUND_ID = "playground"
+PLAYGROUND_ID = fixture_uuid("tenant:playground")
 TEMPLATE_SETTINGS = TEMPLATE_DIR / "settings"
 #: The frozen test fixture tenant (#1120 H2): what a test runs as when it names no tenant.
 FIXTURE = REPO_ROOT / "knowledge" / "tenant-fixture"
@@ -482,7 +484,7 @@ def plant_tenant_record(runs_base: Path, tenant_id: str) -> Path:
     runs_base.mkdir(parents=True, exist_ok=True)
     path = runs_base / "_tenant.json"
     path.write_text(json.dumps({
-        "tenant_id": tenant_id, "base_world_id": "0" * 32,
+        "tenant_id": tenant_id, "base_world_id": "0" * 32,  # lint-stale-ref: ok — deliberately planted pre-1187 tenant record
         "created_at": "2026-09-26T00:00:00+00:00",
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path

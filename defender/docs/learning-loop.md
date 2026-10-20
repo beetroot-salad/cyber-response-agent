@@ -136,7 +136,7 @@ defender/learning/branch/cli.py --tenant <T> <run_id> <branch_message_id>
         ├── 2. pre-flight       — replay the original calls through each world's oracle;
         │                         outcome.yaml; two or more failed worlds → no sibling starts
         ├── 3. the family       — each world as its own `run.py --tenant <T> --episode <id> --world <label>`, served by its oracle
-        ├── 4. archive          — episodes/<id>/worlds/<label>/, self-contained
+        ├── 4. archive          — episodes/<id>/worlds/<world UUID>/, self-contained
         └── 5. judge            — judge.yaml + findings → learning/_pending/findings.jsonl
         │
         ▼
@@ -233,7 +233,7 @@ being a process is what gets a sibling the box lifecycle, the reap scan, its own
 role preflight and its own provenance stamp.
 
 **4. `Step.VERIFY`** (`branch/archive.py`) copies each world into
-`episodes/<id>/worlds/<label>/` so later readers answer from the episode
+`episodes/<id>/worlds/<world UUID>/` so later readers answer from the episode
 directory alone — sibling run dirs are disposable. Every sibling's scrub verdict
 and provenance stamp is checked against each other AND against the source run's
 stamp (the anchor the preflight read, threaded here and never re-read): stamps
@@ -244,7 +244,7 @@ rewrites `outcome.yaml`. The derived readers (`branch/episode.py`) refuse an
 episode whose outcome is not exactly `accepted`, so "no differences" and "no
 comparison was possible" stay different answers. Anything learned about a world after launch — it went
 unservable, ran out of budget, did not finish, or could not be archived — is
-that world's own record (`world_records/<label>.yaml`, one writer each).
+that world's own record (`world_records/<world UUID>.yaml`, one writer each).
 `Step.JUDGE` follows.
 
 ## The Judge
@@ -266,7 +266,7 @@ questioner's definition until then, which is why some older prose pairs the two.
    other usable sibling as a reference) through computed contrast sections: the
    joined call lists, the contrast table, the fact surfaces. One model call per
    planted world per draw (`JUDGE_DRAWS`, default **1**) into
-   `worlds/<X>/judge/<n>.yaml`; the payload is capped (`JUDGE_PAYLOAD_CAP`), and
+   `worlds/<world UUID>/judge/<n>.yaml`; the payload is capped (`JUDGE_PAYLOAD_CAP`), and
    run text reaches the model framed as untrusted data. A failed draw does not
    unwind the pass.
 
@@ -358,22 +358,24 @@ findings whose source case has a ground truth.
 ## Artifacts
 
 ```text
-$DEFENDER_EPISODES_BASE/<episode_id>/
-  family.yaml                 # the questioner's manifest — every sibling re-parses it
+$DEFENDER_DATA_ROOT/<tenant>/episodes/<episode uuid>/
+  family.yaml                 # labels and host-minted world UUIDs, published once before preflight
+  arms.json                   # the arm roster {world UUID: arm UUID}, written once by the host at the start of RUNS
   samples.yaml                # real example answers per served system, for the questioner and judge
   outcome.yaml                # pre-flight's write-once outcome: accepted | unusable | refused
-  world_records/<label>.yaml  # a world's own post-launch record (unservable, budget, did not finish, not archived)
-  oracle/<label>/             # that world's oracle-side store: forged rows, recorded facts, oracle ledger
+  world_records/<world UUID>.yaml  # a world's own post-launch record (unservable, budget, did not finish, not archived)
+  oracle/<world UUID>/             # that world's oracle-side store: forged rows, recorded facts, oracle ledger
   provenance.json             # the family stamp, only when every sibling's agrees with the source's
   timing.json                 # the launcher's own StageClock record, one row per step
   served/base.jsonl           # the capture, primed before pre-flight
-  served/<world_token>.jsonl  # every response served that world, with its decision
-  worlds/<label>/
+  served/<world UUID>.jsonl  # every response served that world, with its decision
+  worlds/<world UUID>/
     report.md  investigation.md  alert.json  provenance.json
     executed_queries.jsonl  gather_raw/  gather_summaries/
-    lessons_loaded.jsonl  scrub_verdict.json  run_dir   # a text pointer, not a link
+    lessons_loaded.jsonl  scrub_verdict.json
     judge/<n>.yaml            # one per judge draw
-  runs/                       # the siblings' live run dirs (disposable)
+  runs/<arm uuid>/            # the siblings' live run dirs, named by their roster ids (disposable)
+  judge/<n>.yaml              # family-level judge draws in episode scope
   judge.yaml                  # written last; its presence certifies the pass
   learning.html               # the episode page (#1025) — rendered after judge.yaml, from the episode dir alone
 

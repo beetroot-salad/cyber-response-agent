@@ -278,17 +278,29 @@ def _header_markers() -> list[str]:
 
 
 def _rewrite_manifest(ep: Path, edit: Callable[[dict], None]) -> None:
+    """Edit an archived manifest; replant the roster only if its world UUID set changes.
+
+    Label-only edits preserve UUID bindings. These fixtures have no arm folders to orphan.
+    """
     manifest = ep / "family.yaml"
     doc = _yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    before = [w.get("world_id") for w in doc.get("worlds") or []]
     edit(doc)
     manifest.write_text(_yaml.safe_dump(doc), encoding="utf-8")
+    roster = ep / S.T.ROSTER_NAME
+    if roster.is_file() and [w.get("world_id") for w in doc.get("worlds") or []] != before:
+        roster.unlink()
+        S.T.plant_roster(ep)
 
 
 def _load_refusal(ep: Path) -> BaseException | None:
-    """`load_family` over the episode's manifest: the `FamilyError` it raised, or `None`."""
+    """`load_family` over the episode's manifest: the `FamilyError` it raised, or `None`. The
+    expected id is the episode's own folder name (#1187 R5: a required keyword; review-4 F36),
+    so a refusal here is the manifest's, never a missing argument's."""
+    load = S.sym(S.FAMILY_LOADER, "load_family")
     with S.mod("_io").bind(ep) as bound:
         return _raised(S.sym(S.FAMILY_LOADER, "FamilyError"),
-                       S.sym(S.FAMILY_LOADER, "load_family"), bound)
+                       lambda: load(bound, expected_episode_id=Path(ep).name))
 
 
 def test_1234_payload_cap_trims_reference_runs_before_the_judged_world(tmp_path, monkeypatch):
@@ -398,7 +410,7 @@ def test_1234_raised_size_failure_is_asked_once_and_recorded(tmp_path, monkeypat
     built = S.family(tmp_path, _worlds())
     seam = _grade(built, monkeypatch,
                   judge=S.judge({FOCUS: _queueing_reply(FOCUS)}, overflow={FOCUS}))
-    assert seam.calls_for(FOCUS) == [f"judge:{FOCUS}:0"], (
+    assert seam.calls_for(FOCUS) == [f"judge:{built.world_ids[FOCUS]}:0"], (
         f"a size failure that raised was re-asked: {seam.calls_for(FOCUS)}")
     row = S.row(built, FOCUS)
     assert row.get(S.EXISTING["row.draws_failed_reason"]), f"the failure is not recorded: {row}"
@@ -724,7 +736,7 @@ def test_1234_hostile_run_text_reaches_the_wire_log_and_page_unframed(tmp_path):
     seam = S.judge()
     S.grade(built, seam)
     assert seam.called(FOCUS), f"world {FOCUS} was never asked"
-    stored = [r for r in S.wire_log_records(built) if r["agent_id"] == f"judge:{FOCUS}:0"]
+    stored = [r for r in S.wire_log_records(built) if r["agent_id"] == f"judge:{built.world_ids[FOCUS]}:0"]
     assert len(stored) == 1, f"{len(stored)} wire-log records for judge:{FOCUS}:0"
     assert stored[0]["prompt"] == seam.prompt_for(FOCUS), (
         "the wire log holds a different text from the prompt the judge was handed")

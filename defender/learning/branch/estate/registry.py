@@ -30,7 +30,9 @@ from typing import Any
 
 from defender import _yaml
 from defender.episodes._episode_paths import LAYOUT
+from defender.records._run_id import uuid_id_fault
 from defender.runtime.branch import source_alert
+from defender.runtime.branch._family import family_identities
 from defender.run_repository import Run
 from defender._io import read_jsonl_rows, read_text_utf8
 from defender.knowledge._query_rules import ParamsTooDeep, _json_safe_params
@@ -323,11 +325,8 @@ class WorldRegistry(ModuleVerbRegistry):
                 "that offset")
         self.as_of = as_of
         world_id = getattr(world, "world_id", None)
-        if not isinstance(world_id, str) or not world_id:
-            raise EstateError(
-                f"a world needs a non-empty string id, got {world_id!r} — `None` is how the "
-                "family tier spells 'the shared base', and a world claiming it would overwrite "
-                "the recording its siblings replay")
+        if (fault := uuid_id_fault(world_id, "world")) is not None:
+            raise EstateError(fault)
         self.world = world
         self.ledger = ledger
         self.tenant = tenant
@@ -386,6 +385,17 @@ class WorldRegistry(ModuleVerbRegistry):
         """How this world's call ids name its run (`record_query.bind_call_ids`): the world
         token every served-ledger row of the world carries as `world_id`."""
         return str(self.world.world_id)
+
+    def branch_identities(self) -> frozenset[str]:
+        """The whole family this world belongs to (`family_identities`), from the manifest the
+        sibling was resumed from and its episode's arm roster (#1187 S-red): what the query
+        tool removes from model-visible fault text. A world resumed without the roster has no
+        arm ids to name, and is refused rather than answering a set that leaves them out."""
+        if self.world.arm_ids is None:
+            raise EstateError(
+                f"world {self.world.label!r} was resumed without its episode's arm roster, so "
+                "its family's arm ids cannot be kept out of model-visible text")
+        return family_identities(self.world.family, self.world.arm_ids)
 
     # -- the grant door -------------------------------------------------------------------------
 
@@ -616,20 +626,18 @@ class _LazyModel:
 
 
 def default_oracle_dir(world: Any, ledger: Ledger) -> Path:
-    """The world's oracle store: under its episode, by label, when the world names one; else
-    beside the world's own ledger rows (a world served outside an episode)."""
-    episode_dir, label = getattr(world, "episode_dir", None), getattr(world, "label", None)
-    if episode_dir is not None and isinstance(label, str):
-        return Path(episode_dir) / LAYOUT.oracle_dir(label)
-    return Path(ledger.path).parent / LAYOUT.oracle_dir(str(world.world_id))
+    """The world's UUID oracle store under its episode or beside its standalone ledger."""
+    episode_dir = getattr(world, "episode_dir", None)
+    root = Path(episode_dir) if episode_dir is not None else Path(ledger.path).parent
+    return root / LAYOUT.oracle_dir(str(world.world_id))
 
 
 def _world_record(world: Any) -> OracleUnservable | None:
-    episode_dir, label = getattr(world, "episode_dir", None), getattr(world, "label", None)
-    if episode_dir is None or not isinstance(label, str):
+    episode_dir = getattr(world, "episode_dir", None)
+    if episode_dir is None:
         return None
     try:
-        doc = _yaml.safe_load(read_text_utf8(Path(episode_dir) / LAYOUT.world_record(label)))
+        doc = _yaml.safe_load(read_text_utf8(Path(episode_dir) / LAYOUT.world_record(str(world.world_id))))
     except (OSError, ValueError):
         return None
     if not isinstance(doc, Mapping) or doc.get("reason") not in (ORACLE_UNSERVABLE, BUDGET):
@@ -664,7 +672,7 @@ def _parsed(text: str) -> Any:
 
 
 _EXAMPLES_PER_SYSTEM = 2
-#: The episode folder holding each world's oracle-side state (`oracle/<label>/`).
+#: The episode folder holding each world's oracle-side state (`oracle/<world-uuid>/`).
 
 
 def _refuse_unstorable(system: str, verb: str, params: Mapping[str, Any]) -> None:

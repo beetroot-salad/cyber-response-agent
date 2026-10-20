@@ -2,6 +2,8 @@
 failed folder, display readers of the describe strings, and the pitfalls stage's own root."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import copy
 import functools
 import json
@@ -56,17 +58,16 @@ def _gradable_episode(tmp_path: Path) -> Path:
     """One accepted episode whose grade enqueues finding rows (the e2e spine's episode)."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     return ep
 
 
 def _launcher_grade(ep: Path) -> BaseException | None:
     """The launcher's `_grade` over the episode at `ep`, caught (#1105 PR 2: by id, through the
     request's tenant's repository — `_grade(runs, episode_id=, judge=)` — the episode opened
-    under the configured episodes base, here its own parent)."""
-    with J.episodes_base(ep.parent):
-        return S.caught(lambda: branch_cli._grade(J.judge_runs(), episode_id=ep.name,
-                                                  judge=_model()))
+    under that tenant's own `<T>/episodes/`, #1187 O9)."""
+    return S.caught(lambda: branch_cli._grade(J.episode_runs_for(ep), episode_id=ep.name,
+                                              judge=_model()))
 
 
 def _model() -> J.FakeJudge:
@@ -107,8 +108,8 @@ def test_e1_a_refused_curation_request_costs_the_investigation_nothing(tmp_path:
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     # #1105 PR 2 (declared change 8): run end hands the curation request its `Run` — a natural
     # run of a real tenant (`S.curation_run_dir`) — and the row it files is that run's address.
-    run_dir = make_run_dir(S.curation_run_dir("case-1135").parent, name="case-1135",
-                           disposition="benign")
+    planted = S.curation_run_dir("case-1135")
+    run_dir = make_run_dir(planted.parent, name=planted.name, disposition="benign")
     scrub_mod.scrub(run_dir)
     case_id = case_ref(RunPaths(run_dir).alert.read_bytes())
 
@@ -341,9 +342,8 @@ def test_describe_strings_keep_every_display_reader_coherent(tmp_path: Path, mon
         "enqueued_to does not name the queue the grade appended to"
 
     # #1105 PR 2 (declared change 4): the page builds from the episode view, opened by id
-    # through the tenant's repository under the configured episodes base.
-    with J.episodes_base(ep.parent), visualize_episode.open_episode_view(
-            J.judge_runs(), ep.name) as view:
+    # through the tenant's repository (#1187: under its own `<T>/episodes/`).
+    with visualize_episode.open_episode_view(J.episode_runs_for(ep), ep.name) as view:
         shown = visualize_episode.build_page(view)
     assert f"enqueued to {findings}" in shown, \
         "visualize_episode's defender 'enqueued to' line does not render describe(FINDINGS)"

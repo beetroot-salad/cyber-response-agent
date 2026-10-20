@@ -130,7 +130,7 @@ def _disposition_heading_raw(f: _Finding) -> str:
 def _render_worlds(ep: _Episode) -> str:
     guide_rows = []
     for w in ep.manifest_worlds:
-        label = w.get("world_id")
+        label = w.get("label")
         if not isinstance(label, str):
             guide_rows.append(_unnameable(str(label), what="world label"))
             continue
@@ -153,7 +153,12 @@ def _render_worlds(ep: _Episode) -> str:
     # line and are not counted.
     sections = [_render_roster_item(ep, item) for item in ep.roster]
 
-    body = f'<div class="vd-guide">{"".join(guide_rows)}</div>{"".join(sections)}'
+    # The arm roster refused: the arms' one state, with the reader's reason (it names
+    # `arms.json`); no arm is linked through it.
+    arms_state = (f'<div class="w-roster-refused">arms: {_uv(ep.roster_rec.error)}</div>'
+                  if ep.roster_rec.error else "")
+    body = (f'<div class="vd-guide">{"".join(guide_rows)}</div>{arms_state}'
+            f'{"".join(sections)}')
     return _page_section("sec-worlds", f"Worlds ({len(ep.sectioned)})", body)
 
 
@@ -253,6 +258,8 @@ def _render_one_world(ep: _Episode, label: str) -> str:  # noqa: C901, PLR0912, 
                 bits.append(f'<span class="w-wall">{fmt_duration(result.wall_ms)}</span>')
         else:
             bits.append(f'<span class="w-cost">{esc(result.text)}</span>')
+    elif ep.roster_rec.error:
+        bits.append('<div class="w-archive">arm refused — the arm roster is refused</div>')
     else:
         bits.append('<div class="w-archive">run directory absent</div>')
 

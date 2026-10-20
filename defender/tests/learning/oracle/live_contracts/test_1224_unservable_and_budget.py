@@ -212,18 +212,19 @@ def _sibling_episode(tmp_path: Path, monkeypatch: Any, est: S.Estate) -> Path:
     from it). Called BEFORE a scenario scripts its own answers: the source run answers the
     default captured calls.
 
-    #1105 PR 2: the sibling opens its episode by id under the configured episodes base, so the
-    episode lives there, and its container `runs/` is present with the tenant's record — what
-    the launcher makes before the first sibling (an absent container refuses the sibling)."""
-    from defender.tenancy import _tenant
+    #1105 PR 2: the sibling opens its episode by id. #1187 (R1, R2, O9, declared changes 5
+    and 6): the episode is the fixture tenant's, at `<T>/episodes/<uuid>` (no configured
+    episodes base, no container record), and the launcher's RUNS step (`T.episode_view` over
+    that tenant) has made `runs/` and the arm roster the sibling reads its arm id from (O4b) —
+    what the launcher makes before the first sibling."""
+    from defender.episodes._episode_handle import Episode
 
-    episodes = tmp_path / "episodes-root"
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(episodes))
     _base, src = S.source_run(tmp_path, est)
-    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)), root=episodes)
-    (ep / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(ep / "runs", S.FIXTURE_TENANT)
+    ep = S.episode_v2(tmp_path, doc=S.family_v2(source_run_dir=str(src)),
+                      root=S.tenant_episodes(S.FIXTURE_TENANT))
+    with Episode.open(ep) as held:
+        T.episode_view(held, tenant=est.place(tenant_id=S.FIXTURE_TENANT)).close()
     return ep
 
 
@@ -866,7 +867,7 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     assert rec["reason"] == S.REASON_UNSERVABLE
     assert _names_call(rec.get("call"), "idp", "query", "user:bob"), rec
     after_abort = sorted(p.name for p in (ep / S.WORLD_RECORDS).iterdir())
-    assert after_abort == ["b.yaml"], f"the abort left {after_abort}, not one record for b"
+    assert after_abort == [f"{T.world_id(ep, 'b')}.yaml"], f"the abort left {after_abort}, not one record for b"
     assert first.run is not None
     from defender.tests.support.storage._alert_plant import unseal_fixture_input
     unseal_fixture_input(first.run.run_dir)
@@ -880,7 +881,7 @@ def test_resume_after_the_sibling_was_already_unservable(tmp_path, monkeypatch):
     assert _served_rows(ep, "b", "user:bob") == []
     assert again.record("b") == rec, "the resume rewrote the world's validity record"
     records = sorted(p.name for p in (ep / S.WORLD_RECORDS).iterdir())
-    assert records == ["b.yaml"], records
+    assert records == [f"{T.world_id(ep, 'b')}.yaml"], records
 
 
 def test_disk_full_while_freezing_forged_rows(tmp_path):

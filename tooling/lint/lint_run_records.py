@@ -359,7 +359,6 @@ _OWNER_NON_RECORD_EXPORTS: frozenset[str] = frozenset({
     # tool-return part, a refusal sentence, and the tenant vocabulary.
     "LEAD_ID_RE", "LEAD_ID_BODY", "GATHER_RAW_SHAPE", "GATE_METADATA_KEY",
     "ALIAS_READ_REFUSAL", "CASE_STABLE_REQUIRED",
-    "TENANT_RECORD_NAME",
 })
 
 #: The owner modules' dotted names (`defender.run_repository`, `defender.tenancy._tenant`, ...): arm

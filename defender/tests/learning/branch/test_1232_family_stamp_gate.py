@@ -167,13 +167,13 @@ def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
     _withhold(ep)
     for reader in (readers.delta_o, readers.verdicts):
         with pytest.raises(T.refusals()) as bad:
-            reader(ep)
+            J.through_view(ep, reader)
         assert "not comparable" in str(bad.value), reader.__name__
         assert WITHHELD in str(bad.value), reader.__name__
 
     J.comparable_family_stamp(ep)
-    assert set(readers.verdicts(ep)) == {"a", "b"}
-    readers.delta_o(ep)
+    assert set(J.through_view(ep, readers.verdicts)) == {"a", "b"}
+    J.through_view(ep, readers.delta_o)
 
 
 def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_path):
@@ -193,14 +193,14 @@ def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_
     assert report["comparable"] is True, report
     assert "'c'" in report["reason"]
     assert report["not_comparable"] == ""
-    assert report["archived"] == ["b"]
+    assert report["archived"] == [T.world_id(ep, "b")]
     stamp = json.loads((ep / "provenance.json").read_text(encoding="utf-8"))
     assert stamp["agreed"]["commit"] == "deadbee", stamp
     assert not (ep / "not_comparable.yaml").exists()
-    assert (ep / "world_records" / "c.yaml").exists(), "the unwalked world has no record of its own"
+    assert (ep / "world_records" / f"{T.world_id(ep, 'c')}.yaml").exists(), "the unwalked world has no record of its own"
 
     judge = _judge()
     _grade(tmp_path, ep, judge)
     assert not _not_graded(ep), J.judge_record(ep)
-    assert S.judge_called_for(judge, "b"), judge.agent_ids
-    assert not S.judge_called_for(judge, "c"), judge.agent_ids
+    assert S.judge_called_for(judge, T.world_id(ep, "b")), judge.agent_ids
+    assert not S.judge_called_for(judge, T.world_id(ep, "c")), judge.agent_ids

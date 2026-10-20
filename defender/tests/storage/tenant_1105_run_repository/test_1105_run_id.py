@@ -8,6 +8,14 @@ import pickle
 import pytest
 
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
+from defender.tests.storage.ids_1187 import _spec1187 as S
+
+
+#: Three canonical lowercase uuid4 texts in text order (#1187 declared change 1: `RunId` admits
+#: nothing else), for the value-type tests that need distinct, ordered ids.
+U_A = "10000000-0000-4000-8000-000000000000"
+U_B = "20000000-0000-4000-8000-000000000000"
+U_C = "30000000-0000-4000-8000-000000000000"
 
 
 def _ascii_id(n: int) -> str:
@@ -40,106 +48,174 @@ def _forged_in_place(rid: object, text: str, forged: str, protocol: int) -> byte
     return blob.replace(old, new)
 
 
+def test_1105_run_id_is_built_only_by_parse_and_mint():
+    """RunId.parse(text) and RunId.mint() each return a RunId; a direct RunId(...) call, with any
+    arguments, raises RunRefused.
+
+    #1187 declared changes 1 and 2: `parse` takes canonical UUID text and `mint()` takes no
+    label and no clock, so the minted text is a bare UUID rather than `<stamp>-<label>`."""
+    from defender.run_repository import RunId, RunRefused
+
+    parsed = RunId.parse(S.SAMPLE_UUID)
+    minted = RunId.mint()
+    assert str(parsed) == S.SAMPLE_UUID
+    assert S.is_canonical_uuid(str(minted)), str(minted)
+    assert H.is_a(parsed, RunId)
+    assert H.is_a(minted, RunId)
+    for args, kwargs in (((), {}), (("r1",), {}), (("r1", "r2"), {}), ((), {"text": "r1"})):
+        err = H.raised(RunId, *args, **kwargs)
+        assert H.is_a(err, RunRefused), f"RunId(*{args}, **{kwargs}) raised {err!r}"
+
+
 def test_1105_run_id_is_a_frozen_value_ordered_by_its_text_and_never_equal_to_a_str():
+    """A RunId is frozen (assigning an attribute raises), is not a str subclass, gives its text
+    through str(), survives copy.copy, copy.deepcopy and a pickle round trip equal to the
+    original (each rebuilt through RunId.parse, MF-02), compares, hashes and sorts by its text
+    against another RunId, and never equals a str: RunId.parse(t) == t is False in both
+    operand orders, and a dict holds the RunId and the str of the same text as two keys.
+    #1187 declared change 1: the ids are canonical uuid4 texts (`U_A < U_B < U_C`), not 'a'."""
     from defender.run_repository import RunId
 
-    a = RunId.parse("a")
-    assert str(a) == "a", f"str(RunId.parse('a')) is {str(a)!r}"
+    a = RunId.parse(U_A)
+    assert str(a) == U_A, f"str(RunId.parse(U_A)) is {str(a)!r}"
     assert not isinstance(a, str), "a RunId is not a str subclass"
     for attr in ("text", "_text", "value", "anything"):
-        err = H.raised(setattr, a, attr, "b")
+        err = H.raised(setattr, a, attr, U_B)
         assert err is not None, f"assigning {attr!r} on a RunId did not raise"
-    assert str(a) == "a"
+    assert str(a) == U_A
     for twin in (copy.copy(a), copy.deepcopy(a), pickle.loads(pickle.dumps(a))):
         assert H.is_a(twin, RunId)
         assert twin == a
         assert hash(twin) == hash(a)
-    b, c = RunId.parse("b"), RunId.parse("c")
-    assert RunId.parse("a") == a
+    b, c = RunId.parse(U_B), RunId.parse(U_C)
+    assert RunId.parse(U_A) == a
     assert a != b
     assert a < b < c
     assert sorted([c, a, b]) == [a, b, c]
-    assert len({a, RunId.parse("a"), b}) == 2
-    assert (a == "a") is False
-    assert (a == "a") is False
-    assert (a != "a") is True
-    keys = {a: 1, "a": 2}
+    assert len({a, RunId.parse(U_A), b}) == 2
+    assert (a == U_A) is False
+    assert (a == U_A) is False
+    assert (a != U_A) is True
+    keys = {a: 1, U_A: 2}
     assert len(keys) == 2
     assert keys[a] == 1
-    assert keys["a"] == 2
+    assert keys[U_A] == 2
 
 
 def test_1105_run_id_parse_refuses_what_refuse_bad_run_id_refuses_and_any_non_str_as_run_refused():
-    from defender.records._run_id import refuse_bad_run_id
+    """RunId.parse raises RunRefused, never ValueError or AttributeError, for every text
+    refuse_bad_run_id refuses ('', '_episodes', '_tenant.json', '../x', 'a/b', '.hidden', 'r1\\n'),
+    for text that is not case-stable ('Run1'), and for a non-str (5, None, b'r1'). Positive
+    control: a canonical UUID parses.
+
+    #1187 declared change 1: the controls were 'r1', '2026-x.y_z' and a 206-byte id, which are no
+    longer run ids. The old text cross-checked each refused id against `refuse_bad_run_id`; that
+    helper has no caller left in this path, so only `RunId.parse`'s own refusal is asserted.
+    `RunId.mint` takes no argument now, so its non-str-label refusal is gone with the label
+    (the ids slice's tests pin that a label is refused)."""
     from defender.run_repository import RunId, RunRefused
 
-    for good in ("r1", "2026-x.y_z", _ascii_id(H.RUN_ID_BOUND)):
+    for good in (S.SAMPLE_UUID, S.new_id()):
         assert str(RunId.parse(good)) == good
     refused_today = ("", "_episodes", "_tenant.json", "../x", "a/b", ".hidden", "r1\n", "Run1")
-    for text in refused_today:
-        assert isinstance(H.raised(refuse_bad_run_id, text), ValueError), text  # today's rule
     for bad in (*refused_today, 5, None, b"r1"):
         err = H.raised(RunId.parse, bad)
         assert H.is_a(err, RunRefused), f"RunId.parse({bad!r}) raised {err!r}"
         assert not isinstance(err, (ValueError, AttributeError)), (
             f"RunId.parse({bad!r}) raised {type(err).__name__}, which an except for "
             "ValueError/AttributeError would catch — the one error type is RunRefused")
-    err = H.raised(RunId.mint, 5, clock=H.fixed_clock)
-    assert H.is_a(err, RunRefused), err
-    assert not isinstance(err, (ValueError, AttributeError)), err
 
 
 def test_1105_run_id_parse_admits_206_bytes_and_refuses_207():
-    from defender import _io
+    """#1187 declared changes 1 and 4: the 206-byte bound is gone with the free-form id. A
+    grammar-valid id of exactly 206 bytes, which `RunId.parse` admitted, is refused with
+    RunRefused now (it is not a UUID), as is one of 207; and `_run_id` no longer defines the
+    bound's constant (the census in `ids_1187` pins that no source reads it).
+
+    Kept under its old name: the spec graph cites it."""
+    from defender.records import _run_id
     from defender.run_repository import RunId, RunRefused
 
-    assert str(RunId.parse(_ascii_id(206))) == _ascii_id(206)
-    err = H.raised(RunId.parse, _ascii_id(207))
-    assert H.is_a(err, RunRefused), f"a 207-byte id was not refused: {err!r}"
-    # The census, derived from the real constants rather than restated (R4-35).
-    from defender import run_repository as rr
-
-    # #1235 F2 adds the case pointer's sidecar and retires the oracle-held one; neither is
-    # longer than the accounting suffix, so the bound stays 206.
-    suffixes = (rr.RUN_END_SIDECAR_SUFFIX, rr.SCRUB_VERDICT_SUFFIX,
-                rr.ACCOUNTING_FAILURES_SUFFIX, rr.TICKET_WRITE_SUFFIX,
-                rr.SESSION_POINTER_SUFFIX)
-    assert sorted(suffixes) == sorted(H.SIDECAR_SUFFIXES)
-    staged_tail = len(_io.staged_leaf("x")) - len("x")
-    assert staged_tail == len(H.STAGED_TAIL) == 24
-    assert 255 - max(len(s.encode()) for s in suffixes) - staged_tail == H.RUN_ID_BOUND
-    assert "206" in (H.PACKAGE / "_id.py").read_text(encoding="utf-8"), (
-        "the bound is kept as the literal 206 in the RunId submodule (NM-07)")
+    for size in (206, 207):
+        err = H.raised(RunId.parse, _ascii_id(size))
+        assert H.is_a(err, RunRefused), f"a {size}-byte id was not refused: {err!r}"
+    assert not hasattr(_run_id, "RUN_ID_MAX_BYTES"), "the 206-byte bound's constant survives"
 
 
 def test_1105_run_id_mint_folds_then_bounds_the_id_and_never_truncates():
-    from defender.run_repository import RunId, RunRefused
+    """#1187 declared changes 1, 2 and 4: `mint` has no label to fold, bound or truncate, so
+    there is nothing left of what this test pinned. A labelled mint is refused, and the
+    no-argument mint is a UUID however many are made (the ids slice pins the format)."""
+    from defender.run_repository import RunId
 
-    assert len(H.MINT_PREFIX) == 17
-    assert str(RunId.mint("Alert-X", clock=H.fixed_clock)) == f"{H.MINT_PREFIX}alert-x"
-    at_bound = RunId.mint("a" * 189, clock=H.fixed_clock)
-    assert str(at_bound) == H.MINT_PREFIX + "a" * 189
-    assert len(str(at_bound)) == 206
-    folded = RunId.mint("ß" * 94, clock=H.fixed_clock)
-    assert str(folded) == H.MINT_PREFIX + "ss" * 94
-    assert len(str(folded).encode()) == 205
-    for over in ("a" * 190, "ß" * 95):
-        err = H.raised(RunId.mint, over, clock=H.fixed_clock)
-        assert H.is_a(err, RunRefused), f"mint({len(over)} x {over[0]!r}) gave {err!r}"
+    for label in ("Alert-X", "a" * 189, "ß" * 94, "a" * 190, "ß" * 95):
+        assert H.raised(RunId.mint, label) is not None, f"mint accepted the label {label[:12]!r}"
+    assert S.is_canonical_uuid(str(RunId.mint()))
 
 
 def test_1105_run_id_parse_admits_a_sidecar_suffixed_id():
-    from defender.run_repository import RunId
+    """#1187 declared change 1: a canonical UUID with a sidecar suffix, or in the staged shape
+    ('<uuid>.run-end.json.staged-0123456789abcdef'), is no longer a RunId: only canonical UUID
+    text is. The sidecar clause still belongs to the repository's open and run setup, not to
+    RunId, which `run_name_fault` answers for (pinned in the ids slice); the old test's
+    'r1.run-end.json' names are not UUIDs either. Positive control: the bare UUID parses.
 
-    names = [f"r1{s}" for s in H.SIDECAR_SUFFIXES] + [f"r1.run-end.json{H.STAGED_TAIL}"]
+    Kept under its old name: the spec graph cites it."""
+    from defender.run_repository import RunId, RunRefused
+
+    run_id = S.new_id()
+    assert str(RunId.parse(run_id)) == run_id
+    names = [f"{run_id}{s}" for s in H.SIDECAR_SUFFIXES] + [
+        f"{run_id}.run-end.json{H.STAGED_TAIL}"]
     for name in names:
-        assert str(RunId.parse(name)) == name, name
+        err = H.raised(RunId.parse, name)
+        assert H.is_a(err, RunRefused), f"RunId.parse({name!r}) gave {err!r}"
+
+
+def test_1105_the_handle_constructors_keep_taking_str_and_todays_run_id_check(tmp_path):
+    """Run.under still takes the run id as a str (or a RunId), and admits it by the
+    repository's one rule, RunId.parse: a bad id and an upper-case one each raise RunRefused,
+    so no handle is built for a run whose sidecar files could not be named. (Owner ruling,
+    #1105 PR 1 review: this replaced PR 1's split, where the constructors kept
+    refuse_bad_run_id and its ValueError; the name is kept because the spec graph cites it.)
+
+    #1187 declared changes 1 and 6 (R1, S-iso): `Run.for_tenant` — which re-read the
+    container's `_tenant.json` by path — is replaced by `Run.under(container, id,
+    tenant_id=)`, so its half is retired and the container holds no record. The rule is
+    canonical lowercase UUID text: an old id (`r1`, a minted `<stamp>-<label>`), an upper-case
+    UUID and a 207-byte id are each refused for their shape, not a byte count. (Name kept.)"""
+    import uuid
+
+    from defender.run_repository import Run, RunId, RunRefused
+
+    runs = tmp_path / H.T_ID / "runs"
+    runs.mkdir(parents=True)
+    r2, r3 = str(uuid.uuid4()), str(uuid.uuid4())
+    under = Run.under(runs, r2, tenant_id=H.T_ID)
+    assert under.run_dir == runs / r2
+    assert under.tenant_id == H.T_ID
+    assert Run.under(runs, RunId.parse(r3)).run_dir == runs / r3, "a RunId is taken as is"
+    assert not (runs / "_tenant.json").exists()
+    for bad in ("Bad Name", "UPPER", "r1", "20260101t000000z-x", r2.upper(), "a" * 207):
+        err = H.raised(Run.under, runs, bad)
+        assert H.is_a(err, RunRefused), f"{bad[:20]!r}: {err!r}"
 
 
 def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subclassing_are_refused():
+    """Unpickling, copy.copy, copy.deepcopy and dataclasses.replace (and copy.replace where it
+    exists) rebuild a RunId through RunId.parse, so a pickled payload carrying '../x', a
+    300-character text or '_episodes' raises RunRefused at unpickling and the repository's open
+    and exists are never reached with it; RunId.__new__(RunId) and defining a subclass of RunId each raise
+    RunRefused. Positive control: a valid RunId round-trips by each route equal to the original.
+    The forged payloads cover every pickle protocol (0 to pickle.HIGHEST_PROTOCOL), each RunId's
+    own stream with its text overwritten in place; every replace route is driven, and one that
+    does not exist must raise TypeError rather than be skipped (91 BF-08).
+
+    #1187 declared change 1: the id is a canonical uuid4 text (36 bytes), and each in-place
+    forgery is that long; the guard is unchanged."""
     from defender.run_repository import RunId, RunRefused
 
-    text = "abcd" * 50  # 200 bytes: room to forge each payload below in place
+    text = S.SAMPLE_UUID  # 36 bytes: each in-place forgery below is exactly as long
     rid = RunId.parse(text)
     assert pickle.loads(pickle.dumps(rid, protocol=2)) == rid, "a valid RunId round-trips"
     for forged in ("../x", "x" * 300, "_episodes"):
@@ -149,7 +225,8 @@ def test_1105_run_id_is_unforgeable_every_copy_route_reparses_and_new_and_subcla
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
         assert pickle.loads(pickle.dumps(rid, protocol=protocol)) == rid, (
             f"protocol {protocol}: a valid RunId does not round-trip")
-        for forged in ("../" + "x" * 197, "A" * 200, "_" + "x" * 199):
+        n = len(text.encode("utf-8"))
+        for forged in ("../" + "x" * (n - 3), text.upper(), "_" + "x" * (n - 1)):
             err = H.raised(pickle.loads, _forged_in_place(rid, text, forged, protocol))
             assert H.is_a(err, RunRefused), (
                 f"protocol {protocol}: an unpickled {forged[:12]!r}... gave {err!r}")

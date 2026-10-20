@@ -1,6 +1,8 @@
 """#947 Part B — the ledger's two family tiers, and the file each of them lives in."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 from pathlib import Path
 
@@ -49,19 +51,19 @@ def base_file(root: Path) -> Path:
 # 1. the vocabulary
 
 
-@pytest.mark.parametrize("world_id", [None, "w1"])
+@pytest.mark.parametrize("world_id", [None, T.fixture_world_id('w1')])
 def test_the_ledger_refuses_a_captured_row_at_its_own_door(tmp_path, world_id):
     """`record` refuses `captured` outright, whichever tier the row claims."""
     root = episode(tmp_path)
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
         with pytest.raises(LedgerError, match=CAPTURED):
             ledger.record(ServedCall(
                 system="cmdb", verb="get-host", params={"host": "canary-1"},
                 payload_text='{"owner": "estate"}', source=CAPTURED, world_id=world_id))
 
-        assert read_jsonl_rows(root / SERVED_DIRNAME / "w1.jsonl") == []
+        assert read_jsonl_rows(root / SERVED_DIRNAME / f"{T.fixture_world_id('w1')}.jsonl") == []
 
 
 # 2. the primed base is a precondition, not a parameter
@@ -71,7 +73,7 @@ def test_a_ledger_without_a_primed_base_does_not_construct(tmp_path):
     root = episode(tmp_path)
 
     with pytest.raises(ValidationError, match="base_path"):
-        Ledger(root / SERVED_DIRNAME / "w1.jsonl")
+        Ledger(root / SERVED_DIRNAME / f"{T.fixture_world_id('w1')}.jsonl")
 
 
 @pytest.mark.parametrize("shape", ["absent", "directory"])
@@ -84,7 +86,7 @@ def test_a_base_path_that_is_not_a_file_is_refused_at_construction(tmp_path, sha
         base.mkdir()
 
     with Episode.open(root) as ep, pytest.raises(LedgerError):
-        Ledger.for_world(ep, "w1")
+        Ledger.for_world(ep, T.fixture_world_id('w1'))
 
 
 def test_the_primed_capture_is_never_written_to(tmp_path):
@@ -93,14 +95,14 @@ def test_the_primed_capture_is_never_written_to(tmp_path):
                                             {"owner": "estate"})])
     before = base_file(root).read_bytes()
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
         ledger.record(ServedCall(
             system="cmdb", verb="list-hosts", params={}, payload_text='{"hosts": []}',
             source=BASE, world_id=None))
         ledger.record(ServedCall(
             system="cmdb", verb="list-hosts", params={}, payload_text='{"hosts": []}',
-            source=PASSTHROUGH, world_id="w1"))
+            source=PASSTHROUGH, world_id=T.fixture_world_id('w1')))
 
         assert base_file(root).read_bytes() == before, "the run appended to the primed capture"
         assert len(read_jsonl_rows(ledger.path)) == 2
@@ -113,7 +115,7 @@ def test_a_primed_key_is_answered_without_the_world_ever_asking(tmp_path):
     root = episode(tmp_path, rows=[captured("cmdb", "get-host", {"host": "canary-1"},
                                             {"owner": "estate"})])
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
         hit = ledger.base_payload("cmdb", "get-host", {"host": "canary-1"})
 
@@ -128,7 +130,7 @@ def test_a_key_spelled_in_another_order_is_the_same_primed_key(tmp_path):
     root = episode(tmp_path, rows=[captured("elastic", "query",
                                             {"native_query": "x", "limit": 5}, {"hits": []})])
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
         assert ledger.base_payload("elastic", "query", {"limit": 5, "native_query": "x"}) is not None
 
@@ -137,7 +139,7 @@ def test_a_worlds_own_live_read_is_answered_from_its_own_file(tmp_path):
     """A key the capture never held, read live and recorded as `base`, answers from the world's own rows on the next ask."""
     root = episode(tmp_path)
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
         ledger.record(ServedCall(
             system="cmdb", verb="get-host", params={"host": "new-9"},
@@ -150,8 +152,8 @@ def test_one_siblings_live_read_is_not_served_to_another(tmp_path):
     """World B does not read World A's own rows — only the shared capture crosses between them."""
     root = episode(tmp_path)
     with Episode.open(root) as ep:
-        a = Ledger.for_world(ep, "a")
-        b = Ledger.for_world(ep, "b")
+        a = Ledger.for_world(ep, T.fixture_world_id('a'))
+        b = Ledger.for_world(ep, T.fixture_world_id('b'))
 
         a.record(ServedCall(
             system="cmdb", verb="get-host", params={"host": "new-9"},
@@ -167,12 +169,12 @@ def test_the_capture_outranks_a_live_row_for_the_same_key(tmp_path):
     root = episode(tmp_path, rows=[captured("cmdb", "get-host", {"host": "canary-1"},
                                             {"owner": "captured"})])
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
         append_jsonl(ledger.path, [ServedCall(
             system="cmdb", verb="get-host", params={"host": "canary-1"},
             payload_text='{"owner": "live"}', source=BASE, world_id=None).row()])
 
-        reopened = Ledger.for_world(ep, "w1")
+        reopened = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
         assert json.loads(reopened.base_payload("cmdb", "get-host", {"host": "canary-1"})) == {
             "owner": "captured"}
@@ -182,7 +184,7 @@ def test_a_failed_write_leaves_no_memo_behind_it(tmp_path):
     """A `record` whose append FAILS must not leave the payload live in memory."""
     root = episode(tmp_path)
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
         ledger.path.mkdir(parents=True)
 
         with pytest.raises(OSError, match="non-plain"):
@@ -201,7 +203,7 @@ def test_two_staged_calls_for_one_question_pair_on_the_asked_form(tmp_path):
     rows = [
         ServedCall(system="elastic", verb="esql", params={"query": f"FROM wv-{w}-logs-system.auth-"},
                    payload_text="{}", source=STAGED, world_id=w, asked_params=asked)
-        for w in ("a", "b")
+        for w in (T.fixture_world_id('a'), T.fixture_world_id('b'))
     ]
 
     assert rows[0].correlation_key == rows[1].correlation_key, (
@@ -218,7 +220,7 @@ def test_a_torn_base_row_is_not_served_as_an_answer(tmp_path):
         "payload_text": '{"owner": "est', "source": CAPTURED, "world_id": None,
     }])
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
         assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) is None
 
@@ -226,16 +228,16 @@ def test_a_torn_base_row_is_not_served_as_an_answer(tmp_path):
 def test_a_world_owned_row_never_answers_for_the_family_even_when_it_is_first(tmp_path):
     """A world's OWN row is not the family's answer, whatever order the file happens to hold."""
     root = episode(tmp_path)
-    path = root / SERVED_DIRNAME / "w1.jsonl"
+    path = root / SERVED_DIRNAME / f"{T.fixture_world_id('w1')}.jsonl"
     call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"})
     append_jsonl(path, [
         ServedCall(payload_text='{"owner": "world a made this"}', source="patched",
-                   world_id="w1", **call).row(),
+                   world_id=T.fixture_world_id('w1'), **call).row(),
         ServedCall(payload_text='{"owner": "estate"}', source=BASE, world_id=None, **call).row(),
     ])
 
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
         assert json.loads(ledger.base_payload("cmdb", "get-host", {"host": "canary-1"})) == {
             "owner": "estate"}
@@ -245,7 +247,7 @@ def test_a_duplicate_inside_one_file_resolves_to_the_first_row(tmp_path):
     """Two rows for one key resolve to the FIRST, in memory and on a rebuild alike."""
     root = episode(tmp_path)
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
         call = dict(system="cmdb", verb="get-host", params={"host": "canary-1"},
                     source=BASE, world_id=None)
 
@@ -253,7 +255,7 @@ def test_a_duplicate_inside_one_file_resolves_to_the_first_row(tmp_path):
         ledger.record(ServedCall(payload_text='{"owner": "second"}', **call))
 
         assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) \
-            == Ledger.for_world(ep, "w1").base_payload(
+            == Ledger.for_world(ep, T.fixture_world_id('w1')).base_payload(
                 "cmdb", "get-host", {"host": "canary-1"}) \
             == '{"owner": "first"}'
 
@@ -266,14 +268,14 @@ def test_for_world_opens_this_worlds_file_beside_the_shared_capture(tmp_path):
                                             {"owner": "estate"})])
 
     with Episode.open(root) as ep:
-        ledger = Ledger.for_world(ep, "w1")
+        ledger = Ledger.for_world(ep, T.fixture_world_id('w1'))
 
-        assert ledger.path == root / SERVED_DIRNAME / "w1.jsonl"
+        assert ledger.path == root / SERVED_DIRNAME / f"{T.fixture_world_id('w1')}.jsonl"
         assert ledger.base_payload("cmdb", "get-host", {"host": "canary-1"}) is not None
         ledger.record(ServedCall(
             system="cmdb", verb="get-host", params={"host": "canary-1"},
-            payload_text='{"owner": "estate"}', source=PASSTHROUGH, world_id="w1"))
-        assert [r["world_id"] for r in read_jsonl_rows(root / SERVED_DIRNAME / "w1.jsonl")] == ["w1"]
+            payload_text='{"owner": "estate"}', source=PASSTHROUGH, world_id=T.fixture_world_id('w1')))
+        assert [r["world_id"] for r in read_jsonl_rows(root / SERVED_DIRNAME / f"{T.fixture_world_id('w1')}.jsonl")] == [T.fixture_world_id('w1')]
 
 
 def test_for_world_refuses_an_episode_that_was_never_primed(tmp_path):
@@ -282,7 +284,7 @@ def test_for_world_refuses_an_episode_that_was_never_primed(tmp_path):
     (root / SERVED_DIRNAME).mkdir(parents=True)
 
     with Episode.open(root) as ep, pytest.raises(LedgerError):
-        Ledger.for_world(ep, "w1")
+        Ledger.for_world(ep, T.fixture_world_id('w1'))
 
 
 @pytest.mark.parametrize("world_id", ["", ".", "..", "a/b", "../base", "sub/w1", "w1/"])

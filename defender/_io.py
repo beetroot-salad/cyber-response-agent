@@ -807,6 +807,74 @@ def hold_new(parent: Path, name: str, *, os_: Any = os,
     return Held(os_, fd, parent / name, open_unnamed=open_unnamed)
 
 
+def hold_under(held: Held, name: str, *, create: bool = False,
+               exclusive: bool = False) -> Held:
+    """Hold the folder `name` — one component — below the held folder, opened off its handle and
+    judged as `_step` judges every folder of a walk, so a link at `name` (dangling or not) is
+    `OSError(ELOOP)` and anything but a directory `NotADirectoryError`. An absent folder is
+    `FileNotFoundError`, unless `create` makes it first (adopting one already there).
+
+    `exclusive` claims the name instead: ONE `mkdir` off the held handle, and any entry already
+    at the name (a folder, a link, anything) is `FileExistsError` — no retry, nothing adopted,
+    so of two callers racing for one name exactly one wins it. A made folder's entry is synced
+    in the held folder. A function beside `Held`, as `move_at` is: the handle's own surface is
+    pinned to its verbs (#1133). The walk of a tenant's tree below `<T>` steps through here, one
+    level at a time (#1187 S-iso)."""
+    if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
+        raise ValueError(f"{name!r}: {_NOT_A_NAME}")
+    os_ = held._os
+    where = held._where / name
+    with held._dup() as dir_fd:
+        if exclusive:
+            os_.mkdir(name, dir_fd=dir_fd)  # lint-unguarded-tree-write: ok — the rooted mkdir, relative to a no-follow handle; EEXIST is the caller's answer
+        fd = _step(os_, dir_fd, name, where, create=create and not exclusive)
+        if create or exclusive:
+            try:
+                _fsync_folder(os_, dir_fd)
+            except BaseException:
+                os_.close(fd)
+                raise
+    return Held(os_, fd, where, open_unnamed=held._open_unnamed)
+
+
+#: Why a complete-or-absent create could not be made here: no unnamed file on this filesystem
+#: or host. The record is then not written at all, never through the named fallback.
+_NO_COMPLETE_CREATE = ("this filesystem cannot create a file complete-or-absent (no unnamed "
+                       "O_TMPFILE file, or no /proc to link it through)")
+
+
+def create_complete(held: Held, name: str | PurePath, text: str | bytes) -> None:
+    """Create the plain file `name` below the held root through the complete-or-absent lane
+    ONLY (#1078 J16): an unnamed file, written in full and synced, then named in one `linkat`
+    (`_link_unnamed`). An entry already at the name is `FileExistsError` (judged first, and the
+    `linkat` itself refuses a name taken in between); a filesystem or host that cannot make an
+    unnamed file is `OSError(EOPNOTSUPP)` with nothing written. Never the named `O_EXCL`
+    fallback `create` takes, which a SIGKILL between its open and its last write leaves torn —
+    for a record whose mere presence is a fact a reader acts on (the arm roster, #1187 R2). The
+    holding folders are walked, never made, with no link followed; the named file's folder is
+    synced once the name lands."""
+    _check_write(text, "create", False)
+    _spelling, parts = _parse_name(name)
+    os_ = held._os
+    where = Path(held._where, *parts)
+    with held._dup() as root_fd, _descend(os_, root_fd, parts[:-1], held._where) as dir_fd:
+        if _leaf_present(os_, dir_fd, parts[-1], where):
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(where))
+        try:
+            fd = held._open_unnamed(dir_fd)
+        except OSError as e:
+            if unnamed_files_unavailable(e):
+                raise OSError(errno.EOPNOTSUPP, _NO_COMPLETE_CREATE, str(where)) from e
+            raise
+        try:
+            if not _link_unnamed(fd, dir_fd, parts[-1], text, os_=os_):
+                raise OSError(errno.EOPNOTSUPP, _NO_COMPLETE_CREATE, str(where))
+        finally:
+            os_.close(fd)
+        # The name itself is synced too: a reader acts on the record being there.
+        _fsync_folder(os_, dir_fd)
+
+
 def move_at(held: Held, src: str | PurePath, dst: str | PurePath) -> None:
     """Rename the plain file `src` to `dst`, both below the held root, by `renameat` between the
     two holding folders' descriptors. A function beside `Held`, not a method: the handle's own
@@ -828,6 +896,46 @@ def move_at(held: Held, src: str | PurePath, dst: str | PurePath) -> None:
         with _descend(os_, root_fd, d_parts[:-1], held._where, create=True) as dst_fd:
             _leaf_present(os_, dst_fd, d_parts[-1], Path(held._where, *d_parts))
             os_.rename(s_parts[-1], d_parts[-1], src_dir_fd=src_fd, dst_dir_fd=dst_fd)
+
+
+def held_stat(held: Held) -> os.stat_result:
+    """The held folder's own `stat`, off its descriptor (never its path): what a caller compares
+    `st_dev` against. A function beside `Held`, as `move_at` is."""
+    with held._dup() as fd:
+        return held._os.fstat(fd)
+
+
+def rename_into(src: Held, name: str, dst: Held) -> None:
+    """Rename the entry `name` — one component, a real directory or a regular file — out of the
+    held folder `src` into the held folder `dst`, under the same name, by ONE `renameat` between
+    the two descriptors: nothing is copied, and a move across filesystems is the kernel's
+    `EXDEV`, raised as it comes. A function beside `Held`, as `move_at` is.
+
+    Both names are judged no-follow immediately before the rename: at `name` in `src`, absent is
+    `FileNotFoundError` and a link or anything but a directory or regular file is the core's
+    non-plain refusal (`NotPlainEntry`, left in place); ANY entry at `name` in `dst` is
+    `FileExistsError`. A rename replaces a file or an empty directory at its destination and
+    Python exposes no `RENAME_NOREPLACE` (#1187 R2-22), so the judgement and the rename are two
+    steps, with the swap caveat `_unlink_at` documents: non-replacement holds while nothing
+    else writes the destination folder."""
+    if not isinstance(name, str) or len(_parse_name(name)[1]) != 1:
+        raise ValueError(f"{name!r}: {_NOT_A_NAME}")
+    os_ = src._os
+    where, there = src._where / name, dst._where / name
+    with src._dup() as src_fd, dst._dup() as dst_fd:
+        st = os_.stat(name, dir_fd=src_fd, follow_symlinks=False)
+        if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+            raise _mark_alias(NotPlainEntry(errno.ELOOP, _NOT_PLAIN, str(where)),
+                              is_alias=stat.S_ISLNK(st.st_mode))
+        try:
+            os_.stat(name, dir_fd=dst_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(there))
+        os_.rename(name, name, src_dir_fd=src_fd, dst_dir_fd=dst_fd)
+        _fsync_folder(os_, dst_fd)
+        _fsync_folder(os_, src_fd)
 
 
 def open_lock_at(held: Held, name: str | PurePath) -> IO[str]:

@@ -30,7 +30,8 @@ from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender._io import read_jsonl_rows  # noqa: E402
 from defender.run_repository import RunPaths  # noqa: E402
-from defender.runtime import driver, observe, session_store, tools_gather  # noqa: E402
+from defender.runtime import driver, observe, tools_gather  # noqa: E402
+from defender.runtime import session_store  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.providers import BuiltModel  # noqa: E402
 from defender.runtime.query_tool import (  # noqa: E402

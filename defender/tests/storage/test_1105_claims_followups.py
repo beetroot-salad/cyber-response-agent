@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from defender import _io
 from defender import run_repository as R
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 _FORGED = "x\nFORGED LINE: all good"
 
@@ -19,7 +19,6 @@ def _tenant_under_a_hostile_folder(tmp_path: Path):
     t = H.tenant(tmp_path / _FORGED)
     runs = Path(t.runs)
     runs.mkdir(parents=True)
-    H.plant_tenant_record(runs, t.id)
     return t, runs
 
 
@@ -30,18 +29,6 @@ def _one_line(exc: BaseException) -> str:
     return text
 
 
-def test_a_record_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path):
-    t, runs = _tenant_under_a_hostile_folder(tmp_path)
-    (runs / "_episodes").mkdir()
-    (runs / "_episodes" / "junk.txt").write_text("x", encoding="utf-8")
-    with pytest.raises(R.RunRefused) as listed:
-        t.runs_repository().list()
-    assert "junk.txt" in _one_line(listed.value)
-    with _io.hold(runs, follow=False) as held, pytest.raises(R.RunRefused) as path_only:
-        R.episode_sibling_ids(held.view())
-    assert "junk.txt" in _one_line(path_only.value)
-
-
 def test_a_lookup_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path):
     t, runs = _tenant_under_a_hostile_folder(tmp_path)
     (runs / "stray").write_text("x", encoding="utf-8")
@@ -50,7 +37,7 @@ def test_a_lookup_refusal_under_a_folder_with_a_newline_stays_one_line(tmp_path)
     _one_line(stray.value)
     (runs / "stray").unlink()
     with pytest.raises(R.RunRefused) as absent:
-        t.runs_repository().open(R.RunId.mint("a"))
+        t.runs_repository().open(R.RunId.parse(fixture_uuid("claims-followups-absent")))
     _one_line(absent.value)
 
 

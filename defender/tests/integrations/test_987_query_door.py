@@ -29,12 +29,8 @@ from pydantic_ai.messages import (  # noqa: E402
 from defender.runtime.driver import MAIN_DEF  # noqa: E402
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.hooks.budget_enforcer import BudgetKill  # noqa: E402
-from defender.runtime import (  # noqa: E402
-    circuit_breaker,
-    request_ceiling,
-    session_store,
-    tools_gather,
-)
+from defender.runtime import circuit_breaker, request_ceiling, tools_gather  # noqa: E402
+from defender.runtime import session_store  # noqa: E402
 from defender.runtime.agent_definition import bind  # noqa: E402
 from defender.runtime.request_ceiling import FINAL_REQUEST, RequestCeiling  # noqa: E402
 from defender.runtime.tools import DeadEnd, LeadStop  # noqa: E402

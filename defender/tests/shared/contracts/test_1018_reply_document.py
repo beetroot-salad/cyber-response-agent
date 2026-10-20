@@ -400,7 +400,8 @@ def _grade(tmp_path, ep, judge, **kw):
 
 def _wire_row(ep: Path, label: str, draw: int) -> dict:
     """The judge's own wire-log row for one draw — `_write_wire_log`'s file, read back."""
-    path = Path(ep) / "wire_logs" / f"judge_{label}_{draw}_framed_trace.jsonl"
+    scope_id = label if label == "family" else T.world_id(ep, label)
+    path = Path(ep) / "wire_logs" / f"judge_{scope_id}_{draw}_framed_trace.jsonl"
     assert path.is_file(), f"no wire log at {path}"
     return json.loads(path.read_text(encoding="utf-8").splitlines()[0])
 
@@ -427,14 +428,14 @@ def test_1018_judge_fence_then_prose_reply_costs_one_draw_and_the_reply_is_on_di
     rows = J.world_rows(J.judge_record(ep))
     assert rows["b"]["completed_draws"] == 0, "a fence-then-prose reply completed a draw"
     assert rows["b"]["malformed_replies"] == ASKS_PER_DRAW
-    assert not (ep / "worlds" / "b" / "judge" / "0.yaml").exists(), (
+    assert not (ep / "worlds" / T.world_id(ep, "b") / "judge" / "0.yaml").exists(), (
         "a draw file was written off a reply that was not one bare document")
     assert grade.episode_dir == ep, "the pass did not return normally"
     assert _wire_row(ep, "b", 0)["reply"] == shape_4, (
         "the refused reply's own bytes are not on the wire log")
     # Positive control on the same pass: world c's bare reply completed its draw.
     assert rows["c"]["completed_draws"] == 1
-    assert (ep / "worlds" / "c" / "judge" / "0.yaml").is_file()
+    assert (ep / "worlds" / T.world_id(ep, "c") / "judge" / "0.yaml").is_file()
 
 
 def test_1018_judge_a_bare_second_draw_completes_beside_a_malformed_first(tmp_path):
@@ -447,7 +448,7 @@ def test_1018_judge_a_bare_second_draw_completes_beside_a_malformed_first(tmp_pa
     rows = J.world_rows(J.judge_record(ep))
     assert rows["b"]["completed_draws"] == 1
     assert rows["b"]["malformed_replies"] == ASKS_PER_DRAW
-    assert not (ep / "worlds" / "b" / "judge" / "0.yaml").exists()
+    assert not (ep / "worlds" / T.world_id(ep, "b") / "judge" / "0.yaml").exists()
     # #1234: the reply carries no `episode_outcome` (retired, A17); the completed draw's own
     # answer is its world bucket.
     assert J.draw_doc(ep, "b", 1)["bucket"] == "lead-set"
@@ -521,8 +522,8 @@ def _author(tmp_path, agent):
 def test_1018_questioner_call_1_fence_then_prose_aborts_naming_call_1_before_any_seat_is_paid(
         tmp_path):
     """M2 at the questioner, shape 4 on call 1."""
-    agent = T.FakeAgent(_fenced_doc(T.family_doc()) + PROSE_AFTER,
-                        _fenced_doc(T.world_doc("b")), _fenced_doc(T.world_doc("c")))
+    agent = T.FakeAgent(_fenced_doc(T.declaration(T.family_doc())) + PROSE_AFTER,
+                        _fenced_doc(T.declaration(T.world_doc("b"))), _fenced_doc(T.declaration(T.world_doc("c"))))
     with pytest.raises(_branch_error()) as err:
         _author(tmp_path, agent)
     assert "call 1" in str(err.value)
@@ -531,9 +532,9 @@ def test_1018_questioner_call_1_fence_then_prose_aborts_naming_call_1_before_any
 
 def test_1018_questioner_seat_call_fence_then_prose_aborts_naming_the_seat(tmp_path):
     """Shape 4 on a SEAT call (call 2)."""
-    agent = T.FakeAgent(_fenced_doc(T.family_doc()),
-                        _fenced_doc(T.world_doc("b")) + PROSE_AFTER,
-                        _fenced_doc(T.world_doc("c")))
+    agent = T.FakeAgent(_fenced_doc(T.declaration(T.family_doc())),
+                        _fenced_doc(T.declaration(T.world_doc("b"))) + PROSE_AFTER,
+                        _fenced_doc(T.declaration(T.world_doc("c"))))
     with pytest.raises(_branch_error()) as err:
         _author(tmp_path, agent)
     assert "seat B" in str(err.value)

@@ -85,7 +85,7 @@ def graded_episode(tmp_path: Path, paths, *, reply=None):
     """One accepted episode graded by the REAL family judge, its rows on the REAL queue."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / J.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     from defender.learning.core.state import LearningState
 
     with LearningState.open(paths) as state:

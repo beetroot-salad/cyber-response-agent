@@ -27,14 +27,12 @@ def _tenant_runs() -> Path:
     """The tenant's natural runs folder `<data root>/<T>/runs`, with its tenant record — #1105 PR 2
     (J8, declared change 10): the tracer takes a required `--tenant` and walks that tenant's runs
     (`--runs-dir` is gone)."""
-    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
 
     root = current_data_root()
     H1105.tenant(root, TID)
     runs = root / TID / "runs"
     runs.mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, TID)
     return runs
 
 
@@ -155,8 +153,6 @@ def test_lesson_raw_is_the_slice_the_parser_consumed(tmp_path):
 
 
 def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
-    """demand (review) — ``--all`` must window each lesson's case count to loads at/after that
-    lesson's ``created_at`` (its CURRENT incarnation), not report a lifetime total."""
     tl = _load_trace_lesson()
     corpus = tmp_path / "lessons"
     corpus.mkdir()
@@ -169,6 +165,6 @@ def test_all_windows_each_count_on_the_lessons_created_at(tmp_path, capsys):
     _mk_run(runs, "case-new", disposition="malicious",
             loads=[{"lesson_name": "rewritten", "ts": "2026-06-05T00:00:00+00:00"}])
 
-    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0
+    assert tl.main(["--all", "--lessons-dir", str(corpus), "--tenant", TID]) == 0, capsys.readouterr().err
 
     assert capsys.readouterr().out.splitlines() == ["rewritten\td\t1\t0"]

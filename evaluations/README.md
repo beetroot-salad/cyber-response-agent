@@ -26,14 +26,19 @@ tenant's knowledge repo into the data root and set the tenant up once:
 
 ```bash
 export DEFENDER_DATA_ROOT=/path/outside/the/checkout
-git clone <tenant repo> "$DEFENDER_DATA_ROOT/playground/knowledge"
-python3 defender/cli/tenant.py setup playground
+export TENANT_ID=$(python3 defender/cli/tenant.py new-id)  # save this UUID
+git clone <tenant repo> "$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge"
+python3 defender/cli/tenant.py setup "$TENANT_ID"
 ```
 
 Clone with a credential helper or an ssh agent (never a credential in the URL), and run setup
 once the clone has exited 0; setup adopts the placed folder and copies nothing.
 A data root made before #1120 (no `<id>/knowledge/`) has no repo to clone: build the folder
 once with `tenant.py migrate <id> <root>/<id>/knowledge`, then run setup.
+
+For an existing named tenant, follow the offline identity migration in
+[development operations](../defender/docs/development-operations.md#migrating-named-tenants-to-uuids-1187);
+`tenant.py migrate` does not convert tenant IDs.
 
 Run `tenant.py setup` once, from the main checkout, with `DEFENDER_DATA_ROOT` set (there is no
 default data root) and no run, fork or drain in flight on any checkout of the host, as the same
@@ -43,9 +48,11 @@ setup run as root — that adoption case only.)
 
 ```bash
 # Primary: score against ground truth. It walks fixtures/held_out/ and finds each
-# fixture's run by run-id, so launch scored runs as:
-#   run.py <fixture>/alert.json --tenant playground --run-id <slug> --no-learn
-python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/playground/runs"
+# fixture's run through the held-out index F you name (outside every runs and episodes
+# tree): launch appends {slug, run_id} to F, then runs
+#   run.py <fixture>/alert.json --tenant "$TENANT_ID" --run-id <uuid> --no-learn
+python3 evaluations/held_out.py launch <slug> --tenant "$TENANT_ID" --index F
+python3 evaluations/held_out.py "$DEFENDER_DATA_ROOT/$TENANT_ID/runs" --index F
 ```
 
 **There used to be a second metric here.** `secondary.py` scored a *frozen-actor

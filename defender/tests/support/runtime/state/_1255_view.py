@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from defender.run_repository import RUN_LAYOUT
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 DEFENDER = Path(__file__).resolve().parents[4]
 REPO_ROOT = DEFENDER.parent
@@ -27,8 +28,8 @@ MODEL_ENV = {
     "DEFENDER_AGENT_DIR": MODEL_AGENT,
 }
 
-TENANT_A = "tnt-qzv7a"
-TENANT_B = "orgx-kw3b"
+TENANT_A = fixture_uuid("tenant:tnt-qzv7a")
+TENANT_B = fixture_uuid("tenant:orgx-kw3b")
 STATIC_ROOTFS = "python:3.11-slim"
 
 
@@ -90,10 +91,12 @@ def make_layout(base: Path, tenant_id: str, *, checkout: Path | None = None) -> 
                   checkout=Path(checkout) if checkout is not None else DEFENDER)
 
 
-def natural_run(layout: Layout, alert_bytes: bytes, run_id: str) -> Path:
+def natural_run(layout: Layout, alert_bytes: bytes, label: str) -> Path:
     """Materialize a natural run through its tenant's runs repository."""
     from defender import run_common
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
+    run_id = fixture_uuid(label)
     staged = layout.data_root.parent / f"alert-{run_id}.json"
     staged.write_bytes(alert_bytes)
     run = run_common.materialize_run(staged, run_id, tenant=layout.tenant)

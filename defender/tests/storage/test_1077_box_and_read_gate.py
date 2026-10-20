@@ -159,32 +159,3 @@ def test_the_box_entrypoint_closure_imports_the_owner_without_pydantic():
         f"claim C4: `RunPaths` uses `@model` (pydantic) today while `_io.py` uses a stdlib "
         f"dataclass, so D1's conversion is a real constraint, not a formality:\n{done.stderr!r}")
     assert b"OK" in done.stdout
-
-
-def test_the_tenant_record_sits_outside_every_box_mount(run_dir):
-    """The tenant record's directory is mounted into no box, while the run dir still is."""
-    from defender.box._lifecycle import _create_argv
-    from defender.box._spec import BoxSpec
-
-    runs_base = run_dir.parent
-    record = S.tenant().ensure_runs_base_record(runs_base, "census-tenant")
-    record_path = S.tenant().record_path(runs_base)
-    assert record.tenant_id
-    assert record_path.parent == runs_base
-
-    argv = _create_argv("defender-run-1077", run_dir, DEFENDER, BoxSpec(), ()).argv
-    mounts = [argv[i + 1] for i, a in enumerate(argv) if a == "--mount"]
-    for m in mounts:
-        source = Path(m.split("source=")[1].split(",")[0])
-        assert not record_path.is_relative_to(source), (
-            f"the tenant record is inside the box mount {source} — the box mounts "
-            "`<run_dir>` only (`box/_spec.py`), and the record sits one level up "
-            "under `<runs_base>`, which no box mounts")
-    # POSITIVE CONTROL, in the demand's own sentence: the run dir still IS mounted.
-    # (#1255: the run dir is bound from its host path to the model view's `/runs/current`.)
-    assert any(f"source={run_dir}," in m and "target=/runs/current" in m for m in mounts), (
-        "the run dir stopped being mounted, which would make the negative above pass "
-        "vacuously — and would break N1")
-    # N9 is the recorded scope: a hostile local user on a shared /tmp is outside the threat
-    # model, exactly as it is for today's sidecars beside the same runs base.
-    assert S.RunPaths(run_dir).run_end_sidecar(runs_base).parent == record_path.parent

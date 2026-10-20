@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import pytest
 
@@ -20,18 +22,11 @@ def run_dir(base: Path) -> Path:
     return S.seed_run_tree(S.make_run_dir(base))
 
 
-def _with_record(base: Path) -> Path:
-    """`base` holding its tenant record naming `DEFAULT_TENANT_ID`, unless a test planted its
-    own. #1105 NH-3: `Run.for_tenant` refuses a runs base with no `_tenant.json`, so a handle is
-    built only once the record exists — as run setup writes it before building the handle."""
-    if not (base / "_tenant.json").exists():
-        S.plant_tenant_record(base)
-    return base
 
 
-def _tenanted(base: Path, run_id: str = "run-1077"):
-    """A handle built the way real application code builds one (decision 1d)."""
-    return S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_id, runs_base=_with_record(base))
+def _tenanted(base: Path, run_id: str = S.RUN_ID):
+    """Build a tenant-addressed handle over its record-free runs container."""
+    return S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
 
 
 # Demand #0 — the return-value contract, RESOLVED at §7 on all four axes
@@ -41,8 +36,6 @@ def _tenanted(base: Path, run_id: str = "run-1077"):
 
 
 def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
-    """`Run.at` refuses at construction when the path does not exist or is not a directory, and
-    the refusal says 'not an existing directory', not 'not run-dir-shaped'."""
     missing = tmp_path / "no-such-run"
     a_file = tmp_path / "a-file"
     a_file.write_text("not a directory\n", encoding="utf-8")
@@ -61,80 +54,56 @@ def test_run_at_refuses_a_nonexistent_path_and_a_file(base, tmp_path: Path):
 
 
 def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base):
-    from defender.records._run_id import CASE_STABLE_REQUIRED
-    _with_record(base)
-    S.seed_run_tree(S.make_run_dir(base, "run-1"))
-    S.plant_stamp(base / "run-1", commit="c0ffee", dirty=False, tenant_id=S.DEFAULT_TENANT_ID)
+    from defender.run_repository import RunId, RunRefused
+    one, two = fixture_uuid("handle-case-one"), fixture_uuid("handle-case-two")
+    S.seed_run_tree(S.make_run_dir(base, one))
+    S.plant_stamp(base / one, commit="c0ffee", dirty=False, tenant_id=S.DEFAULT_TENANT_ID)
+    mixed = "".join(c.upper() if i % 2 else c for i, c in enumerate(one))
 
-    for variant in ("Run-1", "RUN-1", "rUn-1"):
-        with pytest.raises(Exception) as excinfo:  # noqa: PT011
-            S.Run().for_tenant(S.DEFAULT_TENANT_ID, variant, runs_base=base)
+    for variant in (one.upper(), mixed):
+        assert variant != one, "fixture: the variant must differ from the id only by case"
+        rule = _rule_refusal(RunId.parse, variant)
+        assert isinstance(rule, RunRefused), f"fixture: the rule admits {variant!r} ({rule!r})"
+        with pytest.raises(RunRefused) as excinfo:
+            S.Run().under(base, variant, tenant_id=S.DEFAULT_TENANT_ID)
         said = str(excinfo.value)
-        assert CASE_STABLE_REQUIRED in said, (
-            f"{variant!r} was not refused by the case-stability rule: {said!r}. On a case-"
-            "insensitive filesystem — macOS, which this repo supports, and where the default "
-            "runs base lives under a symlinked /tmp — it and `run-1` are ONE inode, so "
-            "decision 3's resumable setup would finish `run-1`'s directory as if it were "
-            "this run's, re-stamp its identity and clear its three sidecars (h12, h13)")
-        assert variant.casefold() in said, (
-            "the refusal does not offer the spelling that would work; `_family."
-            "refuse_bad_episode_id` names it, and this is the same rule reached by reference")
+        assert (type(excinfo.value), said) == (type(rule), str(rule)), (
+            f"the handle's refusal of {variant!r} is not the run-id rule's own: the handle said "
+            f"{excinfo.value!r}, RunId.parse says {rule!r}")
+        assert repr(variant) in said, (
+            f"{variant!r} was not refused by name: {said!r}. On a case-insensitive filesystem — "
+            "macOS, which this repo supports, and where the default runs base lives under a "
+            "symlinked /tmp — it and the lowercase id are ONE inode, so decision 3's resumable "
+            "setup would finish that run's directory as if it were this run's, re-stamp its "
+            "identity and clear its three sidecars (h12, h13)")
+        assert "\n" not in said, f"the refusal of {variant!r} is not one line: {said!r}"
     # The refusal is the ID's, not the collision's: it holds with no existing directory too,
     # so the handle never has to look at the filesystem to know the id is unusable.
-    with pytest.raises(Exception) as excinfo:  # noqa: PT011
-        S.Run().for_tenant(S.DEFAULT_TENANT_ID, "Run-2", runs_base=base)
-    assert CASE_STABLE_REQUIRED in str(excinfo.value)
+    with pytest.raises(RunRefused) as excinfo:
+        S.Run().under(base, two.upper(), tenant_id=S.DEFAULT_TENANT_ID)
+    assert str(excinfo.value) == str(_rule_refusal(RunId.parse, two.upper()))
+    assert repr(two.upper()) in str(excinfo.value)
     # And nothing was touched on the way to the refusal.
-    assert S.Run().at(base / "run-1").record.commit == "c0ffee", (
+    assert S.Run().at(base / one).record.commit == "c0ffee", (
         "the refused call re-stamped the run whose directory the case variant folds onto")
-    assert sorted(p.name for p in base.iterdir()) == ["_tenant.json", "run-1"], (
+    assert sorted(p.name for p in base.iterdir()) == [one], (
         f"the refused call created something: {sorted(p.name for p in base.iterdir())}")
     # Positive control: the case-stable spelling is admitted, unchanged.
-    assert S.Run().for_tenant(S.DEFAULT_TENANT_ID, "run-2", runs_base=base) is not None
-
-
-def test_for_tenant_refuses_a_tenant_id_the_record_at_the_resolved_base_disagrees_with(base):
-    """`Run.for_tenant(tenant_id, run_id)` refuses when the `tenant_id` argument disagrees with
-    the tenant record actually stored at the resolved runs base, and the refusal names both."""
-    S.plant_tenant_record(base, tenant_id="acme",
-                          base_world_id="feedfacefeedfacefeedfacefeedface")
-    S.seed_run_tree(S.make_run_dir(base, "run-mismatch"))
-
-    with pytest.raises(Exception) as excinfo:  # noqa: PT011
-        S.Run().for_tenant("globex", "run-mismatch", runs_base=base)
-    said = str(excinfo.value)
-    for named in ("globex", "acme"):
-        assert named in said, (
-            f"the refusal does not name {named!r}: {said!r}. Both sides belong in it — the "
-            "caller cannot tell which of the two is wrong from a message carrying one")
-    assert S.Run().at(base / "run-mismatch").record.tenant_id is None, (
-        "the refused construction stamped the run anyway — decision 22 refuses BEFORE the "
-        "constructor's caller can write a run under the tenant it does not belong to")
-
-    # Neither 'trust the argument' nor 'trust the record' was chosen, because both make the
-    # mismatch silent, which is what decision 1d promoted `for_tenant` to prevent.
-    assert not (base / "_tenant.json").read_text(encoding="utf-8").count("globex"), (
-        "the record was rewritten to agree with the argument — `for_tenant` is an enforcement "
-        "point, not a migration")
-    # POSITIVE CONTROL: the agreeing pair still constructs (h06), so the refusal above is the
-    # disagreement and not `for_tenant` refusing every non-default tenant.
-    agreeing = S.Run().for_tenant("acme", "run-mismatch", runs_base=base)
-    assert agreeing.tenant_id == "acme"
-    assert agreeing.runs_base == base
+    assert S.Run().under(base, two, tenant_id=S.DEFAULT_TENANT_ID) is not None
 
 
 # d42 / d45 / d43 — the fields, the receivers, the archive projection
 
 
 def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path: Path):
-    """`ArchivedWorld.at` exposes exactly the copied set and nothing else, and is not a `Run`."""
-    world = tmp_path / "episodes" / S.EPISODE_ID / "worlds" / S.LABEL
+    world = tmp_path / "episodes" / S.EPISODE_ID / "worlds" / S.WORLD_ID
     world.mkdir(parents=True)
     aw = S.ArchivedWorld().at(world)
 
     assert set(aw.members) == set(S.ARCHIVED_WORLD_MEMBERS), (
-        "the copied set is page §5's enumeration, extended by the four archive.py constants "
-        "claim C17 omitted (gather_summaries, lessons_loaded, alert, and the run_dir pointer)")
+        "the copied set is page §5's enumeration, extended by the archive.py constants claim "
+        "C17 omitted (gather_summaries, lessons_loaded, alert); #1187 R8 retired the run_dir "
+        "pointer")
     for name in S.ARCHIVED_WORLD_MEMBERS:
         assert getattr(aw, name).path.is_relative_to(world)
     for absent in ("tool_trace", "budget", "wire_log", "session_db", "review_record"):
@@ -148,33 +117,29 @@ def test_archived_world_exposes_exactly_the_copied_set_and_is_not_a_run(tmp_path
 # Settled premises on the constructors' admission domain
 
 def test_run_under_run_id_containing_path_separator(base):
-    _with_record(base)
     escaped = base.parent / "escaped"
     escaped.mkdir(exist_ok=True)
     for run_id in ("../escaped", "a/b", "/etc"):
         with pytest.raises(Exception):  # noqa: B017,PT011
-            S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_id, runs_base=base)
+            S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
         with pytest.raises(Exception):  # noqa: B017,PT011
             S.Run().under(base, run_id)
     assert not (escaped / "provenance.json").exists(), "a refused construction wrote outside"
     # Positive control: an ordinary run id resolves, inside the base.
-    ok = S.Run().for_tenant(S.DEFAULT_TENANT_ID, "run-1077", runs_base=base)
+    ok = S.Run().under(base, S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID)
     assert ok.run_dir.is_relative_to(base)
 
 
 def test_run_under_run_id_containing_parent_traversal(base):
-    """The resolved run dir remains inside the runs base regardless of a '..'-shaped run_id, at
-    the public constructor and at the internal helper alike."""
-    _with_record(base)
     outside = base.parent / "outside"
     outside.mkdir(exist_ok=True)
     for run_id in ("..", "../..", "../outside", "x/../../outside"):
-        for build in (lambda r: S.Run().for_tenant(S.DEFAULT_TENANT_ID, r, runs_base=base),
+        for build in (lambda r: S.Run().under(base, r, tenant_id=S.DEFAULT_TENANT_ID),
                       lambda r: S.Run().under(base, r)):
             with pytest.raises(Exception):  # noqa: B017,PT011
                 build(run_id)
-    assert S.Run().for_tenant(
-        S.DEFAULT_TENANT_ID, "run-1077", runs_base=base).run_dir.is_relative_to(base), (
+    assert S.Run().under(
+        base, S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID).run_dir.is_relative_to(base), (
         "positive control: a traversal-free id still resolves, inside the base")
 
 
@@ -213,8 +178,6 @@ def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent
 
 
 def test_a_field_whose_record_is_unparseable_reads_none_and_records_the_fault(base, run_dir):
-    """A run-record field whose backing record is present but unparseable reads `None` and the
-    fault is recorded, not silently swallowed."""
     (run_dir / "provenance.json").write_text("{ not json at all", encoding="utf-8")
     record = S.Run().at(run_dir).record
     assert record.commit is None
@@ -283,8 +246,21 @@ def test_run_observability_group_stays_append_only_through_the_handle(base, run_
             assert not hasattr(rec, "write"), (
                 f"run.observability.{name} exposes a whole-record rewrite of an existing entry")
         else:
+            # A whole JSON/HTML document the host writes once per run (the ticket write, the
+            # session pointer, the rendered page, the review record) is not a log: it has no
+            # entries to append to, and appending JSONL to it would corrupt it.
             assert not hasattr(rec, "append"), (
                 f"run.observability.{name} is a whole document; an append would corrupt it")
 
 
 # Decision 9 — read purity
+
+
+def _rule_refusal(rule: Any, text: str) -> BaseException | None:
+    """What the one run-id rule (`rule`, `RunId.parse`) raises for `text`, or `None` when it
+    admits it — the reference the handle's own refusal is compared against."""
+    try:
+        rule(text)
+    except Exception as refused:  # noqa: BLE001 — the rule's refusal is the value compared
+        return refused
+    return None

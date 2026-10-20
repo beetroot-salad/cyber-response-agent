@@ -375,9 +375,11 @@ class ScopedFakeVerbs(VerbRegistry):
     undeclared system raises `KeyError`, and `decide()` — the grant decision — is the base
     class's, which is production code."""
 
-    def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]], grant: VerbGrant):
+    def __init__(self, table: Mapping[str, Mapping[str, Callable[..., Any]]], grant: VerbGrant,
+                 *, call_run: str | None = None):
         super().__init__(grant)
         self._table = {s: dict(v) for s, v in table.items()}
+        self.call_run = call_run
 
     def systems(self) -> tuple[str, ...]:
         return tuple(sorted(self._table))

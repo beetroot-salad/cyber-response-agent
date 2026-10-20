@@ -46,6 +46,9 @@ class _NarrowedRegistry(VerbRegistry):
     def _cold_verb_names(self, system):
         return self._inner._cold_verb_names(system)
 
+    def branch_identities(self) -> frozenset[str]:
+        return self._inner.branch_identities()
+
 
 # the correlation lead's harness-authored contract
 

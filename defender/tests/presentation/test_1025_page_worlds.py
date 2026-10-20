@@ -196,9 +196,11 @@ def test_1025_each_world_links_to_runs_episode_world_runtime_html_relatively_and
     """Every world section's link is exactly `runs/<episode>-<world>/runtime.html` (the episode id
     the manifest's, correction 4)."""
     ep = E.sample_episode(tmp_path)
+    for label in E.WORLDS:
+        (ep.world(label) / "run_dir").write_text(str(ep.run(label)), encoding="utf-8")
     page = render(ep)
     for label in E.WORLDS:
-        expected = f"runs/{E.EPISODE_ID}-{label}/runtime.html"
+        expected = f"runs/{ep.run(label).name}/runtime.html"
         assert expected in page.anchors_in(f"world-{label}"), page.anchors_in(f"world-{label}")
         pointer = (ep.world(label) / "run_dir").read_text(encoding="utf-8").strip()
         assert pointer not in page.raw, pointer
@@ -286,8 +288,8 @@ def test_1025_the_artifacts_anchor_ids_exist_and_every_nav_href_resolves_to_an_i
     assert page.ids_with("fg-")
     assert len([i for i in page.ids if i.startswith("f-")]) == S.findings
     stems = {"questioner_trace", "questioner_b_trace", "questioner_c_trace",
-             f"judge_{E.FAMILY}_0_trace", f"judge_{E.PASSTHROUGH_WORLD}_0_trace",
-             f"judge_{E.GRADED_WORLD}_0_trace"}
+             f"judge_{E.FAMILY}_0_trace", f"judge_{T.fixture_world_id(E.PASSTHROUGH_WORLD)}_0_trace",
+             f"judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_trace"}
     assert {f"tx-{s}" for s in stems} <= set(page.ids), page.ids_with("tx-")
     for stale in ("sec-disposition", "sec-questioner", "stage-staging"):
         assert stale not in page.by_id, stale
@@ -332,7 +334,7 @@ def test_1025_a_manifest_label_off_the_token_alphabet_never_reaches_a_frame_slot
     manifest["worlds"].append(T.world_doc(hostile, role="D", axis="hostile axis",
                                           disposition_declared="benign"))
     T.write_family(ep.dir, manifest)
-    with pytest.raises(J.sym("learning.judge", "JudgeRefused"), match="world-token alphabet"):
+    with pytest.raises(J.sym("learning.judge", "JudgeRefused"), match="world-label alphabet"):
         E.render_episode(ep.dir, module=visualize_episode())
     assert ep.page.read_bytes() == before, "a refused manifest still rewrote the page"
     assert b"evil<b" not in before
@@ -344,9 +346,11 @@ def test_1025_world_or_lead_directory_name_carries_attribute_or_tag_breaking_cha
     heading unescaped."""
     ep = E.sample_episode(tmp_path)
     bad = 'w"x<i>'
-    T.archived_world(ep.dir, bad)
-    E.draw_document(ep.dir, bad, 0, E.draw_doc(findings=[E.finding(claim="BAD-WORLD-CLAIM")]),
-                    check=False)
+    rogue = ep.dir / "worlds" / T.fixture_world_id(bad)
+    E.plant_raw(rogue / "judge" / "0.yaml", "findings: [{claim: BAD-WORLD-CLAIM}]\n")
+    with pytest.raises(T.sym("runtime.branch._family", "FamilyError"), match="not declared"):
+        render(ep)
+    shutil.rmtree(rogue)
     doc = E.sample_grade()
     doc["worlds"].append(E.world_row(bad, declared="benign"))
     E.write_judge(ep.dir, doc)
@@ -416,7 +420,7 @@ def test_1025_render_when_a_graded_world_has_no_matching_runs_dir(tmp_path):
     world = _world(page, E.GRADED_WORLD)
     assert "run directory absent" in world, world
     assert "decision-discipline" in world, world
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" not in page.hrefs
+    assert f"runs/{ep.run(E.GRADED_WORLD).name}/runtime.html" not in page.hrefs
     assert any(E.GRADED_WORLD in c.text() for c in page.elements(cls="vd-cause"))
     assert f"f-{E.GRADED_WORLD}-0-0" in page.ids
 
@@ -431,7 +435,7 @@ def test_1025_a_run_directory_symlink_or_dir_pointer_naming_a_symlinked_final_co
     link.symlink_to(outside, target_is_directory=True)
     (ep.world(E.GRADED_WORLD) / "run_dir").write_text(f"{link}\n", encoding="utf-8")
     page = render(ep)
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" in page.anchors_in(f"world-{E.GRADED_WORLD}")
+    assert f"runs/{ep.run(E.GRADED_WORLD).name}/runtime.html" in page.anchors_in(f"world-{E.GRADED_WORLD}")
     assert "OUTSIDE-RUN-REPORT" not in page.raw
     assert str(link) not in page.raw
 
@@ -545,9 +549,9 @@ def test_1025_the_worlds_and_leads_headings_count_exactly_the_sections_under_the
 def test_1025_a_missing_or_unreadable_served_ledger_costs_the_leads_block_only_the_ledger(tmp_path):
     """The served ledger and `investigation.md` are two records read by two readers."""
     ep = E.sample_episode(tmp_path)
-    ledger = ep.dir / "served" / f"{T.world_token(E.GRADED_WORLD)}.jsonl"
+    ledger = ep.dir / "served" / f"{T.fixture_world_id(E.GRADED_WORLD)}.jsonl"
     ledger.unlink()
-    E.plant_link(ep.dir / "served" / f"{T.world_token(E.PASSTHROUGH_WORLD)}.jsonl",
+    E.plant_link(ep.dir / "served" / f"{T.fixture_world_id(E.PASSTHROUGH_WORLD)}.jsonl",
                  ep.dir / "family.yaml")
     page = render(ep)
     for label, note in ((E.GRADED_WORLD, "served ledger: absent"),

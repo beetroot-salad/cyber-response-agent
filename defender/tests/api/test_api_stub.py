@@ -1,6 +1,8 @@
 """The platform API HTTP layer over a scripted fake: routes, login seam, port-answer to response mapping."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import base64
 import datetime as _dt
 import json
@@ -50,7 +52,9 @@ from defender.api.ports import (  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NOW = _dt.datetime(2026, 9, 28, 12, 0, tzinfo=_dt.UTC)
 
-A = "tenant-a"
+A = fixture_uuid("tenant:tenant-a")
+DEMO_ONE = fixture_uuid("tenant:t-one")
+DEMO_TWO = fixture_uuid("tenant:t-two")
 USER = "ann@a.example"
 AUTH = {"Authorization": "Bearer tok-a"}
 AUTH_B = {"Authorization": "Bearer tok-b"}
@@ -197,7 +201,7 @@ def _deps(ports: Any, authenticator: Any = None) -> ApiDeps:
     return ApiDeps(
         authenticator=authenticator or TokenAuthenticator({
             "tok-a": Principal(tenant_id=A, user_id=USER),
-            "tok-b": Principal(tenant_id="tenant-b", user_id="bob@b.example"),
+            "tok-b": Principal(tenant_id=fixture_uuid("tenant:tenant-b"), user_id="bob@b.example"),
         }),
         alerts=ports, investigations=ports, learning_jobs=ports, lessons=ports,
         systems=ports, writes=ports, secrets=ports, checker=ports, artifact_links=ports,
@@ -718,9 +722,10 @@ def test_an_id_outside_the_grammar_cannot_be_served(bad: str) -> None:
         SETTINGS.model_validate({**SETTINGS.model_dump(), "system_id": bad})
 
 
-def test_a_caller_from_the_login_provider_carries_a_checked_tenant() -> None:
+@pytest.mark.parametrize("legacy", ["Not_A_Tenant", "acme", "playground", "tenant-a", "blue"])
+def test_a_caller_from_the_login_provider_carries_a_checked_tenant(legacy) -> None:
     with pytest.raises(TenantRefused):
-        Principal(tenant_id="Not_A_Tenant", user_id=USER)
+        Principal(tenant_id=legacy, user_id=USER)
 
 
 def test_a_naive_time_cannot_be_served() -> None:
@@ -927,7 +932,7 @@ def test_paging_the_demo_store_serves_every_row_once_across_tied_timestamps() ->
 
 
 def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
-    tenants = ("t-one", "t-two")
+    tenants = (DEMO_ONE, DEMO_TWO)
     client = TestClient(create_app(demo_deps(tenants, lambda: NOW)))
     seen: dict[str, set[str]] = {}
     for token, principal in demo_tokens(tenants).items():
@@ -938,28 +943,28 @@ def test_the_demo_seed_serves_each_named_tenant_only_its_own_records() -> None:
             assert client.get(f"/alerts/{alert['alert_id']}", headers=auth).status_code == 200
         seen.setdefault(principal.tenant_id, set()).update(a["alert_id"] for a in alerts)
     assert set(seen) == set(tenants)
-    assert not seen["t-one"] & seen["t-two"]
-    systems = client.get("/systems", headers={"Authorization": "Bearer t-one-analyst"}).json()["items"]
+    assert not seen[DEMO_ONE] & seen[DEMO_TWO]
+    systems = client.get("/systems", headers={"Authorization": f'Bearer {DEMO_ONE}-analyst'}).json()["items"]
     assert {s["system_id"]: s["has_credentials"] for s in systems} == {"siem": False, "tickets": True}
 
 
 def test_the_demo_store_keeps_the_audit_events_a_transaction_commits() -> None:
-    deps = demo_deps(("t-one",), lambda: NOW)
+    deps = demo_deps((DEMO_ONE,), lambda: NOW)
     client = TestClient(create_app(deps))
-    auth = {"Authorization": "Bearer t-one-analyst"}
+    auth = {"Authorization": f'Bearer {DEMO_ONE}-analyst'}
     created = client.post("/investigations", headers=auth,
-                          json={"alert_id": "t-one-alert-0003", "client_request_id": "r1"})
+                          json={"alert_id": f'{DEMO_ONE}-alert-0003', "client_request_id": "r1"})
     assert created.status_code == 201, created.text
     events = deps.writes.audit_events  # type: ignore[attr-defined]
     assert [(e.tenant_id, e.user_id, e.action, e.target) for e in events] == [
-        ("t-one", "analyst@t-one.example", "investigation.start", created.json()["investigation_id"])]
+        (DEMO_ONE, f'analyst@{DEMO_ONE}.example', "investigation.start", created.json()["investigation_id"])]
 
 
 def test_the_demo_store_keys_records_by_tenant() -> None:
     store = InMemoryStore(lambda: NOW)
-    store.add_alert("t-one", ALERT)
-    store.add_alert("t-two", ALERT.model_copy(update={"title": "two's"}))
-    one, two = store.get_alert("t-one", "al-1"), store.get_alert("t-two", "al-1")
+    store.add_alert(DEMO_ONE, ALERT)
+    store.add_alert(DEMO_TWO, ALERT.model_copy(update={"title": "two's"}))
+    one, two = store.get_alert(DEMO_ONE, "al-1"), store.get_alert(DEMO_TWO, "al-1")
     assert one is not None
     assert two is not None
     assert (one.title, two.title) == ("t", "two's")
@@ -967,7 +972,7 @@ def test_the_demo_store_keys_records_by_tenant() -> None:
 
 @pytest.mark.parametrize(("tenants", "reason"), [
     ((), "at least one tenant"),
-    (("t-one", "t-one"), "tenants repeat"),
+    ((DEMO_ONE, DEMO_ONE), "tenants repeat"),
     (("Not_A_Tenant",), "not a tenant id"),
 ])
 def test_the_demo_seed_refuses_a_bad_tenant_list(tenants: tuple[str, ...], reason: str) -> None:

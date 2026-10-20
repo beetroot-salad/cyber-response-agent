@@ -91,6 +91,8 @@
     "defender/cli/tenant.py: unused attribute 'dont_write_bytecode' (60% confidence)": "false positive: `sys.dont_write_bytecode` is an interpreter flag the import system reads, which vulture cannot see; set so the operator command writes no bytecode cache into the checkout it runs from.",
     "defender/skills/invlang/advisory.py: unused function 'clear_cache' (60% confidence)": "test-only: cache teardown used by tests/invlang/validation/test_invlang_advisory.py to isolate cases",
     "defender/skills/invlang/corpus.py: unused variable 'parse_warnings' (60% confidence)": "false-positive: Companion dataclass field, read off instances",
-    "defender/skills/invlang/corpus.py: unused variable 'source_path' (60% confidence)": "false-positive: Companion dataclass field, read off instances"
+    "defender/skills/invlang/corpus.py: unused variable 'source_path' (60% confidence)": "false-positive: Companion dataclass field, read off instances",
+    "defender/episodes/_episode_handle.py: unused property 'box_mounted_container' (60% confidence)": "test-only since #1187: tests/storage/test_1133_episode_handle.py pins it as the handle's one public hand-out of its `runs/` path. Its production caller was run.py's sibling acceptance, which #1187 (S-acc) moved before any episode handle exists: the sibling computes `<T>/episodes/<ep>/runs` with `_tenant.box_mounted_arm_container` and only then accepts T.",
+    "defender/run_repository/_lookup.py: unused attribute 'unreadable_reason' (60% confidence)": "test-only since #1187: tests/storage/tenant_1105_run_repository/test_1105_pr2_repository.py reads the recorded reason of an unreadable arm container. Its production reader was the sibling's container-record gate, which #1187 R6 deleted with the episode record; the sibling's gate is now the arm roster, and the page reads an unreadable container as absent (rev 5.1 S1)."
   }
 }

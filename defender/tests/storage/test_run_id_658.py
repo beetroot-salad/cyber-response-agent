@@ -7,8 +7,10 @@ from defender.records._run_id import is_valid_run_id
 from defender.run_repository import RunPaths
 from defender.box import container_name
 from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
+from defender.tests.storage.ids_1187 import _spec1187 as S
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
-TENANT_ID = "t658"
+TENANT_ID = fixture_uuid("tenant:t658")
 
 
 def _set_up_tenant(tmp_path, monkeypatch):
@@ -26,6 +28,8 @@ VALID_RUN_IDS = (
     "a.b",
     "a..b",
 )
+
+MATERIALIZABLE_RUN_IDS = (S.SAMPLE_UUID, "00000000-0000-4000-8000-000000000001")
 
 MIXED_CASE_RUN_IDS = ("A_1", "Run-123", "20260101T000000Z-solo")
 
@@ -83,19 +87,24 @@ def test_run_id_slug_accepts_mixed_case_and_materialize_refuses_it(tmp_path, mon
     tenant = _set_up_tenant(tmp_path, monkeypatch)
     runs_base = tenant.runs
 
-    with pytest.raises(SystemExit, match="invalid run id.*case-stable"):
+    with pytest.raises(SystemExit, match="invalid run id"):
         run_common.materialize_run(alert, run_id, tenant=tenant)
     assert not runs_base.exists()
-    # The host's own mint never produces what its admission refuses.
-    from defender.records._run_id import mint_run_id
-    minted = mint_run_id("Fixture-Alert")
+    # The host's own mint never produces what its admission refuses (#1187 declared change 2:
+    # `RunId.mint()` takes no label and returns a canonical UUID, where `mint_run_id(label)`
+    # returned a case-folded `<stamp>-<label>`).
+    from defender.run_repository import RunId
+    minted = str(RunId.mint())
     assert minted == minted.casefold()
     assert run_common.materialize_run(
         alert, minted, tenant=tenant).run_dir == runs_base / minted
 
 
-@pytest.mark.parametrize("run_id", VALID_RUN_IDS)
+@pytest.mark.parametrize("run_id", MATERIALIZABLE_RUN_IDS)
 def test_materialize_accepts_a_valid_run_id(tmp_path, monkeypatch, run_id):
+    """#1187 declared change 1: a canonical UUID is the pinned id run setup accepts; the old
+    `VALID_RUN_IDS` slugs are refused (`test_1187_o2_run_py_refuses_a_pinned_id_that_is_not_a_
+    canonical_uuid`)."""
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     tenant = _set_up_tenant(tmp_path, monkeypatch)

@@ -1,6 +1,8 @@
 """Permissions are per run: grants are built from the run's own tenant table, so one process can hold two tenants' grants."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from pathlib import Path
 
 import pytest
@@ -22,7 +24,7 @@ def _registry(grant, **kw):
 # ---- the value ------------------------------------------------------------------------------
 
 def test_run_grants_projects_the_settings_folders_own_table(tmp_path):
-    a = T.place_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
+    a = T.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"), table=T.TABLE_A)
     grants = T.run_grants(a / "settings")
     assert Path(grants.path).resolve() == (a / "settings" / "verb-grants.yaml").resolve()
     assert grants.gather.role == "gather"
@@ -33,7 +35,7 @@ def test_run_grants_projects_the_settings_folders_own_table(tmp_path):
 
 
 def test_a_table_that_withholds_the_lead_projects_no_correlation_system(tmp_path):
-    b = T.place_tenant(tmp_path / "tenants", "bravo", table=T.TABLE_B)
+    b = T.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:bravo"), table=T.TABLE_B)
     grants = T.run_grants(b / "settings")
     assert _pairs(grants.gather) == set(T.GATHER_PAIRS_B)
     assert grants.correlation.entries == ()
@@ -54,8 +56,8 @@ def test_a_missing_table_refuses_rather_than_projecting_nothing(tmp_path):
 
 def test_one_process_holds_two_tenants_grants_and_each_admits_exactly_its_own_pairs(tmp_path):
     root = tmp_path / "tenants"
-    a = T.place_tenant(root, "acme", table=T.TABLE_A)
-    b = T.place_tenant(root, "bravo", table=T.TABLE_B)
+    a = T.place_tenant(root, fixture_uuid("tenant:acme"), table=T.TABLE_A)
+    b = T.place_tenant(root, fixture_uuid("tenant:bravo"), table=T.TABLE_B)
     grants_a = T.run_grants(a / "settings")
     grants_b = T.run_grants(b / "settings")
     again_a = T.run_grants(a / "settings")
@@ -83,7 +85,7 @@ def test_one_process_holds_two_tenants_grants_and_each_admits_exactly_its_own_pa
 def test_a_table_edited_between_two_runs_is_read_again(tmp_path):
     """No per-process cache stands between a run and its tenant's file: the same folder, edited
     between two builds in one process, projects the edit."""
-    a = T.place_tenant(tmp_path / "tenants", "acme", table=T.TABLE_A)
+    a = T.place_tenant(tmp_path / "tenants", fixture_uuid("tenant:acme"), table=T.TABLE_A)
     assert ("cmdb", "get-host") in _pairs(T.run_grants(a / "settings").gather)
     (a / "settings" / "verb-grants.yaml").write_text(T.TABLE_B, encoding="utf-8")
     assert _pairs(T.run_grants(a / "settings").gather) == set(T.GATHER_PAIRS_B)
@@ -104,17 +106,17 @@ def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_te
         tmp_path, capsys, monkeypatch):
     policy_cli = T.mod("cli.policy_cli")
     root = tmp_path / "tenants"
-    T.place_tenant(root, "acme")
+    T.place_tenant(root, fixture_uuid("tenant:acme"))
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     base = ["show", "gather", "--run-dir", str(run_dir)]
-    assert policy_cli.main([*base, "--tenant", "acme"]) == 0
+    assert policy_cli.main([*base, "--tenant", fixture_uuid("tenant:acme")]) == 0
     assert "agent: gather" in capsys.readouterr().out
 
     text = ""
     try:
-        rc = policy_cli.main([*base, "--tenant", "ghost"])
+        rc = policy_cli.main([*base, "--tenant", fixture_uuid("tenant:ghost")])
     except SystemExit as e:
         text = str(e.code)
     except Exception as e:  # noqa: BLE001 — the refusal's text is what is asserted
@@ -123,7 +125,7 @@ def test_the_policy_cli_builds_gathers_policy_from_an_injected_root_and_named_te
         assert rc != 0
     text += capsys.readouterr().err
     assert "unrecognized arguments" not in text, text
-    assert str(root / "ghost") in text, text
+    assert str(root / fixture_uuid("tenant:ghost")) in text, text
 
 
 def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
@@ -132,16 +134,16 @@ def test_the_policy_cli_refuses_a_tenant_gather_can_query_nothing_under_by_name(
 
     policy_cli = T.mod("cli.policy_cli")
     root = tmp_path / "tenants"
-    T.place_tenant(root, "newco", table=T.TABLE_BLANK)
+    T.place_tenant(root, fixture_uuid("tenant:newco"), table=T.TABLE_BLANK)
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     run_dir = tmp_path / "run"
     (run_dir / "gather_raw").mkdir(parents=True)
     with pytest.raises(SystemExit) as caught:
-        policy_cli.main(["show", "gather", "--run-dir", str(run_dir), "--tenant", "newco"])
+        policy_cli.main(["show", "gather", "--run-dir", str(run_dir), "--tenant", fixture_uuid("tenant:newco")])
     text = str(caught.value.code)
     assert text.startswith("defender-policy:"), text
     assert "verb-grants.yaml" in text, text
-    assert "newco" in text, text
+    assert fixture_uuid("tenant:newco") in text, text
 
 
 @pytest.mark.parametrize("inside", ["code tree", "runs base"])
@@ -152,11 +154,11 @@ def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside)
     defender_dir.mkdir(parents=True)
     runs_base.mkdir()
     outside = tmp_path / "tenants"
-    T.place_tenant(outside, "acme")
-    assert rt.resolve_tenant(outside, "acme", defender_dir=defender_dir,
-                             dispatches_lead_zero=False, box_mounted=(runs_base,)).tenant_id == "acme"
+    T.place_tenant(outside, fixture_uuid("tenant:acme"))
+    assert rt.resolve_tenant(outside, fixture_uuid("tenant:acme"), defender_dir=defender_dir,
+                             dispatches_lead_zero=False, box_mounted=(runs_base,)).tenant_id == fixture_uuid("tenant:acme")
     root = (defender_dir if inside == "code tree" else runs_base) / "tenants"
-    T.place_tenant(root, "acme")
+    T.place_tenant(root, fixture_uuid("tenant:acme"))
     with pytest.raises(rt.TenantRefused, match="which a box mounts"):
-        rt.resolve_tenant(root, "acme", defender_dir=defender_dir, dispatches_lead_zero=False,
+        rt.resolve_tenant(root, fixture_uuid("tenant:acme"), defender_dir=defender_dir, dispatches_lead_zero=False,
                           box_mounted=(runs_base,))

@@ -1,6 +1,8 @@
 """#920 PR 1 — the estate seam: what a branched sibling queries THROUGH, and what it records."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 from collections.abc import Mapping
 import contextlib
 import json
@@ -80,6 +82,8 @@ _RECORDING_ADAPTER = '''\
 """A verb body that records the params it was CALLED with, under a run dir the test reads."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 from pathlib import Path
 
@@ -137,7 +141,7 @@ CALLS_LOG = "adapter-calls.jsonl"
 AS_OF = datetime(2026, 5, 25, 15, 30, 45, tzinfo=UTC)
 
 
-SERVED_FILE = Path("ep", "served", "w.jsonl")
+SERVED_FILE = Path("ep", "served", f"{T.fixture_world_id('w1')}.jsonl")
 
 
 def fresh_ledger(path: Path) -> Ledger:
@@ -162,8 +166,25 @@ class World:
     """The world object the seam reads: an id, and the facts it asserts (none: a control,
     served its base answer as `passthrough`)."""
 
-    world_id: str
+    label: str
     facts: tuple[dict, ...] = ()
+
+    @property
+    def world_id(self):
+        return T.fixture_world_id(self.label)
+
+    @property
+    def family(self):
+        from defender.runtime.branch._family import parse_family
+
+        return parse_family(S24.family_v2(worlds=[S24.control_world(self.label)]))
+
+    @property
+    def arm_ids(self):
+        from defender.run_repository import RunId
+        from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
+        return {self.label: RunId.parse(fixture_uuid(f"estate920:{self.label}"))}
 
 
 def fake_estate(tmp_path: Path) -> Path:
@@ -318,7 +339,7 @@ def test_serving_through_the_wrapper_writes_a_row_carrying_the_decision(tmp_path
 
     payload = reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
-    world_rows = [r for r in served_rows(ledger_path) if r["world_id"] == "w1"]
+    world_rows = [r for r in served_rows(ledger_path) if r["world_id"] == T.fixture_world_id("w1")]
     assert len(world_rows) == 1
     row = world_rows[0]
     assert (row["system"], row["verb"], row["params"]) == ("cmdb", "get-host", {"host": "canary-1"})
@@ -356,7 +377,7 @@ def test_an_estate_fault_still_leaves_a_row(tmp_path):
     assert [r["source"] for r in rows] == [REAL_ERROR], (
         f"an estate fault left {[r['source'] for r in rows]} behind; a served response with no "
         "row is the one state this table exists to make visible")
-    assert rows[0]["world_id"] == "w1"
+    assert rows[0]["world_id"] == T.fixture_world_id("w1")
     assert "cmdb is down" in rows[0]["payload_text"]
 
 
@@ -382,7 +403,7 @@ def test_a_denied_call_is_a_refused_row_and_a_listing_of_the_same_verb_is_not(tm
         f"a denied call left {[r['source'] for r in rows]} behind; a refusal that writes no "
         "row is a served response with no row")
     assert (rows[0]["system"], rows[0]["verb"], rows[0]["params"]) == ("elastic", "get-host", asked)
-    assert rows[0]["world_id"] == "w1"
+    assert rows[0]["world_id"] == T.fixture_world_id("w1")
     assert rows[0]["payload_text"] == decision.refusal, "the row's text is the refusal the model sees"
     assert adapter_calls(ctx) == [], "the estate was called for a call the grant withheld"
 
@@ -406,7 +427,7 @@ def test_an_adapter_that_cannot_load_at_the_decision_is_a_fault_row_and_still_ra
     rows = served_rows(ledger_path)
     assert [r["source"] for r in rows] == [FAULT], f"an adapter that could not load left {rows}"
     assert "not installed" in rows[0]["payload_text"]
-    assert rows[0]["world_id"] == "w1"
+    assert rows[0]["world_id"] == T.fixture_world_id("w1")
 
 
 def test_the_verb_table_handed_back_is_the_callers_to_edit(tmp_path):
@@ -426,7 +447,7 @@ def test_the_reserved_base_world_id_cannot_name_the_family_capture(tmp_path):
     capture.touch()
 
     with Episode.open(episode_root) as episode, \
-            pytest.raises(LedgerError, match="family's own capture"):
+            pytest.raises(LedgerError, match="not a valid world id"):
         Ledger.for_world(episode, "base")
 
     assert capture.read_text(encoding="utf-8") == ""
@@ -470,7 +491,7 @@ def test_two_siblings_read_one_base_recording(tmp_path):
     assert from_a == from_b == {"host": "canary-1", "owner": "captured"}
     assert adapter_calls(ctx, "get-host") == []
     rows = served_rows(ledger_path)
-    assert [(r["world_id"], r["source"]) for r in rows] == [("a", PASSTHROUGH), ("b", PASSTHROUGH)]
+    assert [(r["world_id"], r["source"]) for r in rows] == [(T.fixture_world_id("a"), PASSTHROUGH), (T.fixture_world_id("b"), PASSTHROUGH)]
 
 
 def test_a_duplicate_base_row_resolves_the_same_way_in_memory_and_on_disk(tmp_path):
@@ -508,7 +529,7 @@ def test_a_world_reopened_from_disk_replays_its_own_kept_base_read(tmp_path):
     other.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
     assert len(adapter_calls(ctx, "get-host")) == 2, "one world's live read served another"
-    assert (ledger_path.parent / LAYOUT.oracle_dir("a")).is_dir()
+    assert (ledger_path.parent / LAYOUT.oracle_dir(T.fixture_world_id("a"))).is_dir()
 
 
 def test_two_spellings_of_one_question_are_one_key(tmp_path):
@@ -570,7 +591,7 @@ def test_a_world_may_not_answer_to_the_family_tiers_key(tmp_path):
     with pytest.raises(EstateError):
         build_registry(
             read_roster(fake_estate(tmp_path)), FAKE_GRANT, world=BaseWorld(),
-            ledger=fresh_ledger(ledger_path), as_of=AS_OF)
+            ledger=fresh_ledger(ledger_path), as_of=AS_OF, oracle_dir=tmp_path / "unused-oracle")
 
     assert not ledger_path.exists(), "a refused world must not have written a row"
 
@@ -581,7 +602,8 @@ def test_the_control_worlds_rows_are_its_own_never_the_familys(tmp_path):
     body = "FROM logs-system.auth-*\n| LIMIT 5"
 
     class ControlWorld:
-        world_id = "base"
+        label = "base"
+        world_id = T.fixture_world_id("base")
         facts = ()
 
     reg = world_registry(
@@ -592,7 +614,7 @@ def test_the_control_worlds_rows_are_its_own_never_the_familys(tmp_path):
 
     assert [c["params"]["query"] for c in adapter_calls(ctx, "esql")] == [body]
     assert [(r["world_id"], r["source"]) for r in served_rows(ledger_path)] \
-        == [("base", PASSTHROUGH)], "the control world's row must not share the family's slot"
+        == [(T.fixture_world_id("base"), PASSTHROUGH)], "the control world's row must not share the family's slot"
     assert EpisodePaths(tmp_path / "ep").served_base.read_text(encoding="utf-8") == ""
 
 
@@ -600,12 +622,12 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     ledger_path = tmp_path / SERVED_FILE
     adapters, ctx = fake_estate(tmp_path), run_ctx(tmp_path)
     reg = build_registry(
-        read_roster(adapters), FAKE_GRANT, world=World("A"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
+        read_roster(adapters), FAKE_GRANT, world=World("a"), ledger=fresh_ledger(ledger_path), as_of=AS_OF,
         **control_oracle(estate_host("canary-1")))
 
     reg.verbs("cmdb")["get-host"](ctx, host="canary-1")
 
-    own = [r for r in served_rows(ledger_path) if r["world_id"] == "A"]
+    own = [r for r in served_rows(ledger_path) if r["world_id"] == T.fixture_world_id("a")]
     assert len(own) == 1
     assert "asked_params" not in own[0], (
         "an unstaged call's asked and run forms are the same call; a second column would be a "
@@ -615,5 +637,5 @@ def test_an_unstaged_call_records_one_identity_not_two(tmp_path):
     # the absent column is the storage consequence, not the property itself.
     call = ServedCall(
         system="cmdb", verb="get-host", params={"host": "canary-1"},
-        payload_text="{}", source=PASSTHROUGH, world_id="A")
+        payload_text="{}", source=PASSTHROUGH, world_id="a")
     assert call.key == call.correlation_key

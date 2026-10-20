@@ -1,6 +1,7 @@
 """#1235 round 2: the correlation lead's calls ride the run's one RunState; an enforced role with no state raises rather than reaching a live run's state; concurrent breaker charges lose no failure."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import contextlib
 import sys
@@ -25,11 +26,11 @@ LEAD = "l-001"
 def test_the_correlation_leads_calls_ride_the_runs_one_state(tmp_path):
     from defender.tests.tenancy.alert_front_door_1222 import _spec1222 as S
 
-    busy = S.run_alert(tmp_path / "busy", run_id="k1-busy",
+    busy = S.run_alert(tmp_path / "busy", run_id=fixture_uuid("k1-busy"),
                        leads={S.L3: [S.query("elastic", "alerts", {"native_query": "k1:1"}),
                                      S.query("elastic", "alerts", {"native_query": "k1:2"}),
                                      S.text(S.DEFAULT_CORRELATION_SUMMARY)]})
-    idle = S.run_alert(tmp_path / "idle", run_id="k1-idle")
+    idle = S.run_alert(tmp_path / "idle", run_id=fixture_uuid("k1-idle"))
     mine = [c for c in busy.backend.rec.calls if "k1:" in str(c.params.get("native_query"))]
     assert len(mine) == 2
     assert len(busy.rows_for(S.L3)) == 2

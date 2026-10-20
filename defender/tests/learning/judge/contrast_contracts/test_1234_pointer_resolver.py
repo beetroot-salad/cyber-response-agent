@@ -1,6 +1,8 @@
 """#1234 judge contrast: evidence/contrast pointer resolution."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import json
 import os
 import shutil
@@ -557,8 +559,8 @@ def test_1234_am_reference_half_in_a_run_outside_the_reference_set(tmp_path: Pat
         built = S.family(tmp_path, _with_d(archived=False,
                                            world_record=S.sym(S.OUTCOME, "NOT_ARCHIVED")))
         row = S.ledger_row(S.CallRow(system="siem-x", verb="lookup", params={"entity": "svc-9"}),
-                           label="d", token=built.token,
-                           cid=S.call_id("d", 0, episode_token=built.token))
+                           label="d",
+                           cid=S.call_id("d", 0))
         built.ledger_path("d").write_text(json.dumps(row) + "\n", encoding="utf-8")
     else:
         built = S.family(tmp_path, _with_d())
@@ -601,10 +603,10 @@ def test_1234_pointer_into_an_excluded_worlds_oracle_store(tmp_path: Path, d_sta
 
 #: D30's hostile pointers: empty, whitespace, only a fragment, absolute, home-relative, a URL, a
 #: glob, an embedded newline, an embedded NUL, and one far longer than any path.
-_HOSTILE = ["", "   ", "#worlds/b", "/etc/passwd", "~/worlds/b/report.md",
-            "https://example.com/worlds/b/report.md", "worlds/*/report.md",
-            "worlds/b/report.md\nworlds/a/report.md", "worlds/b/report.md\x00",
-            "worlds/b/" + "x" * 5000 + ".md"]
+_HOSTILE = ["", "   ", "#worlds/b", "/etc/passwd", f"~/worlds/{T.fixture_world_id('b')}/report.md",
+            f"https://example.com/worlds/{T.fixture_world_id('b')}/report.md", "worlds/*/report.md",
+            f"worlds/{T.fixture_world_id('b')}/report.md\nworlds/{T.fixture_world_id('a')}/report.md", f"worlds/{T.fixture_world_id('b')}/report.md\x00",
+            f"worlds/{T.fixture_world_id('b')}/" + "x" * 5000 + ".md"]
 
 
 def test_1234_pointer_with_hostile_syntax(tmp_path: Path) -> None:
@@ -618,7 +620,7 @@ def test_1234_pointer_with_hostile_syntax(tmp_path: Path) -> None:
     assert S.lane_of(built, built.finding_id("b", 0, 1)) == UNRESOLVED
     assert _surfaces(built, S.marker("b", "hostile-only")) == []
     assert (seam.calls_for("b"), seam.called("c"), seam.called(S.FAMILY)) == (
-        ["judge:b:0"], True, True)
+        [f"judge:{built.world_ids['b']}:0"], True, True)
     S.validate(reply)
 
 
@@ -630,7 +632,7 @@ def test_1234_manifest_replaced_by_a_link_and_cited_as_design(tmp_path: Path, li
     if link == "to_a_byte_copy_of_itself":
         S.plant_symlink(manifest, S.scratch_copy(tmp_path, manifest, "manifest-copy.yaml"))
     elif link == "to_a_reference_runs_report":
-        S.plant_symlink(manifest, "worlds/c/report.md")
+        S.plant_symlink(manifest, f"worlds/{T.fixture_world_id('c')}/report.md")
     damaged = link != "plain_twin"
     assert _manifest_case(built, damaged=damaged) == _manifest_expected(damaged=damaged)
 

@@ -39,7 +39,8 @@ class _ScopedJudge(J.FakeJudge):
 
     def __init__(self, world: dict[str, str], family: str) -> None:
         super().__init__()
-        self.world_text = world
+        self.world_text = {T.fixture_world_id(label) if label != "*" else "*": reply
+                           for label, reply in world.items()}
         self.family_text = family
 
     def __call__(self, prompt, *, role=None, agent_id: str = "judge", **kw):
@@ -241,7 +242,7 @@ def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
         S.outcome_record(ep, word, reason=f"the family is {word}")
         for reader in (verdicts, delta_o):
             with pytest.raises(refusal) as refused:
-                reader(ep)
+                J.through_view(ep, reader)
             assert word in str(refused.value), f"{reader.__name__} did not name {word!r}"
 
     absent = S.judged_episode(tmp_path / "absent", outcome=None)
@@ -250,10 +251,10 @@ def test_1224_episode_readers_refuse_unusable_refused_and_no_record(tmp_path):
     for ep in (absent, torn):
         for reader in (verdicts, delta_o):
             with pytest.raises(refusal) as refused:
-                reader(ep)
+                J.through_view(ep, reader)
             assert "no record" in str(refused.value).lower() or S.OUTCOME_NAME in str(
                 refused.value), f"{reader.__name__} did not report the missing record"
 
     accepted = S.judged_episode(tmp_path / "accepted")
-    assert set(verdicts(accepted)) == {"a", "b", "c"}
-    delta_o(accepted)
+    assert set(J.through_view(accepted, verdicts)) == {"a", "b", "c"}
+    J.through_view(accepted, delta_o)

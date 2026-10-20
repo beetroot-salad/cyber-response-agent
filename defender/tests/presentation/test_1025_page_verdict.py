@@ -233,8 +233,17 @@ def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_sta
     (tmp_path / "learning-state" / "_pending").write_text("not a directory", encoding="utf-8")
     # One investigator finding per world draw; the family scope refuses a world-scope reply,
     # so the family call completes no draw.
-    judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc(
-        bucket="lead-quality", systems=["idp"])))
+    class JudgeWithCurrentPointers(J.FakeJudge):
+        def __call__(self, prompt, *, agent_id="judge", **kwargs):
+            world_ids = re.findall(r"storage world UUID: ([0-9a-f-]{36})", prompt)
+            assert agent_id.split(":")[1] in world_ids
+            self.default = J.as_reply_text(J.reply_doc(
+                bucket="lead-quality", systems=["idp"],
+                findings=[J.finding_doc(evidence=[f"worlds/{world_id}/report.md"
+                                                  for world_id in world_ids])]))
+            return super().__call__(prompt, agent_id=agent_id, **kwargs)
+
+    judge = JudgeWithCurrentPointers()
     launch = ST._launch(tmp_path, judge=judge)
     assert launch.rc == 0
     assert launch.judge.calls > 0
@@ -494,8 +503,10 @@ def test_1025_one_draw_document_is_a_symlink_to_a_file_outside_the_episode(tmp_p
 
 
 def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
-    """The join is on the `(world, draw, index)` suffix of the recorded `finding_id` (J9e)."""
+    from defender.tests.storage.ids_1187._spec1187 import roster_for_arms
+
     ep = E.sample_episode(tmp_path)
+    roster = roster_for_arms(ep.dir, {label: ep.run(label) for label in E.WORLDS})
     doc = E.set_lane(E.sample_grade(), E.GRADED_WORLD, 0, 1, "unqueueable", "a reason")
     for row in doc["dispositions"]:
         row["finding_id"] = row["finding_id"].replace(E.EPISODE_ID, "old-name-before-repair")
@@ -505,8 +516,9 @@ def test_1025_recorded_finding_ids_carry_a_different_episode_prefix(tmp_path):
     assert f"old-name-before-repair/{E.GRADED_WORLD}/0/4" in text, text
     assert "enqueued" in _group_of(page, f"f-{E.GRADED_WORLD}-0-4").text()
     assert "unqueueable" in _group_of(page, f"f-{E.GRADED_WORLD}-0-1").text()
-    assert f"runs/{E.EPISODE_ID}-{E.GRADED_WORLD}/runtime.html" in page.hrefs
+    assert f"runs/{roster[T.world_id(ep.dir, E.GRADED_WORLD)]}/runtime.html" in page.hrefs
     assert not [h for h in page.hrefs if "old-name-before-repair" in h]
+
 
 
 def test_1025_a_world_finding_refused_for_citing_an_unavailable_sample(tmp_path):
@@ -600,7 +612,7 @@ def test_1025_a_gradable_row_whose_draws_never_ran(tmp_path):
     (`is_gradable_row`)."""
     ep = E.sample_episode(tmp_path)
     (ep.world(E.GRADED_WORLD) / "judge" / "0.yaml").unlink()
-    for name in (f"judge_{E.GRADED_WORLD}_0_trace.jsonl", f"judge_{E.GRADED_WORLD}_0_framed_trace.jsonl"):
+    for name in (f"judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_trace.jsonl", f"judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_framed_trace.jsonl"):
         (ep.dir / "wire_logs" / name).unlink()
     doc = E.drop_lanes(E.sample_grade(), E.GRADED_WORLD)
     row = doc["worlds"][1]
@@ -616,5 +628,5 @@ def test_1025_a_gradable_row_whose_draws_never_ran(tmp_path):
     assert "inconclusive" in world
     assert "no bucket" in world
     assert any(E.GRADED_WORLD in c.text() for c in _cards(page))
-    assert f"tx-judge_{E.GRADED_WORLD}_0_trace" not in page.by_id
+    assert f"tx-judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_trace" not in page.by_id
     assert not [r for r in _rows(page) if r.startswith(f"f-{E.GRADED_WORLD}-")]

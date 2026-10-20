@@ -3,12 +3,10 @@
 After archiving, `delta_o`, `verdicts` and the grader answer from `episodes/<id>/` alone, with no
 re-run and no path outside it. That self-containment requires a complete copy: the report, the
 investigation document, the two tables, the run's provenance stamp, the scrub verdict, the
-run-end record, the lessons-loaded table, the alert, the gather summaries, and a text pointer
-naming the source run dir.
+run-end record, the lessons-loaded table, the alert and the gather summaries.
 
-None is sourced from another. The pointer is a text file, never a symlink, and nothing follows
-it: sibling run dirs are disposable, and resolving it would make the episode self-contained only
-while the runs base still holds the run.
+None is sourced from another. No pointer back to the arm's folder is written (#1187 R8): the
+episode's arm roster names every arm by id, and nothing read the pointer.
 
 The scrub verdict and run-end record are sidecars beside the run dir (`scrub.verdict_path`,
 `run_end.sidecar_path`), written outside the tree they describe because a file inside a
@@ -43,6 +41,7 @@ from typing import Any
 from defender.episodes._episode_handle import Episode
 from defender._io import Bound, entry_present, read_text_utf8
 from defender.episodes._episode_paths import LAYOUT, WorldPaths
+from defender.runtime.branch._family import load_family
 from defender.run_repository import (
     RunPaths,
     artifact_dir,
@@ -61,7 +60,7 @@ from defender.box._scrub import verdict_path
 _logger = logging.getLogger(__name__)
 
 # This module binds no record names of its own: sources and destinations are both reached
-# through the owners' accessors (`RunPaths`, `EpisodePaths`), so a rename in the owner cannot
+# through the owners' accessors (`RunPaths`, `WorldPaths`), so a rename in the owner cannot
 # strand a re-binding here.
 
 
@@ -217,22 +216,24 @@ def _screen_destinations(world: str, dest: WorldPaths, run_dir: Path,
 
 
 def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Path]:
-    """Archive each world's run dir into the episode's `worlds/<label>/`; return what was
+    """Archive each world's run dir into the episode's `worlds/<world-uuid>/`; return what was
     written.
 
-    `run_dirs` is keyed by short world label and chosen by the caller: an `incomplete` episode
-    archives only its clean siblings, so the set is not derived from the manifest.
+    `run_dirs` and the returned paths are keyed by declared world UUID, chosen by the caller:
+    an `incomplete` episode archives only its clean siblings, so the set is not derived from
+    the manifest.
 
     Each world is screened, then copied. Worlds go in sorted order so a partial failure always
     leaves the same prefix.
     """
     archived: dict[str, Path] = {}
-    for world in sorted(run_dirs):
-        run_dir = Path(run_dirs[world])
-        # The label passes the handle's minting check; the copy lane's own paths are the
-        # world's, under the episode dir the handle holds.
-        handle = episode.world(world)
-        dest = WorldPaths(episode.dir, LAYOUT.world(world))
+    family = load_family(episode.view(), expected_episode_id=episode.dir.name)
+    worlds = {world_id: family.world_by_id(world_id) for world_id in run_dirs}
+    for world_id in sorted(run_dirs):
+        world = worlds[world_id].label
+        run_dir = Path(run_dirs[world_id])
+        handle = episode.world(world_id)
+        dest = WorldPaths(episode.dir, LAYOUT.world(world_id))
         sources = _screened_sources(world, run_dir, dest)
         world_dir = dest.dir
         handle.dir.ensure()
@@ -259,9 +260,7 @@ def archive_episode(episode: Episode, run_dirs: dict[str, Path]) -> dict[str, Pa
             _logger.warning(f"world {world}: {len(refused)} non-artifact entr"
                             f"{'y was' if len(refused) == 1 else 'ies were'} refused rather than copied: "
                             f"{', '.join(str(p) for p in refused)}")
-        # The pointer last, as text, through the episode handle.
-        handle.run_dir_pointer.write(f"{run_dir}\n")
-        archived[world] = world_dir
+        archived[world_id] = world_dir
     return archived
 
 

@@ -5,6 +5,8 @@ Nothing here implements target policy: fixtures plant trees and record what cros
 boundary; every judgement is the code under test's."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import contextlib
 import importlib
 import json
@@ -26,6 +28,8 @@ from defender.tests.support.tenancy import _tenants1106 as tenants
 
 ORIGIN = "http://forge.invalid:3000/tenants/blue.git"
 from ._identity import TOKEN, identity as fixture_identity
+
+_TENANT_BLUE = fixture_uuid('tenant:blue')
 DEFENDER = Path(__file__).resolve().parents[3]
 #: The import root a probe subprocess needs, so it imports THIS tree's `defender`.
 IMPORT_ROOT = DEFENDER.parent
@@ -350,7 +354,7 @@ class ForgeHTTP:
 # ---------------------------------------------------------------------------------------
 
 @contextlib.contextmanager
-def build_tenant(tmp_path, tenant_id="blue", *, root=None, object_format="sha1"):
+def build_tenant(tmp_path, tenant_id=_TENANT_BLUE, *, root=None, object_format="sha1", repo_name="blue"):
     """An accepted tenant with a real HTTP remote. Yields its tenant, bare repository and
     ignored legacy credential sentinel; the server lives until the context exits."""
     root = root if root is not None else tmp_path / "data"
@@ -364,12 +368,12 @@ def build_tenant(tmp_path, tenant_id="blue", *, root=None, object_format="sha1")
     git(clone, "config", "user.email", "p3@test.invalid")
     git(clone, "add", ".")
     git(clone, "commit", "-m", "seed")
-    remote = tmp_path / "tenants" / f"{tenant_id}.git"
+    remote = tmp_path / "tenants" / f"{repo_name}.git"
     remote.parent.mkdir(exist_ok=True)
     git(tmp_path, "clone", "--bare", *BARE_NO_UPKEEP, clone, remote)
     server = GitHTTP(tmp_path, token=fixture_identity(tenant_id).token())
     try:
-        origin = f"{server.url}/tenants/{tenant_id}.git"
+        origin = f"{server.url}/tenants/{repo_name}.git"
         git(clone, "remote", "add", "origin", origin)
         git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
         credentials = tenant.dir / "forge" / "git-credentials"
@@ -856,8 +860,8 @@ def http_repo(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
     root = tmp_path / "data"
-    tenants.place_tenant(root, "blue")
-    tenant = tenants.accept(root, "blue")
+    tenants.place_tenant(root, fixture_uuid("tenant:blue"))
+    tenant = tenants.accept(root, fixture_uuid("tenant:blue"))
     clone = tenant.knowledge
     (tenant.agent / "lessons").mkdir()
     (tenant.agent / "lessons" / "seed.md").write_text("seed\n", encoding="utf-8")

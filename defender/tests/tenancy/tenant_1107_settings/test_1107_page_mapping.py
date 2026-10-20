@@ -1,6 +1,8 @@
 """Run page ticket line and receipt rendering, ticket replies independent of mapping, estate registry."""
 from __future__ import annotations
 
+from defender.episodes._episode_handle import Episode
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _view_run_1165
 
 import copy
@@ -19,6 +21,7 @@ from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.support.storage._alert_plant import plant_alert as plant_with_record
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.e2e._replay_harness import (
     GOLDEN_AB3,
     FakeVerbs,
@@ -41,8 +44,10 @@ TICKET_TABLE = """dispositions:
 
 
 def _seeded_run(tmp_path: Path, name: str) -> Path:
-    """A run dir the renderer accepts: the alert and a real session store behind its pointer."""
-    run_dir = tmp_path / "runs" / name
+    """A run dir the renderer accepts: the alert and a real session store behind its pointer.
+    `name` is a LABEL: #1187 (declared change 1) — the folder, the run's id, is
+    `fixture_uuid(name)`."""
+    run_dir = tmp_path / "runs" / fixture_uuid(name)
     run_dir.mkdir(parents=True, exist_ok=True)
     plant_with_record(run_dir, {"alert_id": "a-1107", "rule": {"id": "r-1107",
                                                                "description": "spec 1107"},
@@ -440,11 +445,9 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
     ]))
     # #1105 PR 2: the sibling opens its episode by id under the configured episodes base, over
     # the container the launcher made for its tenant before the first sibling.
-    from defender.tenancy import _tenant
 
-    (ep / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(ep / "runs", S.PLAYGROUND_ID)
-    monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
+    with Episode.open(ep) as held:
+        T.episode_view(held).close()
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     run = S.run_py()

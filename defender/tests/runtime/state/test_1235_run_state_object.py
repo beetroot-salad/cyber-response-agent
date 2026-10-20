@@ -22,6 +22,7 @@ from defender.run_repository import RunPaths  # noqa: E402
 from defender.runtime import circuit_breaker as cb  # noqa: E402
 from defender.runtime.run_state import RunState  # noqa: E402
 from defender.runtime import record_query as rq  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape  # noqa: E402
 
 LEAD = "l-001"
 _PAYLOAD = '{"total": 1, "hits": ["web-1"]}'
@@ -29,7 +30,8 @@ _BUDGET_KEYS = {"run_id", "tool_calls", "subagent_spawns", "created_at", "starte
 
 
 def _run_dir(root: Path, name: str = "run") -> Path:
-    run_dir = root / name
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(name)
+    run_dir = root / (name if is_fixture_uuid_shape(name) else fixture_uuid(name))
     RunPaths(run_dir).gather_raw.mkdir(parents=True)
     return run_dir
 
@@ -166,11 +168,11 @@ def test_a_row_recorded_through_deps_lands_in_the_state_the_deps_carry(tmp_path)
 
     real = _run_dir(tmp_path / "real")
     (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
-    carried = RunState(tmp_path / "link" / "run", "r-carried")
+    carried = RunState(tmp_path / "link" / real.name, "r-carried")
     deps = replace(_with_live_run_1165(bind(_tenants1106.fixture_gather_def(), real, defender_dir=DEFENDER), run=_live_run_1165(real)),
                    lead_id=LEAD, run_state=carried)
 
-    asyncio.run(QueryCapture(registry=None)._record(
+    asyncio.run(QueryCapture(registry=None, known_ids=frozenset())._record(
         deps, system="elastic", verb="search", query_id="elastic.ad-hoc", params={"q": "a"},
         payload=[{"a": 1}], exit_code=0, detail="", system_key=""))
 

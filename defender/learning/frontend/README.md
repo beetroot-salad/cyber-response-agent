@@ -89,5 +89,5 @@ defender/.venv/bin/python3 -m pytest defender/tests/learning/retrieval/test_less
 
 Findings-queue AUTHORABLE depth vs `LEARNING_AUTHOR_THRESHOLD` — rows carrying `held_reason`
 are queued but do not count (`learning/_pending/findings.jsonl`) —
-episode history (the branched episodes under `$DEFENDER_EPISODES_BASE`, with each
+episode history (the branched episodes under each tenant's `<data root>/<T>/episodes/`, with each
 family's verdicts and the judge's buckets), and the consumed/audit trail.

@@ -1,6 +1,8 @@
 """#921 — what may move a world's row, and who owns its bucket."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import pytest
 
 from defender.episodes._episode_handle import Episode
@@ -37,7 +39,7 @@ def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path)
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")],
                                                "c": [J.ledger_row(source="passthrough",
                                                                   world_label="c")]})
-    sibling = ep / "worlds" / "c"
+    sibling = ep / "worlds" / T.world_id(ep, "c")
     stash = tmp_path / "sibling-stash"
     shutil.move(str(sibling), str(stash))
     early = J.rows(_grade(ep))
@@ -57,7 +59,7 @@ def test_921_world_processing_order_does_not_change_any_per_world_fact(tmp_path)
 def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
     base = ep / "served" / "base.jsonl"
 
     base.unlink()
@@ -79,7 +81,7 @@ def test_921_family_pass_never_reads_served_base_and_never_calls_the_comparator(
 def test_921_model_findings_explain_a_bucket_and_never_assign_it(tmp_path):
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []},
                             dispositions={"a": "benign", "b": "malicious", "c": "malicious"})
-    (ep / "worlds" / "b" / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(J.report_text("benign"), encoding="utf-8")
 
     loud = J.as_reply_text(J.reply_doc(bucket="decision-discipline", findings=[
         J.finding_doc(bucket="lead-set",
@@ -128,7 +130,7 @@ def test_921_the_majority_denominator_is_completed_draws(tmp_path):
         "measurement")
 
     failed = [J.draw_doc(ep, "b", n) for n in range(4)
-              if (ep / "worlds" / "b" / "judge" / f"{n}.yaml").exists()]
+              if (ep / "worlds" / T.world_id(ep, "b") / "judge" / f"{n}.yaml").exists()]
     reasons = [doc.get("failure_reason") for doc in failed if doc.get("failure_reason")]
     assert reasons, "a failed draw left no record at all; that is a draw never requested"
     assert all("RunUnprocessable" in str(r) or "did not complete" in str(r) or "failed" in str(r)
@@ -147,7 +149,7 @@ def test_921_a_running_world_leaves_a_ledger_even_when_it_serves_nothing(tmp_pat
     ledger_mod = J.mod("learning.branch.ledger")
     ep_dir = J.accepted_episode(tmp_path)
     with Episode.open(ep_dir) as episode:
-        fresh = ledger_mod.Ledger.for_world(episode, "newborn")
+        fresh = ledger_mod.Ledger.for_world(episode, T.fixture_world_id("newborn"))
         assert not fresh.path.exists(), "the scenario started with the file already there"
 
         returned = fresh.declare()
@@ -161,7 +163,7 @@ def test_921_declaring_a_ledger_twice_keeps_the_rows_already_written(tmp_path):
     ledger_mod = J.mod("learning.branch.ledger")
     ep_dir = J.accepted_episode(tmp_path)
     with Episode.open(ep_dir) as episode:
-        led = ledger_mod.Ledger.for_world(episode, "already_writing").declare()
+        led = ledger_mod.Ledger.for_world(episode, T.fixture_world_id("already_writing")).declare()
         led.path.write_text('{"source": "oracle"}\n', encoding="utf-8")
 
         led.declare()

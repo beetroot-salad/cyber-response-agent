@@ -79,7 +79,8 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
     from defender.runtime.branch import _family
 
     doc = {
-        "world_id": "Alpha", "role": "B", "story": "s", "axis": "an axis",
+        "label": "Alpha", "world_id": T.fixture_world_id("alpha"),
+        "role": "B", "story": "s", "axis": "an axis",
         "disposition_declared": "malicious", "label_basis": "policy-rule",
         "facts": [{"fact_id": "f1", "statement": "web-1's owner is the platform team",
                    "entities": ["web-1"]}],
@@ -91,15 +92,15 @@ def test_a_world_id_carrying_upper_case_is_refused_at_the_mint() -> None:
             episode_id="ep1", source_run_dir="/runs/src", source_run_id="src",
             branch_message_id=1, as_of="2026-07-28T16:18:45Z",
             base_story="b", served_systems=["elastic"], discriminator={"predicate": "p"},
-            worlds=[{**world, "world_id": "a", "role": "A", "axis": None, "facts": []}, world])
+            worlds=[T.base_world(), world])
 
     with pytest.raises(_family.FamilyError) as caught:
         _family.check_identities(_family.parse_family(family(doc)))
     # #1224: the case rule is now the world-token alphabet's own (`world_label_fault`), whose
     # words name the case it admits — and `Alpha` differs from an admitted label only by case.
-    assert "'Alpha' is outside the world-token alphabet (lower-case" in str(caught.value)
+    assert "'Alpha' is outside the world-label alphabet (lower-case" in str(caught.value)
     # The control: the same label lower-cased passes the same gate.
-    _family.check_identities(_family.parse_family(family({**doc, "world_id": "alpha"})))
+    _family.check_identities(_family.parse_family(family({**doc, "label": "alpha"})))
 
 
 def test_an_episode_id_carrying_upper_case_is_refused() -> None:

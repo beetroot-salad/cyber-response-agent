@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from pathlib import Path
 
@@ -83,8 +84,13 @@ def test_a_missing_mapping_is_a_refusal_naming_the_injected_path(tmp_path):
 
 def test_the_ticket_writer_posts_to_the_injected_tenants_store_with_its_mapping(
         injected, tmp_path):
+    """The `--update-ticket` lane (O2 names the ticket writer): the REAL writer, over a
+    recording request seam, is handed the run's record — and both the store it
+    addresses (`case-history/config.env`) and the payload it renders (`mapping.yaml`) are the
+    injected tenant's."""
     writer = T.mod("integrations.ticket_writer")
-    run_dir = tmp_path / "run-1106"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run_dir = tmp_path / fixture_uuid("run-1106")
     run_dir.mkdir()
     plant_alert(run_dir, {"rule": {"id": "r-1", "description": "d"},
                           "timestamp": "2026-09-26T00:00:00Z"})

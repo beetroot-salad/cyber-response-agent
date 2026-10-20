@@ -6,10 +6,13 @@ from pathlib import Path
 import pytest
 
 from defender.tests.support.tenancy import _tenants1106 as T
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.sandbox._spec1092 import STOCK_ROOTFS, make_run_dir, plant_tree
 from defender.tests.tenancy.tenant_1108_p2._support import AgentReadDocker
 
 pytestmark = pytest.mark.e2e
+ACME = fixture_uuid("tenant:acme")
+BRAVO = fixture_uuid("tenant:bravo")
 
 
 @pytest.fixture(autouse=True)
@@ -24,9 +27,9 @@ def _boxed_only(monkeypatch):
 @pytest.fixture
 def two_tenants(tmp_path):
     root = tmp_path / "tenants"
-    T.place_tenant(root, "acme", table=T.TABLE_A)
-    T.place_tenant(root, "bravo", table=T.TABLE_B)
-    return root, T.accept(root, "acme"), T.accept(root, "bravo")
+    T.place_tenant(root, ACME, table=T.TABLE_A)
+    T.place_tenant(root, BRAVO, table=T.TABLE_B)
+    return root, T.accept(root, ACME), T.accept(root, BRAVO)
 
 
 def _start(tmp_path: Path, agent: Path) -> AgentReadDocker:
@@ -42,11 +45,11 @@ def _start(tmp_path: Path, agent: Path) -> AgentReadDocker:
     return rec
 
 
-@pytest.mark.parametrize(("own", "other"), [("acme", "bravo"), ("bravo", "acme")])
+@pytest.mark.parametrize(("own", "other"), [(ACME, BRAVO), (BRAVO, ACME)])
 def test_the_box_mounts_its_own_tenants_agent_half_read_only_and_nothing_else(
         tmp_path, two_tenants, own, other):
     root, acme, bravo = two_tenants
-    mine, theirs = {"acme": acme, "bravo": bravo}[own], {"acme": acme, "bravo": bravo}[other]
+    mine, theirs = {ACME: acme, BRAVO: bravo}[own], {ACME: acme, BRAVO: bravo}[other]
     rec = _start(tmp_path, mine.agent)
     mounts = rec.mounts()
     joined = " ".join(rec.create_argv or [])
@@ -81,7 +84,7 @@ def test_the_agent_source_is_translated_through_a_covering_shared_mount(tmp_path
 
     defender_dir = plant_tree(tmp_path / "tree", copy_code=False)
     run_dir = make_run_dir(tmp_path / "r")
-    agent = tmp_path / "tenants" / "acme" / "knowledge" / "agent"
+    agent = tmp_path / "tenants" / ACME / "knowledge" / "agent"
     shared = ((tmp_path, Path("/daemon/shared")),)
     argv = box_mod._create_argv(
         "defender-run-r1106", run_dir, defender_dir,

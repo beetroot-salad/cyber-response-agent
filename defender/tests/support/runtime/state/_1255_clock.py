@@ -372,26 +372,23 @@ def mentions(text: str, moment: dt.datetime) -> bool:
 def control_episode(tmp_path: Path, source_run_dir: Path, branch_message_id: int,
                     *, worlds: list[dict] | None = None) -> Path:
     """Create a control-world episode and its tenant-owned run container."""
-    import os
-
     from defender.tenancy import _tenant
     from defender.learning.branch import cli
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     source = opened_source(source_run_dir)
-    episode_id = cli.episode_id_for(str(source.id), branch_message_id)
+    tenant = _tenant.accept_tenant(source.run_dir.parents[2], source.tenant_id,
+                                   defender_dir=DEFENDER)
     as_of = cli.branch_point_clock(source, branch_message_id)
-    doc = T.family_doc(
-        worlds=worlds if worlds is not None else [T.base_world()],
-        source_run_dir=str(source.run_dir), source_run_id=str(source.id),
-        episode_id=episode_id, branch_message_id=branch_message_id,
-        as_of=as_of.isoformat().replace("+00:00", "Z"))
-    root = Path(os.environ[T.EPISODES_BASE_ENV])
-    ep = T.episode(tmp_path, doc=doc, episode_id=episode_id, root=root)
-    (ep / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(ep / "runs", T.mod("tenancy._tenant").read_tenant(
-        source.run_dir.parent).tenant_id)
-    return ep
+    with cli.prepare_episode(tenant.runs_repository(), source) as view:
+        doc = T.family_doc(
+            worlds=worlds if worlds is not None else [T.base_world()],
+            source_run_dir=str(source.run_dir), source_run_id=str(source.id),
+            episode_id=view.episode_id, branch_message_id=branch_message_id,
+            as_of=as_of.isoformat().replace("+00:00", "Z"))
+        T.write_family(view.episode.dir, doc)
+        view.start_runs([world["world_id"] for world in doc["worlds"]])
+        return view.episode.dir
 
 
 BRANCH_READING = at(SOURCE_START, 610)
@@ -403,7 +400,7 @@ def record_source(tmp_path: Path, *, limits: dict | None = None) -> tuple[str, P
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     base, seed = T.runs_base(tmp_path)
-    tenant_id = T.mod("tenancy._tenant").read_tenant(base).tenant_id
+    tenant_id = T.current_tenant().id
     clock = FakeClock(SOURCE_START)
     main = script(clock, (0, append_first_fence()), (5, gather_turn("l-001", "elastic")),
                   (5, read_lesson(LESSONS[0])), (600, read_lesson(LESSONS[1])), (5, DONE))

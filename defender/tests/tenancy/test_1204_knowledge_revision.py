@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import contextlib
 import json
 import os
@@ -501,7 +503,7 @@ def test_1204_only_a_40_or_64_lowercase_hex_sha_is_a_commit(tmp_path, site):
         _assert_unavailable(_wire(repo))
 
 
-TENANT_ID = "acme"
+TENANT_ID = fixture_uuid("tenant:acme")
 
 
 def _tenant_with_knowledge(tmp_path: Path, monkeypatch, *, versioned: bool) -> tuple[Any, str]:
@@ -531,10 +533,13 @@ def _tenant_with_knowledge(tmp_path: Path, monkeypatch, *, versioned: bool) -> t
     return tenant, head
 
 
-def _materialise(tmp_path: Path, tenant: Any, run_id: str) -> tuple[Path, dict]:
-    """One run through the real `materialize_run`, and its stamp as the JSON on disk."""
+def _materialise(tmp_path: Path, tenant: Any, label: str) -> tuple[Path, dict]:
+    """One run through the real `materialize_run`, and its stamp as the JSON on disk. The run is
+    pinned at the uuid4 `label` names (#1187: a run id is a uuid4; `fixture_uuid`)."""
     from defender import run_common
+    from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
+    run_id = fixture_uuid(label)
     alert = tmp_path / f"{run_id}.alert.json"
     alert.write_text(json.dumps({"id": run_id}), encoding="utf-8")
     run_dir = run_common.materialize_run(alert, run_id, tenant=tenant).run_dir
@@ -548,7 +553,7 @@ def test_1204_a_run_on_a_versioned_tenant_stamps_its_knowledge_clones_commit(
     """O1/D3 at the ONE place every executed run is stamped (`materialize_run` -> `_stamp`,
     fork siblings included)."""
     tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
-    run_dir, doc = _materialise(tmp_path, tenant, "20260101t000000z-versioned")
+    run_dir, doc = _materialise(tmp_path, tenant, "1204-versioned")
 
     assert doc["knowledge"] == {"commit": knowledge_head}
     assert doc["commit"] != knowledge_head, "the knowledge commit is the PRODUCT's"
@@ -561,7 +566,7 @@ def test_1204_a_run_on_a_versioned_tenant_stamps_its_knowledge_clones_commit(
 def test_1204_a_run_on_a_plain_copy_tenant_stamps_unversioned(tmp_path, monkeypatch):
     """O1/D3, the negative beside the positive above on the same entry point."""
     tenant, _ = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=False)
-    _run_dir, doc = _materialise(tmp_path, tenant, "20260101t000000z-plain")
+    _run_dir, doc = _materialise(tmp_path, tenant, "1204-plain")
 
     assert doc["knowledge"] == "unversioned"
     assert doc["tenant_id"] == TENANT_ID
@@ -574,7 +579,7 @@ def test_1204_an_unreadable_knowledge_git_stamps_unavailable_and_the_run_goes_on
     shutil.rmtree(git_dir)
     git_dir.write_text(f"gitdir: {tmp_path / 'nowhere'}\n", encoding="utf-8")
 
-    _run_dir, doc = _materialise(tmp_path, tenant, "20260101t000000z-gitfile")
+    _run_dir, doc = _materialise(tmp_path, tenant, "1204-gitfile")
     _assert_unavailable(doc["knowledge"])
     assert doc["commit"] is not None or doc["unavailable"] is not None
     assert doc["tenant_id"] == TENANT_ID
@@ -590,7 +595,7 @@ def test_1204_a_read_fault_inside_the_knowledge_git_still_writes_the_whole_stamp
     _plant_site_fault(tenant.knowledge, "loose-ref", fault, knowledge_head)
     product = _provenance.capture_tree(run_common.REPO_ROOT)
 
-    _run_dir, doc = _materialise(tmp_path, tenant, f"20260101t000000z-{fault}")
+    _run_dir, doc = _materialise(tmp_path, tenant, f"1204-{fault}")
     _assert_unavailable(doc["knowledge"], never=(knowledge_head,))
     assert doc["commit"] == product.commit
     assert doc["scope"] == _provenance.CODE_SCOPE
@@ -605,24 +610,27 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
     tenant, knowledge_head = _tenant_with_knowledge(tmp_path, monkeypatch, versioned=True)
     data_root = tmp_path / "data"
     _base, src = H.tenant_source(data_root, TENANT_ID, row=False)
-    episode_dir = tmp_path / "episodes" / T.EPISODE_ID
-    manifest = H.family_for(src, episode_dir)
-    # tenant_source plants the source tenant's natural runs-container record. The fork
-    # keeps that neutral world; its episode container must not become run-local lineage.
-    neutral_world = T.mod("tenancy._tenant").read_tenant(src.parent).base_world_id
+    # #1187 (Layout A): the episode is `<data root>/<T>/episodes/<uuid>`, as RUNS leaves it
+    # (its arm roster written); `family_for` builds it there.
+    manifest = H.family_for(src)
+    episode_dir = manifest.parent
     with Episode.open(manifest.parent) as episode:
         world = H.run_py().resume_world(
             episode, "b", tenant=lambda: H.T1106.run_tenant(H.accept(data_root, TENANT_ID)))
         # #1105 PR 2: the arm is made through the sibling's episode view, over the container
-        # the launcher made for the tenant (`family_for` plants it).
+        # RUNS made for the tenant (`family_for` plants it and the roster, #1187).
+        # #1187 (O4b): the sibling's form requires its UUID roster (`require_roster=True`, replacing
+        # PR 2's `container_required`): the view refuses unless the roster names the world.
         view = tenant.runs_repository().episode(episode.dir.name, held=episode,
-                                                container_required=True)
+                                                require_roster=True)
+        # #1187 (review-4 F42): the arm's id is the one the roster holds for its label, never the
+        # world's composed `run_id` (design: `ResumeWorld.run_id` is deleted or the roster's).
         run_dir = run_common.materialize_run(
-            RunPaths(src).alert, world.run_id, tenant=tenant, world=world,
+            RunPaths(src).alert, T.roster_arm_id(episode_dir, world.world_id), tenant=tenant, world=world,
             episode_runs=view).run_dir
     assert run_dir.parent == episode_dir / "runs", "precondition: the fork path, not a fresh run"
     doc = json.loads(RunPaths(run_dir).provenance.read_text(encoding="utf-8"))
-    assert doc["world_id"] in (None, neutral_world)
+    assert doc["world_id"] is None
     assert doc["parent_run_id"] is None
     assert doc["fork_turn"] is None
     assert doc["knowledge"] == {"commit": knowledge_head}
@@ -633,8 +641,9 @@ def test_1204_a_fork_sibling_materialised_through_the_real_path_stamps_the_clone
 RICH: dict[str, Any] = {
     "commit": "a" * 40, "dirty": True, "dirty_paths": ["x.md", "y.md"], "dirty_path_count": 3,
     "unavailable": "git status: a note beside the dirt", "scope": "defender", "model": "m-1",
-    "tenant_id": "acme", "world_id": "20260728t161845z-fresh-case-n59.b",
-    "parent_run_id": "20260728T161845Z-fresh-case", "fork_turn": 59,
+    "tenant_id": fixture_uuid("tenant:acme"), "world_id": fixture_uuid("world:knowledge-revision:b"),
+    "parent_run_id": fixture_uuid("run:knowledge-revision:source"), "fork_turn": 59,
+    "started_at": "2026-07-28T16:18:45+00:00", "alert_label": "fresh-case",
 }
 
 SHA = "b" * 40

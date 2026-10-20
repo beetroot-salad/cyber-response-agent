@@ -1,0 +1,89 @@
+{
+  "issue": 1187,
+  "design_revision": 4,
+  "user_amendments": [
+    "Preserve main layout and consolidate tests and metadata.",
+    "Tenant IDs join run, arm and episode IDs as opaque UUIDs; require explicit migration, without aliases.",
+    "World labels are descriptive metadata; host-minted persisted world UUIDs name all world artifacts, removing label-derived filename bounds. Family judge draws have an episode-level namespace.",
+    "Arm rosters and internal identity joins use persisted world UUIDs. A shared reader/publication byte budget is enforced before family publication and preflight; one trace classifier supplies rendering and unattributed reporting."
+  ],
+  "contract": {
+    "base": "d50c16ad",
+    "original": "3cce294e963665d98479a976189b10a890f584d4",
+    "reviewed": "6d2b34e909cbfb3641620f46bffeddb72a3fee36"
+  },
+  "history": {
+    "pre_cleanup": "b37b95044ae9b650502aa220f039eadca8f63d13",
+    "main": "55dd2bee8c4a4391d9c358493d63f371eea6de73",
+    "policy": "Preserve tests-first ancestry; merge main, no rebase.",
+    "detailed_records": [
+      "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-contract-review.json",
+      "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-implementation.json",
+      "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-main-integration.json"
+    ]
+  },
+  "verification": {
+    "before_cleanup": "Affected regressions, both Ruff checks, mypy and 34 custom linters passed; first full CI fixture drift repaired with focused reruns.",
+    "shared_fixture_consumers": "356 passed across 19 files before consolidation.",
+    "F6": "Rerun after consolidation and tenant UUID amendment: 1 passed in owned Docker image with same filesystem bound independently at /data and /other. Actual EXDEV, byte preservation and safe rerun asserted.",
+    "gvisor": "Both dedicated hosted box jobs and all4feature arm-boundary cases passed in run39277017581.",
+    "cleanup": "Consolidation baseline ownership batches passed: 234, 84 (3 skipped), and 148 cases. Original scenario-to-case maps independently inspected; exact duplicate witnesses retained in existing suites.",
+    "uuid_probe": "100 arbitrary canonical UUIDs admitted by tenant/row/run/episode owners; 900 noncanonical tenant variants refused.",
+    "local_gates": "Both CI Ruff commands, mypy (348 files), and all 34 custom CI linters pass without new baselines/suppressions.",
+    "affected_runs": {
+      "root": "819 cases covered by passing runs (817 initially, both failures repaired in 46-case rerun).",
+      "storage": "1604 passed/11 skipped initially; four fixtures repaired and all 33 cases in their three files passed.",
+      "runtime_replay": "176 passed initially; marker failures repaired in 9 passed/2 skipped rerun. Comparator 64 passed initially; control corrected and full comparator 60 passed.",
+      "learning_evaluation": "1337 passed/80 skipped initially; three held-out harness failures repaired and whole held-out file 38 passed.",
+      "tenancy_api": "1864 passed/14 skipped initially; all 26 fixture failures repaired: 286 passed in focused rerun, final repository-name decoupling verified by 2 delivery/second-tenant-lock controls. Six representative 1222 real-driver cases passed. Full expensive 1222 matrix and 2 unavailable runsc cases reserved for hosted CI."
+    },
+    "collection": "18303 tests collect without errors after UUID-roster and trace-classification amendment.",
+    "last_green_before_world_amendment": "c50af87bca5bbf887c1b7f3c464bfb32af1ec55e: all six CI jobs passed at https://github.com/beetroot-salad/cyber-response-agent/actions/runs/39290206245 . This run does not certify the subsequent world UUID amendment.",
+    "affected_runs_scope": "The affected_runs entries are the tenant/consolidation baseline; world amendment batches are recorded separately."
+  },
+  "review": {
+    "adversary_dispositions": "b37b95044ae9b650502aa220f039eadca8f63d13:spec-flow/records/1187-contract-review.json",
+    "scope": "F1-F13 dispositions and sampled attack discrimination retained at immutable ref; bounded sampling is not proof.",
+    "next": "Source/contract review complete for revision 4; hosted CI pending. Keep draft; do not merge.",
+    "tenant_amendment": "Independent source/migration review found no aliases, normalization or historical-ID mutation; retirement documentation ambiguity repaired. Tenant amendment tests were authored during implementation. Nonidentity adapter, repository and scenario names retained; migration uses chosen UUID without rewriting historical records.",
+    "world_amendment": "Independent source and filesystem probes found no label-derived path/identity fallback; old F1-F13 evidence is historical and does not certify changed world namespaces. Pre-existing role-uniqueness validation asymmetry recorded outside this amendment.",
+    "world_ci_repair": "Independent review withdrew the roster-only fixture workaround and approved the source inclusion fix. Declaration loop validates UUID before any namespace read; unknown grade entries remain unnameable. Original no-roster page fixture and main path-owner census remain intact."
+  },
+  "tenant_migration": "Offline: archive entire named tenant outside data root; copy knowledge only to chosen UUID folder, update and commit marker, run setup/check. Historical records retain old identity and bytes. See defender/docs/development-operations.md.",
+  "consolidation": {
+    "feature_lines": "6483 before consolidation;5583 after world amendment;5689 after UUID-roster regressions (794 fewer than original).",
+    "method": "Shared existing fixture oracles/FakeSibling, explicit parameter matrices, common retirement probes and shared refusal scenarios; retain race, decoy, spend-order, actual-launch and byte/inode controls.",
+    "duplicate_witnesses": [
+      "test_1105_pr2_repository.py::test_episode_files_is_the_owners_handle_alone_and_creates_nothing",
+      "test_1105_run_lookup.py::test_1105_both_listings_accept_only_runs_the_record_episodes_and_known_sidecar_files"
+    ],
+    "historical_graph": "Restored unchanged main graph; no generated historical metadata added."
+  },
+  "world_identity": {
+    "lifecycle": "Questioner supplies labels; host stamps distinct UUID4 values before create-only family publication and preflight. Reads require persisted UUIDs; no derivation, alias or mint-on-read. Existing world manifests require fresh episodes.",
+    "selectors": "CLI and display boundaries resolve descriptive labels through the validated manifest. Arm rosters and internal arm/archive identity maps use persisted world UUIDs.",
+    "publication": "Strict UUID/duplicate checks, expected episode binding and create-only manifest publication preserve the mapping. Authored world_id fields are refused.",
+    "layout": "Ledger, world record, oracle, archive and per-world judge paths use world UUIDs; family draws are episode judge/<n>.yaml. Labels impose no filename-length constraint.",
+    "verification": "Independent actual-filesystem/source probe passed 11 checks with a 4102-character label and changed-mapping republish refusal. Owner/storage matrix 306 passed; storage 523 passed/3 skipped, all three failures repaired in focused reruns; presentation 228 passed/12 skipped; shared filesystem 750 passed plus sole repaired file 9 passed. Oracle 254 passed with eight fixture failures repaired in a 166-case green manifest/questioner/oracle/tenant/judge batch. Final remaining consumers 652 passed with all three fixture failures repaired and verified in a 31-case green rerun. Current F6 Docker EXDEV rerun 1 passed.",
+    "readers": "Persisted-manifest readers, including roster UUID census, reuse the strict family validator instead of maintaining a second partial world schema.",
+    "test_provenance": "World UUID amendment regressions were authored during implementation and independently reviewed; the original tests-first ancestry remains pinned above.",
+    "regressions": [
+      "learning/branch/test_947_triplet_manifest.py: long labels, UUID faults, binding and reminted replacement refusal",
+      "learning/branch/test_1007_namespace.py: 220/1000-character actual launch, preflight/oracle and archive",
+      "learning/branch/test_947_triplet_questioner.py: absent/null/explicit host IDs, early refusal and file immutability"
+    ],
+    "hosted_ci": "7b3be9a3 / run39300492695: all six jobs green, unit shard1 on unchanged retry after independently reproduced pre-existing SQLite sidecar cleanup race. No workaround added. This baseline does not certify revision4.",
+    "ci_repairs": "Restore main archive WorldPaths ownership (census unchanged,37 passed); bind declared graded page worlds without a RUNS roster, keeping unknown grade labels metadata-only (original p193 unchanged,225 passed/12 skipped plus one transient source-inspection case passed fresh); shared reply/wire fixtures49 passed; three bare family fixtures repaired, seed/entry suites37 passed. No new skips or weakened assertions."
+  },
+  "roster_trace_amendment": {
+    "test_checkpoint": "e4b32a9e: tests committed before production edits; expected-red logs retained locally.",
+    "roster": "arms.json is exactly {world UUID: arm UUID}; old label-keyed rosters require fresh episodes, with no aliases. Syntax/duplicates are refused before manifest read; exact UUID membership is checked before source/model/run writes.",
+    "capacity": "Same canonical encoder and 65536-byte reader budget at family admission, direct preflight and RUNS publication. 799 worlds encode as 65521 bytes; 800 as 65603. No label-length bound.",
+    "trace": "One UUID/family classifier feeds rendering and unmatched traces. Recorded-draw filtering remains render-only; unknown and grade-only scopes stay unattributed.",
+    "baseline_ci": "7b3be9a391d6faf7461e00a3ed46916ef17dfba7: all six jobs green at https://github.com/beetroot-salad/cyber-response-agent/actions/runs/39300492695 (unit shard retry). This baseline does not certify revision 4.",
+    "review": "Implementation-exposed independent source probes: 1050 capacity counts match independently encoded JSON, six invalid counts and six invalid start inputs refuse before mutation; fresh detached public-render probe fails at checkpoint and passes implementation. This is contract review, not blind certification. Detached probes detect all three mutations: grade-only world admission, stale-draw rendering, and label-key arm lookup. Root reviewed the source and fixture repair boundaries.",
+    "verification": "Both exact CI Ruff commands, mypy348files and34customlinters pass;18303collect. Core56pass; actual-child missingUUID and799/800publication6pass. Storage622pass5skip initially,10fixture failures repaired through70pass3fail then4pass focused runs. Interrupted learning8filebatch55pass3fail; after explicit roster/embeddedadapter repairs, remaining affected101pass. Learning/tenant/archive509pass2skip across431case batch with11targeted repairs plus78neighbors. Presentation226pass12skip plus exact repaired assertion1pass. Batches overlap; these counts are not summed. Hosted CI pending.",
+    "test_provenance": "Checkpoint regressions preceded implementation. Subsequent assertion-strengthening and fixture ports were reviewed with implementation visibility; no false claim of blind certification. Embedded fault adapter now inverts worldUUID-to-arm mapping before resolving display label, preserving write-failure injection. Early malformed-roster gate remains premanifest; missing/foreign UUID membership is validated after strict manifest read and before sibling source/model/writes.",
+    "hosted_ci_repair": "1f072b52 / run39369006008: lint,code-quality andbothcontainer jobs passed; unitshards18101pass3fail. All three failures are two missed label-key archive fixtures (rename-proof helper used by bothshards and former-mountpoint archive case). Updated fixture calls/assertions to declared worldUUIDs; production unchanged. Focused repairs verified before follow-up publication."
+  }
+}

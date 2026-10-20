@@ -10,6 +10,7 @@ from defender.runtime.verbs import VerbContext
 from defender.integrations import _stub_transport as transport
 from defender.integrations import ticket_adapter
 from defender.integrations.faults import ConfigFault, TransportFault, UpstreamFault
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.tenancy import _tenants1106 as T1106
 from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S1107
 
@@ -104,8 +105,9 @@ def _config_ctx(tmp_path, *, env=None, **values) -> VerbContext:
     """A VerbContext whose record is resolved from a tenant planted with `values` as the ticket
     system's whole `config.env`."""
     text = "\n".join(f'{k}="{v}"' for k, v in values.items()) + "\n"
-    S1107.plant(tmp_path / "tenants", "t", configs={"ticket": text})
-    record = S1107.resolve(tmp_path / "tenants", "t")
+    tenant_id = fixture_uuid("tenant:ticket-config")
+    S1107.plant(tmp_path / "tenants", tenant_id, configs={"ticket": text})
+    record = S1107.resolve(tmp_path / "tenants", tenant_id)
     return T1106.verb_context(tmp_path / "defender", tmp_path / "run", env or {}, tenant=record)
 
 

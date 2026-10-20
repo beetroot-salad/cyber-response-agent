@@ -1,5 +1,6 @@
 """The turn-zero correlation grant is authored in the verb-disposition table: projection, withholding, and load-time refusals."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
 
@@ -163,20 +164,20 @@ def test_a_grant_with_no_query_verb_has_no_dispatch_target():
 
 
 def test_a_withheld_lead_is_neither_claimed_nor_declared(tmp_path):
-    """`run_correlation` returns the `withheld` ending before any claim: no `l-00c` row lands in the
-    leads table for a lead that will never run."""
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
     import asyncio
 
     from defender.runtime.lead_zero import ENDING_WITHHELD, CorrelationDispatch, run_correlation
 
-    lead_file = tmp_path / "gather_raw" / "l-00c.lead.json"
+    lead_file = run_dir / "gather_raw" / "l-00c.lead.json"
     withheld = CorrelationDispatch("alpha.correlate", None, VerbGrant(role=HOLDER, entries=()))
 
     from defender.runtime.run_state import RunState
     outcome = asyncio.run(run_correlation(
-        run_state=RunState(tmp_path, "r"), defender_dir=tmp_path, verbs=None, limits={},
+        run_state=RunState(run_dir, "r"), defender_dir=run_dir, verbs=None, limits={},
         make_model=None, logger=None, box=None, store=None,
-        catalog=None, dispatch=withheld, tenant=None, deadline=1.0, run=_writer_run_1165(tmp_path)))
+        catalog=None, dispatch=withheld, tenant=None, deadline=1.0, run=_writer_run_1165(run_dir)))
 
     assert outcome.ending == ENDING_WITHHELD, outcome
     assert outcome.summary is None, outcome

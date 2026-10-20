@@ -49,7 +49,7 @@ def _live_spec():
 def test_a_host_made_copy_under_the_tenant_folder_binds_into_a_real_box(monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     data_root, spec = _live_spec()
-    tenant_dir = data_root / f"k8-{uuid.uuid4().hex[:12]}"
+    tenant_dir = data_root / str(uuid.uuid4())
     copy = tenant_dir / "drafts" / "k8"
     try:
         (copy / "agent" / "lessons").mkdir(parents=True)

@@ -25,6 +25,7 @@ from defender.learning.leads.draft_synthesis import _draft_basename
 from defender.learning.leads.lead_extraction import ExecutedLead, LeadAuthorError
 from defender.learning.leads.pitfalls_curator import PitfallsDisposition
 from defender import box as box_mod
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.learning.curation._curator1134 import plant_fifo
 from defender.tests.support.learning.core._state1135 import curation_row, curation_run_dir, enqueue_case, state_for_paths
 from defender.tests.support.runtime.engine._declared869 import (
@@ -389,7 +390,7 @@ def _is_systemic_git_fault(e: BaseException) -> bool:
 def _assert_lead_claim_held(sc: _Scene, case: str = "case-1") -> None:
     """The claim was served once and not consumed, dead-lettered or re-queued: it waits in
     `inflight/` with its one attempt for the next tick's reclaim, its run not recorded done."""
-    [run_dir] = [d for d in sc.run_dirs if d.name == case]
+    [run_dir] = [d for d in sc.run_dirs if d.name == fixture_uuid(case)]
     assert _inflight(sc.paths) == {f"{case}.json": {
         **curation_row(case, run_dir), "attempts": 1}}, _inflight(sc.paths)
     assert _failed(sc.paths) == [], "the claim was dead-lettered"

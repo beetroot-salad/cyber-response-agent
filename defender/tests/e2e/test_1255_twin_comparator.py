@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 pytest.importorskip("pydantic_ai")
 
@@ -329,7 +330,8 @@ def test_1255_twin_unclocked_natural_run_forgives_no_time():
         [str(d) for d in diffs])
 
 
-META = {"data_root": "/srv/data", "data_root_resolved": "/srv/data", "tenant": "acmecorp",
+HOST_TENANT = fixture_uuid("tenant:acmecorp")
+META = {"data_root": "/srv/data", "data_root_resolved": "/srv/data", "tenant": HOST_TENANT,
         "defender_dir": "/opt/ck/defender", "repo_root": "/opt/ck", "home": "/home/sam",
         "user": "sam"}
 
@@ -356,13 +358,13 @@ def test_1255_twin_scanner_reads_the_content_and_finds_nothing_in_a_clean_one():
 
 @pytest.mark.parametrize(("planted", "surface_kw", "what", "channel"), [
     ("a data-root path in a tool result",
-     {"tool_out": "raw payload: /srv/data/acmecorp/runs/x/gather_raw/l-001/0.json"},
+     {"tool_out": f"raw payload: /srv/data/{HOST_TENANT}/runs/x/gather_raw/l-001/0.json"},
      {"data root", "data root (resolved)", "tenant name"}, "main#0 request"),
     ("the checkout path in a tool definition",
      {"description": "Read skills under /opt/ck/defender/skills on demand."},
      {"checkout path", "checkout repo root"}, "main#0 request"),
     ("the tenant folder in a file",
-     {"files": {"report.md": "see acmecorp's table pointer\n"}},
+     {"files": {"report.md": f"see {HOST_TENANT}'s table pointer\n"}},
      {"tenant name"}, "main#0 files:report.md"),
     ("the host user's home in a refusal",
      {"tool_out": "could not read /home/sam/.cache/x: [Errno 2]"},
@@ -375,29 +377,22 @@ def test_1255_twin_scanner_flags_a_planted_host_value(planted, surface_kw, what,
 
 
 def test_1255_twin_scanner_matches_whole_names_only():
-    rec = _surface(tool_out="acmecorporate /srv/database /home/samuel /srv/data/")
-    found = W.scan(rec, W.host_tokens(META))
+    rec = _surface(tool_out=f"{HOST_TENANT}a acmecorporate /srv/database /home/samuel /srv/data/")
+    found = W.scan(rec, {**W.host_tokens(META), "ordinary name": "acmecorp"})
     assert {f.what for f in found} == {"data root", "data root (resolved)"}, \
         [str(f) for f in found]
 
 
 def test_1255_twin_identity_tokens_name_every_scannable_arm_identity():
-    pair = {"natural": {"run_id": "20261015t150031z-input"},
-            "arm": {"run_id": "20261015t150031z-input-n10-a"},
-            "sibling": {"run_id": "20261015t150031z-input-n10-r"},
-            "episode_id": "20261015t150031z-input-n10",
-            "episode_token": "20261015t150031z.input.n10",
-            "world_token": "20261015t150031z.input.n10.a",
-            "sibling_world_token": "20261015t150031z.input.n10.r"}
-    assert W.identity_tokens(pair, "natural") == {"natural run id": "20261015t150031z-input"}
+    pair = ARM_PAIR
+    assert W.identity_tokens(pair, "natural") == {"natural run id": pair["natural"]["run_id"]}
     base = {
-        "source run id": "20261015t150031z-input",
-        "arm run id": "20261015t150031z-input-n10-a",
-        "sibling run id": "20261015t150031z-input-n10-r",
-        "episode id": "20261015t150031z-input-n10",
-        "episode token": "20261015t150031z.input.n10",
-        "world token": "20261015t150031z.input.n10.a",
-        "sibling world token": "20261015t150031z.input.n10.r"}
+        "source run id": pair["natural"]["run_id"],
+        "arm run id": pair["arm"]["run_id"],
+        "sibling run id": pair["sibling"]["run_id"],
+        "episode id": pair["episode_id"],
+        "world id": pair["world_id"],
+        "sibling world id": pair["sibling_world_id"]}
     assert W.identity_tokens(pair, "arm") == base
     with_fork = W.identity_tokens(pair | {"branch_message_id": FORK_TURN}, "arm")
     assert with_fork.items() >= base.items()
@@ -414,21 +409,20 @@ def test_1255_twin_identity_tokens_name_every_scannable_arm_identity():
     assert with_fork["fork turn (16-hex int)"] == f"{FORK_TURN:016x}"
 
 
-ARM_PAIR = {"natural": {"run_id": "20261015t150031z-input"},
-            "arm": {"run_id": "20261015t150031z-input-n10-a"},
-            "sibling": {"run_id": "20261015t150031z-input-n10-r"},
-            "episode_id": "20261015t150031z-input-n10",
-            "episode_token": "20261015t150031z.input.n10",
-            "world_token": "20261015t150031z.input.n10.a",
-            "sibling_world_token": "20261015t150031z.input.n10.r"}
-_WORLD_TOKEN = ARM_PAIR["world_token"]
-_MD5_OF_WORLD = hashlib.md5(_WORLD_TOKEN.encode("utf-8")).hexdigest()
-_UUID5_OF_WORLD = uuid.uuid5(uuid.NAMESPACE_URL, _WORLD_TOKEN)
-_MD5_AS_FRESH = uuid.UUID(bytes=hashlib.md5(_WORLD_TOKEN.encode("utf-8")).digest(),
+ARM_PAIR = {"natural": {"run_id": fixture_uuid("run:twin-natural")},
+            "arm": {"run_id": fixture_uuid("run:twin-control")},
+            "sibling": {"run_id": fixture_uuid("run:twin-replicate")},
+            "episode_id": fixture_uuid("episode:twin"),
+            "world_id": fixture_uuid("world:twin-control"),
+            "sibling_world_id": fixture_uuid("world:twin-replicate")}
+_WORLD_ID = ARM_PAIR["world_id"]
+_MD5_OF_WORLD = hashlib.md5(_WORLD_ID.encode("utf-8")).hexdigest()
+_UUID5_OF_WORLD = uuid.uuid5(uuid.NAMESPACE_URL, _WORLD_ID)
+_MD5_AS_FRESH = uuid.UUID(bytes=hashlib.md5(_WORLD_ID.encode("utf-8")).digest(),
                           version=4).hex
 _UUID5_AS_FRESH = uuid.UUID(bytes=_UUID5_OF_WORLD.bytes, version=4).hex
 _B64_RECORD = base64.b64encode(json.dumps(
-    {"lead_id": "l-001", "seq": 0, "w": _WORLD_TOKEN}).encode("utf-8")).decode("ascii")
+    {"lead_id": "l-001", "seq": 0, "w": _WORLD_ID}).encode("utf-8")).decode("ascii")
 
 
 def _a_uuid4_hex(value: str) -> bool:
@@ -443,17 +437,17 @@ def _review_frame(salt: str) -> str:
 
 
 @pytest.mark.parametrize(("planted", "surface_kw", "forgiven", "how"), [
-    ("an md5 of the world token in a uuid4's shape, as a review frame's salt in a readable file",
+    ("an md5 of the world id in a uuid4's shape, as a review frame's salt in a readable file",
      {"files": {"report.md": _review_frame(_MD5_AS_FRESH)}}, _MD5_AS_FRESH, "md5 hex"),
-    ("a uuid5 over the world token in a uuid4's shape, as a tool-call id in a tool result",
+    ("a uuid5 over the world id in a uuid4's shape, as a tool-call id in a tool result",
      {"tool_out": f"exit=0\nretry pyd_ai_{_UUID5_AS_FRESH}\n"}, _UUID5_AS_FRESH, "uuid5(url)"),
-    ("the world token base64-encoded inside a record in a readable file",
+    ("the world id base64-encoded inside a record in a readable file",
      {"files": {"report.md": f"ref: {_B64_RECORD}\n"}}, None, "inside an encoded run"),
 ], ids=["md5", "uuid5", "base64-record"])
 def test_1255_twin_identity_scan_finds_a_derived_identity_the_comparison_forgives(
         planted, surface_kw, forgiven, how):
     tokens = W.identity_tokens(ARM_PAIR, "arm")
-    assert tokens["world token"] == _WORLD_TOKEN
+    assert tokens["world id"] == _WORLD_ID
     assert W.scan(_surface(), tokens, encoded=True) == [], "the encoded scan flags a clean surface"
     rec = _surface(**surface_kw)
     if forgiven is not None:
@@ -464,7 +458,7 @@ def test_1255_twin_identity_scan_finds_a_derived_identity_the_comparison_forgive
             f"fixture: {planted} is not one the comparison forgives")
     assert W.scan(rec, tokens) == [], f"fixture: the literal scan already finds {planted}"
     found = W.scan(rec, tokens, encoded=True)
-    assert any(f.what.startswith(f"world token ({how}") for f in found), (
+    assert any(f.what.startswith(f"world id ({how}") for f in found), (
         planted, [str(f) for f in found])
 
 
@@ -495,8 +489,8 @@ def _arm_with_session(value: str) -> dict[str, Any]:
      f"world label {LABEL} with the fork turn (uuid int, hyphenated)"),
     ("a uuid1 (a time and a host node)", _UUID1.hex, None),
     ("a constant marker", "a" * 32, None),
-    ("an md5 of the world token", _MD5_OF_WORLD, "world token (md5 hex)"),
-    ("a uuid5 over the world token", _UUID5_OF_WORLD.hex, "world token (uuid5(url) hex)"),
+    ("an md5 of the world id", _MD5_OF_WORLD, "world id (md5 hex)"),
+    ("a uuid5 over the world id", _UUID5_OF_WORLD.hex, "world id (uuid5(url) hex)"),
 ], ids=["uuid-int-fork-turn", "uuid-with-label", "uuid1", "constant-marker", "md5", "uuid5"])
 def test_1255_twin_comparator_forgives_no_id_its_producer_did_not_mint(planted, value,
                                                                      scanned_as):

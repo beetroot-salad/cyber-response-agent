@@ -9,6 +9,7 @@ import pytest
 
 from defender.runtime import case_ticket
 from defender.runtime.payload_view import LEAF_MAX_CHARS, PASSTHROUGH_MAX_BYTES_DEFAULT
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.runtime.engine._spec767 import (
     COMMENTS_SUFFIX,
     ELLIPSIS,
@@ -28,10 +29,11 @@ from defender.tests.support.runtime.engine._spec767 import (
     use_mapping,
 )
 
-#: Run ids in the shapes the product mints: a live run's `{UTC stamp}-{alert slug}`, and the
-#: longest one, a branch run's `{source run}-n{N}-{label}` (runtime/branch/_family.py).
-RUN_ID = "20261008t091500z-5710-sshd-invalid-user"
-BRANCH_RUN_ID = "20261008t091500z-5710-sshd-invalid-user-n12-world-b-no-cmdb-owner"
+#: Two runs' ids, a live run's and a branch run's: #1187 (declared change 1) — a run id is a
+#: canonical UUID, so each is `fixture_uuid(<label>)`, the label keeping the run it stands for
+#: readable (the run folder `make_run` builds is named by the id).
+RUN_ID = fixture_uuid("20261008t091500z-5710-sshd-invalid-user")
+BRANCH_RUN_ID = fixture_uuid("20261008t091500z-5710-sshd-invalid-user-n12-world-b-no-cmdb-owner")
 
 NARRATIVE = "The account is a decommissioned service identity; no egress followed."
 

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -119,6 +119,7 @@ class ReasonScope:
     tenant: RunTenant | None = None
     defender_dir: Path | None = None
     adapters_root: Path | None = None
+    known_ids: frozenset[str] = frozenset()
 
     def reason(self, text: str) -> str:
         """`text` as a down system's reason, fit for the model and the operator — THE redaction
@@ -131,7 +132,7 @@ class ReasonScope:
         (`_paths.name_roots`) — the tenant's folder and the data root (`Tenant.root_names`,
         their owner's) and the code trees, each by its name here. An adapter's crash text often
         carries its own file's absolute path, and a repr of the run's record the data root."""
-        text = redact_model_visible(text)
+        text = redact_model_visible(text, self.known_ids)
         named: dict[str, str] = {}
         if self.tenant is not None:
             text = redact_settings_path(text, self.tenant.settings)
@@ -196,7 +197,8 @@ class RunSystems:
     scope: ReasonScope
 
 
-def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path) -> RunSystems:
+def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path,
+              known_ids: Collection[str] = ()) -> RunSystems:
     """@owns system_down — each granted system the run cannot use, with why: the verdict of its
     adapter's own settings check over the run's frozen record (O-1, O-5), or the reason its
     adapter cannot be judged (O-5a), each from `judge_adapter`. Every other granted system is
@@ -208,7 +210,7 @@ def judge_run(roster: RosterRead, tenant: RunTenant, *, defender_dir: Path) -> R
     system the roster does not hold refuses startup as an invalid grant (C11), before any
     adapter check runs. The registry still validates the granted verbs at construction."""
     scope = ReasonScope(tenant=tenant, defender_dir=Path(defender_dir),
-                        adapters_root=Path(roster.root))
+                        adapters_root=Path(roster.root), known_ids=frozenset(known_ids))
     down: dict[str, StartCause] = {}
     systems = granted_systems(tenant.grants)
     missing = systems - set(roster.accepted)
@@ -313,7 +315,8 @@ def cause_text(cause: Down) -> str:
 
 
 def mark_escaped(state: RunState, system: str, fault_text: str, *,
-                 tenant: RunTenant | None = None, defender_dir: Path | None = None) -> None:
+                 tenant: RunTenant | None = None, defender_dir: Path | None = None,
+                 known_ids: Collection[str] = ()) -> None:
     """A verb of `system` raised `ConfigFault` at call time (O-5b): its settings check missed a
     fault its verbs can raise. The system is down as not configured from this call on — the same
     status and accounting the start check gives, reached late — and the escape is logged as the
@@ -326,7 +329,8 @@ def mark_escaped(state: RunState, system: str, fault_text: str, *,
         held = state.reason_scope
     scope = held if held is not None else ReasonScope(
         tenant=tenant, defender_dir=defender_dir,
-        adapters_root=adapters_under(defender_dir) if defender_dir is not None else None)
+        adapters_root=adapters_under(defender_dir) if defender_dir is not None else None,
+        known_ids=frozenset(known_ids))
     cause = NotConfigured(scope.reason(fault_text))
     _logger.error(
         f"adapter defect: a {system} verb raised ConfigFault at call time — a settings fault "

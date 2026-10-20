@@ -1,5 +1,6 @@
 """Hardening: refused siblings/pages read no episode record, foreign records and linked runs refused, malformed drain rows quarantined, CLI smoke as a process."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import contextlib
 import difflib
@@ -20,13 +21,11 @@ from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 from defender.tests.storage.tenant_1105_run_repository import _spec1105_pr2 as P
 
 
+_F6_R1, _F6_R2 = (fixture_uuid('f6-r1'), fixture_uuid('f6-r2'))
+
 @pytest.fixture(autouse=True)
 def _roots(tmp_path, monkeypatch):
     P.roots(tmp_path, monkeypatch)
-
-
-def _episodes() -> Path:
-    return Path(os.environ[P.EPISODES_BASE_ENV])
 
 
 def _launched(got: P.Launched) -> bool:
@@ -83,21 +82,25 @@ def _episode_records(episode_dir: Path) -> set[str]:
 
 
 def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
-    src, ep = P.sibling_scene(tmp_path, container="beta")
-    P.second_tenant(P.data_root(), "beta")
+    from defender import _yaml
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    src, ep = P.sibling_scene(tmp_path, roster=False)
+    doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
+    (ep / "runs").mkdir(exist_ok=True)
+    S.write_roster(ep, {w["world_id"]: S.new_id() for w in doc["worlds"]})
+    P.second_tenant(P.data_root(), H.U_ID)
     records = _episode_records(ep)
-    assert "family.yaml" in records
+    assert {"family.yaml", S.ROSTER_NAME} <= records
 
     rec = P.SiblingRecorder()
     with _opens() as opened:
-        rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), rec)
-    assert refused is not None or rc not in (0, None), f"a foreign container was run: {err}"
+        rc, refused, err = P.drive_run_py(P.sibling_argv(H.U_ID, ep, "b"), rec)
+    assert refused is not None or rc not in (0, None), f"another tenant's episode was run: {err}"
     assert "lifecycle" not in rec.order
     read = sorted(set(opened) & records)
-    assert read == [], f"the refused sibling read {read} before the container record refused"
+    assert read == [], f"the refused sibling read {read} of another tenant's episode"
 
-    (ep / "runs" / "_tenant.json").unlink()
-    P.plant_record(ep / "runs", P.SIBLING_TENANT)
     ok = P.SiblingRecorder()
     with _opens() as opened:
         rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
@@ -106,23 +109,26 @@ def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
 
 
 def test_f2_a_refused_page_reads_no_episode_record(tmp_path, d9_tenant):
-    ep = E.sample_episode(tmp_path, root=_episodes())
-    P.second_tenant(P.data_root(), "beta")
-    P.plant_record(ep.dir / "runs", "beta")
-    records = _episode_records(ep.dir)
-    assert {"family.yaml", "judge.yaml", "worlds"} <= records
+    from defender.tests.support.learning.branch import _triplet_947 as T
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    episode_id = S.new_id()
+    ep = S.make_episode(P.data_root(), d9_tenant, episode_id, labels=T.WORLDS, roster=True)
+    T.write_family(ep, T.family_doc(episode_id=episode_id, source_run_id=S.new_id()))
+    E.write_outcome(ep, "accepted", reason="F2 outcome", family_stamp=False)
+    P.second_tenant(P.data_root(), H.U_ID)
+    records = _episode_records(ep)
+    assert {"family.yaml", S.ROSTER_NAME, "outcome.yaml"} <= records
 
     with _opens() as opened:
-        got = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+        got = P.drive_cli(P.page_main(), P.new_page_argv(H.U_ID, episode_id))
     assert _refused(got), "another tenant's episode was rendered"
-    assert not ep.page.exists()
+    assert not (ep / E.PAGE_NAME).exists()
     read = sorted(set(opened) & records)
-    assert read == [], f"the refused page read {read} before the container record refused"
+    assert read == [], f"the refused page read {read} of another tenant's episode"
 
-    (ep.dir / "runs" / "_tenant.json").unlink()
-    P.plant_record(ep.dir / "runs", d9_tenant)
     with _opens() as opened:
-        ok = P.drive_cli(P.page_main(), P.page_argv(d9_tenant, ep.dir))
+        ok = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))
     assert ok.rc == 0, ok.said
     assert "family.yaml" in opened, "the hook did not see the manifest read"
 
@@ -130,37 +136,54 @@ def test_f2_a_refused_page_reads_no_episode_record(tmp_path, d9_tenant):
 _SALT = re.compile(r"run-[0-9a-f]{16}-")
 
 
-def _judge_prompts(root: Path, monkeypatch, *, prior: bool) -> dict[str, str]:
-    """One launch under fresh roots at `root`, its judge's prompts by agent id, with the
-    roots' path and the per-run frame salt normalised (the only bytes two identical launches
-    differ in). `prior`: a FINISHED run of the same alert sits in T's runs folder."""
-    P.roots(root, monkeypatch)
-    monkeypatch.setenv(P.DATA_ROOT_ENV, str(root / "data-root"))
-    est, src = P.launch_source(root)
-    if prior:
-        other = src.parent / "20260101t000000z-prior-trial"
-        other.mkdir()
-        (other / "alert.json").write_text(json.dumps({"alert_id": P.J.ALERT_ID}),
-                                          encoding="utf-8")
-        (other / "report.md").write_text(
-            P.T.report_text("benign") + "\nPRIOR-RUN-ONLY-MARKER\n", encoding="utf-8")
-    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
-    assert _launched(got), f"the launch did not run: {got.message!r}"
-    assert len(got.judge.agent_ids) == len(got.judge.prompts)
-    return {agent: _SALT.sub("run-SALT-", prompt.replace(str(root), "<ROOT>"))
-            for agent, prompt in zip(got.judge.agent_ids, got.judge.prompts, strict=True)}
+def _judge_prompts(ep: Path) -> dict[str, str]:
+    """Grade one published family afresh; normalize only each call's fresh frame salt."""
+    from defender.tests.support.learning.core._state1135 import env_state
+
+    (ep / "judge.yaml").unlink(missing_ok=True)
+    judge = P.quiet_judge()
+    P.J.grade_at(ep, judge=judge, state=env_state())
+    assert len(judge.agent_ids) == len(judge.prompts)
+    assert len(set(judge.agent_ids)) == len(judge.agent_ids)
+    return {agent: _SALT.sub("run-SALT-", prompt)
+            for agent, prompt in zip(judge.agent_ids, judge.prompts, strict=True)}
 
 
 def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch):
-    bare = _judge_prompts(tmp_path / "bare", monkeypatch, prior=False)
-    with_prior = _judge_prompts(tmp_path / "prior", monkeypatch, prior=True)
+    from defender.records import _alert_input
+    from defender.run_repository import RunPaths
+    from defender.tests.support.storage._alert_plant import plant_alert
+
+    P.roots(tmp_path, monkeypatch)
+    est, src = P.launch_source(tmp_path)
+    got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
+    assert _launched(got), f"the launch did not run: {got.message!r}"
+    (ep,) = P.launched_episodes()
+    bare = _judge_prompts(ep)
+
+    other = src.parent / fixture_uuid("f3-prior-trial")
+    other.mkdir()
+    source_paths, prior_paths = RunPaths(src), RunPaths(other)
+    source_raw, source_record = _alert_input.verified_alert(
+        source_paths.alert, source_paths.alert_record, run_name=src.name)
+    plant_alert(other, source_raw)
+    prior_raw, prior_record = _alert_input.verified_alert(
+        prior_paths.alert, prior_paths.alert_record, run_name=other.name)
+    assert prior_raw == source_raw
+    assert prior_record == source_record
+    assert prior_record.facts.signature == json.loads(source_raw)["rule"]["id"]
+    assert prior_record.facts.signature is not None
+    (other / "report.md").write_text(
+        P.T.report_text("benign") + "\nPRIOR-RUN-ONLY-MARKER\n", encoding="utf-8")
+    with_prior = _judge_prompts(ep)
     assert bare, "the judge was never asked"
     worlds = [agent for agent in bare if not agent.startswith("judge:family:")]
     assert worlds
     from defender.learning.judge.layout import FOCUS_VIEW_TITLES
 
     # #1234 M3/A10: the focus world's report view is titled, in host text, by its world label.
-    assert all(f"world {agent.split(':')[1]} — {FOCUS_VIEW_TITLES['report']}" in bare[agent]
+    labels = {P.T.world_id(ep, label): label for label in P.T.WORLDS}
+    assert all(f"world {labels[agent.split(':')[1]]} — {FOCUS_VIEW_TITLES['report']}" in bare[agent]
                for agent in worlds)
     assert sorted(with_prior) == sorted(bare)
     for agent, prompt in sorted(with_prior.items()):
@@ -170,21 +193,6 @@ def test_f3_a_same_alert_prior_run_changes_no_judge_prompt(tmp_path, monkeypatch
                                            lineterm="", n=0)))
 
 
-def _swap_record(runs: Path, tenant_id: str) -> bytes:
-    """Re-plant `<runs>/_tenant.json` naming `tenant_id`; returns the record it replaced."""
-    record = runs / "_tenant.json"
-    own = record.read_bytes()
-    record.unlink()
-    P.plant_record(runs, tenant_id)
-    return own
-
-
-def _restore_record(runs: Path, own: bytes) -> None:
-    record = runs / "_tenant.json"
-    record.unlink()
-    record.write_bytes(own)
-
-
 def _link_runs(runs: Path, elsewhere: Path) -> Path:
     runs.rename(elsewhere)
     os.symlink(elsewhere, runs)
@@ -192,20 +200,13 @@ def _link_runs(runs: Path, elsewhere: Path) -> Path:
 
 
 def test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs(tmp_path):
-    src, _ep = P.sibling_scene(tmp_path, container=P.SIBLING_TENANT)
+    src, _ep = P.sibling_scene(tmp_path)
     runs = src.parent
     argv = P.new_run_page_argv(P.SIBLING_TENANT, src.name)
     ok = P.drive_cli(P.run_page_main(), argv)
     assert ok.rc == 0, f"--tenant T <run id> did not render: {ok.said}"
     assert (src / "runtime.html").is_file()
     (src / "runtime.html").unlink()
-
-    P.second_tenant(P.data_root(), "beta")
-    own = _swap_record(runs, "beta")
-    foreign = P.drive_cli(P.run_page_main(), argv)
-    assert _refused(foreign), "the run page rendered under a record naming another tenant"
-    assert not (src / "runtime.html").exists()
-    _restore_record(runs, own)
 
     moved = _link_runs(runs, tmp_path / "runs-elsewhere")
     linked = P.drive_cli(P.run_page_main(), argv)
@@ -214,26 +215,20 @@ def test_f5_the_run_page_refuses_a_foreign_record_and_a_linked_runs(tmp_path):
 
 
 def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d9_tenant):
+    import uuid
+
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
     from defender.cli import workspace_map as wm
 
     runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = H.make_run(runs, "20260605t000000z-case-a")
+    run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
         run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
     argv = ["workspace_map.py", "--tenant", d9_tenant, run.name]
     ok = P.drive_cli(wm.main, argv)
     assert ok.rc == 0, ok.said
     assert ok.out == expected
-
-    P.second_tenant(P.data_root(), "beta")
-    own = _swap_record(runs, "beta")
-    foreign = P.drive_cli(wm.main, argv)
-    assert _refused(foreign), "workspace_map mapped a run under another tenant's record"
-    assert foreign.out == ""
-    _restore_record(runs, own)
 
     _link_runs(runs, tmp_path / "runs-elsewhere")
     linked = P.drive_cli(wm.main, argv)
@@ -245,26 +240,26 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
     ("no-run", {"tenant_id": H.T_ID}),
     ("run-null", {"tenant_id": H.T_ID, "run_id": None}),
     ("run-int", {"tenant_id": H.T_ID, "run_id": 7}),
-    ("run-list", {"tenant_id": H.T_ID, "run_id": ["r1"]}),
-    ("run-upper", {"tenant_id": H.T_ID, "run_id": "R1"}),
+    ("run-list", {"tenant_id": H.T_ID, "run_id": [_F6_R1]}),
+    ("run-upper", {"tenant_id": H.T_ID, "run_id": _F6_R1.upper()}),
     ("run-empty", {"tenant_id": H.T_ID, "run_id": ""}),
-    ("tenant-null", {"tenant_id": None, "run_id": "r1"}),
-    ("tenant-int", {"tenant_id": 7, "run_id": "r1"}),
-    ("tenant-dict", {"tenant_id": {"id": H.T_ID}, "run_id": "r1"}),
+    ("tenant-null", {"tenant_id": None, "run_id": _F6_R1}),
+    ("tenant-int", {"tenant_id": 7, "run_id": _F6_R1}),
+    ("tenant-dict", {"tenant_id": {"id": H.T_ID}, "run_id": _F6_R1}),
 ])
 def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_id, body):
     root = P.data_root()
     t = H.tenant(root, H.T_ID)
     H.runs_folder(t)
-    for run_id in ("r1", "r2"):
+    for run_id in (_F6_R1, _F6_R2):
         H.make_run(t.runs, run_id)
     paths = P.loop_paths(tmp_path)
     P.queue_row(paths, case_id, {"case_id": case_id, **body})
-    P.queue_row(paths, "good", {"case_id": "good", "tenant_id": H.T_ID, "run_id": "r1"})
+    P.queue_row(paths, "good", {"case_id": "good", "tenant_id": H.T_ID, "run_id": _F6_R1})
 
     lane = P.Lane()
     assert H.raised(P.drain, paths, lane) is None, "the malformed row raised out of the drain"
-    assert lane.run_dirs == [Path(t.runs) / "r1"], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(t.runs) / _F6_R1], f"served {lane.run_dirs}"
     letter = P.dead_letter(paths, case_id)
     assert letter is not None, f"{case_id} was not quarantined"
     assert str(letter.get("failed", "")).startswith("unreadable"), letter
@@ -272,13 +267,13 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
 
     # The next tick: it raises nothing and serves the next row. (This lane double never
     # consumes what it is handed, so the tick may hand it `good` again; that is the harness's.)
-    P.queue_row(paths, "next", {"case_id": "next", "tenant_id": H.T_ID, "run_id": "r2"})
+    P.queue_row(paths, "next", {"case_id": "next", "tenant_id": H.T_ID, "run_id": _F6_R2})
     again = P.Lane()
     assert H.raised(P.drain, paths, again) is None, "the next tick raised: the drain is wedged"
-    assert Path(t.runs) / "r2" in again.run_dirs, f"the next tick served {again.run_dirs}"
+    assert Path(t.runs) / _F6_R2 in again.run_dirs, f"the next tick served {again.run_dirs}"
 
 
-_ABSENT = "20990101t000000z-pr2-absent"
+_ABSENT = fixture_uuid("pr2-absent")
 
 
 def _process(*command: str) -> subprocess.CompletedProcess:
@@ -304,13 +299,14 @@ def _script(*parts: str) -> str:
 
 
 def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
+    import uuid
+
     from defender._paths import adapters_under
     from defender.runtime.verbs import read_roster
-    from defender.presentation import workspace_map as wm
+    from defender.cli import workspace_map as wm
 
     runs = P.data_root() / d9_tenant / "runs"
-    P.plant_record(runs, d9_tenant)
-    run = H.make_run(runs, "20260605t000000z-case-a")
+    run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
         run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
     script = _script("cli", "workspace_map.py")
@@ -322,12 +318,14 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
 
 def _done_run(tenant_id: str) -> Path:
     """A run of `tenant_id` the lead author has already served (its `done` sentinel written
-    through the real writer), so serving it again is the clean no-op exit 0."""
+    through the real writer), so serving it again is the clean no-op exit 0. #1187 declared
+    changes 1 and 6: UUID-named, in a container holding no `_tenant.json`."""
+    import uuid
+
     from defender.learning.leads import lead_author
 
     runs = P.data_root() / tenant_id / "runs"
-    P.plant_record(runs, tenant_id)
-    run = H.make_run(runs, "20260605t000000z-case-a")
+    run = H.make_run(runs, str(uuid.uuid4()))
     lead_author.write_done_sentinel(run, "0" * 40)
     return run
 
@@ -339,9 +337,9 @@ def test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path(tmp_pa
     ok = P.drive_cli(lead_author.main, ["--tenant", d9_tenant, run.name])
     assert ok.rc == 0, f"--tenant T <run id> was not served: {ok.said}"
 
-    P.second_tenant(P.data_root(), "beta")
+    P.second_tenant(P.data_root(), H.U_ID)
     for argv in (["--tenant", d9_tenant, str(run)],
-                 ["--tenant", "beta", run.name],
+                 ["--tenant", H.U_ID, run.name],
                  ["--tenant", d9_tenant, _ABSENT]):
         got = P.drive_cli(lead_author.main, argv)
         assert _refused(got), f"the lead author served {argv}"

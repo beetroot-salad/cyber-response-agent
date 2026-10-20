@@ -326,7 +326,8 @@ def test_usage_limit_exceeded_after_a_challenged_inconclusive(tmp_path):
 def test_budget_kill_and_circuit_breaker_are_not_closed_as_a_verdict(tmp_path):
     """The other two exits that stop the model — the tool budget's kill and the circuit breaker's abort — do NOT..."""
     from defender.hooks.budget_enforcer import BudgetKill
-    from defender.runtime import driver, session_store
+    from defender.runtime import driver
+    from defender.runtime import session_store
     from defender.runtime.circuit_breaker import RunAborted
     from defender.tests.support.invlang.validation._invlang_warn_836 import build_main_agent
 

@@ -461,7 +461,8 @@ def branch_message_id(source: Any, *, tool: str = "gather") -> int:
     """Find the tool-calling MAIN response for the requested branch tool."""
     from pydantic_ai.messages import ModelResponse, ToolCallPart
 
-    from defender.runtime import branch, session_store
+    from defender.runtime import branch
+    from defender.runtime import session_store
 
     store = branch.source_store_if_any(source.run_dir, source_run=source)
     assert store is not None, f"the natural run {source.run_dir} kept no session store"
@@ -499,17 +500,16 @@ def replicate_world() -> dict[str, Any]:
     return T.world_doc(REPLICATE, role=None, axis=None, facts=[], story="the captured story")
 
 
-def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, int]:
+def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, int, dict[str, str]]:
     """Use launcher steps to prime the recording and create control and replicate arms."""
-    from defender.tenancy import _tenant
     from defender.learning.branch import cli
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     tenant, source = _source_run(tenant_id, str(natural.run_id))
     k = branch_message_id(source)
-    episode_id = cli.episode_id_for(str(source.id), k)
     run_tenant = _resolve(tenant)
-    episode = cli.prepare_episode(episode_id, source, data_root=_tenant.resolve_data_root())
+    view = cli.prepare_episode(tenant.runs_repository(), source)
+    episode = view.episode
     try:
         as_of = cli.branch_point_clock(source, k)
         doc = T.family_doc(
@@ -520,10 +520,10 @@ def compose_control_episode(tenant_id: str, natural: Recording) -> tuple[str, in
             served_systems=cli.served_systems(run_tenant.grants.gather))
         doc.pop("source_run_dir", None)
         T.write_family(episode.dir, doc)
-        tenant.runs_repository().episode(episode.dir.name, held=episode).create_container()
-        return episode.dir.name, k
+        view.start_runs([world["world_id"] for world in doc["worlds"]])
+        return episode.dir.name, k, {w["label"]: w["world_id"] for w in doc["worlds"]}
     finally:
-        episode.close()
+        view.close()
 
 
 def _resolve(tenant: Any) -> Any:
@@ -554,11 +554,12 @@ def record_pair(*, tenant_id: str, alert: Path, arm: bool = True) -> dict[str, A
     if not arm:
         return out
     try:
-        episode_id, k = compose_control_episode(tenant_id, natural)
+        episode_id, k, world_ids = compose_control_episode(tenant_id, natural)
     except Exception as failed:  # noqa: BLE001 — reported, so the test names the composition step
         out["composition_error"] = f"{type(failed).__name__}: {failed}"
         return out
     out["episode_id"], out["branch_message_id"] = episode_id, k
+    out["world_id"], out["sibling_world_id"] = world_ids[CONTROL], world_ids[REPLICATE]
     for key, label in (("sibling", REPLICATE), ("arm", CONTROL)):
         world = Recording(key)
         run_main(["--tenant", tenant_id, "--episode", episode_id, "--world", label], world,
@@ -1000,10 +1001,8 @@ def identity_tokens(pair: Mapping[str, Any], which: str) -> dict[str, str]:
             out[name] = str(pair[key]["run_id"])
     if pair.get("episode_id"):
         out["episode id"] = str(pair["episode_id"])
-    if pair.get("episode_token"):
-        out["episode token"] = str(pair["episode_token"])
-    for key, name in (("world_token", "world token"),
-                      ("sibling_world_token", "sibling world token")):
+    for key, name in (("world_id", "world id"),
+                      ("sibling_world_id", "sibling world id")):
         if pair.get(key):
             out[name] = str(pair[key])
     if pair.get("branch_message_id") is not None:
@@ -1179,12 +1178,6 @@ def _child(config_path: str) -> int:
     set_up_tenant(Path(config["data_root"]), config["tenant"])
     pair = record_pair(tenant_id=config["tenant"], alert=plant_alert(Path(config["alert"])),
                        arm=bool(config["arm"]))
-    if pair.get("episode_id"):
-        from defender.runtime.branch._family import episode_token_for
-
-        pair["episode_token"] = episode_token_for(pair["episode_id"])
-        pair["world_token"] = _world_token(pair["episode_id"], CONTROL)
-        pair["sibling_world_token"] = _world_token(pair["episode_id"], REPLICATE)
     pair["meta"] = {
         "label": config["label"], "tenant": config["tenant"],
         "data_root": config["data_root"],
@@ -1194,20 +1187,6 @@ def _child(config_path: str) -> int:
     }
     Path(config["out"]).write_text(json.dumps(pair, default=repr), encoding="utf-8")
     return 0
-
-
-def _world_token(episode_id: str, label: str) -> str | None:
-    """A world's token as production composes it (its arm's resume target)."""
-    import defender.run as run_mod
-    from defender.tenancy import _tenant
-    from defender.episodes._episode_handle import Episode, episode_dir
-
-    try:
-        root = _tenant.resolve_data_root()
-        with Episode.open(episode_dir(root, episode_id)) as episode:
-            return str(run_mod.resume_world(episode, label, tenant=lambda: None).token)
-    except Exception:  # noqa: BLE001 — the token is a scan input; its absence is reported there
-        return None
 
 
 if __name__ == "__main__":  # lint-log-setup: ok — a test child; `_child` configures logging first

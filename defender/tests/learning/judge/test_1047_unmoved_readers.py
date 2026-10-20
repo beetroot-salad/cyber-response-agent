@@ -1,6 +1,10 @@
 """#1047 — the readers this piece does NOT move, observed at their own edges."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
+from defender.tests.support.learning.judge import _judge_921 as J
+
 
 from defender.tests.support.shared.filesystem import _spec1047 as S
 
@@ -18,7 +22,7 @@ def test_a_cut_short_world_files_no_finding_and_its_reason_travels_on_its_row_un
     assert reason, "the control failed: the cut-short row carries no reason to pass through"
     assert "request-limit" in reason, f"the cut-short reason does not name the exit: {reason!r}"
 
-    assert S.judge_calls_for(judge, "b") == [], "a cut-short world bought a world call"
+    assert S.judge_calls_for(judge, "b", episode_dir=ep) == [], "a cut-short world bought a world call"
     ledger = [e["finding_id"] for e in record.dispositions or []]
     assert not [f for f in ledger if f.split("/")[-3] == "b"], (
         f"the ledger names a finding of the cut-short world: {ledger}")
@@ -58,7 +62,7 @@ def test_pass_lessons_commit_still_returns_none_when_the_gradable_set_is_empty(t
     ep = _all_cut_short(tmp_path)
     bound = S.mod("_io").bind(ep)  # #1049: the resolver takes the pass's bound, not the root
     assert judge._pass_lessons_commit(bound, []) is None
-    assert judge._pass_lessons_commit(bound, ["b", "c"]) is not None, (
+    assert judge._pass_lessons_commit(bound, [T.world_id(ep, label) for label in ("b", "c")]) is not None, (
         "the control failed: the commit resolver answered None for worlds that do carry a "
         "provenance stamp, so the empty-set answer above is not about the empty set")
 
@@ -93,9 +97,9 @@ def test_a_host_write_into_the_run_dir_still_goes_through_write_guarded_and_the_
 def test_the_episode_reader_and_the_graded_record_disagree_about_a_cut_short_world(tmp_path):
     episode_mod = S.mod("learning.branch.episode")
     ep = S.cut_short_episode(tmp_path, cut={"b": "request-limit"})
-    (ep / "worlds" / "b" / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
+    (ep / "worlds" / T.world_id(ep, "b") / "report.md").write_text(S.report_text("unresolved"), encoding="utf-8")
     row = S.graded(ep)["b"]
-    said = episode_mod.verdicts(ep)
+    said = J.through_view(ep, episode_mod.verdicts)
     assert row.get("ungradable") is True, "the cut-short world graded as a verdict"
     assert row.get("cut_short") == "request-limit"
     assert said.get("b") == "unresolved", (

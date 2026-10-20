@@ -16,7 +16,6 @@ def _tmp_roots(tmp_path, monkeypatch):
 
 def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anything(
         tmp_path, capsys):
-    from defender.episodes._episode_handle import episode_dir
     from defender.learning.branch import cli as branch_cli
 
     _base, src = T.runs_base(tmp_path, pre_snapshot=True)
@@ -28,8 +27,9 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
         preflights.append((model, branching))
         return 0
 
-    episode = episode_dir(T.current_tenant().data_root, T.EPISODE_ID)
-    assert not episode.exists(), "the fixture already holds the episode"
+    tenant = T.current_tenant()
+    episodes = tenant.data_root / tenant.id / "episodes"
+    before = set(episodes.glob("*"))
     try:
         got: object = branch_cli.main(
             ["--tenant", src.parent.parent.name, src.name, str(T.BRANCH_MESSAGE_ID),
@@ -45,7 +45,7 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
         "snapshot — the fork command spent before refusing")
     assert preflights == [], f"the role-model preflight ran before the refusal: {preflights}"
     assert spawn.launches == [], "a sibling process was started for a snapshot-less source"
-    assert not episode.exists(), f"the refused fork left an episode directory: {episode}"
+    assert set(episodes.glob("*")) == before, "the refused fork claimed an episode"
     assert isinstance(got, BaseException) or got != 0, f"the fork was not refused: {got!r}"
     assert "snapshot" in text.lower(), (
         f"the refusal does not name the missing fork snapshot: {text[-400:]!r}")

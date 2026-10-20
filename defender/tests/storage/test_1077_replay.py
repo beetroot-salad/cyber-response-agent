@@ -1,5 +1,6 @@
 """#1077 — the properties that must survive the migration, driven through the real run."""
 from __future__ import annotations
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
@@ -34,15 +35,6 @@ def _closing_turns() -> list[Turn]:
     ]
 
 
-def _with_record(base: Path) -> Path:
-    """`base` holding its tenant record naming `DEFAULT_TENANT_ID`. #1105 NH-3: `Run.for_tenant`
-    refuses a runs base with no `_tenant.json`, so the record is planted first — as run setup
-    writes it before building the handle."""
-    if not (base / "_tenant.json").exists():
-        S.plant_tenant_record(base)
-    return base
-
-
 def _read_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
@@ -54,15 +46,16 @@ def _read_rows(path: Path) -> list[dict]:
 
 def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_handle(
         tmp_path: Path):
-    """Leads and queries written through the handle stay append-only and are readable by a
-    second process while the run is still going."""
     run_dir = materialize(tmp_path, GOLDEN)
     base = run_dir.parent
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     queries = S.member(handle, "tables", "queries")
     leads = S.member(handle, "tables", "leads", S.LEAD_ID)
 
     queries.append([{"seq": 0, "system": "elastic"}])
+    # A lead claim is an EXCLUSIVE-CREATE sidecar (the design's own words for `tables`:
+    # "append-only; exclusive-create claims"): written once, and a second claim on the same
+    # lead id collides — which is what keeps two dispatches of one lead from being one row.
     leads.write(json.dumps({"lead_id": S.LEAD_ID, "goal": "first"}))
     with pytest.raises(Exception, match="write-once"):
         leads.write(json.dumps({"lead_id": S.LEAD_ID, "goal": "second"}))
@@ -94,11 +87,9 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
 
 
 def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: Path):
-    """A resume or fork joining the source run's session store observes either the fully committed
-    last append or its absence, never a torn message row without its payload."""
     base = SS.runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-resume"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-resume")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
 
     with S.member(handle, "session", "session_db", "case-alpha").open() as store:
         session_id, _ = SS.mid_pair_session(store)
@@ -127,8 +118,6 @@ def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: P
 
 
 def test_a_second_claim_on_one_lead_still_loses_the_exclusive_create(tmp_path: Path):
-    """Two claims on one lead through the handle leave exactly one winner, the loser refused by
-    the exclusive create."""
     from defender.hooks import record_lead
     run_dir = S.seed_run_tree(S.make_run_dir(S.make_runs_base(tmp_path)))
     dispatch = {"run_dir": str(run_dir), "lead_id": S.LEAD_ID, "goal": "first claim",
@@ -152,8 +141,8 @@ def test_a_second_claim_on_one_lead_still_loses_the_exclusive_create(tmp_path: P
 def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
     from defender._io import append_jsonl
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-mixed"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-mixed")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     queries = S.member(handle, "tables", "queries")
 
     queries.append([{"seq": 0, "route": "handle"}])
@@ -170,7 +159,7 @@ def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
 
 def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-outside"))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-outside")))
 
     # (1) THE HOOK's arm retired with #1235: the accounting-failures sidecar it wrote is gone
     # (the budget is counted in the run process's memory, and nothing writes the sidecar).
@@ -191,11 +180,9 @@ def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
 
 
 def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_path: Path):
-    """A failed wire-log, review-trace, sidecar or tool-trace write is recorded as a partial
-    failure and does not fail the run."""
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-besteffort"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-besteffort")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
 
     # A REAL obstruction through the REAL primitive: the record's own path is occupied by a
     # directory, so today's append seam raises on disk. No exception is injected.
@@ -212,15 +199,21 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
 
     # POSITIVE CONTROL: with the obstruction gone the same append lands and records nothing.
     trace.path.rmdir()
-    clean = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=base)
+    clean = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     S.member(clean, "observability", "tool_trace").append([{"row": 2}])
     assert _read_rows(trace.path) == [{"row": 2}]
     assert clean.partial_failures == ()
 
-    (base / S.TENANT_RECORD_NAME).unlink()
-    (base / S.TENANT_RECORD_NAME).mkdir()
-    with pytest.raises(S.tenant().TenantRefused):
-        S.tenant().ensure_runs_base_record(base, "census-tenant")
+    # THE CONTRAST, in one test: the SAME obstruction on a decision-bearing write fails loudly
+    # rather than being recorded and shrugged off. #1187 (R1): the runs-base record this used
+    # to obstruct is retired (and `Run.under` reads none), so the obstructed write is the
+    # run's own report — a record the run's verdict is read from, never best-effort.
+    report = S.member(clean, "documents", "report")
+    report.path.mkdir(parents=True)
+    with pytest.raises(OSError, match="non-plain or aliased"):
+        report.write(S.report_text("# the contrast\n"))
+    assert clean.partial_failures == (), (
+        "a failed report write was recorded as a partial failure and shrugged off")
 
 
 # g01 / g05 / h49 — the payloads the run writes, and who wrote each wire-log line
@@ -234,6 +227,9 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     from defender.runtime.observe import POLICY_DENIAL_EVENT_TYPE
     rows = _read_rows(S.RunPaths(run_dir).wire_log)
     assert rows, "the replay produced no wire-log records"
+    # Every AGENT-produced record: a message, a budget refusal. A policy denial is the host's
+    # bounded projection of a call, keyed by `role`, whose exact key set #632 pins
+    # (`test_denial_audit_632`) — it names its writer already and gains no second field.
     rows = [r for r in rows if r.get("event_type") != POLICY_DENIAL_EVENT_TYPE]
     missing = [i for i, r in enumerate(rows) if not r.get("writer_id")]
     assert missing == [], (
@@ -245,6 +241,8 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
     # And this is the trade-off O3's second exemption pays for: the wire log's BYTES change.
     assert "writer_id" in S.RunPaths(run_dir).wire_log.read_text(encoding="utf-8")
 
+    # The reader retains writer IDs on every record in the shared wire log.
+    # Import data first to resolve its existing import cycle with messages.
     import defender.presentation.visualize_data  # noqa: F401
     from defender.presentation.visualize_messages import load_messages
     assert load_messages(run_dir) == rows, (
@@ -256,8 +254,8 @@ def test_every_wire_log_record_carries_a_writer_id_that_tells_main_from_each_sub
 def test_wire_log_writers_stay_distinguishable_under_concurrent_main_and_subagent_appends(
         tmp_path: Path):
     base = S.make_runs_base(tmp_path)
-    run_dir = S.seed_run_tree(S.make_run_dir(base, "run-concurrent"))
-    handle = S.Run().for_tenant(S.DEFAULT_TENANT_ID, run_dir.name, runs_base=_with_record(base))
+    run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-concurrent")))
+    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     wire = S.member(handle, "observability", "wire_log")
 
     writers = ("MAIN", "gather-l-aaa111", "gather-l-bbb222")

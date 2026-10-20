@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from defender.episodes._episode_handle import Episode
-from defender.episodes._episodes_root import episode_dir
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.run_repository import RUN_LAYOUT
 from defender.execution import bash_exec
 from defender import box as box_mod
@@ -20,7 +20,7 @@ from defender.tests.support.tenancy import _tenants1106
 ALERT = (Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "e2e" / "golden-sshpivot-ab3"
          / "alert.json").read_bytes()
 SPEC = BoxSpec(runtime="runc", rootfs=V.STATIC_ROOTFS)
-EPISODE_ID = "20261015t120000z-view-case-n7"
+EPISODE_ID = fixture_uuid("20261015t120000z-view-case-n7")
 
 
 def _start(run_dir: Path, layout: V.Layout, docker: V.FakeDocker) -> None:
@@ -94,14 +94,18 @@ def test_b1_two_host_layouts_render_the_same_create_command(tmp_path):
 def _arm_run(layout: V.Layout, tmp_path: Path, monkeypatch) -> object:
     """Create a materialized arm in the episode-owned runs container."""
     from defender.tests.support.storage import _alert_plant
+    from defender import _yaml
+    from defender.tests.support.learning.branch import _triplet_947 as T
 
-    monkeypatch.setenv("DEFENDER_EPISODES_BASE", str(tmp_path / "episodes-root"))
-    ep_dir = episode_dir(layout.data_root, EPISODE_ID)
+    ep_dir = layout.data_root / layout.tenant_id / "episodes" / EPISODE_ID
     ep_dir.parent.mkdir(parents=True, exist_ok=True)
     with Episode.create(ep_dir) as episode:
+        episode.family.create(_yaml.safe_dump(T.family_doc(
+            episode_id=EPISODE_ID, worlds=[T.world_doc("b", world_id=fixture_uuid("world:view-box:b"),
+                                                       role="A", axis=None, facts=[])])))
         view = layout.tenant.runs_repository().episode(EPISODE_ID, held=episode)
-        view.create_container()
-        arm = view.create(view.arm_id("b"))
+        view.start_runs((fixture_uuid("world:view-box:b"),))
+        arm = view.create(view.arm_id(fixture_uuid("world:view-box:b")))
     Path(arm.run_dir).mkdir()
     _alert_plant.plant_alert(Path(arm.run_dir), ALERT)
     return arm
@@ -132,7 +136,7 @@ def test_b1_o2_an_arm_and_a_natural_run_get_the_same_create_command(tmp_path, mo
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     staged = tmp_path / "alert.json"
     staged.write_bytes(ALERT)
-    natural = run_common.materialize_run(staged, "20261015t120000z-view-nat", tenant=layout.tenant)
+    natural = run_common.materialize_run(staged, fixture_uuid("20261015t120000z-view-nat"), tenant=layout.tenant)
     arm = _arm_run(layout, tmp_path, monkeypatch)
 
     cn = _lifecycle_create(natural, layout)

@@ -144,6 +144,7 @@ import contextlib
 import hashlib
 import importlib
 import json
+import logging
 import os
 import threading
 import time
@@ -154,6 +155,8 @@ from pathlib import Path
 from typing import Any
 
 from defender import _yaml
+
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.support.learning.judge import _judge_921 as J
 from defender.tests.support.tenancy import _tenants1106 as T6
@@ -295,8 +298,10 @@ def judge_refused_cls() -> type[BaseException]:
 
 # Re-exported from the #947 / #921 machinery, unchanged.
 EPISODE_ID = T.EPISODE_ID
-EPISODE_TOKEN = T.EPISODE_TOKEN
 SOURCE_RUN_ID = T.SOURCE_RUN_ID
+#: The run id a direct (unbranched) investigation fixture runs under (#1187: a uuid4 — `RunId`
+#: admits canonical lowercase UUID text only).
+RUN_ID = "9c2e4b1a-7d3f-4e5a-8b6c-1d2e3f4a5b6c"
 AS_OF = T.AS_OF
 AS_OF_DT = datetime(2026, 7, 28, 16, 18, 45, tzinfo=UTC)
 WORLDS = ("a", "b", "c")
@@ -313,7 +318,7 @@ def no_preflight(*_args: Any, **_kw: Any) -> int:
     refuse with a TypeError."""
     return 0
 
-world_token = T.world_token
+fixture_world_id = T.fixture_world_id
 untrusted_frames = T.untrusted_frames
 outside_untrusted_frames = T.outside_untrusted_frames
 assert_wrapped_untrusted = T.assert_wrapped_untrusted
@@ -325,16 +330,16 @@ def judge_reply(*, systems: tuple[str, ...] = ("idp",), bucket: str = "lead-set"
     return as_reply_text(J.reply_doc(findings=[], bucket=bucket, systems=list(systems)))
 
 
-def judge_label(agent_id: str) -> str | None:
-    """The world a judge call is about, from its agent id: `judge:<label>:<n>` -> `<label>`
+def judge_identity(agent_id: str) -> str | None:
+    """The persisted UUID a judge call names: `judge:<world UUID>:<n>`
     (the family-scope call is `judge:family:<n>`)."""
     parts = str(agent_id).split(":")
     return parts[1] if len(parts) >= 3 and parts[0] == "judge" else None
 
 
-def judge_called_for(judge: FakeJudge, label: str) -> bool:
-    """Whether the judge model was called for world `label` (agent id `judge:<label>:<n>`)."""
-    return any(str(a).startswith(f"judge:{label}:") for a in judge.agent_ids)
+def judge_called_for(judge: FakeJudge, world_id: str) -> bool:
+    """Whether a model call names the explicit world UUID."""
+    return any(str(a).startswith(f"judge:{world_id}:") for a in judge.agent_ids)
 archived_judge_world = J.archived_judge_world
 
 
@@ -382,7 +387,7 @@ def provider_outage(status: int | None = OUTAGE, *,
 SYSTEMS = ("edr", "idp", "siem-x")
 LAB_SYSTEMS = ("change-mgmt", "cmdb", "elastic", "host-state", "identity", "tacit-knowledge",
                "threat-intel", "ticket")
-FIXTURE_TENANT = "acme"
+FIXTURE_TENANT = fixture_uuid("tenant:acme")
 
 #: One stub adapter module, planted per system. It reads its answers from the estate's JSON
 #: file AT CALL TIME (so a scenario may change an answer mid-test) and appends every call it
@@ -971,7 +976,7 @@ def world_v2(label: str, *, facts: list[dict] | None = None, role: str = "B",
              disposition_declared: str = "malicious", label_basis: str = "policy-rule",
              **over: Any) -> dict:
     """One v2 world. `facts=None` gives one default fact; pass `[]` for a control world."""
-    doc = {"world_id": label, "role": role, "story": story, "axis": axis,
+    doc = {"label": label, "world_id": T.fixture_world_id(label), "role": role, "story": story, "axis": axis,
            "disposition_declared": disposition_declared, "label_basis": label_basis,
            "facts": [fact()] if facts is None else facts}
     doc.update(over)
@@ -1092,16 +1097,16 @@ def read_outcome(ep: Path) -> dict | None:
 
 def world_record(ep: Path, label: str, reason: str = REASON_UNSERVABLE, *,
                  call: Mapping[str, Any] | None = None, detail: str = "") -> Path:
-    path = Path(ep) / WORLD_RECORDS / f"{label}.yaml"
+    path = Path(ep) / WORLD_RECORDS / f"{T.world_id(ep, label)}.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_yaml.safe_dump({"world": label, "reason": reason,
+    path.write_text(_yaml.safe_dump({"world": label, "world_id": T.world_id(ep, label), "reason": reason,
                                      "call": dict(call) if call else None, "detail": detail}),
                     encoding="utf-8")
     return path
 
 
 def read_world_record(ep: Path, label: str) -> dict | None:
-    path = Path(ep) / WORLD_RECORDS / f"{label}.yaml"
+    path = Path(ep) / WORLD_RECORDS / f"{T.world_id(ep, label)}.yaml"
     if not path.is_file():
         return None
     return _yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -1121,7 +1126,7 @@ def read_samples(ep: Path) -> dict | None:
 
 
 def oracle_dir(ep: Path, label: str) -> Path:
-    return Path(ep) / ORACLE_DIRNAME / label
+    return Path(ep) / ORACLE_DIRNAME / T.world_id(ep, label)
 
 
 def oracle_rows(ep: Path, label: str, name: str) -> list[dict]:
@@ -1129,8 +1134,12 @@ def oracle_rows(ep: Path, label: str, name: str) -> list[dict]:
     return read_jsonl(oracle_dir(ep, label) / f"{name}.jsonl")
 
 
+def _episode_world_id(ep: Path, label: str) -> str:
+    return T.world_id(ep, label)
+
+
 def ledger_path(ep: Path, label: str) -> Path:
-    return Path(ep) / "served" / f"{world_token(label)}.jsonl"
+    return Path(ep) / "served" / f"{_episode_world_id(ep, label)}.jsonl"
 
 
 def ledger_rows(ep: Path, label: str) -> list[dict]:
@@ -1160,8 +1169,8 @@ def write_call_table(ep: Path, label: str, ledger: list[dict]) -> Path:
     `(lead_id, seq)` — written even when the ledger is empty."""
     rq = mod("runtime.record_query")
     breaker = mod("runtime.circuit_breaker")
-    world = Path(ep) / "worlds" / label
-    token = world_token(label)
+    world = Path(ep) / "worlds" / T.world_id(ep, label)
+    token = _episode_world_id(ep, label)
     lines: list[str] = []
     joined: list[dict] = []
     for i, row in enumerate(ledger):
@@ -1197,7 +1206,7 @@ def ledger_row(source: str, *, system: str = "idp", verb: str = "query",
     row = {"system": system, "verb": verb, "params": dict(params or query_params()),
            "payload_text": json.dumps(payload if payload is not None else {"rows": []},
                                       sort_keys=True),
-           "source": source, "world_id": world_token(label)}
+           "source": source, "world_id": fixture_world_id(label)}
     row.update(extra)
     return row
 
@@ -1225,19 +1234,27 @@ def strings_in(value: Any) -> list[str]:
 def judged_episode(tmp_path: Path, *, doc: dict | None = None,
                    labels: tuple[str, ...] = WORLDS, outcome: str | None = "accepted",
                    ledgers: dict[str, list[dict]] | None = None,
-                   root: Path | None = None, samples: bool = True, **world_kw: Any) -> Path:
+                   root: Path | None = None, samples: bool = True,
+                   episode_id: str = EPISODE_ID, **world_kw: Any) -> Path:
     """A fully archived v2 episode — the judge's and the page's whole input: v2 manifest, a
     base recording, every world archived under `worlds/<X>/` (the #921 archive builder), the
     world ledgers with the query-table rows they answered (`write_call_table`), each planted
     world's oracle store directory, and pre-flight's outcome record (`outcome=None` writes
-    none)."""
-    ep = episode_v2(tmp_path, doc=doc, root=root, base_rows=[
+    none).
+
+    #1187 R2 (review-4 F38): an episode whose worlds are archived reached RUNS, so it carries
+    `runs/` and the arm roster naming every manifest world (the fixture's explicit RUNS step,
+    `_triplet_947.plant_roster`, taken last). Without it the page renders the episode with no
+    world sections (design Flow 4: manifest present, roster absent = never reached RUNS), a
+    state this fixture's archived worlds contradict. No roster is planted when no world is
+    archived (`labels=()`)."""
+    ep = episode_v2(tmp_path, doc=doc, root=root, episode_id=episode_id, base_rows=[
         captured("idp", "query", query_params("user:alice"),
                  {"rows": [{"user": "alice", "event_id": "e-100", "action": "logon"}]})])
     manifest = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
-    declared = {w["world_id"]: w.get("disposition_declared", "malicious")
+    declared = {w["label"]: w.get("disposition_declared", "malicious")
                 for w in manifest["worlds"]}
-    planted = {w["world_id"] for w in manifest["worlds"] if w.get("role") != "A"}
+    planted = {w["label"] for w in manifest["worlds"] if w.get("role") != "A"}
     for label in labels:
         J.archived_judge_world(ep, label, disposition=declared.get(label, "malicious"),
                                **world_kw)
@@ -1254,6 +1271,8 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
                             for system in manifest.get("served_systems") or []})
     if outcome is not None:
         outcome_record(ep, outcome)
+    if labels:
+        T.plant_roster(ep)
     return ep
 
 
@@ -1263,11 +1282,23 @@ def judged_episode(tmp_path: Path, *, doc: dict | None = None,
 
 
 def load_world(ep: Path, label: str) -> Any:
-    """The sibling's `ResumeWorld` for `label`, through the REAL loader."""
+    """The sibling's `ResumeWorld` for `label`, through the REAL loader, as the sibling builds it
+    after its roster check (#1187): the manifest loaded with the episode's own folder name as the
+    expected id (R5, `expected_episode_id=`), and the world handed the episode's ARM ROSTER
+    (`arm_ids=`, `{label: RunId}`) — its own run id and the redaction set's arm ids come from
+    the roster, never composed (O4, S-red). A hand-built episode with no roster yet takes the
+    fixture's explicit RUNS step here (`_triplet_947.plant_roster`: `runs/`, then a roster
+    naming every manifest world); the roster reader itself never writes one (review-3 F33)."""
+    from defender.run_repository import RunId
+
     fam = mod(FAMILY)
-    with mod("episodes._episode_handle").Episode.create(Path(ep)) as handle:
-        family = fam.load_family(handle.view())
-    return fam.resume_world_from(family, label, Path(ep))
+    ep = Path(ep)
+    if not (ep / T.ROSTER_NAME).is_file():
+        T.plant_roster(ep)
+    arm_ids = {name: RunId.parse(arm) for name, arm in T.read_roster(ep).items()}
+    with mod("episodes._episode_handle").Episode.create(ep) as handle:
+        family = fam.load_family(handle.view(), expected_episode_id=ep.name)
+    return fam.resume_world_from(family, label, ep, arm_ids=arm_ids)
 
 
 def world_ledger(ep: Path, label: str) -> Any:
@@ -1275,7 +1306,7 @@ def world_ledger(ep: Path, label: str) -> Any:
     episode = mod("episodes._episode_handle").Episode.create(Path(ep))
     with contextlib.suppress(FileExistsError):
         episode.served_base.create("")
-    return sym(LEDGER, "Ledger").for_world(episode, world_token(label)).declare()
+    return sym(LEDGER, "Ledger").for_world(episode, _episode_world_id(ep, label)).declare()
 
 
 def serving(*, oracle: Any = None, verifier: Any = None, box: Callable[[], Any] | None = None,
@@ -1360,7 +1391,7 @@ def plain_registry(est: Estate) -> Any:
                                             grant_home=rt.table_pointer)
 
 
-def run_state(run_dir: Path, run_id: str = "run-1224") -> Any:
+def run_state(run_dir: Path, run_id: str = RUN_ID) -> Any:
     """A fresh run's `RunState` (#1235 round 2) — what a direct registry call's context carries
     when the scenario needs the investigator's clock to pause and resume (a context with no run
     state pauses none). Imported lazily: the module is new in round 2."""
@@ -1426,7 +1457,7 @@ def lead_rows(run_dir: Path) -> list[dict]:
 
 
 def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
-                 run_id: str = "run-1224", limits: Any = None, tenant: Any = None,
+                 run_id: str = RUN_ID, limits: Any = None, tenant: Any = None,
                  **kw: Any) -> tuple[Path, Any]:
     """A whole investigation through the replay harness (the `test_1106_query_lane` shape):
     the main loop dispatches ONE gather lead on `system`, whose scripted turns are
@@ -1439,7 +1470,7 @@ def drive_gather(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system:
 
 
 def drive_gather_run(tmp_path: Path, *, verbs: Any, gather_turns: list[Any], system: str = "idp",
-                     run_id: str = "run-1224", limits: Any = None, tenant: Any = None,
+                     run_id: str = RUN_ID, limits: Any = None, tenant: Any = None,
                      **kw: Any) -> tuple[Path, Any, Any]:
     """`drive_gather`, also handing back the run's one `RunState` (#1235: `drive()` injects it
     and returns it as `["run_state"]`) — where a scenario reads the run's budget or breaker,
@@ -1631,7 +1662,7 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
 
     from defender.run_repository import SessionPaths
 
-    store = ss.open_store(case_id=T.SOURCE_CASE_ID, sessions=SessionPaths(base))
+    store = ss.open_store(case_id=T.source_case_id(src), sessions=SessionPaths(base))
     try:
         session_id = session_for_run(store, src, source_run=_run_handle_1165(src))
         call_id = f"gather-{lead}-after-branch"
@@ -1649,8 +1680,9 @@ def questioner_for(doc: dict | None = None) -> FakeAgent:
     """The question-writer double: call 1 answers the family, then one call per authored seat
     (`author_family`'s protocol), each reply a document."""
     doc = doc if doc is not None else family_v2()  # lint-default: ok — a test builder's fresh per-call double or fixture, never a shared instance
-    seats = [w for w in doc["worlds"] if w.get("role") != "A"]
-    return FakeAgent(doc, *seats)
+    authored = T.declaration(doc)
+    seats = [w for w in authored["worlds"] if w.get("role") != "A"]
+    return FakeAgent(authored, *seats)
 
 
 def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
@@ -1676,9 +1708,11 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
         seams["verifier"] = verifier.model
     cli = mod(CLI)
     message = ""
-    root = Path(os.environ.get(T.EPISODES_BASE_ENV, "")) if os.environ.get(
-        T.EPISODES_BASE_ENV) else None
-    before = {p.name for p in root.iterdir()} if root is not None and root.is_dir() else set()
+    # #1187 (O9): the episode lands under the launching tenant's own `<T>/episodes/`, no
+    # configured root; the launcher mints its id, so it is found as the ONE new folder there.
+    tenant_id = src.parent.parent.name
+    root = Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
+    before = {p.name for p in root.iterdir()} if root.is_dir() else set()
     try:
         # #1105 PR 2 (declared change 1): the tenant and the source run by id — the source sits
         # at `<data root>/<tenant>/runs/<run id>`.
@@ -1689,18 +1723,52 @@ def launch(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = None,
             rc = stop.code
         else:
             rc, message = 2, str(stop.code)
-    # The episode this launch created: the ONE new directory under the configured episodes root
-    # (N17: a launch never reuses a directory, so an implementation may mint a fresh id per
-    # launch); the derived id's directory when nothing new appeared (a refusal before minting).
+    # The episode this launch created: the ONE new folder under the tenant's episodes folder
+    # (N17: a launch never reuses one). A launch refused before it claimed an episode leaves
+    # none, and `ep` is then a name under that folder that nothing made (its records read as
+    # absent).
     fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before) \
-        if root is not None and root.is_dir() else []
-    if len(fresh) == 1:
-        ep = fresh[0]
-    else:
-        from defender.episodes._episode_handle import episode_dir
-
-        ep = episode_dir(T.current_tenant().data_root, EPISODE_ID)
+        if root.is_dir() else []
+    ep = fresh[0] if len(fresh) == 1 else root / NO_EPISODE
+    log_refusal(rc, message)
     return Launch(rc=rc, message=message, spawn=spawn, ep=ep)
+
+
+def log_refusal(rc: Any, message: str) -> None:
+    """Log a launch's refusal (a WARNING on this module's logger), so a test that fails
+    downstream of a refused launch — no episode, no outcome — still carries WHY in its captured
+    log: the refusal text is otherwise held only in the returned `Launch`."""
+    if rc not in (0, None) and message:
+        logging.getLogger(__name__).warning("the launch was refused (rc=%s): %s", rc, message)
+
+
+#: The name `launch()` reports for a launch that made no episode (refused before claiming one):
+#: not a UUID, so no launch can ever make a folder by it.
+NO_EPISODE = "no-episode-was-made"
+
+
+def tenant_episodes(tenant_id: str = FIXTURE_TENANT) -> Path:
+    """`<data root>/<tenant_id>/episodes` — where #1187 (Layout A, O9) puts every episode a
+    launch over that tenant makes."""
+    return Path(os.environ["DEFENDER_DATA_ROOT"]) / tenant_id / "episodes"
+
+
+def new_episode(root: Path, before: set[str]) -> Path:
+    """The ONE folder under `root` whose name is not in `before` (a launch's own episode — the
+    launcher mints its id, N17: it never reuses one), else `root / NO_EPISODE`."""
+    fresh = sorted(p for p in root.iterdir() if p.is_dir() and p.name not in before) \
+        if root.is_dir() else []
+    return fresh[0] if len(fresh) == 1 else root / NO_EPISODE
+
+
+def episode_of(argv: list[str]) -> Path | None:
+    """The episode folder a sibling started with `argv` runs in: `<data root>/<T>/episodes/<ep>`
+    from its own `--tenant` and `--episode` (#1187), or None when either is missing."""
+    flags = {argv[i]: argv[i + 1] for i in range(len(argv) - 1)
+             if argv[i] in ("--tenant", "--episode")}
+    if "--tenant" not in flags or "--episode" not in flags:
+        return None
+    return tenant_episodes(flags["--tenant"]) / flags["--episode"]
 
 
 @dataclass(frozen=True)

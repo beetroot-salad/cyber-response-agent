@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
 import os
@@ -154,7 +155,8 @@ def test_the_receipt_lives_beside_the_run_dir_where_the_box_cannot_reach(tmp_pat
     from defender.integrations import ticket_writer
     from defender.presentation import visualize_run
 
-    run_dir = tmp_path / "runs" / "run-1"
+    # #1187 (declared change 1): a run folder's name is its canonical UUID run id.
+    run_dir = tmp_path / "runs" / fixture_uuid("run-1")
     run_dir.mkdir(parents=True)
     path = S.receipt_path(run_dir)
     assert path.parent == run_dir.parent, f"the receipt is not beside the run dir: {path}"

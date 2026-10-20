@@ -145,8 +145,8 @@ def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_fi
         assert _stage_of(page, f"tx-{stem}") == "stage-questioner", stem
     judge_blocks = _tx_order(page, "stage-judge")
     assert judge_blocks[0] == f"tx-judge_{E.FAMILY}_0_trace", judge_blocks
-    assert set(judge_blocks) == {f"tx-judge_{E.FAMILY}_0_trace", f"tx-judge_{E.PASSTHROUGH_WORLD}_0_trace",
-                                 f"tx-judge_{E.GRADED_WORLD}_0_trace"}, judge_blocks
+    assert set(judge_blocks) == {f"tx-judge_{E.FAMILY}_0_trace", f"tx-judge_{T.fixture_world_id(E.PASSTHROUGH_WORLD)}_0_trace",
+                                 f"tx-judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_trace"}, judge_blocks
     family = page.text_of(f"tx-judge_{E.FAMILY}_0_trace")
     assert f"framed prompt for {E.FAMILY}" in family, family
     assert "reply of" not in family, family
@@ -156,8 +156,8 @@ def test_1025_each_questioner_and_judge_trace_renders_a_labelled_block_family_fi
     entries = page.section(f"tx-judge_{E.FAMILY}_0_trace").find_all(cls="tx-entry")
     assert len(entries) == 1, [e.text() for e in entries]
 
-    E.write_framed(ep.dir, f"judge:{E.GRADED_WORLD}:0", prompt="P", reply=None, failure="the call FAILED-MARKER")
-    assert "the call FAILED-MARKER" in render(ep).text_of(f"tx-judge_{E.GRADED_WORLD}_0_trace")
+    E.write_framed(ep.dir, f"judge:{T.fixture_world_id(E.GRADED_WORLD)}:0", prompt="P", reply=None, failure="the call FAILED-MARKER")
+    assert "the call FAILED-MARKER" in render(ep).text_of(f"tx-judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_trace")
 
     launch = ST._launch(tmp_path)
     launched = E.read_page(launch.episode_dir)
@@ -217,12 +217,12 @@ def test_1025_trace_present_but_framed_absent(tmp_path):
     """A judge trace without its `_framed` twin renders its block's request from the plain trace's
     request row ."""
     ep = E.sample_episode(tmp_path)
-    (ep.dir / "wire_logs" / f"judge_{E.GRADED_WORLD}_0_framed_trace.jsonl").unlink()
-    E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:0", prompt="PLAIN-PROMPT <b>x</b>",
+    (ep.dir / "wire_logs" / f"judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_framed_trace.jsonl").unlink()
+    E.write_trace(ep.dir, f"judge:{T.fixture_world_id(E.GRADED_WORLD)}:0", prompt="PLAIN-PROMPT <b>x</b>",
                   instructions="PLAIN-INSTRUCTIONS", usage=S.judge_usage[2],
                   duration_ms=float(S.judge_ms[2]))
     page = render(ep)
-    block = page.text_of(f"tx-judge_{E.GRADED_WORLD}_0_trace")
+    block = page.text_of(f"tx-judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_trace")
     assert "PLAIN-PROMPT <b>x</b>" in block, block
     assert "PLAIN-INSTRUCTIONS" in block, block
     assert "&lt;b&gt;x&lt;/b&gt;" in page.raw
@@ -230,11 +230,11 @@ def test_1025_trace_present_but_framed_absent(tmp_path):
 
 def test_1025_a_framed_trace_row_carries_a_failure_field_instead_of_a_reply(tmp_path):
     ep = E.sample_episode(tmp_path)
-    E.write_trace(ep.dir, f"judge:{E.GRADED_WORLD}:0", response=False)
-    E.write_framed(ep.dir, f"judge:{E.GRADED_WORLD}:0", prompt="FRAMED-P", reply=None,
+    E.write_trace(ep.dir, f"judge:{T.fixture_world_id(E.GRADED_WORLD)}:0", response=False)
+    E.write_framed(ep.dir, f"judge:{T.fixture_world_id(E.GRADED_WORLD)}:0", prompt="FRAMED-P", reply=None,
                    failure="did not complete: <TimeoutError>")
     page = render(ep)
-    block = page.text_of(f"tx-judge_{E.GRADED_WORLD}_0_trace")
+    block = page.text_of(f"tx-judge_{T.fixture_world_id(E.GRADED_WORLD)}_0_trace")
     assert "FRAMED-P" in block, block
     assert "did not complete: <TimeoutError>" in block, block
     assert "$" not in block

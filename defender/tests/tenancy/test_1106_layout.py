@@ -1,6 +1,8 @@
 """Where tenant settings live: the playground tenant and tenant template resolve through the real resolver, the template grants nothing, and no settings file is readable by the model's read surfaces."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 import shutil
 import warnings
 from pathlib import Path
@@ -65,10 +67,10 @@ def test_the_templates_lead_zero_names_an_established_template_in_the_catalog():
 
 def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tmp_path):
     root = tmp_path / "tenants"
-    shutil.copytree(T.TEMPLATE_DIR, root / "newco" / "knowledge")
-    (root / "newco" / "knowledge" / "agent" / ".tenant-id").write_text("newco\n", encoding="utf-8")
-    T.mod("tenancy._tenant").create_tenant(root, "newco")
-    td = T.accept(root, "newco")
+    shutil.copytree(T.TEMPLATE_DIR, root / fixture_uuid("tenant:newco") / "knowledge")
+    (root / fixture_uuid("tenant:newco") / "knowledge" / "agent" / ".tenant-id").write_text(f"{fixture_uuid('tenant:newco')}\n", encoding="utf-8")
+    T.mod("tenancy._tenant").create_tenant(root, fixture_uuid("tenant:newco"))
+    td = T.accept(root, fixture_uuid("tenant:newco"))
     grants = T.run_grants(td.settings)
     assert grants.gather.entries == ()
     assert grants.correlation_system is None
@@ -93,7 +95,7 @@ def test_every_committed_tenant_passes_the_resolver(tmp_path):
     folders = _committed_tenant_dirs()
     assert folders, "no committed knowledge folder to check"
     for n, folder in enumerate(folders):
-        tenant_id = f"committed-{n}"
+        tenant_id = fixture_uuid(f"tenant:committed-{n}")
         shutil.copytree(folder, root / tenant_id / "knowledge")
         (root / tenant_id / "knowledge" / "agent" / ".tenant-id").write_text(
             f"{tenant_id}\n", encoding="utf-8")

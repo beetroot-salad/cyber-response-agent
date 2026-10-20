@@ -345,7 +345,7 @@ async def _drive_agent(  # noqa: PLR0913, C901 — the loop's own inputs: agent,
 
 def _bind_call_ids(state: RunState, verbs: Any, run_id: str) -> None:
     """Name the run in every call id its writers allocate (A12, #1234): the registry's own
-    `call_run` when it serves a branched world (the world token its served-ledger rows carry
+    `call_run` when it serves a branched world (the world UUID its served-ledger rows carry
     as `world_id`), else the run id. Bound before any writer runs, lead zero's included."""
     from ..query_tool import bind_call_ids
 
@@ -431,7 +431,7 @@ def _dispatch_catalogs(
 
 def _systems_at_run_start(
     state: RunState, systems: system_status.RunSystems | None, roster: RosterRead,
-    tenant: RunTenant, defender_dir: Path,
+    tenant: RunTenant, defender_dir: Path, *, known_ids: frozenset[str] = frozenset(),
 ) -> system_status.RunSystems:
     """The run's one judgement of its systems (#1256): the one `run.py` made before the run
     existed when handed it (`systems`), else — a direct caller, a run started without one —
@@ -441,7 +441,7 @@ def _systems_at_run_start(
     refused (O-8, the predicate over the verdict — never a second judgement), naming each down
     system."""
     judged = systems if systems is not None else system_status.judge_run(
-        roster, tenant, defender_dir=defender_dir)
+        roster, tenant, defender_dir=defender_dir, known_ids=known_ids)
     system_status.hold_at_start(state, judged)
     system_status.require_usable(tenant.grants, judged.down)
     return judged
@@ -690,7 +690,9 @@ async def run_investigation(  # noqa: PLR0913 — a composition root: every para
     make_model = make_model or providers.build_for_effort
     roster, verbs = _adapters_at_run_start(
         defender_dir, systems.roster if systems is not None else roster, verbs, tenant)
-    judged = _systems_at_run_start(state, systems, roster, tenant, defender_dir)
+    judged = _systems_at_run_start(
+        state, systems, roster, tenant, defender_dir,
+        known_ids=frozenset() if verbs is None else verbs.branch_identities())
     _bind_call_ids(state, verbs, run_id)
     correlation = _correlation_dispatch_at_run_start(
         tenant=tenant, resume=resume, lead_zero_verbs=lead_zero_verbs,

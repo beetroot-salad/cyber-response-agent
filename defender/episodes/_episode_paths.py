@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path, PurePosixPath
 
-from defender.records._run_id import CASE_STABLE_REQUIRED, is_case_stable_id
+from defender.records._run_id import episode_id_fault, uuid_id_fault
 from defender.run_repository._layout import (
     RUN_LAYOUT,
     ALERT,
@@ -23,6 +23,9 @@ from defender.run_repository._layout import (
 #: The episode-layout names — the only place they are spelled. Other modules must not re-bind
 #: them under local aliases (`tooling/lint/lint_run_records.py` refuses that).
 FAMILY_NAME = "family.yaml"
+#: The host-written arm roster (#1187): `{world_id: arm run id}` for every world the manifest
+#: declares, written once when the episode reaches RUNS and never by a sibling.
+ARM_ROSTER_NAME = "arms.json"
 REVIEW_NAME = "review.yaml"
 SAMPLES_NAME = "samples.yaml"
 JUDGE_NAME = "judge.yaml"
@@ -43,9 +46,9 @@ SOURCE_RECORD_NAME = "source_record.json"
 
 WORLDS_DIRNAME = "worlds"
 #: Each sibling's own record of why its world ended without a full run (#1224):
-#: `world_records/<label>.yaml`, written once by the sibling that went unservable.
+#: `world_records/<world_id>.yaml`, written once by the sibling that went unservable.
 WORLD_RECORDS_DIRNAME = "world_records"
-#: Each world's oracle-side store (#1224): `oracle/<label>/`, one writer per world.
+#: Each world's oracle-side store (#1224): `oracle/<world_id>/`, one writer per world.
 ORACLE_DIRNAME = "oracle"
 RUNS_DIRNAME = "runs"
 SERVED_DIRNAME = SERVED_PREFIX.rstrip("/")
@@ -55,7 +58,6 @@ BASE_FILENAME = "base.jsonl"
 #: lacks because the call failed or its payload was unreadable.
 UNRECORDED_FILENAME = "unrecorded.jsonl"
 PRIMING_LOCK_NAME = f"{SERVED_PREFIX}.priming"
-RUN_DIR_POINTER_NAME = "run_dir"
 
 #: The archive's names for the two sidecars, which live beside a run dir keyed by run id and
 #: are re-homed under the world as a bare `<kind>.json`. Other archived names are the run
@@ -67,24 +69,30 @@ ARCHIVED_RUN_END_NAME = "run_end.json"
 ARCHIVED_CALL_JOIN_NAME = "call_join.jsonl"
 
 
-def _check_label(label: object, *, what: str = "label") -> str:
-    """A world label: a plain, case-stable component — labels differing only in case would
-    merge into one directory on a case-insensitive filesystem."""
-    label = _check_component(label, what=what)
-    if not is_case_stable_id(label):
-        raise ValueError(f"{label!r} is not case-stable ({CASE_STABLE_REQUIRED})")
-    return label
+class EpisodeRefused(ValueError):
+    """The episode owner refused an episode id, before any path was built from it. The message
+    is operator-ready; each door adds its own prefix."""
 
 
-def check_minted_token(token: object) -> str:
-    """A served-world token being minted (`<episode token>.<label>`): a plain component that is
-    case-stable as a whole, so two tokens differing only in case are never two files on a host
-    that folds them to one. Every minted token is (the episode token is casefolded, the label
-    case-stable). Readers of an existing token use the shape check on `LAYOUT.served_world`."""
-    token = _check_component(token, what="token")
-    if not is_case_stable_id(token):
-        raise ValueError(f"{token!r} is not case-stable ({CASE_STABLE_REQUIRED})")
-    return token
+def refuse_bad_episode_id(episode_id: object) -> str:  # lint-dup: ok — one rule, two error classes: `_family` raises `FamilyError` for a manifest; the episode owner raises `EpisodeRefused` before any path is built (both state the rule once, in `_run_id.episode_id_fault`)
+    """`episode_id`, when it may name an episode folder under `<T>/episodes` — canonical
+    lowercase UUID text (`_run_id.episode_id_fault`, the one statement of the rule) — else
+    `EpisodeRefused`, before any path is built from it. Kept beside the layout, not in the
+    handle, so the handle stays a pure holder (#1133 D6': it defines no public function); the
+    handle re-exports it, where the doors' callers look for it."""
+    if type(episode_id) is not str:
+        raise EpisodeRefused(f"an episode id must be text, not {type(episode_id).__name__}")
+    if (why := episode_id_fault(episode_id)) is not None:
+        raise EpisodeRefused(why)
+    return episode_id
+
+
+def _check_world_id(world_id: object) -> str:
+    """A world's stored identity: canonical UUID text, independent of its world_id."""
+    if (why := uuid_id_fault(world_id, "world")) is not None:
+        raise ValueError(why)
+    assert isinstance(world_id, str)
+    return world_id
 
 
 # ==========================================================================================
@@ -99,7 +107,7 @@ def check_minted_token(token: object) -> str:
 @dataclasses.dataclass(frozen=True)
 class ArchivedWorldLeaves:
     """One archived world's records relative to the world dir, for readers bound at
-    `worlds/<label>/`. `WorldLayout` (episode-relative) composes from this, so each leaf is
+    `worlds/<world_id>/`. `WorldLayout` (episode-relative) composes from this, so each leaf is
     spelled once.
     """
 
@@ -174,11 +182,6 @@ class ArchivedWorldLeaves:
         return self.draws / f"{_check_index(n, what='n')}.yaml"
 
     @property
-    def run_dir_pointer(self) -> PurePosixPath:
-        """`run_dir` — a text pointer, never a link."""
-        return PurePosixPath(RUN_DIR_POINTER_NAME)
-
-    @property
     def review(self) -> PurePosixPath:
         return PurePosixPath(REVIEW_NAME)
 
@@ -197,15 +200,18 @@ WORLD_LEAVES = ArchivedWorldLeaves()
 
 @dataclasses.dataclass(frozen=True)
 class WorldLayout:
-    """One archived world's records relative to the episode dir — `worlds/<label>/...`.
+    """One archived world's records relative to the episode dir — `worlds/<world_id>/...`.
     Every record is `dir / WORLD_LEAVES.<name>`.
     """
 
-    label: str
+    world_id: str
+
+    def __post_init__(self) -> None:
+        _check_world_id(self.world_id)
 
     @property
     def dir(self) -> PurePosixPath:
-        return PurePosixPath(WORLDS_DIRNAME) / self.label
+        return PurePosixPath(WORLDS_DIRNAME) / self.world_id
 
     @property
     def report(self) -> PurePosixPath:
@@ -262,10 +268,6 @@ class WorldLayout:
         return self.dir / WORLD_LEAVES.draw(n)
 
     @property
-    def run_dir_pointer(self) -> PurePosixPath:
-        return self.dir / WORLD_LEAVES.run_dir_pointer
-
-    @property
     def review(self) -> PurePosixPath:
         return self.dir / WORLD_LEAVES.review
 
@@ -293,6 +295,12 @@ class EpisodeLayout:
         return PurePosixPath(PROVENANCE)
 
     @property
+    def arm_roster(self) -> PurePosixPath:
+        """`arms.json` — the episode's arm roster (#1187), present once the episode reached
+        RUNS."""
+        return PurePosixPath(ARM_ROSTER_NAME)
+
+    @property
     def review(self) -> PurePosixPath:
         return PurePosixPath(REVIEW_NAME)
 
@@ -303,6 +311,13 @@ class EpisodeLayout:
     @property
     def judge(self) -> PurePosixPath:
         return PurePosixPath(JUDGE_NAME)
+
+    @property
+    def family_draws(self) -> PurePosixPath:
+        return PurePosixPath(JUDGE_DRAWS_DIRNAME)
+
+    def family_draw(self, n: int) -> PurePosixPath:
+        return self.family_draws / f"{_check_index(n, what='draw')}.yaml"
 
     @property
     def timing(self) -> PurePosixPath:
@@ -363,19 +378,19 @@ class EpisodeLayout:
         """`world_records/` — every world's own record (#1224)."""
         return PurePosixPath(WORLD_RECORDS_DIRNAME)
 
-    def world_record(self, label: str) -> PurePosixPath:
-        """`world_records/<label>.yaml` — one world's own record (#1224). Shape check only."""
-        return PurePosixPath(WORLD_RECORDS_DIRNAME) / f"{_check_component(label, what='label')}.yaml"
+    def world_record(self, world_id: str) -> PurePosixPath:
+        """`world_records/<world_id>.yaml` — one world's own record (#1224). Shape check only."""
+        return PurePosixPath(WORLD_RECORDS_DIRNAME) / f"{_check_world_id(world_id)}.yaml"
 
-    def oracle_dir(self, label: str) -> PurePosixPath:
-        """`oracle/<label>/` — one world's oracle-side store (#1224). Shape check only."""
-        return PurePosixPath(ORACLE_DIRNAME) / _check_component(label, what="label")
+    def oracle_dir(self, world_id: str) -> PurePosixPath:
+        """`oracle/<world_id>/` — one world's oracle-side store (#1224). Shape check only."""
+        return PurePosixPath(ORACLE_DIRNAME) / _check_world_id(world_id)
 
     # -- composing ------------------------------------------------------------------------------
 
     def run(self, run_dir_name: str) -> PurePosixPath:
-        """`runs/<run dir name>` — an existing sibling run dir, by its on-disk name. Shape check
-        only; the minting rules live on `sibling_run_dir`.
+        """`runs/<run dir name>` — a sibling run dir, by its on-disk name: the arm id the roster
+        holds (#1187). Shape check only; the id rule is `RunId`'s.
         """
         return self.runs / _check_component(run_dir_name, what="run_dir_name")
 
@@ -384,20 +399,13 @@ class EpisodeLayout:
         spanning the episode and run layouts."""
         return self.run(run_dir_name) / RUN_LAYOUT.runtime_html
 
-    def world(self, label: str) -> WorldLayout:
-        """One archived world's records, by label.
+    def world(self, world_id: str) -> WorldLayout:
+        """One archived world's records, by its canonical UUID."""
+        return WorldLayout(_check_world_id(world_id))
 
-        Shape check only: readers must be able to open an existing directory whose label is not
-        case-stable. Case stability is enforced where a label is minted (`EpisodePaths.world`,
-        `world_dir`, `sibling_run_dir`).
-        """
-        return WorldLayout(_check_component(label, what="label"))
-
-    def served_world(self, token: str) -> PurePosixPath:
-        """`served/<episode token>.<label>.jsonl`, by the token a manifest already declares.
-        Shape check only, as for `world`; `EpisodePaths.served_world` enforces case stability.
-        """
-        return self.served / f"{_check_component(token, what='token')}.jsonl"
+    def served_world(self, world_id: str) -> PurePosixPath:
+        """The ledger named by a canonical world UUID persisted in the manifest."""
+        return self.served / f"{_check_world_id(world_id)}.jsonl"
 
     def stage_trace(self, stage: str) -> PurePosixPath:
         """`wire_logs/<stage>.trace.jsonl` — the episode-root wire trace of one learning stage."""
@@ -409,29 +417,18 @@ class EpisodeLayout:
         framed trace, named by `WIRE_LOG_NAMES`). One component."""
         return PurePosixPath(WIRE_LOG_DIR) / _check_component(name, what="wire log name")
 
-    def sibling_run_dir(self, episode_id: str, label: str) -> PurePosixPath:
-        """`runs/<episode_id>-<label>`. The label must be case-stable and `-`-free: episode ids
-        always contain `-`, so a `-`-free label keeps `ep-a-b` unambiguously `(ep-a, b)`."""
-        episode_id = _check_component(episode_id, what="episode_id")
-        if "-" in str(label):
-            raise ValueError(
-                f"label {label!r} carries '-', the sibling run id's own delimiter — two "
-                "distinct (episode, label) pairs would compose to one run directory")
-        label = _check_label(label)
-        return self.runs / f"{episode_id}-{label}"
-
 
 #: The layout, as one value. Stateless, so one instance serves every caller.
 LAYOUT = EpisodeLayout()
 
 
-#: `oracle/<label>/collisions.jsonl` — see `OracleStorePaths.collisions`.
+#: `oracle/<world_id>/collisions.jsonl` — see `OracleStorePaths.collisions`.
 COLLISIONS_FILENAME = "collisions.jsonl"
 
 
 @dataclasses.dataclass(frozen=True)
 class OracleStorePaths:
-    """The records of one world's oracle-side store, rooted at `root` (`oracle/<label>/` under
+    """The records of one world's oracle-side store, rooted at `root` (`oracle/<world_id>/` under
     the episode, or wherever the caller placed the store): frozen forged rows, recorded facts,
     the served-answer cache, the oracle-side ledger, the world's live base answers and the
     oracle's spend trace (#1224)."""
@@ -477,7 +474,7 @@ class OracleStorePaths:
 class EpisodePaths:
     """One episode's directories and accessors, rooted at ``episode_dir`` with a containment
     check on every composed path. The relative form is ``.rel`` / ``LAYOUT``. Locating the
-    episodes root is `learning/branch/cli.episodes_root`'s job, not this module's.
+    episodes folder (`<T>/episodes/`) is `run_repository`'s job, not this module's.
     """
 
     episode_dir: Path
@@ -494,10 +491,7 @@ class EpisodePaths:
         return _confine(self.episode_dir / rel, self.episode_dir, what=what)
 
     def at(self, rel: PurePosixPath, *, what: str = "path") -> Path:
-        """Root one of `LAYOUT`'s relative paths at this episode, with containment checked —
-        the read side's way to an absolute path, without the minting accessors' case-stability
-        rule.
-        """
+        """Root one of `LAYOUT`'s relative paths at this episode, checking containment."""
         return self._at(rel, what=what)
 
     # -- episode-root records -----------------------------------------------------------------
@@ -512,6 +506,10 @@ class EpisodePaths:
         return self.episode_dir / LAYOUT.family_stamp
 
     @property
+    def arm_roster(self) -> Path:
+        return self.episode_dir / LAYOUT.arm_roster
+
+    @property
     def review(self) -> Path:
         return self.episode_dir / LAYOUT.review
 
@@ -522,6 +520,13 @@ class EpisodePaths:
     @property
     def judge(self) -> Path:
         return self.episode_dir / LAYOUT.judge
+
+    @property
+    def family_draws(self) -> Path:
+        return self.episode_dir / LAYOUT.family_draws
+
+    def family_draw(self, n: int) -> Path:
+        return self._at(LAYOUT.family_draw(n), what="family_draw")
 
     @property
     def timing(self) -> Path:
@@ -575,50 +580,38 @@ class EpisodePaths:
 
     # -- composing accessors — shape + containment checked on every one ------------------------
 
-    def world(self, label: str) -> WorldPaths:
-        """One archived world, rooted at this episode. The write side, so the label must be
-        case-stable.
-        """
-        return WorldPaths(self.episode_dir, LAYOUT.world(_check_label(label)))
+    def world(self, world_id: str) -> WorldPaths:
+        """One archived world, rooted at this episode and addressed by canonical UUID."""
+        return WorldPaths(self.episode_dir, LAYOUT.world(_check_world_id(world_id)))
 
-    def served_world(self, token: str) -> Path:
-        """`served/<episode token>.<label>.jsonl` — the minting side. The label is the text
-        after the last dot (`_family.world_token_for` forbids dots in labels) and must be
-        case-stable.
-        """
-        return self._at(LAYOUT.served_world(check_minted_token(token)), what="served_world")
+    def served_world(self, world_id: str) -> Path:
+        """The world UUID's ledger; labels never participate in its filename."""
+        return self._at(LAYOUT.served_world(_check_world_id(world_id)), what="served_world")
 
-    def judge_draw(self, label: str, n: int) -> Path:
-        """`worlds/<label>/judge/<n>.yaml`."""
-        return self._at(LAYOUT.world(_check_label(label)).draw(n), what="judge_draw")
+    def judge_draw(self, world_id: str, n: int) -> Path:
+        """`worlds/<world_id>/judge/<n>.yaml`."""
+        return self._at(LAYOUT.world(_check_world_id(world_id)).draw(n), what="judge_draw")
 
     def stage_trace(self, stage: str) -> Path:
         return self._at(LAYOUT.stage_trace(stage), what="stage_trace")
 
-    def sibling_run_dir(self, episode_id: str, label: str) -> Path:
-        return self._at(LAYOUT.sibling_run_dir(episode_id, label), what="sibling_run_dir")
+    def world_dir(self, world_id: str) -> Path:
+        """`worlds/<world_id>`."""
+        return self._at(LAYOUT.world(_check_world_id(world_id)).dir, what="world_dir")
 
-    def world_dir(self, label: str) -> Path:
-        """`worlds/<label>`."""
-        return self._at(LAYOUT.world(_check_label(label)).dir, what="world_dir")
+    # -- the archive projection's flat spellings, per world_id ------------------------------------
 
-    def run_dir_pointer(self, label: str) -> Path:
-        return self._at(LAYOUT.world(_check_label(label)).run_dir_pointer,
-                        what="run_dir_pointer")
+    def gather_summaries(self, world_id: str) -> Path:
+        return self._at(LAYOUT.world(world_id).gather_summaries, what="gather_summaries")
 
-    # -- the archive projection's flat spellings, per label ------------------------------------
+    def lessons_loaded(self, world_id: str) -> Path:
+        return self._at(LAYOUT.world(world_id).lessons_loaded, what="lessons_loaded")
 
-    def gather_summaries(self, label: str) -> Path:
-        return self._at(LAYOUT.world(label).gather_summaries, what="gather_summaries")
+    def alert(self, world_id: str) -> Path:
+        return self._at(LAYOUT.world(world_id).alert, what="alert")
 
-    def lessons_loaded(self, label: str) -> Path:
-        return self._at(LAYOUT.world(label).lessons_loaded, what="lessons_loaded")
-
-    def alert(self, label: str) -> Path:
-        return self._at(LAYOUT.world(label).alert, what="alert")
-
-    def draws(self, label: str) -> Path:
-        return self._at(LAYOUT.world(label).draws, what="draws")
+    def draws(self, world_id: str) -> Path:
+        return self._at(LAYOUT.world(world_id).draws, what="draws")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -631,8 +624,8 @@ class WorldPaths:
     rel: WorldLayout
 
     @property
-    def label(self) -> str:
-        return self.rel.label
+    def world_id(self) -> str:
+        return self.rel.world_id
 
     def _at(self, rel: PurePosixPath, *, what: str) -> Path:
         return _confine(self.episode_dir / rel, self.episode_dir, what=what)
@@ -690,10 +683,6 @@ class WorldPaths:
 
     def draw(self, n: int) -> Path:
         return self._at(self.rel.draw(n), what="judge_draw")
-
-    @property
-    def run_dir_pointer(self) -> Path:
-        return self._at(self.rel.run_dir_pointer, what="run_dir_pointer")
 
     @property
     def review(self) -> Path:

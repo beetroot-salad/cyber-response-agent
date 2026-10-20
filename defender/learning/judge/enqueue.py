@@ -257,7 +257,7 @@ def enqueue_report(episode_dir: Path, record: dict[str, Any], *, state: Learning
 
 
 def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one keyword each
-    *, run_id: str, label: str, draw: str, index: int, subject: str, finding: dict[str, Any],
+    *, run_id: str, label: str, world_id: str | None, draw: str, index: int, subject: str, finding: dict[str, Any],
     alert_rule_key: str | None, citations: Sequence[str] = (), contrast: Sequence[str] = (),
     world_label_doubted: bool = False, provenance: str = "model",
     recorded_signature: str | None = None,
@@ -280,6 +280,11 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
     doubt mark); a world row carries `world` (the pass's stamp, `None` for the family call),
     the finding's own `systems` (A5) and `provenance`. `direction` is derived from `subject`
     so the two cannot disagree."""
+    if (label == "family") != (world_id is None):
+        raise ValueError("a world finding needs its host UUID; only the family call has none")
+    source = f"episodes/{run_id}"
+    if world_id is not None:
+        source += f"/{LAYOUT.world(world_id).dir}"
     direction = SUBJECT_WORLD if subject == SUBJECT_WORLD else DIRECTION_FAMILY
     row: dict[str, Any] = {
         "schema_version": 1,
@@ -293,8 +298,7 @@ def build_finding_row(  # noqa: PLR0913 — the FindingRow's own inputs, one key
         "subject_topic": finding.get("topic"),
         "finding": f"{finding.get('claim', '')} — {finding.get('root_cause', '')}",
         "citations": list(citations),
-        "source_run_dir": (
-            f"episodes/{run_id}" if label == "family" else f"episodes/{run_id}/worlds/{label}"),
+        "source_run_dir": source,
     }
     if recorded_signature is not None:
         row["recorded_signature"] = recorded_signature
@@ -332,16 +336,16 @@ class DrawsSkipReport:
 
 
 def draws_on_disk_report(
-    view: Bound, label: str,
+    view: Bound, world_id: str | None,
 ) -> tuple[dict[int, dict[str, Any]], DrawsSkipReport]:
-    """Every draw document of world `label` (`worlds/<label>/judge/`) under the episode root
+    """Every draw document of world `label` (`worlds/<world-uuid>/judge/`) under the episode root
     `view` reads, keyed by draw index in numeric order, plus what it skipped or refused — the
     episode page's reader. The grading pass never reads a draw back: it routes the documents it just
     produced."""
     report = DrawsSkipReport()
-    # Walked no-follow from the episode root: a link at `worlds/`, `worlds/<label>` or `judge/`
+    # Walked no-follow from the episode root: a link at `worlds/`, `worlds/<world-uuid>` or `judge/`
     # lists nothing, so another tree's draws are never read as ours.
-    bound = view.under(LAYOUT.world(label).draws)
+    bound = view.under(LAYOUT.family_draws if world_id is None else LAYOUT.world(world_id).draws)
     listed = bound.entries().entries or {}
     out: dict[int, dict[str, Any]] = {}
     for name in sorted(n for n in listed if n.endswith(".yaml")):
@@ -382,10 +386,10 @@ def _draw_text(bound: Bound, name: str, kind: str, report: DrawsSkipReport) -> s
     return text
 
 
-def draws_on_disk(view: Bound, label: str) -> dict[int, dict[str, Any]]:
+def draws_on_disk(view: Bound, world_id: str | None) -> dict[int, dict[str, Any]]:
     """`draws_on_disk_report` without the skip report: every readable draw document of world
     `label`, by index."""
-    return draws_on_disk_report(view, label)[0]
+    return draws_on_disk_report(view, world_id)[0]
 
 
 def disposition_entry(finding_id: str, lane: str, reason: str | None = None) -> dict[str, Any]:

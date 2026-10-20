@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
 from defender.tests.support.storage._alert_plant import plant_alert
@@ -12,17 +13,17 @@ from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.tests.tenancy.tenant_1078_pass_a import _spec1078 as H
 
 TENANT = H.VALID_ID
+R1, R2 = fixture_uuid("1078-env-r1"), fixture_uuid("1078-env-r2")
 
 
-def _fresh_run(root: Path, run_id: str = "r2", tenant_id: str = TENANT) -> Path:
-    """A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the
-    data root this process resolves (the tenant is created first, through `create_tenant`
-    over a placed knowledge folder, then accepted there as the entry does)."""
+def _fresh_run(root: Path, run_id: str = R2, tenant_id: str = TENANT) -> Path:
+    'A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the\ndata root this process resolves (the tenant is created first, through `create_tenant`\nover a placed knowledge folder, then accepted there as the entry does).'
     if not H.row_path(root, tenant_id).is_file():
         H.make_tenant(root, tenant_id)
     alert = H.plant_alert(root.parent / f"alert-{run_id}")
     tenant = H.accept(H.resolve_data_root(), tenant_id)
     return H.run_common().materialize_run(alert, run_id, tenant=tenant).run_dir
+
 
 
 def _box_env(run_dir: Path) -> dict[str, str]:
@@ -51,30 +52,28 @@ def _shim_loaded(env: dict[str, str]) -> str:
 
 
 def _plant_corpus_layout(root: Path) -> tuple[Path, Path, Path]:
-    """T with a prior finished run in `<root>/T/runs/r1` and an investigation planted under
-    `<root>/T/episodes/x/runs/y/`, both REAL corpus documents (the committed golden — a stub
-    parses to nothing and every corpus assertion would read 0 == 0). Then a fresh run r2 of T,
-    materialised for real. Returns (r2's run dir, r1's document, the planted document)."""
+    "T with a prior finished run in `<root>/T/runs/r1` and an investigation planted under\n`<root>/T/episodes/x/runs/y/`, both REAL corpus documents (the committed golden — a stub\nparses to nothing and every corpus assertion would read 0 == 0). Then a fresh run r2 of T,\nmaterialised for real. Returns (r2's run dir, r1's document, the planted document)."
     H.make_tenant(root, TENANT)
-    prior = T.corpus_document(H.runs_dir(root, TENANT) / "r1")
+    prior = T.corpus_document(H.runs_dir(root, TENANT) / R1)
     planted = T.corpus_document(root / TENANT / "episodes" / "x" / "runs" / "y")
-    run_dir = _fresh_run(root, "r2")
+    run_dir = _fresh_run(root, R2)
     return Path(run_dir), prior, planted
 
 
+
 def test_o8_corpus_is_own_runs_base(tmp_path, monkeypatch):
-    """Orient's corpus for a fresh run under <root>/T/runs/ includes a prior run's
-    investigation.md in <root>/T/runs/."""
+    "Orient's corpus for a fresh run under <root>/T/runs/ includes a prior run's\ninvestigation.md in <root>/T/runs/."
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
     run_dir, prior, _planted = _plant_corpus_layout(root)
-    assert run_dir == H.runs_dir(root, TENANT) / "r2", f"the fresh run landed at {run_dir}"
+    assert run_dir == H.runs_dir(root, TENANT) / R2, f"the fresh run landed at {run_dir}"
     env = H.run_common().run_env(H.DEFENDER, run_dir)
     assert Path(env["DEFENDER_RUNS_BASE"]) == H.runs_dir(root, TENANT)
     assert prior.resolve() in _corpus_paths(env["DEFENDER_RUNS_BASE"]), (
         "the prior run of the same tenant is missing from the fresh run's corpus")
     assert _shim_loaded(env).startswith("loaded 1/1 "), (
         "the shim's corpus is not exactly T's one prior run")
+
 
 
 def test_o8_episode_runs_absent(tmp_path, monkeypatch):
@@ -94,11 +93,10 @@ def test_o8_episode_runs_absent(tmp_path, monkeypatch):
 
 
 def test_data_root_value_reaches_host_subprocesses(tmp_path, monkeypatch):
-    """Host subprocesses a run spawns inherit DEFENDER_DATA_ROOT unchanged, alongside the
-    derived DEFENDER_RUNS_BASE."""
+    'Host subprocesses a run spawns inherit DEFENDER_DATA_ROOT unchanged, alongside the\nderived DEFENDER_RUNS_BASE.'
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
-    run_dir = _fresh_run(root, "r1")
+    run_dir = _fresh_run(root, R1)
     env = H.run_common().run_env(H.DEFENDER, run_dir)
     child = subprocess.run(  # noqa: S603 — the test's own interpreter
         [sys.executable, "-c",
@@ -108,6 +106,7 @@ def test_data_root_value_reaches_host_subprocesses(tmp_path, monkeypatch):
     seen = json.loads(child.stdout)
     assert seen["DEFENDER_DATA_ROOT"] == str(root), "the host child lost the data root"
     assert seen["DEFENDER_RUNS_BASE"] == str(H.runs_dir(root, TENANT))
+
 
 
 def test_run_env_export_clobbers_stale_runs_base(tmp_path, monkeypatch):

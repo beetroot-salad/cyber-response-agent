@@ -1,6 +1,10 @@
 """#1234 judge contrast: control/reference usability checks and damaged-archive handling."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
+from defender.tests.support.learning.judge import _judge_921 as J
+
 import dataclasses
 import re
 from collections.abc import Callable
@@ -377,7 +381,7 @@ def test_1234_control_not_archived_stamps_the_family_not_graded(tmp_path):
         a={"archived": False, "world_record": outcome.NOT_ARCHIVED}, b=b_over))
     ctl_blocked = S.refused_call(params={"entity": "ctl-blocked"})
     S.rewrite_jsonl(built.ledger_path(CTL), lambda rows: [*rows, S.ledger_row(
-        ctl_blocked, label=CTL, token=built.token, cid=S.call_id(CTL, 0))])
+        ctl_blocked, label=CTL, cid=S.call_id(CTL, 0))])
     judge = S.judge({"b": _finding_reply("b", CTL)})
 
     S.grade(built, judge)
@@ -414,7 +418,7 @@ def test_1234_control_cut_short_stamps_the_family_not_graded(tmp_path, cut):
 
     est = S.Estate1234(tmp_path / "estate", withheld=(("edr", "lookup"),))
     pattern = ("{run_dir}/executed_queries.jsonl" if cut == "failed-query-table-write"
-               else "{episode}/served/*.{label}.jsonl")
+               else "{episode}/served/{world_id}.jsonl")
     est.break_write("idp", "query", FRESH, pattern)
     turns = [*S.default_turns()[:-1], S.query_turn("idp", "query", FRESH), S.done_turn()]
     real = S.real_family(tmp_path, {"a": S.RealWorld("a", disposition="benign", turns=turns)},
@@ -535,7 +539,7 @@ def test_1234_malformed_planted_report_does_not_refuse_the_episode(tmp_path, dam
     assert _shows(judge.prompt_for("b"), "a"), "b was not graded against the control"
     _assert_no_host_text(built, judge)
     with pytest.raises(S.sym(S.EPISODE_MOD, "EpisodeError")):
-        S.mod(S.EPISODE_MOD).verdicts(built.ep)
+        J.through_view(built.ep, S.mod(S.EPISODE_MOD).verdicts)
 
 
 @pytest.mark.parametrize("case", [
@@ -602,16 +606,20 @@ def test_1234_world_setup_faults_while_its_siblings_are_judged(tmp_path):
     assert "investigation.md" not in user_text, "b's setup fault (not a gap) is in the user section"
 
 
-def _ledger_file(ep: Path, label: str, token: str) -> Path:
-    return ep / "served" / f"{S.world_token(label, episode_token=token)}.jsonl"
+def _ledger_file(ep: Path, label: str) -> Path:
+    return ep / "served" / f"{T.world_id(ep, label)}.jsonl"
 
 
 def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
+    import shutil
+    import uuid
+
+    from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H5
+
     real = S.real_family(tmp_path)
-    token = real.token
     refused_b = next(r for r in real.ledger_rows("b") if r.get("source") == "refused")
     refused_c = next(r for r in real.ledger_rows("c") if r.get("source") == "refused")
-    own_b = {**refused_b, "params": dict(FOREIGN), S.CALL_ID: S.call_id("b", 98, episode_token=token)}
+    own_b = {**refused_b, "params": dict(FOREIGN), S.CALL_ID: f"{real.world_ids['b']}/98"}
     foreign = {
         "no-world-id": {k: v for k, v in own_b.items() if k != "world_id"},
         "another-worlds-id": {**refused_c, "params": dict(FOREIGN)},
@@ -621,10 +629,10 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
 
     for name, row in foreign.items():
         ep = S.copy_episode(real.ep, tmp_path / f"variant-{name}")
-        S.rewrite_jsonl(_ledger_file(ep, "b", token), lambda rows, row=row: [*rows, row])
-        judge = S.judge()
+        S.rewrite_jsonl(_ledger_file(ep, "b"), lambda rows, row=row: [*rows, row])
+        judge = S.judge(world_ids=real.world_ids)
         S.grade(ep, judge)
-        _assert_malformed(ep, "b", _ledger_file(ep, "b", token).name)
+        _assert_malformed(ep, "b", _ledger_file(ep, "b").name)
         assert not judge.called("b"), f"{name}: the malformed b was graded"
         assert judge.called("c"), f"{name}: c was not graded beside the malformed b"
         c_prompt = judge.prompt_for("c")
@@ -636,9 +644,9 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
             f"{name}: the foreign row entered the found gaps: {S.found_gaps(ep)}")
 
     unmapped = S.copy_episode(real.ep, tmp_path / "variant-unmapped")
-    S.rewrite_jsonl(_ledger_file(unmapped, "b", token), lambda rows: [*rows, {
-        **refused_b, "params": dict(GHOST_PARAMS), S.CALL_ID: S.call_id("b", 99, episode_token=token)}])
-    judge = S.judge()
+    S.rewrite_jsonl(_ledger_file(unmapped, "b"), lambda rows: [*rows, {
+        **refused_b, "params": dict(GHOST_PARAMS), S.CALL_ID: f"{real.world_ids['b']}/99"}])
+    judge = S.judge(world_ids=real.world_ids)
     S.grade(unmapped, judge)
     assert judge.called("b"), "an unmapped row of b's own stopped b being graded"
     assert not S.row(unmapped, "b").get("ungradable"), (
@@ -646,17 +654,17 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
 
     control_file = S.copy_episode(real.ep, tmp_path / "variant-control")
     refused_a = next(r for r in real.ledger_rows("a") if r.get("source") == "refused")
-    S.rewrite_jsonl(_ledger_file(control_file, "a", token), lambda rows: [*rows, {
+    S.rewrite_jsonl(_ledger_file(control_file, "a"), lambda rows: [*rows, {
         k: v for k, v in {**refused_a, "params": dict(FOREIGN)}.items() if k != "world_id"}])
-    judge = S.judge()
+    judge = S.judge(world_ids=real.world_ids)
     S.grade(control_file, judge)
-    _assert_stamped(control_file, judge, _ledger_file(control_file, "a", token).name)
+    _assert_stamped(control_file, judge, _ledger_file(control_file, "a").name)
 
     clean = S.copy_episode(real.ep, tmp_path / "variant-clean")
-    S.rewrite_jsonl(_ledger_file(clean, GHOST, token), lambda _rows: [{
-        **refused_b, "world_id": S.world_token(GHOST, episode_token=token),
+    S.rewrite_jsonl(clean / "served" / f"{S.fixture_world_id(GHOST)}.jsonl", lambda _rows: [{
+        **refused_b, "world_id": S.fixture_world_id(GHOST),
         "params": dict(GHOST_PARAMS)}])
-    judge = S.judge()
+    judge = S.judge(world_ids=real.world_ids)
     S.grade(clean, judge)
     assert judge.called("b"), "control: the unedited archive did not grade b"
     assert not S.row(clean, "b").get("ungradable"), S.row(clean, "b")
@@ -664,6 +672,21 @@ def test_1234_am_foreign_rows_in_a_worlds_served_file(tmp_path):
         f"control: b's own refused call is not a found gap: {S.found_gaps(clean)}")
     assert not any(_carries(e, GHOST_PARAMS) or _names_run(e, GHOST)
                    for e in S.found_gaps(clean)), "the undeclared label's file was read"
+
+    # R5: the same archive under a renamed folder is refused (the variants above, copies that
+    # keep the folder name, are the positive control on the same door).
+    renamed_id = str(uuid.uuid4())
+    renamed = S.tenant_episodes(tmp_path / "variant-renamed") / renamed_id
+    shutil.copytree(real.ep, renamed, symlinks=True)
+    before = H5.tree_state(renamed)
+    judge = S.judge(world_ids=real.world_ids)
+    err = H5.raised(S.grade, renamed, judge)
+    assert err is not None, "a renamed copy was graded (R5)"
+    said = H5.message(err)
+    assert renamed_id in said, f"the R5 refusal does not name the folder's id: {said!r}"
+    assert real.ep.name in said, f"the R5 refusal does not name the manifest's id: {said!r}"
+    assert judge.calls == 0, f"a renamed copy reached the model: {judge.agent_ids}"
+    assert H5.tree_state(renamed) == before, "the refused pass wrote into the renamed copy"
 
 
 #: The seeded prefix every hand-built table opens with: an ordinary pre-branch row and J3's

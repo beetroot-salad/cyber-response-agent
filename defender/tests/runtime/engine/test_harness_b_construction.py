@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
@@ -127,7 +129,7 @@ def test_835_gather_is_cache_keyed_on_the_system_while_its_agent_id_stays_the_le
 
     from defender.runtime.run_state import RunState
 
-    run_dir = tmp_path / "run"
+    run_dir = tmp_path / fixture_uuid("run")
     (run_dir / "gather_raw").mkdir(parents=True)
     # MAIN's deps carry the run's one `RunState` (#1235 round 2), as the driver hands them:
     # the dispatch's breaker screen reads it.

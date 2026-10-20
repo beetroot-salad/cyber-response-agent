@@ -194,9 +194,10 @@ estimate invites the point estimate to be read.
 3. **Capture the alert and investigate it.**
 
    Every run names its tenant, and there is no default (#1078):
-   clone the tenant repo into `$DEFENDER_DATA_ROOT/playground/knowledge` on the host, then,
+   set `TENANT_ID` to the UUID committed in the tenant repository (new tenants mint one
+   with `python3 defender/cli/tenant.py new-id` before scaffolding), and clone the tenant repo into `$DEFENDER_DATA_ROOT/$TENANT_ID/knowledge` on the host, then,
    once the clone exits 0, run
-   `python3 defender/cli/tenant.py setup playground` once, from the main checkout, with
+   `python3 defender/cli/tenant.py setup "$TENANT_ID"` once, from the main checkout, with
    `DEFENDER_DATA_ROOT` set and no run, fork or drain in flight on any checkout of the host, as
    the same user that runs defender; a destination already occupied makes setup refuse, naming
    it in the message. (Adopting an existing (B)/(C) installation whose old entries are
@@ -204,8 +205,11 @@ estimate invites the point estimate to be read.
 
    ```bash
    experiments/oracle-telemetry-fidelity/extract_alert.py <rule_id> <since-iso> <out.json>
-   python3 defender/run.py <out.json> --tenant playground --run-id <slug> --no-learn
+   python3 defender/run.py <out.json> --tenant "$TENANT_ID" --no-learn
    ```
+
+   The run is named by a minted UUID (`--run-id` takes only a UUID since #1187); note the
+   run id it reports to find the run under `$DEFENDER_DATA_ROOT/playground/runs/`.
 
    The run's leads + queries become the oracle-visible envelope. Prefer this over
    authoring leads: the calibration premise is *the envelope production actually

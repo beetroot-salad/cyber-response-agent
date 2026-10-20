@@ -11,6 +11,7 @@ from defender.runtime import record_query  # noqa: E402
 from defender.tests.e2e.test_query_tool_611 import DONE, LEAD, q, run_gather  # noqa: E402
 from defender.runtime.verbs import VerbContext  # noqa: E402
 from defender.tests.e2e._replay_harness import FakeVerbs  # noqa: E402
+from defender.tests.support.shared._fixture_uuid import fixture_uuid  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
@@ -22,22 +23,28 @@ WIDE = "é"
 def test_persist_payload_refuses_a_payload_one_byte_over_the_read_limit(tmp_path):
     text = WIDE * (READ_LIMIT // 2) + "x"
     assert len(text) <= READ_LIMIT < len(text.encode("utf-8"))
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
 
-    rel = record_query.persist_payload(_writer_run_1165(tmp_path), LEAD, 0, text)
+    rel = record_query.persist_payload(_writer_run_1165(run_dir), LEAD, 0, text)
 
     assert rel is None
-    assert not (tmp_path / "gather_raw" / LEAD / "0.json").exists()
+    assert not (run_dir / "gather_raw" / LEAD / "0.json").exists()
 
 
 def test_persist_payload_writes_a_payload_of_exactly_the_read_limit_and_it_reads_back(tmp_path):
     """The boundary the reader draws: `READ_LIMIT` bytes is readable, so it is written."""
     text = WIDE * (READ_LIMIT // 2)
     assert len(text.encode("utf-8")) == READ_LIMIT
+    # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
+    run_dir = tmp_path / fixture_uuid("run")
+    run_dir.mkdir()
 
-    rel = record_query.persist_payload(_writer_run_1165(tmp_path), LEAD, 0, text)
+    rel = record_query.persist_payload(_writer_run_1165(run_dir), LEAD, 0, text)
 
     assert rel is not None
-    assert read_bytes_capped(tmp_path / rel) == text.encode("utf-8")
+    assert read_bytes_capped(run_dir / rel) == text.encode("utf-8")
 
 
 def test_an_oversized_adapter_response_leaves_no_sidecar(tmp_path):

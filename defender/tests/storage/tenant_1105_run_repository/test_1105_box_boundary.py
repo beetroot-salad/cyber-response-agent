@@ -37,9 +37,8 @@ RUNTIME_ABSENT = (
 EXEC_TIMEOUT = 60.0
 #: The box's own run: exactly `RUN_ID_BOUND` (206) bytes, so the container name is 219
 #: characters (RG-27-a, RG-27-b). It starts with `r1`, so it sorts after the sibling `r0`.
-RUN_ID = "r1-" + "a" * (H.RUN_ID_BOUND - 3)
-SIBLING_ID = "r0"
-ARM_ID = "ep-a"
+RUN_ID = str(uuid.uuid4())
+SIBLING_ID = str(uuid.uuid4())
 SIBLING_SECRET = "SIBLING-RUN-SECRET-1105"
 CONTROL = b"box-control-1105"
 
@@ -50,7 +49,7 @@ _ATTEMPTS = ("tenant_record", "episode_record", "sibling_folder", "into_sibling"
 _PROBE = r'''
 import json, os, sys
 
-run_dir, runs = sys.argv[1], sys.argv[2]
+run_dir, runs, sibling = sys.argv[1], sys.argv[2], sys.argv[3]
 
 
 def attempt(label, fn):
@@ -71,11 +70,9 @@ def write(path, data):
 writes = [
     attempt("tenant_record", write(os.path.join(runs, "_tenant.json"),
                                    b'{"tenant_id": "beta"}')),
-    attempt("episode_record", write(os.path.join(runs, "_episodes", "x.json"), json.dumps(
-        {"episode_id": "x", "tenant_id": "acme", "source_run_id": "r0",
-         "runs": {"a": os.path.basename(run_dir.rstrip("/"))}}).encode())),
+    attempt("episode_record", lambda: os.mkdir(os.path.join(runs, "_episodes"))),
     attempt("sibling_folder", lambda: os.mkdir(os.path.join(runs, "r9"))),
-    attempt("into_sibling", write(os.path.join(runs, "r0", "forged.txt"), b"forged")),
+    attempt("into_sibling", write(os.path.join(runs, sibling, "forged.txt"), b"forged")),
     attempt("dotdot", write("../x", b"escaped")),
     attempt("control", write(os.path.join(run_dir, "control.txt"), b"box-control-1105")),
 ]
@@ -141,19 +138,18 @@ def _outside_run(state: dict[str, Any]) -> dict[str, Any]:
 
 def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> dict[str, Any]:
     t = H.tenant(root, H.T_ID)
-    runs = H.runs_folder(t)
+    runs = Path(t.runs)
     run_dir = H.make_run(runs, RUN_ID)
     sibling = H.make_run(runs, SIBLING_ID)
     (sibling / "secret.txt").write_text(SIBLING_SECRET, encoding="utf-8")
     (runs / f"{RUN_ID}{H.SIDECAR_SUFFIXES[0]}").write_text("{}\n", encoding="utf-8")
-    H.plant_record(runs, "ep", t.id, SIBLING_ID, {"a": ARM_ID})
-    H.make_run(runs, ARM_ID)
     before = _outside_run(H.tree_state(runs))
 
     script = run_dir / "_probe_s3_1105.py"
     script.write_text(_PROBE, encoding="utf-8")
-    command = f"python3 /runs/current/{script.name} /runs/current /runs"
-    box = start_box(run_dir, defender_dir, spec=BoxSpec(runtime=runtime))
+    command = f"python3 /runs/current/{script.name} /runs/current {runs} {SIBLING_ID}"
+    box = start_box(run_dir, defender_dir, spec=BoxSpec(runtime=runtime),
+                    tenant_agent=t.agent, tenant_id=t.id)
     sandboxed, name = box.sandboxed, box.name
     try:
         result = box.run_parsed(parse(command), command=command, cwd=Path("/runs/current"),
@@ -169,6 +165,7 @@ def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> di
         "before": before, "after": _outside_run(H.tree_state(runs)),
         "control_on_host": control.read_bytes() if control.is_file() else None,
     }
+
 
 
 @pytest.fixture(scope="module", params=RUNTIMES)
@@ -198,14 +195,13 @@ def _writes(session: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_episodes(
         box_session):
-    from defender.run_repository import RunId, sibling_run_ids
+    from defender.run_repository import RunId
 
     s = box_session
+    assert str(uuid.UUID(RUN_ID)) == RUN_ID, "the run uses the canonical UUID contract"
     assert s["sandboxed"] is True, (
-        f"the box for a 206-byte run id did not start sandboxed (name {s['name']!r})")
-    assert len(RUN_ID.encode()) == H.RUN_ID_BOUND, f"the box's run id is 206 bytes: {RUN_ID!r}"
-    assert s["name"].endswith(RUN_ID), (
-        f"the box must run under the 206-byte id's 219-character name: {s['name']!r}")
+        f"the box for the run did not start sandboxed (name {s['name']!r})")
+    assert s["name"].endswith(RUN_ID), f"the box must run under the run's id: {s['name']!r}"
     assert s["probe"] is not None, f"the probe did not complete in the box: rc={s['rc']} {s['err']}"
     writes = _writes(s)
     assert writes["control"]["ok"] is True, (
@@ -218,11 +214,9 @@ def test_1105_a_sandboxed_box_cannot_write_the_runs_folder_the_tenant_record_or_
         "the host's runs folder changed outside the run's own folder: "
         f"{sorted(set(s['after'].items()) ^ set(s['before'].items()))[:6]}")
     listed = list(s["tenant"].runs_repository().list())
-    assert listed == [RunId.parse(SIBLING_ID), RunId.parse(RUN_ID)], (
+    assert listed == [RunId.parse(i) for i in sorted((SIBLING_ID, RUN_ID))], (
         f"after the box ran, runs.list() must answer the planted runs, no more no fewer: {listed!r}")
-    claimed = sibling_run_ids(s["tenant"])
-    assert claimed == {RunId.parse(ARM_ID)}, (
-        f"after the box ran, the claims must be the host-written record's alone: {claimed!r}")
+
 
 
 def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record_episodes_or_a_sibling(
@@ -231,7 +225,7 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
 
     s = box_session
     assert s["sandboxed"] is True, (
-        f"the box for a 206-byte run id did not start sandboxed (name {s['name']!r})")
+        f"the box for the run did not start sandboxed (name {s['name']!r})")
     assert s["probe"] is not None, f"the probe did not complete in the box: rc={s['rc']} {s['err']}"
     listing = s["probe"]["listing"]
     assert listing == ["current"], (
@@ -243,5 +237,8 @@ def test_1105_a_sandboxed_box_sees_only_its_own_run_folder_not_the_tenant_record
     for name in (SIBLING_ID, RUN_ID):
         assert t.runs_repository().open(RunId.parse(name)).run_dir.name == name, (
             f"the host's runs folder holds {name!r}, which the box must not list")
-    for name in ("_tenant.json", "_episodes", f"{RUN_ID}{H.SIDECAR_SUFFIXES[0]}"):
-        assert (s["runs"] / name).exists(), f"the host's runs folder holds {name}"
+    sidecar = f"{RUN_ID}{H.SIDECAR_SUFFIXES[0]}"
+    assert (s["runs"] / sidecar).exists(), f"the host's runs folder holds {sidecar}"
+    for name in ("_tenant.json", "_episodes"):
+        assert not os.path.lexists(s["runs"] / name), (
+            f"the host's runs folder holds {name}, which #1187 never plants")

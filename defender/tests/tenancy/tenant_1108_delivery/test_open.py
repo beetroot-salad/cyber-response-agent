@@ -1,6 +1,8 @@
 """Tenant delivery: open behavior through the public API."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 
 import json
 
@@ -86,7 +88,7 @@ def test_tenant_identity_must_match_before_forge_http(repo):
     from ._identity import identity
     http = ForgeHTTP()
     with pytest.raises(target().DeliveryRefused, match="tenant"):
-        delivery(repo, http, identity=identity("other"))
+        delivery(repo, http, identity=identity(fixture_uuid("tenant:other")))
     assert http.requests == []
 
 

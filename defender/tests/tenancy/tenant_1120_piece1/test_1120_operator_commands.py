@@ -1,6 +1,8 @@
 """D1/D2: the operator commands and the settings loaders read the DATA ROOT's copy."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
 
 import functools
@@ -97,7 +99,7 @@ def test_1120_operator_commands_read_the_data_root_tenants_settings_not_the_chec
         data_root: Path, tmp_path: Path, capsys) -> None:
     """The lab is retired (human, PR #1157: #1158 folded in); the checkout's knowledge/ holds only the
     template and the fixture, a complete copy of the lab's settings."""
-    tid = "playground"
+    tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
     settings = H.settings_dir(data_root, tid)
     (settings / "verb-grants.yaml").write_text(HEALTH_CHECK_ONLY_TABLE, encoding="utf-8")
@@ -179,7 +181,7 @@ def test_1120_s6_operator_tools_in_a_shell_without_the_data_root(
         data_root: Path, tmp_path: Path, monkeypatch) -> None:
     """With DEFENDER_DATA_ROOT unset, validate_scaffold --tenant and policy_cli gather --tenant each
     report resolve_data_root's refusal naming the variable."""
-    tid = "playground"
+    tid = fixture_uuid("tenant:playground")
     H.adopted(data_root, tid)
 
     scaffold = _validate_scaffold(None, tid)
@@ -216,10 +218,11 @@ class _SpawnRecorder:
 
 
 def _launcher_source(root: Path) -> Path:
-    """A finished, branchable source run at `<root>/acme/runs/<id>`, its runs-base record
-    naming acme (pass-A's source-run builder, at a tenant location)."""
+    """A finished, branchable source run at `<root>/acme/runs/<id>` (pass-A's source-run
+    builder, at a tenant location). #1187 R1 (review-4 F42): no runs-base record — the run's
+    tenant is where it sits."""
     base = root / H.TID / "runs"
-    H78.plant_record(base, H.TID)
+    base.mkdir(parents=True, exist_ok=True)
     return H78.source_run(base)
 
 
@@ -328,8 +331,9 @@ def test_1120_the_run_box_mounts_the_tenants_agent_half_from_under_the_data_root
     assert agent.resolve() == H.agent_dir(data_root).resolve(), (
         f"start_box was handed {agent}, not the data root's {H.agent_dir(data_root)}")
 
+    # #1187: the recorder's run folder is `fixture_uuid("run")` — read it off the recorder.
     argv = box_mod._create_argv(
-        "defender-run-spec1120", tmp_path / "run", H.DEFENDER,
+        "defender-run-spec1120", rec.run_dir_at, H.DEFENDER,
         box_mod.DEFAULT_SPEC, (), tenant_agent=agent).argv
     mounts = _mount_specs(argv)
     agent_mounts = [m for m in mounts if m.get("target") == MODEL_AGENT]

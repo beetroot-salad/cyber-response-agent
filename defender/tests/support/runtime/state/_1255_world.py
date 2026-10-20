@@ -135,9 +135,8 @@ def row_for(rows: Iterable[Mapping[str, Any]], params: Mapping[str, Any]) -> dic
 
 
 def arm_identities(episode_dir: Path, labels: Iterable[str] = S24.WORLDS) -> list[str]:
-    """Return the episode id, episode token, and world tokens."""
-    token = S24.sym(S24.FAMILY, "episode_token_for")(Path(episode_dir).name)
-    return [Path(episode_dir).name, token, *(f"{token}.{label}" for label in labels)]
+    """Return the persisted episode and selected world identities."""
+    return [Path(episode_dir).name, *(S24.T.world_id(episode_dir, label) for label in labels)]
 
 
 def identities_in(text: str, identities: Iterable[str]) -> list[str]:

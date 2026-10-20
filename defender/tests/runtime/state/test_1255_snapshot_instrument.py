@@ -35,7 +35,7 @@ def test_p4_a_manifest_without_a_continuation_prompt_loads():
     family = parse(doc)
 
     assert family.branch_message_id == T.BRANCH_MESSAGE_ID
-    assert [w.world_id for w in family.worlds] == list(T.WORLDS)
+    assert [w.label for w in family.worlds] == list(T.WORLDS)
 
 
 @pytest.fixture
@@ -58,13 +58,9 @@ class _Lifecycle:
 
 def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
     """`run.main --tenant T --episode <id> --world <world>` over the fixture episode, lifecycle recorded."""
-    from defender.tenancy import _tenant
-
     base, src = T.runs_base(tmp_path)
-    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)),
-                   root=tmp_path / "episodes-root")
-    (ep / "runs").mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(ep / "runs", T.SOURCE_TENANT)
+    ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
+    T.plant_roster(ep)
     lifecycle = _Lifecycle()
     rc = T.mod("run").main(
         ["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", world],
@@ -86,8 +82,7 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
     from defender.tests.support.runtime.state import _1255_run_records as RR
 
     arm, ep, base = _launch_arm(tmp_path, world)
-    token = T.world_token(world)
-    natural_world = T.mod("tenancy._tenant").read_tenant(base).base_world_id
+    token = T.world_id(ep, world)
 
     stamp = _provenance.read(RunPaths(arm).provenance)
     if stamp is not None:
@@ -95,13 +90,10 @@ def test_p3_an_arms_run_folder_carries_no_lineage(tmp_path, world):
             f"the arm's stamp names its parent run {stamp.parent_run_id!r} inside the box")
         assert stamp.fork_turn is None, (
             f"the arm's stamp names its fork turn {stamp.fork_turn!r} inside the box")
-        assert T.EPISODE_TOKEN not in str(stamp.world_id or ""), (
-            f"the arm's stamp names its episode's world {stamp.world_id!r} inside the box")
-        assert stamp.world_id in (None, natural_world), (
-            f"the arm's stamp carries a world id {stamp.world_id!r} that is neither absent nor "
-            f"a natural run's ({natural_world!r}) — the world id moves out of the run folder")
+        assert stamp.world_id is None, (
+            f"the arm's stamp carries a world id {stamp.world_id!r} inside the box")
     RR.assert_only_run_records(arm, f"world {world}'s arm", RR.table_rows(arm))
-    lineage = {"world token": token, "episode token": T.EPISODE_TOKEN, "episode id": ep.name}
+    lineage = {"world id": token, "episode id": ep.name, "source run id": T.SOURCE_RUN_ID}
     record = json.dumps([token, T.SOURCE_RUN_ID]).encode()
     for how, raw in (("plain", record), ("zlib", zlib.compress(record))):
         planted = base64.b64encode(raw).decode("ascii")

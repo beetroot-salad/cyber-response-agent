@@ -79,12 +79,13 @@ RUN_PY = DEFENDER / "run.py"
 #: `_OWNER_NON_RECORD_EXPORTS`), so the tests spell it.
 ROW_NAME = "tenant.json"
 
-#: #1077's runs-base record, unchanged in name and fields: `{tenant_id, base_world_id, created_at}`.
+#: #1077's runs-base record `{tenant_id, base_world_id, created_at}` — RETIRED by #1187 (R1, R1b):
+#: nothing writes or accepts it. The name stays so a test can plant one as the OLD entry it is
+#: and show nothing writes one.
 RECORD_NAME = S.TENANT_RECORD_NAME
 
-#: The grammar, verbatim from "Settled by the user": `^[a-z][a-z0-9-]{0,62}$`, matched with
-#: `re.fullmatch`.
-GRAMMAR = r"^[a-z][a-z0-9-]{0,62}$"
+#: Canonical lowercase UUID text: no legacy tenant names or alternate spellings.
+GRAMMAR = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 #: O3's seven refused ids (C19), with the gate's address tokens as pytest ids so a failure
 #: names the domain member it is about.
@@ -128,10 +129,6 @@ def create_tenant(root: Path, tenant_id: str) -> Any:
 
 def require_tenant(root: Path, tenant_id: str) -> Any:
     return tenant().require_tenant(root, tenant_id)
-
-
-def ensure_runs_base_record(runs_base: Path, tenant_id: str) -> Any:
-    return tenant().ensure_runs_base_record(runs_base, tenant_id)
 
 
 def resolve_data_root() -> Path:
@@ -237,14 +234,22 @@ def plant_row(root: Path, tenant_id: str, body: str | bytes | None = None, *,
 
 
 def plant_record(runs_base: Path, tenant_id: str, **kw: Any) -> Path:
-    """`<runs_base>/_tenant.json` naming `tenant_id` (or a real corruption, via `body=`)."""
+    """`<runs_base>/_tenant.json` naming `tenant_id` (or a real corruption, via `body=`) — a
+    pre-#1187 container record, planted as the OLD entry it now is (R1)."""
     runs_base.mkdir(parents=True, exist_ok=True)
     return S.plant_tenant_record(runs_base, tenant_id=tenant_id, **kw)
 
 
 def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
     """A finished, BRANCHABLE run dir under `base`, with its session store beside the base
-    (`<base>/../sessions/`) — `_triplet_947.runs_base`'s source, at a base the test chooses."""
+    (`<base>/../sessions/`) — `_triplet_947.runs_base`'s source, at a base the test chooses.
+
+    Stamped with the tenant it was made FOR — what materialize stamps every run with (#1077),
+    and what the launcher compares with the requested tenant (`_source_stamp_agrees`, kept by
+    #1187 N14): when `base` is a tenant's own runs folder `<root>/<T>/runs` (T's row beside it),
+    T — the run's tenant follows from where it sits (#1187 P-loc, no container record is read);
+    anywhere else, no tenant (a legacy stamp)."""
+    base = Path(base)
     src = base / run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
     plant_alert_input(src, {"rule": {"id": "v2-cross-tier-ssh-pivot"}})
@@ -252,31 +257,25 @@ def source_run(base: Path, run_id: str = T.SOURCE_RUN_ID) -> Path:
     (src / "report.md").write_text("disposition: malicious\n", encoding="utf-8")
     (src / "executed_queries.jsonl").write_text("", encoding="utf-8")
     T.capture_call(src)
-    # Stamped with the tenant its base's record names, when there is one — what materialize
-    # stamps every run with (#1077), and what the launcher holds the record to (#1106).
-    record = base / RECORD_NAME
-    stamped = json.loads(record.read_text(encoding="utf-8"))["tenant_id"] if record.is_file() else None
+    at_tenant = base.name == "runs" and (base.parent / ROW_NAME).is_file()
+    stamped = base.parent.name if at_tenant else None
     (src / "provenance.json").write_text(json.dumps(T.provenance_record(tenant_id=stamped)),
                                          encoding="utf-8")
     T.seed_source_session(base, src)
     return src
 
 
-def tenant_source(root: Path, tenant_id: str = VALID_ID, *, record: str | None = "same",
-                  row: bool = True, run_id: str = T.SOURCE_RUN_ID) -> tuple[Path, Path]:
-    """A source run AT A TENANT LOCATION: `<root>/<T>/runs/<run_id>`, returns (base, src).
-
-    `record="same"` plants the runs-base record naming T (what a pass-A materialize leaves);
-    another string plants one naming that tenant; `None` plants none. `row` creates T through
-    the real `create_tenant` first (the data root must be empty for that, so it runs before
-    anything else is written under `root`)."""
+def tenant_source(root: Path, tenant_id: str = VALID_ID, *, row: bool = True,
+                  run_id: str = T.SOURCE_RUN_ID) -> tuple[Path, Path]:
+    """A source run AT A TENANT LOCATION: `<root>/<T>/runs/<run_id>`, returns (base, src) —
+    stamped with T (`source_run`). #1187 (R1): the runs folder holds no `_tenant.json`. `row`
+    creates T through the real `create_tenant` first (the data root must be empty for that, so
+    it runs before anything else is written under `root`)."""
     root = Path(root)
     if row:
         make_tenant(root, tenant_id)
     base = runs_dir(root, tenant_id)
     base.mkdir(parents=True, exist_ok=True)
-    if record is not None:
-        plant_record(base, tenant_id if record == "same" else record)
     return base, source_run(base, run_id)
 
 
@@ -452,40 +451,30 @@ def drive_main(argv: list[str], rec: Recorder) -> tuple[int | None, BaseExceptio
 def sibling_argv(manifest: Path, world: str = "b", *extra: str) -> list[str]:
     """A sibling's command line for the episode whose manifest is `manifest` (#1105 PR 2,
     declared change 6: `run.py --episode <episode_id> --world L`, the tenant among `extra`).
-    The episode is opened by id under `DEFENDER_EPISODES_BASE`, which the scene points at the
-    manifest's episodes root (`family_for(..., monkeypatch=)`)."""
+    #1187: the episode is opened by id under the requested tenant's `<T>/episodes/`
+    (`family_for` puts it there); no environment names it."""
     return ["--episode", Path(manifest).parent.name, "--world", world, *extra]
 
 
-#: `family_for`'s default container: the tenant whose location `<root>/<T>/runs/<run>` the
-#: source sits at.
-SOURCE_TENANT_CONTAINER = object()
+def family_for(source: Path, *, episode_id: str = T.EPISODE_ID, roster: bool = True) -> Path:
+    """An episode holding a family manifest whose source is `source` (by its run id) — what the
+    launcher leaves before it spawns a sibling — at `<root>/<T>/episodes/<episode_id>`, T the
+    tenant whose `<root>/<T>/runs/` holds `source` (#1187 Layout A: an episode lives under its
+    tenant). Returns the manifest path.
 
-
-def family_for(source: Path, episode_dir: Path, *, monkeypatch: Any = None,
-               container: Any = SOURCE_TENANT_CONTAINER) -> Path:
-    """An episode dir holding a family manifest whose source is `source` (by its run id) — what
-    the launcher leaves before it spawns a sibling. Returns the manifest path.
-
-    #1105 PR 2: the launcher makes the siblings' container `<episode>/runs` with its tenant's
-    record before the first sibling starts (`EpisodeRuns.create_container`), and a sibling over
-    an absent one refuses; it is planted here through the real writer, naming `container` (the
-    source location's tenant by default; `None` leaves it absent). With `monkeypatch`, the
-    episodes base a sibling opens its episode under (`DEFENDER_EPISODES_BASE`) is pointed at
-    the episode's parent."""
-    from defender.tenancy import _tenant
+    `roster=True` is the episode as RUNS leaves it (#1187 R2): `runs/` made, then the arm roster
+    `arms.json` naming every manifest world at a fresh uuid4 — a sibling starts only in an
+    episode that reached RUNS (O4b). `roster=False` leaves both absent (a pre-RUNS episode)."""
+    import uuid
 
     source = Path(source)
-    ep = T.episode(episode_dir.parent, doc=T.family_doc(source_run_dir=str(source),
-                                                        source_run_id=source.name),
-                   episode_id=episode_dir.name, root=episode_dir.parent)
-    if container is SOURCE_TENANT_CONTAINER:
-        container = source.parent.parent.name
-    if container is not None:
+    episodes = source.parent.parent / "episodes"
+    doc = T.family_doc(source_run_dir=str(source), source_run_id=source.name,
+                       episode_id=episode_id)
+    ep = T.episode(episodes.parent, doc=doc, episode_id=episode_id, root=episodes)
+    if roster:
         (ep / "runs").mkdir(exist_ok=True)
-        _tenant.ensure_runs_base_record(ep / "runs", container)
-    if monkeypatch is not None:
-        monkeypatch.setenv(T.EPISODES_BASE_ENV, str(ep.parent))
+        T.write_roster(ep, {w["world_id"]: str(uuid.uuid4()) for w in doc["worlds"]})
     return ep / "family.yaml"
 
 

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from defender.tests.support.shared.contracts._by_path import WORKTREE, load_module
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import pytest
 
@@ -168,14 +169,19 @@ def test_tool_trace_is_written_at_most_once_per_run_id_or_fails_loud_on_a_second
 # gl5 / rp1 — the render surface R4 loaded and every reasoning artifact missed
 
 def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
-    """`(T, run_dir)` with the driven run moved to where the run page's repository opens it."""
-    from defender.tenancy import _tenant
+    """`(T, run_dir)` with the driven run moved to where the run page's repository opens it.
+
+    #1105 PR 2 (declared change 7): the standalone re-render is `--tenant T <run_id>` and opens
+    the run by id through T's repository, so the run moves to `<data root>/<T>/runs/<run_id>`
+    (#1187 R1, declared change 6: the runs folder carries no `_tenant.json`; the tenant's folder
+    holding it is the owner). The store stays where the drive put it: the run's pointer names
+    it by its absolute path. (Not driven there in place: `_driven_run` puts the store under the
+    same folder it puts the run in.)"""
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, ensure_d9_tenant
 
     tenant = ensure_d9_tenant()
     runs = current_data_root() / tenant / "runs"
     runs.mkdir(exist_ok=True)
-    _tenant.ensure_runs_base_record(runs, _tenant.TenantId(tenant))
     # #1235 F2: the run -> case link is a sidecar beside the run folder, so the move carries it.
     from defender.run_repository import RunPaths
     moved = runs / run_dir.name
@@ -183,7 +189,7 @@ def _into_tenant_runs(run_dir: Path) -> tuple[str, Path]:
     return tenant, Path(shutil.move(run_dir, moved))
 
 
-def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path):
+def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_path, capsys):
     """`runtime.html` is written whole (a replacing write) under ONE `run_id`, and it has two"""
     from defender import run_common
     from defender.presentation import visualize_run
@@ -200,7 +206,8 @@ def test_the_two_render_drivers_under_one_run_id_do_not_clobber_each_other(tmp_p
                 for name in ("runtime.html",)}
 
     # driver A — the standalone re-render, in-process
-    assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name]) == 0
+    assert visualize_run.main(["visualize_run.py", "--tenant", tenant, run_dir.name]) == 0, (
+        capsys.readouterr().err)
     after_a = pages()
     for name, page in after_a.items():
         assert marker in page, (
@@ -233,10 +240,24 @@ def test_the_visualizer_fails_closed_when_it_cannot_resolve_the_store(tmp_path, 
     """A visualizer that cannot resolve the store FAILS CLOSED: the standalone re-render"""
     from defender import run_common
 
-    run_dir, store, _replay = _driven_run(tmp_path, run_id=f"failclosed-{breakage}")
+    # #1187 declared change 1: the run id is a uuid, so the re-render's `--tenant T <run_id>`
+    # cannot be refused for the id's shape — that refusal is non-zero too, and would pass the
+    # negative below for the wrong reason (#1187 sweep: pass-by-accident).
+    run_dir, store, _replay = _driven_run(tmp_path, run_id=fixture_uuid(f"failclosed-{breakage}"))
     tenant, run_dir = _into_tenant_runs(run_dir)
+    from defender.presentation import visualize_run
 
-    # positive control — intact, the post-run step renders the page and does not raise
+    script = Path(visualize_run.__file__)
+
+    # positive control — intact, the standalone re-render exits 0 on the same argv, and the
+    # post-run step renders the page and does not raise
+    healthy = subprocess.run(  # noqa: S603 — this interpreter, the renderer script, the run id
+        [sys.executable, str(script), "--tenant", tenant, run_dir.name],
+        capture_output=True, text=True, encoding="utf-8", check=False)
+    assert healthy.returncode == 0, (
+        f"control: the re-render of the intact run exited {healthy.returncode}: "
+        f"{healthy.stderr!r}")
+    (run_dir / "runtime.html").unlink(missing_ok=True)
     run_common.visualize(_view_run_1165(run_dir))
     for name in ("runtime.html",):
         assert (run_dir / name).is_file(), f"{name} was not written on the healthy path"

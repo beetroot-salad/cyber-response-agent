@@ -37,13 +37,13 @@ base_disposition: malicious | benign | false-positive | inconclusive
 discriminator:
   predicate: the single question whose answer separates the sibling worlds
 worlds:
-  - world_id: sshpass_confirmed    # see the id grammar below — NO HYPHENS
+  - label: sshpass_confirmed    # see the label grammar below — NO HYPHENS
     axis: the axis this world varies, in one sentence
     facts:
       - fact_id: f1
         statement: one thing that is true in this world and not in the capture, in plain words
         entities: [the-host, the-account]
-  - world_id: no_automation_precedent
+  - label: no_automation_precedent
     axis: the axis the second world varies, in one sentence
     facts:
       - fact_id: f1
@@ -51,15 +51,16 @@ worlds:
         entities: [the-host]
 ```
 
-Each `world_id` may carry ONLY lowercase letters, digits, `_` and `.`, and must be unique in
-the family. A HYPHEN IS REFUSED — use `_` where you would write `-`. The label also names a
-directory, so it may not be `base`, and two labels differing only in case are one label.
+Each `label` uses lowercase ASCII letters, digits and `_`, starts with a letter or digit,
+and is unique in the family. Use `_` where you would write `-`. `base`, `family` and
+`family_<digits>` are reserved reporting selectors. Labels are descriptive metadata;
+the host assigns opaque world UUIDs before preflight. Do not supply `world_id`.
 
 `base_disposition` is what the REAL investigation had established by the branch point, not what
 you would conclude — it is the reading every counterfactual is measured against.
 
 `worlds` IS THE PLAN, and it is yours alone. You have read the capture once; calls 2 and 3
-write one world's STORY each against this plan and never re-plan it, so the ids, the axes and
+write one world's STORY each against this plan and never re-plan it, so the labels, the axes and
 the facts are decided here or they are decided by two calls that have not seen each other.
 Do not include the base world A — it is the capture unchanged and the launcher composes it.
 The fan-out is as wide as this list: two entries is the ordinary triplet, one is a pair.

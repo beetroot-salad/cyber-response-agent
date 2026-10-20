@@ -24,7 +24,6 @@ from defender.learning.judge._errors import JudgeRefused  # noqa: E402
 
 from defender.episodes._episode_handle import Episode  # noqa: E402
 
-from defender._io import bind  # noqa: E402
 
 
 from defender.episodes._episode_paths import LAYOUT  # noqa: E402
@@ -191,27 +190,30 @@ def _known_keys(record: type, doc: dict[Any, Any]) -> dict[Any, Any]:
 
 
 
-def _existing_grade(episode_dir: Path) -> dict[str, Any] | None:
+def _existing_grade(episode: Episode) -> dict[str, Any] | None:
     # Screened read: this is the idempotency record in a box-reachable tree, and a planted one
     # would stop the pass from ever running. Nothing at the name is an ordinary ungraded episode.
-    with bind(Path(episode_dir)) as bound:
-        return family_mod.screened_yaml_mapping(bound, LAYOUT.judge, what="the family grade")
+    # Read off the walked handle's own view, never a re-bind of its `.dir` (#1187 S-iso).
+    return family_mod.screened_yaml_mapping(episode.view(), LAYOUT.judge,
+                                            what="the family grade")
 
 
 
 
-def read_grade(episode_dir: Path) -> EpisodeGrade | None:
+def read_grade(episode: Episode) -> EpisodeGrade | None:
     """The episode's recorded grade off `judge.yaml`, or `None` when there is none.
 
-    The one reader, shared with the episode page and the re-run. A record carrying a name
+    The one reader, shared with the episode page and the re-run, over the episode handle the
+    runs repository's walk returned (`runs.episode_files`, or an `EpisodeRuns` view's
+    `.episode`): a bare path carries no tenant, so it cannot go through that walk (#1187
+    S-iso). A record carrying a name
     #1234 retired (`_retired_names_in`) is `JudgeRefused` naming it, before anything is read
     (A4). Otherwise absent fields take defaults and unknown keys are dropped, never read; a
     planted link, a non-mapping or a schema failure is `JudgeRefused`. A `not_graded` stamp
     reads back as a grade carrying it.
     """
-    episode_dir = Path(episode_dir)
-    doc = _existing_grade(episode_dir)
-    return None if doc is None else _grade_from_document(episode_dir, doc)
+    doc = _existing_grade(episode)
+    return None if doc is None else _grade_from_document(Path(episode.dir), doc)
 
 
 

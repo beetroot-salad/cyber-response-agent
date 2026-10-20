@@ -16,7 +16,7 @@ absent inputs (tier 1) and malformed ones (tier 2) both mark it `ungradable` wit
 and a malformed world also carries `malformed: true`, so "not there" and "there and wrong" stay
 distinguishable on the record.
 
-This module is also the one home of the episode archive's record readers (`raw_manifest`,
+This module is also the one home of the episode archive's record readers (`read_manifest`,
 `read_samples_record`, `read_world_facts`, `screened_yaml_mapping`) and the accessors in
 `__all__`, shared by the judge's input builder (`render.py`) and the episode page. The world's
 leads and queries come off `lead_repository.joined`.
@@ -34,9 +34,8 @@ from pydantic import SkipValidation
 
 from pathlib import Path, PurePath
 
-from defender._io import Bound, bind
+from defender._io import Bound
 from defender.records._report import ReportRead, parse_report_text
-from defender.records._run_id import is_valid_run_id
 from defender._vocab import normalized_disposition
 from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES, EpisodePaths
 from defender.learning.branch.ledger import (
@@ -49,8 +48,7 @@ from defender.runtime.branch._family import (
     FamilyError,
     ManifestPredatesOracle,
     load_manifest_document,
-    is_reserved_world_label,
-    world_token_for,
+    parse_family,
 )
 from defender.runtime.circuit_breaker import DENIED_ERROR_CLASS, INFRA_ERROR_CLASS
 from defender.runtime.run_end import (
@@ -131,29 +129,21 @@ def read_samples_record(bound: Bound, *, reader: Any = None) -> dict[str, Any]:
     return read(bound, LAYOUT.samples)
 
 
-def raw_manifest(episode_dir: Path) -> dict[str, Any]:
-    """The manifest as a mapping, or `JudgeRefused`.
-
-    Screened like the launcher's own read: the episode dir is box-reachable, and a link the
-    launcher refuses must not be one the grader honours. Absent is a refusal too."""
-    with bind(Path(episode_dir)) as bound:
-        return read_manifest(bound)
-
-
-def read_manifest(bound: Bound) -> dict[str, Any]:
-    """`raw_manifest` through the pass's own bound reader: the runtime loader's own gate
-    (`_family.load_manifest_document`), so a manifest the sibling refuses — one predating the
-    oracle, a label off the world-token rule, a hostile system name — is refused here too,
-    before any of it reaches a prompt or a page. A repeated key is refused as well: YAML keeps
-    the last spelling silently, and the judge and the page must not read a document whose
-    meaning depends on which copy won.
+def read_manifest(bound: Bound, *, expected_episode_id: str) -> dict[str, Any]:
+    """The manifest as a mapping, or `JudgeRefused`, through the pass's own bound reader (the
+    walked episode's view): the runtime loader's own gate (`_family.load_manifest_document`),
+    so a manifest the sibling refuses — one predating the oracle, a label off the world-token
+    rule, a hostile system name, an `episode_id` other than `expected_episode_id` (the folder
+    it was read from, #1187 R5) — is refused here too, before any of it reaches a prompt or a
+    page. A repeated key is refused as well: YAML keeps the last spelling silently, and the
+    judge and the page must not read a document whose meaning depends on which copy won.
 
     The refusal is `JudgeRefused` raised FROM the loader's `FamilyError`, so a caller can tell
     an archive of the old design (`ManifestPredatesOracle` as the cause) from a damaged one."""
     from defender._yaml import duplicate_key_paths
 
     try:
-        doc = load_manifest_document(bound)
+        doc = load_manifest_document(bound, expected_episode_id=expected_episode_id)
     except ManifestPredatesOracle as old:
         raise JudgeRefused(str(old)) from old
     except FamilyError as refused:
@@ -334,74 +324,10 @@ def discriminator_of(doc: dict[str, Any]) -> dict[str, Any]:
     return block if isinstance(block, dict) else {}
 
 
-def _non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    raw = doc.get("worlds")
-    if not isinstance(raw, list):
-        raise JudgeRefused("the manifest's worlds is not a list")
-    # A model-authored list can hold non-mapping entries. Dropping them silently would grade a
-    # family missing an arm as though complete, so the residue refuses the pass.
-    entries = [w for w in raw if isinstance(w, dict)]
-    dropped = [w for w in raw if not isinstance(w, dict)]
-    if dropped:
-        raise JudgeRefused(
-            f"the manifest's worlds list holds {len(dropped)} entr"
-            f"{'y' if len(dropped) == 1 else 'ies'} that are not mappings ({dropped[:3]!r}) — "
-            "a world entry is an object, and dropping one silently would grade a family that "
-            "is missing an arm as though the arm had never been declared")
-    seen: dict[str, str] = {}
-    for entry in entries:
-        label = entry.get("world_id")
-        if not isinstance(label, str) or not label:
-            raise JudgeRefused("a world entry carries no world_id")
-        folded = label.casefold()
-        if folded in seen and seen[folded] != label:
-            raise JudgeRefused(
-                f"world labels {seen[folded]!r} and {label!r} are one label wherever the "
-                "filesystem folds case — the manifest is refused rather than picking either "
-                "entry silently")
-        if folded in seen:
-            raise JudgeRefused(
-                f"two world entries both carry the label {label!r} — the manifest is ambiguous "
-                "at the one join every per-world fact goes through")
-        seen[folded] = label
-    return [w for w in entries if w.get("role") != BASE_ROLE]
 
 
-def world_label_names_directory(episode_id: str, label: str) -> bool:
-    """Whether `label` may be joined into a per-world path (`worlds/<label>/…`,
-    `runs/<episode_id>-<label>/`); shared by the grading pass and the episode page.
-
-    Both spellings are checked: the launcher checks only the concatenation, whose first
-    character is the episode id's, so `..` would pass it and turn `worlds/<label>` into the
-    episode dir."""
-    return is_valid_run_id(label) and is_valid_run_id(f"{episode_id}-{label}")
 
 
-def _check_world_labels(episode_id: str, worlds: list[dict[str, Any]]) -> None:
-    """Refuse a world label that cannot be used as a name, before any path is built from it.
-
-    - Reserved labels (`base`, `family`, `family_<n>`): re-checked here because `grade_episode`
-      can run over an episode that never passed the launcher, and a world labeled `family`
-      would collide with the family-level call's finding ids and archive path.
-    - The label must name a directory (`world_label_names_directory`): it is model-authored and
-      joined straight into every per-world path.
-
-    The judge reads only the episode it is handed (#1105 J3), so a label is never probed
-    against the tenant's runs: the collision probe guarded a resolver nothing called."""
-    for world in worlds:
-        label = world.get("world_id")
-        if isinstance(label, str) and is_reserved_world_label(label):
-            raise JudgeRefused(
-                f"world label {label!r} is reserved — it is the family's own base capture, the "
-                "family-level judge call, or one of that call's own `family_<n>` draws — a "
-                "graded world claiming it would collide with the family call's own agent id "
-                "and archive path (M5)")
-        if isinstance(label, str) and not world_label_names_directory(episode_id, label):
-            raise JudgeRefused(
-                f"world label {label!r} cannot name a directory of its own, or this episode's "
-                f"sibling run ({episode_id}-{label}) — the label is joined straight into every "
-                "per-world path this pass reads and writes, so a label off that grammar reads "
-                "and writes outside the world it names")
 
 from defender.learning.judge._records import (
     _admitted_query_table as _admitted_query_table,
@@ -558,6 +484,9 @@ class WorldFacts:
     """One world's archived record (ledger, investigation, report), read once per grading pass
     and shared between the pass and the render."""
 
+    #: The host-minted world UUID carried by ledger rows and the run half of call IDs.
+    token: str
+
     #: `SkipValidation`: the ledger is the largest thing a pass holds and `dict[str, Any]`
     #: checks nothing inside a row, so validation would only copy every row.
     ledger_rows: Annotated[list[dict[str, Any]], SkipValidation]
@@ -578,9 +507,6 @@ class WorldFacts:
     table_rows: Annotated[list[dict[str, Any]], SkipValidation] = field(default_factory=list)
     forged_rows: Annotated[list[dict[str, Any]], SkipValidation] = field(default_factory=list)
     summary_leads: frozenset[str] = frozenset()
-    #: The run's world token (`<episode token>.<label>`): the `world_id` its ledger rows carry
-    #: and the run half of its call ids.
-    token: str = ""
 
     @property
     def referenced_leads(self) -> frozenset[str]:
@@ -632,7 +558,7 @@ class InvestigationFacts:
 
 
 def read_investigation_facts(bound: Bound, *, world: str) -> InvestigationFacts:
-    """`worlds/<label>/investigation.md` alone: text and resolution facts, `.absent` when
+    """`worlds/<world-uuid>/investigation.md` alone: text and resolution facts, `.absent` when
     missing, `JudgeRefused` when present but unreadable."""
     name = LAYOUT.world(world).investigation
     rec = _read_archived_text(bound, name, world=world, role=str(WORLD_LEAVES.investigation))
@@ -645,15 +571,15 @@ def read_investigation_facts(bound: Bound, *, world: str) -> InvestigationFacts:
         unlanded_document_rows=unlanded)
 
 
-def read_world_ledger(bound: Bound, label: str, *, episode_token: str,
+def read_world_ledger(bound: Bound, world_id: str,
                       ) -> tuple[list[dict[str, Any]], int, Any]:
     """This world's served-ledger rows, malformed-row count and the read record. Refuses on an
     unreadable ledger; a missing one is reported through the record's absent state."""
-    return _read_world_ledger(bound, world_ledger_name(label, episode_token=episode_token),
-                              world_token_for(episode_token, label))
+    return _read_world_ledger(bound, world_ledger_name(world_id),
+                              world_id)
 
 
-def read_world_facts(bound: Bound, label: str, *, episode_token: str,  # noqa: PLR0913 — the grading read's extras ride on the one construction
+def read_world_facts(bound: Bound, label: str, *, world_id: str,  # noqa: PLR0913 — the grading read's extras ride on the one construction
                      leads: Callable[[], dict[str, JoinedLead]] | None = None,
                      absent_ledger_ok: bool = False,
                      call_records: tuple[list[dict[str, Any]], list[dict[str, Any]]] | None = None,
@@ -668,29 +594,29 @@ def read_world_facts(bound: Bound, label: str, *, episode_token: str,  # noqa: P
     ledger is one whose investigator made no call that reached it.
 
     `leads` is deferred (`leads_by_id` takes a `Path`, not a bound reader) and runs only after
-    the three reads pass, so a planted link at `worlds/<label>` is refused by the document read
+    the three reads pass, so a planted link at `worlds/<world-uuid>` is refused by the document read
     first. Set on the one construction because `dataclasses.replace` on a `@model` would copy
     the whole ledger."""
-    ledger_name = world_ledger_name(label, episode_token=episode_token)
+    ledger_name = world_ledger_name(world_id)
     if call_records is not None:
         table_rows, ledger_rows = call_records
         malformed = 0
     else:
         table_rows = []
         ledger_rows, malformed, ledger_read = read_world_ledger(
-            bound, label, episode_token=episode_token)
+            bound, world_id)
         if ledger_read.absent and not absent_ledger_ok:
             raise JudgeRefused(
                 f"the ledger ({ledger_name}) could not be read: nothing is at that name")
-    document = read_investigation_facts(bound, world=label)
+    document = read_investigation_facts(bound, world=world_id)
     if document.absent:
         raise JudgeRefused(
-            f"world {label!r}: {LAYOUT.world(label).investigation} could not be read: "
+            f"world {label!r}: {LAYOUT.world(world_id).investigation} could not be read: "
             "nothing is at that name")
-    report = read_archived_report(bound, LAYOUT.world(label).report)
+    report = read_archived_report(bound, LAYOUT.world(world_id).report)
     if report.absent:
         raise JudgeRefused(
-            f"world {label!r}: {LAYOUT.world(label).report} could not be read: "
+            f"world {label!r}: {LAYOUT.world(world_id).report} could not be read: "
             "nothing is at that name")
     return WorldFacts(
         ledger_rows=ledger_rows, malformed_rows=malformed,
@@ -701,7 +627,7 @@ def read_world_facts(bound: Bound, label: str, *, episode_token: str,  # noqa: P
         unlanded_document_rows=document.unlanded_document_rows,
         leads=leads() if leads is not None else {},
         table_rows=table_rows, forged_rows=list(forged_rows or ()),
-        summary_leads=summary_leads, token=world_token_for(episode_token, label),
+        summary_leads=summary_leads, token=world_id,
     )
 
 
@@ -725,7 +651,7 @@ def _archive_notes(world: Bound, *, facts: WorldFacts) -> list[str]:
     return notes
 
 
-def _missing_required_input(bound: Bound, *, label: str, declared: Any) -> str | None:
+def _missing_required_input(bound: Bound, *, world_id: str, declared: Any) -> str | None:
     """The first file a world's context needs that is not in its parent's listing at all, or
     `None`. Absent is a state, not a refusal (K2): it marks the world ungradable without
     `malformed`. A name that IS listed but is not a plain file (a link, a FIFO, a directory)
@@ -734,7 +660,7 @@ def _missing_required_input(bound: Bound, *, label: str, declared: Any) -> str |
     nothing here — the read refuses it. The served ledger and the alert are not required (no
     call reached the ledger; the rule key falls back): whether a world ran is its own
     record's to say (S8)."""
-    world = bound.under(LAYOUT.world(label).dir).entries()
+    world = bound.under(LAYOUT.world(world_id).dir).entries()
     if world.absent:
         return str(WORLD_LEAVES.report)
     if world.entries is not None:
@@ -748,7 +674,7 @@ def _missing_required_input(bound: Bound, *, label: str, declared: Any) -> str |
 
 
 def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world is set aside
-    bound: Bound, world: dict[str, Any], *, episode_dir: Path, episode_token: str,
+    bound: Bound, world: dict[str, Any], *, episode_dir: Path,
 ) -> tuple[dict[str, Any], WorldFacts | None]:
     """One non-control world's row and archived facts, or the row alone marked `ungradable`
     when the archive cannot be put in front of the judge (cut short, an input missing, a
@@ -756,18 +682,18 @@ def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world i
 
     @owns ungradable — the sole producer of a world row's `ungradable`/`ungradable_reason`/
     `malformed` from its archive (the pass adds the O5 failed worlds' rows itself)."""
-    label = world["world_id"]
+    label, world_id = world["label"], world["world_id"]
     raw_declared = world.get("disposition_declared")
     row: dict[str, Any] = {"world": label, "declared": normalized_disposition(raw_declared)}
 
     # A world the host cut short before the model decided is never graded (its report is the
     # host's, not a verdict) — unless the model had already closed. A cut by a failed write of
     # a call record names that record's file (A12).
-    end = _read_run_end_record(bound.under(LAYOUT.world(label).dir))
+    end = _read_run_end_record(bound.under(LAYOUT.world(world_id).dir))
     if end is not None and end.truncated_by is not None and not end.closed_before_cut:
         failed_write = {
-            TRUNCATED_BY_EXECUTED_QUERIES: str(LAYOUT.world(label).executed_queries),
-            TRUNCATED_BY_SERVED_LEDGER: world_ledger_name(label, episode_token=episode_token),
+            TRUNCATED_BY_EXECUTED_QUERIES: str(LAYOUT.world(world_id).executed_queries),
+            TRUNCATED_BY_SERVED_LEDGER: world_ledger_name(world_id),
         }.get(end.truncated_by)
         row["ungradable"] = True
         row["cut_short"] = end.truncated_by
@@ -777,7 +703,7 @@ def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world i
             + " — the host's report is not a verdict")
         return row, None
 
-    missing = _missing_required_input(bound, label=label, declared=raw_declared)
+    missing = _missing_required_input(bound, world_id=world_id, declared=raw_declared)
     if missing is not None:
         row["ungradable"] = True
         row["ungradable_reason"] = f"world {label!r} is missing its {missing}"
@@ -789,18 +715,18 @@ def read_world(  # noqa: PLR0911 — one tier rule, one return per way a world i
             "the disposition vocabulary — this world has no ground truth to grade against")
         return row, None
 
-    world_bound = bound.under(LAYOUT.world(label).dir)
+    world_bound = bound.under(LAYOUT.world(world_id).dir)
     try:
         # The usability read (A3): every file this run's context needs, plain, within limits
         # and well-formed — the call records first, so a damaged table is refused before the
         # lead reader (which takes a path) ever opens it.
-        call_records = read_call_records(bound, label, episode_token=episode_token)
+        call_records = read_call_records(bound, world_id)
         forged = _read_oracle_store(bound, world)
         summaries = _read_summaries(world_bound, label=label)
         _read_run_records(world_bound, label=label)
         facts = read_world_facts(
-            bound, label, episode_token=episode_token,
-            leads=lambda: _repository_leads(world_bound, Path(episode_dir), label),
+            bound, label, world_id=world_id,
+            leads=lambda: _repository_leads(world_bound, Path(episode_dir), world_id),
             absent_ledger_ok=True, call_records=call_records, forged_rows=forged,
             summary_leads=summaries)
         _check_gather_summaries(world_bound, label=label, referenced_leads=facts.referenced_leads)
@@ -824,8 +750,8 @@ def _read_oracle_store(bound: Bound, world: dict[str, Any]) -> list[dict[str, An
     planted world with no store is a failed read (A24), and every row must name one of that
     world's own facts (A3). The control legitimately has no store (its facts are `[]`); one it
     has is read under the same rule."""
-    label = world["world_id"]
-    name = LAYOUT.oracle_dir(label) / "forged.jsonl"
+    label, world_id = world["label"], world["world_id"]
+    name = LAYOUT.oracle_dir(world_id) / "forged.jsonl"
     rows, torn, rec = bound.read_jsonl(name)
     if rec.refusal is not None:
         raise JudgeRefused(f"world {label!r}: {rec.refusal}")
@@ -835,7 +761,7 @@ def _read_oracle_store(bound: Bound, world: dict[str, Any]) -> list[dict[str, An
         # The store is the directory: the oracle leaves `forged.jsonl` out when it froze no row
         # (K5: its empty records are absent), so a store holding no forged file is an empty
         # store. No readable directory is a planted world with no store (R6b): a failed read.
-        if bound.under(LAYOUT.oracle_dir(label)).entries().entries is None:
+        if bound.under(LAYOUT.oracle_dir(world_id)).entries().entries is None:
             raise JudgeRefused(f"world {label!r}: its oracle store ({name}) is absent — a "
                                "planted world's built layer is part of what it is judged on")
         return []
@@ -903,38 +829,33 @@ def _read_summaries(world: Bound, *, label: str) -> frozenset[str]:
 
 
 def control_world(doc: dict[str, Any]) -> dict[str, Any]:
-    """The manifest's control entry (`role` is the base role), its label checked usable as a
-    name like every world's; `JudgeRefused` when the manifest declares none or several."""
-    raw = doc.get("worlds")
-    controls = [w for w in raw if isinstance(w, dict) and w.get("role") == BASE_ROLE] \
-        if isinstance(raw, list) else []
+    """The validated manifest's unique control entry."""
+    try:
+        parse_family(doc)
+    except FamilyError as refused:
+        raise JudgeRefused(str(refused)) from refused
+    controls = [world for world in doc["worlds"] if world.get("role") == BASE_ROLE]
     if len(controls) != 1:
         raise JudgeRefused(f"the manifest declares {len(controls)} control worlds, not one")
-    label = controls[0].get("world_id")
-    if not isinstance(label, str) or not world_label_names_directory(episode_id_of(doc), label):
-        raise JudgeRefused(f"the control's label {label!r} cannot name a directory")
     return controls[0]
 
-
 def non_control_worlds(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    """The manifest's non-control world entries, each label checked usable as a name
-    (`_check_world_labels`) before any path is built from it."""
-    worlds = _non_control_worlds(doc)
-    _check_world_labels(episode_id_of(doc), worlds)
-    return worlds
+    """The validated manifest's non-control worlds in declaration order."""
+    try:
+        parse_family(doc)
+    except FamilyError as refused:
+        raise JudgeRefused(str(refused)) from refused
+    return [world for world in doc["worlds"] if world.get("role") != BASE_ROLE]
 
-
-def _repository_leads(world: Bound, episode_dir: Path, label: str) -> dict[str, JoinedLead]:
-    """`leads_by_id` over `worlds/<label>`, only once the bind's listing shows a real
+def _repository_leads(world: Bound, episode_dir: Path, world_id: str) -> dict[str, JoinedLead]:
+    """`leads_by_id` over `worlds/<world-uuid>`, only once the bind's listing shows a real
     directory there."""
     listing = world.entries()
     if listing.entries is None:
         raise JudgeRefused(
-            f"world {label!r}: {LAYOUT.world(label).dir} could not be listed: "
+            f"world {world_id!r}: {LAYOUT.world(world_id).dir} could not be listed: "
             f"{listing.reason or 'nothing is at that name'}")
-    # `.at(...)`, not `.world(label)`: the minting accessor's case-stability rule would refuse
-    # a declared label that names a real directory.
-    return leads_by_id(EpisodePaths(episode_dir).at(LAYOUT.world(label).dir))
+    return leads_by_id(EpisodePaths(episode_dir).world(world_id).dir)
 
 
 def is_gradable_row(row: Any) -> bool:
@@ -948,10 +869,10 @@ __all__ = [
     "read_call_join", "read_query_table", "read_served_ledger",
     "discriminator_of", "episode_id_of",
     "is_gradable_row", "json_mapping", "json_mapping_of", "lead_chain", "leads_by_id", "mapping_key",
-    "names_one_file", "non_control_worlds", "raw_manifest", "read_manifest",
+    "names_one_file", "non_control_worlds", "read_manifest",
     "refused_entries", "has_refusals", "render_refused", "is_external_refusal",
     "read_archived_report", "read_investigation_facts", "read_samples_record", "read_world",
     "read_world_facts", "read_world_ledger", "scope_params",
     "summary_lead_ids", "world_ledger_name",
-    "screened_yaml_mapping", "world_label_names_directory",
+    "screened_yaml_mapping",
 ]

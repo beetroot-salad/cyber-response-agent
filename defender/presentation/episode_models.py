@@ -37,7 +37,7 @@ from defender.learning.judge.enqueue import (
 
 
 from defender.runtime.branch._family import (
-    BASE_ROLE, episode_token_for,
+    BASE_ROLE, world_id_for,
 )
 
 from defender.configuration._pricing import UnknownModel, model_key, usage_cost
@@ -182,7 +182,7 @@ class _Timing:
 
 
 class _WorldArchive:
-    """What `worlds/<label>/` holds: the archived report, whether the investigation is
+    """What `worlds/<world-uuid>/` holds: the archived report, whether the investigation is
     archived, and the two JSON stamps (`None` when absent or unreadable)."""
 
     __slots__ = ("report", "investigation_present", "provenance", "scrub")
@@ -213,7 +213,7 @@ class _WorldLeads:
         #: them: each call with the decision word that answered it.
         self.calls: list[dict[str, Any]] = []
         self.archived = False
-        #: `worlds/<label>` exists but is not a listable real directory: the bind's refusal,
+        #: `worlds/<world-uuid>` exists but is not a listable real directory: the bind's refusal,
         #: said once for the block.
         self.dir_error: str | None = None
         self.facts_error: str | None = None
@@ -252,15 +252,13 @@ class WorldEntry:
         self.in_manifest = False
         self.manifest_doc: dict[str, Any] | None = None
         self.row: dict[str, Any] | None = None  # judge.yaml row, if any
-        #: Whether the label may be joined into a path (`family.world_label_names_directory`):
-        #: a label with `..` or a separator names a directory outside the episode, so nothing
-        #: is read for it and it renders as unnameable.
+        #: Whether the validated manifest binds this display label to a host UUID.
         self.nameable = False
         self.run_dir_name: str | None = None  # the arm's run folder, opened by id through the view
         #: The arm's run page, relative to the episode page (`runs/<arm>/runtime.html`).
         self.run_page: str | None = None
         self.result: _ResultEvent | None = None  # `None` when there is no run dir at all
-        self.archive: _WorldArchive | None = None  # `None` when nothing is at worlds/<label>
+        self.archive: _WorldArchive | None = None  # `None` when nothing is at worlds/<world-uuid>
 
 
 
@@ -451,23 +449,19 @@ class _Episode:
         # it, so renderers have no tree to reach for.
         self.manifest = manifest
         self.episode_id = family.episode_id_of(manifest)
-        # Built or absent, never the raw id: the token is joined into
-        # `served/<token>.<label>.jsonl`, and a raw `../../x` would escape the episode dir.
-        try:
-            self.episode_token: str | None = episode_token_for(self.episode_id)
-        except Exception:  # noqa: BLE001 — a token that cannot be built names no world's ledger
-            self.episode_token = None
         # Only mapping entries: scalars have nothing to render.
         self.manifest_worlds: list[dict[str, Any]] = [
             w for w in _items(manifest.get("worlds")) if isinstance(w, dict)]
         self.control_label: str | None = next(
-            (w["world_id"] for w in self.manifest_worlds
-             if w.get("role") == BASE_ROLE and isinstance(w.get("world_id"), str)), None)
+            (w["label"] for w in self.manifest_worlds
+             if w.get("role") == BASE_ROLE and isinstance(w.get("label"), str)), None)
         self.grade_rec = _Record()
         self.outcome_rec = _Record()
         self.samples_rec = _Record()
         self.stamp_rec = _Record()
         self.timing_rec = _Record()
+        #: Arm roster: absent before RUNS; a refusal is displayed beside the arms.
+        self.roster_rec = _Record()
         self.entries: dict[str, WorldEntry] = {}
         #: Every roster line in section order, classified — what the worlds and leads sections
         #: render, and what their headings count.
@@ -494,6 +488,11 @@ class _Episode:
         self.review_cost = 0.0
         self.review_calls = 0
 
+
+    def world_id(self, label: str) -> str:
+        """The host identity for a label in this episode's validated manifest."""
+        return world_id_for(self.manifest, label)
+
     @property
     def sectioned(self) -> list[RosterItem]:
         """The roster items that get a section and a leads block — what both headings count."""
@@ -510,7 +509,7 @@ class _Episode:
 
     def manifest_world(self, label: str) -> dict[str, Any] | None:
         """The first manifest entry naming `label`; the guide still renders every entry."""
-        return next((w for w in self.manifest_worlds if w.get("world_id") == label), None)
+        return next((w for w in self.manifest_worlds if w.get("label") == label), None)
 
     @property
     def failed_worlds(self) -> dict[str, dict[str, Any]]:

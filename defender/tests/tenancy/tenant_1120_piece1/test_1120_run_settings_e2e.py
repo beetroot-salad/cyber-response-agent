@@ -2,6 +2,8 @@
 code, and the replay harness runs as the fixture tenant (H2)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from pathlib import Path
 
 import pytest
@@ -16,7 +18,7 @@ from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H  # noqa: E4
 pytestmark = pytest.mark.e2e
 
 #: The retired lab's own id: the data-root tenant carries it, so reading a checkout copy would
-LAB_ID = "playground"
+LAB_ID = fixture_uuid("tenant:playground")
 
 #: The one gather pair the data-root table withholds and the checkout's fixture grants.
 WITHHELD = ("change-mgmt", "list-changes")

@@ -26,10 +26,8 @@ from typing import Annotated, Any
 
 from pydantic import SkipValidation
 
-import contextlib
-
 from defender.records import _alert_input
-from defender._io import Bound, bind
+from defender._io import Bound
 from defender.episodes._episode_paths import LAYOUT, WORLD_LEAVES, OracleStorePaths
 from defender.hooks.record_lesson_load import (
     EVIDENCE_INDIRECT,
@@ -43,7 +41,6 @@ from defender.learning.judge._errors import JudgeRefused
 from defender.learning.judge.family import (
     WorldFacts,
     discriminator_of,
-    episode_id_of,
     json_mapping,
     has_refusals,
     _repository_leads,
@@ -64,7 +61,7 @@ from defender.learning.judge.calls import (
 )
 from defender.learning.judge.runs import RunSet, read_run_set
 from defender.run_common import REPO_ROOT
-from defender.runtime.branch._family import episode_token_for
+from defender.runtime.branch._family import world_id_for, parse_family
 
 #: The frame tag every model-authored body in the judge's prompt is wrapped in — the
 #: questioner's spelling, so one frame regex matches both.
@@ -159,7 +156,7 @@ def _render_lessons(lessons: list[dict[str, Any]]) -> str:
 
 def _world_entry(doc: dict[str, Any], label: str) -> dict[str, Any]:
     for world in doc.get("worlds") or ():
-        if isinstance(world, dict) and world.get("world_id") == label:
+        if isinstance(world, dict) and world.get("label") == label:
             return world
     raise JudgeRefused(f"the manifest declares no world {label!r}")
 
@@ -206,13 +203,13 @@ def _render_samples(samples_doc: dict[str, Any], served: list[str]) -> tuple[str
     return (text, ends) if text else ("No samples record is archived.\n", {})
 
 
-def render_oracle_store(bound: Bound, label: str) -> str:
+def render_oracle_store(bound: Bound, world_id: str) -> str:
     """The judged world's oracle-side record as the judge reads it (its built layer): every
     frozen forged row (the telemetry its facts were served through), every collision of a
     frozen row's identifier with this world's real data (M12=A — the row stayed frozen and was
     still served), and pre-flight's calibration result — the facts it recorded and its
     `preflight` rows of the oracle-side ledger."""
-    paths = OracleStorePaths(Path(LAYOUT.oracle_dir(label)))
+    paths = OracleStorePaths(Path(LAYOUT.oracle_dir(world_id)))
     forged, _bad, _rec = bound.read_jsonl(paths.forged.as_posix())
     collisions, _bad, _rec = bound.read_jsonl(paths.collisions.as_posix())
     lines = ["frozen telemetry (forged rows this world serves):" if forged
@@ -241,7 +238,7 @@ def render_oracle_store(bound: Bound, label: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def family_status(bound: Bound) -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
+def family_status(bound: Bound, manifest: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
     """Pre-flight's outcome record (`None` when there is none to read) and every world O5
     counts as failed (`outcome.failed_worlds`) — read once per pass and shared by every
     world's prompt."""
@@ -250,8 +247,8 @@ def family_status(bound: Bound) -> tuple[dict[str, Any] | None, dict[str, dict[s
     try:
         record = outcome_mod.read_outcome(bound)
     except outcome_mod.OutcomeUnreadable:
-        return None, outcome_mod.failed_worlds(bound, {})
-    return record, outcome_mod.failed_worlds(bound, record)
+        return None, outcome_mod.failed_worlds(bound, {}, family=parse_family(manifest))
+    return record, outcome_mod.failed_worlds(bound, record, family=parse_family(manifest))
 
 
 #: A run label as the manifest grammar spells one: the only run-named text that may sit in
@@ -322,7 +319,7 @@ def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that
     episode_dir: Path, world_label: str, *,
     git_show: Any = None, lessons_commit: str | None = None, payload_cap: int | None = None,
     facts: WorldFacts | None = None, samples: dict[str, Any] | None = None,
-    manifest: dict[str, Any] | None = None, bound: Bound | None = None,
+    manifest: dict[str, Any] | None = None, bound: Bound,
     family_text: list[Any] | None = None, runs: RunSet | None = None,
 ) -> JudgeContext:
     """The judge's computed context for one planted world (design M2, derived on read, P-b):
@@ -330,32 +327,35 @@ def render(  # noqa: PLR0913 — the keyword tail is the per-pass hand-over that
     every reference run, the reference runs' compressed sections, the focus world's own views,
     the noise, and the questioner inputs (samples record, base story).
 
-    `git_show` is the `(cwd, rev, path) -> str | None` seam for reading a lesson body at a
-    recorded commit. `lessons_commit` overrides the per-world provenance read. `facts`,
-    `manifest`, `samples`, `family_text`, `runs` and `bound` are the caller's already-read
-    per-pass inputs; each is read or computed here only when not handed over.
+    `bound` is the walked episode's view (`Episode.view()` off the runs repository's walk),
+    which every read here goes through; `episode_dir` names that folder for the path-taking
+    lead reader and in messages, and is never re-bound (#1187 S-iso). `git_show` is the
+    `(cwd, rev, path) -> str | None` seam for reading a lesson body at a recorded commit.
+    `lessons_commit` overrides the per-world provenance read. `facts`, `manifest`, `samples`,
+    `family_text` and `runs` are the caller's already-read per-pass inputs; each is read or
+    computed here only when not handed over.
     """
     episode_dir = Path(episode_dir)
-    with (contextlib.nullcontext(bound) if bound is not None else bind(episode_dir)) as bound:
-        doc = manifest if manifest is not None else read_manifest(bound)
-        record, failed = family_status(bound)
-        if runs is None:
-            runs = read_run_set(bound, doc, episode_dir=episode_dir, failed=failed)
-        if family_text is None:
-            family_text = render_family_text(record, failed)
-        samples_doc = read_samples_record(bound) if samples is None else samples
-        focus = _render_bound_world(bound, episode_dir, world_label, git_show=git_show,
-                                    lessons_commit=lessons_commit,
-                                    facts=facts if facts is not None else runs.usable.get(
-                                        world_label),
-                                    samples=samples_doc, manifest=doc)
-        labels = [world_label, *runs.references(world_label)]
-        views = [run_view(doc, runs, label) for label in labels]
-        surfaces = fact_surfaces(doc, runs, labels)
-        return JudgeContext(
-            world_label=world_label, run_views=views, fact_surfaces=surfaces, focus=focus,
-            noise=family_text, aligned_rows=aligned_lead_rows(views, surfaces),
-            samples=samples_doc, base_story=doc.get("base_story"), payload_cap=payload_cap)
+    doc = manifest if manifest is not None else read_manifest(
+        bound, expected_episode_id=episode_dir.name)
+    record, failed = family_status(bound, doc)
+    if runs is None:
+        runs = read_run_set(bound, doc, episode_dir=episode_dir, failed=failed)
+    if family_text is None:
+        family_text = render_family_text(record, failed)
+    samples_doc = read_samples_record(bound) if samples is None else samples
+    focus = _render_bound_world(bound, episode_dir, world_label, git_show=git_show,
+                                lessons_commit=lessons_commit,
+                                facts=facts if facts is not None else runs.usable.get(
+                                    world_label),
+                                samples=samples_doc, manifest=doc)
+    labels = [world_label, *runs.references(world_label)]
+    views = [run_view(doc, runs, label) for label in labels]
+    surfaces = fact_surfaces(doc, runs, labels)
+    return JudgeContext(
+        world_label=world_label, run_views=views, fact_surfaces=surfaces, focus=focus,
+        noise=family_text, aligned_rows=aligned_lead_rows(views, surfaces),
+        samples=samples_doc, base_story=doc.get("base_story"), payload_cap=payload_cap)
 
 
 def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
@@ -366,15 +366,16 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
 ) -> JudgeInput:
     from defender.learning.judge.run import served_systems_of
 
-    doc = manifest if manifest is not None else read_manifest(bound)
-    episode_token = episode_token_for(episode_id_of(doc))
+    doc = manifest if manifest is not None else read_manifest(
+        bound, expected_episode_id=Path(episode_dir).name)
+    world_id = world_id_for(doc, world_label)
     _world_entry(doc, world_label)  # validates the judged world is actually declared
     show = git_show if git_show is not None else _git_show_default
-    world = bound.under(LAYOUT.world(world_label).dir)
+    world = bound.under(LAYOUT.world(world_id).dir)
     # `leads_by_id` takes a path; gated as in the pass's own per-world read.
     record = facts if facts is not None else read_world_facts(
-        bound, world_label, episode_token=episode_token,
-        leads=lambda: _repository_leads(world, episode_dir, world_label))
+        bound, world_label, world_id=world_id,
+        leads=lambda: _repository_leads(world, episode_dir, world_id))
 
     text = record.investigation_text
     resolutions_by_lead = record.resolutions_by_lead
@@ -434,7 +435,7 @@ def _render_bound_world(  # noqa: C901, PLR0913, PLR0915 — see `render`
         discriminator=discriminator_of(doc),
         leads=leads, lessons=lessons, document_text=text,
         report_text=report_text, samples_text=samples_text, samples_ends=samples_ends,
-        oracle_text=render_oracle_store(bound, world_label),
+        oracle_text=render_oracle_store(bound, world_id),
     )
 
 
@@ -559,6 +560,7 @@ class RunView:
     verifier verdict keyed by its call number."""
 
     label: str
+    world_id: str
     role: Any
     story: Any
     axis: Any
@@ -596,7 +598,7 @@ def run_view(doc: dict[str, Any], runs: RunSet, label: str) -> RunView:
             claims[n] = {"claim": partner.get("claim"),
                          "verifier_verdict": partner.get("verifier_verdict")}
     return RunView(
-        label=label, role=entry.get("role"), story=entry.get("story"), axis=entry.get("axis"),
+        label=label, world_id=run.token, role=entry.get("role"), story=entry.get("story"), axis=entry.get("axis"),
         declared=entry.get("disposition_declared"), label_basis=entry.get("label_basis"),
         reached=run.report.disposition,
         facts=[f for f in entry.get("facts") or () if isinstance(f, dict)],

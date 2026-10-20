@@ -2,7 +2,12 @@
 forged rows, accounting and pricing, pre-flight worlds, pre-branch calls, esql forging checks."""
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
+from defender.tests.support.learning.judge import _judge_921 as J
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
@@ -1150,7 +1155,7 @@ def test_a_failed_worlds_detail_never_reaches_another_worlds_judge_prompt(tmp_pa
     judge = J.scripted_judge()
     J.grade(ep, judge=judge)
 
-    world_c = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True) if a.startswith("judge:c:")]
+    world_c = [p for p, a in zip(judge.prompts, judge.agent_ids, strict=True) if a.startswith(f"judge:{T.fixture_world_id('c')}:")]
     assert world_c, f"world c was never graded (agent ids: {judge.agent_ids})"
     assert all("world b" in p for p in world_c), "the failed world is not listed by its label"
     for agent, prompt in zip(judge.agent_ids, judge.prompts, strict=True):
@@ -1224,12 +1229,16 @@ def test_an_unexpected_error_in_one_preflight_world_stops_the_others(tmp_path):
                       base_rows=[S.captured("idp", "query", ALICE, ALICE_ROWS),
                                  S.captured("idp", "query", BOB, BOB_ROWS)])
     (ep / "oracle").mkdir(exist_ok=True)
-    (ep / "oracle" / "b").write_text("not a folder", encoding="utf-8")
+    (ep / "oracle" / T.world_id(ep, "b")).write_text("not a folder", encoding="utf-8")
     o = S.oracle(S.submit(ALICE_ROWS, S.EMPTY_CLAIM), S.submit(BOB_ROWS, S.EMPTY_CLAIM),
                  fault=S.Fault(delay=1.5))
 
-    with pytest.raises(OSError, match=re.escape(str(ep / "oracle" / "b"))):
-        cli.preflight_replay(ep, source=S.T.open_source(src), roster=est.roster(),
+    # Review-3 F32 ruling (#1187 S-iso): pre-flight takes the walked view's held episode.
+    # The view is opened OUTSIDE the raises block: its own open failure (an OSError too) must
+    # propagate as itself, not be read against the match below.
+    with J.walked_view(ep) as view, \
+            pytest.raises(OSError, match=re.escape(str(ep / "oracle" / T.world_id(ep, "b")))):
+        cli.preflight_replay(view.episode, source=S.T.open_source(src), roster=est.roster(),
                              tenant=est.run_tenant(), oracle=o.model,
                              verifier=S.passing_verifier().model, rate=1e6)
 
@@ -1331,7 +1340,7 @@ def test_the_sibling_s_registry_gets_pre_flight_s_pre_branch_set(tmp_path):
     seen: dict = {}
     from defender.episodes._episode_handle import Episode
     run._drive_investigation(
-        alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / 'sib'),
+        alert_path=src / "alert.json", run=_fixture_run_1165(tmp_path / fixture_uuid("sib")),  # #1187 (declared change 1)
         defender_dir=est.defender_dir, model_name="m", model_override=None, box=None,
         tenant=est.run_tenant(), world=S.load_world(ep, "b"), episode=Episode.open(ep),
         serving=S.serving(), source=S.T.open_source(src),

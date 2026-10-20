@@ -1,6 +1,8 @@
 """Compare natural continuations and control arms under distinct host layouts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +14,7 @@ from defender.tests.e2e import _1255_twin as W  # noqa: E402
 
 pytestmark = pytest.mark.e2e
 
-LAYOUTS = {"alpha": "twinalpha", "beta": "twinbeta"}
+LAYOUTS = {"alpha": fixture_uuid("tenant:twinalpha"), "beta": fixture_uuid("tenant:twinbeta")}
 
 
 @pytest.fixture(scope="module")
@@ -163,7 +165,7 @@ def test_1255_twin_arm_surfaces_carry_no_arm_identity(twin, layout):
     arm = _arm_reached_the_model(pair, layout)
     tokens = W.identity_tokens(pair, "arm")
     assert {"source run id", "arm run id", "sibling run id", "episode id",
-            "episode token", "fork turn (uuid int)",
+            "world id", "sibling world id", "fork turn (uuid int)",
             f"world label {W.CONTROL} with the fork turn (uuid int)"} <= set(tokens), tokens
     assert W.scan(arm, {"the lead's own summary": W.LEAD_SUMMARY}), (
         "the arm's surfaces do not carry the re-run lead's summary — the scan below would be "

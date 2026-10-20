@@ -10,6 +10,7 @@ import threading
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from typing import Any
 
 import pytest
@@ -80,8 +81,10 @@ class World:
         return self.tmp / "mapping-scratch"
 
     def next_id(self, what: str) -> str:
+        """A fresh run id for this world's `what`-th drive: #1187 (declared change 1) — a
+        canonical UUID (`run.py --run-id` refuses any other), derived from a readable label."""
         self.n += 1
-        return f"{what}-{self.n}"
+        return fixture_uuid(f"1222-tenant-check-{what}-{self.n}")
 
     def alert_shape(self, shape: str) -> Path:
         """Put the alert mapping into one of `alert_mapping.domain.distinguished`'s shapes."""
@@ -115,6 +118,7 @@ class World:
         self.case_text(S.case_mapping_text())
 
 
+
 def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any) -> World:
     """A planted tenant whose mapping the check accepts. `launchable` also builds, while it is
     still valid, the branchable source run (`T.runs_base`) and a family manifest naming it
@@ -123,7 +127,7 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
     if launchable:
         _base, src = T.runs_base(w.tmp, tenant_id=w.planted.tenant_id)
         w.source_run = src
-        w.episode = T.episode(w.tmp, root=Path(os.environ["DEFENDER_EPISODES_BASE"]),
+        w.episode = T.episode(w.tmp, root=w.planted.root / w.planted.tenant_id / "episodes",
                               doc=T.family_doc(source_run_dir=str(src)))
         with S.sym("episodes._episode_handle", "Episode").open(w.episode) as episode:
             T.episode_view(episode, tenant=w.planted.accept())

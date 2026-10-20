@@ -38,7 +38,7 @@ def spliced(doc: dict, splices: dict[str, str]) -> str:
 
 def _world_b(doc: dict) -> dict:
     world = doc["worlds"][1]
-    assert world["world_id"] == "b"
+    assert world["label"] == "b"
     return world
 
 
@@ -51,13 +51,19 @@ def family_text(facts_yaml: str) -> str:
 
 
 def load(path: Path):
-    """`load_family` over the episode whose manifest is at `path` (`<episode>/family.yaml`)."""
+    """`load_family` over the episode whose manifest is at `path` (`<episode>/family.yaml`).
+    #1187 (R5, declared change 10): the loader is told the episode's id — its folder's name —
+    and refuses a manifest naming another (`expected_episode_id=`, required)."""
     with Episode.open(path.parent) as episode:
-        return load_family(episode.view())
+        return load_family(episode.view(), expected_episode_id=path.parent.name)
 
 
 def write_manifest(tmp_path: Path, text: str) -> Path:
-    path = tmp_path / "family.yaml"
+    """The manifest `text` as an episode's `family.yaml`, the episode folder named by the id
+    the shared fixture's document carries (`T.EPISODE_ID`), so the #1187 R5 id check passes
+    and only the envelope under test can refuse."""
+    path = tmp_path / T.EPISODE_ID / "family.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -202,7 +208,7 @@ from defender.runtime.branch._family import FamilyError, load_family
 start = time.monotonic()
 try:
     with Episode.open(Path(sys.argv[1]).parent) as episode:
-        load_family(episode.view())
+        load_family(episode.view(), expected_episode_id=Path(sys.argv[1]).parent.name)
     outcome, yaml_cause = "loaded", False
 except FamilyError as e:
     outcome, yaml_cause = "FamilyError", isinstance(e.__cause__, yaml.YAMLError)
@@ -355,8 +361,8 @@ def _author(tmp_path: Path, agent: T.FakeAgent) -> dict:
 
 
 def _seats() -> tuple[str, str]:
-    return (_fenced(yaml.safe_dump(T.world_doc("b"), sort_keys=False)),
-            _fenced(yaml.safe_dump(T.world_doc("c"), sort_keys=False)))
+    return (_fenced(yaml.safe_dump(T.declaration(T.world_doc("b")), sort_keys=False)),
+            _fenced(yaml.safe_dump(T.declaration(T.world_doc("c")), sort_keys=False)))
 
 
 _ALIASED_REPLIES: dict[str, Callable[[], str]] = {
@@ -395,7 +401,7 @@ def _cyclic_facts_doc() -> dict:
 @pytest.mark.parametrize("build", [_shared_facts_doc, _cyclic_facts_doc],
                          ids=["shared", "cyclic"])
 def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tmp_path, build):
-    agent = T.FakeAgent(build(), T.world_doc("b"), T.world_doc("c"))
+    agent = T.FakeAgent(build(), T.declaration(T.world_doc("b")), T.declaration(T.world_doc("c")))
 
     err = raised(lambda: _author(tmp_path, agent))
 
@@ -407,11 +413,11 @@ def test_a_parsed_questioner_reply_with_shared_parts_is_refused_like_an_alias(tm
 
 
 #: Seat B's reply (call 2) with its story's text reused as its axis through an alias.
-_SEAT_B_ALIASED = ("world_id: b\nrole: B\nstory: &s a story\naxis: *s\n"
+_SEAT_B_ALIASED = ("story: &s a story\naxis: *s\n"
                    "disposition_declared: malicious\nlabel_basis: policy-rule\n")
 #: Seat B's reply carrying the bomb under a key the questioner never reads — so no check of
 #: the COMPOSED world would ever see it; only the loader can refuse it.
-_SEAT_B_BOMB = ("world_id: b\nrole: B\nstory: a story\naxis: an axis\n"
+_SEAT_B_BOMB = ("story: a story\naxis: an axis\n"
                 "disposition_declared: malicious\nlabel_basis: policy-rule\n"
                 "scratch: {" + _bomb_members() + "}\n")
 
@@ -419,7 +425,7 @@ _ALIASED_SEAT_REPLIES = {"reused-scalar": _SEAT_B_ALIASED, "bomb-in-an-unread-ke
 
 
 def _family_reply() -> str:
-    return _fenced(yaml.safe_dump(T.family_doc(), sort_keys=False))
+    return _fenced(yaml.safe_dump(T.declaration(T.family_doc()), sort_keys=False))
 
 
 @pytest.mark.parametrize("kind", list(_ALIASED_SEAT_REPLIES))

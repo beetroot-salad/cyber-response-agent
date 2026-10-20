@@ -1,7 +1,6 @@
 """#947 — the family launcher's refusals that nothing later could recover from."""
 from __future__ import annotations
 
-from defender.run_repository import Run
 
 import importlib
 import os
@@ -11,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from defender.tests.support.storage._alert_plant import plant_alert
-from defender.episodes import _episode_handle as EH
+from defender.tests.support.shared._fixture_uuid import fixture_uuid
+
 
 
 def cli_mod():
@@ -28,7 +27,7 @@ def tenant_paths(tmp_path, monkeypatch):
 
     root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
-    return set_up_tenant(root, "acme")
+    return set_up_tenant(root, fixture_uuid("tenant:acme"))
 
 
 def _tree(root: Path) -> list[str]:
@@ -51,54 +50,66 @@ def episodes_root(tmp_path, monkeypatch):
 def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
         tmp_path, tenant_paths, episodes_root, episode_id):
     """Absolute and traversing episode ids never reach the capture writer."""
-    cli = cli_mod()
+    from defender.records._run_id import episode_id_fault
+
     # #1120: an accepted tenant's data root exists before the launcher runs, so "created
     # nothing under the data root" is compared on its tree rather than on its absence.
     data_root = tenant_paths.dir.parent
     before = _tree(data_root)
+    runs = tenant_paths.runs_repository()
 
-    def primed_too_early(*_args, **_kwargs):
-        pytest.fail("prime_base was called before the episode id was validated")
-
-    with pytest.raises(SystemExit, match="episode id"):
-        cli.prepare_episode(episode_id, Run(tmp_path / "source", runs_base=None), data_root=tenant_paths.data_root,
-                            prime=primed_too_early)
-
+    assert episode_id_fault(episode_id), f"the episode-id rule admits {episode_id!r}"
+    try:
+        with runs.episode(episode_id):
+            refused = None
+    except Exception as exc:  # noqa: BLE001 — the refusal is the observation
+        refused = exc
+    assert refused is not None, f"the episode door opened {episode_id!r}"
+    assert not isinstance(refused, OSError), (
+        f"the door built a path from {episode_id!r} and let the OS answer: {refused!r}")
     assert not episodes_root.exists()
-    assert _tree(data_root) == before, "the refused priming wrote under the data root"
+    assert _tree(data_root) == before, "the refused id wrote under the data root"
+
+    with runs.create_episode() as view:
+        claimed = view.episode_id
+    with runs.episode(claimed) as opened:
+        assert opened is not None, "positive control: the claimed episode does not open"
 
 
 def test_a_safe_episode_id_resolves_beneath_the_configured_episodes_root(
         tenant_paths, episodes_root):
     """The positive control for the path-component refusal."""
-    assert EH.episode_dir(tenant_paths.data_root, "episode-001") == (
-        episodes_root / "episode-001")
-    assert tenant_paths.dir.parent not in (episodes_root / "episode-001").parents
+    from defender.tests.storage.ids_1187 import _spec1187 as S
+
+    with tenant_paths.runs_repository().create_episode() as view:
+        episode_id = view.episode_id
+    claimed = S.episodes_dir(tenant_paths.data_root, str(tenant_paths.id)) / episode_id
+    assert S.is_canonical_uuid(episode_id), f"{episode_id!r} is not a canonical uuid"
+    assert claimed.is_dir(), claimed
+    assert not claimed.is_symlink(), claimed
+    assert tenant_paths.dir in claimed.parents, f"{claimed} is not under the tenant's folder"
+    assert not episodes_root.exists(), "the configured episodes root was created"
 
 
 def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
         tmp_path, tenant_paths, episodes_root):
     """Reusing an episode id cannot revive old per-world live-base rows."""
-    from defender.learning.branch.capture import PrimeReport
+    from defender.tests.storage.ids_1187 import _spec1187 as S
 
-    cli = cli_mod()
-    episode = episodes_root / "episode-001"
-    stale = episode / "served" / "w1.jsonl"
+    episodes = S.episodes_dir(tenant_paths.data_root, str(tenant_paths.id))
+    stale_id = S.new_id()
+    stale = episodes / stale_id / "served" / "w1.jsonl"
     stale.parent.mkdir(parents=True, exist_ok=True)
     stale.write_text('{"source":"base","world_id":null}\n', encoding="utf-8")
-    primed: list[Path] = []
 
-    def prime(_source, claimed):
-        primed.append(claimed.dir)
-        return PrimeReport()
+    with tenant_paths.runs_repository().create_episode() as view:
+        fresh = view.episode_id
+        assert fresh != stale_id, "the stale episode was handed out"
+        assert not fresh.endswith("-r2"), f"{fresh!r} is a retry name"
+        assert S.is_canonical_uuid(fresh), f"{fresh!r} is not a canonical uuid"
+        assert list((episodes / fresh).rglob("*.jsonl")) == [], "the fresh episode holds rows"
 
-    plant_alert(tmp_path / "source", {"rule": {"id": "r"}})
-    with cli.prepare_episode("episode-001", Run.at(tmp_path / "source"), data_root=tenant_paths.data_root,
-                             prime=prime) as fresh:
-        assert fresh.dir == episodes_root / "episode-001-r2"
-        assert list((fresh.dir / "served").glob("*.jsonl")) == []
-
-    assert primed == [episodes_root / "episode-001-r2"], "the stale episode was primed"
+    assert sorted(os.listdir(episodes)) == sorted([stale_id, fresh])
     assert stale.read_text(encoding="utf-8") == '{"source":"base","world_id":null}\n', (
         "the relaunch should not mutate or sanitize the stale episode")
 
@@ -121,9 +132,9 @@ def test_the_launcher_bootstraps_the_package_when_invoked_by_path(tmp_path):
 def test_p4_a_branch_request_without_a_continuation_prompt_is_complete():
     """P4: a tenant, a source run and a branch point are the whole request — it parses, and the
     parsed request carries no prompt field. Today the parser refuses it for the missing flag."""
-    ns = cli_mod().parse_branch_args(["--tenant", "acme", "run-x", "59"])
+    ns = cli_mod().parse_branch_args(["--tenant", fixture_uuid("tenant:acme"), "run-x", "59"])
 
-    assert (ns.tenant, ns.source_run_id, ns.branch_message_id) == ("acme", "run-x", 59)
+    assert (ns.tenant, ns.source_run_id, ns.branch_message_id) == (fixture_uuid("tenant:acme"), "run-x", 59)
     assert not hasattr(ns, "continuation_prompt"), (
         "the parsed request still carries a continuation prompt")
 
@@ -131,7 +142,7 @@ def test_p4_a_branch_request_without_a_continuation_prompt_is_complete():
 def test_p4_the_branch_command_line_refuses_a_continuation_prompt(capsys):
     with pytest.raises(SystemExit) as exc:
         cli_mod().parse_branch_args(
-            ["--tenant", "acme", "run-x", "59", "--continuation-prompt", "go"])
+            ["--tenant", fixture_uuid("tenant:acme"), "run-x", "59", "--continuation-prompt", "go"])
 
     assert exc.value.code == 2, f"exit {exc.value.code}"
     assert "--continuation-prompt" in capsys.readouterr().err

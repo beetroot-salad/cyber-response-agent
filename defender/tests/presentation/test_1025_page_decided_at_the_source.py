@@ -4,7 +4,6 @@ from __future__ import annotations
 import contextlib
 import inspect
 import os
-from pathlib import Path
 
 import pytest
 
@@ -41,21 +40,30 @@ def _world(page: E.Page, label: str) -> str:
 
 def test_1025_a_short_relative_episode_dir_name_scrubs_only_itself(tmp_path):
     """Rendered from `re` — a directory named with a substring of `report.md` and `read` — the
-    report slot's refusal still says `report.md` and `could not be read`, whole: no."""
+    report slot's refusal still says `report.md` and `could not be read`, whole: no scrub runs
+    over the sentence at all (#1049: the loader's `_sentence` is gone — the reader formats the
+    relative name `worlds/<w>/report.md` at its source and never holds the root, so a short
+    relative spelling of the root has nothing to leak from and nothing to be cut out of a
+    word). Before, the same page read "<episode>port.md could not be <episode>ad" (review of
+    PR #1042). Positive control: the root's spelling is absent from the page.
+
+    #1187 (Layout A, R5): an episode is reached by id under its tenant and its folder is named
+    by its id, so the short spelling is the DATA ROOT's — the scene's own data root `re`,
+    rendered from inside its parent — and the episode folder keeps its id."""
     ep = E.sample_episode(tmp_path)
-    short = tmp_path / "re"
-    ep.dir.rename(short)
-    (short / "worlds" / E.GRADED_WORLD / "report.md").unlink()
-    (short / "worlds" / E.GRADED_WORLD / "report.md").mkdir()
+    copy = E.copy_episode(ep, tmp_path / "re" / ep.dir.name)
+    short = copy.dir
+    (short / "worlds" / T.world_id(short, E.GRADED_WORLD) / "report.md").unlink()
+    (short / "worlds" / T.world_id(short, E.GRADED_WORLD) / "report.md").mkdir()
     with contextlib.chdir(tmp_path):
-        page = render(Path("re"))
+        page = render(short)
     world = _world(page, E.GRADED_WORLD)
     assert "report.md could not be read" in world, world
     assert "<episode>port" not in world, world
     assert "<episode>ad" not in world, world
-    assert f"worlds/{E.GRADED_WORLD}/report.md" in world, world
+    assert f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md" in world, world
     # said bare — never as a quoted filename cut down from an absolute path
-    assert f"'worlds/{E.GRADED_WORLD}/report.md'" not in world, world
+    assert f"'worlds/{T.fixture_world_id(E.GRADED_WORLD)}/report.md'" not in world, world
     assert "re/worlds" not in page.raw
 
 
@@ -106,14 +114,48 @@ def test_1025_a_framed_only_judge_trace_naming_no_roster_label_is_listed_as_unat
     assert "tx-judge_zz_gone_0_trace" not in page.by_id
 
 
+
+def test_judge_trace_uuid_scope_is_shared_by_blocks_and_unattributed_list(tmp_path):
+    """Declared UUID traces route once; unknown scopes stay separate from recorded draws."""
+    ep = E.sample_episode(tmp_path)
+    world_id = T.world_id(ep.dir, E.GRADED_WORLD)
+    unknown_id = T.fixture_world_id("unknown_trace_world")
+    grade_only_id = T.fixture_world_id("grade_only")
+    grade = E.sample_grade()
+    grade["worlds"].append(E.world_row("grade_only", declared="benign"))
+    E.write_judge(ep.dir, grade)
+    scopes = [(world_id, 0), ("family", 0), (world_id, 9),
+              (unknown_id, 0), (grade_only_id, 0), ("grade_only", 0)]
+    for scope, draw in scopes:
+        E.write_framed(ep.dir, f"judge:{scope}:{draw}", prompt=f"scope {scope} draw {draw}")
+    page = render(ep)
+    blocks = [node.id for node in page.section("stage-judge").find_all(cls="tx-stream")]
+    assert blocks[0] == "tx-judge_family_0_trace"
+    assert f"tx-judge_{world_id}_0_trace" in blocks
+    assert f"scope {world_id} draw 0" in page.text_of(f"tx-judge_{world_id}_0_trace")
+    unmatched = page.one(cls="st-unattributed").text()
+    assert f"judge_{world_id}_0_trace" not in unmatched
+    assert "judge_family_0_trace" not in unmatched
+    assert f"judge_{world_id}_9_trace" not in unmatched
+    for scope in (unknown_id, grade_only_id, "grade_only"):
+        assert f"judge_{scope}_0_trace" in unmatched
+        assert f"tx-judge_{scope}_0_trace" not in page.by_id
+    assert f"tx-judge_{world_id}_9_trace" not in page.by_id
+
+
 def test_1025_the_draw_read_totals_count_every_directory_the_world_sections_count(tmp_path):
     """A world whose draw directory holds one unparsable document."""
     ep = E.sample_episode(tmp_path)
     (ep.dir / "runs" / f"{E.EPISODE_ID}-orphan").mkdir()
-    E.plant_raw(ep.dir / "worlds" / "orphan" / "judge" / "0.yaml", b"- not: [a mapping")
-    page = render(ep)
-    assert "world-orphan" not in page.by_id, page.ids
-    assert "1 draw documents unreadable" not in page.text_of("sec-findings")
+    orphan = T.fixture_world_id("orphan")
+    E.plant_raw(ep.dir / "worlds" / orphan / "judge" / "0.yaml", b"- not: [a mapping")
+    with pytest.raises(T.sym("runtime.branch._family", "FamilyError"), match="not declared"):
+        render(ep)
+    manifest = E.sample_manifest()
+    manifest["worlds"].append(T.world_doc("orphan", role="B", axis="orphan fact"))
+    T.write_family(ep.dir, manifest)
+    (ep.dir / T.ROSTER_NAME).unlink()
+    T.plant_roster(ep.dir)
     doc = E.sample_grade()
     doc["worlds"].append(E.world_row("orphan", declared="benign"))
     E.write_judge(ep.dir, doc)
@@ -176,7 +218,7 @@ def test_1025_an_unreadable_gather_summary_is_the_chains_own_sentence_for_the_ju
     summary = world / "gather_summaries" / "l-001.md"
     summary.chmod(0)
     try:
-        chain = family.lead_chain(E.mod("_io").bind(ep.dir).under(f"worlds/{E.GRADED_WORLD}"),
+        chain = family.lead_chain(E.mod("_io").bind(ep.dir).under(f"worlds/{T.fixture_world_id(E.GRADED_WORLD)}"),
                                   "l-001", {}, leads=family.leads_by_id(world))
         page = render(ep)
     finally:

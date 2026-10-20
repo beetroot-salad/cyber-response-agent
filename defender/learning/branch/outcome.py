@@ -6,7 +6,7 @@ never rewritten (S6): `accepted`, `unusable` (two or more worlds failed calibrat
 worlds pre-flight found unservable, the calls it could not replay and the calls whose live
 answer drifted from the recording.
 
-Anything learned after launch is a world's own record, `world_records/<label>.yaml`, holding
+Anything learned after launch is a world's own record, `world_records/<world-uuid>.yaml`, holding
 one reason (S7, S8): `oracle unservable` or `budget` (written by the sibling as it aborts),
 `did not finish` (written by the launcher when a sibling's process exited without a record),
 or `not archived` (written by the launcher when the archive refused that world's tree). Every
@@ -29,6 +29,7 @@ from typing import Any
 import yaml
 
 from defender import _yaml
+from defender.runtime.branch._family import Family, FamilyError, load_family
 from defender.episodes._episode_handle import Episode
 from defender.episodes._episode_paths import LAYOUT
 from defender._io import Bound
@@ -83,18 +84,20 @@ def write_outcome(episode: Episode, outcome: str, *, reason: str,
     }, sort_keys=False))
 
 
-def write_world_record(episode: Episode, label: str, reason: str, *,
+def write_world_record(episode: Episode, world_id: str, reason: str, *,
                        call: Mapping[str, Any] | None = None, detail: str = "") -> bool:
-    """Create world `label`'s own record with one reason; `False` when it already has one.
+    """Create `world_id`'s own record with one reason; `False` when it already has one.
 
-    @owns world_records — the shipped `world_records/<label>.yaml` (`world`, `reason`, `call`,
-    `detail`) is produced here and nowhere else, for the sibling's writer and the launcher's
+    @owns world_records — the shipped `world_records/<world-uuid>.yaml` (`world_id`, `world`,
+    `reason`, `call`, `detail`) is produced here and nowhere else, for the sibling's writer and the launcher's
     alike. An existing record is never rewritten: whoever wrote first holds the reason."""
     if reason not in WORLD_REASONS:
         raise ValueError(f"{reason!r} is not a world record's reason ({', '.join(WORLD_REASONS)})")
+    family = load_family(episode.view(), expected_episode_id=episode.dir.name)
+    label = family.world_by_id(world_id).label
     try:
-        episode.world_record(label).create(_yaml.safe_dump({
-            "world": label, "reason": reason,
+        episode.world_record(world_id).create(_yaml.safe_dump({
+            "world": label, "world_id": world_id, "reason": reason,
             "call": dict(call) if call is not None else None, "detail": detail,
         }, sort_keys=False))
     except FileExistsError:
@@ -125,14 +128,14 @@ def read_outcome(bound: Bound) -> dict[str, Any]:
     return record
 
 
-def failed_worlds(bound: Bound, record: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+def failed_worlds(bound: Bound, record: Mapping[str, Any], *, family: Family) -> dict[str, dict[str, Any]]:
     """Every world O5 counts as failed, by label: pre-flight's `unservable_worlds` plus every
-    world whose own record (`world_records/<label>.yaml`) exists (S9, M04=A). Each value is
+    world whose own record (`world_records/<world-uuid>.yaml`) exists (S9, M04=A). Each value is
     `{world, reason, call, detail}`; a world named by both keeps its own record's entry.
 
     A world record that cannot be read still counts — its presence is the fact — with the
-    refusal as its detail. Labels come off the records as written; nothing here checks them
-    against the manifest."""
+    refusal as its detail. File UUIDs and readable payload identities must agree with the
+    persisted manifest; an undeclared file never invents a world."""
     failed: dict[str, dict[str, Any]] = {}
     listed = record.get("unservable_worlds")
     for entry in listed if isinstance(listed, (list, tuple)) else ():
@@ -143,13 +146,20 @@ def failed_worlds(bound: Bound, record: Mapping[str, Any]) -> dict[str, dict[str
     for name in records.entries().files():
         if not name.endswith(".yaml") or len(name) <= len(".yaml"):
             continue
-        label = name[:-len(".yaml")]
+        world_id = name[:-len(".yaml")]
+        try:
+            label = family.world_by_id(world_id).label
+        except FamilyError as refused:
+            raise OutcomeUnreadable(f"world record {name}: {refused}") from refused
         rec = records.read(name)
         try:
             doc = _yaml.safe_load(rec.text) if rec.text is not None else None
         except (yaml.YAMLError, _yaml.AliasRefused):
             doc = None
         if isinstance(doc, dict):
+            if doc.get("world_id") != world_id or doc.get("world") != label:
+                raise OutcomeUnreadable(
+                    f"world record {name} does not name its manifest world {label!r} ({world_id})")
             failed[label] = {"world": label, "reason": doc.get("reason"), "call": doc.get("call"),
                              "detail": doc.get("detail", "")}
         else:

@@ -1,13 +1,15 @@
 """Run setup checks: pinned ids claimed by records, id bounds, sidecar suffixes, linked runs folders, one-line stderr refusals."""
 from __future__ import annotations
 
+import uuid
+from defender.tests.storage.ids_1187 import _spec1187 as S
+
 import os
 from pathlib import Path
 
 from defender.tenancy import _tenant
 from defender import run as run_py
 from defender import run_common
-from defender.tests.support.learning.branch import _triplet_947 as T947
 from defender.tests.storage.tenant_1105_run_repository import _spec1105 as H
 
 
@@ -35,56 +37,43 @@ def _link_runs_to(t, outside: Path) -> None:
     os.symlink(outside, t.runs)
 
 
-def test_1105_run_setup_refuses_a_pinned_id_a_record_claims_and_creates_no_run_folder(
+def test_1105_run_setup_admits_the_id_then_checks_the_folder_then_the_record_then_the_claims(
         tmp_path, data_root):
-    from defender.run_repository import RunId, record_episode_runs
+    """Run setup refuses in order: a bad id over a linked runs folder gets 'invalid run id: ...'
+    and nothing is created; a linked runs folder gets TenantRefused ('[run.py] ...') with
+    nothing created through the link.
 
-    t = H.tenant(data_root, H.T_ID)
-    runs = H.runs_folder(t)
-    record_episode_runs(t, "ep1", RunId.parse("src1"), {"a": RunId.parse("ep1-a")})
-    assert (runs / "_episodes" / "ep1.json").is_file(), "the writer recorded the episode"
+    #1187 declared changes 1, 6 and 13: the steps after the folder are gone. `_tenant.json` as a
+    pinned id is no longer the collision guard's own message (`refuse_colliding_run_id` is
+    retired): it is not a UUID, so it is the invalid-run-id exit like any old id (`r1`). No
+    container record is required and no `_episodes` claim is read: over a real runs folder
+    holding no `_tenant.json` and an `_episodes` record claiming the pinned UUID, run setup
+    creates that run. (Whether a container still holding a stray `_tenant.json` refuses run
+    setup is not pinned here: the design pins that refusal for the listing only.) (Name kept.)"""
+    import uuid
+
     alert = H.alert_file(tmp_path / "in")
-    before = H.tree_state(runs)
-    err = H.raised(_pinned, alert, "ep1-a", t)
-    assert _one_line_exit(err), f"a claimed pinned id was not refused by sys.exit(str): {err!r}"
-    assert "ep1-a" in H.message(err), f"the refusal names the claimed id: {H.message(err)!r}"
-    assert not os.path.lexists(runs / "ep1-a"), "a run folder was created for a claimed id"
-    assert H.tree_state(runs) == before, "the runs folder or its _tenant.json changed"
-    run = _pinned(alert, "r9", t)
-    assert run.run_dir == runs / "r9", f"an unclaimed pinned id runs: {run.run_dir}"
-    assert (runs / "r9").is_dir(), "the unclaimed pinned id's run folder exists"
-
-
-def test_1105_a_corrupt_episode_record_refuses_every_pinned_id_and_never_a_minted_one(
-        tmp_path, data_root):
     t = H.tenant(data_root, H.T_ID)
-    runs = H.runs_folder(t)
-    good = H.record_text("ep1", t.id, "src1", {"a": "ep1-a"})
-    record = H.plant_record(runs, "ep1", t.id, "src1", {"a": "ep1-a"}, raw=H.truncated(good))
-    alert = H.alert_file(tmp_path / "in")
-    for pinned in ("ep1-a", "r-unclaimed"):
-        err = H.raised(_pinned, alert, pinned, t)
-        assert _one_line_exit(err), f"pinned {pinned!r} over a torn record gave {err!r}"
-        assert "ep1.json" in H.message(err), (
-            f"the refusal names the corrupt record {record}: {H.message(err)!r}")
-        assert not os.path.lexists(runs / pinned), f"a run folder {pinned!r} was created"
-    minted = _pinned(alert, None, t)
-    assert Path(minted.run_dir).parent == runs, (
-        f"a minted id is not checked against the records and still runs: {minted.run_dir}")
-    assert Path(minted.run_dir).is_dir(), "the minted run's folder exists"
-
-
-def test_1105_run_setup_refuses_a_pinned_id_a_record_naming_another_tenant_claims(
-        tmp_path, data_root):
-    t = H.tenant(data_root, H.T_ID)
-    runs = H.runs_folder(t)
-    H.plant_record(runs, "ep1", H.U_ID, "src1", {"a": "ep1-a"})
-    alert = H.alert_file(tmp_path / "in")
-    err = H.raised(_pinned, alert, "ep1-a", t)
-    assert _one_line_exit(err), f"a pinned id a foreign record claims was not refused: {err!r}"
-    assert "ep1-a" in H.message(err), f"the refusal names the id: {H.message(err)!r}"
-    assert not os.path.lexists(runs / "ep1-a"), "a run folder was created for a claimed id"
-    assert _pinned(alert, "ep1-b", t).run_dir == runs / "ep1-b", "an unclaimed pinned id runs"
+    outside = tmp_path / "elsewhere"
+    _link_runs_to(t, outside)
+    pinned = str(uuid.uuid4())
+    # 1. id admission comes first: over a linked runs folder, the id refusals fire.
+    for bad in ("_tenant.json", "Bad Name", "r1"):
+        err = H.raised(_via_run_py, alert, bad, t)
+        assert H.message(err).startswith("invalid run id: "), f"pinned {bad!r} gave {err!r}"
+    assert H.tree_state(outside) == {}, "an id refusal created something through the link"
+    # 2. the runs-folder state.
+    err = H.raised(_via_run_py, alert, pinned, t)
+    assert H.message(err).startswith("[run.py] "), f"a linked runs folder gave {err!r}"
+    assert H.tree_state(outside) == {}, "run setup created something through a linked runs folder"
+    os.unlink(t.runs)
+    # 3. nothing after the folder refuses: no record step, no claimed-id step.
+    runs = Path(t.runs)
+    H.plant_record(runs, str(uuid.uuid4()), t.id, str(uuid.uuid4()), {"a": pinned})
+    assert not (runs / "_tenant.json").exists()
+    run = _pinned(alert, pinned, t)
+    assert run.run_dir == runs / pinned, f"the pinned run was not created: {run!r}"
+    assert (runs / pinned).is_dir()
 
 
 def test_1105_run_setup_refuses_a_pinned_or_minted_id_over_206_bytes_with_the_invalid_run_id_exit(
@@ -92,57 +81,75 @@ def test_1105_run_setup_refuses_a_pinned_or_minted_id_over_206_bytes_with_the_in
     t = H.tenant(data_root, H.T_ID)
     runs = Path(t.runs)
     alert = H.alert_file(tmp_path / "in")
-    for n in (207, 231, 256):
-        err = H.raised(_pinned, alert, "r" + "1" * (n - 1), t)
+    for pinned in ["r" + "1" * (n - 1) for n in (207, 231, 256, 206)] + [S.OLD_PINNED_ID]:
+        err = H.raised(_pinned, alert, pinned, t)
         assert H.message(err).startswith("invalid run id: "), (
-            f"a pinned {n}-byte id gave {err!r}, not the invalid-run-id exit")
-        assert not os.path.lexists(runs), f"a {n}-byte id created {runs} before refusing"
-    for label in ("a" * 190, "ß" * 95):
+            f"a pinned {len(pinned)}-byte id {pinned[:12]!r}… gave {err!r}, not the invalid-run-id exit")
+        assert not os.path.lexists(runs), f"a refused id created {runs} before refusing"
+    for label in ("a" * 190, "ß" * 95, "ß" * 94):
         labelled = H.alert_file(tmp_path / f"in-{len(label)}-{label[0]}", f"{label}.json")
-        err = H.raised(_pinned, labelled, None, t)
-        assert H.message(err).startswith("invalid run id: "), (
-            f"a minted id from {len(label)} x {label[0]!r} gave {err!r}")
-        assert not os.path.lexists(runs), "a refused minted id created the runs folder"
-    pinned = _pinned(alert, "r" + "1" * 205, t)
-    assert pinned.run_dir == runs / ("r" + "1" * 205), f"a pinned 206-byte id runs: {pinned!r}"
-    assert Path(pinned.run_dir).is_dir(), "the 206-byte run's folder exists"
-    folded = _pinned(H.alert_file(tmp_path / "in-94", f"{'ß' * 94}.json"), None, t)
-    name = Path(folded.run_dir).name
-    assert name.endswith("ss" * 94), f"94 x 'ß' mints the folded label: {name!r}"
-    assert len(name.encode()) == 205, f"94 x 'ß' mints a 205-byte id: {name!r}"
+        minted = _pinned(labelled, None, t)
+        name = Path(minted.run_dir).name
+        assert S.is_canonical_uuid(name), f"{len(label)} x {label[0]!r} minted {name!r}"
+        assert Path(minted.run_dir).parent == runs, minted.run_dir
+        assert Path(minted.run_dir).is_dir(), minted.run_dir
+    pinned = str(uuid.uuid4())
+    run = _pinned(alert, pinned, t)
+    assert run.run_dir == runs / pinned, f"a pinned uuid runs: {run!r}"
+    assert Path(run.run_dir).is_dir(), "the pinned uuid's run folder exists"
 
 
 def test_1105_run_setup_refuses_a_sidecar_suffixed_pinned_or_minted_id(tmp_path, data_root):
     t = H.tenant(data_root, H.T_ID)
     runs = Path(t.runs)
     alert = H.alert_file(tmp_path / "in")
-    names = [f"r1{s}" for s in H.SIDECAR_SUFFIXES] + [f"r1.run-end.json{H.STAGED_TAIL}"]
+    run_id = str(uuid.uuid4())
+    names = [f"{run_id}{s}" for s in H.SIDECAR_SUFFIXES] + [f"{run_id}.run-end.json{H.STAGED_TAIL}"]
     for name in names:
         err = H.raised(_pinned, alert, name, t)
         assert H.message(err).startswith("invalid run id: "), f"pinned {name!r} gave {err!r}"
         assert not os.path.lexists(runs / name), f"a folder named {name!r} was created"
     for minted_from in (H.alert_file(tmp_path / "in-stem", "x.run-end.json.txt"),
                         H.alert_file(tmp_path / "y.scrub-verdict.json")):
-        err = H.raised(_pinned, minted_from, None, t)
-        assert H.message(err).startswith("invalid run id: "), (
-            f"a minted id from {minted_from.relative_to(tmp_path)} ends in a sidecar suffix and "
-            f"was not refused: {err!r}")
-        assert not os.path.lexists(runs), (
-            f"a refused minted id from {minted_from.name} created {runs}: "
-            f"{sorted(os.listdir(runs)) if os.path.isdir(runs) else 'a non-directory'}")
-    assert _pinned(alert, "r1", t).run_dir == runs / "r1", "the plain id r1 runs"
+        minted = _pinned(minted_from, None, t)
+        name = Path(minted.run_dir).name
+        assert S.is_canonical_uuid(name), (
+            f"an alert at {minted_from.relative_to(tmp_path)} minted {name!r}, not a bare uuid")
+        assert Path(minted.run_dir).is_dir(), "the minted run's folder exists"
+    assert all(S.is_canonical_uuid(n) for n in os.listdir(runs)), sorted(os.listdir(runs))
+    assert _pinned(alert, run_id, t).run_dir == runs / run_id, "the plain uuid runs"
 
 
 def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
         tmp_path, data_root):
-    from defender.episodes._episode_handle import Episode
+    """When tenant.runs is a link to an outside folder, run setup refuses before creating or
+    reading anything inside it, and run.py prints the refusal as '[run.py] ...': the outside
+    folder stays empty and no raw OSError escapes. Positive control: an absent tenant.runs is
+    created with the run. The link is P2's one representative state of the runs folder; a
+    dangling link and a non-directory there are not driven here: _io.hold(follow=False) tells
+    those states apart (test_1105_hold_follow_false_refuses_a_link_root_and_tells_the_states_apart).
+    The tenant.runs arm is driven through run.main itself.
+
+    #1187 declared changes 1, 6 and 8 (R1, S-iso): the pinned id is a UUID (an old id such as
+    `r1` is now the invalid-run-id exit, which fires before the folder is looked at); the
+    positive control writes no `_tenant.json`; and the refusal at the link is `TenantRefused` or
+    `RunRefused` naming the level. The sibling arm (a linked `runs/` in a pre-#1187 episode
+    outside `<T>/episodes`, its arm named `<ep>-<label>`) is retired: the arm container is
+    `<T>/episodes/<ep>/runs` now, and a link there is
+    ids_1187/test_1187_layout_isolation.py::test_a_link_at_an_arm_container_is_refused_and_the_real_folder_opens
+    and ids_1187/test_1187_roster_sibling.py::test_a_link_or_a_file_at_runs_refuses_before_any_roster_is_written.
+    (Name kept.)"""
+    import uuid
+
+    from defender.run_repository import RunRefused
 
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)
     outside = tmp_path / "outside"
     _link_runs_to(t, outside)
+    pinned = str(uuid.uuid4())
     lifecycles: list[object] = []
-    err = H.raised(run_py.main, [str(alert), "--tenant", t.id, "--run-id", "r1", "--no-learn"],
+    err = H.raised(run_py.main, [str(alert), "--tenant", t.id, "--run-id", pinned, "--no-learn"],
                    preflight=lambda _model: 0,
                    lifecycle=lambda **kw: lifecycles.append(kw) or {},
                    visualize=lambda _run, **_kw: None)
@@ -151,46 +158,41 @@ def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
     assert not isinstance(err, OSError), f"a raw OSError escaped: {err!r}"
     assert H.tree_state(outside) == {}, "run setup wrote through the linked runs folder"
     assert lifecycles == [], "the run went on past a refused runs folder"
-    err = H.raised(_pinned, alert, "r1", t)
-    assert isinstance(err, _tenant.TenantRefused), f"materialize_run raised {err!r}"
+    err = H.raised(_pinned, alert, pinned, t)
+    assert isinstance(err, (_tenant.TenantRefused, RunRefused)), f"materialize_run raised {err!r}"
+    assert H.tree_state(outside) == {}, "materialize_run wrote through the linked runs folder"
     os.unlink(t.runs)
 
-    episode_outside = tmp_path / "episode-outside"
-    episode_outside.mkdir()
-    ep = T947.episode(tmp_path / "eps")
-    with Episode.open(ep) as episode:
-        world = run_py.resume_world(episode, "b", tenant=lambda: None)
-        os.symlink(episode_outside, Path(world.episode_dir) / "runs")
-        # #1105 PR 2: an arm is made through the sibling's episode view (`episode_runs=`).
-        view = t.runs_repository().episode(episode.dir.name, held=episode)
-        err = H.raised(_via_run_py, alert, world.run_id, t, world=world, episode_runs=view)
-    assert H.message(err).startswith("[run.py] "), f"a linked episode runs/ gave {err!r}"
-    assert H.tree_state(episode_outside) == {}, "a sibling's setup wrote through the link"
-
-    run = _pinned(alert, "r1", t)
-    assert run.run_dir == Path(t.runs) / "r1", f"an absent runs folder is created: {run!r}"
+    run = _pinned(alert, pinned, t)
+    assert run.run_dir == Path(t.runs) / pinned, f"an absent runs folder is created: {run!r}"
     assert Path(t.runs).is_dir(), "the absent runs folder was created as a real directory"
-    assert (Path(t.runs) / "_tenant.json").is_file(), "the runs folder's record was written"
+    assert not (Path(t.runs) / "_tenant.json").exists(), (
+        "run setup wrote the retired tenant record")
 
 
 def test_1105_run_setups_refusals_are_one_stderr_line_naming_the_path(tmp_path, data_root):
-    from defender.run_repository import RunId
+    """Run setup's refusals are one stderr line: the hold's own refusal of a linked runs folder
+    is TenantRefused shown as '[run.py] ...' naming the path; 'invalid run id: ...' carries
+    RunId's repr-quoted refusal. Odd occupants at a pinned id's name keep today's outcome
+    (RG-21-a): a regular file exits '<runs>/<id> is not a directory — refusing to materialise a
+    run over it', an empty directory proceeds, and a directory holding investigation.md exits
+    'run dir already exists and a run has been in it: ...'.
+
+    #1187 declared change 13 (R6, D-del): the claimed-id half is retired — run setup reads no
+    `_episodes` record, so a torn record or a stray name there refuses nothing (pinned by
+    `ids_1187/test_1187_layout_isolation.py::test_a_pinned_id_is_not_refused_by_an_episodes_claim_and_the_listing_refuses`).
+    The pinned ids are UUIDs (declared change 1). A linked runs folder is refused by the walk
+    from `<T>` with `TenantRefused` or `RunRefused` (declared change 8; which is not pinned).
+    (Name kept.)"""
+    import uuid
+
+    from defender.run_repository import RunId, RunRefused
 
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)
-    runs = H.runs_folder(t)
-    good = H.record_text("ep1", t.id, "src1", {"a": "ep1-a"})
-    torn = H.plant_record(runs, "ep1", t.id, "src1", {}, raw=H.truncated(good))
-    err = H.raised(_pinned, alert, "r2", t)
-    assert _one_line_exit(err), f"a torn record's refusal is not one stderr line: {err!r}"
-    assert str(torn) in H.message(err), f"the refusal names {torn}: {H.message(err)!r}"
-    torn.unlink()
-    stray = runs / "_episodes" / "README"
-    stray.write_text("stray\n", encoding="utf-8")
-    err = H.raised(_pinned, alert, "r2", t)
-    assert _one_line_exit(err), f"a stray name's refusal is not one stderr line: {err!r}"
-    assert str(stray) in H.message(err), f"the refusal names {stray}: {H.message(err)!r}"
-    stray.unlink()
+    runs = Path(t.runs)
+    runs.mkdir(parents=True)
+    r1, r3, r4, r5 = (str(uuid.uuid4()) for _ in range(4))
 
     bad = "Bad\nName"
     refusal = H.raised(RunId.parse, bad)
@@ -200,37 +202,24 @@ def test_1105_run_setups_refusals_are_one_stderr_line_naming_the_path(tmp_path, 
     assert _one_line_exit(err), f"the invalid-run-id exit is one stderr line: {err!r}"
     assert repr(bad) in H.message(err), f"the bad id is repr-quoted: {H.message(err)!r}"
 
-    (runs / "r1").write_text("not a run\n", encoding="utf-8")
-    err = H.raised(_pinned, alert, "r1", t)
-    assert H.message(err) == (f"{runs / 'r1'} is not a directory — refusing to materialise a "
+    (runs / r1).write_text("not a run\n", encoding="utf-8")
+    err = H.raised(_pinned, alert, r1, t)
+    assert H.message(err) == (f"{runs / r1} is not a directory — refusing to materialise a "
                               "run over it"), f"a file at the run's name gave {err!r}"
-    (runs / "r3").mkdir()
-    assert _pinned(alert, "r3", t).run_dir == runs / "r3", "an empty directory proceeds"
-    (runs / "r4").mkdir()
-    (runs / "r4" / "investigation.md").write_text("+ ran\n", encoding="utf-8")
-    err = H.raised(_pinned, alert, "r4", t)
+    (runs / r3).mkdir()
+    assert _pinned(alert, r3, t).run_dir == runs / r3, "an empty directory proceeds"
+    (runs / r4).mkdir()
+    (runs / r4 / "investigation.md").write_text("+ ran\n", encoding="utf-8")
+    err = H.raised(_pinned, alert, r4, t)
     assert H.message(err).startswith(
-        f"run dir already exists and a run has been in it: {runs / 'r4'}"), f"got {err!r}"
+        f"run dir already exists and a run has been in it: {runs / r4}"), f"got {err!r}"
 
     os.rename(runs, tmp_path / "moved-runs")
     os.symlink(tmp_path / "moved-runs", runs)
-    err = H.raised(_via_run_py, alert, "r5", t)
+    err = H.raised(_via_run_py, alert, r5, t)
     assert H.message(err).startswith("[run.py] "), (
         f"the hold's refusal of a linked runs folder is not '[run.py] …': {err!r}")
     assert str(runs) in H.message(err), f"the refusal names {runs}: {H.message(err)!r}"
-    plain = H.raised(_pinned, alert, "r5", t)
-    assert isinstance(plain, _tenant.TenantRefused), f"the hold's refusal type: {plain!r}"
-
-
-def test_1105_run_setup_over_a_deeply_nested_tenant_record_refuses_as_tenant_refused(
-        tmp_path, data_root):
-    alert = H.alert_file(tmp_path / "in")
-    t = H.tenant(data_root, H.T_ID)
-    record = H.plant_tenant_record(t.runs, t.id, raw=H.deep_json())
-    err = H.raised(_pinned, alert, "r1", t)
-    assert isinstance(err, _tenant.TenantRefused), (
-        f"a 200,000-deep _tenant.json raised {type(err).__name__}, not TenantRefused")
-    assert "_tenant.json" in str(err), f"the refusal names the record {record}: {err!r}"
-    err = H.raised(_via_run_py, alert, "r1", t)
-    assert H.message(err).startswith("[run.py] "), f"run.py surfaced {err!r}"
-    assert not os.path.lexists(Path(t.runs) / "r1"), "a run folder was created"
+    plain = H.raised(_pinned, alert, r5, t)
+    assert isinstance(plain, (_tenant.TenantRefused, RunRefused)), (
+        f"the walk's refusal type (TenantRefused or RunRefused, declared change 8): {plain!r}")

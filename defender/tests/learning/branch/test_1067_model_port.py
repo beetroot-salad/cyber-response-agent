@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from defender.tests.support.learning.branch import _triplet_947 as T
+
 import re
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -85,7 +87,7 @@ def test_family_fact_refuses_a_non_string_entity_as_family_error():
     from defender.runtime.branch._family import FamilyError, parse_world
 
     with pytest.raises(FamilyError, match=r"worlds\['b'\]\.facts\[0\]\.entities names True"):
-        parse_world({"world_id": "b", "role": "B", "story": "s", "axis": "x",
+        parse_world({"label": "b", "world_id": T.fixture_world_id("b"), "role": "B", "story": "s", "axis": "x",
                      "disposition_declared": "malicious", "label_basis": "policy-rule",
                      "facts": [{"fact_id": "f1", "statement": "s", "entities": [True]}]})
 

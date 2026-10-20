@@ -24,7 +24,7 @@ def _episode_with(tmp_path, worlds=("b", "c"), **kw):
 
 
 def _record(episode_dir, label):
-    path = episode_dir / "worlds" / label / S.run_end_name()
+    path = episode_dir / "worlds" / T.world_id(episode_dir, label) / S.run_end_name()
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
@@ -36,7 +36,7 @@ def test_the_archive_writes_each_worlds_run_end_record_itself(tmp_path):
     S.plant_sidecar(dirs["b"], truncated_by="request-limit")
     S.plant_sidecar(dirs["c"], truncated_by="aborted", closed_before_cut=True)
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "request-limit", "closed_before_cut": False}
     assert _record(ep, "c") == {"truncated_by": "aborted", "closed_before_cut": True}
 
@@ -47,7 +47,7 @@ def test_the_worlds_exit_class_is_read_from_a_source_no_box_can_write(tmp_path):
     for planted in S.salt_run_dir(dirs["b"], value="request-limit"):
         assert planted.exists(), f"the fixture failed to plant {planted}"
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "store", "closed_before_cut": True}, (
         "the archived record does not match the host's own sidecar — something inside the "
         "box's rw bind reached it")
@@ -61,7 +61,7 @@ def test_a_forged_run_end_file_in_the_run_dir_is_never_the_archived_one(tmp_path
     forged = {"truncated_by": "request-limit", "closed_before_cut": True, "forged": True}
     (dirs["b"] / S.run_end_name()).write_text(json.dumps(forged), encoding="utf-8")
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     archived = _record(ep, "b")
     assert archived == {"truncated_by": "aborted", "closed_before_cut": False}, (
         f"the planted file reached the archive: {archived!r}")
@@ -74,11 +74,11 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     own record; a pre-existing HARD LINK there is refused rather than written through."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="budget")
-    dest = ep / "worlds" / "b"
+    dest = ep / "worlds" / T.world_id(ep, "b")
     dest.mkdir(parents=True, exist_ok=True)
     (dest / S.run_end_name()).write_text('{"truncated_by": "PRE-EXISTING"}', encoding="utf-8")
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "budget", "closed_before_cut": False}, (
         "a stale record at the destination survived a re-archive; a retried world would keep "
         "reporting the attempt it no longer has")
@@ -87,11 +87,11 @@ def test_a_pre_existing_record_at_the_destination_is_overwritten_through_the_gua
     victim.write_text("VICTIM\n", encoding="utf-8")
     linked_ep, linked_dirs, _b2 = _episode_with(tmp_path / "linked", worlds=("b",))
     S.plant_sidecar(linked_dirs["b"], truncated_by="budget")
-    world = linked_ep / "worlds" / "b"
+    world = linked_ep / "worlds" / T.world_id(linked_ep, "b")
     world.mkdir(parents=True, exist_ok=True)
     (world / S.run_end_name()).hardlink_to(victim)
     with pytest.raises(S.refusals()), Episode.open(linked_ep) as episode:
-        _archive().archive_episode(episode, linked_dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in linked_dirs.items()})
     assert victim.read_text(encoding="utf-8") == "VICTIM\n", (
         "the archive wrote this world's record through a hard link planted at the "
         "destination, landing it outside the archive tree")
@@ -105,11 +105,11 @@ def test_an_unreadable_sidecar_is_copied_verbatim_and_the_judge_reads_no_record(
         ep, dirs, _base = _episode_with(tmp_path / name, worlds=("b",))
         S.plant_sidecar(dirs["b"], raw=raw)
         with Episode.open(ep) as episode:
-            _archive().archive_episode(episode, dirs)
-        archived = ep / "worlds" / "b" / S.run_end_name()
+            _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
+        archived = ep / "worlds" / T.world_id(ep, "b") / S.run_end_name()
         assert archived.read_text(encoding="utf-8") == raw, (
             f"{name}: the archive rewrote the sidecar's bytes instead of copying them")
-        assert (ep / "worlds" / "b" / "report.md").is_file(), (
+        assert (ep / "worlds" / T.world_id(ep, "b") / "report.md").is_file(), (
             f"{name}: an unreadable sidecar cost the world its other artifacts")
         graded = S.cut_short_episode(tmp_path / f"{name}-graded")
         S.plant_archived_record(graded, "b", raw=raw)
@@ -124,8 +124,8 @@ def test_a_directory_squatting_the_sidecars_name_refuses_the_world_like_any_plan
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.sidecar_path(dirs["b"]).mkdir(parents=True, exist_ok=True)
     with pytest.raises(S.refusals()), Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
-    assert not (ep / "worlds" / "b" / "report.md").exists(), (
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
+    assert not (ep / "worlds" / T.world_id(ep, "b") / "report.md").exists(), (
         "the archive copied part of the world before refusing it")
 
 
@@ -139,11 +139,11 @@ def test_a_destination_side_symlink_at_the_run_end_path_pointing_outside_the_arc
     outside.write_text("OUTSIDE\n", encoding="utf-8")
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b",))
     S.plant_sidecar(dirs["b"], truncated_by="store")
-    world = ep / "worlds" / "b"
+    world = ep / "worlds" / T.world_id(ep, "b")
     world.mkdir(parents=True, exist_ok=True)
     (world / S.run_end_name()).symlink_to(outside)
     with pytest.raises(S.refusals() + (OSError,)), Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert outside.read_text(encoding="utf-8") == "OUTSIDE\n", (
         "the archive followed a link out of the archive tree and wrote this world's record "
         "over a file the episode does not own")
@@ -158,7 +158,7 @@ def test_a_symlink_planted_inside_the_run_dir_at_the_sidecars_basename_is_not_re
     inside = dirs["b"] / S.sidecar_path(dirs["b"]).name
     inside.symlink_to(decoy)
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "budget", "closed_before_cut": False}
 
 
@@ -205,9 +205,13 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
     faults: list[BaseException] = []
 
     def spawn(argv, *, env=None, **_kw):
+        # `start_family` records a thread that died as a NON-ZERO exit rather than re-raising,
+        # so a fault in here would otherwise reach the assertions below as "the launcher fanned
+        # nothing" — a message about the wrong thing.
         try:
             label = next(argv[i + 1] for i, tok in enumerate(argv) if tok == "--world")
-            run_dir = runs / f"{S.EPISODE_ID}-{label}"
+            # #1187: the child's run folder is the arm id the roster names for its label.
+            run_dir = runs / T.read_roster(ep)[T.world_id(ep, label)]
             run_dir.mkdir(parents=True, exist_ok=True)
             S.plant_sidecar(run_dir, truncated_by="aborted")
             written[label] = run_dir
@@ -220,7 +224,7 @@ def test_the_run_end_sidecar_leaf_never_collides_with_a_run_dir_or_another_sibli
         # #1105 PR 2: the launcher makes the container (with the tenant's record) before the
         # first sibling; `start_family` no longer does.
         T.episode_view(episode)
-        cli.start_family(episode, ["b", "c"], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID)
+        cli.start_family(episode, [T.world_id(ep, label) for label in ("b", "c")], spawn=spawn, tenant_id=T1106.PLAYGROUND_ID)
     if faults:
         raise faults[0]
     assert set(written) == {"b", "c"}, f"the launcher fanned {sorted(written)}"
@@ -303,6 +307,10 @@ def test_one_world_is_cut_short_while_a_sibling_archive_is_refused(tmp_path):
     """World b archives and grades per its own exit class independently of world c's refusal: the
     archive's refuse-and-report is per-world and per-entry (flagged fact F6), not per-episode."""
     ep, dirs, _base = _episode_with(tmp_path, worlds=("b", "c"))
+    # Archive order is by opaque UUID: arrange the clean world before the refused one.
+    first, second = sorted(T.world_id(ep, label) for label in ("b", "c"))
+    T.write_family(ep, T.family_doc(worlds=[
+        T.base_world(), T.world_doc("b", world_id=first), T.world_doc("c", world_id=second)]))
     S.plant_sidecar(dirs["b"], truncated_by="request-limit")
     S.plant_sidecar(dirs["c"], truncated_by="aborted")
     secret = tmp_path / "secret.md"
@@ -310,10 +318,10 @@ def test_one_world_is_cut_short_while_a_sibling_archive_is_refused(tmp_path):
     (dirs["c"] / "report.md").unlink()
     (dirs["c"] / "report.md").symlink_to(secret)
     with pytest.raises(S.refusals()), Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "request-limit", "closed_before_cut": False}, (
         "world c's refusal cost world b the record its own run produced")
-    assert not (ep / "worlds" / "c" / "report.md").exists()
+    assert not (ep / "worlds" / T.world_id(ep, "c") / "report.md").exists()
 
 
 def test_a_run_dir_emptied_or_corrupted_by_the_box_at_run_end_still_grades_a_genuinely_cut_short_world_correctly(
@@ -328,7 +336,7 @@ def test_a_run_dir_emptied_or_corrupted_by_the_box_at_run_end_still_grades_a_gen
         shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
     assert list(dirs["b"].iterdir()) == [], "the fixture did not empty the run dir"
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "request-limit", "closed_before_cut": False}
 
     graded = S.cut_short_episode(tmp_path / "graded", cut={"b": "request-limit"})
@@ -347,8 +355,8 @@ def test_a_path_traversal_style_value_written_by_the_box_anywhere_in_the_run_dir
             json.dumps({"truncated_by": escape, "path": escape, "run_end": escape}),
             encoding="utf-8")
     with Episode.open(ep) as episode:
-        _archive().archive_episode(episode, dirs)
+        _archive().archive_episode(episode, {T.world_id(episode.dir, label): path for label, path in dirs.items()})
     assert _record(ep, "b") == {"truncated_by": "aborted", "closed_before_cut": False}
     landed = sorted(p.relative_to(ep) for p in ep.rglob(S.run_end_name()))
-    assert [str(p) for p in landed] == [f"worlds/b/{S.run_end_name()}"], (
+    assert [str(p) for p in landed] == [f"worlds/{T.fixture_world_id('b')}/{S.run_end_name()}"], (
         f"the feature's write landed at {landed} — a path derived from box-written content")

@@ -482,21 +482,21 @@ def _tenant_id_directory(knowledge: Path) -> None:
 def _tenant_id_oversize(knowledge: Path) -> None:
     """A 16 MiB SPARSE file: a bounded read (at most 128 bytes) refuses it at once."""
     with open(knowledge / H.TENANT_ID_FILE, "wb") as fh:
-        fh.write(b"acme\n")
+        fh.write(f"{H.TID}\n".encode())
         fh.truncate(16 * 1024 * 1024)
 
 
 #: M8's byte rule, cell by cell: (id token, the file's bytes or a planter, accepted?).
 BYTE_RULE_CELLS: list[tuple[str, object, bool]] = [
-    ("trailing-newline", b"acme\n", True),
-    ("crlf", b"acme\r\n", True),
-    ("bom", b"\xef\xbb\xbfacme\n", False),
-    ("trailing-space", b"acme \n", False),
-    ("uppercase", b"ACME\n", False),
-    ("extra-line", b"acme\nbeta\n", False),
+    ("trailing-newline", f"{H.TID}\n".encode(), True),
+    ("crlf", f"{H.TID}\r\n".encode(), True),
+    ("bom", b"\xef\xbb\xbf" + f"{H.TID}\n".encode(), False),
+    ("trailing-space", f"{H.TID} \n".encode(), False),
+    ("uppercase", f"{H.TID.upper()}\n".encode(), False),
+    ("extra-line", f"{H.TID}\n{H.OTHER}\n".encode(), False),
     ("empty", b"", False),
     ("directory", _tenant_id_directory, False),
-    ("invalid-utf8", b"acme\xff\n", False),
+    ("invalid-utf8", H.TID.encode() + b"\xff\n", False),
     ("oversize", _tenant_id_oversize, False),
 ]
 
@@ -536,7 +536,7 @@ def test_1120_accept_tenant_reads_the_tenant_id_file_bounded_and_admits_only_the
     folder = tmp_path / "fixture-copy"
     shutil.copytree(H.FIXTURE, folder, symlinks=True)
     H.assert_clean(H.check(tenant_py, None, "--folder", str(folder)))
-    (folder / H.TENANT_ID_FILE).write_bytes(b"ACME\n")
+    (folder / H.TENANT_ID_FILE).write_bytes(f"{H.TID.upper()}\n".encode())
     H.assert_refused(H.check(tenant_py, None, "--folder", str(folder)),
                      str(folder / H.TENANT_ID_FILE))
 
@@ -668,16 +668,15 @@ def test_1120_accept_tenant_names_an_unreadable_entry_as_a_refusal_never_a_trace
 
 
 def test_1120_s0_id_grammar_length_boundary(tmp_path: Path) -> None:
-    """A 63-character id that matches the unchanged TenantId grammar passes accept_tenant's step 1 (a
-    finished tenant under that id is accepted)."""
+    """A canonical UUID reaches acceptance; appending one character refuses before any path read."""
     root = tmp_path / "data"
-    longest = "a" * 63
+    longest = H.TID
     H.adopted(root, longest)
     assert H.accept(_tenant, root, longest).id == longest
 
-    too_long = "a" * 64
+    too_long = H.TID + "a"
     text = H.accept_refusal(_tenant, root, too_long)
-    assert too_long[:40] in text, text
+    assert too_long in text, text
     assert str(root) not in text, text
 
 
