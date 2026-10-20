@@ -1,8 +1,9 @@
 """Test-side doors onto the learning state handle (#1135).
 
 The handle's root must already exist (nothing creates it lazily), so a fixture that points
-`DEFENDER_LEARNING_STATE_DIR` at a path under `tmp_path` has to create the folder too, and a test
-that drives a verb taking `state=` opens the handle over whatever root the env names.
+`DEFENDER_LEARNING_STATE_DIR` at a path under `tmp_path` has to create the folder too. This is
+an explicit test scratch setting used by helpers that inject `state=`; production launchers
+ignore the retired variable and select their accepted tenant's learning root.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ STATE_DIR_ENV = "DEFENDER_LEARNING_STATE_DIR"
 
 
 def set_state_dir(monkeypatch, root: Path) -> Path:
-    """Create `root` and make it the env-named learning state root. Returns `root`."""
+    """Create `root` and name it for explicit test scratch handles. Returns `root`."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv(STATE_DIR_ENV, str(root))
@@ -24,7 +25,7 @@ def set_state_dir(monkeypatch, root: Path) -> Path:
 
 
 def env_state() -> LearningState:
-    """A handle over the root the environment currently names (what a launcher entry opens)."""
+    """An explicit scratch handle over the test setting; production launchers ignore it."""
     import os
 
     root = Path(os.environ[STATE_DIR_ENV])
