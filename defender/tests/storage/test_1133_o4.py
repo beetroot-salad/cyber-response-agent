@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import errno
@@ -232,7 +234,7 @@ def _prime_setup(tmp_path: Path) -> tuple[Any, Path, Any]:
     BEFORE priming — a state a launch, which always claims a fresh episode, cannot reach — drive
     the claim body `cli._prime_once` over `runs.create_episode()`'s held episode."""
     cli = T.mod("learning.branch.cli")
-    _base, src = T.runs_base(tmp_path)
+    _base, src = location_path(T.runs_base)(tmp_path)
     return cli, src, T.current_tenant().runs_repository()
 
 
@@ -277,7 +279,7 @@ def test_o4_5_prepare_episode_returns_the_held_episode_and_the_claim_is_released
         assert ep.name == view.episode_id
         assert str(uuid.UUID(view.episode_id)) == view.episode_id, (
             f"the launcher claimed {view.episode_id!r}, not a fresh UUID (declared change 3)")
-        assert ep.parent == Path(T.current_tenant().episodes), (
+        assert ep.parent == Path(location_path(T.current_tenant().episodes)), (
             f"the launcher claimed {ep}, not an episode under <T>/episodes/")
         assert prime.seen["episode"] is episode, "the primer was handed another episode"
         assert prime.seen["source"] == src
@@ -669,17 +671,17 @@ def test_o4_8_2_grade_episode_refuses_a_missing_episode_dir_and_does_not_recreat
         tmp_path, roots, kind):
     judge_mod = J.mod("learning.judge")
     tenant = T.current_tenant()
-    ep = Path(tenant.episodes) / EPISODE_ID
+    ep = Path(location_path(tenant.episodes)) / EPISODE_ID
     if kind != "missing-parent":
         ep.parent.mkdir()
     if kind == "file":
         ep.write_bytes(S.HOST_BYTES)
-    before = S.census(Path(tenant.dir))
+    before = S.census(Path(location_path(tenant.tenant_root)))
 
     with pytest.raises(judge_mod.JudgeRefused):
         J.grade_at(ep, runs=tenant.runs_repository(),
                    judge=ScriptedJudge({}, default="never called"), state=env_state())
-    assert S.census(Path(tenant.dir)) == before, f"grading a {kind} episode dir created something"
+    assert S.census(Path(location_path(tenant.tenant_root))) == before, f"grading a {kind} episode dir created something"
 
     control = T.episode(tmp_path / "control", episode_id=fixture_uuid("o4-8-2-grade-control"),
                         doc=T.family_doc(episode_id=fixture_uuid("o4-8-2-grade-control")))
@@ -703,13 +705,13 @@ def test_o4_8_2_render_episode_refuses_a_missing_episode_dir_and_does_not_recrea
     page = T.mod("presentation.visualize_episode")
     tenant = T.current_tenant()
     runs = tenant.runs_repository()
-    ep = Path(tenant.episodes) / EPISODE_ID
+    ep = Path(location_path(tenant.episodes)) / EPISODE_ID
     if kind == "missing":
         ep.parent.mkdir()
-    before = S.census(Path(tenant.dir))
+    before = S.census(Path(location_path(tenant.tenant_root)))
     with pytest.raises(page.JudgeRefused):
         page.render_episode(runs, EPISODE_ID)
-    assert S.census(Path(tenant.dir)) == before
+    assert S.census(Path(location_path(tenant.tenant_root))) == before
 
     control = T.episode(tmp_path / "control", episode_id=fixture_uuid("o4-8-2-control"),
                         doc=T.family_doc(episode_id=fixture_uuid("o4-8-2-control")))
@@ -760,7 +762,7 @@ def _sibling_episode(tmp_path: Path, src: Path) -> Path:
 def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
         tmp_path, monkeypatch, spelling):
     run = T.mod("run")
-    _base, src = T.runs_base(tmp_path)
+    _base, src = location_path(T.runs_base)(tmp_path)
     ep = _sibling_episode(tmp_path, src)
     bad = {"path": str(ep / LAYOUT.family), "case": ep.name.upper(),
            "separator": f"{ep.name}/{LAYOUT.family}"}[spelling]
@@ -790,7 +792,7 @@ def test_the_sibling_door_refuses_an_episode_id_outside_the_id_grammar(
 def test_the_sibling_door_holds_one_descriptor_on_the_episode_for_the_whole_run(tmp_path,
                                                                               monkeypatch):
     run = T.mod("run")
-    _base, src = T.runs_base(tmp_path)
+    _base, src = location_path(T.runs_base)(tmp_path)
     ep = _sibling_episode(tmp_path, src)
     seen: dict[str, Any] = {}
 

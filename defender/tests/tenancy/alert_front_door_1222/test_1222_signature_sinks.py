@@ -2,6 +2,8 @@
 signature exactly; hostile signature text stays inert."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -234,7 +236,7 @@ def _graded(tmp_path: Path, *, alert: Mapping[str, Any] | bytes,  # noqa: PLR091
     S.plant_episode_copy(ep, alert=alert, record=record, facts=facts)
     if alter is not None:
         alter(ep)
-    base = runs_base if runs_base is not None else J.runs_base(tmp_path)[0]
+    base = runs_base if runs_base is not None else location_path(J.runs_base)(tmp_path)[0]
     judge = J.FakeJudge(default=J.as_reply_text(J.reply_doc()),
                         family_default=J.as_reply_text(J.family_reply()))
     J.grade_at(ep, judge=judge, runs_base=base, draws=1,
@@ -397,7 +399,7 @@ def _siblings_listed(prompt: str, names: Iterable[str]) -> set[str]:
 
 def test_o11_a_rewritten_alert_changes_neither_union_nor_key(tmp_path: Path) -> None:
     decoy = {"alert_id": "decoy-alert-7", "rule": {"id": "DECOY-1"}}
-    base, _src = J.runs_base(tmp_path)
+    base, _src = location_path(J.runs_base)(tmp_path)
     _union_world(base)
     report = {"report.md": J.report_text("benign")}
     S.plant_run(base, "trial-forged", alert=ALERT_A,

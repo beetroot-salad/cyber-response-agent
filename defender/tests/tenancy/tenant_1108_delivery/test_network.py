@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import math
 import signal
 import threading
@@ -41,7 +43,7 @@ class _Stall:
 def _left(tenant, server):
     """Processes still at work in the tenant's folders, or talking to the server, a moment
     after the call ended (a killed process may take that long to go)."""
-    return quiet(tenant.dir, naming=(server.url,), seconds=1.0)
+    return quiet(location_path(tenant.tenant_root), naming=(server.url,), seconds=1.0)
 
 
 _ROUTES = {

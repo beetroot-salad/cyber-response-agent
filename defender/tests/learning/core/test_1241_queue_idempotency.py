@@ -2,6 +2,8 @@
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -84,7 +86,7 @@ def test_existing_queue_identity_survives_torn_tail(channel_case, tmp_path):
     paths, channel, build, append = channel_case
     first = build(finding_id="episode/b/0/0")
     second = build(finding_id="episode/b/0/1")
-    queue = paths.state_root / channel.queue
+    queue = location_path(paths.state_root) / channel.queue
     queue.parent.mkdir(parents=True, exist_ok=True)
     original = json.dumps(first) + '\n{"torn": '
     queue.write_text(original, encoding="utf-8")

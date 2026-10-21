@@ -1,6 +1,8 @@
 """Edge cases: non-directory runs folders and episodes, sidecar names, surrogate escapes."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 from pathlib import Path
 
@@ -22,7 +24,7 @@ def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
     t = H.tenant(root, tenant_id)
     H.runs_folder(t)
     for rid in run_ids:
-        H.make_run(t.runs, rid)
+        H.make_run(location_path(t.runs), rid)
     return t
 
 
@@ -56,7 +58,7 @@ def test_1105_run_setup_refuses_a_non_directory_runs_folder_before_creating_anyt
         tmp_path, data_root, kind):
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     runs.parent.mkdir(parents=True, exist_ok=True)
     if kind == "file":
         runs.write_text("not a folder\n", encoding="utf-8")
@@ -89,7 +91,7 @@ def test_1105_every_function_refuses_a_non_directory_runs_folder(tmp_path, kind)
     root = tmp_path / "data"
     root.mkdir()
     t = H.tenant(root)
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     if kind == "file":
         runs.write_text("not a folder\n", encoding="utf-8")
     else:
@@ -110,7 +112,7 @@ def test_1105_open_run_refuses_a_non_directory_at_the_runs_name(tmp_path, kind):
     from defender.run_repository import RunId, RunRefused
 
     t = _good(tmp_path, R1)
-    entry = Path(t.runs) / R2
+    entry = Path(location_path(t.runs)) / R2
     if kind == "file":
         entry.write_text("x\n", encoding="utf-8")
     else:
@@ -132,7 +134,7 @@ def test_1105_a_sidecar_file_whose_owner_is_not_a_run_id_refuses_the_listings(tm
     from defender.run_repository import RunRefused
 
     t = _good(tmp_path, R1)
-    (Path(t.runs) / name).write_text("{}\n", encoding="utf-8")
+    (Path(location_path(t.runs)) / name).write_text("{}\n", encoding="utf-8")
     for fn, call in _listings(t):
         err = H.raised(call)
         assert H.is_a(err, RunRefused), f"{name!r}: {fn} answered or raised {err!r}"
@@ -147,9 +149,9 @@ def test_1105_a_link_or_fifo_wearing_a_sidecar_name_refuses_the_listings(tmp_pat
     from defender.run_repository import RunRefused
 
     t = _good(tmp_path, R1)
-    entry = Path(t.runs) / f"{R1}.run-end.json"
+    entry = Path(location_path(t.runs)) / f"{R1}.run-end.json"
     if kind == "link":
-        os.symlink(Path(t.runs) / R1 / "alert.json", entry)
+        os.symlink(Path(location_path(t.runs)) / R1 / "alert.json", entry)
     else:
         H.make_fifo(entry)
     for fn, call in _listings(t):

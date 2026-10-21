@@ -1,6 +1,8 @@
 """The runs-base record _tenant.json: grammar on read, ensure/mint semantics, complete-or-absent create lane, torn reads, mismatch backstop."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 import errno
 import json
 import os
@@ -124,7 +126,7 @@ root = Path(sys.argv[1])
 print("ready", flush=True)
 i = 0
 while True:
-    _tenant.create_tenant(root / f"d{i}", sys.argv[2])
+    _tenant.create_tenant(_tenant.data_root_from_path(root / f"d{i}"), sys.argv[2])
     i += 1
 """,
 }
@@ -177,7 +179,7 @@ def test_s7_j16_create_lane_complete_or_absent(tmp_path):
             root = tmp_path / "rows" / f"d{trial}"
             root.parent.mkdir(parents=True, exist_ok=True)
             with _Bystander(root / T_ID / H.ROW_NAME, row_fields) as reader:
-                results, errors = _race(6, lambda r=root: H.create_tenant(r, T_ID))
+                results, errors = _race(6, lambda r=root: H.create_tenant(fixture_data_root(r), T_ID))
             assert len(results) == 1, f"trial {trial}: {len(results)} creates of one row succeeded"
             assert all(isinstance(e, H.tenant().TenantRefused) for e in errors), (
                 f"trial {trial}: a losing create escaped with {[type(e).__name__ for e in errors]}")
@@ -256,5 +258,5 @@ def test_tenant_folder_symlink_swapped_between_o11as_construction_time_check_and
     assert os.listdir(victim) == [], "create_tenant wrote through a symlinked tenant folder"
     assert os.readlink(root / T_ID) == str(victim), "the planted link was replaced"
     fresh = tmp_path / "fresh"
-    H.create_tenant(fresh, T_ID)
+    H.create_tenant(fixture_data_root(fresh), T_ID)
     assert (fresh / T_ID / H.ROW_NAME).is_file()

@@ -1,6 +1,8 @@
 """Queue drains are best-effort only where proven: markers leave the queue only after work happened; lock-held skip; requeue never clobbers."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import fcntl
 import json
 from pathlib import Path
@@ -175,7 +177,7 @@ def _drain(paths, tmp_path: Path, **overrides):
     )
 
 
-def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_path):
+def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_path, monkeypatch):
     """O4: a valid foreign Run address in A's queue cannot grant access to tenant B."""
     from defender.run_repository import RunAddress
     from defender.tenancy import _tenant
@@ -188,7 +190,7 @@ def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_p
     H.adopted(current_data_root(), other_id)
     other = H.accept(_tenant, current_data_root(), other_id)
     own_run = _state1135.curation_run_dir("own-1186", tenant_id=str(tenant.id))
-    foreign_run = other.runs / fixture_uuid("foreign-1186")
+    foreign_run = location_path(other.runs) / fixture_uuid("foreign-1186")
     foreign_run.mkdir(parents=True)
     foreign = other.runs_repository().resolve(RunAddress(other.id, foreign_run.name))
     assert foreign.run_dir == foreign_run.resolve()
@@ -197,6 +199,8 @@ def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_p
     state = _state1135.state_for_paths(paths)
     _enqueue(paths, "a-foreign", foreign_run)
     _enqueue(paths, "b-own", own_run)
+    # Once selected, the tenant supplies request acceptance even if ambient selection changes.
+    monkeypatch.setenv("DEFENDER_DATA_ROOT", str(tmp_path / "not-the-selected-root"))
     served = []
     assert _drain(paths, tmp_path,
                   run_lead_author=lambda _p, _s, run, **kw: served.append(run.run_dir)) == 0
@@ -209,8 +213,8 @@ def test_1186_drain_deadletters_another_tenants_request_and_serves_its_own(tmp_p
     assert record["tenant_id"] == str(other.id)
     assert "tenant" in record["failed"].lower()
     assert author_markers(paths) == []
-    assert list((paths.state_root / "author-queue" / "inflight").glob("*.json")) == []
-    assert not (other.learning / "author-queue").exists()
+    assert list((location_path(paths.state_root) / "author-queue" / "inflight").glob("*.json")) == []
+    assert not (location_path(other.learning) / "author-queue").exists()
 
 
 def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path):
@@ -219,7 +223,7 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     _queued_run("case-1", "run-1", paths)
     _queued_run("case-2", "run-2", paths)
 
-    queue_lock = (paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"
+    queue_lock = (location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"
     queue_lock.parent.mkdir(parents=True, exist_ok=True)
     holder = queue_lock.open("a+")
     try:
@@ -232,12 +236,12 @@ def test_852_f03_a_held_queue_lock_leaves_the_whole_batch_queued(tmp_path: Path)
     assert rc == 0
     assert author_markers(paths) == ["case-1.json", "case-2.json"], \
         "a request nothing served was deleted from the queue"
-    assert list((paths.state_root / "author-queue" / "inflight").glob("*.json")) == [], \
+    assert list((location_path(paths.state_root) / "author-queue" / "inflight").glob("*.json")) == [], \
         "a claimed request was left stranded in inflight/ by a pass that served nothing"
-    assert not (paths.state_root / "author-queue" / "failed").exists(), \
+    assert not (location_path(paths.state_root) / "author-queue" / "failed").exists(), \
         "a skip was dead-lettered — it is not a failure of the request"
     for name in ("case-1.json", "case-2.json"):
-        assert "attempts" not in marker_body(paths.state_root / "author-queue" / name), \
+        assert "attempts" not in marker_body(location_path(paths.state_root) / "author-queue" / name), \
             "a skip spent one of the request's three retries"
     assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is True, \
         "the queue went quiet on work that is still queued"
@@ -248,7 +252,7 @@ def test_852_f03_the_skip_rc_is_distinct_from_a_completed_serve(tmp_path: Path):
     run_dir = _state1135.curation_run_dir("run-1")
     paths = loop_paths(tmp_path)
 
-    queue_lock = (paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"
+    queue_lock = (location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"
     queue_lock.parent.mkdir(parents=True, exist_ok=True)
     holder = queue_lock.open("a+")
     try:
@@ -285,7 +289,7 @@ def test_852_f04_a_transient_retry_does_not_clobber_a_fresher_request(tmp_path: 
     _drain(paths, tmp_path, run_lead_author=serve)
 
     assert author_markers(paths) == ["case-A.json"]
-    body = marker_body(paths.state_root / "author-queue" / "case-A.json")
+    body = marker_body(location_path(paths.state_root) / "author-queue" / "case-A.json")
     assert _address(body) == _address(_state1135.curation_row("case-A", second)), (
         "the retry replaced the fresher curation request with the stale run dir — the case "
         "will be re-served off the run the operator already superseded"

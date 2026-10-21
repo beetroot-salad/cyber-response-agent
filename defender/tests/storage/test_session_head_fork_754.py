@@ -1,6 +1,8 @@
 """fork's recorded branch point, the log readers, and the all-or-nothing transaction."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import inspect
 import sqlite3
 
@@ -256,7 +258,7 @@ def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(t
     """A refused append is invisible to a later reader, whatever refused it: when the wait for a"""
     ss = store_mod()
     base = runs_base(tmp_path)
-    real = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    real = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = real.new_session(agent_id="main")
     r1, r2 = linear_turns(real, session_id, 2)
     real.append(session_id, [text_response("recorded move")], agent_id="main",
@@ -286,7 +288,7 @@ def test_a_failed_append_reads_back_as_the_pre_append_state_in_a_fresh_process(t
     assert exhausted is not None, "the database must really have stopped growing"
     real.close()
 
-    reopened = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    reopened = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     assert head_of(reopened, session_id) == expected_head
     assert log_rows(reopened, session_id) == expected_log
     assert message_ids(reopened, session_id) == expected_rows

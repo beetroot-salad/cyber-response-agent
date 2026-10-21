@@ -2,6 +2,8 @@
 mean something."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
@@ -22,14 +24,14 @@ def _rows_and_word(episode_dir):
 def test_no_file_a_box_can_write_is_an_input_to_was_this_run_cut_short(tmp_path):
     archive = S.mod("learning.branch.archive")
 
-    control_base, _src = S.runs_base(tmp_path / "control-base")
+    control_base, _src = location_path(S.runs_base)(tmp_path / "control-base")
     control_ep = S.cut_short_episode(tmp_path / "control")
     with Episode.open(control_ep) as episode:
         archive.archive_episode(
             episode, {T.world_id(episode.dir, label): path for label, path in ({label: S.sibling_run_dir(control_base, label) for label in ("b", "c")}).items()})
     control_rows, control_word = _rows_and_word(control_ep)
 
-    forged_base, _src = S.runs_base(tmp_path / "forged-base")
+    forged_base, _src = location_path(S.runs_base)(tmp_path / "forged-base")
     forged_ep = S.cut_short_episode(tmp_path / "forged")
     forged_dirs = {label: S.sibling_run_dir(forged_base, label) for label in ("b", "c")}
     for run_dir in forged_dirs.values():
@@ -66,13 +68,13 @@ def test_every_box_writable_artifact_carrying_a_truncated_by_looking_value_leave
     """Every file under the box's bind carrying a truncated_by-looking value leaves the grade
     unmoved — the stated scope of `no_box_writable_input_to_cut_short`."""
     archive = S.mod("learning.branch.archive")
-    control_base, _src = S.runs_base(tmp_path / "control-base")
+    control_base, _src = location_path(S.runs_base)(tmp_path / "control-base")
     control_ep = S.cut_short_episode(tmp_path / "control")
     with Episode.open(control_ep) as episode:
         archive.archive_episode(episode, {T.world_id(episode.dir, 'b'): S.sibling_run_dir(control_base, 'b')})
     control_rows, control_word = _rows_and_word(control_ep)
     for i, name in enumerate(S.FORGEABLE_NAMES):
-        base, _src = S.runs_base(tmp_path / f"base-{i}")
+        base, _src = location_path(S.runs_base)(tmp_path / f"base-{i}")
         ep = S.cut_short_episode(tmp_path / f"forged-{i}-{name.replace('/', '_')}")
         run_dir = S.sibling_run_dir(base, "b")
         (run_dir / name).write_text(
@@ -95,7 +97,7 @@ def test_a_file_named_like_the_archived_run_end_record_planted_anywhere_under_th
         tmp_path):
     """A file named like the archived record, planted anywhere under the run dir, never reaches the
     grade: the archive copies only the host-side sidecar, which is outside the run dir."""
-    base, _src = S.runs_base(tmp_path)
+    base, _src = location_path(S.runs_base)(tmp_path)
     ep = S.cut_short_episode(tmp_path)
     run_dir = S.sibling_run_dir(base, "b")
     S.plant_sidecar(run_dir, truncated_by="aborted")
@@ -157,7 +159,7 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
         tmp_path):
     """No box-writable file's content is ever the value argument to the owner: the two sources are
     the archived record (from a host sidecar) and the in-process summary."""
-    base, _src = S.runs_base(tmp_path)
+    base, _src = location_path(S.runs_base)(tmp_path)
     archive = S.mod("learning.branch.archive")
 
     # site 1 — the archive
@@ -174,7 +176,7 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
            (forged_ep / "worlds" / T.world_id(forged_ep, "b") / S.run_end_name()).read_text(encoding="utf-8"), (
         "the archive's record changed when box-written content changed")
 
-    judge_base, _src = S.runs_base(tmp_path / "judge-base")
+    judge_base, _src = location_path(S.runs_base)(tmp_path / "judge-base")
     clean_grade = S.cut_short_episode(tmp_path / "judge-clean")
     forged_grade = S.cut_short_episode(tmp_path / "judge-forged")
     clean_world, forged_world = (S.sibling_run_dir(judge_base, "jb"),
@@ -200,7 +202,7 @@ def test_no_box_writable_files_content_is_ever_fed_as_the_value_argument_to_the_
 
 
 def test_no_world_can_move_another_worlds_cut_short_row(tmp_path):
-    base, _src = S.runs_base(tmp_path)
+    base, _src = location_path(S.runs_base)(tmp_path)
     ep = S.cut_short_episode(tmp_path)
     b_dir, c_dir = S.sibling_run_dir(base, "b"), S.sibling_run_dir(base, "c")
     S.plant_sidecar(b_dir, truncated_by="request-limit")

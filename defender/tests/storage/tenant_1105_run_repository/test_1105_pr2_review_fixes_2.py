@@ -1,6 +1,8 @@
 """Review-finding regressions: tick without data root, tenant acceptance, quarantined curation rows, cross-tenant grading, prompt view numbering."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import logging
 import os
 import re
@@ -21,7 +23,7 @@ def _roots(tmp_path, monkeypatch):
 
 
 def _queue_dir(paths: Any) -> Path:
-    return Path(paths.state_root) / "author-queue"
+    return Path(location_path(paths.state_root)) / "author-queue"
 
 
 def _queued_top(paths: Any, case_id: str) -> bool:
@@ -78,7 +80,7 @@ def test_1_a_tick_with_rows_and_no_data_root_is_the_stages_configuration_refusal
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     assert _run_stage(lambda: R1._tick(paths, lane=lane, pitfalls=[], box=box)) == 0
-    assert lane.run_dirs == [Path(t.runs) / R1.RID_R1], "control: the row was not served"
+    assert lane.run_dirs == [Path(location_path(t.runs)) / R1.RID_R1], "control: the row was not served"
 
 
 class _EnqueueingBox(R1._Box):
@@ -117,19 +119,19 @@ def test_1_a_row_landing_mid_tick_waits_for_the_next_tick(tmp_path, monkeypatch,
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     assert R1._tick(paths, lane=lane, pitfalls=[], box=R1._Box()) == 0
-    assert lane.run_dirs == [Path(t.runs) / R1.RID_R1], "control: the next tick did not serve it"
+    assert lane.run_dirs == [Path(location_path(t.runs)) / R1.RID_R1], "control: the next tick did not serve it"
 
 
 def test_2_requested_tenant_is_the_one_acceptance_of_a_raw_or_stored_tenant_id(d9_tenant):
     from defender._paths import process_defender_dir
 
     root = _tenant.resolve_data_root()
-    direct = _tenant.accept_tenant(root, d9_tenant, defender_dir=process_defender_dir())
+    direct = _tenant.accept_tenant(fixture_data_root(root), d9_tenant, defender_dir=process_defender_dir())
     for raw in (d9_tenant, _tenant.TenantId(d9_tenant)):
-        got = _tenant.requested_tenant(root, raw)
+        got = _tenant.requested_tenant(fixture_data_root(root), raw)
         assert isinstance(got, _tenant.Tenant)
-        assert (got.id, Path(got.runs), Path(got.data_root)) == (
-            direct.id, Path(direct.runs), Path(direct.data_root)), raw
+        assert (got.id, Path(location_path(got.runs)), Path(location_path(got.data_root))) == (
+            direct.id, Path(location_path(direct.runs)), Path(location_path(direct.data_root))), raw
     for bad in (None, "../x", "no-such-tenant"):
         assert isinstance(H.raised(_tenant.requested_tenant, root, bad),
                           _tenant.TenantRefused), bad
@@ -197,13 +199,13 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
     got = P.drive_launch(est, P.launch_argv(P.LAUNCH_TENANT, src))
     assert got.raised is None, f"the launch did not run: {got!r}"
     assert got.rc == 0, f"the launch did not run: {got!r}"
-    episodes = S.episodes_dir(P.data_root(), P.LAUNCH_TENANT)
+    episodes = S.episodes_dir(location_path(P.data_root)(), P.LAUNCH_TENANT)
     made = sorted(p.name for p in episodes.iterdir()) if episodes.is_dir() else []
     assert len(made) == 1, f"the launch made {made} under <T>/episodes"
     episode_id = made[0]
     ep = episodes / episode_id
     (ep / "judge.yaml").unlink(missing_ok=True)
-    other = P.second_tenant(P.data_root(), H.U_ID)
+    other = P.second_tenant(location_path(P.data_root)(), H.U_ID)
     state_dir = tmp_path / "learning-state"
     before = P.tree(state_dir)
 
@@ -214,9 +216,9 @@ def test_6_grading_another_tenants_episode_is_refused(tmp_path):
                             FileNotFoundError)), f"another tenant graded the episode: {err!r}"
     assert not (ep / "judge.yaml").exists(), "a grade was written for another tenant"
     assert P.tree(state_dir) == before, "the refused grade touched the learning state"
-    assert not os.path.lexists(S.episodes_dir(P.data_root(), H.U_ID) / episode_id)
+    assert not os.path.lexists(S.episodes_dir(location_path(P.data_root)(), H.U_ID) / episode_id)
 
-    own = _tenant.accept_tenant(P.data_root(), P.LAUNCH_TENANT,
+    own = _tenant.accept_tenant(fixture_data_root(location_path(P.data_root)()), P.LAUNCH_TENANT,
                                 defender_dir=H.DEFENDER).runs_repository()
     assert not (ep / "runs" / "_tenant.json").exists(), "the launch wrote a container record"
     moved = tmp_path / "container-away"

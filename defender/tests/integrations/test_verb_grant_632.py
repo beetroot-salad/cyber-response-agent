@@ -134,7 +134,7 @@ def test_a_grant_naming_a_verb_the_registry_lacks_fails_at_load(tmp_path: Path):
     (adapters / "alpha_adapter.py").write_text(
         "def look(ctx, *, name: str) -> dict:\n    return {'name': name}\n"
         "VERBS = {}\n"
-        "for _n, _f in (('look', look),):\n    VERBS[_n] = _f\n", encoding="utf-8")
+        "for verb_name, verb_function in (('look', look),):\n    VERBS[verb_name] = verb_function\n", encoding="utf-8")
     with pytest.raises(GrantError):
         ModuleVerbRegistry(read_roster(adapters), grant_of("gather", (("alpha", "no-such-verb"),)))
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.core._state1135 import enqueue_case
 
 import json
@@ -83,15 +85,15 @@ def _noop_scrub(_path, **_kw):
 
 def _isolate(tmp_path: Path) -> tuple[object, Path]:
     paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
-    learning_run_dir = paths.state_root / "runs" / "case-x"
+    learning_run_dir = location_path(paths.state_root) / "runs" / "case-x"
     learning_run_dir.mkdir(parents=True)
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return paths, learning_run_dir
 
 
 def test_rotate_preserves_concurrent_appends(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
-    pending = paths.state_root / FINDINGS.queue
+    pending = location_path(paths.state_root) / FINDINGS.queue
     pending.parent.mkdir(parents=True, exist_ok=True)
     rows = [
         {"finding_id": "r/0", "v": "f1"},
@@ -108,7 +110,7 @@ def test_rotate_preserves_concurrent_appends(tmp_path: Path):
     assert {s["finding_id"] for s in survivors} == {"r/1", "r/2"}
     held_row = next(s for s in survivors if s["finding_id"] == "r/1")
     assert held_row["held_reason"] == "no_ground_truth"
-    consumed_rows = _read_jsonl(paths.state_root / FINDINGS.consumed)
+    consumed_rows = _read_jsonl(location_path(paths.state_root) / FINDINGS.consumed)
     assert consumed_rows[0]["consumed_commit"] == "abc123"
     assert "consumed_at" in consumed_rows[0]
 
@@ -120,7 +122,7 @@ def test_enqueue_for_authoring_writes_marker(tmp_path: Path):
     # #1187: the run's id is a uuid (`curation_run_dir` derives it from the label), and
     # `enqueue_run` names the request for the run itself.
     rid = run_dir.name
-    spec = json.loads((paths.state_root / "author-queue" / f"{rid}.json").read_text())
+    spec = json.loads((location_path(paths.state_root) / "author-queue" / f"{rid}.json").read_text())
     # The row is the run's address (#1105 PR 2 declared change 8), where it named its folder.
     assert spec == {"case_id": rid, "tenant_id": run_dir.parent.parent.name, "run_id": rid}
 
@@ -167,8 +169,8 @@ def _declarable_worktree(tmp_path: Path) -> Path:
 
 
 def _seed_curator_findings(paths, n: int = 5) -> None:
-    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    with (paths.state_root / FINDINGS.queue).open("w") as fh:
+    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    with (location_path(paths.state_root) / FINDINGS.queue).open("w") as fh:
         for i in range(n):
             fh.write(json.dumps({"finding_id": f"f{i}"}) + "\n")
 
@@ -235,8 +237,8 @@ def test_author_drain_singleton_lock_exits_without_work(tmp_path: Path):
 
     paths, _ = _isolate(tmp_path)
     _seed_curator_findings(paths)
-    (paths.state_root / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
-    holder = (paths.state_root / AUTHOR_DRAIN_LOCK.file).open("a+")
+    (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
+    holder = (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).open("a+")
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
     try:
         worked: list[str] = []
@@ -268,7 +270,7 @@ def test_lead_author_drain_runs_lead_author_then_clears_marker(tmp_path: Path):
     )
     assert [rd for _, rd in seen] == [run_dir.resolve()]
     assert str(seen[0][0]).startswith("/tmp/wt-")
-    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
+    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
     assert branch.events == ["lease-check", "start", "finish", "cleanup"]
 
 
@@ -316,8 +318,8 @@ def test_lead_author_drain_marks_artifact_missing(tmp_path: Path):
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert seen == [run_dir.resolve()]
-    assert not (paths.state_root / "author-queue" / f"{gone.name}.json").exists()
-    failed = paths.state_root / "author-queue" / "failed" / f"{gone.name}.json"
+    assert not (location_path(paths.state_root) / "author-queue" / f"{gone.name}.json").exists()
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{gone.name}.json"
     assert json.loads(failed.read_text())["failed"] == "artifact-missing"
 
 
@@ -337,8 +339,8 @@ def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, bod
     paths, _ = _isolate(tmp_path)
     run_dir = curation_run_dir("case-real")
     enqueue_run(state_for_paths(paths), run_dir)
-    (paths.state_root / "author-queue").mkdir(parents=True, exist_ok=True)
-    (paths.state_root / "author-queue" / "case-broken.json").write_text(body, encoding="utf-8")
+    (location_path(paths.state_root) / "author-queue").mkdir(parents=True, exist_ok=True)
+    (location_path(paths.state_root) / "author-queue" / "case-broken.json").write_text(body, encoding="utf-8")
 
     seen: list[Path] = []
     drains.lead_author_drain(
@@ -349,10 +351,10 @@ def test_lead_author_drain_dead_letters_an_unservable_marker(tmp_path: Path, bod
     )
 
     assert seen == [run_dir.resolve()], "the healthy request in the same pass was not served"
-    assert not (paths.state_root / "author-queue" / "case-broken.json").exists()
-    assert not (paths.state_root / "author-queue" / "inflight" / "case-broken.json").exists(), \
+    assert not (location_path(paths.state_root) / "author-queue" / "case-broken.json").exists()
+    assert not (location_path(paths.state_root) / "author-queue" / "inflight" / "case-broken.json").exists(), \
         "the unservable marker was left claimed — the next tick reclaims and re-fails on it"
-    failed = paths.state_root / "author-queue" / "failed" / "case-broken.json"
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / "case-broken.json"
     assert json.loads(failed.read_text())["failed"].startswith("unreadable")
     assert drains._has_lead_author_work(state_for_paths(paths)) is False, \
         "the queue still reports work on a request nothing can ever serve"
@@ -371,7 +373,7 @@ def test_lead_author_drain_skips_when_lease_held(tmp_path: Path):
     assert rc == 0
     assert seen == []
     assert "start" not in branch.events
-    assert (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
+    assert (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
 
 
 def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
@@ -380,8 +382,8 @@ def test_lead_author_drain_singleton_lock_distinct_from_lessons(tmp_path: Path):
     paths, _ = _isolate(tmp_path)
     run_dir = curation_run_dir("case-d")
     enqueue_run(state_for_paths(paths), run_dir)
-    (paths.state_root / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
-    holder = (paths.state_root / AUTHOR_DRAIN_LOCK.file).open("a+")
+    (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).parent.mkdir(parents=True, exist_ok=True)
+    holder = (location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file).open("a+")
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
     try:
         seen: list = []
@@ -416,8 +418,8 @@ def test_lead_author_drain_quarantines_poison_run_dir(tmp_path: Path):
         start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub,
     )
     assert seen == [good.resolve()]
-    assert not (paths.state_root / "author-queue" / f"{poison.name}.json").exists()
-    failed = paths.state_root / "author-queue" / "failed" / f"{poison.name}.json"
+    assert not (location_path(paths.state_root) / "author-queue" / f"{poison.name}.json").exists()
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{poison.name}.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
@@ -431,8 +433,8 @@ def test_lead_author_drain_quarantines_on_nonzero_rc(tmp_path: Path, monkeypatch
     monkeypatch.setattr(la, "run_under_held_queue_lock", lambda rd, paths=None, box=None, **_kw: 2)  # lint-monkeypatch: ok
     branch = _FakeBranch(prefix="lead-author/", worktree=_declarable_worktree(tmp_path))
     drains.lead_author_drain(paths, branch=branch, start_box=_noop_start_box, stop_box=_noop_stop_box, scrub=_noop_scrub)
-    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
-    failed = paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json"
+    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
     assert json.loads(failed.read_text())["failed"].startswith("lead-author-error")
 
 
@@ -449,8 +451,8 @@ def test_lead_author_drain_bounded_retry_then_quarantine(tmp_path: Path, monkeyp
 
     # lint-monkeypatch: ok — same intentional seam as the rc=2 test above: drives the
     monkeypatch.setattr(la, "run_under_held_queue_lock", boom)  # lint-monkeypatch: ok
-    marker = paths.state_root / "author-queue" / f"{run_dir.name}.json"
-    failed = paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json"
+    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
     wt = _declarable_worktree(tmp_path)
 
     for expected in (1, 2):
@@ -517,9 +519,9 @@ def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path:
     ) == 0
     assert len(forge.open_calls) == 1
     head = forge.open_calls[0]["head"]
-    records = sorted((paths.state_root / "_pending_delivery").glob("*.json"))
+    records = sorted((location_path(paths.state_root) / "_pending_delivery").glob("*.json"))
     assert [json.loads(r.read_text())["branch"] for r in records] == [head]
-    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists(), "the served run was re-queued"
+    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists(), "the served run was re-queued"
     assert _real(work, "rev-parse", "--verify", f"refs/heads/{head}").returncode == 0
     capsys.readouterr()
 
@@ -532,7 +534,7 @@ def test_lead_author_drain_delivers_a_retained_branch_on_the_next_tick(tmp_path:
     assert len(served) == 1, "the retained batch's run was served again"
     assert [c["head"] for c in forge.open_calls] == [head, head]
     assert forge.head_calls == [head], "delivery must look for an open PR before opening one"
-    assert list((paths.state_root / "_pending_delivery").glob("*.json")) == []
+    assert list((location_path(paths.state_root) / "_pending_delivery").glob("*.json")) == []
     remote = _real(work, "ls-remote", "--heads", str(origin), head).stdout
     assert head in remote, "the retained branch never reached origin"
     err = capsys.readouterr().err
@@ -579,8 +581,8 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
     end = _subprocess.run(["git", "-C", str(wt), "status", "--porcelain"],
                           capture_output=True, text=True)
     assert end.stdout.strip() == ""
-    assert (paths.state_root / "author-queue" / "failed" / "case-a-poison.json").exists()
-    assert not (paths.state_root / "author-queue" / "case-b-good.json").exists()
+    assert (location_path(paths.state_root) / "author-queue" / "failed" / "case-a-poison.json").exists()
+    assert not (location_path(paths.state_root) / "author-queue" / "case-b-good.json").exists()
 
 
 import subprocess as _subprocess  # noqa: E402
@@ -857,7 +859,7 @@ def test_revert_cli_skips_when_drain_lock_held(tmp_path: Path):
 
     from defender.cli.learning import revert_lesson as rl  # type: ignore[import-not-found]
     paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
-    lock = paths.state_root / AUTHOR_DRAIN_LOCK.file
+    lock = location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file
     lock.parent.mkdir(parents=True, exist_ok=True)
     holder = lock.open("a+")
     _fcntl.flock(holder.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)

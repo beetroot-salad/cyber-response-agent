@@ -1,5 +1,7 @@
 """run.py main front door: tenant required and checked before anything is spent, sibling tenant from the episode record, data-root faults, refusal confinement."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 CASE_X = fixture_uuid("case-x")
@@ -134,9 +136,9 @@ def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, 
                                                                       monkeypatch):
     src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
     # #1105 PR 2: the launcher accepts the request's tenant (`tenant_of_run_dir` is gone, F-13).
-    assert H.require_tenant(data_root, fixture_uuid("tenant:acme")).tenant_id == fixture_uuid("tenant:acme"), (
+    assert H.require_tenant(fixture_data_root(data_root), fixture_uuid("tenant:acme")).tenant_id == fixture_uuid("tenant:acme"), (
         "the launcher's own acceptance must pass first")
-    H.row_path(data_root, fixture_uuid("tenant:acme")).write_text("{torn", encoding="utf-8")
+    location_path(H.row_path)(data_root, fixture_uuid("tenant:acme")).write_text("{torn", encoding="utf-8")
     owner = H.owner_refusal(H.require_tenant, H.resolve_data_root(), fixture_uuid("tenant:acme"))
     for world in ("a", "b", "c"):
         said = _refused(H.sibling_argv(manifest, world, "--tenant", fixture_uuid("tenant:acme")),
@@ -148,7 +150,7 @@ def test_launch_whose_source_row_disappears_before_the_siblings_start(tmp_path, 
 def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root, monkeypatch):
     _src, manifest = _sibling(tmp_path, data_root, fixture_uuid("tenant:acme"), monkeypatch=monkeypatch)
     episode = manifest.parent.resolve()
-    expected_runs = H.S.EpisodePaths(episode).runs
+    expected_runs = location_path(H.S.EpisodePaths(episode).runs)
     link = tmp_path / "episodes-link"
     link.symlink_to(manifest.parent.parent, target_is_directory=True)
     monkeypatch.chdir(tmp_path)
@@ -161,7 +163,7 @@ def test_s7_j42_resume_episode_resolves_through_its_tenant(tmp_path, data_root, 
         assert Path(world.episode_dir).is_absolute(), f"{base}: {world.episode_dir}"
         assert Path(world.episode_dir) == episode, (
             f"{base}: the episode was not resolved through its tenant ({world.episode_dir})")
-        assert H.S.EpisodePaths(world.episode_dir).runs == expected_runs
+        assert location_path(H.S.EpisodePaths(world.episode_dir).runs) == expected_runs
 
 
 def test_setup_shell_and_run_shell_resolve_different_data_roots(tmp_path, monkeypatch):
@@ -231,7 +233,7 @@ def test_data_root_moves_after_runs_exist(tmp_path, monkeypatch):
     proc = H.run_setup(new, fixture_uuid("tenant:acme"))
     H.assert_setup_ran(proc)
     assert proc.returncode == 0, H.setup_output(proc)
-    assert H.row_path(new, fixture_uuid("tenant:acme")).is_file()
+    assert location_path(H.row_path)(new, fixture_uuid("tenant:acme")).is_file()
 
     # #1187 Layout A refuses at the absent episode under the NEW root before any source read.
     with pytest.raises(FileNotFoundError) as opened:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import errno
 import logging
@@ -103,7 +105,7 @@ class Spawn:
 
 
 def _queue_files(paths: LoopPaths) -> tuple[Path, ...]:
-    return (paths.state_root / FINDINGS.queue, paths.state_root / QUESTIONER_FINDINGS.queue)
+    return (location_path(paths.state_root) / FINDINGS.queue, location_path(paths.state_root) / QUESTIONER_FINDINGS.queue)
 
 
 def _queued(paths: LoopPaths) -> tuple[bytes | None, ...]:
@@ -608,7 +610,7 @@ def test_a_run_start_fault_through_the_default_curator_step_halts_the_drain(
         tmp_path: Path, monkeypatch, queued: str):
     sc, daemon = _default_scene(tmp_path, monkeypatch, findings=queued == "both")
     daemon.refuse_start(at=[1])
-    q_before = (sc.paths.state_root / QUESTIONER_FINDINGS.queue).read_bytes()
+    q_before = (location_path(sc.paths.state_root) / QUESTIONER_FINDINGS.queue).read_bytes()
     events: list[str] = []
     watch = X.ScanWatch(daemon, events)
 
@@ -626,7 +628,7 @@ def test_a_run_start_fault_through_the_default_curator_step_halts_the_drain(
         return
     assert _stuck_classes(sc.paths, "findings") == ["BoxFault"], (
         "the box fault was not the findings curator's own")
-    assert (sc.paths.state_root / QUESTIONER_FINDINGS.queue).read_bytes() == q_before, (
+    assert (location_path(sc.paths.state_root) / QUESTIONER_FINDINGS.queue).read_bytes() == q_before, (
         "the questioner's queue moved after the findings curator's box fault")
     assert _stuck_classes(sc.paths, "questioner_findings") == [], (
         "the questioner curator was served after the findings curator's box fault")
@@ -640,7 +642,7 @@ def test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain(tmp_path: Pa
     monkeypatch.setenv("LEARNING_AUTHOR_MODEL", "no-such-model-1195")
     if stop == "refused":
         daemon.refuse_stop(at=[2])  # 1: the post-create stop; 2: the findings curator's run
-    q_before = (sc.paths.state_root / QUESTIONER_FINDINGS.queue).read_bytes()
+    q_before = (location_path(sc.paths.state_root) / QUESTIONER_FINDINGS.queue).read_bytes()
     events: list[str] = []
     watch = X.ScanWatch(daemon, events)
 
@@ -661,7 +663,7 @@ def test_a_stop_fault_under_a_failing_default_spawn_halts_the_drain(tmp_path: Pa
     assert isinstance(got.__context__, FatalConfigError), X.chain(got)
     assert _stuck_classes(sc.paths, "findings") == ["BoxFault"]
     assert calls == [*first_run, "rm"], f"the daemon was asked after the failed stop: {calls}"
-    assert (sc.paths.state_root / QUESTIONER_FINDINGS.queue).read_bytes() == q_before
+    assert (location_path(sc.paths.state_root) / QUESTIONER_FINDINGS.queue).read_bytes() == q_before
     assert _stuck_classes(sc.paths, "questioner_findings") == []
     assert not any(e.startswith("finish_batch:") for e in events), events
 
@@ -849,7 +851,7 @@ def test_a_box_fault_in_the_first_curator_halts_the_tick_before_the_second(
     t = f.t
     q_queued = _queued(t.paths)[1]
 
-    got = X.caught(lambda: drains._drain_curators(t.paths, t.state, t.trigger, box=f.runs))
+    got = X.caught(lambda: drains._drain_curators(t.paths, t.state, t.trigger, box=location_path(f.runs)))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_after_the_first_curator(t, f.q_curator, q_queued)
@@ -864,7 +866,7 @@ def test_a_box_fault_in_the_second_curator_halts_the_drain(tmp_path: Path, monke
                                                            source: str):
     f = _box_fault_scene(tmp_path, monkeypatch, source, in_curator="questioner_curator")
 
-    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.state, f.t.trigger, box=f.runs))
+    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.state, f.t.trigger, box=location_path(f.runs)))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_in_the_second_curator(f.t)
@@ -940,7 +942,7 @@ def test_a_box_fault_outranks_an_undo_fault_and_the_second_curator_never_runs(
                          plant=_swap_sub_for_a_link(tmp_path / "outside" / "moved-sub"))
     q_queued = _queued(f.t.paths)[1]
 
-    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.state, f.t.trigger, box=f.runs))
+    got = X.caught(lambda: drains._drain_curators(f.t.paths, f.t.state, f.t.trigger, box=location_path(f.runs)))
 
     _assert_is_the_box_fault(got, f)
     _assert_halted_after_the_first_curator(f.t, f.q_curator, q_queued)

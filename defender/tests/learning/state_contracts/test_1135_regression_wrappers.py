@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import logging
@@ -26,7 +28,7 @@ def test_1135_the_e2e_spine_replay_reaches_the_corpus_unchanged(tmp_path: Path, 
     runs_base = tmp_path / "defender-runs"
     monkeypatch.setenv(J.RUNS_BASE_ENV, str(runs_base))
     monkeypatch.setenv(J.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    monkeypatch.setenv(ENV, str(paths.state_root))
+    monkeypatch.setenv(ENV, str(location_path(paths.state_root)))
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     channel = FINDINGS
 
@@ -93,7 +95,7 @@ def test_1135_the_drains_append_lock_wait_ends_at_the_configured_deadline(tmp_pa
     channel = D.channel_of("findings")
     rows = [D.row_for("findings", "a/0")]
     # The append lock by today's record name (R14); the handle exposes no append-lock role.
-    append_lock = (paths.state_root / channel.queue).parent / D.APPEND_LOCK_NAMES_TODAY["findings"]
+    append_lock = (location_path(paths.state_root) / channel.queue).parent / D.APPEND_LOCK_NAMES_TODAY["findings"]
     caplog.set_level(logging.INFO)
     observed: dict[int, float] = {}
 

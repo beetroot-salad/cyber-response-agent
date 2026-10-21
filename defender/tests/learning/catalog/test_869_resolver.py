@@ -1,6 +1,8 @@
 """#869 M1/O4 — `declared_systems`, the resolver as a VALUE."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 import pytest
@@ -193,5 +195,5 @@ def test_a_resolver_failure_is_not_a_successful_tick(tmp_path, capsys, monkeypat
             paths, _state1135.state_for_paths(paths), on_curated=lambda _d: None, label=LEAD_AUTHOR_DRAIN_LABEL)
 
     assert len(persist.read_pitfalls(_state1135.state_for_paths(paths))) == 2
-    assert not (paths.state_root / PITFALLS.consumed).exists()
+    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists()
     assert "(continuing)" not in loop_log(capsys)

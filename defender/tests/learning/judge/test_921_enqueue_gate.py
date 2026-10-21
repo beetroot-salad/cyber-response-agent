@@ -1,6 +1,8 @@
 """#921 — the queue row, the appender that writes it, and the family partition inside the gate."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
@@ -309,7 +311,7 @@ def test_921_a_torn_trailing_row_in_the_findings_queue_is_skipped_and_counted(tm
     paths = D.make_paths(tmp_path)
     channel = D.channel_of("findings")
     D.seed(paths, channel, [_family_row("ep-0/b/0/0")])
-    queue = paths.state_root / channel.queue
+    queue = location_path(paths.state_root) / channel.queue
     with queue.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(_family_row("ep-1/b/9/9"))[:120])   # NO newline: the tail is TORN
 

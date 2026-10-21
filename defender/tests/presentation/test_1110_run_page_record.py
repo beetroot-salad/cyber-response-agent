@@ -1,6 +1,8 @@
 """DEFENDER_DEPLOYMENT setting and the run.py render-step hand-off (tenant-bound handle; a failed render leaves exit 0)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import logging
 from typing import Any
 
@@ -98,7 +100,6 @@ class _FailingRender(SpecTail):
 
 def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materialized(
         tmp_path, state):
-    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root
     from defender.tests.support.tenancy._tenants1106 import accept
 
@@ -107,10 +108,10 @@ def test_1110_o1_main_hands_the_render_step_the_tenant_bound_handle_it_materiali
 
     assert len(tail.visualized) == 1, f"the render step ran {len(tail.visualized)} times"
     (run,) = tail.visualized
-    runs_base = _tenant.runs_base_for(accept(current_data_root(), run.tenant_id))
+    runs_base = location_path(accept(current_data_root(), run.tenant_id).runs)
     assert tail.run_dirs == [run.run_dir], (
         "the render step was handed a handle over a different run dir than the lifecycle's")
-    assert run.runs_base == runs_base, "the handle is not bound to the configured runs base"
+    assert location_path(run.runs_base) == runs_base, "the handle is not bound to the configured runs base"
     assert run.tenant_id == runs_base.parent.name, (
         "the handle does not carry the tenant whose runs folder holds the run")
     assert run.observability.runtime_html.path == run.run_dir / "runtime.html"

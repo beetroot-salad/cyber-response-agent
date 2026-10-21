@@ -1,6 +1,8 @@
 """Tenant-scoped episode walks refuse aliases and preserve filesystem isolation."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import ast
 import os
 import shutil
@@ -296,15 +298,15 @@ def test_a_link_at_the_tenant_folder_is_refused_at_acceptance_and_the_real_folde
     S.replace_with_link(link, S.tenant_dir(data_root, B_ID))
     b_before = S.tree(S.tenant_dir(data_root, B_ID))
 
-    err = S.raised(_tenant.accept_tenant, data_root, A_ID, defender_dir=H5.DEFENDER)
+    err = S.raised(_tenant.accept_tenant, fixture_data_root(data_root), A_ID, defender_dir=H5.DEFENDER)
     assert isinstance(err, _tenant.TenantRefused), f"acceptance through a linked <A> gave {err!r}"
     assert str(link) in S.message(err), f"the refusal does not name <A>: {S.message(err)!r}"
     assert S.tree(S.tenant_dir(data_root, B_ID)) == b_before, "acceptance changed B's tree"
 
     _restore(link, aside)
-    accepted = _tenant.accept_tenant(data_root, A_ID, defender_dir=H5.DEFENDER)
+    accepted = _tenant.accept_tenant(fixture_data_root(data_root), A_ID, defender_dir=H5.DEFENDER)
     assert str(accepted.id) == A_ID
-    assert Path(accepted.dir) == link
+    assert Path(location_path(accepted.tenant_root)) == link
 
 
 def test_a_tenant_folder_swapped_for_a_link_after_acceptance_refuses_every_repository_door(

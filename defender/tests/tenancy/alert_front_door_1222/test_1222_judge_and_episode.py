@@ -2,6 +2,8 @@
 without a record is not a run; hostile or changed source runs are refused."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 from defender.run_repository import Run
@@ -204,7 +206,7 @@ def _source(tmp_path: Path, raw: bytes, *, record: bool = True, digest: str | No
     capture, session and runs-base record), its alert replaced by `raw` at the run's alert
     place and (default) its record beside it. Returns (tenant, runs base, source run)."""
     planted = S.plant_tenant(TENANT, alert_mapping=alert_mapping, case_mapping=case_mapping)
-    base, src = T.runs_base(tmp_path, tenant_id=TENANT)
+    base, src = location_path(T.runs_base)(tmp_path, tenant_id=TENANT)
     former = src / "alert.json"
     if former != S.alert_file(src):
         former.unlink()
@@ -290,12 +292,12 @@ def test_o11_episode_alert_is_the_episodes_copy(tmp_path):
                                                     "summary": "rule.description"})
     ep, raw = _episode(tmp_path, "o11", signature="SIG-COPY-O11")
     source = _alert("o11-source")
-    _trial(planted.runs, T.SOURCE_RUN_ID, source, facts={"signature": "SIG-SOURCE-O11"})
-    _trial(planted.runs, "trial-copy", raw, facts={"signature": "SIG-COPY-O11"})
+    _trial(location_path(planted.runs), T.SOURCE_RUN_ID, source, facts={"signature": "SIG-SOURCE-O11"})
+    _trial(location_path(planted.runs), "trial-copy", raw, facts={"signature": "SIG-COPY-O11"})
     decoy = (ep / "worlds" / T.world_id(ep, "b") / "alert.json").read_bytes()
-    _trial(planted.runs, "trial-decoy", decoy, facts={"signature": "SIG-DECOY-O11"})
+    _trial(location_path(planted.runs), "trial-decoy", decoy, facts={"signature": "SIG-DECOY-O11"})
 
-    _grade_, judge = _grade(ep, planted.runs)
+    _grade_, judge = _grade(ep, location_path(planted.runs))
 
     keys = set(_keys(_rows()))
     assert keys == {"SIG-COPY-O11"}, (
@@ -445,16 +447,16 @@ def test_p070_mapping_changed_between_source_run_and_judge(tmp_path):
                                                     "event_time": "detected_at",
                                                     "summary": "rule.description"})
     ep, raw = _episode(tmp_path, "p070", signature="SIG-p070")
-    src = _trial(planted.runs, T.SOURCE_RUN_ID, raw, facts={"signature": "SIG-p070"})
+    src = _trial(location_path(planted.runs), T.SOURCE_RUN_ID, raw, facts={"signature": "SIG-p070"})
     T.corpus_document(src)
     S.remap(planted, {"signature": "user.login", "event_time": "detected_at",
                       "summary": "rule.description"})
 
-    _grade(ep, planted.runs)
+    _grade(ep, location_path(planted.runs))
     assert set(_keys(_rows())) == {"SIG-p070"}
 
     corpus = S.mod(CORPUS)
-    companions, _report = corpus.load_corpus(planted.runs)
+    companions, _report = corpus.load_corpus(location_path(planted.runs))
     by_case = {c.case_id: c.signature_id for c in companions}
     assert by_case.get(T.SOURCE_RUN_ID) == "SIG-p070", (
         f"the corpus looks the source run up as {by_case.get(T.SOURCE_RUN_ID)!r}, not by its "

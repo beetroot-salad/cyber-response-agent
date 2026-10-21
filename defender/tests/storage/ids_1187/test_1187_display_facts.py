@@ -1,6 +1,8 @@
 """Run pages display stamped labels and start times without treating them as identity."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import datetime as _dt
 import json
 import re
@@ -194,7 +196,7 @@ class _Siblings(J.FakeSibling):
     """Use the shared completed-sibling fixture, then forge selected display/stamp facts."""
 
     def __init__(self, edits: dict[str, dict[str, Any]] | None = None) -> None:
-        super().__init__(data_root=P.data_root())
+        super().__init__(data_root=location_path(P.data_root)())
         self.edits = edits or {}
         self.labels: list[str] = []
 
@@ -222,7 +224,7 @@ def _launch(root: Path, monkeypatch: Any, *, edits: dict[str, dict[str, Any]] | 
     (src.parent / "_tenant.json").unlink(missing_ok=True)
     siblings = _Siblings(edits)
     got = P.drive_launch(est, P.new_launch_argv(P.LAUNCH_TENANT, src.name), spawn=siblings)
-    base = P.data_root() / P.LAUNCH_TENANT / "episodes"
+    base = location_path(P.data_root)() / P.LAUNCH_TENANT / "episodes"
     made = [d for d in (base.iterdir() if base.is_dir() else ()) if (d / "family.yaml").is_file()]
     stamps = [d / "provenance.json" for d in made if (d / "provenance.json").is_file()]
     assert len(stamps) <= 1, f"more than one episode stamped a family: {stamps}"

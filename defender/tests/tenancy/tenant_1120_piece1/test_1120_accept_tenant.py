@@ -1,6 +1,8 @@
 """D1: `accept_tenant`, the one acceptance function, and `Tenant`."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import contextlib
 import os
 import shutil
@@ -47,7 +49,7 @@ def test_1120_accept_tenant_refuses_an_off_grammar_id_before_touching_the_root(
     assert not root.exists(), "accepting a tenant created the data root"
 
     control = H.accept_refusal(_tenant, root, H.TID)
-    assert str(H.row_path(root, H.TID)) in control, (
+    assert str(location_path(H.row_path)(root, H.TID)) in control, (
         f"a valid id over an absent root must be refused for its row, naming it: {control!r}")
 
 
@@ -101,12 +103,12 @@ def _accept_within(owner, root: Path, tenant_id: str = H.TID, *, seconds: float 
 
 
 def _off_grammar_and_no_row(root: Path, tmp_path: Path) -> tuple[str, str, str]:
-    return "A", repr("A"), str(H.row_path(root, "A"))
+    return "A", repr("A"), str(location_path(H.row_path)(root, "A"))
 
 
 def _no_row_and_no_knowledge(root: Path, tmp_path: Path) -> tuple[str, str, str]:
     (root / H.TID).mkdir(parents=True)
-    return H.TID, str(H.row_path(root)), str(H.knowledge_dir(root))
+    return H.TID, str(location_path(H.row_path)(root)), str(H.knowledge_dir(root))
 
 
 def _knowledge_link_over_missing_settings(root: Path, tmp_path: Path) -> tuple[str, str, str]:
@@ -164,7 +166,7 @@ BAD_ROWS = [
     pytest.param(lambda root: H.plant_row(root, body="{not json"), id="corrupt"),
     pytest.param(lambda root: H.plant_row(root, body="[]\n"), id="corrupt-non-object"),
     pytest.param(lambda root: H.plant_row(root, row_tenant_id=H.OTHER), id="other-tenant"),
-    pytest.param(lambda root: H.row_path(root).mkdir(parents=True), id="directory"),
+    pytest.param(lambda root: location_path(H.row_path)(root).mkdir(parents=True), id="directory"),
     pytest.param(lambda root: H.plant_row(root, drop="created_at"), id="missing-created-at"),
 ]
 
@@ -176,7 +178,7 @@ def test_1120_accept_tenant_refuses_an_absent_corrupt_or_foreign_row(
     H.place_knowledge(root)
     plant_bad_row(root)
     text = H.accept_refusal(_tenant, root)
-    assert str(H.row_path(root)) in text, f"the refusal does not name the row: {text!r}"
+    assert str(location_path(H.row_path)(root)) in text, f"the refusal does not name the row: {text!r}"
 
     control = tmp_path / "control"
     H.place_knowledge(control)
@@ -457,7 +459,7 @@ def test_1120_accept_tenant_refuses_a_knowledge_entry_outside_the_allow_list(
     H.assert_refused(H.check(tenant_py, None, "--folder", str(H.knowledge_dir(root))),
                      str(entry))
 
-    H.row_path(root).unlink()
+    location_path(H.row_path)(root).unlink()
     before = H.tree_census(root)
     text = H.assert_refused(H.setup(tenant_py, root), str(entry))
     assert "the data root is not empty" not in text, (
@@ -657,9 +659,9 @@ def test_1120_accept_tenant_names_an_unreadable_entry_as_a_refusal_never_a_trace
         assert str(target) in text, f"the refusal does not name the unreadable path: {text!r}"
         assert any(e in text for e in ("Permission denied", "EACCES", "Errno 13")), (
             f"the refusal does not name the errno: {text!r}")
-        H.row_path(root).unlink()
+        location_path(H.row_path)(root).unlink()
         H.assert_refused(H.setup(tenant_py, root), "[tenant.py]", str(target))
-        assert not H.row_path(root).exists(), "the refused setup wrote the row"
+        assert not location_path(H.row_path)(root).exists(), "the refused setup wrote the row"
         H.plant_row(root)
         H.assert_refused(H.check(tenant_py, root, H.TID), "[tenant.py]", str(target))
     finally:
@@ -716,10 +718,10 @@ def test_1120_s6_data_root_env_var_symlink_retargeted_mid_resolution(
     link.symlink_to(first, target_is_directory=True)
     monkeypatch.setenv(H.DATA_ROOT_ENV, str(link))
     resolved = _tenant.resolve_data_root()
-    assert resolved == first.resolve()
+    assert location_path(resolved) == first.resolve()
 
     link.unlink()
     link.symlink_to(second, target_is_directory=True)
     tenant = H.accept(_tenant, resolved)
-    assert tenant.data_root == first.resolve()
+    assert location_path(tenant.data_root) == first.resolve()
     assert tenant.settings == first.resolve() / H.TID / "knowledge" / "settings"

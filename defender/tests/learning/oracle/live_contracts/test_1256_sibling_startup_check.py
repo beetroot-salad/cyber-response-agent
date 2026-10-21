@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import re
 from pathlib import Path
 from typing import Any
@@ -73,7 +75,7 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
     world = S.load_world(ep, "a")
     tenant = run_py._resolve_run_tenant(accepted, defender_dir=S.DEFENDER,
                                         dispatches_lead_zero=False)
-    source = Run.under(source_dir.parent, source_dir.name)
+    source = Run.under(fixture_runs_base(source_dir.parent), source_dir.name)
     sibling_dir = LZ.materialize_alert(tmp_path / f"sibling-{label}", LZ.alert_doc())
     main = H.ReplayFn([
         H.Turn(tool_calls=[("gather", {"lead_id": LEAD, "system": "elastic",
@@ -102,7 +104,7 @@ def _sibling(tmp_path: Path, label: str, *, accepted: Any, spec: Any, source_dir
     with S.mod("episodes._episode_handle").Episode.open(ep) as episode:
         summary = run_py._drive_investigation(
             alert_path=RunPaths(sibling_dir).alert,
-            run=Run.under(sibling_dir.parent, sibling_dir.name),
+            run=Run.under(fixture_runs_base(sibling_dir.parent), sibling_dir.name),
             defender_dir=S.DEFENDER, model_name="fd1256-sibling", model_override=None,
             box=None, tenant=tenant, world=world, episode=episode, investigate=investigate,
             **run_py._world_seams(world, oracle=None, verifier=None, source=source))

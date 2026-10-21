@@ -1,6 +1,8 @@
 """Shared helpers for the run-repository tests (tenant/runs-folder planting, record writers, error probes). No test functions."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import datetime as _dt
 import json
 import os
@@ -111,12 +113,12 @@ def tenant(root: Path, tenant_id: str = T_ID) -> Any:
     if not row.is_file():
         others = [p for p in root.iterdir() if p.name != tenant_id]
         if not others:
-            _tenant.create_tenant(root, _tenant.TenantId(tenant_id))
+            _tenant.create_tenant(fixture_data_root(root), _tenant.TenantId(tenant_id))
         else:
             row.write_text(json.dumps(
                 {"tenant_id": tenant_id, "created_at": "2026-10-04T00:00:00+00:00"},
                 indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return _tenant.accept_tenant(root, tenant_id, defender_dir=DEFENDER)
+    return _tenant.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)
 
 
 def tenant_record_text(tenant_id: str) -> str:
@@ -144,8 +146,8 @@ def runs_folder(t: Any) -> Path:
     """`t.runs` as run setup leaves it: a real folder. #1187 (R1): it holds run folders and their
     sidecars only — no `_tenant.json` (a test planting one plants the OLD entry it now is,
     `plant_tenant_record`)."""
-    Path(t.runs).mkdir(parents=True, exist_ok=True)
-    return Path(t.runs)
+    Path(location_path(t.runs)).mkdir(parents=True, exist_ok=True)
+    return Path(location_path(t.runs))
 
 
 def make_run(runs: Path, run_id: str, *, alert: str = '{"alert": "seed"}\n') -> Path:

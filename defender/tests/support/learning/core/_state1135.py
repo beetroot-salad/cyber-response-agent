@@ -8,6 +8,8 @@ ignore the retired variable and select their accepted tenant's learning root.
 
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+
 from pathlib import Path
 
 from defender.learning.core.config import LoopPaths
@@ -45,7 +47,7 @@ def state_over(root: Path) -> LearningState:
 def state_for_paths(paths) -> LearningState:
     """Create the root `paths` names (if absent) and open a handle over exactly it — the test
     side of a fixture whose `LoopPaths` points `state_dir` at a not-yet-made tmp folder."""
-    paths.state_root.mkdir(parents=True, exist_ok=True)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
     return LearningState.open(paths)
 
 
@@ -85,7 +87,7 @@ def run_of(run_dir: Path):
     from defender.run_repository import Run
 
     run_dir = Path(run_dir)
-    return Run.under(run_dir.parent, run_dir.name, tenant_id=run_dir.parent.parent.name)
+    return Run.under(fixture_runs_base(run_dir.parent), run_dir.name, tenant_id=run_dir.parent.parent.name)
 
 
 def curation_row(case_id: str, run_dir: Path) -> dict:

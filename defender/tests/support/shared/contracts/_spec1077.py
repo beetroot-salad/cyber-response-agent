@@ -1,6 +1,8 @@
 """Shared machinery for #1077's run-handle spec — NO test scripts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
@@ -417,13 +419,13 @@ def resolve(acc: Accessor, *, run_dir: Path, runs_base: Path | None = None,
     """
     values = acc.args if args is None else args
     if acc.owner == "tenant_row":
-        return tenant()._TenantPaths(data_root, tenant_id).row
+        return tenant()._TenantPaths(fixture_data_root(data_root), tenant_id).row
     if acc.owner == "episode_arm":
         return getattr(EpisodePaths(episode_dir), acc.attr) / values[0]
     owner = RunPaths(run_dir) if acc.owner == "run" else EpisodePaths(episode_dir)
     member = getattr(owner, acc.attr)
     if acc.attr in UPWARD_ACCESSORS:
-        return member(runs_base, *values) if values else member(runs_base)
+        return member(fixture_runs_base(runs_base), *values) if values else member(fixture_runs_base(runs_base))
     return member(*values) if values else member
 
 
@@ -460,7 +462,7 @@ def fixture_run(directory: Path) -> Any:
         raise AssertionError(
             f"fixture_run({directory}): a run folder's name is its canonical UUID run id "
             "(#1187) — make the folder at fixture_uuid(<label>) where it is created")
-    return Run().under(directory.parent, directory.name)
+    return Run().under(fixture_runs_base(directory.parent), directory.name)
 
 
 def make_runs_base(tmp_path: Path, name: str = "runs") -> Path:

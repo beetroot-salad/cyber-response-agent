@@ -1,6 +1,8 @@
 """#947 — the archive, its two derived readers, and where a sibling's artifacts may live (M8, O4, O7"""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 from defender.tests.support.learning.judge import _judge_921 as J
 
@@ -55,7 +57,7 @@ def _archived(tmp_path, worlds=T.WORLDS, **kw):
 
 
 def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
@@ -70,7 +72,7 @@ def test_947_each_archived_world_carries_every_declared_artifact(tmp_path):
 
 def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_path):
     """The archive copies through the existing screened paths and never through a raw copy"""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
     run_dir = T.sibling_run_dir(base, "b")
     secret = tmp_path / "secret.md"
@@ -87,7 +89,7 @@ def test_947_archive_copies_tables_through_stage_tables_and_artifact_file(tmp_pa
 
 def test_947_archive_reads_the_scrub_verdict_at_its_sidecar_path(tmp_path):
     """The archive reads each sibling's scrub verdict at the sidecar path beside the run dir, through the same regular-file screen every other artifact..."""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
     run_dir = T.sibling_run_dir(base, "b", scrub_ran=True)
     assert not (run_dir / "scrub-verdict.json").exists()
@@ -102,7 +104,7 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
     both derived readers answer identically when the arms they were archived from are gone.
     #1187 declared change 12
     """
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _accepted(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
@@ -120,7 +122,7 @@ def test_947_the_archived_run_dir_pointer_is_never_followed(tmp_path):
 def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path):
     import shutil
 
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _accepted(tmp_path)
     dirs = {w: T.sibling_run_dir(base, w) for w in T.WORLDS}
     with Episode.open(ep) as episode:
@@ -138,7 +140,7 @@ def test_947_readers_compute_from_the_episode_dir_with_run_dirs_removed(tmp_path
 def test_947_no_episode_reader_opens_a_siblings_run_dir(tmp_path):
     """Neither derived reader opens a sibling's run dir on any path: a run dir replaced by a
     directory that raises on every read is never touched, and both readers still answer."""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _archived(tmp_path)
     T.base_capture(ep, [T.captured_row(key="k1")])
     src_text = "".join(
@@ -244,7 +246,7 @@ def _relocated(tmp_path, monkeypatch):
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     tenant = _tenant_paths()
     with tenant.runs_repository().create_episode() as view:
-        ep = S.episodes_dir(tenant.data_root, str(tenant.id)) / view.episode_id
+        ep = S.episodes_dir(location_path(tenant.data_root), str(tenant.id)) / view.episode_id
         T.write_family(ep, T.family_doc(episode_id=view.episode_id))
         arms = view.start_runs([T.world_id(ep, label) for label in T.WORLDS])
     for w in T.WORLDS:
@@ -291,7 +293,7 @@ def test_947_the_episode_dir_is_outside_the_runs_base(tmp_path, monkeypatch):
 
     base, src, root = T.configured_layout(tmp_path, monkeypatch)
     tenant = _tenant_paths()
-    episodes = S.episodes_dir(tenant.data_root, str(tenant.id))
+    episodes = S.episodes_dir(location_path(tenant.data_root), str(tenant.id))
     repo_root = T.mod("run_common").REPO_ROOT
     # configured_layout now returns the REAL tenant episodes root, so use a distinct decoy.
     for bad in (tmp_path / "retired-episodes-root", base / "episodes", repo_root / "episodes"):
@@ -323,7 +325,7 @@ def test_947_the_episodes_root_is_read_from_configuration_not_the_runs_base(tmp_
     root = tmp_path / "retired-episodes-root"
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(root))
     tenant = _tenant_paths()
-    episodes = S.episodes_dir(tenant.data_root, str(tenant.id))
+    episodes = S.episodes_dir(location_path(tenant.data_root), str(tenant.id))
     with tenant.runs_repository().create_episode() as view:
         before = view.episode_id
     assert (episodes / before).is_dir(), f"the episode was not claimed under {episodes}"
@@ -352,7 +354,7 @@ def test_947_the_episode_dirs_placement_never_dirties_a_siblings_stamp(tmp_path,
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(checkout / "episodes-root"))
     tenant = _tenant_paths()
     with tenant.runs_repository().create_episode() as view:
-        ep = S.episodes_dir(tenant.data_root, str(tenant.id)) / view.episode_id
+        ep = S.episodes_dir(location_path(tenant.data_root), str(tenant.id)) / view.episode_id
         T.write_family(ep, T.family_doc(episode_id=view.episode_id))
     T.write_family(ep)
     S.make_run(ep / "runs", S.new_id())

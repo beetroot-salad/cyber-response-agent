@@ -1,4 +1,4 @@
-"""lint_run_records treats the accepted Tenant's record locations as owner-derived; the rename proof."""
+"""Structural tenant-location acquisition, record names and rename coverage (#1210)."""
 from __future__ import annotations
 
 import ast
@@ -11,8 +11,7 @@ JOIN_FINDING = "literal-free join onto an owner-derived value"
 
 
 def test_d1_tenantpaths_owner_class(tmp_path):
-    """TenantPaths is a member of _OWNER_CLASS_ORIGINS, so the #1077 lint treats a join onto a
-    TenantPaths accessor as owner-derived."""
+    """Root acquisition is rejected before a value can escape through a local or call."""
     source = (
         "from defender.tenancy._tenant import accept_tenant\n"
         "from defender.episodes._episode_paths import EpisodePaths\n\n"
@@ -26,11 +25,11 @@ def test_d1_tenantpaths_owner_class(tmp_path):
     found = S.gate_findings(tmp_path, "runtime/joins.py", source)
     joins = [f.display for f in found if JOIN_FINDING in f.display]
     assert any("control()" in d for d in joins), f"the join arm is not live: {joins}"
+    acquisitions = [f.display for f in found if "owner-only record location" in f.display]
     for fn in ("direct()", "through_a_local()"):
-        assert any(fn in d for d in joins), (
-            f"a join onto a Tenant accessor in {fn} is not owner-derived to the lint: "
-            f"{joins}")
-    accessors = S.gate()._accessor_names()
+        assert any(fn in d for d in acquisitions), (
+            f"a Tenant accessor in {fn} escaped the acquisition gate: {acquisitions}")
+    accessors = S.gate().RECORD_LOCATION_NAMES
     missing = {"row_path", "episodes", "learning"} - set(accessors)
     assert not missing, f"_accessor_names() does not list Tenant's {sorted(missing)}"
 

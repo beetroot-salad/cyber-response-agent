@@ -1,6 +1,8 @@
 """#631 — the seams the enforced posture hangs on: the posture bit, the limits passthrough, the tier table, the flag, the retry ceiling, the two pool roots, and the CI wiring."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from dataclasses import replace as _with_fixture_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
 from defender.tests.support.shared._fixture_uuid import fixture_uuid, is_fixture_uuid_shape
@@ -457,7 +459,7 @@ def test_retired_learning_state_override_cannot_redirect_tenant_state(
     from defender.learning.core.state import FINDINGS, LearningState
 
     tenant = T1106.accept(data_root, d9_tenant)
-    tenant.learning.mkdir(exist_ok=True)
+    location_path(tenant.learning).mkdir(exist_ok=True)
     expected = {"finding_id": "tenant/0", "run_id": "tenant"}
     with LearningState.open(LoopPaths.for_tenant(tenant)) as state:
         assert state.append(FINDINGS, [expected]) == (1, 0)
@@ -468,16 +470,16 @@ def test_retired_learning_state_override_cannot_redirect_tenant_state(
     queue.parent.mkdir(parents=True)
     decoy_bytes = b'{"finding_id":"ambient/0","run_id":"ambient"}\n'
     queue.write_bytes(decoy_bytes)
-    for ambient in (tenant.runs, alias, decoy):
+    for ambient in (location_path(tenant.runs), alias, decoy):
         monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(ambient))
         accepted = T1106.accept(_tenant.resolve_data_root(), d9_tenant)
-        assert _tenant.runs_base_for(accepted) == data_root.resolve() / d9_tenant / "runs"
+        assert location_path(accepted.runs) == data_root.resolve() / d9_tenant / "runs"
         paths = LoopPaths.for_tenant(accepted)
-        assert paths.state_root == tenant.learning
+        assert location_path(paths.state_root) == location_path(tenant.learning)
         with LearningState.open(paths) as state:
             assert state.rows(FINDINGS) == [expected]
     assert queue.read_bytes() == decoy_bytes
-    assert not (tenant.runs / FINDINGS.queue).exists()
+    assert not (location_path(tenant.runs) / FINDINGS.queue).exists()
 
 
 def test_every_agent_construction_pins_retries_explicitly(tmp_path):

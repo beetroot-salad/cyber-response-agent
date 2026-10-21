@@ -1,6 +1,8 @@
 """tenant.py setup: row step and refusals on a non-empty data root, re-runs, rowless own folder, alias refusal at the row."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
@@ -72,7 +74,7 @@ def test_o10_fresh_root_writes_exactly_row_and_empty_learning(tmp_path, shape):
     assert list((H.tenant_dir(root, TID) / "learning").iterdir()) == []
     assert {k: after[k] for k in before} == before, "setup changed the placed knowledge folder"
     assert after[f"{prefix}{TID}/{H.ROW_NAME}"][0] == "file"
-    row = json.loads(H.row_path(root, TID).read_text(encoding="utf-8"))
+    row = json.loads(location_path(H.row_path)(root, TID).read_text(encoding="utf-8"))
     assert row["tenant_id"] == TID
 
 
@@ -98,7 +100,7 @@ def test_setup_reports_a_corrupt_row_instead_of_already_exists(tmp_path):
     root = tmp_path / "data"
     H.place_knowledge(root, H.VALID_ID)  # #1120 DC2: the operator's clone precedes setup
     assert H.run_setup(root, H.VALID_ID).returncode == 0
-    H.row_path(root, H.VALID_ID).write_text("{torn", encoding="utf-8")
+    location_path(H.row_path)(root, H.VALID_ID).write_text("{torn", encoding="utf-8")
     proc = H.run_setup(root, H.VALID_ID)
     said = H.setup_output(proc)
     assert proc.returncode == 1, said
@@ -114,11 +116,11 @@ def test_o10_rerun_no_second_row(tmp_path):
     first = H.run_setup(root, TID)
     H.assert_setup_ran(first)
     assert first.returncode == 0, H.setup_output(first)
-    row_bytes = H.row_path(root, TID).read_bytes()
+    row_bytes = location_path(H.row_path)(root, TID).read_bytes()
     before = H.census(root)
     again = H.run_setup(root, TID)
     assert again.returncode == 0, f"the same-id re-run was refused:\n{H.setup_output(again)}"
-    assert H.row_path(root, TID).read_bytes() == row_bytes, "the re-run rewrote the row"
+    assert location_path(H.row_path)(root, TID).read_bytes() == row_bytes, "the re-run rewrote the row"
     assert H.census(root) == before, "the re-run wrote something"
 
 
@@ -163,7 +165,7 @@ def test_s7_j08_setup_rerun_completes_rowless_own_folder(tmp_path):
     assert set(after) == set(before) | {f"{TID}/{H.ROW_NAME}", f"{TID}/learning"}
     assert list((H.tenant_dir(root, TID) / "learning").iterdir()) == []
     assert {k: after[k] for k in before} == before
-    assert H.require_tenant(root, TID).tenant_id == TID
+    assert H.require_tenant(fixture_data_root(root), TID).tenant_id == TID
 
     foreign = tmp_path / "foreign-in-own"
     H.place_knowledge(foreign, TID)
@@ -184,7 +186,7 @@ def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
         H.tenant_dir(root, TID).mkdir(parents=True)
         target = tmp_path / driver / "outside.json"
         target.write_text("ORIGINAL OUTSIDE\n", encoding="utf-8")
-        plant = H.row_path(root, TID)
+        plant = location_path(H.row_path)(root, TID)
         if alias == "symlink":
             plant.symlink_to(target)
         else:
@@ -207,8 +209,8 @@ def test_s7_j60_create_tenant_census_row_reaches_write(tmp_path, alias):
 
     control = tmp_path / "control" / "data"
     H.tenant_dir(control, TID).mkdir(parents=True)
-    assert H.create_tenant(control, TID).tenant_id == TID
-    assert not H.row_path(control, TID).is_symlink()
+    assert H.create_tenant(fixture_data_root(control), TID).tenant_id == TID
+    assert not location_path(H.row_path)(control, TID).is_symlink()
 
 
 def test_new_id_mints_a_canonical_uuid4_without_a_data_root_or_writes(tmp_path):

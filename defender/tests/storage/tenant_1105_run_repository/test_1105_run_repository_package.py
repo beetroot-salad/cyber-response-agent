@@ -1,6 +1,8 @@
 """The `defender/run_repository/` package door: lazy PEP 562 surface, layout names load without pydantic, import retry, box-bind boundary, frozen handle."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+
 import ast
 import json
 import os
@@ -219,15 +221,15 @@ def test_1105_a_handles_address_is_frozen_after_init(tmp_path):
     runs = tmp_path / H.T_ID / "runs"
     rid = fixture_uuid("package-frozen")
     run_dir = H.make_run(runs, rid)
-    for run in (Run.under(runs, rid, tenant_id=H.T_ID),
-                Run(run_dir, runs_base=runs, tenant_id=H.T_ID)):
+    for run in (Run.under(fixture_runs_base(runs), rid, tenant_id=H.T_ID),
+                Run(run_dir, runs_base=fixture_runs_base(runs), tenant_id=H.T_ID)):
         for attr, value in (("run_dir", tmp_path / "elsewhere"), ("runs_base", tmp_path),
                             ("tenant_id", H.U_ID)):
             err = H.raised(setattr, run, attr, value)
             assert isinstance(err, AttributeError), f"assigning {attr} gave {err!r}"
             err = H.raised(delattr, run, attr)
             assert isinstance(err, AttributeError), f"deleting {attr} gave {err!r}"
-        assert (run.run_dir, run.runs_base, run.tenant_id) == (run_dir, runs, H.T_ID), (
+        assert (run.run_dir, location_path(run.runs_base), run.tenant_id) == (run_dir, runs, H.T_ID), (
             "the address changed")
         run.partial_failures = ("noted",)
         assert run.partial_failures == ("noted",), "partial_failures stays the handle's state"

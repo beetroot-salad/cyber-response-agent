@@ -1,6 +1,8 @@
 """#947 — a sibling is a `run.py --episode` PROCESS (M6, M7, O6, O9, O10)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+
 from defender.tests.storage.ids_1187 import _spec1187 as S
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
@@ -95,7 +97,7 @@ def test_947_resume_makes_the_positional_alert_illegal(tmp_path):
 
 
 def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     order: list[str] = []
     rc = _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=_Recorder(order),
@@ -105,7 +107,7 @@ def test_947_sibling_runs_from_manifest_and_what_it_points_at(tmp_path):
 
 
 def test_947_resume_run_returns_its_own_run_dir_and_verdict(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     rec = _Recorder([])
     rc = _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec,
@@ -119,7 +121,7 @@ def test_947_resume_run_returns_its_own_run_dir_and_verdict(tmp_path):
 def test_947_resume_with_a_world_the_manifest_does_not_declare_refuses_before_materialize(tmp_path):
     """A world label the manifest does not declare refuses before the run dir is materialised
     and before any box starts: nothing is written under the runs base at all."""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     before = sorted(p.name for p in base.iterdir())
     with pytest.raises(SystemExit) as bad:
@@ -137,7 +139,7 @@ def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
     refusal is the flag's, not the tenant's — and #1187: the episode is a UUID folder under
     that tenant's `<T>/episodes/`, past RUNS (its roster written), so the refusal is not the
     episode's either.)"""
-    _base, src = T.runs_base(tmp_path, tenant_id=d9_tenant)
+    _base, src = location_path(T.runs_base)(tmp_path, tenant_id=d9_tenant)
     manifest = _episode(tmp_path, src) / "family.yaml"
     assert _run().parse_args(_sibling_argv(manifest)).update_ticket is False
     with pytest.raises(SystemExit) as bad:
@@ -153,7 +155,7 @@ def test_947_resume_refuses_update_ticket(tmp_path, d9_tenant):
 def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
     """A sibling run writes no ticket row on any of its exits: the writer seam records nothing
     for a resumed run, on the opening call and on the closing one alike."""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
 
     class Writer:
@@ -177,7 +179,7 @@ def test_947_a_sibling_run_writes_no_ticket_row(tmp_path):
 
 def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
     """A sibling run reaches the curation lane on none of its exits"""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     roster = {T.world_id(ep, w): S.new_id() for w in T.WORLDS}
     S.write_roster(ep, roster)
@@ -195,7 +197,7 @@ def test_947_a_sibling_run_writes_no_queue_marker(tmp_path):
 
 
 def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     seen: dict = {}
     _run()._drive_investigation(
@@ -213,7 +215,7 @@ def test_947_resume_path_builds_a_world_registry_and_world_ledger(tmp_path):
 
 
 def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     built: list[str] = []
 
@@ -234,7 +236,7 @@ def test_947_resume_path_never_constructs_the_production_registry(tmp_path):
 
 
 def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     lifecycle = _Recorder([])
     rc = _run().main([*_sibling_argv(ep / "family.yaml"), "--no-learn"],
@@ -246,7 +248,7 @@ def test_a_sibling_resumes_through_its_requested_tenant(tmp_path):
 
 def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
     ledger_mod = T.mod("learning.branch.ledger")
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     world = _run().resume_world(
         Episode.open(ep), "b", tenant=T1106.fixture_run_tenant)
@@ -261,7 +263,7 @@ def test_947_every_comparing_site_reads_the_same_world_token(tmp_path):
 
 
 def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     order: list[str] = []
     rec = _Recorder(order)
@@ -277,7 +279,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
         order.append("materialize")
         run_dir = T.sibling_run_dir(base, "b", stamp=False)
         made.append(run_dir)
-        return T.sym("run_repository", "Run").under(base, run_dir.name, tenant_id=tenant_id)
+        return T.sym("run_repository", "Run").under(fixture_runs_base(base), run_dir.name, tenant_id=tenant_id)
 
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
                 preflight=lambda m, **_kw: order.append("preflight") or 0,
@@ -290,7 +292,7 @@ def test_947_resume_keeps_preflight_materialize_lifecycle_verdict_order(tmp_path
 
 def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
     """Each sibling runs the runtime's own box lifecycle IN ORDER and leaves a scrub verdict beside its run dir"""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     events: list[str] = []
     run_dir = base / fixture_uuid("947-sibling-lifecycle-b")  # #1187: a run id is a uuid4
@@ -310,7 +312,7 @@ def test_947_each_sibling_runs_the_runtime_box_lifecycle(tmp_path):
 def test_947_each_sibling_captures_its_own_provenance_stamp(tmp_path):
     """Each sibling captures its OWN provenance stamp inside its own process, written into its
     own run dir before any agent exists — never a stamp hoisted once above the family."""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     rec = _Recorder([])
     _run().main(_sibling_argv(ep / "family.yaml"), lifecycle=rec, visualize=lambda p, **kw: None,
@@ -330,7 +332,7 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
     folder `<ep>/runs/<roster id>` holds neither the label nor the episode id. (Name kept.)"""
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = _episode(tmp_path, src)
     roster = {T.world_id(ep, w): S.new_id() for w in T.WORLDS}
     S.write_roster(ep, roster)
@@ -347,7 +349,7 @@ def test_947_sibling_run_id_is_episode_id_dash_x_beside_the_source(tmp_path):
 
 
 def test_947_run_py_screens_the_source_alert_before_reading_it(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     secret = tmp_path / "secret.json"
     secret.write_text('{"stolen": true}', encoding="utf-8")
     RunPaths(src).alert.unlink()

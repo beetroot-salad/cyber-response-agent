@@ -1,6 +1,8 @@
 """Shared machinery for #1107's spec — "the tenant settings record". NO test scripts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import contextlib
@@ -220,7 +222,7 @@ def resolve(root: Path, tenant_id: str = PLAYGROUND_ID, *, dispatches_lead_zero:
     the resolver itself calls `run_tenant.resolve_tenant` in its own body; this is for the ones
     that need a record to drive something else."""
     return run_tenant_mod().resolve_tenant(
-        Path(root), tenant_id, defender_dir=DEFENDER,
+        fixture_data_root(Path(root)), tenant_id, defender_dir=DEFENDER,
         dispatches_lead_zero=dispatches_lead_zero, **kw)
 
 
@@ -559,7 +561,7 @@ def seed_session_store(run_dir: Path) -> None:
     """A real, empty session store behind the run dir's pointer — `render_and_mirror`'s
     precondition (the page is refused for a run whose record cannot be found)."""
     ss = mod("runtime.session_store")
-    store = ss.open_store(case_id=f"c1107-{uuid.uuid4().hex[:12]}", sessions=SessionPaths(Path(run_dir).parent))
+    store = ss.open_store(case_id=f"c1107-{uuid.uuid4().hex[:12]}", sessions=SessionPaths(fixture_runs_base(Path(run_dir).parent)))
     try:
         ss.write_case_pointer(_run_handle_1165(Path(run_dir)), case_id=store.case_id, store_path=store.path)
     finally:
@@ -600,7 +602,7 @@ def open_step(run_dir: Path, record: Any, *, env: Mapping[str, str],
 
 def receipt_path(run_dir: Path) -> Path:
     """The receipt: a sidecar beside the run dir, keyed by the run's name, out of the box's reach."""
-    return mod("run_repository._layout").RunPaths(Path(run_dir)).ticket_write(Path(run_dir).parent)
+    return mod("run_repository._layout").RunPaths(Path(run_dir)).ticket_write(fixture_runs_base(Path(run_dir).parent))
 
 
 def receipt(run_dir: Path) -> dict[str, Any] | None:

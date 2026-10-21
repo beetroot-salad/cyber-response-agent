@@ -1,6 +1,8 @@
 """Real repository setup for the #1165 record and logging contract."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +16,7 @@ def run_at(tmp_path: Path, *, io: Any = None):
     base = S.make_runs_base(tmp_path)
     directory = S.make_run_dir(base, RUN_ID)
     options = {} if io is None else {"io": io}
-    return S.Run().under(base, directory.name, tenant_id=S.DEFAULT_TENANT_ID, **options)
+    return S.Run().under(fixture_runs_base(base), directory.name, tenant_id=S.DEFAULT_TENANT_ID, **options)
 
 
 #: The #1165 fixture run's id (a uuid4).

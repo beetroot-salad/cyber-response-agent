@@ -2,6 +2,8 @@
 keeps pytest from collecting it)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import ast
 import inspect
 import json
@@ -371,7 +373,7 @@ def drive_tail(main, alert: Path, tail: SpecTail, *args: str) -> int:
 
     require_tail_seam(main)
     tenant_id = ensure_d9_tenant()
-    requested_tenant(current_data_root(), tenant_id).learning.mkdir(exist_ok=True)
+    location_path(requested_tenant(fixture_data_root(current_data_root()), tenant_id).learning).mkdir(exist_ok=True)
     return main([str(alert), "--tenant", tenant_id, *args], lifecycle=tail.lifecycle,
                 visualize=tail.visualize, ticket_writer=tail)
 
@@ -389,7 +391,7 @@ def plant_alert(tmp_path: Path, *, name: str = "alert.json",
 
 
 def author_markers(paths) -> list[str]:
-    q = paths.state_root / "author-queue"
+    q = location_path(paths.state_root) / "author-queue"
     return sorted(p.name for p in q.glob("*.json")) if q.is_dir() else []
 
 

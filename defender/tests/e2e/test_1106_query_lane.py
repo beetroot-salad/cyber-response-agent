@@ -1,6 +1,8 @@
 """#1106 e2e through the real driver: gather's query verbs are handed the run's tenant record, config faults name the settings folder not its host path, and the dispatch advertises exactly the run tenant's granted systems."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 import pytest
@@ -121,7 +123,7 @@ def test_a_config_fault_reaches_the_model_naming_the_settings_folder_not_its_hos
     assert not [r for r in rows if r.get("lead_id") == LEAD], (
         f"the refused lead {LEAD} left a queries row — its call ran: {rows}")
     table = "\n".join(p.read_text(encoding="utf-8") for p in run_dir.rglob("*.jsonl"))
-    data_root = str(tenant.data_root)
+    data_root = str(location_path(tenant.data_root))
     shown = "\n".join([*main.seen, *gather.seen])
     reason_lines = [ln for ln in shown.splitlines()
                     if "config file not found" in ln or "systems/cmdb/config.env" in ln]

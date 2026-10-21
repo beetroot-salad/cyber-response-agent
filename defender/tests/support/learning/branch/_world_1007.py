@@ -1,6 +1,8 @@
 """Shared machinery for #1007's grade-the-world spec — NO test scripts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import sys
 from dataclasses import dataclass, field
@@ -356,7 +358,7 @@ def learning_state(paths: Any):
 def queue_rows(paths: Any, channel: Any) -> list[dict]:
     """Every row on a state `Channel`'s queue under `paths`' state root, in written order.
     Missing file reads as no rows, which is the honest answer for a pass that enqueued nothing."""
-    path = paths.state_root / channel.queue
+    path = location_path(paths.state_root) / channel.queue
     if not path.is_file():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()

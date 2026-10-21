@@ -1,6 +1,8 @@
 """D1/D2: the operator commands and the settings loaders read the DATA ROOT's copy."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.runtime.state._1255_view import MODEL_AGENT
@@ -476,8 +478,8 @@ def test_1186_learning_operator_cli_uses_the_explicit_tenants_lock(
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     tenant = set_up_tenant(data_root, H.TID)
-    tenant.learning.mkdir(parents=True, exist_ok=True)
-    with Holder(tenant.learning / lock_name, blocking_discipline=False):
+    location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
+    with Holder(location_path(tenant.learning) / lock_name, blocking_discipline=False):
         proc = H.run_script(H.REPO_ROOT / script, *args, "--tenant", H.TID, root=data_root,
                             DEFENDER_LEARNING_STATE_DIR=str(data_root))
     assert proc.returncode == status, H.output(proc)

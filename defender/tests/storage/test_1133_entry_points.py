@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import contextlib
 import dataclasses
 import errno
@@ -543,10 +545,10 @@ def test_h4_the_priming_claim_alone_keeps_a_second_launcher_out_while_the_first_
     cli = branch_cli()
     capture = T.mod("learning.branch.capture")
     ledger = T.mod("learning.branch.ledger")
-    _base, src = T.runs_base(tmp_path)
+    _base, src = location_path(T.runs_base)(tmp_path)
     # #1187 (O9): an episode is the tenant's own `<T>/episodes/<id>`; the configured
     # `episode_dir` resolver is retired, so the address is the tenant's folder.
-    ep = T.current_tenant().episodes / T.EPISODE_ID
+    ep = location_path(T.current_tenant().episodes) / T.EPISODE_ID
     claim = ep / "served" / ".priming"
     priming, second_done = threading.Event(), threading.Event()
     first: dict[str, Any] = {}

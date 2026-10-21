@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import json
 import os
@@ -212,7 +214,7 @@ def _lead_scene(tmp_path: Path, committed: dict[str, str] | None = None) -> Lead
             write(repo / "defender" / "skills" / name, text)
         commit_all(repo, "seed the names the agent rewrites")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return LeadScene(tmp=tmp_path, repo=repo, paths=paths, run_dir=_run_dir(),
                      head=_git.git_head_sha(repo))
 
@@ -921,7 +923,7 @@ class Lanes:
 def _request_dir(s: LeadScene, *below: str) -> Path:
     """The lead-author request queue's folder (or one below it), spelled literally as the #1135
     suite spells it: `state.py` names it for no caller."""
-    return s.paths.state_root.joinpath("author-queue", *below)
+    return location_path(s.paths.state_root).joinpath("author-queue", *below)
 
 
 def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:

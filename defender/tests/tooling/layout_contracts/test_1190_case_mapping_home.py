@@ -2,6 +2,8 @@
 Goldens: `goldens/tenants.json`."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 import importlib
 import os
 import textwrap
@@ -105,7 +107,7 @@ def _record(root: Path) -> Any:
     unmoved)."""
     from defender.runtime import run_tenant
 
-    return run_tenant.resolve_tenant(root, TENANT, defender_dir=S.DEFENDER,
+    return run_tenant.resolve_tenant(fixture_data_root(root), TENANT, defender_dir=S.DEFENDER,
                                      dispatches_lead_zero=False)
 
 

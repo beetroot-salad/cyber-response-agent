@@ -1,5 +1,7 @@
 """A run records the commit it was made against, against real throwaway repos; the record never says something false."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
@@ -326,7 +328,7 @@ def test_a_stamp_that_cannot_be_written_does_not_take_the_run_down(tmp_path, mon
     from defender import run_common
 
     tenant = _set_up_tenant(tmp_path, monkeypatch)
-    runs = tenant.runs
+    runs = location_path(tenant.runs)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
     # A real failure, not an authored exception: a DIRECTORY at the stamp's name is one of the
@@ -349,7 +351,7 @@ def test_each_materialised_run_takes_its_own_capture(tmp_path, monkeypatch):
     from defender import run_common
 
     tenant = _set_up_tenant(tmp_path, monkeypatch)
-    runs = tenant.runs
+    runs = location_path(tenant.runs)
     alert = tmp_path / "alert.json"
     alert.write_text(json.dumps({"id": "a1"}))
     run_dir = run_common.materialize_run(

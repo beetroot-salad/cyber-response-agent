@@ -1,6 +1,8 @@
 """Box clocks follow the run clock; clock mounts stay outside model read scope."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import contextlib
 import datetime as dt
 import functools
@@ -78,7 +80,7 @@ def _start(argv: list[str]) -> Captured:
 @pytest.fixture
 def natural(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Captured:
     """A natural run's box start through `run.main`, from the fixture tenant's seed alert."""
-    base, seed = T.runs_base(tmp_path)
+    base, seed = location_path(T.runs_base)(tmp_path)
     tenant_id = T.current_tenant().id
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
@@ -234,7 +236,7 @@ def _assert_clock_file_reads(seen: dict[str, Any], out: C.Launched, reading: dt.
 def test_k1_a_natural_runs_clock_file_holds_the_run_clocks_reading(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
-    base, seed = T.runs_base(tmp_path)
+    base, seed = location_path(T.runs_base)(tmp_path)
     tenant_id = T.current_tenant().id
 
     seen, out, _docker = _clock_file_after_a_command(
@@ -266,7 +268,7 @@ def test_k1_a_natural_runs_clock_file_follows_the_run_clock_between_commands(tmp
                                                                             monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
     monkeypatch.delenv(box_mod.BoxSpec.ENV_VAR, raising=False)
-    base, seed = T.runs_base(tmp_path)
+    base, seed = location_path(T.runs_base)(tmp_path)
     tenant_id = T.current_tenant().id
     clock = C.FakeClock(START)
 
@@ -494,7 +496,7 @@ def _box_reads(seen: dict[str, Any], reading: dt.datetime, out: C.Launched) -> N
 @requires_live_box
 def test_k4_live_in_box_time_reads_the_run_clock(tmp_path, monkeypatch):
     monkeypatch.delenv("DEFENDER_ALLOW_UNSANDBOXED", raising=False)
-    base, seed = T.runs_base(tmp_path)
+    base, seed = location_path(T.runs_base)(tmp_path)
     tenant_id = T.current_tenant().id
     clock = C.FakeClock(START)
     out = C.Launched()

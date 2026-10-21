@@ -1,6 +1,8 @@
 """#1007 — M8: the questioner reads its own corpus back at call 1."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 
@@ -13,7 +15,7 @@ CAPTURED_LEADS = "CAPTURED-LEADS-BODY-1007"
 def author(tmp_path: Path, paths, *, invoke, lessons=None, leads=CAPTURED_LEADS, **kw):
     """Drive the REAL `questioner.author_family` through its injected `invoke=` seam."""
     questioner = W.mod("learning.branch.questioner")
-    base, src = W.runs_base(tmp_path)
+    base, src = location_path(W.runs_base)(tmp_path)
     ep = tmp_path / "episodes" / W.EPISODE_ID
     ep.mkdir(parents=True, exist_ok=True)
     return questioner.author_family(

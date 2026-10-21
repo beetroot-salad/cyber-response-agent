@@ -1,6 +1,8 @@
 """D9's tenant fixture helper (#1078 pass A) — the ONE place a test gets a data root and a tenant."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import importlib
@@ -52,11 +54,11 @@ def set_up_tenant(root: Path, tenant_id: str = D9_TENANT_ID) -> Any:
     fresh tmp root"). Each step is skipped when already done, so a second call is the first
     one's tenant. Returns the `Tenant` the real `accept_tenant` hands back."""
     owner = _tenant_owner()
-    root = Path(root)
+    root = Path(location_path(root))
     knowledge = root / tenant_id / "knowledge"
     if not knowledge.exists():
         shutil.copytree(FIXTURE, knowledge, symlinks=True)
         (knowledge / "agent" / ".tenant-id").write_text(f"{tenant_id}\n", encoding="utf-8")
     if not (root / tenant_id / "tenant.json").is_file():
-        owner.create_tenant(root, tenant_id)
-    return owner.accept_tenant(root, tenant_id, defender_dir=DEFENDER)
+        owner.create_tenant(fixture_data_root(root), tenant_id)
+    return owner.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)

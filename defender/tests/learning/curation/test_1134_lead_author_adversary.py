@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import errno
 import logging
@@ -92,7 +94,7 @@ def _pitfalls_tree(tmp_path: Path) -> LoopPaths:
     write_reducer_surface(repo)
     commit_all(repo, "seed the reducer surface")
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     persist.append_pitfalls([shim_row(f"r:l-003:{i}") for i in range(3)], state=_state1135.state_for_paths(paths))
     return paths
 
@@ -165,7 +167,7 @@ def test_the_runs_commit_gate_reads_what_the_agent_left_through_the_trees(
         tmp_path: Path, what: Left, left: str, caplog):
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     run_dir = _run_dir()
     target = write(tmp_path / "outside" / Path(what.name).name, what.text)
     at = paths.skills_dir / what.name
@@ -287,7 +289,7 @@ def test_two_claims_over_one_paths_each_mint_through_their_own_trees(
     monkeypatch.setenv("LEAD_AUTHOR_MODEL", NO_MODEL)
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     reached: list[str] = []
     for i, lead in enumerate((WAZUH_LEAD, ELASTIC_LEAD)):
         run_dir = _run_dir((lead.query_id, lead.system, lead.verb), run_id=f"claim-{i}")
@@ -314,7 +316,7 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
     monkeypatch.delenv("LEARNING_LEAD_AUTHOR_LIFT_THRESHOLD", raising=False)
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     run_dir = _run_dir()
     target = write(tmp_path / "outside" / "contradicts.md", CONTRADICTING)
     at = paths.skills_dir / "elastic/_draft/contradicts.md"
@@ -343,7 +345,7 @@ def test_the_lift_bypass_reads_a_pending_draft_through_the_trees(
 def test_the_runs_catalog_loads_go_through_the_deps_held_mount(tmp_path: Path, refused: bool):
     repo = _worktree(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
     run_dir = _run_dir()
     write(paths.skills_dir / TEMPLATE_NAME, marked_template("wazuh.probe"))
     lead = _lead("wazuh.probe", system="wazuh", verb="noverb", params={"index": "idx-7"})
@@ -407,12 +409,12 @@ def test_run_pitfalls_checks_its_trees_before_it_reads_its_queue(
     monkeypatch.setenv("LEARNING_PITFALLS_THRESHOLD", "99")
     if how == "lane_trees":
         paths = LoopPaths(repo_root=_worktree(tmp_path), state_dir=tmp_path / "state")
-        paths.state_root.mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
+        location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # never created lazily (#1135)
         trees = lead_trees(paths)
     else:
         paths, trees = _refusing_trees(tmp_path)[how]()
     persist.append_pitfalls([pitfall_row("r:l-000:0", "elastic")], state=_state1135.state_for_paths(paths))
-    queue = paths.state_root / PITFALLS.queue
+    queue = location_path(paths.state_root) / PITFALLS.queue
     spawn = Spawn()
 
     with trees, kernel_watch(reads=[queue], opens=[queue]) as events:

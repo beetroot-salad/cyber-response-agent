@@ -1,6 +1,8 @@
 """Box boundary: from a sandboxed box, writes to the runs folder, `_tenant.json` and `_episodes/` fail and sibling runs are invisible; one box session per runtime."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import functools
 import json
 import os
@@ -138,7 +140,7 @@ def _outside_run(state: dict[str, Any]) -> dict[str, Any]:
 
 def _session(root: Path, runtime: str, *, defender_dir: Path = H.DEFENDER) -> dict[str, Any]:
     t = H.tenant(root, H.T_ID)
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     run_dir = H.make_run(runs, RUN_ID)
     sibling = H.make_run(runs, SIBLING_ID)
     (sibling / "secret.txt").write_text(SIBLING_SECRET, encoding="utf-8")

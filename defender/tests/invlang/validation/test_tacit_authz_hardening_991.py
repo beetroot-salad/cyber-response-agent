@@ -371,7 +371,7 @@ def test_a_repeated_registry_id_is_refused_at_load() -> None:
 
 
 def test_a_grounding_refusal_is_reported_once_on_a_benign_document() -> None:
-    """The grounding check is COLLECTED at both boundaries and REPORTED once."""
+    """The grounding check is collected at both boundaries and reported once."""
     doc = scene.benign_document(rows=scene.authz_block(
         scene.authz_row(grounding="telemetry-baseline")))
     errors = _errors(doc)

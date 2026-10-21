@@ -1,6 +1,8 @@
 """#860 end to end — the family judge sees every refused attempt a lead made, by lead. A denied verb is a `∅.denied` sentinel row in the queries table; driven through the real gather entry, archive, join, VIEW 1 render and judge pass."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.learning.judge.contrast_contracts import _spec1234 as S34
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
@@ -349,7 +351,7 @@ def test_m6_the_chain_and_each_refused_entry_carry_exactly_their_named_keys(
 
     # The unknown-id arm: referenced by the document, unknown to the surface.
     ep2 = J.accepted_episode(tmp_path / "unknown", ledgers={"b": [J.oracle_row("b")], "c": []})
-    base2, _src = J.runs_base(tmp_path / "unknown")
+    base2, _src = location_path(J.runs_base)(tmp_path / "unknown")
     world2 = ep2 / "worlds" / J.world_id(ep2, "b")
     assert not (world2 / "gather_raw" / "l-001.lead.json").exists()
     leads2, _text2 = _leads_view(ep2, base2)
@@ -553,7 +555,7 @@ def test_key_flow_rows_a_real_run_wrote_render_as_the_pinned_kinds(tmp_path, jud
 
     oracle = {**J.oracle_row("b"), J.CALL_ID: f"{B_RUN}/99"}
     ep = J.accepted_episode(tmp_path, ledgers={"b": [oracle], "c": []})
-    base, _src = J.runs_base(tmp_path)
+    base, _src = location_path(J.runs_base)(tmp_path)
     world = ep / "worlds" / J.world_id(ep, "b")
     for name in ("report.md", "lessons_loaded.jsonl"):
         if (world / name).is_file():

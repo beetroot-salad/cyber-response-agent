@@ -2,6 +2,8 @@
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import inspect
 import json
 from dataclasses import replace
@@ -45,8 +47,8 @@ def state(tmp_path, monkeypatch):
     set_state_dir(monkeypatch, tmp_path / "legacy-state")
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     tenant = set_up_tenant(current_data_root())
-    tenant.learning.mkdir(exist_ok=True)
-    return replace(loop_paths(tmp_path), state_dir=tenant.learning)
+    location_path(tenant.learning).mkdir(exist_ok=True)
+    return replace(loop_paths(tmp_path), state_dir=location_path(tenant.learning))
 
 
 def _certified_run(*, name="case-791", alert_bytes=None, tenant_id=None) -> Path:
@@ -68,7 +70,7 @@ def _opened(body: dict) -> Path:
     from defender.tenancy import _tenant
     from defender.run_repository import RunAddress
 
-    tenant = _tenant.accept_tenant(_tenant.resolve_data_root(), body["tenant_id"],
+    tenant = _tenant.accept_tenant(fixture_data_root(_tenant.resolve_data_root()), body["tenant_id"],
                                    defender_dir=_paths.process_defender_dir())
     return tenant.runs_repository().resolve(RunAddress(body["tenant_id"], body["run_id"])).run_dir
 
@@ -136,7 +138,7 @@ def test_791_the_curation_marker_names_the_case_and_the_run_dir(tmp_path, state)
     run_dir = _certified_run()
     run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json")
 
-    markers = sorted((state.state_root / "author-queue").glob("*.json"))
+    markers = sorted((location_path(state.state_root) / "author-queue").glob("*.json"))
     assert len(markers) == 1
     body = marker_body(markers[0])
 
@@ -154,7 +156,7 @@ def test_1186_run_end_keeps_identical_cases_in_their_runs_tenant_queues(tmp_path
     first_root = current_data_root()
     other_root = tmp_path / "other-data"
     other = set_up_tenant(other_root, fixture_uuid("tenant:other-1186"))
-    other.learning.mkdir(exist_ok=True)
+    location_path(other.learning).mkdir(exist_ok=True)
     alert = b'{"rule":{"id":"1186"},"case":"same-alert"}'
     first = _certified_run(name="tenant-a", alert_bytes=alert)
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(other_root))
@@ -162,7 +164,7 @@ def test_1186_run_end_keeps_identical_cases_in_their_runs_tenant_queues(tmp_path
     for root, run_dir in ((first_root, first), (other_root, second)):
         monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
         assert run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json") is True
-    queues = [state.state_root / "author-queue", other.learning / "author-queue"]
+    queues = [location_path(state.state_root) / "author-queue", location_path(other.learning) / "author-queue"]
     markers = [list(queue.glob("*.json")) for queue in queues]
     assert [len(items) for items in markers] == [1, 1]
     bodies = [marker_body(items[0]) for items in markers]
@@ -182,7 +184,7 @@ def test_791_a_retried_investigation_coalesces_onto_one_curation_request(tmp_pat
     run_common.enqueue_curation(run_of(first), first / "alert.json")
     run_common.enqueue_curation(run_of(second), second / "alert.json")
 
-    markers = sorted((state.state_root / "author-queue").glob("*.json"))
+    markers = sorted((location_path(state.state_root) / "author-queue").glob("*.json"))
     assert len(markers) == 1, \
         f"a retry added a second curation request instead of coalescing: {[m.name for m in markers]}"
     body = marker_body(markers[0])
@@ -227,8 +229,8 @@ def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, s
     """curation_write_is_isolated — a curation request that cannot be written costs the
     investigation nothing."""
     run_dir = _certified_run()
-    (state.state_root / "author-queue").parent.mkdir(parents=True, exist_ok=True)
-    (state.state_root / "author-queue").write_text("not a directory\n", encoding="utf-8")
+    (location_path(state.state_root) / "author-queue").parent.mkdir(parents=True, exist_ok=True)
+    (location_path(state.state_root) / "author-queue").write_text("not a directory\n", encoding="utf-8")
 
     assert run_common.enqueue_curation(run_of(run_dir), run_dir / "alert.json") is False, \
         "a failed curation write did not report itself"
@@ -240,7 +242,7 @@ def test_791_a_failed_curation_write_costs_the_investigation_nothing(tmp_path, s
         "the failed curation write took the render step with it — the investigation lost its " \
         "human-facing output to an optimisation over a corpus"
 
-    (state.state_root / "author-queue").unlink()
+    (location_path(state.state_root) / "author-queue").unlink()
     working = SpecTail(state)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "working"), working) == 0
     assert working.step("visualize").curation_requests, \
@@ -279,7 +281,7 @@ def test_791_no_learn_suppresses_curation_too(tmp_path, state):
     assert author_markers(state), \
         "the boundary never fires at all — the suppressed arm above proves nothing"
 
-    for marker in (state.state_root / "author-queue").glob("*.json"):
+    for marker in (location_path(state.state_root) / "author-queue").glob("*.json"):
         marker.unlink()
     scoring = SpecTail(state)
     assert drive_tail(
@@ -321,7 +323,7 @@ def test_791_the_curation_trigger_joins_the_scrub_ordering_property(tmp_path, st
     assert author_markers(state), \
         "no curation request was written at all, so the refusal below proves nothing"
 
-    for marker in (state.state_root / "author-queue").glob("*.json"):
+    for marker in (location_path(state.state_root) / "author-queue").glob("*.json"):
         marker.unlink()
     uncertified = SpecTail(state, certify=False)
     assert drive_tail(run_py.main, plant_alert(tmp_path / "uncertified"), uncertified) == 0

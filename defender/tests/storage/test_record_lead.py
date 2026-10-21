@@ -1,6 +1,8 @@
 """record_lead.claim_lead: atomic exclusive claim of a lead id and its failure modes."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 from defender import _io
@@ -190,7 +192,7 @@ def test_failed_flush_does_not_close_a_descriptor_it_no_longer_owns(tmp_path, mo
                 raise OSError(errno.EOPNOTSUPP, "test named-create fallback")
             return _io.rooted_write(*args, **kwargs, open_unnamed=unavailable)
 
-    run = Run.under(run_dir.parent, run_dir.name, io=NamedCreateIo())
+    run = Run.under(fixture_runs_base(run_dir.parent), run_dir.name, io=NamedCreateIo())
     real_fdopen = os.fdopen
     handed_out: list[int] = []
     sentinel_fds: list[int] = []

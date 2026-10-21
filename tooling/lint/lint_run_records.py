@@ -4,7 +4,7 @@ repository package `defender/run_repository/`, `defender/episodes/_episode_paths
 `defender/episodes/_episode_handle.py`, `defender/tenancy/_tenant.py`) may spell or hold a run or episode record's name, whole or as a
 composed part, or join a name onto a run or episode root.
 
-Three checks:
+Four checks:
 
   (a) Literal pass, root-agnostic. Outside the owners, any string constant, f-string piece,
       or `glob`/`rglob` string argument that contains a whole record name or a composed part
@@ -22,6 +22,11 @@ Three checks:
 
   (c) Import pass: importing or reading a record-name constant off an owner module (see
       `_scan_import_pass`).
+
+  (d) Location pass (#1210): record-root acquisition, location construction, private
+      conversion and caller-supplied root overrides are owner-only. Conversions in storage
+      adapters have exact function-and-role permissions, independent of the older owner
+      exemptions. Import aliases and static re-exports resolve through `_astlib`.
 
 SCOPE_STATEMENT names what the gate cannot see: the trees it never enters, and a name
 assembled so that no whole part is ever an AST literal.
@@ -44,7 +49,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from _astlib import (
-    PARTIAL_OWNER_ATTRS, ScanBlind, import_source, module_and_package, module_env, owner_derived,
+    ScanBlind, callee, origin, reexport_origin, import_source, module_and_package, module_env, owner_derived,
     read_and_parse, require_claimed, require_selected, scan_guard, selects, source_files,
 )
 
@@ -93,7 +98,12 @@ SCOPE_STATEMENT = (
     "assembly in which no single part is ever a literal string, whichever of concatenation, "
     "%-formatting, .format, os.path.join or multi-argument Path() does the assembling (§7 "
     "decision 6, settled premise s34). The same five forms carrying the name as ONE literal "
-    "are caught."
+    "are caught. Record-location checks reject acquisition and private conversions at the "
+    "reported expression, without following bindings. Individual run/episode/content paths "
+    "remain plain Paths: parent traversal and reconstruction from text are not prevented. "
+    "Explicit owner environment/display/mount exports remain permitted. Dynamic getattr "
+    "and importlib reflection are outside this static gate; tests are excluded."
+
 )
 
 APPENDIX_ONLY_KINDS = frozenset({"tool_seam"})
@@ -187,24 +197,145 @@ def _owner_constants() -> tuple[frozenset[str], frozenset[str]]:
 
 
 def _accessor_names() -> frozenset[str]:
-    """Every public accessor name on the path owners (`RunPaths`, `SessionPaths`,
-    `EpisodePaths`), computed so it never goes stale, plus the members a partial owner owns
-    (`_astlib.PARTIAL_OWNER_ATTRS`: an accepted `Tenant`'s record locations, never its
-    knowledge halves). A new owner class needs a line here and in
+    """Every public accessor name on the full path owners, computed so it never goes stale.
+    Tenant locations use the structural acquisition pass. A new full path owner needs a line here and in
     `_astlib._OWNER_CLASS_ORIGINS`."""
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     from defender.episodes._episode_paths import EpisodePaths  # noqa: PLC0415
     from defender.run_repository import RunPaths, SessionPaths  # noqa: PLC0415
 
-    partial = (name for owned in PARTIAL_OWNER_ATTRS.values() for name in owned)
     return frozenset(
-        n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths), *partial)
+        n for n in (*dir(RunPaths), *dir(SessionPaths), *dir(EpisodePaths))
         if not n.startswith("_"))
 
 
 def _is_owner_module(rel: str) -> bool:
     return rel.startswith(f"{OWNER_PACKAGE}/") or rel in _OWNER_FLAT_MODULES
+
+
+
+# Structural permissions are independent of the literal gate's owner exemptions.
+_LOCATION_MODULE = "defender.records._locations"
+_LOCATION_FILE = "records/_locations.py"
+_EXPORT_OWNER = "learning/author/version_control/exports.py"
+_RECORD_OWNER = "learning/author/version_control/record.py"
+RECORD_LOCATION_NAMES = frozenset({
+    "tenant_root", "row_path", "runs", "sessions", "episodes", "learning", "worktrees",
+    "data_root", "runs_base", "trust_root", "sessions_dir", "runs_legacy", "episodes_legacy",
+    "exports", "drafts", "knowledge_lock", "commit_record",
+})
+# Keys are (location role, module), values are exact qualified functions, not module exemptions.
+CONVERSION_PERMISSIONS: dict[tuple[str, str], frozenset[str]] = {
+    ("learning_root", "learning/core/state.py"): frozenset({"LearningState.open", "LearningAdoption.__init__"}),
+    ("data_root", "learning/core/state.py"): frozenset({"LearningAdoption.__init__"}),
+    ("session_trust_root", "runtime/session_store/_write.py"): frozenset({"open_store"}),
+    ("exports_root", _EXPORT_OWNER): frozenset({"current_export", "publish_locked", "write_export"}),
+    ("drafts_root", _EXPORT_OWNER): frozenset({"publish_locked", "build_draft", "draft_path"}),
+    ("knowledge_lock", _EXPORT_OWNER): frozenset({"tenant_lock"}),
+    ("commit_record", _RECORD_OWNER): frozenset({"_record_made", "_Record.read"}),
+}
+_ATTRIBUTE_ROLES = {
+    "exports": "exports_root", "drafts": "drafts_root", "knowledge_lock": "knowledge_lock",
+    "commit_record": "commit_record",
+}
+_ROOT_OVERRIDE_METHODS = frozenset({
+    "run_end_sidecar", "scrub_verdict", "ticket_write", "call_join", "ticket_comments",
+    "session_pointer", "sessions_dir",
+})
+_OWNER_CONSTRUCTORS = frozenset({
+    "defender.tenancy._tenant._TenantPaths", "defender.tenancy._tenant._TenantLayout",
+    "defender.run_repository.SessionPaths", "defender.run_repository._layout.SessionPaths",
+    "defender.learning.core.state.LearningAdoption",
+})
+
+
+def _qualified_scopes(tree: ast.AST) -> dict[ast.AST, str]:
+    scopes: dict[ast.AST, str] = {}
+
+    def walk(node: ast.AST, scope: str) -> None:
+        scopes[node] = scope
+        definition = isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        qualified = f"{scope}.{node.name}" if definition and scope else node.name if definition else scope
+        for child in ast.iter_child_nodes(node):
+            # Defaults, decorators and class bases execute in the enclosing scope.
+            walk(child, qualified if definition and child in node.body else scope)
+
+    walk(tree, "")
+    return scopes
+
+
+def _scan_location_pass(rel: str, tree: ast.Module, lines: list[str],
+                        root: Path = DEFENDER,
+                        relay_cache: dict[str, dict[str, str]] | None = None) -> list[Finding]:
+    """Line-local root acquisition and role-specific conversion permissions (#1210)."""
+    from defender.records import _locations
+
+    classes = {name for name, value in vars(_locations).items()
+               if isinstance(value, type) and issubclass(value, _locations._Location)}
+    module, package = module_and_package(rel)
+    env = module_env(tree, module=module, package=package)
+    scopes = _qualified_scopes(tree)
+    annotations: set[ast.AST] = set()
+
+    def mark_type(expr: ast.AST) -> None:
+        if isinstance(expr, (ast.Name, ast.Attribute)):
+            annotations.update(ast.walk(expr))
+        elif isinstance(expr, (ast.Subscript, ast.Tuple, ast.List, ast.BinOp)):
+            for child in ast.iter_child_nodes(expr):
+                mark_type(child)
+
+    for node in ast.walk(tree):
+        ann = (node.annotation if isinstance(node, (ast.arg, ast.AnnAssign))
+               else node.returns if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) else None)
+        if ann is not None:
+            mark_type(ann)
+        if isinstance(node, ast.Call) and callee(node, env) == "builtins.isinstance" and len(node.args) == 2:
+            mark_type(node.args[1])
+    findings: list[Finding] = []
+    relay_cache = {} if relay_cache is None else relay_cache
+
+    def allowed(role: str, node: ast.AST) -> bool:
+        return (_is_owner_module(rel) or rel == _LOCATION_FILE
+                or scopes[node] in CONVERSION_PERMISSIONS.get((role, rel), ()))
+
+    def report(node: ast.AST, why: str) -> None:
+        line = getattr(node, "lineno", 0)
+        scope = scopes[node] or "<module>"
+        findings.append(Finding(f"{rel}::{scope}::{line}::{why}", f"{rel}:{line} {scope}(): {why}"))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            if node.attr == "_record_location_path" and rel != _LOCATION_FILE:
+                report(node, "private record-location storage access")
+            if node.attr in {"__reduce__", "__reduce_ex__", "__getstate__"} and rel != _LOCATION_FILE:
+                report(node, "owner-only serialization protocol access")
+            if node.attr in RECORD_LOCATION_NAMES and not allowed(_ATTRIBUTE_ROLES.get(node.attr, ""), node):
+                report(node, f"owner-only record location (.{node.attr})")
+        if isinstance(node, (ast.Name, ast.Attribute)):
+            resolved = origin(node, env)
+            if resolved is not None:
+                resolved = reexport_origin(resolved, (root, DEFENDER), relay_cache)
+            if resolved and resolved.startswith(_LOCATION_MODULE + "."):
+                member = resolved.removeprefix(_LOCATION_MODULE + ".")
+                if member.startswith("_unwrap_"):
+                    if not allowed(member.removeprefix("_unwrap_"), node):
+                        report(node, f"owner-only location conversion ({member})")
+                elif member in classes and node not in annotations and not (_is_owner_module(rel) or rel == _LOCATION_FILE):
+                    report(node, f"owner-only location constructor ({member})")
+            if resolved in _OWNER_CONSTRUCTORS and node not in annotations and not _is_owner_module(rel):
+                report(node, "owner-only root-taking constructor")
+        if not _is_owner_module(rel) and rel != _LOCATION_FILE:
+            if isinstance(node, ast.Name) and node.id == "runs_base":
+                report(node, "owner-only runs_base identifier")
+            elif isinstance(node, ast.arg) and node.arg == "runs_base":
+                report(node, "owner-only runs_base parameter")
+            elif isinstance(node, ast.keyword) and node.arg == "runs_base":
+                report(node, "owner-only runs_base keyword")
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in _ROOT_OVERRIDE_METHODS and (node.args or node.keywords)):
+                report(node, "owner-only runs-container override")
+    return findings
 
 
 def _record_shaped(text: str, whole: frozenset[str], parts: frozenset[str]) -> bool:
@@ -466,17 +597,18 @@ def scan(root: Path = DEFENDER, *, allow_list: dict[str, int] | None = None) -> 
     whole, parts = _owner_constants()
     accessor_names = _accessor_names()
     findings: list[Finding] = []
+    relay_cache: dict[str, dict[str, str]] = {}
     for path in sweep_files(root):
         rel = path.relative_to(root).as_posix()
-        if _is_owner_module(rel) or rel in allow_list:
-            continue
         try:
             text, tree = read_and_parse(path, rel)
             lines = text.splitlines()
             with scan_guard(rel):
-                found = [*_scan_literal_pass(rel, tree, lines, whole, parts),
-                         *_scan_accessor_pass(rel, tree, lines, accessor_names),
-                         *_scan_import_pass(rel, tree, lines)]
+                found = _scan_location_pass(rel, tree, lines, root, relay_cache)
+                if not _is_owner_module(rel) and rel not in allow_list:
+                    found.extend(_scan_literal_pass(rel, tree, lines, whole, parts))
+                    found.extend(_scan_accessor_pass(rel, tree, lines, accessor_names))
+                    found.extend(_scan_import_pass(rel, tree, lines))
         except ScanBlind as exc:
             findings.append(Finding(fingerprint=f"{rel}::<unparseable>",
                                     display=f"{rel}: {exc}"))

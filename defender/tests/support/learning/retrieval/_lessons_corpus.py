@@ -2,6 +2,8 @@
 those suites drive `_frontier_recall` through."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from pathlib import Path
 
 
@@ -67,4 +69,4 @@ def _main_deps(tmp_path: Path):
     from defender.run_repository import Run
 
     return replace(bind(MAIN_DEF, run, defender_dir=dfn),
-                   run=Run.under(run.parent, run.name)), run, dfn
+                   run=Run.under(fixture_runs_base(run.parent), run.name)), run, dfn

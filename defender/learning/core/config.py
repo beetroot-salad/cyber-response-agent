@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.records._locations import (LearningRoot)
+
 import dataclasses
 import enum
 import logging
@@ -73,8 +75,14 @@ class LoopPaths(DefenderPaths):
     Inherits the repo-tree paths rather than forwarding them, so `getattr(paths, name)` answers
     for the whole set and directory names stay owned by `_paths.py`."""
 
-    state_dir: Path | None = None
+    state_dir: Path | LearningRoot | None = None
     tenant: Tenant | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if self.tenant is not None and not isinstance(self.state_dir, LearningRoot):
+            raise FatalConfigError("tenant learning state requires LearningRoot")
+        if self.tenant is None and isinstance(self.state_dir, LearningRoot):
+            raise FatalConfigError("scratch learning state requires an explicit Path")
 
     @classmethod
     def for_tenant(cls, tenant: Tenant) -> LoopPaths:
@@ -82,10 +90,10 @@ class LoopPaths(DefenderPaths):
         from defender.run_repository._held import require_accepted_tenant
 
         accepted = require_accepted_tenant(tenant)
-        return cls(repo_root=REPO_ROOT, state_dir=accepted.learning, tenant=accepted)
+        return accepted.learning_paths(cls, repo_root=REPO_ROOT)
 
     @property
-    def state_root(self) -> Path:
+    def state_root(self) -> Path | LearningRoot:
         if self.state_dir is None:
             raise FatalConfigError("learning state requires an explicit tenant or scratch state_dir")
         return self.state_dir

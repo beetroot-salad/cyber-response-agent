@@ -1,6 +1,8 @@
 """runtime.html data layer and page composition: the phase tagger follows write_file/edit_file, per-phase cost and wall reconcile with the headline (gather folded in, repeated phase names are one bucket), the transcript is built from the wire log in the right id space, and run health surfaces retries and dead-end leads."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import json
@@ -42,7 +44,7 @@ def _seed_session_store(run: Path, messages: list[dict]) -> None:
     from defender.runtime import session_store as ss
 
     store = ss.open_store(
-        case_id=f"visualize-runtime-fixture-{run.parent.name}", sessions=SessionPaths(run.parent))
+        case_id=f"visualize-runtime-fixture-{run.parent.name}", sessions=SessionPaths(fixture_runs_base(run.parent)))
     ss.write_case_pointer(_run_handle_1165(run), case_id=store.case_id, store_path=store.path)
     sessions: dict[str, str] = {}
     for rec in messages:

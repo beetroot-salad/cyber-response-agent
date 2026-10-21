@@ -1,6 +1,8 @@
 """Permissions are per run: grants are built from the run's own tenant table, so one process can hold two tenants' grants."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from pathlib import Path
@@ -155,10 +157,10 @@ def test_a_tenant_folder_inside_a_tree_a_box_mounts_is_refused(tmp_path, inside)
     runs_base.mkdir()
     outside = tmp_path / "tenants"
     T.place_tenant(outside, fixture_uuid("tenant:acme"))
-    assert rt.resolve_tenant(outside, fixture_uuid("tenant:acme"), defender_dir=defender_dir,
+    assert rt.resolve_tenant(fixture_data_root(outside), fixture_uuid("tenant:acme"), defender_dir=defender_dir,
                              dispatches_lead_zero=False, box_mounted=(runs_base,)).tenant_id == fixture_uuid("tenant:acme")
     root = (defender_dir if inside == "code tree" else runs_base) / "tenants"
     T.place_tenant(root, fixture_uuid("tenant:acme"))
     with pytest.raises(rt.TenantRefused, match="which a box mounts"):
-        rt.resolve_tenant(root, fixture_uuid("tenant:acme"), defender_dir=defender_dir, dispatches_lead_zero=False,
+        rt.resolve_tenant(fixture_data_root(root), fixture_uuid("tenant:acme"), defender_dir=defender_dir, dispatches_lead_zero=False,
                           box_mounted=(runs_base,))

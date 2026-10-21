@@ -20,6 +20,8 @@ takes precedence over the ambient value.
 
 from __future__ import annotations
 
+from defender.records._locations import DataRoot, RunsBase, EpisodesRoot
+
 import logging
 import json
 import os
@@ -615,7 +617,7 @@ def _materialize_run(
     return run
 
 
-def _request_data_root(ns: argparse.Namespace) -> Path:
+def _request_data_root(ns: argparse.Namespace) -> DataRoot:
     """The request's tenant id checked (`--tenant` is required, there is no default), then the
     data root resolved — once, here — or a `[run.py]` refusal before the preflight."""
     try:
@@ -626,7 +628,7 @@ def _request_data_root(ns: argparse.Namespace) -> Path:
 
 
 def _accept_request_tenant(
-    ns: argparse.Namespace, *, data_root: Path, box_mounted: tuple[Path, ...],
+    ns: argparse.Namespace, *, data_root: DataRoot, box_mounted: tuple[Path | RunsBase | EpisodesRoot, ...],
 ) -> _tenant.Tenant:
     """The request's tenant, accepted, or a `[run.py]` refusal before the preflight. Every run
     names it with `--tenant`, a sibling included: it comes from the request (for a platform,
@@ -644,7 +646,7 @@ def _accept_request_tenant(
         sys.exit(f"[run.py] this run's tenant cannot be used: {refused}")
 
 
-def _sibling_box_mounted(ns: argparse.Namespace, data_root: Path) -> tuple[Path, ...]:
+def _sibling_box_mounted(ns: argparse.Namespace, data_root: DataRoot) -> tuple[RunsBase, ...]:
     """What a sibling's box mounts besides the checkout — its arm container,
     `<data root>/<T>/episodes/<episode id>/runs`, named before the tenant is accepted, so
     acceptance holds the tenant's settings out of it — or nothing for an ordinary run. The

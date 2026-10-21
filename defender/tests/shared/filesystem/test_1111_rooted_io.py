@@ -1,6 +1,8 @@
 """Every read and write the Run handle makes walks no-follow from the record's trust root: the plant matrix (symlink, hardlink, FIFO, device, folder links) over every record member, the root's own spelling being followed, and the direct _io.rooted_* seam rules (name grammar, create complete-or-absent lane, replace staging)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+
 import contextlib
 import dataclasses
 import errno
@@ -96,7 +98,7 @@ def trust_roots(runs_base: Path, world_dir: Path) -> dict[str, Path]:
     return {
         "run_dir": runs_base / RUN_ID,
         "runs_base": runs_base,
-        "session_root": SessionPaths(runs_base).trust_root,
+        "session_root": location_path(SessionPaths(fixture_runs_base(runs_base)).trust_root),
         "world_dir": world_dir,
     }
 
@@ -115,7 +117,7 @@ _PROBE_WORLD = Path("/nonexistent-1111/worlds/overlay_a")
 
 def _run_members() -> tuple[Member, ...]:
     """`GROUP_MEMBERS` x `MEMBER_VERB`, each addressed from the path its accessor builds."""
-    run = H.Run.under(_PROBE_BASE, RUN_ID)
+    run = H.Run.under(fixture_runs_base(_PROBE_BASE), RUN_ID)
     roots = trust_roots(_PROBE_BASE, _PROBE_WORLD)
     out = []
     for group, names in H.GROUP_MEMBERS.items():
@@ -159,7 +161,7 @@ class Tree:
     host: Path
 
     def root(self, m: Member) -> Path:
-        return trust_roots(self.runs_base, self.world_dir)[m.root]
+        return trust_roots(location_path(self.runs_base), self.world_dir)[m.root]
 
     def path(self, m: Member) -> Path:
         return self.root(m) / m.rel
@@ -168,7 +170,7 @@ class Tree:
         """The handle as application code builds it. #1187 (R1): `Run.for_tenant` and the
         runs base's `_tenant.json` it read are retired; `Run.under(container, id, tenant_id=)`
         replaces it, over a container holding no record."""
-        return H.Run.under(self.runs_base, RUN_ID, tenant_id=S.DEFAULT_TENANT_ID, io=io)
+        return H.Run.under(location_path(self.runs_base), RUN_ID, tenant_id=S.DEFAULT_TENANT_ID, io=io)
 
     def handle(self, m: Member, *, run: Any = None, io: Any = _io) -> Any:
         if m.root == "world_dir":
@@ -426,14 +428,14 @@ def test_o1_o3_a_plant_at_a_records_address_reads_none_and_a_plain_file_there_re
 
 def _fill_record_sources(tree: Tree) -> None:
     """A run whose `run.record` has something from every file it reads."""
-    run_dir = tree.runs_base / RUN_ID
+    run_dir = location_path(tree.runs_base) / RUN_ID
     owner = RunPaths(run_dir)
     owner.provenance.write_text(RunProvenance(
         commit="0" * 40, dirty=False, model="m-1111", tenant_id=S.DEFAULT_TENANT_ID,
         world_id="w-1111").as_json(), encoding="utf-8")
     plant_alert(run_dir, b'{"alert": "1111"}\n')
     owner.report.write_text(S.report_text("# the report\n"), encoding="utf-8")
-    owner.run_end_sidecar(tree.runs_base).write_text(
+    owner.run_end_sidecar(location_path(tree.runs_base)).write_text(
         json.dumps({"truncated_by": "budget", "closed_before_cut": False}), encoding="utf-8")
 
 
@@ -461,9 +463,9 @@ def _record_sources(tree: Tree) -> list[Path]:
 def test_o1_o3_a_plant_at_any_file_run_record_reads_counts_as_absent(tree, kind):
     _fill_record_sources(tree)
     sources = _record_sources(tree)
-    owner = RunPaths(tree.runs_base / RUN_ID)
+    owner = RunPaths(location_path(tree.runs_base) / RUN_ID)
     floor = {owner.provenance, owner.alert, owner.alert_record, owner.report,
-             owner.run_end_sidecar(tree.runs_base)}
+             owner.run_end_sidecar(location_path(tree.runs_base))}
     assert floor <= set(sources), f"run.record's recorded reads {sources} miss {floor}"
     full = tree.run().record
 
@@ -624,7 +626,7 @@ def test_o6_an_occupied_staged_name_refuses_the_replace_as_a_marked_eexist(tree,
 @pytest.mark.parametrize("m", [m for m in RUN_MEMBERS if m.root == "run_dir"], ids=str)
 def test_o5_run_at_over_a_symlinked_run_dir_reads_and_writes_every_in_run_record(tree, m):
     alias = tree.tmp / "alias-of-the-run"
-    alias.symlink_to(tree.runs_base / RUN_ID, target_is_directory=True)
+    alias.symlink_to(location_path(tree.runs_base) / RUN_ID, target_is_directory=True)
     h = S.member(H.Run.at(alias), m.group, m.name, *S.member_args(m.name))
     assert h.path == alias / m.rel, "Run.at no longer keeps the alias spelling"
 
@@ -685,7 +687,7 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
     # retired the record, but the runs base is still made here so the cases stay the ones the
     # docstring names.
     if m.root != "world_dir":
-        tree.runs_base.mkdir()
+        location_path(tree.runs_base).mkdir()
     verb_call(tree.handle(m), m, "created")()
     assert_landed(real / tree.path(m).relative_to(tmp_path / "data"), m, "created")
 
@@ -694,7 +696,7 @@ def test_o5_a_write_under_a_missing_root_creates_it_following_links(tmp_path, m)
 def test_o5_a_read_under_a_missing_root_is_none_and_creates_nothing(tmp_path, m):
     tree = Tree(tmp_path, tmp_path / "data" / "runs", tmp_path / "worlds" / "gone", tmp_path)
     if m.root != "world_dir":  # #1105 NH-3's precondition, kept (#1187 R1: no record now)
-        tree.runs_base.mkdir(parents=True)
+        location_path(tree.runs_base).mkdir(parents=True)
     before = census(tmp_path)
     assert tree.handle(m).read() is None
     assert census(tmp_path) == before, f"{m}: a read under a missing root made something"

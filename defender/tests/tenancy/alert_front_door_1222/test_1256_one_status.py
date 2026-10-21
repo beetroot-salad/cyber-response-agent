@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import functools
@@ -163,7 +165,7 @@ def _claim_scene(scene: _Scene, label: str, system: str, *,
     conversation (whichever dispatch opens it) answers with one summary; `l00c` scripts lead
     zero (its default makes no call). The probe lists the leads-table rows of `l-001` under the
     scene's runs base (one run per scene)."""
-    runs = scene.tenant.runs
+    runs = location_path(scene.tenant.runs)
 
     def probe() -> list[str]:
         return sorted(str(p) for p in runs.glob("*/gather_raw/l-001.lead.json"))

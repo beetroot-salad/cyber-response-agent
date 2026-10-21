@@ -2,6 +2,8 @@
 table the cutover deletes."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import json
 from pathlib import Path
@@ -116,9 +118,9 @@ def readonly_sources(request) -> set[Path]:
 
 def stuff_retired_queues(paths, *, rows: int = 25) -> None:
     """Put every retired observation queue far over any threshold the drain could read."""
-    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
     for name in RETIRED_OBSERVATION_QUEUES:
-        ((paths.state_root / FINDINGS.queue).parent / name).write_text(
+        ((location_path(paths.state_root) / FINDINGS.queue).parent / name).write_text(
             "".join(json.dumps(D.obs_row(f"{name}-{i}")) + "\n" for i in range(rows)),
             encoding="utf-8")
 
@@ -216,7 +218,7 @@ def test_922_author_drain_triggers_exactly_the_findings_curator(tmp_path):
     # Selected BY MODULE rather than by position, for the same reason the set above is sorted:
     # the tick now triggers two curators and their order is not a contract.
     call = next(c for c in trigger.calls if c["module_name"] == "author")
-    assert call["pending_file"] == str(paths.state_root / FINDINGS.queue), (
+    assert call["pending_file"] == str(location_path(paths.state_root) / FINDINGS.queue), (
         f"the findings trigger names {call['pending_file']}, not the findings queue")
     assert call["threshold_env"] == "LEARNING_AUTHOR_THRESHOLD"
     assert call["pending_label"] == "pending"
@@ -252,7 +254,7 @@ def test_922_a_full_findings_queue_alone_wakes_the_drain(tmp_path):
     paths = D.make_paths(tmp_path, state_dir=tmp_path / "learning-state")
     graded_episode(tmp_path, paths)
     for name in RETIRED_OBSERVATION_QUEUES:
-        assert not ((paths.state_root / FINDINGS.queue).parent / name).exists(), (
+        assert not ((location_path(paths.state_root) / FINDINGS.queue).parent / name).exists(), (
             "this control is about a findings-only queue; an observation queue exists")
 
     trigger = TriggerRecorder(D.recording(D.committing("family-lesson")))

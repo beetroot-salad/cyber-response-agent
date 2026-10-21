@@ -1,6 +1,8 @@
 """tenant.py migrate gives a pre-knowledge-folder tenant the folder acceptance requires."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import shutil
@@ -117,7 +119,7 @@ def test_migrate_gives_an_old_shape_tenant_a_folder_setup_accepts(
     assert H.census_diff(after, H.tree_census(root)) == [f"added: {_TID}/learning"], (
         "setup changed more than provisioning the migrated tenant's learning root")
     assert list((root / _TID / "learning").iterdir()) == []
-    accepted = _tenant.accept_tenant(root, _tenant.TenantId(_TID),
+    accepted = _tenant.accept_tenant(fixture_data_root(root), _tenant.TenantId(_TID),
                                      defender_dir=PATHS.defender_dir)
     assert accepted.knowledge == knowledge
 

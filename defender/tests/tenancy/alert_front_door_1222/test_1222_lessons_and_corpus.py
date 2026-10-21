@@ -2,6 +2,8 @@
 corpus and held-out index reading past runs by their record."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
@@ -492,7 +494,7 @@ def test_r7_the_shared_lesson_readers_agree_on_an_unquoted_signature_entry(tmp_p
         assert [lesson.path.stem for lesson in iter_lessons(corpus)] == [name], (
             f"iter_lessons skipped the {spelling} lesson")
 
-    runs = S.plant_tenant().accept().runs
+    runs = location_path(S.plant_tenant().accept().runs)
     # #1187 (R1): the natural container holds run folders only — no `_tenant.json` is written.
     runs.mkdir(parents=True, exist_ok=True)
     alert = S.generic_alert(rule_id="R-R7-TRACE")
@@ -581,8 +583,8 @@ def test_p063_main_calls_the_corpus_in_box_with_the_mapped_sig(tmp_path, capsys,
         "p3": dict(signature=sig.lower(), rule_id="R-3"),
         "p4": dict(signature=sig + "0", rule_id="R-4"),
     }
-    recorded = [_past_run(planted.runs, f"past-{tag}", tag=tag, **spec) for tag, spec in past.items()]
-    _rc, over_runs = _vocab_cli(capsys, planted.runs, sig)
+    recorded = [_past_run(location_path(planted.runs), f"past-{tag}", tag=tag, **spec) for tag, spec in past.items()]
+    _rc, over_runs = _vocab_cli(capsys, location_path(planted.runs), sig)
     assert _probes(over_runs) == {"p1"}, (
         f"the corpus lookup of {sig!r} over the runs folder counted "
         f"{sorted(_probes(over_runs))}, not exactly the run recorded under it:\n{over_runs}")
@@ -621,7 +623,7 @@ def test_p065_corpus_subprocess_cannot_obtain_the_mapping(tmp_path):
         "the unavailable vocabulary reads exactly as a corpus with no past runs")
 
     mapped = S.plant_tenant(fixture_uuid("tenant:acme-c"), alert_mapping=_UUID_MAPPING)
-    recorded = _past_run(mapped.runs, "past-pc", tag="pc", signature="SIG-P065",
+    recorded = _past_run(location_path(mapped.runs), "past-pc", tag="pc", signature="SIG-P065",
                          alert=S.generic_alert(rule_id="R-9", rule={"id": "R-9", "uuid": "U-9",
                                                                      "description": "past"}))
     d = S.run_alert(tmp_path, alert=S.generic_alert(rule_id="R-other", rule={"id": "R-other", "uuid": "SIG-P065",
@@ -702,7 +704,7 @@ def test_p080_short_signature_substring_matches_other_lessons(tmp_path):
     for name, entries in {"fd-p080-r": ["R"], "fd-p080-second": ["Q", "R"],
                           "fd-p080-longer": ["R-1001"], "fd-p080-lower": ["r"]}.items():
         S.plant_lesson(name, source_signature=entries)
-    recorded = [_past_run(planted.runs, f"past-{tag}", tag=tag, rule_id=sig, signature=sig)
+    recorded = [_past_run(location_path(planted.runs), f"past-{tag}", tag=tag, rule_id=sig, signature=sig)
                 for tag, sig in (("pr", "R"), ("plonger", "R-1001"), ("plower", "r"))]
 
     one = S.run_alert(tmp_path, alert=_lesson_alert("R"), tenant=planted, run_id=fixture_uuid("p080-one"),

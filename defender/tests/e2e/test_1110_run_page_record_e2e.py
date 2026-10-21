@@ -1,6 +1,8 @@
 """#1110 e2e: the run page is saved as the run's record through the run's tenant-bound handle (post-run step and run.py main); a failed dev copy is only a warning, while an unrenderable/unimportable renderer or a refused record write is VisualizeFailed (run.py main still exits 0); the standalone re-render refuses a link planted at the record."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import errno
@@ -249,13 +251,12 @@ class _ReplayLifecycle:
 def entrypoint_env(tmp_path, monkeypatch) -> Path:
     """What the real `run.py main` needs to get past its startup and into its tail:"""
     from defender.runtime import providers
-    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import current_data_root, set_up_tenant
 
     for var in providers.api_key_vars():
         monkeypatch.setenv(var, "spec1110-not-used")
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(tmp_path / "state"))
-    return _tenant.runs_base_for(set_up_tenant(current_data_root()))
+    return location_path(set_up_tenant(current_data_root()).runs)
 
 
 def _main(**seams: Callable[..., Any]) -> int:
@@ -277,7 +278,7 @@ def test_1110_o1_run_main_saves_the_page_through_the_handle_it_materialized(
 
     def materialize(alert: Path, run_id: str | None, **kw: Any) -> Run:
         real = run_common.materialize_run(alert, run_id, **kw)
-        assert real.runs_base == entrypoint_env, "the builder bound another runs base"
+        assert location_path(real.runs_base) == entrypoint_env, "the builder bound another runs base"
         # #1187 (R1): `Run.for_tenant` is retired with the runs base's record it read;
         # `Run.under(container, id, tenant_id=)` is its replacement.
         run = Run.under(real.runs_base, real.run_dir.name, tenant_id=real.tenant_id, io=io)

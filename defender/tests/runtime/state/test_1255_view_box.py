@@ -1,6 +1,8 @@
 """Check model-view mounts, environment, host independence, and unboxed execution."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import functools
 import os
 import subprocess
@@ -65,7 +67,7 @@ def test_b1_the_run_box_uses_only_the_model_view(tmp_path):
     tokens = V.host_tokens(layout)
 
     unmasked = " ".join(create.argv)
-    assert V.scan(unmasked, [str(layout.data_root)]), "control: the sources name the data root"
+    assert V.scan(unmasked, [str(location_path(layout.data_root))]), "control: the sources name the data root"
     assert V.scan(unmasked, [str(layout.checkout)]), "control: the sources name the checkout"
     hits = V.scan(" ".join(V.masked_create(create.argv)), tokens)
     assert not hits, "the box create command shows host layout:\n" + "\n".join(hits)
@@ -80,8 +82,8 @@ def test_b1_two_host_layouts_render_the_same_create_command(tmp_path):
     cb = _created(V.natural_run(b, ALERT, run_id), b)
 
     assert ca.argv != cb.argv, "control: the two hosts' raw create commands must differ"
-    assert V.scan(" ".join(ca.argv), [str(a.data_root)])
-    assert V.scan(" ".join(cb.argv), [str(b.data_root)])
+    assert V.scan(" ".join(ca.argv), [str(location_path(a.data_root))])
+    assert V.scan(" ".join(cb.argv), [str(location_path(b.data_root))])
     ma, mb = V.masked_create(ca.argv), V.masked_create(cb.argv)
     assert ma == mb, (
         "the create command depends on the host layout:\n"
@@ -97,7 +99,7 @@ def _arm_run(layout: V.Layout, tmp_path: Path, monkeypatch) -> object:
     from defender import _yaml
     from defender.tests.support.learning.branch import _triplet_947 as T
 
-    ep_dir = layout.data_root / layout.tenant_id / "episodes" / EPISODE_ID
+    ep_dir = location_path(layout.data_root) / layout.tenant_id / "episodes" / EPISODE_ID
     ep_dir.parent.mkdir(parents=True, exist_ok=True)
     with Episode.create(ep_dir) as episode:
         episode.family.create(_yaml.safe_dump(T.family_doc(

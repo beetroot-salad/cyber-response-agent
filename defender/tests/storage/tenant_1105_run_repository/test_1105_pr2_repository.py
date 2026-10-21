@@ -1,6 +1,8 @@
 """The tenant-scoped run repository: open/create/list, RunAddress, episode views and their refusals."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import uuid
@@ -42,7 +44,7 @@ def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
     t = H.tenant(root, tenant_id)
     H.runs_folder(t)
     for rid in run_ids:
-        H.make_run(t.runs, rid)
+        H.make_run(location_path(t.runs), rid)
     return root, t
 
 
@@ -72,10 +74,10 @@ def _uuid_container(tmp_path: Path, count: int, *, tenant_id: str = H.T_ID):
     root = tmp_path / "data"
     root.mkdir(parents=True, exist_ok=True)
     t = H.tenant(root, tenant_id)
-    Path(t.runs).mkdir(parents=True, exist_ok=True)
+    Path(location_path(t.runs)).mkdir(parents=True, exist_ok=True)
     ids = sorted(str(uuid.uuid4()) for _ in range(count))
     for rid in ids:
-        H.make_run(t.runs, rid)
+        H.make_run(location_path(t.runs), rid)
     return root, t, ids
 
 
@@ -103,10 +105,10 @@ def test_the_accepted_tenant_hands_out_a_repository_that_opens_its_own_runs_by_i
     runs = t.runs_repository()
 
     run = runs.open(_rid(R1))
-    assert Path(run.run_dir) == Path(t.runs) / R1
+    assert Path(run.run_dir) == Path(location_path(t.runs)) / R1
     assert str(run.tenant_id) == H.T_ID
     assert "seed" in (run.facts.alert.read() or "")
-    assert Path(runs.open(_rid(R2)).run_dir) == Path(t.runs) / R2
+    assert Path(runs.open(_rid(R2)).run_dir) == Path(location_path(t.runs)) / R2
     assert isinstance(H.raised(runs.open, t, _rid(R1)), TypeError), (
         "the repository's open took a Tenant beside the id")
 
@@ -115,8 +117,8 @@ def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):
     from defender.run_repository import RunAbsent, RunRefused
 
     _root, t = _good(tmp_path, R1)
-    (Path(t.runs) / AFILE).write_text("x\n", encoding="utf-8")
-    os.symlink(Path(t.runs) / R1, Path(t.runs) / ALINK)
+    (Path(location_path(t.runs)) / AFILE).write_text("x\n", encoding="utf-8")
+    os.symlink(Path(location_path(t.runs)) / R1, Path(location_path(t.runs)) / ALINK)
     runs = t.runs_repository()
 
     absent = H.raised(runs.open, _rid(NOPE))
@@ -133,7 +135,7 @@ def test_run_absent_tells_an_absent_run_from_a_refused_entry(tmp_path):
     with pytest.raises(RunRefused) as caught:  # the handler every existing caller has
         runs.open(_rid(NOPE))
     assert isinstance(caught.value, RunAbsent)
-    assert Path(runs.open(_rid(R1)).run_dir) == Path(t.runs) / R1
+    assert Path(runs.open(_rid(R1)).run_dir) == Path(location_path(t.runs)) / R1
 
 
 def test_a_container_fault_is_the_tenants_refusal_not_an_absent_run(tmp_path):  # name kept; the owner changed the class (#1105 PR 2 review)
@@ -149,17 +151,17 @@ def test_a_container_fault_is_the_tenants_refusal_not_an_absent_run(tmp_path):  
 
     elsewhere = tmp_path / "elsewhere-runs"
     H.make_run(elsewhere, r1)
-    os.symlink(elsewhere, t.runs)
+    os.symlink(elsewhere, location_path(t.runs))
     linked = H.raised(runs.open, _rid(r1))
     assert isinstance(linked, RunUnreachable), f"a linked runs folder was followed: {linked!r}"
     assert isinstance(linked.__cause__, TenantRefused), repr(linked.__cause__)
-    os.unlink(t.runs)
+    os.unlink(location_path(t.runs))
 
     # #1187 declared change 6 (R1): no container record is judged. A real runs folder with no
     # `_tenant.json` is the one #1187 writes, and its run opens.
-    H.make_run(t.runs, r1)
-    assert not (Path(t.runs) / "_tenant.json").exists()
-    assert Path(runs.open(_rid(r1)).run_dir) == Path(t.runs) / r1
+    H.make_run(location_path(t.runs), r1)
+    assert not (Path(location_path(t.runs)) / "_tenant.json").exists()
+    assert Path(runs.open(_rid(r1)).run_dir) == Path(location_path(t.runs)) / r1
 
 
 def test_list_tells_an_absent_container_from_an_empty_one_and_judges_every_entry(tmp_path):
@@ -174,27 +176,27 @@ def test_list_tells_an_absent_container_from_an_empty_one_and_judges_every_entry
     assert none_yet.absent is True
     assert _ids(none_yet) == []
 
-    Path(t.runs).mkdir()
+    Path(location_path(t.runs)).mkdir()
     empty = runs.list()
     assert empty.absent is False
     assert _ids(empty) == []
 
     ids = sorted(str(uuid.uuid4()) for _ in range(2))
     for rid in reversed(ids):
-        H.make_run(t.runs, rid)
-    H.plant_sidecars(t.runs, ids[0])
+        H.make_run(location_path(t.runs), rid)
+    H.plant_sidecars(location_path(t.runs), ids[0])
     listed = runs.list()
     assert listed.absent is False
     assert _ids(listed) == ids
 
-    record = H.plant_tenant_record(t.runs, H.T_ID)
+    record = H.plant_tenant_record(location_path(t.runs), H.T_ID)
     refused = H.raised(runs.list)
     assert isinstance(refused, RunRefused), f"the listing took a _tenant.json: {refused!r}"
     assert "_tenant.json" in str(refused), repr(refused)
     record.unlink()
     assert _ids(runs.list()) == ids, "control: the record gone, the container lists again"
 
-    (Path(t.runs) / "stray.txt").write_text("x\n", encoding="utf-8")
+    (Path(location_path(t.runs)) / "stray.txt").write_text("x\n", encoding="utf-8")
     stray = H.raised(runs.list)
     assert isinstance(stray, RunRefused), repr(stray)
     assert "stray.txt" in str(stray), repr(stray)
@@ -208,22 +210,22 @@ def test_create_holds_the_container_writes_its_record_and_hands_out_the_run(tmp_
 
     r9 = str(uuid.uuid4())
     run = runs.create(_rid(r9))
-    assert Path(run.run_dir) == Path(t.runs) / r9
+    assert Path(run.run_dir) == Path(location_path(t.runs)) / r9
     assert str(run.tenant_id) == H.T_ID
-    assert Path(t.runs).is_dir()
-    assert not Path(t.runs).is_symlink()
+    assert Path(location_path(t.runs)).is_dir()
+    assert not Path(location_path(t.runs)).is_symlink()
     # F18(a): `create` holds the container and hands out the `Run`; it does not make the run's
     # folder (the run makes it at its own setup) and writes no record (#1187 R1), so the
     # container is still empty.
-    assert sorted(os.listdir(t.runs)) == [], (
-        f"create left something in the container: {sorted(os.listdir(t.runs))}")
+    assert sorted(os.listdir(location_path(t.runs))) == [], (
+        f"create left something in the container: {sorted(os.listdir(location_path(t.runs)))}")
 
     other_root = tmp_path / "data2"
     other_root.mkdir()
     u = H.tenant(other_root, H.T_ID)
     target = tmp_path / "link-target"
     target.mkdir()
-    os.symlink(target, u.runs)
+    os.symlink(target, location_path(u.runs))
     linked = H.raised(u.runs_repository().create, _rid(r9))
     assert isinstance(linked, _refusal_classes()), repr(linked)
     assert list(target.iterdir()) == [], "the create wrote through a linked runs folder"
@@ -234,7 +236,7 @@ def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_pat
 
     root, t, (r1,) = _uuid_container(tmp_path, 1)
     u = H.tenant(root, H.U_ID)
-    H.make_run(u.runs, r1)
+    H.make_run(location_path(u.runs), r1)
 
     addr = RunAddress(tenant_id=_tenant.TenantId(H.T_ID), run_id=RunId.parse(r1),
                       episode_id=None)
@@ -245,14 +247,14 @@ def test_a_run_address_round_trips_and_rehydrates_only_in_its_own_tenant(tmp_pat
 
     accepted = H.tenant(root, stored["tenant_id"])
     resolved = accepted.runs_repository().resolve(back)
-    assert Path(resolved.run_dir) == Path(t.runs) / r1
+    assert Path(resolved.run_dir) == Path(location_path(t.runs)) / r1
     assert str(resolved.tenant_id) == H.T_ID
 
     beta_addr = RunAddress(tenant_id=_tenant.TenantId(H.U_ID), run_id=RunId.parse(r1),
                            episode_id=None)
     crossed = H.raised(t.runs_repository().resolve, beta_addr)
     assert isinstance(crossed, _refusal_classes()), f"another tenant's address: {crossed!r}"
-    assert Path(u.runs_repository().resolve(beta_addr).run_dir) == Path(u.runs) / r1
+    assert Path(u.runs_repository().resolve(beta_addr).run_dir) == Path(location_path(u.runs)) / r1
 
 
 def test_a_run_address_checks_its_fields_at_construction_and_is_frozen():

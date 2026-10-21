@@ -1,6 +1,8 @@
 """#1047 O3 — each archived world carries a HOST-WRITTEN record of how its run ended."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 
 import pytest
@@ -18,7 +20,7 @@ def _archive():
 
 def _episode_with(tmp_path, worlds=("b", "c"), **kw):
     """An episode dir plus a runs base holding one finished sibling run dir per world."""
-    base, _src = S.runs_base(tmp_path)
+    base, _src = location_path(S.runs_base)(tmp_path)
     ep = S.episode(tmp_path)
     return ep, {w: S.sibling_run_dir(base, w, **kw) for w in worlds}, base
 

@@ -2,6 +2,8 @@
 per-kind `RecordHandle`."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path, fixture_runs_base
+
 import json
 from pathlib import Path
 from typing import Any
@@ -26,7 +28,7 @@ def run_dir(base: Path) -> Path:
 
 def _tenanted(base: Path, run_id: str = S.RUN_ID):
     """Build a tenant-addressed handle over its record-free runs container."""
-    return S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
+    return S.Run().under(fixture_runs_base(base), run_id, tenant_id=S.DEFAULT_TENANT_ID)
 
 
 # Demand #0 — the return-value contract, RESOLVED at §7 on all four axes
@@ -65,7 +67,7 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
         rule = _rule_refusal(RunId.parse, variant)
         assert isinstance(rule, RunRefused), f"fixture: the rule admits {variant!r} ({rule!r})"
         with pytest.raises(RunRefused) as excinfo:
-            S.Run().under(base, variant, tenant_id=S.DEFAULT_TENANT_ID)
+            S.Run().under(fixture_runs_base(base), variant, tenant_id=S.DEFAULT_TENANT_ID)
         said = str(excinfo.value)
         assert (type(excinfo.value), said) == (type(rule), str(rule)), (
             f"the handle's refusal of {variant!r} is not the run-id rule's own: the handle said "
@@ -80,7 +82,7 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
     # The refusal is the ID's, not the collision's: it holds with no existing directory too,
     # so the handle never has to look at the filesystem to know the id is unusable.
     with pytest.raises(RunRefused) as excinfo:
-        S.Run().under(base, two.upper(), tenant_id=S.DEFAULT_TENANT_ID)
+        S.Run().under(fixture_runs_base(base), two.upper(), tenant_id=S.DEFAULT_TENANT_ID)
     assert str(excinfo.value) == str(_rule_refusal(RunId.parse, two.upper()))
     assert repr(two.upper()) in str(excinfo.value)
     # And nothing was touched on the way to the refusal.
@@ -89,7 +91,7 @@ def test_two_run_ids_differing_only_by_case_cannot_become_one_run_directory(base
     assert sorted(p.name for p in base.iterdir()) == [one], (
         f"the refused call created something: {sorted(p.name for p in base.iterdir())}")
     # Positive control: the case-stable spelling is admitted, unchanged.
-    assert S.Run().under(base, two, tenant_id=S.DEFAULT_TENANT_ID) is not None
+    assert S.Run().under(fixture_runs_base(base), two, tenant_id=S.DEFAULT_TENANT_ID) is not None
 
 
 # d42 / d45 / d43 — the fields, the receivers, the archive projection
@@ -121,12 +123,12 @@ def test_run_under_run_id_containing_path_separator(base):
     escaped.mkdir(exist_ok=True)
     for run_id in ("../escaped", "a/b", "/etc"):
         with pytest.raises(Exception):  # noqa: B017,PT011
-            S.Run().under(base, run_id, tenant_id=S.DEFAULT_TENANT_ID)
+            S.Run().under(fixture_runs_base(base), run_id, tenant_id=S.DEFAULT_TENANT_ID)
         with pytest.raises(Exception):  # noqa: B017,PT011
-            S.Run().under(base, run_id)
+            S.Run().under(fixture_runs_base(base), run_id)
     assert not (escaped / "provenance.json").exists(), "a refused construction wrote outside"
     # Positive control: an ordinary run id resolves, inside the base.
-    ok = S.Run().under(base, S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID)
+    ok = S.Run().under(fixture_runs_base(base), S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID)
     assert ok.run_dir.is_relative_to(base)
 
 
@@ -134,12 +136,12 @@ def test_run_under_run_id_containing_parent_traversal(base):
     outside = base.parent / "outside"
     outside.mkdir(exist_ok=True)
     for run_id in ("..", "../..", "../outside", "x/../../outside"):
-        for build in (lambda r: S.Run().under(base, r, tenant_id=S.DEFAULT_TENANT_ID),
-                      lambda r: S.Run().under(base, r)):
+        for build in (lambda r: S.Run().under(fixture_runs_base(base), r, tenant_id=S.DEFAULT_TENANT_ID),
+                      lambda r: S.Run().under(fixture_runs_base(base), r)):
             with pytest.raises(Exception):  # noqa: B017,PT011
                 build(run_id)
     assert S.Run().under(
-        base, S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID).run_dir.is_relative_to(base), (
+        fixture_runs_base(base), S.RUN_ID, tenant_id=S.DEFAULT_TENANT_ID).run_dir.is_relative_to(base), (
         "positive control: a traversal-free id still resolves, inside the base")
 
 
@@ -148,7 +150,7 @@ def test_handle_over_the_learning_run_directory_that_this_issue_leaves_unowned(t
     S.seed_run_tree(learning_run)
     run = S.Run().at(learning_run)
     assert run.run_dir == learning_run, "N8: it is run-dir-shaped, so Run.at takes it"
-    assert run.runs_base is None, "this root is not a runs base and the handle claims none"
+    assert location_path(run.runs_base) is None, "this root is not a runs base and the handle claims none"
     # Claim C16 is REFUTED: this root IS written. A trace landing here is ordinary, not a fault.
     trace_dir = learning_run / "wire_logs"
     trace_dir.mkdir()
@@ -167,7 +169,7 @@ def test_handle_over_a_companion_corpus_directory_that_is_merely_someones_parent
     # The live site builds from the FILE's parent, which is a directory — unaffected by h09.
     assert S.RunPaths(companion.parent).alert == corpus / "alert_input" / "alert.json", (
         "RunPaths still composes ad hoc over an arbitrary companion-corpus directory")
-    assert S.Run().at(companion.parent).runs_base is None
+    assert location_path(S.Run().at(companion.parent).runs_base) is None
     gate = S.gate()
     assert "skills" not in gate.SWEEP_DIRS, (
         "claim G3 / brief red flag R3: `defender/skills/` is outside the sweep, which is why "
@@ -218,7 +220,7 @@ def test_each_accessor_is_checked_against_its_own_root_not_one_assumed_root(base
         assert resolved.parent == base, (
             f"{name} resolved under {resolved.parent}, not its own root, the runs base")
         assert resolved.name.startswith(run_dir.name), "a sidecar is keyed `<run_id><suffix>`"
-    assert owner.sessions_dir(base) == sessions, (
+    assert location_path(owner.sessions_dir)(fixture_runs_base(base)) == sessions, (
         "the sessions directory is a SIBLING of the runs base (claims C10/C15)")
     assert owner.session_db(base, S.LINEAGE_ID).parent == sessions
     for name in ("alert", "report", "investigation", "executed_queries", "wire_log",

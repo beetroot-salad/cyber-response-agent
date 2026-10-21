@@ -1,6 +1,8 @@
 """Drain retire ceiling: new queue paths live under state_root, ceiling bound at config build, and the pitfalls channel retires at the ceiling."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 import pytest
@@ -21,11 +23,11 @@ from defender.tests.support.learning.curation._lead_author_1134 import lead_tree
 
 
 def _graveyard_file(paths, ch) -> Path:
-    return paths.state_root / ch.deadletter
+    return location_path(paths.state_root) / ch.deadletter
 
 
 def _stuck_file(paths, ch) -> Path:
-    return paths.state_root / ch.stuck
+    return location_path(paths.state_root) / ch.stuck
 
 
 def _pitfalls_rows(n: int) -> list[dict]:
@@ -38,14 +40,14 @@ def _pitfalls_rows(n: int) -> list[dict]:
 def test_new_queue_paths_resolve_under_state_root_not_the_worktree(tmp_path: Path):
     state = tmp_path / "elsewhere"
     paths = h.make_paths(tmp_path, state_dir=state)
-    assert paths.state_root == state
+    assert location_path(paths.state_root) == state
 
     for name in h.ALL_CHANNELS:
         ch = h.channel_of(name)
-        targets = [paths.state_root / rel for rel in (ch.queue, ch.consumed, ch.append_lock)]
+        targets = [location_path(paths.state_root) / rel for rel in (ch.queue, ch.consumed, ch.append_lock)]
         targets.append(_graveyard_file(paths, ch))
         if ch.drain_role is not None:
-            targets.append(paths.state_root / ch.drain_role.file)
+            targets.append(location_path(paths.state_root) / ch.drain_role.file)
         for p in targets:
             assert state in p.parents, f"{name}: {p} is not under the state root"
             assert paths.repo_root not in p.parents
@@ -71,10 +73,10 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     ch = h.channel_of("findings")
 
     for p in (
-        paths.state_root / ch.append_lock, paths.state_root / ch.drain_role.file,
+        location_path(paths.state_root) / ch.append_lock, location_path(paths.state_root) / ch.drain_role.file,
         _graveyard_file(paths, ch), _stuck_file(paths, ch),
     ):
-        assert p.is_relative_to((paths.state_root / FINDINGS.queue).parent), f"{p} is outside the ignored prefix"
+        assert p.is_relative_to((location_path(paths.state_root) / FINDINGS.queue).parent), f"{p} is outside the ignored prefix"
 
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
     fault = h.cfg_for(
@@ -85,7 +87,7 @@ def test_new_lock_and_graveyard_paths_do_not_abort_the_next_batch(tmp_path: Path
     )
     assert drain.run_batch(cfg=fault) == 2
     assert _graveyard_file(paths, ch).is_file()
-    assert (paths.state_root / ch.drain_role.file).exists()
+    assert (location_path(paths.state_root) / ch.drain_role.file).exists()
 
     h.seed(paths, ch, [h.row_for("findings", "a/1")])
     clean = h.cfg_for(paths, "findings", max_attempts=1, invoke_agent=h.committing("ok"))
@@ -254,7 +256,7 @@ def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
     branch, because the dominant pitfalls failure never reached the retire path at all."""
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("pitfalls")
-    assert (paths.state_root / ch.append_lock).name == ".pitfalls.lock"
+    assert (location_path(paths.state_root) / ch.append_lock).name == ".pitfalls.lock"
     assert ch.drain_role is None
     h.seed(paths, ch, _pitfalls_rows(2))
 
@@ -263,7 +265,7 @@ def test_pitfalls_retire_goes_through_the_locked_rotation(tmp_path: Path):
             _state1135.state_for_paths(paths), channel=PITFALLS, batch_ids=["r:l-000:0"], reason="pitfalls retire", max_attempts=1
         )
     )
-    with h.Holder(paths.state_root / ch.append_lock):
+    with h.Holder(location_path(paths.state_root) / ch.append_lock):
         worker._thread.start()
         assert not worker.finished_within(1.0), "the pitfalls retire took no lock"
         assert h.graveyard(paths, ch) == []
@@ -293,20 +295,20 @@ def test_1186_tenant_state_requires_a_real_learning_directory(
     from defender.tests.tenancy.tenant_1120_piece1 import _spec1120 as H
 
     tenant = set_up_tenant(data_root)
-    target = tenant.learning if shape == "plain" else tmp_path / "outside-state"
+    target = location_path(tenant.learning) if shape == "plain" else tmp_path / "outside-state"
     if shape != "dangling-link":
         queue = target / FINDINGS.queue
         queue.parent.mkdir(parents=True)
         queue.write_text('{"finding_id":"boundary/0","run_id":"boundary"}\n', encoding="utf-8")
-    tenant.learning.mkdir(exist_ok=True)
+    location_path(tenant.learning).mkdir(exist_ok=True)
     selected = None
     if selection != "at-open":
         selected = LoopPaths.for_tenant(tenant)
         if selection == "author-checkout":
             selected = selected.with_repo_root(tmp_path / "other-author-checkout")
     if shape != "plain":
-        tenant.learning.rmdir()
-        tenant.learning.symlink_to(target, target_is_directory=True)
+        location_path(tenant.learning).rmdir()
+        location_path(tenant.learning).symlink_to(target, target_is_directory=True)
     before_root, before_target = H.tree_census(data_root), H.tree_census(target)
 
     def read_selected():
@@ -319,8 +321,8 @@ def test_1186_tenant_state_requires_a_real_learning_directory(
     else:
         with pytest.raises((TenantRefused, FatalConfigError, StateRefused)) as refused:
             read_selected()
-        assert str(tenant.learning) in str(refused.value)
-        assert tenant.learning.is_symlink()
+        assert str(location_path(tenant.learning)) in str(refused.value)
+        assert location_path(tenant.learning).is_symlink()
     if shape == "dangling-link":
         assert not target.exists()
         assert not target.is_symlink()
@@ -343,15 +345,15 @@ def test_1186_tenant_paths_keep_state_and_locks_across_author_checkouts(
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))
     first = LoopPaths.for_tenant(a)
     second = LoopPaths.for_tenant(b)
-    assert first.state_root == a.learning
-    assert second.state_root == b.learning
+    assert location_path(first.state_root) == location_path(a.learning)
+    assert location_path(second.state_root) == location_path(b.learning)
     worktree = tmp_path / "different-author-checkout"
     moved = first.with_repo_root(worktree)
     assert moved.repo_root == worktree
-    assert moved.state_root == a.learning
+    assert location_path(moved.state_root) == location_path(a.learning)
 
     # A real read/write through each handle rejects roots that only look tenant scoped.
-    for root in (a.learning, b.learning):
+    for root in (location_path(a.learning), location_path(b.learning)):
         root.mkdir(parents=True, exist_ok=True)
     with LearningState.open(first) as sa, LearningState.open(second) as sb, \
             LearningState.open(moved) as same_a:
@@ -362,10 +364,10 @@ def test_1186_tenant_paths_keep_state_and_locks_across_author_checkouts(
             assert sb.append(ch, [row_b]) == (1, 0)
             assert same_a.rows(ch) == [row_a]
             assert sb.rows(ch) == [row_b]
-            assert (a.learning / ch.queue).is_file()
-            assert (b.learning / ch.queue).is_file()
-            assert (a.learning / ch.append_lock).is_file()
-            assert (b.learning / ch.append_lock).is_file()
+            assert (location_path(a.learning) / ch.queue).is_file()
+            assert (location_path(b.learning) / ch.queue).is_file()
+            assert (location_path(a.learning) / ch.append_lock).is_file()
+            assert (location_path(b.learning) / ch.append_lock).is_file()
 
         sa.record_delivery("same-batch", {"batch_id": "same-batch", "owner": "a"})
         sb.record_delivery("same-batch", {"batch_id": "same-batch", "owner": "b"})

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from defender.records._locations import (_unwrap_exports_root, _unwrap_drafts_root, _unwrap_knowledge_lock)
+
 import contextlib
 import os
 import secrets
@@ -50,7 +52,7 @@ def current_export(tenant: Tenant) -> TenantExport:
     """The export `<T>/exports/current` names, read from the files alone: no git and no process
     (P4's runs have neither). An absent or empty pointer, one that is not an object id (one
     leading out of `exports/` included), or one naming a missing export is `DeliveryRefused`."""
-    exports = tenant.exports
+    exports = _unwrap_exports_root(tenant.exports)
     with _io.bind(exports) as folder:
         # Text, decoded with replacement: an oid is ASCII, so any byte that is not fails the
         # match below rather than the read.
@@ -95,7 +97,7 @@ def tenant_lock(tenant: Tenant) -> Iterator[None]:
     `* -filter` write to the clone's `info/attributes`, and a draft's build, rename and sweep;
     never across network I/O, a box window or a commit. A second taker fails at once with
     `LockBusy` naming the holder's pid; it never waits."""
-    path = tenant.knowledge_lock
+    path = _unwrap_knowledge_lock(tenant.knowledge_lock)
     with _io.hold(path.parent) as folder:
         handle = _io.open_lock_at(folder, path.name)
     try:
@@ -125,13 +127,13 @@ def _pointed_at(tenant: Tenant) -> str | None:
 def publish_locked(tenant: Tenant, repository: GitRepository) -> TenantExport:
     """Sweep dead draft builds, turn tenant-named filters off, fast-forward, export, point
     `current`: the caller holds the tenant's lock."""
-    _sweep_temporaries(tenant.drafts, _DRAFT_TEMPORARY)
+    _sweep_temporaries(_unwrap_drafts_root(tenant.drafts), _DRAFT_TEMPORARY)
     upstream = repository.prepare_publish()
     files = knowledge_at(tenant, repository, upstream)
     repository.fast_forward(upstream)
     export = write_export(tenant, upstream, files)
     if _pointed_at(tenant) != upstream:
-        _io.write_guarded(tenant.exports / _POINTER, f"{upstream}\n", mode="replace")
+        _io.write_guarded(_unwrap_exports_root(tenant.exports) / _POINTER, f"{upstream}\n", mode="replace")
     return export
 
 
@@ -169,7 +171,7 @@ def write_export(tenant: Tenant, commit: str, files: dict[str, bytes]) -> Tenant
     """`<T>/exports/<commit>/`, written whole into a fresh folder beside it and renamed into
     place; an export already there is immutable and kept as it is. The caller holds the
     lock, so any staging folder found is a dead publisher's and is removed first."""
-    exports = tenant.exports
+    exports = _unwrap_exports_root(tenant.exports)
     _sweep_temporaries(exports, _PUBLISHING_PREFIX)
     final = exports / commit
     if _io.entry_present(final):
@@ -200,7 +202,7 @@ def build_draft(
     there. A build that fails removes its temporary; one killed leaves only that temporary,
     which the next publish or batch start sweeps. The caller holds the lock."""
     files = agent_blobs(repository, commit)
-    drafts = tenant.drafts
+    drafts = _unwrap_drafts_root(tenant.drafts)
     temporary = f"{_DRAFT_TEMPORARY}{batch_id}-{secrets.token_hex(4)}"
     try:
         with _io.hold_new(drafts, temporary, exclusive=True) as draft:
@@ -232,3 +234,10 @@ def agent_blobs(repository: GitRepository, commit: str) -> dict[str, bytes]:
             )
     blobs = repository.blobs(oid for _m, _k, oid, _p in entries)
     return {path.removeprefix("agent/"): blobs[oid] for _m, _k, oid, path in entries}
+
+
+def draft_path(tenant: Tenant, batch_id: str) -> Path:
+    """One batch's content folder; the tenant's drafts root stays with this owner."""
+    if not _plain_component(batch_id):
+        raise DeliveryRefused(f"{batch_id!r} is not a plain batch id")
+    return _unwrap_drafts_root(tenant.drafts) / batch_id

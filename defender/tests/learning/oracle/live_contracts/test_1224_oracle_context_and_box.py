@@ -1,6 +1,8 @@
 """What reaches the oracle and the verifier (framed, fact side only, static-to-volatile conversation order) and where oracle Python runs (sandboxed box of its own)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import gc
 import inspect
 import json
@@ -1013,7 +1015,7 @@ def test_python_output_is_not_the_requested_shape(tmp_path):
 def test_oracle_python_scratch_files_and_the_investigators_box(tmp_path, monkeypatch):
     est = _estate(tmp_path)
     tenant = est.place()
-    run_dir = tenant.runs / "run-1224-sib"
+    run_dir = location_path(tenant.runs) / "run-1224-sib"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "investigation.md").write_text("INVRUN-1384 the sibling's own notes\n",
                                               encoding="utf-8")

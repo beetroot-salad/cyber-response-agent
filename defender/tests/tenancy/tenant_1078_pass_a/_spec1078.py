@@ -1,6 +1,8 @@
 """Shared machinery for #1078 pass (A)'s spec — "tenant 1 on the request". NO test scripts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import json
 import os
 import shutil
@@ -80,19 +82,19 @@ def TenantPaths(root: Path | str, tenant_id: str) -> Any:  # noqa: N802 — it i
     """The private layout class #1120 made of the public one (M4): the same constructor, with
     the O11a/J03 guards, now reached by no production caller outside the owner. The pass-A
     tests that built it are re-plumbed onto it (spec_graph_1120-piece1 block (5))."""
-    return tenant()._TenantPaths(root, tenant_id)
+    return tenant()._TenantPaths(fixture_data_root(root), tenant_id)
 
 
 def create_tenant(root: Path, tenant_id: str) -> Any:
-    return tenant().create_tenant(root, tenant_id)
+    return tenant().create_tenant(fixture_data_root(root), tenant_id)
 
 
 def require_tenant(root: Path, tenant_id: str) -> Any:
-    return tenant().require_tenant(root, tenant_id)
+    return tenant().require_tenant(fixture_data_root(root), tenant_id)
 
 
 def resolve_data_root() -> Path:
-    return tenant().resolve_data_root()
+    return location_path(tenant().resolve_data_root())
 
 
 def runs_base_for(tenant_id: str) -> Path:
@@ -100,7 +102,7 @@ def runs_base_for(tenant_id: str) -> Path:
     fixture under the process's data root first (`_data_root_1078.set_up_tenant`)."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
-    return tenant().runs_base_for(set_up_tenant(resolve_data_root(), tenant_id))
+    return location_path(set_up_tenant(resolve_data_root(), tenant_id).runs)
 
 
 def run_common() -> Any:
@@ -163,13 +165,13 @@ def make_tenant(root: Path, tenant_id: str = VALID_ID) -> Any:
     (#1120 DC2: `place_knowledge`, the one entry O10 sanctions in a rowless own folder).
     Returns the `TenantRow` it wrote."""
     place_knowledge(Path(root), tenant_id)
-    return create_tenant(Path(root), tenant_id)
+    return create_tenant(fixture_data_root(Path(root)), tenant_id)
 
 
 def accept(root: Path, tenant_id: str = VALID_ID) -> Any:
     """#1120 D1: the accepted `Tenant` an entry point hands inward — the REAL `accept_tenant`
     over `root`, keyed to this checkout's `defender/`, refusing as it would."""
-    return tenant().accept_tenant(Path(root), tenant_id, defender_dir=DEFENDER)
+    return tenant().accept_tenant(fixture_data_root(Path(root)), tenant_id, defender_dir=DEFENDER)
 
 
 def plant_row(root: Path, tenant_id: str, body: str | bytes | None = None, *,
@@ -234,7 +236,7 @@ def tenant_source(root: Path, tenant_id: str = VALID_ID, *, row: bool = True,
     root = Path(root)
     if row:
         make_tenant(root, tenant_id)
-        accept(root, tenant_id).learning.mkdir(exist_ok=True)
+        location_path(accept(root, tenant_id).learning).mkdir(exist_ok=True)
     base = runs_dir(root, tenant_id)
     base.mkdir(parents=True, exist_ok=True)
     return base, source_run(base, run_id)

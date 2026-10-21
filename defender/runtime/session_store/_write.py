@@ -1,5 +1,7 @@
 """Store connections and append-only writes."""
 from __future__ import annotations
+
+from defender.records._locations import (_unwrap_session_trust_root)
 import contextlib
 import hashlib
 import json
@@ -9,7 +11,7 @@ import uuid
 from dataclasses import field
 from defender._model import model
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from pydantic_ai.messages import (
     ModelMessagesTypeAdapter,
     ModelRequest,
@@ -401,7 +403,7 @@ def _next_seq(conn: sqlite3.Connection, session_id: str, agent_id: str, synthesi
         "WHERE session_id = ? AND agent_id = ? AND synthesized = ?",
         (session_id, agent_id, int(synthesized)),
     ).fetchone()
-    return row[0]
+    return cast(int, row[0])
 
 
 
@@ -425,7 +427,7 @@ def open_store(*, case_id: str, sessions: SessionPaths) -> StoreHandle:
     # The store's path and the root its directory is made under, from the owner's one
     # hand-out (the one `store_path_for`, which the resume door asks, reads too), asked once.
     path, root = sessions.store(case_id)
-    guarded_mkdir(path.parent, base=root)
+    guarded_mkdir(path.parent, base=_unwrap_session_trust_root(root))
     fresh = not path.exists()
     conn = _bare_connect(path)
     try:

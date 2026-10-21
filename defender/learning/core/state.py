@@ -1,6 +1,8 @@
 """The learning-state handle (#1135): the one front door to the learning state tree."""
 from __future__ import annotations
 
+from defender.records._locations import (LearningRoot, DataRoot, _unwrap_learning_root, _unwrap_data_root)
+
 import contextlib
 import errno
 import json
@@ -313,7 +315,8 @@ class LearningState:
     def open(cls, paths: LoopPaths) -> LearningState:
         """Hold an existing state root. Tenant roots must be real directories; explicit
         scratch roots retain their resolved-once handle semantics. Nothing is created."""
-        original = Path(paths.state_root)
+        location = paths.state_root
+        original = _unwrap_learning_root(location) if isinstance(location, LearningRoot) else location
         if paths.tenant is not None and original.is_symlink():
             raise FatalConfigError(f"the tenant learning state root {original} must be a real directory, not a symlink")
         root = original.resolve()
@@ -880,33 +883,35 @@ class LearningAdoption:
     A rerun uses matching tokens to distinguish unpublished copies from committed data.
     """
 
-    def __init__(self, destination: Path, source: Path | None, *, tenant_id: str,
-                 data_root: Path, repo_root: Path) -> None:
+    def __init__(self, destination: LearningRoot, source: Path | None, *, tenant_id: str,
+                 data_root: DataRoot, repo_root: Path) -> None:
         from defender.tenancy._tenant import TenantRefused
 
-        self.destination = destination
+        destination_path = _unwrap_learning_root(destination)
+        root_path = _unwrap_data_root(data_root)
+        self.destination = destination_path
         self.source = source
         self.aside = source / f".adopting-to-{tenant_id}" if source is not None else None
-        self.partial = destination.with_name(destination.name + ".adopting")
+        self.partial = destination_path.with_name(destination_path.name + ".adopting")
         self.stage = self.aside.with_name(self.aside.name + ".stage") if self.aside else None
         self.entries = _adoption_entries()
         self.in_place = False
         self.published = False
-        if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
-            raise TenantRefused(f"{destination} must be a real learning directory, not a link or file")
+        if destination_path.is_symlink() or (destination_path.exists() and not destination_path.is_dir()):
+            raise TenantRefused(f"{destination_path} must be a real learning directory, not a link or file")
         if source is None:
-            if os.path.lexists(self.partial) or os.path.lexists(destination / ".adoption"):
-                raise TenantRefused(f"{destination}: interrupted learning adoption requires its explicit source")
+            if os.path.lexists(self.partial) or os.path.lexists(destination_path / ".adoption"):
+                raise TenantRefused(f"{destination_path}: interrupted learning adoption requires its explicit source")
             return
         if not source.is_dir():
             raise TenantRefused(f"learning migration source {source} is not an existing directory")
         resolved = source.resolve()
-        if resolved == destination.resolve():
+        if resolved == destination_path.resolve():
             self.in_place = True
             return
-        for root in (data_root.resolve(), repo_root.resolve()):
+        for root in (root_path.resolve(), repo_root.resolve()):
             if resolved == root or root.is_relative_to(resolved) or (
-                    root == data_root.resolve() and resolved.is_relative_to(root)):
+                    root == root_path.resolve() and resolved.is_relative_to(root)):
                 raise TenantRefused(f"learning migration source {source} overlaps {root}")
         self._validate_existing_state()
 

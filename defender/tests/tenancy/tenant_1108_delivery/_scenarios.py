@@ -1,6 +1,8 @@
 """Shared setup and independent observations for batch, delivery and revert tests."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import importlib
 
 import json
@@ -77,7 +79,7 @@ def _clone_state(clone):
 
 def _drafts(tenant):
     """The entries of `<T>/drafts/` (none when it does not exist)."""
-    folder = tenant.dir / "drafts"
+    folder = location_path(tenant.tenant_root) / "drafts"
     return sorted(os.listdir(folder)) if folder.exists() else []
 
 
@@ -209,7 +211,7 @@ resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 if mode == "crash":
     d.start_batch(batch_id, lanes=LANES)
     os.kill(os.getpid(), signal.SIGKILL)
-drafts = os.path.realpath(tenant.dir / "drafts")
+drafts = os.path.realpath(root / tenant_id / "drafts")
 # "fail": a write past the cap fails (EFBIG) and the build fails inside this process;
 # "kill": it kills the process (SIGXFSZ), as SIGKILL or a power cut would.
 signal.signal(signal.SIGXFSZ, signal.SIG_IGN if mode == "fail" else signal.SIG_DFL)
@@ -266,7 +268,7 @@ def _build_elsewhere(repo, tmp_path, batch_id, mode):
     build begins under `drafts/` so the big lesson's write fails there; `kill` makes it kill
     the process instead; `crash` kills the process right after `start_batch` returned."""
     tenant = repo[0]
-    proc = subprocess.run([sys.executable, "-c", _BUILD, str(tenant.data_root), str(tenant.id),
+    proc = subprocess.run([sys.executable, "-c", _BUILD, str(location_path(tenant.data_root)), str(tenant.id),
                            str(repo[1]), batch_id, str(_CAP), mode], capture_output=True,
                           text=True, timeout=300, check=False,
                           env=fresh_process_env(tenant, tmp_path / f"build-{mode}"))

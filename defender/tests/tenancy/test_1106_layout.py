@@ -1,6 +1,8 @@
 """Where tenant settings live: the playground tenant and tenant template resolve through the real resolver, the template grants nothing, and no settings file is readable by the model's read surfaces."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import shutil
@@ -19,8 +21,8 @@ def _committed_tenant_dirs() -> list[Path]:
 def test_the_playground_resolves_through_the_real_resolver():
     td = T.fixture_tenant()
     assert td.id == T.PLAYGROUND_ID
-    assert td.settings == td.data_root / T.PLAYGROUND_ID / "knowledge" / "settings"
-    assert td.agent == td.data_root / T.PLAYGROUND_ID / "knowledge" / "agent"
+    assert td.settings == location_path(td.data_root) / T.PLAYGROUND_ID / "knowledge" / "settings"
+    assert td.agent == location_path(td.data_root) / T.PLAYGROUND_ID / "knowledge" / "agent"
     assert (td.settings / "verb-grants.yaml").read_bytes() == \
         (T.FIXTURE_SETTINGS / "verb-grants.yaml").read_bytes()
     assert td.agent.is_dir()
@@ -69,7 +71,7 @@ def test_a_tenant_copied_from_the_template_resolves_and_grants_gather_nothing(tm
     root = tmp_path / "tenants"
     shutil.copytree(T.TEMPLATE_DIR, root / fixture_uuid("tenant:newco") / "knowledge")
     (root / fixture_uuid("tenant:newco") / "knowledge" / "agent" / ".tenant-id").write_text(f"{fixture_uuid('tenant:newco')}\n", encoding="utf-8")
-    T.mod("tenancy._tenant").create_tenant(root, fixture_uuid("tenant:newco"))
+    T.mod("tenancy._tenant").create_tenant(fixture_data_root(root), fixture_uuid("tenant:newco"))
     td = T.accept(root, fixture_uuid("tenant:newco"))
     grants = T.run_grants(td.settings)
     assert grants.gather.entries == ()

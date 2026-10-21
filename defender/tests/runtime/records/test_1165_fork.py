@@ -1,5 +1,7 @@
 """#1165 O1/O4/O7: fork reads belong to the opened source Run."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
@@ -143,7 +145,7 @@ def test_source_store_factory_uses_the_opened_source_record_and_cannot_bypass_it
     assert opened.path == store.path
     opened.close()
     pointer = source.observability.session_pointer.path
-    relative = str(pointer.relative_to(source.runs_base))
+    relative = str(pointer.relative_to(location_path(source.runs_base)))
     assert any(name == relative for _op, _root, name, _mode in source_io.calls)
     source_io.fail_reads = True
     with pytest.raises(branch.BranchError):

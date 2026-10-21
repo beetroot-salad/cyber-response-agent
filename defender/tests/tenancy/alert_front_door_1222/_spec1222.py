@@ -2,6 +2,8 @@
 underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import asyncio
@@ -1295,7 +1297,7 @@ def store_factory(tmp_path: Path, *, fault: SS.StoreFault | None = None,
     base = SS.runs_base(tmp_path)
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("run_repository", "SessionPaths")(base))
+        real = SS.store_mod().open_store(case_id=case_id, sessions=sym("run_repository", "SessionPaths")(fixture_runs_base(base)))
         handle = LeadSessionFault(real, fault or default, once=once)
         if sink is not None:
             sink.append(handle)
@@ -1557,7 +1559,7 @@ class Drive:
         """Every entry under the tenant's runs base (A8: a refused alert leaves none but what
         existed before)."""
         assert self.tenant is not None
-        base = self.tenant.runs
+        base = location_path(self.tenant.runs)
         return sorted(p.name for p in base.iterdir()) if base.is_dir() else []
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from defender.records._locations import (_unwrap_commit_record)
+
 import json
 import logging
 from dataclasses import dataclass
@@ -69,7 +71,7 @@ def _record_made(tenant: Tenant, made: _Made) -> None:
     }
     if made.reverts is not None:
         row["reverts"] = {"batch": _batch_row(made.reverts[0]), "path": made.reverts[1]}
-    record = tenant.commit_record
+    record = _unwrap_commit_record(tenant.commit_record)
     _io.rooted_mkdir(record.parent, ".")
     _io.rooted_write(
         record.parent,
@@ -151,7 +153,7 @@ class _Record:
         """Every row the commit-maker recorded for this tenant. A row of another shape records
         nothing (a torn last line from a crash among them): its commit is then refused by every
         push route, failing closed. An unreadable record refuses."""
-        record = tenant.commit_record
+        record = _unwrap_commit_record(tenant.commit_record)
         with _io.bind(record.parent) as folder:
             rows, malformed, read = folder.read_jsonl(record.name)
         if read.reason is not None:

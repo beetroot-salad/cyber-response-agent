@@ -33,6 +33,8 @@ episode directory: a relaunch, or a second launch beside a running one, is a new
 
 from __future__ import annotations
 
+from defender.records._locations import DataRoot
+
 import argparse
 import concurrent.futures
 import functools
@@ -237,7 +239,7 @@ def _prime_once(
         "than replayed")
 
 
-def _episode_tenant(tenant_id: _tenant.TenantId, data_root: Path) -> RunTenant:
+def _episode_tenant(tenant_id: _tenant.TenantId, data_root: DataRoot) -> RunTenant:
     """The episode's tenant: the request's (`--tenant`), accepted under `data_root` — or the
     refusal, before anything is spent (S2: the tenant comes from the request, never from a
     record or a stamp).

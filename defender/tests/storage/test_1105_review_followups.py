@@ -1,6 +1,8 @@
 """Run-record repository: name rules, bounded reads, escaped refusals, runs-folder link handling."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 import subprocess
 import sys
@@ -27,7 +29,7 @@ def test_the_repository_reads_and_writes_episode_records_without_the_model_stack
 
     t = H.tenant(tmp_path / "data")
     run_id = str(uuid.uuid4())
-    H.make_run(t.runs, run_id)
+    H.make_run(location_path(t.runs), run_id)
     probe = textwrap.dedent(f'''
         import sys
         class _Block:
@@ -109,8 +111,8 @@ def test_an_absent_runs_folder_refusal_carries_no_stale_error(tmp_path):
     with pytest.raises(R.RunAbsent) as absent:
         t.runs_repository().open(R.RunId.parse(run_id))
     assert absent.value.__context__ is None, repr(absent.value.__context__)
-    H.make_run(t.runs, run_id)
-    assert t.runs_repository().open(R.RunId.parse(run_id)).run_dir == t.runs / run_id
+    H.make_run(location_path(t.runs), run_id)
+    assert t.runs_repository().open(R.RunId.parse(run_id)).run_dir == location_path(t.runs) / run_id
 
 
 # -- the third review's findings ----------------------------------------------------------------
@@ -163,7 +165,7 @@ def test_run_setup_and_the_lookups_refuse_a_linked_runs_folder_in_the_same_words
     t = H.tenant(tmp_path / "data")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    os.symlink(elsewhere, t.runs)
+    os.symlink(elsewhere, location_path(t.runs))
     alert = tmp_path / "a" / "alert.json"
     alert.parent.mkdir()
     alert.write_text('{"alert": 1}', encoding="utf-8")

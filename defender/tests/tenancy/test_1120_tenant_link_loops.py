@@ -1,6 +1,8 @@
 """Acceptance answers a link loop or linked tenant folder with its own refusal, never a traceback."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import shutil
 from pathlib import Path
 
@@ -57,7 +59,7 @@ def test_runs_linked_onto_knowledge_puts_settings_in_a_mounted_tree(tmp_path: Pa
 
     runs.unlink()
     runs.mkdir()
-    assert H.accept(_tenant, root).runs == runs
+    assert location_path(H.accept(_tenant, root).runs) == runs
 
 
 def test_a_linked_folder_above_a_required_setting_is_named_as_a_link(tmp_path: Path) -> None:
@@ -82,7 +84,7 @@ def test_a_tenant_folder_linked_into_the_checkout_is_refused_before_acceptance(
 
     (root / H.TID).unlink()
     (root / H.TID).mkdir()
-    assert _tenant._TenantPaths(root, H.TID).dir == root / H.TID
+    assert location_path(_tenant._TenantPaths(fixture_data_root(root), H.TID).tenant_root) == root / H.TID
 
 
 def test_a_nul_in_a_mounted_tree_path_is_a_refusal(tmp_path: Path) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.run_repository import Run
 
 import errno
@@ -780,7 +782,7 @@ def _launcher(tmp_path: Path) -> tuple[Any, Path, Any]:
     episode is claimed by `runs.create_episode()`, a fresh UUID under `<T>/episodes/`; the
     retired `episode_dir` resolver names nothing)."""
     cli = mod("learning.branch.cli")
-    _base, src = T.runs_base(tmp_path)
+    _base, src = location_path(T.runs_base)(tmp_path)
     return cli, src, T.current_tenant().runs_repository()
 
 
@@ -797,7 +799,7 @@ def test_r3_the_launchers_default_primer_primes_an_empty_capture_once_and_warns(
     with cli.prepare_episode(runs, Run.at(src)) as view:
         ep = Path(view.episode.dir)
         assert ep.name == view.episode_id
-    assert ep.parent == Path(T.current_tenant().episodes), (
+    assert ep.parent == Path(location_path(T.current_tenant().episodes)), (
         f"the launcher claimed {ep}, not an episode under <T>/episodes/")
     base = ep / LAYOUT.served_base
     assert base.read_bytes() == b""
@@ -881,7 +883,7 @@ def test_patch_the_minting_check_judges_the_whole_token(tmp_path, token, minted)
 
 def test_patch_resume_with_no_held_episode_is_refused_never_an_ordinary_run(tmp_path):
     run = mod("run")
-    _base, src = T.runs_base(tmp_path)
+    _base, src = location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     ns = run.parse_args(["--tenant", T.SOURCE_TENANT, "--episode", ep.name, "--world", "b"])
 

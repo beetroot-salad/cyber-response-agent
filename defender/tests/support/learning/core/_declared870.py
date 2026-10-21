@@ -1,6 +1,8 @@
 """Substrate for the issue-870 executable spec (`spec-flow/specs/spec_graph_870.yaml`)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 from typing import Any
 
@@ -214,11 +216,11 @@ def queue_ids(paths) -> list[str]:
 
 
 def consumed_by_id(paths) -> dict[str, dict]:
-    return {str(r["pitfall_id"]): r for r in read_rows(paths.state_root / PITFALLS.consumed)}
+    return {str(r["pitfall_id"]): r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
 
 
 def graveyard_by_id(paths) -> dict[str, dict]:
     return {
         str(r["pitfall_id"]): r
-        for r in read_rows(paths.state_root / PITFALLS.deadletter)
+        for r in read_rows(location_path(paths.state_root) / PITFALLS.deadletter)
     }

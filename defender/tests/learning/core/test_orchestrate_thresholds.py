@@ -1,6 +1,8 @@
 """A non-numeric loop threshold env var fails loud as exit 2 (FatalConfigError), and the drain's quarantine/requeue/dead-letter behavior."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 
 import pytest
@@ -22,7 +24,7 @@ from defender.learning.leads import lead_author  # type: ignore[import-not-found
 def _paths(tmp_path) -> LoopPaths:
     """`LoopPaths` over `tmp_path` with its learning state root made (never created lazily)."""
     paths = LoopPaths(repo_root=tmp_path, state_dir=tmp_path / "defender" / "learning")
-    paths.state_root.mkdir(parents=True, exist_ok=True)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
     return paths
 
 
@@ -55,7 +57,7 @@ def test_lead_author_max_retries_bad_value_raises_fatal_config(tmp_path, monkeyp
     with pytest.raises(FatalConfigError, match="LEAD_AUTHOR_MAX_RETRIES"):
         drains._drain_lead_author_markers(
             paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None,
-            data_root=drains._data_root())
+            accept_tenant=drains._tenant_acceptor(paths.tenant))
 
 
 def test_author_drain_bad_threshold_is_fatal_two(tmp_path, monkeypatch):
@@ -82,11 +84,11 @@ def test_lead_author_marker_drain_reraises_fatal_lift_threshold(tmp_path, monkey
 
     with pytest.raises(FatalConfigError):
         drains._drain_lead_author_markers(
-            paths, state, _run_lead_author, data_root=drains._data_root())
+            paths, state, _run_lead_author, accept_tenant=drains._tenant_acceptor(paths.tenant))
 
-    failed_dir = paths.state_root / "author-queue" / "failed"
+    failed_dir = location_path(paths.state_root) / "author-queue" / "failed"
     assert not (failed_dir / f"{run_dir.name}.json").exists()
-    assert (paths.state_root / "author-queue" / "inflight" / f"{run_dir.name}.json").exists()
+    assert (location_path(paths.state_root) / "author-queue" / "inflight" / f"{run_dir.name}.json").exists()
 
 
 def test_drain_pitfalls_reraises_fatal_config_error(tmp_path):
@@ -112,10 +114,10 @@ def test_lead_author_drain_unlinks_marker_on_success(tmp_path, monkeypatch):
 
     drains._drain_lead_author_markers(
         paths, state, lambda _p, _s, _rd, *, box=None, **_kw: None,
-        data_root=drains._data_root())
+        accept_tenant=drains._tenant_acceptor(paths.tenant))
 
-    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
-    assert not (paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
+    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
+    assert not (location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
 
 
 def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
@@ -131,10 +133,10 @@ def test_lead_author_drain_quarantines_a_plain_failure(tmp_path, monkeypatch):
         raise RuntimeError("poison run dir")
 
     drains._drain_lead_author_markers(
-        paths, state, _run_lead_author, data_root=drains._data_root())
+        paths, state, _run_lead_author, accept_tenant=drains._tenant_acceptor(paths.tenant))
 
-    assert not (paths.state_root / "author-queue" / f"{run_dir.name}.json").exists()
-    failed = paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json"
+    assert not (location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json").exists()
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json"
     assert failed.exists()
     assert "lead-author-error" in json.loads(failed.read_text())["failed"]
 
@@ -151,11 +153,11 @@ def test_lead_author_drain_requeues_a_transient_with_bumped_attempts(tmp_path, m
         raise drains._LeadAuthorRetry("rc=None transient")
 
     drains._drain_lead_author_markers(
-        paths, state, _run_lead_author, data_root=drains._data_root())
+        paths, state, _run_lead_author, accept_tenant=drains._tenant_acceptor(paths.tenant))
 
-    marker = paths.state_root / "author-queue" / f"{run_dir.name}.json"
+    marker = location_path(paths.state_root) / "author-queue" / f"{run_dir.name}.json"
     assert marker.exists()
-    assert not (paths.state_root / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
+    assert not (location_path(paths.state_root) / "author-queue" / "failed" / f"{run_dir.name}.json").exists()
     assert json.loads(marker.read_text())["attempts"] == 1
 
 
@@ -301,8 +303,8 @@ def test_run_stage_maps_giterror_to_exit_2():
 
 
 def _seed_queue(paths: LoopPaths, lines: list[str]) -> None:
-    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    (paths.state_root / FINDINGS.queue).write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    (location_path(paths.state_root) / FINDINGS.queue).write_text("".join(line + "\n" for line in lines), encoding="utf-8")
 
 
 def _row(fid: str, **extra) -> str:

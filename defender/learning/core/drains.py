@@ -360,15 +360,19 @@ class BatchDisposition:
         )
 
 
-def _data_root() -> Path:
-    """The configured data root — the lane's one place that reads it, asked only by a tick
-    that has a curation row queued when it starts. A missing or bad setting is the stage's
-    configuration refusal (`FatalConfigError`, raised from `resolve_data_root`'s
+def _tenant_acceptor(tenant: Tenant | None) -> Callable[[object], Tenant]:
+    """Fresh tenant acceptance for a tick with queued curation requests.
+
+    A selected tenant supplies the root through its owner. Scratch paths use the configured
+    root. A missing or bad setting is the stage's configuration refusal
+    (`FatalConfigError`, raised from `resolve_data_root`'s
     `TenantRefused`): `_run_stage` logs it on one line and exits 2."""
     from defender.tenancy import _tenant
 
+    if tenant is not None:
+        return tenant.accept_requested_tenant
     try:
-        return _tenant.resolve_data_root()
+        return functools.partial(_tenant.requested_tenant, _tenant.resolve_data_root())
     except _tenant.TenantRefused as refused:
         raise FatalConfigError(str(refused)) from refused
 
@@ -396,7 +400,7 @@ def _drain_lead_author_markers(
     run_lead_author: Callable[..., None],
     *,
     box: Any = None,
-    data_root: Path,
+    accept_tenant: Callable[[object], Tenant],
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> list[ServedMarker]:
     """Claim the queued curation requests and serve each one's run to `run_lead_author`."""
@@ -415,7 +419,7 @@ def _drain_lead_author_markers(
         if paths.tenant is not None and spec.get("tenant_id") != str(paths.tenant.id):
             state.quarantine(claim, f"tenant {spec.get('tenant_id')!r} does not own selected tenant {paths.tenant.id}'s queue")
             continue
-        run = _rehydrate(claim, data_root, accepted)
+        run = _rehydrate(claim, accept_tenant, accepted)
         if isinstance(run, RunAbsent):
             state.quarantine(claim, "artifact-missing")
             continue
@@ -457,9 +461,10 @@ def _drain_lead_author_markers(
 
 
 def _rehydrate(
-    claim: Claimed, data_root: Path, accepted: dict[str, Tenant | Exception],
+    claim: Claimed, accept_tenant: Callable[[object], Tenant],
+    accepted: dict[str, Tenant | Exception],
 ) -> Run | Exception:
-    """The run `claim`'s address names: its tenant accepted under `data_root` — as a natural
+    """The run `claim`'s address names: its tenant freshly accepted — as a natural
     run's acceptance has it, with no box mount beside the runs base (`box_mounted=()`), once
     per tenant per tick, a refusal included — then the run opened through that tenant's
     repository, which never follows a link at its name. Else the refusal, logged: the
@@ -471,7 +476,7 @@ def _rehydrate(
     key = str(address.tenant_id)
     if key not in accepted:
         try:
-            accepted[key] = _tenant.requested_tenant(data_root, address.tenant_id)
+            accepted[key] = accept_tenant(address.tenant_id)
         except _tenant.TenantRefused as refused:
             _logger.warning(f"{claim.identity}: its tenant cannot be accepted ({refused})")
             accepted[key] = refused
@@ -554,19 +559,19 @@ def _drain_lead_author(
     run_lead_author: Callable[..., None],
     run_pitfalls: Callable[..., int],
     *,
-    data_root: Path | None,
+    accept_tenant: Callable[[object], Tenant] | None,
     box: Any = None,
     lock_wait_seconds: int | None = None,
     git_timeout: float = GIT_TIMEOUT_SECONDS,
 ) -> BatchDisposition:
-    """The tick's work: the curation requests served under `data_root`, then the pitfalls
-    curation. `data_root` is `None` when no request was queued as the tick started
+    """The tick's work: accept each curation request's tenant, then run the pitfalls
+    curation. `accept_tenant` is `None` when no request was queued as the tick started
     (`lead_author_drain`): the tick then claims none — a row that lands mid-tick waits, queued,
     for the next tick — and only the pitfalls step runs."""
     # The batch's box is stopped between agent runs and runs only inside each spawn's
     # `box_for_run`, so no host step of the tick runs beside a process an agent left (#1195).
-    served = [] if data_root is None else _drain_lead_author_markers(
-        paths, state, run_lead_author, box=box, data_root=data_root, git_timeout=git_timeout)
+    served = [] if accept_tenant is None else _drain_lead_author_markers(
+        paths, state, run_lead_author, box=box, accept_tenant=accept_tenant, git_timeout=git_timeout)
     pitfalls = _drain_pitfalls(
         paths, state, run_pitfalls, box=box, lock_wait_seconds=lock_wait_seconds,
         git_timeout=git_timeout,
@@ -894,20 +899,18 @@ def lead_author_drain(
             if not queue_locked:
                 _logger.warning("lead_author_drain: another lead-author run holds the queue lock — skipping")  # lint-run-records: ok — the lead-author role/drain/module's own name, not the `lead_author/` record dir
                 return 0
-            # A queued row is served only under a data root: resolved here, once, before a
-            # worktree or a box exists (the rule above), so a missing or bad setting refuses
-            # the tick (`FatalConfigError`) with every row still queued. A tick with nothing
-            # queued now reads no root and claims no row: one that lands mid-tick waits for
-            # the next tick.
-            data_root = ((paths.tenant.data_root if paths.tenant is not None else _data_root())
-                         if state.has_requests() else None)
+            # Choose request acceptance before a worktree or box exists. A selected tenant
+            # supplies it; scratch paths resolve the configured root here, so a bad setting
+            # refuses the tick with every row still queued. A tick with nothing queued reads
+            # no root and claims no row: one that lands mid-tick waits for the next tick.
+            accept_tenant = _tenant_acceptor(paths.tenant) if state.has_requests() else None
             return _run_worktree_batch(
                 paths, state, branch, label=LEAD_AUTHOR_DRAIN_LABEL,
                 has_work=_has_lead_author_work,
                 do_work=lambda wt_paths, *, box=None: _drain_lead_author(
                     wt_paths, state, run_lead_author, run_pitfalls, box=box,
                     lock_wait_seconds=lock_wait_seconds, git_timeout=git_timeout,
-                    data_root=data_root,
+                    accept_tenant=accept_tenant,
                 ),
                 start_box=start_box, stop_box=stop_box, scrub=scrub,
             )

@@ -1,6 +1,8 @@
 """Branch launcher keeps a fork's tenant: source opened through the tenant's runs repository, refusals write nothing, episodes-root placement refusals."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _branch_947 as B947
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -125,7 +127,7 @@ def test_o5_no_record_refused_never_minted(tmp_path, monkeypatch, data_root):
 
 def test_o5_requires_row(tmp_path, data_root):
     base, src = H.tenant_source(data_root, TID, row=False)
-    assert not H.row_path(data_root, TID).exists()
+    assert not location_path(H.row_path)(data_root, TID).exists()
     H.place_knowledge(data_root, TID)
     before = H.census(data_root)
     H.owner_refusal(H.accept, data_root, TID)
@@ -295,7 +297,7 @@ def test_tenant_of_run_dir_given_a_run_dir_that_is_a_file_not_a_directory(
 def _accepted(root: Path):
     """T created in `root` over its placed knowledge (when it is not there yet) and accepted
     through the real `accept_tenant` — what the launcher hands `episodes_root`."""
-    if not H.row_path(root, TID).exists():
+    if not location_path(H.row_path)(root, TID).exists():
         H.make_tenant(root, TID)
     return H.accept(root, TID)
 

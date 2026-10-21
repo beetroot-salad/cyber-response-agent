@@ -1,5 +1,7 @@
 """#1077's tenant-record/stamp/family demands, RESTORED under #1078's tenant-on-the-request API."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
@@ -263,7 +265,7 @@ def _family_dirs(tmp_path, tenant_id=FAMILY_TENANT, episode_id=None):
     `<data root>/<T>/episodes/<uuid>`, its RUNS step taken (`episode_view`: `runs/` and the
     arm roster), each arm at the id the roster holds for its label — never `<episode>-<label>`.
     `dirs` is in `T.WORLDS` order; `_label(ep, d)` names an arm's label."""
-    T.runs_base(tmp_path, tenant_id=tenant_id)
+    location_path(T.runs_base)(tmp_path, tenant_id=tenant_id)
     episode_id = episode_id or T.EPISODE_ID
     ep = T.episode(tmp_path, episode_id=episode_id)
     with Episode.open(ep) as episode:

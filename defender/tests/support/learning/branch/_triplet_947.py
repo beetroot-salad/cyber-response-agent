@@ -1,6 +1,8 @@
 """Shared machinery for #947's questioner-authored-triplet spec — NO test scripts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base, location_path
+
 
 import hashlib
 import importlib
@@ -465,7 +467,7 @@ def _default_root(tmp_path: Path) -> Path:
     one episode per id under a tenant, so without this a second scene would be built INTO the
     first (a FIFO the first planted then blocks the second's writes). The judge and the page
     reach either by id through the tenant whose folder holds it (`_judge_921.episode_runs_for`)."""
-    home = current_tenant().episodes
+    home = location_path(current_tenant().episodes)
     first = _FIRST_SCENE.setdefault(str(Path(home).absolute()), str(Path(tmp_path).absolute()))
     if first == str(Path(tmp_path).absolute()):
         return home
@@ -561,7 +563,7 @@ def tenant_episodes(data_root: Path) -> Path:
     location). Pass the result as `episode(root=...)`."""
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
-    return set_up_tenant(Path(data_root), current_tenant().id).episodes
+    return location_path(set_up_tenant(Path(data_root), current_tenant().id).episodes)
 
 
 def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
@@ -569,7 +571,6 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
               pre_snapshot: bool = False,
               land_calls: Callable[[Path], None] | None = None) -> tuple[Path, Path]:
     """A runs base holding ONE ordinary finished run. Returns (base, source_run_dir)."""
-    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
@@ -578,8 +579,8 @@ def runs_base(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID,
                           if (p / "tenant.json").is_file()) if root.is_dir() else []
         tenant_id = existing[0] if existing else SOURCE_TENANT
     tenant = set_up_tenant(root, tenant_id)
-    tenant.learning.mkdir(exist_ok=True)  # setup provisions the real launcher queue root
-    base = _tenant.runs_base_for(tenant)
+    location_path(tenant.learning).mkdir(exist_ok=True)  # setup provisions the real launcher queue root
+    base = location_path(tenant.runs)
     base.mkdir(parents=True, exist_ok=True)
     src = base / source_run_id
     (src / "gather_raw").mkdir(parents=True, exist_ok=True)
@@ -645,7 +646,7 @@ def _source_handle(src: Path) -> Any:
     src = Path(src)
     if is_fixture_uuid_shape(src.name):
         return fixture_run(src)
-    return Run(src, runs_base=src.parent)
+    return Run(src, runs_base=fixture_runs_base(src.parent))
 
 
 def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) -> None:
@@ -665,7 +666,7 @@ def seed_source_session(base: Path, src: Path, *, pre_snapshot: bool = False) ->
 
     # #1105 fork S(b): the store takes the layout owner's hand-out for the runs base.
     case_id = source_case_id(src)
-    store = ss.open_store(case_id=case_id, sessions=SessionPaths(base))
+    store = ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(base)))
     try:
         ss.write_case_pointer(_source_handle(src), case_id=case_id, store_path=store.path)
         session_id = store.new_session(agent_id="main")
@@ -1024,7 +1025,7 @@ def open_source(src: Path) -> Any:
     from defender.run_repository import RunId
 
     src = Path(src)
-    tenant = _tenant.accept_tenant(src.parent.parent.parent, src.parent.parent.name,
+    tenant = _tenant.accept_tenant(fixture_data_root(src.parent.parent.parent), src.parent.parent.name,
                                    defender_dir=DEFENDER)
     return tenant.runs_repository().open(RunId.parse(src.name))
 

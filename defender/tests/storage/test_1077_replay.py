@@ -1,5 +1,7 @@
 """#1077 — the properties that must survive the migration, driven through the real run."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
@@ -48,7 +50,7 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
         tmp_path: Path):
     run_dir = materialize(tmp_path, GOLDEN)
     base = run_dir.parent
-    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
+    handle = S.Run().under(fixture_runs_base(base), run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     queries = S.member(handle, "tables", "queries")
     leads = S.member(handle, "tables", "leads", S.LEAD_ID)
 
@@ -87,9 +89,9 @@ def test_leads_and_queries_stay_append_only_and_readable_mid_run_through_the_han
 
 
 def test_resume_joins_a_session_store_with_an_incomplete_last_append(tmp_path: Path):
-    base = SS.runs_base(tmp_path)
+    base = location_path(SS.runs_base)(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-resume")))
-    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
+    handle = S.Run().under(fixture_runs_base(base), run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
 
     with S.member(handle, "session", "session_db", "case-alpha").open() as store:
         session_id, _ = SS.mid_pair_session(store)
@@ -142,7 +144,7 @@ def test_the_append_only_tables_written_by_two_routes_at_once(tmp_path: Path):
     from defender._io import append_jsonl
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-mixed")))
-    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
+    handle = S.Run().under(fixture_runs_base(base), run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     queries = S.member(handle, "tables", "queries")
 
     queries.append([{"seq": 0, "route": "handle"}])
@@ -182,7 +184,7 @@ def test_a_writer_that_runs_outside_the_driver_process(tmp_path: Path):
 def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_path: Path):
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-besteffort")))
-    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
+    handle = S.Run().under(fixture_runs_base(base), run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
 
     # A REAL obstruction through the REAL primitive: the record's own path is occupied by a
     # directory, so today's append seam raises on disk. No exception is injected.
@@ -199,7 +201,7 @@ def test_a_failed_observability_write_is_recorded_and_does_not_fail_the_run(tmp_
 
     # POSITIVE CONTROL: with the obstruction gone the same append lands and records nothing.
     trace.path.rmdir()
-    clean = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
+    clean = S.Run().under(fixture_runs_base(base), run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     S.member(clean, "observability", "tool_trace").append([{"row": 2}])
     assert _read_rows(trace.path) == [{"row": 2}]
     assert clean.partial_failures == ()
@@ -255,7 +257,7 @@ def test_wire_log_writers_stay_distinguishable_under_concurrent_main_and_subagen
         tmp_path: Path):
     base = S.make_runs_base(tmp_path)
     run_dir = S.seed_run_tree(S.make_run_dir(base, fixture_uuid("run-concurrent")))
-    handle = S.Run().under(base, run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
+    handle = S.Run().under(fixture_runs_base(base), run_dir.name, tenant_id=S.DEFAULT_TENANT_ID)
     wire = S.member(handle, "observability", "wire_log")
 
     writers = ("MAIN", "gather-l-aaa111", "gather-l-bbb222")

@@ -33,6 +33,7 @@ Only a slug with no row is "not run". An F inside the runs dir is refused: that 
 boxes' own.
 """
 from __future__ import annotations
+from defender.tenancy._tenant import data_root_contains, data_root_description
 
 import argparse
 import json
@@ -181,8 +182,8 @@ def launch(slug: str, index: Path, fixtures_dir: Path, *, tenant_id: str, spawn:
         raise IndexRefused(f"no labelled held-out fixture {slug!r} under {fixtures_dir}")
     held, absolute, leaf = _hold_index_folder(index)
     with held:
-        if _inside(absolute, data_root):
-            raise IndexRefused(f"it is under the data root {data_root}, where a box or the loop can "
+        if data_root_contains(data_root, absolute):
+            raise IndexRefused(f"it is under the data root {data_root_description(data_root)}, where a box or the loop can "
                                "write it")
         run_id = str(RunId.mint())
         row = json.dumps({"slug": slug, "run_id": run_id})  # lint-jsonl-io: ok — one row through the held folder's no-follow append; `append_jsonl` follows the spelling

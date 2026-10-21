@@ -1,6 +1,8 @@
 """Substrate for the issue-869 executable spec (`spec-flow/specs/spec_graph_869.yaml`)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import json
 import os
 import subprocess
@@ -265,7 +267,7 @@ def seed_executed_query(
     state = RunState(run_dir, "r869-historical")
     state.inherit_rows(read_jsonl_rows(RunPaths(run_dir).executed_queries))
     return append_query_row(
-        state, run=Run.under(run_dir.parent, run_dir.name),
+        state, run=Run.under(fixture_runs_base(run_dir.parent), run_dir.name),
         lead_id=lead_id, system=system, verb=verb, query_id=query_id,
         params={"query": "FROM logs"}, raw_command=f"{system} {verb}",
         payload_text="[]", exit_code=0, payload_status="ok", payload_digest="2 bytes",

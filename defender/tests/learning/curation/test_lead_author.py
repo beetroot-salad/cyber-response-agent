@@ -1,6 +1,8 @@
 """Lead-author driver: lead extraction, handoff shape, lock/sentinel paths, and the post-flight skills scope gate."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import re
 import shutil
@@ -1090,7 +1092,7 @@ def test_run_collects_general_failure_before_early_return(tmp_git_repo: Path, tm
     _write_query(run_dir, "l-001", 0, "elastic.esql", payload_status="error")
 
     assert lead_author.run(run_of(run_dir), label=LEAD_AUTHOR_DRAIN_LABEL, deps=deps) == 0
-    queue = deps.paths.state_root / PITFALLS.queue
+    queue = location_path(deps.paths.state_root) / PITFALLS.queue
     rows = [json.loads(ln) for ln in queue.read_text().splitlines()]
     assert [r["query_id"] for r in rows] == ["elastic.esql"]
     assert rows[0]["error_class"] == "agent-fixable"

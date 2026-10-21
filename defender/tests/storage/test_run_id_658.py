@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import pytest
 
 from defender import run_common
@@ -70,7 +72,7 @@ def test_materialize_rejects_an_invalid_explicit_run_id_before_writing(
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     tenant = _set_up_tenant(tmp_path, monkeypatch)
-    runs_base = tenant.runs
+    runs_base = location_path(tenant.runs)
 
     with pytest.raises(SystemExit, match="invalid run id"):
         run_common.materialize_run(alert, run_id, tenant=tenant)
@@ -85,7 +87,7 @@ def test_run_id_slug_accepts_mixed_case_and_materialize_refuses_it(tmp_path, mon
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     tenant = _set_up_tenant(tmp_path, monkeypatch)
-    runs_base = tenant.runs
+    runs_base = location_path(tenant.runs)
 
     with pytest.raises(SystemExit, match="invalid run id"):
         run_common.materialize_run(alert, run_id, tenant=tenant)
@@ -108,7 +110,7 @@ def test_materialize_accepts_a_valid_run_id(tmp_path, monkeypatch, run_id):
     alert = tmp_path / "fixture.json"
     alert.write_text("{}\n", encoding="utf-8")
     tenant = _set_up_tenant(tmp_path, monkeypatch)
-    runs_base = tenant.runs
+    runs_base = location_path(tenant.runs)
 
     run_dir = run_common.materialize_run(alert, run_id, tenant=tenant).run_dir
 
@@ -126,7 +128,7 @@ def test_materialize_cannot_create_a_run_outside_the_runs_base(tmp_path, monkeyp
     outside = tmp_path / "escape"
     run_id = str(outside) if kind == "absolute" else "../escape"
     tenant = _set_up_tenant(tmp_path, monkeypatch)
-    runs_base = tenant.runs
+    runs_base = location_path(tenant.runs)
 
     with pytest.raises(SystemExit, match="invalid run id"):
         run_common.materialize_run(alert, run_id, tenant=tenant)

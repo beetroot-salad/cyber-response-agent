@@ -2,6 +2,8 @@
 underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+
 import contextlib
 import hashlib
 import importlib
@@ -1460,7 +1462,7 @@ def source_run(tmp_path: Path, est: Estate, *, calls: Iterable[Call] | None = No
         if after_source is not None:
             after_source(src)
 
-    base, src = T.runs_base(tmp_path, tenant_id=tenant_id, land_calls=land)
+    base, src = location_path(T.runs_base)(tmp_path, tenant_id=tenant_id, land_calls=land)
     for seq, c in enumerate(post):
         T.capture_call(src, system=c.system, verb=c.verb, params=dict(c.params),
                        payload=c.payload, lead=POST_BRANCH_LEAD, seq=seq)
@@ -1481,7 +1483,7 @@ def _dispatch_after_branch_point(base: Path, src: Path, lead: str) -> None:
 
     from defender.run_repository import SessionPaths
 
-    store = ss.open_store(case_id=T.source_case_id(src), sessions=SessionPaths(base))
+    store = ss.open_store(case_id=T.source_case_id(src), sessions=SessionPaths(fixture_runs_base(base)))
     try:
         session_id = session_for_run(store, src, source_run=_run_handle_1165(src))
         call_id = f"gather-{lead}-after-branch"

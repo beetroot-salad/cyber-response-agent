@@ -1,6 +1,8 @@
 """Run-record refusals stay one line under a forged folder name; the run-layout lint reports unparseable modules."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import importlib.util
 import shutil
 import sys
@@ -17,7 +19,7 @@ _FORGED = "x\nFORGED LINE: all good"
 
 def _tenant_under_a_hostile_folder(tmp_path: Path):
     t = H.tenant(tmp_path / _FORGED)
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     runs.mkdir(parents=True)
     return t, runs
 

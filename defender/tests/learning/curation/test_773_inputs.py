@@ -242,7 +242,7 @@ def test_a_lesson_citing_an_id_that_belongs_to_the_sibling_channels_batch_773(tm
 
 
 def test_a_tick_whose_corpus_is_already_dirty_when_it_starts_773(tmp_path):
-    """A tick refuses to start on an ALREADY-DIRTY corpus with a NAMED, REPORTED disposition
+    """A tick refuses to start on an ALREADY-DIRTY corpus with a named, reported disposition
     — loud, never a silent widening of vouching's scope to anything under the corpus."""
     sc = S.build_scene(
         tmp_path,

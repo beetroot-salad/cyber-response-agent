@@ -1,6 +1,8 @@
 """#947 — the family launcher's refusals that nothing later could recover from."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 
 import importlib
 import os
@@ -83,7 +85,7 @@ def test_a_safe_episode_id_resolves_beneath_the_configured_episodes_root(
 
     with tenant_paths.runs_repository().create_episode() as view:
         episode_id = view.episode_id
-    claimed = S.episodes_dir(tenant_paths.data_root, str(tenant_paths.id)) / episode_id
+    claimed = S.episodes_dir(location_path(tenant_paths.data_root), str(tenant_paths.id)) / episode_id
     assert S.is_canonical_uuid(episode_id), f"{episode_id!r} is not a canonical uuid"
     assert claimed.is_dir(), claimed
     assert not claimed.is_symlink(), claimed
@@ -96,7 +98,7 @@ def test_an_existing_episode_is_refused_even_if_only_stale_world_rows_remain(
     """Reusing an episode id cannot revive old per-world live-base rows."""
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
-    episodes = S.episodes_dir(tenant_paths.data_root, str(tenant_paths.id))
+    episodes = S.episodes_dir(location_path(tenant_paths.data_root), str(tenant_paths.id))
     stale_id = S.new_id()
     stale = episodes / stale_id / "served" / "w1.jsonl"
     stale.parent.mkdir(parents=True, exist_ok=True)

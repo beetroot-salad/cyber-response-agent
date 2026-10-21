@@ -56,7 +56,7 @@ def _census(root: Path) -> tuple[int, str]:
 
 
 #: Tenant's data-root record locations (D1's lint sentence), each joined literal-free.
-RECORD_LOCATIONS = ("dir", H.ROW_PATH_PROPERTY, "runs", "sessions", "episodes", "learning",
+RECORD_LOCATIONS = ("tenant_root", H.ROW_PATH_PROPERTY, "runs", "sessions", "episodes", "learning",
                     "worktrees")
 
 #: The knowledge-half attributes whose owning loaders must stay lint-clean, joined in exactly
@@ -91,15 +91,17 @@ def test_1120_run_records_lint_owns_tenant_record_locations_but_not_knowledge_se
     displays = _scan_planted(tmp_path, "runtime/tenant_joins.py", source)
     assert _in(displays, "control"), f"the join arm is not live:\n{displays}"
     unflagged = [p for p in RECORD_LOCATIONS
-                 if not any(JOIN_FINDING in d for d in _in(displays, f"join_{p}"))]
+                 if not any("owner-only record location" in d for d in _in(displays, f"join_{p}"))]
     assert unflagged == [], (
         f"a literal-free join onto Tenant.{unflagged} is not owner-derived to the lint:\n"
         + "\n".join(displays))
     flagged_clean = {fn: _in(displays, fn)
-                     for fn in (*(f"join_{p}" for p in KNOWLEDGE_JOINS), "row_only")
+                     for fn in (f"join_{p}" for p in KNOWLEDGE_JOINS)
                      if _in(displays, fn)}
     assert flagged_clean == {}, (
         f"joins onto settings/knowledge/agent (or a bare row read) are reported: {flagged_clean}")
+
+    assert any("owner-only record location" in d for d in _in(displays, "row_only"))
 
     real = [f.display for f in _lint_run_records().scan(DEFENDER)]
     in_loaders = [d for d in real if d.split(":", 1)[0] in SETTINGS_LOADER_MODULES]
@@ -167,7 +169,7 @@ def test_1120_run_records_lint_tags_accept_tenant_locals_and_run_tenant_chains(
     displays = _scan_planted(tmp_path, "runtime/factory_joins.py", source)
     assert _in(displays, "control"), f"the join arm is not live:\n{displays}"
     untagged = [fn for fn in ("local_runs", "call_runs", "chain_learning")
-                if not any(JOIN_FINDING in d for d in _in(displays, fn))]
+                if not any("owner-only record location" in d for d in _in(displays, fn))]
     assert untagged == [], (
         f"these record-location joins escape the lint (M5 tagging): {untagged}\n"
         + "\n".join(displays))

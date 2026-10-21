@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import re
 import shutil
 import pathlib
@@ -236,7 +238,7 @@ def test_1025_an_episode_whose_judge_failed_at_the_enqueue_still_renders_its_sta
         def __call__(self, prompt, *, agent_id="judge", **kwargs):
             if self.calls == 0:
                 # The launch scene has now installed its own accepted tenant settings.
-                (T.current_tenant().learning / "_pending").write_text(
+                (location_path(T.current_tenant().learning) / "_pending").write_text(
                     "not a directory", encoding="utf-8")
             world_ids = re.findall(r"storage world UUID: ([0-9a-f-]{36})", prompt)
             assert agent_id.split(":")[1] in world_ids

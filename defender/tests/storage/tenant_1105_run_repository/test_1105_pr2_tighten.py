@@ -1,5 +1,7 @@
 """Hardening: refused siblings/pages read no episode record, foreign records and linked runs refused, malformed drain rows quarantined, CLI smoke as a process."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import contextlib
@@ -89,7 +91,7 @@ def test_f2_a_refused_sibling_reads_no_episode_record(tmp_path):
     doc = _yaml.safe_load((ep / "family.yaml").read_text(encoding="utf-8"))
     (ep / "runs").mkdir(exist_ok=True)
     S.write_roster(ep, {w["world_id"]: S.new_id() for w in doc["worlds"]})
-    P.second_tenant(P.data_root(), H.U_ID)
+    P.second_tenant(location_path(P.data_root)(), H.U_ID)
     records = _episode_records(ep)
     assert {"family.yaml", S.ROSTER_NAME} <= records
 
@@ -113,10 +115,10 @@ def test_f2_a_refused_page_reads_no_episode_record(tmp_path, d9_tenant):
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     episode_id = S.new_id()
-    ep = S.make_episode(P.data_root(), d9_tenant, episode_id, labels=T.WORLDS, roster=True)
+    ep = S.make_episode(location_path(P.data_root)(), d9_tenant, episode_id, labels=T.WORLDS, roster=True)
     T.write_family(ep, T.family_doc(episode_id=episode_id, source_run_id=S.new_id()))
     E.write_outcome(ep, "accepted", reason="F2 outcome", family_stamp=False)
-    P.second_tenant(P.data_root(), H.U_ID)
+    P.second_tenant(location_path(P.data_root)(), H.U_ID)
     records = _episode_records(ep)
     assert {"family.yaml", S.ROSTER_NAME, "outcome.yaml"} <= records
 
@@ -221,7 +223,7 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
     from defender.runtime.verbs import read_roster
     from defender.cli import workspace_map as wm
 
-    runs = P.data_root() / d9_tenant / "runs"
+    runs = location_path(P.data_root)() / d9_tenant / "runs"
     run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
         run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
@@ -248,18 +250,18 @@ def test_f5_workspace_map_refuses_a_foreign_record_and_a_linked_runs(tmp_path, d
     ("tenant-dict", {"tenant_id": {"id": H.T_ID}, "run_id": _F6_R1}),
 ])
 def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_id, body):
-    root = P.data_root()
+    root = location_path(P.data_root)()
     t = H.tenant(root, H.T_ID)
     H.runs_folder(t)
     for run_id in (_F6_R1, _F6_R2):
-        H.make_run(t.runs, run_id)
+        H.make_run(location_path(t.runs), run_id)
     paths = P.loop_paths(tmp_path)
     P.queue_row(paths, case_id, {"case_id": case_id, **body})
     P.queue_row(paths, "good", {"case_id": "good", "tenant_id": H.T_ID, "run_id": _F6_R1})
 
     lane = P.Lane()
     assert H.raised(P.drain, paths, lane) is None, "the malformed row raised out of the drain"
-    assert lane.run_dirs == [Path(t.runs) / _F6_R1], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(location_path(t.runs)) / _F6_R1], f"served {lane.run_dirs}"
     letter = P.dead_letter(paths, case_id)
     assert letter is not None, f"{case_id} was not quarantined"
     assert str(letter.get("failed", "")).startswith("unreadable"), letter
@@ -270,7 +272,7 @@ def test_f6_a_malformed_row_is_quarantined_and_the_drain_goes_on(tmp_path, case_
     P.queue_row(paths, "next", {"case_id": "next", "tenant_id": H.T_ID, "run_id": _F6_R2})
     again = P.Lane()
     assert H.raised(P.drain, paths, again) is None, "the next tick raised: the drain is wedged"
-    assert Path(t.runs) / _F6_R2 in again.run_dirs, f"the next tick served {again.run_dirs}"
+    assert Path(location_path(t.runs)) / _F6_R2 in again.run_dirs, f"the next tick served {again.run_dirs}"
 
 
 _ABSENT = fixture_uuid("pr2-absent")
@@ -305,7 +307,7 @@ def test_f7_workspace_map_as_a_process(tmp_path, d9_tenant):
     from defender.runtime.verbs import read_roster
     from defender.cli import workspace_map as wm
 
-    runs = P.data_root() / d9_tenant / "runs"
+    runs = location_path(P.data_root)() / d9_tenant / "runs"
     run = H.make_run(runs, str(uuid.uuid4()))
     expected = wm.workspace_map(
         run, systems=tuple(read_roster(adapters_under(wm.DEFENDER_DIR)).accepted))
@@ -324,9 +326,9 @@ def _done_run(tenant_id: str) -> Path:
 
     from defender.learning.leads import lead_author
 
-    tenant = H.tenant(P.data_root(), tenant_id)
-    tenant.learning.mkdir(exist_ok=True)
-    run = H.make_run(tenant.runs, str(uuid.uuid4()))
+    tenant = H.tenant(location_path(P.data_root)(), tenant_id)
+    location_path(tenant.learning).mkdir(exist_ok=True)
+    run = H.make_run(location_path(tenant.runs), str(uuid.uuid4()))
     lead_author.write_done_sentinel(run, "0" * 40)
     return run
 
@@ -338,7 +340,7 @@ def test_f9_the_lead_author_resolves_tenant_and_run_id_and_refuses_a_path(tmp_pa
     ok = P.drive_cli(lead_author.main, ["--tenant", d9_tenant, run.name])
     assert ok.rc == 0, f"--tenant T <run id> was not served: {ok.said}"
 
-    P.second_tenant(P.data_root(), H.U_ID)
+    P.second_tenant(location_path(P.data_root)(), H.U_ID)
     for argv in (["--tenant", d9_tenant, str(run)],
                  ["--tenant", H.U_ID, run.name],
                  ["--tenant", d9_tenant, _ABSENT]):
