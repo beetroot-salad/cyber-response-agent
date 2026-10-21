@@ -574,7 +574,7 @@ def test_lead_author_drain_resets_worktree_between_markers(tmp_path: Path):
             raise RuntimeError("scope-gate boom")
 
     drains._drain_lead_author_markers(paths, state_for_paths(paths), run_lead_author,
-                                      data_root=drains._data_root())
+                                      accept_tenant=drains._tenant_acceptor(paths.tenant))
 
     assert clean_at_entry[poison.name] is True
     assert clean_at_entry[good.name] is True

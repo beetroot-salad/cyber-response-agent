@@ -33,7 +33,6 @@ Only a slug with no row is "not run". An F inside the runs dir is refused: that 
 boxes' own.
 """
 from __future__ import annotations
-from defender.tenancy._tenant import data_root_contains, data_root_description
 
 import argparse
 import json
@@ -57,7 +56,9 @@ from defender._yaml import safe_load
 from defender._model import model
 from defender.records._report import read_report
 from defender.records._run_id import run_id_fault
-from defender.tenancy._tenant import TenantId, TenantRefused, resolve_data_root
+from defender.tenancy._tenant import (
+    TenantId, TenantRefused, data_root_contains, data_root_description, resolve_data_root,
+)
 from defender.run_repository import RUN_LAYOUT, RunId, RunPaths
 from defender.run_common import HELD_OUT_FIXTURES as FIXTURES_DIR
 from defender._io import read_text_utf8

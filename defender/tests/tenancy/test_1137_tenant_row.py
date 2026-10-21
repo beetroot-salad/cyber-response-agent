@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
+from defender.tests.support.shared._locations_1210 import fixture_data_root
 
 import dataclasses
 import errno
@@ -283,14 +284,14 @@ def test_require_tenant_reads_the_row_as_it_did(tmp_path, shape):
     case = READ_SHAPES[shape]
     case.plant(w)
     if case.repair is None:
-        row = _served(owner.require_tenant, w.root, TID)
+        row = _served(owner.require_tenant, fixture_data_root(w.root), TID)
         assert (row.tenant_id, row.created_at) == (TID, _expected_at(shape))
         return
     before = _tree_state(tmp_path)
-    _assert_row_refusal(_refused(owner.require_tenant, w.root, TID), w, shape)
+    _assert_row_refusal(_refused(owner.require_tenant, fixture_data_root(w.root), TID), w, shape)
     assert _tree_state(tmp_path) == before, f"refusing the {shape} row changed the tree"
     case.repair(w)
-    row = _served(owner.require_tenant, w.root, TID)
+    row = _served(owner.require_tenant, fixture_data_root(w.root), TID)
     assert (row.tenant_id, row.created_at) == (TID, GOOD_AT), "the positive control"
 
 
@@ -320,7 +321,7 @@ def _refuse_then_repair(accept: Callable[..., Any], w: Where, shape: str, top: P
     address is then made plain (the link replaced by the folder it led to, or the shape's own
     repair), with the knowledge folder in place, ready for the caller's positive control."""
     before = _tree_state(top)
-    message = _refused(accept, w.root, TID)
+    message = _refused(accept, fixture_data_root(w.root), TID)
     if shape == "linked-T":
         _assert_knowledge_refusal(message, w)
         repair: Callable[[Where], None] | None = _unlink_dir_and_move_target_in
@@ -340,11 +341,11 @@ def test_accept_tenant_reads_the_row_as_it_did(tmp_path, shape):
     _place_knowledge_if_reachable(w)
     accept = functools.partial(owner.accept_tenant, defender_dir=H.DEFENDER)
     if shape == "good-row":
-        tenant = _served(accept, w.root, TID)
+        tenant = _served(accept, fixture_data_root(w.root), TID)
         assert (tenant.id, tenant.row.tenant_id, tenant.row.created_at) == (TID, TID, GOOD_AT)
         return
     _refuse_then_repair(accept, w, shape, tmp_path)
-    tenant = _served(accept, w.root, TID)
+    tenant = _served(accept, fixture_data_root(w.root), TID)
     assert (tenant.id, tenant.row.created_at) == (TID, _expected_at(shape)), "the positive control"
 
 
@@ -361,10 +362,10 @@ def test_accept_placed_knowledge_reads_a_present_row_as_it_did(tmp_path, shape):
     place = functools.partial(owner.accept_placed_knowledge, defender_dir=H.DEFENDER)
     settings = w.dir / "knowledge" / "settings"
     if shape in ("good-row", "absent-row"):
-        assert _served(place, w.root, TID) == (settings, shape == "good-row")
+        assert _served(place, fixture_data_root(w.root), TID) == (settings, shape == "good-row")
         return
     _refuse_then_repair(place, w, shape, tmp_path)
-    assert _served(place, w.root, TID) == (settings, True), "the positive control"
+    assert _served(place, fixture_data_root(w.root), TID) == (settings, True), "the positive control"
 
 
 def _file_mode(mask: int) -> int:
@@ -385,7 +386,7 @@ def _assert_created(w: Where, row: Any, mask: int) -> None:
                         why=f"umask {oct(mask)}")
     assert json.loads(w.row.read_text(encoding="utf-8")) == {
         "tenant_id": TID, "created_at": row.created_at}
-    assert _served(owner.require_tenant, w.root, TID) == row
+    assert _served(owner.require_tenant, fixture_data_root(w.root), TID) == row
 
 
 CREATE_FRESH: dict[str, Callable[[Where], Any]] = {
@@ -404,7 +405,7 @@ def test_create_tenant_mints_the_row_into_a_fresh_root(tmp_path, shape, mask):
     knowledge_before = _tree_state(w.dir / "knowledge") if not made_dir else None
     dir_mode_before = None if made_dir else stat.S_IMODE(os.lstat(w.dir).st_mode)
     with umask(mask):
-        row = _served(owner.create_tenant, w.root, TID)
+        row = _served(owner.create_tenant, fixture_data_root(w.root), TID)
     _assert_created(w, row, mask)
     assert sorted(os.listdir(w.root)) == [TID]
     assert sorted(os.listdir(w.dir)) == sorted(
@@ -444,7 +445,7 @@ def _plant_dir_link(w: Where, *, live: bool) -> None:
 def _plant_occupied_row(w: Where) -> Any:
     """The first create on this root, which succeeds: the positive control for the second."""
     with umask(0o022):
-        first = _served(owner.create_tenant, w.root, TID)
+        first = _served(owner.create_tenant, fixture_data_root(w.root), TID)
     _assert_created(w, first, 0o022)
     return first
 
@@ -504,7 +505,7 @@ def test_create_tenant_refuses_as_it_did(tmp_path, shape):
     case = CREATE_REFUSED[shape]
     first = case.plant(w)
     before = _tree_state(tmp_path)
-    message = _refused(owner.create_tenant, w.root, TID)
+    message = _refused(owner.create_tenant, fixture_data_root(w.root), TID)
     if case.subject == "root":
         assert str(w.root) in message, f"the refusal does not name the data root: {message!r}"
     else:
@@ -516,11 +517,11 @@ def test_create_tenant_refuses_as_it_did(tmp_path, shape):
         f"only an occupied row is told it already exists; {shape}: {message!r}")
     assert _tree_state(tmp_path) == before, f"refusing {shape} changed the tree"
     if case.repair is None:
-        assert _served(owner.require_tenant, w.root, TID) == first, "the first row was disturbed"
+        assert _served(owner.require_tenant, fixture_data_root(w.root), TID) == first, "the first row was disturbed"
         return
     case.repair(w)
     with umask(0o022):
-        row = _served(owner.create_tenant, w.root, TID)
+        row = _served(owner.create_tenant, fixture_data_root(w.root), TID)
     _assert_created(w, row, 0o022)
 
 
@@ -537,10 +538,10 @@ def test_an_unreadable_row_is_refused_naming_it(tmp_path):
     _put_row(w)
     w.row.chmod(0)
     try:
-        _assert_names(_refused(owner.require_tenant, w.root, TID), w.row)
+        _assert_names(_refused(owner.require_tenant, fixture_data_root(w.root), TID), w.row)
     finally:
         w.row.chmod(0o644)
-    assert _served(owner.require_tenant, w.root, TID).tenant_id == TID
+    assert _served(owner.require_tenant, fixture_data_root(w.root), TID).tenant_id == TID
 
 
 @_UNPRIVILEGED
@@ -549,11 +550,11 @@ def test_a_row_create_into_an_unwritable_folder_is_refused_naming_the_row(tmp_pa
     (w.dir / "knowledge").mkdir(parents=True)
     w.dir.chmod(0o555)
     try:
-        _assert_names(_refused(owner.create_tenant, w.root, TID), w.row)
+        _assert_names(_refused(owner.create_tenant, fixture_data_root(w.root), TID), w.row)
         assert not os.path.lexists(w.row), "the refused create left an entry at the row"
     finally:
         w.dir.chmod(0o755)
-    assert _served(owner.create_tenant, w.root, TID).tenant_id == TID
+    assert _served(owner.create_tenant, fixture_data_root(w.root), TID).tenant_id == TID
 
 
 @_UNPRIVILEGED
@@ -564,8 +565,8 @@ def test_a_folder_create_into_an_unwritable_root_is_refused_naming_the_folder(tm
     w.root.mkdir(parents=True)
     w.root.chmod(0o555)
     try:
-        _assert_names(_refused(owner.create_tenant, w.root, TID), w.dir, folder=True)
+        _assert_names(_refused(owner.create_tenant, fixture_data_root(w.root), TID), w.dir, folder=True)
         assert not os.path.lexists(w.dir), "the refused create made <T>"
     finally:
         w.root.chmod(0o755)
-    assert _served(owner.create_tenant, w.root, TID).tenant_id == TID
+    assert _served(owner.create_tenant, fixture_data_root(w.root), TID).tenant_id == TID

@@ -216,13 +216,13 @@ def test_each_accessor_is_checked_against_its_own_root_not_one_assumed_root(base
     owner = S.RunPaths(run_dir)
     sessions = base.parent / "sessions"
     for name in S.SIDECAR_ACCESSORS:
-        resolved = getattr(owner, name)(base)
+        resolved = getattr(owner, name)(fixture_runs_base(base))
         assert resolved.parent == base, (
             f"{name} resolved under {resolved.parent}, not its own root, the runs base")
         assert resolved.name.startswith(run_dir.name), "a sidecar is keyed `<run_id><suffix>`"
-    assert location_path(owner.sessions_dir)(fixture_runs_base(base)) == sessions, (
+    assert location_path(owner.sessions_dir(fixture_runs_base(base))) == sessions, (
         "the sessions directory is a SIBLING of the runs base (claims C10/C15)")
-    assert owner.session_db(base, S.LINEAGE_ID).parent == sessions
+    assert owner.session_db(fixture_runs_base(base), S.LINEAGE_ID).parent == sessions
     for name in ("alert", "report", "investigation", "executed_queries", "wire_log",
                  "provenance", "tool_trace"):
         assert getattr(owner, name).is_relative_to(run_dir), f"{name}'s root is the run directory"

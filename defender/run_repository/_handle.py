@@ -550,7 +550,7 @@ class Run:
 
         assert self.runs_base is not None
         sidecar_text, _reason = self._io.rooted_read(
-            self.runs_base, owner.run_end_sidecar(self.runs_base).name)
+            _unwrap_runs_base(self.runs_base), owner.run_end_sidecar(self.runs_base).name)
         if sidecar_text is None:
             return None
         try:

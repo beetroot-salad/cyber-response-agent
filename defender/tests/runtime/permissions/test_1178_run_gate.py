@@ -931,7 +931,7 @@ def _drain(s: LeadScene, lanes: Lanes, **kw: Any) -> Any:
     root (as the lane's entry opens one), its two work steps `lanes`'."""
     return drains._drain_lead_author(s.paths, _state1135.state_for_paths(s.paths), lanes.run_lead,
                                      lanes.run_pitfalls,
-                                     data_root=drains._data_root(), **kw)
+                                     accept_tenant=drains._tenant_acceptor(s.paths.tenant), **kw)
 
 
 def _failed(s: LeadScene) -> list[str]:

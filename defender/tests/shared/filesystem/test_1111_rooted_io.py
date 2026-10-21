@@ -170,7 +170,7 @@ class Tree:
         """The handle as application code builds it. #1187 (R1): `Run.for_tenant` and the
         runs base's `_tenant.json` it read are retired; `Run.under(container, id, tenant_id=)`
         replaces it, over a container holding no record."""
-        return H.Run.under(location_path(self.runs_base), RUN_ID, tenant_id=S.DEFAULT_TENANT_ID, io=io)
+        return H.Run.under(fixture_runs_base(self.runs_base), RUN_ID, tenant_id=S.DEFAULT_TENANT_ID, io=io)
 
     def handle(self, m: Member, *, run: Any = None, io: Any = _io) -> Any:
         if m.root == "world_dir":
@@ -435,7 +435,7 @@ def _fill_record_sources(tree: Tree) -> None:
         world_id="w-1111").as_json(), encoding="utf-8")
     plant_alert(run_dir, b'{"alert": "1111"}\n')
     owner.report.write_text(S.report_text("# the report\n"), encoding="utf-8")
-    owner.run_end_sidecar(location_path(tree.runs_base)).write_text(
+    owner.run_end_sidecar(fixture_runs_base(tree.runs_base)).write_text(
         json.dumps({"truncated_by": "budget", "closed_before_cut": False}), encoding="utf-8")
 
 
@@ -465,7 +465,7 @@ def test_o1_o3_a_plant_at_any_file_run_record_reads_counts_as_absent(tree, kind)
     sources = _record_sources(tree)
     owner = RunPaths(location_path(tree.runs_base) / RUN_ID)
     floor = {owner.provenance, owner.alert, owner.alert_record, owner.report,
-             owner.run_end_sidecar(location_path(tree.runs_base))}
+             owner.run_end_sidecar(fixture_runs_base(tree.runs_base))}
     assert floor <= set(sources), f"run.record's recorded reads {sources} miss {floor}"
     full = tree.run().record
 
@@ -1358,13 +1358,14 @@ _ALERT_CRASH_CHILD = r"""
 import os, sys, uuid
 from pathlib import Path
 from defender.run_repository import Run
+from defender.records._locations import RunsBase
 root = Path(sys.argv[1])
 body = b"A" * (int(sys.argv[2]) - 1) + b"\n"
 print("ready", flush=True)
 while True:
     run_id = str(uuid.uuid4())  # #1187: a run id is canonical uuid4 text
     os.mkdir(root / run_id)
-    Run.under(root, run_id).facts.alert.write(body)
+    Run.under(RunsBase(root), run_id).facts.alert.write(body)
 """
 
 ALERT_BODY_BYTES = 1 << 20

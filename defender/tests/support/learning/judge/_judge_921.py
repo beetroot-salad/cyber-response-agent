@@ -508,7 +508,8 @@ def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any)
             from defender.learning.core.state import LearningState
             from defender.tenancy._tenant import requested_tenant
 
-            tenant = requested_tenant(fixture_data_root(*episode_location(episode_dir)))
+            data_root, tenant_id = episode_location(episode_dir)
+            tenant = requested_tenant(fixture_data_root(data_root), tenant_id)
             location_path(tenant.learning).mkdir(exist_ok=True)
             state = LearningState.open(LoopPaths.for_tenant(tenant))
     return grade_at(episode_dir, judge=judge if judge is not None else scripted_judge(),
