@@ -79,7 +79,7 @@ def test_a_tenant_folder_linked_into_the_checkout_is_refused_before_acceptance(
     root = tmp_path / "data"
     root.mkdir()
     (root / H.TID).symlink_to(_paths.PATHS.defender_dir, target_is_directory=True)
-    refused = H.refusal(_tenant, _tenant._TenantPaths, root, H.TID)
+    refused = H.refusal(_tenant, _tenant._TenantPaths, fixture_data_root(root), H.TID)
     assert "inside the checkout's defender/ tree" in str(refused), refused
 
     (root / H.TID).unlink()

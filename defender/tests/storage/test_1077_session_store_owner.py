@@ -90,7 +90,7 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
 
     refuses_and_creates_nothing("before any store exists beside the runs base")
 
-    with open_store(case_id=lower, sessions=SessionPaths(runs_base)) as handle:
+    with open_store(case_id=lower, sessions=SessionPaths(fixture_runs_base(runs_base))) as handle:
         assert handle.path == _owner_path(runs_base, lower), (
             "positive control: the lowercase id's store is not at the owner's path")
         assert handle.path.is_file(), "positive control: the lowercase id opened no store file"

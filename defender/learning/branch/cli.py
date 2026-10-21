@@ -33,8 +33,6 @@ episode directory: a relaunch, or a second launch beside a running one, is a new
 
 from __future__ import annotations
 
-from defender.records._locations import DataRoot
-
 import argparse
 import concurrent.futures
 import functools
@@ -57,6 +55,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.records import _alert_input, _provenance
+from defender.records._locations import DataRoot
 from defender.episodes._episode_handle import Episode
 from defender._io import (
     NotPlainEntry,

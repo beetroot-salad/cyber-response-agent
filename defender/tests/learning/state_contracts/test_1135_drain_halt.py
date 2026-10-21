@@ -531,12 +531,12 @@ def cell(name, root):
     try:
         if name == "e1":
             from defender.run_repository import RunId
-            from defender.tenancy._tenant import requested_tenant
+            from defender.tenancy._tenant import data_root_from_path, requested_tenant
 
             run_dir = Path(spec["e1_runs"][root])
             data_root = run_dir.parents[2]
             os.environ["DEFENDER_DATA_ROOT"] = str(data_root)
-            tenant = requested_tenant(data_root, run_dir.parent.parent.name)
+            tenant = requested_tenant(data_root_from_path(data_root), run_dir.parent.parent.name)
             run = tenant.runs_repository().open(RunId.parse(run_dir.name))
             out["answer"] = run_common.enqueue_curation(run, run_common.RunPaths(run_dir).alert)
             return out

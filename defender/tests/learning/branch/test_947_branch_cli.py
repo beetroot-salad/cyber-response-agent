@@ -56,7 +56,7 @@ def test_an_episode_id_that_is_not_one_safe_component_is_refused_before_priming(
 
     # #1120: an accepted tenant's data root exists before the launcher runs, so "created
     # nothing under the data root" is compared on its tree rather than on its absence.
-    data_root = tenant_paths.dir.parent
+    data_root = location_path(tenant_paths.data_root)
     before = _tree(data_root)
     runs = tenant_paths.runs_repository()
 
@@ -89,7 +89,7 @@ def test_a_safe_episode_id_resolves_beneath_the_configured_episodes_root(
     assert S.is_canonical_uuid(episode_id), f"{episode_id!r} is not a canonical uuid"
     assert claimed.is_dir(), claimed
     assert not claimed.is_symlink(), claimed
-    assert tenant_paths.dir in claimed.parents, f"{claimed} is not under the tenant's folder"
+    assert location_path(tenant_paths.tenant_root) in claimed.parents, f"{claimed} is not under the tenant's folder"
     assert not episodes_root.exists(), "the configured episodes root was created"
 
 

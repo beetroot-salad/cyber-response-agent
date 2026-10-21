@@ -38,8 +38,10 @@ def test_the_repository_reads_and_writes_episode_records_without_the_model_stack
                     raise ModuleNotFoundError(name)
         sys.meta_path.insert(0, _Block())
         from defender.tenancy import _tenant
+        from pathlib import Path
         from defender import run_repository as R
-        t = _tenant.accept_tenant({str(tmp_path / "data")!r}, {t.id!r},
+        root = _tenant.data_root_from_path(Path({str(tmp_path / "data")!r}))
+        t = _tenant.accept_tenant(root, {t.id!r},
                                   defender_dir={str(H.DEFENDER)!r})
         assert str(R.RunId.parse({run_id!r})) == {run_id!r}
         assert [str(i) for i in t.runs_repository().list()] == [{run_id!r}]

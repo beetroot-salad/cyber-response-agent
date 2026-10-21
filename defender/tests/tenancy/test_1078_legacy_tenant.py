@@ -1,7 +1,7 @@
 """#1077's tenant-record/stamp/family demands, RESTORED under #1078's tenant-on-the-request API."""
 from __future__ import annotations
 
-from defender.tests.support.shared._locations_1210 import location_path
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
@@ -192,7 +192,7 @@ def test_reusing_a_run_id_clears_all_three_sidecars_not_only_the_named_one(tenan
     run_id = fixture_uuid("run-recycled")  # #1187: a run id is a uuid4
     run_dir = base / run_id
     sidecars = {
-        name: getattr(S.RunPaths(run_dir), name)(base) for name in S.SIDECAR_ACCESSORS}
+        name: getattr(S.RunPaths(run_dir), name)(fixture_runs_base(base)) for name in S.SIDECAR_ACCESSORS}
     for name, path in sidecars.items():
         path.write_text(f'{{"from": "a previous occupant", "which": "{name}"}}\n',
                         encoding="utf-8")
