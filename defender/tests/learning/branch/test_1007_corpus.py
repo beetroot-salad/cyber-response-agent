@@ -1,6 +1,8 @@
 """#1007 — D3/M7: the second authored corpus, its curator, and the one drain tick they share."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import dataclasses
@@ -147,9 +149,9 @@ def test_the_author_drain_triggers_exactly_its_two_named_curators(tmp_path):
         f"one tick triggered {trigger.modules} — the drain's curator set is not the two "
         "literals it names")
     by_module = {c["module_name"]: c for c in trigger.calls}
-    assert by_module[W.DEFENDER_CURATOR_MODULE]["pending_file"] == paths.state_root / FINDINGS.queue
+    assert by_module[W.DEFENDER_CURATOR_MODULE]["pending_file"] == location_path(paths.state_root) / FINDINGS.queue
     assert by_module[W.QUESTIONER_CURATOR_MODULE]["pending_file"] == (
-        paths.state_root / QUESTIONER_FINDINGS.queue)
+        location_path(paths.state_root) / QUESTIONER_FINDINGS.queue)
 
 
 def test_a_full_findings_queue_alone_still_wakes_the_drain(tmp_path):
@@ -331,10 +333,10 @@ def test_nothing_lands_outside_the_declared_write_set(tmp_path, monkeypatch):
            if p not in allowed and p.parts[0] not in ("served", "worlds", "judge", "wire_logs")}
     assert new == set(), (
         f"the pass wrote artifacts outside the declared set: {sorted(map(str, new))}")
-    queue_files = {p.name for p in (paths.state_root / FINDINGS.queue).parent.glob("*") if p.is_file()}
-    assert queue_files <= {(paths.state_root / FINDINGS.queue).name, W.QUESTIONER_QUEUE_FILENAME,
-                           (paths.state_root / FINDINGS.append_lock).name,
-                           (paths.state_root / QUESTIONER_FINDINGS.append_lock).name,
-                           (paths.state_root / FINDINGS.consumed).name,
-                           (paths.state_root / QUESTIONER_FINDINGS.consumed).name, ".lock"}, (
+    queue_files = {p.name for p in (location_path(paths.state_root) / FINDINGS.queue).parent.glob("*") if p.is_file()}
+    assert queue_files <= {(location_path(paths.state_root) / FINDINGS.queue).name, W.QUESTIONER_QUEUE_FILENAME,
+                           (location_path(paths.state_root) / FINDINGS.append_lock).name,
+                           (location_path(paths.state_root) / QUESTIONER_FINDINGS.append_lock).name,
+                           (location_path(paths.state_root) / FINDINGS.consumed).name,
+                           (location_path(paths.state_root) / QUESTIONER_FINDINGS.consumed).name, ".lock"}, (
         f"the queue directory gained {sorted(queue_files)}")

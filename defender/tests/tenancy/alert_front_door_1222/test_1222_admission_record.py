@@ -2,6 +2,8 @@
 run record (facts plus alert digest) written beside the alert; identity checks read that record."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 from defender.run_repository import Run
 
 import json
@@ -226,11 +228,11 @@ def _curation_requests(run_dir: Path) -> dict[str, Path]:
     from defender.tenancy._tenant import requested_tenant
 
     root = Path(os.environ["DEFENDER_DATA_ROOT"])
-    tenant = requested_tenant(root, Path(run_dir).parent.parent.name)
+    tenant = requested_tenant(fixture_data_root(root), Path(run_dir).parent.parent.name)
     paths = LoopPaths.for_tenant(tenant)
     out: dict[str, Path] = {}
     for name in author_markers(paths):
-        body = marker_body(Path(paths.state_root) / CURATION_QUEUE / name)
+        body = marker_body(Path(location_path(paths.state_root)) / CURATION_QUEUE / name)
         out[str(body.get("case_id"))] = (
             Path(os.environ["DEFENDER_DATA_ROOT"]) / str(body["tenant_id"]) / "runs" / str(body["run_id"]))
     return out
@@ -385,16 +387,16 @@ def test_p045_alert_nests_deeper_than_the_parser_follows(tmp_path):
     _assert_refused_before_any_folder(d, "deep nesting")
 
     source = S.alert_bytes(S.generic_alert())
-    past = S.plant_run(planted.runs, "p045-past", alert=source,
+    past = S.plant_run(location_path(planted.runs), "p045-past", alert=source,
                        facts={"signature": "R-1001", "event_time": EVENT_TIME},
                        files={"investigation.md": _golden_investigation(),
                               "report.md": J.report_text("benign")})
     _host_rewrite(S.alert_file(past), S.admission_bytes("deep_nesting"))
 
-    signatures, _report = _corpus_signatures(planted.runs)
+    signatures, _report = _corpus_signatures(location_path(planted.runs))
     assert signatures.get("p045-past") == "R-1001", (
         f"the corpus did not take the past run's signature from its record: {signatures}")
-    shown = _union_shown(tmp_path, source, planted.runs, "p045")
+    shown = _union_shown(tmp_path, source, location_path(planted.runs), "p045")
     assert "p045-past" not in shown, (
         "the judge's union dropped a trial of this alert whose alert file the parser cannot "
         "follow — it parsed the alert bytes instead of reading the record")
@@ -439,18 +441,18 @@ def test_p138_refused_alert_leaves_a_run_folder_without_a_reco(tmp_path):
     assert d.runs_base_entries() == before, (
         f"the refused start changed the runs base: {sorted(set(d.runs_base_entries()) - set(before))}")
 
-    signatures, report = _corpus_signatures(planted.runs)
+    signatures, report = _corpus_signatures(location_path(planted.runs))
     assert set(signatures) == {fixture_uuid("p138-finished")}, (
         f"the corpus counted something besides the finished run: {signatures}")
     assert report.scanned == 1, f"the corpus scanned {report.scanned} past runs, not one"
-    shown = _union_shown(tmp_path, source, planted.runs, "p138")
+    shown = _union_shown(tmp_path, source, location_path(planted.runs), "p138")
     assert fixture_uuid("p138-finished") not in shown, "the union lost the finished trial of this alert"
     assert fixture_uuid("p138-refused") not in shown, "a refused start was shown to the judge as a trial"
 
 
 def test_p139_record_cannot_be_written_at_run_start(tmp_path):
     planted = S.plant_tenant()
-    squatted = planted.runs / fixture_uuid("p139-squatted")
+    squatted = location_path(planted.runs) / fixture_uuid("p139-squatted")
     squatter = S.record_file(squatted)
     squatter.mkdir(parents=True)
     (squatter / "occupant.txt").write_text("not a record", encoding="utf-8")
@@ -466,7 +468,7 @@ def test_p139_record_cannot_be_written_at_run_start(tmp_path):
     assert d.router.leads() == [], "a lead started although the record could not be written"
     assert (squatter / "occupant.txt").is_file(), "the squatter was removed"
 
-    free = planted.runs / fixture_uuid("p139-free")
+    free = location_path(planted.runs) / fixture_uuid("p139-free")
     S.input_dir(free).mkdir(parents=True)
     control = _drive(tmp_path, planted, fixture_uuid("p139-free"))
     run_dir = _assert_admitted(control, "the same folder with the record's name free")
@@ -630,7 +632,7 @@ def test_p118_run_restarted_in_the_same_run_directory_after_th(tmp_path):
 
 def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
     planted = S.plant_tenant()
-    planted.accept().learning.mkdir(exist_ok=True)
+    location_path(planted.accept().learning).mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-1")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)
@@ -661,20 +663,20 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
     assert len(set(keys.values())) == 1, (
         f"the curation key follows the operator's input file, not the recorded digest: {keys}")
 
-    episode, refusal = _launch(planted, planted.runs / fixture_uuid("dig-removed"))
+    episode, refusal = _launch(planted, location_path(planted.runs) / fixture_uuid("dig-removed"))
     assert refusal is None, f"the launch was refused: {refusal}"
     assert episode is not None
     assert S.episode_alert_file(episode).read_bytes() == ordinary
     assert json.loads(S.episode_record_file(episode).read_text(encoding="utf-8")).get(
         S.COINED["record.digest"]) == S.sha256_hex(ordinary)
 
-    rewritten = planted.runs / fixture_uuid("dig-untouched")
+    rewritten = location_path(planted.runs) / fixture_uuid("dig-untouched")
     _host_rewrite(S.alert_file(rewritten), S.alert_bytes(_alert(id="R-9999")))
     episode, refusal = _launch(planted, rewritten)
     assert episode is None, "a launch copied an alert whose bytes no longer match the record"
     assert refusal, "the launch stopped without naming why"
 
-    shown = _union_shown(tmp_path, ordinary, planted.runs, "dig")
+    shown = _union_shown(tmp_path, ordinary, location_path(planted.runs), "dig")
     for run_id in (fixture_uuid("dig-untouched"), fixture_uuid("dig-removed"), fixture_uuid("dig-rewritten")):
         assert run_id not in shown, f"the judge's union did not list {run_id}, a trial of this alert"
     assert fixture_uuid("dig-held-out") not in shown, "the union listed a run of another alert"
@@ -682,7 +684,7 @@ def test_a8_every_identity_check_reads_the_recorded_digest(tmp_path):
 
 def test_p145_input_file_changes_during_the_run_and_post_run_s(tmp_path):
     planted = S.plant_tenant()
-    planted.accept().learning.mkdir(exist_ok=True)
+    location_path(planted.accept().learning).mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-2")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)
@@ -718,7 +720,7 @@ def test_p145_input_file_changes_during_the_run_and_post_run_s(tmp_path):
 
 def test_p128_held_out_copies_of_the_alert_exist_under_the_run(tmp_path):
     planted = S.plant_tenant()
-    planted.accept().learning.mkdir(exist_ok=True)
+    location_path(planted.accept().learning).mkdir(exist_ok=True)
     held_out, ordinary = S.alert_bytes(_alert(id="H-3")), S.alert_bytes(_alert())
     enqueue = _learning_enqueue(_held_out_fixtures(tmp_path, held_out))
     entry = S.operator_input(tmp_path)
@@ -737,7 +739,7 @@ def test_p128_held_out_copies_of_the_alert_exist_under_the_run(tmp_path):
     assert _request_key_for(_assert_admitted(plain, "an ordinary run")) is not None, (
         "the gate refused an ordinary run")
 
-    shown = _union_shown(tmp_path, held_out, planted.runs, "p128")
+    shown = _union_shown(tmp_path, held_out, location_path(planted.runs), "p128")
     assert fixture_uuid("p128-copy") not in shown, "the held-out copy was dropped from its alert's union"
     assert fixture_uuid("p128-ordinary") not in shown, "the union listed a run of another alert"
 
@@ -748,25 +750,25 @@ def test_p142_record_present_but_alert_file_gone_or_rewritten_(tmp_path):
     for run_id in (fixture_uuid("p142-rewritten"), fixture_uuid("p142-gone"), fixture_uuid("p142-intact")):
         _assert_admitted(_drive(tmp_path, planted, run_id, alert=source,
                                 main=S.closing_main_turns()), run_id)
-    _host_rewrite(S.alert_file(planted.runs / fixture_uuid("p142-rewritten")), S.alert_bytes(_alert(id="R-9999")))
-    _host_rewrite(S.alert_file(planted.runs / fixture_uuid("p142-gone")), None)
+    _host_rewrite(S.alert_file(location_path(planted.runs) / fixture_uuid("p142-rewritten")), S.alert_bytes(_alert(id="R-9999")))
+    _host_rewrite(S.alert_file(location_path(planted.runs) / fixture_uuid("p142-gone")), None)
 
-    signatures, _report = _corpus_signatures(planted.runs)
+    signatures, _report = _corpus_signatures(location_path(planted.runs))
     for run_id in (fixture_uuid("p142-rewritten"), fixture_uuid("p142-gone"), fixture_uuid("p142-intact")):
         assert signatures.get(run_id) == "R-1001", (
             f"the corpus did not take {run_id}'s signature from its record: {signatures}")
 
-    shown = _union_shown(tmp_path, source, planted.runs, "p142")
+    shown = _union_shown(tmp_path, source, location_path(planted.runs), "p142")
     for run_id in (fixture_uuid("p142-rewritten"), fixture_uuid("p142-gone"), fixture_uuid("p142-intact")):
         assert run_id not in shown, f"the judge's union did not list {run_id} by its recorded digest"
 
     for run_id in (fixture_uuid("p142-rewritten"), fixture_uuid("p142-gone")):
-        episode, refusal = _launch(planted, planted.runs / run_id)
+        episode, refusal = _launch(planted, location_path(planted.runs) / run_id)
         assert episode is None, (
             f"a launch from {run_id} went ahead although its alert no longer matches its record")
         assert refusal is not None
         assert run_id in refusal, f"the launch refusal does not name the run: {refusal!r}"
-    episode, refusal = _launch(planted, planted.runs / fixture_uuid("p142-intact"))
+    episode, refusal = _launch(planted, location_path(planted.runs) / fixture_uuid("p142-intact"))
     assert refusal is None, f"the intact run's launch was refused: {refusal}"
     assert episode is not None
     assert S.episode_alert_file(episode).read_bytes() == source

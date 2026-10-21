@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import hashlib
 import os
@@ -196,7 +198,7 @@ class _Hook:
     def assert_armed(self, wt: Path) -> None:
         """The positive control: a plain `git commit` in `wt` runs the hook, and the hook bites
         (the commit fails, or does not answer within `BOUND`)."""
-        before = len(self.runs())
+        before = len(location_path(self.runs)())
         argv = ["git", "-C", str(wt), "commit", "--allow-empty", "-q", "-m", "hook probe"]
         if self.stall:
             with pytest.raises(subprocess.TimeoutExpired):
@@ -204,7 +206,7 @@ class _Hook:
         else:
             assert subprocess.run(argv, capture_output=True).returncode != 0, \
                 f"a plain commit passed the failing {self.name} hook"
-        assert self.runs()[before:] == [self.name], f"a plain commit did not run {self.name}"
+        assert location_path(self.runs)()[before:] == [self.name], f"a plain commit did not run {self.name}"
 
 
 #: `id: (hook, stalls)`. `prepare-commit-msg` and `post-commit` run under `--no-verify` too.
@@ -232,7 +234,7 @@ def test_o7_no_repo_hook_runs_in_the_lead_author_commit(tmp_path, monkeypatch, c
     try:
         got = _tick(sc, run_lead_author=lane, run_pitfalls=_no_curation,
                     shim=hook.shim)
-        runs = hook.runs()
+        runs = location_path(hook.runs)()
 
         assert got == ("value", 0), got
         assert runs == [], f"the {hook.name} hook ran in the claim's commit"
@@ -250,7 +252,7 @@ def test_o7_no_repo_hook_runs_in_the_curation_commit(tmp_path, monkeypatch, case
     try:
         got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=lane,
                     shim=hook.shim)
-        runs = hook.runs()
+        runs = location_path(hook.runs)()
 
         assert got == ("value", 0), got
         assert runs == [], f"the {hook.name} hook ran in the curation's commit"
@@ -445,7 +447,7 @@ def test_o8_control_unstartable_git_after_a_clean_lead_author_claim_ends_the_tic
     assert _inflight(sc.paths) == {"case-a.json": {
         **curation_row("case-a", run_a), "attempts": 1}}, _inflight(sc.paths)
     assert author_markers(sc.paths) == ["case-b.json"]
-    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == \
+    assert marker_body(location_path(sc.paths.state_root) / "author-queue" / "case-b.json") == \
         curation_row("case-b", run_b)
     assert _failed(sc.paths) == []
     assert "finish" not in sc.branch.events

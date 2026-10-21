@@ -1,6 +1,8 @@
 """#1165 flow fixtures: real Run/core I/O, with observation and fault injection only."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import asyncio
 import errno
 from pathlib import Path
@@ -91,7 +93,7 @@ class ReadObservation:
 
 def run_handle(directory: Path, io: RecordIO | None = None) -> Run:
     directory.mkdir(parents=True, exist_ok=True)
-    return Run.under(directory.parent, directory.name, io=io if io is not None else _io)
+    return Run.under(fixture_runs_base(directory.parent), directory.name, io=io if io is not None else _io)
 
 
 def drive_run(  # noqa: PLR0913 — the real driver's injection inputs

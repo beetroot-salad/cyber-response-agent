@@ -1,6 +1,8 @@
 """#705 store boundary: R1 placement (the store sits beside runs/, not under it; case-id resolver rejects non-conforming ids; unreachable from the box; host readers do not follow a planted symlink) and R2 read authorization (role-scoped projection)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -44,14 +46,14 @@ def test_store_path_is_not_under_the_runs_base(tmp_path):
     # The run-id-shaped id is spelled the way the host mints run ids since #1077 — casefolded
     # (`records/_run_id.py`); the store now refuses an id that is not case-stable (#1077, O2).
     for case_id in ("case-alpha", "20260718t101500z-boxspec", "runs", "case.with.dots"):
-        path = Path(ss.store_path_for(case_id, sessions=SessionPaths(base)))
+        path = Path(ss.store_path_for(case_id, sessions=SessionPaths(fixture_runs_base(base))))
         assert base.resolve() not in path.resolve().parents, (
             f"{case_id}: the store landed UNDER the runs base at {path}")
         assert path.resolve().parent.parent == base.resolve().parent, (
             f"{case_id}: the store must be a sibling of the runs base; got {path}")
         assert path.name.endswith(".db")
 
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
     run_dir = base / fixture_uuid("20260718t101500z-alpha")
     run_dir.mkdir(parents=True)
@@ -69,7 +71,7 @@ def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
     ss = store_mod()
     base = runs_base(tmp_path)
 
-    assert Path(ss.store_path_for("case-alpha", sessions=SessionPaths(base))).name == "case-alpha.db", (
+    assert Path(ss.store_path_for("case-alpha", sessions=SessionPaths(fixture_runs_base(base)))).name == "case-alpha.db", (
         "positive control: a conforming slug resolves")
 
     hostile = [
@@ -79,9 +81,9 @@ def test_the_resolver_rejects_a_non_conforming_case_id(tmp_path):
     ]
     for value in hostile:
         with pytest.raises(ss.InvalidCaseId):
-            ss.store_path_for(value, sessions=SessionPaths(base))
+            ss.store_path_for(value, sessions=SessionPaths(fixture_runs_base(base)))
         with pytest.raises(ss.InvalidCaseId):
-            ss.open_store(case_id=value, sessions=SessionPaths(base))
+            ss.open_store(case_id=value, sessions=SessionPaths(fixture_runs_base(base)))
 
     assert ss.CASE_ID_RE.pattern.endswith("\\Z"), (
         f"anchor with \\Z, not $: {ss.CASE_ID_RE.pattern!r} admits a trailing newline "
@@ -124,7 +126,7 @@ def test_the_store_is_unreachable_from_inside_the_box(tmp_path):
 
     ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request(SECRET)], agent_id="main")
     store.close()
@@ -167,7 +169,7 @@ def test_host_readers_do_not_dereference_a_symlink_out_of_the_run_dir(tmp_path):
 
     ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
     store.append(session_id, [user_request(SECRET)], agent_id="main")
     store.close()
@@ -278,14 +280,14 @@ def test_two_investigations_of_the_same_case_land_in_one_per_case_database(tmp_p
         # #1187 (declared change 1): a run id is a canonical UUID — the folder is fixture_uuid(<label>)
         run_dir = base / fixture_uuid(slug)
         run_dir.mkdir(parents=True)
-        store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+        store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
         ss.write_case_pointer(_run_handle_1165(run_dir), case_id="case-alpha", store_path=store.path)
         session_id = store.new_session(agent_id="main")
         store.append(session_id, [user_request(slug), *complete_pair()], agent_id="main")
         sessions.append(session_id)
         store.close()
 
-    final = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    final = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     assert {row[0] for row in sql(final, "SELECT session_id FROM session")} == set(sessions)
     files = sorted(p.name for p in Path(final.path).parent.glob("*.db"))
     assert files == ["case-alpha.db"], f"two executions produced {files}"

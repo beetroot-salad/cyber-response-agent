@@ -1,6 +1,8 @@
 """#1049 — the episode-tree readers rewritten over the bound primitive."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 from pathlib import Path
 
@@ -346,7 +348,7 @@ def test_1049_a_lead_id_that_is_not_a_plain_component_never_reaches_name_constru
     grade = _grade(ep, tmp_path)
     row = _rows(grade)["b"]
     assert not row.get("ungradable"), row
-    base, _src = J.runs_base(tmp_path)
+    base, _src = location_path(J.runs_base)(tmp_path)
     shown = J.render_at(ep, "b").focus.leads
     assert "does not name a file inside this world" in shown[nul]["summary"], shown[nul]
 

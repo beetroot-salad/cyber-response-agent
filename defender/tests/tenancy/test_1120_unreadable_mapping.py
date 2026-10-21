@@ -1,6 +1,8 @@
 """An unreadable case-history mapping is a refusal, never a traceback."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 from pathlib import Path
 
@@ -20,10 +22,10 @@ def test_an_unreadable_mapping_is_named_by_setup_and_check(tmp_path: Path) -> No
     mapping.chmod(0)
     try:
         H.assert_refused(H.setup(tenant_py, root), "[tenant.py]", "systems/case-history/mapping.yaml")
-        assert not H.row_path(root).exists(), "the refused setup wrote the row"
+        assert not location_path(H.row_path)(root).exists(), "the refused setup wrote the row"
         H.plant_row(root)
         H.assert_refused(H.check(tenant_py, root, H.TID), "[tenant.py]", "systems/case-history/mapping.yaml")
-        H.row_path(root).unlink()
+        location_path(H.row_path)(root).unlink()
     finally:
         mapping.chmod(0o644)
     H.assert_clean(H.setup(tenant_py, root))

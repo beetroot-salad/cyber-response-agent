@@ -1,5 +1,7 @@
 """run_common.materialize_run: the runs base follows from the tenant; record mismatch, torn record, missing row and sibling-base refusals."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -119,7 +121,7 @@ def test_o4_run_store_location(tmp_path, tenant_root):
 
 
 def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
-    row_bytes = H.row_path(tenant_root, T_ID).read_bytes()
+    row_bytes = location_path(H.row_path)(tenant_root, T_ID).read_bytes()
     run_dir = Path(_materialize(_golden_alert(tmp_path), R1, T_ID))
     # `knowledge/` is the operator's (#1120 DC2: placed before setup), never materialize's.
     assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "knowledge", "runs"]), (
@@ -128,7 +130,7 @@ def test_d2_only_sessions_beside_base(tmp_path, tenant_root):
     assert H.entries(tenant_root / T_ID) == sorted([H.ROW_NAME, "knowledge", "runs",
                                                      "sessions"])
     assert H.entries(tenant_root) == [T_ID]
-    assert H.row_path(tenant_root, T_ID).read_bytes() == row_bytes, "the row was rewritten"
+    assert location_path(H.row_path)(tenant_root, T_ID).read_bytes() == row_bytes, "the row was rewritten"
 
 
 def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
@@ -142,13 +144,13 @@ def test_o2_materialize_never_creates_row(tmp_path, monkeypatch):
     assert H.entries(root) == [], "the refused materialize created something"
 
     H.make_tenant(root, T_ID)
-    row_bytes = H.row_path(root, T_ID).read_bytes()
+    row_bytes = location_path(H.row_path)(root, T_ID).read_bytes()
     _materialize(alert, R1, T_ID)
-    assert H.row_path(root, T_ID).read_bytes() == row_bytes
+    assert location_path(H.row_path)(root, T_ID).read_bytes() == row_bytes
 
 
 def test_tenant_row_deleted_mid_materialize(tmp_path, tenant_root):
-    row = H.row_path(tenant_root, T_ID)
+    row = location_path(H.row_path)(tenant_root, T_ID)
     fired: list[str] = []
 
     def hook(frame, event, _arg):

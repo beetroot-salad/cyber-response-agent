@@ -1,6 +1,8 @@
 """Drain hardening: read-only git probe failures, bounded append-lock wait at retire, and strays that must not whitelist themselves."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 import pytest
@@ -73,7 +75,7 @@ def test_the_retire_seams_append_lock_wait_ends_at_the_configured_deadline(tmp_p
     rows = [h.row_for("findings", "a/0")]
     h.seed(paths, ch, rows)
 
-    appender = h.Holder(paths.state_root / ch.append_lock)
+    appender = h.Holder(location_path(paths.state_root) / ch.append_lock)
 
     def curate_then_appender_takes_the_lock(rows, batch_id, cfg):
         appender.__enter__()

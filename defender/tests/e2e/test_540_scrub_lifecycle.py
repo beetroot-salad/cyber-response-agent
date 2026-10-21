@@ -1,6 +1,8 @@
 """#540 — the reap-time run_dir scrub (symlink/hardlink/special-file taint), the box lifecycle and its fail-closed edges, gate survival, and hostile run-id / filename handling. `docker=` is the lifecycle seam; every fs fault is built with the real primitive."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import ast
@@ -950,7 +952,6 @@ def test_a_box_authored_filename_cannot_forge_a_workspace_map_section(tmp_path):
 def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monkeypatch):
     """d_hostile_run_id_fails_loudly — a hostile run id fails LOUDLY rather than splitting the
     container-name grammar or the colon-separated bind spec."""
-    from defender.tenancy import _tenant
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
     from defender.runtime.model_view import MODEL_RUN
     from defender.tests.support.shared._fixture_uuid import is_fixture_uuid_shape
@@ -958,7 +959,7 @@ def test_hostile_run_id_fails_rather_than_splitting_the_bind_spec(tmp_path, monk
     data_root = tmp_path / "data"
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(data_root))
     tenant = set_up_tenant(data_root, fixture_uuid("tenant:t540"))
-    runs_base = _tenant.runs_base_for(tenant)
+    runs_base = location_path(tenant.runs)
     runs_base.mkdir(parents=True)
     fixture = tmp_path / "fixtures"
     fixture.mkdir()

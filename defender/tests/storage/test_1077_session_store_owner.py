@@ -1,6 +1,8 @@
 """The session store's path comes from its owner, refusal included (#1077, the leftover of D7)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import json
@@ -40,7 +42,7 @@ def runs_base(tmp_path: Path) -> Path:
 
 
 def _owner_path(runs_base: Path, case_id: str) -> Path:
-    return SessionPaths(runs_base).session_db(case_id)
+    return SessionPaths(fixture_runs_base(runs_base)).session_db(case_id)
 
 
 def _is_the_subject(case_id: str) -> None:
@@ -56,10 +58,10 @@ def test_store_path_for_refuses_an_id_that_is_not_case_stable(runs_base, case_id
     lowercase spelling of the same id resolves, to exactly the owner's path."""
     _is_the_subject(case_id)
     with pytest.raises(InvalidCaseId):
-        store_path_for(case_id, sessions=SessionPaths(runs_base))
+        store_path_for(case_id, sessions=SessionPaths(fixture_runs_base(runs_base)))
 
     lower = case_id.casefold()
-    assert store_path_for(lower, sessions=SessionPaths(runs_base)) == _owner_path(runs_base, lower), (
+    assert store_path_for(lower, sessions=SessionPaths(fixture_runs_base(runs_base))) == _owner_path(runs_base, lower), (
         "positive control: a case-stable id resolves to the owner's path")
 
 
@@ -75,7 +77,7 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
         before = _tree(tmp_path)
         raised: BaseException | None = None
         try:
-            handle = open_store(case_id=case_id, sessions=SessionPaths(runs_base))
+            handle = open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(runs_base)))
         except InvalidCaseId as exc:
             raised = exc
         else:
@@ -88,7 +90,7 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
 
     refuses_and_creates_nothing("before any store exists beside the runs base")
 
-    with open_store(case_id=lower, sessions=SessionPaths(runs_base)) as handle:
+    with open_store(case_id=lower, sessions=SessionPaths(fixture_runs_base(runs_base))) as handle:
         assert handle.path == _owner_path(runs_base, lower), (
             "positive control: the lowercase id's store is not at the owner's path")
         assert handle.path.is_file(), "positive control: the lowercase id opened no store file"
@@ -99,8 +101,8 @@ def test_open_store_refuses_an_id_that_is_not_case_stable_and_creates_nothing(
 @pytest.mark.parametrize("case_id", NOT_A_STRING, ids=repr)
 def test_store_path_for_refuses_a_value_that_is_not_a_string(runs_base, case_id):
     with pytest.raises(InvalidCaseId):
-        store_path_for(case_id, sessions=SessionPaths(runs_base))
-    assert store_path_for("case-alpha", sessions=SessionPaths(runs_base)) == _owner_path(
+        store_path_for(case_id, sessions=SessionPaths(fixture_runs_base(runs_base)))
+    assert store_path_for("case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base))) == _owner_path(
         runs_base, "case-alpha")
 
 
@@ -108,7 +110,7 @@ def test_store_path_for_refuses_a_value_that_is_not_a_string(runs_base, case_id)
 def test_the_store_and_the_owner_agree_on_every_admitted_id(runs_base, case_id):
     assert CASE_ID_RE.match(case_id)
     assert case_id == case_id.casefold()
-    assert store_path_for(case_id, sessions=SessionPaths(runs_base)) == _owner_path(runs_base, case_id)
+    assert store_path_for(case_id, sessions=SessionPaths(fixture_runs_base(runs_base))) == _owner_path(runs_base, case_id)
 
 
 def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_exit(tmp_path):
@@ -119,7 +121,7 @@ def test_a_fresh_run_handed_a_case_unstable_id_ends_through_the_handled_store_ex
     before = _tree(tmp_path)
 
     def mixed_case_factory(case_id: str, rd: Path):
-        return open_store(case_id=f"Case-{case_id}", sessions=SessionPaths(rd.parent))
+        return open_store(case_id=f"Case-{case_id}", sessions=SessionPaths(fixture_runs_base(rd.parent)))
 
     summary = replay.drive(run_dir, run_id="1077-mixed-fresh", main=replay.ReplayFn([
         replay.Turn(text="Nothing to do; stopping."),

@@ -1,6 +1,8 @@
 """Reusable machinery for the hermetic e2e replay tests — NO test scripts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import asyncio
 import contextlib
 import functools
@@ -566,7 +568,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     if resume is not None:
         seams["resume"] = resume
         source = resume.source_run_dir
-        seams["source_run"] = source_run if source_run is not None else Run.under(source.parent, source.name)
+        seams["source_run"] = source_run if source_run is not None else Run.under(fixture_runs_base(source.parent), source.name)
     elif source_run is not None:
         seams["source_run"] = source_run
     if run_state is not None:
@@ -598,7 +600,7 @@ def driver_summary(  # noqa: PLR0913, C901 — `drive`'s seams, one parameter ea
     seams["box"] = box if box is not None else production_unboxed_box(run_dir, tree, run_tenant)
     with override_allow_model_requests(False):
         return asyncio.run(driver.run_investigation(
-            alert_path=RunPaths(run_dir).alert, run=Run.under(run_dir.parent, run_dir.name),
+            alert_path=RunPaths(run_dir).alert, run=Run.under(fixture_runs_base(run_dir.parent), run_dir.name),
             defender_dir=tree, make_model=make_model, tenant=run_tenant,
             orient_shim=orient_shim if orient_shim is not None else no_orient_shims, **seams,
         ))

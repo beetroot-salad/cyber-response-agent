@@ -1,6 +1,8 @@
 """Drain append/drain lock split: rotation and retirement exclude appends, non-blocking drain lock, declared lock order."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 
@@ -37,7 +39,7 @@ def test_rotate_blocks_while_append_lock_held(tmp_path: Path):
         )
 
     worker = h.Background(rotate)
-    with h.Holder(paths.state_root / ch.append_lock):
+    with h.Holder(location_path(paths.state_root) / ch.append_lock):
         worker._thread.start()
         assert not worker.finished_within(1.0), "the rotation proceeded under a held append lock"
         assert h.pending_by_id(paths, ch) == {"a/0": h.row_for("findings", "a/0")}
@@ -55,7 +57,7 @@ def test_retire_blocks_while_append_lock_held(tmp_path: Path):
             LearningState.open(paths), channel=FINDINGS, batch_ids=["a/0"], reason="excluded",
             max_attempts=1)
     )
-    with h.Holder(paths.state_root / ch.append_lock):
+    with h.Holder(location_path(paths.state_root) / ch.append_lock):
         worker._thread.start()
         assert not worker.finished_within(1.0), "the retire seam proceeded under a held lock"
         assert h.graveyard(paths, ch) == [], "not even the graveyard append happened"
@@ -72,7 +74,7 @@ def test_every_channels_read_batch_happens_under_the_append_lock(tmp_path: Path)
         h.seed(paths, ch, [h.row_for(name, rid)])
         agent = h.recording(h.committing(f"lock-{name}"))
         cfg = h.cfg_for(paths, name, invoke_agent=agent, repo_lock_wait_seconds=1)
-        with h.Holder(paths.state_root / ch.append_lock):
+        with h.Holder(location_path(paths.state_root) / ch.append_lock):
             assert drain.run_batch(cfg=cfg) == 0
         assert agent.calls == [], f"{name}: the read proceeded without the append lock"
         assert h.pending_by_id(paths, ch), f"{name}: the queue was rewritten anyway"
@@ -91,7 +93,7 @@ def test_the_drains_nonblocking_acquisition_excludes_a_real_blocking_appender_th
     cfg = h.cfg_for(
         paths, "findings", invoke_agent=blocked, repo_lock_wait_seconds=1
     )
-    with h.Holder(paths.state_root / ch.append_lock, blocking_discipline=True):
+    with h.Holder(location_path(paths.state_root) / ch.append_lock, blocking_discipline=True):
         assert drain.run_batch(cfg=cfg) == 0
     assert blocked.calls == [], "the drain proceeded past a real blocking appender"
     assert h.pending(paths, ch) == rows, "the queue was rewritten while an appender held the lock"
@@ -119,7 +121,7 @@ def test_the_drains_append_lock_wait_ends_at_the_configured_repo_lock_deadline(t
         cfg = h.cfg_for(
             paths, "findings", invoke_agent=agent, repo_lock_wait_seconds=deadline
         )
-        with h.Holder(paths.state_root / ch.append_lock):
+        with h.Holder(location_path(paths.state_root) / ch.append_lock):
             rc, seconds = h.elapsed(lambda cfg=cfg: drain.run_batch(cfg=cfg))
         assert rc == 0
         assert agent.calls == []
@@ -145,7 +147,7 @@ def test_the_drain_acquires_its_three_locks_in_one_declared_order(tmp_path: Path
 
     agent = h.recording(h.committing("ordered"))
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent, repo_lock_wait_seconds=1)
-    with h.Holder(paths.state_root / ch.drain_role.file, blocking_discipline=False):
+    with h.Holder(location_path(paths.state_root) / ch.drain_role.file, blocking_discipline=False):
         assert drain.run_batch(cfg=cfg) == 0
         with LearningState.open(paths).lock(REPO_LOCK, wait=TRY_ONCE) as took:
             assert took, "the skipped tick was still holding the repo lock"
@@ -159,10 +161,10 @@ def test_a_bare_module_invocation_beside_a_live_drain_skips_its_tick(tmp_path: P
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "a/0")]
     h.seed(paths, ch, rows)
-    tmp_name = (paths.state_root / ch.queue).with_name((paths.state_root / ch.queue).name + ".tmp")
+    tmp_name = (location_path(paths.state_root) / ch.queue).with_name((location_path(paths.state_root) / ch.queue).name + ".tmp")
 
     agent = h.recording(h.committing("second"))
-    with h.Holder(paths.state_root / ch.drain_role.file, blocking_discipline=False):
+    with h.Holder(location_path(paths.state_root) / ch.drain_role.file, blocking_discipline=False):
         rc, seconds = h.elapsed(
             lambda: drain.run_batch(cfg=h.cfg_for(paths, "findings", invoke_agent=agent))
         )
@@ -178,7 +180,7 @@ def test_second_author_drain_invocation_returns_without_blocking(tmp_path: Path)
     paths = h.make_paths(tmp_path)
     triggered: list[str] = []
 
-    with h.Holder(paths.state_root / AUTHOR_DRAIN_LOCK.file, blocking_discipline=False):
+    with h.Holder(location_path(paths.state_root) / AUTHOR_DRAIN_LOCK.file, blocking_discipline=False):
         rc, seconds = h.elapsed(
             lambda: drains.author_drain(
                 paths, trigger_author=lambda *a, **k: triggered.append(a)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import os
 import shutil
@@ -253,7 +255,7 @@ def test_1204_a_source_whose_knowledge_is_unprovable_is_refused_at_preflight_unl
 def test_1204_a_launch_whose_siblings_read_another_knowledge_commit_ends_incomplete(
         tmp_path, argv, caplog):
     """O2 end to end, the authority tier."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     launch = A._prepare(tmp_path, spawn=J.FakeSibling(knowledge={"commit": K2}))
     assert launch.run(*argv) == 0, "the exit is about the launch; the outcome is the family's"
     assert launch.questioner.calls > 0, "the launch was refused at preflight instead"

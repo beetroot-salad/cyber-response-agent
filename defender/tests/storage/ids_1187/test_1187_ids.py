@@ -1,6 +1,8 @@
 """Run and episode identities are canonical UUIDs with no labels or composed meaning."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import ast
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,7 +45,7 @@ def test_1187_o1_run_setup_names_an_unpinned_run_folder_by_a_bare_uuid(tmp_path,
     first = run_common.materialize_run(alert, None, tenant=t)
     second = run_common.materialize_run(alert, None, tenant=t)
 
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     assert Path(first.run_dir).parent == runs
     assert Path(second.run_dir).parent == runs
     for run in (first, second):
@@ -208,7 +210,7 @@ def test_1187_o2_run_py_runs_a_pinned_uuid(tmp_path, data_root):
     assert refusal is None, f"--run-id {run_id} was refused: {P.refusal_text(refusal)!r} {stderr!r}"
     assert status == 0, (status, stderr)
     assert rec.order.count("lifecycle") == 1, rec.order
-    assert (Path(t.runs) / run_id).is_dir()
+    assert (Path(location_path(t.runs)) / run_id).is_dir()
 
 
 @pytest.mark.parametrize("text", [pytest.param(t, id=repr(t)) for t in S.NON_CANONICAL_IDS
@@ -227,8 +229,8 @@ def test_1187_o2_run_py_refuses_a_pinned_id_that_is_not_a_canonical_uuid(
     # curation enqueue are what a refused id must never reach.
     assert [step for step in rec.order if step != "preflight"] == [], (
         f"the run went on past a refused id: {rec.order}")
-    assert not Path(t.runs).exists() or sorted(Path(t.runs).iterdir()) == [], (
-        f"a refused id left something in the runs folder: {sorted(Path(t.runs).iterdir())}")
+    assert not Path(location_path(t.runs)).exists() or sorted(Path(location_path(t.runs)).iterdir()) == [], (
+        f"a refused id left something in the runs folder: {sorted(Path(location_path(t.runs)).iterdir())}")
 # O1: the census. No production source composes, derives or bounds an id by meaning.
 
 #: Functions production must neither call nor pass around (C1 of the design): the stamp-label

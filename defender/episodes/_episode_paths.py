@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.records._locations import (RunsBase)
+
 import dataclasses
 from pathlib import Path, PurePosixPath
 
@@ -571,8 +573,8 @@ class EpisodePaths:
         return self.episode_dir / LAYOUT.priming_lock
 
     @property
-    def runs(self) -> Path:
-        return self.episode_dir / LAYOUT.runs
+    def runs(self) -> RunsBase:
+        return RunsBase(self.episode_dir / LAYOUT.runs)
 
     @property
     def worlds(self) -> Path:

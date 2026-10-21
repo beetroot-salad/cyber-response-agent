@@ -323,12 +323,6 @@ class ModuleEnv:
     #: owner class. Sticky: a later rebinding never untags (see `_binding_pairs`). See
     #: `owner_derived`.
     owner_locals: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
-    #: Names directly bound to a PARTIAL owner instance (an accepted `Tenant`), keyed to its
-    #: class's origin; and names bound to a CARRIER of one (a `RunTenant`). See
-    #: `PARTIAL_OWNER_ATTRS`.
-    partial_owner_locals: Mapping[str, str] = field(
-        default_factory=dict, compare=False, repr=False)
-    carrier_locals: Mapping[str, str] = field(default_factory=dict, compare=False, repr=False)
     #: The module's own top-level `def` / `class` names, each resolved to `<module>.<name>` the
     #: way an import resolves to its origin — only when `module_env` was given the module's
     #: dotted name. Scoped like an import: a scope that binds or imports the name drops it, and
@@ -431,44 +425,6 @@ _OWNER_CLASS_ORIGINS = frozenset({
     "defender.run_repository.SessionPaths",
 })
 
-#: Owners whose members are owner-derived only for a NAMED set (#1120 M5), keyed by class
-#: origin. An accepted `Tenant` owns the data-root record locations — a join onto
-#: `tenant.runs` is owner-derived exactly as one onto `EpisodePaths(ep).runs` is — while its
-#: knowledge halves (`settings`, `knowledge`, `agent`) are not run records: the settings
-#: loaders join onto them by design, and must stay clean.
-_TENANT = "defender.tenancy._tenant.Tenant"
-PARTIAL_OWNER_ATTRS: dict[str, frozenset[str]] = {
-    _TENANT: frozenset({
-        "dir", "row_path", "runs", "sessions", "episodes", "learning", "worktrees"}),
-}
-
-_RUN_TENANT = "defender.runtime.run_tenant.RunTenant"
-
-#: Every function that RETURNS a partial owner (`Tenant`) or a carrier (`RunTenant`), keyed by
-#: its dotted origin — private ones included, since a same-module def resolves to
-#: `<module>.<name>` too (`ModuleEnv.own_defs`). Named, not inferred: a call tags its result
-#: only through an entry here. `test_1160_owner_tagging_shapes` holds the table equal to the
-#: sweep's census of functions annotated `-> Tenant` / `-> RunTenant` (`annotated_class`), so a
-#: new factory, or a stale entry, fails it.
-_TENANT_FACTORIES: dict[str, str] = {
-    "defender.tenancy._tenant.accept_tenant": _TENANT,
-    # #1105 PR 2 review: a request's tenant, accepted (the one step `accept_tenant` sits under).
-    "defender.tenancy._tenant.requested_tenant": _TENANT,
-    "defender.runtime.run_tenant.resolve_tenant": _RUN_TENANT,
-    "defender.runtime.run_tenant.run_tenant_for": _RUN_TENANT,
-    "defender.run._resolve_run_tenant": _RUN_TENANT,
-    "defender.run._accept_request_tenant": _TENANT,
-    "defender.learning.branch.cli._episode_tenant": _RUN_TENANT,
-    # #1105: the runs repository's argument check returns the accepted `Tenant` it was handed.
-    "defender.run_repository._held.require_accepted_tenant": _TENANT,
-}
-
-#: Classes one of whose members IS a partial owner instance: `RunTenant.tenant` is the run's
-#: accepted `Tenant`, so `run_tenant.tenant.learning` is reached through the owner.
-_PARTIAL_OWNER_CARRIERS: dict[str, dict[str, str]] = {
-    _RUN_TENANT: {"tenant": _TENANT},
-}
-
 #: The owner modules' module-level singletons — stateless layout values a caller imports rather
 #: than constructs. `RunPaths(d).alert` is a path; `RUN_LAYOUT.alert` is the same record's name
 #: relative to the run dir (the form `_io.Bound`'s readers take). Both are owner-derived.
@@ -552,65 +508,14 @@ def annotated_class(ann: ast.expr | None, env: ModuleEnv) -> str | None:
     return None
 
 
-def _call_returns(node: ast.Call, env: ModuleEnv) -> str | None:
-    """The partial-owner or carrier class origin a call returns, or None: a construction
-    (`Tenant(...)`, `RunTenant(...)`) or a `_TENANT_FACTORIES` entry, the callee resolved
-    whether imported or defined in this module."""
-    called = _resolved_callee(node, env)
-    if called in PARTIAL_OWNER_ATTRS or called in _PARTIAL_OWNER_CARRIERS:
-        return called
-    return _TENANT_FACTORIES.get(called or "")
-
-
-def _carrier_of(node: ast.expr, carriers: Mapping[str, str], env: ModuleEnv) -> str | None:
-    """The carrier class origin `node` evaluates to, or None: a local tagged as one, or a
-    call returning one."""
-    node = _unawait(node)
-    if isinstance(node, ast.Name):
-        return carriers.get(node.id)
-    if isinstance(node, ast.Call):
-        returned = _call_returns(node, env)
-        return returned if returned in _PARTIAL_OWNER_CARRIERS else None
-    return None
-
-
-def _partial_owner_of(
-    node: ast.expr, partials: Mapping[str, str], carriers: Mapping[str, str], env: ModuleEnv,
-) -> str | None:
-    """The class origin of the partial owner instance `node` evaluates to, or None: a
-    construction or a factory call, a local tagged as one, or a carrier's member
-    (`run_tenant.tenant`, `resolve_tenant(...).tenant`)."""
-    node = _unawait(node)
-    if isinstance(node, ast.Call):
-        returned = _call_returns(node, env)
-        return returned if returned in PARTIAL_OWNER_ATTRS else None
-    if isinstance(node, ast.Name):
-        return partials.get(node.id)
-    if isinstance(node, ast.Attribute):
-        carrier = _carrier_of(node.value, carriers, env)
-        return _PARTIAL_OWNER_CARRIERS.get(carrier or "", {}).get(node.attr)
-    return None
-
-
-def _partial_owner_member(
-    node: ast.expr, partials: Mapping[str, str], carriers: Mapping[str, str], env: ModuleEnv,
-) -> bool:
-    """`node` is `<partial owner>.<one of its owned members>` — `tenant.runs`, never
-    `tenant.settings`."""
-    if not isinstance(node, ast.Attribute):
-        return False
-    owner = _partial_owner_of(node.value, partials, carriers, env)
-    return owner is not None and node.attr in PARTIAL_OWNER_ATTRS[owner]
-
-
 def _binding_pairs(stmt: ast.AST) -> list[tuple[str, ast.expr]]:
     """`(name, value)` for each name `stmt` binds to a traceable value: `x = v`, every name
     of `a = b = v`, and `x: T = v` (tagged from the value, never the annotation). Unpacking
     is not traced: `a, b = ...` binds nothing here.
 
     Only tag SOURCES come from here; nothing untags. Tagging is per scope, not per line, so
-    untagging on a rebind would hide a join made before it (`t = accept_tenant(...);
-    out = t.runs / x; t = None`). The accepted costs: a reused name (`for t in things`) keeps
+    untagging on a rebind would hide a join made before it (`p = RunPaths(...);
+    out = p.gather_raw / x; p = None`). The accepted costs: a reused name (`for p in things`) keeps
     its tag and may report a join it should not, and a name rebound to an unknown value no
     longer reaches the "unresolvable accessor use" arm."""
     if isinstance(stmt, ast.AnnAssign):
@@ -622,46 +527,9 @@ def _binding_pairs(stmt: ast.AST) -> list[tuple[str, ast.expr]]:
     return [(t.id, stmt.value) for t in stmt.targets if isinstance(t, ast.Name)]
 
 
-def _partial_locals(
-    scope: ast.AST, imports: dict[str, str], consts: dict[str, str], defines: frozenset[str],
-    inherited: tuple[Mapping[str, str], Mapping[str, str]], own_defs: Mapping[str, str],
-) -> tuple[dict[str, str], dict[str, str]]:
-    """`(partial owner locals, carrier locals)` bound in `scope`'s own statements: a parameter
-    annotated with a partial owner or a carrier class, or a local bound (any shape
-    `_binding_pairs` traces) to a partial owner instance (`t = accept_tenant(...)`,
-    `t = run_tenant.tenant`) or a carrier (`rt = resolve_tenant(...)`, `rt2 = rt`)."""
-    probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={},
-                          own_defs=own_defs)
-    partials = dict(inherited[0])
-    carriers = dict(inherited[1])
-    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        for arg in (*scope.args.posonlyargs, *scope.args.args, *scope.args.kwonlyargs):
-            annotated = annotated_class(arg.annotation, probe_env)
-            if annotated in PARTIAL_OWNER_ATTRS:
-                partials[arg.arg] = annotated
-            elif annotated in _PARTIAL_OWNER_CARRIERS:
-                carriers[arg.arg] = annotated
-
-    def walk(node: ast.AST) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-                continue
-            for target, value in _binding_pairs(child):
-                owner = _partial_owner_of(value, partials, carriers, probe_env)
-                if owner is not None:
-                    partials[target] = owner
-                elif (carrier := _carrier_of(value, carriers, probe_env)) is not None:
-                    carriers[target] = carrier
-            walk(child)
-
-    walk(scope)
-    return partials, carriers
-
-
 def _owner_locals(
     scope: ast.AST, imports: dict[str, str], consts: dict[str, str],
     defines: frozenset[str], inherited: frozenset[str],
-    partials: Mapping[str, str] | None = None, carriers: Mapping[str, str] | None = None,
     own_defs: Mapping[str, str] | None = None,
 ) -> frozenset[str]:
     """Names bound, in `scope`'s own statements (never a nested def) and in any shape
@@ -673,8 +541,6 @@ def _owner_locals(
     probe_env = ModuleEnv(imports=imports, consts=consts, defines=defines, scope_of={},
                           own_defs=own_defs or {})
     owners: set[str] = set(inherited)
-    partials = partials or {}
-    carriers = carriers or {}
 
     def is_owner_expr(node: ast.expr) -> bool:
         node = _unawait(node)
@@ -684,8 +550,7 @@ def _owner_locals(
         if isinstance(node, ast.Name):
             return node.id in owners or _is_owner_value(_origin(node, probe_env))
         if isinstance(node, ast.Attribute):
-            return (_owner_instance_in(node.value, owners, probe_env)
-                    or _partial_owner_member(node, partials, carriers, probe_env))
+            return _owner_instance_in(node.value, owners, probe_env)
         return False
 
     if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -735,20 +600,13 @@ def _child_env(func: ast.AST, parent: ModuleEnv) -> ModuleEnv:
     inherited = frozenset(n for n in parent.owner_locals if n not in bound)
     own_defs = {n: o for n, o in parent.own_defs.items()
                 if n not in bound and n not in local_imports}
-    partials, carriers = _partial_locals(
-        func, imports, consts, defines,
-        ({n: o for n, o in parent.partial_owner_locals.items() if n not in bound},
-         {n: o for n, o in parent.carrier_locals.items() if n not in bound}),
-        own_defs)
     return ModuleEnv(
         imports=imports,
         consts=consts,
         defines=defines,
         scope_of=parent.scope_of,
         owner_locals=_owner_locals(
-            func, imports, consts, defines, inherited, partials, carriers, own_defs),
-        partial_owner_locals=partials,
-        carrier_locals=carriers,
+            func, imports, consts, defines, inherited, own_defs=own_defs),
         own_defs=own_defs,
         package=parent.package,
     )
@@ -818,16 +676,13 @@ def module_env(
     defines = frozenset(bound)
     consts = _module_consts(tree)
     own_defs = _own_defs(tree, imports, module)
-    partials, carriers = _partial_locals(tree, imports, consts, defines, ({}, {}), own_defs)
     root = ModuleEnv(
         imports=imports,
         consts=consts,
         defines=defines,
         scope_of=scope_of,
         owner_locals=_owner_locals(
-            tree, imports, consts, defines, frozenset(), partials, carriers, own_defs),
-        partial_owner_locals=partials,
-        carrier_locals=carriers,
+            tree, imports, consts, defines, frozenset(), own_defs=own_defs),
         own_defs=own_defs,
         package=package,
     )
@@ -847,8 +702,7 @@ def owner_derived(node: ast.expr, env: ModuleEnv) -> bool:
     if isinstance(node, ast.Name):
         return node.id in e.owner_locals
     if isinstance(node, ast.Attribute):
-        return (_owner_instance_in(node.value, set(e.owner_locals), e)
-                or _partial_owner_member(node, e.partial_owner_locals, e.carrier_locals, e))
+        return _owner_instance_in(node.value, set(e.owner_locals), e)
     if isinstance(node, ast.Call):
         return _is_owner_class(_resolved_callee(node, e))
     return False
@@ -916,6 +770,49 @@ def callee(call: ast.Call, env: ModuleEnv) -> str | None:
     if isinstance(func, ast.Attribute):
         return origin(func, env)  # re-resolves func's scope — the same one, by construction
     return None
+
+
+def reexport_origin(value: str, roots: tuple[Path, ...],
+                    cache: dict[str, dict[str, str]]) -> str:
+    """Follow static module imports, including renamed relays, without value dataflow.
+
+    Each root is the folder of the first package component; planted trees can precede the
+    checkout supplying the shared owners. The caller owns the cache for one scan.
+    """
+    initial = value
+    seen: set[str] = set()
+    bindings: set[tuple[str, str]] = set()
+    while value.startswith("defender.") and value not in seen:
+        seen.add(value)
+        parts = value.split(".")
+        target = None
+        for end in range(len(parts) - 1, 1, -1):
+            module = ".".join(parts[:end])
+            if module not in cache:
+                cache[module] = {}
+                for root in roots:
+                    path = root.joinpath(*parts[1:end])
+                    candidates = (path.with_suffix(".py"), path / "__init__.py")
+                    found = next((p for p in candidates if p.is_file()), None)
+                    if found is not None:
+                        _, tree = read_and_parse(found, module)
+                        package = module if found.name == "__init__.py" else module.rpartition(".")[0]
+                        imports, bound = _scope_bindings(tree, package)
+                        cache[module] = {name: target for name, target in imports.items()
+                                         if name not in bound}
+                        break
+            rest = parts[end:]
+            if rest[0] in cache[module]:
+                binding = (module, rest[0])
+                if binding in bindings:
+                    return initial  # a module imports itself through a package relay
+                bindings.add(binding)
+                target = ".".join((cache[module][rest[0]], *rest[1:]))
+                break
+        if target is None or target == value:
+            break
+        value = target
+    return value
 
 
 def root_name(node: ast.expr) -> str | None:

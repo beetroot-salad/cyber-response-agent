@@ -55,6 +55,7 @@ if (_root := str(_DEFENDER_DIR.parent)) not in sys.path:
     sys.path.insert(0, _root)
 
 from defender.records import _alert_input, _provenance
+from defender.records._locations import DataRoot
 from defender.episodes._episode_handle import Episode
 from defender._io import (
     NotPlainEntry,
@@ -237,7 +238,7 @@ def _prime_once(
         "than replayed")
 
 
-def _episode_tenant(tenant_id: _tenant.TenantId, data_root: Path) -> RunTenant:
+def _episode_tenant(tenant_id: _tenant.TenantId, data_root: DataRoot) -> RunTenant:
     """The episode's tenant: the request's (`--tenant`), accepted under `data_root` — or the
     refusal, before anything is spent (S2: the tenant comes from the request, never from a
     record or a stamp).

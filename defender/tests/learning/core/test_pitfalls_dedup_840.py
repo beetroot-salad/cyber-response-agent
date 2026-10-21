@@ -1,6 +1,8 @@
 """The pitfalls record set is deduplicated on read by (owner, stderr_digest) and the occurrence count survives the collapse."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 from pathlib import Path
 
@@ -187,7 +189,7 @@ def test_a_row_whose_digest_carries_no_diagnosis_keys_to_itself(paths):
     # The whole no-diagnosis family, each spelling of it repeated: a bare envelope with no
     # trailing space, nothing at all, and whitespace-only.
     for digest in ("exit=2;", "", "   "):
-        p = LoopPaths(repo_root=paths.repo_root, state_dir=paths.state_dir / f"v{len(digest)}")
+        p = LoopPaths(repo_root=paths.repo_root, state_dir=location_path(paths.state_dir) / f"v{len(digest)}")
         persist.append_pitfalls(
             [_row(f"v:l-00{i}:0", digest=digest) for i in range(2)], state=_state1135.state_for_paths(p))
         assert len(persist.merge_pitfalls(persist.read_pitfalls(_state1135.state_for_paths(p)))) == 2, (
@@ -278,5 +280,5 @@ def test_every_duplicate_row_behind_a_curated_record_rotates(paths, monkeypatch)
     assert len(calls[0][0]["failures"]) == 1, "the curator saw the duplicates"
     assert _pending(paths) == []
     consumed = [json.loads(ln) for ln in
-                (paths.state_root / PITFALLS.consumed).read_text(encoding="utf-8").splitlines()]
+                (location_path(paths.state_root) / PITFALLS.consumed).read_text(encoding="utf-8").splitlines()]
     assert sorted(c["pitfall_id"] for c in consumed) == [f"r:l-003:{i}" for i in range(4)]

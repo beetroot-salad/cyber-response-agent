@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
@@ -157,7 +159,7 @@ def test_drain_request_mounts_the_code_the_draft_root_staged_and_only_its_lanes(
         (DEFENDER, Path("/defender"), False, "code"), (draft, Path("/draft"), False, "staged"),
         (draft / "agent/lessons", Path("/draft/agent/lessons"), True, None)}
     assert request.env["DEFENDER_AGENT_DIR"] == "/draft/agent"
-    host_only = (tenant.knowledge, tenant.worktrees, tenant.dir / "exports", tenant.dir / "forge")
+    host_only = (tenant.knowledge, location_path(tenant.worktrees), location_path(tenant.tenant_root) / "exports", location_path(tenant.tenant_root) / "forge")
     for mount in request.mounts:
         source = Path(mount.source)
         assert not any(source.is_relative_to(h) or h.is_relative_to(source) for h in host_only), source

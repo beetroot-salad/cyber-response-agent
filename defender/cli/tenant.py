@@ -120,11 +120,8 @@ def setup(tenant_id: str, learning_state_from: Path | None = None) -> int:
         _settings_files_parse(settings)
         run_tenant.resolve_run_tenant_or_refuse(
             settings, tenant_id=tid, defender_dir=_DEFENDER_DIR, dispatches_lead_zero=True)
-        from defender.learning.core.state import LearningAdoption
-
-        adoption = LearningAdoption(_tenant._TenantPaths(root, tid).learning, learning_state_from,
-                                    tenant_id=tid, data_root=root, repo_root=_REPO_ROOT)
-        adoption.run(before_move=(lambda: _tenant.create_tenant(root, tid)) if not has_row else None)
+        _tenant.provision_learning(root, tid, learning_state_from, repo_root=_REPO_ROOT,
+                                   create_row=not has_row)
         if learning_state_from is not None:
             print(f"learning state adopted from {learning_state_from}")
     except (OSError, _tenant.TenantRefused) as refused:

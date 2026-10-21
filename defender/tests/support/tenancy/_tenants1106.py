@@ -1,6 +1,8 @@
 """#1106 — the per-tenant knowledge folder: shared fixtures for the spec and the migrated suites."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
@@ -89,7 +91,7 @@ def fixture_gather_def() -> Any:
 def accept(root: Path, tenant_id: str, **kw: Any) -> Any:
     """`tenant_id` under `root`, through the real `accept_tenant` (#1120 D1) against this
     checkout's `defender/`."""
-    return mod("tenancy._tenant").accept_tenant(Path(root), tenant_id, defender_dir=DEFENDER, **kw)
+    return mod("tenancy._tenant").accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER, **kw)
 
 
 def run_tenant(tenant: Any, *, defender_dir: Path | None = None,

@@ -1,6 +1,8 @@
 """#1035 — one roster read: `runtime.verbs.read_roster`, and the four readers that consume it."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import functools
 import os
 import shutil
@@ -269,7 +271,7 @@ def test_an_unsearchable_adapters_directory_is_not_a_successful_pitfalls_tick(
     )
     assert CONTINUING not in verdict.log, f"the drain seam swallowed the fault: {verdict.log!r}"
     assert len(persist.read_pitfalls(open_state(paths))) == 2, "the queue was rotated on a failed tick"
-    assert not (paths.state_root / PITFALLS.consumed).exists(), "rows were stamped consumed on a failed tick"
+    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists(), "rows were stamped consumed on a failed tick"
 
     with handed_to_nobody(repo, adapters, 0o755):
         control = run_as_nobody(probe, expected=LeadAuthorError)

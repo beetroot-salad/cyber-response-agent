@@ -1,6 +1,8 @@
 """Independent model-path literals, host layouts, argv recording, and model response observations."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 import re
 import subprocess
@@ -97,7 +99,7 @@ def natural_run(layout: Layout, alert_bytes: bytes, label: str) -> Path:
     from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
     run_id = fixture_uuid(label)
-    staged = layout.data_root.parent / f"alert-{run_id}.json"
+    staged = location_path(layout.data_root).parent / f"alert-{run_id}.json"
     staged.write_bytes(alert_bytes)
     run = run_common.materialize_run(staged, run_id, tenant=layout.tenant)
     return Path(run.run_dir)
@@ -107,7 +109,7 @@ def host_tokens(*layouts: Layout, extra: Iterable[Path | str] = ()) -> list[str]
     """Return host-layout tokens, longest first, for model-visible leak detection."""
     tokens: set[str] = {str(REPO_ROOT), str(DEFENDER)}
     for layout in layouts:
-        tokens |= {str(layout.data_root), str(layout.data_root.resolve()), layout.tenant_id,
+        tokens |= {str(location_path(layout.data_root)), str(location_path(layout.data_root).resolve()), layout.tenant_id,
                    str(layout.checkout), str(layout.checkout.resolve()),
                    str(layout.checkout.parent)}
     home = os.path.expanduser("~")

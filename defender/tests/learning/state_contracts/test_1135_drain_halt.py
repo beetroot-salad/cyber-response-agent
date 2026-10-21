@@ -2,6 +2,8 @@
 real `drains.author_drain` through `cli._run_stage` over a created state root and a real git repo."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
@@ -529,12 +531,12 @@ def cell(name, root):
     try:
         if name == "e1":
             from defender.run_repository import RunId
-            from defender.tenancy._tenant import requested_tenant
+            from defender.tenancy._tenant import data_root_from_path, requested_tenant
 
             run_dir = Path(spec["e1_runs"][root])
             data_root = run_dir.parents[2]
             os.environ["DEFENDER_DATA_ROOT"] = str(data_root)
-            tenant = requested_tenant(data_root, run_dir.parent.parent.name)
+            tenant = requested_tenant(data_root_from_path(data_root), run_dir.parent.parent.name)
             run = tenant.runs_repository().open(RunId.parse(run_dir.name))
             out["answer"] = run_common.enqueue_curation(run, run_common.RunPaths(run_dir).alert)
             return out
@@ -668,9 +670,9 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
             w = base / "warm" / n
             w.mkdir(parents=True)
             warm[n] = str(w)
-        warm_tenant.learning.mkdir(exist_ok=True)
-        warm["e1"] = str(warm_tenant.learning)
-        e1_runs = {str(tenant.learning): str(run_dir), warm["e1"]: str(warm_run_dir)}
+        location_path(warm_tenant.learning).mkdir(exist_ok=True)
+        warm["e1"] = str(location_path(warm_tenant.learning))
+        e1_runs = {str(location_path(tenant.learning)): str(run_dir), warm["e1"]: str(warm_run_dir)}
         for p in (base / "cells", base / "warm"):
             os.chmod(p, 0o755)
         script = base / "verb_child.py"
@@ -719,7 +721,7 @@ def test_1135_an_everyday_failure_writing_moving_or_locking_a_state_record(tmp_p
     assert e1["answer"] is False, \
         f"the run-end enqueue did not answer False on an everyday failure: {e1}"
     assert any(lvl == "ERROR" and "Permission denied" in m
-               and str(tenant.learning / "author-queue") in m for lvl, m in out["lines"]), \
+               and str(location_path(tenant.learning) / "author-queue") in m for lvl, m in out["lines"]), \
         f"the run-end enqueue's selected queue permission failure was not logged: {out['lines']}"
     for name in ("append", "rotate", "move", "lock"):
         got = results[name]

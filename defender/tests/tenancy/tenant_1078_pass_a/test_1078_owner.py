@@ -1,6 +1,8 @@
 """The tenant owner (tenancy/_tenant.py): id grammar, checkout/data-root placement refusals, row create/require, data-root and learning-state resolution."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import json
 import re
 import threading
@@ -57,9 +59,9 @@ def test_o3_only_canonical_uuid_spelling_reaches_tenant_paths_and_rows(tmp_path)
     ok = fixture_uuid("tenant:acme")
     assert len(ok) == 36
     assert H.tenant().is_valid_tenant_id(ok) is True
-    assert H.TenantPaths(root, ok).dir == root / ok
+    assert location_path(H.TenantPaths(fixture_data_root(root), ok).tenant_root) == root / ok
     H.make_tenant(root, ok)
-    assert H.require_tenant(root, ok).tenant_id == ok
+    assert H.require_tenant(fixture_data_root(root), ok).tenant_id == ok
     for malformed in (ok.replace("-", ""), ok.upper(), "{" + ok + "}", ok + "x"):
         assert H.tenant().is_valid_tenant_id(malformed) is False
         H.owner_refusal(H.TenantPaths, tmp_path / "other", malformed)
@@ -93,9 +95,9 @@ def test_legacy_tenant_names_are_refused_by_every_admission_door(tmp_path, legac
     calls = {
         "TenantId": lambda: owner.TenantId(legacy),
         "requested_tenant_id": lambda: owner.requested_tenant_id(legacy),
-        "paths": lambda: H.TenantPaths(root, legacy),
-        "create": lambda: H.create_tenant(root, legacy),
-        "require": lambda: H.require_tenant(root, legacy),
+        "paths": lambda: H.TenantPaths(fixture_data_root(root), legacy),
+        "create": lambda: H.create_tenant(fixture_data_root(root), legacy),
+        "require": lambda: H.require_tenant(fixture_data_root(root), legacy),
         "accept": lambda: H.accept(root, legacy),
     }
     error = H.owner_refusal(calls[door])
@@ -109,12 +111,12 @@ def test_legacy_tenant_names_are_refused_by_every_admission_door(tmp_path, legac
 def test_o3_valid_id_round_trip(tmp_path, monkeypatch, tenant_id):
     root = tmp_path / "data"
     H.set_data_root(monkeypatch, root)
-    written = H.create_tenant(root, tenant_id)
+    written = H.create_tenant(fixture_data_root(root), tenant_id)
     assert written.tenant_id == tenant_id
-    assert json.loads(H.row_path(root, tenant_id).read_text(encoding="utf-8"))["tenant_id"] == \
+    assert json.loads(location_path(H.row_path)(root, tenant_id).read_text(encoding="utf-8"))["tenant_id"] == \
         tenant_id
-    assert H.require_tenant(root, tenant_id).tenant_id == tenant_id
-    assert H.TenantPaths(root, tenant_id).runs == root / tenant_id / "runs"
+    assert H.require_tenant(fixture_data_root(root), tenant_id).tenant_id == tenant_id
+    assert location_path(H.TenantPaths(fixture_data_root(root), tenant_id).runs) == root / tenant_id / "runs"
     base = H.runs_dir(root, tenant_id)
     # #1187 R1 (review-4 F42): no container record — the run's tenant is where it sits.
     run_dir = base / RUN_ID
@@ -142,7 +144,7 @@ def test_s7_j03_tenantpaths_relative_root_refused(tmp_path, monkeypatch):
     assert "rel/root" in str(refusal), f"the refusal does not name the relative root: {refusal}"
     H.owner_refusal(H.TenantPaths, "rel/root", fixture_uuid("tenant:playground"))
     assert H.census(tmp_path) == before, "the refused relative root created something"
-    assert H.TenantPaths(tmp_path / "abs", fixture_uuid("tenant:playground")).dir == tmp_path / "abs" / fixture_uuid("tenant:playground")
+    assert location_path(H.TenantPaths(fixture_data_root(tmp_path / "abs"), fixture_uuid("tenant:playground")).tenant_root) == tmp_path / "abs" / fixture_uuid("tenant:playground")
 
 
 def test_o11a_root_inside_defender_refused(tmp_path):
@@ -168,7 +170,7 @@ def test_o11a_uuid_tenant_linked_into_the_checkout_is_refused(tmp_path):
     assert "inside the checkout" in str(refused), refused
     assert str(H.DEFENDER) in str(refused), refused
     assert H.census(root) == before, "a refused mounted tenant changed its root"
-    assert H.TenantPaths(tmp_path / "outside", tenant_id).dir == tmp_path / "outside" / tenant_id
+    assert location_path(H.TenantPaths(fixture_data_root(tmp_path / "outside"), tenant_id).tenant_root) == tmp_path / "outside" / tenant_id
 
 
 def test_checkout_path_itself_reached_through_a_symlink(tmp_path):
@@ -180,15 +182,15 @@ def test_checkout_path_itself_reached_through_a_symlink(tmp_path):
     H.owner_refusal(H.TenantPaths, link / "defender", fixture_uuid("tenant:playground"))
     H.owner_refusal(H.TenantPaths, link / "defender" / "x", fixture_uuid("tenant:playground"))
     # the control: the same symlinked checkout, at an allowed location, is accepted
-    assert H.TenantPaths(link / ".defender-data", fixture_uuid("tenant:playground")).dir.name == fixture_uuid("tenant:playground")
+    assert location_path(H.TenantPaths(fixture_data_root(link / ".defender-data"), fixture_uuid("tenant:playground")).tenant_root).name == fixture_uuid("tenant:playground")
 
 
 def test_data_root_inside_another_checkouts_mounted_tree(tmp_path):
     other = tmp_path / "other-checkout"
     (other / ".git").mkdir(parents=True)
     (other / "defender").mkdir()
-    paths = H.TenantPaths(other / "defender" / "data", fixture_uuid("tenant:playground"))
-    assert paths.dir == other / "defender" / "data" / fixture_uuid("tenant:playground")
+    paths = H.TenantPaths(fixture_data_root(other / "defender" / "data"), fixture_uuid("tenant:playground"))
+    assert location_path(paths.tenant_root) == other / "defender" / "data" / fixture_uuid("tenant:playground")
     # and the running checkout's own tree is still refused beside it (the pair is not vacuous)
     H.owner_refusal(H.TenantPaths, H.mod("_paths").PATHS.defender_dir / "data", fixture_uuid("tenant:playground"))
 
@@ -200,7 +202,7 @@ def test_data_root_inside_another_checkouts_mounted_tree(tmp_path):
 ])
 def test_d1_require_tenant_refusals(tmp_path, fault):
     root = tmp_path / "data"
-    row = H.row_path(root, fixture_uuid("tenant:playground"))
+    row = location_path(H.row_path)(root, fixture_uuid("tenant:playground"))
     row.parent.mkdir(parents=True)
     plant = {
         "absent": lambda: None,
@@ -224,17 +226,17 @@ def test_d1_require_tenant_refusals(tmp_path, fault):
     # the control: a well-formed row for the same folder is accepted
     good = tmp_path / "good"
     H.plant_row(good, fixture_uuid("tenant:playground"))
-    assert H.require_tenant(good, fixture_uuid("tenant:playground")).tenant_id == fixture_uuid("tenant:playground")
+    assert H.require_tenant(fixture_data_root(good), fixture_uuid("tenant:playground")).tenant_id == fixture_uuid("tenant:playground")
 
 
 def test_d1_create_exclusive(tmp_path):
     """Two create_tenant calls for the same id cannot both succeed; the loser refuses and the
     row is the winner's."""
     root = tmp_path / "seq"
-    first = H.create_tenant(root, fixture_uuid("tenant:playground"))
-    bytes_after_first = H.row_path(root, fixture_uuid("tenant:playground")).read_bytes()
+    first = H.create_tenant(fixture_data_root(root), fixture_uuid("tenant:playground"))
+    bytes_after_first = location_path(H.row_path)(root, fixture_uuid("tenant:playground")).read_bytes()
     H.owner_refusal(H.create_tenant, root, fixture_uuid("tenant:playground"))
-    assert H.row_path(root, fixture_uuid("tenant:playground")).read_bytes() == bytes_after_first
+    assert location_path(H.row_path)(root, fixture_uuid("tenant:playground")).read_bytes() == bytes_after_first
     assert json.loads(bytes_after_first)["created_at"] == first.created_at
 
     for trial in range(20):
@@ -247,7 +249,7 @@ def test_d1_create_exclusive(tmp_path):
         def attempt(gate=gate, root=root, won=won, lost=lost) -> None:
             gate.wait(timeout=30)
             try:
-                won.append(H.create_tenant(root, fixture_uuid("tenant:playground")))
+                won.append(H.create_tenant(fixture_data_root(root), fixture_uuid("tenant:playground")))
             except BaseException as refused:  # noqa: BLE001 — classified below
                 lost.append(refused)
 
@@ -260,7 +262,7 @@ def test_d1_create_exclusive(tmp_path):
         assert all(isinstance(e, H.tenant().TenantRefused) for e in lost), (
             f"trial {trial}: a loser escaped with {[type(e).__name__ for e in lost]} rather "
             "than the owner's refusal")
-        on_disk = json.loads(H.row_path(root, fixture_uuid("tenant:playground")).read_text(encoding="utf-8"))
+        on_disk = json.loads(location_path(H.row_path)(root, fixture_uuid("tenant:playground")).read_text(encoding="utf-8"))
         assert on_disk["created_at"] == won[0].created_at, "the row is not the winner's"
 
 

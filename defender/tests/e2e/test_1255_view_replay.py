@@ -1,6 +1,8 @@
 """Drive model-path rendering, evidence preservation, operand refusal, and corpus isolation."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import re
 from pathlib import Path
@@ -115,7 +117,7 @@ def test_b6_o3_message_zero_lessons_section_shows_no_host_layout(tmp_path, monke
 
 def test_b4_an_alert_carrying_a_host_path_is_shown_byte_for_byte(tmp_path, monkeypatch):
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
-    evidence = f"{layout.data_root}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
+    evidence = f"{location_path(layout.data_root)}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
     doc = json.loads(ALERT)
     doc["process_args_evidence"] = f"cat {evidence}"
     run_dir = V.natural_run(layout, json.dumps(doc, indent=2).encode("utf-8"),
@@ -128,7 +130,7 @@ def test_b4_an_alert_carrying_a_host_path_is_shown_byte_for_byte(tmp_path, monke
 
     m0 = main.first_user_text()
     assert f"cat {evidence}" in m0, "the alert's own bytes were rewritten in message 0"
-    assert V.scan(m0, [str(layout.data_root)]), "control: the scanner sees the planted path"
+    assert V.scan(m0, [str(location_path(layout.data_root))]), "control: the scanner sees the planted path"
     assert _value(m0, "run_dir") == V.MODEL_RUN
     assert not V.scan(m0.replace(evidence, "<EVIDENCE>"), V.host_tokens(layout)), (
         "message 0 shows host layout outside the evidence")
@@ -154,14 +156,14 @@ def _outside(text: str, evidence: list[str]) -> str:
 def test_b4_evidence_naming_this_runs_own_trees_is_shown_byte_for_byte(tmp_path, monkeypatch):
     layout = V.make_layout(tmp_path / "a", V.TENANT_A)
     run_id = "20261015t120000z-view-evid-own"
-    old = f"{layout.data_root}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
-    own = _own_tree_evidence(layout, Path(layout.tenant.runs) / fixture_uuid(run_id))
+    old = f"{location_path(layout.data_root)}/{layout.tenant_id}/runs/20250101t000000z-old/investigation.md"
+    own = _own_tree_evidence(layout, Path(location_path(layout.tenant.runs)) / fixture_uuid(run_id))
     planted = [f"cat {p}" for p in (old, *own.values())]
     doc = json.loads(ALERT)
     for i, line in enumerate(planted):
         doc[f"process_args_evidence_{i}"] = line
     run_dir = V.natural_run(layout, json.dumps(doc, indent=2).encode("utf-8"), run_id)
-    assert run_dir == Path(layout.tenant.runs) / fixture_uuid(run_id), (
+    assert run_dir == Path(location_path(layout.tenant.runs)) / fixture_uuid(run_id), (
         f"fixture: the run folder is not where the evidence named it ({run_dir})")
     main = V.Recorder([
         Turn(tool_calls=[("read_file", {"path": V.MODEL_ALERT})]),

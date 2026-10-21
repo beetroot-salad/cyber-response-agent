@@ -1,6 +1,8 @@
 """Run page ticket line and receipt rendering, ticket replies independent of mapping, estate registry."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 from defender.episodes._episode_handle import Episode
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _view_run_1165
@@ -360,7 +362,7 @@ def test_s7pg_box_planted_flag_and_receipt_render_no_ticket_line(tmp_path, monke
 def test_d_mapping_error_consumers(tmp_path, caplog):
     root = tmp_path / "tenants"
     S.plant(root, marker="bad", table=TICKET_TABLE, open_status="{summary}")
-    record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+    record = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     error = record.ticket_mapping
     assert isinstance(error, S.case_ticket_error()), f"ticket_mapping is {error!r}"
@@ -402,7 +404,7 @@ def test_d_mapping_error_consumers(tmp_path, caplog):
 def test_o2_ticket_replies_ignore_the_mapping(tmp_path):
     root = tmp_path / "tenants"
     folder = S.plant(root, marker="o2", table=TICKET_TABLE)
-    record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+    record = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     assert S.open_reporter(record.ticket_mapping) == "defender"
 
@@ -429,7 +431,7 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
     # #1120: the resumed sibling reads its tenant from `DEFENDER_DATA_ROOT` alone.
     root = current_data_root()
     folder = S.plant(root, marker="est", table=TICKET_TABLE)
-    probe = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+    probe = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                       dispatches_lead_zero=False)
     assert S.open_reporter(probe.ticket_mapping) == "defender"
 
@@ -437,7 +439,7 @@ def test_c_estate_registry_takes_no_mapping(tmp_path, monkeypatch):
         return [T.fact("f1", f"case {entity} is in status {status} and carries a defender note "
                              "that the same binary was benign last quarter", (entity,))]
 
-    _base, src = T.runs_base(tmp_path)
+    _base, src = location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src), worlds=[
         T.base_world(),
         T.world_doc("b", facts=note("SOC-1", "closed")),

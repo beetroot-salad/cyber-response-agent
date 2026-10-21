@@ -1,6 +1,8 @@
 """Episode readers, launchers, and siblings use host-written arm rosters."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import os
 from pathlib import Path
@@ -886,7 +888,7 @@ class RegistryProbe:
 def test_the_siblings_query_tool_knows_every_roster_arm_id(tmp_path, monkeypatch, data_root):
     P.roots(tmp_path, monkeypatch)
     source_id = R.new_id()
-    _base, src = T.runs_base(tmp_path, source_run_id=source_id)
+    _base, src = location_path(T.runs_base)(tmp_path, source_run_id=source_id)
     tenant_id = src.parent.parent.name
     episode_id = R.new_id()
     doc = P.family_doc(src, episode_id=episode_id, source_run_id=source_id)

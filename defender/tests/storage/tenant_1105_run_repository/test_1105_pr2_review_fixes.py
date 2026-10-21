@@ -1,6 +1,8 @@
 """Review-finding regressions: natural open refusals, container spoiled after view, transient drain attempts, CLI stderr refusals."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import uuid
 import threading
 
@@ -40,20 +42,20 @@ RID_R1 = fixture_uuid("pr2-rf-r1")
 def _good(tmp_path: Path, *run_ids: str, tenant_id: str = H.T_ID):
     """A tenant under the configured data root, its natural runs folder as run setup leaves it
     (#1187 R1: no `_tenant.json`) and a real run folder per id."""
-    t = H.tenant(P.data_root(), tenant_id)
+    t = H.tenant(location_path(P.data_root)(), tenant_id)
     H.runs_folder(t)
     for rid in run_ids:
-        H.make_run(t.runs, rid)
+        H.make_run(location_path(t.runs), rid)
     return t
 
 
 def _uuid_tenant(*run_ids: str, tenant_id: str = H.T_ID):
     """#1187's natural container (declared changes 1 and 6): a tenant under the configured data
     root, its `<T>/runs` a real folder with NO `_tenant.json`, and a run folder per (UUID) id."""
-    t = H.tenant(P.data_root(), tenant_id)
-    Path(t.runs).mkdir(parents=True, exist_ok=True)
+    t = H.tenant(location_path(P.data_root)(), tenant_id)
+    Path(location_path(t.runs)).mkdir(parents=True, exist_ok=True)
     for rid in run_ids:
-        H.make_run(t.runs, rid)
+        H.make_run(location_path(t.runs), rid)
     return t
 
 
@@ -64,7 +66,7 @@ def _post_runs_episode(tenant_id: str, labels: tuple[str, ...]) -> tuple[Path, s
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     episode_id = S.new_id()
-    ep = S.make_episode(P.data_root(), tenant_id, episode_id, labels=labels, roster=True,
+    ep = S.make_episode(location_path(P.data_root)(), tenant_id, episode_id, labels=labels, roster=True,
                         arms=True)
     return ep, episode_id, S.read_roster(ep)
 
@@ -83,24 +85,24 @@ def test_a_natural_open_refuses_only_with_run_refused_and_absent_only_when_gone(
     r1 = str(uuid.uuid4())
     t = _uuid_tenant(r1)
     runs = t.runs_repository()
-    assert not (Path(t.runs) / "_tenant.json").exists()
-    assert Path(runs.open(_rid(r1)).run_dir) == Path(t.runs) / r1, "positive control"
-    assert Path(runs.resolve(RunAddress(H.T_ID, r1)).run_dir) == Path(t.runs) / r1
+    assert not (Path(location_path(t.runs)) / "_tenant.json").exists()
+    assert Path(runs.open(_rid(r1)).run_dir) == Path(location_path(t.runs)) / r1, "positive control"
+    assert Path(runs.resolve(RunAddress(H.T_ID, r1)).run_dir) == Path(location_path(t.runs)) / r1
 
     moved = tmp_path / "runs-elsewhere"
-    Path(t.runs).rename(moved)
-    os.symlink(moved, t.runs)
+    Path(location_path(t.runs)).rename(moved)
+    os.symlink(moved, location_path(t.runs))
     for door, call in (("open", lambda: runs.open(_rid(r1))),
                        ("resolve", lambda: runs.resolve(RunAddress(H.T_ID, r1)))):
         err = H.raised(call)
         assert isinstance(err, RunRefused), f"{door} under a linked runs folder raised {err!r}"
         assert not isinstance(err, RunAbsent), door
-        assert str(t.runs) in H.message(err), f"{door}: the refusal names the level: {err!r}"
-    os.unlink(t.runs)
+        assert str(location_path(t.runs)) in H.message(err), f"{door}: the refusal names the level: {err!r}"
+    os.unlink(location_path(t.runs))
     err = H.raised(runs.open, _rid(r1))
     assert isinstance(err, RunAbsent), f"open over an absent container raised {err!r}"
-    moved.rename(t.runs)
-    assert Path(runs.open(_rid(r1)).run_dir) == Path(t.runs) / r1, "the folder put back"
+    moved.rename(location_path(t.runs))
+    assert Path(runs.open(_rid(r1)).run_dir) == Path(location_path(t.runs)) / r1, "the folder put back"
 
     foreign = H.raised(runs.resolve, RunAddress(H.U_ID, r1))
     assert isinstance(foreign, _tenant.TenantRefused), (
@@ -243,7 +245,7 @@ def test_a_a_container_linked_after_the_siblings_ran_is_recorded_and_judged(
 
 
 def _queued(paths: Any, case_id: str) -> dict | None:
-    row = Path(paths.state_root) / "author-queue" / f"{case_id}.json"
+    row = Path(location_path(paths.state_root)) / "author-queue" / f"{case_id}.json"
     return json.loads(row.read_text(encoding="utf-8")) if row.is_file() else None
 
 
@@ -253,7 +255,7 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     r1, linked, nope = (str(uuid.uuid4()) for _ in range(3))
     t = _uuid_tenant(r1)
     u = _uuid_tenant(r1, tenant_id=H.U_ID)
-    os.symlink(Path(t.runs) / r1, Path(t.runs) / linked)
+    os.symlink(Path(location_path(t.runs)) / r1, Path(location_path(t.runs)) / linked)
     paths = P.loop_paths(tmp_path)
     transient = {
         "ghost": {"case_id": "ghost", "tenant_id": fixture_uuid("tenant:ghost"), "run_id": r1},
@@ -265,12 +267,12 @@ def test_b_a_row_that_cannot_be_reached_right_now_is_a_counted_transient_attempt
     P.queue_row(paths, "gone", {"case_id": "gone", "tenant_id": H.T_ID, "run_id": nope})
     P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.T_ID, "run_id": r1})
     moved = tmp_path / "u-runs-elsewhere"
-    Path(u.runs).rename(moved)
-    os.symlink(moved, u.runs)
+    Path(location_path(u.runs)).rename(moved)
+    os.symlink(moved, location_path(u.runs))
 
     lane = P.Lane()
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(t.runs) / r1], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(location_path(t.runs)) / r1], f"served {lane.run_dirs}"
     gone = P.dead_letter(paths, "gone")
     assert gone is not None
     assert gone.get("failed") == "artifact-missing", gone
@@ -377,7 +379,7 @@ def test_c_a_tick_with_rows_and_no_data_root_refuses_before_any_box(tmp_path, mo
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     assert _tick(paths, lane=lane, pitfalls=[], box=box) == 0
     assert box.started, "the control never started its box"
-    assert lane.run_dirs == [Path(t.runs) / RID_R1]
+    assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1]
 
 
 @contextmanager

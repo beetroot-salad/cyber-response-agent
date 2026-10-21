@@ -1,6 +1,8 @@
 """#1007 — the `subject` partition, the second queue channel, and who owns a row's identity."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import threading
 
@@ -88,7 +90,7 @@ def test_the_questioner_channel_declares_its_own_append_lock_and_shares_the_drai
     """The questioner channel gets its OWN append lock and consumed file, and SHARES the drain lock
     with the findings channel."""
     paths = W.loop_paths(tmp_path)
-    root, findings, questioner = paths.state_root, FINDINGS, QUESTIONER_FINDINGS
+    root, findings, questioner = location_path(paths.state_root), FINDINGS, QUESTIONER_FINDINGS
 
     assert (root / questioner.queue).name == W.QUESTIONER_QUEUE_FILENAME
     assert root / questioner.queue != root / findings.queue
@@ -320,8 +322,8 @@ def test_a_world_row_reusing_a_consumed_defender_finding_id_still_reaches_its_ow
     enqueue = W.mod("learning.judge.enqueue")
     paths = W.loop_paths(tmp_path)
     shared_id = f"{W.EPISODE_ID}/b/0/0"
-    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    (paths.state_root / FINDINGS.consumed).write_text(
+    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    (location_path(paths.state_root) / FINDINGS.consumed).write_text(
         json.dumps(queue_row(finding_id=shared_id,
                              consumed_category="consumed_idempotent")) + "\n",
         encoding="utf-8")
@@ -368,8 +370,8 @@ def test_a_malformed_line_on_either_channel_is_skipped_and_counted_never_silentl
     """A malformed line on EITHER channel is skipped and COUNTED — the same reading on both."""
     io_mod = W.mod("_io")
     paths = W.loop_paths(tmp_path)
-    (paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    channel = paths.state_root / QUESTIONER_FINDINGS.queue
+    (location_path(paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    channel = location_path(paths.state_root) / QUESTIONER_FINDINGS.queue
     channel.write_text(
         json.dumps(world_row()) + "\n{not json\n" + json.dumps(world_row(finding_id="x/2")) + "\n",
         encoding="utf-8")

@@ -1,6 +1,8 @@
 """#1106 e2e through run.py's real main: a run for a tenant that is missing, incomplete or inconsistent refuses before the box naming the path to fix; one process running tenant A then B hands each run only its own tenant's agent half, grant and settings."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import functools
@@ -73,15 +75,15 @@ def world(tmp_path, monkeypatch):
 
     def runs_base(tenant_id: str) -> Path:
         tenant = T.mod("tenancy._tenant")
-        layout = tenant._TenantPaths(root, tenant_id)
+        layout = tenant._TenantPaths(fixture_data_root(root), tenant_id)
         if not layout.row.exists():
             # The row alone (no knowledge folder): a tenant set up in name only.
-            layout.dir.mkdir(parents=True, exist_ok=True)
+            layout.tenant_root.mkdir(parents=True, exist_ok=True)
             layout.row.write_text(json.dumps(
                 {"tenant_id": tenant_id, "created_at": "2026-09-28T00:00:00+00:00"}) + "\n",
                 encoding="utf-8")
         chosen["tenant"] = tenant_id
-        return layout.runs
+        return location_path(layout.runs)
 
     return {"alert": alert, "root": root, "runs_base": runs_base, "chosen": chosen}
 

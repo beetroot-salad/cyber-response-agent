@@ -1,6 +1,8 @@
 """#987 — a STOPPED lead writes its own summary, through the REAL gather agent."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from dataclasses import replace as _with_live_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
 
@@ -483,7 +485,7 @@ def test_a_denied_verb_after_a_dead_end_still_leaves_its_denial_record(tmp_path)
 
 def test_the_stopped_leads_session_is_recorded_like_a_finished_ones(tmp_path):
     base = runs_base(tmp_path / "db")
-    store = session_store.open_store(case_id="case-987", sessions=SessionPaths(base))
+    store = session_store.open_store(case_id="case-987", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id=f"gather:{LEAD}")
     caps = driver._gather_extra_capabilities(store, session_id, f"gather:{LEAD}", request_limit=6)
 

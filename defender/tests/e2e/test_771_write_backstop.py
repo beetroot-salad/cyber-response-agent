@@ -1,6 +1,8 @@
 """#771 — write backstop: the alias-refusing guarded write primitive (symlink/hard-link/planted-directory refusal at every shared-tree writer, unpredictable staged names, ELOOP before lock), refusal postures preserved per call site, and the gated model writers."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run
 
 import contextlib
@@ -231,7 +233,7 @@ def test_a_symlinked_ancestor_above_the_tree_does_not_refuse(tmp_path):
     )
 
     # The consequence that is not recoverable by any caller: a run cannot start at all.
-    handle = session_store.open_store(case_id="c-771-anchor", sessions=SessionPaths(linked / "runs"))
+    handle = session_store.open_store(case_id="c-771-anchor", sessions=SessionPaths(fixture_runs_base(linked / "runs")))
     try:
         assert handle.path.is_file(), "the session store did not land under a symlinked base"
     finally:

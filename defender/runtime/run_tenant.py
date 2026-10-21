@@ -10,6 +10,8 @@ passes is one a run can start with.
 """
 from __future__ import annotations
 
+from defender.records._locations import DataRoot, RunsBase, EpisodesRoot
+
 import dataclasses
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -127,8 +129,8 @@ def refusals() -> tuple[type[Exception], ...]:
 
 
 def resolve_tenant(
-    data_root: Path, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
-    box_mounted: tuple[Path, ...] = (),
+    data_root: DataRoot, tenant_id: str, *, defender_dir: Path, dispatches_lead_zero: bool,
+    box_mounted: tuple[Path | RunsBase | EpisodesRoot, ...] = (),
 ) -> RunTenant:
     """`tenant_id` under `data_root`, accepted and ready to run, or `TenantRefused`.
 

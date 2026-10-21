@@ -1,6 +1,8 @@
 """#921 — a world's row: the facts read off X's own archived record (`family.read_world`)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
@@ -249,7 +251,7 @@ def test_921_a_world_label_equal_to_a_real_run_id_grades(tmp_path):
 
     # The real run appears under the tenant's runs base — `runs_base` writes an ORDINARY
     # finished run there — and the label still grades.
-    _base, source_run_dir = J.runs_base(tmp_path, source_run_id=colliding)
+    _base, source_run_dir = location_path(J.runs_base)(tmp_path, source_run_id=colliding)
     assert source_run_dir.name == colliding
     assert sorted(_rows(ep)) == sorted(["b", colliding]), (
         "a label spelled like a natural run id of the tenant no longer grades — the judge read "

@@ -1,6 +1,8 @@
 """resolve_tenant / resolve_run_tenant: systems, ticket mapping, faults kept per system, fresh read per resolve, read-only parts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import contextlib
@@ -27,7 +29,7 @@ RECORD_TYPES = ("SystemConfig", "CaseMapping")
 def _resolve(root: Path, tenant_id: str = TID) -> object:
     """The REAL acceptance frame over a planted root (C1: the one frame every entry uses)."""
     return run_tenant.resolve_tenant(
-        Path(root), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
+        fixture_data_root(Path(root)), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
 
 def _ctx(record: object, tmp_path: Path, env: Mapping[str, str] | None = None) -> object:

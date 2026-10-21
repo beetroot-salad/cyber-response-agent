@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import importlib
@@ -520,7 +522,7 @@ dispositions:
 
 
 def _runs_entries(tenant: S.Planted) -> list[str]:
-    base = tenant.runs
+    base = location_path(tenant.runs)
     return sorted(p.name for p in base.iterdir()) if base.is_dir() else []
 
 
@@ -800,7 +802,7 @@ def test_o8_d4_setup_adopts_an_all_down_tenant_whose_runs_are_refused(
 
     proc = H20.setup(tenant_py, root, tenant_id)
     H20.assert_clean(proc)
-    assert H20.row_path(root, tenant_id).is_file(), (
+    assert location_path(H20.row_path)(root, tenant_id).is_file(), (
         f"setup exited 0 but wrote no row for {tenant_id}:\n{H20.output(proc)}")
 
     # The operator's policy audit over the adopted tenant (`defender-policy show gather`).

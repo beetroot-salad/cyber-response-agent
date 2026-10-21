@@ -1,6 +1,8 @@
 """Guards on migrated paths: cross-tenant sources and containers, links and files at derived names are refused before anything is spent or written."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 import shutil
 from pathlib import Path
@@ -21,7 +23,7 @@ def _episode_names() -> set[str]:
     """Every entry under any tenant's `<data root>/<T>/episodes/` — #1187 Layout A, where every
     launch claims its episode (O9: no configured episodes root). Each refusal's control shows
     the census sees the episode a launch makes, so "no episode made" is not vacuous."""
-    root = P.data_root()
+    root = location_path(P.data_root)()
     return {str(p.relative_to(root)) for p in root.glob("*/episodes/*")}
 
 
@@ -74,7 +76,7 @@ def test_g15_a_link_at_the_derived_episode_name_is_passed_over_and_left_untouche
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     est, src = P.launch_source(tmp_path, source_run_id=str(uuid.uuid4()))
-    root = S.episodes_dir(P.data_root(), P.LAUNCH_TENANT)
+    root = S.episodes_dir(location_path(P.data_root)(), P.LAUNCH_TENANT)
     root.mkdir(parents=True, exist_ok=True)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -104,12 +106,12 @@ def test_g16_a_source_pointer_naming_another_tenants_store_is_refused_before_any
     from defender.run_repository import RunPaths
 
     est, src = P.launch_source(tmp_path)
-    beta = P.second_tenant(P.data_root(), H.U_ID)
+    beta = P.second_tenant(location_path(P.data_root)(), H.U_ID)
     # #1235: the case pointer is the host-only sidecar beside the run folder.
     pointer = RunPaths(src).session_pointer()
     honest = pointer.read_text(encoding="utf-8")
     doc = json.loads(honest)
-    foreign = Path(beta.sessions) / Path(doc["store_path"]).name
+    foreign = Path(location_path(beta.sessions)) / Path(doc["store_path"]).name
     foreign.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(doc["store_path"], foreign)
     pointer.write_text(json.dumps({**doc, "store_path": str(foreign)}), encoding="utf-8")
@@ -182,8 +184,8 @@ def test_g19_a_sibling_for_another_tenant_is_refused_before_any_write_or_spend(t
     `runs.episode(ep)`. The existing pins assert no spend but take no write census. The positive
     control is the same episode resumed by T: it runs."""
     src, ep = P.sibling_scene(tmp_path)
-    P.second_tenant(P.data_root(), H.T_ID)
-    episodes_before, data_before = P.tree(P.episodes(P.SIBLING_TENANT)), P.tree(P.data_root())
+    P.second_tenant(location_path(P.data_root)(), H.T_ID)
+    episodes_before, data_before = P.tree(location_path(P.episodes)(P.SIBLING_TENANT)), P.tree(location_path(P.data_root)())
 
     rec = P.SiblingRecorder()
     rc, refused, _err = P.drive_run_py(P.sibling_argv(H.T_ID, ep, "b"), rec)
@@ -191,12 +193,12 @@ def test_g19_a_sibling_for_another_tenant_is_refused_before_any_write_or_spend(t
     assert rc is None, "a sibling resumed another tenant's episode"
     said = P.refusal_text(refused)
     assert H.T_ID in said, f"the refusal does not name the requested tenant: {said!r}"
-    assert P.SIBLING_TENANT not in said.replace(str(P.data_root()), "<data root>"), (
+    assert P.SIBLING_TENANT not in said.replace(str(location_path(P.data_root)()), "<data root>"), (
         f"the refusal names the episode's tenant, so something of it was read: {said!r}")
     assert rec.order == [], f"the sibling spent before refusing: {rec.order}"
-    assert P.tree(P.episodes(P.SIBLING_TENANT)) == episodes_before, (
+    assert P.tree(location_path(P.episodes)(P.SIBLING_TENANT)) == episodes_before, (
         "the refused sibling wrote under the episode's tenant's episodes")
-    assert P.tree(P.data_root()) == data_before, "the refused sibling wrote under the data root"
+    assert P.tree(location_path(P.data_root)()) == data_before, "the refused sibling wrote under the data root"
 
     ok = P.SiblingRecorder()
     rc, refused, err = P.drive_run_py(P.sibling_argv(P.SIBLING_TENANT, ep, "b"), ok)
@@ -208,7 +210,7 @@ def _sample(tmp_path: Path, tenant_id: str) -> E.Episode:
     """`_episode_1025`'s sample episode at `<data root>/<tenant_id>/episodes/<uuid>/` (#1187
     Layout A), as RUNS leaves it: the arm roster naming every world, each arm at its roster id.
     No container record (R1)."""
-    return E.sample_episode(tmp_path, root=P.episodes(tenant_id))
+    return E.sample_episode(tmp_path, root=location_path(P.episodes)(tenant_id))
 
 
 def test_g9_a_linked_episode_container_reads_as_absent_on_the_page(tmp_path, d9_tenant):
@@ -275,7 +277,7 @@ def test_g23_the_page_refuses_a_file_at_the_episodes_name_and_leaves_it_untouche
     from defender.tests.support.learning.branch import _triplet_947 as T
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
-    root = S.episodes_dir(P.data_root(), d9_tenant)
+    root = S.episodes_dir(location_path(P.data_root)(), d9_tenant)
     root.mkdir(parents=True, exist_ok=True)
     episode_id = S.new_id()
     squatter = root / episode_id
@@ -287,7 +289,7 @@ def test_g23_the_page_refuses_a_file_at_the_episodes_name_and_leaves_it_untouche
     assert P.tree(root) == before
 
     squatter.unlink()
-    ep = S.make_episode(P.data_root(), d9_tenant, episode_id, labels=T.WORLDS, roster=True)
+    ep = S.make_episode(location_path(P.data_root)(), d9_tenant, episode_id, labels=T.WORLDS, roster=True)
     T.write_family(ep, T.family_doc(episode_id=episode_id, source_run_id=S.new_id()))
     assert ep == squatter
     ok = P.drive_cli(P.page_main(), P.new_page_argv(d9_tenant, episode_id))

@@ -1,6 +1,8 @@
 """Run setup checks: pinned ids claimed by records, id bounds, sidecar suffixes, linked runs folders, one-line stderr refusals."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import uuid
 from defender.tests.storage.ids_1187 import _spec1187 as S
 
@@ -33,8 +35,8 @@ def _one_line_exit(err: BaseException | None) -> bool:
 def _link_runs_to(t, outside: Path) -> None:
     """`t.runs` as a link to a real folder elsewhere (another tenant's, say)."""
     outside.mkdir(parents=True, exist_ok=True)
-    Path(t.runs).parent.mkdir(parents=True, exist_ok=True)
-    os.symlink(outside, t.runs)
+    Path(location_path(t.runs)).parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(outside, location_path(t.runs))
 
 
 def test_1105_run_setup_admits_the_id_then_checks_the_folder_then_the_record_then_the_claims(
@@ -58,9 +60,9 @@ def test_1105_run_setup_admits_the_id_then_checks_the_folder_then_the_record_the
     err = H.raised(_via_run_py, alert, pinned, t)
     assert H.message(err).startswith("[run.py] "), f"a linked runs folder gave {err!r}"
     assert H.tree_state(outside) == {}, "run setup created something through a linked runs folder"
-    os.unlink(t.runs)
+    os.unlink(location_path(t.runs))
     # 3. nothing after the folder refuses: no record step, no claimed-id step.
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     H.plant_record(runs, str(uuid.uuid4()), t.id, str(uuid.uuid4()), {"a": pinned})
     assert not (runs / "_tenant.json").exists()
     run = _pinned(alert, pinned, t)
@@ -71,7 +73,7 @@ def test_1105_run_setup_admits_the_id_then_checks_the_folder_then_the_record_the
 def test_1105_run_setup_refuses_a_pinned_or_minted_id_over_206_bytes_with_the_invalid_run_id_exit(
         tmp_path, data_root):
     t = H.tenant(data_root, H.T_ID)
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     alert = H.alert_file(tmp_path / "in")
     for pinned in ["r" + "1" * (n - 1) for n in (207, 231, 256, 206)] + [S.OLD_PINNED_ID]:
         err = H.raised(_pinned, alert, pinned, t)
@@ -93,7 +95,7 @@ def test_1105_run_setup_refuses_a_pinned_or_minted_id_over_206_bytes_with_the_in
 
 def test_1105_run_setup_refuses_a_sidecar_suffixed_pinned_or_minted_id(tmp_path, data_root):
     t = H.tenant(data_root, H.T_ID)
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     alert = H.alert_file(tmp_path / "in")
     run_id = str(uuid.uuid4())
     names = [f"{run_id}{s}" for s in H.SIDECAR_SUFFIXES] + [f"{run_id}.run-end.json{H.STAGED_TAIL}"]
@@ -143,12 +145,12 @@ def test_1105_run_setup_refuses_a_linked_runs_folder_before_creating_anything(
     err = H.raised(_pinned, alert, pinned, t)
     assert isinstance(err, (_tenant.TenantRefused, RunRefused)), f"materialize_run raised {err!r}"
     assert H.tree_state(outside) == {}, "materialize_run wrote through the linked runs folder"
-    os.unlink(t.runs)
+    os.unlink(location_path(t.runs))
 
     run = _pinned(alert, pinned, t)
-    assert run.run_dir == Path(t.runs) / pinned, f"an absent runs folder is created: {run!r}"
-    assert Path(t.runs).is_dir(), "the absent runs folder was created as a real directory"
-    assert not (Path(t.runs) / "_tenant.json").exists(), (
+    assert run.run_dir == Path(location_path(t.runs)) / pinned, f"an absent runs folder is created: {run!r}"
+    assert Path(location_path(t.runs)).is_dir(), "the absent runs folder was created as a real directory"
+    assert not (Path(location_path(t.runs)) / "_tenant.json").exists(), (
         "run setup wrote the retired tenant record")
 
 
@@ -165,7 +167,7 @@ def test_1105_run_setups_refusals_are_one_stderr_line_naming_the_path(tmp_path, 
 
     alert = H.alert_file(tmp_path / "in")
     t = H.tenant(data_root, H.T_ID)
-    runs = Path(t.runs)
+    runs = Path(location_path(t.runs))
     runs.mkdir(parents=True)
     r1, r3, r4, r5 = (str(uuid.uuid4()) for _ in range(4))
 

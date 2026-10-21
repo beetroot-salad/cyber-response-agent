@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import base64
 import contextlib
 import json
@@ -228,7 +230,7 @@ def test_no_second_copy_of_the_credential_is_written_anywhere(http_repo, tmp_pat
     assert opened(d.revert("agent/lessons/no-copy.md", "no-copy"), None) == forge_pulls(http_repo[1])[-1]["html_url"]
     assert server.authorized("git-receive-pack")
     new_in_tmp = [os.path.join(tmp, name) for name in sorted(set(os.listdir(tmp)) - existing)]
-    copies = _holding([*new_in_tmp, tenant.dir, git_config_home(tmp_path).home], token.encode(), started)
+    copies = _holding([*new_in_tmp, location_path(tenant.tenant_root), git_config_home(tmp_path).home], token.encode(), started)
     assert copies == [], copies
 
 
@@ -253,7 +255,7 @@ def test_no_file_holds_the_credential_while_network_git_waits_on_the_forge(http_
 
     def scan(service):
         roots = [entry for folder, names in existing.items() for entry in _new_entries(folder, names)]
-        found = _holding([*roots, tenant.dir, git_config_home(tmp_path).home], token.encode(), started)
+        found = _holding([*roots, location_path(tenant.tenant_root), git_config_home(tmp_path).home], token.encode(), started)
         scans[phase[0], service] = found
     server.on_service = scan
     http = ForgeHTTP()
@@ -413,7 +415,7 @@ def test_git_never_prompts_on_a_terminal(http_repo, rewritten, tmp_path):
     # watched, so a chatty child cannot stall until the deadline.
     out_path, err_path = tmp_path / "terminal.out", tmp_path / "terminal.err"
     with open(out_path, "wb") as out_file, open(err_path, "wb") as err_file:
-        child = subprocess.Popen([sys.executable, "-c", _ON_A_TERMINAL, terminal, str(tenant.data_root),
+        child = subprocess.Popen([sys.executable, "-c", _ON_A_TERMINAL, terminal, str(location_path(tenant.data_root)),
                                   str(tenant.id)], stdout=out_file, stderr=err_file,
                                  stdin=subprocess.DEVNULL, env=fresh_process_env(tenant, tmp_path / "terminal"))
     written, deadline = b"", time.monotonic() + 60

@@ -1,6 +1,8 @@
 """#767 — the investigation tail: when the run records its ticket comment, and when it does not (real `run.main`)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 from defender.episodes._episode_handle import Episode
 
@@ -46,7 +48,7 @@ def state(tmp_path, monkeypatch):
 
     satisfy_entrypoint_keys(monkeypatch, tmp_path)
     tenant = set_up_tenant(current_data_root())
-    tenant.learning.mkdir(exist_ok=True)
+    location_path(tenant.learning).mkdir(exist_ok=True)
     repo = tmp_path / "repo"
     (repo / "defender").mkdir(parents=True)
     return LoopPaths.for_tenant(tenant).with_repo_root(repo)

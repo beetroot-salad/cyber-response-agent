@@ -2,6 +2,8 @@
 tenant's alert mapping: path resolution, value domain, hostile values."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import difflib
 import json
 from collections.abc import Mapping, Sequence
@@ -361,7 +363,7 @@ def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
     nul_data = _drive(tmp_path, planted, S.generic_alert(
         rule={"id": VALID, "description": "first part\u0000second part"},
         detected_at="2026-09-30T08:15:00Z\u0000"), fixture_uuid("s01-nul-data"), mapping=SHIPPED)
-    before = sorted(p.name for p in planted.runs.iterdir())
+    before = sorted(p.name for p in location_path(planted.runs).iterdir())
     surrogate = S.run_alert(
         tmp_path, tenant=planted, run_id=fixture_uuid("s01-surrogate"),
         alert=_literal(_alert(_HOLE), '"Zq7731\\ud800tail"'), orient_shim=S.RecordingShim())
@@ -375,7 +377,7 @@ def test_p049_signature_value_carries_a_nul_or_control(tmp_path: Path) -> None:
         problems.append(f"[surrogate] not refused: rc={surrogate.rc!r} raised={surrogate.raised!r}")
     if surrogate.main.requests:
         problems.append("[surrogate] MAIN was asked for a turn over an unadmitted alert")
-    after = sorted(p.name for p in planted.runs.iterdir())
+    after = sorted(p.name for p in location_path(planted.runs).iterdir())
     if after != before:
         problems.append(f"[surrogate] the refused alert left {sorted(set(after) - set(before))}")
     assert not problems, _fail(problems)
@@ -441,7 +443,7 @@ def test_p057_duplicate_keys_at_the_mapped_path(tmp_path: Path) -> None:
     problems += _carries(dup_outer, "OUTER-2", "repeated parent")
     problems += _not_handed(dup_outer, ["OUTER-1"], "repeated parent")
     load_corpus = S.sym("skills.invlang.corpus", "load_corpus")
-    companions, _report = load_corpus(planted.runs)
+    companions, _report = load_corpus(location_path(planted.runs))
     seen = {c.case_id: c.signature_id for c in companions}
     if seen.get(fixture_uuid("s01-dup-inner")) != "LAST-7731":
         problems.append(f"[repeated member] the invlang corpus reads the run's signature as "

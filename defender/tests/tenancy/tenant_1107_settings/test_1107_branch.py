@@ -1,6 +1,8 @@
 """Branch launcher and tenant settings: box-mounted tenants-root refusal; a sibling resolves its own record."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from pathlib import Path
@@ -77,7 +79,7 @@ def _launch(src: Path, root: Path, seams: dict[str, Any]) -> tuple[Any, BaseExce
 def _resolve(root: Path) -> Any:
     """The REAL acceptance frame over a planted root (C1)."""
     return run_tenant.resolve_tenant(
-        Path(root), TID, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
+        fixture_data_root(Path(root)), TID, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
 
 def _sans_paths(text: str, *paths: Path) -> str:
@@ -103,7 +105,7 @@ def test_s7_mf13_launcher_refuses_box_mounted_tenants_root(tmp_path, data_root, 
 
     episodes.symlink_to(_folder, target_is_directory=True)
     before = set(episodes.iterdir())
-    resolved = run_tenant.resolve_tenant(outside, TID, defender_dir=S.DEFENDER,
+    resolved = run_tenant.resolve_tenant(fixture_data_root(outside), TID, defender_dir=S.DEFENDER,
                                          dispatches_lead_zero=False)
     assert resolved.tenant_id == TID, "the resolver alone refuses this root"
     seams = _seams()

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import errno
 import json
@@ -843,7 +845,7 @@ class PlantingBranch(SpecBranch):
 
 
 def _failed(paths: LoopPaths) -> list[dict]:
-    failed = paths.state_root / "author-queue" / "failed"
+    failed = location_path(paths.state_root) / "author-queue" / "failed"
     return [json.loads(p.read_text()) for p in sorted(failed.glob("*.json"))] \
         if failed.is_dir() else []
 

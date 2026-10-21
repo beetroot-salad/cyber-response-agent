@@ -2,6 +2,8 @@
 carries its outcome."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import json
@@ -736,7 +738,7 @@ def _source_then_sibling(tmp_path: Path, *, planted: S.Planted, run_id: str,
     point = S1255.tool_calling_responses(store)[2]  # the `echo` call
     assert S1255.calls_of(S1255.message_at(store, point))[0].tool_name == "bash", path
     spec = spec_at(store, src.run_dir, point)
-    sibling_dir = _plant_sibling(src.run_dir, planted.runs / fixture_uuid(f"{run_id}-sibling"))
+    sibling_dir = _plant_sibling(src.run_dir, location_path(planted.runs) / fixture_uuid(f"{run_id}-sibling"))
     sib = S.new_drive(tmp_path / "sibling", tenant=planted, main=sibling_turns)
     S.drive_run(sib, sibling_dir, tenant=planted.accept(), resume=spec)
     return src, sib

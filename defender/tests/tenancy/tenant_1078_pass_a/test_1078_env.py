@@ -1,6 +1,8 @@
 """The environment a run hands its children: DEFENDER_RUNS_BASE is derived from the run's runs base, and the prior-run corpus is scoped to the tenant."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import subprocess
 import sys
@@ -18,7 +20,7 @@ R1, R2 = fixture_uuid("1078-env-r1"), fixture_uuid("1078-env-r2")
 
 def _fresh_run(root: Path, run_id: str = R2, tenant_id: str = TENANT) -> Path:
     'A fresh run of `tenant_id` materialised by the REAL `materialize_run` under the\ndata root this process resolves (the tenant is created first, through `create_tenant`\nover a placed knowledge folder, then accepted there as the entry does).'
-    if not H.row_path(root, tenant_id).is_file():
+    if not location_path(H.row_path)(root, tenant_id).is_file():
         H.make_tenant(root, tenant_id)
     alert = H.plant_alert(root.parent / f"alert-{run_id}")
     tenant = H.accept(H.resolve_data_root(), tenant_id)

@@ -12,6 +12,8 @@ each fake injects faults only and never classifies or decides policy.
 """
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import json
 from dataclasses import dataclass, field
@@ -137,7 +139,7 @@ class Scene:
         """The channel's own disposition report — `held_report` on the lessons channel,
         `skip_report` on the questioner's. One accessor, because both are written by the
         same `shared.write_disposition_report` and both are what "reported" means."""
-        path = self.paths.state_root / self.cfg.channel.report
+        path = location_path(self.paths.state_root) / self.cfg.channel.report
         return path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
 
     def pending(self) -> list[dict]:

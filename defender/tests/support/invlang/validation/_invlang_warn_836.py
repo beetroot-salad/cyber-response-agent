@@ -1,6 +1,8 @@
 """Shared fixtures and drivers for the #836 suite — warn severity, the repair window, `fix_row`."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import os
 from dataclasses import replace
 import sys
@@ -157,7 +159,7 @@ def main_deps(tmp_path: Path) -> tuple[Any, Path]:
     from defender.run_repository import Run
 
     return replace(bind(MAIN_DEF, run, defender_dir=dfn),
-                   run=Run.under(run.parent, run.name), run_state=RunState(run, "r-836")), run
+                   run=Run.under(fixture_runs_base(run.parent), run.name), run_state=RunState(run, "r-836")), run
 
 
 def seed_investigation(run_dir: Path, text: str) -> Path:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.records._locations import (RunsBase, SessionsRoot, SessionTrustRoot, _unwrap_runs_base, _unwrap_sessions_root, _unwrap_session_trust_root)
+
 import dataclasses
 import errno
 import re
@@ -433,29 +435,29 @@ class RunPaths:
     # container, or — `runs_base` left out — derives it here, from the folder (#1105 PR 2,
     # J15): a caller holding only its run folder never names the container itself.
 
-    def _container(self, runs_base: Path | None) -> Path:
-        return self.run_dir.parent if runs_base is None else Path(runs_base)
+    def _container(self, runs_base: RunsBase | None) -> Path:
+        return self.run_dir.parent if runs_base is None else _unwrap_runs_base(runs_base)
 
-    def run_end_sidecar(self, runs_base: Path | None = None) -> Path:
+    def run_end_sidecar(self, runs_base: RunsBase | None = None) -> Path:
         return self._container(runs_base) / f"{self.run_dir.name}{RUN_END_SIDECAR_SUFFIX}"
 
-    def scrub_verdict(self, runs_base: Path | None = None) -> Path:
+    def scrub_verdict(self, runs_base: RunsBase | None = None) -> Path:
         return self._container(runs_base) / f"{self.run_dir.name}{SCRUB_VERDICT_SUFFIX}"
 
-    def ticket_write(self, runs_base: Path | None = None) -> Path:
+    def ticket_write(self, runs_base: RunsBase | None = None) -> Path:
         return self._container(runs_base) / f"{self.run_dir.name}{TICKET_WRITE_SUFFIX}"
 
-    def call_join(self, runs_base: Path | None = None) -> Path:
+    def call_join(self, runs_base: RunsBase | None = None) -> Path:
         """The run's call join (#1255 G4/G6): `(lead_id, seq)` -> the call's host-written id,
         one line per query-table row the run wrote. Beside the run folder, so the box can
         neither read the ids nor forge a row's partner."""
         return self._container(runs_base) / f"{self.run_dir.name}{_CALL_JOIN_SUFFIX}"
 
-    def ticket_comments(self, runs_base: Path | None = None) -> Path:
+    def ticket_comments(self, runs_base: RunsBase | None = None) -> Path:
         """Every comment the run posted on its case ticket (#1255 P5), beside the run folder."""
         return self._container(runs_base) / f"{self.run_dir.name}{_TICKET_COMMENTS_SUFFIX}"
 
-    def session_pointer(self, runs_base: Path | None = None) -> Path:
+    def session_pointer(self, runs_base: RunsBase | None = None) -> Path:
         """The run -> case link: which case's session store this run belongs to. Beside the
         run folder, so the box cannot rewrite it (#1235)."""
         return self._container(runs_base) / f"{self.run_dir.name}{SESSION_POINTER_SUFFIX}"
@@ -472,13 +474,13 @@ class RunPaths:
     def session_paths(self) -> SessionPaths:
         """The session store's paths for this run's container (`SessionPaths`), derived here
         from the run folder (#1105 PR 2, fork S): the store's caller hands them on whole."""
-        return SessionPaths(self.run_dir.parent)
+        return SessionPaths(RunsBase(self.run_dir.parent))
 
-    def sessions_dir(self, runs_base: Path) -> Path:
+    def sessions_dir(self, runs_base: RunsBase) -> SessionsRoot:
         """The sessions directory (a sibling of the runs base), from `SessionPaths`."""
         return SessionPaths(runs_base).sessions_dir
 
-    def session_db(self, runs_base: Path, lineage_id: str) -> Path:
+    def session_db(self, runs_base: RunsBase, lineage_id: str) -> Path:
         """`<sessions>/<lineage_id>.db` — asked of `SessionPaths`, which refuses a malformed or
         case-unstable lineage id (`InvalidCaseId`)."""
         return SessionPaths(runs_base).session_db(lineage_id)
@@ -490,29 +492,30 @@ class SessionPaths:
     the runs base, since one store spans a run and all its resumes and forks.
     """
 
-    runs_base: Path
+    runs_base: RunsBase
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "runs_base", Path(self.runs_base))
+        if not isinstance(self.runs_base, RunsBase):
+            raise TypeError("SessionPaths requires RunsBase")
 
     @property
-    def trust_root(self) -> Path:
+    def trust_root(self) -> SessionTrustRoot:
         """The runs base's parent: the highest point no box gets a writable mount on. Anchoring
         higher would refuse on a symlinked runs base (`/tmp` on macOS)."""
-        return self.runs_base.parent
+        return SessionTrustRoot(_unwrap_runs_base(self.runs_base).parent)
 
     @property
-    def sessions_dir(self) -> Path:
+    def sessions_dir(self) -> SessionsRoot:
         """A sibling of the runs base, never a child."""
-        return self.trust_root / SESSIONS_DIRNAME
+        return SessionsRoot(_unwrap_session_trust_root(self.trust_root) / SESSIONS_DIRNAME)
 
     def session_db(self, lineage_id: str) -> Path:
         """`<sessions>/<lineage_id>.db`. Raises `InvalidCaseId` for a malformed or
         case-unstable lineage id."""
         refuse_bad_case_id(lineage_id)
-        return self.sessions_dir / f"{lineage_id}{SESSION_DB_SUFFIX}"
+        return _unwrap_sessions_root(self.sessions_dir) / f"{lineage_id}{SESSION_DB_SUFFIX}"
 
-    def store(self, lineage_id: str) -> tuple[Path, Path]:
+    def store(self, lineage_id: str) -> tuple[Path, SessionTrustRoot]:
         """The store for `lineage_id` and the root its directory is made under, as one hand-out
         (#1105 PR 2, fork S): the session store opens the first and guards its mkdir at the
         second, and names neither the runs base nor the trust root itself."""

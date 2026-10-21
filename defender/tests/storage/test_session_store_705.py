@@ -1,6 +1,8 @@
 """The per-case session store: schema, identity, durability, payloads, lineage, concurrency."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import json
 import sqlite3
 import threading
@@ -98,7 +100,7 @@ def test_reader_refuses_an_unknown_user_version(tmp_path):
         raw.commit()
         raw.close()
         with pytest.raises(ss.UnknownSchemaVersion):
-            ss.open_store(case_id="case-alpha", sessions=SessionPaths(runs_base(tmp_path)))
+            ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(runs_base(tmp_path))))
 
 
 # append-only: the negative and its positive control
@@ -375,9 +377,9 @@ def test_an_append_is_one_commit_per_render_boundary(tmp_path):
     """One append is one transaction: the `message` row and its `message_payload` row"""
     ss = store_mod()
     base = runs_base(tmp_path)
-    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    store = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = store.new_session(agent_id="main")
-    observer = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    observer = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
 
     samples: list[tuple[int, int]] = []
 
@@ -402,7 +404,7 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
     """Two gather legs appending concurrently against one store, each under its own"""
     ss = store_mod()
     base = runs_base(tmp_path)
-    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = owner.new_session(agent_id="main")
 
     counts = {"gather-a": 20, "gather-b": 10}
@@ -411,7 +413,7 @@ def test_message_writes_from_concurrent_gather_legs_do_not_collide_or_lose_rows(
 
     def leg(agent_id: str, n: int) -> None:
         try:
-            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
             barrier.wait(timeout=10)
             for i in range(n):
                 handle.append(session_id, [text_response(f"{agent_id}-{i}")],
@@ -440,7 +442,7 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
     """One writer racing ITSELF — the same `session_id` and the same `agent_id`, appending"""
     ss = store_mod()
     base = runs_base(tmp_path)
-    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+    owner = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = owner.new_session(agent_id="main")
 
     per_leg = 15
@@ -450,7 +452,7 @@ def test_one_writer_racing_itself_under_one_agent_id_allocates_distinct_seqs(tmp
 
     def leg(tag: str) -> None:
         try:
-            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(base))
+            handle = ss.open_store(case_id="case-alpha", sessions=SessionPaths(fixture_runs_base(base)))
             barrier.wait(timeout=10)
             for i in range(per_leg):
                 handle.append(session_id, [text_response(f"{tag}-{i}")], agent_id=agent_id)

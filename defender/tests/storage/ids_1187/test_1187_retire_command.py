@@ -1,6 +1,8 @@
 """Legacy retirement renames old entries without copying, replacing, or following aliases."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import errno
 import importlib
 import json
@@ -141,16 +143,16 @@ def _full(sc: Scene) -> list[str]:
 
 def _inodes(sc: Scene) -> dict[str, dict[str, tuple[int, int]]]:
     """The scene's entries' `(st_dev, st_ino)` before the command, by where each must END."""
-    return {"runs_legacy": S.identities(sc.runs, sc.old),
+    return {"runs_legacy": S.identities(location_path(sc.runs), sc.old),
             "episodes_legacy": S.identities(sc.old_root, sc.old_episodes),
-            "runs": S.identities(sc.runs, sc.stay)}
+            "runs": S.identities(location_path(sc.runs), sc.stay)}
 
 
 def _assert_renamed(sc: Scene, before: dict[str, dict[str, tuple[int, int]]]) -> None:
     """Check renamed entries retain their original device and inode identities."""
-    after = {"runs_legacy": S.identities(sc.runs_legacy),
-             "episodes_legacy": S.identities(sc.episodes_legacy),
-             "runs": S.identities(sc.runs)}
+    after = {"runs_legacy": S.identities(location_path(sc.runs_legacy)),
+             "episodes_legacy": S.identities(location_path(sc.episodes_legacy)),
+             "runs": S.identities(location_path(sc.runs))}
     for where, was in before.items():
         moved = {rel for rel in was if after[where].get(rel) != was[rel]}
         assert not moved, (f"{len(moved)} entr(ies) bound for {where} are not the entries that "
@@ -217,7 +219,7 @@ def test_uuid_runs_and_sidecars_need_no_container_record(data_root, tmp_path):
 def test_1187_o6_the_tracer_stops_on_a_pre_1187_container_naming_the_command(
         data_root, tmp_path):
     sc = _scene(data_root, tmp_path, old_root=False)
-    shutil.rmtree(sc.runs / "_episodes")
+    shutil.rmtree(location_path(sc.runs) / "_episodes")
 
     got = _trace(T, sc.lessons)
     assert _refused(got), f"the tracer served a pre-#1187 container: {_shown(got)}"
@@ -237,14 +239,14 @@ def _prepare_retirement(sc: Scene, phase: str, data_root: Path, tmp_path: Path, 
         link.symlink_to(sc.old_root)
         argv[-1] = str(link)
     elif phase.startswith("mid-"):
-        sc.runs_legacy.mkdir()
+        location_path(sc.runs_legacy).mkdir()
         names = sorted(sc.old)
         for name in names if phase == "mid-episodes" else names[:len(names) // 2]:
-            os.rename(sc.runs / name, sc.runs_legacy / name)
+            os.rename(location_path(sc.runs) / name, location_path(sc.runs_legacy) / name)
         if phase == "mid-episodes":
-            sc.episodes_legacy.mkdir()
+            location_path(sc.episodes_legacy).mkdir()
             name = sorted(sc.old_episodes)[0]
-            os.rename(sc.old_root / name, sc.episodes_legacy / name)
+            os.rename(sc.old_root / name, location_path(sc.episodes_legacy) / name)
     if phase == "fresh":
         assert sc.old
         assert sc.old_episodes
@@ -268,20 +270,20 @@ def _prepare_retirement(sc: Scene, phase: str, data_root: Path, tmp_path: Path, 
 ])
 def test_retirement_moves_intact_entries_and_is_restartable(phase, data_root, tmp_path, monkeypatch):
     sc = _scene(data_root, tmp_path, old_root=phase != "absent-root")
-    runs_before, episodes_before = S.tree(sc.runs), S.tree(sc.old_root)
+    runs_before, episodes_before = S.tree(location_path(sc.runs)), S.tree(sc.old_root)
     inodes = _inodes(sc)
     argv, after_first = _prepare_retirement(sc, phase, data_root, tmp_path, monkeypatch)
 
     got = _retire(*argv)
     assert _ok(got), _shown(got)
-    assert S.tree(sc.runs) == _under(runs_before, sc.stay), "a UUID run or sidecar moved"
-    assert S.tree(sc.runs_legacy) == _under(runs_before, sc.old), "legacy bytes changed"
+    assert S.tree(location_path(sc.runs)) == _under(runs_before, sc.stay), "a UUID run or sidecar moved"
+    assert S.tree(location_path(sc.runs_legacy)) == _under(runs_before, sc.old), "legacy bytes changed"
     if phase == "unnamed-root":
         assert S.tree(sc.old_root) == episodes_before, "the unnamed root moved"
-        assert S.tree(sc.episodes_legacy) == {}
+        assert S.tree(location_path(sc.episodes_legacy)) == {}
         inodes["episodes_legacy"] = {}
     else:
-        assert S.tree(sc.episodes_legacy) == episodes_before, "episode bytes changed"
+        assert S.tree(location_path(sc.episodes_legacy)) == episodes_before, "episode bytes changed"
         assert S.tree(sc.old_root) == {}
     _assert_renamed(sc, inodes)
     if phase == "fresh":
@@ -314,8 +316,8 @@ def test_1187_r3_a_queued_curation_row_naming_an_old_run_does_not_stop_the_comma
 
     got = _retire(*_full(sc))
     assert _ok(got), _shown(got)
-    assert S.OLD_PINNED_ID in _names(sc.runs_legacy)
-    assert _names(sc.runs_legacy) == sc.old
+    assert S.OLD_PINNED_ID in _names(location_path(sc.runs_legacy))
+    assert _names(location_path(sc.runs_legacy)) == sc.old
     assert S.tree(state_root) == queued, "the command touched the curation queue"
 
 
@@ -329,7 +331,7 @@ def test_1187_n13_old_episodes_go_to_the_tenant_named_and_no_other_tenant_is_tou
 
     got = _retire(*_full(sc))
     assert _ok(got), _shown(got)
-    assert S.tree(sc.episodes_legacy) == episodes_before
+    assert S.tree(location_path(sc.episodes_legacy)) == episodes_before
     assert S.tree(other.tenant_dir) == other_before, f"tenant {U}'s tree changed"
 # S-move — refuse before ANY move. Each refusal: non-zero exit, every tree byte-identical,
 # the refusal names what it found. Positive control: the operator's fix, then the same command
@@ -356,12 +358,12 @@ _OBSTRUCTIONS = [
 
 def _obstruction(sc: Scene, outside: Path, group: str, location: str, shape: str) -> Path:
     locations = {
-        "old-link": sc.runs / "zz-old-link", "uuid-link": sc.runs / S.new_id(),
-        "runs-fifo": sc.runs / "zz-old-fifo", "latest": sc.old_root / "latest",
+        "old-link": location_path(sc.runs) / "zz-old-link", "uuid-link": location_path(sc.runs) / S.new_id(),
+        "runs-fifo": location_path(sc.runs) / "zz-old-fifo", "latest": sc.old_root / "latest",
         "episodes-fifo": sc.old_root / "zz-fifo",
-        "old-run": sc.runs_legacy / S.OLD_PINNED_ID,
-        "old-sidecar": sc.runs_legacy / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}",
-        "old-episode": sc.episodes_legacy / sorted(sc.old_episodes)[-1],
+        "old-run": location_path(sc.runs_legacy) / S.OLD_PINNED_ID,
+        "old-sidecar": location_path(sc.runs_legacy) / f"{S.OLD_MINTED_ID}{S.SIDECAR_SUFFIXES[0]}",
+        "old-episode": location_path(sc.episodes_legacy) / sorted(sc.old_episodes)[-1],
     }
     path = sc.tenant_dir / location if group == "root" else locations[location]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -407,8 +409,8 @@ def test_obstruction_refuses_before_any_move_and_removal_restores_service(
         entry.unlink()
     again = _retire(*_full(sc))
     assert _ok(again), _shown(again)
-    assert _names(sc.runs_legacy) == sc.old
-    assert _names(sc.episodes_legacy) == sc.old_episodes
+    assert _names(location_path(sc.runs_legacy)) == sc.old
+    assert _names(location_path(sc.episodes_legacy)) == sc.old_episodes
 
 
 def test_1187_n15_a_record_an_old_checkout_recreates_is_never_renamed_over_the_moved_one(
@@ -416,14 +418,14 @@ def test_1187_n15_a_record_an_old_checkout_recreates_is_never_renamed_over_the_m
     sc = _scene(data_root, tmp_path)
     first = _retire(*_full(sc))
     assert _ok(first), _shown(first)
-    moved_record = (sc.runs_legacy / "_tenant.json").read_bytes()
-    H.plant_tenant_record(sc.runs, T, raw=json.dumps({"tenant_id": T, "recreated": True}) + "\n")
+    moved_record = (location_path(sc.runs_legacy) / "_tenant.json").read_bytes()
+    H.plant_tenant_record(location_path(sc.runs), T, raw=json.dumps({"tenant_id": T, "recreated": True}) + "\n")
     before = _world(data_root, sc.old_root)
 
     got = _retire(*_full(sc))
     assert _refused(got), f"the command ran over the moved _tenant.json: {_shown(got)}"
     assert _world(data_root, sc.old_root) == before, "something moved or was replaced"
-    assert (sc.runs_legacy / "_tenant.json").read_bytes() == moved_record
+    assert (location_path(sc.runs_legacy) / "_tenant.json").read_bytes() == moved_record
     assert "_tenant.json" in got.said, f"the refusal does not name _tenant.json: {got.said!r}"
 
 
@@ -431,7 +433,7 @@ def test_1187_s_move_a_link_at_the_tenants_runs_folder_refuses_before_any_move(
         data_root, tmp_path):
     sc = _scene(data_root, tmp_path)
     elsewhere = tmp_path / "elsewhere-runs"
-    S.replace_with_link(sc.runs, elsewhere)
+    S.replace_with_link(location_path(sc.runs), elsewhere)
     before = _world(data_root, sc.old_root, elsewhere)
 
     got = _retire(*_full(sc))
@@ -439,11 +441,11 @@ def test_1187_s_move_a_link_at_the_tenants_runs_folder_refuses_before_any_move(
     assert _world(data_root, sc.old_root, elsewhere) == before, "something moved through the link"
     assert "runs" in got.said, got.said
 
-    os.unlink(sc.runs)
-    os.rename(elsewhere, sc.runs)
+    os.unlink(location_path(sc.runs))
+    os.rename(elsewhere, location_path(sc.runs))
     again = _retire(*_full(sc))
     assert _ok(again), _shown(again)
-    assert _names(sc.runs_legacy) == sc.old
+    assert _names(location_path(sc.runs_legacy)) == sc.old
 
 
 @pytest.mark.parametrize("target", ["another_tenants_folder", "a_folder_outside_the_data_root"])
@@ -473,14 +475,14 @@ def test_1187_s_move_a_link_at_the_tenant_folder_refuses_before_any_move(
     if target == "another_tenants_folder":
         again = _retire("--tenant", U)
         assert _ok(again), _shown(again)
-        assert _names(sc.runs_legacy) == sc.old
+        assert _names(location_path(sc.runs_legacy)) == sc.old
     else:
         os.unlink(link)
         os.rename(aside, link)
         again = _retire(*_full(sc))
         assert _ok(again), _shown(again)
-        assert _names(sc.runs_legacy) == sc.old
-        assert _names(sc.episodes_legacy) == sc.old_episodes
+        assert _names(location_path(sc.runs_legacy)) == sc.old
+        assert _names(location_path(sc.episodes_legacy)) == sc.old_episodes
 
 
 #: The CI-provided folder for the rename-time EXDEV case (adversary F6): a folder on ANOTHER
@@ -530,10 +532,10 @@ def test_1187_s_move_an_exdev_at_rename_time_refuses_naming_both_paths_and_a_rer
         assert str(sc.tenant_dir) in got.said, (
             f"the refusal does not name the destination under <T>: {got.said!r}")
         for name in sc.old_episodes:
-            places = [p for p in (sc.old_root / name, sc.episodes_legacy / name)
+            places = [p for p in (sc.old_root / name, location_path(sc.episodes_legacy) / name)
                       if os.path.lexists(p)]
             assert len(places) == 1, f"old episode {name!r} is in {len(places)} places: {places}"
-        merged = {**S.tree(sc.old_root), **S.tree(sc.episodes_legacy)}
+        merged = {**S.tree(sc.old_root), **S.tree(location_path(sc.episodes_legacy))}
         assert merged == episodes_before, "an old episode's bytes changed or went missing"
         after_first = _world(data_root, sc.old_root)
 
@@ -566,8 +568,8 @@ def test_1187_s_move_an_old_episodes_root_on_another_filesystem_refuses_before_a
         got = _retire(*_full(sc))
         if where == "same_filesystem":
             assert _ok(got), _shown(got)
-            assert _names(sc.episodes_legacy) == sc.old_episodes
-            assert _names(sc.runs_legacy) == sc.old
+            assert _names(location_path(sc.episodes_legacy)) == sc.old_episodes
+            assert _names(location_path(sc.runs_legacy)) == sc.old
             return
         assert _refused(got), f"the command ran over a root on another filesystem: {_shown(got)}"
         assert _world(data_root, sc.old_root) == before, "something moved before refusing"
@@ -591,7 +593,7 @@ def test_1187_o6_the_path_the_refusal_names_runs_as_the_operators_command(data_r
     script = H.WORKTREE / S.COMMAND
     child = process.run_script(script, *_full(sc), root=data_root)
     assert child.returncode == 0, (child.stdout + child.stderr)[-1200:]
-    assert _names(sc.runs_legacy) == sc.old
-    assert _names(sc.episodes_legacy) == sc.old_episodes
-    assert _names(sc.runs) == sc.stay
+    assert _names(location_path(sc.runs_legacy)) == sc.old
+    assert _names(location_path(sc.episodes_legacy)) == sc.old_episodes
+    assert _names(location_path(sc.runs)) == sc.stay
     _assert_renamed(sc, inodes_before)

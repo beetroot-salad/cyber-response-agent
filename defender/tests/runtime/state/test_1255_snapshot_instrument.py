@@ -1,6 +1,8 @@
 """Fork lineage stays host-side and model-visible run records stay neutral."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 from pathlib import Path
 from typing import Any
@@ -58,7 +60,7 @@ class _Lifecycle:
 
 def _launch_arm(tmp_path: Path, world: str) -> tuple[Path, Path, Path]:
     """`run.main --tenant T --episode <id> --world <world>` over the fixture episode, lifecycle recorded."""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path, doc=T.family_doc(source_run_dir=str(src)))
     T.plant_roster(ep)
     lifecycle = _Lifecycle()

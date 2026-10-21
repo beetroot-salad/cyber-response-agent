@@ -2,6 +2,8 @@
 per-kind `RecordHandle` every record accessor answers."""
 from __future__ import annotations
 
+from defender.records._locations import (RunsBase, _unwrap_runs_base, _unwrap_session_trust_root)
+
 import contextlib
 import dataclasses
 import json
@@ -113,11 +115,13 @@ class RecordHandle:
 
     if TYPE_CHECKING:
         write: Callable[[str | bytes], None]
+    _lineage_id: Any
+    _sessions_runs_base: RunsBase | None
 
     def __init__(
         self, resolve: Callable[[], Path], *, io: Any, root: Callable[[], Path], group: str,
         member: str, on_partial_failure: Any = None,
-        session_args: tuple[Any, ...] | None = None,
+        session_args: tuple[Any, RunsBase | None] | None = None,
         prepare_write: Callable[[], None] | None = None,
     ) -> None:
         self._resolve = resolve
@@ -278,6 +282,7 @@ class RecordHandle:
     def _do_open(self):
         # Resolve first so the owner's refusals apply to `.open()` as to `.path`.
         _ = self.path
+        assert self._sessions_runs_base is not None  # resolved above: a bare Run.at refused
         return self.open_store(case_id=self._lineage_id,
                                sessions=SessionPaths(self._sessions_runs_base))
 
@@ -336,16 +341,16 @@ class Run:
     #: on a `Run.at` handle), and the tenant half — present on an `under` handle, absent on
     #: `at`.
     run_dir: Path
-    runs_base: Path | None
+    runs_base: RunsBase | None
     tenant_id: str
 
     def __init__(
-        self, run_dir: Path, *, runs_base: Path | None, io: Any = _real_io,
+        self, run_dir: Path, *, runs_base: RunsBase | None, io: Any = _real_io,
         tenant_id: str | None = None,
     ) -> None:
         # The address is frozen once built (#1105 O5.13): `__setattr__` refuses these names.
         object.__setattr__(self, "run_dir", Path(run_dir))
-        object.__setattr__(self, "runs_base", Path(runs_base) if runs_base is not None else None)
+        object.__setattr__(self, "runs_base", runs_base)
         # The address's tenant, not the stamp's (that is `run.record.tenant_id`). A `Run.at`
         # handle has no address and no such attribute.
         if tenant_id is not None:
@@ -387,7 +392,7 @@ class Run:
         `gather_raw` is refused and nothing above the container is judged. The container is
         never handed out for it (#1105 PR 2, J15)."""
         self._io.guarded_mkdir(RunPaths(self.run_dir).gather_raw,
-                               base=self._runs_base_for("make_run_dir", "gather_raw"))
+                               base=_unwrap_runs_base(self._runs_base_for("make_run_dir", "gather_raw")))
 
     @contextlib.contextmanager
     def reader(self) -> Iterator[_real_io.Bound]:
@@ -396,7 +401,7 @@ class Run:
         held no-follow — a link there is refused — and every read walks no-follow below it,
         so the caller formats no path. Held for the `with` block only. A handle built from a
         bare directory (`Run.at`) holds no container and refuses (`ValueError`)."""
-        held = self._io.hold(self._runs_base_for("reader", "run folder"), follow=False)
+        held = self._io.hold(_unwrap_runs_base(self._runs_base_for("reader", "run folder")), follow=False)
         try:
             yield held.view().under(self.run_dir.name)
         finally:
@@ -405,7 +410,7 @@ class Run:
     def _record_partial_failure(self, note: str) -> None:
         self.partial_failures = (*self.partial_failures, note)
 
-    def _runs_base_for(self, group: str, name: str) -> Path:
+    def _runs_base_for(self, group: str, name: str) -> RunsBase:
         if self.runs_base is None:
             raise ValueError(
                 f"run.{group}.{name} needs the runs base, which this handle does not hold — "
@@ -429,9 +434,9 @@ class Run:
 
             def trust_root() -> Path:
                 if name in _SIDECAR_MEMBERS:
-                    return self._runs_base_for(group, name)
+                    return _unwrap_runs_base(self._runs_base_for(group, name))
                 if name == "session_db":
-                    return SessionPaths(self._runs_base_for(group, name)).trust_root
+                    return _unwrap_session_trust_root(SessionPaths(self._runs_base_for(group, name)).trust_root)
                 return self.run_dir
 
             def prepare_write() -> None:
@@ -452,7 +457,7 @@ class Run:
 
     @classmethod
     def under(
-        cls, runs_base: Path, run_id: str | RunId, *, io: Any = _real_io,
+        cls, runs_base: RunsBase, run_id: str | RunId, *, io: Any = _real_io,
         tenant_id: str | None = None,
     ) -> Run:
         """The no-I/O builder the repository's opens and creates share — not a public front
@@ -460,8 +465,8 @@ class Run:
         repository has one admission rule, so no handle is built for a run whose sidecar files
         could not be named."""
         name = str(run_id if isinstance(run_id, RunId) else RunId.parse(run_id))
-        runs_base = Path(runs_base)
-        return cls(runs_base / name, runs_base=runs_base, io=io, tenant_id=tenant_id)
+        folder = _unwrap_runs_base(runs_base)
+        return cls(folder / name, runs_base=runs_base, io=io, tenant_id=tenant_id)
 
     @classmethod
     def at(cls, directory: Path) -> Run:
@@ -545,7 +550,7 @@ class Run:
 
         assert self.runs_base is not None
         sidecar_text, _reason = self._io.rooted_read(
-            self.runs_base, owner.run_end_sidecar(self.runs_base).name)
+            _unwrap_runs_base(self.runs_base), owner.run_end_sidecar(self.runs_base).name)
         if sidecar_text is None:
             return None
         try:

@@ -25,6 +25,7 @@ from .auth import ForgejoIdentity
 from .batch import Batch
 from .commits import CommitMaker, _Line
 from .exports import (
+    draft_path,
     TenantExport,
     build_draft,
     publish_locked,
@@ -123,7 +124,7 @@ class TenantDelivery:
                 id=batch_id,
                 branch=branch,
                 export=export,
-                draft_root=self.tenant.drafts / batch_id,
+                draft_root=draft_path(self.tenant, batch_id),
                 lanes=declared,
                 tenant=self.tenant,
                 defender_dir=self.defender_dir,
@@ -133,7 +134,7 @@ class TenantDelivery:
             )
 
     def _refuse_taken(self, batch_id: str, branch: str) -> None:
-        if os.path.lexists(self.tenant.drafts / batch_id):
+        if os.path.lexists(draft_path(self.tenant, batch_id)):
             raise DeliveryRefused(
                 f"the batch id {batch_id} has a draft already: batch ids are "
                 "never used again while their draft remains"

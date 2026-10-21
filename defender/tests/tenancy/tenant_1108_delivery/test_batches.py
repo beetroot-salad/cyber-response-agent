@@ -1,6 +1,8 @@
 """Tenant delivery: batches behavior through the public API."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 
 import os
 
@@ -54,11 +56,11 @@ def test_start_batch_makes_a_git_free_draft_of_the_export_commit_and_no_checkout
     assert (tenant.agent / "lessons/merged.md").read_text(encoding="utf-8") == "human-reviewed merge\n"
 
     assert _worktrees(clone) == [os.path.realpath(clone)], "a batch worktree was made"
-    assert not tenant.worktrees.exists() or not any(tenant.worktrees.iterdir())
+    assert not location_path(tenant.worktrees).exists() or not any(location_path(tenant.worktrees).iterdir())
     assert branch_tip(clone, batch.branch) is None, "the batch's branch exists before any commit"
     assert git(clone, "status", "--porcelain") == ""
 
-    assert batch.draft_root == tenant.dir / "drafts" / "fresh"
+    assert batch.draft_root == location_path(tenant.tenant_root) / "drafts" / "fresh"
     assert _drafts(tenant) == ["fresh"], "a temporary entry was left beside the draft"
     assert sorted(p.name for p in batch.draft_root.iterdir()) == ["agent"]
     assert not list(batch.draft_root.rglob(".git"))
@@ -152,7 +154,7 @@ def test_stale_draft_temporaries_are_swept_and_drafts_are_kept(repo, by):
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     kept = d.start_batch("kept", lanes=LANES)
-    drafts = tenant.dir / "drafts"
+    drafts = location_path(tenant.tenant_root) / "drafts"
     _write(drafts / ".killed-1a2b3c/agent/lessons/seed.md", "a part-built draft\n")
     (drafts / ".empty-4d5e6f").mkdir()
     draft = files_under(kept.draft_root)
@@ -202,12 +204,12 @@ def test_a_crash_after_the_draft_exists_leaves_its_id_refused_for_good(repo, tmp
     tenant = repo[0]
     code, out, err = _build_elsewhere(repo, tmp_path, "crashed", "crash")
     assert code == -signal.SIGKILL, f"{code} {out} {err}"
-    draft = files_under(tenant.dir / "drafts" / "crashed")
+    draft = files_under(location_path(tenant.tenant_root) / "drafts" / "crashed")
     assert "agent/lessons/seed.md" in draft, draft
     d = delivery(repo, ForgeHTTP())
     for _ in range(2):
         with pytest.raises(target().DeliveryRefused):
             d.start_batch("crashed", lanes=LANES)
         d.publish()
-    assert files_under(tenant.dir / "drafts" / "crashed") == draft
-    assert d.start_batch("other", lanes=LANES).draft_root == tenant.dir / "drafts" / "other"
+    assert files_under(location_path(tenant.tenant_root) / "drafts" / "crashed") == draft
+    assert d.start_batch("other", lanes=LANES).draft_root == location_path(tenant.tenant_root) / "drafts" / "other"

@@ -1,6 +1,8 @@
 """Record natural and control-arm requests, compare only permitted O4 differences, and scan identity leaks."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 import asyncio
 import dataclasses
 import datetime as dt
@@ -453,7 +455,7 @@ def _source_run(tenant_id: str, run_id: str) -> Any:
     from defender.run_repository import RunId
 
     root = _tenant.resolve_data_root()
-    tenant = _tenant.accept_tenant(root, tenant_id, defender_dir=DEFENDER)
+    tenant = _tenant.accept_tenant(fixture_data_root(root), tenant_id, defender_dir=DEFENDER)
     return tenant, tenant.runs_repository().open(RunId.parse(run_id))
 
 

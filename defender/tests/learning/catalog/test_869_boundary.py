@@ -1,6 +1,8 @@
 """#869 M2/O1 — resolve once at the boundary, thread the value inward non-Optional."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import json
 from pathlib import Path
@@ -174,7 +176,7 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
         [pitfall_row("r:l-000:0", "elastic"), pitfall_row("r:l-001:0", "elastic")], state=state,
     )
     # The drain's own input: one queued lead-author request, which lane 1 will refuse.
-    write(paths.state_root / "author-queue" / "case-1.json",
+    write(location_path(paths.state_root) / "author-queue" / "case-1.json",
           json.dumps(curation_row("case-1", _run_dir())) + "\n")
 
     residue = "residue that lane 1 left behind\n"
@@ -194,12 +196,13 @@ def test_uncommitted_residue_does_not_cross_lanes(tmp_path, monkeypatch, capsys)
         )
 
     capsys.readouterr()
-    drains._drain_lead_author(paths, state, lane1, lane2, data_root=drains._data_root())
+    drains._drain_lead_author(paths, state, lane1, lane2,
+                             accept_tenant=drains._tenant_acceptor(paths.tenant))
 
     # Both lanes actually ran, and lane 1 actually refused: without this the residue claim
     # would be green over a drain that never reached either lane.
     assert lane1_calls, "lane 1 was never served, so it left no residue to carry"
-    assert (paths.state_root / "author-queue" / "failed" / "case-1.json").is_file()
+    assert (location_path(paths.state_root) / "author-queue" / "failed" / "case-1.json").is_file()
 
     committed = git(repo, "log", "--all", "-p", "--", str(skill_md(repo, "elastic").relative_to(repo))).stdout
     assert residue.strip() not in committed

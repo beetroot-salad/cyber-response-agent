@@ -1,6 +1,8 @@
 """Fork-command validation requires a matching recorded snapshot."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import pytest
 
 from defender.tests.support.learning.branch import _triplet_947 as T
@@ -18,7 +20,7 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
         tmp_path, capsys):
     from defender.learning.branch import cli as branch_cli
 
-    _base, src = T.runs_base(tmp_path, pre_snapshot=True)
+    _base, src = location_path(T.runs_base)(tmp_path, pre_snapshot=True)
     questioner = T.FakeAgent()  # no replies: a call it should never get fails loudly
     spawn = T.FakeSpawn()
     preflights: list[tuple] = []
@@ -28,7 +30,7 @@ def test_c2_the_fork_command_refuses_a_snapshot_less_source_before_spending_anyt
         return 0
 
     tenant = T.current_tenant()
-    episodes = tenant.data_root / tenant.id / "episodes"
+    episodes = location_path(tenant.data_root) / tenant.id / "episodes"
     before = set(episodes.glob("*"))
     try:
         got: object = branch_cli.main(

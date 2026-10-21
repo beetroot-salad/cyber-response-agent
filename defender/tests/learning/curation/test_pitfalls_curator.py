@@ -1,6 +1,8 @@
 """Pitfalls curation mode (leads/pitfalls_curator.py): commit-gate verification, threshold/rotation, and the systemless-batch drop."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import subprocess
 from pathlib import Path
@@ -170,7 +172,7 @@ def test_run_pitfalls_at_threshold_commits_and_rotates(tmp_git_repo: Path, tmp_p
     log = _run_git(tmp_git_repo, "log", "--oneline", "-1").stdout
     assert "execution.md pitfalls" in log
     assert persist.read_pitfalls(state) == []
-    consumed = [json.loads(ln) for ln in (paths.state_root / PITFALLS.consumed).read_text().splitlines()]
+    consumed = [json.loads(ln) for ln in (location_path(paths.state_root) / PITFALLS.consumed).read_text().splitlines()]
     assert {c["pitfall_id"] for c in consumed} == {"r:l-000:0", "r:l-001:0"}
 
 

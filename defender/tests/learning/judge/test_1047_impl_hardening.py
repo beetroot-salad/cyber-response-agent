@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 from defender.episodes._episode_handle import Episode
@@ -22,7 +24,7 @@ def _archive():
 
 
 def _episode_with(tmp_path, worlds=("b",), **kw):
-    base, _src = S.runs_base(tmp_path)
+    base, _src = location_path(S.runs_base)(tmp_path)
     ep = S.episode(tmp_path)
     return ep, {w: S.sibling_run_dir(base, w, **kw) for w in worlds}, base
 
@@ -99,7 +101,7 @@ def test_a_reused_run_id_does_not_inherit_the_previous_attempts_record(tmp_path,
 
 
 def test_re_archiving_a_world_whose_sidecar_is_gone_removes_the_stale_record(tmp_path):
-    base, _src = S.runs_base(tmp_path)
+    base, _src = location_path(S.runs_base)(tmp_path)
     ep = S.episode(tmp_path)
     run_dir = S.sibling_run_dir(base, "b")
     archive = S.mod("learning.branch.archive")

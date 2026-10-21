@@ -2,6 +2,8 @@
 lead reading the alert through its file tools, and host-side digest checks on every read."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
@@ -959,7 +961,7 @@ def _seeded_sibling(tmp_path: Path) -> tuple[dict, dict]:
     assert calls_of(message_at(store, point))[0].tool_name == "bash", (
         "the branch point is not the source's `echo` call")
     spec = spec_at(store, src.run_dir, point)
-    sibling_dir = planted.runs / fixture_uuid(f"{src.run_dir.name}-sibling")
+    sibling_dir = location_path(planted.runs) / fixture_uuid(f"{src.run_dir.name}-sibling")
     sibling_dir.mkdir(parents=True)
     for name, source in _held_files(src.run_dir).items():
         target = S.alert_file(sibling_dir) if name == "alert" else S.record_file(sibling_dir)

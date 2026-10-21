@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import json
@@ -50,7 +52,7 @@ def _current(tenant):
 def _exports(tenant):
     """The export folders and the `current` pointer; other files (a lock, say) are not
     exports and are not counted."""
-    folder = tenant.dir / "exports"
+    folder = location_path(tenant.tenant_root) / "exports"
     if not folder.exists():
         return []
     return sorted(p.name for p in folder.iterdir()
@@ -93,7 +95,7 @@ def test_publish_writes_the_commits_blobs_and_points_current_at_them(repo, tmp_p
     export = d.publish()
     assert export.commit == commit
     assert git(tenant.knowledge, "rev-parse", "HEAD") == commit, "publish fast-forwards the clone"
-    assert export.path == tenant.dir / "exports" / commit
+    assert export.path == location_path(tenant.tenant_root) / "exports" / commit
     assert files_under(export.path) == planted
     # Precondition of the discrimination above: the clone's own checkout converted endings.
     assert (tenant.agent / "lessons/merged.md").read_bytes() == b"human-reviewed merge\r\n"
@@ -116,13 +118,13 @@ def test_a_later_publish_leaves_every_earlier_export_as_it_was(repo, tmp_path):
     before = files_under(first.path)
     stats = {p: (s.st_ino, s.st_mtime_ns, s.st_mode)
              for p in first.path.rglob("*") for s in [os.lstat(p)]}
-    pointer = tenant.dir / "exports" / "current"
+    pointer = location_path(tenant.tenant_root) / "exports" / "current"
     pointer_inode = os.lstat(pointer).st_ino
 
     newer = advance_remote(repo, tmp_path)
     second = d.publish()
     assert second.commit == newer != first.commit
-    assert second.path == tenant.dir / "exports" / newer
+    assert second.path == location_path(tenant.tenant_root) / "exports" / newer
     assert files_under(second.path)["agent/lessons/merged.md"] == b"human-reviewed merge\n"
     assert files_under(first.path) == before
     assert {p: (s.st_ino, s.st_mtime_ns, s.st_mode)
@@ -164,7 +166,7 @@ def test_current_export_refuses_a_pointer_that_names_no_export(repo, tmp_path, d
     tenant = repo[0]
     if damage != "never-published":
         export = delivery(repo, ForgeHTTP()).publish()
-        pointer = tenant.dir / "exports" / "current"
+        pointer = location_path(tenant.tenant_root) / "exports" / "current"
         if damage == "pointer-removed":
             pointer.unlink()
         elif damage == "pointer-empty":
@@ -205,7 +207,7 @@ def test_publish_refuses_a_tree_entry_that_is_not_a_regular_blob(repo, tmp_path,
         d.publish()
     assert _current(tenant) == (first.commit, first.path)
     assert _exports(tenant) == sorted([first.commit, "current"])
-    assert not (tenant.dir / "exports" / refused).exists()
+    assert not (location_path(tenant.tenant_root) / "exports" / refused).exists()
 
 
 def test_publish_accepts_an_executable_blob(repo, tmp_path):
@@ -260,7 +262,7 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
     baseline = min(_timed(d.publish)[0] for _ in range(2))
     head = git(tenant.knowledge, "rev-parse", "HEAD")
     newer = advance_remote(repo, tmp_path)
-    with build_tenant(tmp_path, fixture_uuid("tenant:red"), root=tenant.data_root, repo_name="red") as (red_tenant, red_remote, _):
+    with build_tenant(tmp_path, fixture_uuid("tenant:red"), root=location_path(tenant.data_root), repo_name="red") as (red_tenant, red_remote, _):
         mod = target()
         with LockHolder(tenant, tmp_path / "holder") as holder:
             for attempt in (d.publish, lambda: d.start_batch("busy", lanes=LANES)):
@@ -277,14 +279,14 @@ def test_a_second_taker_of_the_tenant_lock_fails_fast_naming_the_holder(repo, tm
             assert git(tenant.knowledge, "rev-parse", "HEAD") == head
             assert _current(tenant) == (first.commit, first.path)
             assert _exports(tenant) == sorted([first.commit, "current"])
-            drafts = tenant.dir / "drafts"
+            drafts = location_path(tenant.tenant_root) / "drafts"
             assert not drafts.exists() or not any(drafts.iterdir()), \
                 "a draft or its temporary was made under a busy lock"
             assert git(tenant.knowledge, "for-each-ref", "--format=%(refname)", "refs/heads") == "refs/heads/main"
             red_forge = ForgeHTTP(origin=configured_origin(red_tenant.knowledge))
             red = mod.TenantDelivery.open(red_tenant, defender_dir=DEFENDER, client=red_forge.client, identity=fixture_identity(str(red_tenant.id)), origin=configured_origin(red_tenant.knowledge))
             assert red.publish().commit == git(red_remote, "rev-parse", "main")
-        assert sorted(p.name for p in (tenant.dir / "forge").iterdir()) == ["git-credentials"], \
+        assert sorted(p.name for p in (location_path(tenant.tenant_root) / "forge").iterdir()) == ["git-credentials"], \
             "the lock (or anything else) landed in forge/, which stays the credential's alone"
         assert d.publish().commit == newer
 
@@ -392,7 +394,7 @@ def test_the_export_and_current_are_written_under_the_tenant_lock(repo, tmp_path
     tenant = repo[0]
     d = delivery(repo, ForgeHTTP())
     d.publish()
-    exports = os.path.realpath(tenant.dir / "exports")
+    exports = os.path.realpath(location_path(tenant.tenant_root) / "exports")
     seen = set()
 
     def pick(event, args):
@@ -506,8 +508,8 @@ def test_a_publish_cut_off_mid_export_leaves_no_partial_export(repo, tmp_path):
         planted.update(_knowledge_files(checkout))
     newer = push_to_remote(repo, tmp_path, edit)
     assert all(len(data) < _WRITE_CAP for rel, data in planted.items() if not rel.endswith(marker))
-    exports = tenant.dir / "exports"
-    proc = subprocess.run([sys.executable, "-c", _INTERRUPTED_PUBLISH, str(tenant.data_root),
+    exports = location_path(tenant.tenant_root) / "exports"
+    proc = subprocess.run([sys.executable, "-c", _INTERRUPTED_PUBLISH, str(location_path(tenant.data_root)),
                            str(tenant.id), marker, str(len(_MARKER_BYTES)), str(_WRITE_CAP)],
                           capture_output=True, text=True, timeout=300, check=False,
                           env=fresh_process_env(tenant, tmp_path / "cut"))
@@ -532,7 +534,7 @@ mod = target()
 tenant = tenants.accept(root, tenant_id)
 d = mod.TenantDelivery.open(tenant, defender_dir=DEFENDER, client=ForgeHTTP(origin=configured_origin(tenant.knowledge)).client, identity=fixture_identity(str(tenant.id)), origin=configured_origin(tenant.knowledge))
 clone = os.path.abspath(tenant.knowledge)
-current = os.path.join(os.path.realpath(tenant.dir / "exports"), "current")
+current = os.path.join(os.path.realpath(root / tenant_id / "exports"), "current")
 in_clone = os.path.join(clone, "agent", "lessons", marker)
 SPAWNS = ("subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn")
 state = {"inside": False, "done": False, "paused": False, "unprobed": 0}
@@ -626,7 +628,7 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
                "from defender.tests.support.tenancy import _tenants1106 as t; "
                "from defender.tests.tenancy.tenant_1108_delivery._support import lock_probe; "
                "print(json.dumps(lock_probe(t.accept(Path(sys.argv[1]), sys.argv[2]))))",
-               str(tenant.data_root), str(tenant.id)]
+               str(location_path(tenant.data_root)), str(tenant.id)]
     with LockHolder(tenant, tmp_path / "holder"):
         held = subprocess.run(control, capture_output=True, text=True, env=env, timeout=120, check=False)
     free = subprocess.run(control, capture_output=True, text=True, env=env, timeout=120, check=False)
@@ -634,7 +636,7 @@ def test_two_publishers_never_interleave_so_current_never_goes_back(repo, tmp_pa
         ["busy", "free"], (held.stdout, held.stderr, free.stdout, free.stderr)
     out_path, err_path = tmp_path / "first.out", tmp_path / "first.err"
     with open(out_path, "wb") as out_file, open(err_path, "wb") as err_file:
-        first = subprocess.Popen([sys.executable, "-c", _PAUSED_PUBLISH, str(tenant.data_root),
+        first = subprocess.Popen([sys.executable, "-c", _PAUSED_PUBLISH, str(location_path(tenant.data_root)),
                                   str(tenant.id), marker, str(ready), str(go), str(trace)],
                                  stdout=out_file, stderr=err_file, env=env)
     try:
@@ -683,7 +685,7 @@ def _under_drafts(tenant):
     removal) and for the clone's `$GIT_DIR/info/attributes` (`attributes`: opened for
     writing, or renamed or linked onto; a file written beside it, a temporary, counts too)."""
     info = os.path.realpath(tenant.knowledge / ".git" / "info")
-    folder = os.path.join(os.path.realpath(tenant.dir), "drafts")
+    folder = os.path.join(os.path.realpath(location_path(tenant.tenant_root)), "drafts")
     seen = set()
 
     def pick(event, args):
@@ -713,7 +715,7 @@ def _under_drafts(tenant):
 def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, tmp_path):
     tenant = repo[0]
     audit = LockAudit(tenant, _under_drafts(tenant))
-    control = tenant.dir / "drafts" / ".p3-control"
+    control = location_path(tenant.tenant_root) / "drafts" / ".p3-control"
     control.mkdir(parents=True)
     with LockHolder(tenant, tmp_path / "holder"), audit:
         (control / "held").write_bytes(b"")
@@ -724,7 +726,7 @@ def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, t
     with audit:
         d = delivery(repo, ForgeHTTP())
         d.publish()
-    stale = tenant.dir / "drafts" / ".stale-0a1b2c" / "agent" / "lessons"
+    stale = location_path(tenant.tenant_root) / "drafts" / ".stale-0a1b2c" / "agent" / "lessons"
     stale.mkdir(parents=True)
     (stale / "seed.md").write_bytes(b"left by a build that never finished\n")
     advance_remote(repo, tmp_path)
@@ -733,9 +735,9 @@ def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, t
     labels = [label for label, _ in audit.probes]
     assert {"attributes", "build", "rename", "sweep"} <= set(labels), audit.probes
     assert all("busy" in verdict for _, verdict in audit.probes), audit.probes
-    assert sorted(p.name for p in (tenant.dir / "drafts").iterdir()) == ["drafted"]
+    assert sorted(p.name for p in (location_path(tenant.tenant_root) / "drafts").iterdir()) == ["drafted"]
     assert files_under(batch.draft_root / "agent") == files_under(batch.export.path / "agent")
-    stale = tenant.dir / "drafts" / ".stale-3d4e5f" / "agent"
+    stale = location_path(tenant.tenant_root) / "drafts" / ".stale-3d4e5f" / "agent"
     stale.mkdir(parents=True)
     (stale / "seed.md").write_bytes(b"left by another build that never finished\n")
     audit = LockAudit(tenant, _under_drafts(tenant))
@@ -743,7 +745,7 @@ def test_the_draft_and_info_attributes_are_written_under_the_tenant_lock(repo, t
         d.publish()
     assert "sweep" in [label for label, _ in audit.probes], audit.probes
     assert all("busy" in verdict for _, verdict in audit.probes), audit.probes
-    assert sorted(p.name for p in (tenant.dir / "drafts").iterdir()) == ["drafted"]
+    assert sorted(p.name for p in (location_path(tenant.tenant_root) / "drafts").iterdir()) == ["drafted"]
 
 
 _SPY = '#!/bin/sh\necho "$1 $2" >> {log}\ncat\n'
@@ -869,7 +871,7 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
                                    env={**os.environ, **hold}, stdout=subprocess.PIPE)
         try:
             sleeper.stdout.readline()
-            assert sleeper.pid in [pid for pid, _ in running_in(tenant.dir)], \
+            assert sleeper.pid in [pid for pid, _ in running_in(location_path(tenant.tenant_root))], \
                 f"the scan must see a process whose {how} is in the clone"
         finally:
             sleeper.kill()
@@ -878,7 +880,7 @@ def test_no_git_upkeep_runs_over_the_clone_from_a_delivery_call(repo, tmp_path, 
 
     for key, value in _FORCED_TASK:
         git(clone, "config", key, value)
-    roots = [tenant.dir]
+    roots = [location_path(tenant.tenant_root)]
 
     def probe(call, fn, settle=0.0):
         result = fn()

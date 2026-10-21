@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 import pytest
@@ -53,7 +55,7 @@ def _assert_not_provider_down(d: S.Drive, stores: list) -> None:
     rec = P.sidecar(d.folder)
     assert rec is None or rec["truncated_by"] != P.PROVIDER_DOWN, rec
     assert d.rc != P.PROVIDER_DOWN_EXIT, f"a run with no ProviderDown exited {d.rc}"
-    assert P.sessions(_store(stores)).get("main") != P.PROVIDER_DOWN, (
+    assert location_path(P.sessions)(_store(stores)).get("main") != P.PROVIDER_DOWN, (
         "MAIN's session is stamped provider-down by a group that holds no ProviderDown")
 
 
@@ -81,7 +83,7 @@ def test_d6_main_request_down_inside_a_group_ends_the_run_provider_down(tmp_path
     assert main.requests == 2, f"MAIN made {main.requests} requests; the group is on its 2nd"
     _assert_fired_a_group(fault, holding_provider_down=True)
     P.assert_ended_provider_down(d)
-    assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN, (
+    assert location_path(P.sessions)(_store(stores)).get("main") == P.PROVIDER_DOWN, (
         "MAIN's session is not stamped provider-down")
 
 
@@ -105,7 +107,7 @@ def test_d6_a_main_lead_down_inside_a_group_ends_the_run_provider_down(tmp_path:
                                                                         shape: str) -> None:
     d, _fault, stores = _lead_down_in_a_group(tmp_path, shape)
     P.assert_ended_provider_down(d)
-    assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN, (
+    assert location_path(P.sessions)(_store(stores)).get("main") == P.PROVIDER_DOWN, (
         "MAIN's session is not stamped provider-down")
 
 
@@ -114,7 +116,7 @@ def test_d6_a_main_lead_down_inside_a_group_stamps_the_leads_session(tmp_path: P
                                                                       shape: str) -> None:
     d, _fault, stores = _lead_down_in_a_group(tmp_path, shape)
     assert d.raised is None, f"the run crashed instead of ending provider-down: {d.raised!r}"
-    ended = P.sessions(_store(stores))
+    ended = location_path(P.sessions)(_store(stores))
     assert ended.get(P.gather_agent(LEAD)) == P.PROVIDER_DOWN, (
         f"the lead's session reads {ended.get(P.gather_agent(LEAD))!r}, not provider-down")
 
@@ -133,7 +135,7 @@ def test_d6_correlation_lead_down_inside_a_group_stops_before_main(tmp_path: Pat
         f"MAIN was asked for {d.main.requests} turn(s) after the correlation lead's provider "
         "went down inside a group: the lead ended dispatch_raised and the run went on")
     P.assert_ended_provider_down(d)
-    assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN, (
+    assert location_path(P.sessions)(_store(stores)).get("main") == P.PROVIDER_DOWN, (
         "MAIN's session is not stamped provider-down")
 
 
@@ -165,7 +167,7 @@ def test_d6_control_a_group_without_provider_down_from_a_main_lead_still_escapes
     group = _assert_fired_a_group(fault, holding_provider_down=False)
     _assert_escaped_as_itself(d, group)
     _assert_not_provider_down(d, stores)
-    assert P.sessions(_store(stores)).get(P.gather_agent(LEAD)) != P.PROVIDER_DOWN
+    assert location_path(P.sessions)(_store(stores)).get(P.gather_agent(LEAD)) != P.PROVIDER_DOWN
 
 
 def _correlation_ending(d: S.Drive) -> str:

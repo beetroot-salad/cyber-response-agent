@@ -1,6 +1,8 @@
 """Shared machinery for #1120 piece 1's spec — "the tenant frame". NO test functions."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import hashlib
@@ -42,7 +44,7 @@ ROW_PATH_PROPERTY = "row_path"
 
 #: `Tenant`'s nine path properties (D1's table), in the design's order.
 TENANT_PATH_PROPERTIES = (
-    "dir", "runs", "sessions", "episodes", "learning", "worktrees", "knowledge", "settings",
+    "tenant_root", "runs", "sessions", "episodes", "learning", "worktrees", "knowledge", "settings",
     "agent",
 )
 
@@ -96,7 +98,7 @@ def accept(owner: Any, root: Path | str, tenant_id: str = TID, *,
            defender_dir: Path = DEFENDER, box_mounted: tuple[Path, ...] = ()) -> Any:
     """The REAL `accept_tenant(data_root, raw_id, *, defender_dir, box_mounted)` (D1)."""
     return owner.accept_tenant(
-        Path(root), tenant_id, defender_dir=Path(defender_dir), box_mounted=tuple(box_mounted))
+        fixture_data_root(Path(location_path(root))), tenant_id, defender_dir=Path(defender_dir), box_mounted=tuple(box_mounted))
 
 
 def refusal(owner: Any, fn: Any, *args: Any, **kw: Any) -> BaseException:

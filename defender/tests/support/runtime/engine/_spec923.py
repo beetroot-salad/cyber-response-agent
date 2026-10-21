@@ -2,6 +2,8 @@
 pytest from collecting it)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import asyncio
 import json
 from pathlib import Path
@@ -231,7 +233,7 @@ def _with_run_state(deps: Any) -> Any:
     from defender.run_repository import Run
     from defender.runtime.run_state import RunState
 
-    return replace(deps, run=Run.under(deps.run_dir.parent, deps.run_dir.name),
+    return replace(deps, run=Run.under(fixture_runs_base(deps.run_dir.parent), deps.run_dir.name),
                    run_state=RunState(deps.run_dir, "r-923"))
 
 

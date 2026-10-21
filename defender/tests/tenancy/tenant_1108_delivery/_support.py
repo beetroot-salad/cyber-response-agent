@@ -5,6 +5,8 @@ Nothing here implements target policy: fixtures plant trees and record what cros
 boundary; every judgement is the code under test's."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import contextlib
@@ -357,7 +359,7 @@ def build_tenant(tmp_path, tenant_id=_TENANT_BLUE, *, root=None, object_format="
         origin = f"{server.url}/tenants/{repo_name}.git"
         git(clone, "remote", "add", "origin", origin)
         git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
-        credentials = tenant.dir / "forge" / "git-credentials"
+        credentials = location_path(tenant.tenant_root) / "forge" / "git-credentials"
         credentials.parent.mkdir()
         credentials.write_text("ignored legacy credential\n", encoding="utf-8")
         credentials.chmod(0o600)
@@ -859,7 +861,7 @@ def http_repo(tmp_path, monkeypatch):
     try:
         git(clone, "remote", "add", "origin", f"{server.url}/tenants/blue.git")
         git(clone, "fetch", remote, "+refs/heads/*:refs/remotes/origin/*")
-        credentials = tenant.dir / "forge" / "git-credentials"
+        credentials = location_path(tenant.tenant_root) / "forge" / "git-credentials"
         credentials.parent.mkdir()
         credentials.write_text(f"http://bot:ignored-legacy-secret@127.0.0.1:{server.server.server_address[1]}\n",
                                encoding="utf-8")
@@ -908,7 +910,7 @@ def fresh_process_env(tenant, scratch: Path):
     env = {key: os.environ[key] for key in _FRESH_ENV_KEYS if key in os.environ}
     env.update(GitConfigHome(scratch).create().env())
     env.update(PYTHONPATH=str(IMPORT_ROOT), PYTHONDONTWRITEBYTECODE="1",
-               DEFENDER_DATA_ROOT=str(tenant.data_root))
+               DEFENDER_DATA_ROOT=str(location_path(tenant.data_root)))
     return env
 
 
@@ -920,8 +922,8 @@ def in_a_later_process(repo, verb, *args, python_prelude=""):
     (`url` `None` when the result has none) or `{"refused": ...}`, with `"creates"`, the PR
     requests it sent."""
     tenant, remote = repo[0], repo[1]
-    scratch = Path(tenant.data_root).parent / f"later-{len(list(Path(tenant.data_root).parent.glob('later-*')))}"
-    proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _LATER_SCRIPT, str(tenant.data_root), str(tenant.id),
+    scratch = Path(location_path(tenant.data_root)).parent / f"later-{len(list(Path(location_path(tenant.data_root)).parent.glob('later-*')))}"
+    proc = subprocess.run([sys.executable, "-c", python_prelude + "\n" + _LATER_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id),
                            str(remote), verb, *map(str, args)], capture_output=True, text=True,
                           env=fresh_process_env(tenant, scratch), timeout=300, check=False)
     assert proc.returncode == 0, f"the later process crashed: {proc.stderr}"
@@ -956,7 +958,7 @@ else:
 
 
 def _lock_argv(tenant, mode, *extra):
-    return [sys.executable, "-c", _LOCK_SCRIPT, str(tenant.data_root), str(tenant.id), mode,
+    return [sys.executable, "-c", _LOCK_SCRIPT, str(location_path(tenant.data_root)), str(tenant.id), mode,
             *map(str, extra)]
 
 

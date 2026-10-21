@@ -1,6 +1,8 @@
 """`RunId`: frozen value, parse/mint bounds (206 bytes), sidecar suffixes, unforgeability."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 import copy
 import dataclasses
 import pickle
@@ -179,10 +181,10 @@ def test_1105_the_handle_constructors_keep_taking_str_and_todays_run_id_check(tm
     runs = tmp_path / H.T_ID / "runs"
     runs.mkdir(parents=True)
     r2, r3 = str(uuid.uuid4()), str(uuid.uuid4())
-    under = Run.under(runs, r2, tenant_id=H.T_ID)
+    under = Run.under(fixture_runs_base(runs), r2, tenant_id=H.T_ID)
     assert under.run_dir == runs / r2
     assert under.tenant_id == H.T_ID
-    assert Run.under(runs, RunId.parse(r3)).run_dir == runs / r3, "a RunId is taken as is"
+    assert Run.under(fixture_runs_base(runs), RunId.parse(r3)).run_dir == runs / r3, "a RunId is taken as is"
     assert not (runs / "_tenant.json").exists()
     for bad in ("Bad Name", "UPPER", "r1", "20260101t000000z-x", r2.upper(), "a" * 207):
         err = H.raised(Run.under, runs, bad)

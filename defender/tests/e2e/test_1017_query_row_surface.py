@@ -1,6 +1,8 @@
 """#1017 e2e: every writer of the queries table leaves rows keyed as declared, the read surface returns what the writer wrote, and the judge's leads view reads through the surface (and refuses a link at the table's name)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import os
 import re
@@ -122,7 +124,7 @@ def _world_row(seq: int, **overrides) -> dict:
 def _judge_world(tmp_path: Path, rows: list[dict], *, goal: str = "GOAL_MARKER"):
     """An accepted #947 episode whose graded world `b` carries `rows` as its archived `executed_queries.jsonl`..."""
     ep = J.accepted_episode(tmp_path, ledgers={"b": [J.oracle_row("b")], "c": []})
-    base, _src = J.runs_base(tmp_path)
+    base, _src = location_path(J.runs_base)(tmp_path)
     world = ep / "worlds" / J.world_id(ep, "b")
     _lead_file(world, goal)
     token = J.world_id(ep, "b")

@@ -1,6 +1,8 @@
 """#1047 — the vocabulary owner: ONE answer to what a `truncated_by` value means."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import json
@@ -72,7 +74,7 @@ def test_normalized_truncated_by_given_a_value_torn_by_a_partial_write():
 def _three_sites(tmp_path, value):
     """Drive the exit value through the archive and both interpretation sites and return what each
     made of it: the archive's copied record, the judge's read, and the ticket lane's calls."""
-    base, _src = S.runs_base(tmp_path)
+    base, _src = location_path(S.runs_base)(tmp_path)
     ep = S.episode(tmp_path)
     run_dir = S.sibling_run_dir(base, "b")
     S.plant_sidecar(run_dir, truncated_by=value)

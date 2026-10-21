@@ -1,6 +1,8 @@
 """Drain retire seam: lifetime attempt counts, ceiling, byte-identical untouched rows, systemic retire-write failure, inert empty ticks."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 from pathlib import Path
 
@@ -109,7 +111,7 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     h.seed(paths, ch, [h.row_for("findings", "a/0")])
-    before = (paths.state_root / ch.queue).read_bytes()
+    before = (location_path(paths.state_root) / ch.queue).read_bytes()
 
     from defender.tests.learning.core.test_881_loop_plumbing import _StateWhoseDiskIsFull
 
@@ -122,7 +124,7 @@ def test_a_failing_retirement_write_stops_the_drain_and_leaves_the_queue_intact(
     cfg = dataclasses.replace(cfg, state=_StateWhoseDiskIsFull.over(cfg.state, "deadletter"))
     with pytest.raises(OSError):  # noqa: PT011 - the OS-level append failure's exact subclass is platform-dependent; the point is that it propagates uncaught
         drain.run_batch(cfg=cfg)
-    assert (paths.state_root / ch.queue).read_bytes() == before, "the queue survives a failed retirement write"
+    assert (location_path(paths.state_root) / ch.queue).read_bytes() == before, "the queue survives a failed retirement write"
 
 
 def test_an_all_empty_tick_writes_no_consumed_row_and_no_graveyard_row(tmp_path: Path):
@@ -163,7 +165,7 @@ def test_attempt_count_survives_a_fresh_process(tmp_path: Path):
         "from defender.learning.author import drain\n"
         "from defender.learning.core.config import LoopPaths\n"
         "from defender.learning.core.state import FINDINGS, LearningState\n"
-        f"paths = LoopPaths(repo_root=Path(sys.argv[1]), state_dir=Path({str(paths.state_root)!r}))\n"
+        f"paths = LoopPaths(repo_root=Path(sys.argv[1]), state_dir=Path({str(location_path(paths.state_root))!r}))\n"
         "out = drain.retire(LearningState.open(paths), channel=FINDINGS, batch_ids=['a/0'],\n"
         "                   reason='second process', max_attempts=2)\n"
         "print(out.bumped['a/0'])\n"

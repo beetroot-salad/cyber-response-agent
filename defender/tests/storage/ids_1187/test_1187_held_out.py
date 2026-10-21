@@ -1,6 +1,8 @@
 """Held-out launches record opaque run IDs before execution and scoring reads that index."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import os
 from collections.abc import Callable, Sequence
@@ -282,22 +284,22 @@ def test_launch_requires_an_explicit_canonical_tenant_before_appending(scene, te
 
 def test_launch_as_the_operator_runs_it_really_starts_run_py(scene):
     index = scene.ops / INDEX_NAME
-    before = S.tree(scene.data_root)
+    before = S.tree(location_path(scene.data_root))
     child = process.run_script(
         S.H5.WORKTREE / "evaluations" / "held_out.py", "launch", SLUG, "--tenant", LAUNCH_TENANT,
-        "--index", str(index), "--fixtures-dir", str(scene.fixtures), root=scene.data_root)
+        "--index", str(index), "--fixtures-dir", str(scene.fixtures), root=location_path(scene.data_root))
     said = f"{child.stdout}\n{child.stderr}"
 
     rows = _rows(index.read_text(encoding="utf-8") if index.is_file() else None)
     assert [slug for slug, _run_id in rows] == [SLUG], (
         f"launch did not append one row for {SLUG}: {rows}\n{said[-1500:]}")
     assert S.is_canonical_uuid(rows[0][1]), f"the row's run id is {rows[0][1]!r}"
-    playground = str(Path(scene.data_root) / LAUNCH_TENANT)
+    playground = str(Path(location_path(scene.data_root)) / LAUNCH_TENANT)
     refusals = [line for line in said.splitlines() if "[run.py]" in line and playground in line]
     assert refusals, (
         "launch's real spawn never ran run.py --tenant playground under this data root: no "
         f"refusal of its own naming {playground} in the output:\n{said[-1500:]}")
-    assert S.tree(scene.data_root) == before, "the refused run.py made something"
+    assert S.tree(location_path(scene.data_root)) == before, "the refused run.py made something"
 # Launch: locations that cannot hold the host-owned index.
 
 _LAUNCH_REFUSALS = (
@@ -327,12 +329,12 @@ def _refused_launch_index(scene: Scene, place: str, monkeypatch) -> tuple[Path, 
         link.symlink_to(target)
         index = link if place == "link-index" else link / real.relative_to(folder)
         return index, real
-    roots = {"data-root": scene.data_root, "state-root": scene.state,
+    roots = {"data-root": location_path(scene.data_root), "state-root": scene.state,
              "state-descendant": scene.state / "runs" / "some-case"}
     if place == "natural-run":
-        root = S.make_run(S.natural_runs(scene.data_root, LAUNCH_TENANT))
+        root = S.make_run(S.natural_runs(location_path(scene.data_root), LAUNCH_TENANT))
     elif place == "foreign-arm":
-        episode = S.make_episode(scene.data_root, fixture_uuid("tenant:acme"), labels=("a",), arms=True)
+        episode = S.make_episode(location_path(scene.data_root), fixture_uuid("tenant:acme"), labels=("a",), arms=True)
         root = next((episode / "runs").iterdir())
     else:
         root = roots[place]
@@ -343,7 +345,7 @@ def _refused_launch_index(scene: Scene, place: str, monkeypatch) -> tuple[Path, 
 def test_launch_refuses_untrusted_index_locations_without_writing_or_spawning(scene, monkeypatch, place):
     original_root = os.environ[S.DATA_ROOT_ENV]
     index, control = _refused_launch_index(scene, place, monkeypatch)
-    roots = (scene.data_root, scene.state, scene.tmp)
+    roots = (location_path(scene.data_root), scene.state, scene.tmp)
     before = {root: S.tree(root) for root in roots}
     spawn = FakeSpawn(index)
     res = scene.launch(index, spawn)
@@ -428,7 +430,7 @@ def _index_swap_child(scene: Scene, index: Path, elsewhere: Path, mode: str,
     """The audit hook runs only in a child; the launcher's only injected dependency is spawn."""
     child = process.run_script(
         Path("-c"), _INDEX_SWAP_CHILD, str(index), str(elsewhere), str(scene.fixtures),
-        SLUG, mode, swap_kind, LAUNCH_TENANT, root=scene.data_root)
+        SLUG, mode, swap_kind, LAUNCH_TENANT, root=location_path(scene.data_root))
     rows = [line.removeprefix("INDEX_SWAP_RESULT ") for line in child.stdout.splitlines()
             if line.startswith("INDEX_SWAP_RESULT ")]
     assert child.returncode == 0, (
@@ -440,7 +442,7 @@ def _index_swap_child(scene: Scene, index: Path, elsewhere: Path, mode: str,
 def _index_swap_scene(scene: Scene, name: str) -> tuple[Path, Path, Path, bytes]:
     """An operator index and a same-named canary in a simulated box-writable run folder."""
     index = _index(scene.tmp / name / INDEX_NAME, (OTHER, S.new_id()))
-    elsewhere = scene.data_root / LAUNCH_TENANT / "runs" / S.new_id()
+    elsewhere = location_path(scene.data_root) / LAUNCH_TENANT / "runs" / S.new_id()
     canary = _index(elsewhere / INDEX_NAME, (OTHER, S.new_id()))
     return index, elsewhere, canary, canary.read_bytes()
 

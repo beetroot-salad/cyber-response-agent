@@ -215,3 +215,8 @@ max-complexity = 10
 max-branches = 15
 max-args = 8
 max-statements = 60
+
+[[tool.mypy.overrides]]
+module = ["defender.records._locations", "defender.learning.author.version_control.exports", "defender.learning.author.version_control.record", "defender.runtime.session_store._write"]
+disallow_untyped_defs = true
+warn_return_any = true

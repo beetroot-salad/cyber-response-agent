@@ -1,6 +1,8 @@
 """A branched sibling runs on its episode's tenant, handed the data root by env; no stamped tenant refuses."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.storage.tenant_1105_run_repository._spec1105_pr2 import CountingQuestioner
@@ -160,7 +162,7 @@ def _launch(tmp_path: Path, *, stamp_tenant: str | None, location_tenant: Any = 
     shaped by hand). Every scenario driving this one is refused before pre-flight reads
     anything."""
     location = stamp_tenant if location_tenant is _AS_STAMPED else location_tenant
-    src = source if source is not None else P.runs_base(tmp_path, tenant_id=location)[1]
+    src = source if source is not None else location_path(P.runs_base)(tmp_path, tenant_id=location)[1]
     P.source_stamp(src, tenant_id=stamp_tenant)
     return _main(src, stamp_tenant=stamp_tenant, questioner=questioner)
 
@@ -202,7 +204,7 @@ def _knowledgeless_source(tmp_path: Path, tenant_id: str) -> Path:
     tenant is planted beside it afterwards, by hand."""
     import shutil
 
-    _base, src = P.runs_base(tmp_path, tenant_id=tenant_id)
+    _base, src = location_path(P.runs_base)(tmp_path, tenant_id=tenant_id)
     shutil.rmtree(current_data_root() / tenant_id / "knowledge")
     return src
 
@@ -301,7 +303,7 @@ def test_an_episode_tenant_gather_can_query_nothing_under_refuses_before_the_que
         configs=S.config_texts(fixture_uuid("tenant:acme"), events_index=P.EVENTS_PATTERN,
                                alerts_index=P.ALERTS_PATTERN))
     questioner = O.questioner_for()
-    base, src = P.runs_base(tmp_path, tenant_id=fixture_uuid("tenant:acme"))
+    base, src = location_path(P.runs_base)(tmp_path, tenant_id=fixture_uuid("tenant:acme"))
     P.source_stamp(src, tenant_id=fixture_uuid("tenant:acme"))
     spawn = SpawnRecorder()
     with pytest.raises((Exception, SystemExit)) as refused:  # noqa: PT011 — the launcher's refusal type is not what is pinned; its text and timing are
@@ -328,7 +330,7 @@ _ELASTIC_FOR_GATHER = """\
 
 def test_a_resumed_siblings_world_registry_holds_its_runs_gather_grant(tmp_path):
     run = T.mod("run")
-    base, src = P.runs_base(tmp_path)
+    base, src = location_path(P.runs_base)(tmp_path)
     ep = P.episode(tmp_path, doc=P.family_doc(source_run_dir=str(src)))
     root = current_data_root()
     # Both tables reach elastic, the system the fixture source's one captured call read; they

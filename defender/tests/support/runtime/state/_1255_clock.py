@@ -1,6 +1,8 @@
 """Clock sources, scripted models, and run.main replay helpers."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import asyncio
 import contextlib
 import datetime as dt
@@ -377,7 +379,7 @@ def control_episode(tmp_path: Path, source_run_dir: Path, branch_message_id: int
     from defender.tests.support.learning.branch import _triplet_947 as T
 
     source = opened_source(source_run_dir)
-    tenant = _tenant.accept_tenant(source.run_dir.parents[2], source.tenant_id,
+    tenant = _tenant.accept_tenant(fixture_data_root(source.run_dir.parents[2]), source.tenant_id,
                                    defender_dir=DEFENDER)
     as_of = cli.branch_point_clock(source, branch_message_id)
     with cli.prepare_episode(tenant.runs_repository(), source) as view:
@@ -399,7 +401,7 @@ def record_source(tmp_path: Path, *, limits: dict | None = None) -> tuple[str, P
     """A source run recorded through `run.main` (natural, unboxed), its clock source at `SOURCE_START`."""
     from defender.tests.support.learning.branch import _triplet_947 as T
 
-    base, seed = T.runs_base(tmp_path)
+    base, seed = location_path(T.runs_base)(tmp_path)
     tenant_id = T.current_tenant().id
     clock = FakeClock(SOURCE_START)
     main = script(clock, (0, append_first_fence()), (5, gather_turn("l-001", "elastic")),

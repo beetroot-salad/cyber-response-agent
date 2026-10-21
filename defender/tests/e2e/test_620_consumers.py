@@ -1,6 +1,8 @@
 """#620 — consumers of the frozen `executed_queries.jsonl` row (draft synthesis, lead extraction, repository projections, pitfalls lane, visualizers, workspace map) and the `validate_scaffold` gate. Rows come from a real driver run; offline readers are driven over rows on disk."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import ast
 import importlib
 import json
@@ -425,7 +427,7 @@ def test_canonical_record_value_cannot_forge_a_draft_section(tmp_path):
 def _seed_pitfalls(paths, *, system: str, digest: str, n: int = 2) -> None:
     """``n`` queued pitfalls, each a distinct mistake: the digest is suffixed per row because
     #840 collapses rows sharing one into a single record, and the threshold counts records."""
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     with LearningState.open(paths) as state:
         _persist.append_pitfalls(
             [{"schema_version": 1, "pitfall_id": f"r:l-{i:03d}:0", "source_run": "r",

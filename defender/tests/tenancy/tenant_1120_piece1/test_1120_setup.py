@@ -1,6 +1,8 @@
 """D7 `tenant.py setup <id>`: ADOPT the operator-placed knowledge folder."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import json
 import os
 import shutil
@@ -338,8 +340,8 @@ GAP_PAIR = "change-mgmt.get-change"
 def _row_is_acme(root: Path) -> None:
     """Exactly one row under `root`, and it is valid JSON naming acme."""
     rows = sorted(Path(root).glob("*/tenant.json"))
-    assert rows == [H.row_path(root)], f"the data root holds rows {rows}, not exactly acme's"
-    doc = json.loads(H.row_path(root).read_text(encoding="utf-8"))
+    assert rows == [location_path(H.row_path)(root)], f"the data root holds rows {rows}, not exactly acme's"
+    doc = json.loads(location_path(H.row_path)(root).read_text(encoding="utf-8"))
     assert doc.get("tenant_id") == H.TID, f"the row names {doc.get('tenant_id')!r}, not acme"
 
 
@@ -419,7 +421,7 @@ def _row_alias_beside_knowledge(root: Path, tmp: Path) -> None:
     # J60: an alias planted at the row's own name is the guarded write's to refuse, never the
     # guard's — the row's name stays exempt from the inner scan.
     H.knowledge_dir(root).mkdir(parents=True)
-    H.row_path(root).symlink_to(tmp / "nowhere.json")
+    location_path(H.row_path)(root).symlink_to(tmp / "nowhere.json")
 
 
 def _runs_beside_knowledge(root: Path, tmp: Path) -> None:
@@ -450,7 +452,7 @@ def test_1120_the_one_tenant_guard_admits_only_knowledge_beside_a_missing_row(
     before = H.tree_census(root)
     refused: BaseException | None = None
     try:
-        _tenant.refuse_foreign_data_root(root, _tenant.TenantId(H.TID))
+        _tenant.refuse_foreign_data_root(fixture_data_root(root), _tenant.TenantId(H.TID))
     except _tenant.TenantRefused as exc:
         refused = exc
     assert H.census_diff(before, H.tree_census(root)) == [], "the guard wrote into the root"
@@ -481,7 +483,7 @@ def test_1120_setup_refuses_a_placed_knowledge_folder_whose_tenant_id_is_absent_
     proc = H.setup(tenant_py, root)
     H.assert_refused(proc, str(knowledge / H.TENANT_ID_FILE), *also_named)
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused setup wrote something"
-    assert not H.row_path(root).exists(), "a refused setup left a row (rules-first, MF1 Q2)"
+    assert not location_path(H.row_path)(root).exists(), "a refused setup left a row (rules-first, MF1 Q2)"
     assert H.git_status(knowledge) == "", "setup wrote into the operator's clone"
 
     control = tmp_path / "control"
@@ -661,7 +663,7 @@ def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
         tmp_path: Path, plant) -> None:
     root = tmp_path / "data"
     named = plant(root, tmp_path)
-    assert not H.row_path(root).exists(), "precondition: this is a first, row-less setup"
+    assert not location_path(H.row_path)(root).exists(), "precondition: this is a first, row-less setup"
     before = H.tree_census(root)
     try:
         proc = H.setup(tenant_py, root)
@@ -675,7 +677,7 @@ def test_1120_a_first_setup_applies_every_folder_rule_before_it_writes_the_row(
         f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
         f"the folder rule must refuse {named}:\n{text}")
     assert H.census_diff(before, H.tree_census(root)) == [], "the refused first setup wrote"
-    assert not H.row_path(root).exists(), "a refused first setup left a row (MF1 Q2)"
+    assert not location_path(H.row_path)(root).exists(), "a refused first setup left a row (MF1 Q2)"
 
     control = tmp_path / "control"
     H.place_knowledge(control)
@@ -703,7 +705,7 @@ def test_1120_two_concurrent_first_setups_leave_one_row_and_one_refusal_naming_i
         assert "Traceback (most recent call last)" not in text, f"a setup crashed:\n{text}"
         assert rc in (0, 1), f"a racing setup exited {rc}:\n{text}"
         if rc == 1:
-            assert str(H.row_path(root)) in text, (
+            assert str(location_path(H.row_path)(root)) in text, (
                 f"the racing loser's refusal does not name the row:\n{text}")
             assert "already exists" in text, f"the loser's refusal is not the create race:\n{text}"
     assert any(rc == 0 for rc, _ in results), f"neither racing setup succeeded: {results}"
@@ -740,11 +742,11 @@ def test_1120_s2_data_root_parent_not_writable(tmp_path: Path) -> None:
     folder = H.tenant_folder(root)
     folder.chmod(0o555)
     try:
-        text = H.assert_refused(H.setup(tenant_py, root), str(H.row_path(root)))
+        text = H.assert_refused(H.setup(tenant_py, root), str(location_path(H.row_path)(root)))
         assert "ermission" in text, f"the refusal does not name the permission error:\n{text}"
     finally:
         folder.chmod(0o755)
-    assert not H.row_path(root).exists()
+    assert not location_path(H.row_path)(root).exists()
     assert H.census_diff(before, _knowledge_census(root)) == []
 
 

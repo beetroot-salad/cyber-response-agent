@@ -1,5 +1,7 @@
 """Replay-driven runs: record reaches the leads, resume re-resolves, grants via tenant config, settings path redacted."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import fixture_data_root
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
@@ -177,7 +179,7 @@ def test_s7_mf16_resume_reflects_its_own_start(tmp_path, data_root, monkeypatch)
     S.set_key(folder, "cmdb", "CMDB_URL_BASE", edited)
     S.mapping_path(folder).write_text(T1106.mapping_text(reporter="resolved"),
                                       encoding="utf-8")
-    fresh = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+    fresh = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                       dispatches_lead_zero=False)
 
     def edit_within(_run_dir: Path) -> None:
@@ -269,7 +271,7 @@ def test_d_record_settings_redacted(tmp_path, monkeypatch):
     shim = S.DockerShim(tmp_path / "docker")
     monkeypatch.setenv("PATH", shim.path_value())
     root, _folder, tenant = _plant(tmp_path, "red1107")
-    record = run_tenant.resolve_tenant(root, S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
+    record = run_tenant.resolve_tenant(fixture_data_root(root), S.PLAYGROUND_ID, defender_dir=S.DEFENDER,
                                        dispatches_lead_zero=False)
     assert record.settings == tenant.settings, (record.settings, tenant.settings)
     given, resolved = str(record.settings), str(Path(record.settings).resolve())

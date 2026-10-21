@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.learning.core.state import FINDINGS, LearningState
 from defender.tests.support.learning.curation._drain719 import make_paths
 
@@ -109,10 +111,10 @@ def test_a_refusal_met_recording_a_contained_curator_fault_carries_no_displaced_
     outside.write_text("", encoding="utf-8")
 
     def trigger_author(*_a, **_k):
-        os.symlink(outside, paths.state_root / "_pending" / "findings.stuck.jsonl")
+        os.symlink(outside, location_path(paths.state_root) / "_pending" / "findings.stuck.jsonl")
         raise ValueError("the curator failed")
 
-    (paths.state_root / "_pending").mkdir(exist_ok=True)
+    (location_path(paths.state_root) / "_pending").mkdir(exist_ok=True)
     with pytest.raises(StateRefused) as raised:
         drains._drain_one_curator(paths, state, trigger_author, FINDINGS,
                                   "LEARNING_AUTHOR_THRESHOLD", "author", "pending", box=None)

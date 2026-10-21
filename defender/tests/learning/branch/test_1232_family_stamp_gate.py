@@ -2,6 +2,8 @@
 records why it withheld the stamp and the judge and episode readers refuse a stampless family."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import os
 
@@ -135,7 +137,7 @@ def test_a_stampless_family_with_no_recorded_reason_still_is_not_comparable(tmp_
 
 
 def test_verify_family_records_why_it_withheld_the_stamp_and_the_judge_names_it(tmp_path):
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     ep = S.judged_episode(tmp_path, outcome=None)
     S.outcome_record(ep, "accepted", family_stamp=False)
     base = _container(ep)
@@ -179,7 +181,7 @@ def test_the_episode_readers_refuse_a_stampless_family(tmp_path):
 def test_a_per_world_fault_leaves_the_family_stamp_to_the_verified_siblings(tmp_path):
     """Seventh round (finding 3), FORK-1 as amended."""
 
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     # #1234 A3: the control is archived too — every world is judged against it, and a family
     # whose control is not usable is stamped not graded.
     ep = S.judged_episode(tmp_path, outcome=None, labels=("a", "b"))

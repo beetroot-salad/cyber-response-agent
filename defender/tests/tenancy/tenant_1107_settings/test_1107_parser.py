@@ -1,6 +1,8 @@
 """The one config.env parser: quote and line rules."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root
+
 from pathlib import Path
 
 import pytest
@@ -13,7 +15,7 @@ from defender.tests.tenancy.tenant_1107_settings import _spec1107 as S
 def _resolve(root: Path, tenant_id: str = S.PLAYGROUND_ID) -> object:
     """The REAL acceptance frame over a planted root (C1)."""
     return run_tenant.resolve_tenant(
-        Path(root), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
+        fixture_data_root(Path(root)), tenant_id, defender_dir=S.DEFENDER, dispatches_lead_zero=False)
 
 
 def _ctx(record: object, tmp_path: Path) -> object:

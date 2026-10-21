@@ -1,6 +1,8 @@
 """#1135/#1186 — tenant-selected state and explicit scratch roots preserve handle I/O routes."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 import pytest
@@ -15,18 +17,18 @@ def test_the_kept_root_routes_still_resolve(
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     tenant = set_up_tenant(data_root)
-    tenant.learning.mkdir(parents=True, exist_ok=True)
+    location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
     # Overlapping ambient values formerly refused tenant acceptance. They are now inert.
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(data_root))
     paths = config.LoopPaths.for_tenant(tenant)
-    assert paths.state_root == tenant.learning
+    assert location_path(paths.state_root) == location_path(tenant.learning)
     other = tmp_path / "explicit-scratch-state"
-    assert config.LoopPaths(repo_root=tmp_path / "repo", state_dir=other).state_root == other
+    assert location_path(config.LoopPaths(repo_root=tmp_path / "repo", state_dir=other).state_root) == other
 
     with S.LearningState.open(paths) as state:
         channel = S.coined("FINDINGS")
         described = state.describe(channel)
-        assert described == str(tenant.learning / channel.queue)
+        assert described == str(location_path(tenant.learning) / channel.queue)
         row = {"finding_id": "front-door/0", "run_id": "front-door"}
         assert state.append(channel, [row]) == (1, 0)
         assert state.rows(channel) == [row]

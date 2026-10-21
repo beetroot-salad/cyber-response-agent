@@ -1,6 +1,8 @@
 """Substrate for the issue-719 executable spec (`spec_graph_719.yaml`)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import dataclasses
@@ -144,7 +146,7 @@ def make_paths(tmp_path: Path, *, state_dir: Path | None = None) -> LoopPaths:
     graveyard away from the worktree without moving the corpus."""
     repo = make_repo(tmp_path)
     paths = LoopPaths(repo_root=repo, state_dir=state_dir if state_dir is not None else repo / "defender" / "learning")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the root is never created lazily (#1135)
     return paths
 
 
@@ -219,7 +221,7 @@ def row_for(name: str, rid: str, **extra) -> dict:
 
 
 def seed(paths: LoopPaths, channel: Channel, rows: list[dict]) -> None:
-    queue = paths.state_root / channel.queue
+    queue = location_path(paths.state_root) / channel.queue
     queue.parent.mkdir(parents=True, exist_ok=True)
     with queue.open("w") as fh:
         for row in rows:
@@ -233,7 +235,7 @@ def read_rows(path: Path) -> list[dict]:
 
 
 def pending(paths: LoopPaths, channel: Channel) -> list[dict]:
-    return read_rows(paths.state_root / channel.queue)
+    return read_rows(location_path(paths.state_root) / channel.queue)
 
 
 def pending_by_id(paths: LoopPaths, channel: Channel) -> dict[str, dict]:
@@ -241,15 +243,15 @@ def pending_by_id(paths: LoopPaths, channel: Channel) -> dict[str, dict]:
 
 
 def graveyard(paths: LoopPaths, channel: Channel) -> list[dict]:
-    return read_rows(paths.state_root / channel.deadletter)
+    return read_rows(location_path(paths.state_root) / channel.deadletter)
 
 
 def stuck_records(paths: LoopPaths, channel: Channel) -> list[dict]:
-    return read_rows(paths.state_root / channel.stuck)
+    return read_rows(location_path(paths.state_root) / channel.stuck)
 
 
 def consumed(paths: LoopPaths, channel: Channel) -> list[dict]:
-    return read_rows(paths.state_root / channel.consumed)
+    return read_rows(location_path(paths.state_root) / channel.consumed)
 
 
 def attempts_of(paths: LoopPaths, channel: Channel, rid: str) -> int | None:

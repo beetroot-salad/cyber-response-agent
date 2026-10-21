@@ -1,6 +1,8 @@
 """#1025 O8 (prep 2) — one episode reader and one home for each file name."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.learning.branch import _triplet_947 as T
 
 import ast
@@ -187,7 +189,7 @@ def test_the_input_builders_leads_view_is_what_family_lead_chain_answers(tmp_pat
                                   for n, r in enumerate(rows, start=1)])
     (world_dir / "gather_raw" / "l-001.lead.json").write_text(
         json.dumps({"lead_id": "l-001", "goal": "find the pivot"}), encoding="utf-8")
-    base, _src = J.runs_base(tmp_path)
+    base, _src = location_path(J.runs_base)(tmp_path)
 
     shown = J.render_at(ep, "b").focus.leads
     facts = family.read_world_facts(J.mod("_io").bind(ep), "b", world_id=T.world_id(ep, "b"))

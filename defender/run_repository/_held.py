@@ -2,6 +2,8 @@
 the bottom layer every lookup works through, and the argument checks the lookups share."""
 from __future__ import annotations
 
+from defender.records._locations import (LegacyEpisodesRoot, LegacyRunsRoot, RunsBase, _unwrap_data_root, _unwrap_legacy_episodes_root, _unwrap_legacy_runs_root, _unwrap_runs_base, _unwrap_tenant_root)
+
 import contextlib
 import errno
 import os
@@ -179,7 +181,7 @@ def hold_tenant_folder(tenant: Tenant, io: Any) -> _io.Held:
     the data root, followed as configuration; `<T>` itself never is. A link there (one swapped
     in after acceptance), something other than a directory, or a folder that is gone is
     `TenantRefused` naming `<T>`. Held afresh by every call: no descriptor outlives a lookup."""
-    folder = Path(tenant.dir)
+    folder = Path(_unwrap_tenant_root(tenant.tenant_root))
     try:
         return io.hold(folder, follow=False)
     except OSError as exc:
@@ -206,7 +208,7 @@ def walk_from_tenant(tenant: Tenant, io: Any, names: tuple[str, ...], *,
     returns. `create` makes each missing level. An absent level is `FileNotFoundError`; any
     other fault of a level is `TenantRefused` naming it."""
     held = hold_tenant_folder(tenant, io)
-    where = Path(tenant.dir)
+    where = Path(_unwrap_tenant_root(tenant.tenant_root))
     try:
         for name in names:
             where = where / name
@@ -222,7 +224,7 @@ def walk_from_tenant(tenant: Tenant, io: Any, names: tuple[str, ...], *,
 def tenant_levels(tenant: Tenant, folder: Path) -> tuple[str, ...]:
     """`folder`'s names below `<T>` (`tenant.runs` is `("runs",)`), so a walk takes every name
     from the tenant's own layout and spells none."""
-    return Path(folder).relative_to(tenant.dir).parts
+    return Path(folder).relative_to(_unwrap_tenant_root(tenant.tenant_root)).parts
 
 
 # -- a runs folder held by its path (#1105 H1) ---------------------------------------------------
@@ -289,9 +291,20 @@ class _Lane:
     (`source_path` in messages) into the folder `destination` below `<T>`."""
 
     source: _io.Held | None
-    source_path: Path
-    destination: Path
+    source_path: RunsBase | Path  # Path is only the operator-supplied external archive.
+    destination: LegacyRunsRoot | LegacyEpisodesRoot
     names: list[str] = field(default_factory=list)
+
+
+def _lane_source(lane: _Lane) -> Path:
+    return (_unwrap_runs_base(lane.source_path)
+            if isinstance(lane.source_path, RunsBase) else lane.source_path)
+
+
+def _lane_destination(lane: _Lane) -> Path:
+    return (_unwrap_legacy_runs_root(lane.destination)
+            if isinstance(lane.destination, LegacyRunsRoot)
+            else _unwrap_legacy_episodes_root(lane.destination))
 
 
 class RetirePlan:
@@ -334,11 +347,12 @@ class RetirePlan:
             if not lane.names:
                 continue
             assert lane.source is not None  # a lane with names was held
-            destination = hold_level(self._tenant_held, lane.destination.name, lane.destination,
+            source_path, destination_path = _lane_source(lane), _lane_destination(lane)
+            destination = hold_level(self._tenant_held, destination_path.name, destination_path,
                                      io=self._io, create=True)
             try:
                 for name in lane.names:
-                    src, dst = lane.source_path / name, lane.destination / name
+                    src, dst = source_path / name, destination_path / name
                     try:
                         self._io.rename_into(lane.source, name, destination)
                     except OSError as exc:
@@ -346,8 +360,8 @@ class RetirePlan:
                                "and nothing is copied" if exc.errno == errno.EXDEV
                                else (exc.strerror or str(exc)))
                         raise TenantRefused(
-                            f"{entry_path(lane.source_path, name)} could not be renamed to "
-                            f"{entry_path(lane.destination, name)}: {why} — {moved} entr"
+                            f"{entry_path(source_path, name)} could not be renamed to "
+                            f"{entry_path(destination_path, name)}: {why} — {moved} entr"
                             f"{'y' if moved == 1 else 'ies'} moved before it stay moved; fix "
                             "this and run the command again to move the rest") from None
                     moved += 1
@@ -367,7 +381,7 @@ def _judge_entries(plan: RetirePlan, lane: _Lane, stats: dict[str, os.stat_resul
         if keep(name, st):
             continue
         lane.names.append(name)
-        where = entry_path(lane.source_path, name)
+        where = entry_path(_lane_source(lane), name)
         if stat.S_ISLNK(st.st_mode):
             plan.faults.append(f"{where} is a link — remove it by hand (`rm` the link; a link "
                                "is never followed or moved)")
@@ -375,7 +389,7 @@ def _judge_entries(plan: RetirePlan, lane: _Lane, stats: dict[str, os.stat_resul
             plan.faults.append(f"{where} is neither a folder nor a regular file (a FIFO, socket "
                                "or device) — remove it by hand")
         elif st.st_dev != plan._tenant_dev:
-            plan.faults.append(f"{where} is on another filesystem than {lane.destination.parent} "
+            plan.faults.append(f"{where} is on another filesystem than {_lane_destination(lane).parent} "
                                "(a mount point): a rename cannot move it")
 
 
@@ -384,7 +398,7 @@ def _judge_destination(plan: RetirePlan, lane: _Lane, io: Any) -> None:
     absent (made at `act`), or a real folder on `<T>`'s filesystem in which no planned name is
     taken — a rename replaces a file or an empty folder (R2-22), so a taken name refuses here.
     A link or anything but a folder refuses."""
-    folder = lane.destination
+    folder = _lane_destination(lane)
     found = io.stat_entry(plan._tenant_held.view(), folder.name)
     if found.absent:
         return
@@ -421,15 +435,15 @@ def plan_retire(tenant: Tenant, old_episodes_root: Path | None, *, io: Any) -> R
         tenant_held.close()
         raise
     try:
-        natural = _Lane(None, Path(tenant.runs), Path(tenant.runs_legacy))
+        natural = _Lane(None, tenant.runs, tenant.runs_legacy)
         plan.lanes.append(natural)
         with contextlib.suppress(FileNotFoundError):
-            natural.source = hold_level(tenant_held, tenant.runs.name, tenant.runs, io=io,
+            natural.source = hold_level(tenant_held, _unwrap_runs_base(tenant.runs).name, _unwrap_runs_base(tenant.runs), io=io,
                                         what="the runs folder")
         if natural.source is not None:
             listed = io.stat_entries(natural.source.view())
             if listed.stats is None:
-                raise TenantRefused(f"the runs folder {tenant.runs} could not be listed: "
+                raise TenantRefused(f"the runs folder {_unwrap_runs_base(tenant.runs)} could not be listed: "
                                     f"{listed.reason}")
             _judge_entries(plan, natural, listed.stats,
                            lambda name, st: served_entry(name, _stat_kind(st, io), io=io))
@@ -444,10 +458,10 @@ def plan_retire(tenant: Tenant, old_episodes_root: Path | None, *, io: Any) -> R
 
 
 def _plan_old_episodes(plan: RetirePlan, tenant: Tenant, root: Path, io: Any) -> None:
-    lane = _Lane(None, root, Path(tenant.episodes_legacy))
+    lane = _Lane(None, root, tenant.episodes_legacy)
     plan.lanes.append(lane)
     real = root.resolve()
-    data_root = Path(tenant.data_root).resolve()
+    data_root = Path(_unwrap_data_root(tenant.data_root)).resolve()
     if _within(real, data_root) or _within(data_root, real):
         plan.faults.append(f"the old episodes root {root} is inside the data root {data_root}, "
                            "or holds it — the retired episodes root sat outside every data root, "
@@ -463,7 +477,7 @@ def _plan_old_episodes(plan: RetirePlan, tenant: Tenant, root: Path, io: Any) ->
         return
     if io.held_stat(lane.source).st_dev != plan._tenant_dev:
         plan.faults.append(f"the old episodes root {root} is on another filesystem than "
-                           f"{tenant.dir}: the command only renames, and a rename cannot cross "
+                           f"{_unwrap_tenant_root(tenant.tenant_root)}: the command only renames, and a rename cannot cross "
                            "filesystems — move it onto the data root's filesystem first")
         return
     listed = io.stat_entries(lane.source.view())

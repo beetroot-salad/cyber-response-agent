@@ -1,6 +1,8 @@
 """Pre-flight gates: lock, clean-scope, ground-truth filter, idempotency."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 from dataclasses import replace
 
@@ -27,9 +29,9 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
     import fcntl
 
     a = tmp_repo.author
-    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-A/0", run_id="run-A")
+    helpers.write_finding(location_path(tmp_repo.paths.state_root) / FINDINGS.queue, finding_id="run-A/0", run_id="run-A")
 
-    lock_file = tmp_repo.paths.state_root / REPO_LOCK.file
+    lock_file = location_path(tmp_repo.paths.state_root) / REPO_LOCK.file
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     holder = lock_file.open("a+")
     fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
@@ -52,7 +54,7 @@ def test_repo_lock_held_returns_zero(tmp_repo, helpers):
 
     pending = [
         json.loads(line)
-        for line in (tmp_repo.paths.state_root / FINDINGS.queue).read_text().splitlines()
+        for line in (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text().splitlines()
         if line.strip()
     ]
     assert [p["finding_id"] for p in pending] == ["run-A/0"]
@@ -74,7 +76,7 @@ def test_clean_scope_passes_when_clean(tmp_repo):
 
 def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatch):
     a = tmp_repo.author
-    helpers.write_finding(tmp_repo.paths.state_root / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
+    helpers.write_finding(location_path(tmp_repo.paths.state_root) / FINDINGS.queue, finding_id="run-X/0", run_id="run-X")
 
     (tmp_repo.paths.lessons_dir / "preexisting.md").write_text(
         "---\n"
@@ -99,10 +101,10 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
     assert rc == 0
     assert invoked["called"] is False, "agent must not be invoked when all findings are idempotent"
 
-    assert (tmp_repo.paths.state_root / FINDINGS.queue).read_text().strip() == ""
+    assert (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).read_text().strip() == ""
     consumed = [
         json.loads(line)
-        for line in (tmp_repo.paths.state_root / FINDINGS.consumed).read_text().splitlines()
+        for line in (location_path(tmp_repo.paths.state_root) / FINDINGS.consumed).read_text().splitlines()
         if line.strip()
     ]
     assert len(consumed) == 1
@@ -112,8 +114,8 @@ def test_idempotency_filter_skips_already_authored(tmp_repo, helpers, monkeypatc
 
 def test_empty_queue_is_noop(tmp_repo, monkeypatch):
     a = tmp_repo.author
-    (tmp_repo.paths.state_root / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
-    (tmp_repo.paths.state_root / FINDINGS.queue).write_text("")
+    (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).parent.mkdir(parents=True, exist_ok=True)
+    (location_path(tmp_repo.paths.state_root) / FINDINGS.queue).write_text("")
     called = {"n": 0}
 
     def fake_invoke(*args, **kwargs):

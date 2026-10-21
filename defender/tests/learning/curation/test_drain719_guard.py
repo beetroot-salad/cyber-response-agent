@@ -1,6 +1,8 @@
 """Drain retire set: only the enumerated failure classes bump attempts and retire; systemic faults propagate; stuck rows surface an operator signal."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from pathlib import Path
 
 import pytest
@@ -28,7 +30,7 @@ def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouc
     ch = h.channel_of("findings")
     rows = [h.row_for("findings", "b/0", attempts=2)]
     h.seed(paths, ch, rows)
-    before = (paths.state_root / ch.queue).read_bytes()
+    before = (location_path(paths.state_root) / ch.queue).read_bytes()
     cfg = h.cfg_for(
         paths,
         "findings",
@@ -40,7 +42,7 @@ def test_a_failure_in_no_named_class_leaves_the_row_queued_with_its_count_untouc
         with pytest.raises(FileNotFoundError):
             drain.run_batch(cfg=cfg)
 
-    assert (paths.state_root / ch.queue).read_bytes() == before, "an unnamed class must not touch the queue at all"
+    assert (location_path(paths.state_root) / ch.queue).read_bytes() == before, "an unnamed class must not touch the queue at all"
     assert h.attempts_of(paths, ch, "b/0") == 2, "the count is untouched — not bumped, not reset"
     assert h.graveyard(paths, ch) == []
     assert h.consumed(paths, ch) == []
@@ -81,7 +83,7 @@ def test_a_repeatedly_failing_row_that_never_retires_surfaces_a_named_operator_s
 
     assert h.pending_by_id(paths, ch).keys() == {"a/0", "a/1"}, "the rows are stuck, as decision 8 wants"
     assert h.graveyard(paths, ch) == []
-    assert not ((paths.state_root / FINDINGS.queue).parent / "held_report.log").exists(), (
+    assert not ((location_path(paths.state_root) / FINDINGS.queue).parent / "held_report.log").exists(), (
         "the signal must exist on a channel that has no held_report — D7 keeps that one "
         "lessons-local, so it cannot be the stuck-row surface"
     )
@@ -172,7 +174,7 @@ def test_a_plain_oserror_from_a_lock_acquisition_is_classified_systemic(tmp_path
     rows = [h.row_for("findings", "a/0")]
     h.seed(paths, ch, rows)
 
-    (paths.state_root / ch.drain_role.file).mkdir(parents=True)
+    (location_path(paths.state_root) / ch.drain_role.file).mkdir(parents=True)
     cfg = h.cfg_for(
         paths,
         "findings",

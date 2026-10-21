@@ -333,7 +333,7 @@ def test_basis_does_not_change_the_verdict_or_the_escalation():
         assert row["verdict"] == "indeterminate", f"basis={basis!r} rewrote the verdict"
 
         outstanding = outstanding_authz_contracts(companion)
-        assert [c.get("id") for _h, c, _w in outstanding] == ["ac1"], (
+        assert [c.get("id") for _handle, c, _world in outstanding] == ["ac1"], (
             f"basis={basis!r} moved the benign gate — the contract is no longer outstanding"
         )
         assert disposition_entry_price("benign", doc).owed, (
@@ -381,7 +381,7 @@ def test_exhausted_drops_only_its_own_contract():
 
     companion, _ = parse_dense_companion(doc)
     assert sorted(
-        c.get("id") for _h, c, _w in outstanding_authz_contracts(companion)
+        c.get("id") for _handle, c, _world in outstanding_authz_contracts(companion)
     ) == ["ac1", "ac2"], (
         "fixture control: neither contract is discharged — both rows are `indeterminate`"
     )

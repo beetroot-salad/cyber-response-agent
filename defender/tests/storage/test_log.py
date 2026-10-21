@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import asyncio
 import io
 import json
@@ -283,7 +285,7 @@ def test_run_main_binds_the_run_id_and_tenant_for_the_whole_run(tmp_path, monkey
     included — logs under this run's id and its tenant."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     seen: dict = {}
 
     def lifecycle(**kw):
@@ -306,7 +308,7 @@ def test_a_run_s_crash_is_logged_while_the_run_is_still_bound(tmp_path, monkeypa
     included — names the run and its tenant."""
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
 
     def lifecycle(**kw):
         raise RuntimeError("lifecycle blew up")

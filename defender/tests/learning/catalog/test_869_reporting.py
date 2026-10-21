@@ -1,6 +1,8 @@
 """#869 O3/RF6/RF7/FK-2/FK-17 — reported, never silently absorbed; and the durable record."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 from pathlib import Path
 
@@ -55,7 +57,7 @@ def test_a_dropped_row_is_never_labelled_committed(tmp_path, monkeypatch):
     state = open_state(paths)
     pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths))
 
-    consumed = {r["pitfall_id"]: r for r in read_rows(paths.state_root / PITFALLS.consumed)}
+    consumed = {r["pitfall_id"]: r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
     assert set(consumed) == {"r:l-000:0", "r:l-001:0", "r:l-002:0"}
     assert "defender/skills/elastic/execution.md" in head_files(repo)
 
@@ -73,13 +75,13 @@ def test_a_dropped_row_takes_a_terminal_undeclared_category(tmp_path, monkeypatc
     state = open_state(paths)
     pitfalls_curator.run_pitfalls(paths=paths, state=state, invoke=spawn, trees=lead_trees(paths))
 
-    consumed = {r["pitfall_id"]: r for r in read_rows(paths.state_root / PITFALLS.consumed)}
+    consumed = {r["pitfall_id"]: r for r in read_rows(location_path(paths.state_root) / PITFALLS.consumed)}
     assert consumed["r:l-002:0"]["consumed_category"] == "consumed_unattributable"
     assert "consumed_commit" not in consumed["r:l-002:0"]
     assert consumed["r:l-000:0"]["consumed_category"] == "consumed_committed"
 
     assert persist.read_pitfalls(state) == [], "pending must go empty; the row is terminal"
-    graveyard = {r.get("pitfall_id") for r in read_rows(paths.state_root / PITFALLS.deadletter)}
+    graveyard = {r.get("pitfall_id") for r in read_rows(location_path(paths.state_root) / PITFALLS.deadletter)}
     assert "r:l-002:0" in graveyard, (
         "the dropped row leaves no durable record, so nothing reaches human review"
     )
@@ -95,7 +97,7 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
     # A natural run where the drain rehydrates the row (#1105 PR 2): the row is its address.
     run_dir = curation_run_dir("run-x")
     (run_dir / "gather_raw").mkdir()
-    write(paths.state_root / "author-queue" / "case-1.json",
+    write(location_path(paths.state_root) / "author-queue" / "case-1.json",
           json.dumps(curation_row("case-1", run_dir)) + "\n")
 
     calls: list[Path] = []
@@ -108,13 +110,13 @@ def test_a_membership_refusal_is_terminal_and_leaves_a_re_drivable_record(tmp_pa
     capsys.readouterr()
     for _tick in range(5):
         drains._drain_lead_author_markers(paths, state, refusing_lane,
-                                          data_root=drains._data_root())
+                                          accept_tenant=drains._tenant_acceptor(paths.tenant))
 
     assert len(calls) == 1, f"the refusal was retried: {len(calls)} invocations"
-    assert not (paths.state_root / "author-queue" / "case-1.json").exists()
-    assert not list((paths.state_root / "author-queue" / "inflight").glob("*.json"))
+    assert not (location_path(paths.state_root) / "author-queue" / "case-1.json").exists()
+    assert not list((location_path(paths.state_root) / "author-queue" / "inflight").glob("*.json"))
 
-    failed = paths.state_root / "author-queue" / "failed" / "case-1.json"
+    failed = location_path(paths.state_root) / "author-queue" / "failed" / "case-1.json"
     assert failed.is_file()
     record = json.loads(failed.read_text())
     assert "mcpsys" in record["failed"]

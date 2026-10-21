@@ -2,6 +2,8 @@
 inherits."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path, fixture_runs_base
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _writer_run_1165
 
 from pathlib import Path
@@ -73,8 +75,8 @@ def test_run_paths_resolves_every_name_d1_enumerates(base, run_dir):
         "claim G5: the owner owns exactly 7 accessors today and D1 takes it to roughly twenty; "
         f"these names have no accessor: {missing}")
     # The sessions directory and the database, whose root is a SIBLING of the runs base (C10/C15).
-    assert S.RunPaths(run_dir).sessions_dir(base) == base.parent / "sessions"
-    assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID).name == f"{S.LINEAGE_ID}.db"
+    assert location_path(S.RunPaths(run_dir).sessions_dir(fixture_runs_base(base))) == base.parent / "sessions"
+    assert S.RunPaths(run_dir).session_db(fixture_runs_base(base), S.LINEAGE_ID).name == f"{S.LINEAGE_ID}.db"
 
 
 # O8 — the two model-facing payload forms
@@ -193,7 +195,7 @@ def test_run_paths_plain_name_screens_non_plain_files(run_dir):
 def _refuses(run_dir: Path, base: Path, lineage) -> BaseException:
     from defender.runtime.session_store._write import InvalidCaseId
     with pytest.raises(InvalidCaseId) as excinfo:
-        S.RunPaths(run_dir).session_db(base, lineage)
+        S.RunPaths(run_dir).session_db(fixture_runs_base(base), lineage)
     return excinfo.value
 
 
@@ -207,10 +209,10 @@ def test_session_db_refuses_a_lineage_id_the_case_id_pattern_rejects(base, run_d
             "this test reads it, it does not re-spell it")
         _refuses(run_dir, base, lineage)
         with pytest.raises(InvalidCaseId):
-            store_path_for(lineage, sessions=SessionPaths(base))
+            store_path_for(lineage, sessions=SessionPaths(fixture_runs_base(base)))
     # Positive control: the id today's resolver admits resolves to today's path.
-    assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID) == store_path_for(
-        S.LINEAGE_ID, sessions=SessionPaths(base))
+    assert S.RunPaths(run_dir).session_db(fixture_runs_base(base), S.LINEAGE_ID) == store_path_for(
+        S.LINEAGE_ID, sessions=SessionPaths(fixture_runs_base(base)))
 
 
 # Decision 12 — composed-identifier collisions
@@ -254,8 +256,8 @@ def test_the_composed_identifiers_and_the_session_db_path_carry_the_case_stabili
         "the format check admits a mixed-case id today (`_run_id.CASE_ID_RE`) — the case-"
         "stability refusal is the NEW check beside it, not a re-spelling of the old one")
     with pytest.raises(InvalidCaseId):
-        S.RunPaths(run_dir).session_db(base, mixed)
-    assert S.RunPaths(run_dir).session_db(base, S.LINEAGE_ID).name.endswith(".db"), (
+        S.RunPaths(run_dir).session_db(fixture_runs_base(base), mixed)
+    assert S.RunPaths(run_dir).session_db(fixture_runs_base(base), S.LINEAGE_ID).name.endswith(".db"), (
         "positive control: a case-stable lineage id still resolves")
 
 

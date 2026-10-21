@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import subprocess
 from pathlib import Path
@@ -91,11 +93,11 @@ exit 0
         """Positive control: a plain `git add` of an edited file in `wt` runs the hook and is
         stalled by it."""
         (wt / rel).write_text("# touched by the positive control\n", encoding="utf-8")
-        before = len(self.runs())
+        before = len(location_path(self.runs)())
         argv = ["git", "-C", str(wt), "add", "--", rel]
         with pytest.raises(subprocess.TimeoutExpired):
             subprocess.run(argv, capture_output=True, timeout=BOUND * 2)
-        assert "add" in self.runs()[before:], f"a plain add did not run {self.name}"
+        assert "add" in location_path(self.runs)()[before:], f"a plain add did not run {self.name}"
 
 
 @pytest.mark.parametrize("name", ["post-index-change"])
@@ -106,7 +108,7 @@ def test_r2a_no_index_hook_runs_in_the_lead_author_commit(tmp_path, monkeypatch,
     lane = _LeadLane(EDIT_LIFT, git_timeout=BOUND)
     try:
         got = _tick(sc, run_lead_author=lane, run_pitfalls=_no_curation, shim=hook.shim)
-        in_commit = [r for r in hook.runs() if r in COMMIT_STEP]
+        in_commit = [r for r in location_path(hook.runs)() if r in COMMIT_STEP]
 
         assert got == ("value", 0), got
         assert in_commit == [], f"the {name} hook ran in the claim's commit: {in_commit}"
@@ -125,7 +127,7 @@ def test_r2a_no_index_hook_runs_in_the_curation_commit(tmp_path, monkeypatch, na
     lane = _PitfallsLane(CURATE, git_timeout=BOUND)
     try:
         got = _tick(sc, run_lead_author=_no_claim, run_pitfalls=lane, shim=hook.shim)
-        in_commit = [r for r in hook.runs() if r in COMMIT_STEP]
+        in_commit = [r for r in location_path(hook.runs)() if r in COMMIT_STEP]
 
         assert got == ("value", 0), got
         assert in_commit == [], f"the {name} hook ran in the curation's commit: {in_commit}"
@@ -203,7 +205,7 @@ def test_r2c_unstartable_git_after_a_requeued_claim_ends_the_tick(tmp_path, monk
     assert _oserror_in(exc), repr(exc)
     assert served == [], "the next claim was served over the re-queued claim's leftovers"
     assert "case-b.json" in author_markers(sc.paths)
-    assert marker_body(sc.paths.state_root / "author-queue" / "case-b.json") == \
+    assert marker_body(location_path(sc.paths.state_root) / "author-queue" / "case-b.json") == \
         curation_row("case-b", run_b)
     assert _failed(sc.paths) == []
     assert "finish" not in sc.branch.events

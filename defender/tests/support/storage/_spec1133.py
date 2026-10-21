@@ -1,6 +1,8 @@
 """Shared machinery for #1133's Episode-handle spec, rev 3. It defines NO tests."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import dataclasses
@@ -162,7 +164,7 @@ def expected_record_rel(key: str) -> PurePosixPath:
 def expected_folder_rel(key: str) -> PurePosixPath:
     world = LAYOUT.world(WORLD_ID)
     return {
-        "served": LAYOUT.served, "runs": LAYOUT.runs, "worlds": LAYOUT.worlds,
+        "served": LAYOUT.served, "runs": location_path(LAYOUT.runs), "worlds": LAYOUT.worlds,
         "world.dir": world.dir, "world.draws": world.draws,
         "family_draws": LAYOUT.family_draws,
     }[key]

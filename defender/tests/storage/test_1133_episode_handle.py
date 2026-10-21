@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import errno
 import os
 import stat
@@ -33,7 +35,7 @@ class Tree:
     def __init__(self, tmp: Path) -> None:
         self.tmp = tmp
         self.episodes = tmp / "episodes"
-        self.ep = self.episodes / EPISODE_ID
+        self.ep = location_path(self.episodes) / EPISODE_ID
         self.ep.mkdir(parents=True)
         self.host = tmp / "host"
         self.host.mkdir()
@@ -283,7 +285,7 @@ def test_o6_a_handle_whose_dir_was_removed_refuses_every_ensure(tree, key):
 def test_o6_a_handle_whose_dir_was_renamed_writes_into_the_moved_folder(tree, key, verb):
     """The episode is held, not remembered: after its dir is renamed, a write verb lands in the
     moved folder at the record's name, and nothing appears at the old spelling."""
-    moved = tree.episodes / "moved"
+    moved = location_path(tree.episodes) / "moved"
     with S.open_episode(tree.ep) as episode:
         rec = S.resolve(episode, key)
         tree.ep.rename(moved)
@@ -293,7 +295,7 @@ def test_o6_a_handle_whose_dir_was_renamed_writes_into_the_moved_folder(tree, ke
 
 
 def test_o3_the_view_is_a_bound_with_the_readers_surface_reading_through_the_same_handle(tree):
-    moved = tree.episodes / "moved"
+    moved = location_path(tree.episodes) / "moved"
     with S.open_episode(tree.ep) as episode:
         view = episode.view()
         assert isinstance(view, _io.Bound), f"view() is {type(view).__name__}"
@@ -323,14 +325,14 @@ def test_d1_a_write_after_close_raises_ebadf_and_lands_nowhere(tree):
 
 @pytest.mark.parametrize("dir_state", ["fresh", "adopted"])
 def test_d1_episode_create_fsyncs_the_episodes_root(tree, dir_state):
-    fresh = tree.episodes / "ep-durable"
+    fresh = location_path(tree.episodes) / "ep-durable"
     if dir_state == "adopted":
         fresh.mkdir()
     spy = S.OsSpy()
     rec_io = S.RecordingIo(os_=spy)
     with S.create_episode(fresh, io=rec_io):
         at_create = list(spy.fsyncs)
-    assert any(s.ino == S.inode(tree.episodes) and s.is_dir and not s.getfl & S.O_PATH
+    assert any(s.ino == S.inode(location_path(tree.episodes)) and s.is_dir and not s.getfl & S.O_PATH
                for s in at_create), (
         f"Episode.create did not fsync the episodes root on a directory handle: {at_create}")
 

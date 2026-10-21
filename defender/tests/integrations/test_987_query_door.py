@@ -1,6 +1,8 @@
 """#987 — the STOPPED lead, at `_run_gather`'s own seam and at the stop record's."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from dataclasses import replace as _with_live_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _live_run_1165
 
@@ -96,7 +98,7 @@ class Agent:
         self.deps: list = []
 
     async def run(self, prompt=None, **kwargs):
-        self.runs.append({"prompt": prompt, **kwargs})
+        location_path(self.runs).append({"prompt": prompt, **kwargs})
         self.deps.append(kwargs["deps"])
         if self._to_stop is not None:
             self._to_stop(kwargs["deps"].stop)
@@ -284,9 +286,9 @@ def test_the_factory_and_the_usage_limit_are_handed_one_number(tmp_path):
         handed: list[int] = []
         agent = Agent()
         dispatch(tmp_path / f"c{i}", agent, ceiling=ceiling_, handed=handed)
-        assert len(agent.runs) == 1, "a lead makes ONE run"
+        assert len(location_path(agent.runs)) == 1, "a lead makes ONE run"
         assert handed == [ceiling_]
-        assert agent.runs[0]["usage_limits"].request_limit == ceiling_
+        assert location_path(agent.runs)[0]["usage_limits"].request_limit == ceiling_
         assert agent.deps[0].stop == LeadStop()
 
 

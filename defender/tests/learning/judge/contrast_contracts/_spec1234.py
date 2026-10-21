@@ -2,6 +2,8 @@
 test functions; underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
 
 import ast
@@ -671,7 +673,7 @@ def episodes_root(tmp_path: Path | None = None) -> Path:
     an episode lives under its tenant; no episodes root is configured). `tmp_path` is unused,
     kept so every caller's spelling stands."""
     del tmp_path
-    return T.current_tenant().episodes
+    return location_path(T.current_tenant().episodes)
 
 
 def tenant_episodes(data_root: Path) -> Path:
@@ -1989,7 +1991,7 @@ class RealBuilt:
 @contextlib.contextmanager
 def _launcher_judge_suppressed(tmp_path: Path) -> Iterator[None]:
     """Keep this tenant's real learning root absent during the launch; grade afterwards."""
-    root = T.current_tenant().learning
+    root = location_path(T.current_tenant().learning)
     saved = Path(tmp_path) / "saved-tenant-learning"
     had_root = root.exists()
     if had_root:

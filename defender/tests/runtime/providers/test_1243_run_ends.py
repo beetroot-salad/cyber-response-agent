@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 import asyncio
@@ -37,7 +39,7 @@ def test_o3_main_down_ends_the_run_provider_down_with_no_report_and_exit_4(tmp_p
                     store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
     assert main.requests == 2, f"MAIN made {main.requests} requests; the fault is on its 2nd"
     P.assert_ended_provider_down(d)
-    assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN, (
+    assert location_path(P.sessions)(_store(stores)).get("main") == P.PROVIDER_DOWN, (
         "MAIN's session is not stamped provider-down")
 
 
@@ -60,7 +62,7 @@ def test_o3_a_main_lead_down_stamps_its_session_and_ends_the_run(tmp_path: Path)
         store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
     assert d.router.requests(LEAD) == 2, "MAIN's lead never reached its failing request"
     P.assert_ended_provider_down(d)
-    ended = P.sessions(_store(stores))
+    ended = location_path(P.sessions)(_store(stores))
     assert ended.get(P.gather_agent(LEAD)) == P.PROVIDER_DOWN, (
         f"the lead's session reads {ended.get(P.gather_agent(LEAD))!r}, not provider-down")
     assert ended.get("main") == P.PROVIDER_DOWN
@@ -77,7 +79,7 @@ def test_o3_concurrent_leads_down_end_the_run_once(tmp_path: Path) -> None:
         store_factory=S.store_factory(tmp_path, sink=stores), stores=stores)
     assert d.router.dispatched(LEAD) or d.router.dispatched("l-002"), "no lead ran"
     P.assert_ended_provider_down(d)
-    ended = P.sessions(_store(stores))
+    ended = location_path(P.sessions)(_store(stores))
     stamped = [lead for lead in (LEAD, "l-002") if ended.get(P.gather_agent(lead)) == P.PROVIDER_DOWN]
     assert stamped, f"neither down lead's session is stamped provider-down: {ended}"
     for lead in (LEAD, "l-002"):
@@ -99,7 +101,7 @@ def test_o3_scenario5_correlation_lead_down_stops_before_main(tmp_path: Path) ->
         f"MAIN was asked for {d.main.requests} turn(s) after the correlation lead met a down "
         "provider: the run went on (dispatch_raised) instead of stopping before MAIN")
     P.assert_ended_provider_down(d)
-    assert P.sessions(_store(stores)).get("main") == P.PROVIDER_DOWN
+    assert location_path(P.sessions)(_store(stores)).get("main") == P.PROVIDER_DOWN
 
 
 def test_o3_correlation_lead_provider_down_is_not_a_lead_ending(tmp_path: Path) -> None:
@@ -131,7 +133,7 @@ def test_o3_a_deadline_cutting_a_backoff_keeps_its_own_ending(tmp_path: Path) ->
     assert d.raised is None, d.raised
     assert (d.summary or {}).get("truncated_by") != P.PROVIDER_DOWN, d.summary
     timed_out = P.sym("runtime.run_end", "TRUNCATED_BY_TIMED_OUT")
-    assert P.sessions(_store(stores)).get(P.gather_agent(L3)) == timed_out, (
+    assert location_path(P.sessions)(_store(stores)).get(P.gather_agent(L3)) == timed_out, (
         "the correlation lead cut mid-backoff is not stamped timed out")
 
 
@@ -258,7 +260,7 @@ def test_o3_d5_a_review_stage_failing_otherwise_still_fails_the_review_closed(tm
     rec = P.sidecar(d.folder)
     assert rec is not None, "no run-end record on an uncut run"
     assert rec["truncated_by"] is None
-    assert P.sessions(_store(stores)).get("main") is None
+    assert location_path(P.sessions)(_store(stores)).get("main") is None
     assert any(r.get("incomplete") is True for r in P.trace_rows(d.folder, "support"))
 
 
@@ -327,7 +329,7 @@ def _sibling_episode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from defender.run_repository import RunId
 
     planted = S.plant_tenant(SIBLING_TENANT)
-    _base, src = T.runs_base(tmp_path, tenant_id=SIBLING_TENANT, recorded=True)
+    _base, src = location_path(T.runs_base)(tmp_path, tenant_id=SIBLING_TENANT, recorded=True)
     runs = planted.accept().runs_repository()
     source = runs.open(RunId.parse(src.name))
     with P.mod("learning.branch.cli").prepare_episode(runs, source) as view:

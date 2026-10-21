@@ -1,6 +1,8 @@
 """#903 — the queue-state page: the serializer contract, the renderer, and the writers' stamps."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import copy
 import html
 import json
@@ -185,7 +187,7 @@ EXPECTED_TAINTED = [
 def _make_paths(tmp_path: Path) -> LoopPaths:
     """`LoopPaths` over a state root that exists: the handle never creates it (#1135)."""
     paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)
     return paths
 
 
@@ -197,11 +199,11 @@ def _build(paths: LoopPaths) -> dict:
 
 def _graveyard_file(paths: LoopPaths, channel: Channel) -> Path:
     """The channel's dead-letter sidecar, beside its queue (the layout is unchanged)."""
-    return paths.state_root / channel.deadletter
+    return location_path(paths.state_root) / channel.deadletter
 
 
 def _stuck_file(paths: LoopPaths, channel: Channel) -> Path:
-    return paths.state_root / channel.stuck
+    return location_path(paths.state_root) / channel.stuck
 
 
 def _write_lines(path: Path, entries: list) -> None:
@@ -226,7 +228,7 @@ def _write_torn_json(path: Path) -> None:
 
 def _seed_findings(paths: LoopPaths) -> None:
     ch = FINDINGS
-    _write_lines(paths.state_root / ch.queue, [
+    _write_lines(location_path(paths.state_root) / ch.queue, [
         {"finding_id": "f-1", "run_id": "r1", "title": BENIGN_PAYLOAD},
         {"finding_id": "f-2", "held_reason": "waits on a fact with no writer"},
         # PRESENCE, not truthiness — `drains._pending_queue_counts`' own rule.
@@ -243,7 +245,7 @@ def _seed_findings(paths: LoopPaths) -> None:
 
 def _seed_questioner(paths: LoopPaths) -> None:
     ch = QUESTIONER_FINDINGS
-    _write_lines(paths.state_root / ch.queue, [
+    _write_lines(location_path(paths.state_root) / ch.queue, [
         {"finding_id": "q-1", "subject": "world"},
         {"finding_id": "q-2", "held_reason": "no source bundle"},
     ])
@@ -254,7 +256,7 @@ def _seed_questioner(paths: LoopPaths) -> None:
 
 def _seed_pitfalls(paths: LoopPaths) -> None:
     ch = PITFALLS
-    _write_lines(paths.state_root / ch.queue, [
+    _write_lines(location_path(paths.state_root) / ch.queue, [
         {"pitfall_id": "p-1", "offers_declined": 0},
         {"pitfall_id": "p-2", "offers_declined": 2},
         {"pitfall_id": "p-3", "system": "elastic"},
@@ -266,7 +268,7 @@ def _seed_pitfalls(paths: LoopPaths) -> None:
 
 
 def _seed_set_aside(paths: LoopPaths) -> None:
-    lead_failed = paths.state_root / "author-queue" / "failed"
+    lead_failed = location_path(paths.state_root) / "author-queue" / "failed"
     _write_json(lead_failed / "run-a.json", {
         "run_id": "run-a", "failed": "unreadable: run_dir is not an absolute path",
     })
@@ -277,21 +279,21 @@ def _seed_set_aside(paths: LoopPaths) -> None:
     _write_torn_json(lead_failed / "torn.json")
     _write_torn_json(lead_failed / "torn-2.json")
 
-    delivery_failed = paths.state_root / "_pending_delivery" / "failed"
+    delivery_failed = location_path(paths.state_root) / "_pending_delivery" / "failed"
     # `_pending_deliveries` quarantines with an EMPTY spec, so `failed` is the whole record.
     _write_json(delivery_failed / "z-delivery-1.json", {
         "failed": "unreadable pending-delivery record",
     })
 
-    _write_json(paths.state_root / "_pending_delivery" / "a-older.json", {
+    _write_json(location_path(paths.state_root) / "_pending_delivery" / "a-older.json", {
         "branch": "learning/lessons/b1", "batch_id": "b1", "label": "lessons author",
         "reason": "push rejected", "at": "2026-09-15T10:00:00+00:00",
     })
-    _write_json(paths.state_root / "_pending_delivery" / "b-newer.json", {
+    _write_json(location_path(paths.state_root) / "_pending_delivery" / "b-newer.json", {
         "branch": "learning/leads/b2", "batch_id": "b2", "label": "lead author",
         "reason": "opening the PR failed", "at": "2026-09-16T10:00:00+00:00",
     })
-    _write_torn_json(paths.state_root / "_pending_delivery" / "c-torn.json")
+    _write_torn_json(location_path(paths.state_root) / "_pending_delivery" / "c-torn.json")
 
     qdir = paths.quarantine_dir
     _write_json(qdir / "a-earlier.json", TAINT_EARLIER)
@@ -303,7 +305,7 @@ def _seed_set_aside(paths: LoopPaths) -> None:
 
 def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page(tmp_path):
     paths = _make_paths(tmp_path)
-    _write_lines(paths.state_root / FINDINGS.queue, [])
+    _write_lines(location_path(paths.state_root) / FINDINGS.queue, [])
     _write_lines(_graveyard_file(paths, FINDINGS), [
         {"finding_id": "g-list", "deadletter_reason": "r", "row": ["not", "a", "mapping"]},
         {"finding_id": 7, "deadletter_reason": None, "retired_at": 12, "row": {"k": "v"}},
@@ -312,7 +314,7 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
         {"fault_class": ["X"], "row_ids": "f-1", "consecutive_ticks": "many", "reason": None,
          "recorded_at": 5},
     ])
-    _write_lines(paths.state_root / PITFALLS.queue, [
+    _write_lines(location_path(paths.state_root) / PITFALLS.queue, [
         {"pitfall_id": "p-prose", "offers_declined": "lots"},
         {"pitfall_id": "p-bool", "offers_declined": True},
         {"pitfall_id": "p-real", "offers_declined": 1},
@@ -328,7 +330,7 @@ def test_a_manifest_or_record_of_the_wrong_type_degrades_that_row_never_the_page
         "batch_id": "odd", "archive": "odd.tar.gz", "quarantined_at": 20260914,
         "label": ["lead"], "taint": "t", "cause": 5, "verdict": "clean", "findings": 3,
     })
-    _write_json(paths.state_root / "_pending_delivery" / "odd.json", {"batch_id": "b", "at": 3})
+    _write_json(location_path(paths.state_root) / "_pending_delivery" / "odd.json", {"batch_id": "b", "at": 3})
 
     view = _build(paths)
     page = build.render_queues(view)
@@ -361,7 +363,7 @@ def test_an_empty_state_root_reads_as_three_idle_channels_and_nothing_set_aside(
 
     view = _build(paths)
 
-    assert view["state_root"] == str(paths.state_root)
+    assert view["state_root"] == str(location_path(paths.state_root))
     for name, accent, flag in (("findings", "defender", True),
                                ("questioner_findings", "learning", True),
                                ("pitfalls", "oracle", False)):
@@ -505,7 +507,7 @@ def test_the_findings_lane_records_stuck_ticks_even_before_it_has_written_one(tm
     """The other half of "structural": a findings root with NO stuck file at all still says
     `has_stuck_record: true` — the lane records them, it just has not had one."""
     paths = _make_paths(tmp_path)
-    _write_lines(paths.state_root / FINDINGS.queue, [])
+    _write_lines(location_path(paths.state_root) / FINDINGS.queue, [])
     ch = _channel(_build(paths), "findings")
     assert ch["has_stuck_record"] is True
     assert ch["stuck"] is None
@@ -553,7 +555,7 @@ def test_held_is_the_writers_count_of_archives_not_of_readable_manifests(paths):
 def test_the_page_names_the_quarantine_directory_because_it_is_not_under_the_state_root(view, paths):
     assert view["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
     assert paths.quarantine_dir == AuthorBranch(repo_root=paths.repo_root).quarantine_dir
-    assert not str(paths.quarantine_dir).startswith(str(paths.state_root))
+    assert not str(paths.quarantine_dir).startswith(str(location_path(paths.state_root)))
     assert html.escape(str(paths.quarantine_dir), quote=True) in _rendered(build.render_queues(view))
 
 
@@ -603,7 +605,7 @@ def test_stamped_view_uses_the_explicit_tenant_root_and_stamps_it(data_root, tmp
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     tenant = set_up_tenant(data_root)
-    tenant.learning.mkdir(parents=True, exist_ok=True)
+    location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
     poison = tmp_path / "old-env-root"
     poison.mkdir()
     monkeypatch.setenv("DEFENDER_LEARNING_STATE_DIR", str(poison))
@@ -612,7 +614,7 @@ def test_stamped_view_uses_the_explicit_tenant_root_and_stamps_it(data_root, tmp
     with _Clock() as clock:
         stamped = serialize_queues.stamped_view(paths)
 
-    assert Path(stamped["state_root"]) == tenant.learning
+    assert Path(stamped["state_root"]) == location_path(tenant.learning)
     assert stamped["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
     clock.check(stamped["generated_at"].replace("Z", "+00:00"))
     assert [ch["name"] for ch in stamped["channels"]] == [
@@ -625,7 +627,7 @@ def test_stamped_view_takes_the_paths_it_is_handed(paths):
     """The seam the CLI and the tests share: handed a `LoopPaths`, nothing is resolved from
     the environment, so a test's root is the whole input surface."""
     stamped = serialize_queues.stamped_view(paths)
-    assert stamped["state_root"] == str(paths.state_root)
+    assert stamped["state_root"] == str(location_path(paths.state_root))
     assert stamped["quarantine"]["tainted"]["dir"] == str(paths.quarantine_dir)
     assert stamped["generated_at"]
 
@@ -757,7 +759,7 @@ def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths, data_root, 
             "findings", "questioner_findings", "pitfalls",
         ]
         assert queues["generated_at"]
-        assert Path(queues["state_root"]) == paths.state_root
+        assert Path(queues["state_root"]) == location_path(paths.state_root)
         # Hermetic: the seeded root's two tainted trees, not whatever this checkout holds.
         assert [t["batch_id"] for t in queues["quarantine"]["tainted"]["rows"]] == [
             "b-later", "a-earlier",
@@ -773,14 +775,14 @@ def test_main_writes_the_queue_pages_beside_the_lessons_pages(paths, data_root, 
         from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
         tenant = set_up_tenant(data_root, H.TID)
-        shutil.copytree(paths.state_root, tenant.learning, dirs_exist_ok=True)
+        shutil.copytree(location_path(paths.state_root), location_path(tenant.learning), dirs_exist_ok=True)
         poison = tmp_path / "ambient-state"
         poison.mkdir()
         proc = H.run_script(Path(build.__file__), "--tenant", H.TID, root=data_root,
                             DEFENDER_LEARNING_STATE_DIR=str(poison))
         assert proc.returncode == 0, H.output(proc)
         selected = json.loads((frontend / "queues.json").read_text(encoding="utf-8"))
-        assert Path(selected["state_root"]) == tenant.learning
+        assert Path(selected["state_root"]) == location_path(tenant.learning)
         assert _channel(selected, "findings")["deadletter"] == EXPECTED_FINDINGS_DEADLETTER
         assert _embedded_data((frontend / "queues.html").read_text(encoding="utf-8")) == selected
         assert not list(poison.iterdir())
@@ -830,7 +832,7 @@ def test_retire_stamps_the_dead_letter_it_writes(bare):
     """O8, writer 1 of 4. A dead letter with no time is a row a human cannot place against
     anything else that happened — and `when` is the only column the page can sort on."""
     ch = FINDINGS
-    _write_lines(bare.state_root / ch.queue, [{"finding_id": "a/0", "run_id": "a"}])
+    _write_lines(location_path(bare.state_root) / ch.queue, [{"finding_id": "a/0", "run_id": "a"}])
 
     with _Clock() as clock, LearningState.open(bare) as state:
         drain.retire(state, channel=FINDINGS, batch_ids=["a/0"], reason="the ceiling", max_attempts=1)
@@ -845,7 +847,7 @@ def test_retiring_an_unkeyable_row_stamps_its_flat_record(bare):
     """O8, writer 2 of 4 — and the stamp rides on the FLAT shape without giving it a `row`
     key, since that key is the very thing a reader branches on."""
     ch = QUESTIONER_FINDINGS
-    _write_lines(bare.state_root / ch.queue, [])
+    _write_lines(location_path(bare.state_root) / ch.queue, [])
 
     with _Clock() as clock, LearningState.open(bare) as state:
         drain._retire_unkeyable(state, QUESTIONER_FINDINGS, [{"run_id": "r9", "note": "no id here"}], logging.getLogger("defender.test"), 5)

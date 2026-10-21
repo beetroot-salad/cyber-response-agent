@@ -1,6 +1,8 @@
 """#952 — consumption follows durability in the lead-author lane."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import contextlib
 import fcntl
 import json
@@ -136,7 +138,7 @@ def _seed_pitfalls(paths: LoopPaths) -> bytes:
         ],
         state=_state1135.state_for_paths(paths),
     )
-    return (paths.state_root / PITFALLS.queue).read_bytes()
+    return (location_path(paths.state_root) / PITFALLS.queue).read_bytes()
 
 
 def _disposition(sha: str | None = SHA) -> PitfallsDisposition:
@@ -201,16 +203,16 @@ def _done_sha(run_dir: Path) -> str:
 
 
 def _inflight(paths: LoopPaths) -> list[str]:
-    d = paths.state_root / "author-queue" / "inflight"
+    d = location_path(paths.state_root) / "author-queue" / "inflight"
     return sorted(p.name for p in d.glob("*.json")) if d.is_dir() else []
 
 
 def _inflight_attempts(paths: LoopPaths, case: str) -> int:
-    return int(marker_body(paths.state_root / "author-queue" / "inflight" / f"{case}.json").get("attempts", 0))
+    return int(marker_body(location_path(paths.state_root) / "author-queue" / "inflight" / f"{case}.json").get("attempts", 0))
 
 
 def _pending_deliveries(paths: LoopPaths) -> list[dict]:
-    d = paths.state_root / "_pending_delivery"
+    d = location_path(paths.state_root) / "_pending_delivery"
     return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(d.glob("*.json"))] \
         if d.is_dir() else []
 
@@ -265,16 +267,16 @@ def _assert_nothing_consumed(
 ) -> None:
     """O1's shared-state clause, in one place so every pre-apply exit asserts the same thing"""
     assert _inflight(paths) == [f"{case}.json"], "the served marker left inflight/"
-    claimed = marker_body(paths.state_root / "author-queue" / "inflight" / f"{case}.json")
+    claimed = marker_body(location_path(paths.state_root) / "author-queue" / "inflight" / f"{case}.json")
     assert (claimed["tenant_id"], claimed["run_id"]) == _address(run_dir)
     assert author_markers(paths) == [], "the claim was handed back to the top level"
-    assert not (paths.state_root / "author-queue" / "failed").exists(), "the served run was dead-lettered"
-    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before, (
+    assert not (location_path(paths.state_root) / "author-queue" / "failed").exists(), "the served run was dead-lettered"
+    assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before, (
         "the pitfalls queue changed on a tick that consumed nothing (a rotation, or a bumped "
         f"`{pitfalls_curator.OFFERS_DECLINED_KEY}`)"
     )
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1
-    assert not (paths.state_root / PITFALLS.consumed).exists(), "a row reached the consumed ledger"
+    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists(), "a row reached the consumed ledger"
     assert not _done(run_dir).exists(), (
         "the done sentinel was written under the shared run dir — the reclaimed marker will "
         "be served as 'already processed' next tick and unlinked anyway"
@@ -463,7 +465,7 @@ def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfall
     curated: list[PitfallsDisposition] = []
     branch = _Branch(tmp_path / "worktrees")
 
-    with _held(paths.state_root / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
+    with _held(location_path(paths.state_root) / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
         _bounded(
             lambda: _tick(
                 paths, branch=branch,
@@ -480,8 +482,8 @@ def test_952_m1_the_disposition_applies_sentinels_and_unlinks_before_the_pitfall
     assert author_markers(paths) == []
     assert _inflight(paths) == []
     # From the rotation on: not applied.
-    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
-    assert not (paths.state_root / PITFALLS.consumed).exists()
+    assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before
+    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists()
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1, \
         "the decline bump ran ahead of the rotation it is ordered behind"
 
@@ -607,7 +609,7 @@ def test_952_o7_each_lane_delivers_only_its_own_records(tmp_path: Path):
     assert _tick(paths, branch=failing, run_lead_author=_serving([]), run_pitfalls=_no_curation) == 0
     assert len(_pending_deliveries(paths)) == 1
 
-    append_jsonl(paths.state_root / FINDINGS.queue, [{"finding_id": f"f{i}"} for i in range(5)])
+    append_jsonl(location_path(paths.state_root) / FINDINGS.queue, [{"finding_id": f"f{i}"} for i in range(5)])
     lessons = _Branch(tmp_path / "worktrees", prefix="lessons/", deliver_fail=BranchError("no"))
     rc = drains.author_drain(
         paths, trigger_author=lambda *_a, **_kw: None, branch=lessons,
@@ -650,7 +652,7 @@ def test_952_o8_a_batch_that_never_passes_the_scrub_is_quarantined_at_the_ceilin
     assert len(served) == 3, "the run was served past the ceiling"
     assert _inflight(paths) == []
     assert not _done(run_dir).exists()
-    failed = marker_body(paths.state_root / "author-queue" / "failed" / "case-1.json")
+    failed = marker_body(location_path(paths.state_root) / "author-queue" / "failed" / "case-1.json")
     assert failed["failed"] == "served 3 time(s) without being recorded done"
     assert (failed["tenant_id"], failed["run_id"]) == _address(run_dir)
     assert drains._has_lead_author_work(_state1135.state_for_paths(paths)) is False
@@ -680,14 +682,14 @@ def test_952_o6_a_failed_push_neither_destroys_nor_supersedes_a_fresher_request(
     assert served == [first.resolve()]
 
     assert author_markers(paths) == ["case-A.json"]
-    fresher = marker_body(paths.state_root / "author-queue" / "case-A.json")
+    fresher = marker_body(location_path(paths.state_root) / "author-queue" / "case-A.json")
     assert (fresher["tenant_id"], fresher["run_id"]) == _address(second), (
         "the failed push replaced the fresher curation request with the stale run dir"
     )
     assert "attempts" not in fresher
     assert _inflight(paths) == [], "the consumed claim was left in inflight/"
     assert _done_sha(first) == SHA
-    assert not (paths.state_root / "author-queue" / "failed").exists()
+    assert not (location_path(paths.state_root) / "author-queue" / "failed").exists()
 
     landing = _Branch(tmp_path / "worktrees")
     assert _tick(
@@ -895,11 +897,11 @@ def test_952_m1_the_deferred_rotation_reaches_the_queue_lock_with_a_deadline(tmp
     queue_before = _seed_pitfalls(paths)
     disposition = _disposition()
 
-    with _held(paths.state_root / PITFALLS.append_lock) as holder:
+    with _held(location_path(paths.state_root) / PITFALLS.append_lock) as holder:
         with pytest.raises(TimeoutError):
             _bounded(lambda: disposition.apply(_state1135.state_for_paths(paths), timeout_seconds=0), holder=holder)
-        assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
-        assert not (paths.state_root / PITFALLS.consumed).exists()
+        assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before
+        assert not (location_path(paths.state_root) / PITFALLS.consumed).exists()
 
         with pytest.raises(TimeoutError):
             _bounded(
@@ -908,7 +910,7 @@ def test_952_m1_the_deferred_rotation_reaches_the_queue_lock_with_a_deadline(tmp
                 ),
                 holder=holder,
             )
-        assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
+        assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before
 
     assert disposition.apply(_state1135.state_for_paths(paths), timeout_seconds=0) == 0
     consumed = consumed_by_id(paths)
@@ -925,9 +927,9 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
     """The deadline covers the rotations the curator makes AT ONCE too — the `consumed_unattributable` rotation runs inside the drain's `do_work`, under..."""
     paths = LoopPaths(repo_root=pitfalls_repo, state_dir=tmp_path / "state")
     persist.append_pitfalls([pitfall_row("u:l-001:0", "newsys")], state=_state1135.state_for_paths(paths))
-    queue_before = (paths.state_root / PITFALLS.queue).read_bytes()
+    queue_before = (location_path(paths.state_root) / PITFALLS.queue).read_bytes()
 
-    with _held(paths.state_root / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
+    with _held(location_path(paths.state_root) / PITFALLS.append_lock) as holder, pytest.raises(TimeoutError):
         _bounded(
             lambda: pitfalls_curator.run_pitfalls(
                 paths=paths, invoke=_agent_must_not_run, lock_wait_seconds=0,
@@ -935,7 +937,7 @@ def test_952_m1_the_immediate_rotation_is_bounded_under_the_drain_and_unbounded_
             ),
             holder=holder,
         )
-    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
+    assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before
 
     assert pitfalls_curator.run_pitfalls(paths=paths, invoke=_agent_must_not_run,
                                          trees=lead_trees(paths)) == 0
@@ -972,7 +974,7 @@ def test_952_m5_the_drain_holds_the_queue_lock_across_the_serve(tmp_path: Path):
 
     # Positive control: the lock the tick held IS the file a by-hand run locks. Held here the
     # way a second process would hold it, the same call skips; released, it does not.
-    with _held((paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"):
+    with _held((location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"):
         assert lead_author.run(_state1135.run_of(by_hand), label=LEAD_AUTHOR_DRAIN_LABEL,
                                paths=paths) == lead_author.QUEUE_LOCK_SKIP_RC
         assert not (by_hand / "lead_author").exists(), "a skipped by-hand run wrote state"
@@ -989,7 +991,7 @@ def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: 
     served: list[Path] = []
     branch = _Branch(tmp_path / "worktrees")
 
-    with _held((paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"):
+    with _held((location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"):
         rc = _tick(
             paths, branch=branch, run_pitfalls=_no_curation,
             run_lead_author=_serving(served),
@@ -1000,7 +1002,7 @@ def test_952_m5_a_tick_started_under_a_held_queue_lock_claims_nothing(tmp_path: 
     assert author_markers(paths) == ["case-1.json", "case-2.json"]
     assert _inflight(paths) == [], "a skipped tick claimed a marker"
     for name in ("case-1.json", "case-2.json"):
-        assert "attempts" not in marker_body(paths.state_root / "author-queue" / name), \
+        assert "attempts" not in marker_body(location_path(paths.state_root) / "author-queue" / name), \
             "a skip spent one of the request's attempts"
     assert "start" not in branch.events, "a skipped tick minted a batch"
     err = capsys.readouterr().err
@@ -1026,7 +1028,7 @@ def test_952_m5_the_drain_enters_the_curator_past_its_own_lock(tmp_path: Path):
         (d / "gather_raw").mkdir()
     captured: list[str | None] = []
 
-    with _held((paths.state_root / LEAD_QUEUE_LOCK.file).parent / ".lock"):
+    with _held((location_path(paths.state_root) / LEAD_QUEUE_LOCK.file).parent / ".lock"):
         drains._invoke_lead_author(paths, _state1135.state_for_paths(paths),
                                    _state1135.run_of(drained), on_done=captured.append,
                                    label=LEAD_AUTHOR_DRAIN_LABEL)
@@ -1115,6 +1117,6 @@ def test_952_d_a_failed_sentinel_write_leaves_the_claim_in_inflight(tmp_path: Pa
     assert _inflight(paths) == ["case-1.json"], \
         "the claim was unlinked ahead of a sentinel write that then failed"
     assert author_markers(paths) == []
-    assert (paths.state_root / PITFALLS.queue).read_bytes() == queue_before
-    assert not (paths.state_root / PITFALLS.consumed).exists()
+    assert (location_path(paths.state_root) / PITFALLS.queue).read_bytes() == queue_before
+    assert not (location_path(paths.state_root) / PITFALLS.consumed).exists()
     assert _rows_by_id(paths)[HELD_ID][pitfalls_curator.OFFERS_DECLINED_KEY] == 1

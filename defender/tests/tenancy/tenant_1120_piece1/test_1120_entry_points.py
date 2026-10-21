@@ -1,6 +1,8 @@
 """D1/O3: the entry points take a tenant through `accept_tenant`, once."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, fixture_runs_base, location_path
+
 from defender.runtime import session_store
 from defender.runtime import run_tenant as run_tenant_mod
 from defender.tests.support.learning.core import _state1135
@@ -60,7 +62,7 @@ def _owner_in_checkout(checkout: Path, root: Path, tenant_id: str = H.TID) -> st
         "assert Path(_tenant.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve()), "
         "_tenant.__file__\n"
         "try:\n"
-        "    _tenant.accept_tenant(Path(sys.argv[2]), sys.argv[3],\n"
+        "    _tenant.accept_tenant(_tenant.data_root_from_path(Path(sys.argv[2])), sys.argv[3],\n"
         "                          defender_dir=Path(sys.argv[1]) / 'defender', box_mounted=())\n"
         "except _tenant.TenantRefused as refused:\n"
         "    print(refused, end='')\n"
@@ -366,8 +368,8 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
     inside = _never_created_root()
     for root in (relative, inside):
         owners = {
-            "create_tenant": lambda r=root: _tenant.create_tenant(r, tid),
-            "require_tenant": lambda r=root: _tenant.require_tenant(r, tid),
+            "create_tenant": lambda r=root: _tenant.create_tenant(fixture_data_root(r), tid),
+            "require_tenant": lambda r=root: _tenant.require_tenant(fixture_data_root(r), tid),
             "accept_tenant": lambda r=root: H.accept(_tenant, r, H.TID),
         }
         for name, call in owners.items():
@@ -408,7 +410,7 @@ def test_1120_every_pre_acceptance_path_refuses_a_relative_or_defender_tree_data
     (other / ".git").mkdir(parents=True)
     other_root = other / "defender" / "data"
     H.adopted(other_root)
-    assert H.accept(_tenant, other_root, H.TID).dir == other_root / H.TID
+    assert location_path(H.accept(_tenant, other_root, H.TID).tenant_root) == other_root / H.TID
 
 
 # ======================================================================================
@@ -424,8 +426,8 @@ def test_1120_runs_base_for_a_tenant_is_its_runs_folder(
     H.adopted(data_root)
     tenant = H.accept(_tenant, data_root, H.TID)
     monkeypatch.delenv(H.DATA_ROOT_ENV)
-    got = _tenant.runs_base_for(tenant)
-    assert Path(got) == data_root / H.TID / "runs" == tenant.runs
+    got = location_path(tenant.runs)
+    assert Path(got) == data_root / H.TID / "runs" == location_path(tenant.runs)
 
 
 def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
@@ -446,10 +448,10 @@ def test_1120_tenant_sessions_is_the_session_stores_folder_for_a_fresh_run(
     from defender.run_repository import SessionPaths
 
     # #1105 fork S(b): the layout owner's `SessionPaths` names the store, not a runs base.
-    store = session_store.store_path_for("spec1120-case", sessions=SessionPaths(run_dir.parent))
+    store = session_store.store_path_for("spec1120-case", sessions=SessionPaths(fixture_runs_base(run_dir.parent)))
     expected = data_root / H.TID / "sessions"
     assert store.parent == expected
-    assert H.accept(_tenant, data_root, H.TID).sessions == expected
+    assert location_path(H.accept(_tenant, data_root, H.TID).sessions) == expected
 
 
 # ======================================================================================

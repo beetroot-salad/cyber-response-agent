@@ -1,6 +1,8 @@
 """Shared machinery for #921's family-judge spec — NO test scripts."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import json
 import os
 from collections.abc import Iterable, Mapping
@@ -506,8 +508,9 @@ def grade(episode_dir: Path, *, judge: Any = None, state: Any = None, **kw: Any)
             from defender.learning.core.state import LearningState
             from defender.tenancy._tenant import requested_tenant
 
-            tenant = requested_tenant(*episode_location(episode_dir))
-            tenant.learning.mkdir(exist_ok=True)
+            data_root, tenant_id = episode_location(episode_dir)
+            tenant = requested_tenant(fixture_data_root(data_root), tenant_id)
+            location_path(tenant.learning).mkdir(exist_ok=True)
             state = LearningState.open(LoopPaths.for_tenant(tenant))
     return grade_at(episode_dir, judge=judge if judge is not None else scripted_judge(),
                     state=state, **kw)
@@ -814,7 +817,7 @@ class FakeSibling:
         tenant, episode = _flag(argv, "--tenant"), _flag(argv, "--episode")
         if tenant is None or episode is None:
             return None
-        root = (self.data_root if self.data_root is not None
+        root = (location_path(self.data_root) if location_path(self.data_root) is not None
                 else Path(os.environ["DEFENDER_DATA_ROOT"]))
         return root / tenant / "episodes" / episode
 

@@ -2,6 +2,8 @@
 guarded write, and location independence."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 import re
 import subprocess
@@ -268,7 +270,7 @@ def test_1025_episode_dir_given_through_a_symlink(tmp_path, capsys, monkeypatch)
 
     monkeypatch.delenv(R.EPISODES_BASE_ENV, raising=False)
     tenant = E.page_tenant()
-    episodes = R.episodes_dir(tenant.data_root, str(tenant.id))
+    episodes = R.episodes_dir(location_path(tenant.data_root), str(tenant.id))
     episode_id = R.new_id()
     built = E.sample_episode(tmp_path, root=episodes, runs=False)
     target = episodes / episode_id

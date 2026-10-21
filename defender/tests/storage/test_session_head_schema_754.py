@@ -1,5 +1,7 @@
 """The head log's schema, version refusal on stale stores, the two openers, and role-scoped readers."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _run_handle_1165
@@ -217,16 +219,16 @@ def test_open_store_refuses_a_user_version_1_file(tmp_path):
     # provenance: issue obligation 9, as narrowed by correction C2.
     ss = store_mod()
     base = runs_base(tmp_path)
-    stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(base)))
+    stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(fixture_runs_base(base))))
     assert file_shape(stale)["user_version"] == 1
 
-    refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(base))
+    refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(fixture_runs_base(base)))
 
     assert isinstance(refusal, ss.UnknownSchemaVersion), (
         f"a version-1 file must be refused at open; got {refusal!r}")
     assert "1" in str(refusal), f"the refusal names the version it found: {refusal}"
 
-    fresh = ss.open_store(case_id="case-fresh", sessions=SessionPaths(base))
+    fresh = ss.open_store(case_id="case-fresh", sessions=SessionPaths(fixture_runs_base(base)))
     assert fresh.path != stale, "control: a file at the current version opens"
     assert fresh.new_session(agent_id="main")
 
@@ -237,20 +239,20 @@ def test_open_store_for_read_refuses_a_stale_version_too(tmp_path):
     # wired exclusively to hydrate. C11 for the asymmetry, OC-2 for the writer's fresh file.
     ss = store_mod()
     base = runs_base(tmp_path)
-    stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(base)))
+    stale = legacy_v1_store_file(ss.store_path_for("case-stale", sessions=SessionPaths(fixture_runs_base(base))))
 
     reader_refusal = raised_by(ss.open_store_for_read, stale)
-    writer_refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(base))
+    writer_refusal = raised_by(ss.open_store, case_id="case-stale", sessions=SessionPaths(fixture_runs_base(base)))
     assert isinstance(reader_refusal, ss.UnknownSchemaVersion), (
         f"the reader is the opener that MEETS a stale file; got {reader_refusal!r}")
     assert isinstance(writer_refusal, ss.UnknownSchemaVersion), writer_refusal
     assert sidecars(stale) == [], "neither refusal leaks its connection"
 
-    current = ss.open_store(case_id="case-current", sessions=SessionPaths(base))
+    current = ss.open_store(case_id="case-current", sessions=SessionPaths(fixture_runs_base(base)))
     session_id = current.new_session(agent_id="main")
     linear_turns(current, session_id, 1)
     current.close()
-    reader = ss.open_store_for_read(ss.store_path_for("case-current", sessions=SessionPaths(base)))
+    reader = ss.open_store_for_read(ss.store_path_for("case-current", sessions=SessionPaths(fixture_runs_base(base))))
     assert ss.path_row_ids(reader, session_id), (
         "control: the same reader opens and serves a file at the current version")
 
@@ -263,7 +265,7 @@ def _rendered_run(tmp_path, *, case_id: str = "case-alpha"):
     base = runs_base(tmp_path)
     run_dir = tmp_path / fixture_uuid(f"run-{case_id}")
     run_dir.mkdir()
-    store = ss.open_store(case_id=case_id, sessions=SessionPaths(base))
+    store = ss.open_store(case_id=case_id, sessions=SessionPaths(fixture_runs_base(base)))
     ss.write_case_pointer(_run_handle_1165(run_dir), case_id=case_id, store_path=store.path)
     return run_dir, store
 

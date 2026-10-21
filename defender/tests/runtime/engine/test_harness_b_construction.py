@@ -1,6 +1,8 @@
 """Single-source agent construction: `build_agent_core` threads the AgentDefinition's model/effort/cache key, registers tools from its ToolSet, and the MAIN/GATHER builders delegate to it."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base
+
 from dataclasses import replace as _with_fixture_run_1165
 from defender.tests.support.shared.contracts._spec1077 import fixture_run as _fixture_run_1165
 
@@ -231,7 +233,7 @@ def test_main_extra_capabilities_is_unconditional(tmp_path, monkeypatch):
     """SEAM CONTRACT, overturned by #705 (O20, R2/M8 — not preserved):"""
     from defender.runtime import session_store
 
-    store = session_store.open_store(case_id="case-harness", sessions=SessionPaths(tmp_path / "runs"))
+    store = session_store.open_store(case_id="case-harness", sessions=SessionPaths(fixture_runs_base(tmp_path / "runs")))
     session_id = store.new_session(agent_id="main")
 
     monkeypatch.delenv("DEFENDER_COMPACTION", raising=False)

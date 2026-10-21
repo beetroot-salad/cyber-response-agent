@@ -2,6 +2,8 @@
 operator interrupt) it must not absorb."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+
 import functools
 import sqlite3
 import time
@@ -229,11 +231,11 @@ class _AgentAppendFault(SS.FaultStore):
 def _main_append_fault_store(tmp: Path, sink: list) -> Callable[..., Any]:
     """`run_investigation(store_factory=...)`: a REAL store whose file is filled to its growth
     ceiling at MAIN's first append — after the lead produced its output (RJ-01)."""
-    base = SS.runs_base(tmp)
+    base = location_path(SS.runs_base)(tmp)
     fault = SS.StoreFault(on="append", after=0, mode="disk-full")
 
     def factory(case_id: str, run_dir: Path) -> Any:
-        real = SS.store_mod().open_store(case_id=case_id, sessions=S.sym("run_repository", "SessionPaths")(base))
+        real = SS.store_mod().open_store(case_id=case_id, sessions=S.sym("run_repository", "SessionPaths")(fixture_runs_base(base)))
         handle = _AgentAppendFault(real, fault, agent_id="main")
         sink.append(handle)
         return handle

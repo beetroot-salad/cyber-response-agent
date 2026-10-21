@@ -1,5 +1,7 @@
 """Migrated callers (launcher, run page, judge enqueue/drain, tracer, ...) address runs by tenant and id: refusals for links, absent containers, and bad rows."""
 from __future__ import annotations
+
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
@@ -32,7 +34,7 @@ def _roots(tmp_path, monkeypatch):
 def _episode_names() -> set[str]:
     """Every entry under any tenant's `<data root>/<T>/episodes/` — #1187 Layout A, where every
     launch claims its episode (O9: no configured episodes root)."""
-    root = P.data_root()
+    root = location_path(P.data_root)()
     return {str(p.relative_to(root)) for p in root.glob("*/episodes/*")}
 
 
@@ -47,7 +49,7 @@ def _refused_unspent(got: P.Launched) -> bool:
 
 def _sample(tmp_path: Path, tenant_id: str) -> E.Episode:
     """Create a tenant-scoped sample with a roster and arms at their recorded UUIDs."""
-    return E.sample_episode(tmp_path, root=P.episodes(tenant_id))
+    return E.sample_episode(tmp_path, root=location_path(P.episodes)(tenant_id))
 
 
 def _corrupt_manifest(ep: Path) -> None:
@@ -132,7 +134,7 @@ def test_dc3_a_world_label_equal_to_a_natural_run_id_grades(tmp_path, caplog):
 
 
 def test_dc4_the_page_judges_the_container_record_first(tmp_path, d9_tenant):
-    P.second_tenant(P.data_root(), H.U_ID)
+    P.second_tenant(location_path(P.data_root)(), H.U_ID)
     ep, episode_id = _tenant_episode(H.U_ID)
     page = ep / E.PAGE_NAME
     good_manifest = (ep / "family.yaml").read_bytes()
@@ -322,8 +324,8 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
     from defender.learning.core.config import LoopPaths
     from defender.tenancy._tenant import requested_tenant
 
-    tenant = requested_tenant(P.data_root(), d9_tenant)
-    tenant.learning.mkdir(exist_ok=True)
+    tenant = requested_tenant(fixture_data_root(location_path(P.data_root)()), d9_tenant)
+    location_path(tenant.learning).mkdir(exist_ok=True)
     alert = H.alert_file(tmp_path / "in")
     rec = P.SiblingRecorder()
 
@@ -341,8 +343,8 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
     assert rc == 0
     run_dir = rec.run_dir
     assert run_dir is not None
-    assert run_dir.parent == P.data_root() / d9_tenant / "runs"
-    queue = LoopPaths.for_tenant(tenant).state_root / "author-queue"
+    assert run_dir.parent == location_path(P.data_root)() / d9_tenant / "runs"
+    queue = location_path(LoopPaths.for_tenant(tenant).state_root) / "author-queue"
     rows = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(queue.glob("*.json"))]
     assert len(rows) == 1, rows
     row = rows[0]
@@ -355,12 +357,12 @@ def test_dc8_a_natural_run_enqueues_its_address_not_its_folder(tmp_path, d9_tena
 def _drain_scene(tmp_path: Path):
     """Two real tenants under the data root, each with a natural runs folder holding `RID_R1`, and
     the drain's paths (a git work tree and a state root)."""
-    root = P.data_root()
+    root = location_path(P.data_root)()
     t = H.tenant(root, H.T_ID)
     u = H.tenant(root, H.U_ID)
     for tenant in (t, u):
         H.runs_folder(tenant)
-        H.make_run(tenant.runs, RID_R1)
+        H.make_run(location_path(tenant.runs), RID_R1)
     return t, u, P.loop_paths(tmp_path)
 
 
@@ -370,7 +372,7 @@ def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
     P.queue_row(paths, "case-u", {"case_id": "case-u", "tenant_id": H.U_ID, "run_id": RID_R1})
     lane = P.Lane()
     P.drain(paths, lane)
-    assert sorted(lane.run_dirs) == sorted([Path(t.runs) / RID_R1, Path(u.runs) / RID_R1]), (
+    assert sorted(lane.run_dirs) == sorted([Path(location_path(t.runs)) / RID_R1, Path(location_path(u.runs)) / RID_R1]), (
         f"served {lane.run_dirs}")
     assert P.dead_letter(paths, "case-t") is None
     assert P.dead_letter(paths, "case-u") is None
@@ -378,8 +380,8 @@ def test_dc8_the_drain_rehydrates_the_row_in_its_own_tenant(tmp_path):
 
 def test_dc8_a_row_that_cannot_be_reached_is_artifact_missing(tmp_path):
     t, u, paths = _drain_scene(tmp_path)
-    H.make_run(u.runs, ONLY_IN_U)
-    os.symlink(Path(t.runs) / RID_R1, Path(t.runs) / LINKED)
+    H.make_run(location_path(u.runs), ONLY_IN_U)
+    os.symlink(Path(location_path(t.runs)) / RID_R1, Path(location_path(t.runs)) / LINKED)
     gone = {
         "absent": {"case_id": "absent", "tenant_id": H.T_ID, "run_id": NOPE},
         "crossed": {"case_id": "crossed", "tenant_id": H.T_ID, "run_id": ONLY_IN_U},
@@ -393,7 +395,7 @@ def test_dc8_a_row_that_cannot_be_reached_is_artifact_missing(tmp_path):
     P.queue_row(paths, "own", {"case_id": "own", "tenant_id": H.U_ID, "run_id": ONLY_IN_U})
     lane = P.Lane()
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(u.runs) / ONLY_IN_U], f"served {lane.run_dirs}"
+    assert lane.run_dirs == [Path(location_path(u.runs)) / ONLY_IN_U], f"served {lane.run_dirs}"
     for case_id in gone:
         letter = P.dead_letter(paths, case_id)
         assert letter is not None, f"{case_id}: {letter!r}"
@@ -416,7 +418,7 @@ def test_dc8_a_drain_with_no_data_root_leaves_its_rows_queued(tmp_path, monkeypa
 
     monkeypatch.setenv(P.DATA_ROOT_ENV, root)
     P.drain(paths, lane)
-    assert lane.run_dirs == [Path(t.runs) / RID_R1]
+    assert lane.run_dirs == [Path(location_path(t.runs)) / RID_R1]
 
 
 def _lead_author_main():
@@ -445,7 +447,7 @@ def test_dc10_the_tracer_walks_the_tenants_runs_and_refuses_a_stray(tmp_path, d9
 
     lessons = tmp_path / "lessons"
     _lesson(lessons, "L")
-    runs = P.data_root() / d9_tenant / "runs"
+    runs = location_path(P.data_root)() / d9_tenant / "runs"
     runs.mkdir(parents=True, exist_ok=True)
     run = runs / str(uuid.uuid4())
     run.mkdir()
@@ -493,7 +495,7 @@ def _tenant_episode(tenant_id: str) -> tuple[Path, str]:
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
     episode_id = S.new_id()
-    ep = S.make_episode(P.data_root(), tenant_id, episode_id, labels=T.WORLDS, roster=True)
+    ep = S.make_episode(location_path(P.data_root)(), tenant_id, episode_id, labels=T.WORLDS, roster=True)
     T.write_family(ep, T.family_doc(episode_id=episode_id, source_run_id=S.new_id()))
     return ep, episode_id
 

@@ -1,6 +1,8 @@
 """D7/O8 `tenant.py check <id> | --folder <path>`: the tenant's own checks."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import os
 import re
 import shutil
@@ -316,7 +318,7 @@ def test_1120_setup_and_check_refuse_a_lead_zero_table_that_disagrees_with_the_r
         f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
         f"the lead-zero agreement must refuse it:\n{text}")
     assert H.census_diff(before, H.tree_census(first)) == [], "the refused setup wrote something"
-    assert not H.row_path(first).exists(), "a refused first setup left a row (MF1 Q2)"
+    assert not location_path(H.row_path)(first).exists(), "a refused first setup left a row (MF1 Q2)"
 
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
@@ -443,7 +445,7 @@ def test_1120_setup_refuses_an_all_withheld_table_that_check_accepts(tmp_path: P
         f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
         f"setup must refuse the table no run can start with:\n{text}")
     assert H.census_diff(before, H.tree_census(first)) == [], "the refused setup wrote something"
-    assert not H.row_path(first).exists(), "a refused first setup left a row (MF1 Q2)"
+    assert not location_path(H.row_path)(first).exists(), "a refused first setup left a row (MF1 Q2)"
 
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
@@ -485,7 +487,7 @@ def test_1120_setup_refuses_a_health_check_only_gather_grant_that_check_accepts(
         f"the refusal is the one-tenant guard's; it must admit the placed knowledge (MF1) and "
         f"setup must refuse the table no run can start with:\n{text}")
     assert H.census_diff(before, H.tree_census(first)) == [], "the refused setup wrote something"
-    assert not H.row_path(first).exists(), "a refused first setup left a row (MF1 Q2)"
+    assert not location_path(H.row_path)(first).exists(), "a refused first setup left a row (MF1 Q2)"
 
     rerun = tmp_path / "rerun"
     H.place_knowledge(rerun)
@@ -524,7 +526,7 @@ def test_1120_check_refuses_a_clones_tenant_id_that_its_repo_does_not_commit(
     assert named in status, f"precondition: the clone's .tenant-id is not uncommitted:\n{status!r}"
 
     H.assert_clean(H.setup(tenant_py, root))
-    assert H.row_path(root).is_file(), "setup refused a matching .tenant-id (V11: no git rule)"
+    assert location_path(H.row_path)(root).is_file(), "setup refused a matching .tenant-id (V11: no git rule)"
     assert H.accept(_tenant, root).id == H.TID
 
     H.assert_refused(_check_id(root), named)

@@ -1,6 +1,8 @@
 """#881 — two pieces of the author drain's plumbing that lost a row in silence."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import errno
 import json
 import os
@@ -41,7 +43,7 @@ def test_881_a_row_the_pre_author_gate_holds_is_named_in_the_findings_held_repor
     h.seed(paths, ch, [legacy, family, authorable])
     agent = h.recording(h.committing("881-o3"))
     cfg = h.cfg_for(paths, "findings", invoke_agent=agent)
-    report = paths.state_root / FINDINGS.report
+    report = location_path(paths.state_root) / FINDINGS.report
 
     assert drain.run_batch(cfg=cfg) == 0
     assert [[r["finding_id"] for r in call["rows"]] for call in agent.calls] == [["z/0"]], (
@@ -150,7 +152,7 @@ def _tick_meeting_an_appender_at_the_unkeyable_retirement(
 ) -> BaseException | None:
     """One real `run_batch` whose unkeyable retirement — and only that — meets a held append
     lock. Returns whatever escaped the tick."""
-    appender = h.Holder(paths.state_root / ch.append_lock)
+    appender = h.Holder(location_path(paths.state_root) / ch.append_lock)
 
     def _an_appender_arrives() -> None:
         appender.__enter__()
@@ -205,7 +207,7 @@ def test_881_a_contended_append_lock_in_the_unkeyable_retirement_leaves_a_stuck_
     escaped = _tick_meeting_an_appender_at_the_unkeyable_retirement(paths, ch)
 
     assert isinstance(escaped, TimeoutError), f"the tick ended as {escaped!r}"
-    assert str(paths.state_root / ch.append_lock) in str(escaped), (
+    assert str(location_path(paths.state_root) / ch.append_lock) in str(escaped), (
         f"the timeout was not the append lock's: {escaped}"
     )
     assert h.pending(paths, ch) == rows, "the queue was rewritten by a rotation that never ran"
@@ -333,12 +335,12 @@ def test_881_stuck_unkeyable_ticks_fold_by_row_content_and_not_by_an_empty_id_li
 def test_881_a_queue_of_only_unreadable_lines_is_cleared_by_the_tick_it_wakes(tmp_path: Path):
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
-    (paths.state_root / ch.queue).parent.mkdir(parents=True, exist_ok=True)
-    (paths.state_root / ch.queue).write_text('{not json at all\n[1,2]\nnull\n', encoding="utf-8")
+    (location_path(paths.state_root) / ch.queue).parent.mkdir(parents=True, exist_ok=True)
+    (location_path(paths.state_root) / ch.queue).write_text('{not json at all\n[1,2]\nnull\n', encoding="utf-8")
     cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o2-junk")))
 
     assert drain.run_batch(cfg=cfg) == 0
-    assert (paths.state_root / ch.queue).read_text(encoding="utf-8") == "", (
+    assert (location_path(paths.state_root) / ch.queue).read_text(encoding="utf-8") == "", (
         "the tick returned on the empty batch and left the unreadable lines queued; the wake "
         "gate counts them as work, so it will fire on the same bytes on every pass forever"
     )
@@ -358,8 +360,8 @@ def test_881_unreadable_lines_beside_a_real_row_do_not_take_it_with_them(tmp_pat
     paths = h.make_paths(tmp_path)
     ch = h.channel_of("findings")
     keep = h.row_for("findings", "a/0", direction="adversarial")  # held, so it stays queued
-    (paths.state_root / ch.queue).parent.mkdir(parents=True, exist_ok=True)
-    (paths.state_root / ch.queue).write_text(json.dumps(keep) + "\n{torn\n", encoding="utf-8")
+    (location_path(paths.state_root) / ch.queue).parent.mkdir(parents=True, exist_ok=True)
+    (location_path(paths.state_root) / ch.queue).write_text(json.dumps(keep) + "\n{torn\n", encoding="utf-8")
     cfg = h.cfg_for(paths, "findings", invoke_agent=h.recording(h.committing("881-o2-mixed")))
 
     assert drain.run_batch(cfg=cfg) == 0
@@ -379,7 +381,7 @@ def test_881_a_tick_whose_gate_held_the_whole_batch_names_those_rows_when_it_sti
     full = _StateWhoseDiskIsFull.over(LearningState.open(paths), "disposition_report")
     cfg = h.cfg_for(paths, "findings", state=full,
                     invoke_agent=h.recording(h.committing("881-o4-rotate")))
-    held_report = paths.state_root / FINDINGS.report
+    held_report = location_path(paths.state_root) / FINDINGS.report
 
     with pytest.raises(OSError, match="No space left"):
         drain.run_batch(cfg=cfg)

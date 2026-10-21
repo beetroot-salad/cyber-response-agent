@@ -1,6 +1,8 @@
 """Run end keeps its order: cross-check, ticket, curation, page."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import errno
 import logging
 from typing import Any
@@ -76,7 +78,7 @@ def _drive(arm: Any, monkeypatch: Any, *, fail: str | None = None):
     monkeypatch.setenv("DEFENDER_DATA_ROOT", str(root))
     satisfy_entrypoint_keys(monkeypatch, arm)
     tenant = set_up_tenant(root)
-    tenant.learning.mkdir(exist_ok=True)
+    location_path(tenant.learning).mkdir(exist_ok=True)
     repo = arm / "repo"
     (repo / "defender").mkdir(parents=True)
     paths = LoopPaths.for_tenant(tenant).with_repo_root(repo)

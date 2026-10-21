@@ -2,6 +2,8 @@
 entries) per operation kind, conversion of core refusals, ordinary errors, rotate and lock opens."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import contextlib
 import errno
 import fcntl
@@ -62,7 +64,7 @@ def test_state_refused_is_a_systemic_fault_no_oserror_arm_holds(tmp_path: Path, 
     # rejected: a StateRefused subclassing OSError (every `except OSError` arm would catch it;
     # X2 shows today's arms swallow the core's refusal exactly that way)
     paths = S.built_paths(tmp_path)
-    S.plant(paths.state_root / "_pending" / "findings.jsonl", "symlink", target=S.outside(tmp_path))
+    S.plant(location_path(paths.state_root) / "_pending" / "findings.jsonl", "symlink", target=S.outside(tmp_path))
     state = S.LearningState.open(paths)
     refused = S.caught(lambda: state.rows(S.coined("FINDINGS")))
 
@@ -203,7 +205,7 @@ def test_1135_unset_and_empty_state_env_keep_the_explicit_tenant_root(data_root,
     from defender.tests.support.shared.contracts._data_root_1078 import set_up_tenant
 
     tenant = set_up_tenant(data_root)
-    tenant.learning.mkdir(parents=True, exist_ok=True)
+    location_path(tenant.learning).mkdir(parents=True, exist_ok=True)
     if value is None:
         monkeypatch.delenv(ENV, raising=False)
     else:
@@ -211,10 +213,10 @@ def test_1135_unset_and_empty_state_env_keep_the_explicit_tenant_root(data_root,
     package = S.DEFENDER / "learning"
     listing = sorted(os.listdir(package))
     paths = config.LoopPaths.for_tenant(tenant)
-    assert paths.state_root == tenant.learning
+    assert location_path(paths.state_root) == location_path(tenant.learning)
     with S.LearningState.open(paths) as state:
         described = state.describe(S.coined("FINDINGS"))
-        assert described == str(tenant.learning / "_pending" / "findings.jsonl")
+        assert described == str(location_path(tenant.learning) / "_pending" / "findings.jsonl")
     assert sorted(os.listdir(package)) == listing, "opening tenant state changed the package"
 
 
@@ -227,10 +229,10 @@ def test_a_linked_queue_read_raises_and_never_reads_as_empty(tmp_path: Path, at)
     payload = (json.dumps(_finding("x/0")) + "\n").encode()
     with S.fifo_holding(outside_dir / "findings.jsonl", payload) as unread:
         if at == "queue-file":
-            planted = S.plant(paths.state_root / "_pending" / "findings.jsonl", "symlink",
+            planted = S.plant(location_path(paths.state_root) / "_pending" / "findings.jsonl", "symlink",
                               target=outside_dir / "findings.jsonl")
         else:
-            planted = S.plant(paths.state_root / "_pending", "symlink", target=outside_dir)
+            planted = S.plant(location_path(paths.state_root) / "_pending", "symlink", target=outside_dir)
         before = S.tree_snapshot(outside_dir)
 
         state = S.LearningState.open(paths)
@@ -257,10 +259,10 @@ def test_a_plain_queue_reads_its_rows_and_an_absent_one_reads_empty(tmp_path: Pa
     assert raised is None, f"an absent queue raised {raised!r}"
     assert len(absent) == 1, f"an absent queue answered {absent!r}"
     assert S.rows_of(absent[0]) == [], f"an absent queue answered {absent!r}"
-    assert S.entry_kind(paths.state_root / "_pending") == "absent", "a read created _pending/"
+    assert S.entry_kind(location_path(paths.state_root) / "_pending") == "absent", "a read created _pending/"
 
     rows = [_finding("a/0"), _finding("a/1")]
-    S.write_jsonl(paths.state_root / "_pending" / "findings.jsonl", rows)
+    S.write_jsonl(location_path(paths.state_root) / "_pending" / "findings.jsonl", rows)
     assert S.rows_of(state.rows(findings)) == rows, "a plain queue did not read its rows"
 
 
@@ -274,7 +276,7 @@ def test_a_linked_write_target_raises_in_either_mode_and_is_never_slot_taken(tmp
     claims = _claim_all(state)
     assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
     claim = claims[0]
-    queue = paths.state_root / "author-queue"
+    queue = location_path(paths.state_root) / "author-queue"
     target = S.outside(tmp_path, "case-x.json", '{"outside": true}\n')
     if at == "holding-folder":
         (queue / "inflight" / "case-x.json").unlink()
@@ -306,7 +308,7 @@ def test_a_plain_write_lands_in_either_mode(tmp_path: Path):
     claims = _claim_all(state)
     assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
     claim = claims[0]
-    queue = paths.state_root / "author-queue"
+    queue = location_path(paths.state_root) / "author-queue"
     stamped = {**claim.spec, "attempts": 1}
 
     state.stamp(claim, stamped)
@@ -329,9 +331,9 @@ def test_a_linked_append_target_raises_and_its_target_is_untouched(tmp_path: Pat
     paths = S.built_paths(tmp_path)
     target = S.outside(tmp_path, "pitfalls.jsonl", "")
     if at == "channel-file":
-        S.plant(paths.state_root / "_pending_pitfalls" / "pitfalls.jsonl", "symlink", target=target)
+        S.plant(location_path(paths.state_root) / "_pending_pitfalls" / "pitfalls.jsonl", "symlink", target=target)
     else:
-        S.plant(paths.state_root / "_pending_pitfalls", "symlink", target=target.parent)
+        S.plant(location_path(paths.state_root) / "_pending_pitfalls", "symlink", target=target.parent)
 
     state = S.LearningState.open(paths)
     refused = S.caught(lambda: state.append(S.coined("PITFALLS"), [_pitfall("p-1")]))
@@ -346,12 +348,12 @@ def test_a_plain_append_returns_todays_counts_and_encoding(tmp_path: Path):
     state = S.LearningState.open(paths)
 
     pit = state.append(S.coined("PITFALLS"), [_pitfall("p-1"), _pitfall("p-1")])
-    pit_file = paths.state_root / "_pending_pitfalls" / "pitfalls.jsonl"
+    pit_file = location_path(paths.state_root) / "_pending_pitfalls" / "pitfalls.jsonl"
     assert tuple(pit) == (2, 0), f"the read-free pitfalls append answered {pit!r}"
     assert pit_file.read_text(encoding="utf-8") == (json.dumps(_pitfall("p-1")) + "\n") * 2, \
         "the pitfalls append deduplicated or re-encoded its rows"
 
-    queue = paths.state_root / "_pending" / "findings.jsonl"
+    queue = location_path(paths.state_root) / "_pending" / "findings.jsonl"
     a, b = _finding("a/0"), _finding("a/1")
     queue.parent.mkdir(parents=True)
     queue.write_text(json.dumps(a) + "\n" + '{"torn": ', encoding="utf-8")
@@ -368,7 +370,7 @@ def test_a_linked_inflight_folder_stops_the_claim_before_any_move(tmp_path: Path
     body = queued.read_bytes()
     elsewhere = tmp_path / "outside" / "inflight"
     elsewhere.mkdir(parents=True)
-    S.plant(paths.state_root / "author-queue" / "inflight", "symlink", target=elsewhere)
+    S.plant(location_path(paths.state_root) / "author-queue" / "inflight", "symlink", target=elsewhere)
 
     state = S.LearningState.open(paths)
     refused = S.caught(lambda: _claim_all(state))
@@ -384,7 +386,7 @@ def test_a_plain_claim_moves_the_request_into_inflight(tmp_path: Path):
     run_a, run_b = S.curation_run_dir("run-a"), S.curation_run_dir("run-b")
     S.seed_request(paths, "case-a", run_a)
     S.seed_request(paths, "case-b", run_b, inflight=True)  # an orphan of a dead pass
-    queue = paths.state_root / "author-queue"
+    queue = location_path(paths.state_root) / "author-queue"
 
     state = S.LearningState.open(paths)
     claims = _claim_all(state)
@@ -401,7 +403,7 @@ def test_a_plain_claim_moves_the_request_into_inflight(tmp_path: Path):
 def test_a_linked_lock_name_raises_for_a_try_once_role_and_creates_no_target(tmp_path: Path):
     paths = S.built_paths(tmp_path)
     absent_target = tmp_path / "outside" / "never-made.lock"
-    S.plant(paths.state_root / ".author-drain.lock", "symlink", target=absent_target)
+    S.plant(location_path(paths.state_root) / ".author-drain.lock", "symlink", target=absent_target)
     state = S.LearningState.open(paths)
     answers: list = []
 
@@ -420,8 +422,8 @@ def test_a_plain_lock_role_is_taken_refused_while_held_and_released(tmp_path: Pa
     # rejected: N8 — no lease or claim-epoch model; locks stay flock
     paths = S.built_paths(tmp_path)
     state = S.LearningState.open(paths)
-    drain_lock = paths.state_root / "_pending" / ".lock"
-    repo_lock = paths.state_root / "_author.lock"
+    drain_lock = location_path(paths.state_root) / "_pending" / ".lock"
+    repo_lock = location_path(paths.state_root) / "_author.lock"
     try_once = S.coined("TRY_ONCE")
     seen: dict[str, object] = {}
 
@@ -454,7 +456,7 @@ def test_a_plain_lock_role_is_taken_refused_while_held_and_released(tmp_path: Pa
         f"a deadline take of a held lock answered {seen.get('deadline')!r}"
     assert seen.get("repo_free_after") is True, "the repo lock was not released on exit"
 
-    lead_lock = paths.state_root / "_pending_leads" / ".lock"
+    lead_lock = location_path(paths.state_root) / "_pending_leads" / ".lock"
     holding = threading.Event()
 
     def hold_then_release() -> None:  # another holder, as a second process's open would be
@@ -499,7 +501,7 @@ def test_1135_a_zero_repo_lock_wait_is_try_once(tmp_path: Path, monkeypatch):
         with state.lock(S.coined("REPO_LOCK"), wait=wait):
             return "taken"
 
-    with S.held_flock(paths.state_root / "_author.lock"):
+    with S.held_flock(location_path(paths.state_root) / "_author.lock"):
         t0 = time.monotonic()
         finished, answer, err = S.within(10, take)
         spent = time.monotonic() - t0
@@ -516,7 +518,7 @@ def test_1135_a_zero_repo_lock_wait_is_try_once(tmp_path: Path, monkeypatch):
 @pytest.mark.parametrize("shape", S.SHAPES)
 def test_a_non_plain_entry_at_a_record_name_halts_when_the_claim_opens_it(tmp_path: Path, shape):
     paths = S.built_paths(tmp_path)
-    queue = paths.state_root / "author-queue"
+    queue = location_path(paths.state_root) / "author-queue"
     queue.mkdir()
     body = (json.dumps(S.request_body("case-x", S.curation_run_dir("run-x"))) + "\n").encode()
     with contextlib.ExitStack() as stack:
@@ -552,7 +554,7 @@ def test_a_listing_keeps_record_names_and_never_opens_a_foreign_name(tmp_path: P
     # rejected: halting on a non-plain entry at a foreign name (3.1 D: O2 holds because nothing
     # follows it)
     paths = S.built_paths(tmp_path)
-    queue = paths.state_root / "author-queue"
+    queue = location_path(paths.state_root) / "author-queue"
     queue.mkdir()
     (queue / "README").write_text("operator notes\n", encoding="utf-8")
     (queue / ".case-z.json.requeue.4242").write_text("{}\n", encoding="utf-8")
@@ -611,13 +613,13 @@ def test_every_core_refusal_shape_surfaces_as_state_refused(tmp_path: Path, verb
     target = S.outside(tmp_path, "entry.json", '{"outside": true}\n')
     state = S.LearningState.open(paths)
     if verb == "rows":
-        folder = paths.state_root / "_pending"
+        folder = location_path(paths.state_root) / "_pending"
         leaf = folder / "findings.jsonl"
     else:
         S.seed_request(paths, "case-x", S.curation_run_dir("run-a"))
         claims = _claim_all(state)
         assert len(claims) == 1, f"the plain request was not claimed: {claims!r}"
-        folder = paths.state_root / "author-queue" / "inflight"
+        folder = location_path(paths.state_root) / "author-queue" / "inflight"
         leaf = folder / "case-x.json"
         leaf.unlink()
     if where == "leaf":
@@ -666,7 +668,7 @@ def test_ordinary_io_errors_are_not_converted_to_refusals(tmp_path: Path):
         f"a request that vanished mid-pass was not skipped: {[c.key for c in served]}"
 
     move_at = S.core_fn("move_at")
-    with _io.hold(paths.state_root) as held:
+    with _io.hold(location_path(paths.state_root)) as held:
         missing = S.caught(lambda: move_at(held, "author-queue/nope.json",
                                            "author-queue/inflight/nope.json"))
     assert isinstance(missing, FileNotFoundError), f"move_at on a missing source answered {missing!r}"
@@ -678,7 +680,7 @@ def _vanishing_pass(state, paths: LoopPaths):
     pass has started and before it reaches that request."""
     claims = iter(state.claim("case_id"))
     for claim in claims:
-        (paths.state_root / "author-queue" / "case-q.json").unlink(missing_ok=True)
+        (location_path(paths.state_root) / "author-queue" / "case-q.json").unlink(missing_ok=True)
         yield claim
 
 
@@ -709,12 +711,12 @@ def test_a_refused_ledger_stops_rotate_before_the_queue_is_replaced(tmp_path: Pa
     # rejected: closing the crash window between the queue replace and the ledger append
     # (unchanged, O3; X11)
     paths = S.built_paths(tmp_path)
-    queue = paths.state_root / "_pending" / "findings.jsonl"
+    queue = location_path(paths.state_root) / "_pending" / "findings.jsonl"
     keep, done = _finding("a/0"), _finding("a/1")
     S.write_jsonl(queue, [keep, done])
     queue_bytes = queue.read_bytes()
     ledger_target = S.outside(tmp_path, "consumed.jsonl", "")
-    S.plant(paths.state_root / "_pending" / "consumed.jsonl", "symlink", target=ledger_target)
+    S.plant(location_path(paths.state_root) / "_pending" / "consumed.jsonl", "symlink", target=ledger_target)
 
     state = S.LearningState.open(paths)
     refused = S.caught(lambda: state.rotate(S.coined("FINDINGS"), [keep], [done], "abc123",
@@ -730,7 +732,7 @@ def test_move_at_renames_under_the_held_root(tmp_path: Path):
     # edge enumeration; #20 is the move guard)
     move_at = S.core_fn("move_at")
     paths = S.built_paths(tmp_path)
-    root = paths.state_root
+    root = location_path(paths.state_root)
     (root / "author-queue").mkdir()
     (root / "author-queue" / "case-a.json").write_text('{"a": 1}\n', encoding="utf-8")
     (root / "author-queue" / "case-b.json").write_text('{"b": 1}\n', encoding="utf-8")
@@ -762,7 +764,7 @@ def test_open_lock_at_opens_a_plain_lock_without_truncating(tmp_path: Path):
     # (R17)
     open_lock_at = S.core_fn("open_lock_at")
     paths = S.built_paths(tmp_path)
-    root = paths.state_root
+    root = location_path(paths.state_root)
     (root / "_author.lock").write_text("held-by: someone\n", encoding="utf-8")
 
     opened: list = []  # closed in `finally`, whichever of the three opens (or an assert) fails

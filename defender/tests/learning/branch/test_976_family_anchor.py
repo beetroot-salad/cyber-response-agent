@@ -1,6 +1,8 @@
 """#976 — the family is anchored to its source's commit (detect-and-refuse)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import os
 from dataclasses import dataclass, field
@@ -281,7 +283,7 @@ def test_976_a_source_stamped_before_scope_existed_is_compared_on_commit_alone(t
 
 def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete(tmp_path):
     """O1/M3, C5 closed: three siblings that agree with each other at `cafe1` while the source ran `deadbee` are NOT a comparable family — `incomplete`,..."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
 
     def dirs(ep, w):
         return T.arm_run_dir(ep, w, commit="cafe1")
@@ -317,7 +319,7 @@ def test_976_siblings_agreeing_at_a_commit_the_source_did_not_run_are_incomplete
 
 def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_path):
     """O1/M3: siblings measured over scope `repo` against a source measured over `defender` are `incomplete` on scope even at one commit"""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
 
     # WITH AND WITHOUT THE OVERRIDE (adversary H3): a scope mismatch is not dirt, so
     # `--allow-dirty` does not reach it at this tier any more than at preflight.
@@ -341,7 +343,7 @@ def test_976_siblings_whose_scope_differs_from_the_sources_are_incomplete(tmp_pa
 
 def test_976_a_dirty_source_under_the_override_is_still_held_to_its_commit(tmp_path):
     """O4/M3: under `--allow-dirty` a dirty source is compared on the fields it carries, as a dirty sibling is — siblings at the source's commit are..."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
 
     def elsewhere(ep, w):
         return T.arm_run_dir(ep, w, commit="cafe1")
@@ -404,7 +406,7 @@ def test_976_the_override_waives_dirt_on_both_sides_and_the_family_is_accepted(t
 
 def test_976_the_authority_judges_the_sources_own_dirt_not_only_the_siblings(tmp_path):
     """The verify tier is the authority, so it asks everything the preflight asks — including whether the SOURCE's tree was certified clean."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
 
     ep = T.episode(tmp_path, episode_id=fixture_uuid("976-dirty-source-unwaived"))
     report = _verify(ep, source=T.provenance_record(dirty=True))
@@ -441,7 +443,7 @@ def test_976_two_problems_are_reported_at_once_never_waivable_first_and_without_
 
 def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_path):
     """The recorded `episode.reason` holds to the same message rule as a preflight refusal"""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     never = {
         "dirty-and-drifted": lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1",
                                                          dirty=(w == "b")),
@@ -468,7 +470,7 @@ def test_976_a_verify_reason_the_override_cannot_reach_never_names_the_flag(tmp_
 
 def test_976_siblings_off_the_anchor_are_named_against_the_source_once_each(tmp_path):
     """An archived reason tells each fact once."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
 
     def two_commits(ep, w):
         return T.arm_run_dir(ep, w, commit=f"c-{w}")

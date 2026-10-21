@@ -1,6 +1,8 @@
 """#947 — the QUESTIONER role and its host-side fan-out (M1, O1, O8)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import json
 import re
 
@@ -42,9 +44,9 @@ def test_947_role_preflight_runs_once_for_the_family_and_again_in_each_sibling(t
     """The role-model preflight runs at family level, before the questioner is paid for, AND again inside each sibling process — the family-level pass is..."""
     cli = T.mod("learning.branch.cli")
     seen: list[str] = []
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(base))
-    data_root = T.current_tenant().data_root
+    data_root = location_path(T.current_tenant().data_root)
     before = set(data_root.glob("*/episodes/*"))
     spawn = T.FakeSpawn()
     worlds = [T.base_world(), T.world_doc("b", facts=[]), T.world_doc("c", facts=[])]
@@ -135,7 +137,7 @@ def test_947_call_one_output_is_rewrapped_before_it_seeds_calls_two_and_three(tm
 
 
 def test_947_the_questioner_screens_the_source_document_before_reading_it(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     secret = tmp_path / "secret.txt"
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
     (src / "investigation.md").unlink()

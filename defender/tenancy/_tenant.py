@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from pydantic import ValidationError
 from pydantic_core import core_schema
 
+from defender.records._locations import (
+    DataRoot, TenantRoot, TenantRecord, RunsBase, SessionsRoot, EpisodesRoot, LearningRoot, WorktreesRoot, ExportsRoot, DraftsRoot, KnowledgeLock, CommitRecord, LegacyRunsRoot, LegacyEpisodesRoot, _unwrap_data_root, _unwrap_tenant_root, _unwrap_runs_base, _unwrap_episodes_root,
+)
 from defender.records import _alert_input
 from defender.records._run_id import mint_uuid, uuid_id_fault
 from defender import _io as _real_io
@@ -28,6 +31,7 @@ from defender.tenancy._tenants import (
 )
 
 if TYPE_CHECKING:
+    from defender.learning.core.config import LoopPaths
     from defender.run_repository._lookup import RunsRepository
 
 _R = TypeVar("_R")
@@ -135,39 +139,39 @@ class _TenantLayout:
     `_TenantPaths`, which guards first."""
 
     def __init__(self, tenant_dir: Path) -> None:
-        self.dir = tenant_dir
+        self.tenant_root = tenant_dir
 
     @property
     def row(self) -> Path:
-        return self.dir / ROW_NAME
+        return self.tenant_root / ROW_NAME
 
     @property
     def runs(self) -> Path:
-        return self.dir / "runs"
+        return self.tenant_root / "runs"
 
     @property
     def sessions(self) -> Path:
-        return self.dir / "sessions"
+        return self.tenant_root / "sessions"
 
     @property
     def episodes(self) -> Path:
-        return self.dir / "episodes"
+        return self.tenant_root / "episodes"
 
     @property
     def runs_legacy(self) -> Path:
         """Where the one-time command (#1187 Flow 6) moves `runs/`'s pre-#1187 entries. Nothing
         reads it."""
-        return self.dir / "runs-legacy"
+        return self.tenant_root / "runs-legacy"
 
     @property
     def episodes_legacy(self) -> Path:
         """Where the one-time command moves the old shared episodes root's entries. Nothing
         reads it."""
-        return self.dir / "episodes-legacy"
+        return self.tenant_root / "episodes-legacy"
 
     @property
     def learning(self) -> Path:
-        return self.dir / "learning"
+        return self.tenant_root / "learning"
 
     @property
     def worktrees(self) -> Path:
@@ -175,19 +179,19 @@ class _TenantLayout:
 
     @property
     def knowledge(self) -> Path:
-        return self.dir / "knowledge"
+        return self.tenant_root / "knowledge"
 
     @property
     def exports(self) -> Path:
-        return self.dir / "exports"
+        return self.tenant_root / "exports"
 
     @property
     def drafts(self) -> Path:
-        return self.dir / "drafts"
+        return self.tenant_root / "drafts"
 
     @property
     def knowledge_lock(self) -> Path:
-        return self.dir / "knowledge.lock"
+        return self.tenant_root / "knowledge.lock"
 
     @property
     def commit_record(self) -> Path:
@@ -210,13 +214,13 @@ class _TenantPaths(_TenantLayout):
     must meet first: the data root is absolute (J03), and the tenant's folder is not inside
     the running checkout's box-mounted `defender/` (O11a)."""
 
-    def __init__(self, root: Path | str, tenant_id: str) -> None:
+    def __init__(self, root: DataRoot, tenant_id: str) -> None:
         #: The id, parsed: a plain string handed in is checked here (a `TenantId` passes as-is).
         self.tenant_id = TenantId(tenant_id)
-        root = Path(root)
-        _refuse_unusable_data_root(root)
-        _refuse_inside_defender_tree(_resolve_or_refuse(root / self.tenant_id), root)
-        super().__init__(root / self.tenant_id)
+        root_path = _unwrap_data_root(root)
+        _refuse_unusable_data_root(root_path)
+        _refuse_inside_defender_tree(_resolve_or_refuse(root_path / self.tenant_id), root_path)
+        super().__init__(root_path / self.tenant_id)
 
 
 def _refuse_unusable_data_root(root: Path) -> None:
@@ -267,12 +271,13 @@ _ACCEPTED = object()
 @dataclasses.dataclass(frozen=True)
 class Tenant:
     """One accepted tenant: its id, the data root it was accepted under, and its row — built
-    ONLY by `accept_tenant`, and frozen. Its other members are its layout, as paths.
+    ONLY by `accept_tenant`, and frozen. Record locations are opaque values; knowledge
+    content paths remain ordinary paths.
 
     A point-in-time value (M3): it says the tree passed acceptance when it was built."""
 
     id: TenantId
-    data_root: Path
+    data_root: DataRoot
     row: TenantRow
     _token: dataclasses.InitVar[object]
 
@@ -283,72 +288,72 @@ class Tenant:
 
     @property
     def _layout(self) -> _TenantLayout:
-        return _TenantLayout(self.data_root / self.id)
+        return _TenantLayout(_unwrap_data_root(self.data_root) / self.id)
 
     @property
-    def dir(self) -> Path:
-        return self._layout.dir
+    def tenant_root(self) -> TenantRoot:
+        return TenantRoot(self._layout.tenant_root)
 
     @property
-    def row_path(self) -> Path:
+    def row_path(self) -> TenantRecord:
         """The row FILE's path; `row` is the row itself."""
-        return self._layout.row
+        return TenantRecord(self._layout.row)
 
     @property
-    def runs(self) -> Path:
-        return self._layout.runs
+    def runs(self) -> RunsBase:
+        return RunsBase(self._layout.runs)
 
     @property
-    def sessions(self) -> Path:
-        return self._layout.sessions
+    def sessions(self) -> SessionsRoot:
+        return SessionsRoot(self._layout.sessions)
 
     @property
-    def episodes(self) -> Path:
-        return self._layout.episodes
+    def episodes(self) -> EpisodesRoot:
+        return EpisodesRoot(self._layout.episodes)
 
     @property
-    def runs_legacy(self) -> Path:
-        return self._layout.runs_legacy
+    def runs_legacy(self) -> LegacyRunsRoot:
+        return LegacyRunsRoot(self._layout.runs_legacy)
 
     @property
-    def episodes_legacy(self) -> Path:
-        return self._layout.episodes_legacy
+    def episodes_legacy(self) -> LegacyEpisodesRoot:
+        return LegacyEpisodesRoot(self._layout.episodes_legacy)
 
     @property
-    def learning(self) -> Path:
-        return self._layout.learning
+    def learning(self) -> LearningRoot:
+        return LearningRoot(self._layout.learning)
 
     @property
-    def worktrees(self) -> Path:
-        return self._layout.worktrees
+    def worktrees(self) -> WorktreesRoot:
+        return WorktreesRoot(self._layout.worktrees)
 
     @property
     def knowledge(self) -> Path:
         return self._layout.knowledge
 
     @property
-    def exports(self) -> Path:
+    def exports(self) -> ExportsRoot:
         """Host-made, immutable copies of the knowledge at one commit each (`<commit>/`), and
         the `current` pointer naming the latest (#1108 amendment 2)."""
-        return self._layout.exports
+        return ExportsRoot(self._layout.exports)
 
     @property
-    def drafts(self) -> Path:
+    def drafts(self) -> DraftsRoot:
         """Host-made, git-free copies of `agent/` a drain box writes into, one per batch."""
-        return self._layout.drafts
+        return DraftsRoot(self._layout.drafts)
 
     @property
-    def knowledge_lock(self) -> Path:
+    def knowledge_lock(self) -> KnowledgeLock:
         """The per-tenant lock over the knowledge clone and its exports: held for a
         fast-forward, export publication, filter configuration and draft build or sweep,
         never across network I/O, a box window or commit creation."""
-        return self._layout.knowledge_lock
+        return KnowledgeLock(self._layout.knowledge_lock)
 
     @property
-    def commit_record(self) -> Path:
+    def commit_record(self) -> CommitRecord:
         """The commit-maker's record of every tenant commit it made, which outlives the
         process that made them: push routes send only commits it lists."""
-        return self._layout.commit_record
+        return CommitRecord(self._layout.commit_record)
 
     @property
     def settings(self) -> Path:
@@ -366,8 +371,8 @@ class Tenant:
         (#1256's reasons) — handed to `_paths.name_roots`, which names whole paths only and the
         longest spelling first, so the tenant's folder is never cut into `<data root>/<id>`.
         Read here because this module owns the root (#1210)."""
-        return {**_paths.root_spellings(self.data_root, "<data root>"),
-                **_paths.root_spellings(self.dir, "<tenant folder>")}
+        return {**_paths.root_spellings(_unwrap_data_root(self.data_root), "<data root>"),
+                **_paths.root_spellings(_unwrap_tenant_root(self.tenant_root), "<tenant folder>")}
 
     def runs_repository(self) -> RunsRepository:
         """This tenant's runs repository (#1105 PR 2, decision C): bound to this tenant, and
@@ -376,6 +381,18 @@ class Tenant:
         from defender.run_repository._lookup import RunsRepository
 
         return RunsRepository(self)
+
+    def learning_paths(self, paths_type: type[LoopPaths], *, repo_root: Path) -> LoopPaths:
+        """Build learning configuration where the tenant's record root is owned."""
+        return paths_type(repo_root=repo_root, state_dir=self.learning, tenant=self)
+
+    def accept_requested_tenant(self, raw_id: object) -> Tenant:
+        """Fresh acceptance of an addressed tenant under this identity's data root.
+
+        Queue ownership remains the caller's check; this keeps the root inside its owner
+        while preserving request-time validation rather than reusing an acceptance snapshot.
+        """
+        return requested_tenant(self.data_root, raw_id)
 
 
 def requested_tenant_id(raw: object) -> TenantId:
@@ -391,7 +408,7 @@ def requested_tenant_id(raw: object) -> TenantId:
 
 
 def accept_tenant(
-    data_root: Path, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path] = (),
+    data_root: DataRoot, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
 ) -> Tenant:
     """`raw_id` under `data_root`, checked whole — the ONE acceptance of a tenant, and the
     only constructor of `Tenant`. Refused with `TenantRefused` naming the refused value, at the
@@ -400,18 +417,18 @@ def accept_tenant(
     paths = _TenantPaths(data_root, tenant_id)
     row = _read_row(paths)
     _accept_knowledge(paths, defender_dir=defender_dir, box_mounted=box_mounted)
-    return Tenant(id=tenant_id, data_root=Path(data_root), row=row, _token=_ACCEPTED)
+    return Tenant(id=tenant_id, data_root=data_root, row=row, _token=_ACCEPTED)
 
 
-def box_mounted_episodes(data_root: Path, raw_id: object) -> Path:
+def box_mounted_episodes(data_root: DataRoot, raw_id: object) -> EpisodesRoot:
     """The tenant's episodes folder, `<data root>/<T>/episodes` — every arm container a box of
     its episodes mounts lies inside it, so the launcher names it as `box_mounted` (#1187 S-acc;
     no environment names it). Judged as every pre-acceptance site judges the root and the id
     (`TenantRefused`). A join: nothing is read or made."""
-    return _TenantPaths(data_root, TenantId(raw_id)).episodes
+    return EpisodesRoot(_TenantPaths(data_root, TenantId(raw_id)).episodes)
 
 
-def box_mounted_arm_container(data_root: Path, raw_id: object, episode_id: str) -> Path:
+def box_mounted_arm_container(data_root: DataRoot, raw_id: object, episode_id: str) -> RunsBase:
     """The arm container a sibling's box mounts — `<data root>/<T>/episodes/<episode id>/runs`
     — named BEFORE the tenant is accepted, so the sibling hands it to acceptance as
     `box_mounted` (step 7 holds the settings half out of it, judging it by where it leads, so a
@@ -422,10 +439,10 @@ def box_mounted_arm_container(data_root: Path, raw_id: object, episode_id: str) 
     from defender.episodes._episode_paths import LAYOUT
 
     episode_id = refuse_bad_episode_id(episode_id)
-    return box_mounted_episodes(data_root, raw_id) / episode_id / LAYOUT.runs
+    return RunsBase(_unwrap_episodes_root(box_mounted_episodes(data_root, raw_id)) / episode_id / LAYOUT.runs)
 
 
-def requested_tenant(data_root: Path, raw: object) -> Tenant:
+def requested_tenant(data_root: DataRoot, raw: object) -> Tenant:
     """The tenant a request names — a command line's raw `--tenant` text, or the `TenantId` a
     stored row carries — accepted under `data_root`: the ONE acceptance step every request
     without a box of its own shares (the tracer, the pages, the `--tenant T <run_id>` opener,
@@ -440,7 +457,7 @@ def requested_tenant(data_root: Path, raw: object) -> Tenant:
 
 
 def accept_placed_knowledge(
-    data_root: Path, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path] = (),
+    data_root: DataRoot, raw_id: object, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot] = (),
 ) -> tuple[Path, bool]:
     """Setup's half of acceptance, for a tenant whose row may not exist yet: every check
     `accept_tenant` makes except that the row must exist — a row that IS there must still read
@@ -455,15 +472,27 @@ def accept_placed_knowledge(
     return paths.settings, has_row
 
 
+def provision_learning(
+    data_root: DataRoot, tenant_id: TenantId, source: Path | None, *, repo_root: Path,
+    create_row: bool,
+) -> None:
+    """Execute setup's learning plan, publishing a missing row only after plan validation."""
+    from defender.learning.core.state import LearningAdoption
+
+    adoption = LearningAdoption(LearningRoot(_TenantPaths(data_root, tenant_id).learning), source,
+                                tenant_id=tenant_id, data_root=data_root, repo_root=repo_root)
+    adoption.run(before_move=(lambda: create_tenant(data_root, tenant_id)) if create_row else None)
+
+
 def _accept_knowledge(
-    paths: _TenantPaths, *, defender_dir: Path, box_mounted: Iterable[Path],
+    paths: _TenantPaths, *, defender_dir: Path, box_mounted: Iterable[Path | RunsBase | EpisodesRoot],
 ) -> None:
     """Steps 3-7 of `accept_tenant` over an id and root its layout class already guarded.
     The knowledge folder is neither followed nor resolved: the walk opens `<T>` and
     `knowledge` no-follow off the root's handle, so a linked `<T>` or `knowledge` is refused,
     and the settings half's real path is then the root's own resolution joined below it.
     Both relative names come from the layout (`_TenantLayout`), never spelled here."""
-    root = paths.dir.parent
+    root = paths.tenant_root.parent
     knowledge_name = paths.knowledge.relative_to(root).as_posix()
     with _real_io.bind(root) as bound:
         _knowledge_is_real(paths, _real_io.stat_entry(bound, knowledge_name))
@@ -473,7 +502,7 @@ def _accept_knowledge(
     settings_real = root_real / paths.settings.relative_to(root)
     halves_real = (settings_real, root_real / paths.agent.relative_to(root))
     knowledge_real = root_real / paths.knowledge.relative_to(root)
-    for mounted in (Path(defender_dir), paths.runs, *(Path(m) for m in box_mounted)):
+    for mounted in (Path(defender_dir), paths.runs, *(_unwrap_runs_base(m) if isinstance(m, RunsBase) else _unwrap_episodes_root(m) if isinstance(m, EpisodesRoot) else m for m in box_mounted)):
         mounted_real = _resolve_or_refuse(mounted)
         if settings_real.is_relative_to(mounted_real):
             raise TenantRefused(
@@ -509,7 +538,7 @@ def _knowledge_is_real(paths: _TenantPaths, found: _real_io.StatRead) -> None:
                                and stat.S_ISLNK(found.st.st_mode) else "it is not a directory")
         raise TenantRefused(
             f"tenant {paths.tenant_id!r}'s knowledge folder {knowledge} must be a real "
-            f"directory, never a link or a file, under an unlinked {paths.dir}: {why}")
+            f"directory, never a link or a file, under an unlinked {paths.tenant_root}: {why}")
 
 
 def check_knowledge_folder(folder: Path, *, tenant_id: TenantId | None) -> None:
@@ -691,23 +720,23 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def create_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
+def create_tenant(root: DataRoot, tenant_id: TenantId) -> TenantRow:
     """Mint tenant_id's row exactly once, into a FRESH data root (O10: tenant 1 only). The
     folder is made and held by `hold_new` off the root's handle (F12: no raw mkdir here), which
     judges `<T>` with no link followed at mkdir time, closing an O11a-vs-write-time symlink swap;
     the row itself is created off that held folder through the core's complete-or-absent lane
     (J16/J63, #1137), never overwritten (O2, D1)."""
     paths = _TenantPaths(root, tenant_id)
-    root = Path(root)
     refuse_foreign_data_root(root, paths.tenant_id)
+    root_path = _unwrap_data_root(root)
     row = TenantRow(tenant_id=paths.tenant_id, created_at=_now())
     body = json.dumps(
         {"tenant_id": row.tenant_id, "created_at": row.created_at}, indent=2, sort_keys=True,
     ) + "\n"
     try:
-        held = _real_io.hold_new(root, paths.tenant_id)
+        held = _real_io.hold_new(root_path, paths.tenant_id)
     except OSError as blocked:
-        raise TenantRefused(f"{paths.dir}: {blocked}") from blocked
+        raise TenantRefused(f"{paths.tenant_root}: {blocked}") from blocked
     # The close is inside the mapping, as `_read_row`'s is: a failing close is a refusal too.
     try:
         with held:
@@ -719,7 +748,7 @@ def create_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
     return row
 
 
-def refuse_foreign_data_root(root: Path, tenant_id: TenantId) -> None:
+def refuse_foreign_data_root(root: DataRoot, tenant_id: TenantId) -> None:
     """O10: a tenant is created only into a FRESH data root — one whose only entry, if any, is
     this tenant's own folder. While that folder has NO row it is an unfinished setup, and
     anything in it the setup protocol did not sanction is foreign too: the protocol sanctions
@@ -733,10 +762,10 @@ def refuse_foreign_data_root(root: Path, tenant_id: TenantId) -> None:
     caller that skips `create_tenant` on a re-run still meets it."""
     tenant_id = TenantId(tenant_id)  # before anything under `root` is named with it
     try:
-        _refuse_foreign_entries(root, tenant_id)
+        _refuse_foreign_entries(_unwrap_data_root(root), tenant_id)
     except OSError as unreadable:
         raise TenantRefused(
-            f"the data root {root} could not be checked for other tenants: {unreadable}",
+            f"the data root {_unwrap_data_root(root)} could not be checked for other tenants: {unreadable}",
         ) from unreadable
 
 
@@ -760,7 +789,7 @@ def _refuse_foreign_entries(root: Path, tenant_id: TenantId) -> None:
                 "into a fresh data root")
 
 
-def require_tenant(root: Path, tenant_id: TenantId) -> TenantRow:
+def require_tenant(root: DataRoot, tenant_id: TenantId) -> TenantRow:
     """`tenant_id`'s row, or the refusal: absent, corrupt (bad JSON, a non-object top level, an
     undecodable byte, a missing or non-string field), anything but a plain file at the row's
     name (a directory, a link live or dangling, a FIFO, a hard link: the core's alias refusal),
@@ -773,7 +802,7 @@ def _read_row(paths: _TenantPaths) -> TenantRow:
     # Read off `<T>`, its spelling followed as the folders above a path read's leaf are; the row
     # itself is opened no-follow and judged by the core (#1137). A reason never names a path.
     try:
-        with _real_io.bind(paths.dir) as bound:
+        with _real_io.bind(paths.tenant_root) as bound:
             answer = bound.read(ROW_NAME)
     except OSError as unreadable:
         # Only the platform fault reaches here (no `O_PATH`, or a failing close): `bind` and
@@ -789,10 +818,10 @@ def _read_row(paths: _TenantPaths) -> TenantRow:
 
 
 # ==========================================================================================
-# The data root (D2) and runs_base_for.
+# The data root (D2): typed selection and explicit owner comparisons/display.
 # ==========================================================================================
 
-def resolve_data_root() -> Path:
+def resolve_data_root() -> DataRoot:
     """The one path from `DEFENDER_DATA_ROOT` to an absolute, symlink-resolved root. No
     default: an unset or empty value is refused, naming the variable (settled by the user).
     Called once by an entry point; the root is handed inward from there. Learning state now
@@ -804,9 +833,20 @@ def resolve_data_root() -> Path:
     if not root.is_absolute():
         raise TenantRefused(f"{_DATA_ROOT_ENV}={raw!r} must be an absolute path")
     resolved = _resolve_or_refuse(root)
-    return resolved
+    return data_root_from_path(resolved)
 
 
-def runs_base_for(tenant: Tenant) -> Path:
-    """The accepted tenant's runs base, `<root>/<tenant>/runs`."""
-    return tenant.runs
+def data_root_from_path(path: Path) -> DataRoot:
+    """Mark an explicit host-selected root; acceptance still performs every check."""
+    return DataRoot(path)
+
+
+def data_root_contains(root: DataRoot, path: Path) -> bool:
+    """Whether an already absolute candidate is at or below the configured root."""
+    location = _unwrap_data_root(root)
+    return path == location or location in path.parents
+
+
+def data_root_description(root: DataRoot) -> str:
+    """Explicit owner display of a configured root for operator refusals."""
+    return str(_unwrap_data_root(root))

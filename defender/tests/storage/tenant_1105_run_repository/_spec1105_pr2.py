@@ -1,6 +1,8 @@
 """Shared helpers for the PR 2 run-repository tests (tenant fixtures, CLI/process drivers). No test functions."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_data_root, location_path
+
 import logging
 import io
 import json
@@ -147,7 +149,7 @@ def launch_source(tmp_path: Path, *, source_run_id: str = SOURCE_RUN_ID) -> tupl
                            payload=c.payload, lead=S.LEAD, seq=seq)
             est.answer(c.system, c.verb, c.params, c.payload)
 
-    _base, src = T.runs_base(tmp_path, tenant_id=LAUNCH_TENANT, source_run_id=source_run_id,
+    _base, src = location_path(T.runs_base)(tmp_path, tenant_id=LAUNCH_TENANT, source_run_id=source_run_id,
                              land_calls=land)
     return est, src
 
@@ -238,7 +240,7 @@ def grade(episode_dir: Path, tenant_id: str) -> Any:
     (Path(episode_dir) / "judge.yaml").unlink(missing_ok=True)
 
     runs = _tenant.accept_tenant(
-        data_root(), tenant_id, defender_dir=H1.DEFENDER).runs_repository()
+        fixture_data_root(data_root()), tenant_id, defender_dir=H1.DEFENDER).runs_repository()
     return T.mod("learning.judge").grade_episode(
         runs, Path(episode_dir).name, judge=J.scripted_judge(), state=env_state())
 
@@ -253,7 +255,7 @@ def sibling_scene(tmp_path: Path, *, roster: bool = True,
     from defender import _yaml
     from defender.tests.storage.ids_1187 import _spec1187 as R
 
-    _base, src = T.runs_base(tmp_path, source_run_id=SOURCE_RUN_ID)
+    _base, src = location_path(T.runs_base)(tmp_path, source_run_id=SOURCE_RUN_ID)
     doc = doc if doc is not None else family_doc(src)  # lint-default: ok — a test builder's fresh per-call manifest
     labels = [w["label"] for w in doc.get("worlds", [])]
     ep = R.make_episode(data_root(), SIBLING_TENANT, episode_id, manifest=_yaml.safe_dump(doc),
@@ -418,19 +420,19 @@ def git_repo(path: Path) -> Path:
 def queue_row(paths: Any, case_id: str, body: dict) -> Path:
     """A curation request written by hand at `author-queue/<case_id>.json` — the queue a drain
     claims from (the shape `enqueue_curation` writes: one JSON document per request)."""
-    row = Path(paths.state_root) / "author-queue" / f"{case_id}.json"
+    row = Path(location_path(paths.state_root)) / "author-queue" / f"{case_id}.json"
     row.parent.mkdir(parents=True, exist_ok=True)
     row.write_text(json.dumps(body) + "\n", encoding="utf-8")
     return row
 
 
 def dead_letter(paths: Any, case_id: str) -> dict | None:
-    failed = Path(paths.state_root) / "author-queue" / "failed" / f"{case_id}.json"
+    failed = Path(location_path(paths.state_root)) / "author-queue" / "failed" / f"{case_id}.json"
     return json.loads(failed.read_text(encoding="utf-8")) if failed.is_file() else None
 
 
 def still_queued(paths: Any, case_id: str) -> bool:
-    q = Path(paths.state_root) / "author-queue"
+    q = Path(location_path(paths.state_root)) / "author-queue"
     return (q / f"{case_id}.json").is_file() or (q / "inflight" / f"{case_id}.json").is_file()
 
 
@@ -454,13 +456,13 @@ class Lane:
 
 
 def drain(paths: Any, lane: Lane) -> list[Any]:
-    """One lead-author tick's claim loop (`_drain_lead_author_markers`) over `paths`, under
-    the data root the tick resolves before it claims (`drains._data_root`: with none
-    configured, the tick's configuration refusal, raised before any claim)."""
+    """One lead-author tick's claim loop over `paths`, with its fresh tenant acceptor.
+    Scratch paths require a configured data root before any claim is made."""
     from defender.learning.core import drains
 
     state = _state1135.state_for_paths(paths)
-    return drains._drain_lead_author_markers(paths, state, lane, data_root=drains._data_root())
+    return drains._drain_lead_author_markers(
+        paths, state, lane, accept_tenant=drains._tenant_acceptor(paths.tenant))
 
 
 def loop_paths(tmp_path: Path) -> Any:

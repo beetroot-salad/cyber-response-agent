@@ -1,6 +1,8 @@
 """#947 — the family manifest is the contract (M2, O1)."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import pytest
 
 from defender.episodes._episode_handle import Episode
@@ -158,7 +160,7 @@ def test_947_one_identity_gate_refuses_every_bad_world_identity_before_launch(tm
 
     monkeypatch.setenv(T.RUNS_BASE_ENV, str(tmp_path / "defender-runs"))
     monkeypatch.setenv(T.EPISODES_BASE_ENV, str(tmp_path / "episodes-root"))
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     for i, (worlds, _needle) in enumerate(bad_families):
         # One episodes root per arm: four launches sharing one would have the later three meet a
         # directory an earlier abort left behind rather than the identity gate.

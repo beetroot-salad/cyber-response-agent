@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import dataclasses
 import enum
 import os
@@ -102,7 +104,7 @@ class Leaf:
 
 def _leaf(tmp_path: Path) -> Leaf:
     paths = LoopPaths(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
     return Leaf(paths=paths, wt=tmp_path / "wt-leaf")
 
 
@@ -169,7 +171,7 @@ def relocated_paths(asked: list[tuple[Path, str]]) -> type[LoopPaths]:
 
     class RelocatedPaths(LoopPaths):
         def with_repo_root(self, repo_root: Path) -> LoopPaths:
-            return type(self)(repo_root=repo_root, state_dir=self.state_root)
+            return type(self)(repo_root=repo_root, state_dir=location_path(self.state_root))
 
         def _moved(self, attr: str, name: str) -> Path:
             asked.append((self.repo_root, attr))
@@ -536,7 +538,7 @@ def start_drive(tmp_path: Path, label: str, kind: str, prefix: str) -> Drive:
     asked: list[tuple[Path, str]] = []
     cls = LoopPaths if kind == "shipped" else relocated_paths(asked)
     paths = cls(repo_root=tmp_path / MAIN, state_dir=tmp_path / "learning-state")
-    paths.state_root.mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
+    location_path(paths.state_root).mkdir(parents=True, exist_ok=True)  # the handle never creates its root (#1135)
     other = LEAD if label == AUTHOR else AUTHOR
     rec = B.BoxLifecycleRecorder()
     branch = CheckoutBranch(tmp_path / "worktrees", events=rec.events,
@@ -584,7 +586,7 @@ def test_the_author_lane_mounts_its_leafs_two_corpora_and_its_work_step_holds_th
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, prefix: str):
     monkeypatch.setenv("LEARNING_AUTHOR_THRESHOLD", "1")
     d = start_drive(tmp_path, AUTHOR, kind, prefix)
-    put_plain(d.paths.state_root / FINDINGS.queue, b'{"finding_id": "f-1"}\n')
+    put_plain(location_path(d.paths.state_root) / FINDINGS.queue, b'{"finding_id": "f-1"}\n')
 
     rc = drains.author_drain(d.paths, trigger_author=d.step, branch=d.branch,
                              start_box=d.rec.start_box, stop_box=d.rec.stop_box,

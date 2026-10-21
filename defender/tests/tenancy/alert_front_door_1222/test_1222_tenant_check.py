@@ -2,6 +2,8 @@
 `settings/alert-mapping.yaml` and the case mapping's top-level `source:` key."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import contextlib
 import os
 import re
@@ -125,7 +127,7 @@ def world(tmp_path: Path, capsys: Any, *, launchable: bool = False, **plant: Any
     (`T.episode`), so launch and sibling resume can be driven over the tenant afterwards."""
     w = World(tmp=Path(tmp_path), capsys=capsys, planted=S.plant_tenant(**plant))
     if launchable:
-        _base, src = T.runs_base(w.tmp, tenant_id=w.planted.tenant_id)
+        _base, src = location_path(T.runs_base)(w.tmp, tenant_id=w.planted.tenant_id)
         w.source_run = src
         w.episode = T.episode(w.tmp, root=w.planted.root / w.planted.tenant_id / "episodes",
                               doc=T.family_doc(source_run_dir=str(src)))

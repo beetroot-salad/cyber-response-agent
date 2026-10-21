@@ -589,12 +589,12 @@ class HardLinkBeforeOpen(FaultOs):
 
     def __init__(self, target: Path, other: Path) -> None:
         super().__init__()
-        self._target, self._other = target, other
+        self._target, self._link_path = target, other
 
     def open(self, path: Any, *a: Any, **kw: Any) -> int:
         self.calls.append("open")
-        if Path(path) == self._target and not self._other.exists():
-            os.link(self._target, self._other)
+        if Path(path) == self._target and not self._link_path.exists():
+            os.link(self._target, self._link_path)
         return os.open(path, *a, **kw)
 
 

@@ -1,6 +1,8 @@
 """#947 — the launcher: what it checks, what it starts, what it refuses (preflight, `Step.RUNS`, `Step.VERIFY`"""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import fixture_runs_base, location_path
+
 from defender.tests.support.shared._fixture_uuid import fixture_uuid
 
 
@@ -79,7 +81,7 @@ def test_947_launcher_returns_episode_dir_and_status(tmp_path):
 def test_947_un_nameable_episode_token_is_refused_before_the_questioner_runs(tmp_path):
     """An episode whose token cannot be rendered nameable is refused before the questioner is
     called at all: the refusal costs no model call and no primed capture."""
-    base, src = T.runs_base(tmp_path, source_run_id="fresh-case")
+    base, src = location_path(T.runs_base)(tmp_path, source_run_id="fresh-case")
     invalid = src.with_name("FRESH CASE")
     src.rename(invalid)
     src = invalid
@@ -106,7 +108,7 @@ def test_world_identities_are_independent_of_episode_and_label(tmp_path):
 
 def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_path):
     """Preflight checks every precondition in ONE block before anything is spent, and EACH of them refuses before the questioner is called"""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
 
     def refuses(argv_extra, *, prepare=lambda: None):
         agent = T.FakeAgent()
@@ -126,7 +128,7 @@ def test_947_step_one_preflight_checks_every_precondition_before_spending(tmp_pa
 
 def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_it(tmp_path):
     """The launcher screens the source run's `alert.json` before it reaches the questioner's prompt"""
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     secret = tmp_path / "root-private-key"
     secret.write_text("ROOT-PRIVATE-KEY", encoding="utf-8")
     RunPaths(src).alert.unlink()
@@ -143,7 +145,7 @@ def test_947_the_launcher_screens_the_source_alert_before_the_questioner_reads_i
 
 
 def test_947_the_step_one_command_line_needs_only_the_source_and_the_branch_point(tmp_path):
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     request = _cli().parse_branch_args(["--tenant", src.parent.parent.name, src.name,
                                         str(T.BRANCH_MESSAGE_ID)])
     assert request.branch_message_id == T.BRANCH_MESSAGE_ID
@@ -245,7 +247,7 @@ def test_947_any_failure_in_steps_two_to_four_aborts_the_episode(tmp_path):
 def test_947_launcher_verifies_each_siblings_scrub_verdict(tmp_path):
     """The launcher verifies each sibling's scrub verdict after the processes exit, reading the
     verdict at its sidecar path beside the run dir rather than inside the tree it judges."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
     report = _verify_family(ep, source=T.provenance_record())
     assert report["scrub_verified"] == [T.world_id(ep, label) for label in T.WORLDS]
@@ -253,7 +255,7 @@ def test_947_launcher_verifies_each_siblings_scrub_verdict(tmp_path):
 
 def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp_path):
     """A sibling whose scrub verdict is absent, or present but not recording a completed walk, is never archived and the reason names it."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     for scrub_ran, world in ((None, "b"), (False, "c")):
         ep = T.episode(tmp_path / world)
 
@@ -270,7 +272,7 @@ def test_947_a_sibling_without_a_ran_true_scrub_marks_the_episode_incomplete(tmp
 
 def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_record(tmp_path):
     outcome = T.mod("learning.branch.outcome")
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
 
     def dirs(ep, w):
@@ -287,7 +289,7 @@ def test_a_finished_sibling_without_a_scrub_verdict_gets_its_own_not_archived_re
 
 def test_947_agreeing_sibling_stamps_write_the_family_stamp(tmp_path):
     """Sibling stamps that agree write the family stamp"""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
     _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, commit="cafe1"),
                    source=T.provenance_record(commit="cafe1"))
@@ -310,7 +312,7 @@ def test_947_family_stamp_carries_agreed_and_override_as_disjoint_roles(tmp_path
 
 
 def test_947_disagreeing_sibling_stamps_mark_the_episode_incomplete_with_a_reason(tmp_path):
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
 
     def dirs(ep, w):
@@ -323,7 +325,7 @@ def test_947_disagreeing_sibling_stamps_mark_the_episode_incomplete_with_a_reaso
 
 
 def test_947_an_absent_or_unreadable_sibling_stamp_marks_the_episode_incomplete(tmp_path):
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     for mutate in ("absent", "truncated"):
         ep = T.episode(tmp_path)
 
@@ -339,7 +341,7 @@ def test_947_an_absent_or_unreadable_sibling_stamp_marks_the_episode_incomplete(
 
 
 def test_947_the_family_stamp_carries_the_resolved_model_per_sibling(tmp_path):
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
     _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, model="m-1"),
                    source=T.provenance_record())
@@ -348,7 +350,7 @@ def test_947_the_family_stamp_carries_the_resolved_model_per_sibling(tmp_path):
 
 
 def test_947_a_cross_model_family_refuses_rather_than_agreeing(tmp_path):
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
 
     def dirs(ep, w):
@@ -362,7 +364,7 @@ def test_947_a_cross_model_family_refuses_rather_than_agreeing(tmp_path):
 
 def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
     """EVERY non-clean stamp outcome refuses absent the override, and there are three a capture can produce"""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     waivable = {
         "dirty": {"dirty": True},
         "git-failed": {"dirty": None, "unavailable": T.GIT_STATUS_FAILED},
@@ -401,7 +403,7 @@ def test_947_a_dirty_sibling_tree_is_refused_without_the_override(tmp_path):
 def test_947_the_dirty_override_is_named_in_the_family_stamp(tmp_path):
     """When the dirty override is given it is NAMED in the family stamp: a reader of the archive
     can tell an agreed clean family from one that was waved through."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     ep = T.episode(tmp_path)
     _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, dirty=(w == "b")),
                    source=T.provenance_record(), allow_dirty=True)
@@ -414,7 +416,7 @@ def test_947_the_dirty_override_is_named_in_the_family_stamp(tmp_path):
 
 def test_947_an_incomplete_family_archives_per_world_and_withholds_comparability(tmp_path):
     """A family that fails verification archives each individually clean sibling."""
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     # A per-world fault: c is not archived and the reason names it; the stamp is written.
     ep = T.episode(tmp_path / "per-world")
     report = _verify_family(ep, lambda ep, w: T.arm_run_dir(ep, w, scrub_ran=(w != "c")),
@@ -452,7 +454,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
 
     from defender.tests.storage.ids_1187 import _spec1187 as S
 
-    T.runs_base(tmp_path)
+    location_path(T.runs_base)(tmp_path)
     tenant = _tenant_paths()
     results: list = []
     barrier = threading.Barrier(2)
@@ -472,7 +474,7 @@ def test_947_two_launchers_on_one_episode_cannot_both_prime_it(tmp_path):
         t.join()
     assert not any(isinstance(r, Exception) for r in results), results
     assert len(set(results)) == 2, f"two launchers claimed one episode: {results}"
-    episodes = S.episodes_dir(tenant.data_root, str(tenant.id))
+    episodes = S.episodes_dir(location_path(tenant.data_root), str(tenant.id))
     assert sorted(os.listdir(episodes)) == sorted(results), sorted(os.listdir(episodes))
     for episode_id in results:
         assert S.is_canonical_uuid(episode_id), f"{episode_id!r} is not a canonical uuid"
@@ -491,9 +493,9 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
 
     from defender.run_repository import SessionPaths
 
-    base, src = T.runs_base(tmp_path)
+    base, src = location_path(T.runs_base)(tmp_path)
     # #1105 fork S(b): the layout owner hands the store its paths.
-    handle = store_mod.open_store(case_id="case-947", sessions=SessionPaths(base))
+    handle = store_mod.open_store(case_id="case-947", sessions=SessionPaths(fixture_runs_base(base)))
     sid = handle.new_session(agent_id="main")
     at = handle.append(sid, [S.user_request("investigate the alert"), *S.complete_pair()],
                        agent_id="main")[-1]
@@ -503,7 +505,7 @@ def test_947_concurrent_sibling_forks_into_one_source_store_all_land(tmp_path):
 
     def fork():
         barrier.wait()
-        h = store_mod.open_store(case_id="case-947", sessions=SessionPaths(base))
+        h = store_mod.open_store(case_id="case-947", sessions=SessionPaths(fixture_runs_base(base)))
         child = h.fork(sid, at_message_id=at)
         with lock:
             made.append(child)

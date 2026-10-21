@@ -1,6 +1,8 @@
 """The stage frame across a stage's lifetime: successive curator batches, cross-agent reads, learning Bash result envelopes."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import logging
 from types import SimpleNamespace
 
@@ -164,7 +166,7 @@ def test_revert_lesson_driver_holds_shared_author_lock_and_calls_through(
     from defender.cli.learning import revert_lesson
 
     paths = LoopPaths(repo_root=tmp_path / "repo", state_dir=tmp_path / "state")
-    paths.state_root.mkdir(parents=True)
+    location_path(paths.state_root).mkdir(parents=True)
     seen = []
 
     def fake_revert(rel, lesson_name):

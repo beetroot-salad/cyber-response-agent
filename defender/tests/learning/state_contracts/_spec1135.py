@@ -2,6 +2,8 @@
 on `Held`". NO test functions; underscore-prefixed so pytest never collects it."""
 from __future__ import annotations
 
+from defender.tests.support.shared._locations_1210 import location_path
+
 import contextlib
 import errno
 import fcntl
@@ -275,7 +277,7 @@ def seed_request(paths: LoopPaths, case_id: str, run_dir: Path, *, inflight: boo
                  **extra: Any) -> Path:
     """A plain request record at today's name, written by the fixture."""
     run_dir.mkdir(parents=True, exist_ok=True)
-    folder = paths.state_root / "author-queue" / ("inflight" if inflight else "")
+    folder = location_path(paths.state_root) / "author-queue" / ("inflight" if inflight else "")
     folder.mkdir(parents=True, exist_ok=True)
     rec = folder / f"{case_id}.json"
     rec.write_text(json.dumps(request_body(case_id, run_dir, **extra)) + "\n", encoding="utf-8")
