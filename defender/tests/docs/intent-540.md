@@ -4,7 +4,7 @@
 
 **Scope frozen by the human (2026-07-18).** IN: (A) the per-run box, (B) the exec seam, (C) the reap-time `run_dir` scrub (the re-owned #547). OUT: host-side consumer confinement, driver isolation, the broker/vault/capability-RPC, #291, #550. See §Non-obligations — the exclusions are recorded, not deleted.
 
-**Source precedence.** Executed probes (2026-07-18) beat everything. Then the 2026-07-17 issue comment ([#540 comment 5006561145](https://github.com/beetroot-salad/cyber-response-agent/issues/540#issuecomment-5006561145), cited as `issue-comment §n`). Then the design docs. Conflicts are called out inline. Doc shorthands: `RSD` = `defender/docs/runtime-sandbox-design.md`, `RIEM` = `defender/docs/decisions/runtime-isolation-executor-model.md`, `TM` = `defender/docs/decisions/threat-model.md`, `RSG` = `defender/docs/decisions/runsc-spawner-host-go-no-go.md`.
+**Source precedence.** Executed probes (2026-07-18) beat everything. Then the 2026-07-17 issue comment ([#540 comment 5006561145](https://github.com/beetroot-salad/cyber-response-agent/issues/540#issuecomment-5006561145), cited as `issue-comment §n`). Then the design docs. Conflicts are called out inline. Doc shorthands: `RSD` = `defender/docs/archive/runtime-sandbox-design.md` (originally `defender/docs/runtime-sandbox-design.md`), `RIEM` = `defender/docs/decisions/runtime-isolation-executor-model.md`, `TM` = `defender/docs/decisions/threat-model.md`, `RSG` = `defender/docs/decisions/runsc-spawner-host-go-no-go.md`.
 
 ---
 

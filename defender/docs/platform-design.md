@@ -2,6 +2,12 @@
 
 **Version:** 0.3 · **Status:** Draft — design record, not yet implemented · **Date:** June 2026
 
+> **Deployment update (October 2026).** See the
+> [VPS deployment design](decisions/vps-compose-deployment.md) for the current
+> two-host deployment and brain/hands execution direction. The single-investigation
+> container, container-owned store writes, and learning/publication assumptions below
+> require reconciliation. API and domain contracts remain separately scoped.
+
 > **Learning-stage note (post-#922).** The *platform* argument stands; what it assumes about
 > the learning stages does not. The `actor → oracle → judge` chain, `lead_sequence.yaml`, and
 > `learning/replay_actor.py` were deleted (#922, `e9e11a48`). The

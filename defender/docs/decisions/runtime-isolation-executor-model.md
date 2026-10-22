@@ -12,7 +12,7 @@ disk in `run_dir`. The only channel is **inbound**: the driver ships a command i
 and reads the result out. Nothing inside can initiate anything.
 
 This supersedes the broker architecture in
-[`defender/docs/runtime-sandbox-design.md`](../runtime-sandbox-design.md)
+[`defender/docs/runtime-sandbox-design.md`](../archive/runtime-sandbox-design.md)
 — **both halves**. The credential-injecting egress proxy (#549) and the
 capability-RPC (Phase 2) are not needed for v1. The isolate itself (#540) stays,
 and gets substantially cheaper.

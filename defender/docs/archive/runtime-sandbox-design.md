@@ -1,7 +1,11 @@
 # Runtime sandbox: gVisor isolate + host-side credential broker
 
+> **Archived 2026-10-22.** Historical design, superseded by the
+> [runtime isolation decision](../decisions/runtime-isolation-executor-model.md).
+> Retained for rationale and historical evidence; do not use it as the current deployment plan.
+
 > **⚠️ SUPERSEDED IN PART — read
-> [`defender/docs/decisions/runtime-isolation-executor-model.md`](decisions/runtime-isolation-executor-model.md)
+> [`defender/docs/decisions/runtime-isolation-executor-model.md`](../decisions/runtime-isolation-executor-model.md)
 > first.** Following #571's brain/hands split to its conclusion removes the
 > **entire broker** from v1: with the LLM, MCP, and adapter clients all host-side,
 > nothing credentialed runs inside the isolate, so there is nothing to inject and
@@ -22,7 +26,7 @@
 > smaller than this document implies: a per-run box, two binds, `--network=none`,
 > and an exec per bash call. It also removes the reason to invent a credential
 > plane: the box is safe because it holds nothing, not because the driver was
-> disarmed first. Risk register: [`threat-model.md`](decisions/threat-model.md).
+> disarmed first. Risk register: [`threat-model.md`](../decisions/threat-model.md).
 
 **Status:** design — not yet implemented. **Decision:** run each defender
 investigation inside a per-alert **gVisor (runsc) isolate** whose only route
@@ -525,7 +529,7 @@ nothing is shared across runs.
 The driver keeping the provider key is deliberate, not an oversight — #550 removes
 it by `base_url` origination and is **independent of this issue**, not a
 prerequisite. What that key buys an attacker who lands RCE *in the driver* is
-class 2 in [`threat-model.md`](decisions/threat-model.md); its control is
+class 2 in [`threat-model.md`](../decisions/threat-model.md); its control is
 dependency hygiene, not a box.
 
 The learning-loop entrypoint (`learning/loop.py`) that re-enters the runtime wraps
@@ -546,7 +550,7 @@ One knob-specific asymmetry: the OCI `linux.seccomp` profile (e.g. denying
 network is the enforcement.
 
 **v1 is not gated on runsc (resolved 2026-07-17).** #540's boundary claim —
-classes 1 and 8 in [`threat-model.md`](decisions/threat-model.md),
+classes 1 and 8 in [`threat-model.md`](../decisions/threat-model.md),
 *which paths are visible* and *no direct egress* — is delivered by the mount list +
 `--network=none`, and **`runc` provides both on any Docker host**. runsc's *added*
 value is exactly class 2: a parser-bug RCE *inside the box* (jq, coreutils,
